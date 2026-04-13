@@ -1,0 +1,9 @@
+{
+  "name": "@rovenue/docs",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "echo 'docs dev not configured yet'",
+    "build": "echo 'docs build not configured yet'"
+  }
+}
