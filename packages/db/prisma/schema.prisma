@@ -22,6 +22,7 @@ model User {
   updatedAt     DateTime
   sessions      Session[]
   accounts      Account[]
+  members       ProjectMember[]
 
   @@map("user")
 }
@@ -71,29 +72,48 @@ model Verification {
 }
 
 // =============================================================
-// App models
+// Auth & project
 // =============================================================
 
-model Project {
-  id        String   @id
-  name      String
-  createdAt DateTime @default(now()) @db.Timestamptz
-  updatedAt DateTime @updatedAt @db.Timestamptz
+enum MemberRole {
+  OWNER
+  ADMIN
+  VIEWER
+}
 
-  apiKeys ApiKey[]
+enum Environment {
+  PRODUCTION
+  SANDBOX
+}
 
-  @@map("projects")
+model ProjectMember {
+  id        String     @id @default(cuid(2))
+  projectId String
+  userId    String
+  role      MemberRole
+  createdAt DateTime   @default(now()) @db.Timestamptz
+  updatedAt DateTime   @updatedAt @db.Timestamptz
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+  @@map("project_members")
 }
 
 model ApiKey {
-  id         String     @id
-  projectId  String
-  kind       ApiKeyKind
-  keyHash    String     @unique
-  prefix     String
-  lastUsedAt DateTime?  @db.Timestamptz
-  createdAt  DateTime   @default(now()) @db.Timestamptz
-  revokedAt  DateTime?  @db.Timestamptz
+  id            String      @id @default(cuid(2))
+  projectId     String
+  label         String
+  keyPublic     String      @unique
+  keySecretHash String
+  lastUsedAt    DateTime?   @db.Timestamptz
+  expiresAt     DateTime?   @db.Timestamptz
+  revokedAt     DateTime?   @db.Timestamptz
+  environment   Environment
+  createdAt     DateTime    @default(now()) @db.Timestamptz
+  updatedAt     DateTime    @updatedAt @db.Timestamptz
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
@@ -101,7 +121,320 @@ model ApiKey {
   @@map("api_keys")
 }
 
-enum ApiKeyKind {
-  PUBLIC
-  SECRET
+model Project {
+  id                String   @id @default(cuid(2))
+  name              String
+  slug              String   @unique
+  appleCredentials  Json?
+  googleCredentials Json?
+  stripeCredentials Json?
+  webhookUrl        String?
+  webhookSecret     String?
+  settings          Json     @default("{}")
+  createdAt         DateTime @default(now()) @db.Timestamptz
+  updatedAt         DateTime @updatedAt @db.Timestamptz
+
+  members          ProjectMember[]
+  apiKeys          ApiKey[]
+  products         Product[]
+  productGroups    ProductGroup[]
+  subscribers      Subscriber[]
+  purchases        Purchase[]
+  creditLedger     CreditLedger[]
+  webhookEvents    WebhookEvent[]
+  outgoingWebhooks OutgoingWebhook[]
+  revenueEvents    RevenueEvent[]
+
+  @@map("projects")
+}
+
+// =============================================================
+// Catalog — Product (ne) / ProductGroup (nasıl)
+// =============================================================
+
+enum ProductType {
+  SUBSCRIPTION
+  CONSUMABLE
+  NON_CONSUMABLE
+}
+
+model Product {
+  id              String      @id @default(cuid(2))
+  projectId       String
+  identifier      String
+  type            ProductType
+  storeIds        Json
+  displayName     String
+  entitlementKeys String[]
+  creditAmount    Int?
+  isActive        Boolean     @default(true)
+  metadata        Json        @default("{}")
+  createdAt       DateTime    @default(now()) @db.Timestamptz
+  updatedAt       DateTime    @updatedAt @db.Timestamptz
+
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  purchases     Purchase[]
+  revenueEvents RevenueEvent[]
+
+  @@unique([projectId, identifier])
+  @@index([projectId, isActive])
+  @@map("products")
+}
+
+model ProductGroup {
+  id         String   @id @default(cuid(2))
+  projectId  String
+  identifier String
+  isDefault  Boolean  @default(false)
+  products   Json     @default("[]")
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now()) @db.Timestamptz
+  updatedAt  DateTime @updatedAt @db.Timestamptz
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, identifier])
+  @@index([projectId, isDefault])
+  @@map("product_groups")
+}
+
+// =============================================================
+// Subscribers
+// =============================================================
+
+model Subscriber {
+  id          String   @id @default(cuid(2))
+  projectId   String
+  appUserId   String
+  firstSeenAt DateTime @default(now()) @db.Timestamptz
+  lastSeenAt  DateTime @default(now()) @db.Timestamptz
+  attributes  Json     @default("{}")
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  project          Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  purchases        Purchase[]
+  access           SubscriberAccess[]
+  creditLedger     CreditLedger[]
+  revenueEvents    RevenueEvent[]
+  webhookEvents    WebhookEvent[]
+  outgoingWebhooks OutgoingWebhook[]
+
+  @@unique([projectId, appUserId])
+  @@map("subscribers")
+}
+
+enum Store {
+  APP_STORE
+  PLAY_STORE
+  STRIPE
+}
+
+enum PurchaseStatus {
+  TRIAL
+  ACTIVE
+  EXPIRED
+  REFUNDED
+  REVOKED
+  PAUSED
+  GRACE_PERIOD
+}
+
+model Purchase {
+  id                    String         @id @default(cuid(2))
+  projectId             String
+  subscriberId          String
+  productId             String
+  store                 Store
+  storeTransactionId    String
+  originalTransactionId String
+  status                PurchaseStatus
+  isTrial               Boolean        @default(false)
+  isIntroOffer          Boolean        @default(false)
+  isSandbox             Boolean        @default(false)
+  purchaseDate          DateTime       @db.Timestamptz
+  expiresDate           DateTime?      @db.Timestamptz
+  originalPurchaseDate  DateTime       @db.Timestamptz
+  priceAmount           Decimal?       @db.Decimal(12, 4)
+  priceCurrency         String?
+  environment           Environment
+  autoRenewStatus       Boolean?
+  cancellationDate      DateTime?      @db.Timestamptz
+  refundDate            DateTime?      @db.Timestamptz
+  gracePeriodExpires    DateTime?      @db.Timestamptz
+  ownershipType         String?
+  verifiedAt            DateTime?      @db.Timestamptz
+  createdAt             DateTime       @default(now()) @db.Timestamptz
+  updatedAt             DateTime       @updatedAt @db.Timestamptz
+
+  project          Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subscriber       Subscriber         @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  product          Product            @relation(fields: [productId], references: [id])
+  access           SubscriberAccess[]
+  revenueEvents    RevenueEvent[]
+  webhookEvents    WebhookEvent[]
+  outgoingWebhooks OutgoingWebhook[]
+
+  @@unique([store, storeTransactionId])
+  @@index([originalTransactionId])
+  @@index([subscriberId, status])
+  @@index([expiresDate])
+  @@map("purchases")
+}
+
+model SubscriberAccess {
+  id             String    @id @default(cuid(2))
+  subscriberId   String
+  purchaseId     String
+  entitlementKey String
+  isActive       Boolean   @default(true)
+  expiresDate    DateTime? @db.Timestamptz
+  store          Store
+  createdAt      DateTime  @default(now()) @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @db.Timestamptz
+
+  subscriber Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  purchase   Purchase   @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+
+  @@index([subscriberId, isActive])
+  @@index([subscriberId, entitlementKey])
+  @@map("subscriber_access")
+}
+
+// =============================================================
+// Credits (append-only ledger)
+// =============================================================
+
+enum CreditLedgerType {
+  PURCHASE
+  SPEND
+  REFUND
+  BONUS
+  EXPIRE
+}
+
+model CreditLedger {
+  id            String           @id @default(cuid(2))
+  projectId     String
+  subscriberId  String
+  type          CreditLedgerType
+  amount        Int
+  balance       Int
+  referenceType String?
+  referenceId   String?
+  description   String?
+  metadata      Json?
+  createdAt     DateTime         @default(now()) @db.Timestamptz
+
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subscriber Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+
+  @@index([subscriberId, createdAt])
+  @@index([projectId, subscriberId])
+  @@map("credit_ledger")
+}
+
+// =============================================================
+// Events
+// =============================================================
+
+enum WebhookSource {
+  APPLE
+  GOOGLE
+  STRIPE
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+model WebhookEvent {
+  id           String             @id @default(cuid(2))
+  projectId    String
+  source       WebhookSource
+  eventType    String
+  storeEventId String
+  payload      Json
+  status       WebhookEventStatus @default(RECEIVED)
+  subscriberId String?
+  purchaseId   String?
+  errorMessage String?
+  processedAt  DateTime?          @db.Timestamptz
+  retryCount   Int                @default(0)
+  createdAt    DateTime           @default(now()) @db.Timestamptz
+
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subscriber Subscriber? @relation(fields: [subscriberId], references: [id])
+  purchase   Purchase?   @relation(fields: [purchaseId], references: [id])
+
+  @@unique([source, storeEventId])
+  @@index([status, retryCount])
+  @@map("webhook_events")
+}
+
+enum OutgoingWebhookStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model OutgoingWebhook {
+  id           String                @id @default(cuid(2))
+  projectId    String
+  eventType    String
+  subscriberId String
+  purchaseId   String?
+  payload      Json
+  url          String
+  status       OutgoingWebhookStatus @default(PENDING)
+  httpStatus   Int?
+  responseBody String?
+  attempts     Int                   @default(0)
+  nextRetryAt  DateTime?             @db.Timestamptz
+  sentAt       DateTime?             @db.Timestamptz
+  createdAt    DateTime              @default(now()) @db.Timestamptz
+
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subscriber Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  purchase   Purchase?  @relation(fields: [purchaseId], references: [id])
+
+  @@index([status, nextRetryAt])
+  @@map("outgoing_webhooks")
+}
+
+enum RevenueEventType {
+  INITIAL
+  RENEWAL
+  TRIAL_CONVERSION
+  CANCELLATION
+  REFUND
+  REACTIVATION
+  CREDIT_PURCHASE
+}
+
+model RevenueEvent {
+  id           String           @id @default(cuid(2))
+  projectId    String
+  subscriberId String
+  purchaseId   String
+  type         RevenueEventType
+  amount       Decimal          @db.Decimal(12, 4)
+  currency     String
+  amountUsd    Decimal          @db.Decimal(12, 4)
+  store        Store
+  productId    String
+  eventDate    DateTime         @db.Timestamptz
+  createdAt    DateTime         @default(now()) @db.Timestamptz
+
+  project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subscriber Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  purchase   Purchase   @relation(fields: [purchaseId], references: [id])
+  product    Product    @relation(fields: [productId], references: [id])
+
+  @@index([projectId, eventDate])
+  @@index([subscriberId, type])
+  @@map("revenue_events")
 }

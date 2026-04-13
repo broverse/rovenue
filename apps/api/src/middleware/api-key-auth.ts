@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import prisma from "@rovenue/db";
@@ -8,17 +7,15 @@ export type ApiKeyKind = "PUBLIC" | "SECRET";
 export interface AuthenticatedProject {
   id: string;
   name: string;
+  slug: string;
   keyKind: ApiKeyKind;
+  apiKeyId: string;
 }
 
 declare module "hono" {
   interface ContextVariableMap {
     project: AuthenticatedProject;
   }
-}
-
-function hashKey(raw: string): string {
-  return createHash("sha256").update(raw).digest("hex");
 }
 
 function detectKind(rawKey: string): ApiKeyKind | null {
@@ -48,32 +45,43 @@ export function apiKeyAuth(
       });
     }
 
+    // Public keys are stored plaintext and indexed, so we can look them up
+    // directly. Secret keys are bcrypted — verification path requires a lookup
+    // convention (e.g. key-id prefix) that isn't wired yet.
+    if (detected !== "PUBLIC") {
+      throw new HTTPException(501, {
+        message: "Secret key verification not yet implemented",
+      });
+    }
+
     const record = await prisma.apiKey.findUnique({
-      where: { keyHash: hashKey(rawKey) },
+      where: { keyPublic: rawKey },
       include: { project: true },
     });
 
-    if (!record || record.revokedAt) {
-      throw new HTTPException(401, { message: "Invalid API key" });
-    }
+    const now = new Date();
+    const isExpired = record?.expiresAt != null && record.expiresAt < now;
 
-    if (record.kind !== detected) {
-      throw new HTTPException(401, { message: "Key kind mismatch" });
+    if (!record || record.revokedAt || isExpired) {
+      throw new HTTPException(401, { message: "Invalid or expired API key" });
     }
 
     c.set("project", {
       id: record.project.id,
       name: record.project.name,
-      keyKind: record.kind,
+      slug: record.project.slug,
+      keyKind: "PUBLIC",
+      apiKeyId: record.id,
     });
 
-    // Best-effort last-used touch; don't block the request if it fails.
     prisma.apiKey
       .update({
         where: { id: record.id },
-        data: { lastUsedAt: new Date() },
+        data: { lastUsedAt: now },
       })
-      .catch((err) => console.error("[api-key-auth] lastUsedAt update:", err));
+      .catch((err) =>
+        console.error("[api-key-auth] lastUsedAt update:", err),
+      );
 
     await next();
   };
