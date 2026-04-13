@@ -1,56 +1,22 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { z } from "zod";
 import prisma from "@rovenue/db";
-import { handleStripeNotification } from "../../services/stripe/stripe-webhook";
-import {
-  STRIPE_SIGNATURE_HEADER,
-  type StripeProjectCredentials,
-} from "../../services/stripe/stripe-types";
+import { STRIPE_SIGNATURE_HEADER } from "../../services/stripe/stripe-types";
+import { enqueueWebhookEvent } from "../../services/webhook-processor";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
 
 const log = logger.child("route:webhook:stripe");
-
-const stripeCredentialsSchema = z
-  .object({
-    secretKey: z.string().min(1),
-    webhookSecret: z.string().min(1),
-  })
-  .passthrough();
-
-async function loadCredentials(
-  projectId: string,
-): Promise<StripeProjectCredentials | null> {
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { stripeCredentials: true },
-  });
-  if (!project?.stripeCredentials) return null;
-
-  const parsed = stripeCredentialsSchema.safeParse(project.stripeCredentials);
-  if (!parsed.success) {
-    log.warn("project stripeCredentials failed schema validation", {
-      projectId,
-      issues: parsed.error.issues,
-    });
-    return null;
-  }
-  return {
-    secretKey: parsed.data.secretKey,
-    webhookSecret: parsed.data.webhookSecret,
-  };
-}
 
 export const stripeWebhookRoute = new Hono();
 
 /**
  * Stripe webhook endpoint.
  *
- * Configure `project.stripeCredentials` to `{ secretKey, webhookSecret }`.
- * The raw request body is read via `c.req.text()` BEFORE any JSON parsing
- * so `stripe.webhooks.constructEvent` can verify the Stripe-Signature
- * header against the webhook secret.
+ * Reads the raw body (required for signature verification inside the
+ * worker), checks the project exists, and enqueues the event for async
+ * processing. The worker loads stripeCredentials from the project and
+ * verifies the Stripe-Signature header inside the store handler.
  */
 stripeWebhookRoute.post("/:projectId", async (c) => {
   const projectId = c.req.param("projectId");
@@ -62,27 +28,24 @@ stripeWebhookRoute.post("/:projectId", async (c) => {
     });
   }
 
-  const credentials = await loadCredentials(projectId);
-  if (!credentials) {
-    throw new HTTPException(404, {
-      message: "Project not configured for Stripe",
-    });
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: { id: true },
+  });
+  if (!project) {
+    throw new HTTPException(404, { message: "Project not found" });
   }
 
   const rawBody = await c.req.text();
 
-  const result = await handleStripeNotification({
+  const job = await enqueueWebhookEvent({
+    source: "STRIPE",
     projectId,
     rawBody,
     signature,
-    credentials,
   });
 
-  log.info("stripe notification handled", {
-    projectId,
-    status: result.status,
-    type: result.eventType,
-  });
+  log.info("stripe notification enqueued", { projectId, jobId: job.id });
 
-  return c.json(ok(result));
+  return c.json(ok({ status: "enqueued", jobId: job.id }), 202);
 });

@@ -47,10 +47,21 @@ export interface HandleGoogleNotificationOptions {
 }
 
 export type HandleGoogleNotificationResult =
-  | { status: "processed"; kind: string; webhookEventId: string }
+  | {
+      status: "processed";
+      kind: string;
+      webhookEventId: string;
+      subscriberId?: string;
+      purchaseId?: string;
+    }
   | { status: "duplicate"; kind: string }
   | { status: "test" }
   | { status: "persisted-no-verify"; kind: string; webhookEventId: string };
+
+interface GoogleDispatchOutcome {
+  subscriberId?: string;
+  purchaseId?: string;
+}
 
 export async function handleGoogleNotification(
   opts: HandleGoogleNotificationOptions,
@@ -120,17 +131,21 @@ export async function handleGoogleNotification(
   }
 
   try {
+    let outcome: GoogleDispatchOutcome = {};
+
     if (payload.subscriptionNotification) {
-      await processSubscriptionNotification({
-        projectId: opts.projectId,
-        notification: payload.subscriptionNotification,
-        verifyConfig: opts.verifyConfig,
-      });
+      outcome =
+        (await processSubscriptionNotification({
+          projectId: opts.projectId,
+          notification: payload.subscriptionNotification,
+          verifyConfig: opts.verifyConfig,
+        })) ?? {};
     } else if (payload.voidedPurchaseNotification) {
-      await processVoidedPurchase({
-        projectId: opts.projectId,
-        purchaseToken: payload.voidedPurchaseNotification.purchaseToken,
-      });
+      outcome =
+        (await processVoidedPurchase({
+          projectId: opts.projectId,
+          purchaseToken: payload.voidedPurchaseNotification.purchaseToken,
+        })) ?? {};
     } else if (payload.oneTimeProductNotification) {
       log.info("one-time product notification, acknowledging", {
         sku: payload.oneTimeProductNotification.sku,
@@ -139,13 +154,20 @@ export async function handleGoogleNotification(
 
     await prisma.webhookEvent.update({
       where: { id: webhookEvent.id },
-      data: { status: WebhookEventStatus.PROCESSED, processedAt: new Date() },
+      data: {
+        status: WebhookEventStatus.PROCESSED,
+        processedAt: new Date(),
+        subscriberId: outcome.subscriberId,
+        purchaseId: outcome.purchaseId,
+      },
     });
 
     return {
       status: "processed",
       kind,
       webhookEventId: webhookEvent.id,
+      subscriberId: outcome.subscriberId,
+      purchaseId: outcome.purchaseId,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -178,7 +200,7 @@ interface SubscriptionCtx {
 
 async function processSubscriptionNotification(
   ctx: SubscriptionCtx,
-): Promise<void> {
+): Promise<GoogleDispatchOutcome> {
   const purchase = await verifyGoogleSubscription(
     ctx.verifyConfig,
     ctx.notification.purchaseToken,
@@ -292,6 +314,8 @@ async function processSubscriptionNotification(
       },
     });
   }
+
+  return { subscriberId: subscriber.id, purchaseId: persisted.id };
 }
 
 interface ResolvePricingArgs {
@@ -438,7 +462,17 @@ interface VoidedPurchaseArgs {
 
 async function processVoidedPurchase(
   args: VoidedPurchaseArgs,
-): Promise<void> {
+): Promise<GoogleDispatchOutcome> {
+  const purchase = await prisma.purchase.findUnique({
+    where: {
+      store_storeTransactionId: {
+        store: Store.PLAY_STORE,
+        storeTransactionId: args.purchaseToken,
+      },
+    },
+    select: { id: true, subscriberId: true },
+  });
+
   await prisma.purchase.updateMany({
     where: {
       projectId: args.projectId,
@@ -460,4 +494,8 @@ async function processVoidedPurchase(
     },
     data: { isActive: false },
   });
+
+  return purchase
+    ? { subscriberId: purchase.subscriberId, purchaseId: purchase.id }
+    : {};
 }

@@ -45,17 +45,25 @@ export type HandleAppleNotificationResult =
       status: "processed";
       notificationType: AppleNotificationType;
       webhookEventId: string;
+      subscriberId?: string;
+      purchaseId?: string;
     }
   | {
       status: "duplicate";
       notificationType: AppleNotificationType;
     };
 
+interface DispatchOutcome {
+  subscriberId?: string;
+  purchaseId?: string;
+}
+
 interface DispatchContext {
   projectId: string;
   notification: AppleResponseBodyV2DecodedPayload;
   transaction: AppleJwsTransactionPayload;
   renewalInfo?: AppleJwsRenewalInfoPayload;
+  outcome: DispatchOutcome;
 }
 
 // =============================================================
@@ -111,12 +119,15 @@ export async function handleAppleNotification(
       ? await verifier.verifyRenewalInfo(notification.data.signedRenewalInfo)
       : undefined;
 
+    const outcome: DispatchOutcome = {};
+
     if (transaction) {
       await dispatch({
         projectId: opts.projectId,
         notification,
         transaction,
         renewalInfo,
+        outcome,
       });
     } else {
       log.info("notification without transaction info, acknowledging", {
@@ -130,6 +141,8 @@ export async function handleAppleNotification(
       data: {
         status: WebhookEventStatus.PROCESSED,
         processedAt: new Date(),
+        subscriberId: outcome.subscriberId,
+        purchaseId: outcome.purchaseId,
       },
     });
 
@@ -137,6 +150,8 @@ export async function handleAppleNotification(
       status: "processed",
       notificationType: notification.notificationType,
       webhookEventId: webhookEvent.id,
+      subscriberId: outcome.subscriberId,
+      purchaseId: outcome.purchaseId,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -198,6 +213,8 @@ async function applySubscribed(ctx: DispatchContext): Promise<void> {
     status: isTrial(ctx.transaction) ? PurchaseStatus.TRIAL : PurchaseStatus.ACTIVE,
     autoRenewStatus: ctx.renewalInfo?.autoRenewStatus === 1,
   });
+  ctx.outcome.subscriberId = subscriber.id;
+  ctx.outcome.purchaseId = purchase.id;
   await grantAccess({ subscriber, purchase, product, ctx });
   await emitRevenueEvent({
     ctx,
@@ -219,6 +236,8 @@ async function applyRenewal(ctx: DispatchContext): Promise<void> {
     status: PurchaseStatus.ACTIVE,
     autoRenewStatus: ctx.renewalInfo?.autoRenewStatus === 1,
   });
+  ctx.outcome.subscriberId = subscriber.id;
+  ctx.outcome.purchaseId = purchase.id;
   await grantAccess({ subscriber, purchase, product, ctx });
   await emitRevenueEvent({
     ctx,
@@ -306,6 +325,9 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
     },
   });
   if (!subscriber || !purchase) return;
+
+  ctx.outcome.subscriberId = subscriber.id;
+  ctx.outcome.purchaseId = purchase.id;
 
   await emitRevenueEvent({
     ctx,

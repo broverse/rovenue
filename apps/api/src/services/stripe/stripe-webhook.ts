@@ -46,8 +46,19 @@ export interface HandleStripeNotificationOptions {
 }
 
 export type HandleStripeNotificationResult =
-  | { status: "processed"; eventType: string; webhookEventId: string }
+  | {
+      status: "processed";
+      eventType: string;
+      webhookEventId: string;
+      subscriberId?: string;
+      purchaseId?: string;
+    }
   | { status: "duplicate"; eventType: string };
+
+interface StripeDispatchOutcome {
+  subscriberId?: string;
+  purchaseId?: string;
+}
 
 export async function handleStripeNotification(
   opts: HandleStripeNotificationOptions,
@@ -99,17 +110,25 @@ export async function handleStripeNotification(
     }));
 
   try {
-    await dispatch({ projectId: opts.projectId, event, stripe });
+    const outcome: StripeDispatchOutcome = {};
+    await dispatch({ projectId: opts.projectId, event, stripe, outcome });
 
     await prisma.webhookEvent.update({
       where: { id: webhookEvent.id },
-      data: { status: WebhookEventStatus.PROCESSED, processedAt: new Date() },
+      data: {
+        status: WebhookEventStatus.PROCESSED,
+        processedAt: new Date(),
+        subscriberId: outcome.subscriberId,
+        purchaseId: outcome.purchaseId,
+      },
     });
 
     return {
       status: "processed",
       eventType: event.type,
       webhookEventId: webhookEvent.id,
+      subscriberId: outcome.subscriberId,
+      purchaseId: outcome.purchaseId,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -138,6 +157,7 @@ interface DispatchContext {
   projectId: string;
   event: Stripe.Event;
   stripe: Stripe;
+  outcome: StripeDispatchOutcome;
 }
 
 async function dispatch(ctx: DispatchContext): Promise<void> {
@@ -173,6 +193,9 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
     status,
   );
 
+  ctx.outcome.subscriberId = subscriber.id;
+  ctx.outcome.purchaseId = purchase.id;
+
   if (ENTITLEMENT_GRANTING_STATUSES.has(status)) {
     await grantAccess({
       subscriberId: subscriber.id,
@@ -200,6 +223,9 @@ async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
     },
   });
   if (!purchase) return;
+
+  ctx.outcome.subscriberId = purchase.subscriberId;
+  ctx.outcome.purchaseId = purchase.id;
 
   await prisma.purchase.update({
     where: { id: purchase.id },
@@ -257,6 +283,9 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
     log.warn("invoice.paid for unknown purchase", { subscriptionId });
     return;
   }
+
+  ctx.outcome.subscriberId = purchase.subscriberId;
+  ctx.outcome.purchaseId = purchase.id;
 
   const amount = (invoice.amount_paid ?? 0) / 100;
   const currency = invoice.currency?.toUpperCase() ?? "USD";
@@ -355,6 +384,9 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
     log.warn("charge.refunded for unknown purchase", { subscriptionId });
     return;
   }
+
+  ctx.outcome.subscriberId = purchase.subscriberId;
+  ctx.outcome.purchaseId = purchase.id;
 
   await prisma.purchase.update({
     where: { id: purchase.id },
