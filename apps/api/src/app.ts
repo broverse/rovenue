@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { errorHandler } from "./middleware/error";
-import { healthRoute } from "./routes";
+import { authRoute, healthRoute } from "./routes";
 
 export function createApp() {
   const app = new Hono();
@@ -8,6 +8,7 @@ export function createApp() {
   app.onError(errorHandler);
 
   app.route("/health", healthRoute);
+  app.route("/api/auth", authRoute);
 
   return app;
 }
