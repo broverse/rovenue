@@ -5,6 +5,7 @@ Open-source subscription management platform for mobile & web apps. Self-host, o
 ## Tech Stack
 
 - **Backend:** Hono + TypeScript
+- **Auth:** Better Auth (GitHub + Google OAuth, session management)
 - **Database:** PostgreSQL + Prisma ORM
 - **Cache/Queue:** Redis + BullMQ
 - **Dashboard:** React (Vite + TypeScript)
@@ -36,10 +37,15 @@ rovenue/
 
 ## Architecture Decisions
 
+- **Dashboard Auth:** Better Auth with GitHub + Google OAuth only (no email/password)
+  - Better Auth manages user, session, account tables automatically
+  - `npx @better-auth/cli generate` generates Prisma schema for auth tables
+  - Mount: `app.on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw))`
+- **SDK Auth:** Public API key (per-project) via Bearer token — no user auth needed
+- **Server-to-Server Auth:** Secret API key (per-project) for webhook configuration
 - Receipt verification: Apple App Store Server API v2 (JWS), Google Play Developer API, Stripe Webhooks
 - Subscription state machine: TRIAL → ACTIVE → GRACE_PERIOD → EXPIRED | PAUSED | REFUNDED
 - Webhook processing: Idempotent (store_event_id deduplication)
-- API auth: Public API key (SDK) + Secret key (server-side), both per-project
 - Entitlements: Denormalized subscriber_entitlements table for fast reads
 - Offline SDK: MMKV cache for last-known entitlement state
 
@@ -58,17 +64,29 @@ rovenue/
 
 - PostgreSQL 16
 - Prisma ORM with prisma migrate
-- Key tables: projects, subscribers, products, offerings, purchases, entitlements, subscriber_entitlements, webhook_events, outgoing_webhooks, revenue_events
+- **Auth tables (managed by Better Auth):** user, session, account (auto-generated)
+- **App tables (simplified — Product = ne, ProductGroup = nasıl):**
+  - project_members, api_keys, projects, subscribers
+  - products (includes entitlementKeys[], creditAmount)
+  - product_groups (includes products JSON array with order/promoted, metadata for UI config)
+  - purchases, subscriber_access, credit_ledger
+  - webhook_events, outgoing_webhooks, revenue_events
 - All IDs are UUIDs (cuid2 generated)
 - All timestamps are UTC with timezone
 - Encrypted fields (store credentials) use AES-256-GCM
+- CreditLedger is append-only (immutable log, never update/delete)
 
 ## Environment Variables
 
 - DATABASE_URL — PostgreSQL connection string
 - REDIS_URL — Redis connection string
 - ENCRYPTION_KEY — 32-byte hex for credential encryption
-- JWT_SECRET — Dashboard auth
+- BETTER_AUTH_SECRET — Better Auth session encryption key
+- BETTER_AUTH_URL — Backend URL (e.g. http://localhost:3000)
+- GITHUB_CLIENT_ID — GitHub OAuth app client ID
+- GITHUB_CLIENT_SECRET — GitHub OAuth app client secret
+- GOOGLE_CLIENT_ID — Google OAuth client ID
+- GOOGLE_CLIENT_SECRET — Google OAuth client secret
 - PORT — API port (default 3000)
 
 ## Commands
