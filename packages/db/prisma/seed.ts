@@ -1,5 +1,19 @@
 import bcrypt from "bcryptjs";
+import {
+  Environment,
+  MemberRole,
+  ProductType,
+} from "@prisma/client";
 import prisma from "../src";
+
+const DEMO_USER_ID = "usr_demo";
+const DEMO_USER_EMAIL = "demo@rovenue.dev";
+const DEMO_PROJECT_SLUG = "demo";
+const DEMO_PUBLIC_KEY = "rov_pub_demo_production";
+const DEMO_SECRET_PLAINTEXT = "rov_sec_demo_do_not_use_in_prod";
+const PRODUCT_PRO_MONTHLY = "pro_monthly";
+const PRODUCT_CREDITS_100 = "credits_100";
+const DEFAULT_GROUP = "default";
 
 async function main() {
   console.log("Seeding database...");
@@ -7,12 +21,12 @@ async function main() {
   const now = new Date();
 
   const user = await prisma.user.upsert({
-    where: { email: "demo@rovenue.dev" },
+    where: { email: DEMO_USER_EMAIL },
     update: {},
     create: {
-      id: "usr_demo",
+      id: DEMO_USER_ID,
       name: "Demo User",
-      email: "demo@rovenue.dev",
+      email: DEMO_USER_EMAIL,
       emailVerified: true,
       createdAt: now,
       updatedAt: now,
@@ -20,11 +34,11 @@ async function main() {
   });
 
   const project = await prisma.project.upsert({
-    where: { slug: "demo" },
+    where: { slug: DEMO_PROJECT_SLUG },
     update: {},
     create: {
       name: "Demo Project",
-      slug: "demo",
+      slug: DEMO_PROJECT_SLUG,
       settings: {},
     },
   });
@@ -37,20 +51,19 @@ async function main() {
     create: {
       projectId: project.id,
       userId: user.id,
-      role: "OWNER",
+      role: MemberRole.OWNER,
     },
   });
 
-  const demoSecretPlaintext = "rov_sec_demo_do_not_use_in_prod";
   await prisma.apiKey.upsert({
-    where: { keyPublic: "rov_pub_demo_production" },
+    where: { keyPublic: DEMO_PUBLIC_KEY },
     update: {},
     create: {
       projectId: project.id,
       label: "Default production key",
-      keyPublic: "rov_pub_demo_production",
-      keySecretHash: await bcrypt.hash(demoSecretPlaintext, 10),
-      environment: "PRODUCTION",
+      keyPublic: DEMO_PUBLIC_KEY,
+      keySecretHash: await bcrypt.hash(DEMO_SECRET_PLAINTEXT, 10),
+      environment: Environment.PRODUCTION,
     },
   });
 
@@ -58,18 +71,18 @@ async function main() {
     where: {
       projectId_identifier: {
         projectId: project.id,
-        identifier: "pro_monthly",
+        identifier: PRODUCT_PRO_MONTHLY,
       },
     },
     update: {},
     create: {
       projectId: project.id,
-      identifier: "pro_monthly",
-      type: "SUBSCRIPTION",
+      identifier: PRODUCT_PRO_MONTHLY,
+      type: ProductType.SUBSCRIPTION,
       displayName: "Pro Monthly",
       storeIds: {
         apple: "com.rovenue.demo.pro.monthly",
-        google: "pro_monthly",
+        google: PRODUCT_PRO_MONTHLY,
         stripe: "price_demo_pro_monthly",
       },
       entitlementKeys: ["premium", "analytics"],
@@ -81,18 +94,18 @@ async function main() {
     where: {
       projectId_identifier: {
         projectId: project.id,
-        identifier: "credits_100",
+        identifier: PRODUCT_CREDITS_100,
       },
     },
     update: {},
     create: {
       projectId: project.id,
-      identifier: "credits_100",
-      type: "CONSUMABLE",
+      identifier: PRODUCT_CREDITS_100,
+      type: ProductType.CONSUMABLE,
       displayName: "100 Credits",
       storeIds: {
         apple: "com.rovenue.demo.credits.100",
-        google: "credits_100",
+        google: PRODUCT_CREDITS_100,
         stripe: "price_demo_credits_100",
       },
       entitlementKeys: [],
@@ -105,13 +118,13 @@ async function main() {
     where: {
       projectId_identifier: {
         projectId: project.id,
-        identifier: "default",
+        identifier: DEFAULT_GROUP,
       },
     },
     update: {},
     create: {
       projectId: project.id,
-      identifier: "default",
+      identifier: DEFAULT_GROUP,
       isDefault: true,
       products: [
         {
@@ -138,8 +151,8 @@ async function main() {
   console.log("Seed complete");
   console.log(`  user:    ${user.email}`);
   console.log(`  project: ${project.slug} (${project.id})`);
-  console.log(`  public:  rov_pub_demo_production`);
-  console.log(`  secret:  ${demoSecretPlaintext} (DEV ONLY)`);
+  console.log(`  public:  ${DEMO_PUBLIC_KEY}`);
+  console.log(`  secret:  ${DEMO_SECRET_PLAINTEXT} (DEV ONLY)`);
 }
 
 main()

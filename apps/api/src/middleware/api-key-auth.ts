@@ -1,8 +1,16 @@
 import type { MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
+import {
+  API_KEY_KIND,
+  API_KEY_PREFIX,
+  BEARER_SCHEME,
+  HEADER,
+  type ApiKeyKind,
+} from "@rovenue/shared";
 import prisma from "@rovenue/db";
+import { logger } from "../lib/logger";
 
-export type ApiKeyKind = "PUBLIC" | "SECRET";
+const log = logger.child("api-key-auth");
 
 export interface AuthenticatedProject {
   id: string;
@@ -18,22 +26,30 @@ declare module "hono" {
   }
 }
 
+const BEARER_PREFIX_LOWER = `${BEARER_SCHEME.toLowerCase()} `;
+
 function detectKind(rawKey: string): ApiKeyKind | null {
-  if (rawKey.startsWith("rov_pub_")) return "PUBLIC";
-  if (rawKey.startsWith("rov_sec_")) return "SECRET";
+  if (rawKey.startsWith(API_KEY_PREFIX[API_KEY_KIND.PUBLIC])) {
+    return API_KEY_KIND.PUBLIC;
+  }
+  if (rawKey.startsWith(API_KEY_PREFIX[API_KEY_KIND.SECRET])) {
+    return API_KEY_KIND.SECRET;
+  }
   return null;
 }
 
+export type ApiKeyRequirement = ApiKeyKind | "any";
+
 export function apiKeyAuth(
-  required: ApiKeyKind | "any" = "any",
+  required: ApiKeyRequirement = "any",
 ): MiddlewareHandler {
   return async (c, next) => {
-    const header = c.req.header("authorization");
-    if (!header?.toLowerCase().startsWith("bearer ")) {
+    const header = c.req.header(HEADER.AUTHORIZATION);
+    if (!header || !header.toLowerCase().startsWith(BEARER_PREFIX_LOWER)) {
       throw new HTTPException(401, { message: "Bearer token required" });
     }
 
-    const rawKey = header.slice(7).trim();
+    const rawKey = header.slice(BEARER_PREFIX_LOWER.length).trim();
     const detected = detectKind(rawKey);
     if (!detected) {
       throw new HTTPException(401, { message: "Invalid API key format" });
@@ -45,10 +61,10 @@ export function apiKeyAuth(
       });
     }
 
-    // Public keys are stored plaintext and indexed, so we can look them up
-    // directly. Secret keys are bcrypted — verification path requires a lookup
-    // convention (e.g. key-id prefix) that isn't wired yet.
-    if (detected !== "PUBLIC") {
+    // Public keys are stored plaintext and indexed for direct lookup.
+    // Secret keys are bcrypted — verification needs a lookup convention
+    // (e.g. key-id prefix) that isn't wired yet.
+    if (detected !== API_KEY_KIND.PUBLIC) {
       throw new HTTPException(501, {
         message: "Secret key verification not yet implemented",
       });
@@ -70,7 +86,7 @@ export function apiKeyAuth(
       id: record.project.id,
       name: record.project.name,
       slug: record.project.slug,
-      keyKind: "PUBLIC",
+      keyKind: API_KEY_KIND.PUBLIC,
       apiKeyId: record.id,
     });
 
@@ -79,9 +95,12 @@ export function apiKeyAuth(
         where: { id: record.id },
         data: { lastUsedAt: now },
       })
-      .catch((err) =>
-        console.error("[api-key-auth] lastUsedAt update:", err),
-      );
+      .catch((err: unknown) => {
+        log.warn("lastUsedAt update failed", {
+          apiKeyId: record.id,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
 
     await next();
   };

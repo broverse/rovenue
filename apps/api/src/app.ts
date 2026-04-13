@@ -1,9 +1,20 @@
 import { Hono } from "hono";
+import { logger as honoRequestLogger } from "hono/logger";
 import { errorHandler } from "./middleware/error";
 import { authRoute, healthRoute } from "./routes";
+import { logger } from "./lib/logger";
+
+const requestLog = logger.child("request");
 
 export function createApp() {
   const app = new Hono();
+
+  app.use(
+    "*",
+    honoRequestLogger((message, ...rest) => {
+      requestLog.info(message, rest.length > 0 ? { details: rest } : undefined);
+    }),
+  );
 
   app.onError(errorHandler);
 

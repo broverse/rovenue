@@ -1,7 +1,8 @@
 import { serve } from "@hono/node-server";
 import { app } from "./app";
 import { env } from "./lib/env";
+import { logger } from "./lib/logger";
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
-  console.log(`[rovenue/api] listening on http://localhost:${info.port}`);
+  logger.info("listening", { url: `http://localhost:${info.port}` });
 });
