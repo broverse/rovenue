@@ -1,24 +1,30 @@
 import prisma, {
   Environment,
-  PurchaseStatus,
-  RevenueEventType,
-  Store,
   WebhookEventStatus,
   WebhookSource,
+  Store,
+  PurchaseStatus,
 } from "@rovenue/db";
 import { logger } from "../../lib/logger";
 import {
-  GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE,
-  GOOGLE_SUBSCRIPTION_STATE,
+  GOOGLE_ACKNOWLEDGEMENT_STATE,
   type GooglePubSubPushBody,
-  type GoogleRtdnPayload,
   type GoogleRtdnSubscriptionNotification,
-  type GoogleSubscriptionNotificationType,
   type GoogleSubscriptionPurchaseV2,
-  type GoogleSubscriptionState,
 } from "./google-types";
 import {
+  classifyNotification,
+  extractCancelTime,
+  isEntitlementGranting,
+  mapRevenueEventType,
+  mapStatus,
+  parsePushBody,
+} from "./google-mappers";
+import {
+  acknowledgeGoogleSubscription,
+  getSubscriptionBasePlanPricing,
   verifyGoogleSubscription,
+  type BasePlanPricing,
   type GoogleVerifyConfig,
 } from "./google-verify";
 
@@ -161,28 +167,6 @@ export async function handleGoogleNotification(
 }
 
 // =============================================================
-// Pub/Sub envelope parsing
-// =============================================================
-
-function parsePushBody(body: GooglePubSubPushBody): GoogleRtdnPayload {
-  const dataJson = Buffer.from(body.message.data, "base64").toString("utf8");
-  return JSON.parse(dataJson) as GoogleRtdnPayload;
-}
-
-function classifyNotification(payload: GoogleRtdnPayload): string {
-  if (payload.subscriptionNotification) {
-    return `SUBSCRIPTION_${payload.subscriptionNotification.notificationType}`;
-  }
-  if (payload.oneTimeProductNotification) {
-    return `ONE_TIME_${payload.oneTimeProductNotification.notificationType}`;
-  }
-  if (payload.voidedPurchaseNotification) {
-    return "VOIDED_PURCHASE";
-  }
-  return "UNKNOWN";
-}
-
-// =============================================================
 // Subscription notification processing
 // =============================================================
 
@@ -191,12 +175,6 @@ interface SubscriptionCtx {
   notification: GoogleRtdnSubscriptionNotification;
   verifyConfig: GoogleVerifyConfig;
 }
-
-const ENTITLEMENT_GRANTING_STATUSES = new Set<PurchaseStatus>([
-  PurchaseStatus.ACTIVE,
-  PurchaseStatus.TRIAL,
-  PurchaseStatus.GRACE_PERIOD,
-]);
 
 async function processSubscriptionNotification(
   ctx: SubscriptionCtx,
@@ -208,8 +186,8 @@ async function processSubscriptionNotification(
 
   const subscriber = await resolveSubscriber(ctx, purchase);
 
-  const productId =
-    purchase.lineItems?.[0]?.productId ?? ctx.notification.subscriptionId;
+  const lineItem = purchase.lineItems?.[0];
+  const productId = lineItem?.productId ?? ctx.notification.subscriptionId;
   const product = await prisma.product.findFirst({
     where: {
       projectId: ctx.projectId,
@@ -226,15 +204,19 @@ async function processSubscriptionNotification(
     purchase.subscriptionState,
     ctx.notification.notificationType,
   );
-  const expiresDate = purchase.lineItems?.[0]?.expiryTime
-    ? new Date(purchase.lineItems[0].expiryTime)
-    : null;
+  const expiresDate = lineItem?.expiryTime ? new Date(lineItem.expiryTime) : null;
   const startTime = purchase.startTime
     ? new Date(purchase.startTime)
     : new Date();
-  const autoRenewStatus =
-    purchase.lineItems?.[0]?.autoRenewingPlan?.autoRenewEnabled ?? null;
+  const autoRenewStatus = lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null;
   const cancellationDate = extractCancelTime(purchase);
+
+  const pricing = await resolvePricing({
+    verifyConfig: ctx.verifyConfig,
+    productId,
+    basePlanId: lineItem?.offerDetails?.basePlanId,
+    regionCode: purchase.regionCode,
+  });
 
   const persisted = await prisma.purchase.upsert({
     where: {
@@ -258,6 +240,8 @@ async function processSubscriptionNotification(
       environment: Environment.PRODUCTION,
       autoRenewStatus,
       cancellationDate,
+      priceAmount: pricing?.amount ?? null,
+      priceCurrency: pricing?.currency ?? null,
       verifiedAt: new Date(),
     },
     update: {
@@ -265,11 +249,13 @@ async function processSubscriptionNotification(
       expiresDate,
       autoRenewStatus,
       cancellationDate,
+      priceAmount: pricing?.amount ?? undefined,
+      priceCurrency: pricing?.currency ?? undefined,
       verifiedAt: new Date(),
     },
   });
 
-  if (ENTITLEMENT_GRANTING_STATUSES.has(status)) {
+  if (isEntitlementGranting(status)) {
     await grantAccess({
       subscriberId: subscriber.id,
       purchaseId: persisted.id,
@@ -283,11 +269,12 @@ async function processSubscriptionNotification(
     });
   }
 
-  const revenueEventType = mapRevenueEventType(ctx.notification.notificationType);
+  await ensureAcknowledged(ctx, purchase);
+
+  const revenueEventType = mapRevenueEventType(
+    ctx.notification.notificationType,
+  );
   if (revenueEventType) {
-    // TODO: enrich amount/currency by fetching basePlan pricing from the
-    // Monetization API. For now the event fires with 0 so downstream
-    // analytics see the lifecycle transition.
     await prisma.revenueEvent.create({
       data: {
         projectId: ctx.projectId,
@@ -295,12 +282,69 @@ async function processSubscriptionNotification(
         purchaseId: persisted.id,
         productId: product.id,
         type: revenueEventType,
-        amount: 0,
-        currency: "USD",
-        amountUsd: 0,
+        amount: pricing?.amount ?? 0,
+        currency: pricing?.currency ?? "USD",
+        // Same-currency pass-through: non-USD revenue is reported in its
+        // native units until an FX normalisation service is wired in.
+        amountUsd: pricing?.amount ?? 0,
         store: Store.PLAY_STORE,
         eventDate: new Date(),
       },
+    });
+  }
+}
+
+interface ResolvePricingArgs {
+  verifyConfig: GoogleVerifyConfig;
+  productId: string;
+  basePlanId: string | undefined;
+  regionCode: string | undefined;
+}
+
+async function resolvePricing(
+  args: ResolvePricingArgs,
+): Promise<BasePlanPricing | null> {
+  if (!args.basePlanId) return null;
+
+  try {
+    return await getSubscriptionBasePlanPricing(
+      args.verifyConfig,
+      args.productId,
+      args.basePlanId,
+      args.regionCode ?? "US",
+    );
+  } catch (err) {
+    log.warn("basePlan pricing lookup failed", {
+      productId: args.productId,
+      basePlanId: args.basePlanId,
+      regionCode: args.regionCode,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+async function ensureAcknowledged(
+  ctx: SubscriptionCtx,
+  purchase: GoogleSubscriptionPurchaseV2,
+): Promise<void> {
+  if (purchase.acknowledgementState !== GOOGLE_ACKNOWLEDGEMENT_STATE.PENDING) {
+    return;
+  }
+
+  try {
+    await acknowledgeGoogleSubscription(
+      ctx.verifyConfig,
+      ctx.notification.subscriptionId,
+      ctx.notification.purchaseToken,
+    );
+  } catch (err) {
+    // Don't fail the whole notification over an ack hiccup — Google retries
+    // the RTDN, and a subsequent event will trigger another ack attempt.
+    log.warn("acknowledge failed", {
+      subscriptionId: ctx.notification.subscriptionId,
+      tokenPrefix: ctx.notification.purchaseToken.slice(0, 12),
+      err: err instanceof Error ? err.message : String(err),
     });
   }
 }
@@ -381,62 +425,6 @@ async function grantAccess(args: GrantAccessArgs): Promise<void> {
       });
     }
   }
-}
-
-function mapStatus(
-  state: GoogleSubscriptionState,
-  type: GoogleSubscriptionNotificationType,
-): PurchaseStatus {
-  switch (state) {
-    case GOOGLE_SUBSCRIPTION_STATE.ACTIVE:
-    case GOOGLE_SUBSCRIPTION_STATE.CANCELED:
-      // CANCELED means auto-renew is off; access runs until expiry.
-      return PurchaseStatus.ACTIVE;
-    case GOOGLE_SUBSCRIPTION_STATE.IN_GRACE_PERIOD:
-      return PurchaseStatus.GRACE_PERIOD;
-    case GOOGLE_SUBSCRIPTION_STATE.ON_HOLD:
-    case GOOGLE_SUBSCRIPTION_STATE.PAUSED:
-      return PurchaseStatus.PAUSED;
-    case GOOGLE_SUBSCRIPTION_STATE.EXPIRED:
-      return PurchaseStatus.EXPIRED;
-    case GOOGLE_SUBSCRIPTION_STATE.PENDING:
-    case GOOGLE_SUBSCRIPTION_STATE.PENDING_PURCHASE_CANCELED:
-      return PurchaseStatus.TRIAL;
-    default:
-      if (type === GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_REVOKED) {
-        return PurchaseStatus.REVOKED;
-      }
-      return PurchaseStatus.ACTIVE;
-  }
-}
-
-function mapRevenueEventType(
-  type: GoogleSubscriptionNotificationType,
-): RevenueEventType | null {
-  switch (type) {
-    case GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_PURCHASED:
-      return RevenueEventType.INITIAL;
-    case GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_RENEWED:
-      return RevenueEventType.RENEWAL;
-    case GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_RECOVERED:
-    case GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_RESTARTED:
-      return RevenueEventType.REACTIVATION;
-    case GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_CANCELED:
-    case GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_EXPIRED:
-      return RevenueEventType.CANCELLATION;
-    case GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_REVOKED:
-      return RevenueEventType.REFUND;
-    default:
-      return null;
-  }
-}
-
-function extractCancelTime(
-  purchase: GoogleSubscriptionPurchaseV2,
-): Date | null {
-  const cancelTime =
-    purchase.canceledStateContext?.userInitiatedCancellation?.cancelTime;
-  return cancelTime ? new Date(cancelTime) : null;
 }
 
 // =============================================================

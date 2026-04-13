@@ -13,6 +13,12 @@ const envSchema = z.object({
   GITHUB_CLIENT_SECRET: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
+  // Pub/Sub push authentication. When PUBSUB_PUSH_AUDIENCE is set, the
+  // google webhook route enforces an OIDC Bearer token whose `aud` claim
+  // matches this value. Optionally constrain `email` to a specific service
+  // account via PUBSUB_PUSH_SERVICE_ACCOUNT.
+  PUBSUB_PUSH_AUDIENCE: z.string().min(1).optional(),
+  PUBSUB_PUSH_SERVICE_ACCOUNT: z.string().email().optional(),
 });
 
 export const env = envSchema.parse(process.env);

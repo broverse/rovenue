@@ -86,3 +86,88 @@ export async function acknowledgeGoogleSubscription(
     subscriptionId,
   });
 }
+
+// =============================================================
+// Base plan pricing (monetization.subscriptions.get)
+// =============================================================
+
+export interface BasePlanPricing {
+  amount: number;
+  currency: string;
+}
+
+interface CachedPricing extends BasePlanPricing {
+  expiresAt: number;
+}
+
+const PRICING_CACHE_TTL_MS = 60 * 60 * 1000;
+const pricingCache = new Map<string, CachedPricing>();
+
+/**
+ * Look up the list price for a subscription's base plan in a given region.
+ * Calls monetization.subscriptions.get and walks basePlans → regionalConfigs
+ * for the matching regionCode. Result is cached in-process for 1 hour to
+ * keep webhook processing cheap on repeat renewals.
+ *
+ * Returns `null` when the base plan, region, or price field cannot be
+ * resolved — callers should fall back to 0/USD and log the miss.
+ */
+export async function getSubscriptionBasePlanPricing(
+  config: GoogleVerifyConfig,
+  productId: string,
+  basePlanId: string,
+  regionCode: string,
+): Promise<BasePlanPricing | null> {
+  const cacheKey = `${config.packageName}:${productId}:${basePlanId}:${regionCode}`;
+  const now = Date.now();
+  const cached = pricingCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return { amount: cached.amount, currency: cached.currency };
+  }
+
+  const client = androidPublisher(config.credentials);
+  const response = await client.monetization.subscriptions.get({
+    packageName: config.packageName,
+    productId,
+  });
+
+  const basePlan = response.data.basePlans?.find(
+    (bp) => bp.basePlanId === basePlanId,
+  );
+  const regional = basePlan?.regionalConfigs?.find(
+    (rc) => rc.regionCode === regionCode,
+  );
+  const money = regional?.price;
+
+  if (!money || !money.currencyCode) {
+    log.warn("basePlan pricing lookup returned no price", {
+      packageName: config.packageName,
+      productId,
+      basePlanId,
+      regionCode,
+    });
+    return null;
+  }
+
+  const units = Number(money.units ?? 0);
+  const nanos = money.nanos ?? 0;
+  const pricing: BasePlanPricing = {
+    amount: units + nanos / 1_000_000_000,
+    currency: money.currencyCode,
+  };
+
+  pricingCache.set(cacheKey, {
+    ...pricing,
+    expiresAt: now + PRICING_CACHE_TTL_MS,
+  });
+
+  log.debug("fetched basePlan pricing", {
+    productId,
+    basePlanId,
+    regionCode,
+    amount: pricing.amount,
+    currency: pricing.currency,
+  });
+
+  return pricing;
+}
