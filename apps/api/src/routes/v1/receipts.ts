@@ -1,0 +1,136 @@
+import { Hono } from "hono";
+import { z } from "zod";
+import prisma, { ProductType, type Prisma } from "@rovenue/db";
+import { addCredits } from "../../services/credit-engine";
+import { getActiveAccess, syncAccess } from "../../services/access-engine";
+import { verifyReceipt } from "../../services/receipt-verify";
+import { ok } from "../../lib/response";
+import { logger } from "../../lib/logger";
+
+const log = logger.child("route:v1:receipts");
+
+const bodySchema = z.object({
+  store: z.enum(["APP_STORE", "PLAY_STORE"]),
+  receipt: z.string().min(1),
+  appUserId: z.string().min(1),
+  productId: z.string().min(1),
+});
+
+export const receiptsRoute = new Hono();
+
+/**
+ * POST /v1/receipts
+ *
+ * Verify a store receipt, upsert the purchase, reconcile entitlement
+ * access, credit consumables, and return the subscriber's current access
+ * map plus credit balance.
+ */
+receiptsRoute.post("/", async (c) => {
+  const project = c.get("project");
+  const body = bodySchema.parse(await c.req.json());
+
+  const { subscriber, product, purchase } = await verifyReceipt({
+    projectId: project.id,
+    store: body.store,
+    receipt: body.receipt,
+    productId: body.productId,
+    appUserId: body.appUserId,
+  });
+
+  await syncAccess(subscriber.id);
+
+  if (
+    product.type === ProductType.CONSUMABLE &&
+    product.creditAmount &&
+    product.creditAmount > 0
+  ) {
+    const alreadyCredited = await prisma.creditLedger.findFirst({
+      where: {
+        subscriberId: subscriber.id,
+        referenceType: "purchase",
+        referenceId: purchase.id,
+      },
+      select: { id: true },
+    });
+    if (!alreadyCredited) {
+      await addCredits({
+        subscriberId: subscriber.id,
+        amount: product.creditAmount,
+        referenceType: "purchase",
+        referenceId: purchase.id,
+        description: `Credits for ${product.identifier}`,
+      });
+    }
+  }
+
+  const [access, balance] = await Promise.all([
+    buildAccessResponse(subscriber.id),
+    currentBalance(subscriber.id),
+  ]);
+
+  log.info("receipt verified", {
+    projectId: project.id,
+    subscriberId: subscriber.id,
+    purchaseId: purchase.id,
+    product: product.identifier,
+  });
+
+  return c.json(
+    ok({
+      subscriber: {
+        id: subscriber.id,
+        appUserId: subscriber.appUserId,
+        attributes: subscriber.attributes as Prisma.JsonValue,
+      },
+      access,
+      credits: { balance },
+    }),
+  );
+});
+
+export interface AccessResponseEntry {
+  isActive: boolean;
+  expiresDate: string | null;
+  store: string;
+  productIdentifier: string;
+}
+
+async function buildAccessResponse(
+  subscriberId: string,
+): Promise<Record<string, AccessResponseEntry>> {
+  const raw = await getActiveAccess(subscriberId);
+  const purchaseIds = Array.from(
+    new Set(Object.values(raw).map((entry) => entry.purchaseId)),
+  );
+
+  const purchases = purchaseIds.length
+    ? await prisma.purchase.findMany({
+        where: { id: { in: purchaseIds } },
+        include: { product: { select: { identifier: true } } },
+      })
+    : [];
+  const productByPurchase = new Map(
+    purchases.map((p) => [p.id, p.product.identifier] as const),
+  );
+
+  const result: Record<string, AccessResponseEntry> = {};
+  for (const [key, entry] of Object.entries(raw)) {
+    result[key] = {
+      isActive: entry.isActive,
+      expiresDate: entry.expiresDate ? entry.expiresDate.toISOString() : null,
+      store: entry.store,
+      productIdentifier:
+        productByPurchase.get(entry.purchaseId) ?? "unknown",
+    };
+  }
+  return result;
+}
+
+async function currentBalance(subscriberId: string): Promise<number> {
+  const last = await prisma.creditLedger.findFirst({
+    where: { subscriberId },
+    orderBy: { createdAt: "desc" },
+    select: { balance: true },
+  });
+  return last?.balance ?? 0;
+}

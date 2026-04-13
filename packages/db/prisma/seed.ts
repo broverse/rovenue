@@ -10,7 +10,8 @@ const DEMO_USER_ID = "usr_demo";
 const DEMO_USER_EMAIL = "demo@rovenue.dev";
 const DEMO_PROJECT_SLUG = "demo";
 const DEMO_PUBLIC_KEY = "rov_pub_demo_production";
-const DEMO_SECRET_PLAINTEXT = "rov_sec_demo_do_not_use_in_prod";
+const DEMO_API_KEY_ID = "apkdemoseedkey";
+const DEMO_SECRET_PLAINTEXT = `rov_sec_${DEMO_API_KEY_ID}_demosecret123456789`;
 const PRODUCT_PRO_MONTHLY = "pro_monthly";
 const PRODUCT_CREDITS_100 = "credits_100";
 const DEFAULT_GROUP = "default";
@@ -55,10 +56,14 @@ async function main() {
     },
   });
 
+  // Secret key format: `rov_sec_<apiKeyId>_<random>`. The id is encoded in
+  // the token so the auth middleware can look up the row without bcrypting
+  // every candidate.
   await prisma.apiKey.upsert({
     where: { keyPublic: DEMO_PUBLIC_KEY },
     update: {},
     create: {
+      id: DEMO_API_KEY_ID,
       projectId: project.id,
       label: "Default production key",
       keyPublic: DEMO_PUBLIC_KEY,

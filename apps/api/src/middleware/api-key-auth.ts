@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import type { MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import {
@@ -38,7 +39,54 @@ function detectKind(rawKey: string): ApiKeyKind | null {
   return null;
 }
 
+/**
+ * Secret API key token layout: `rov_sec_<apiKeyId>_<random>`
+ *
+ * We encode the ApiKey row id in the token so we can do an indexed lookup
+ * before running the expensive bcrypt comparison — otherwise every request
+ * would have to iterate all non-revoked secrets and bcrypt each one.
+ */
+function parseSecretKeyId(rawKey: string): string | null {
+  const body = rawKey.slice(API_KEY_PREFIX[API_KEY_KIND.SECRET].length);
+  const delimiter = body.indexOf("_");
+  if (delimiter <= 0) return null;
+  return body.slice(0, delimiter);
+}
+
 export type ApiKeyRequirement = ApiKeyKind | "any";
+
+type ApiKeyRecord = Awaited<
+  ReturnType<typeof prisma.apiKey.findUnique>
+> extends infer R
+  ? R extends null
+    ? never
+    : R & { project: { id: string; name: string; slug: string } }
+  : never;
+
+async function lookupPublicKey(
+  rawKey: string,
+): Promise<ApiKeyRecord | null> {
+  return prisma.apiKey.findUnique({
+    where: { keyPublic: rawKey },
+    include: { project: true },
+  }) as Promise<ApiKeyRecord | null>;
+}
+
+async function lookupSecretKey(
+  rawKey: string,
+): Promise<ApiKeyRecord | null> {
+  const keyId = parseSecretKeyId(rawKey);
+  if (!keyId) return null;
+
+  const record = (await prisma.apiKey.findUnique({
+    where: { id: keyId },
+    include: { project: true },
+  })) as ApiKeyRecord | null;
+  if (!record) return null;
+
+  const valid = await bcrypt.compare(rawKey, record.keySecretHash);
+  return valid ? record : null;
+}
 
 export function apiKeyAuth(
   required: ApiKeyRequirement = "any",
@@ -61,23 +109,13 @@ export function apiKeyAuth(
       });
     }
 
-    // Public keys are stored plaintext and indexed for direct lookup.
-    // Secret keys are bcrypted — verification needs a lookup convention
-    // (e.g. key-id prefix) that isn't wired yet.
-    if (detected !== API_KEY_KIND.PUBLIC) {
-      throw new HTTPException(501, {
-        message: "Secret key verification not yet implemented",
-      });
-    }
-
-    const record = await prisma.apiKey.findUnique({
-      where: { keyPublic: rawKey },
-      include: { project: true },
-    });
+    const record =
+      detected === API_KEY_KIND.PUBLIC
+        ? await lookupPublicKey(rawKey)
+        : await lookupSecretKey(rawKey);
 
     const now = new Date();
     const isExpired = record?.expiresAt != null && record.expiresAt < now;
-
     if (!record || record.revokedAt || isExpired) {
       throw new HTTPException(401, { message: "Invalid or expired API key" });
     }
@@ -86,10 +124,11 @@ export function apiKeyAuth(
       id: record.project.id,
       name: record.project.name,
       slug: record.project.slug,
-      keyKind: API_KEY_KIND.PUBLIC,
+      keyKind: detected,
       apiKeyId: record.id,
     });
 
+    // Fire-and-forget last-used touch.
     prisma.apiKey
       .update({
         where: { id: record.id },
@@ -105,3 +144,16 @@ export function apiKeyAuth(
     await next();
   };
 }
+
+/**
+ * Route-level guard that runs after `apiKeyAuth` and enforces that the
+ * authenticated caller presented a SECRET key. Used for server-side-only
+ * endpoints like credit grants.
+ */
+export const requireSecretKey: MiddlewareHandler = async (c, next) => {
+  const project = c.get("project");
+  if (project?.keyKind !== API_KEY_KIND.SECRET) {
+    throw new HTTPException(403, { message: "Secret API key required" });
+  }
+  await next();
+};
