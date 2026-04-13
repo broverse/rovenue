@@ -1,4 +1,8 @@
-import prisma, { PurchaseStatus, type Store } from "@rovenue/db";
+import prisma, {
+  Prisma,
+  PurchaseStatus,
+  type Store,
+} from "@rovenue/db";
 import { logger } from "../lib/logger";
 
 const log = logger.child("access-engine");
@@ -16,104 +20,101 @@ export interface ActiveAccessEntry {
 
 /**
  * Reconcile a subscriber's `subscriber_access` rows against the authoritative
- * set derived from their current purchases. For each entitlement key we pick
- * the purchase with the latest expiry among active (ACTIVE / TRIAL /
- * GRACE_PERIOD and not yet expired) purchases, and deactivate any access
- * row that no longer has a matching authoritative source.
- *
- * Idempotent and safe to call repeatedly. Intended to run after webhook
- * processing or on demand (e.g. dashboard "resync access" action).
+ * set derived from their current purchases. Holds a Postgres advisory lock
+ * keyed on the subscriberId for the duration of the transaction so concurrent
+ * webhook workers can't race on the same subscriber.
  */
 export async function syncAccess(subscriberId: string): Promise<void> {
-  const purchases = await prisma.purchase.findMany({
-    where: { subscriberId },
-    include: { product: { select: { entitlementKeys: true } } },
-  });
-
-  const now = new Date();
-
-  interface DesiredTarget {
-    purchaseId: string;
-    expiresDate: Date | null;
-    store: Store;
-  }
-  const desired = new Map<string, DesiredTarget>();
-
-  for (const purchase of purchases) {
-    if (!ENTITLEMENT_GRANTING_STATUSES.has(purchase.status)) continue;
-    if (purchase.expiresDate && purchase.expiresDate < now) continue;
-
-    for (const key of purchase.product.entitlementKeys) {
-      const existing = desired.get(key);
-      if (
-        !existing ||
-        isLaterExpiry(purchase.expiresDate, existing.expiresDate)
-      ) {
-        desired.set(key, {
-          purchaseId: purchase.id,
-          expiresDate: purchase.expiresDate,
-          store: purchase.store,
-        });
-      }
-    }
-  }
-
-  const current = await prisma.subscriberAccess.findMany({
-    where: { subscriberId },
-  });
-
-  // Deactivate rows that no longer have an authoritative source
-  for (const record of current) {
-    const target = desired.get(record.entitlementKey);
-    const isSource = target?.purchaseId === record.purchaseId;
-    if (!isSource && record.isActive) {
-      await prisma.subscriberAccess.update({
-        where: { id: record.id },
-        data: { isActive: false },
-      });
-    }
-  }
-
-  // Upsert desired entries
-  for (const [key, target] of desired) {
-    const existing = current.find(
-      (r) =>
-        r.entitlementKey === key && r.purchaseId === target.purchaseId,
+  await prisma.$transaction(async (tx) => {
+    // Serialize access sync per-subscriber. Non-blocking for different
+    // subscribers; blocking for the same one.
+    await tx.$executeRaw(
+      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${subscriberId}, 0))`,
     );
-    if (existing) {
-      const expiryChanged =
-        existing.expiresDate?.getTime() !== target.expiresDate?.getTime();
-      if (!existing.isActive || expiryChanged) {
-        await prisma.subscriberAccess.update({
-          where: { id: existing.id },
-          data: { isActive: true, expiresDate: target.expiresDate },
+
+    const purchases = await tx.purchase.findMany({
+      where: { subscriberId },
+      include: { product: { select: { entitlementKeys: true } } },
+    });
+
+    const now = new Date();
+    interface Target {
+      purchaseId: string;
+      expiresDate: Date | null;
+      store: Store;
+    }
+    const desired = new Map<string, Target>();
+
+    for (const purchase of purchases) {
+      if (!ENTITLEMENT_GRANTING_STATUSES.has(purchase.status)) continue;
+      if (purchase.expiresDate && purchase.expiresDate < now) continue;
+
+      for (const key of purchase.product.entitlementKeys) {
+        const existing = desired.get(key);
+        if (
+          !existing ||
+          isLaterExpiry(purchase.expiresDate, existing.expiresDate)
+        ) {
+          desired.set(key, {
+            purchaseId: purchase.id,
+            expiresDate: purchase.expiresDate,
+            store: purchase.store,
+          });
+        }
+      }
+    }
+
+    const current = await tx.subscriberAccess.findMany({
+      where: { subscriberId },
+    });
+
+    for (const record of current) {
+      const target = desired.get(record.entitlementKey);
+      const isSource = target?.purchaseId === record.purchaseId;
+      if (!isSource && record.isActive) {
+        await tx.subscriberAccess.update({
+          where: { id: record.id },
+          data: { isActive: false },
         });
       }
-    } else {
-      await prisma.subscriberAccess.create({
-        data: {
-          subscriberId,
-          purchaseId: target.purchaseId,
-          entitlementKey: key,
-          isActive: true,
-          expiresDate: target.expiresDate,
-          store: target.store,
-        },
-      });
     }
-  }
 
-  log.debug("synced access", {
-    subscriberId,
-    granted: desired.size,
-    total: current.length,
+    for (const [key, target] of desired) {
+      const existing = current.find(
+        (r) =>
+          r.entitlementKey === key && r.purchaseId === target.purchaseId,
+      );
+      if (existing) {
+        const expiryChanged =
+          existing.expiresDate?.getTime() !== target.expiresDate?.getTime();
+        if (!existing.isActive || expiryChanged) {
+          await tx.subscriberAccess.update({
+            where: { id: existing.id },
+            data: { isActive: true, expiresDate: target.expiresDate },
+          });
+        }
+      } else {
+        await tx.subscriberAccess.create({
+          data: {
+            subscriberId,
+            purchaseId: target.purchaseId,
+            entitlementKey: key,
+            isActive: true,
+            expiresDate: target.expiresDate,
+            store: target.store,
+          },
+        });
+      }
+    }
+
+    log.debug("synced access", {
+      subscriberId,
+      granted: desired.size,
+      total: current.length,
+    });
   });
 }
 
-/**
- * Fast check whether a subscriber currently has an active, non-expired
- * access row for the given entitlement key.
- */
 export async function hasAccess(
   subscriberId: string,
   entitlementKey: string,
@@ -131,11 +132,6 @@ export async function hasAccess(
   return record !== null;
 }
 
-/**
- * Return every active, non-expired entitlement for a subscriber keyed by
- * entitlement key. Conflicts (two purchases granting the same key) resolve
- * to the one with the latest expiry date.
- */
 export async function getActiveAccess(
   subscriberId: string,
 ): Promise<Record<string, ActiveAccessEntry>> {
@@ -168,7 +164,6 @@ export async function getActiveAccess(
 
 function isLaterExpiry(a: Date | null, b: Date | null): boolean {
   if (a === b) return false;
-  // null = no expiry = ever-active = always "latest"
   if (a === null) return true;
   if (b === null) return false;
   return a.getTime() > b.getTime();

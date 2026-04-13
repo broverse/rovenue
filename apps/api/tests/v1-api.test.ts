@@ -45,6 +45,8 @@ const { prismaMock } = vi.hoisted(() => {
     create: vi.fn(),
   };
 
+  const $executeRaw = vi.fn().mockResolvedValue(0);
+
   const $transaction = vi.fn(
     async (
       fn: (
@@ -54,6 +56,9 @@ const { prismaMock } = vi.hoisted(() => {
       fn({
         subscriber,
         creditLedger,
+        subscriberAccess,
+        purchase,
+        $executeRaw,
       }),
   );
 
@@ -66,6 +71,7 @@ const { prismaMock } = vi.hoisted(() => {
     productGroup,
     subscriberAccess,
     creditLedger,
+    $executeRaw,
     $transaction,
   };
 
@@ -130,6 +136,16 @@ vi.mock("@rovenue/db", () => ({
     CREDIT_PURCHASE: "CREDIT_PURCHASE",
   },
   Prisma: {
+    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+      strings,
+      values,
+    }),
+    Decimal: class {
+      constructor(public value: number | string) {}
+      toString() {
+        return String(this.value);
+      }
+    },
     TransactionIsolationLevel: { Serializable: "Serializable" },
     PrismaClientKnownRequestError: class PrismaClientKnownRequestError extends Error {
       code = "";
@@ -476,7 +492,7 @@ describe("POST /v1/subscribers/:appUserId/credits/spend", () => {
     } as any);
 
     const res = await app.request(
-      withPublicAuth("/v1/subscribers/user_1/credits/spend", {
+      withSecretAuth("/v1/subscribers/user_1/credits/spend", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -503,7 +519,7 @@ describe("POST /v1/subscribers/:appUserId/credits/spend", () => {
     } as any);
 
     const res = await app.request(
-      withPublicAuth("/v1/subscribers/user_1/credits/spend", {
+      withSecretAuth("/v1/subscribers/user_1/credits/spend", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ amount: 10 }),
@@ -511,6 +527,17 @@ describe("POST /v1/subscribers/:appUserId/credits/spend", () => {
     );
 
     expect(res.status).toBe(402);
+  });
+
+  it("rejects a public key with 403", async () => {
+    const res = await app.request(
+      withPublicAuth("/v1/subscribers/user_1/credits/spend", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ amount: 10 }),
+      }),
+    );
+    expect(res.status).toBe(403);
   });
 });
 

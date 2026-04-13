@@ -8,9 +8,24 @@ import prisma, {
   type Purchase,
   type Subscriber,
 } from "@rovenue/db";
+import { env } from "../lib/env";
 import { logger } from "../lib/logger";
-import { JoseAppleNotificationVerifier } from "./apple/apple-verify";
-import { APPLE_ENVIRONMENT, APPLE_OFFER_TYPE } from "./apple/apple-types";
+import {
+  loadAppleCredentials,
+  loadGoogleCredentials,
+} from "../lib/project-credentials";
+import {
+  createAppleVerifier,
+  decodeUnverifiedJws,
+  JoseAppleNotificationVerifier,
+  type AppleNotificationVerifier,
+} from "./apple/apple-verify";
+import {
+  APPLE_ENVIRONMENT,
+  APPLE_OFFER_TYPE,
+  type AppleEnvironment,
+  type AppleJwsTransactionPayload,
+} from "./apple/apple-types";
 import {
   verifyGoogleProductPurchase,
   verifyGoogleSubscription,
@@ -19,7 +34,6 @@ import type {
   GoogleServiceAccountCredentials,
   GoogleVerifyConfig,
 } from "./google";
-import { z } from "zod";
 
 const log = logger.child("receipt-verify");
 
@@ -62,12 +76,46 @@ export async function verifyReceipt(
 // Apple receipt (JWS signed transaction from StoreKit 2)
 // =============================================================
 
+async function resolveAppleVerifier(
+  projectId: string,
+  signedPayload: string,
+): Promise<AppleNotificationVerifier> {
+  let environment: AppleEnvironment | undefined;
+  try {
+    const peek = decodeUnverifiedJws<AppleJwsTransactionPayload>(signedPayload);
+    environment = peek.environment;
+  } catch {
+    environment = undefined;
+  }
+
+  const creds = await loadAppleCredentials(projectId);
+  if (creds) {
+    return createAppleVerifier({
+      projectId,
+      bundleId: creds.bundleId,
+      appAppleId: creds.appAppleId,
+      environment,
+    });
+  }
+
+  if (env.NODE_ENV === "production") {
+    throw new HTTPException(400, {
+      message: "Project not configured for Apple receipt verification",
+    });
+  }
+
+  log.warn("no project Apple credentials; falling back to jose verifier", {
+    projectId,
+  });
+  return new JoseAppleNotificationVerifier();
+}
+
 async function verifyAppleReceipt(
   args: VerifyReceiptArgs,
 ): Promise<VerifyReceiptResult> {
-  const verifier = new JoseAppleNotificationVerifier();
+  const verifier = await resolveAppleVerifier(args.projectId, args.receipt);
 
-  let transaction;
+  let transaction: AppleJwsTransactionPayload;
   try {
     transaction = await verifier.verifyTransaction(args.receipt);
   } catch (err) {
@@ -101,7 +149,9 @@ async function verifyAppleReceipt(
     transaction.environment === APPLE_ENVIRONMENT.PRODUCTION
       ? Environment.PRODUCTION
       : Environment.SANDBOX;
-  const isTrial = transaction.offerType === APPLE_OFFER_TYPE.INTRODUCTORY;
+  const isTrial =
+    transaction.offerType === APPLE_OFFER_TYPE.INTRODUCTORY &&
+    (transaction.price ?? 0) === 0;
   const status = isTrial ? PurchaseStatus.TRIAL : PurchaseStatus.ACTIVE;
 
   const purchase = await prisma.purchase.upsert({
@@ -153,39 +203,18 @@ async function verifyAppleReceipt(
 // Google receipt (purchaseToken)
 // =============================================================
 
-const googleCredentialsSchema = z
-  .object({
-    packageName: z.string().min(1),
-    serviceAccount: z
-      .object({
-        client_email: z.string().email(),
-        private_key: z.string().min(1),
-      })
-      .passthrough(),
-  })
-  .passthrough();
-
 async function loadGoogleConfig(
   projectId: string,
 ): Promise<GoogleVerifyConfig> {
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { googleCredentials: true },
-  });
-  if (!project?.googleCredentials) {
+  const creds = await loadGoogleCredentials(projectId);
+  if (!creds) {
     throw new HTTPException(400, {
       message: "Project not configured for Google Play",
     });
   }
-  const parsed = googleCredentialsSchema.safeParse(project.googleCredentials);
-  if (!parsed.success) {
-    throw new HTTPException(500, {
-      message: "Invalid Google credentials in project config",
-    });
-  }
   return {
-    packageName: parsed.data.packageName,
-    credentials: parsed.data.serviceAccount as GoogleServiceAccountCredentials,
+    packageName: creds.packageName,
+    credentials: creds.serviceAccount as GoogleServiceAccountCredentials,
   };
 }
 

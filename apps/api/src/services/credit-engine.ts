@@ -7,8 +7,6 @@ import { logger } from "../lib/logger";
 
 const log = logger.child("credit-engine");
 
-const DEFAULT_RETRY_ATTEMPTS = 3;
-
 export class InsufficientCreditsError extends Error {
   constructor(
     readonly balance: number,
@@ -20,8 +18,8 @@ export class InsufficientCreditsError extends Error {
 }
 
 /**
- * Return the subscriber's current credit balance. The CreditLedger is
- * append-only so the most recent entry's `balance` field is authoritative.
+ * Return the subscriber's current credit balance — the `balance` field of
+ * the most recent CreditLedger entry. Append-only; no aggregation.
  */
 export async function getBalance(subscriberId: string): Promise<number> {
   const last = await prisma.creditLedger.findFirst({
@@ -43,8 +41,9 @@ export interface AddCreditsArgs {
 }
 
 /**
- * Append a PURCHASE / BONUS / REFUND ledger entry. Runs inside a serializable
- * transaction so concurrent grants cannot race on the running balance.
+ * Append a PURCHASE / BONUS / REFUND ledger entry. A per-subscriber
+ * Postgres advisory lock serialises concurrent writers on the same
+ * subscriber without the cost of Serializable isolation.
  */
 export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
   if (!Number.isInteger(args.amount) || args.amount <= 0) {
@@ -52,41 +51,46 @@ export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
   }
   const type = args.type ?? CreditLedgerType.PURCHASE;
 
-  return withSerializableRetry(() =>
-    prisma.$transaction(
-      async (tx) => {
-        const subscriber = await tx.subscriber.findUnique({
-          where: { id: args.subscriberId },
-          select: { projectId: true },
-        });
-        if (!subscriber) {
-          throw new Error(`Subscriber ${args.subscriberId} not found`);
-        }
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw(
+      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${args.subscriberId}, 0))`,
+    );
 
-        const last = await tx.creditLedger.findFirst({
-          where: { subscriberId: args.subscriberId },
-          orderBy: { createdAt: "desc" },
-          select: { balance: true },
-        });
-        const balance = (last?.balance ?? 0) + args.amount;
+    const subscriber = await tx.subscriber.findUnique({
+      where: { id: args.subscriberId },
+      select: { projectId: true },
+    });
+    if (!subscriber) {
+      throw new Error(`Subscriber ${args.subscriberId} not found`);
+    }
 
-        return tx.creditLedger.create({
-          data: {
-            projectId: subscriber.projectId,
-            subscriberId: args.subscriberId,
-            type,
-            amount: args.amount,
-            balance,
-            referenceType: args.referenceType,
-            referenceId: args.referenceId,
-            description: args.description,
-            metadata: args.metadata,
-          },
-        });
+    const last = await tx.creditLedger.findFirst({
+      where: { subscriberId: args.subscriberId },
+      orderBy: { createdAt: "desc" },
+      select: { balance: true },
+    });
+    const balance = (last?.balance ?? 0) + args.amount;
+
+    log.debug("adding credits", {
+      subscriberId: args.subscriberId,
+      amount: args.amount,
+      newBalance: balance,
+    });
+
+    return tx.creditLedger.create({
+      data: {
+        projectId: subscriber.projectId,
+        subscriberId: args.subscriberId,
+        type,
+        amount: args.amount,
+        balance,
+        referenceType: args.referenceType,
+        referenceId: args.referenceId,
+        description: args.description,
+        metadata: args.metadata,
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    ),
-  );
+    });
+  });
 }
 
 export interface SpendCreditsArgs {
@@ -99,9 +103,9 @@ export interface SpendCreditsArgs {
 }
 
 /**
- * Append a SPEND ledger entry. Rejects with {@link InsufficientCreditsError}
- * when the current balance is below `amount`. Uses serializable isolation +
- * retry so concurrent spends can't overdraft.
+ * Append a SPEND ledger entry; throws {@link InsufficientCreditsError}
+ * when the balance is below `amount`. Per-subscriber advisory lock keeps
+ * concurrent spends from overdrafting.
  */
 export async function spendCredits(
   args: SpendCreditsArgs,
@@ -110,47 +114,52 @@ export async function spendCredits(
     throw new Error("spendCredits: amount must be a positive integer");
   }
 
-  return withSerializableRetry(() =>
-    prisma.$transaction(
-      async (tx) => {
-        const subscriber = await tx.subscriber.findUnique({
-          where: { id: args.subscriberId },
-          select: { projectId: true },
-        });
-        if (!subscriber) {
-          throw new Error(`Subscriber ${args.subscriberId} not found`);
-        }
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw(
+      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${args.subscriberId}, 0))`,
+    );
 
-        const last = await tx.creditLedger.findFirst({
-          where: { subscriberId: args.subscriberId },
-          orderBy: { createdAt: "desc" },
-          select: { balance: true },
-        });
-        const prevBalance = last?.balance ?? 0;
+    const subscriber = await tx.subscriber.findUnique({
+      where: { id: args.subscriberId },
+      select: { projectId: true },
+    });
+    if (!subscriber) {
+      throw new Error(`Subscriber ${args.subscriberId} not found`);
+    }
 
-        if (prevBalance < args.amount) {
-          throw new InsufficientCreditsError(prevBalance, args.amount);
-        }
+    const last = await tx.creditLedger.findFirst({
+      where: { subscriberId: args.subscriberId },
+      orderBy: { createdAt: "desc" },
+      select: { balance: true },
+    });
+    const prevBalance = last?.balance ?? 0;
 
-        const balance = prevBalance - args.amount;
+    if (prevBalance < args.amount) {
+      throw new InsufficientCreditsError(prevBalance, args.amount);
+    }
 
-        return tx.creditLedger.create({
-          data: {
-            projectId: subscriber.projectId,
-            subscriberId: args.subscriberId,
-            type: CreditLedgerType.SPEND,
-            amount: -args.amount,
-            balance,
-            referenceType: args.referenceType,
-            referenceId: args.referenceId,
-            description: args.description,
-            metadata: args.metadata,
-          },
-        });
+    const balance = prevBalance - args.amount;
+
+    log.debug("spending credits", {
+      subscriberId: args.subscriberId,
+      amount: args.amount,
+      newBalance: balance,
+    });
+
+    return tx.creditLedger.create({
+      data: {
+        projectId: subscriber.projectId,
+        subscriberId: args.subscriberId,
+        type: CreditLedgerType.SPEND,
+        amount: -args.amount,
+        balance,
+        referenceType: args.referenceType,
+        referenceId: args.referenceId,
+        description: args.description,
+        metadata: args.metadata,
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    ),
-  );
+    });
+  });
 }
 
 export interface RefundCreditsArgs {
@@ -162,11 +171,6 @@ export interface RefundCreditsArgs {
   metadata?: Prisma.InputJsonValue;
 }
 
-/**
- * Append a REFUND ledger entry — additive like addCredits but tagged with
- * `type=REFUND` and always references the original grant or purchase via
- * `referenceId` for audit.
- */
 export async function refundCredits(
   args: RefundCreditsArgs,
 ): Promise<CreditLedger> {
@@ -179,37 +183,4 @@ export async function refundCredits(
     description: args.description,
     metadata: args.metadata,
   });
-}
-
-async function withSerializableRetry<T>(
-  fn: () => Promise<T>,
-  maxAttempts = DEFAULT_RETRY_ATTEMPTS,
-): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastError = err;
-      if (!isSerializationError(err)) throw err;
-      log.warn("serialization conflict, retrying credit transaction", {
-        attempt,
-        maxAttempts,
-      });
-      await sleep(Math.floor(Math.random() * 50 * attempt));
-    }
-  }
-  throw lastError;
-}
-
-function isSerializationError(err: unknown): boolean {
-  if (err instanceof Prisma.PrismaClientKnownRequestError) {
-    // P2034 = transaction failed due to write conflict or deadlock
-    return err.code === "P2034";
-  }
-  return false;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

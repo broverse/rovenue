@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import { HTTPException } from "hono/http-exception";
 import prisma, {
   Environment,
+  Prisma,
   PurchaseStatus,
   RevenueEventType,
   Store,
@@ -9,6 +10,7 @@ import prisma, {
   WebhookSource,
 } from "@rovenue/db";
 import { logger } from "../../lib/logger";
+import { convertToUsd } from "../fx";
 import {
   STRIPE_EVENT_TYPE,
   STRIPE_INVOICE_BILLING_REASON,
@@ -60,6 +62,10 @@ interface StripeDispatchOutcome {
   purchaseId?: string;
 }
 
+/**
+ * Verify + process a Stripe webhook from the raw request body. Preferred
+ * for synchronous route handlers.
+ */
 export async function handleStripeNotification(
   opts: HandleStripeNotificationOptions,
 ): Promise<HandleStripeNotificationResult> {
@@ -79,16 +85,48 @@ export async function handleStripeNotification(
     throw new HTTPException(400, { message: "Invalid Stripe signature" });
   }
 
-  const existing = await prisma.webhookEvent.findUnique({
+  return processStripeEvent({
+    projectId: opts.projectId,
+    event,
+    stripe,
+  });
+}
+
+export interface ProcessStripeEventOptions {
+  projectId: string;
+  event: Stripe.Event;
+  stripe: Stripe;
+}
+
+/**
+ * Process an already-verified Stripe event. Called by the BullMQ worker
+ * after the route has verified the signature synchronously, so the job
+ * payload never includes raw webhook bodies.
+ */
+export async function processStripeEvent(
+  opts: ProcessStripeEventOptions,
+): Promise<HandleStripeNotificationResult> {
+  const { event, projectId, stripe } = opts;
+
+  const webhookEvent = await prisma.webhookEvent.upsert({
     where: {
       source_storeEventId: {
         source: WebhookSource.STRIPE,
         storeEventId: event.id,
       },
     },
+    create: {
+      projectId,
+      source: WebhookSource.STRIPE,
+      eventType: event.type,
+      storeEventId: event.id,
+      payload: JSON.parse(JSON.stringify(event)),
+      status: WebhookEventStatus.PROCESSING,
+    },
+    update: {},
   });
 
-  if (existing && existing.status === WebhookEventStatus.PROCESSED) {
+  if (webhookEvent.status === WebhookEventStatus.PROCESSED) {
     log.info("duplicate event, skipping", {
       id: event.id,
       type: event.type,
@@ -96,22 +134,9 @@ export async function handleStripeNotification(
     return { status: "duplicate", eventType: event.type };
   }
 
-  const webhookEvent =
-    existing ??
-    (await prisma.webhookEvent.create({
-      data: {
-        projectId: opts.projectId,
-        source: WebhookSource.STRIPE,
-        eventType: event.type,
-        storeEventId: event.id,
-        payload: JSON.parse(JSON.stringify(event)),
-        status: WebhookEventStatus.PROCESSING,
-      },
-    }));
-
   try {
     const outcome: StripeDispatchOutcome = {};
-    await dispatch({ projectId: opts.projectId, event, stripe, outcome });
+    await dispatch({ projectId, event, stripe, outcome });
 
     await prisma.webhookEvent.update({
       where: { id: webhookEvent.id },
@@ -250,9 +275,9 @@ async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
       purchaseId: purchase.id,
       productId: purchase.productId,
       type: RevenueEventType.CANCELLATION,
-      amount: 0,
+      amount: new Prisma.Decimal(0),
       currency: purchase.priceCurrency ?? "USD",
-      amountUsd: 0,
+      amountUsd: new Prisma.Decimal(0),
       store: Store.STRIPE,
       eventDate: new Date(),
     },
@@ -289,6 +314,7 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
 
   const amount = (invoice.amount_paid ?? 0) / 100;
   const currency = invoice.currency?.toUpperCase() ?? "USD";
+  const amountUsd = convertToUsd(amount, currency);
   const isFirstInvoice =
     invoice.billing_reason === STRIPE_INVOICE_BILLING_REASON.SUBSCRIPTION_CREATE;
 
@@ -301,8 +327,6 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
     type = RevenueEventType.RENEWAL;
   }
 
-  // Once the first paid invoice clears the trial flag should drop so
-  // subsequent renewals are classified as RENEWAL instead of TRIAL_CONVERSION.
   if (purchase.isTrial) {
     await prisma.purchase.update({
       where: { id: purchase.id },
@@ -321,9 +345,9 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
       purchaseId: purchase.id,
       productId: purchase.productId,
       type,
-      amount,
+      amount: new Prisma.Decimal(amount),
       currency,
-      amountUsd: amount,
+      amountUsd: new Prisma.Decimal(amountUsd),
       store: Store.STRIPE,
       eventDate,
     },
@@ -404,6 +428,7 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
   const amount = (charge.amount_refunded ?? 0) / 100;
   const currency =
     charge.currency?.toUpperCase() ?? purchase.priceCurrency ?? "USD";
+  const amountUsd = convertToUsd(-amount, currency);
 
   await prisma.revenueEvent.create({
     data: {
@@ -412,9 +437,9 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
       purchaseId: purchase.id,
       productId: purchase.productId,
       type: RevenueEventType.REFUND,
-      amount: -amount,
+      amount: new Prisma.Decimal(-amount),
       currency,
-      amountUsd: -amount,
+      amountUsd: new Prisma.Decimal(amountUsd),
       store: Store.STRIPE,
       eventDate: new Date(),
     },

@@ -1,24 +1,30 @@
-import prisma from "@rovenue/db";
-import {
+import prisma, {
   Environment,
+  Prisma,
   PurchaseStatus,
   RevenueEventType,
   Store,
   WebhookEventStatus,
   WebhookSource,
 } from "@rovenue/db";
+import { env } from "../../lib/env";
 import { logger } from "../../lib/logger";
+import { loadAppleCredentials } from "../../lib/project-credentials";
+import { convertToUsd } from "../fx";
 import {
   APPLE_ENVIRONMENT,
   APPLE_NOTIFICATION_SUBTYPE,
   APPLE_NOTIFICATION_TYPE,
   APPLE_OFFER_TYPE,
+  type AppleEnvironment,
   type AppleJwsRenewalInfoPayload,
   type AppleJwsTransactionPayload,
   type AppleNotificationType,
   type AppleResponseBodyV2DecodedPayload,
 } from "./apple-types";
 import {
+  createAppleVerifier,
+  decodeUnverifiedJws,
   JoseAppleNotificationVerifier,
   type AppleKeyLookup,
   type AppleNotificationVerifier,
@@ -30,13 +36,11 @@ export interface HandleAppleNotificationOptions {
   projectId: string;
   signedPayload: string;
   /**
-   * Verifier used to decode the notification + embedded JWS payloads. In
-   * production this should be a {@link LibraryAppleNotificationVerifier}
-   * configured with Apple root certs, bundleId, and environment. If omitted,
-   * a {@link JoseAppleNotificationVerifier} is constructed from `keyLookup`.
+   * Explicit verifier. If omitted, the handler builds a
+   * LibraryAppleNotificationVerifier using project.appleCredentials +
+   * APPLE_ROOT_CERTS_DIR. In production, missing credentials throw.
    */
   verifier?: AppleNotificationVerifier;
-  /** Legacy key lookup path — ignored if `verifier` is provided. */
   keyLookup?: AppleKeyLookup;
 }
 
@@ -73,21 +77,30 @@ interface DispatchContext {
 export async function handleAppleNotification(
   opts: HandleAppleNotificationOptions,
 ): Promise<HandleAppleNotificationResult> {
-  const verifier =
-    opts.verifier ?? new JoseAppleNotificationVerifier(opts.keyLookup);
-
+  const verifier = await resolveVerifier(opts);
   const notification = await verifier.verifyNotification(opts.signedPayload);
 
-  const existing = await prisma.webhookEvent.findUnique({
+  // Idempotent insert — concurrent workers see the same row and we check
+  // the claimed status below.
+  const webhookEvent = await prisma.webhookEvent.upsert({
     where: {
       source_storeEventId: {
         source: WebhookSource.APPLE,
         storeEventId: notification.notificationUUID,
       },
     },
+    create: {
+      projectId: opts.projectId,
+      source: WebhookSource.APPLE,
+      eventType: notification.notificationType,
+      storeEventId: notification.notificationUUID,
+      payload: JSON.parse(JSON.stringify(notification)),
+      status: WebhookEventStatus.PROCESSING,
+    },
+    update: {},
   });
 
-  if (existing && existing.status === WebhookEventStatus.PROCESSED) {
+  if (webhookEvent.status === WebhookEventStatus.PROCESSED) {
     log.info("duplicate notification, skipping", {
       uuid: notification.notificationUUID,
       type: notification.notificationType,
@@ -98,29 +111,17 @@ export async function handleAppleNotification(
     };
   }
 
-  const webhookEvent =
-    existing ??
-    (await prisma.webhookEvent.create({
-      data: {
-        projectId: opts.projectId,
-        source: WebhookSource.APPLE,
-        eventType: notification.notificationType,
-        storeEventId: notification.notificationUUID,
-        payload: JSON.parse(JSON.stringify(notification)),
-        status: WebhookEventStatus.PROCESSING,
-      },
-    }));
-
   try {
     const transaction = notification.data?.signedTransactionInfo
-      ? await verifier.verifyTransaction(notification.data.signedTransactionInfo)
+      ? await verifier.verifyTransaction(
+          notification.data.signedTransactionInfo,
+        )
       : undefined;
     const renewalInfo = notification.data?.signedRenewalInfo
       ? await verifier.verifyRenewalInfo(notification.data.signedRenewalInfo)
       : undefined;
 
     const outcome: DispatchOutcome = {};
-
     if (transaction) {
       await dispatch({
         projectId: opts.projectId,
@@ -172,6 +173,43 @@ export async function handleAppleNotification(
   }
 }
 
+async function resolveVerifier(
+  opts: HandleAppleNotificationOptions,
+): Promise<AppleNotificationVerifier> {
+  if (opts.verifier) return opts.verifier;
+
+  let environment: AppleEnvironment | undefined;
+  try {
+    const peek =
+      decodeUnverifiedJws<AppleResponseBodyV2DecodedPayload>(opts.signedPayload);
+    environment = peek.data?.environment;
+  } catch {
+    // Malformed JWS — verification will fail downstream with a clearer
+    // error; fall through to the default environment.
+  }
+
+  const creds = await loadAppleCredentials(opts.projectId);
+  if (creds) {
+    return createAppleVerifier({
+      projectId: opts.projectId,
+      bundleId: creds.bundleId,
+      appAppleId: creds.appAppleId,
+      environment,
+    });
+  }
+
+  if (env.NODE_ENV === "production") {
+    throw new Error(
+      `Apple credentials not configured for project ${opts.projectId}; refusing to verify notification in production`,
+    );
+  }
+
+  log.warn("no project Apple credentials; falling back to jose verifier", {
+    projectId: opts.projectId,
+  });
+  return new JoseAppleNotificationVerifier(opts.keyLookup);
+}
+
 // =============================================================
 // Dispatch
 // =============================================================
@@ -210,7 +248,9 @@ async function applySubscribed(ctx: DispatchContext): Promise<void> {
   const { product, purchase } = await upsertPurchase({
     ctx,
     subscriberId: subscriber.id,
-    status: isTrial(ctx.transaction) ? PurchaseStatus.TRIAL : PurchaseStatus.ACTIVE,
+    status: isTrial(ctx.transaction)
+      ? PurchaseStatus.TRIAL
+      : PurchaseStatus.ACTIVE,
     autoRenewStatus: ctx.renewalInfo?.autoRenewStatus === 1,
   });
   ctx.outcome.subscriberId = subscriber.id;
@@ -305,17 +345,6 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
   });
   await revokeAccessForTransaction(ctx);
 
-  const subscriber = await prisma.subscriber.findFirst({
-    where: {
-      projectId: ctx.projectId,
-      purchases: {
-        some: {
-          store: Store.APP_STORE,
-          storeTransactionId: ctx.transaction.transactionId,
-        },
-      },
-    },
-  });
   const purchase = await prisma.purchase.findUnique({
     where: {
       store_storeTransactionId: {
@@ -324,7 +353,12 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
       },
     },
   });
-  if (!subscriber || !purchase) return;
+  if (!purchase) return;
+
+  const subscriber = await prisma.subscriber.findUnique({
+    where: { id: purchase.subscriberId },
+  });
+  if (!subscriber) return;
 
   ctx.outcome.subscriberId = subscriber.id;
   ctx.outcome.purchaseId = purchase.id;
@@ -355,7 +389,12 @@ async function applyRevoke(ctx: DispatchContext): Promise<void> {
 // =============================================================
 
 function isTrial(transaction: AppleJwsTransactionPayload): boolean {
-  return transaction.offerType === APPLE_OFFER_TYPE.INTRODUCTORY;
+  // Introductory offer + price 0 = free trial. Paid intro discounts keep
+  // ACTIVE status so they're counted as real revenue.
+  return (
+    transaction.offerType === APPLE_OFFER_TYPE.INTRODUCTORY &&
+    (transaction.price ?? 0) === 0
+  );
 }
 
 function mapEnvironment(tx: AppleJwsTransactionPayload): Environment {
@@ -391,9 +430,7 @@ async function resolveSubscriber(ctx: DispatchContext) {
     include: { subscriber: true },
     orderBy: { createdAt: "desc" },
   });
-  if (existing?.subscriber) {
-    return existing.subscriber;
-  }
+  if (existing?.subscriber) return existing.subscriber;
 
   return prisma.subscriber.create({
     data: {
@@ -542,6 +579,7 @@ async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
 
   const amount = tx.price / 1_000_000;
   const signed = negative ? -amount : amount;
+  const amountUsd = convertToUsd(signed, tx.currency);
 
   await prisma.revenueEvent.create({
     data: {
@@ -550,10 +588,9 @@ async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
       purchaseId,
       productId,
       type,
-      amount: signed,
+      amount: new Prisma.Decimal(signed),
       currency: tx.currency,
-      // TODO: plug real FX conversion; for now treat price currency as USD-equivalent.
-      amountUsd: signed,
+      amountUsd: new Prisma.Decimal(amountUsd),
       store: Store.APP_STORE,
       eventDate: new Date(tx.purchaseDate),
     },
@@ -573,6 +610,9 @@ async function emitCancellationEvent(ctx: DispatchContext): Promise<void> {
     where: { id: purchase.subscriberId },
   });
   if (!subscriber) return;
+
+  ctx.outcome.subscriberId = subscriber.id;
+  ctx.outcome.purchaseId = purchase.id;
 
   await emitRevenueEvent({
     ctx,

@@ -1,6 +1,6 @@
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
-import { z } from "zod";
+import type Stripe from "stripe";
 import prisma, {
   CreditLedgerType,
   OutgoingWebhookStatus,
@@ -9,6 +9,10 @@ import prisma, {
 } from "@rovenue/db";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
+import {
+  loadGoogleCredentials,
+  loadStripeCredentials,
+} from "../lib/project-credentials";
 import { syncAccess } from "./access-engine";
 import { addCredits } from "./credit-engine";
 import {
@@ -23,10 +27,10 @@ import {
   type HandleGoogleNotificationResult,
 } from "./google";
 import {
-  handleStripeNotification,
+  getStripeClient,
+  processStripeEvent,
   type HandleStripeNotificationResult,
-  type StripeProjectCredentials,
-} from "./stripe";
+} from "./stripe/stripe-webhook";
 
 const log = logger.child("webhook-processor");
 
@@ -48,10 +52,12 @@ export type WebhookJobData =
       pushBody: GooglePubSubPushBody;
     }
   | {
+      // NOTE: Stripe events are verified synchronously at the route edge
+      // so the raw body and webhook secret never land in Redis. The worker
+      // only re-processes the parsed event.
       source: "STRIPE";
       projectId: string;
-      rawBody: string;
-      signature: string;
+      event: Stripe.Event;
     };
 
 export type WebhookJobResult =
@@ -64,9 +70,6 @@ export type WebhookJobResult =
 // =============================================================
 
 function createBullConnection(): Redis {
-  // BullMQ requires maxRetriesPerRequest: null; the shared lib/redis.ts
-  // client uses retries for general command safety, so we use a dedicated
-  // connection for the queue.
   return new Redis(env.REDIS_URL, {
     maxRetriesPerRequest: null,
     lazyConnect: false,
@@ -103,13 +106,6 @@ export async function enqueueWebhookEvent(
 // processWebhookEvent — BullMQ job body
 // =============================================================
 
-/**
- * Process a verified webhook event end-to-end:
- *  1. Dispatch to the store handler (idempotent via WebhookEvent dedup).
- *  2. Reconcile subscriber entitlements via access-engine.syncAccess.
- *  3. Credit consumable purchases idempotently via credit-engine.
- *  4. Insert a pending row into outgoing_webhooks for downstream delivery.
- */
 export async function processWebhookEvent(
   data: WebhookJobData,
 ): Promise<WebhookJobResult> {
@@ -142,7 +138,7 @@ async function dispatchToHandler(
         signedPayload: data.signedPayload,
       });
     case "GOOGLE": {
-      const verifyConfig = await loadGoogleVerifyConfig(data.projectId);
+      const verifyConfig = await resolveGoogleVerifyConfig(data.projectId);
       return handleGoogleNotification({
         projectId: data.projectId,
         pushBody: data.pushBody,
@@ -156,14 +152,25 @@ async function dispatchToHandler(
           `Stripe credentials not configured for project ${data.projectId}`,
         );
       }
-      return handleStripeNotification({
+      const stripe = getStripeClient(credentials.secretKey);
+      return processStripeEvent({
         projectId: data.projectId,
-        rawBody: data.rawBody,
-        signature: data.signature,
-        credentials,
+        event: data.event,
+        stripe,
       });
     }
   }
+}
+
+async function resolveGoogleVerifyConfig(
+  projectId: string,
+): Promise<GoogleVerifyConfig | undefined> {
+  const creds = await loadGoogleCredentials(projectId);
+  if (!creds) return undefined;
+  return {
+    packageName: creds.packageName,
+    credentials: creds.serviceAccount as GoogleServiceAccountCredentials,
+  };
 }
 
 function extractEventType(result: WebhookJobResult): string {
@@ -185,8 +192,6 @@ interface PostProcessingArgs {
 }
 
 async function runPostProcessing(args: PostProcessingArgs): Promise<void> {
-  // Defensive access reconciliation — handlers already update access inline,
-  // this catches any drift from edge cases.
   try {
     await syncAccess(args.subscriberId);
   } catch (err) {
@@ -240,7 +245,6 @@ async function maybeCreditConsumablePurchase(
     return;
   }
 
-  // Idempotency: if this purchase has already been credited, skip.
   const existing = await prisma.creditLedger.findFirst({
     where: {
       subscriberId,
@@ -283,7 +287,6 @@ async function enqueueOutgoingWebhook(
   });
   if (!project?.webhookUrl) return;
 
-  // Idempotency: dedupe on (projectId, eventType, purchaseId, subscriberId).
   if (args.purchaseId) {
     const existing = await prisma.outgoingWebhook.findFirst({
       where: {
@@ -315,75 +318,6 @@ async function enqueueOutgoingWebhook(
       status: OutgoingWebhookStatus.PENDING,
     },
   });
-}
-
-// =============================================================
-// Per-project credential loaders (worker-side)
-// =============================================================
-
-const googleCredentialsSchema = z
-  .object({
-    packageName: z.string().min(1),
-    serviceAccount: z
-      .object({
-        client_email: z.string().email(),
-        private_key: z.string().min(1),
-      })
-      .passthrough(),
-  })
-  .passthrough();
-
-async function loadGoogleVerifyConfig(
-  projectId: string,
-): Promise<GoogleVerifyConfig | undefined> {
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { googleCredentials: true },
-  });
-  if (!project?.googleCredentials) return undefined;
-
-  const parsed = googleCredentialsSchema.safeParse(project.googleCredentials);
-  if (!parsed.success) {
-    log.warn("project googleCredentials failed schema validation", {
-      projectId,
-      issues: parsed.error.issues,
-    });
-    return undefined;
-  }
-  return {
-    packageName: parsed.data.packageName,
-    credentials: parsed.data.serviceAccount as GoogleServiceAccountCredentials,
-  };
-}
-
-const stripeCredentialsSchema = z
-  .object({
-    secretKey: z.string().min(1),
-    webhookSecret: z.string().min(1),
-  })
-  .passthrough();
-
-async function loadStripeCredentials(
-  projectId: string,
-): Promise<StripeProjectCredentials | null> {
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { stripeCredentials: true },
-  });
-  if (!project?.stripeCredentials) return null;
-
-  const parsed = stripeCredentialsSchema.safeParse(project.stripeCredentials);
-  if (!parsed.success) {
-    log.warn("project stripeCredentials failed schema validation", {
-      projectId,
-      issues: parsed.error.issues,
-    });
-    return null;
-  }
-  return {
-    secretKey: parsed.data.secretKey,
-    webhookSecret: parsed.data.webhookSecret,
-  };
 }
 
 // =============================================================

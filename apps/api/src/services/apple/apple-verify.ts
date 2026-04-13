@@ -17,6 +17,10 @@ import {
   type AppleJwsTransactionPayload,
   type AppleResponseBodyV2DecodedPayload,
 } from "./apple-types";
+import { loadAppleRootCerts } from "./apple-root-ca";
+import { logger } from "../../lib/logger";
+
+const log = logger.child("apple-verify");
 
 // =============================================================
 // Verifier interface
@@ -35,7 +39,6 @@ export interface AppleNotificationVerifier {
 // =============================================================
 
 export interface LibraryVerifierConfig {
-  /** PEM- or DER-encoded Apple root CA certs (AppleRootCA-G3, etc). */
   appleRootCertificates: Buffer[];
   environment: AppleEnvironment;
   bundleId: string;
@@ -43,18 +46,12 @@ export interface LibraryVerifierConfig {
   enableOnlineChecks?: boolean;
 }
 
-function mapEnvironmentToSdk(env: AppleEnvironment): AppleSdkEnvironment {
-  return env === APPLE_ENVIRONMENT.PRODUCTION
+function mapEnvironmentToSdk(envValue: AppleEnvironment): AppleSdkEnvironment {
+  return envValue === APPLE_ENVIRONMENT.PRODUCTION
     ? AppleSdkEnvironment.PRODUCTION
     : AppleSdkEnvironment.SANDBOX;
 }
 
-/**
- * Verifier that delegates to Apple's official
- * `@apple/app-store-server-library`. The library validates the full x5c chain
- * against Apple's root CA, checks OCSP/CRL if `enableOnlineChecks` is true,
- * and enforces the bundleId + environment match.
- */
 export class LibraryAppleNotificationVerifier
   implements AppleNotificationVerifier
 {
@@ -63,7 +60,7 @@ export class LibraryAppleNotificationVerifier
   constructor(config: LibraryVerifierConfig) {
     this.verifier = new SignedDataVerifier(
       config.appleRootCertificates,
-      config.enableOnlineChecks ?? true,
+      config.enableOnlineChecks ?? false,
       mapEnvironmentToSdk(config.environment),
       config.bundleId,
       config.appAppleId,
@@ -87,13 +84,9 @@ export class LibraryAppleNotificationVerifier
 }
 
 // =============================================================
-// Jose-backed verifier — used by tests and as a config-less fallback
+// Jose-backed verifier — test fallback (insecure: no chain validation)
 // =============================================================
 
-/**
- * Function jose uses to look up the verification key for a JWS. The default
- * implementation imports the x5c leaf cert; tests inject a fixed public key.
- */
 export type AppleKeyLookup = (
   protectedHeader: CompactJWSHeaderParameters,
   token: FlattenedJWSInput,
@@ -145,7 +138,7 @@ export class JoseAppleNotificationVerifier
 }
 
 // =============================================================
-// Back-compat functional wrappers around the jose verifier
+// Back-compat functional wrappers
 // =============================================================
 
 export function verifySignedPayload(
@@ -169,10 +162,6 @@ export function verifySignedRenewalInfo(
   return new JoseAppleNotificationVerifier(keyLookup).verifyRenewalInfo(jws);
 }
 
-/**
- * Decode a JWS payload WITHOUT verifying its signature. Only use for
- * diagnostics and tests — never trust the result in production flows.
- */
 export function decodeUnverifiedJws<T>(jws: string): T {
   const parts = jws.split(".");
   if (parts.length !== 3) {
@@ -180,4 +169,45 @@ export function decodeUnverifiedJws<T>(jws: string): T {
   }
   const payload = Buffer.from(parts[1]!, "base64url").toString("utf8");
   return JSON.parse(payload) as T;
+}
+
+// =============================================================
+// Factory — picks library verifier when root certs are configured,
+// falls back to jose (insecure) otherwise.
+// =============================================================
+
+export interface CreateAppleVerifierOpts {
+  projectId: string;
+  bundleId: string;
+  appAppleId?: number;
+  environment?: AppleEnvironment;
+}
+
+const verifierCache = new Map<string, AppleNotificationVerifier>();
+
+export function createAppleVerifier(
+  opts: CreateAppleVerifierOpts,
+): AppleNotificationVerifier {
+  const certs = loadAppleRootCerts();
+  if (!certs || certs.length === 0) {
+    log.warn("falling back to jose verifier (no Apple root certs)", {
+      projectId: opts.projectId,
+    });
+    return new JoseAppleNotificationVerifier();
+  }
+
+  const envKey = opts.environment ?? APPLE_ENVIRONMENT.PRODUCTION;
+  const cacheKey = `${opts.projectId}:${opts.bundleId}:${envKey}`;
+  const cached = verifierCache.get(cacheKey);
+  if (cached) return cached;
+
+  const verifier = new LibraryAppleNotificationVerifier({
+    appleRootCertificates: certs,
+    environment: envKey,
+    bundleId: opts.bundleId,
+    appAppleId: opts.appAppleId,
+    enableOnlineChecks: false,
+  });
+  verifierCache.set(cacheKey, verifier);
+  return verifier;
 }

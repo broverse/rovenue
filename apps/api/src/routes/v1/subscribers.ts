@@ -230,11 +230,14 @@ const spendBodySchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
-subscribersRoute.post("/:appUserId/credits/spend", async (c) => {
-  const project = c.get("project");
-  const appUserId = c.req.param("appUserId");
-  const body = spendBodySchema.parse(await c.req.json());
-  const subscriber = await resolveSubscriber(project.id, appUserId);
+subscribersRoute.post(
+  "/:appUserId/credits/spend",
+  requireSecretKey,
+  async (c) => {
+    const project = c.get("project");
+    const appUserId = c.req.param("appUserId");
+    const body = spendBodySchema.parse(await c.req.json());
+    const subscriber = await resolveSubscriber(project.id, appUserId);
 
   try {
     const entry = await spendCredits({

@@ -1,11 +1,13 @@
 import prisma, {
   Environment,
+  Prisma,
   WebhookEventStatus,
   WebhookSource,
   Store,
   PurchaseStatus,
 } from "@rovenue/db";
 import { logger } from "../../lib/logger";
+import { convertToUsd } from "../fx";
 import {
   GOOGLE_ACKNOWLEDGEMENT_STATE,
   type GooglePubSubPushBody,
@@ -84,32 +86,28 @@ export async function handleGoogleNotification(
 
   const kind = classifyNotification(payload);
 
-  const existing = await prisma.webhookEvent.findUnique({
+  const webhookEvent = await prisma.webhookEvent.upsert({
     where: {
       source_storeEventId: {
         source: WebhookSource.GOOGLE,
         storeEventId,
       },
     },
+    create: {
+      projectId: opts.projectId,
+      source: WebhookSource.GOOGLE,
+      eventType: kind,
+      storeEventId,
+      payload: JSON.parse(JSON.stringify(payload)),
+      status: WebhookEventStatus.PROCESSING,
+    },
+    update: {},
   });
 
-  if (existing && existing.status === WebhookEventStatus.PROCESSED) {
+  if (webhookEvent.status === WebhookEventStatus.PROCESSED) {
     log.info("duplicate notification, skipping", { storeEventId, kind });
     return { status: "duplicate", kind };
   }
-
-  const webhookEvent =
-    existing ??
-    (await prisma.webhookEvent.create({
-      data: {
-        projectId: opts.projectId,
-        source: WebhookSource.GOOGLE,
-        eventType: kind,
-        storeEventId,
-        payload: JSON.parse(JSON.stringify(payload)),
-        status: WebhookEventStatus.PROCESSING,
-      },
-    }));
 
   if (!opts.verifyConfig) {
     log.warn("no verify config, persisting without API verification", {
@@ -297,6 +295,8 @@ async function processSubscriptionNotification(
     ctx.notification.notificationType,
   );
   if (revenueEventType) {
+    const amount = pricing?.amount ?? 0;
+    const currency = pricing?.currency ?? "USD";
     await prisma.revenueEvent.create({
       data: {
         projectId: ctx.projectId,
@@ -304,11 +304,9 @@ async function processSubscriptionNotification(
         purchaseId: persisted.id,
         productId: product.id,
         type: revenueEventType,
-        amount: pricing?.amount ?? 0,
-        currency: pricing?.currency ?? "USD",
-        // Same-currency pass-through: non-USD revenue is reported in its
-        // native units until an FX normalisation service is wired in.
-        amountUsd: pricing?.amount ?? 0,
+        amount: new Prisma.Decimal(amount),
+        currency,
+        amountUsd: new Prisma.Decimal(convertToUsd(amount, currency)),
         store: Store.PLAY_STORE,
         eventDate: new Date(),
       },
