@@ -1,4 +1,8 @@
 import {
+  Environment as AppleSdkEnvironment,
+  SignedDataVerifier,
+} from "@apple/app-store-server-library";
+import {
   compactVerify,
   decodeProtectedHeader,
   importX509,
@@ -6,15 +10,89 @@ import {
   type FlattenedJWSInput,
   type KeyLike,
 } from "jose";
-import type {
-  AppleJwsRenewalInfoPayload,
-  AppleJwsTransactionPayload,
-  AppleResponseBodyV2DecodedPayload,
+import {
+  APPLE_ENVIRONMENT,
+  type AppleEnvironment,
+  type AppleJwsRenewalInfoPayload,
+  type AppleJwsTransactionPayload,
+  type AppleResponseBodyV2DecodedPayload,
 } from "./apple-types";
 
+// =============================================================
+// Verifier interface
+// =============================================================
+
+export interface AppleNotificationVerifier {
+  verifyNotification(
+    signedPayload: string,
+  ): Promise<AppleResponseBodyV2DecodedPayload>;
+  verifyTransaction(jws: string): Promise<AppleJwsTransactionPayload>;
+  verifyRenewalInfo(jws: string): Promise<AppleJwsRenewalInfoPayload>;
+}
+
+// =============================================================
+// Library-backed verifier — production path
+// =============================================================
+
+export interface LibraryVerifierConfig {
+  /** PEM- or DER-encoded Apple root CA certs (AppleRootCA-G3, etc). */
+  appleRootCertificates: Buffer[];
+  environment: AppleEnvironment;
+  bundleId: string;
+  appAppleId?: number;
+  enableOnlineChecks?: boolean;
+}
+
+function mapEnvironmentToSdk(env: AppleEnvironment): AppleSdkEnvironment {
+  return env === APPLE_ENVIRONMENT.PRODUCTION
+    ? AppleSdkEnvironment.PRODUCTION
+    : AppleSdkEnvironment.SANDBOX;
+}
+
 /**
- * Function jose uses to look up the verification key for a JWS. In production
- * this inspects the x5c chain in the header; tests inject a fixed public key.
+ * Verifier that delegates to Apple's official
+ * `@apple/app-store-server-library`. The library validates the full x5c chain
+ * against Apple's root CA, checks OCSP/CRL if `enableOnlineChecks` is true,
+ * and enforces the bundleId + environment match.
+ */
+export class LibraryAppleNotificationVerifier
+  implements AppleNotificationVerifier
+{
+  private readonly verifier: SignedDataVerifier;
+
+  constructor(config: LibraryVerifierConfig) {
+    this.verifier = new SignedDataVerifier(
+      config.appleRootCertificates,
+      config.enableOnlineChecks ?? true,
+      mapEnvironmentToSdk(config.environment),
+      config.bundleId,
+      config.appAppleId,
+    );
+  }
+
+  async verifyNotification(signedPayload: string) {
+    const result = await this.verifier.verifyAndDecodeNotification(signedPayload);
+    return result as unknown as AppleResponseBodyV2DecodedPayload;
+  }
+
+  async verifyTransaction(jws: string) {
+    const result = await this.verifier.verifyAndDecodeTransaction(jws);
+    return result as unknown as AppleJwsTransactionPayload;
+  }
+
+  async verifyRenewalInfo(jws: string) {
+    const result = await this.verifier.verifyAndDecodeRenewalInfo(jws);
+    return result as unknown as AppleJwsRenewalInfoPayload;
+  }
+}
+
+// =============================================================
+// Jose-backed verifier — used by tests and as a config-less fallback
+// =============================================================
+
+/**
+ * Function jose uses to look up the verification key for a JWS. The default
+ * implementation imports the x5c leaf cert; tests inject a fixed public key.
  */
 export type AppleKeyLookup = (
   protectedHeader: CompactJWSHeaderParameters,
@@ -26,11 +104,6 @@ function pemFromBase64(der: string): string {
   return `-----BEGIN CERTIFICATE-----\n${wrapped}\n-----END CERTIFICATE-----\n`;
 }
 
-/**
- * Default resolver: imports the leaf cert from the JWS `x5c` header and uses
- * its public key to verify the signature. TODO: also validate the full chain
- * against Apple's root CA (AppleRootCA-G3) before trusting the leaf.
- */
 export const defaultAppleKeyLookup: AppleKeyLookup = async (header) => {
   const x5c = header.x5c;
   if (!Array.isArray(x5c) || x5c.length === 0 || typeof x5c[0] !== "string") {
@@ -51,25 +124,49 @@ async function verifyJws<T>(
   return JSON.parse(new TextDecoder().decode(payload)) as T;
 }
 
+export class JoseAppleNotificationVerifier
+  implements AppleNotificationVerifier
+{
+  constructor(
+    private readonly keyLookup: AppleKeyLookup = defaultAppleKeyLookup,
+  ) {}
+
+  verifyNotification(jws: string) {
+    return verifyJws<AppleResponseBodyV2DecodedPayload>(jws, this.keyLookup);
+  }
+
+  verifyTransaction(jws: string) {
+    return verifyJws<AppleJwsTransactionPayload>(jws, this.keyLookup);
+  }
+
+  verifyRenewalInfo(jws: string) {
+    return verifyJws<AppleJwsRenewalInfoPayload>(jws, this.keyLookup);
+  }
+}
+
+// =============================================================
+// Back-compat functional wrappers around the jose verifier
+// =============================================================
+
 export function verifySignedPayload(
   jws: string,
   keyLookup: AppleKeyLookup = defaultAppleKeyLookup,
 ): Promise<AppleResponseBodyV2DecodedPayload> {
-  return verifyJws<AppleResponseBodyV2DecodedPayload>(jws, keyLookup);
+  return new JoseAppleNotificationVerifier(keyLookup).verifyNotification(jws);
 }
 
 export function verifySignedTransaction(
   jws: string,
   keyLookup: AppleKeyLookup = defaultAppleKeyLookup,
 ): Promise<AppleJwsTransactionPayload> {
-  return verifyJws<AppleJwsTransactionPayload>(jws, keyLookup);
+  return new JoseAppleNotificationVerifier(keyLookup).verifyTransaction(jws);
 }
 
 export function verifySignedRenewalInfo(
   jws: string,
   keyLookup: AppleKeyLookup = defaultAppleKeyLookup,
 ): Promise<AppleJwsRenewalInfoPayload> {
-  return verifyJws<AppleJwsRenewalInfoPayload>(jws, keyLookup);
+  return new JoseAppleNotificationVerifier(keyLookup).verifyRenewalInfo(jws);
 }
 
 /**

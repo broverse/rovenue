@@ -19,10 +19,9 @@ import {
   type AppleResponseBodyV2DecodedPayload,
 } from "./apple-types";
 import {
-  verifySignedPayload,
-  verifySignedRenewalInfo,
-  verifySignedTransaction,
+  JoseAppleNotificationVerifier,
   type AppleKeyLookup,
+  type AppleNotificationVerifier,
 } from "./apple-verify";
 
 const log = logger.child("apple-webhook");
@@ -30,6 +29,14 @@ const log = logger.child("apple-webhook");
 export interface HandleAppleNotificationOptions {
   projectId: string;
   signedPayload: string;
+  /**
+   * Verifier used to decode the notification + embedded JWS payloads. In
+   * production this should be a {@link LibraryAppleNotificationVerifier}
+   * configured with Apple root certs, bundleId, and environment. If omitted,
+   * a {@link JoseAppleNotificationVerifier} is constructed from `keyLookup`.
+   */
+  verifier?: AppleNotificationVerifier;
+  /** Legacy key lookup path — ignored if `verifier` is provided. */
   keyLookup?: AppleKeyLookup;
 }
 
@@ -58,10 +65,10 @@ interface DispatchContext {
 export async function handleAppleNotification(
   opts: HandleAppleNotificationOptions,
 ): Promise<HandleAppleNotificationResult> {
-  const notification = await verifySignedPayload(
-    opts.signedPayload,
-    opts.keyLookup,
-  );
+  const verifier =
+    opts.verifier ?? new JoseAppleNotificationVerifier(opts.keyLookup);
+
+  const notification = await verifier.verifyNotification(opts.signedPayload);
 
   const existing = await prisma.webhookEvent.findUnique({
     where: {
@@ -98,16 +105,10 @@ export async function handleAppleNotification(
 
   try {
     const transaction = notification.data?.signedTransactionInfo
-      ? await verifySignedTransaction(
-          notification.data.signedTransactionInfo,
-          opts.keyLookup,
-        )
+      ? await verifier.verifyTransaction(notification.data.signedTransactionInfo)
       : undefined;
     const renewalInfo = notification.data?.signedRenewalInfo
-      ? await verifySignedRenewalInfo(
-          notification.data.signedRenewalInfo,
-          opts.keyLookup,
-        )
+      ? await verifier.verifyRenewalInfo(notification.data.signedRenewalInfo)
       : undefined;
 
     if (transaction) {
