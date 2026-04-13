@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { logger as honoRequestLogger } from "hono/logger";
 import { errorHandler } from "./middleware/error";
-import { authRoute, healthRoute } from "./routes";
+import { authRoute, healthRoute, webhooksRoute } from "./routes";
 import { logger } from "./lib/logger";
 
 const requestLog = logger.child("request");
@@ -20,6 +20,7 @@ export function createApp() {
 
   app.route("/health", healthRoute);
   app.route("/api/auth", authRoute);
+  app.route("/webhooks", webhooksRoute);
 
   return app;
 }
