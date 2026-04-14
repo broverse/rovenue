@@ -6,18 +6,21 @@
   "types": "./src/index.ts",
   "scripts": {
     "build": "tsc",
+    "test": "vitest",
     "migrate": "prisma migrate dev",
     "generate": "prisma generate",
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.10.0",
+    "@rovenue/shared": "workspace:*",
     "bcryptjs": "^2.4.3"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "prisma": "^5.10.0",
     "tsx": "^4.7.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^1.3.0"
   }
 }

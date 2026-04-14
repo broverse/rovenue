@@ -1,6 +1,6 @@
+import prisma, { decryptCredential } from "@rovenue/db";
 import { z } from "zod";
-import prisma from "@rovenue/db";
-import { decryptJson, isEncryptedBlob } from "./crypto";
+import { env } from "./env";
 import { logger } from "./logger";
 
 const log = logger.child("project-credentials");
@@ -48,18 +48,14 @@ export type AppleCredentials = z.infer<typeof appleSchema>;
 
 function unwrap(raw: unknown): unknown {
   if (raw === null || raw === undefined) return null;
-  if (isEncryptedBlob(raw)) {
-    try {
-      return decryptJson(raw);
-    } catch (err) {
-      log.error("credential decrypt failed", {
-        err: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    }
+  try {
+    return decryptCredential(raw, env.ENCRYPTION_KEY ?? "");
+  } catch (err) {
+    log.error("credential decrypt failed", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return null;
   }
-  // Plaintext fallback — acceptable in dev/test before encryption is wired.
-  return raw;
 }
 
 export async function loadGoogleCredentials(

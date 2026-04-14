@@ -10,3 +10,4 @@ if (process.env.NODE_ENV !== "production") {
 
 export default prisma;
 export * from "@prisma/client";
+export * from "./helpers/encrypted-field";
