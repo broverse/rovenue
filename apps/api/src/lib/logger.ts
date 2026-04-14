@@ -1,4 +1,10 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { createLogger, type Logger as PinoLogger } from "@rovenue/shared";
 import { env } from "./env";
+
+// =============================================================
+// Log levels (backwards-compat — many modules import these)
+// =============================================================
 
 export const LOG_LEVEL = {
   DEBUG: "debug",
@@ -8,64 +14,92 @@ export const LOG_LEVEL = {
 } as const;
 export type LogLevel = (typeof LOG_LEVEL)[keyof typeof LOG_LEVEL];
 
-const LEVEL_ORDER: Record<LogLevel, number> = {
-  [LOG_LEVEL.DEBUG]: 10,
-  [LOG_LEVEL.INFO]: 20,
-  [LOG_LEVEL.WARN]: 30,
-  [LOG_LEVEL.ERROR]: 40,
-};
+// =============================================================
+// Request context via AsyncLocalStorage
+//
+// request-id middleware calls `requestContext.run(ctx, next)` so any
+// logger call inside the request chain — including deeply nested
+// services — automatically inherits the per-request fields.
+// =============================================================
+
+export interface RequestContextFields {
+  requestId?: string;
+  projectId?: string;
+  subscriberId?: string;
+}
+
+export const requestContext = new AsyncLocalStorage<RequestContextFields>();
+
+export function getRequestContext(): RequestContextFields | undefined {
+  return requestContext.getStore();
+}
+
+export function mergeRequestContext(extra: RequestContextFields): void {
+  const current = requestContext.getStore();
+  if (!current) return;
+  Object.assign(current, extra);
+}
+
+// =============================================================
+// Pino instance
+// =============================================================
+
+function resolveLevel(): string {
+  if (env.LOG_LEVEL) return env.LOG_LEVEL;
+  if (env.NODE_ENV === "production") return "info";
+  if (env.NODE_ENV === "test") return "silent";
+  return "debug";
+}
+
+/**
+ * Native Pino instance. Use this directly in new code to get the
+ * Pino-native `logger.info({ fields }, "message")` call style with
+ * full type hints from @types/pino.
+ */
+export const pinoLogger: PinoLogger = createLogger({
+  service: "rovenue-api",
+  environment: env.NODE_ENV,
+  level: resolveLevel(),
+  pretty: env.NODE_ENV === "development",
+  mixin: () => requestContext.getStore() ?? {},
+});
+
+// =============================================================
+// Legacy wrapper — preserves the `log.info(message, fields)` API
+// that all existing services already use. Internally delegates to
+// Pino, so JSON output, scoped components, and ALS-injected request
+// fields are all picked up automatically.
+// =============================================================
 
 export type LogFields = Readonly<Record<string, unknown>>;
 
 export class Logger {
-  constructor(
-    private readonly scope: string,
-    private readonly minLevel: LogLevel,
-  ) {}
+  constructor(private readonly pino: PinoLogger) {}
 
-  child(subScope: string, minLevel?: LogLevel): Logger {
-    return new Logger(`${this.scope}:${subScope}`, minLevel ?? this.minLevel);
+  /**
+   * Create a scoped child logger. The `scope` string is recorded as
+   * the `component` field on every child log line, matching Pino's
+   * child-logger idiom.
+   */
+  child(scope: string): Logger {
+    return new Logger(this.pino.child({ component: scope }));
   }
 
   debug(message: string, fields?: LogFields): void {
-    this.emit(LOG_LEVEL.DEBUG, message, fields);
+    this.pino.debug(fields ?? {}, message);
   }
 
   info(message: string, fields?: LogFields): void {
-    this.emit(LOG_LEVEL.INFO, message, fields);
+    this.pino.info(fields ?? {}, message);
   }
 
   warn(message: string, fields?: LogFields): void {
-    this.emit(LOG_LEVEL.WARN, message, fields);
+    this.pino.warn(fields ?? {}, message);
   }
 
   error(message: string, fields?: LogFields): void {
-    this.emit(LOG_LEVEL.ERROR, message, fields);
-  }
-
-  private emit(level: LogLevel, message: string, fields?: LogFields): void {
-    if (LEVEL_ORDER[level] < LEVEL_ORDER[this.minLevel]) return;
-
-    const payload = {
-      ts: new Date().toISOString(),
-      level,
-      scope: this.scope,
-      message,
-      ...(fields ?? {}),
-    };
-
-    const line = `${JSON.stringify(payload)}\n`;
-
-    if (level === LOG_LEVEL.ERROR || level === LOG_LEVEL.WARN) {
-      process.stderr.write(line);
-    } else {
-      process.stdout.write(line);
-    }
+    this.pino.error(fields ?? {}, message);
   }
 }
 
-const rootLevel: LogLevel =
-  env.LOG_LEVEL ??
-  (env.NODE_ENV === "production" ? LOG_LEVEL.INFO : LOG_LEVEL.DEBUG);
-
-export const logger = new Logger("rovenue/api", rootLevel);
+export const logger = new Logger(pinoLogger);
