@@ -4,6 +4,7 @@ import prisma, { ProductType, type Prisma } from "@rovenue/db";
 import { addCredits } from "../../services/credit-engine";
 import { getActiveAccess, syncAccess } from "../../services/access-engine";
 import { verifyReceipt } from "../../services/receipt-verify";
+import { idempotency } from "../../middleware/idempotency";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
 
@@ -25,7 +26,7 @@ export const receiptsRoute = new Hono();
  * access, credit consumables, and return the subscriber's current access
  * map plus credit balance.
  */
-receiptsRoute.post("/", async (c) => {
+receiptsRoute.post("/", idempotency, async (c) => {
   const project = c.get("project");
   const body = bodySchema.parse(await c.req.json());
 

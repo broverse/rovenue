@@ -19,6 +19,7 @@ import {
 } from "../../services/access-engine";
 import { verifyReceipt } from "../../services/receipt-verify";
 import { requireSecretKey } from "../../middleware/api-key-auth";
+import { idempotency } from "../../middleware/idempotency";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
 
@@ -233,6 +234,7 @@ const spendBodySchema = z.object({
 subscribersRoute.post(
   "/:appUserId/credits/spend",
   requireSecretKey,
+  idempotency,
   async (c) => {
     const project = c.get("project");
     const appUserId = c.req.param("appUserId");
@@ -286,6 +288,7 @@ const addBodySchema = z.object({
 subscribersRoute.post(
   "/:appUserId/credits/add",
   requireSecretKey,
+  idempotency,
   async (c) => {
     const project = c.get("project");
     const appUserId = c.req.param("appUserId");
