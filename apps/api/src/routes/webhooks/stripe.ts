@@ -2,13 +2,9 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type Stripe from "stripe";
 import prisma from "@rovenue/db";
-import {
-  getStripeClient,
-  type HandleStripeNotificationResult,
-} from "../../services/stripe/stripe-webhook";
-import { STRIPE_SIGNATURE_HEADER } from "../../services/stripe/stripe-types";
+import { verifyStripeWebhook } from "../../middleware/webhook-verify";
+import { type HandleStripeNotificationResult } from "../../services/stripe/stripe-webhook";
 import { enqueueWebhookEvent } from "../../services/webhook-processor";
-import { loadStripeCredentials } from "../../lib/project-credentials";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
 
@@ -19,19 +15,13 @@ export const stripeWebhookRoute = new Hono();
 /**
  * Stripe webhook endpoint.
  *
- * Signature verification runs synchronously at the edge so the raw body
- * and webhook secret never leave the process. The verified {@link
- * Stripe.Event} is enqueued for async processing.
+ * The middleware verifies the Stripe-Signature header (HMAC with a
+ * 300s tolerance) using the per-project webhook secret. The handler
+ * then checks the project exists and enqueues the already-verified
+ * event for async processing.
  */
-stripeWebhookRoute.post("/:projectId", async (c) => {
+stripeWebhookRoute.post("/:projectId", verifyStripeWebhook, async (c) => {
   const projectId = c.req.param("projectId");
-
-  const signature = c.req.header(STRIPE_SIGNATURE_HEADER);
-  if (!signature) {
-    throw new HTTPException(400, {
-      message: "Missing Stripe-Signature header",
-    });
-  }
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
@@ -41,30 +31,12 @@ stripeWebhookRoute.post("/:projectId", async (c) => {
     throw new HTTPException(404, { message: "Project not found" });
   }
 
-  const credentials = await loadStripeCredentials(projectId);
-  if (!credentials) {
-    throw new HTTPException(404, {
-      message: "Project not configured for Stripe",
-    });
+  const verified = c.get("verifiedWebhook");
+  if (!verified || verified.source !== "STRIPE") {
+    throw new HTTPException(500, { message: "Verified payload missing" });
   }
 
-  const rawBody = await c.req.text();
-  const stripe = getStripeClient(credentials.secretKey);
-
-  let event: Stripe.Event;
-  try {
-    event = stripe.webhooks.constructEvent(
-      rawBody,
-      signature,
-      credentials.webhookSecret,
-    );
-  } catch (err) {
-    log.warn("signature verification failed", {
-      projectId,
-      err: err instanceof Error ? err.message : String(err),
-    });
-    throw new HTTPException(400, { message: "Invalid Stripe signature" });
-  }
+  const event = verified.event;
 
   const job = await enqueueWebhookEvent({
     source: "STRIPE",

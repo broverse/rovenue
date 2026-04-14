@@ -1,34 +1,41 @@
 import { Hono } from "hono";
-import { z } from "zod";
+import { HTTPException } from "hono/http-exception";
+import { verifyAppleWebhook } from "../../middleware/webhook-verify";
 import { enqueueWebhookEvent } from "../../services/webhook-processor";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
 
 const log = logger.child("route:webhook:apple");
 
-const bodySchema = z.object({
-  signedPayload: z.string().min(1),
-});
-
 export const appleWebhookRoute = new Hono();
 
 /**
  * App Store Server Notifications V2 webhook.
  *
- * Enqueues the signed payload for async processing and returns 202. The
- * worker verifies + dispatches the notification via the store handler.
+ * The middleware verifies the JWS signature (x5c chain validated
+ * against Apple's root CA) before the handler runs. The verified
+ * signedPayload is then enqueued for async processing — the worker
+ * re-verifies as defence-in-depth before touching the database.
  */
-appleWebhookRoute.post("/:projectId", async (c) => {
+appleWebhookRoute.post("/:projectId", verifyAppleWebhook, async (c) => {
   const projectId = c.req.param("projectId");
-  const body = bodySchema.parse(await c.req.json());
+  const verified = c.get("verifiedWebhook");
+  if (!verified || verified.source !== "APPLE") {
+    throw new HTTPException(500, { message: "Verified payload missing" });
+  }
 
   const job = await enqueueWebhookEvent({
     source: "APPLE",
     projectId,
-    signedPayload: body.signedPayload,
+    signedPayload: verified.signedPayload,
   });
 
-  log.info("apple notification enqueued", { projectId, jobId: job.id });
+  log.info("apple notification enqueued", {
+    projectId,
+    jobId: job.id,
+    notificationType: verified.notification.notificationType,
+    notificationUUID: verified.notification.notificationUUID,
+  });
 
   return c.json(ok({ status: "enqueued", jobId: job.id }), 202);
 });
