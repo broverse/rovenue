@@ -3,8 +3,10 @@ import { z } from "zod";
 import prisma, { ProductType, type Prisma } from "@rovenue/db";
 import { addCredits } from "../../services/credit-engine";
 import { getActiveAccess, syncAccess } from "../../services/access-engine";
+import { recordEvent } from "../../services/experiment-engine";
 import { verifyReceipt } from "../../services/receipt-verify";
 import { idempotency } from "../../middleware/idempotency";
+import { endpointRateLimit } from "../../middleware/rate-limit";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
 
@@ -26,7 +28,15 @@ export const receiptsRoute = new Hono();
  * access, credit consumables, and return the subscriber's current access
  * map plus credit balance.
  */
-receiptsRoute.post("/", idempotency, async (c) => {
+// Heavy endpoint guard: each call fans out to Apple/Google receipt
+// verification APIs, so throttle hard even within the per-project
+// envelope. 30 req/min per API key.
+const receiptsEndpointLimit = endpointRateLimit({
+  name: "receipts",
+  max: 30,
+});
+
+receiptsRoute.post("/", receiptsEndpointLimit, idempotency, async (c) => {
   const project = c.get("project");
   const body = bodySchema.parse(await c.req.json());
 
@@ -68,6 +78,27 @@ receiptsRoute.post("/", idempotency, async (c) => {
     buildAccessResponse(subscriber.id),
     currentBalance(subscriber.id),
   ]);
+
+  // Auto-conversion: tag every active experiment assignment the
+  // subscriber is in with a "purchase" event. Any experiment whose
+  // metrics list includes "purchase" gets its convertedAt /
+  // purchaseId / revenue fields filled in. Failures are isolated
+  // from the purchase response — the primary request succeeds even
+  // if tracking hiccups.
+  try {
+    const priceAmount =
+      purchase.priceAmount != null ? Number(purchase.priceAmount) : undefined;
+    await recordEvent(subscriber.id, "purchase", {
+      purchaseId: purchase.id,
+      revenue: priceAmount,
+    });
+  } catch (err) {
+    log.warn("experiment conversion tracking failed", {
+      subscriberId: subscriber.id,
+      purchaseId: purchase.id,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   log.info("receipt verified", {
     projectId: project.id,
