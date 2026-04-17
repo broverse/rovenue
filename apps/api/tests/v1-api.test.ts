@@ -80,6 +80,7 @@ const { prismaMock } = vi.hoisted(() => {
 
 vi.mock("@rovenue/db", () => ({
   default: prismaMock,
+  MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   Store: {
     APP_STORE: "APP_STORE",
     PLAY_STORE: "PLAY_STORE",
@@ -134,6 +135,18 @@ vi.mock("@rovenue/db", () => ({
     REFUND: "REFUND",
     REACTIVATION: "REACTIVATION",
     CREDIT_PURCHASE: "CREDIT_PURCHASE",
+  },
+  FeatureFlagType: {
+    BOOLEAN: "BOOLEAN",
+    STRING: "STRING",
+    NUMBER: "NUMBER",
+    JSON: "JSON",
+  },
+  ExperimentStatus: {
+    DRAFT: "DRAFT",
+    RUNNING: "RUNNING",
+    PAUSED: "PAUSED",
+    COMPLETED: "COMPLETED",
   },
   Prisma: {
     sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
@@ -600,8 +613,8 @@ describe("GET /v1/product-groups/:identifier", () => {
     prismaMock.productGroup.findUnique.mockResolvedValue({
       id: "pg_1",
       projectId: "proj_test",
-      identifier: "default",
-      isDefault: true,
+      identifier: "premium",
+      isDefault: false,
       products: [
         {
           productId: "prod_1",
@@ -640,11 +653,11 @@ describe("GET /v1/product-groups/:identifier", () => {
     ]);
 
     const res = await app.request(
-      withPublicAuth("/v1/product-groups/default"),
+      withPublicAuth("/v1/product-groups/premium"),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
-    expect(body.data.identifier).toBe("default");
+    expect(body.data.identifier).toBe("premium");
     expect(body.data.products).toHaveLength(2);
     expect(body.data.products[0].identifier).toBe("credits_100");
     expect(body.data.products[0].isPromoted).toBe(true);

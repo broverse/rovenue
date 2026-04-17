@@ -1,0 +1,102 @@
+import { Hono, type Context } from "hono";
+import { HTTPException } from "hono/http-exception";
+import { z } from "zod";
+import prisma, { type Prisma } from "@rovenue/db";
+import { evaluateAllFlags } from "../../services/flag-engine";
+import { evaluateExperiments } from "../../services/experiment-engine";
+import { ok } from "../../lib/response";
+
+// =============================================================
+// GET / POST /v1/config
+// =============================================================
+//
+// Unified bootstrap endpoint for the SDK. One request returns
+// every feature flag + experiment assignment for the given
+// subscriber, so the SDK can cache the response locally (MMKV)
+// and decide UI behaviour without a round-trip per decision.
+//
+// GET is the lightweight path — only subscriberId identity is
+// required. POST carries runtime attributes (country, platform,
+// appVersion, custom fields) that get merged with whatever is
+// stored on the Subscriber row so audience targeting has the
+// freshest picture.
+
+const SUBSCRIBER_HEADER = "x-rovenue-user-id";
+
+const configBodySchema = z
+  .object({
+    attributes: z.record(z.unknown()).optional(),
+  })
+  .optional();
+
+export const configRoute = new Hono();
+
+function resolveSubscriberId(c: Context): string | null {
+  return (
+    c.req.query("subscriberId") ??
+    c.req.header(SUBSCRIBER_HEADER) ??
+    null
+  );
+}
+
+async function handleConfig(
+  c: Context,
+  requestAttributes: Record<string, unknown>,
+) {
+  const project = c.get("project");
+  const appUserId = resolveSubscriberId(c);
+  if (!appUserId) {
+    throw new HTTPException(400, {
+      message:
+        "subscriberId is required (via query param or X-Rovenue-User-Id header)",
+    });
+  }
+
+  // Read-then-upsert so we can merge request-supplied attributes
+  // into the stored set instead of overwriting. A subscriber who
+  // moves from country=TR to country=US must be reflected in both
+  // the evaluation path AND the stored attributes, otherwise the
+  // dashboard's "subscribers with country=TR" view goes stale.
+  const existing = await prisma.subscriber.findUnique({
+    where: { projectId_appUserId: { projectId: project.id, appUserId } },
+    select: { attributes: true },
+  });
+  const mergedAttributes: Record<string, unknown> = {
+    ...((existing?.attributes as Record<string, unknown> | null) ?? {}),
+    ...requestAttributes,
+  };
+
+  const hasNewAttributes = Object.keys(requestAttributes).length > 0;
+  const subscriber = await prisma.subscriber.upsert({
+    where: {
+      projectId_appUserId: { projectId: project.id, appUserId },
+    },
+    create: {
+      projectId: project.id,
+      appUserId,
+      attributes: requestAttributes as Prisma.InputJsonValue,
+    },
+    update: {
+      lastSeenAt: new Date(),
+      ...(hasNewAttributes && {
+        attributes: mergedAttributes as Prisma.InputJsonValue,
+      }),
+    },
+  });
+
+  const [flags, experiments] = await Promise.all([
+    evaluateAllFlags(project.id, subscriber.id, mergedAttributes),
+    evaluateExperiments(project.id, subscriber.id, mergedAttributes),
+  ]);
+
+  return c.json(ok({ flags, experiments }));
+}
+
+configRoute.get("/", async (c) => handleConfig(c, {}));
+
+configRoute.post("/", async (c) => {
+  const raw = await c.req.json().catch(() => undefined);
+  const parsed = configBodySchema.safeParse(raw);
+  const attributes = parsed.success ? parsed.data?.attributes ?? {} : {};
+  return handleConfig(c, attributes);
+});
