@@ -8,6 +8,7 @@ import prisma, {
   type Purchase,
   type Subscriber,
 } from "@rovenue/db";
+import { appleCircuit, googleCircuit } from "../lib/circuit-breaker";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import {
@@ -117,15 +118,19 @@ async function verifyAppleReceipt(
 
   let transaction: AppleJwsTransactionPayload;
   try {
-    transaction = await verifier.verifyTransaction(args.receipt);
+    transaction = await appleCircuit.exec(() =>
+      verifier.verifyTransaction(args.receipt),
+    );
   } catch (err) {
     log.warn("apple receipt verification failed", {
       projectId: args.projectId,
+      circuit: appleCircuit.state,
       err: err instanceof Error ? err.message : String(err),
     });
-    throw new HTTPException(400, {
-      message: "Invalid Apple receipt",
-    });
+    throw new HTTPException(
+      appleCircuit.state === "OPEN" ? 503 : 400,
+      { message: "Apple receipt verification failed" },
+    );
   }
 
   const product = await prisma.product.findFirst({
@@ -252,12 +257,18 @@ async function verifyGoogleSubscriptionReceipt(
 ): Promise<VerifyReceiptResult> {
   let subscription;
   try {
-    subscription = await verifyGoogleSubscription(verifyConfig, args.receipt);
+    subscription = await googleCircuit.exec(() =>
+      verifyGoogleSubscription(verifyConfig, args.receipt),
+    );
   } catch (err) {
     log.warn("google subscription verification failed", {
+      circuit: googleCircuit.state,
       err: err instanceof Error ? err.message : String(err),
     });
-    throw new HTTPException(400, { message: "Invalid Google receipt" });
+    throw new HTTPException(
+      googleCircuit.state === "OPEN" ? 503 : 400,
+      { message: "Google receipt verification failed" },
+    );
   }
 
   const subscriber = await upsertSubscriber(args.projectId, args.appUserId);
@@ -317,16 +328,18 @@ async function verifyGoogleProductReceipt(
 
   let productPurchase;
   try {
-    productPurchase = await verifyGoogleProductPurchase(
-      verifyConfig,
-      storeProductId,
-      args.receipt,
+    productPurchase = await googleCircuit.exec(() =>
+      verifyGoogleProductPurchase(verifyConfig, storeProductId, args.receipt),
     );
   } catch (err) {
     log.warn("google product verification failed", {
+      circuit: googleCircuit.state,
       err: err instanceof Error ? err.message : String(err),
     });
-    throw new HTTPException(400, { message: "Invalid Google receipt" });
+    throw new HTTPException(
+      googleCircuit.state === "OPEN" ? 503 : 400,
+      { message: "Google receipt verification failed" },
+    );
   }
 
   const subscriber = await upsertSubscriber(args.projectId, args.appUserId);
