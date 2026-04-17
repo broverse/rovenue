@@ -18,8 +18,10 @@ import {
   syncAccess,
 } from "../../services/access-engine";
 import { verifyReceipt } from "../../services/receipt-verify";
+import { transferSubscriber } from "../../services/subscriber-transfer";
 import { requireSecretKey } from "../../middleware/api-key-auth";
 import { idempotency } from "../../middleware/idempotency";
+import { endpointRateLimit } from "../../middleware/rate-limit";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
 
@@ -231,9 +233,22 @@ const spendBodySchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
+// Throttle spend per *subscriber*, not per API key, so one noisy user
+// can't DoS another's credits but multiple users share the ceiling.
+const spendEndpointLimit = endpointRateLimit({
+  name: "credits-spend",
+  max: 60,
+  identify: (c) => {
+    const projectId = c.get("project")?.id ?? "anon";
+    const appUserId = c.req.param("appUserId") ?? "anon";
+    return `${projectId}:${appUserId}`;
+  },
+});
+
 subscribersRoute.post(
   "/:appUserId/credits/spend",
   requireSecretKey,
+  spendEndpointLimit,
   idempotency,
   async (c) => {
     const project = c.get("project");
@@ -321,6 +336,40 @@ subscribersRoute.post(
     );
   },
 );
+
+// =============================================================
+// POST /transfer — account merge (server-side only)
+// =============================================================
+
+const transferBodySchema = z.object({
+  fromAppUserId: z.string().min(1),
+  toAppUserId: z.string().min(1),
+});
+
+subscribersRoute.post("/transfer", requireSecretKey, async (c) => {
+  const project = c.get("project");
+  const body = transferBodySchema.parse(await c.req.json());
+
+  try {
+    const result = await transferSubscriber(
+      project.id,
+      body.fromAppUserId,
+      body.toAppUserId,
+    );
+
+    log.info("subscriber transfer completed", {
+      projectId: project.id,
+      ...result,
+    });
+
+    return c.json(ok(result));
+  } catch (err) {
+    if (err instanceof Error) {
+      throw new HTTPException(400, { message: err.message });
+    }
+    throw err;
+  }
+});
 
 // Silence unused import when Store is not referenced directly but kept
 // for potential future expansion of the response shape.
