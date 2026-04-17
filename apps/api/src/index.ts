@@ -7,6 +7,14 @@ import {
   createExpiryWorker,
   scheduleExpiryCheck,
 } from "./workers/expiry-checker";
+import {
+  createFxWorker,
+  scheduleFxFetch,
+} from "./services/fx";
+import {
+  createDeliveryWorker,
+  scheduleDelivery,
+} from "./workers/webhook-delivery";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -17,6 +25,22 @@ createWebhookWorker();
 createExpiryWorker();
 scheduleExpiryCheck().catch((err: unknown) => {
   logger.error("failed to schedule expiry checker", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Daily FX rate fetch at 00:05 UTC.
+createFxWorker();
+scheduleFxFetch().catch((err: unknown) => {
+  logger.error("failed to schedule FX rate fetch", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Outgoing webhook delivery — 30-second repeatable poll.
+createDeliveryWorker();
+scheduleDelivery().catch((err: unknown) => {
+  logger.error("failed to schedule webhook delivery", {
     err: err instanceof Error ? err.message : String(err),
   });
 });

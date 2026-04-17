@@ -61,7 +61,7 @@ export const pinoLogger: PinoLogger = createLogger({
   environment: env.NODE_ENV,
   level: resolveLevel(),
   pretty: env.NODE_ENV === "development",
-  mixin: () => requestContext.getStore() ?? {},
+  mixin: () => (requestContext.getStore() ?? {}) as Record<string, unknown>,
 });
 
 // =============================================================
