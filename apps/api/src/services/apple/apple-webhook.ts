@@ -579,7 +579,7 @@ async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
 
   const amount = tx.price / 1_000_000;
   const signed = negative ? -amount : amount;
-  const amountUsd = convertToUsd(signed, tx.currency);
+  const amountUsd = await convertToUsd(signed, tx.currency);
 
   await prisma.revenueEvent.create({
     data: {

@@ -314,7 +314,7 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
 
   const amount = (invoice.amount_paid ?? 0) / 100;
   const currency = invoice.currency?.toUpperCase() ?? "USD";
-  const amountUsd = convertToUsd(amount, currency);
+  const amountUsd = await convertToUsd(amount, currency);
   const isFirstInvoice =
     invoice.billing_reason === STRIPE_INVOICE_BILLING_REASON.SUBSCRIPTION_CREATE;
 
@@ -428,7 +428,7 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
   const amount = (charge.amount_refunded ?? 0) / 100;
   const currency =
     charge.currency?.toUpperCase() ?? purchase.priceCurrency ?? "USD";
-  const amountUsd = convertToUsd(-amount, currency);
+  const amountUsd = await convertToUsd(-amount, currency);
 
   await prisma.revenueEvent.create({
     data: {

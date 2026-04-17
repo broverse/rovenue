@@ -306,7 +306,7 @@ async function processSubscriptionNotification(
         type: revenueEventType,
         amount: new Prisma.Decimal(amount),
         currency,
-        amountUsd: new Prisma.Decimal(convertToUsd(amount, currency)),
+        amountUsd: new Prisma.Decimal(await convertToUsd(amount, currency)),
         store: Store.PLAY_STORE,
         eventDate: new Date(),
       },
