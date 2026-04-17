@@ -23,6 +23,7 @@ model User {
   sessions      Session[]
   accounts      Account[]
   members       ProjectMember[]
+  auditLogs     AuditLog[]
 
   @@map("user")
 }
@@ -144,6 +145,10 @@ model Project {
   webhookEvents    WebhookEvent[]
   outgoingWebhooks OutgoingWebhook[]
   revenueEvents    RevenueEvent[]
+  audiences        Audience[]
+  experiments      Experiment[]
+  featureFlags     FeatureFlag[]
+  auditLogs        AuditLog[]
 
   @@map("projects")
 }
@@ -203,22 +208,25 @@ model ProductGroup {
 // =============================================================
 
 model Subscriber {
-  id          String   @id @default(cuid(2))
+  id          String    @id @default(cuid(2))
   projectId   String
   appUserId   String
-  firstSeenAt DateTime @default(now()) @db.Timestamptz
-  lastSeenAt  DateTime @default(now()) @db.Timestamptz
-  attributes  Json     @default("{}")
-  createdAt   DateTime @default(now()) @db.Timestamptz
-  updatedAt   DateTime @updatedAt @db.Timestamptz
+  firstSeenAt DateTime  @default(now()) @db.Timestamptz
+  lastSeenAt  DateTime  @default(now()) @db.Timestamptz
+  attributes  Json      @default("{}")
+  deletedAt   DateTime? @db.Timestamptz
+  mergedInto  String?
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @db.Timestamptz
 
-  project          Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  purchases        Purchase[]
-  access           SubscriberAccess[]
-  creditLedger     CreditLedger[]
-  revenueEvents    RevenueEvent[]
-  webhookEvents    WebhookEvent[]
-  outgoingWebhooks OutgoingWebhook[]
+  project                Project                 @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  purchases              Purchase[]
+  access                 SubscriberAccess[]
+  creditLedger           CreditLedger[]
+  revenueEvents          RevenueEvent[]
+  webhookEvents          WebhookEvent[]
+  outgoingWebhooks       OutgoingWebhook[]
+  experimentAssignments  ExperimentAssignment[]
 
   @@unique([projectId, appUserId])
   @@map("subscribers")
@@ -311,6 +319,8 @@ enum CreditLedgerType {
   REFUND
   BONUS
   EXPIRE
+  TRANSFER_IN
+  TRANSFER_OUT
 }
 
 model CreditLedger {
@@ -379,29 +389,34 @@ enum OutgoingWebhookStatus {
   PENDING
   SENT
   FAILED
+  DEAD
+  DISMISSED
 }
 
 model OutgoingWebhook {
-  id           String                @id @default(cuid(2))
-  projectId    String
-  eventType    String
-  subscriberId String
-  purchaseId   String?
-  payload      Json
-  url          String
-  status       OutgoingWebhookStatus @default(PENDING)
-  httpStatus   Int?
-  responseBody String?
-  attempts     Int                   @default(0)
-  nextRetryAt  DateTime?             @db.Timestamptz
-  sentAt       DateTime?             @db.Timestamptz
-  createdAt    DateTime              @default(now()) @db.Timestamptz
+  id               String                @id @default(cuid(2))
+  projectId        String
+  eventType        String
+  subscriberId     String
+  purchaseId       String?
+  payload          Json
+  url              String
+  status           OutgoingWebhookStatus @default(PENDING)
+  httpStatus       Int?
+  responseBody     String?
+  lastErrorMessage String?
+  attempts         Int                   @default(0)
+  nextRetryAt      DateTime?             @db.Timestamptz
+  sentAt           DateTime?             @db.Timestamptz
+  deadAt           DateTime?             @db.Timestamptz
+  createdAt        DateTime              @default(now()) @db.Timestamptz
 
   project    Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   subscriber Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
   purchase   Purchase?  @relation(fields: [purchaseId], references: [id])
 
   @@index([status, nextRetryAt])
+  @@index([projectId, status])
   @@map("outgoing_webhooks")
 }
 
@@ -437,4 +452,174 @@ model RevenueEvent {
   @@index([projectId, eventDate])
   @@index([subscriberId, type])
   @@map("revenue_events")
+}
+
+// =============================================================
+// Experiment engine — Audiences, Experiments, Assignments, Flags
+// =============================================================
+
+/// Targeting group evaluated via sift / MongoDB-style queries.
+/// `rules` is a JSON document matched against the subscriber's
+/// runtime attributes: { country: { $in: ["TR"] }, appVersion: { $gte: "2.0" } }
+/// An empty object (`{}`) matches every subscriber — that's the
+/// canonical "All Users" audience flagged with `isDefault = true`.
+model Audience {
+  id          String   @id @default(cuid(2))
+  projectId   String
+  name        String
+  description String?
+  rules       Json     @default("{}")
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now()) @db.Timestamptz
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  experiments Experiment[]
+
+  @@unique([projectId, name])
+  @@index([projectId])
+  @@map("audiences")
+}
+
+enum ExperimentType {
+  FLAG
+  PRODUCT_GROUP
+  PAYWALL
+  ELEMENT
+}
+
+enum ExperimentStatus {
+  DRAFT
+  RUNNING
+  PAUSED
+  COMPLETED
+}
+
+/// A single experiment definition. Variant values are stored as
+/// opaque JSON — the engine never introspects them. Type-specific
+/// shape (PaywallConfig, flag value, product group key, etc.)
+/// is validated against @rovenue/shared schemas at the API layer
+/// and cast at the SDK boundary via generics.
+///
+/// `mutualExclusionGroup` lets two experiments share a namespace
+/// so a subscriber can only land in one of them — prevents
+/// interaction effects between overlapping paywall tests.
+model Experiment {
+  id                   String            @id @default(cuid(2))
+  projectId            String
+  name                 String
+  description          String?
+  type                 ExperimentType
+  key                  String
+  audienceId           String
+  status               ExperimentStatus  @default(DRAFT)
+  variants             Json
+  metrics              Json?
+  mutualExclusionGroup String?
+  startedAt            DateTime?         @db.Timestamptz
+  completedAt          DateTime?         @db.Timestamptz
+  winnerVariantId      String?
+  createdAt            DateTime          @default(now()) @db.Timestamptz
+  updatedAt            DateTime          @updatedAt @db.Timestamptz
+
+  project     Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  audience    Audience               @relation(fields: [audienceId], references: [id])
+  assignments ExperimentAssignment[]
+
+  @@unique([projectId, key])
+  @@index([projectId, status])
+  @@index([mutualExclusionGroup])
+  @@map("experiments")
+}
+
+/// Per-subscriber assignment + append-only funnel log.
+/// `events` records every step in the funnel (paywall_viewed,
+/// cta_clicked, purchase, …) so conversion analysis can compute
+/// funnel drop-off per variant without joining across tables.
+/// `convertedAt` is set when the first revenue event is logged;
+/// the unique index on (experimentId, subscriberId) guarantees a
+/// subscriber only lands in the same variant on repeat visits.
+model ExperimentAssignment {
+  id           String    @id @default(cuid(2))
+  experimentId String
+  subscriberId String
+  variantId    String
+  assignedAt   DateTime  @default(now()) @db.Timestamptz
+  events       Json      @default("[]")
+  convertedAt  DateTime? @db.Timestamptz
+  purchaseId   String?
+  revenue      Decimal?  @db.Decimal(12, 4)
+  createdAt    DateTime  @default(now()) @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @db.Timestamptz
+
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  subscriber Subscriber @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+
+  @@unique([experimentId, subscriberId])
+  @@index([subscriberId])
+  @@index([experimentId, convertedAt])
+  @@map("experiment_assignments")
+}
+
+enum FeatureFlagType {
+  BOOLEAN
+  STRING
+  NUMBER
+  JSON
+}
+
+/// Standalone feature flag (not tied to an experiment). Rules are
+/// evaluated in order and the first audience match wins. Each rule
+/// may carry an optional `rolloutPercentage` (0..1) that the engine
+/// resolves with a murmurhash bucket against the subscriber id.
+///
+/// Evaluation order:
+///   1. isEnabled = false           → defaultValue (kill switch)
+///   2. rules[i].audience matches   → rules[i].value
+///      (subject to rolloutPercentage bucketing)
+///   3. no rule matches             → defaultValue
+model FeatureFlag {
+  id           String          @id @default(cuid(2))
+  projectId    String
+  key          String
+  type         FeatureFlagType
+  defaultValue Json
+  rules        Json            @default("[]")
+  isEnabled    Boolean         @default(true)
+  description  String?
+  createdAt    DateTime        @default(now()) @db.Timestamptz
+  updatedAt    DateTime        @updatedAt @db.Timestamptz
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, key])
+  @@index([projectId, isEnabled])
+  @@map("feature_flags")
+}
+
+// =============================================================
+// Audit log — immutable history of dashboard mutations
+// =============================================================
+
+model AuditLog {
+  id         String   @id @default(cuid(2))
+  projectId  String
+  userId     String
+  action     String
+  resource   String
+  resourceId String
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now()) @db.Timestamptz
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([action])
+  @@index([resourceId])
+  @@index([userId])
+  @@map("audit_logs")
 }
