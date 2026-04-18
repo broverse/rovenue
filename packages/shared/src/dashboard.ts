@@ -81,15 +81,17 @@ export interface SubscriberPurchase {
   status: string;
   priceAmount: string | null;
   priceCurrency: string | null;
-  purchasedAt: string;
-  expiresAt: string | null;
+  purchaseDate: string;
+  expiresDate: string | null;
+  autoRenewStatus: boolean | null;
 }
 
 export interface SubscriberAccessRow {
   entitlementKey: string;
-  expiresAt: string | null;
-  willRenew: boolean;
-  source: string;
+  isActive: boolean;
+  expiresDate: string | null;
+  store: "APP_STORE" | "PLAY_STORE" | "STRIPE";
+  purchaseId: string;
 }
 
 export interface SubscriberCreditLedgerRow {
