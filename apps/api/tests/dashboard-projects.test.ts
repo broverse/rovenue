@@ -185,3 +185,127 @@ describe("GET /dashboard/projects/:id", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("POST /dashboard/projects", () => {
+  test("creates project + OWNER membership + default audience + api key in one transaction", async () => {
+    signedIn("user_1");
+    prismaMock.project.create.mockResolvedValue({
+      id: "proj_new",
+      name: "Alpha",
+      slug: "alpha",
+      webhookUrl: null,
+      webhookSecret: null,
+      settings: {},
+      createdAt: new Date("2026-04-18"),
+      updatedAt: new Date("2026-04-18"),
+    });
+    prismaMock.projectMember.create.mockResolvedValue({ id: "pm_new", role: "OWNER" });
+    prismaMock.audience.create.mockResolvedValue({ id: "aud_default", isDefault: true });
+    prismaMock.apiKey.create.mockResolvedValue({
+      id: "k_new",
+      label: "default",
+      keyPublic: "rov_pub_new_id_xxxx",
+      environment: "PRODUCTION",
+      createdAt: new Date("2026-04-18"),
+    });
+    prismaMock.apiKey.findMany.mockResolvedValue([
+      {
+        id: "k_new",
+        label: "default",
+        keyPublic: "rov_pub_new_id_xxxx",
+        environment: "PRODUCTION",
+        revokedAt: null,
+        createdAt: new Date("2026-04-18"),
+      },
+    ]);
+
+    const res = await app.request("/dashboard/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Alpha", slug: "alpha" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        project: { id: string; name: string; slug: string };
+        apiKey: { publicKey: string; secretKey: string };
+      };
+    };
+    expect(body.data.project).toMatchObject({ id: "proj_new", name: "Alpha", slug: "alpha" });
+    expect(body.data.apiKey.publicKey).toMatch(/^rov_pub_/);
+    expect(body.data.apiKey.secretKey).toMatch(/^rov_sec_/);
+    // Plaintext secret appears in the response but secretKey hash never does.
+    expect(body.data.apiKey.publicKey).toBe("rov_pub_new_id_xxxx");
+
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(prismaMock.project.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.projectMember.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ role: "OWNER", userId: "user_1" }),
+      }),
+    );
+    expect(prismaMock.audience.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ isDefault: true, name: "All Users" }),
+      }),
+    );
+    expect(prismaMock.apiKey.create).toHaveBeenCalledTimes(1);
+  });
+
+  test("returns 400 when name or slug is missing", async () => {
+    signedIn("user_1");
+    const res = await app.request("/dashboard/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  test("accepts environment override (SANDBOX)", async () => {
+    signedIn("user_1");
+    prismaMock.project.create.mockResolvedValue({
+      id: "proj_sandbox",
+      name: "Sbx",
+      slug: "sbx",
+      webhookUrl: null,
+      webhookSecret: null,
+      settings: {},
+      createdAt: new Date("2026-04-18"),
+      updatedAt: new Date("2026-04-18"),
+    });
+    prismaMock.projectMember.create.mockResolvedValue({ id: "pm_new", role: "OWNER" });
+    prismaMock.audience.create.mockResolvedValue({ id: "aud_default", isDefault: true });
+    prismaMock.apiKey.create.mockResolvedValue({
+      id: "k_sbx",
+      label: "default",
+      keyPublic: "rov_pub_sandbox_yyy",
+      environment: "SANDBOX",
+      createdAt: new Date("2026-04-18"),
+    });
+    prismaMock.apiKey.findMany.mockResolvedValue([
+      {
+        id: "k_sbx",
+        label: "default",
+        keyPublic: "rov_pub_sandbox_yyy",
+        environment: "SANDBOX",
+        revokedAt: null,
+        createdAt: new Date("2026-04-18"),
+      },
+    ]);
+
+    const res = await app.request("/dashboard/projects", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Sbx", slug: "sbx", environment: "SANDBOX" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.apiKey.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ environment: "SANDBOX" }),
+      }),
+    );
+  });
+});
