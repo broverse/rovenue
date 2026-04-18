@@ -51,9 +51,74 @@ function urlSafeRandom(bytes: number): string {
  * `apiKey.create` call. The auth middleware parses the id back out of
  * the token during Bearer auth, so the id inside the plaintext MUST
  * match the row id.
+ *
+ * The secret-key plaintext layout is `rov_sec_<id>_<random>`; the auth
+ * middleware at apps/api/src/middleware/api-key-auth.ts splits on the
+ * first `_` after the prefix to recover <id>. The id MUST NOT contain
+ * `_` — that's why this helper emits hex, not a cuid2. Changing the id
+ * alphabet here without updating `parseSecretKeyId` there will silently
+ * break secret-key auth.
  */
 function newApiKeyId(): string {
   return randomBytes(16).toString("hex");
+}
+
+/**
+ * Build the ProjectDetail wire payload from a Prisma project row plus
+ * the already-loaded (or freshly-created) active ApiKey rows and counts.
+ * Shared between GET /:id and POST / so the response shape stays in
+ * lockstep; the POST handler passes zeroed counts for the freshly-created
+ * project since nothing has had a chance to reference it yet.
+ */
+type ProjectRow = {
+  id: string;
+  name: string;
+  slug: string;
+  webhookUrl: string | null;
+  webhookSecret: string | null;
+  settings: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type ApiKeyRow = {
+  id: string;
+  label: string;
+  keyPublic: string;
+  environment: "PRODUCTION" | "SANDBOX";
+  createdAt: Date;
+};
+
+type ProjectDetailCounts = {
+  subscribers: number;
+  experiments: number;
+  featureFlags: number;
+};
+
+function toProjectDetail(
+  project: ProjectRow,
+  apiKeys: ApiKeyRow[],
+  counts: ProjectDetailCounts,
+): ProjectDetail {
+  const apiKeyPayload: ProjectApiKey[] = apiKeys.map((k) => ({
+    id: k.id,
+    label: k.label,
+    publicKey: k.keyPublic,
+    environment: k.environment,
+    createdAt: k.createdAt.toISOString(),
+  }));
+  return {
+    id: project.id,
+    name: project.name,
+    slug: project.slug,
+    webhookUrl: project.webhookUrl,
+    hasWebhookSecret: Boolean(project.webhookSecret),
+    settings: (project.settings as Record<string, unknown> | null) ?? {},
+    createdAt: project.createdAt.toISOString(),
+    updatedAt: project.updatedAt.toISOString(),
+    counts: { ...counts, activeApiKeys: apiKeys.length },
+    apiKeys: apiKeyPayload,
+  };
 }
 
 const createProjectSchema = z.object({
@@ -116,26 +181,11 @@ projectsRoute.get("/:id", async (c) => {
 
   if (!project) throw new HTTPException(404, { message: "Project not found" });
 
-  const apiKeyPayload: ProjectApiKey[] = apiKeys.map((k) => ({
-    id: k.id,
-    label: k.label,
-    publicKey: k.keyPublic,
-    environment: k.environment,
-    createdAt: k.createdAt.toISOString(),
-  }));
-
-  const payload: ProjectDetail = {
-    id: project.id,
-    name: project.name,
-    slug: project.slug,
-    webhookUrl: project.webhookUrl,
-    hasWebhookSecret: Boolean(project.webhookSecret),
-    settings: (project.settings as Record<string, unknown> | null) ?? {},
-    createdAt: project.createdAt.toISOString(),
-    updatedAt: project.updatedAt.toISOString(),
-    counts: { subscribers, experiments, featureFlags, activeApiKeys: apiKeys.length },
-    apiKeys: apiKeyPayload,
-  };
+  const payload = toProjectDetail(project, apiKeys, {
+    subscribers,
+    experiments,
+    featureFlags,
+  });
   return c.json(ok({ project: payload }));
 });
 
@@ -204,46 +254,15 @@ projectsRoute.post("/", async (c) => {
     return { project: createdProject, apiKey: createdApiKey, secretKey: secretPlaintext };
   });
 
-  // Re-read aggregates the same way GET /:id does so the caller gets a
-  // consistent ProjectDetail shape back (counts start at 0 for a fresh
-  // project; the single new api key shows up in apiKeys).
-  const [apiKeys, subscribers, experiments, featureFlags] = await Promise.all([
-    prisma.apiKey.findMany({
-      where: { projectId: project.id, revokedAt: null },
-      orderBy: { createdAt: "asc" },
-      select: {
-        id: true,
-        label: true,
-        keyPublic: true,
-        environment: true,
-        createdAt: true,
-      },
-    }),
-    prisma.subscriber.count({ where: { projectId: project.id, deletedAt: null } }),
-    prisma.experiment.count({ where: { projectId: project.id } }),
-    prisma.featureFlag.count({ where: { projectId: project.id } }),
-  ]);
-
-  const apiKeyPayload: ProjectApiKey[] = apiKeys.map((k) => ({
-    id: k.id,
-    label: k.label,
-    publicKey: k.keyPublic,
-    environment: k.environment,
-    createdAt: k.createdAt.toISOString(),
-  }));
-
-  const detail: ProjectDetail = {
-    id: project.id,
-    name: project.name,
-    slug: project.slug,
-    webhookUrl: project.webhookUrl,
-    hasWebhookSecret: Boolean(project.webhookSecret),
-    settings: (project.settings as Record<string, unknown> | null) ?? {},
-    createdAt: project.createdAt.toISOString(),
-    updatedAt: project.updatedAt.toISOString(),
-    counts: { subscribers, experiments, featureFlags, activeApiKeys: apiKeys.length },
-    apiKeys: apiKeyPayload,
-  };
+  // Rebuild the ProjectDetail payload in-memory from the transaction's
+  // return values: a freshly-created project has zero subscribers /
+  // experiments / feature flags and exactly one api key (the one we just
+  // minted). Re-querying the database here would be wasted round-trips.
+  const detail = toProjectDetail(project, [apiKey], {
+    subscribers: 0,
+    experiments: 0,
+    featureFlags: 0,
+  });
 
   const payload: CreateProjectResponse = {
     project: detail,
