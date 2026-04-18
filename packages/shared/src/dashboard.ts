@@ -7,16 +7,28 @@
 
 export type MemberRoleName = "OWNER" | "ADMIN" | "VIEWER";
 
+export type ApiKeyEnvironment = "PRODUCTION" | "SANDBOX";
+
 export interface ProjectSummary {
   id: string;
   name: string;
+  slug: string;
   role: MemberRoleName;
   createdAt: string; // ISO
+}
+
+export interface ProjectApiKey {
+  id: string;
+  label: string;
+  publicKey: string; // the keyPublic column — plaintext identifier, safe to expose
+  environment: ApiKeyEnvironment;
+  createdAt: string;
 }
 
 export interface ProjectDetail {
   id: string;
   name: string;
+  slug: string;
   webhookUrl: string | null;
   hasWebhookSecret: boolean;
   settings: Record<string, unknown>;
@@ -28,23 +40,20 @@ export interface ProjectDetail {
     featureFlags: number;
     activeApiKeys: number;
   };
-  apiKeys: Array<{
-    id: string;
-    prefix: string;
-    type: "PUBLIC" | "SECRET";
-    createdAt: string;
-  }>;
+  apiKeys: ProjectApiKey[];
 }
 
 export interface CreateProjectRequest {
   name: string;
+  slug: string;
+  environment?: ApiKeyEnvironment; // default PRODUCTION
 }
 
 export interface CreateProjectResponse {
   project: ProjectDetail;
-  apiKeys: {
-    publicKey: string; // plaintext, shown once
-    secretKey: string; // plaintext, shown once
+  apiKey: {
+    publicKey: string; // plaintext — same as ProjectApiKey.publicKey, also readable from detail
+    secretKey: string; // plaintext — shown once, only in this response
   };
 }
 
