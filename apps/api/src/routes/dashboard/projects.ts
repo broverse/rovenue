@@ -11,9 +11,11 @@ import {
   type ProjectApiKey,
   type ProjectDetail,
   type ProjectSummary,
+  type RotateWebhookSecretResponse,
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
+import { audit, extractRequestContext, redactCredentials } from "../../lib/audit";
 import { ok } from "../../lib/response";
 
 // =============================================================
@@ -134,6 +136,12 @@ const createProjectSchema = z.object({
   environment: z
     .enum([Environment.PRODUCTION, Environment.SANDBOX])
     .default(Environment.PRODUCTION),
+});
+
+const updateProjectSchema = z.object({
+  name: z.string().trim().min(2).max(80).optional(),
+  webhookUrl: z.string().url().nullable().optional(),
+  settings: z.record(z.unknown()).optional(),
 });
 
 export const projectsRoute = new Hono();
@@ -272,4 +280,106 @@ projectsRoute.post("/", async (c) => {
     },
   };
   return c.json(ok(payload));
+});
+
+// PATCH /:id — partial update, ADMIN+. Reads the before-snapshot so the
+// audit row captures both sides; only fields present in the body are
+// forwarded to `update`.
+projectsRoute.patch("/:id", async (c) => {
+  const id = c.req.param("id");
+  const user = c.get("user");
+  await assertProjectAccess(id, user.id, MemberRole.ADMIN);
+
+  // Check existence first so callers hitting a missing resource get a
+  // crisp 404 regardless of whether their body would have been valid.
+  const before = await prisma.project.findUnique({
+    where: { id },
+    select: { name: true, webhookUrl: true, settings: true },
+  });
+  if (!before) throw new HTTPException(404, { message: "Project not found" });
+
+  let body: z.infer<typeof updateProjectSchema>;
+  try {
+    body = updateProjectSchema.parse(await c.req.json());
+  } catch (err) {
+    throw new HTTPException(400, {
+      message:
+        err instanceof z.ZodError ? err.errors[0]?.message ?? "Invalid input" : "Invalid JSON body",
+    });
+  }
+
+  const project = await prisma.project.update({
+    where: { id },
+    data: {
+      ...(body.name !== undefined && { name: body.name }),
+      ...(body.webhookUrl !== undefined && { webhookUrl: body.webhookUrl }),
+      ...(body.settings !== undefined && { settings: body.settings }),
+    },
+  });
+
+  await audit({
+    projectId: id,
+    userId: user.id,
+    action: "project.updated",
+    resource: "project",
+    resourceId: id,
+    before: before as Record<string, unknown>,
+    after: body as Record<string, unknown>,
+    ...extractRequestContext(c),
+  });
+
+  return c.json(ok({ project: { id: project.id, name: project.name } }));
+});
+
+// POST /:id/webhook-secret/rotate — OWNER only. Mints a fresh plaintext
+// `whsec_<base64url-32>` secret and returns it exactly once. The audit
+// row MUST use redacted snapshots — audit() rejects credential entries
+// whose before/after leak the raw secret.
+projectsRoute.post("/:id/webhook-secret/rotate", async (c) => {
+  const id = c.req.param("id");
+  const user = c.get("user");
+  await assertProjectAccess(id, user.id, MemberRole.OWNER);
+
+  const webhookSecret = `whsec_${randomBytes(32).toString("base64url")}`;
+  await prisma.project.update({
+    where: { id },
+    data: { webhookSecret },
+  });
+
+  await audit({
+    projectId: id,
+    userId: user.id,
+    action: "credential.updated",
+    resource: "credential",
+    resourceId: id,
+    before: redactCredentials({ webhookSecret: "*" }),
+    after: redactCredentials({ webhookSecret: "*" }),
+    ...extractRequestContext(c),
+  });
+
+  const payload: RotateWebhookSecretResponse = { webhookSecret };
+  return c.json(ok(payload));
+});
+
+// DELETE /:id — OWNER only. We intentionally write the audit row
+// BEFORE the project row is deleted so the audit.projectId foreign key
+// still resolves. Cascading delete on the project table would take the
+// audit row with it if we ran these in the opposite order.
+projectsRoute.delete("/:id", async (c) => {
+  const id = c.req.param("id");
+  const user = c.get("user");
+  await assertProjectAccess(id, user.id, MemberRole.OWNER);
+
+  await audit({
+    projectId: id,
+    userId: user.id,
+    action: "project.deleted",
+    resource: "project",
+    resourceId: id,
+    ...extractRequestContext(c),
+  });
+
+  await prisma.project.delete({ where: { id } });
+
+  return c.json(ok({ id }));
 });

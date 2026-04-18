@@ -309,3 +309,123 @@ describe("POST /dashboard/projects", () => {
     );
   });
 });
+
+describe("PATCH /dashboard/projects/:id", () => {
+  test("requires ADMIN role — VIEWER gets 403", async () => {
+    signedIn("viewer");
+    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "VIEWER" });
+    const res = await app.request("/dashboard/projects/proj_1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "New Name" }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test("ADMIN can rename and update webhookUrl; writes an audit entry", async () => {
+    signedIn("admin");
+    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
+    prismaMock.project.findUnique.mockResolvedValue({
+      id: "proj_1",
+      name: "Old",
+      webhookUrl: null,
+      settings: {},
+    });
+    prismaMock.project.update.mockResolvedValue({
+      id: "proj_1",
+      name: "Renamed",
+      slug: "proj-1",
+      webhookUrl: "https://new.example.com",
+      webhookSecret: null,
+      settings: {},
+      createdAt: new Date("2026-04-01"),
+      updatedAt: new Date(),
+    });
+
+    const res = await app.request("/dashboard/projects/proj_1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Renamed", webhookUrl: "https://new.example.com" }),
+    });
+    expect(res.status).toBe(200);
+    expect(prismaMock.project.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "proj_1" },
+        data: expect.objectContaining({ name: "Renamed", webhookUrl: "https://new.example.com" }),
+      }),
+    );
+    expect(prismaMock.auditLog.create).toHaveBeenCalled();
+  });
+
+  test("404 when project not found", async () => {
+    signedIn("admin");
+    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
+    prismaMock.project.findUnique.mockResolvedValue(null);
+    const res = await app.request("/dashboard/projects/missing", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "X" }),
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /dashboard/projects/:id/webhook-secret/rotate", () => {
+  test("requires OWNER — ADMIN gets 403", async () => {
+    signedIn("admin");
+    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
+    const res = await app.request("/dashboard/projects/proj_1/webhook-secret/rotate", {
+      method: "POST",
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test("OWNER rotates the secret; audit before/after are redacted", async () => {
+    signedIn("owner");
+    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "OWNER" });
+    prismaMock.project.update.mockResolvedValue({ id: "proj_1", webhookSecret: "new_placeholder" });
+
+    const res = await app.request("/dashboard/projects/proj_1/webhook-secret/rotate", {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { webhookSecret: string } };
+    expect(body.data.webhookSecret).toMatch(/^whsec_/);
+
+    const auditCall = prismaMock.auditLog.create.mock.calls[0]?.[0] as {
+      data: { before: Record<string, unknown>; after: Record<string, unknown>; resource: string };
+    };
+    expect(auditCall.data.resource).toBe("credential");
+    expect(auditCall.data.before).toEqual({ webhookSecret: "[REDACTED]" });
+    expect(auditCall.data.after).toEqual({ webhookSecret: "[REDACTED]" });
+  });
+});
+
+describe("DELETE /dashboard/projects/:id", () => {
+  test("requires OWNER — ADMIN gets 403", async () => {
+    signedIn("admin");
+    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
+    const res = await app.request("/dashboard/projects/proj_1", { method: "DELETE" });
+    expect(res.status).toBe(403);
+  });
+
+  test("OWNER deletes the project AND writes an audit entry first", async () => {
+    signedIn("owner");
+    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "OWNER" });
+    prismaMock.project.delete.mockResolvedValue({ id: "proj_1" });
+
+    const res = await app.request("/dashboard/projects/proj_1", { method: "DELETE" });
+    expect(res.status).toBe(200);
+
+    expect(prismaMock.project.delete).toHaveBeenCalledWith({ where: { id: "proj_1" } });
+    expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "project.deleted",
+          resource: "project",
+          resourceId: "proj_1",
+        }),
+      }),
+    );
+  });
+});
