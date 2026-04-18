@@ -313,15 +313,17 @@ export interface SubscriberPurchase {
   status: string;
   priceAmount: string | null;
   priceCurrency: string | null;
-  purchasedAt: string;
-  expiresAt: string | null;
+  purchaseDate: string;
+  expiresDate: string | null;
+  autoRenewStatus: boolean | null;
 }
 
 export interface SubscriberAccessRow {
   entitlementKey: string;
-  expiresAt: string | null;
-  willRenew: boolean;
-  source: string;
+  isActive: boolean;
+  expiresDate: string | null;
+  store: "APP_STORE" | "PLAY_STORE" | "STRIPE";
+  purchaseId: string;
 }
 
 export interface SubscriberCreditLedgerRow {
@@ -1479,12 +1481,13 @@ describe("GET /dashboard/projects/:projectId/subscribers/:id", () => {
         status: "ACTIVE",
         priceAmount: "9.99",
         priceCurrency: "USD",
-        purchasedAt: new Date("2026-04-10"),
-        expiresAt: new Date("2026-05-10"),
+        purchaseDate: new Date("2026-04-10"),
+        expiresDate: new Date("2026-05-10"),
+        autoRenewStatus: true,
       },
     ]);
     prismaMock.subscriberAccess.findMany.mockResolvedValue([
-      { entitlementKey: "premium", expiresAt: null, willRenew: true, source: "pur_1" },
+      { entitlementKey: "premium", isActive: true, expiresDate: null, store: "APP_STORE", purchaseId: "pur_1" },
     ]);
     prismaMock.creditLedger.findFirst.mockResolvedValue({ balance: "42" });
     prismaMock.creditLedger.findMany.mockResolvedValue([
@@ -1578,7 +1581,7 @@ subscribersRoute.get("/:id", async (c) => {
     await Promise.all([
       prisma.purchase.findMany({
         where: { subscriberId: id },
-        orderBy: { purchasedAt: "desc" },
+        orderBy: { purchaseDate: "desc" },
         take: 50,
         include: { product: { select: { identifier: true } } },
       }),
@@ -1618,9 +1621,10 @@ subscribersRoute.get("/:id", async (c) => {
     mergedInto: subscriber.mergedInto,
     access: access.map((a) => ({
       entitlementKey: a.entitlementKey,
-      expiresAt: a.expiresAt?.toISOString() ?? null,
-      willRenew: a.willRenew,
-      source: a.source ?? "",
+      isActive: a.isActive,
+      expiresDate: a.expiresDate?.toISOString() ?? null,
+      store: a.store,
+      purchaseId: a.purchaseId,
     })),
     purchases: purchases.map((p) => ({
       id: p.id,
@@ -1630,8 +1634,9 @@ subscribersRoute.get("/:id", async (c) => {
       status: p.status,
       priceAmount: p.priceAmount?.toString() ?? null,
       priceCurrency: p.priceCurrency,
-      purchasedAt: p.purchasedAt.toISOString(),
-      expiresAt: p.expiresAt?.toISOString() ?? null,
+      purchaseDate: p.purchaseDate.toISOString(),
+      expiresDate: p.expiresDate?.toISOString() ?? null,
+      autoRenewStatus: p.autoRenewStatus,
     })),
     creditBalance: latestLedger?.balance.toString() ?? "0",
     creditLedger: ledger.map((l) => ({
@@ -3399,22 +3404,24 @@ export function AccessTable({ rows }: { rows: SubscriberAccessRow[] }) {
     <Table aria-label="Access" removeWrapper>
       <TableHeader>
         <TableColumn>ENTITLEMENT</TableColumn>
+        <TableColumn>STATUS</TableColumn>
         <TableColumn>EXPIRES</TableColumn>
-        <TableColumn>RENEWS</TableColumn>
-        <TableColumn>SOURCE</TableColumn>
+        <TableColumn>STORE</TableColumn>
+        <TableColumn>PURCHASE</TableColumn>
       </TableHeader>
       <TableBody emptyContent="No active entitlements">
         {rows.map((r) => (
-          <TableRow key={`${r.entitlementKey}-${r.source}`}>
+          <TableRow key={`${r.entitlementKey}-${r.purchaseId}`}>
             <TableCell>
               <Chip color="success" size="sm">{r.entitlementKey}</Chip>
             </TableCell>
+            <TableCell>{r.isActive ? "Active" : "Inactive"}</TableCell>
             <TableCell>
-              {r.expiresAt ? new Date(r.expiresAt).toLocaleString() : "Never"}
+              {r.expiresDate ? new Date(r.expiresDate).toLocaleString() : "Never"}
             </TableCell>
-            <TableCell>{r.willRenew ? "Yes" : "No"}</TableCell>
+            <TableCell>{r.store}</TableCell>
             <TableCell>
-              <span className="font-mono text-xs text-default-500">{r.source}</span>
+              <span className="font-mono text-xs text-default-500">{r.purchaseId}</span>
             </TableCell>
           </TableRow>
         ))}
@@ -3458,9 +3465,9 @@ export function PurchasesTable({ rows }: { rows: SubscriberPurchase[] }) {
             <TableCell>
               {p.priceAmount ? `${p.priceAmount} ${p.priceCurrency ?? ""}` : "—"}
             </TableCell>
-            <TableCell>{new Date(p.purchasedAt).toLocaleDateString()}</TableCell>
+            <TableCell>{new Date(p.purchaseDate).toLocaleDateString()}</TableCell>
             <TableCell>
-              {p.expiresAt ? new Date(p.expiresAt).toLocaleDateString() : "—"}
+              {p.expiresDate ? new Date(p.expiresDate).toLocaleDateString() : "—"}
             </TableCell>
           </TableRow>
         ))}
@@ -3786,7 +3793,7 @@ export const handlers = [
           deletedAt: null,
           mergedInto: null,
           access: [
-            { entitlementKey: "premium", expiresAt: null, willRenew: true, source: "pur_1" },
+            { entitlementKey: "premium", isActive: true, expiresDate: null, store: "APP_STORE", purchaseId: "pur_1" },
           ],
           purchases: [],
           creditBalance: "42",
