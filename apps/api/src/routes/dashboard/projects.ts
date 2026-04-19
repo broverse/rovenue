@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import prisma, { Environment, MemberRole } from "@rovenue/db";
+import prisma, { Environment, MemberRole, Prisma } from "@rovenue/db";
 import {
   API_KEY_KIND,
   API_KEY_PREFIX,
@@ -317,7 +317,9 @@ projectsRoute.patch("/:id", async (c) => {
     data: {
       ...(body.name !== undefined && { name: body.name }),
       ...(body.webhookUrl !== undefined && { webhookUrl: body.webhookUrl }),
-      ...(body.settings !== undefined && { settings: body.settings }),
+      ...(body.settings !== undefined && {
+        settings: body.settings as Prisma.InputJsonValue,
+      }),
     },
   });
 
