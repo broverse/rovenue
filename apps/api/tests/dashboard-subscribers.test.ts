@@ -147,3 +147,97 @@ describe("GET /dashboard/projects/:projectId/subscribers", () => {
     expect(whereJson).toContain("insensitive");
   });
 });
+
+describe("GET /dashboard/projects/:projectId/subscribers/:id", () => {
+  test("forbidden when not a member", async () => {
+    signedIn("outsider");
+    prismaMock.projectMember.findUnique.mockResolvedValue(null);
+    const res = await app.request("/dashboard/projects/proj_1/subscribers/sub_1");
+    expect(res.status).toBe(403);
+  });
+
+  test("returns 404 when subscriber isn't in project", async () => {
+    signedIn("user_1");
+    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    prismaMock.subscriber.findUnique.mockResolvedValue(null);
+    const res = await app.request("/dashboard/projects/proj_1/subscribers/sub_missing");
+    expect(res.status).toBe(404);
+  });
+
+  test("assembles subscriber + purchases + access + ledger + assignments + webhooks", async () => {
+    signedIn("user_1");
+    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    prismaMock.subscriber.findUnique.mockResolvedValue({
+      id: "sub_1",
+      projectId: "proj_1",
+      appUserId: "user_abc",
+      attributes: { country: "TR" },
+      firstSeenAt: new Date("2026-04-01"),
+      lastSeenAt: new Date("2026-04-18"),
+      deletedAt: null,
+      mergedInto: null,
+    });
+    prismaMock.purchase.findMany.mockResolvedValue([
+      {
+        id: "pur_1",
+        productId: "prod_1",
+        product: { identifier: "pro_monthly" },
+        store: "APP_STORE",
+        status: "ACTIVE",
+        priceAmount: "9.99",
+        priceCurrency: "USD",
+        purchaseDate: new Date("2026-04-10"),
+        expiresDate: new Date("2026-05-10"),
+        autoRenewStatus: true,
+      },
+    ]);
+    prismaMock.subscriberAccess.findMany.mockResolvedValue([
+      { entitlementKey: "premium", isActive: true, expiresDate: null, store: "APP_STORE", purchaseId: "pur_1" },
+    ]);
+    prismaMock.creditLedger.findFirst.mockResolvedValue({ balance: "42" });
+    prismaMock.creditLedger.findMany.mockResolvedValue([
+      {
+        id: "led_1",
+        type: "PURCHASE",
+        amount: "100",
+        balance: "100",
+        referenceType: "purchase",
+        description: null,
+        createdAt: new Date("2026-04-12"),
+      },
+    ]);
+    prismaMock.experimentAssignment.findMany.mockResolvedValue([
+      {
+        experimentId: "exp_1",
+        variantId: "v_a",
+        assignedAt: new Date("2026-04-12"),
+        convertedAt: null,
+        revenue: null,
+        experiment: { key: "paywall_test" },
+      },
+    ]);
+    prismaMock.outgoingWebhook.findMany.mockResolvedValue([
+      {
+        id: "ow_1",
+        eventType: "purchase",
+        url: "https://example.com/hook",
+        status: "SENT",
+        attempts: 1,
+        createdAt: new Date("2026-04-12"),
+        sentAt: new Date("2026-04-12"),
+        lastErrorMessage: null,
+      },
+    ]);
+
+    const res = await app.request("/dashboard/projects/proj_1/subscribers/sub_1");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { subscriber: Record<string, unknown> } };
+    const s = body.data.subscriber as Record<string, unknown>;
+    expect(s.appUserId).toBe("user_abc");
+    expect(Array.isArray(s.purchases)).toBe(true);
+    expect(Array.isArray(s.access)).toBe(true);
+    expect(s.creditBalance).toBe("42");
+    expect(Array.isArray(s.assignments)).toBe(true);
+    expect(Array.isArray(s.outgoingWebhooks)).toBe(true);
+  });
+});
