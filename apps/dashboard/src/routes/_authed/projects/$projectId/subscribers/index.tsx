@@ -7,13 +7,17 @@ import { SubscribersTable } from "../../../../../components/subscribers/Subscrib
 export const Route = createFileRoute(
   "/_authed/projects/$projectId/subscribers/",
 )({
-  component: SubscribersPage,
+  component: SubscribersRouteComponent,
 });
 
-function SubscribersPage() {
+function SubscribersRouteComponent() {
   const { projectId } = useParams({
     from: "/_authed/projects/$projectId/subscribers/",
   });
+  return <SubscribersPage projectId={projectId} />;
+}
+
+export function SubscribersPage({ projectId }: { projectId: string }) {
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
 

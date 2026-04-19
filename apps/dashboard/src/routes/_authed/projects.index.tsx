@@ -8,7 +8,7 @@ export const Route = createFileRoute("/_authed/projects/")({
   component: ProjectsList,
 });
 
-function ProjectsList() {
+export function ProjectsList() {
   const { data, isLoading, error } = useProjects();
 
   return (

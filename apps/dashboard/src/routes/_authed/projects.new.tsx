@@ -19,7 +19,7 @@ export const Route = createFileRoute("/_authed/projects/new")({
   component: NewProjectPage,
 });
 
-function NewProjectPage() {
+export function NewProjectPage() {
   const navigate = useNavigate();
   const [result, setResult] = useState<CreateProjectResponse | null>(null);
 

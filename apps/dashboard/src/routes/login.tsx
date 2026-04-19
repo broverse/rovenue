@@ -3,14 +3,18 @@ import { Card } from "@heroui/react";
 import { OAuthButton } from "../components/auth/OAuthButton";
 
 export const Route = createFileRoute("/login")({
-  component: LoginPage,
+  component: LoginRouteComponent,
   validateSearch: (search: Record<string, unknown>) => ({
     error: typeof search.error === "string" ? search.error : undefined,
   }),
 });
 
-function LoginPage() {
+function LoginRouteComponent() {
   const { error } = Route.useSearch();
+  return <LoginPage error={error} />;
+}
+
+export function LoginPage({ error }: { error?: string }) {
   return (
     <div className="flex min-h-screen items-center justify-center p-6">
       <Card className="w-full max-w-md p-6">

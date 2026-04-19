@@ -4,11 +4,21 @@ import { useSubscriber } from "../../../../../lib/hooks/useSubscriber";
 import { SubscriberDetailPanel } from "../../../../../components/subscribers/SubscriberDetailPanel";
 
 export const Route = createFileRoute("/_authed/projects/$projectId/subscribers/$id")({
-  component: SubscriberDetailPage,
+  component: SubscriberDetailRouteComponent,
 });
 
-function SubscriberDetailPage() {
+function SubscriberDetailRouteComponent() {
   const { projectId, id } = useParams({ from: "/_authed/projects/$projectId/subscribers/$id" });
+  return <SubscriberDetailPage projectId={projectId} id={id} />;
+}
+
+export function SubscriberDetailPage({
+  projectId,
+  id,
+}: {
+  projectId: string;
+  id: string;
+}) {
   const { data, isLoading, error } = useSubscriber(projectId, id);
 
   if (isLoading) {
