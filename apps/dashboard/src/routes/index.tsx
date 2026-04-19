@@ -5,17 +5,15 @@ export const Route = createFileRoute("/")({
   beforeLoad: async () => {
     const session = await getSession();
     if (!session.data) {
-      // @ts-expect-error /login route is registered in Task B5
-      throw redirect({ to: "/login" });
+      throw redirect({ to: "/login", search: { error: undefined } });
     }
     const lastProjectId =
       typeof localStorage !== "undefined"
         ? localStorage.getItem("lastProjectId")
         : null;
     throw redirect({
-      // @ts-expect-error /projects route is registered in Task B7
+      // @ts-expect-error /projects/$projectId route is registered in Task B8
       to: lastProjectId ? "/projects/$projectId" : "/projects",
-      // @ts-expect-error /projects route is registered in Task B7
       params: lastProjectId ? { projectId: lastProjectId } : undefined,
     });
   },
