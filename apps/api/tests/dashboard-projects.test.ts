@@ -341,6 +341,12 @@ describe("PATCH /dashboard/projects/:id", () => {
       createdAt: new Date("2026-04-01"),
       updatedAt: new Date(),
     });
+    // Reset the count/apiKey mocks to default (clearAllMocks does not
+    // undo mockResolvedValue implementations set by earlier tests).
+    prismaMock.apiKey.findMany.mockResolvedValue([]);
+    prismaMock.subscriber.count.mockResolvedValue(0);
+    prismaMock.experiment.count.mockResolvedValue(0);
+    prismaMock.featureFlag.count.mockResolvedValue(0);
 
     const res = await app.request("/dashboard/projects/proj_1", {
       method: "PATCH",
@@ -355,6 +361,47 @@ describe("PATCH /dashboard/projects/:id", () => {
       }),
     );
     expect(prismaMock.auditLog.create).toHaveBeenCalled();
+
+    const body = (await res.json()) as {
+      data: {
+        project: {
+          id: string;
+          name: string;
+          slug: string;
+          counts: Record<string, number>;
+          apiKeys: unknown[];
+        };
+      };
+    };
+    expect(body.data.project.id).toBe("proj_1");
+    expect(body.data.project.name).toBe("Renamed");
+    expect(body.data.project.slug).toBe("proj-1");
+    expect(body.data.project.counts).toEqual({
+      subscribers: 0,
+      experiments: 0,
+      featureFlags: 0,
+      activeApiKeys: 0,
+    });
+    expect(body.data.project.apiKeys).toEqual([]);
+  });
+
+  test("empty PATCH body returns 400", async () => {
+    signedIn("admin");
+    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
+    prismaMock.project.findUnique.mockResolvedValue({
+      id: "proj_1",
+      name: "Old",
+      webhookUrl: null,
+      settings: {},
+    });
+    const res = await app.request("/dashboard/projects/proj_1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    expect(prismaMock.project.update).not.toHaveBeenCalled();
+    expect(prismaMock.auditLog.create).not.toHaveBeenCalled();
   });
 
   test("404 when project not found", async () => {

@@ -138,11 +138,15 @@ const createProjectSchema = z.object({
     .default(Environment.PRODUCTION),
 });
 
-const updateProjectSchema = z.object({
-  name: z.string().trim().min(2).max(80).optional(),
-  webhookUrl: z.string().url().nullable().optional(),
-  settings: z.record(z.unknown()).optional(),
-});
+const updateProjectSchema = z
+  .object({
+    name: z.string().trim().min(2).max(80).optional(),
+    webhookUrl: z.string().url().nullable().optional(),
+    settings: z.record(z.unknown()).optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, {
+    message: "At least one field required",
+  });
 
 export const projectsRoute = new Hono();
 projectsRoute.use("*", requireDashboardAuth);
@@ -324,11 +328,35 @@ projectsRoute.patch("/:id", async (c) => {
     resource: "project",
     resourceId: id,
     before: before as Record<string, unknown>,
-    after: body as Record<string, unknown>,
+    after: { ...before, ...body } as Record<string, unknown>,
     ...extractRequestContext(c),
   });
 
-  return c.json(ok({ project: { id: project.id, name: project.name } }));
+  // Mirror GET /:id's response shape so the dashboard client can refresh
+  // its cache from the PATCH response without a follow-up re-fetch.
+  const [apiKeys, subscribers, experiments, featureFlags] = await Promise.all([
+    prisma.apiKey.findMany({
+      where: { projectId: id, revokedAt: null },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        label: true,
+        keyPublic: true,
+        environment: true,
+        createdAt: true,
+      },
+    }),
+    prisma.subscriber.count({ where: { projectId: id, deletedAt: null } }),
+    prisma.experiment.count({ where: { projectId: id } }),
+    prisma.featureFlag.count({ where: { projectId: id } }),
+  ]);
+
+  const payload = toProjectDetail(project, apiKeys, {
+    subscribers,
+    experiments,
+    featureFlags,
+  });
+  return c.json(ok({ project: payload }));
 });
 
 // POST /:id/webhook-secret/rotate — OWNER only. Mints a fresh plaintext
