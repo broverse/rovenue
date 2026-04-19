@@ -55,11 +55,9 @@ function ProjectLayout() {
               Overview
             </Link>
             <Link
-              to="/projects/$projectId"
+              to="/projects/$projectId/subscribers"
               params={{ projectId: project.id }}
-              // Subscribers route is added in Task B9; keep the tab visible
-              // so layout design stays complete. It currently no-ops onto overview.
-              className="text-default-400"
+              activeProps={activeLinkProps}
             >
               Subscribers
             </Link>
