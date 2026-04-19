@@ -31,9 +31,7 @@ export function SubscribersTable({ projectId, rows }: Props) {
             <tr key={s.id} className="border-b border-default-100">
               <td className="py-2 pr-4">
                 <Link
-                  // @ts-expect-error /projects/$projectId/subscribers/$id route is registered in Task B10
                   to="/projects/$projectId/subscribers/$id"
-                  // @ts-expect-error params for the not-yet-registered detail route
                   params={{ projectId, id: s.id }}
                   className="text-primary"
                 >
