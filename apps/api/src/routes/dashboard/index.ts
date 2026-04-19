@@ -4,6 +4,7 @@ import { auditLogsRoute } from "./audit-logs";
 import { experimentsRoute } from "./experiments";
 import { featureFlagsRoute } from "./feature-flags";
 import { projectsRoute } from "./projects";
+import { subscribersRoute } from "./subscribers";
 import { webhooksDashboardRoute } from "./webhooks";
 
 export const dashboardRoute = new Hono();
@@ -13,4 +14,5 @@ dashboardRoute.route("/audit-logs", auditLogsRoute);
 dashboardRoute.route("/experiments", experimentsRoute);
 dashboardRoute.route("/feature-flags", featureFlagsRoute);
 dashboardRoute.route("/projects", projectsRoute);
+dashboardRoute.route("/projects/:projectId/subscribers", subscribersRoute);
 dashboardRoute.route("/webhooks", webhooksDashboardRoute);
