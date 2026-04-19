@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@heroui/react": "^3.0.3",
+    "@heroui/styles": "^3.0.0",
     "@rovenue/shared": "workspace:*",
     "@tanstack/react-query": "^5.59.0",
     "@tanstack/react-router": "^1.130.0",
