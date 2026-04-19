@@ -67,9 +67,7 @@ function NewProjectPage() {
                     if (!result) return;
                     localStorage.setItem("lastProjectId", result.project.id);
                     navigate({
-                      // @ts-expect-error /projects/$projectId route is registered in Task B8
                       to: "/projects/$projectId",
-                      // @ts-expect-error /projects/$projectId route is registered in Task B8
                       params: { projectId: result.project.id },
                     });
                   }}

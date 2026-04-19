@@ -11,10 +11,12 @@ export const Route = createFileRoute("/")({
       typeof localStorage !== "undefined"
         ? localStorage.getItem("lastProjectId")
         : null;
-    throw redirect({
-      // @ts-expect-error /projects/$projectId route is registered in Task B8
-      to: lastProjectId ? "/projects/$projectId" : "/projects",
-      params: lastProjectId ? { projectId: lastProjectId } : undefined,
-    });
+    if (lastProjectId) {
+      throw redirect({
+        to: "/projects/$projectId",
+        params: { projectId: lastProjectId },
+      });
+    }
+    throw redirect({ to: "/projects" });
   },
 });

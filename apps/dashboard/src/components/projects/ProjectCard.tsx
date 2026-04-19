@@ -13,9 +13,7 @@ const roleColor: Record<string, "success" | "accent" | "default"> = {
 export function ProjectCard({ project }: { project: ProjectSummary }) {
   return (
     <Link
-      // @ts-expect-error /projects/$projectId route is registered in Task B8
       to="/projects/$projectId"
-      // @ts-expect-error /projects/$projectId route is registered in Task B8
       params={{ projectId: project.id }}
       className="block"
     >

@@ -4,7 +4,7 @@ import { TopNav } from "../../components/layout/TopNav";
 import { ProjectCard } from "../../components/projects/ProjectCard";
 import { useProjects } from "../../lib/hooks/useProjects";
 
-export const Route = createFileRoute("/_authed/projects")({
+export const Route = createFileRoute("/_authed/projects/")({
   component: ProjectsList,
 });
 
