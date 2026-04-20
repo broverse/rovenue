@@ -67,6 +67,51 @@ export interface RotateWebhookSecretResponse {
   webhookSecret: string; // plaintext, shown once
 }
 
+// =============================================================
+// Store credentials (apple / google / stripe)
+// =============================================================
+// Responses never carry plaintext secret material. Only a
+// `configured` flag plus a small allowlist of safe-to-display
+// fields (bundleId, packageName, etc.).
+
+export type CredentialStore = "apple" | "google" | "stripe";
+
+export interface CredentialStatus {
+  store: CredentialStore;
+  configured: boolean;
+  safeFields?: Record<string, string>;
+}
+
+export interface CredentialsListResponse {
+  credentials: {
+    apple: CredentialStatus;
+    google: CredentialStatus;
+    stripe: CredentialStatus;
+  };
+}
+
+export interface UpdateAppleCredentialsRequest {
+  bundleId: string;
+  appAppleId?: number;
+  keyId?: string;
+  issuerId?: string;
+  privateKey?: string;
+}
+
+export interface UpdateGoogleCredentialsRequest {
+  packageName: string;
+  serviceAccount: {
+    client_email: string;
+    private_key: string;
+    [key: string]: unknown;
+  };
+}
+
+export interface UpdateStripeCredentialsRequest {
+  secretKey: string;
+  webhookSecret: string;
+}
+
 export interface SubscriberListItem {
   id: string;
   appUserId: string;

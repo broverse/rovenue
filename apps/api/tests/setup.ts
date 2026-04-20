@@ -10,3 +10,5 @@ process.env.GOOGLE_CLIENT_ID ??= "test-google-id";
 process.env.GOOGLE_CLIENT_SECRET ??= "test-google-secret";
 process.env.DATABASE_URL ??= "postgresql://postgres:postgres@localhost:5432/rovenue_test";
 process.env.REDIS_URL ??= "redis://localhost:6379";
+process.env.ENCRYPTION_KEY ??=
+  "6ecfcd0f73d5afe055ff651e0e4ce85679cdd12bb4cede7aa4338b693047b8f1";

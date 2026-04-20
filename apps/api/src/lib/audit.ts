@@ -31,6 +31,7 @@ export type AuditAction =
   | "api_key.revoked"
   // --- credentials ---
   | "credential.updated"
+  | "credential.cleared"
   // --- product / group ---
   | "product.created"
   | "product.updated"
