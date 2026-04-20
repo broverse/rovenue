@@ -9,14 +9,22 @@ import { projectsRoute } from "./projects";
 import { subscribersRoute } from "./subscribers";
 import { webhooksDashboardRoute } from "./webhooks";
 
-export const dashboardRoute = new Hono();
+// =============================================================
+// /dashboard route tree
+// =============================================================
+//
+// Chained on a single expression so each sub-route's accumulated
+// type surfaces through to AppType in apps/api/src/app.ts. All
+// children run `requireDashboardAuth` internally, so the top-level
+// middleware list here is empty on purpose.
 
-dashboardRoute.route("/audiences", audiencesRoute);
-dashboardRoute.route("/audit-logs", auditLogsRoute);
-dashboardRoute.route("/experiments", experimentsRoute);
-dashboardRoute.route("/feature-flags", featureFlagsRoute);
-dashboardRoute.route("/projects", projectsRoute);
-dashboardRoute.route("/projects/:projectId/credentials", credentialsRoute);
-dashboardRoute.route("/projects/:projectId/members", membersRoute);
-dashboardRoute.route("/projects/:projectId/subscribers", subscribersRoute);
-dashboardRoute.route("/webhooks", webhooksDashboardRoute);
+export const dashboardRoute = new Hono()
+  .route("/audiences", audiencesRoute)
+  .route("/audit-logs", auditLogsRoute)
+  .route("/experiments", experimentsRoute)
+  .route("/feature-flags", featureFlagsRoute)
+  .route("/projects", projectsRoute)
+  .route("/projects/:projectId/credentials", credentialsRoute)
+  .route("/projects/:projectId/members", membersRoute)
+  .route("/projects/:projectId/subscribers", subscribersRoute)
+  .route("/webhooks", webhooksDashboardRoute);
