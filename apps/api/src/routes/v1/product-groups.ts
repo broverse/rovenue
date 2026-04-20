@@ -5,10 +5,21 @@ import prisma, { type Prisma } from "@rovenue/db";
 import { evaluateExperiments } from "../../services/experiment-engine";
 import { ok } from "../../lib/response";
 
+// =============================================================
+// /v1/product-groups
+// =============================================================
+//
+// Catalog surface for the SDK's paywall rendering path. Callers
+// hit GET / to list every group the project exposes, then GET
+// /:identifier to hydrate the full product list for the paywall
+// they're about to render. The per-identifier path also runs
+// the experiment engine so PRODUCT_GROUP experiments can
+// override the requested identifier — the substitution is
+// annotated on the response via `X-Rovenue-Experiment:
+// <key>:<variantId>` so the SDK can log the exposure back.
+
 const SUBSCRIBER_HEADER = "x-rovenue-user-id";
 const EXPERIMENT_HEADER = "x-rovenue-experiment";
-
-export const productGroupsRoute = new Hono();
 
 // Shape of each item in ProductGroup.products JSON array
 const productMembershipSchema = z.object({
@@ -30,37 +41,35 @@ interface GroupProductEntry {
   metadata: Prisma.JsonValue;
 }
 
-// =============================================================
-// GET /v1/product-groups
-// =============================================================
+export const productGroupsRoute = new Hono()
+  // =============================================================
+  // GET /v1/product-groups
+  // =============================================================
+  .get("/", async (c) => {
+    const project = c.get("project");
 
-productGroupsRoute.get("/", async (c) => {
-  const project = c.get("project");
+    const groups = await prisma.productGroup.findMany({
+      where: { projectId: project.id },
+      orderBy: [{ isDefault: "desc" }, { identifier: "asc" }],
+    });
 
-  const groups = await prisma.productGroup.findMany({
-    where: { projectId: project.id },
-    orderBy: [{ isDefault: "desc" }, { identifier: "asc" }],
-  });
-
-  return c.json(
-    ok({
-      groups: groups.map((group) => {
-        const products = productMembershipsSchema.safeParse(group.products);
-        return {
-          identifier: group.identifier,
-          isDefault: group.isDefault,
-          productCount: products.success ? products.data.length : 0,
-        };
+    return c.json(
+      ok({
+        groups: groups.map((group) => {
+          const products = productMembershipsSchema.safeParse(group.products);
+          return {
+            identifier: group.identifier,
+            isDefault: group.isDefault,
+            productCount: products.success ? products.data.length : 0,
+          };
+        }),
       }),
-    }),
-  );
-});
-
-// =============================================================
-// GET /v1/product-groups/:identifier
-// =============================================================
-
-productGroupsRoute.get("/:identifier", async (c) => {
+    );
+  })
+  // =============================================================
+  // GET /v1/product-groups/:identifier
+  // =============================================================
+  .get("/:identifier", async (c) => {
   const project = c.get("project");
   const identifier = c.req.param("identifier");
 
@@ -171,12 +180,12 @@ productGroupsRoute.get("/:identifier", async (c) => {
     })
     .filter((p): p is GroupProductEntry => p !== null);
 
-  return c.json(
-    ok({
-      identifier: group.identifier,
-      isDefault: group.isDefault,
-      products: payload,
-      metadata: group.metadata,
-    }),
-  );
-});
+    return c.json(
+      ok({
+        identifier: group.identifier,
+        isDefault: group.isDefault,
+        products: payload,
+        metadata: group.metadata,
+      }),
+    );
+  });

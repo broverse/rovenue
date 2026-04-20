@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import prisma, { ProductType, type Prisma } from "@rovenue/db";
 import { addCredits } from "../../services/credit-engine";
@@ -10,35 +11,42 @@ import { endpointRateLimit } from "../../middleware/rate-limit";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
 
+// =============================================================
+// POST /v1/receipts — receipt verification + entitlement grant
+// =============================================================
+//
+// Verify a store receipt, upsert the purchase, reconcile
+// entitlement access, credit consumables, and return the
+// subscriber's current access map plus credit balance. The
+// endpoint is a heavy one: each call fans out to Apple/Google
+// receipt verification APIs, so we pair the standard per-project
+// rate limit with a tighter per-endpoint 30/min envelope.
+
 const log = logger.child("route:v1:receipts");
 
-const bodySchema = z.object({
+export const receiptBodySchema = z.object({
   store: z.enum(["APP_STORE", "PLAY_STORE"]),
   receipt: z.string().min(1),
   appUserId: z.string().min(1),
   productId: z.string().min(1),
 });
 
-export const receiptsRoute = new Hono();
+export type ReceiptBody = z.infer<typeof receiptBodySchema>;
 
-/**
- * POST /v1/receipts
- *
- * Verify a store receipt, upsert the purchase, reconcile entitlement
- * access, credit consumables, and return the subscriber's current access
- * map plus credit balance.
- */
-// Heavy endpoint guard: each call fans out to Apple/Google receipt
-// verification APIs, so throttle hard even within the per-project
-// envelope. 30 req/min per API key.
+// 30 req/min per API key on top of the /v1 envelope.
 const receiptsEndpointLimit = endpointRateLimit({
   name: "receipts",
   max: 30,
 });
 
-receiptsRoute.post("/", receiptsEndpointLimit, idempotency, async (c) => {
-  const project = c.get("project");
-  const body = bodySchema.parse(await c.req.json());
+export const receiptsRoute = new Hono().post(
+  "/",
+  receiptsEndpointLimit,
+  idempotency,
+  zValidator("json", receiptBodySchema),
+  async (c) => {
+    const project = c.get("project");
+    const body = c.req.valid("json");
 
   const { subscriber, product, purchase } = await verifyReceipt({
     projectId: project.id,
@@ -107,18 +115,19 @@ receiptsRoute.post("/", receiptsEndpointLimit, idempotency, async (c) => {
     product: product.identifier,
   });
 
-  return c.json(
-    ok({
-      subscriber: {
-        id: subscriber.id,
-        appUserId: subscriber.appUserId,
-        attributes: subscriber.attributes as Prisma.JsonValue,
-      },
-      access,
-      credits: { balance },
-    }),
-  );
-});
+    return c.json(
+      ok({
+        subscriber: {
+          id: subscriber.id,
+          appUserId: subscriber.appUserId,
+          attributes: subscriber.attributes as Prisma.JsonValue,
+        },
+        access,
+        credits: { balance },
+      }),
+    );
+  },
+);
 
 export interface AccessResponseEntry {
   isActive: boolean;
