@@ -601,6 +601,19 @@ model FeatureFlag {
 // Audit log — immutable history of dashboard mutations
 // =============================================================
 
+/// Immutable, tamper-evident mutation log. Every row carries a
+/// SHA-256 `rowHash` computed over `(prevHash || canonical_payload)`,
+/// where `prevHash` points at the previous row in the same project's
+/// chain. A missing or broken link is verifiable evidence of
+/// rewritten history.
+///
+/// `prevHash` is nullable only for the first row in a project's
+/// chain. `rowHash` is always set by the application writer — the
+/// DB column stays nullable only because Postgres can't retroactively
+/// enforce NOT NULL on rows that predate the chain.
+///
+/// UPDATE and DELETE are blocked at the DB level via triggers so a
+/// compromised application account can't silently rewrite history.
 model AuditLog {
   id         String   @id @default(cuid(2))
   projectId  String
@@ -612,6 +625,8 @@ model AuditLog {
   after      Json?
   ipAddress  String?
   userAgent  String?
+  prevHash   String?
+  rowHash    String?  @unique
   createdAt  DateTime @default(now()) @db.Timestamptz
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
