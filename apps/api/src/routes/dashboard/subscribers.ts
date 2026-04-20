@@ -27,16 +27,15 @@ import { encodeCursor, decodeCursor } from "../../lib/pagination";
 //
 // Detail endpoint lives in Task A7; this file is list-only.
 
-export const subscribersRoute = new Hono();
-subscribersRoute.use("*", requireDashboardAuth);
-
 const listQuerySchema = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   q: z.string().trim().min(1).max(200).optional(),
 });
 
-subscribersRoute.get("/", async (c) => {
+export const subscribersRoute = new Hono()
+  .use("*", requireDashboardAuth)
+  .get("/", async (c) => {
   const projectId = c.req.param("projectId");
   if (!projectId) {
     throw new HTTPException(400, { message: "Missing projectId" });
@@ -122,23 +121,21 @@ subscribersRoute.get("/", async (c) => {
     ],
   }));
 
-  const response: SubscriberListResponse = { subscribers, nextCursor };
-  return c.json(ok(response));
-});
-
-// =============================================================
-// Dashboard: Subscriber detail (Task A7)
-// =============================================================
-//
-// GET /dashboard/projects/:projectId/subscribers/:id
-//
-// Fans out via Promise.all to gather access, purchases (last 50),
-// credit balance + last 20 ledger entries, experiment assignments
-// (with experiment.key), and last 20 outgoing webhooks. Cross-
-// project lookups 404 explicitly. Response matches the
-// SubscriberDetail wire contract in @rovenue/shared.
-
-subscribersRoute.get("/:id", async (c) => {
+    const response: SubscriberListResponse = { subscribers, nextCursor };
+    return c.json(ok(response));
+  })
+  // =============================================================
+  // Dashboard: Subscriber detail (Task A7)
+  // =============================================================
+  //
+  // GET /dashboard/projects/:projectId/subscribers/:id
+  //
+  // Fans out via Promise.all to gather access, purchases (last 50),
+  // credit balance + last 20 ledger entries, experiment assignments
+  // (with experiment.key), and last 20 outgoing webhooks. Cross-
+  // project lookups 404 explicitly. Response matches the
+  // SubscriberDetail wire contract in @rovenue/shared.
+  .get("/:id", async (c) => {
   const projectId = c.req.param("projectId");
   const id = c.req.param("id");
   if (!projectId || !id) {
@@ -255,5 +252,5 @@ subscribersRoute.get("/:id", async (c) => {
     })),
   };
 
-  return c.json(ok({ subscriber: payload }));
-});
+    return c.json(ok({ subscriber: payload }));
+  });

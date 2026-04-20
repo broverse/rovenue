@@ -16,13 +16,11 @@ import { ok } from "../../lib/response";
 const DEAD_ALERT_THRESHOLD = 5;
 const DEAD_ALERT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-export const webhooksDashboardRoute = new Hono();
-
-webhooksDashboardRoute.use("*", requireDashboardAuth);
-
-// ----- GET /dashboard/webhooks/failed?projectId= -----
-// List DEAD webhooks with pagination.
-webhooksDashboardRoute.get("/failed", async (c) => {
+export const webhooksDashboardRoute = new Hono()
+  .use("*", requireDashboardAuth)
+  // ----- GET /dashboard/webhooks/failed?projectId= -----
+  // List DEAD webhooks with pagination.
+  .get("/failed", async (c) => {
   const projectId = c.req.query("projectId");
   if (!projectId) {
     throw new HTTPException(400, { message: "projectId query param required" });
@@ -50,23 +48,22 @@ webhooksDashboardRoute.get("/failed", async (c) => {
     prisma.outgoingWebhook.count({ where }),
   ]);
 
-  return c.json(
-    ok({
-      webhooks,
-      pagination: {
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
-    }),
-  );
-});
-
-// ----- POST /dashboard/webhooks/:id/retry -----
-// Reset a DEAD webhook back to PENDING so the delivery worker picks
-// it up again with a fresh attempt counter.
-webhooksDashboardRoute.post("/:id/retry", async (c) => {
+    return c.json(
+      ok({
+        webhooks,
+        pagination: {
+          total,
+          limit,
+          offset,
+          hasMore: offset + limit < total,
+        },
+      }),
+    );
+  })
+  // ----- POST /dashboard/webhooks/:id/retry -----
+  // Reset a DEAD webhook back to PENDING so the delivery worker picks
+  // it up again with a fresh attempt counter.
+  .post("/:id/retry", async (c) => {
   const id = c.req.param("id");
   const existing = await prisma.outgoingWebhook.findUnique({
     where: { id },
@@ -96,13 +93,12 @@ webhooksDashboardRoute.post("/:id/retry", async (c) => {
     },
   });
 
-  return c.json(ok({ webhook }));
-});
-
-// ----- POST /dashboard/webhooks/:id/dismiss -----
-// Mark a DEAD webhook as DISMISSED — acknowledged by the operator,
-// permanently removed from the active dead-letter view.
-webhooksDashboardRoute.post("/:id/dismiss", async (c) => {
+    return c.json(ok({ webhook }));
+  })
+  // ----- POST /dashboard/webhooks/:id/dismiss -----
+  // Mark a DEAD webhook as DISMISSED — acknowledged by the operator,
+  // permanently removed from the active dead-letter view.
+  .post("/:id/dismiss", async (c) => {
   const id = c.req.param("id");
   const existing = await prisma.outgoingWebhook.findUnique({
     where: { id },
@@ -119,19 +115,18 @@ webhooksDashboardRoute.post("/:id/dismiss", async (c) => {
     });
   }
 
-  const webhook = await prisma.outgoingWebhook.update({
-    where: { id },
-    data: { status: OutgoingWebhookStatus.DISMISSED },
-  });
+    const webhook = await prisma.outgoingWebhook.update({
+      where: { id },
+      data: { status: OutgoingWebhookStatus.DISMISSED },
+    });
 
-  return c.json(ok({ webhook }));
-});
-
-// ----- GET /dashboard/webhooks/alert?projectId= -----
-// Returns a dead webhook count for the last 24 hours and whether
-// the alert threshold is exceeded. The dashboard renders a warning
-// banner when `alert` is true.
-webhooksDashboardRoute.get("/alert", async (c) => {
+    return c.json(ok({ webhook }));
+  })
+  // ----- GET /dashboard/webhooks/alert?projectId= -----
+  // Returns a dead webhook count for the last 24 hours and whether
+  // the alert threshold is exceeded. The dashboard renders a warning
+  // banner when `alert` is true.
+  .get("/alert", async (c) => {
   const projectId = c.req.query("projectId");
   if (!projectId) {
     throw new HTTPException(400, { message: "projectId query param required" });
@@ -148,11 +143,11 @@ webhooksDashboardRoute.get("/alert", async (c) => {
     },
   });
 
-  return c.json(
-    ok({
-      deadCount,
-      threshold: DEAD_ALERT_THRESHOLD,
-      alert: deadCount >= DEAD_ALERT_THRESHOLD,
-    }),
-  );
-});
+    return c.json(
+      ok({
+        deadCount,
+        threshold: DEAD_ALERT_THRESHOLD,
+        alert: deadCount >= DEAD_ALERT_THRESHOLD,
+      }),
+    );
+  });
