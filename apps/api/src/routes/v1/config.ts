@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import prisma, { type Prisma } from "@rovenue/db";
 import { evaluateAllFlags } from "../../services/flag-engine";
@@ -20,16 +21,22 @@ import { ok } from "../../lib/response";
 // appVersion, custom fields) that get merged with whatever is
 // stored on the Subscriber row so audience targeting has the
 // freshest picture.
+//
+// Route handlers are chained on a single `new Hono()` expression
+// and the POST body passes through `zValidator("json", …)` so
+// the AppType export at apps/api/src/app.ts carries both the
+// request body + response shape into downstream RPC consumers:
+//
+//   await client.v1.config.$post({ json: { attributes: {…} } })
+//     // body is typechecked against configBodySchema
 
 const SUBSCRIBER_HEADER = "x-rovenue-user-id";
 
-const configBodySchema = z
-  .object({
-    attributes: z.record(z.unknown()).optional(),
-  })
-  .optional();
+export const configBodySchema = z.object({
+  attributes: z.record(z.unknown()).optional(),
+});
 
-export const configRoute = new Hono();
+export type ConfigBody = z.infer<typeof configBodySchema>;
 
 function resolveSubscriberId(c: Context): string | null {
   return (
@@ -92,11 +99,9 @@ async function handleConfig(
   return c.json(ok({ flags, experiments }));
 }
 
-configRoute.get("/", async (c) => handleConfig(c, {}));
-
-configRoute.post("/", async (c) => {
-  const raw = await c.req.json().catch(() => undefined);
-  const parsed = configBodySchema.safeParse(raw);
-  const attributes = parsed.success ? parsed.data?.attributes ?? {} : {};
-  return handleConfig(c, attributes);
-});
+export const configRoute = new Hono()
+  .get("/", (c) => handleConfig(c, {}))
+  .post("/", zValidator("json", configBodySchema), (c) => {
+    const body = c.req.valid("json");
+    return handleConfig(c, body.attributes ?? {});
+  });

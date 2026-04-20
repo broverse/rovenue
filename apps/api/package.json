@@ -20,6 +20,7 @@
   "dependencies": {
     "@apple/app-store-server-library": "^1.4.0",
     "@hono/node-server": "^1.8.0",
+    "@hono/zod-validator": "^0.7.6",
     "@rovenue/db": "workspace:*",
     "@rovenue/shared": "workspace:*",
     "bcryptjs": "^2.4.3",
