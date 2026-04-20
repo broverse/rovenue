@@ -13,23 +13,24 @@ import {
   webhooksRoute,
 } from "./routes";
 
+// =============================================================
+// Hono app + RPC-ready AppType export
+// =============================================================
+//
+// Every `.use()` / `.route()` call is chained on a single expression
+// so Hono's type system can accumulate the full path surface on the
+// resulting `Hono<...>` type. That lets consumers do:
+//
+//   import type { AppType } from "@rovenue/api";
+//   const client = hc<AppType>("https://api.rovenue.com");
+//   const res = await client.v1.config.$get();
+//
+// Sub-route files (routes/v1/*.ts, routes/dashboard/*.ts) still use
+// the statement-per-handler pattern — Phase 1 of the Hono RPC
+// cutover converts them to the same chained form so request/response
+// inference extends past the top-level path prefix.
+
 export function createApp() {
-  const app = new Hono();
-
-  // ── 1. Request ID ─────────────────────────────────────────
-  // Must run before request-logger so the logger can read
-  // `c.get("requestId")` and wrap the downstream chain in the
-  // AsyncLocalStorage scope.
-  app.use("*", requestIdMiddleware);
-
-  // ── 2. Request logger ─────────────────────────────────────
-  app.use("*", requestLoggerMiddleware);
-
-  // ── 3. CORS ───────────────────────────────────────────────
-  // Allow the dashboard SPA origin + localhost dev server.
-  // SDK calls don't need CORS (native mobile), and webhooks
-  // come from store servers — but applying it globally is
-  // harmless and keeps the config in one place.
   // Allow the local Vite dev server only outside production so a
   // production deploy never echoes `Access-Control-Allow-Origin:
   // http://localhost:5173` — that would let a malicious page served
@@ -38,52 +39,66 @@ export function createApp() {
   if (env.NODE_ENV !== "production") {
     origins.push("http://localhost:5173");
   }
-  app.use(
-    "*",
-    cors({
-      origin: origins,
-      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-      allowHeaders: [
-        "Content-Type",
-        "Authorization",
-        "X-Request-Id",
-        "X-Rovenue-User-Id",
-        "Idempotency-Key",
-        "Stripe-Signature",
-      ],
-      exposeHeaders: [
-        "X-Request-Id",
-        "X-RateLimit-Limit",
-        "X-RateLimit-Remaining",
-        "X-RateLimit-Reset",
-        "X-Rovenue-Experiment",
-        "Retry-After",
-        "Idempotent-Replay",
-      ],
-      credentials: true,
-      maxAge: 86400,
-    }),
-  );
 
-  // ── 10. Error handler ─────────────────────────────────────
+  // ── Pipeline ──────────────────────────────────────────────
+  // 1. Request ID (scopes the logger's AsyncLocalStorage)
+  // 2. Request logger
+  // 3. CORS (dashboard origin + dev server)
+  // -> /health mounts here with no rate limit (liveness probes)
+  // 4. Global IP rate limit (DDoS absorber)
+  // -> /api/auth, /webhooks, /v1, /dashboard each own their own
+  //    auth + scoped rate limiters.
+  //
+  // Error handler is attached after the chain — `onError` returns
+  // Hono but doesn't contribute route types, so we apply it last to
+  // keep the chain's inferred AppType focused on actual endpoints.
+  const app = new Hono()
+    .use("*", requestIdMiddleware)
+    .use("*", requestLoggerMiddleware)
+    .use(
+      "*",
+      cors({
+        origin: origins,
+        allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allowHeaders: [
+          "Content-Type",
+          "Authorization",
+          "X-Request-Id",
+          "X-Rovenue-User-Id",
+          "Idempotency-Key",
+          "Stripe-Signature",
+        ],
+        exposeHeaders: [
+          "X-Request-Id",
+          "X-RateLimit-Limit",
+          "X-RateLimit-Remaining",
+          "X-RateLimit-Reset",
+          "X-Rovenue-Experiment",
+          "Retry-After",
+          "Idempotent-Replay",
+        ],
+        credentials: true,
+        maxAge: 86400,
+      }),
+    )
+    .route("/health", healthRoute)
+    .use("*", globalIpRateLimit())
+    .route("/api/auth", authRoute)
+    .route("/webhooks", webhooksRoute)
+    .route("/v1", v1Route)
+    .route("/dashboard", dashboardRoute);
+
   app.onError(errorHandler);
-
-  // ── Health (no auth, no rate limit) ───────────────────────
-  app.route("/health", healthRoute);
-
-  // ── 4. Global IP rate limit ───────────────────────────────
-  // DDoS absorber — sits above all authed paths.
-  app.use("*", globalIpRateLimit());
-
-  // ── Route groups ──────────────────────────────────────────
-  // Each group mounts its own auth + scoped rate limiters
-  // (steps 5–7 in the pipeline diagram).
-  app.route("/api/auth", authRoute);
-  app.route("/webhooks", webhooksRoute);
-  app.route("/v1", v1Route);
-  app.route("/dashboard", dashboardRoute);
 
   return app;
 }
 
 export const app = createApp();
+
+/**
+ * RPC type bridge. Dashboard and SDK import this (type-only) to
+ * instantiate `hc<AppType>()` with full path + method inference.
+ * Never `export const` the client here — it is built per-consumer
+ * with their own baseUrl, auth headers, and fetch polyfill.
+ */
+export type AppType = typeof app;
