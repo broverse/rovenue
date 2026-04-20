@@ -1,16 +1,37 @@
 import { eq, sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import {
+  apiKeys,
+  audiences,
   auditLogs,
   creditLedger,
+  experimentAssignments,
+  experiments,
+  featureFlags,
+  outgoingWebhooks,
+  productGroups,
+  products,
   projectMembers,
   projects,
+  purchases,
+  revenueEvents,
+  subscriberAccess,
   subscribers,
   user,
+  webhookEvents,
   type AuditLogRow,
   type NewAuditLogRow,
   type NewProject,
 } from "./schema";
+import {
+  experimentVariantsSchema,
+  featureFlagRulesSchema,
+  productGroupProductsSchema,
+  productInsertSchema,
+  productStoreIdsSchema,
+  projectInsertSchema,
+  subscriberInsertSchema,
+} from "./validators";
 
 // =============================================================
 // Drizzle foundation — smoke tests
@@ -23,13 +44,29 @@ import {
 // starts swapping callers off Prisma.
 
 describe("schema shapes compile", () => {
-  it("exposes user, projects, projectMembers, subscribers, creditLedger, auditLogs", () => {
-    expect(user).toBeDefined();
-    expect(projects).toBeDefined();
-    expect(projectMembers).toBeDefined();
-    expect(subscribers).toBeDefined();
-    expect(creditLedger).toBeDefined();
-    expect(auditLogs).toBeDefined();
+  it("exposes every table in the Prisma schema", () => {
+    for (const table of [
+      user,
+      projects,
+      projectMembers,
+      apiKeys,
+      products,
+      productGroups,
+      subscribers,
+      purchases,
+      subscriberAccess,
+      creditLedger,
+      webhookEvents,
+      outgoingWebhooks,
+      revenueEvents,
+      audiences,
+      experiments,
+      experimentAssignments,
+      featureFlags,
+      auditLogs,
+    ]) {
+      expect(table).toBeDefined();
+    }
   });
 
   it("maps camelCase columns onto the Prisma on-disk names", () => {
@@ -97,6 +134,132 @@ describe("NewAuditLogRow hash chain columns", () => {
       rowHash: "abc123",
     };
     expect(row.rowHash).toBe("abc123");
+  });
+});
+
+// =============================================================
+// drizzle-zod validators
+// =============================================================
+
+describe("projectInsertSchema", () => {
+  it("accepts a valid project", () => {
+    expect(() =>
+      projectInsertSchema.parse({ name: "Acme", slug: "acme" }),
+    ).not.toThrow();
+  });
+
+  it("rejects an invalid slug", () => {
+    expect(() =>
+      projectInsertSchema.parse({ name: "Acme", slug: "Acme!" }),
+    ).toThrow();
+  });
+
+  it("rejects an empty name", () => {
+    expect(() =>
+      projectInsertSchema.parse({ name: "", slug: "acme" }),
+    ).toThrow();
+  });
+});
+
+describe("productInsertSchema + productStoreIdsSchema", () => {
+  it("parses a minimal product insert", () => {
+    expect(() =>
+      productInsertSchema.parse({
+        projectId: "proj_1",
+        identifier: "pro_monthly",
+        type: "SUBSCRIPTION",
+        storeIds: { apple: "com.x.pro" },
+        displayName: "Pro",
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects empty storeIds via the standalone schema", () => {
+    expect(() => productStoreIdsSchema.parse({})).toThrow(
+      /at least one store/i,
+    );
+  });
+
+  it("rejects an identifier starting with a dash", () => {
+    expect(() =>
+      productInsertSchema.parse({
+        projectId: "proj_1",
+        identifier: "-bad",
+        type: "SUBSCRIPTION",
+        storeIds: { apple: "x" },
+        displayName: "Bad",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("subscriberInsertSchema", () => {
+  it("caps appUserId length at 256 chars", () => {
+    expect(() =>
+      subscriberInsertSchema.parse({
+        projectId: "proj_1",
+        appUserId: "a".repeat(257),
+      }),
+    ).toThrow();
+  });
+});
+
+describe("experimentVariantsSchema", () => {
+  it("accepts two variants with weights summing to 1", () => {
+    expect(() =>
+      experimentVariantsSchema.parse([
+        { id: "control", name: "Control", value: null, weight: 0.5 },
+        { id: "variant", name: "Variant", value: null, weight: 0.5 },
+      ]),
+    ).not.toThrow();
+  });
+
+  it("rejects weights that don't sum to 1", () => {
+    expect(() =>
+      experimentVariantsSchema.parse([
+        { id: "a", name: "A", value: null, weight: 0.4 },
+        { id: "b", name: "B", value: null, weight: 0.4 },
+      ]),
+    ).toThrow(/sum to 1/);
+  });
+
+  it("rejects duplicate variant ids", () => {
+    expect(() =>
+      experimentVariantsSchema.parse([
+        { id: "same", name: "A", value: null, weight: 0.5 },
+        { id: "same", name: "B", value: null, weight: 0.5 },
+      ]),
+    ).toThrow(/duplicate variant id/);
+  });
+});
+
+describe("featureFlagRulesSchema", () => {
+  it("accepts an ordered rule list", () => {
+    expect(() =>
+      featureFlagRulesSchema.parse([
+        { audienceId: "aud_1", value: true, rolloutPercentage: 0.5 },
+        { audienceId: "aud_2", value: false },
+      ]),
+    ).not.toThrow();
+  });
+
+  it("rejects rolloutPercentage > 1", () => {
+    expect(() =>
+      featureFlagRulesSchema.parse([
+        { audienceId: "aud_1", value: true, rolloutPercentage: 1.5 },
+      ]),
+    ).toThrow();
+  });
+});
+
+describe("productGroupProductsSchema", () => {
+  it("accepts a simple product group", () => {
+    expect(() =>
+      productGroupProductsSchema.parse([
+        { productId: "prod_1", order: 0, promoted: true },
+        { productId: "prod_2", order: 1 },
+      ]),
+    ).not.toThrow();
   });
 });
 

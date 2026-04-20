@@ -14,3 +14,4 @@ export { createPool, getPool, closePool } from "./pool";
 export { createDb, getDb, db, schema, type Db } from "./client";
 export * from "./schema";
 export * from "./enums";
+export * from "./validators";
