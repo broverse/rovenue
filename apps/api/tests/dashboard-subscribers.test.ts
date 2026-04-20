@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { prismaMock, authMock } = vi.hoisted(() => {
+const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
   const prismaMock = {
     projectMember: { findUnique: vi.fn() },
     subscriber: {
@@ -14,12 +14,26 @@ const { prismaMock, authMock } = vi.hoisted(() => {
     experimentAssignment: { findMany: vi.fn(async () => []) },
     outgoingWebhook: { findMany: vi.fn(async () => []) },
   };
+  // Shadow reader: yields the primary caller, ignores the shadow.
+  const drizzleMock = {
+    db: {} as unknown,
+    subscriberRepo: {
+      findSubscriberAttributes: vi.fn(async () => null),
+      findSubscriberByAppUserId: vi.fn(async () => null),
+      listSubscribers: vi.fn(async () => []),
+    },
+    shadowRead: vi.fn(
+      async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
+        primary(),
+    ),
+  };
   const authMock = { api: { getSession: vi.fn() } };
-  return { prismaMock, authMock };
+  return { prismaMock, drizzleMock, authMock };
 });
 
 vi.mock("@rovenue/db", () => ({
   default: prismaMock,
+  drizzle: drizzleMock,
   MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   FeatureFlagType: { BOOLEAN: "BOOLEAN", STRING: "STRING", NUMBER: "NUMBER", JSON: "JSON" },
   ExperimentStatus: { DRAFT: "DRAFT", RUNNING: "RUNNING", PAUSED: "PAUSED", COMPLETED: "COMPLETED" },

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, authMock } = vi.hoisted(() => {
+const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
   // Audit chain writer needs $transaction + $executeRaw + auditLog.findFirst
   // on the tx client. We wire all of them onto the same mock object and
   // reuse it as both top-level prisma and the tx parameter passed to the
@@ -56,11 +56,35 @@ const { prismaMock, authMock } = vi.hoisted(() => {
     },
   };
 
-  return { prismaMock, authMock };
+  // Shadow reader short-circuits to the primary caller; Drizzle
+  // parity is unit-tested in packages/db/src/drizzle/shadow.test.ts.
+  const drizzleMock = {
+    db: {} as unknown,
+    auditLogRepo: {
+      listAuditLogs: vi.fn(async () => []),
+      countAuditLogs: vi.fn(async () => 0),
+    },
+    featureFlagRepo: {
+      findFeatureFlagsByProject: vi.fn(async () => []),
+      findAudiencesByProject: vi.fn(async () => []),
+    },
+    subscriberRepo: {
+      findSubscriberAttributes: vi.fn(async () => null),
+      findSubscriberByAppUserId: vi.fn(async () => null),
+      listSubscribers: vi.fn(async () => []),
+    },
+    shadowRead: vi.fn(
+      async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
+        primary(),
+    ),
+  };
+
+  return { prismaMock, drizzleMock, authMock };
 });
 
 vi.mock("@rovenue/db", () => ({
   default: prismaMock,
+  drizzle: drizzleMock,
   MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   FeatureFlagType: {
     BOOLEAN: "BOOLEAN",

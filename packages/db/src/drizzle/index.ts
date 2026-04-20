@@ -17,3 +17,5 @@ export * from "./enums";
 export * from "./validators";
 export * from "./shadow";
 export * as subscriberRepo from "./repositories/subscribers";
+export * as featureFlagRepo from "./repositories/feature-flags";
+export * as auditLogRepo from "./repositories/audit-logs";

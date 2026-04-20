@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // Hoisted mocks — prisma + redis
 // =============================================================
 
-const { prismaMock, redisMock, redisStore, setRedisMode } = vi.hoisted(() => {
+const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(() => {
   const store = new Map<string, string>();
   let mode: "ok" | "get-fail" | "set-fail" | "all-fail" = "ok";
 
@@ -39,8 +39,24 @@ const { prismaMock, redisMock, redisStore, setRedisMode } = vi.hoisted(() => {
     },
   };
 
+  // Shadow reader is a no-op that always yields the primary
+  // caller — Drizzle parity is covered in its own unit test
+  // file, not here.
+  const drizzleMock = {
+    db: {} as unknown,
+    featureFlagRepo: {
+      findFeatureFlagsByProject: vi.fn(async () => []),
+      findAudiencesByProject: vi.fn(async () => []),
+    },
+    shadowRead: vi.fn(
+      async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
+        primary(),
+    ),
+  };
+
   return {
     prismaMock,
+    drizzleMock,
     redisMock,
     redisStore: store,
     setRedisMode: (m: typeof mode) => {
@@ -51,6 +67,7 @@ const { prismaMock, redisMock, redisStore, setRedisMode } = vi.hoisted(() => {
 
 vi.mock("@rovenue/db", () => ({
   default: prismaMock,
+  drizzle: drizzleMock,
 }));
 
 vi.mock("../src/lib/redis", () => ({ redis: redisMock }));

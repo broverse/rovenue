@@ -1,10 +1,14 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import prisma, { type Prisma } from "@rovenue/db";
+import prisma, { drizzle, type Prisma } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
+import { env } from "../../lib/env";
+import { logger } from "../../lib/logger";
 import { ok } from "../../lib/response";
+
+const log = logger.child("route:dashboard:audit-logs");
 
 // =============================================================
 // Dashboard: Audit log viewer
@@ -54,17 +58,57 @@ export const auditLogsRoute = new Hono()
       if (to) where.createdAt.lte = new Date(to);
     }
 
+    // Shadow repository filters mirror the Prisma `where` so the
+    // structural diff compares identical result sets. Date fields
+    // pass through as Date instances on both sides.
+    const repoFilters = {
+      projectId,
+      ...(action && { action }),
+      ...(filterUserId && { userId: filterUserId }),
+      ...(resource && { resource }),
+      ...(resourceId && { resourceId }),
+      ...(from && { from: new Date(from) }),
+      ...(to && { to: new Date(to) }),
+    };
+    const shadowCtx = { projectId, limit, offset };
+
     const [logs, total] = await Promise.all([
-      prisma.auditLog.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        skip: offset,
-        include: {
-          user: { select: { id: true, name: true, email: true, image: true } },
+      drizzle.shadowRead(
+        () =>
+          prisma.auditLog.findMany({
+            where,
+            orderBy: { createdAt: "desc" },
+            take: limit,
+            skip: offset,
+            include: {
+              user: {
+                select: { id: true, name: true, email: true, image: true },
+              },
+            },
+          }),
+        () =>
+          drizzle.auditLogRepo.listAuditLogs(drizzle.db, {
+            ...repoFilters,
+            limit,
+            offset,
+          }),
+        {
+          name: "auditLog.list",
+          context: shadowCtx,
+          enabled: env.DB_SHADOW_READS,
+          logger: log,
         },
-      }),
-      prisma.auditLog.count({ where }),
+      ),
+      drizzle.shadowRead(
+        () => prisma.auditLog.count({ where }),
+        () => drizzle.auditLogRepo.countAuditLogs(drizzle.db, repoFilters),
+        {
+          name: "auditLog.count",
+          context: shadowCtx,
+          enabled: env.DB_SHADOW_READS,
+          logger: log,
+        },
+      ),
     ]);
 
     return c.json(

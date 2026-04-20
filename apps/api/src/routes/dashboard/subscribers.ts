@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import prisma, { MemberRole, type Prisma } from "@rovenue/db";
+import prisma, { MemberRole, drizzle, type Prisma } from "@rovenue/db";
 import type {
   SubscriberDetail,
   SubscriberListItem,
@@ -9,8 +9,27 @@ import type {
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
+import { env } from "../../lib/env";
+import { logger } from "../../lib/logger";
 import { ok } from "../../lib/response";
 import { encodeCursor, decodeCursor } from "../../lib/pagination";
+
+const log = logger.child("route:dashboard:subscribers");
+
+// Normalised row shape the shadow read compares on. Both Prisma
+// (with include: _count + access) and the Drizzle repository
+// project into this shape so the structural diff sees identical
+// payloads.
+interface NormalizedSubscriberRow {
+  id: string;
+  appUserId: string;
+  attributes: Record<string, unknown>;
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+  createdAt: Date;
+  purchaseCount: number;
+  activeEntitlementKeys: string[];
+}
 
 // =============================================================
 // Dashboard: Subscribers list (Task A6)
@@ -87,21 +106,67 @@ export const subscribersRoute = new Hono()
     ...(and.length > 0 && { AND: and }),
   };
 
-  const rows = await prisma.subscriber.findMany({
-    where,
-    take: query.limit + 1,
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    include: {
-      _count: { select: { purchases: true } },
-      access: {
-        where: {
-          isActive: true,
-          OR: [{ expiresDate: null }, { expiresDate: { gt: new Date() } }],
+  const fetchLimit = query.limit + 1;
+  const rows = await drizzle.shadowRead(
+    async (): Promise<NormalizedSubscriberRow[]> => {
+      const prismaRows = await prisma.subscriber.findMany({
+        where,
+        take: fetchLimit,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        include: {
+          _count: { select: { purchases: true } },
+          access: {
+            where: {
+              isActive: true,
+              OR: [{ expiresDate: null }, { expiresDate: { gt: new Date() } }],
+            },
+            select: { entitlementKey: true },
+          },
         },
-        select: { entitlementKey: true },
-      },
+      });
+      return prismaRows.map((s) => ({
+        id: s.id,
+        appUserId: s.appUserId,
+        attributes: (s.attributes as Record<string, unknown> | null) ?? {},
+        firstSeenAt: s.firstSeenAt,
+        lastSeenAt: s.lastSeenAt,
+        createdAt: s.createdAt,
+        purchaseCount: s._count.purchases,
+        activeEntitlementKeys: [
+          ...new Set(
+            s.access.map((a: { entitlementKey: string }) => a.entitlementKey),
+          ),
+        ].sort(),
+      }));
     },
-  });
+    async (): Promise<NormalizedSubscriberRow[]> => {
+      const drizzleRows = await drizzle.subscriberRepo.listSubscribers(
+        drizzle.db,
+        {
+          projectId,
+          cursor: cursor ?? undefined,
+          limit: fetchLimit,
+          q: query.q,
+        },
+      );
+      return drizzleRows.map((r) => ({
+        id: r.id,
+        appUserId: r.appUserId,
+        attributes: (r.attributes as Record<string, unknown> | null) ?? {},
+        firstSeenAt: r.firstSeenAt,
+        lastSeenAt: r.lastSeenAt,
+        createdAt: r.createdAt,
+        purchaseCount: r.purchaseCount,
+        activeEntitlementKeys: [...r.activeEntitlementKeys].sort(),
+      }));
+    },
+    {
+      name: "subscriber.list",
+      context: { projectId, limit: query.limit, hasCursor: !!cursor, q: query.q ?? null },
+      enabled: env.DB_SHADOW_READS,
+      logger: log,
+    },
+  );
 
   const hasMore = rows.length > query.limit;
   const page = hasMore ? rows.slice(0, query.limit) : rows;
@@ -112,13 +177,11 @@ export const subscribersRoute = new Hono()
   const subscribers: SubscriberListItem[] = page.map((s) => ({
     id: s.id,
     appUserId: s.appUserId,
-    attributes: (s.attributes as Record<string, unknown> | null) ?? {},
+    attributes: s.attributes,
     firstSeenAt: s.firstSeenAt.toISOString(),
     lastSeenAt: s.lastSeenAt.toISOString(),
-    purchaseCount: s._count.purchases,
-    activeEntitlementKeys: [
-      ...new Set(s.access.map((a: { entitlementKey: string }) => a.entitlementKey)),
-    ],
+    purchaseCount: s.purchaseCount,
+    activeEntitlementKeys: s.activeEntitlementKeys,
   }));
 
     const response: SubscriberListResponse = { subscribers, nextCursor };
