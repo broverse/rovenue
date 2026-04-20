@@ -27,6 +27,14 @@ const envSchema = z
     // Directory containing Apple root CA certs (AppleRootCA-G3.cer etc).
     // Required in production for SignedDataVerifier chain validation.
     APPLE_ROOT_CERTS_DIR: z.string().optional(),
+    // Prisma → Drizzle shadow reads. Flip to "1" to run both ORMs
+    // for every migrated call site, compare results, and log the
+    // divergence. Cheap to toggle without a deploy since it only
+    // guards the shadow call — the primary reader is unchanged.
+    DB_SHADOW_READS: z
+      .enum(["0", "1"])
+      .default("0")
+      .transform((v) => v === "1"),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== "production") return;

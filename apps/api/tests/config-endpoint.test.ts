@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, engineMock, flagMock } = vi.hoisted(() => {
+const { prismaMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
   const prismaMock = {
     apiKey: {
       findUnique: vi.fn(),
@@ -23,6 +23,23 @@ const { prismaMock, engineMock, flagMock } = vi.hoisted(() => {
     },
   };
 
+  // During tests the shadow path is a no-op that just awaits the
+  // Prisma caller. We keep the shape aligned with the real helper
+  // (accepts primary + shadow callbacks) so the production code
+  // path stays unchanged.
+  const drizzleMock = {
+    db: {} as unknown,
+    subscriberRepo: {
+      findSubscriberAttributes: vi.fn(async () => null),
+    },
+    shadowRead: vi.fn(
+      async <T>(
+        primary: () => Promise<T>,
+        _shadow: () => Promise<T>,
+      ): Promise<T> => primary(),
+    ),
+  };
+
   const engineMock = {
     evaluateExperiments: vi.fn(async () => ({})),
     recordEvent: vi.fn(async () => undefined),
@@ -35,11 +52,12 @@ const { prismaMock, engineMock, flagMock } = vi.hoisted(() => {
     invalidateFlagCache: vi.fn(async () => undefined),
   };
 
-  return { prismaMock, engineMock, flagMock };
+  return { prismaMock, drizzleMock, engineMock, flagMock };
 });
 
 vi.mock("@rovenue/db", () => ({
   default: prismaMock,
+  drizzle: drizzleMock,
   MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   Store: {
     APP_STORE: "APP_STORE",

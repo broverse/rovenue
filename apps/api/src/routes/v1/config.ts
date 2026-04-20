@@ -2,9 +2,11 @@ import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, { type Prisma } from "@rovenue/db";
+import prisma, { drizzle, type Prisma } from "@rovenue/db";
 import { evaluateAllFlags } from "../../services/flag-engine";
 import { evaluateExperiments } from "../../services/experiment-engine";
+import { env } from "../../lib/env";
+import { logger } from "../../lib/logger";
 import { ok } from "../../lib/response";
 
 // =============================================================
@@ -38,6 +40,8 @@ export const configBodySchema = z.object({
 
 export type ConfigBody = z.infer<typeof configBodySchema>;
 
+const log = logger.child("route:v1:config");
+
 function resolveSubscriberId(c: Context): string | null {
   return (
     c.req.query("subscriberId") ??
@@ -64,10 +68,30 @@ async function handleConfig(
   // moves from country=TR to country=US must be reflected in both
   // the evaluation path AND the stored attributes, otherwise the
   // dashboard's "subscribers with country=TR" view goes stale.
-  const existing = await prisma.subscriber.findUnique({
-    where: { projectId_appUserId: { projectId: project.id, appUserId } },
-    select: { attributes: true },
-  });
+  //
+  // The read passes through `shadowRead` so the Drizzle repo mirrors
+  // every call while we're in the hybrid period. Prisma stays the
+  // canonical reader; shadow log entries drive parity confidence.
+  const existing = await drizzle.shadowRead(
+    () =>
+      prisma.subscriber.findUnique({
+        where: {
+          projectId_appUserId: { projectId: project.id, appUserId },
+        },
+        select: { attributes: true },
+      }),
+    () =>
+      drizzle.subscriberRepo.findSubscriberAttributes(drizzle.db, {
+        projectId: project.id,
+        appUserId,
+      }),
+    {
+      name: "subscriber.findAttributes",
+      context: { projectId: project.id, appUserId },
+      enabled: env.DB_SHADOW_READS,
+      logger: log,
+    },
+  );
   const mergedAttributes: Record<string, unknown> = {
     ...((existing?.attributes as Record<string, unknown> | null) ?? {}),
     ...requestAttributes,
