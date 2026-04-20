@@ -112,6 +112,38 @@ export interface UpdateStripeCredentialsRequest {
   webhookSecret: string;
 }
 
+// =============================================================
+// Project members
+// =============================================================
+
+export interface ProjectMemberRow {
+  id: string;
+  userId: string;
+  email: string;
+  name: string | null;
+  image: string | null;
+  role: MemberRoleName;
+  createdAt: string;
+}
+
+export interface ListMembersResponse {
+  members: ProjectMemberRow[];
+}
+
+export interface AddMemberRequest {
+  /** User must have signed in at least once so the User row exists. */
+  email: string;
+  role: MemberRoleName;
+}
+
+export interface AddMemberResponse {
+  member: ProjectMemberRow;
+}
+
+export interface UpdateMemberRoleRequest {
+  role: MemberRoleName;
+}
+
 export interface SubscriberListItem {
   id: string;
   appUserId: string;
