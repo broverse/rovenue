@@ -29,14 +29,16 @@ import { ok } from "../../lib/response";
 // `encryptCredential` helper so the wire format `{v:1, enc:"iv:…"}`
 // stays consistent across loaders.
 
-export const credentialsRoute = new Hono();
-credentialsRoute.use("*", requireDashboardAuth);
-
 // =============================================================
 // Zod request schemas — mirror apps/api/src/lib/project-credentials.ts
 // =============================================================
+//
+// The body shape depends on the `:store` route param so zValidator
+// (static schema) isn't a clean fit here. The handler dispatches
+// to the right schema post-match and surfaces a 400 with a
+// field-level Zod message on failure.
 
-const appleSchema = z
+export const appleCredentialsBodySchema = z
   .object({
     bundleId: z.string().min(1),
     appAppleId: z.number().int().positive().optional(),
@@ -46,7 +48,7 @@ const appleSchema = z
   })
   .passthrough();
 
-const googleSchema = z
+export const googleCredentialsBodySchema = z
   .object({
     packageName: z.string().min(1),
     serviceAccount: z
@@ -58,7 +60,7 @@ const googleSchema = z
   })
   .passthrough();
 
-const stripeSchema = z
+export const stripeCredentialsBodySchema = z
   .object({
     secretKey: z.string().min(1),
     webhookSecret: z.string().min(1),
@@ -118,11 +120,12 @@ function columnForStore(store: CredentialStore): keyof Prisma.ProjectSelect {
   return "stripeCredentials";
 }
 
-// =============================================================
-// GET /dashboard/projects/:projectId/credentials
-// =============================================================
-
-credentialsRoute.get("/", async (c) => {
+export const credentialsRoute = new Hono()
+  .use("*", requireDashboardAuth)
+  // =============================================================
+  // GET /dashboard/projects/:projectId/credentials
+  // =============================================================
+  .get("/", async (c) => {
   const projectId = c.req.param("projectId");
   if (!projectId) {
     throw new HTTPException(400, { message: "Missing projectId" });
@@ -160,14 +163,12 @@ credentialsRoute.get("/", async (c) => {
       stripe: statusFor("stripe", project.stripeCredentials),
     },
   };
-  return c.json(ok(payload));
-});
-
-// =============================================================
-// PUT /dashboard/projects/:projectId/credentials/:store
-// =============================================================
-
-credentialsRoute.put("/:store", async (c) => {
+    return c.json(ok(payload));
+  })
+  // =============================================================
+  // PUT /dashboard/projects/:projectId/credentials/:store
+  // =============================================================
+  .put("/:store", async (c) => {
   const projectId = c.req.param("projectId");
   const storeParamRaw = c.req.param("store");
   if (!projectId) {
@@ -186,10 +187,10 @@ credentialsRoute.put("/:store", async (c) => {
   try {
     const raw = await c.req.json();
     const schema = store === "apple"
-      ? appleSchema
+      ? appleCredentialsBodySchema
       : store === "google"
-        ? googleSchema
-        : stripeSchema;
+        ? googleCredentialsBodySchema
+        : stripeCredentialsBodySchema;
     body = schema.parse(raw) as Record<string, unknown>;
   } catch (err) {
     throw new HTTPException(400, {
@@ -229,14 +230,12 @@ credentialsRoute.put("/:store", async (c) => {
     );
   });
 
-  return c.json(ok({ credential: { store, configured: true } }));
-});
-
-// =============================================================
-// DELETE /dashboard/projects/:projectId/credentials/:store
-// =============================================================
-
-credentialsRoute.delete("/:store", async (c) => {
+    return c.json(ok({ credential: { store, configured: true } }));
+  })
+  // =============================================================
+  // DELETE /dashboard/projects/:projectId/credentials/:store
+  // =============================================================
+  .delete("/:store", async (c) => {
   const projectId = c.req.param("projectId");
   const storeParamRaw = c.req.param("store");
   if (!projectId) {
@@ -272,5 +271,5 @@ credentialsRoute.delete("/:store", async (c) => {
     );
   });
 
-  return c.json(ok({ credential: { store, configured: false } }));
-});
+    return c.json(ok({ credential: { store, configured: false } }));
+  });
