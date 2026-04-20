@@ -32,6 +32,8 @@ import {
   projectInsertSchema,
   subscriberInsertSchema,
 } from "./validators";
+import { nowMinus, timeBucket } from "./sql-helpers";
+import { dailyMrr } from "./views";
 
 // =============================================================
 // Drizzle foundation — smoke tests
@@ -284,5 +286,46 @@ describe("enum membership", () => {
       "ADMIN",
       "VIEWER",
     ]);
+  });
+});
+
+// =============================================================
+// Timescale SQL helpers + continuous aggregates
+// =============================================================
+
+// `sql.param()` wraps values in a Param chunk whose value stays
+// off the raw SQL string. Searching for a Param with the given
+// interval string proves the helper binds (not concats) the arg.
+function containsParam(fragment: { queryChunks: unknown[] }, value: unknown): boolean {
+  return fragment.queryChunks.some(
+    (chunk) =>
+      chunk !== null &&
+      typeof chunk === "object" &&
+      chunk.constructor?.name === "Param" &&
+      (chunk as { value: unknown }).value === value,
+  );
+}
+
+describe("timeBucket", () => {
+  it("binds the interval argument as a Param", () => {
+    const fragment = timeBucket("1 day", revenueEvents.eventDate);
+    expect(containsParam(fragment, "1 day")).toBe(true);
+  });
+});
+
+describe("nowMinus", () => {
+  it("binds the offset argument as a Param", () => {
+    const fragment = nowMinus("30 days");
+    expect(containsParam(fragment, "30 days")).toBe(true);
+  });
+});
+
+describe("dailyMrr view", () => {
+  it("exposes the cagg column surface (projectId, bucket, gross_usd, …)", () => {
+    expect(dailyMrr.projectId.name).toBe("projectId");
+    expect(dailyMrr.bucket.name).toBe("bucket");
+    expect(dailyMrr.grossUsd.name).toBe("gross_usd");
+    expect(dailyMrr.eventCount.name).toBe("event_count");
+    expect(dailyMrr.activeSubscribers.name).toBe("active_subscribers");
   });
 });

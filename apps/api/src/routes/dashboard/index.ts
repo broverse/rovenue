@@ -5,6 +5,7 @@ import { credentialsRoute } from "./credentials";
 import { experimentsRoute } from "./experiments";
 import { featureFlagsRoute } from "./feature-flags";
 import { membersRoute } from "./members";
+import { metricsRoute } from "./metrics";
 import { projectsRoute } from "./projects";
 import { subscribersRoute } from "./subscribers";
 import { webhooksDashboardRoute } from "./webhooks";
@@ -26,5 +27,6 @@ export const dashboardRoute = new Hono()
   .route("/projects", projectsRoute)
   .route("/projects/:projectId/credentials", credentialsRoute)
   .route("/projects/:projectId/members", membersRoute)
+  .route("/projects/:projectId/metrics", metricsRoute)
   .route("/projects/:projectId/subscribers", subscribersRoute)
   .route("/webhooks", webhooksDashboardRoute);
