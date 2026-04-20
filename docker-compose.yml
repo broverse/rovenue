@@ -27,7 +27,9 @@ services:
     volumes:
       - rovenue-data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      # Host 5433 → container 5432 so rovenue can coexist with other
+      # Postgres instances bound to 5432 on the host.
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rovenue}"]
       interval: 5s
@@ -38,7 +40,9 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      # Host 6380 → container 6379 so rovenue can coexist with other
+      # Redis instances bound to 6379 on the host.
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
