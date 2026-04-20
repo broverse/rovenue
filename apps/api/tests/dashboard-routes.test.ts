@@ -27,6 +27,7 @@ const { prismaMock, authMock, flagMock, engineMock } = vi.hoisted(() => {
     },
     auditLog: {
       create: vi.fn(async () => ({ id: "al_1" })),
+      findFirst: vi.fn(async () => null),
     },
     featureFlag: {
       findMany: vi.fn(async () => []),
@@ -35,6 +36,9 @@ const { prismaMock, authMock, flagMock, engineMock } = vi.hoisted(() => {
       update: vi.fn(),
       delete: vi.fn(),
     },
+    $executeRaw: vi.fn(async () => 0),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    $transaction: vi.fn(async (fn: any) => fn(prismaMock)),
   };
 
   const authMock = {

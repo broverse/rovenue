@@ -11,7 +11,11 @@ const { prismaMock, authMock } = vi.hoisted(() => {
       count: vi.fn(async () => 0),
     },
     user: { findUnique: vi.fn() },
-    auditLog: { create: vi.fn() },
+    auditLog: {
+      create: vi.fn(async () => ({ id: "al_1" })),
+      findFirst: vi.fn(async () => null),
+    },
+    $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
       fn(prismaMock),
     ),

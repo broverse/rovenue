@@ -33,6 +33,8 @@ const { prismaMock } = vi.hoisted(() => {
     return { ...existing, ...args.data };
   });
   const $executeRaw = vi.fn(async () => 0);
+  const auditLogCreate = vi.fn(async () => ({ id: "al_1" }));
+  const auditLogFindFirst = vi.fn(async () => null);
   const $transaction = vi.fn(
     async (fn: (tx: Record<string, unknown>) => Promise<unknown>) =>
       fn({
@@ -47,11 +49,18 @@ const { prismaMock } = vi.hoisted(() => {
           findFirst: creditLedgerFindFirst,
           create: creditLedgerCreate,
         },
+        auditLog: {
+          create: auditLogCreate,
+          findFirst: auditLogFindFirst,
+        },
         $executeRaw,
       }),
   );
 
-  const auditLog = { create: vi.fn(async () => ({ id: "al_1" })) };
+  // Top-level prisma alias — used when audit() is invoked without a
+  // tx and wraps its own $transaction. Same handlers as the nested
+  // tx so assertions don't need to pick a lane.
+  const auditLog = { create: auditLogCreate, findFirst: auditLogFindFirst };
 
   return {
     prismaMock: {
@@ -89,7 +98,10 @@ vi.mock("@rovenue/db", () => ({
 // System under test
 // =============================================================
 
-import { transferSubscriber } from "../src/services/subscriber-transfer";
+import {
+  anonymizeSubscriber,
+  transferSubscriber,
+} from "../src/services/subscriber-transfer";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -258,5 +270,56 @@ describe("transferSubscriber", () => {
       toSubscriberId: "sub_to",
       creditsTransferred: 100,
     });
+  });
+});
+
+// =============================================================
+// anonymizeSubscriber
+// =============================================================
+
+describe("anonymizeSubscriber", () => {
+  test("replaces appUserId with an anon: token and clears attributes", async () => {
+    prismaMock.__subscriberData["sub_1"] = {
+      id: "sub_1",
+      projectId: "proj_a",
+      appUserId: "alice@example.com",
+      attributes: { email: "alice@example.com", country: "TR" },
+      deletedAt: null,
+    };
+
+    const result = await anonymizeSubscriber(
+      "proj_a",
+      "alice@example.com",
+      "user_admin",
+    );
+
+    expect(result.alreadyAnonymized).toBe(false);
+    expect(result.subscriberId).toBe("sub_1");
+    expect(result.anonymousId).toMatch(/^anon:[a-f0-9]{32}$/);
+
+    const updateCall = prismaMock.subscriber.update.mock.calls[0]![0] as {
+      where: { id: string };
+      data: {
+        appUserId: string;
+        attributes: Record<string, unknown>;
+        deletedAt: Date;
+      };
+    };
+    expect(updateCall.where.id).toBe("sub_1");
+    expect(updateCall.data.appUserId).toBe(result.anonymousId);
+    expect(updateCall.data.attributes).toEqual({});
+    expect(updateCall.data.deletedAt).toBeInstanceOf(Date);
+  });
+
+  test("rejects already-anonymized input to prevent double-hashing", async () => {
+    await expect(
+      anonymizeSubscriber("proj_a", "anon:abc123", "user_admin"),
+    ).rejects.toThrow(/already-anonymized/);
+  });
+
+  test("throws when the subscriber does not exist", async () => {
+    await expect(
+      anonymizeSubscriber("proj_a", "missing@example.com", "user_admin"),
+    ).rejects.toThrow(/not found/);
   });
 });

@@ -5,13 +5,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // =============================================================
 
 const { prismaMock, authMock } = vi.hoisted(() => {
-  const prismaMock = {
+  // Audit chain writer needs $transaction + $executeRaw + auditLog.findFirst
+  // on the tx client. We wire all of them onto the same mock object and
+  // reuse it as both top-level prisma and the tx parameter passed to the
+  // $transaction callback — that's enough for the dashboard routes under
+  // test here, which never care about isolation boundaries.
+  const prismaMock: Record<string, unknown> = {
     projectMember: { findUnique: vi.fn() },
     auditLog: {
       findMany: vi.fn(async () => []),
       findUnique: vi.fn(),
+      findFirst: vi.fn(async () => null),
       count: vi.fn(async () => 0),
-      create: vi.fn(),
+      create: vi.fn(async () => ({ id: "al_1" })),
     },
     audience: {
       findMany: vi.fn(async () => []),
@@ -36,6 +42,10 @@ const { prismaMock, authMock } = vi.hoisted(() => {
       update: vi.fn(),
       delete: vi.fn(),
     },
+    $executeRaw: vi.fn(async () => 0),
+    $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn(prismaMock),
+    ),
   };
 
   const authMock = {

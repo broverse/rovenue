@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { matchesAudience } from "../src/lib/targeting";
+import { matchesAudience, validateAudienceRules } from "../src/lib/targeting";
 
 // =============================================================
 // Empty rules — "All Users"
@@ -131,5 +131,49 @@ describe("matchesAudience — $exists", () => {
     const rules = { email: { $exists: true } };
     expect(matchesAudience({ email: "a@b.c" }, rules)).toBe(true);
     expect(matchesAudience({}, rules)).toBe(false);
+  });
+});
+
+// =============================================================
+// validateAudienceRules — operator allowlist
+// =============================================================
+
+describe("validateAudienceRules — rejects dangerous operators", () => {
+  test("rejects $regex (ReDoS risk)", () => {
+    expect(() => validateAudienceRules({ email: { $regex: "^a+b" } })).toThrow(
+      /\$regex is not allowed/,
+    );
+  });
+
+  test("rejects $where (arbitrary JS)", () => {
+    expect(() =>
+      validateAudienceRules({ $where: "this.country === 'TR'" }),
+    ).toThrow(/\$where is not allowed/);
+  });
+
+  test("rejects $expr (aggregation expressions)", () => {
+    expect(() =>
+      validateAudienceRules({ $expr: { $eq: ["$a", "$b"] } }),
+    ).toThrow(/\$expr is not allowed/);
+  });
+
+  test("rejects $function", () => {
+    expect(() =>
+      validateAudienceRules({
+        $function: { body: "function(){}", args: [], lang: "js" },
+      }),
+    ).toThrow(/\$function is not allowed/);
+  });
+
+  test("accepts the standard operator set", () => {
+    expect(() =>
+      validateAudienceRules({
+        $and: [
+          { country: { $in: ["TR", "AZ"] } },
+          { totalRevenue: { $gte: 50 } },
+          { email: { $exists: true } },
+        ],
+      }),
+    ).not.toThrow();
   });
 });

@@ -9,10 +9,14 @@ import sift from "sift";
 // subscriber's runtime attributes and returns a boolean.
 //
 // Operators are restricted at WRITE time (validateAudienceRules)
-// so sift's full operator surface never sees adversarial input —
-// $where, $expr, $function are hard-blocked; $regex strings are
-// length-capped so ReDoS-style catastrophic backtracking can't
-// starve the SDK hot path.
+// so sift's full operator surface never sees adversarial input.
+// `$regex`, `$where`, `$expr`, `$function` are all rejected — a
+// regex operator on a user-supplied pattern opens the door to
+// ReDoS-style catastrophic backtracking on the SDK hot path, and
+// the other three allow arbitrary JavaScript execution. The
+// operator surface below is what we need for real targeting use
+// cases (country/platform/version/custom attributes), nothing
+// more.
 
 const ALLOWED_OPERATORS = new Set<string>([
   "$eq",
@@ -24,7 +28,6 @@ const ALLOWED_OPERATORS = new Set<string>([
   "$in",
   "$nin",
   "$exists",
-  "$regex",
   "$and",
   "$or",
   "$nor",
@@ -35,7 +38,6 @@ const ALLOWED_OPERATORS = new Set<string>([
 
 const MAX_DEPTH = 8;
 const MAX_NODES = 256;
-const MAX_REGEX_LEN = 128;
 const MAX_ARRAY_LEN = 500;
 
 type Rules = Record<string, unknown> | null | undefined;
@@ -75,9 +77,6 @@ export function validateAudienceRules(
       if (key.startsWith("$")) {
         if (!ALLOWED_OPERATORS.has(key)) {
           throw new Error(`Operator ${key} is not allowed`);
-        }
-        if (key === "$regex" && typeof v === "string" && v.length > MAX_REGEX_LEN) {
-          throw new Error(`$regex exceeds ${MAX_REGEX_LEN} chars`);
         }
       }
       walk(v, depth + 1);
