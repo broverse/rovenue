@@ -97,6 +97,37 @@ type ProjectDetailCounts = {
   featureFlags: number;
 };
 
+// Project.settings is an open Json column used for product flags
+// ("defaultEnvironment", "retries.maxAttempts", ...). To prevent
+// anyone colocating a real secret in there and leaking it via GET
+// /:id or POST /, we strip sensitive-looking keys from BOTH read
+// and write paths. PATCH rejects the same keys upfront so the
+// caller notices instead of silently losing them.
+const SENSITIVE_SETTINGS_KEY_RE =
+  /secret|password|token|private.*key|credential|apikey|api_key/i;
+
+function sanitizeSettings(settings: unknown): Record<string, unknown> {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+    return {};
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(settings as Record<string, unknown>)) {
+    if (SENSITIVE_SETTINGS_KEY_RE.test(k)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+function assertSettingsSafe(settings: Record<string, unknown>): void {
+  for (const k of Object.keys(settings)) {
+    if (SENSITIVE_SETTINGS_KEY_RE.test(k)) {
+      throw new HTTPException(400, {
+        message: `settings key "${k}" looks sensitive — store secrets in appleCredentials / googleCredentials / stripeCredentials instead`,
+      });
+    }
+  }
+}
+
 function toProjectDetail(
   project: ProjectRow,
   apiKeys: ApiKeyRow[],
@@ -115,7 +146,7 @@ function toProjectDetail(
     slug: project.slug,
     webhookUrl: project.webhookUrl,
     hasWebhookSecret: Boolean(project.webhookSecret),
-    settings: (project.settings as Record<string, unknown> | null) ?? {},
+    settings: sanitizeSettings(project.settings),
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString(),
     counts: { ...counts, activeApiKeys: apiKeys.length },
@@ -312,26 +343,36 @@ projectsRoute.patch("/:id", async (c) => {
     });
   }
 
-  const project = await prisma.project.update({
-    where: { id },
-    data: {
-      ...(body.name !== undefined && { name: body.name }),
-      ...(body.webhookUrl !== undefined && { webhookUrl: body.webhookUrl }),
-      ...(body.settings !== undefined && {
-        settings: body.settings as Prisma.InputJsonValue,
-      }),
-    },
-  });
+  if (body.settings !== undefined) assertSettingsSafe(body.settings);
 
-  await audit({
-    projectId: id,
-    userId: user.id,
-    action: "project.updated",
-    resource: "project",
-    resourceId: id,
-    before: before as Record<string, unknown>,
-    after: { ...before, ...body } as Record<string, unknown>,
-    ...extractRequestContext(c),
+  // Atomic: a crash between update and audit would otherwise produce
+  // a silent mutation. Running both in one $transaction means the
+  // audit row is a guaranteed side-effect of the project change.
+  const project = await prisma.$transaction(async (tx) => {
+    const updated = await tx.project.update({
+      where: { id },
+      data: {
+        ...(body.name !== undefined && { name: body.name }),
+        ...(body.webhookUrl !== undefined && { webhookUrl: body.webhookUrl }),
+        ...(body.settings !== undefined && {
+          settings: body.settings as Prisma.InputJsonValue,
+        }),
+      },
+    });
+    await audit(
+      {
+        projectId: id,
+        userId: user.id,
+        action: "project.updated",
+        resource: "project",
+        resourceId: id,
+        before: before as Record<string, unknown>,
+        after: { ...before, ...body } as Record<string, unknown>,
+        ...extractRequestContext(c),
+      },
+      tx,
+    );
+    return updated;
   });
 
   // Mirror GET /:id's response shape so the dashboard client can refresh
@@ -371,20 +412,27 @@ projectsRoute.post("/:id/webhook-secret/rotate", async (c) => {
   await assertProjectAccess(id, user.id, MemberRole.OWNER);
 
   const webhookSecret = `whsec_${randomBytes(32).toString("base64url")}`;
-  await prisma.project.update({
-    where: { id },
-    data: { webhookSecret },
-  });
-
-  await audit({
-    projectId: id,
-    userId: user.id,
-    action: "credential.updated",
-    resource: "credential",
-    resourceId: id,
-    before: redactCredentials({ webhookSecret: "*" }),
-    after: redactCredentials({ webhookSecret: "*" }),
-    ...extractRequestContext(c),
+  // Atomic update + audit. Without the transaction, a 5xx between the
+  // two writes would leave the caller thinking rotation failed while
+  // the new secret is already live and the old one is gone.
+  await prisma.$transaction(async (tx) => {
+    await tx.project.update({
+      where: { id },
+      data: { webhookSecret },
+    });
+    await audit(
+      {
+        projectId: id,
+        userId: user.id,
+        action: "credential.updated",
+        resource: "credential",
+        resourceId: id,
+        before: redactCredentials({ webhookSecret: "*" }),
+        after: redactCredentials({ webhookSecret: "*" }),
+        ...extractRequestContext(c),
+      },
+      tx,
+    );
   });
 
   const payload: RotateWebhookSecretResponse = { webhookSecret };
@@ -400,16 +448,23 @@ projectsRoute.delete("/:id", async (c) => {
   const user = c.get("user");
   await assertProjectAccess(id, user.id, MemberRole.OWNER);
 
-  await audit({
-    projectId: id,
-    userId: user.id,
-    action: "project.deleted",
-    resource: "project",
-    resourceId: id,
-    ...extractRequestContext(c),
+  // Atomic. Note the ordering constraint: audit FIRST so the fk
+  // (audit.projectId → project.id) resolves before cascade delete
+  // takes the project row out.
+  await prisma.$transaction(async (tx) => {
+    await audit(
+      {
+        projectId: id,
+        userId: user.id,
+        action: "project.deleted",
+        resource: "project",
+        resourceId: id,
+        ...extractRequestContext(c),
+      },
+      tx,
+    );
+    await tx.project.delete({ where: { id } });
   });
-
-  await prisma.project.delete({ where: { id } });
 
   return c.json(ok({ id }));
 });

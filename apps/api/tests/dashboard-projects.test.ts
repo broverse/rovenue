@@ -184,6 +184,43 @@ describe("GET /dashboard/projects/:id", () => {
     const res = await app.request("/dashboard/projects/proj_1");
     expect(res.status).toBe(403);
   });
+
+  test("strips sensitive-looking keys from settings before returning", async () => {
+    signedIn("user_1");
+    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "OWNER" });
+    prismaMock.project.findUnique.mockResolvedValue({
+      id: "proj_1",
+      name: "Acme",
+      slug: "acme",
+      webhookUrl: null,
+      webhookSecret: null,
+      settings: {
+        defaultEnvironment: "PRODUCTION",
+        apiSecret: "LEAKED-SECRET-DO-NOT-SHOW",
+        stripeCredential: "sk_live_leak",
+        "user.password": "hunter2",
+        safeFlag: true,
+      },
+      createdAt: new Date("2026-04-01"),
+      updatedAt: new Date("2026-04-10"),
+    });
+    prismaMock.apiKey.findMany.mockResolvedValue([]);
+    prismaMock.subscriber.count.mockResolvedValue(0);
+    prismaMock.experiment.count.mockResolvedValue(0);
+    prismaMock.featureFlag.count.mockResolvedValue(0);
+
+    const res = await app.request("/dashboard/projects/proj_1");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { project: { settings: Record<string, unknown> } } };
+    expect(body.data.project.settings).toEqual({
+      defaultEnvironment: "PRODUCTION",
+      safeFlag: true,
+    });
+    const serialized = JSON.stringify(body.data.project);
+    expect(serialized).not.toContain("LEAKED-SECRET-DO-NOT-SHOW");
+    expect(serialized).not.toContain("sk_live_leak");
+    expect(serialized).not.toContain("hunter2");
+  });
 });
 
 describe("POST /dashboard/projects", () => {
@@ -361,6 +398,13 @@ describe("PATCH /dashboard/projects/:id", () => {
       }),
     );
     expect(prismaMock.auditLog.create).toHaveBeenCalled();
+    // Atomicity: project.update + auditLog.create run inside the SAME
+    // $transaction call, so a crash between them can't leave a silent
+    // mutation.
+    expect(prismaMock.$transaction).toHaveBeenCalled();
+    expect(prismaMock.$transaction.mock.invocationCallOrder[0]).toBeLessThan(
+      prismaMock.project.update.mock.invocationCallOrder[0]!,
+    );
 
     const body = (await res.json()) as {
       data: {
@@ -414,6 +458,30 @@ describe("PATCH /dashboard/projects/:id", () => {
       body: JSON.stringify({ name: "X" }),
     });
     expect(res.status).toBe(404);
+  });
+
+  test("rejects settings keys that look like secrets", async () => {
+    signedIn("admin");
+    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
+    prismaMock.project.findUnique.mockResolvedValue({
+      id: "proj_1",
+      name: "Old",
+      webhookUrl: null,
+      settings: {},
+    });
+
+    const res = await app.request("/dashboard/projects/proj_1", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        settings: { safeKey: "ok", apiSecret: "nope" },
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: { message: string } };
+    expect(body.error?.message).toMatch(/apiSecret/);
+    expect(prismaMock.project.update).not.toHaveBeenCalled();
+    expect(prismaMock.auditLog.create).not.toHaveBeenCalled();
   });
 });
 

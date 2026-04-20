@@ -115,6 +115,29 @@ describe("deliverWebhooks — success", () => {
     expect(updateCall.data.attempts).toBe(1);
   });
 
+  test("raw fetch query uses FOR UPDATE SKIP LOCKED to prevent double-dispatch", async () => {
+    // The worker is pulled from outgoing_webhooks via prisma.$queryRaw
+    // with a SELECT … FOR UPDATE OF w SKIP LOCKED. Under multi-replica
+    // deploys this row-level lock keeps two workers from grabbing the
+    // same row and double-dispatching the webhook. The mock captures
+    // the tagged-template strings array; we assert the SQL contains
+    // the lock clauses + the join against projects for the webhook
+    // secret.
+    prismaMock.$queryRaw.mockResolvedValue([]);
+
+    await deliverWebhooks(fetchMock);
+
+    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
+    const firstArg = prismaMock.$queryRaw.mock.calls[0]![0] as unknown;
+    // Prisma's $queryRaw tagged template receives a TemplateStringsArray.
+    const templateParts = Array.from(firstArg as ArrayLike<string>);
+    const sql = templateParts.join(" ");
+    expect(sql).toMatch(/FROM\s+outgoing_webhooks/i);
+    expect(sql).toMatch(/JOIN\s+projects/i);
+    expect(sql).toMatch(/FOR\s+UPDATE/i);
+    expect(sql).toMatch(/SKIP\s+LOCKED/i);
+  });
+
   test("includes HMAC signature + event-id headers when project has a webhook secret", async () => {
     prismaMock.$queryRaw.mockResolvedValue([
       webhook({ projectWebhookSecret: "topsecret-abc" }),
