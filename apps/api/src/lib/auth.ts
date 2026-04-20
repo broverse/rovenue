@@ -33,9 +33,18 @@ function buildSocialProviders(): SocialProviders {
   return providers;
 }
 
+// Email + password is enabled only outside production so the dashboard's
+// "Continue as Dev User" button can mint a session without an OAuth
+// provider. Production deploys stay OAuth-only.
+const emailPasswordEnabled = env.NODE_ENV !== "production";
+
 export const auth = betterAuth({
   database: prismaAdapter(prisma, { provider: "postgresql" }),
-  emailAndPassword: { enabled: false },
+  emailAndPassword: {
+    enabled: emailPasswordEnabled,
+    autoSignIn: true,
+    minPasswordLength: 8,
+  },
   socialProviders: buildSocialProviders(),
   trustedOrigins: [env.DASHBOARD_URL],
   baseURL: env.BETTER_AUTH_URL,

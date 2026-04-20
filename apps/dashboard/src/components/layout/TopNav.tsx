@@ -1,6 +1,7 @@
 import { Button } from "@heroui/react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { signOut, useSession } from "../../lib/auth";
+import { ThemeToggle } from "./ThemeToggle";
 
 export function TopNav() {
   const { data } = useSession();
@@ -11,7 +12,8 @@ export function TopNav() {
         <Link to="/projects" className="text-lg font-semibold">
           Rovenue
         </Link>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
           <span className="text-sm text-default-500">{data?.user.email}</span>
           <Button
             size="sm"

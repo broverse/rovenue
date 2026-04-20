@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Card } from "@heroui/react";
 import { OAuthButton } from "../components/auth/OAuthButton";
+import { DevLoginButton } from "../components/auth/DevLoginButton";
 
 export const Route = createFileRoute("/login")({
   component: LoginRouteComponent,
@@ -35,6 +36,7 @@ export function LoginPage({ error }: { error?: string }) {
           )}
           <OAuthButton provider="github">Continue with GitHub</OAuthButton>
           <OAuthButton provider="google">Continue with Google</OAuthButton>
+          {import.meta.env.DEV && <DevLoginButton />}
         </div>
       </Card>
     </div>
