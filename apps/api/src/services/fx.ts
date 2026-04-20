@@ -222,7 +222,7 @@ export async function isFxStale(now: Date = new Date()): Promise<boolean> {
 // BullMQ scheduled job — daily 00:05 UTC
 // =============================================================
 
-export const FX_QUEUE_NAME = "rovenue:fx-rates";
+export const FX_QUEUE_NAME = "rovenue-fx-rates";
 
 function createBullConnection(): Redis {
   return new Redis(env.REDIS_URL, {

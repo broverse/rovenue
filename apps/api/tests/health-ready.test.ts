@@ -49,7 +49,7 @@ vi.mock("../src/lib/redis", () => ({ redis: redisMock }));
 
 vi.mock("../src/services/webhook-processor", () => ({
   getWebhookQueue: () => queueMock,
-  WEBHOOK_QUEUE_NAME: "rovenue:webhooks",
+  WEBHOOK_QUEUE_NAME: "rovenue-webhooks",
 }));
 
 vi.mock("../src/workers/webhook-delivery", () => ({

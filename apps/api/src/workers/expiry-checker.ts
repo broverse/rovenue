@@ -29,7 +29,7 @@ import { syncAccess } from "../services/access-engine";
 
 const log = logger.child("expiry-checker");
 
-export const EXPIRY_QUEUE_NAME = "rovenue:expiry-check";
+export const EXPIRY_QUEUE_NAME = "rovenue-expiry-check";
 export const EXPIRATION_EVENT_TYPE = "EXPIRATION";
 
 const REPEAT_EVERY_MS = 5 * 60 * 1000;

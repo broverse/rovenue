@@ -18,7 +18,7 @@ import { logger } from "../lib/logger";
 
 const log = logger.child("webhook-delivery");
 
-export const DELIVERY_QUEUE_NAME = "rovenue:webhook-delivery";
+export const DELIVERY_QUEUE_NAME = "rovenue-webhook-delivery";
 export const MAX_ATTEMPTS = 5;
 export const BACKOFF_SCHEDULE_MS = [
   1 * 60_000,

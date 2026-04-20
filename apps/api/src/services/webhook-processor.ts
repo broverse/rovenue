@@ -34,7 +34,7 @@ import {
 
 const log = logger.child("webhook-processor");
 
-export const WEBHOOK_QUEUE_NAME = "rovenue:webhooks";
+export const WEBHOOK_QUEUE_NAME = "rovenue-webhooks";
 
 // =============================================================
 // Job shapes
