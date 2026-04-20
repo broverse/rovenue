@@ -459,7 +459,10 @@ describe("PATCH /dashboard/projects/:id", () => {
     const res = await app.request("/dashboard/projects/missing", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "X" }),
+      // Body is a valid PATCH payload — name must satisfy min(2)/max(80)
+      // and be something the zValidator middleware passes through, since
+      // schema validation now runs before the 404 check.
+      body: JSON.stringify({ name: "Renamed" }),
     });
     expect(res.status).toBe(404);
   });

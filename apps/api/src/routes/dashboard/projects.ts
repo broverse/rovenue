@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import prisma, { Environment, MemberRole, Prisma } from "@rovenue/db";
 import {
@@ -154,7 +155,7 @@ function toProjectDetail(
   };
 }
 
-const createProjectSchema = z.object({
+export const createProjectBodySchema = z.object({
   name: z.string().trim().min(2).max(80),
   slug: z
     .string()
@@ -169,7 +170,7 @@ const createProjectSchema = z.object({
     .default(Environment.PRODUCTION),
 });
 
-const updateProjectSchema = z
+export const updateProjectBodySchema = z
   .object({
     name: z.string().trim().min(2).max(80).optional(),
     webhookUrl: z.string().url().nullable().optional(),
@@ -179,10 +180,9 @@ const updateProjectSchema = z
     message: "At least one field required",
   });
 
-export const projectsRoute = new Hono();
-projectsRoute.use("*", requireDashboardAuth);
-
-projectsRoute.get("/", async (c) => {
+export const projectsRoute = new Hono()
+  .use("*", requireDashboardAuth)
+  .get("/", async (c) => {
   const user = c.get("user");
   const memberships = await prisma.projectMember.findMany({
     where: { userId: user.id },
@@ -196,10 +196,9 @@ projectsRoute.get("/", async (c) => {
     role: m.role,
     createdAt: m.project.createdAt.toISOString(),
   }));
-  return c.json(ok({ projects }));
-});
-
-projectsRoute.get("/:id", async (c) => {
+    return c.json(ok({ projects }));
+  })
+  .get("/:id", async (c) => {
   const id = c.req.param("id");
   const user = c.get("user");
   await assertProjectAccess(id, user.id, MemberRole.VIEWER);
@@ -229,22 +228,13 @@ projectsRoute.get("/:id", async (c) => {
     experiments,
     featureFlags,
   });
-  return c.json(ok({ project: payload }));
-});
+    return c.json(ok({ project: payload }));
+  })
+  .post("/", zValidator("json", createProjectBodySchema), async (c) => {
+    const user = c.get("user");
+    const body = c.req.valid("json");
 
-projectsRoute.post("/", async (c) => {
-  const user = c.get("user");
-
-  let body: z.infer<typeof createProjectSchema>;
-  try {
-    body = createProjectSchema.parse(await c.req.json());
-  } catch (err) {
-    throw new HTTPException(400, {
-      message: err instanceof z.ZodError ? err.errors[0]?.message ?? "Invalid input" : "Invalid JSON body",
-    });
-  }
-
-  // Mint the api-key material up front so both the row and the
+    // Mint the api-key material up front so both the row and the
   // plaintext we return can share the same id. See newApiKeyId().
   const apiKeyId = newApiKeyId();
   const keyPublic = `${API_KEY_PREFIX[API_KEY_KIND.PUBLIC]}${urlSafeRandom(24)}`;
@@ -307,43 +297,34 @@ projectsRoute.post("/", async (c) => {
     featureFlags: 0,
   });
 
-  const payload: CreateProjectResponse = {
-    project: detail,
-    apiKey: {
-      publicKey: apiKey.keyPublic,
-      secretKey,
-    },
-  };
-  return c.json(ok(payload));
-});
+    const payload: CreateProjectResponse = {
+      project: detail,
+      apiKey: {
+        publicKey: apiKey.keyPublic,
+        secretKey,
+      },
+    };
+    return c.json(ok(payload));
+  })
+  // PATCH /:id — partial update, ADMIN+. Reads the before-snapshot so
+  // the audit row captures both sides; only fields present in the body
+  // are forwarded to `update`.
+  .patch("/:id", zValidator("json", updateProjectBodySchema), async (c) => {
+    const id = c.req.param("id");
+    const user = c.get("user");
+    await assertProjectAccess(id, user.id, MemberRole.ADMIN);
 
-// PATCH /:id — partial update, ADMIN+. Reads the before-snapshot so the
-// audit row captures both sides; only fields present in the body are
-// forwarded to `update`.
-projectsRoute.patch("/:id", async (c) => {
-  const id = c.req.param("id");
-  const user = c.get("user");
-  await assertProjectAccess(id, user.id, MemberRole.ADMIN);
-
-  // Check existence first so callers hitting a missing resource get a
-  // crisp 404 regardless of whether their body would have been valid.
-  const before = await prisma.project.findUnique({
-    where: { id },
-    select: { name: true, webhookUrl: true, settings: true },
-  });
-  if (!before) throw new HTTPException(404, { message: "Project not found" });
-
-  let body: z.infer<typeof updateProjectSchema>;
-  try {
-    body = updateProjectSchema.parse(await c.req.json());
-  } catch (err) {
-    throw new HTTPException(400, {
-      message:
-        err instanceof z.ZodError ? err.errors[0]?.message ?? "Invalid input" : "Invalid JSON body",
+    // Check existence first so callers hitting a missing resource get a
+    // crisp 404 regardless of whether their body would have been valid.
+    const before = await prisma.project.findUnique({
+      where: { id },
+      select: { name: true, webhookUrl: true, settings: true },
     });
-  }
+    if (!before) throw new HTTPException(404, { message: "Project not found" });
 
-  if (body.settings !== undefined) assertSettingsSafe(body.settings);
+    const body = c.req.valid("json");
+
+    if (body.settings !== undefined) assertSettingsSafe(body.settings);
 
   // Atomic: a crash between update and audit would otherwise produce
   // a silent mutation. Running both in one $transaction means the
@@ -399,72 +380,70 @@ projectsRoute.patch("/:id", async (c) => {
     experiments,
     featureFlags,
   });
-  return c.json(ok({ project: payload }));
-});
+    return c.json(ok({ project: payload }));
+  })
+  // POST /:id/webhook-secret/rotate — OWNER only. Mints a fresh
+  // plaintext `whsec_<base64url-32>` secret and returns it exactly
+  // once. The audit row MUST use redacted snapshots — audit() rejects
+  // credential entries whose before/after leak the raw secret.
+  .post("/:id/webhook-secret/rotate", async (c) => {
+    const id = c.req.param("id");
+    const user = c.get("user");
+    await assertProjectAccess(id, user.id, MemberRole.OWNER);
 
-// POST /:id/webhook-secret/rotate — OWNER only. Mints a fresh plaintext
-// `whsec_<base64url-32>` secret and returns it exactly once. The audit
-// row MUST use redacted snapshots — audit() rejects credential entries
-// whose before/after leak the raw secret.
-projectsRoute.post("/:id/webhook-secret/rotate", async (c) => {
-  const id = c.req.param("id");
-  const user = c.get("user");
-  await assertProjectAccess(id, user.id, MemberRole.OWNER);
-
-  const webhookSecret = `whsec_${randomBytes(32).toString("base64url")}`;
-  // Atomic update + audit. Without the transaction, a 5xx between the
-  // two writes would leave the caller thinking rotation failed while
-  // the new secret is already live and the old one is gone.
-  await prisma.$transaction(async (tx) => {
-    await tx.project.update({
-      where: { id },
-      data: { webhookSecret },
+    const webhookSecret = `whsec_${randomBytes(32).toString("base64url")}`;
+    // Atomic update + audit. Without the transaction, a 5xx between
+    // the two writes would leave the caller thinking rotation failed
+    // while the new secret is already live and the old one is gone.
+    await prisma.$transaction(async (tx) => {
+      await tx.project.update({
+        where: { id },
+        data: { webhookSecret },
+      });
+      await audit(
+        {
+          projectId: id,
+          userId: user.id,
+          action: "credential.updated",
+          resource: "credential",
+          resourceId: id,
+          before: redactCredentials({ webhookSecret: "*" }),
+          after: redactCredentials({ webhookSecret: "*" }),
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
     });
-    await audit(
-      {
-        projectId: id,
-        userId: user.id,
-        action: "credential.updated",
-        resource: "credential",
-        resourceId: id,
-        before: redactCredentials({ webhookSecret: "*" }),
-        after: redactCredentials({ webhookSecret: "*" }),
-        ...extractRequestContext(c),
-      },
-      tx,
-    );
+
+    const payload: RotateWebhookSecretResponse = { webhookSecret };
+    return c.json(ok(payload));
+  })
+  // DELETE /:id — OWNER only. We intentionally write the audit row
+  // BEFORE the project row is deleted so the audit.projectId foreign
+  // key still resolves. Cascading delete on the project table would
+  // take the audit row with it if we ran these in the opposite order.
+  .delete("/:id", async (c) => {
+    const id = c.req.param("id");
+    const user = c.get("user");
+    await assertProjectAccess(id, user.id, MemberRole.OWNER);
+
+    // Atomic. Note the ordering constraint: audit FIRST so the fk
+    // (audit.projectId → project.id) resolves before cascade delete
+    // takes the project row out.
+    await prisma.$transaction(async (tx) => {
+      await audit(
+        {
+          projectId: id,
+          userId: user.id,
+          action: "project.deleted",
+          resource: "project",
+          resourceId: id,
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
+      await tx.project.delete({ where: { id } });
+    });
+
+    return c.json(ok({ id }));
   });
-
-  const payload: RotateWebhookSecretResponse = { webhookSecret };
-  return c.json(ok(payload));
-});
-
-// DELETE /:id — OWNER only. We intentionally write the audit row
-// BEFORE the project row is deleted so the audit.projectId foreign key
-// still resolves. Cascading delete on the project table would take the
-// audit row with it if we ran these in the opposite order.
-projectsRoute.delete("/:id", async (c) => {
-  const id = c.req.param("id");
-  const user = c.get("user");
-  await assertProjectAccess(id, user.id, MemberRole.OWNER);
-
-  // Atomic. Note the ordering constraint: audit FIRST so the fk
-  // (audit.projectId → project.id) resolves before cascade delete
-  // takes the project row out.
-  await prisma.$transaction(async (tx) => {
-    await audit(
-      {
-        projectId: id,
-        userId: user.id,
-        action: "project.deleted",
-        resource: "project",
-        resourceId: id,
-        ...extractRequestContext(c),
-      },
-      tx,
-    );
-    await tx.project.delete({ where: { id } });
-  });
-
-  return c.json(ok({ id }));
-});
