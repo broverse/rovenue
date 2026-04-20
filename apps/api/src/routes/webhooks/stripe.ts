@@ -10,8 +10,6 @@ import { logger } from "../../lib/logger";
 
 const log = logger.child("route:webhook:stripe");
 
-export const stripeWebhookRoute = new Hono();
-
 /**
  * Stripe webhook endpoint.
  *
@@ -20,42 +18,46 @@ export const stripeWebhookRoute = new Hono();
  * then checks the project exists and enqueues the already-verified
  * event for async processing.
  */
-stripeWebhookRoute.post("/:projectId", verifyStripeWebhook, async (c) => {
-  const projectId = c.req.param("projectId");
+export const stripeWebhookRoute = new Hono().post(
+  "/:projectId",
+  verifyStripeWebhook,
+  async (c) => {
+    const projectId = c.req.param("projectId");
 
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { id: true },
-  });
-  if (!project) {
-    throw new HTTPException(404, { message: "Project not found" });
-  }
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true },
+    });
+    if (!project) {
+      throw new HTTPException(404, { message: "Project not found" });
+    }
 
-  const verified = c.get("verifiedWebhook");
-  if (!verified || verified.source !== "STRIPE") {
-    throw new HTTPException(500, { message: "Verified payload missing" });
-  }
+    const verified = c.get("verifiedWebhook");
+    if (!verified || verified.source !== "STRIPE") {
+      throw new HTTPException(500, { message: "Verified payload missing" });
+    }
 
-  const event = verified.event;
+    const event = verified.event;
 
-  const job = await enqueueWebhookEvent({
-    source: "STRIPE",
-    projectId,
-    event: JSON.parse(JSON.stringify(event)) as Stripe.Event,
-  });
+    const job = await enqueueWebhookEvent({
+      source: "STRIPE",
+      projectId,
+      event: JSON.parse(JSON.stringify(event)) as Stripe.Event,
+    });
 
-  log.info("stripe notification enqueued", {
-    projectId,
-    eventType: event.type,
-    eventId: event.id,
-    jobId: job.id,
-  });
+    log.info("stripe notification enqueued", {
+      projectId,
+      eventType: event.type,
+      eventId: event.id,
+      jobId: job.id,
+    });
 
-  const response: { status: "enqueued"; jobId: string | undefined } = {
-    status: "enqueued",
-    jobId: job.id,
-  };
-  return c.json(ok(response), 202);
-});
+    const response: { status: "enqueued"; jobId: string | undefined } = {
+      status: "enqueued",
+      jobId: job.id,
+    };
+    return c.json(ok(response), 202);
+  },
+);
 
 export type { HandleStripeNotificationResult };

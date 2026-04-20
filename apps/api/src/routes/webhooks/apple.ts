@@ -7,8 +7,6 @@ import { logger } from "../../lib/logger";
 
 const log = logger.child("route:webhook:apple");
 
-export const appleWebhookRoute = new Hono();
-
 /**
  * App Store Server Notifications V2 webhook.
  *
@@ -17,25 +15,29 @@ export const appleWebhookRoute = new Hono();
  * signedPayload is then enqueued for async processing — the worker
  * re-verifies as defence-in-depth before touching the database.
  */
-appleWebhookRoute.post("/:projectId", verifyAppleWebhook, async (c) => {
-  const projectId = c.req.param("projectId");
-  const verified = c.get("verifiedWebhook");
-  if (!verified || verified.source !== "APPLE") {
-    throw new HTTPException(500, { message: "Verified payload missing" });
-  }
+export const appleWebhookRoute = new Hono().post(
+  "/:projectId",
+  verifyAppleWebhook,
+  async (c) => {
+    const projectId = c.req.param("projectId");
+    const verified = c.get("verifiedWebhook");
+    if (!verified || verified.source !== "APPLE") {
+      throw new HTTPException(500, { message: "Verified payload missing" });
+    }
 
-  const job = await enqueueWebhookEvent({
-    source: "APPLE",
-    projectId,
-    signedPayload: verified.signedPayload,
-  });
+    const job = await enqueueWebhookEvent({
+      source: "APPLE",
+      projectId,
+      signedPayload: verified.signedPayload,
+    });
 
-  log.info("apple notification enqueued", {
-    projectId,
-    jobId: job.id,
-    notificationType: verified.notification.notificationType,
-    notificationUUID: verified.notification.notificationUUID,
-  });
+    log.info("apple notification enqueued", {
+      projectId,
+      jobId: job.id,
+      notificationType: verified.notification.notificationType,
+      notificationUUID: verified.notification.notificationUUID,
+    });
 
-  return c.json(ok({ status: "enqueued", jobId: job.id }), 202);
-});
+    return c.json(ok({ status: "enqueued", jobId: job.id }), 202);
+  },
+);
