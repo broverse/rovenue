@@ -8,8 +8,13 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest",
-    "migrate": "prisma migrate dev",
-    "generate": "prisma generate",
+    "db:migrate": "tsx src/migrate.ts",
+    "db:migrate:baseline": "tsx src/migrate-baseline.ts",
+    "db:migrate:generate": "drizzle-kit generate",
+    "db:studio": "drizzle-kit studio",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:generate": "prisma generate",
+    "prisma:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {

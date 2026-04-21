@@ -18,7 +18,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "turbo run test",
-    "db:migrate": "pnpm --filter @rovenue/db migrate",
+    "db:migrate": "pnpm --filter @rovenue/db db:migrate",
+    "db:migrate:generate": "pnpm --filter @rovenue/db db:migrate:generate",
     "db:seed": "pnpm --filter @rovenue/db seed"
   },
   "devDependencies": {

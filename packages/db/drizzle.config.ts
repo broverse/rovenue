@@ -4,19 +4,22 @@ import { defineConfig } from "drizzle-kit";
 // drizzle-kit configuration
 // =============================================================
 //
-// Drives introspection (`drizzle-kit pull`) and future migration
-// generation (`drizzle-kit generate`). During the Prisma coexistence
-// period the authoritative schema lives in prisma/schema.prisma and
-// migrations are authored with prisma-migrate — drizzle-kit output
-// is DRIFT-DETECTION only (compare schema.ts against the DB and
-// surface mismatches in CI).
+// Phase 7e3: drizzle-kit is now the canonical migration driver
+// for forward schema changes. The existing prisma/migrations/
+// folder stays as the historical record that provisions a fresh
+// database up to the pre-Drizzle baseline — running `prisma
+// migrate deploy` on a brand-new DB brings schema parity with
+// schema.ts. Every subsequent migration is authored here:
 //
-// Once Prisma is removed, flip the `out` path to a real migrations
-// directory and adopt drizzle-kit as the migration driver.
+//   pnpm --filter @rovenue/db drizzle-kit generate   # plans diff → .sql
+//   pnpm --filter @rovenue/db db:migrate             # applies to DB
+//
+// `schema.prisma` is frozen. Changes there without a matching
+// Drizzle-kit migration will drift; CI should fail that case.
 
 export default defineConfig({
   schema: "./src/drizzle/schema.ts",
-  out: "./drizzle/out",
+  out: "./drizzle/migrations",
   dialect: "postgresql",
   dbCredentials: {
     url: process.env.DATABASE_URL ?? "",
