@@ -117,10 +117,12 @@ export function extractRequestContext(c: Context): {
 
 export type AuditTx = unknown;
 
+import type { Db as DrizzleDb } from "@rovenue/db";
+
 type DrizzleAuditTxInner = {
-  select: drizzle.Db["select"];
-  insert: drizzle.Db["insert"];
-  execute: drizzle.Db["execute"];
+  select: DrizzleDb["select"];
+  insert: DrizzleDb["insert"];
+  execute: DrizzleDb["execute"];
 };
 
 // =============================================================

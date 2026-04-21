@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@paralleldrive/cuid2": "^3.3.0",
-    "@prisma/client": "^6.1.0",
     "@rovenue/shared": "workspace:*",
     "bcryptjs": "^2.4.3",
     "drizzle-orm": "^0.45.2",
@@ -23,6 +22,7 @@
     "zod": "^3.22.0"
   },
   "devDependencies": {
+    "@prisma/client": "^6.1.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/pg": "^8.20.0",
     "drizzle-kit": "^0.31.10",
