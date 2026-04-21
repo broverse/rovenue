@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   APPLE_ROOT_FINGERPRINTS,
   assertAppleRootFingerprints,
@@ -48,5 +48,30 @@ describe("Apple root fingerprint verification", () => {
     expect(() =>
       (APPLE_ROOT_FINGERPRINTS as Set<string>).add("ffffffff"),
     ).toThrow(/immutable/i);
+  });
+
+  test("loadAppleRootCerts fails closed when APPLE_ROOT_CERTS_DIR holds a bogus cert", async () => {
+    const tmp = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const dir = await tmp.mkdtemp(path.join(os.tmpdir(), "apple-roots-"));
+    await tmp.writeFile(path.join(dir, "bad.cer"), "not-a-cert");
+
+    const prevEnv = process.env.APPLE_ROOT_CERTS_DIR;
+    process.env.APPLE_ROOT_CERTS_DIR = dir;
+    try {
+      vi.resetModules();
+      const { loadAppleRootCerts } = await import(
+        "../src/services/apple/apple-root-ca"
+      );
+      expect(() => loadAppleRootCerts()).toThrow(/fingerprint/i);
+    } finally {
+      if (prevEnv === undefined) {
+        delete process.env.APPLE_ROOT_CERTS_DIR;
+      } else {
+        process.env.APPLE_ROOT_CERTS_DIR = prevEnv;
+      }
+      vi.resetModules();
+    }
   });
 });

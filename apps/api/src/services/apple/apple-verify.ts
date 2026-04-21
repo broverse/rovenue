@@ -18,6 +18,7 @@ import {
   type AppleResponseBodyV2DecodedPayload,
 } from "./apple-types";
 import { loadAppleRootCerts } from "./apple-root-ca";
+import { env } from "../../lib/env";
 import { logger } from "../../lib/logger";
 
 const log = logger.child("apple-verify");
@@ -188,7 +189,21 @@ const verifierCache = new Map<string, AppleNotificationVerifier>();
 export function createAppleVerifier(
   opts: CreateAppleVerifierOpts,
 ): AppleNotificationVerifier {
-  const certs = loadAppleRootCerts();
+  let certs: Buffer[] | null = null;
+  try {
+    certs = loadAppleRootCerts();
+  } catch (err) {
+    if (env.NODE_ENV === "production") {
+      // Fail closed in production: a fingerprint mismatch is a
+      // deployment-integrity failure, not a dev annoyance. Let the
+      // caller see the error.
+      throw err;
+    }
+    log.warn("Apple root cert load failed — dev fallback to jose verifier", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   if (!certs || certs.length === 0) {
     log.warn("falling back to jose verifier (no Apple root certs)", {
       projectId: opts.projectId,

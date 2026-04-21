@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
 import { env } from "../../lib/env";
 import { logger } from "../../lib/logger";
+import { assertAppleRootFingerprints } from "./apple-root-fingerprints";
 
 const log = logger.child("apple-root-ca");
 
@@ -19,6 +20,12 @@ let loaded = false;
  * files — callers must decide whether to fail closed (production) or fall
  * back to the jose verifier (dev/test).
  *
+ * Throws when the loaded cert bytes do not match the pinned SHA-256
+ * fingerprints in `apple-root-fingerprints.ts`. A mismatch is a
+ * deployment-integrity failure (tampered image, wrong bundled cert, or
+ * a future Apple rotation we haven't pinned yet) — callers decide how
+ * loud to fail (prod rethrows; dev logs + falls back to jose).
+ *
  * Download the canonical roots from https://www.apple.com/certificateauthority/
  * AppleRootCA-G3.cer is the ECC root used for StoreKit signing.
  */
@@ -35,6 +42,7 @@ export function loadAppleRootCerts(): Buffer[] | null {
     return null;
   }
 
+  let buffers: Buffer[];
   try {
     const files = readdirSync(dir).filter((f) =>
       VALID_EXTENSIONS.includes(extname(f).toLowerCase()),
@@ -44,10 +52,7 @@ export function loadAppleRootCerts(): Buffer[] | null {
       cache = null;
       return null;
     }
-    const buffers = files.map((f) => readFileSync(join(dir, f)));
-    log.info("loaded Apple root certs", { dir, count: buffers.length });
-    cache = buffers;
-    return buffers;
+    buffers = files.map((f) => readFileSync(join(dir, f)));
   } catch (err) {
     log.error("failed to load Apple root certs", {
       dir,
@@ -56,4 +61,19 @@ export function loadAppleRootCerts(): Buffer[] | null {
     cache = null;
     return null;
   }
+
+  try {
+    assertAppleRootFingerprints(buffers);
+  } catch (err) {
+    log.error("Apple root cert fingerprint mismatch — deployment tampered", {
+      dir,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    cache = null;
+    throw err;
+  }
+
+  log.info("loaded Apple root certs", { dir, count: buffers.length });
+  cache = buffers;
+  return buffers;
 }
