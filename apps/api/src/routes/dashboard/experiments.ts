@@ -201,12 +201,15 @@ export const experimentsRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(experiment.projectId, user.id);
 
-    const assignmentCount = await prisma.experimentAssignment.count({
-      where: { experimentId: id },
-    });
-    const conversionCount = await prisma.experimentAssignment.count({
-      where: { experimentId: id, convertedAt: { not: null } },
-    });
+    const assignmentCount = await drizzle.experimentAssignmentRepo.countAssignments(
+      drizzle.db,
+      id,
+    );
+    const conversionCount =
+      await drizzle.experimentAssignmentRepo.countConvertedAssignments(
+        drizzle.db,
+        id,
+      );
 
     return c.json(
       ok({

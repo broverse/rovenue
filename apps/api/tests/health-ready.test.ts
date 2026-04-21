@@ -31,6 +31,18 @@ const { prismaMock, drizzleMock, redisMock, queueMock } = vi.hoisted(() => {
       findProjectById: vi.fn(async () => null),
       findProjectCredentials: vi.fn(async () => null),
     },
+    webhookEventRepo: {
+      findLastProcessedWebhookAt: vi.fn(
+        async (_db: unknown, projectId: string, source: string) => {
+          const row = await prismaMock.webhookEvent.findFirst({
+            where: { projectId, source, status: "PROCESSED" },
+            orderBy: { processedAt: "desc" },
+            select: { processedAt: true },
+          });
+          return row?.processedAt ?? null;
+        },
+      ),
+    },
     shadowRead: vi.fn(
       async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
         primary(),

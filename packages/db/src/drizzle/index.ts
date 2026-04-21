@@ -32,3 +32,6 @@ export * as outgoingWebhookRepo from "./repositories/outgoing-webhooks";
 export * as dashboardFeatureFlagRepo from "./repositories/feature-flags-dashboard";
 export * as userRepo from "./repositories/users";
 export * as productGroupRepo from "./repositories/product-groups";
+export * as experimentAssignmentRepo from "./repositories/experiment-assignments";
+export * as purchaseRepo from "./repositories/purchases";
+export * as webhookEventRepo from "./repositories/webhook-events";

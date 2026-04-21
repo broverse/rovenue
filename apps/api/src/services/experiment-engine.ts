@@ -189,21 +189,11 @@ export async function evaluateExperiments(
   // for this project. Covers sticky lookups AND mutual-exclusion
   // filtering without additional round-trips.
   const existingAssignments =
-    (await prisma.experimentAssignment.findMany({
-      where: {
-        subscriberId,
-        experiment: { projectId },
-      },
-      include: {
-        experiment: {
-          select: { mutualExclusionGroup: true, status: true },
-        },
-      },
-    })) as Array<{
-      experimentId: string;
-      variantId: string;
-      experiment: { mutualExclusionGroup: string | null; status: string };
-    }>;
+    await drizzle.experimentAssignmentRepo.findSubscriberAssignments(
+      drizzle.db,
+      projectId,
+      subscriberId,
+    );
 
   const assignmentByExperiment = new Map<string, string>();
   const namespacesClaimed = new Set<string>();
@@ -321,9 +311,11 @@ export async function resolveProductGroup(
   );
 
   if (override && typeof override.value === "string") {
-    const group = await prisma.productGroup.findFirst({
-      where: { projectId, identifier: override.value },
-    });
+    const group = await drizzle.productGroupRepo.findProductGroupByIdentifier(
+      drizzle.db,
+      projectId,
+      override.value,
+    );
     if (group) return group as unknown as ResolvedProductGroup;
     log.warn("PRODUCT_GROUP experiment points at missing group", {
       projectId,
@@ -333,15 +325,18 @@ export async function resolveProductGroup(
   }
 
   if (requestedGroup) {
-    const group = await prisma.productGroup.findFirst({
-      where: { projectId, identifier: requestedGroup },
-    });
+    const group = await drizzle.productGroupRepo.findProductGroupByIdentifier(
+      drizzle.db,
+      projectId,
+      requestedGroup,
+    );
     if (group) return group as unknown as ResolvedProductGroup;
   }
 
-  const fallback = await prisma.productGroup.findFirst({
-    where: { projectId, isDefault: true },
-  });
+  const fallback = await drizzle.productGroupRepo.findDefaultProductGroup(
+    drizzle.db,
+    projectId,
+  );
   return fallback as unknown as ResolvedProductGroup | null;
 }
 
@@ -360,15 +355,11 @@ export async function recordEvent(
   eventType: string,
   metadata?: RecordEventMetadata,
 ): Promise<void> {
-  const assignments = (await prisma.experimentAssignment.findMany({
-    where: { subscriberId },
-    include: { experiment: { select: { metrics: true } } },
-  })) as Array<{
-    id: string;
-    events: unknown;
-    convertedAt: Date | null;
-    experiment: { metrics: unknown };
-  }>;
+  const assignments =
+    await drizzle.experimentAssignmentRepo.findAssignmentsWithMetrics(
+      drizzle.db,
+      subscriberId,
+    );
 
   if (assignments.length === 0) return;
 
@@ -471,9 +462,10 @@ function countEventOccurrences(
 export async function getExperimentResults(
   experimentId: string,
 ): Promise<ExperimentResults> {
-  const experiment = await prisma.experiment.findUnique({
-    where: { id: experimentId },
-  });
+  const experiment = await drizzle.experimentRepo.findExperimentById(
+    drizzle.db,
+    experimentId,
+  );
   if (!experiment) {
     throw new Error(`Experiment ${experimentId} not found`);
   }
@@ -482,14 +474,16 @@ export async function getExperimentResults(
     ? experiment.variants
     : []) as unknown as Variant[];
 
-  const assignments = (await prisma.experimentAssignment.findMany({
-    where: { experimentId },
-  })) as Array<{
-    variantId: string;
-    events: unknown;
-    convertedAt: Date | null;
-    revenue: unknown;
-  }>;
+  const assignments =
+    (await drizzle.experimentAssignmentRepo.findAssignmentsByExperiment(
+      drizzle.db,
+      experimentId,
+    )) as unknown as Array<{
+      variantId: string;
+      events: unknown;
+      convertedAt: Date | null;
+      revenue: unknown;
+    }>;
 
   const metrics = (Array.isArray(experiment.metrics)
     ? experiment.metrics

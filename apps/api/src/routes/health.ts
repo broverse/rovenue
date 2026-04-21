@@ -203,16 +203,12 @@ async function lastProcessedWebhookAt(
   projectId: string,
   source: WebhookSource,
 ): Promise<string | null> {
-  const row = await prisma.webhookEvent.findFirst({
-    where: {
-      projectId,
-      source,
-      status: WebhookEventStatus.PROCESSED,
-    },
-    orderBy: { processedAt: "desc" },
-    select: { processedAt: true },
-  });
-  return row?.processedAt ? row.processedAt.toISOString() : null;
+  const at = await drizzle.webhookEventRepo.findLastProcessedWebhookAt(
+    drizzle.db,
+    projectId,
+    source,
+  );
+  return at ? at.toISOString() : null;
 }
 
 async function loadStoreHealth<T>(

@@ -75,6 +75,17 @@ const { prismaMock } = vi.hoisted(() => {
 vi.mock("@rovenue/db", () => ({
   default: prismaMock,
   Prisma: {},
+  // Drizzle auditLogRepo is wired to the same in-memory `rows`
+  // store so verifyAuditChain walks the chain identically
+  // whether the primary or the repo is asked.
+  drizzle: {
+    db: {} as unknown,
+    auditLogRepo: {
+      findProjectChain: vi.fn(async (_db: unknown, projectId: string) =>
+        prismaMock.auditLog.findMany({ where: { projectId } }),
+      ),
+    },
+  },
 }));
 
 // Import AFTER the mock so audit.ts sees our fake prisma.

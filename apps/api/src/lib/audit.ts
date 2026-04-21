@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Context } from "hono";
-import prisma, { type Prisma, type PrismaClient } from "@rovenue/db";
+import prisma, { drizzle, type Prisma, type PrismaClient } from "@rovenue/db";
 import { logger } from "./logger";
 
 // =============================================================
@@ -283,10 +283,7 @@ export interface ChainVerificationResult {
 export async function verifyAuditChain(
   projectId: string,
 ): Promise<ChainVerificationResult> {
-  const rows = await prisma.auditLog.findMany({
-    where: { projectId },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-  });
+  const rows = await drizzle.auditLogRepo.findProjectChain(drizzle.db, projectId);
 
   const errors: ChainVerificationError[] = [];
   let expectedPrevHash: string | null = null;

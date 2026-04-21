@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, { ProductType, type Prisma } from "@rovenue/db";
+import prisma, { ProductType, drizzle, type Prisma } from "@rovenue/db";
 import { addCredits } from "../../services/credit-engine";
 import { getActiveAccess, syncAccess } from "../../services/access-engine";
 import { recordEvent } from "../../services/experiment-engine";
@@ -63,14 +63,12 @@ export const receiptsRoute = new Hono().post(
     product.creditAmount &&
     product.creditAmount > 0
   ) {
-    const alreadyCredited = await prisma.creditLedger.findFirst({
-      where: {
-        subscriberId: subscriber.id,
-        referenceType: "purchase",
-        referenceId: purchase.id,
-      },
-      select: { id: true },
-    });
+    const alreadyCredited =
+      await drizzle.creditLedgerRepo.findExistingPurchaseCredit(
+        drizzle.db,
+        subscriber.id,
+        purchase.id,
+      );
     if (!alreadyCredited) {
       await addCredits({
         subscriberId: subscriber.id,
@@ -144,12 +142,10 @@ async function buildAccessResponse(
     new Set(Object.values(raw).map((entry) => entry.purchaseId)),
   );
 
-  const purchases = purchaseIds.length
-    ? await prisma.purchase.findMany({
-        where: { id: { in: purchaseIds } },
-        include: { product: { select: { identifier: true } } },
-      })
-    : [];
+  const purchases = await drizzle.purchaseRepo.findPurchasesByIds(
+    drizzle.db,
+    purchaseIds,
+  );
   const productByPurchase = new Map(
     purchases.map((p) => [p.id, p.product.identifier] as const),
   );
@@ -168,10 +164,9 @@ async function buildAccessResponse(
 }
 
 async function currentBalance(subscriberId: string): Promise<number> {
-  const last = await prisma.creditLedger.findFirst({
-    where: { subscriberId },
-    orderBy: { createdAt: "desc" },
-    select: { balance: true },
-  });
+  const last = await drizzle.creditLedgerRepo.findLatestBalance(
+    drizzle.db,
+    subscriberId,
+  );
   return last?.balance ?? 0;
 }

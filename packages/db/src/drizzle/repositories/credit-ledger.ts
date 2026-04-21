@@ -1,6 +1,32 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { Db } from "../client";
 import { creditLedger } from "../schema";
+
+/**
+ * Dedup guard used by receipt verification: has this purchase
+ * already produced a ledger entry? Exact replica of
+ *   prisma.creditLedger.findFirst({
+ *     where: { subscriberId, referenceType: "purchase", referenceId: purchaseId },
+ *   })
+ */
+export async function findExistingPurchaseCredit(
+  db: Db,
+  subscriberId: string,
+  purchaseId: string,
+): Promise<{ id: string } | null> {
+  const rows = await db
+    .select({ id: creditLedger.id })
+    .from(creditLedger)
+    .where(
+      and(
+        eq(creditLedger.subscriberId, subscriberId),
+        eq(creditLedger.referenceType, "purchase"),
+        eq(creditLedger.referenceId, purchaseId),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
 
 // =============================================================
 // Credit ledger reads — Drizzle repository

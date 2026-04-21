@@ -111,6 +111,16 @@ const { prismaMock, drizzleMock } = vi.hoisted(() => {
           select: { balance: true },
         }),
       ),
+      findExistingPurchaseCredit: vi.fn(
+        async (_db: unknown, subscriberId: string, purchaseId: string) =>
+          creditLedger.findFirst({
+            where: {
+              subscriberId,
+              referenceType: "purchase",
+              referenceId: purchaseId,
+            },
+          }),
+      ),
     },
     productGroupRepo: {
       listProductGroups: vi.fn(async (_db: unknown, projectId: string) =>
@@ -135,6 +145,19 @@ const { prismaMock, drizzleMock } = vi.hoisted(() => {
           ? []
           : product.findMany({ where: { projectId, id: { in: ids } } }),
       ),
+    },
+    purchaseRepo: {
+      findPurchasesByIds: vi.fn(async (_db: unknown, ids: string[]) =>
+        ids.length === 0
+          ? []
+          : purchase.findMany({
+              where: { id: { in: ids } },
+              include: { product: { select: { identifier: true } } },
+            }),
+      ),
+    },
+    creditLedgerRepoExt: {
+      findExistingPurchaseCredit: vi.fn(async () => null),
     },
     experimentRepo: {
       findRunningExperimentsByProject: vi.fn(async () => []),

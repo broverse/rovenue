@@ -5,6 +5,7 @@ import prisma, {
   MemberRole,
   Prisma,
   decryptCredential,
+  drizzle,
   encryptCredential,
 } from "@rovenue/db";
 import type {
@@ -133,15 +134,20 @@ export const credentialsRoute = new Hono()
   const user = c.get("user");
   await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
 
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: {
-      appleCredentials: true,
-      googleCredentials: true,
-      stripeCredentials: true,
-    },
-  });
-  if (!project) throw new HTTPException(404, { message: "Project not found" });
+  const [appleRow, googleRow, stripeRow] = await Promise.all([
+    drizzle.projectRepo.findProjectCredentials(drizzle.db, projectId, "apple"),
+    drizzle.projectRepo.findProjectCredentials(drizzle.db, projectId, "google"),
+    drizzle.projectRepo.findProjectCredentials(drizzle.db, projectId, "stripe"),
+  ]);
+  if (!appleRow && !googleRow && !stripeRow) {
+    const exists = await drizzle.projectRepo.findProjectById(drizzle.db, projectId);
+    if (!exists) throw new HTTPException(404, { message: "Project not found" });
+  }
+  const project = {
+    appleCredentials: appleRow?.value ?? null,
+    googleCredentials: googleRow?.value ?? null,
+    stripeCredentials: stripeRow?.value ?? null,
+  };
 
   const statusFor = (
     store: CredentialStore,

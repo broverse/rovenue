@@ -28,7 +28,9 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
           select: { id: true, role: true },
         }),
       ),
-      findProjectById: vi.fn(async () => null),
+      findProjectById: vi.fn(async (_db: unknown, id: string) =>
+        prismaMock.project.findUnique({ where: { id } }),
+      ),
       findProjectCredentials: vi.fn(async (_db, id, store) => {
         const project = await prismaMock.project.findUnique({
           where: { id },

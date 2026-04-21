@@ -53,9 +53,60 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
           }),
       ),
       findExperimentsByProject: vi.fn(async () => []),
-      findExperimentById: vi.fn(async () => null),
+      findExperimentById: vi.fn(async (_db: unknown, id: string) =>
+        prismaMock.experiment.findUnique({ where: { id } }),
+      ),
       findFirstExperimentByAudience: vi.fn(async () => null),
       countExperiments: vi.fn(async () => 0),
+    },
+    experimentAssignmentRepo: {
+      findSubscriberAssignments: vi.fn(
+        async (_db: unknown, _projectId: string, subscriberId: string) => {
+          const rows = await prismaMock.experimentAssignment.findMany({
+            where: { subscriberId },
+            include: {
+              experiment: {
+                select: { mutualExclusionGroup: true, status: true },
+              },
+            },
+          });
+          return Array.isArray(rows) ? rows : [];
+        },
+      ),
+      findAssignmentsWithMetrics: vi.fn(
+        async (_db: unknown, subscriberId: string) => {
+          const rows = await prismaMock.experimentAssignment.findMany({
+            where: { subscriberId },
+            include: { experiment: { select: { metrics: true } } },
+          });
+          return Array.isArray(rows) ? rows : [];
+        },
+      ),
+      findAssignmentsByExperiment: vi.fn(
+        async (_db: unknown, experimentId: string) => {
+          const rows = await prismaMock.experimentAssignment.findMany({
+            where: { experimentId },
+          });
+          return Array.isArray(rows) ? rows : [];
+        },
+      ),
+      countAssignments: vi.fn(async () => 0),
+      countConvertedAssignments: vi.fn(async () => 0),
+    },
+    productGroupRepo: {
+      listProductGroups: vi.fn(async () => []),
+      findDefaultProductGroup: vi.fn(async (_db: unknown, projectId: string) =>
+        prismaMock.productGroup.findFirst({
+          where: { projectId, isDefault: true },
+        }),
+      ),
+      findProductGroupByIdentifier: vi.fn(
+        async (_db: unknown, projectId: string, identifier: string) =>
+          prismaMock.productGroup.findFirst({
+            where: { projectId, identifier },
+          }),
+      ),
+      findProductsByIds: vi.fn(async () => []),
     },
     featureFlagRepo: {
       findFeatureFlagsByProject: vi.fn(async () => []),

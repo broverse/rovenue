@@ -1,0 +1,152 @@
+import { and, count, eq, isNotNull } from "drizzle-orm";
+import type { Db } from "../client";
+import {
+  experimentAssignments,
+  experiments,
+  type ExperimentAssignment,
+} from "../schema";
+
+// =============================================================
+// Experiment assignment reads — Drizzle repository
+// =============================================================
+
+/**
+ * All assignments for a subscriber across a single project's
+ * experiments, with the experiment's status + mutualExclusionGroup
+ * inlined. Mirrors the shape produced by
+ *   prisma.experimentAssignment.findMany({
+ *     where: { subscriberId, experiment: { projectId } },
+ *     include: { experiment: { select: {…} } },
+ *   })
+ */
+export interface AssignmentWithExperiment {
+  id: string;
+  experimentId: string;
+  subscriberId: string;
+  variantId: string;
+  assignedAt: Date;
+  events: unknown;
+  convertedAt: Date | null;
+  purchaseId: string | null;
+  revenue: string | null;
+  experiment: {
+    status: "DRAFT" | "RUNNING" | "PAUSED" | "COMPLETED";
+    mutualExclusionGroup: string | null;
+  };
+}
+
+export async function findSubscriberAssignments(
+  db: Db,
+  projectId: string,
+  subscriberId: string,
+): Promise<AssignmentWithExperiment[]> {
+  const rows = await db
+    .select({
+      id: experimentAssignments.id,
+      experimentId: experimentAssignments.experimentId,
+      subscriberId: experimentAssignments.subscriberId,
+      variantId: experimentAssignments.variantId,
+      assignedAt: experimentAssignments.assignedAt,
+      events: experimentAssignments.events,
+      convertedAt: experimentAssignments.convertedAt,
+      purchaseId: experimentAssignments.purchaseId,
+      revenue: experimentAssignments.revenue,
+      expStatus: experiments.status,
+      expMutualExclusionGroup: experiments.mutualExclusionGroup,
+    })
+    .from(experimentAssignments)
+    .innerJoin(
+      experiments,
+      eq(experiments.id, experimentAssignments.experimentId),
+    )
+    .where(
+      and(
+        eq(experimentAssignments.subscriberId, subscriberId),
+        eq(experiments.projectId, projectId),
+      ),
+    );
+  return rows.map((r) => ({
+    id: r.id,
+    experimentId: r.experimentId,
+    subscriberId: r.subscriberId,
+    variantId: r.variantId,
+    assignedAt: r.assignedAt,
+    events: r.events,
+    convertedAt: r.convertedAt,
+    purchaseId: r.purchaseId,
+    revenue: r.revenue,
+    experiment: {
+      status: r.expStatus,
+      mutualExclusionGroup: r.expMutualExclusionGroup,
+    },
+  }));
+}
+
+export interface AssignmentWithMetrics {
+  id: string;
+  events: unknown;
+  convertedAt: Date | null;
+  experiment: { metrics: unknown };
+}
+
+export async function findAssignmentsWithMetrics(
+  db: Db,
+  subscriberId: string,
+): Promise<AssignmentWithMetrics[]> {
+  const rows = await db
+    .select({
+      id: experimentAssignments.id,
+      events: experimentAssignments.events,
+      convertedAt: experimentAssignments.convertedAt,
+      metrics: experiments.metrics,
+    })
+    .from(experimentAssignments)
+    .innerJoin(
+      experiments,
+      eq(experiments.id, experimentAssignments.experimentId),
+    )
+    .where(eq(experimentAssignments.subscriberId, subscriberId));
+  return rows.map((r) => ({
+    id: r.id,
+    events: r.events,
+    convertedAt: r.convertedAt,
+    experiment: { metrics: r.metrics },
+  }));
+}
+
+export async function findAssignmentsByExperiment(
+  db: Db,
+  experimentId: string,
+): Promise<ExperimentAssignment[]> {
+  return db
+    .select()
+    .from(experimentAssignments)
+    .where(eq(experimentAssignments.experimentId, experimentId));
+}
+
+export async function countAssignments(
+  db: Db,
+  experimentId: string,
+): Promise<number> {
+  const rows = await db
+    .select({ total: count() })
+    .from(experimentAssignments)
+    .where(eq(experimentAssignments.experimentId, experimentId));
+  return Number(rows[0]?.total ?? 0);
+}
+
+export async function countConvertedAssignments(
+  db: Db,
+  experimentId: string,
+): Promise<number> {
+  const rows = await db
+    .select({ total: count() })
+    .from(experimentAssignments)
+    .where(
+      and(
+        eq(experimentAssignments.experimentId, experimentId),
+        isNotNull(experimentAssignments.convertedAt),
+      ),
+    );
+  return Number(rows[0]?.total ?? 0);
+}

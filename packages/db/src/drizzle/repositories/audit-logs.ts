@@ -128,6 +128,38 @@ export async function countAuditLogs(
 }
 
 /**
+ * Full project chain ordered by (createdAt, id) ASC so the
+ * verifyAuditChain walker reads rows in insertion order. Does
+ * NOT join the user — the verifier only needs the hash columns
+ * + core payload fields.
+ */
+export async function findProjectChain(
+  db: Db,
+  projectId: string,
+): Promise<Array<{
+  id: string;
+  projectId: string;
+  userId: string;
+  action: string;
+  resource: string;
+  resourceId: string;
+  before: unknown;
+  after: unknown;
+  ipAddress: string | null;
+  userAgent: string | null;
+  prevHash: string | null;
+  rowHash: string | null;
+  createdAt: Date;
+}>> {
+  const rows = await db
+    .select()
+    .from(auditLogs)
+    .where(eq(auditLogs.projectId, projectId))
+    .orderBy(auditLogs.createdAt, auditLogs.id);
+  return rows;
+}
+
+/**
  * Single-row lookup by PK. Returns null when the row doesn't
  * exist so the caller decides on 404 semantics. Includes the
  * author user row in the same shape the list helper emits.

@@ -103,12 +103,10 @@ async function buildAccessResponse(subscriberId: string) {
   const purchaseIds = Array.from(
     new Set(Object.values(raw).map((entry) => entry.purchaseId)),
   );
-  const purchases = purchaseIds.length
-    ? await prisma.purchase.findMany({
-        where: { id: { in: purchaseIds } },
-        include: { product: { select: { identifier: true } } },
-      })
-    : [];
+  const purchases = await drizzle.purchaseRepo.findPurchasesByIds(
+    drizzle.db,
+    purchaseIds,
+  );
   const productByPurchase = new Map(
     purchases.map((p) => [p.id, p.product.identifier] as const),
   );
