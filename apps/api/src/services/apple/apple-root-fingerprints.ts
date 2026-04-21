@@ -15,10 +15,23 @@ import { createHash } from "node:crypto";
 // Compute with:
 //   openssl x509 -in AppleRootCA-G3.cer -inform DER -noout \
 //     -fingerprint -sha256 | awk -F= '{print tolower($2)}' | tr -d ':'
-export const APPLE_ROOT_FINGERPRINTS = new Set<string>([
+const frozen = new Set<string>([
+  // @placeholder:apple-root-fingerprint — replace before production
   "63343abfb89a6a03ebb57e9b3f5fa7be7c4f5c7a8d1ba7e3e5f4eae1f9b2c7dc",
+  // @placeholder:apple-root-fingerprint — replace before production
   "b0b1730ecbc7ff4505142c49f1295e6eda6bcaed7e2c68c5be91b5a11001f024",
 ]);
+frozen.add = () => {
+  throw new Error("APPLE_ROOT_FINGERPRINTS is immutable");
+};
+frozen.delete = () => {
+  throw new Error("APPLE_ROOT_FINGERPRINTS is immutable");
+};
+frozen.clear = () => {
+  throw new Error("APPLE_ROOT_FINGERPRINTS is immutable");
+};
+
+export const APPLE_ROOT_FINGERPRINTS: ReadonlySet<string> = frozen;
 
 export function fingerprintOf(der: Buffer): string {
   return createHash("sha256").update(der).digest("hex");
