@@ -1,8 +1,10 @@
 import prisma, {
   ExperimentStatus,
   Prisma,
+  drizzle,
   type ExperimentType,
 } from "@rovenue/db";
+import { env } from "../lib/env";
 import {
   analyzeConversion,
   analyzeFunnel,
@@ -91,11 +93,38 @@ function cacheKey(projectId: string): string {
 }
 
 async function loadBundleFromDb(projectId: string): Promise<ExperimentBundle> {
+  // Shadow-read the two bundle sources in parallel. Same pattern
+  // as flag-engine: Prisma canonical, Drizzle mirrors, divergence
+  // surfaces via the structured `shadow-read.divergence` log.
+  const shadowCtx = { projectId };
   const [experiments, audiences] = await Promise.all([
-    prisma.experiment.findMany({
-      where: { projectId, status: ExperimentStatus.RUNNING },
-    }),
-    prisma.audience.findMany({ where: { projectId } }),
+    drizzle.shadowRead(
+      () =>
+        prisma.experiment.findMany({
+          where: { projectId, status: ExperimentStatus.RUNNING },
+        }),
+      () =>
+        drizzle.experimentRepo.findRunningExperimentsByProject(
+          drizzle.db,
+          projectId,
+        ),
+      {
+        name: "experiment.findRunningByProject",
+        context: shadowCtx,
+        enabled: env.DB_SHADOW_READS,
+        logger: log,
+      },
+    ),
+    drizzle.shadowRead(
+      () => prisma.audience.findMany({ where: { projectId } }),
+      () => drizzle.featureFlagRepo.findAudiencesByProject(drizzle.db, projectId),
+      {
+        name: "audience.findManyByProject",
+        context: shadowCtx,
+        enabled: env.DB_SHADOW_READS,
+        logger: log,
+      },
+    ),
   ]);
 
   return {

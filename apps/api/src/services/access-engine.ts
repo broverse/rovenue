@@ -1,8 +1,10 @@
 import prisma, {
   Prisma,
   PurchaseStatus,
+  drizzle,
   type Store,
 } from "@rovenue/db";
+import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 
 const log = logger.child("access-engine");
@@ -136,13 +138,23 @@ export async function getActiveAccess(
   subscriberId: string,
 ): Promise<Record<string, ActiveAccessEntry>> {
   const now = new Date();
-  const records = await prisma.subscriberAccess.findMany({
-    where: {
-      subscriberId,
-      isActive: true,
-      OR: [{ expiresDate: null }, { expiresDate: { gt: now } }],
+  const records = await drizzle.shadowRead(
+    () =>
+      prisma.subscriberAccess.findMany({
+        where: {
+          subscriberId,
+          isActive: true,
+          OR: [{ expiresDate: null }, { expiresDate: { gt: now } }],
+        },
+      }),
+    () => drizzle.accessRepo.findActiveAccess(drizzle.db, subscriberId, now),
+    {
+      name: "subscriberAccess.findActive",
+      context: { subscriberId },
+      enabled: env.DB_SHADOW_READS,
+      logger: log,
     },
-  });
+  );
 
   const result: Record<string, ActiveAccessEntry> = {};
   for (const record of records) {

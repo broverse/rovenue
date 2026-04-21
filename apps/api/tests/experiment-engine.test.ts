@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, redisMock, redisStore, setRedisMode } = vi.hoisted(() => {
+const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(() => {
   const store = new Map<string, string>();
   let mode: "ok" | "get-fail" = "ok";
 
@@ -43,8 +43,31 @@ const { prismaMock, redisMock, redisStore, setRedisMode } = vi.hoisted(() => {
     },
   };
 
+  const drizzleMock = {
+    db: {} as unknown,
+    experimentRepo: {
+      findRunningExperimentsByProject: vi.fn(async () => []),
+      findExperimentsByProject: vi.fn(async () => []),
+    },
+    featureFlagRepo: {
+      findFeatureFlagsByProject: vi.fn(async () => []),
+      findAudiencesByProject: vi.fn(async () => []),
+    },
+    accessRepo: {
+      findActiveAccess: vi.fn(async () => []),
+    },
+    creditLedgerRepo: {
+      findLatestBalance: vi.fn(async () => null),
+    },
+    shadowRead: vi.fn(
+      async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
+        primary(),
+    ),
+  };
+
   return {
     prismaMock,
+    drizzleMock,
     redisMock,
     redisStore: store,
     setRedisMode: (m: typeof mode) => {
@@ -55,6 +78,7 @@ const { prismaMock, redisMock, redisStore, setRedisMode } = vi.hoisted(() => {
 
 vi.mock("@rovenue/db", () => ({
   default: prismaMock,
+  drizzle: drizzleMock,
   ExperimentStatus: {
     DRAFT: "DRAFT",
     RUNNING: "RUNNING",

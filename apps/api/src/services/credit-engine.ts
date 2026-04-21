@@ -1,8 +1,10 @@
 import prisma, {
   CreditLedgerType,
   Prisma,
+  drizzle,
   type CreditLedger,
 } from "@rovenue/db";
+import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 
 const log = logger.child("credit-engine");
@@ -22,11 +24,21 @@ export class InsufficientCreditsError extends Error {
  * the most recent CreditLedger entry. Append-only; no aggregation.
  */
 export async function getBalance(subscriberId: string): Promise<number> {
-  const last = await prisma.creditLedger.findFirst({
-    where: { subscriberId },
-    orderBy: { createdAt: "desc" },
-    select: { balance: true },
-  });
+  const last = await drizzle.shadowRead(
+    () =>
+      prisma.creditLedger.findFirst({
+        where: { subscriberId },
+        orderBy: { createdAt: "desc" },
+        select: { balance: true },
+      }),
+    () => drizzle.creditLedgerRepo.findLatestBalance(drizzle.db, subscriberId),
+    {
+      name: "creditLedger.findLatestBalance",
+      context: { subscriberId },
+      enabled: env.DB_SHADOW_READS,
+      logger: log,
+    },
+  );
   return last?.balance ?? 0;
 }
 

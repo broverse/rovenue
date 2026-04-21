@@ -22,3 +22,6 @@ export * as subscriberRepo from "./repositories/subscribers";
 export * as featureFlagRepo from "./repositories/feature-flags";
 export * as auditLogRepo from "./repositories/audit-logs";
 export * as metricsRepo from "./repositories/metrics";
+export * as experimentRepo from "./repositories/experiments";
+export * as accessRepo from "./repositories/access";
+export * as creditLedgerRepo from "./repositories/credit-ledger";

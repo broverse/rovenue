@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock } = vi.hoisted(() => {
+const { prismaMock, drizzleMock } = vi.hoisted(() => {
   const apiKey = {
     findUnique: vi.fn(),
     update: vi.fn(),
@@ -75,11 +75,35 @@ const { prismaMock } = vi.hoisted(() => {
     $transaction,
   };
 
-  return { prismaMock: mock };
+  const drizzleMock = {
+    db: {} as unknown,
+    subscriberRepo: {
+      findSubscriberAttributes: vi.fn(async () => null),
+      findSubscriberByAppUserId: vi.fn(async () => null),
+      listSubscribers: vi.fn(async () => []),
+    },
+    accessRepo: { findActiveAccess: vi.fn(async () => []) },
+    creditLedgerRepo: { findLatestBalance: vi.fn(async () => null) },
+    experimentRepo: {
+      findRunningExperimentsByProject: vi.fn(async () => []),
+      findExperimentsByProject: vi.fn(async () => []),
+    },
+    featureFlagRepo: {
+      findFeatureFlagsByProject: vi.fn(async () => []),
+      findAudiencesByProject: vi.fn(async () => []),
+    },
+    shadowRead: vi.fn(
+      async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
+        primary(),
+    ),
+  };
+
+  return { prismaMock: mock, drizzleMock };
 });
 
 vi.mock("@rovenue/db", () => ({
   default: prismaMock,
+  drizzle: drizzleMock,
   MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   Store: {
     APP_STORE: "APP_STORE",
