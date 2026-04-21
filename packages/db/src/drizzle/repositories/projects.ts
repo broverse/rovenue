@@ -233,3 +233,84 @@ export async function clearProjectCredential(
     .set({ [column]: sql`NULL` } as Partial<typeof projects.$inferInsert>)
     .where(eq(projects.id, projectId));
 }
+
+// --- membership writes ---
+
+/**
+ * Insert a new project membership. Used by the dashboard "add
+ * member" flow, which has already confirmed the user exists and
+ * is not yet a member.
+ */
+export async function createProjectMember(
+  db: DbOrTx,
+  input: { projectId: string; userId: string; role: (typeof memberRole.enumValues)[number] },
+): Promise<ProjectMember> {
+  const rows = await db
+    .insert(projectMembers)
+    .values({
+      projectId: input.projectId,
+      userId: input.userId,
+      role: input.role,
+    })
+    .returning();
+  const row = rows[0];
+  if (!row) throw new Error("Failed to create project member");
+  return row;
+}
+
+/**
+ * Update a membership role. Returns the updated row joined with
+ * the user so callers can reuse `toMemberRow` without a second
+ * lookup.
+ */
+export async function updateProjectMemberRole(
+  db: DbOrTx,
+  projectId: string,
+  userId: string,
+  role: (typeof memberRole.enumValues)[number],
+): Promise<ProjectMemberWithUser | null> {
+  const updated = await db
+    .update(projectMembers)
+    .set({ role, updatedAt: new Date() })
+    .where(
+      and(
+        eq(projectMembers.projectId, projectId),
+        eq(projectMembers.userId, userId),
+      ),
+    )
+    .returning();
+  const row = updated[0];
+  if (!row) return null;
+  const userRows = await db
+    .select({ email: user.email, name: user.name, image: user.image })
+    .from(user)
+    .where(eq(user.id, row.userId))
+    .limit(1);
+  const u = userRows[0];
+  if (!u) return null;
+  return {
+    id: row.id,
+    userId: row.userId,
+    role: row.role,
+    createdAt: row.createdAt,
+    user: { email: u.email, name: u.name, image: u.image },
+  };
+}
+
+/**
+ * Remove a project membership.
+ */
+export async function deleteProjectMember(
+  db: DbOrTx,
+  projectId: string,
+  userId: string,
+): Promise<void> {
+  await db
+    .delete(projectMembers)
+    .where(
+      and(
+        eq(projectMembers.projectId, projectId),
+        eq(projectMembers.userId, userId),
+      ),
+    );
+}

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, { MemberRole, drizzle } from "@rovenue/db";
+import { MemberRole, drizzle } from "@rovenue/db";
 import type {
   AddMemberResponse,
   ListMembersResponse,
@@ -110,9 +110,11 @@ export const membersRoute = new Hono()
       });
     }
 
-    const created = await prisma.$transaction(async (tx) => {
-      const member = await tx.projectMember.create({
-        data: { projectId, userId: targetUser.id, role: body.role },
+    const created = await drizzle.db.transaction(async (tx) => {
+      const member = await drizzle.projectRepo.createProjectMember(tx, {
+        projectId,
+        userId: targetUser.id,
+        role: body.role,
       });
       await audit(
         {
@@ -173,12 +175,16 @@ export const membersRoute = new Hono()
       }
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const row = await tx.projectMember.update({
-        where: { projectId_userId: { projectId, userId: targetUserId } },
-        data: { role: body.role },
-        include: { user: { select: { email: true, name: true, image: true } } },
-      });
+    const updated = await drizzle.db.transaction(async (tx) => {
+      const row = await drizzle.projectRepo.updateProjectMemberRole(
+        tx,
+        projectId,
+        targetUserId,
+        body.role,
+      );
+      if (!row) {
+        throw new HTTPException(404, { message: "Member not found" });
+      }
       await audit(
         {
           projectId,
@@ -225,7 +231,7 @@ export const membersRoute = new Hono()
       }
     }
 
-    await prisma.$transaction(async (tx) => {
+    await drizzle.db.transaction(async (tx) => {
       await audit(
         {
           projectId,
@@ -238,9 +244,7 @@ export const membersRoute = new Hono()
         },
         tx,
       );
-      await tx.projectMember.delete({
-        where: { projectId_userId: { projectId, userId: targetUserId } },
-      });
+      await drizzle.projectRepo.deleteProjectMember(tx, projectId, targetUserId);
     });
 
     return c.json(ok({ id: target.id }));
@@ -270,7 +274,7 @@ export const membersRoute = new Hono()
       }
     }
 
-    await prisma.$transaction(async (tx) => {
+    await drizzle.db.transaction(async (tx) => {
       await audit(
         {
           projectId,
@@ -284,9 +288,7 @@ export const membersRoute = new Hono()
         },
         tx,
       );
-      await tx.projectMember.delete({
-        where: { projectId_userId: { projectId, userId: user.id } },
-      });
+      await drizzle.projectRepo.deleteProjectMember(tx, projectId, user.id);
     });
 
     return c.json(ok({ id: membership.id }));

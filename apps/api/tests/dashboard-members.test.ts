@@ -44,8 +44,13 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
   // findUnique.mockResolvedValue(...)) keeps working during the
   // Phase 6 cutover. Each repository method maps to its Prisma
   // equivalent 1:1.
+  const drizzleDb = {
+    transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
+      fn(drizzleDb),
+    ),
+  };
   const drizzleMock = {
-    db: {} as unknown,
+    db: drizzleDb,
     projectRepo: {
       findMembership: vi.fn(async (_db, projectId, userId) =>
         prismaMock.projectMember.findUnique({
@@ -68,6 +73,37 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
         prismaMock.projectMember.count({
           where: { projectId, role: "OWNER" },
         }),
+      ),
+      // Write paths. Delegate to the prisma mocks so existing
+      // `prismaMock.projectMember.create.mockResolvedValue(...)`
+      // setup keeps driving the test assertions.
+      createProjectMember: vi.fn(
+        async (
+          _tx: unknown,
+          input: { projectId: string; userId: string; role: string },
+        ) =>
+          prismaMock.projectMember.create({
+            data: { projectId: input.projectId, userId: input.userId, role: input.role },
+          }),
+      ),
+      updateProjectMemberRole: vi.fn(
+        async (
+          _tx: unknown,
+          projectId: string,
+          userId: string,
+          role: string,
+        ) =>
+          prismaMock.projectMember.update({
+            where: { projectId_userId: { projectId, userId } },
+            data: { role },
+            include: { user: { select: { email: true, name: true, image: true } } },
+          }),
+      ),
+      deleteProjectMember: vi.fn(
+        async (_tx: unknown, projectId: string, userId: string) =>
+          prismaMock.projectMember.delete({
+            where: { projectId_userId: { projectId, userId } },
+          }),
       ),
     },
     userRepo: {
