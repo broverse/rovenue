@@ -270,12 +270,15 @@ describe("GET /dashboard/audit-logs", () => {
         after: { name: "TR iOS" },
         ipAddress: "1.2.3.4",
         userAgent: "test",
+        prevHash: null,
+        rowHash: "hash_1",
         createdAt: new Date(),
         user: { id: "user_1", name: "Test", email: "t@t.com", image: null },
       },
     ];
-    prismaMock.auditLog.findMany.mockResolvedValue(logs);
-    prismaMock.auditLog.count.mockResolvedValue(1);
+    // Phase 5: dashboard audit reads are Drizzle-only.
+    drizzleMock.auditLogRepo.listAuditLogs.mockResolvedValue(logs);
+    drizzleMock.auditLogRepo.countAuditLogs.mockResolvedValue(1);
 
     const res = await app.request(
       "http://localhost/dashboard/audit-logs?projectId=proj_a",
@@ -291,25 +294,27 @@ describe("GET /dashboard/audit-logs", () => {
     expect(body.data.pagination.hasMore).toBe(false);
   });
 
-  it("passes filter params to the query", async () => {
-    prismaMock.auditLog.findMany.mockResolvedValue([]);
-    prismaMock.auditLog.count.mockResolvedValue(0);
+  it("passes filter params to the repository", async () => {
+    drizzleMock.auditLogRepo.listAuditLogs.mockResolvedValue([]);
+    drizzleMock.auditLogRepo.countAuditLogs.mockResolvedValue(0);
 
     await app.request(
       "http://localhost/dashboard/audit-logs?projectId=proj_a&action=create&resource=experiment&limit=10&offset=5",
       { headers: authedHeaders() },
     );
 
-    const call = prismaMock.auditLog.findMany.mock.calls[0]![0] as {
-      where: Record<string, unknown>;
-      take: number;
-      skip: number;
+    const call = drizzleMock.auditLogRepo.listAuditLogs.mock.calls[0]![1] as {
+      projectId: string;
+      action?: string;
+      resource?: string;
+      limit: number;
+      offset: number;
     };
-    expect(call.where.projectId).toBe("proj_a");
-    expect(call.where.action).toBe("create");
-    expect(call.where.resource).toBe("experiment");
-    expect(call.take).toBe(10);
-    expect(call.skip).toBe(5);
+    expect(call.projectId).toBe("proj_a");
+    expect(call.action).toBe("create");
+    expect(call.resource).toBe("experiment");
+    expect(call.limit).toBe(10);
+    expect(call.offset).toBe(5);
   });
 
   it("returns 400 when projectId is missing", async () => {

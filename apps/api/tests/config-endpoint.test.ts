@@ -288,7 +288,8 @@ describe("GET /v1/config", () => {
 
 describe("POST /v1/config", () => {
   it("merges request attributes with DB-stored attributes (request wins)", async () => {
-    prismaMock.subscriber.findUnique.mockResolvedValue({
+    // Phase 5: the attributes read is Drizzle-only now.
+    drizzleMock.subscriberRepo.findSubscriberAttributes.mockResolvedValue({
       attributes: { plan: "free", totalRevenue: 0 },
     } as any);
     prismaMock.subscriber.upsert.mockResolvedValue({

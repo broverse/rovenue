@@ -126,3 +126,61 @@ export async function countAuditLogs(
     .where(and(...buildFilters(filters)));
   return Number(rows[0]?.total ?? 0);
 }
+
+/**
+ * Single-row lookup by PK. Returns null when the row doesn't
+ * exist so the caller decides on 404 semantics. Includes the
+ * author user row in the same shape the list helper emits.
+ */
+export async function findAuditLogById(
+  db: Db,
+  id: string,
+): Promise<AuditLogRowWithUser | null> {
+  const rows = await db
+    .select({
+      id: auditLogs.id,
+      projectId: auditLogs.projectId,
+      userId: auditLogs.userId,
+      action: auditLogs.action,
+      resource: auditLogs.resource,
+      resourceId: auditLogs.resourceId,
+      before: auditLogs.before,
+      after: auditLogs.after,
+      ipAddress: auditLogs.ipAddress,
+      userAgent: auditLogs.userAgent,
+      prevHash: auditLogs.prevHash,
+      rowHash: auditLogs.rowHash,
+      createdAt: auditLogs.createdAt,
+      userIdJoined: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      userImage: user.image,
+    })
+    .from(auditLogs)
+    .innerJoin(user, eq(user.id, auditLogs.userId))
+    .where(eq(auditLogs.id, id))
+    .limit(1);
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: r.id,
+    projectId: r.projectId,
+    userId: r.userId,
+    action: r.action,
+    resource: r.resource,
+    resourceId: r.resourceId,
+    before: r.before,
+    after: r.after,
+    ipAddress: r.ipAddress,
+    userAgent: r.userAgent,
+    prevHash: r.prevHash,
+    rowHash: r.rowHash,
+    createdAt: r.createdAt,
+    user: {
+      id: r.userIdJoined,
+      name: r.userName,
+      email: r.userEmail,
+      image: r.userImage,
+    },
+  };
+}

@@ -113,7 +113,10 @@ describe("GET /dashboard/projects/:projectId/subscribers", () => {
     signedIn("user_1");
     prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
 
-    // take: limit + 1 = 51 — indicates there's a next page.
+    // take: limit + 1 = 51 rows to prove the "has more" probe.
+    // The Drizzle list repo returns `purchaseCount` and
+    // `activeEntitlementKeys` flattened — no _count / access
+    // nesting needed post-cutover.
     const rows = Array.from({ length: 51 }, (_, i) => ({
       id: `sub_${i}`,
       appUserId: `user_${i}`,
@@ -121,10 +124,10 @@ describe("GET /dashboard/projects/:projectId/subscribers", () => {
       firstSeenAt: new Date("2026-04-10"),
       lastSeenAt: new Date("2026-04-18"),
       createdAt: new Date(`2026-04-${10 + (i % 8)}T12:00:00Z`),
-      _count: { purchases: 0 },
-      access: [],
+      purchaseCount: 0,
+      activeEntitlementKeys: [],
     }));
-    prismaMock.subscriber.findMany.mockResolvedValue(rows);
+    drizzleMock.subscriberRepo.listSubscribers.mockResolvedValue(rows);
 
     const res = await app.request("/dashboard/projects/proj_1/subscribers?limit=50");
     expect(res.status).toBe(200);
@@ -135,30 +138,28 @@ describe("GET /dashboard/projects/:projectId/subscribers", () => {
     expect(body.data.nextCursor).not.toBeNull();
   });
 
-  test("hides soft-deleted subscribers", async () => {
+  test("passes projectId to the list repository (soft-delete filter is internal)", async () => {
     signedIn("user_1");
     prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
-    prismaMock.subscriber.findMany.mockResolvedValue([]);
+    drizzleMock.subscriberRepo.listSubscribers.mockResolvedValue([]);
 
     await app.request("/dashboard/projects/proj_1/subscribers");
-    const call = prismaMock.subscriber.findMany.mock.calls[0]?.[0] as {
-      where: Record<string, unknown>;
+    const call = drizzleMock.subscriberRepo.listSubscribers.mock.calls[0]?.[1] as {
+      projectId: string;
     };
-    expect(call.where).toMatchObject({ projectId: "proj_1", deletedAt: null });
+    expect(call.projectId).toBe("proj_1");
   });
 
-  test("applies case-insensitive search on appUserId when ?q is set", async () => {
+  test("forwards ?q to the list repository for case-insensitive search", async () => {
     signedIn("user_1");
     prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
-    prismaMock.subscriber.findMany.mockResolvedValue([]);
+    drizzleMock.subscriberRepo.listSubscribers.mockResolvedValue([]);
 
     await app.request("/dashboard/projects/proj_1/subscribers?q=alice");
-    const call = prismaMock.subscriber.findMany.mock.calls[0]?.[0] as {
-      where: Record<string, unknown>;
+    const call = drizzleMock.subscriberRepo.listSubscribers.mock.calls[0]?.[1] as {
+      q?: string;
     };
-    const whereJson = JSON.stringify(call.where);
-    expect(whereJson).toContain("alice");
-    expect(whereJson).toContain("insensitive");
+    expect(call.q).toBe("alice");
   });
 });
 

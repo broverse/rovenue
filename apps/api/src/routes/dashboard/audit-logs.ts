@@ -1,14 +1,16 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import prisma, { drizzle, type Prisma } from "@rovenue/db";
+import { drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
-import { env } from "../../lib/env";
-import { logger } from "../../lib/logger";
 import { ok } from "../../lib/response";
 
-const log = logger.child("route:dashboard:audit-logs");
+// NOTE: audit-log reads were shadow-read through Drizzle for a
+// full cycle (Phase 3). Phase 5 cuts over — Drizzle is now the
+// canonical reader and the old Prisma primary is removed. Prisma
+// keeps handling the WRITE side (audit chain writer in
+// apps/api/src/lib/audit.ts) until Phase 6 covers mutations too.
 
 // =============================================================
 // Dashboard: Audit log viewer
@@ -47,20 +49,6 @@ export const auditLogsRoute = new Hono()
     );
     const offset = rawOffset ? parseInt(rawOffset, 10) || 0 : 0;
 
-    const where: Prisma.AuditLogWhereInput = { projectId };
-    if (action) where.action = action;
-    if (filterUserId) where.userId = filterUserId;
-    if (resource) where.resource = resource;
-    if (resourceId) where.resourceId = resourceId;
-    if (from || to) {
-      where.createdAt = {};
-      if (from) where.createdAt.gte = new Date(from);
-      if (to) where.createdAt.lte = new Date(to);
-    }
-
-    // Shadow repository filters mirror the Prisma `where` so the
-    // structural diff compares identical result sets. Date fields
-    // pass through as Date instances on both sides.
     const repoFilters = {
       projectId,
       ...(action && { action }),
@@ -70,45 +58,14 @@ export const auditLogsRoute = new Hono()
       ...(from && { from: new Date(from) }),
       ...(to && { to: new Date(to) }),
     };
-    const shadowCtx = { projectId, limit, offset };
 
     const [logs, total] = await Promise.all([
-      drizzle.shadowRead(
-        () =>
-          prisma.auditLog.findMany({
-            where,
-            orderBy: { createdAt: "desc" },
-            take: limit,
-            skip: offset,
-            include: {
-              user: {
-                select: { id: true, name: true, email: true, image: true },
-              },
-            },
-          }),
-        () =>
-          drizzle.auditLogRepo.listAuditLogs(drizzle.db, {
-            ...repoFilters,
-            limit,
-            offset,
-          }),
-        {
-          name: "auditLog.list",
-          context: shadowCtx,
-          enabled: env.DB_SHADOW_READS,
-          logger: log,
-        },
-      ),
-      drizzle.shadowRead(
-        () => prisma.auditLog.count({ where }),
-        () => drizzle.auditLogRepo.countAuditLogs(drizzle.db, repoFilters),
-        {
-          name: "auditLog.count",
-          context: shadowCtx,
-          enabled: env.DB_SHADOW_READS,
-          logger: log,
-        },
-      ),
+      drizzle.auditLogRepo.listAuditLogs(drizzle.db, {
+        ...repoFilters,
+        limit,
+        offset,
+      }),
+      drizzle.auditLogRepo.countAuditLogs(drizzle.db, repoFilters),
     ]);
 
     return c.json(
@@ -125,12 +82,7 @@ export const auditLogsRoute = new Hono()
   })
   .get("/:id", async (c) => {
     const id = c.req.param("id");
-    const entry = await prisma.auditLog.findUnique({
-      where: { id },
-      include: {
-        user: { select: { id: true, name: true, email: true, image: true } },
-      },
-    });
+    const entry = await drizzle.auditLogRepo.findAuditLogById(drizzle.db, id);
     if (!entry) {
       throw new HTTPException(404, { message: "Audit log entry not found" });
     }

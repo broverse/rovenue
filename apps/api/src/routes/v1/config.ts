@@ -5,8 +5,6 @@ import { z } from "zod";
 import prisma, { drizzle, type Prisma } from "@rovenue/db";
 import { evaluateAllFlags } from "../../services/flag-engine";
 import { evaluateExperiments } from "../../services/experiment-engine";
-import { env } from "../../lib/env";
-import { logger } from "../../lib/logger";
 import { ok } from "../../lib/response";
 
 // =============================================================
@@ -40,8 +38,6 @@ export const configBodySchema = z.object({
 
 export type ConfigBody = z.infer<typeof configBodySchema>;
 
-const log = logger.child("route:v1:config");
-
 function resolveSubscriberId(c: Context): string | null {
   return (
     c.req.query("subscriberId") ??
@@ -69,28 +65,13 @@ async function handleConfig(
   // the evaluation path AND the stored attributes, otherwise the
   // dashboard's "subscribers with country=TR" view goes stale.
   //
-  // The read passes through `shadowRead` so the Drizzle repo mirrors
-  // every call while we're in the hybrid period. Prisma stays the
-  // canonical reader; shadow log entries drive parity confidence.
-  const existing = await drizzle.shadowRead(
-    () =>
-      prisma.subscriber.findUnique({
-        where: {
-          projectId_appUserId: { projectId: project.id, appUserId },
-        },
-        select: { attributes: true },
-      }),
-    () =>
-      drizzle.subscriberRepo.findSubscriberAttributes(drizzle.db, {
-        projectId: project.id,
-        appUserId,
-      }),
-    {
-      name: "subscriber.findAttributes",
-      context: { projectId: project.id, appUserId },
-      enabled: env.DB_SHADOW_READS,
-      logger: log,
-    },
+  // Cutover: this read is Drizzle-only after Phase 5. Shadow
+  // reads against the dashboard list + config attribute fetch
+  // ran clean for a full cycle; the Prisma caller is removed.
+  // Writes (upsert below) stay on Prisma until Phase 6.
+  const existing = await drizzle.subscriberRepo.findSubscriberAttributes(
+    drizzle.db,
+    { projectId: project.id, appUserId },
   );
   const mergedAttributes: Record<string, unknown> = {
     ...((existing?.attributes as Record<string, unknown> | null) ?? {}),

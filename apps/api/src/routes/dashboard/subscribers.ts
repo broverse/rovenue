@@ -9,27 +9,15 @@ import type {
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
-import { env } from "../../lib/env";
-import { logger } from "../../lib/logger";
 import { ok } from "../../lib/response";
 import { encodeCursor, decodeCursor } from "../../lib/pagination";
 
-const log = logger.child("route:dashboard:subscribers");
-
-// Normalised row shape the shadow read compares on. Both Prisma
-// (with include: _count + access) and the Drizzle repository
-// project into this shape so the structural diff sees identical
-// payloads.
-interface NormalizedSubscriberRow {
-  id: string;
-  appUserId: string;
-  attributes: Record<string, unknown>;
-  firstSeenAt: Date;
-  lastSeenAt: Date;
-  createdAt: Date;
-  purchaseCount: number;
-  activeEntitlementKeys: string[];
-}
+// NOTE: the list endpoint was shadow-read for a full cycle in
+// Phase 3 with Prisma canonical and Drizzle mirroring. Phase 5
+// cuts over — Drizzle is the only reader now. The detail
+// endpoint below still fans out through Prisma on several
+// tables; Phase 6 consolidates those behind a drizzle
+// subscriberDetail repository.
 
 // =============================================================
 // Dashboard: Subscribers list (Task A6)
@@ -80,93 +68,16 @@ export const subscribersRoute = new Hono()
 
   const cursor = decodeCursor(query.cursor);
 
-  // Compose the where clause as AND parts (text search + keyset
-  // cursor) layered on top of the tenancy + soft-delete filters so
-  // the shape stays flat when there are no optional predicates.
-  const and: Prisma.SubscriberWhereInput[] = [];
-
-  if (query.q) {
-    and.push({
-      appUserId: { contains: query.q, mode: "insensitive" },
-    });
-  }
-
-  if (cursor) {
-    and.push({
-      OR: [
-        { createdAt: { lt: cursor.createdAt } },
-        { createdAt: cursor.createdAt, id: { lt: cursor.id } },
-      ],
-    });
-  }
-
-  const where: Prisma.SubscriberWhereInput = {
-    projectId,
-    deletedAt: null,
-    ...(and.length > 0 && { AND: and }),
-  };
-
+  // listSubscribers builds its own WHERE internally (projectId +
+  // deletedAt IS NULL + optional text search + optional keyset
+  // cursor) — see packages/db/src/drizzle/repositories/subscribers.ts.
   const fetchLimit = query.limit + 1;
-  const rows = await drizzle.shadowRead(
-    async (): Promise<NormalizedSubscriberRow[]> => {
-      const prismaRows = await prisma.subscriber.findMany({
-        where,
-        take: fetchLimit,
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        include: {
-          _count: { select: { purchases: true } },
-          access: {
-            where: {
-              isActive: true,
-              OR: [{ expiresDate: null }, { expiresDate: { gt: new Date() } }],
-            },
-            select: { entitlementKey: true },
-          },
-        },
-      });
-      return prismaRows.map((s) => ({
-        id: s.id,
-        appUserId: s.appUserId,
-        attributes: (s.attributes as Record<string, unknown> | null) ?? {},
-        firstSeenAt: s.firstSeenAt,
-        lastSeenAt: s.lastSeenAt,
-        createdAt: s.createdAt,
-        purchaseCount: s._count.purchases,
-        activeEntitlementKeys: [
-          ...new Set(
-            s.access.map((a: { entitlementKey: string }) => a.entitlementKey),
-          ),
-        ].sort(),
-      }));
-    },
-    async (): Promise<NormalizedSubscriberRow[]> => {
-      const drizzleRows = await drizzle.subscriberRepo.listSubscribers(
-        drizzle.db,
-        {
-          projectId,
-          cursor: cursor ?? undefined,
-          limit: fetchLimit,
-          q: query.q,
-        },
-      );
-      return drizzleRows.map((r) => ({
-        id: r.id,
-        appUserId: r.appUserId,
-        attributes: (r.attributes as Record<string, unknown> | null) ?? {},
-        firstSeenAt: r.firstSeenAt,
-        lastSeenAt: r.lastSeenAt,
-        createdAt: r.createdAt,
-        purchaseCount: r.purchaseCount,
-        activeEntitlementKeys: [...r.activeEntitlementKeys].sort(),
-      }));
-    },
-    {
-      name: "subscriber.list",
-      context: { projectId, limit: query.limit, hasCursor: !!cursor, q: query.q ?? null },
-      enabled: env.DB_SHADOW_READS,
-      logger: log,
-    },
-  );
+  const rows = await drizzle.subscriberRepo.listSubscribers(drizzle.db, {
+    projectId,
+    cursor: cursor ?? undefined,
+    limit: fetchLimit,
+    q: query.q,
+  });
 
   const hasMore = rows.length > query.limit;
   const page = hasMore ? rows.slice(0, query.limit) : rows;
@@ -177,7 +88,7 @@ export const subscribersRoute = new Hono()
   const subscribers: SubscriberListItem[] = page.map((s) => ({
     id: s.id,
     appUserId: s.appUserId,
-    attributes: s.attributes,
+    attributes: (s.attributes as Record<string, unknown> | null) ?? {},
     firstSeenAt: s.firstSeenAt.toISOString(),
     lastSeenAt: s.lastSeenAt.toISOString(),
     purchaseCount: s.purchaseCount,
