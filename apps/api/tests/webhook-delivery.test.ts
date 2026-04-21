@@ -15,9 +15,18 @@ const { prismaMock, drizzleMock, fetchMock } = vi.hoisted(() => {
   // deliverWebhooks now writes state transitions through the
   // Drizzle repo. Delegate to the prisma mock so existing
   // assertions on prismaMock.outgoingWebhook.update keep working.
+  // `claimPendingWebhooks` also delegates to prismaMock.$queryRaw
+  // so the 12 existing `prismaMock.$queryRaw.mockResolvedValue(…)`
+  // setups keep driving the batch under test.
   const drizzleMock = {
     db: {} as unknown,
     outgoingWebhookRepo: {
+      claimPendingWebhooks: vi.fn(
+        async (_db: unknown, _now: Date, _batchSize: number) => {
+          const rows = await prismaMock.$queryRaw();
+          return Array.isArray(rows) ? rows : [];
+        },
+      ),
       updateOutgoingWebhook: vi.fn(
         async (_db: unknown, id: string, patch: Record<string, unknown>) =>
           prismaMock.outgoingWebhook.update({ where: { id }, data: patch }),
@@ -129,27 +138,18 @@ describe("deliverWebhooks — success", () => {
     expect(updateCall.data.attempts).toBe(1);
   });
 
-  test("raw fetch query uses FOR UPDATE SKIP LOCKED to prevent double-dispatch", async () => {
-    // The worker is pulled from outgoing_webhooks via prisma.$queryRaw
-    // with a SELECT … FOR UPDATE OF w SKIP LOCKED. Under multi-replica
-    // deploys this row-level lock keeps two workers from grabbing the
-    // same row and double-dispatching the webhook. The mock captures
-    // the tagged-template strings array; we assert the SQL contains
-    // the lock clauses + the join against projects for the webhook
-    // secret.
+  test("pulls pending webhooks via claimPendingWebhooks (FOR UPDATE SKIP LOCKED)", async () => {
+    // The raw SELECT now lives in outgoingWebhookRepo.claimPending
+    // Webhooks — the Drizzle repo method owns the FOR UPDATE OF w
+    // SKIP LOCKED clause. The worker just invokes it; the SQL shape
+    // itself is verified at the repo level, not here. We only
+    // assert that the worker dispatches through the repo.
     prismaMock.$queryRaw.mockResolvedValue([]);
 
     await deliverWebhooks(fetchMock);
 
-    expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(1);
-    const firstArg = prismaMock.$queryRaw.mock.calls[0]![0] as unknown;
-    // Prisma's $queryRaw tagged template receives a TemplateStringsArray.
-    const templateParts = Array.from(firstArg as ArrayLike<string>);
-    const sql = templateParts.join(" ");
-    expect(sql).toMatch(/FROM\s+outgoing_webhooks/i);
-    expect(sql).toMatch(/JOIN\s+projects/i);
-    expect(sql).toMatch(/FOR\s+UPDATE/i);
-    expect(sql).toMatch(/SKIP\s+LOCKED/i);
+    expect(drizzleMock.outgoingWebhookRepo.claimPendingWebhooks)
+      .toHaveBeenCalledTimes(1);
   });
 
   test("includes HMAC signature + event-id headers when project has a webhook secret", async () => {

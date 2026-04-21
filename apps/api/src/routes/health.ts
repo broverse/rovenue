@@ -1,10 +1,11 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import prisma, {
+import {
   WebhookSource,
   WebhookEventStatus,
   drizzle,
 } from "@rovenue/db";
+import { sql } from "drizzle-orm";
 import { getStoreCircuits, type CircuitBreakerStats } from "../lib/circuit-breaker";
 import { redis } from "../lib/redis";
 import {
@@ -70,7 +71,9 @@ async function measure<T>(
 
 async function checkDatabase(): Promise<CheckResult> {
   try {
-    const { latencyMs } = await measure(() => prisma.$queryRaw`SELECT 1`);
+    const { latencyMs } = await measure(() =>
+      drizzle.db.execute(sql`SELECT 1`),
+    );
     return { status: "ok", latencyMs };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);

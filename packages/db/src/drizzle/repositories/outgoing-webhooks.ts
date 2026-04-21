@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte } from "drizzle-orm";
+import { and, count, desc, eq, gte, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { outgoingWebhooks, type OutgoingWebhook } from "../schema";
 
@@ -194,6 +194,46 @@ export async function updateOutgoingWebhook(
     .update(outgoingWebhooks)
     .set(data)
     .where(eq(outgoingWebhooks.id, id));
+}
+
+export interface PendingWebhookRow {
+  id: string;
+  url: string;
+  payload: unknown;
+  attempts: number;
+  projectId: string;
+  projectWebhookSecret: string | null;
+}
+
+/**
+ * Claim a batch of pending webhooks with `FOR UPDATE OF w SKIP
+ * LOCKED` so two replicas can't grab the same row. The join pulls
+ * the project's webhook secret so the delivery worker can sign
+ * payloads without a second round trip.
+ *
+ * Requires a real Postgres connection — MVCC + row locks don't
+ * exist on the SQLite test engine. Tests mock this call.
+ */
+export async function claimPendingWebhooks(
+  db: DbOrTx,
+  now: Date,
+  batchSize: number,
+): Promise<PendingWebhookRow[]> {
+  const result = await db.execute(sql`
+    SELECT w.id, w.url, w.payload, w.attempts, w."projectId",
+           p."webhookSecret" AS "projectWebhookSecret"
+    FROM ${outgoingWebhooks} w
+    JOIN projects p ON p.id = w."projectId"
+    WHERE w.status = 'PENDING'
+       OR (w.status = 'FAILED' AND w."nextRetryAt" <= ${now})
+    ORDER BY w."createdAt" ASC
+    LIMIT ${batchSize}
+    FOR UPDATE OF w SKIP LOCKED
+  `);
+  // drizzle-orm's .execute() returns the node-postgres result shape
+  // with `.rows`. Cast to our row type (raw SQL bypasses schema
+  // inference).
+  return (result as unknown as { rows: PendingWebhookRow[] }).rows ?? [];
 }
 
 export interface EnqueueOutgoingWebhookInput {

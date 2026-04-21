@@ -19,8 +19,17 @@ const { prismaMock, drizzleMock, redisMock, queueMock } = vi.hoisted(() => {
     },
   };
 
+  // health.ts pings the DB via drizzle.db.execute(sql`SELECT 1`).
+  // The execute spy delegates to prismaMock.$queryRaw so the
+  // existing test setup (mockResolvedValue / mockRejectedValue)
+  // still controls the health-check outcome.
   const drizzleMock = {
-    db: {} as unknown,
+    db: {
+      execute: vi.fn(async () => {
+        const rows = await prismaMock.$queryRaw();
+        return { rows: Array.isArray(rows) ? rows : [] };
+      }),
+    },
     projectRepo: {
       findMembership: vi.fn(async (_db, projectId, userId) =>
         prismaMock.projectMember.findUnique({

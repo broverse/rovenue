@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
-import prisma, { OutgoingWebhookStatus, drizzle } from "@rovenue/db";
+import { OutgoingWebhookStatus, drizzle } from "@rovenue/db";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 
@@ -42,21 +42,15 @@ export async function deliverWebhooks(
 ): Promise<{ delivered: number; failed: number; dead: number }> {
   const now = new Date();
 
-  // `FOR UPDATE SKIP LOCKED` prevents two replicas from grabbing the
-  // same row. Falls back silently on backends that don't support it
-  // (e.g. Prisma's SQLite test engine); the unit tests mock prisma
-  // so the raw query path is only hit in real Postgres deploys.
-  const pending = await prisma.$queryRaw<WebhookRow[]>`
-    SELECT w.id, w.url, w.payload, w.attempts, w."projectId",
-           p."webhookSecret" AS "projectWebhookSecret"
-    FROM outgoing_webhooks w
-    JOIN projects p ON p.id = w."projectId"
-    WHERE w.status = 'PENDING'
-       OR (w.status = 'FAILED' AND w."nextRetryAt" <= ${now})
-    ORDER BY w."createdAt" ASC
-    LIMIT ${BATCH_SIZE}
-    FOR UPDATE OF w SKIP LOCKED
-  `;
+  // `FOR UPDATE SKIP LOCKED` prevents two replicas from grabbing
+  // the same row. Falls back silently on backends that don't
+  // support it (e.g. SQLite); tests mock the repo method so the
+  // raw query path is only hit in real Postgres deploys.
+  const pending = (await drizzle.outgoingWebhookRepo.claimPendingWebhooks(
+    drizzle.db,
+    now,
+    BATCH_SIZE,
+  )) as WebhookRow[];
 
   let delivered = 0;
   let failed = 0;
