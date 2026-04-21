@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { requireDashboardAuth } from "../../middleware/dashboard-auth";
+import { dashboardUserRateLimit } from "../../middleware/rate-limit";
 import { audiencesRoute } from "./audiences";
 import { auditLogsRoute } from "./audit-logs";
 import { credentialsRoute } from "./credentials";
@@ -15,11 +17,18 @@ import { webhooksDashboardRoute } from "./webhooks";
 // =============================================================
 //
 // Chained on a single expression so each sub-route's accumulated
-// type surfaces through to AppType in apps/api/src/app.ts. All
-// children run `requireDashboardAuth` internally, so the top-level
-// middleware list here is empty on purpose.
+// type surfaces through to AppType in apps/api/src/app.ts.
+//
+// Auth + per-user rate limit are mounted here at the tree level so
+// `c.get("user")` is populated before the limiter reads it, giving
+// us one bucket per human rather than one per IP. Children still
+// call `requireDashboardAuth` internally as defense-in-depth — the
+// session read is cheap and keeps each sub-route independently
+// testable.
 
 export const dashboardRoute = new Hono()
+  .use("*", requireDashboardAuth)
+  .use("*", dashboardUserRateLimit())
   .route("/audiences", audiencesRoute)
   .route("/audit-logs", auditLogsRoute)
   .route("/experiments", experimentsRoute)

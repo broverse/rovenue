@@ -136,6 +136,16 @@ export function apiKeyRateLimit(): MiddlewareHandler {
   });
 }
 
+/** 300 req/min per authenticated dashboard user — per-tenant-human envelope. */
+export function dashboardUserRateLimit(): MiddlewareHandler {
+  return rateLimit({
+    windowMs: MINUTE_MS,
+    max: 300,
+    keyPrefix: "rl:dashboard:user",
+    identify: (c) => c.get("user")?.id ?? clientIp(c),
+  });
+}
+
 export interface EndpointRateLimitOptions {
   max: number;
   windowMs?: number;

@@ -90,7 +90,7 @@ vi.mock("../src/lib/redis", () => ({ redis: redisMock }));
 // System under test
 // =============================================================
 
-import { rateLimit } from "../src/middleware/rate-limit";
+import { dashboardUserRateLimit, rateLimit } from "../src/middleware/rate-limit";
 
 function buildApp(middlewareArgs: {
   windowMs: number;
@@ -236,5 +236,28 @@ describe("rateLimit middleware", () => {
 
     expect(r1.status).toBe(200);
     expect(r2.status).toBe(429);
+  });
+
+  test("dashboardUserRateLimit scopes by user id", async () => {
+    const app = new Hono()
+      .use("*", async (c, next) => {
+        const uid = c.req.header("x-test-user") ?? "anon";
+        c.set("user", { id: uid } as never);
+        await next();
+      })
+      .use("*", dashboardUserRateLimit())
+      .get("/", (c) => c.json({ ok: true }));
+
+    // Burn user-A quota (300/min)
+    for (let i = 0; i < 300; i++) {
+      const r = await app.request("/", { headers: { "x-test-user": "user-a" } });
+      expect(r.status).toBe(200);
+    }
+    const over = await app.request("/", { headers: { "x-test-user": "user-a" } });
+    expect(over.status).toBe(429);
+
+    // user-b untouched
+    const other = await app.request("/", { headers: { "x-test-user": "user-b" } });
+    expect(other.status).toBe(200);
   });
 });
