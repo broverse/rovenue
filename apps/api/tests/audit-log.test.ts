@@ -111,6 +111,17 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
       findAudienceInProject: vi.fn(async (_db, _projectId, id) =>
         prismaMock.audience.findFirst({ where: { id } }),
       ),
+      createAudience: vi.fn(
+        async (_db: unknown, input: Record<string, unknown>) =>
+          prismaMock.audience.create({ data: input }),
+      ),
+      updateAudience: vi.fn(
+        async (_db: unknown, id: string, patch: Record<string, unknown>) =>
+          prismaMock.audience.update({ where: { id }, data: patch }),
+      ),
+      deleteAudience: vi.fn(async (_db: unknown, id: string) =>
+        prismaMock.audience.delete({ where: { id } }),
+      ),
     },
     dashboardFeatureFlagRepo: {
       listFeatureFlags: vi.fn(async () => []),

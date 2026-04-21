@@ -2,6 +2,9 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import type { Db } from "../client";
 import { audiences, type Audience } from "../schema";
 
+// DB or Drizzle tx handle — writes accept either.
+type DbOrTx = Db;
+
 // =============================================================
 // Audience reads — Drizzle repository
 // =============================================================
@@ -72,7 +75,7 @@ export interface CreateAudienceInput {
  * project.
  */
 export async function createAudience(
-  db: Db,
+  db: DbOrTx,
   input: CreateAudienceInput,
 ): Promise<Audience> {
   const rows = await db
@@ -88,4 +91,47 @@ export async function createAudience(
   const row = rows[0];
   if (!row) throw new Error("Failed to create audience");
   return row;
+}
+
+export interface UpdateAudienceInput {
+  name?: string;
+  description?: string | null;
+  rules?: unknown;
+}
+
+/**
+ * Apply a partial update to an audience. The dashboard layer
+ * composes this from only the body fields that were actually
+ * provided by the caller.
+ */
+export async function updateAudience(
+  db: DbOrTx,
+  id: string,
+  patch: UpdateAudienceInput,
+): Promise<Audience | null> {
+  const data: Partial<typeof audiences.$inferInsert> = {};
+  if (patch.name !== undefined) data.name = patch.name;
+  if (patch.description !== undefined) data.description = patch.description;
+  if (patch.rules !== undefined) {
+    data.rules = patch.rules as typeof audiences.$inferInsert.rules;
+  }
+  if (Object.keys(data).length === 0) return null;
+  const rows = await db
+    .update(audiences)
+    .set(data)
+    .where(eq(audiences.id, id))
+    .returning();
+  return rows[0] ?? null;
+}
+
+/**
+ * Delete an audience by id. Callers must first check that it's
+ * not the default ("All Users") audience and not referenced by
+ * any live experiment.
+ */
+export async function deleteAudience(
+  db: DbOrTx,
+  id: string,
+): Promise<void> {
+  await db.delete(audiences).where(eq(audiences.id, id));
 }

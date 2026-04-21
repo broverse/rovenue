@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, { MemberRole, drizzle, type Prisma } from "@rovenue/db";
+import { MemberRole, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { assertProjectAccess } from "../../lib/project-access";
@@ -26,14 +26,12 @@ async function ensureDefaultAudience(projectId: string): Promise<void> {
     projectId,
   );
   if (existing) return;
-  await prisma.audience.create({
-    data: {
-      projectId,
-      name: DEFAULT_AUDIENCE_NAME,
-      description: "Matches every subscriber",
-      rules: {},
-      isDefault: true,
-    },
+  await drizzle.audienceRepo.createAudience(drizzle.db, {
+    projectId,
+    name: DEFAULT_AUDIENCE_NAME,
+    description: "Matches every subscriber",
+    rules: {},
+    isDefault: true,
   });
 }
 
@@ -93,14 +91,12 @@ export const audiencesRoute = new Hono()
 
     await ensureDefaultAudience(body.projectId);
 
-    const audience = await prisma.audience.create({
-      data: {
-        projectId: body.projectId,
-        name: body.name,
-        description: body.description,
-        rules: body.rules as Prisma.InputJsonValue,
-        isDefault: false,
-      },
+    const audience = await drizzle.audienceRepo.createAudience(drizzle.db, {
+      projectId: body.projectId,
+      name: body.name,
+      description: body.description,
+      rules: body.rules,
+      isDefault: false,
     });
 
     await invalidateCaches(body.projectId);
@@ -148,17 +144,14 @@ export const audiencesRoute = new Hono()
         });
       }
     }
-    const updates: Prisma.AudienceUpdateInput = {};
-    if (body.name !== undefined) updates.name = body.name;
-    if (body.description !== undefined) updates.description = body.description;
-    if (body.rules !== undefined) {
-      updates.rules = body.rules as Prisma.InputJsonValue;
-    }
-
-    const audience = await prisma.audience.update({
-      where: { id },
-      data: updates,
+    const audience = await drizzle.audienceRepo.updateAudience(drizzle.db, id, {
+      ...(body.name !== undefined && { name: body.name }),
+      ...(body.description !== undefined && { description: body.description }),
+      ...(body.rules !== undefined && { rules: body.rules }),
     });
+    if (!audience) {
+      throw new HTTPException(404, { message: "Audience not found" });
+    }
 
     await invalidateCaches(existing.projectId);
     await audit({
@@ -200,7 +193,7 @@ export const audiencesRoute = new Hono()
       });
     }
 
-    await prisma.audience.delete({ where: { id } });
+    await drizzle.audienceRepo.deleteAudience(drizzle.db, id);
     await invalidateCaches(existing.projectId);
     await audit({
       projectId: existing.projectId,
