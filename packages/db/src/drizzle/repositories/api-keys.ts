@@ -125,3 +125,39 @@ export async function listActiveApiKeys(
     )
     .orderBy(asc(apiKeys.createdAt));
 }
+
+// --- writes ---
+
+export interface CreateApiKeyInput {
+  id: string;
+  projectId: string;
+  label: string;
+  keyPublic: string;
+  keySecretHash: string;
+  environment: "PRODUCTION" | "SANDBOX";
+}
+
+/**
+ * Insert a new api_keys row with the caller-supplied id so the id
+ * embedded in the plaintext secret matches the stored row. See the
+ * project create flow for why the id is pre-generated in JS.
+ */
+export async function createApiKey(
+  db: Db,
+  input: CreateApiKeyInput,
+): Promise<ApiKey> {
+  const rows = await db
+    .insert(apiKeys)
+    .values({
+      id: input.id,
+      projectId: input.projectId,
+      label: input.label,
+      keyPublic: input.keyPublic,
+      keySecretHash: input.keySecretHash,
+      environment: input.environment,
+    })
+    .returning();
+  const row = rows[0];
+  if (!row) throw new Error("Failed to create api key");
+  return row;
+}

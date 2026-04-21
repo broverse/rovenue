@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, { Environment, MemberRole, Prisma, drizzle } from "@rovenue/db";
+import { Environment, MemberRole, drizzle } from "@rovenue/db";
 import {
   API_KEY_KIND,
   API_KEY_PREFIX,
@@ -228,31 +228,25 @@ export const projectsRoute = new Hono()
   const apiKeyId = newApiKeyId();
   const keyPublic = `${API_KEY_PREFIX[API_KEY_KIND.PUBLIC]}${urlSafeRandom(24)}`;
 
-  const { project, apiKey, secretKey } = await prisma.$transaction(async (tx) => {
-    const createdProject = await tx.project.create({
-      data: {
-        name: body.name,
-        slug: body.slug,
-        settings: {},
-      },
+  const { project, apiKey, secretKey } = await drizzle.db.transaction(async (tx) => {
+    const createdProject = await drizzle.projectRepo.createProject(tx, {
+      name: body.name,
+      slug: body.slug,
+      settings: {},
     });
 
-    await tx.projectMember.create({
-      data: {
-        projectId: createdProject.id,
-        userId: user.id,
-        role: MemberRole.OWNER,
-      },
+    await drizzle.projectRepo.createProjectMember(tx, {
+      projectId: createdProject.id,
+      userId: user.id,
+      role: MemberRole.OWNER,
     });
 
-    await tx.audience.create({
-      data: {
-        projectId: createdProject.id,
-        name: DEFAULT_AUDIENCE_NAME,
-        description: DEFAULT_AUDIENCE_DESCRIPTION,
-        rules: {},
-        isDefault: true,
-      },
+    await drizzle.audienceRepo.createAudience(tx, {
+      projectId: createdProject.id,
+      name: DEFAULT_AUDIENCE_NAME,
+      description: DEFAULT_AUDIENCE_DESCRIPTION,
+      rules: {},
+      isDefault: true,
     });
 
     // Secret token layout: `rov_sec_<apiKeyId>_<random>`. The auth
@@ -262,15 +256,13 @@ export const projectsRoute = new Hono()
     const secretPlaintext = `${API_KEY_PREFIX[API_KEY_KIND.SECRET]}${apiKeyId}_${urlSafeRandom(32)}`;
     const keySecretHash = await bcrypt.hash(secretPlaintext, BCRYPT_ROUNDS);
 
-    const createdApiKey = await tx.apiKey.create({
-      data: {
-        id: apiKeyId,
-        projectId: createdProject.id,
-        label: DEFAULT_API_KEY_LABEL,
-        keyPublic,
-        keySecretHash,
-        environment: body.environment,
-      },
+    const createdApiKey = await drizzle.apiKeyRepo.createApiKey(tx, {
+      id: apiKeyId,
+      projectId: createdProject.id,
+      label: DEFAULT_API_KEY_LABEL,
+      keyPublic,
+      keySecretHash,
+      environment: body.environment,
     });
 
     return { project: createdProject, apiKey: createdApiKey, secretKey: secretPlaintext };
@@ -315,17 +307,15 @@ export const projectsRoute = new Hono()
   // Atomic: a crash between update and audit would otherwise produce
   // a silent mutation. Running both in one $transaction means the
   // audit row is a guaranteed side-effect of the project change.
-  const project = await prisma.$transaction(async (tx) => {
-    const updated = await tx.project.update({
-      where: { id },
-      data: {
-        ...(body.name !== undefined && { name: body.name }),
-        ...(body.webhookUrl !== undefined && { webhookUrl: body.webhookUrl }),
-        ...(body.settings !== undefined && {
-          settings: body.settings as Prisma.InputJsonValue,
-        }),
-      },
+  const project = await drizzle.db.transaction(async (tx) => {
+    const updated = await drizzle.projectRepo.updateProject(tx, id, {
+      ...(body.name !== undefined && { name: body.name }),
+      ...(body.webhookUrl !== undefined && { webhookUrl: body.webhookUrl }),
+      ...(body.settings !== undefined && { settings: body.settings }),
     });
+    if (!updated) {
+      throw new HTTPException(404, { message: "Project not found" });
+    }
     await audit(
       {
         projectId: id,
@@ -371,11 +361,8 @@ export const projectsRoute = new Hono()
     // Atomic update + audit. Without the transaction, a 5xx between
     // the two writes would leave the caller thinking rotation failed
     // while the new secret is already live and the old one is gone.
-    await prisma.$transaction(async (tx) => {
-      await tx.project.update({
-        where: { id },
-        data: { webhookSecret },
-      });
+    await drizzle.db.transaction(async (tx) => {
+      await drizzle.projectRepo.updateProjectWebhookSecret(tx, id, webhookSecret);
       await audit(
         {
           projectId: id,
@@ -406,7 +393,7 @@ export const projectsRoute = new Hono()
     // Atomic. Note the ordering constraint: audit FIRST so the fk
     // (audit.projectId → project.id) resolves before cascade delete
     // takes the project row out.
-    await prisma.$transaction(async (tx) => {
+    await drizzle.db.transaction(async (tx) => {
       await audit(
         {
           projectId: id,
@@ -418,7 +405,7 @@ export const projectsRoute = new Hono()
         },
         tx,
       );
-      await tx.project.delete({ where: { id } });
+      await drizzle.projectRepo.deleteProject(tx, id);
     });
 
     return c.json(ok({ id }));

@@ -186,6 +186,96 @@ export async function countProjectOwners(
   return rows.length;
 }
 
+// --- project writes ---
+
+export interface CreateProjectInput {
+  name: string;
+  slug: string;
+  settings: unknown;
+}
+
+/**
+ * Insert a new project row. Used by the dashboard create-project
+ * flow inside a Drizzle transaction alongside createProjectMember,
+ * createAudience (default), and createApiKey.
+ */
+export async function createProject(
+  db: DbOrTx,
+  input: CreateProjectInput,
+): Promise<Project> {
+  const rows = await db
+    .insert(projects)
+    .values({
+      name: input.name,
+      slug: input.slug,
+      settings: input.settings as typeof projects.$inferInsert.settings,
+    })
+    .returning();
+  const row = rows[0];
+  if (!row) throw new Error("Failed to create project");
+  return row;
+}
+
+export interface UpdateProjectInput {
+  name?: string;
+  webhookUrl?: string | null;
+  settings?: unknown;
+}
+
+/**
+ * Apply a partial update to a project. The dashboard PATCH route
+ * composes this from whitelisted body fields (name / webhookUrl /
+ * settings) — anything else is stripped by Zod upstream.
+ */
+export async function updateProject(
+  db: DbOrTx,
+  id: string,
+  input: UpdateProjectInput,
+): Promise<Project | null> {
+  const patch: Partial<typeof projects.$inferInsert> = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.webhookUrl !== undefined) {
+    patch.webhookUrl = input.webhookUrl;
+  }
+  if (input.settings !== undefined) {
+    patch.settings = input.settings as typeof projects.$inferInsert.settings;
+  }
+  if (Object.keys(patch).length === 0) return null;
+  const rows = await db
+    .update(projects)
+    .set(patch)
+    .where(eq(projects.id, id))
+    .returning();
+  return rows[0] ?? null;
+}
+
+/**
+ * Rotate the shared webhook secret. OWNER-only; the caller is
+ * responsible for generating the plaintext `whsec_…` value.
+ */
+export async function updateProjectWebhookSecret(
+  db: DbOrTx,
+  id: string,
+  webhookSecret: string,
+): Promise<void> {
+  await db
+    .update(projects)
+    .set({ webhookSecret })
+    .where(eq(projects.id, id));
+}
+
+/**
+ * Delete a project. Cascades to members, api_keys, audiences, etc.
+ * The audit row MUST be written FIRST so the fk (audit.projectId →
+ * project.id) still resolves.
+ */
+export async function deleteProject(
+  db: DbOrTx,
+  id: string,
+): Promise<void> {
+  await db.delete(projects).where(eq(projects.id, id));
+}
+
 // --- credential writes ---
 
 /**

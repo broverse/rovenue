@@ -34,8 +34,13 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) => fn(prismaMock)),
   };
+  const drizzleDb = {
+    transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
+      fn(drizzleDb),
+    ),
+  };
   const drizzleMock = {
-    db: {} as unknown,
+    db: drizzleDb,
     projectRepo: {
       findMembership: vi.fn(async (_db, projectId, userId) =>
         prismaMock.projectMember.findUnique({
@@ -58,12 +63,57 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
       }),
       listProjectMembers: vi.fn(async () => []),
       countProjectOwners: vi.fn(async () => 0),
+      // --- writes — delegate to the already-mocked Prisma calls.
+      createProject: vi.fn(
+        async (
+          _tx: unknown,
+          input: { name: string; slug: string; settings: unknown },
+        ) => prismaMock.project.create({ data: input }),
+      ),
+      updateProject: vi.fn(
+        async (
+          _tx: unknown,
+          id: string,
+          patch: Record<string, unknown>,
+        ) =>
+          prismaMock.project.update({
+            where: { id },
+            data: patch,
+          }),
+      ),
+      updateProjectWebhookSecret: vi.fn(
+        async (_tx: unknown, id: string, webhookSecret: string) =>
+          prismaMock.project.update({
+            where: { id },
+            data: { webhookSecret },
+          }),
+      ),
+      deleteProject: vi.fn(
+        async (_tx: unknown, id: string) =>
+          prismaMock.project.delete({ where: { id } }),
+      ),
+      createProjectMember: vi.fn(
+        async (
+          _tx: unknown,
+          input: { projectId: string; userId: string; role: string },
+        ) => prismaMock.projectMember.create({ data: input }),
+      ),
+    },
+    audienceRepo: {
+      createAudience: vi.fn(
+        async (_tx: unknown, input: Record<string, unknown>) =>
+          prismaMock.audience.create({ data: input }),
+      ),
     },
     apiKeyRepo: {
       findApiKeyByPublic: vi.fn(async () => null),
       findApiKeyById: vi.fn(async () => null),
       listActiveApiKeys: vi.fn(async (_db: unknown, projectId: string) =>
         prismaMock.apiKey.findMany({ where: { projectId, revokedAt: null } }),
+      ),
+      createApiKey: vi.fn(
+        async (_tx: unknown, input: Record<string, unknown>) =>
+          prismaMock.apiKey.create({ data: input }),
       ),
     },
     subscriberRepo: {
@@ -352,7 +402,7 @@ describe("POST /dashboard/projects", () => {
     // Plaintext secret appears in the response but secretKey hash never does.
     expect(body.data.apiKey.publicKey).toBe("rov_pub_new_id_xxxx");
 
-    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(drizzleMock.db.transaction).toHaveBeenCalledTimes(1);
     expect(prismaMock.project.create).toHaveBeenCalledTimes(1);
     expect(prismaMock.projectMember.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -475,13 +525,13 @@ describe("PATCH /dashboard/projects/:id", () => {
       }),
     );
     expect(auditMock.audit).toHaveBeenCalled();
-    // Atomicity: project.update runs inside a transaction; audit() is
-    // invoked with the tx'd prisma client so a crash between them can't
-    // leave a silent mutation.
-    expect(prismaMock.$transaction).toHaveBeenCalled();
-    expect(prismaMock.$transaction.mock.invocationCallOrder[0]).toBeLessThan(
-      prismaMock.project.update.mock.invocationCallOrder[0]!,
-    );
+    // Atomicity: project.update runs inside a Drizzle transaction;
+    // audit() is invoked with the same tx handle, so a crash between
+    // them can't leave a silent mutation.
+    expect(drizzleMock.db.transaction).toHaveBeenCalled();
+    expect(
+      drizzleMock.db.transaction.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(prismaMock.project.update.mock.invocationCallOrder[0]!);
 
     const body = (await res.json()) as {
       data: {
