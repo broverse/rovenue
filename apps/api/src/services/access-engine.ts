@@ -121,39 +121,24 @@ export async function hasAccess(
   subscriberId: string,
   entitlementKey: string,
 ): Promise<boolean> {
-  const now = new Date();
-  const record = await prisma.subscriberAccess.findFirst({
-    where: {
-      subscriberId,
-      entitlementKey,
-      isActive: true,
-      OR: [{ expiresDate: null }, { expiresDate: { gt: now } }],
-    },
-    select: { id: true },
-  });
-  return record !== null;
+  const records = await drizzle.accessRepo.findActiveAccess(
+    drizzle.db,
+    subscriberId,
+    new Date(),
+  );
+  return records.some((r) => r.entitlementKey === entitlementKey);
 }
 
 export async function getActiveAccess(
   subscriberId: string,
 ): Promise<Record<string, ActiveAccessEntry>> {
   const now = new Date();
-  const records = await drizzle.shadowRead(
-    () =>
-      prisma.subscriberAccess.findMany({
-        where: {
-          subscriberId,
-          isActive: true,
-          OR: [{ expiresDate: null }, { expiresDate: { gt: now } }],
-        },
-      }),
-    () => drizzle.accessRepo.findActiveAccess(drizzle.db, subscriberId, now),
-    {
-      name: "subscriberAccess.findActive",
-      context: { subscriberId },
-      enabled: env.DB_SHADOW_READS,
-      logger: log,
-    },
+  // Phase 6 cutover: Drizzle canonical. SDK entitlement checks
+  // land on subscriberAccess.findActive via the repo.
+  const records = await drizzle.accessRepo.findActiveAccess(
+    drizzle.db,
+    subscriberId,
+    now,
   );
 
   const result: Record<string, ActiveAccessEntry> = {};

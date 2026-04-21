@@ -24,20 +24,9 @@ export class InsufficientCreditsError extends Error {
  * the most recent CreditLedger entry. Append-only; no aggregation.
  */
 export async function getBalance(subscriberId: string): Promise<number> {
-  const last = await drizzle.shadowRead(
-    () =>
-      prisma.creditLedger.findFirst({
-        where: { subscriberId },
-        orderBy: { createdAt: "desc" },
-        select: { balance: true },
-      }),
-    () => drizzle.creditLedgerRepo.findLatestBalance(drizzle.db, subscriberId),
-    {
-      name: "creditLedger.findLatestBalance",
-      context: { subscriberId },
-      enabled: env.DB_SHADOW_READS,
-      logger: log,
-    },
+  const last = await drizzle.creditLedgerRepo.findLatestBalance(
+    drizzle.db,
+    subscriberId,
   );
   return last?.balance ?? 0;
 }

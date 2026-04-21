@@ -93,38 +93,15 @@ function cacheKey(projectId: string): string {
 }
 
 async function loadBundleFromDb(projectId: string): Promise<ExperimentBundle> {
-  // Shadow-read the two bundle sources in parallel. Same pattern
-  // as flag-engine: Prisma canonical, Drizzle mirrors, divergence
-  // surfaces via the structured `shadow-read.divergence` log.
-  const shadowCtx = { projectId };
+  // Phase 6 cutover: Drizzle canonical for the running-experiment
+  // bundle + audience rules used by evaluateExperiments. Bundle
+  // is Redis-cached so repeated evaluations don't hit Postgres.
   const [experiments, audiences] = await Promise.all([
-    drizzle.shadowRead(
-      () =>
-        prisma.experiment.findMany({
-          where: { projectId, status: ExperimentStatus.RUNNING },
-        }),
-      () =>
-        drizzle.experimentRepo.findRunningExperimentsByProject(
-          drizzle.db,
-          projectId,
-        ),
-      {
-        name: "experiment.findRunningByProject",
-        context: shadowCtx,
-        enabled: env.DB_SHADOW_READS,
-        logger: log,
-      },
+    drizzle.experimentRepo.findRunningExperimentsByProject(
+      drizzle.db,
+      projectId,
     ),
-    drizzle.shadowRead(
-      () => prisma.audience.findMany({ where: { projectId } }),
-      () => drizzle.featureFlagRepo.findAudiencesByProject(drizzle.db, projectId),
-      {
-        name: "audience.findManyByProject",
-        context: shadowCtx,
-        enabled: env.DB_SHADOW_READS,
-        logger: log,
-      },
-    ),
+    drizzle.featureFlagRepo.findAudiencesByProject(drizzle.db, projectId),
   ]);
 
   return {

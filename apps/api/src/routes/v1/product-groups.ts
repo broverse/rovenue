@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import prisma, { type Prisma } from "@rovenue/db";
+import { drizzle, type Prisma } from "@rovenue/db";
 import { evaluateExperiments } from "../../services/experiment-engine";
 import { ok } from "../../lib/response";
 
@@ -48,10 +48,10 @@ export const productGroupsRoute = new Hono()
   .get("/", async (c) => {
     const project = c.get("project");
 
-    const groups = await prisma.productGroup.findMany({
-      where: { projectId: project.id },
-      orderBy: [{ isDefault: "desc" }, { identifier: "asc" }],
-    });
+    const groups = await drizzle.productGroupRepo.listProductGroups(
+      drizzle.db,
+      project.id,
+    );
 
     return c.json(
       ok({
@@ -85,15 +85,10 @@ export const productGroupsRoute = new Hono()
   let appliedExperiment: { key: string; variantId: string } | null = null;
 
   if (subscriberAppUserId) {
-    const subscriber = await prisma.subscriber.findUnique({
-      where: {
-        projectId_appUserId: {
-          projectId: project.id,
-          appUserId: subscriberAppUserId,
-        },
-      },
-      select: { id: true, attributes: true },
-    });
+    const subscriber = await drizzle.subscriberRepo.findSubscriberByAppUserId(
+      drizzle.db,
+      { projectId: project.id, appUserId: subscriberAppUserId },
+    );
     if (subscriber) {
       const attributes =
         (subscriber.attributes as Record<string, unknown> | null) ?? {};
@@ -117,17 +112,15 @@ export const productGroupsRoute = new Hono()
 
   const group =
     effectiveIdentifier === "default"
-      ? await prisma.productGroup.findFirst({
-          where: { projectId: project.id, isDefault: true },
-        })
-      : await prisma.productGroup.findUnique({
-          where: {
-            projectId_identifier: {
-              projectId: project.id,
-              identifier: effectiveIdentifier,
-            },
-          },
-        });
+      ? await drizzle.productGroupRepo.findDefaultProductGroup(
+          drizzle.db,
+          project.id,
+        )
+      : await drizzle.productGroupRepo.findProductGroupByIdentifier(
+          drizzle.db,
+          project.id,
+          effectiveIdentifier,
+        );
 
   if (!group) {
     throw new HTTPException(404, {
@@ -155,11 +148,11 @@ export const productGroupsRoute = new Hono()
   }
 
   const productIds = memberships.data.map((m) => m.productId);
-  const products = productIds.length
-    ? await prisma.product.findMany({
-        where: { projectId: project.id, id: { in: productIds } },
-      })
-    : [];
+  const products = await drizzle.productGroupRepo.findProductsByIds(
+    drizzle.db,
+    project.id,
+    productIds,
+  );
   const productById = new Map(products.map((p) => [p.id, p] as const));
 
   const sorted = [...memberships.data].sort((a, b) => a.order - b.order);

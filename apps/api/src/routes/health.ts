@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import prisma, { WebhookSource, WebhookEventStatus } from "@rovenue/db";
+import prisma, {
+  WebhookSource,
+  WebhookEventStatus,
+  drizzle,
+} from "@rovenue/db";
 import { getStoreCircuits, type CircuitBreakerStats } from "../lib/circuit-breaker";
 import { redis } from "../lib/redis";
 import {
@@ -232,10 +236,11 @@ async function assertProjectAccess(
   projectId: string,
   userId: string,
 ): Promise<void> {
-  const membership = await prisma.projectMember.findUnique({
-    where: { projectId_userId: { projectId, userId } },
-    select: { id: true },
-  });
+  const membership = await drizzle.projectRepo.findMembership(
+    drizzle.db,
+    projectId,
+    userId,
+  );
   if (!membership) {
     throw new HTTPException(403, {
       message: "Not a member of this project",

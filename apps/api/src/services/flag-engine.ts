@@ -1,6 +1,5 @@
-import prisma, { drizzle } from "@rovenue/db";
+import { drizzle } from "@rovenue/db";
 import { isInRollout } from "../lib/bucketing";
-import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import { redis } from "../lib/redis";
 import { matchesAudience } from "../lib/targeting";
@@ -62,31 +61,13 @@ function cacheKey(projectId: string): string {
 }
 
 async function loadBundleFromDb(projectId: string): Promise<FlagBundle> {
-  // Flag evaluation is the SDK's hot path, so we shadow-read both
-  // fetches in parallel — one shadow RTT per project, gated by
-  // env.DB_SHADOW_READS. Any row-shape divergence between Prisma
-  // and Drizzle surfaces before we flip the canonical reader.
+  // Phase 6 cutover: Drizzle is the canonical reader after the
+  // Phase 3 shadow cycle ran clean. Both fetches run in parallel;
+  // the bundle is then Redis-cached for 60s so steady-state
+  // evaluation doesn't hit Postgres at all.
   const [flags, audiences] = await Promise.all([
-    drizzle.shadowRead(
-      () => prisma.featureFlag.findMany({ where: { projectId } }),
-      () => drizzle.featureFlagRepo.findFeatureFlagsByProject(drizzle.db, projectId),
-      {
-        name: "featureFlag.findManyByProject",
-        context: { projectId },
-        enabled: env.DB_SHADOW_READS,
-        logger: log,
-      },
-    ),
-    drizzle.shadowRead(
-      () => prisma.audience.findMany({ where: { projectId } }),
-      () => drizzle.featureFlagRepo.findAudiencesByProject(drizzle.db, projectId),
-      {
-        name: "audience.findManyByProject",
-        context: { projectId },
-        enabled: env.DB_SHADOW_READS,
-        logger: log,
-      },
-    ),
+    drizzle.featureFlagRepo.findFeatureFlagsByProject(drizzle.db, projectId),
+    drizzle.featureFlagRepo.findAudiencesByProject(drizzle.db, projectId),
   ]);
 
   return {

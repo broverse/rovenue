@@ -46,12 +46,23 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
   const drizzleMock = {
     db: {} as unknown,
     experimentRepo: {
-      findRunningExperimentsByProject: vi.fn(async () => []),
+      findRunningExperimentsByProject: vi.fn(
+        async (_db: unknown, projectId: string) =>
+          prismaMock.experiment.findMany({
+            where: { projectId, status: "RUNNING" },
+          }),
+      ),
       findExperimentsByProject: vi.fn(async () => []),
+      findExperimentById: vi.fn(async () => null),
+      findFirstExperimentByAudience: vi.fn(async () => null),
+      countExperiments: vi.fn(async () => 0),
     },
     featureFlagRepo: {
       findFeatureFlagsByProject: vi.fn(async () => []),
-      findAudiencesByProject: vi.fn(async () => []),
+      findAudiencesByProject: vi.fn(
+        async (_db: unknown, projectId: string) =>
+          prismaMock.audience.findMany({ where: { projectId } }),
+      ),
     },
     accessRepo: {
       findActiveAccess: vi.fn(async () => []),

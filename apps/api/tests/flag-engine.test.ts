@@ -45,8 +45,14 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
   const drizzleMock = {
     db: {} as unknown,
     featureFlagRepo: {
-      findFeatureFlagsByProject: vi.fn(async () => []),
-      findAudiencesByProject: vi.fn(async () => []),
+      findFeatureFlagsByProject: vi.fn(
+        async (_db: unknown, projectId: string) =>
+          prismaMock.featureFlag.findMany({ where: { projectId } }),
+      ),
+      findAudiencesByProject: vi.fn(
+        async (_db: unknown, projectId: string) =>
+          prismaMock.audience.findMany({ where: { projectId } }),
+      ),
     },
     shadowRead: vi.fn(
       async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>

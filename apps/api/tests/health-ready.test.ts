@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, redisMock, queueMock } = vi.hoisted(() => {
+const { prismaMock, drizzleMock, redisMock, queueMock } = vi.hoisted(() => {
   const prismaMock = {
     $queryRaw: vi.fn(async () => [{ "?column?": 1 }]),
     project: {
@@ -19,6 +19,24 @@ const { prismaMock, redisMock, queueMock } = vi.hoisted(() => {
     },
   };
 
+  const drizzleMock = {
+    db: {} as unknown,
+    projectRepo: {
+      findMembership: vi.fn(async (_db, projectId, userId) =>
+        prismaMock.projectMember.findUnique({
+          where: { projectId_userId: { projectId, userId } },
+          select: { id: true, role: true },
+        }),
+      ),
+      findProjectById: vi.fn(async () => null),
+      findProjectCredentials: vi.fn(async () => null),
+    },
+    shadowRead: vi.fn(
+      async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
+        primary(),
+    ),
+  };
+
   const redisMock = {
     ping: vi.fn(async () => "PONG"),
   };
@@ -27,11 +45,12 @@ const { prismaMock, redisMock, queueMock } = vi.hoisted(() => {
     getJobCounts: vi.fn(async () => ({ active: 0, waiting: 0 })),
   };
 
-  return { prismaMock, redisMock, queueMock };
+  return { prismaMock, drizzleMock, redisMock, queueMock };
 });
 
 vi.mock("@rovenue/db", () => ({
   default: prismaMock,
+  drizzle: drizzleMock,
   WebhookEventStatus: {
     RECEIVED: "RECEIVED",
     PROCESSING: "PROCESSING",

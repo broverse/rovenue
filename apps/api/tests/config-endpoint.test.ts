@@ -31,6 +31,47 @@ const { prismaMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
     db: {} as unknown,
     subscriberRepo: {
       findSubscriberAttributes: vi.fn(async () => null),
+      findSubscriberByAppUserId: vi.fn(
+        async (_db: unknown, args: { projectId: string; appUserId: string }) =>
+          prismaMock.subscriber.findUnique({
+            where: {
+              projectId_appUserId: {
+                projectId: args.projectId,
+                appUserId: args.appUserId,
+              },
+            },
+          }),
+      ),
+    },
+    productGroupRepo: {
+      listProductGroups: vi.fn(async () => []),
+      findDefaultProductGroup: vi.fn(async (_db: unknown, projectId: string) =>
+        prismaMock.productGroup.findFirst({
+          where: { projectId, isDefault: true },
+        }),
+      ),
+      findProductGroupByIdentifier: vi.fn(
+        async (_db: unknown, projectId: string, identifier: string) =>
+          prismaMock.productGroup.findUnique({
+            where: { projectId_identifier: { projectId, identifier } },
+          }),
+      ),
+      findProductsByIds: vi.fn(async (_db: unknown, projectId: string, ids: string[]) =>
+        ids.length === 0
+          ? []
+          : prismaMock.product.findMany({ where: { projectId, id: { in: ids } } }),
+      ),
+    },
+    experimentRepo: {
+      findRunningExperimentsByProject: vi.fn(async () => []),
+      findExperimentsByProject: vi.fn(async () => []),
+      findExperimentById: vi.fn(async () => null),
+      findFirstExperimentByAudience: vi.fn(async () => null),
+      countExperiments: vi.fn(async () => 0),
+    },
+    featureFlagRepo: {
+      findFeatureFlagsByProject: vi.fn(async () => []),
+      findAudiencesByProject: vi.fn(async () => []),
     },
     apiKeyRepo: {
       findApiKeyByPublic: vi.fn(async (_db: unknown, keyPublic: string) =>

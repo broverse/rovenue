@@ -79,11 +79,63 @@ const { prismaMock, drizzleMock } = vi.hoisted(() => {
     db: {} as unknown,
     subscriberRepo: {
       findSubscriberAttributes: vi.fn(async () => null),
-      findSubscriberByAppUserId: vi.fn(async () => null),
+      findSubscriberByAppUserId: vi.fn(
+        async (_db: unknown, args: { projectId: string; appUserId: string }) =>
+          subscriber.findUnique({
+            where: {
+              projectId_appUserId: {
+                projectId: args.projectId,
+                appUserId: args.appUserId,
+              },
+            },
+          }),
+      ),
       listSubscribers: vi.fn(async () => []),
+      countActiveSubscribers: vi.fn(async () => 0),
     },
-    accessRepo: { findActiveAccess: vi.fn(async () => []) },
-    creditLedgerRepo: { findLatestBalance: vi.fn(async () => null) },
+    accessRepo: {
+      findActiveAccess: vi.fn(async (_db: unknown, subscriberId: string) =>
+        subscriberAccess.findMany({
+          where: {
+            subscriberId,
+            isActive: true,
+          },
+        }),
+      ),
+    },
+    creditLedgerRepo: {
+      findLatestBalance: vi.fn(async (_db: unknown, subscriberId: string) =>
+        creditLedger.findFirst({
+          where: { subscriberId },
+          orderBy: { createdAt: "desc" },
+          select: { balance: true },
+        }),
+      ),
+    },
+    productGroupRepo: {
+      listProductGroups: vi.fn(async (_db: unknown, projectId: string) =>
+        productGroup.findMany({
+          where: { projectId },
+          orderBy: [{ isDefault: "desc" }, { identifier: "asc" }],
+        }),
+      ),
+      findDefaultProductGroup: vi.fn(async (_db: unknown, projectId: string) =>
+        productGroup.findFirst({
+          where: { projectId, isDefault: true },
+        }),
+      ),
+      findProductGroupByIdentifier: vi.fn(
+        async (_db: unknown, projectId: string, identifier: string) =>
+          productGroup.findUnique({
+            where: { projectId_identifier: { projectId, identifier } },
+          }),
+      ),
+      findProductsByIds: vi.fn(async (_db: unknown, projectId: string, ids: string[]) =>
+        ids.length === 0
+          ? []
+          : product.findMany({ where: { projectId, id: { in: ids } } }),
+      ),
+    },
     experimentRepo: {
       findRunningExperimentsByProject: vi.fn(async () => []),
       findExperimentsByProject: vi.fn(async () => []),

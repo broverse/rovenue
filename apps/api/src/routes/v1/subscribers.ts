@@ -4,6 +4,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import prisma, {
   CreditLedgerType,
+  drizzle,
   type Prisma,
   type Subscriber,
 } from "@rovenue/db";
@@ -85,15 +86,16 @@ async function resolveSubscriber(
   projectId: string,
   appUserId: string,
 ): Promise<Subscriber> {
-  const subscriber = await prisma.subscriber.findUnique({
-    where: { projectId_appUserId: { projectId, appUserId } },
-  });
+  const subscriber = await drizzle.subscriberRepo.findSubscriberByAppUserId(
+    drizzle.db,
+    { projectId, appUserId },
+  );
   if (!subscriber) {
     throw new HTTPException(404, {
       message: `Subscriber ${appUserId} not found`,
     });
   }
-  return subscriber;
+  return subscriber as Subscriber;
 }
 
 async function buildAccessResponse(subscriberId: string) {
@@ -172,9 +174,10 @@ export const subscribersRoute = new Hono()
     const appUserId = c.req.param("appUserId");
     const body = c.req.valid("json");
 
-    let subscriber = await prisma.subscriber.findUnique({
-      where: { projectId_appUserId: { projectId: project.id, appUserId } },
-    });
+    let subscriber = (await drizzle.subscriberRepo.findSubscriberByAppUserId(
+      drizzle.db,
+      { projectId: project.id, appUserId },
+    )) as Subscriber | null;
 
     const restored: Array<{ productId: string; store: string }> = [];
 
