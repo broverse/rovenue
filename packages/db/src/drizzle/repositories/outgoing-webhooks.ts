@@ -156,3 +156,32 @@ export async function markWebhookDismissed(
     .returning();
   return rows[0] ?? null;
 }
+
+export interface EnqueueOutgoingWebhookInput {
+  projectId: string;
+  eventType: string;
+  subscriberId: string;
+  purchaseId: string | null;
+  payload: unknown;
+  url: string;
+}
+
+/**
+ * Enqueue a webhook delivery. The worker picks it up via
+ * pollDueWebhooks (raw SQL; see Phase 7d). We default status to
+ * PENDING so the worker can claim the row on its next tick.
+ */
+export async function enqueueOutgoingWebhook(
+  db: DbOrTx,
+  input: EnqueueOutgoingWebhookInput,
+): Promise<void> {
+  await db.insert(outgoingWebhooks).values({
+    projectId: input.projectId,
+    eventType: input.eventType,
+    subscriberId: input.subscriberId,
+    purchaseId: input.purchaseId,
+    payload: input.payload as typeof outgoingWebhooks.$inferInsert.payload,
+    url: input.url,
+    status: "PENDING",
+  });
+}

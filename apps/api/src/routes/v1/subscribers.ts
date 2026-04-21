@@ -2,10 +2,9 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, {
+import {
   CreditLedgerType,
   drizzle,
-  type Prisma,
   type Subscriber,
 } from "@rovenue/db";
 import {
@@ -224,30 +223,34 @@ export const subscribersRoute = new Hono()
       const appUserId = c.req.param("appUserId");
       const body = c.req.valid("json");
 
-      const subscriber = await prisma.subscriber.upsert({
-        where: { projectId_appUserId: { projectId: project.id, appUserId } },
-        create: {
+      // Read existing attributes so we can compute the merge key-by-
+      // key (request fields overwrite stored fields). A missing
+      // subscriber is treated as "no attributes yet".
+      const existing =
+        await drizzle.subscriberRepo.findSubscriberByAppUserId(drizzle.db, {
           projectId: project.id,
           appUserId,
-          attributes: body.attributes as Prisma.InputJsonValue,
-        },
-        update: {},
-      });
-
+        });
       const currentAttributes =
-        (subscriber.attributes as Record<string, unknown> | null) ?? {};
+        (existing?.attributes as Record<string, unknown> | null) ?? {};
       const merged: Record<string, unknown> = {
         ...currentAttributes,
         ...body.attributes,
       };
 
-      const updated = await prisma.subscriber.update({
-        where: { id: subscriber.id },
-        data: {
-          attributes: merged as Prisma.InputJsonValue,
-          lastSeenAt: new Date(),
+      // Single upsert collapses the previous upsert-then-update pair:
+      // on insert we store `merged` (== body.attributes since there's
+      // no existing row), on update we overwrite with the merge and
+      // bump lastSeenAt.
+      const updated = await drizzle.subscriberRepo.upsertSubscriber(
+        drizzle.db,
+        {
+          projectId: project.id,
+          appUserId,
+          createAttributes: merged,
+          updateAttributes: merged,
         },
-      });
+      );
 
       return c.json(
         ok({
@@ -291,7 +294,7 @@ export const subscribersRoute = new Hono()
           subscriberId: subscriber.id,
           amount: body.amount,
           description: body.description,
-          metadata: body.metadata as Prisma.InputJsonValue | undefined,
+          metadata: body.metadata as Record<string, unknown> | undefined,
         });
         return c.json(
           ok({
@@ -338,7 +341,7 @@ export const subscribersRoute = new Hono()
         referenceType: body.referenceType,
         referenceId: body.referenceId,
         description: body.description,
-        metadata: body.metadata as Prisma.InputJsonValue | undefined,
+        metadata: body.metadata as Record<string, unknown> | undefined,
       });
 
       return c.json(

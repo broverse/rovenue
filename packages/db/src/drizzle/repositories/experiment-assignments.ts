@@ -6,6 +6,9 @@ import {
   type ExperimentAssignment,
 } from "../schema";
 
+// DB or Drizzle tx handle — writes accept either.
+type DbOrTx = Db;
+
 // =============================================================
 // Experiment assignment reads — Drizzle repository
 // =============================================================
@@ -149,4 +152,66 @@ export async function countConvertedAssignments(
       ),
     );
   return Number(rows[0]?.total ?? 0);
+}
+
+// =============================================================
+// Writes
+// =============================================================
+
+export interface NewAssignmentInput {
+  experimentId: string;
+  subscriberId: string;
+  variantId: string;
+}
+
+/**
+ * Batch-insert new assignments, ignoring duplicates on
+ * (experimentId, subscriberId). Mirrors Prisma's
+ * `createMany({ skipDuplicates: true })` via onConflictDoNothing.
+ */
+export async function insertAssignmentsSkipDuplicates(
+  db: DbOrTx,
+  rows: NewAssignmentInput[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  await db
+    .insert(experimentAssignments)
+    .values(rows)
+    .onConflictDoNothing({
+      target: [
+        experimentAssignments.experimentId,
+        experimentAssignments.subscriberId,
+      ],
+    });
+}
+
+export interface AssignmentEventPatch {
+  events: unknown;
+  convertedAt?: Date;
+  purchaseId?: string;
+  /** String-encoded decimal — Drizzle decimal columns use string IO. */
+  revenue?: string;
+}
+
+/**
+ * Partial update of an assignment — callers compose this from
+ * whichever of (events, convertedAt, purchaseId, revenue) they
+ * want to write on a given event recording pass.
+ */
+export async function updateAssignmentEvents(
+  db: DbOrTx,
+  id: string,
+  patch: AssignmentEventPatch,
+): Promise<void> {
+  const data: Partial<typeof experimentAssignments.$inferInsert> = {
+    events: patch.events as typeof experimentAssignments.$inferInsert.events,
+    updatedAt: new Date(),
+  };
+  if (patch.convertedAt !== undefined) data.convertedAt = patch.convertedAt;
+  if (patch.purchaseId !== undefined) data.purchaseId = patch.purchaseId;
+  if (patch.revenue !== undefined) data.revenue = patch.revenue;
+  await db
+    .update(experimentAssignments)
+    .set(data)
+    .where(eq(experimentAssignments.id, id));
 }

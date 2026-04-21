@@ -119,6 +119,36 @@ const { prismaMock, drizzleMock } = vi.hoisted(() => {
           select: { projectId: true },
         }),
       ),
+      upsertSubscriber: vi.fn(
+        async (
+          _db: unknown,
+          input: {
+            projectId: string;
+            appUserId: string;
+            createAttributes?: unknown;
+            updateAttributes?: unknown;
+          },
+        ) =>
+          subscriber.upsert({
+            where: {
+              projectId_appUserId: {
+                projectId: input.projectId,
+                appUserId: input.appUserId,
+              },
+            },
+            create: {
+              projectId: input.projectId,
+              appUserId: input.appUserId,
+              attributes: input.createAttributes ?? {},
+            },
+            update: {
+              lastSeenAt: new Date(),
+              ...(input.updateAttributes !== undefined && {
+                attributes: input.updateAttributes,
+              }),
+            },
+          }),
+      ),
       listSubscribers: vi.fn(async () => []),
       countActiveSubscribers: vi.fn(async () => 0),
     },
@@ -578,13 +608,17 @@ describe("POST /v1/subscribers/:appUserId/restore", () => {
 
 describe("POST /v1/subscribers/:appUserId/attributes", () => {
   it("merges new attributes with existing ones", async () => {
-    prismaMock.subscriber.upsert.mockResolvedValue({
+    // findSubscriberByAppUserId delegates to prismaMock.subscriber.
+    // findUnique (see the drizzleMock above), so we mock the stored
+    // attributes on the Prisma spy. upsertSubscriber delegates to
+    // prismaMock.subscriber.upsert for the return value.
+    prismaMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_1",
       projectId: "proj_test",
       appUserId: "user_1",
       attributes: { locale: "en" },
     } as any);
-    prismaMock.subscriber.update.mockResolvedValue({
+    prismaMock.subscriber.upsert.mockResolvedValue({
       id: "sub_1",
       appUserId: "user_1",
       attributes: { locale: "tr", timezone: "Europe/Istanbul" },
@@ -603,7 +637,8 @@ describe("POST /v1/subscribers/:appUserId/attributes", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
     expect(body.data.subscriber.attributes.locale).toBe("tr");
-    expect(prismaMock.subscriber.update).toHaveBeenCalled();
+    // New flow collapses upsert-then-update into a single upsert.
+    expect(prismaMock.subscriber.upsert).toHaveBeenCalled();
   });
 });
 

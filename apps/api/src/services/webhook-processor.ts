@@ -1,12 +1,10 @@
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
 import type Stripe from "stripe";
-import prisma, {
+import {
   CreditLedgerType,
-  OutgoingWebhookStatus,
   ProductType,
   drizzle,
-  type Prisma as PrismaTypes,
 } from "@rovenue/db";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
@@ -296,23 +294,20 @@ async function enqueueOutgoingWebhook(
     if (existing) return;
   }
 
-  const payload: PrismaTypes.InputJsonValue = {
+  const payload = {
     eventType: args.eventType,
     subscriberId: args.subscriberId,
     purchaseId: args.purchaseId ?? null,
     timestamp: new Date().toISOString(),
   };
 
-  await prisma.outgoingWebhook.create({
-    data: {
-      projectId: args.projectId,
-      eventType: args.eventType,
-      subscriberId: args.subscriberId,
-      purchaseId: args.purchaseId,
-      payload,
-      url: webhookUrl,
-      status: OutgoingWebhookStatus.PENDING,
-    },
+  await drizzle.outgoingWebhookRepo.enqueueOutgoingWebhook(drizzle.db, {
+    projectId: args.projectId,
+    eventType: args.eventType,
+    subscriberId: args.subscriberId,
+    purchaseId: args.purchaseId ?? null,
+    payload,
+    url: webhookUrl,
   });
 }
 

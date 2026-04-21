@@ -92,6 +92,38 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
       ),
       countAssignments: vi.fn(async () => 0),
       countConvertedAssignments: vi.fn(async () => 0),
+      insertAssignmentsSkipDuplicates: vi.fn(
+        async (_db: unknown, rows: Array<Record<string, unknown>>) =>
+          prismaMock.experimentAssignment.createMany({
+            data: rows,
+            skipDuplicates: true,
+          }),
+      ),
+      updateAssignmentEvents: vi.fn(
+        async (
+          _db: unknown,
+          id: string,
+          patch: {
+            events: unknown;
+            convertedAt?: Date;
+            purchaseId?: string;
+            revenue?: string;
+          },
+        ) =>
+          prismaMock.experimentAssignment.update({
+            where: { id },
+            data: {
+              events: patch.events,
+              ...(patch.convertedAt !== undefined && {
+                convertedAt: patch.convertedAt,
+              }),
+              ...(patch.purchaseId !== undefined && {
+                purchaseId: patch.purchaseId,
+              }),
+              ...(patch.revenue !== undefined && { revenue: patch.revenue }),
+            },
+          }),
+      ),
     },
     productGroupRepo: {
       listProductGroups: vi.fn(async () => []),

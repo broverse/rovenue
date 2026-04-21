@@ -1,6 +1,5 @@
-import prisma, {
+import {
   ExperimentStatus,
-  Prisma,
   drizzle,
   type ExperimentType,
 } from "@rovenue/db";
@@ -267,10 +266,10 @@ export async function evaluateExperiments(
 
   if (newAssignments.length > 0) {
     try {
-      await prisma.experimentAssignment.createMany({
-        data: newAssignments,
-        skipDuplicates: true,
-      });
+      await drizzle.experimentAssignmentRepo.insertAssignmentsSkipDuplicates(
+        drizzle.db,
+        newAssignments,
+      );
     } catch (err) {
       log.warn("experiment assignment batch write failed", {
         projectId,
@@ -380,23 +379,31 @@ export async function recordEvent(
         ? (a.experiment.metrics as string[])
         : [];
       const existing = Array.isArray(a.events) ? a.events : [];
-      const data: Record<string, unknown> = {
+      const patch: {
+        events: unknown;
+        convertedAt?: Date;
+        purchaseId?: string;
+        revenue?: string;
+      } = {
         events: [...existing, event],
       };
 
       const isConversion = metrics.includes(eventType);
       if (isConversion && !a.convertedAt) {
-        data.convertedAt = now;
-        if (metadata?.purchaseId) data.purchaseId = metadata.purchaseId;
+        patch.convertedAt = now;
+        if (metadata?.purchaseId) patch.purchaseId = metadata.purchaseId;
         if (typeof metadata?.revenue === "number") {
-          data.revenue = new Prisma.Decimal(metadata.revenue);
+          // Drizzle's decimal column IO is string; the Postgres side
+          // parses it back to NUMERIC(12, 4).
+          patch.revenue = metadata.revenue.toString();
         }
       }
 
-      return prisma.experimentAssignment.update({
-        where: { id: a.id },
-        data,
-      });
+      return drizzle.experimentAssignmentRepo.updateAssignmentEvents(
+        drizzle.db,
+        a.id,
+        patch,
+      );
     }),
   );
 }
