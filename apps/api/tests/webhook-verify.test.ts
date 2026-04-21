@@ -35,7 +35,9 @@ const mocks = vi.hoisted(() => {
 
   const env = {
     NODE_ENV: "test",
-    PUBSUB_PUSH_AUDIENCE: "https://hooks.example.com/webhooks/google",
+    PUBSUB_PUSH_AUDIENCE: "https://hooks.example.com/webhooks/google" as
+      | string
+      | undefined,
     PUBSUB_PUSH_SERVICE_ACCOUNT: undefined as string | undefined,
   };
 
@@ -308,6 +310,34 @@ describe("verifyGoogleWebhook", () => {
     });
     const body = (await res.json()) as { eventId: string; eventTimestamp: number };
     expect(body.eventId).toBe("msg-xyz");
+    expect(body.eventTimestamp).toBe(
+      Math.floor(new Date("2026-04-21T10:00:00Z").getTime() / 1000),
+    );
+  });
+
+  test("dev-mode passthrough still stashes event id + timestamp", async () => {
+    mocks.env.PUBSUB_PUSH_AUDIENCE = undefined;
+    const app = makeApp(verifyGoogleWebhook);
+    const res = await app.request("/proj_a", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: {
+          data: "eyJ4Ijoxfg==",
+          messageId: "dev-msg-1",
+          publishTime: "2026-04-21T10:00:00Z",
+        },
+        subscription: "projects/p/subscriptions/s",
+      }),
+    });
+    const body = (await res.json()) as {
+      source: string;
+      eventId: string;
+      eventTimestamp: number;
+    };
+    expect(res.status).toBe(200);
+    expect(body.source).toBe("GOOGLE");
+    expect(body.eventId).toBe("dev-msg-1");
     expect(body.eventTimestamp).toBe(
       Math.floor(new Date("2026-04-21T10:00:00Z").getTime() / 1000),
     );

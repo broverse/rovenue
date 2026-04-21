@@ -165,12 +165,39 @@ export const verifyAppleWebhook: MiddlewareHandler = async (c, next) => {
 // =============================================================
 
 export const verifyGoogleWebhook: MiddlewareHandler = async (c, next) => {
-  // PUBSUB_PUSH_AUDIENCE is required in production (enforced by env.ts).
-  // In dev/test we let the webhook through unauthenticated so local
-  // testing works without a Google Cloud setup.
+  // Peek the body first so dev-mode and prod-mode both populate the
+  // ctx vars the downstream replay guard depends on. Use clone() so
+  // the downstream zValidator can still read c.req.raw. Swallow JSON
+  // parse errors so malformed bodies fall through to the descriptive
+  // missing-fields 400 below rather than crashing the middleware.
+  const body = (await c.req.raw
+    .clone()
+    .json()
+    .catch(() => ({}))) as {
+    message?: { messageId?: string; publishTime?: string };
+  };
+  const messageId = body.message?.messageId;
+  const publishTime = body.message?.publishTime;
+  if (!messageId || !publishTime) {
+    log.warn("google webhook rejected: body missing messageId/publishTime");
+    throw new HTTPException(400, {
+      message: "Google push body missing message.messageId or publishTime",
+    });
+  }
+
+  // Dev fast-path: PUBSUB_PUSH_AUDIENCE is required in production
+  // (enforced by env.ts). In dev/test we skip identity verification
+  // so local testing works without a Google Cloud setup — but we
+  // still stash ctx so the replay guard and downstream handler work
+  // the same way as prod.
   if (!env.PUBSUB_PUSH_AUDIENCE) {
     log.debug("google webhook: PUBSUB_PUSH_AUDIENCE unset, skipping verify");
     c.set("verifiedWebhook", { source: "GOOGLE" });
+    c.set("webhookEventId", messageId);
+    c.set(
+      "webhookEventTimestamp",
+      Math.floor(new Date(publishTime).getTime() / 1000),
+    );
     await next();
     return;
   }
@@ -195,24 +222,12 @@ export const verifyGoogleWebhook: MiddlewareHandler = async (c, next) => {
     throw new HTTPException(401, { message: "Invalid Pub/Sub token" });
   }
 
-  // Google puts identity in the header, but we still need the body's
-  // messageId + publishTime for replay guarding. Parse once and stash
-  // on ctx so the route handler's zValidator can read it from raw again.
-  const body = (await c.req.raw.clone().json()) as {
-    message?: { messageId?: string; publishTime?: string };
-  };
-  const messageId = body.message?.messageId;
-  const publishTime = body.message?.publishTime;
-  if (!messageId || !publishTime) {
-    log.warn("google webhook rejected: body missing messageId/publishTime");
-    throw new HTTPException(400, {
-      message: "Google push body missing message.messageId or publishTime",
-    });
-  }
-
   c.set("verifiedWebhook", { source: "GOOGLE" });
   c.set("webhookEventId", messageId);
-  c.set("webhookEventTimestamp", Math.floor(new Date(publishTime).getTime() / 1000));
+  c.set(
+    "webhookEventTimestamp",
+    Math.floor(new Date(publishTime).getTime() / 1000),
+  );
   await next();
 };
 
