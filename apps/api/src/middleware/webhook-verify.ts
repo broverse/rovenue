@@ -204,6 +204,7 @@ export const verifyGoogleWebhook: MiddlewareHandler = async (c, next) => {
   const messageId = body.message?.messageId;
   const publishTime = body.message?.publishTime;
   if (!messageId || !publishTime) {
+    log.warn("google webhook rejected: body missing messageId/publishTime");
     throw new HTTPException(400, {
       message: "Google push body missing message.messageId or publishTime",
     });
