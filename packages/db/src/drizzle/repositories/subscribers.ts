@@ -1,11 +1,17 @@
 import { and, count, desc, eq, ilike, isNull, lt, or, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
+  experimentAssignments,
   purchases,
   subscriberAccess,
   subscribers,
   type Subscriber,
 } from "../schema";
+
+// Accepts both the top-level db and a Drizzle tx handle — the tx
+// shape is the same as the db for CRUD. Callers inside
+// db.transaction(async (tx) => …) pass `tx`.
+type DbOrTx = Db;
 
 /** Active (non-soft-deleted) subscriber count for a project. */
 export async function countActiveSubscribers(
@@ -203,4 +209,93 @@ export async function listSubscribers(
     purchaseCount: Number(r.purchaseCount) || 0,
     activeEntitlementKeys: r.activeEntitlementKeys ?? [],
   }));
+}
+
+// =============================================================
+// Write paths — transfer + anonymize
+// =============================================================
+
+/**
+ * Bulk-reassign every purchase row from one subscriber to another.
+ * Used by the merge / transfer flow inside a Drizzle transaction.
+ * Returns the number of rows updated for caller logging.
+ */
+export async function reassignPurchases(
+  db: DbOrTx,
+  fromSubscriberId: string,
+  toSubscriberId: string,
+): Promise<void> {
+  await db
+    .update(purchases)
+    .set({ subscriberId: toSubscriberId })
+    .where(eq(purchases.subscriberId, fromSubscriberId));
+}
+
+/**
+ * Bulk-reassign every subscriber_access row from one subscriber to
+ * another.
+ */
+export async function reassignSubscriberAccess(
+  db: DbOrTx,
+  fromSubscriberId: string,
+  toSubscriberId: string,
+): Promise<void> {
+  await db
+    .update(subscriberAccess)
+    .set({ subscriberId: toSubscriberId })
+    .where(eq(subscriberAccess.subscriberId, fromSubscriberId));
+}
+
+/**
+ * Bulk-reassign every experiment_assignment row from one subscriber
+ * to another.
+ */
+export async function reassignExperimentAssignments(
+  db: DbOrTx,
+  fromSubscriberId: string,
+  toSubscriberId: string,
+): Promise<void> {
+  await db
+    .update(experimentAssignments)
+    .set({ subscriberId: toSubscriberId })
+    .where(eq(experimentAssignments.subscriberId, fromSubscriberId));
+}
+
+/**
+ * Soft-delete a subscriber and point `mergedInto` at the target. The
+ * source row stays addressable for historical lookups but is
+ * excluded from every "active subscriber" query by the deletedAt
+ * null-check that guards them.
+ */
+export async function softDeleteSubscriberAsMerged(
+  db: DbOrTx,
+  subscriberId: string,
+  mergedIntoId: string,
+  deletedAt: Date,
+): Promise<void> {
+  await db
+    .update(subscribers)
+    .set({ deletedAt, mergedInto: mergedIntoId })
+    .where(eq(subscribers.id, subscriberId));
+}
+
+/**
+ * Apply the GDPR / KVKK "right to erasure" write: replace appUserId
+ * with the deterministic anonymous token, clear attributes, and
+ * soft-delete.
+ */
+export async function anonymizeSubscriberRow(
+  db: DbOrTx,
+  subscriberId: string,
+  anonymousId: string,
+  deletedAt: Date,
+): Promise<void> {
+  await db
+    .update(subscribers)
+    .set({
+      appUserId: anonymousId,
+      attributes: {} as typeof subscribers.$inferInsert.attributes,
+      deletedAt,
+    })
+    .where(eq(subscribers.id, subscriberId));
 }

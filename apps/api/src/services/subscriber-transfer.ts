@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import prisma, { CreditLedgerType, Prisma } from "@rovenue/db";
+import { CreditLedgerType, drizzle } from "@rovenue/db";
 import { logger } from "../lib/logger";
 import { audit } from "../lib/audit";
 
@@ -47,22 +47,22 @@ export async function transferSubscriber(
     throw new Error("Cannot transfer a subscriber to the same account");
   }
 
-  return prisma.$transaction(async (tx) => {
+  return drizzle.db.transaction(async (tx) => {
     // Advisory lock on BOTH subscribers, project-scoped, in
     // canonical order to prevent deadlocks. Two concurrent
     // transfer(A→B) calls now serialize at the lock, so the credit
     // balance read + write is race-free. Keys include projectId so
     // same-appUserId in different projects doesn't contend.
     const [k1, k2] = [fromAppUserId, toAppUserId].sort();
-    await tx.$executeRaw(
-      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${projectId}:${k1}`}, 0)),
-                        pg_advisory_xact_lock(hashtextextended(${`${projectId}:${k2}`}, 0))`,
+    await drizzle.lockRepo.advisoryXactLock2(
+      tx,
+      `${projectId}:${k1}`,
+      `${projectId}:${k2}`,
     );
 
-    const from = await tx.subscriber.findUnique({
-      where: {
-        projectId_appUserId: { projectId, appUserId: fromAppUserId },
-      },
+    const from = await drizzle.subscriberRepo.findSubscriberByAppUserId(tx, {
+      projectId,
+      appUserId: fromAppUserId,
     });
     if (!from) {
       throw new Error(`Source subscriber '${fromAppUserId}' not found`);
@@ -73,89 +73,76 @@ export async function transferSubscriber(
       );
     }
 
-    const to = await tx.subscriber.findUnique({
-      where: {
-        projectId_appUserId: { projectId, appUserId: toAppUserId },
-      },
+    const to = await drizzle.subscriberRepo.findSubscriberByAppUserId(tx, {
+      projectId,
+      appUserId: toAppUserId,
     });
     if (!to) {
       throw new Error(`Target subscriber '${toAppUserId}' not found`);
     }
 
     // --- Reassign purchases ---
-    await tx.purchase.updateMany({
-      where: { subscriberId: from.id },
-      data: { subscriberId: to.id },
-    });
+    await drizzle.subscriberRepo.reassignPurchases(tx, from.id, to.id);
 
     // --- Reassign entitlement access ---
-    await tx.subscriberAccess.updateMany({
-      where: { subscriberId: from.id },
-      data: { subscriberId: to.id },
-    });
+    await drizzle.subscriberRepo.reassignSubscriberAccess(tx, from.id, to.id);
 
     // --- Reassign experiment assignments ---
-    await tx.experimentAssignment.updateMany({
-      where: { subscriberId: from.id },
-      data: { subscriberId: to.id },
-    });
+    await drizzle.subscriberRepo.reassignExperimentAssignments(
+      tx,
+      from.id,
+      to.id,
+    );
 
     // --- Transfer credits ---
     let creditsTransferred = 0;
-    const fromBalance = await tx.creditLedger.findFirst({
-      where: { subscriberId: from.id },
-      orderBy: { createdAt: "desc" },
-      select: { balance: true },
-    });
+    const fromBalance = await drizzle.creditLedgerRepo.findLatestBalance(
+      tx,
+      from.id,
+    );
     const fromBal = fromBalance?.balance ?? 0;
 
     if (fromBal > 0) {
       creditsTransferred = fromBal;
 
       // Zero out the source subscriber
-      await tx.creditLedger.create({
-        data: {
-          projectId,
-          subscriberId: from.id,
-          type: CreditLedgerType.TRANSFER_OUT,
-          amount: -fromBal,
-          balance: 0,
-          referenceType: "transfer",
-          referenceId: to.id,
-          description: `Credits transferred to ${toAppUserId}`,
-        },
+      await drizzle.creditLedgerRepo.insertCreditLedger(tx, {
+        projectId,
+        subscriberId: from.id,
+        type: CreditLedgerType.TRANSFER_OUT,
+        amount: -fromBal,
+        balance: 0,
+        referenceType: "transfer",
+        referenceId: to.id,
+        description: `Credits transferred to ${toAppUserId}`,
       });
 
       // Credit the target subscriber
-      const toBalance = await tx.creditLedger.findFirst({
-        where: { subscriberId: to.id },
-        orderBy: { createdAt: "desc" },
-        select: { balance: true },
-      });
+      const toBalance = await drizzle.creditLedgerRepo.findLatestBalance(
+        tx,
+        to.id,
+      );
       const toBal = toBalance?.balance ?? 0;
 
-      await tx.creditLedger.create({
-        data: {
-          projectId,
-          subscriberId: to.id,
-          type: CreditLedgerType.TRANSFER_IN,
-          amount: fromBal,
-          balance: toBal + fromBal,
-          referenceType: "transfer",
-          referenceId: from.id,
-          description: `Credits received from ${fromAppUserId}`,
-        },
+      await drizzle.creditLedgerRepo.insertCreditLedger(tx, {
+        projectId,
+        subscriberId: to.id,
+        type: CreditLedgerType.TRANSFER_IN,
+        amount: fromBal,
+        balance: toBal + fromBal,
+        referenceType: "transfer",
+        referenceId: from.id,
+        description: `Credits received from ${fromAppUserId}`,
       });
     }
 
     // --- Soft-delete the source ---
-    await tx.subscriber.update({
-      where: { id: from.id },
-      data: {
-        deletedAt: new Date(),
-        mergedInto: to.id,
-      },
-    });
+    await drizzle.subscriberRepo.softDeleteSubscriberAsMerged(
+      tx,
+      from.id,
+      to.id,
+      new Date(),
+    );
 
     log.info("subscriber transferred", {
       projectId,
@@ -222,19 +209,19 @@ export async function anonymizeSubscriber(
     );
   }
 
-  return prisma.$transaction(async (tx) => {
+  return drizzle.db.transaction(async (tx) => {
     // Advisory lock scoped to (project, appUserId) serialises
     // concurrent anonymize calls for the same user so the find →
     // update sequence can't race with a transfer in flight.
-    await tx.$executeRaw(
-      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`anon:${projectId}:${appUserId}`}, 0))`,
+    await drizzle.lockRepo.advisoryXactLock(
+      tx,
+      `anon:${projectId}:${appUserId}`,
     );
 
-    const subscriber = await tx.subscriber.findUnique({
-      where: {
-        projectId_appUserId: { projectId, appUserId },
-      },
-    });
+    const subscriber = await drizzle.subscriberRepo.findSubscriberByAppUserId(
+      tx,
+      { projectId, appUserId },
+    );
     if (!subscriber) {
       throw new Error(`Subscriber '${appUserId}' not found`);
     }
@@ -253,14 +240,12 @@ export async function anonymizeSubscriber(
       };
     }
 
-    await tx.subscriber.update({
-      where: { id: subscriber.id },
-      data: {
-        appUserId: anonymousId,
-        attributes: {} as Prisma.InputJsonValue,
-        deletedAt: new Date(),
-      },
-    });
+    await drizzle.subscriberRepo.anonymizeSubscriberRow(
+      tx,
+      subscriber.id,
+      anonymousId,
+      new Date(),
+    );
 
     log.info("subscriber anonymized", {
       projectId,
@@ -282,7 +267,7 @@ export async function anonymizeSubscriber(
           before: { appUserId: "[REDACTED]" },
           after: { appUserId: anonymousId, anonymizedAt: new Date().toISOString() },
         },
-        tx as unknown as Parameters<typeof audit>[1],
+        tx,
       );
     }
 

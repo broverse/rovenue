@@ -22,82 +22,100 @@ vi.mock("../src/lib/audit", () => auditMock);
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock } = vi.hoisted(() => {
+// Mock surface — the service now talks to Drizzle repos, so the
+// test captures writes on those spies. An in-memory `subscriberData`
+// map drives both findSubscriberByAppUserId lookups and the shape
+// returned from softDeleteSubscriberAsMerged / anonymizeSubscriberRow
+// so assertions on before/after state stay authoritative.
+const { drizzleMock, subscriberStore } = vi.hoisted(() => {
   const subscriberData: Record<string, Record<string, unknown>> = {};
 
-  function lookupSubscriber(args: any): Record<string, unknown> | null {
-    if (args.where?.id) {
-      return subscriberData[args.where.id] ?? null;
-    }
-    if (args.where?.projectId_appUserId) {
-      const { projectId, appUserId } = args.where.projectId_appUserId;
-      return (
-        Object.values(subscriberData).find(
-          (s) => s.projectId === projectId && s.appUserId === appUserId,
-        ) ?? null
-      );
-    }
-    return null;
+  function findByAppUserId(projectId: string, appUserId: string) {
+    return (
+      Object.values(subscriberData).find(
+        (s) => s.projectId === projectId && s.appUserId === appUserId,
+      ) ?? null
+    );
   }
 
-  const purchaseUpdateMany = vi.fn(async () => ({ count: 0 }));
-  const accessUpdateMany = vi.fn(async () => ({ count: 0 }));
-  const experimentAssignmentUpdateMany = vi.fn(async () => ({ count: 0 }));
-  const creditLedgerFindFirst = vi.fn(async () => null);
-  const creditLedgerCreate = vi.fn(async (args: any) => args.data);
-  const subscriberFindUnique = vi.fn(async (args: any) => lookupSubscriber(args));
-  const subscriberUpdate = vi.fn(async (args: any) => {
-    const existing = lookupSubscriber(args);
-    return { ...existing, ...args.data };
-  });
-  const $executeRaw = vi.fn(async () => 0);
-  const auditLogCreate = vi.fn(async () => ({ id: "al_1" }));
-  const auditLogFindFirst = vi.fn(async () => null);
-  const $transaction = vi.fn(
-    async (fn: (tx: Record<string, unknown>) => Promise<unknown>) =>
-      fn({
-        subscriber: {
-          findUnique: subscriberFindUnique,
-          update: subscriberUpdate,
-        },
-        purchase: { updateMany: purchaseUpdateMany },
-        subscriberAccess: { updateMany: accessUpdateMany },
-        experimentAssignment: { updateMany: experimentAssignmentUpdateMany },
-        creditLedger: {
-          findFirst: creditLedgerFindFirst,
-          create: creditLedgerCreate,
-        },
-        auditLog: {
-          create: auditLogCreate,
-          findFirst: auditLogFindFirst,
-        },
-        $executeRaw,
-      }),
-  );
+  const drizzleDb = {
+    transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
+      fn(drizzleDb),
+    ),
+  };
 
-  // Top-level prisma alias — used when audit() is invoked without a
-  // tx and wraps its own $transaction. Same handlers as the nested
-  // tx so assertions don't need to pick a lane.
-  const auditLog = { create: auditLogCreate, findFirst: auditLogFindFirst };
+  const reassignPurchases = vi.fn(async () => undefined);
+  const reassignSubscriberAccess = vi.fn(async () => undefined);
+  const reassignExperimentAssignments = vi.fn(async () => undefined);
+  const softDeleteSubscriberAsMerged = vi.fn(
+    async (
+      _tx: unknown,
+      subscriberId: string,
+      mergedIntoId: string,
+      deletedAt: Date,
+    ) => {
+      const row = subscriberData[subscriberId];
+      if (row) {
+        row.deletedAt = deletedAt;
+        row.mergedInto = mergedIntoId;
+      }
+    },
+  );
+  const anonymizeSubscriberRow = vi.fn(
+    async (
+      _tx: unknown,
+      subscriberId: string,
+      anonymousId: string,
+      deletedAt: Date,
+    ) => {
+      const row = subscriberData[subscriberId];
+      if (row) {
+        row.appUserId = anonymousId;
+        row.attributes = {};
+        row.deletedAt = deletedAt;
+      }
+    },
+  );
+  const findSubscriberByAppUserId = vi.fn(
+    async (
+      _tx: unknown,
+      args: { projectId: string; appUserId: string },
+    ) => findByAppUserId(args.projectId, args.appUserId),
+  );
+  const findLatestBalance = vi.fn(
+    async (_tx: unknown, _subscriberId: string) => null as null | { balance: number },
+  );
+  const insertCreditLedger = vi.fn(async () => undefined);
+  const advisoryXactLock = vi.fn(async () => undefined);
+  const advisoryXactLock2 = vi.fn(async () => undefined);
 
   return {
-    prismaMock: {
-      subscriber: { findUnique: subscriberFindUnique, update: subscriberUpdate },
-      purchase: { updateMany: purchaseUpdateMany },
-      subscriberAccess: { updateMany: accessUpdateMany },
-      experimentAssignment: { updateMany: experimentAssignmentUpdateMany },
-      creditLedger: { findFirst: creditLedgerFindFirst, create: creditLedgerCreate },
-      auditLog,
-      $transaction,
-      $executeRaw,
-      // Keep reference to store for test setup
-      __subscriberData: subscriberData,
+    drizzleMock: {
+      db: drizzleDb,
+      subscriberRepo: {
+        findSubscriberByAppUserId,
+        reassignPurchases,
+        reassignSubscriberAccess,
+        reassignExperimentAssignments,
+        softDeleteSubscriberAsMerged,
+        anonymizeSubscriberRow,
+      },
+      creditLedgerRepo: {
+        findLatestBalance,
+        insertCreditLedger,
+      },
+      lockRepo: {
+        advisoryXactLock,
+        advisoryXactLock2,
+      },
     },
+    subscriberStore: subscriberData,
   };
 });
 
 vi.mock("@rovenue/db", () => ({
-  default: prismaMock,
+  default: {},
+  drizzle: drizzleMock,
   CreditLedgerType: {
     PURCHASE: "PURCHASE",
     SPEND: "SPEND",
@@ -106,9 +124,6 @@ vi.mock("@rovenue/db", () => ({
     EXPIRE: "EXPIRE",
     TRANSFER_IN: "TRANSFER_IN",
     TRANSFER_OUT: "TRANSFER_OUT",
-  },
-  Prisma: {
-    sql: (s: TemplateStringsArray, ...v: unknown[]) => ({ strings: s, values: v }),
   },
 }));
 
@@ -124,9 +139,12 @@ import {
 beforeEach(() => {
   vi.clearAllMocks();
   // Reset subscriber store
-  for (const key of Object.keys(prismaMock.__subscriberData)) {
-    delete prismaMock.__subscriberData[key];
+  for (const key of Object.keys(subscriberStore)) {
+    delete subscriberStore[key];
   }
+  // Default: no credits.
+  drizzleMock.creditLedgerRepo.findLatestBalance.mockReset();
+  drizzleMock.creditLedgerRepo.findLatestBalance.mockResolvedValue(null);
 });
 
 function setupSubscribers(
@@ -143,13 +161,13 @@ function setupSubscribers(
     deletedAt?: Date | null;
   },
 ) {
-  prismaMock.__subscriberData[from.id ?? "sub_from"] = {
+  subscriberStore[from.id ?? "sub_from"] = {
     id: from.id ?? "sub_from",
     projectId: from.projectId ?? "proj_a",
     appUserId: from.appUserId ?? "old_user",
     deletedAt: from.deletedAt ?? null,
   };
-  prismaMock.__subscriberData[to.id ?? "sub_to"] = {
+  subscriberStore[to.id ?? "sub_to"] = {
     id: to.id ?? "sub_to",
     projectId: to.projectId ?? "proj_a",
     appUserId: to.appUserId ?? "new_user",
@@ -164,79 +182,77 @@ function setupSubscribers(
 describe("transferSubscriber", () => {
   test("moves purchases, access, and experiment assignments to the target", async () => {
     setupSubscribers({}, {});
-    prismaMock.creditLedger.findFirst.mockResolvedValue({ balance: 0 });
 
     await transferSubscriber("proj_a", "old_user", "new_user");
 
-    expect(prismaMock.purchase.updateMany).toHaveBeenCalledWith({
-      where: { subscriberId: "sub_from" },
-      data: { subscriberId: "sub_to" },
-    });
-    expect(prismaMock.subscriberAccess.updateMany).toHaveBeenCalledWith({
-      where: { subscriberId: "sub_from" },
-      data: { subscriberId: "sub_to" },
-    });
-    expect(prismaMock.experimentAssignment.updateMany).toHaveBeenCalledWith({
-      where: { subscriberId: "sub_from" },
-      data: { subscriberId: "sub_to" },
-    });
+    expect(drizzleMock.subscriberRepo.reassignPurchases).toHaveBeenCalledWith(
+      expect.anything(),
+      "sub_from",
+      "sub_to",
+    );
+    expect(
+      drizzleMock.subscriberRepo.reassignSubscriberAccess,
+    ).toHaveBeenCalledWith(expect.anything(), "sub_from", "sub_to");
+    expect(
+      drizzleMock.subscriberRepo.reassignExperimentAssignments,
+    ).toHaveBeenCalledWith(expect.anything(), "sub_from", "sub_to");
   });
 
   test("transfers credit balance via TRANSFER_OUT + TRANSFER_IN entries", async () => {
     setupSubscribers({}, {});
-    prismaMock.creditLedger.findFirst.mockImplementation(
-      async (args: any) => {
-        if (args.where.subscriberId === "sub_from") return { balance: 150 };
-        return { balance: 50 };
-      },
+    drizzleMock.creditLedgerRepo.findLatestBalance.mockImplementation(
+      async (_tx: unknown, subscriberId: string) =>
+        subscriberId === "sub_from" ? { balance: 150 } : { balance: 50 },
     );
 
     await transferSubscriber("proj_a", "old_user", "new_user");
 
-    const creates = prismaMock.creditLedger.create.mock.calls.map(
-      (c: any) => c[0].data,
+    const creates = drizzleMock.creditLedgerRepo.insertCreditLedger.mock.calls.map(
+      (c: [unknown, Record<string, unknown>]) => c[1],
     );
     expect(creates).toHaveLength(2);
 
-    const outEntry = creates.find((d: any) => d.type === "TRANSFER_OUT");
-    const inEntry = creates.find((d: any) => d.type === "TRANSFER_IN");
+    const outEntry = creates.find((d) => d.type === "TRANSFER_OUT");
+    const inEntry = creates.find((d) => d.type === "TRANSFER_IN");
 
     expect(outEntry).toBeDefined();
-    expect(outEntry.subscriberId).toBe("sub_from");
-    expect(outEntry.amount).toBe(-150);
-    expect(outEntry.balance).toBe(0);
+    expect(outEntry!.subscriberId).toBe("sub_from");
+    expect(outEntry!.amount).toBe(-150);
+    expect(outEntry!.balance).toBe(0);
 
     expect(inEntry).toBeDefined();
-    expect(inEntry.subscriberId).toBe("sub_to");
-    expect(inEntry.amount).toBe(150);
-    expect(inEntry.balance).toBe(200); // 50 + 150
+    expect(inEntry!.subscriberId).toBe("sub_to");
+    expect(inEntry!.amount).toBe(150);
+    expect(inEntry!.balance).toBe(200); // 50 + 150
   });
 
   test("skips credit transfer when fromSubscriber has zero balance", async () => {
     setupSubscribers({}, {});
-    prismaMock.creditLedger.findFirst.mockResolvedValue({ balance: 0 });
+    drizzleMock.creditLedgerRepo.findLatestBalance.mockResolvedValue({
+      balance: 0,
+    });
 
     await transferSubscriber("proj_a", "old_user", "new_user");
 
-    expect(prismaMock.creditLedger.create).not.toHaveBeenCalled();
+    expect(
+      drizzleMock.creditLedgerRepo.insertCreditLedger,
+    ).not.toHaveBeenCalled();
   });
 
   test("soft-deletes the source subscriber with deletedAt + mergedInto", async () => {
     setupSubscribers({}, {});
-    prismaMock.creditLedger.findFirst.mockResolvedValue({ balance: 0 });
 
     await transferSubscriber("proj_a", "old_user", "new_user");
 
-    const updateCall = prismaMock.subscriber.update.mock.calls.find(
-      (c: any) => c[0].where.id === "sub_from",
-    );
-    expect(updateCall).toBeDefined();
-    expect(updateCall![0].data.deletedAt).toBeInstanceOf(Date);
-    expect(updateCall![0].data.mergedInto).toBe("sub_to");
+    const call =
+      drizzleMock.subscriberRepo.softDeleteSubscriberAsMerged.mock.calls[0]!;
+    expect(call[1]).toBe("sub_from");
+    expect(call[2]).toBe("sub_to");
+    expect(call[3]).toBeInstanceOf(Date);
   });
 
   test("throws when fromSubscriber does not exist", async () => {
-    prismaMock.__subscriberData["sub_to"] = {
+    subscriberStore["sub_to"] = {
       id: "sub_to",
       projectId: "proj_a",
       appUserId: "new_user",
@@ -249,7 +265,7 @@ describe("transferSubscriber", () => {
   });
 
   test("throws when toSubscriber does not exist", async () => {
-    prismaMock.__subscriberData["sub_from"] = {
+    subscriberStore["sub_from"] = {
       id: "sub_from",
       projectId: "proj_a",
       appUserId: "old_user",
@@ -279,7 +295,9 @@ describe("transferSubscriber", () => {
 
   test("returns the transfer summary", async () => {
     setupSubscribers({}, {});
-    prismaMock.creditLedger.findFirst.mockResolvedValue({ balance: 100 });
+    drizzleMock.creditLedgerRepo.findLatestBalance.mockResolvedValue({
+      balance: 100,
+    });
 
     const result = await transferSubscriber("proj_a", "old_user", "new_user");
 
@@ -297,7 +315,7 @@ describe("transferSubscriber", () => {
 
 describe("anonymizeSubscriber", () => {
   test("replaces appUserId with an anon: token and clears attributes", async () => {
-    prismaMock.__subscriberData["sub_1"] = {
+    subscriberStore["sub_1"] = {
       id: "sub_1",
       projectId: "proj_a",
       appUserId: "alice@example.com",
@@ -315,18 +333,11 @@ describe("anonymizeSubscriber", () => {
     expect(result.subscriberId).toBe("sub_1");
     expect(result.anonymousId).toMatch(/^anon:[a-f0-9]{32}$/);
 
-    const updateCall = prismaMock.subscriber.update.mock.calls[0]![0] as {
-      where: { id: string };
-      data: {
-        appUserId: string;
-        attributes: Record<string, unknown>;
-        deletedAt: Date;
-      };
-    };
-    expect(updateCall.where.id).toBe("sub_1");
-    expect(updateCall.data.appUserId).toBe(result.anonymousId);
-    expect(updateCall.data.attributes).toEqual({});
-    expect(updateCall.data.deletedAt).toBeInstanceOf(Date);
+    const call =
+      drizzleMock.subscriberRepo.anonymizeSubscriberRow.mock.calls[0]!;
+    expect(call[1]).toBe("sub_1");
+    expect(call[2]).toBe(result.anonymousId);
+    expect(call[3]).toBeInstanceOf(Date);
   });
 
   test("rejects already-anonymized input to prevent double-hashing", async () => {
