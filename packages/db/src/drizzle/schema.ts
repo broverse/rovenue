@@ -71,6 +71,59 @@ export const user = pgTable("user", {
 });
 
 // =============================================================
+// Better Auth session / account / verification tables
+// =============================================================
+//
+// These mirror the Prisma models Better Auth's CLI generates;
+// keeping column names + nullability byte-for-byte identical so
+// the drizzleAdapter reads/writes the same rows Prisma does during
+// the swap window.
+
+export const session = pgTable("session", {
+  id: text("id").primaryKey(),
+  expiresAt: timestamp("expiresAt", { withTimezone: false }).notNull(),
+  token: text("token").notNull().unique(),
+  createdAt: timestamp("createdAt", { withTimezone: false }).notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: false }).notNull(),
+  ipAddress: text("ipAddress"),
+  userAgent: text("userAgent"),
+  userId: text("userId")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+});
+
+export const account = pgTable("account", {
+  id: text("id").primaryKey(),
+  accountId: text("accountId").notNull(),
+  providerId: text("providerId").notNull(),
+  userId: text("userId")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  accessToken: text("accessToken"),
+  refreshToken: text("refreshToken"),
+  idToken: text("idToken"),
+  accessTokenExpiresAt: timestamp("accessTokenExpiresAt", {
+    withTimezone: false,
+  }),
+  refreshTokenExpiresAt: timestamp("refreshTokenExpiresAt", {
+    withTimezone: false,
+  }),
+  scope: text("scope"),
+  password: text("password"),
+  createdAt: timestamp("createdAt", { withTimezone: false }).notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: false }).notNull(),
+});
+
+export const verification = pgTable("verification", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull(),
+  value: text("value").notNull(),
+  expiresAt: timestamp("expiresAt", { withTimezone: false }).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: false }),
+  updatedAt: timestamp("updatedAt", { withTimezone: false }),
+});
+
+// =============================================================
 // projects
 // =============================================================
 
