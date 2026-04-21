@@ -18,6 +18,15 @@ const envSchema = z
     GOOGLE_CLIENT_SECRET: z.string().optional(),
     PUBSUB_PUSH_AUDIENCE: z.string().min(1).optional(),
     PUBSUB_PUSH_SERVICE_ACCOUNT: z.string().email().optional(),
+    // Accepted clock skew (seconds) between a webhook event's
+    // timestamp and our wall clock. Deliveries outside this window
+    // are rejected by the replay-guard middleware.
+    WEBHOOK_REPLAY_TOLERANCE_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(30)
+      .max(3600)
+      .default(300),
     // 32-byte AES-256-GCM key, hex-encoded (64 chars). Required in
     // production for project credential encryption.
     ENCRYPTION_KEY: z
