@@ -1,10 +1,18 @@
 import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import type { Db } from "../client";
+import { store } from "../enums";
 import {
+  products,
   purchases,
   subscriberAccess,
   type SubscriberAccessRow,
 } from "../schema";
+
+type Store = (typeof store.enumValues)[number];
+
+// Accepts db or a Drizzle tx handle — callers inside db.transaction
+// (async (tx) => …) pass `tx`.
+type DbOrTx = Db;
 
 /**
  * First subscriberAccess row matching (subscriberId, purchaseId,
@@ -87,4 +95,106 @@ export async function findActiveAccess(
         )!,
       ),
     );
+}
+
+// =============================================================
+// Access reconciliation — writes
+// =============================================================
+
+/** Every access row for a subscriber (active + inactive). Used by
+ *  syncAccess to reconcile against the authoritative purchase set. */
+export async function findAllAccessBySubscriber(
+  db: DbOrTx,
+  subscriberId: string,
+): Promise<SubscriberAccessRow[]> {
+  return db
+    .select()
+    .from(subscriberAccess)
+    .where(eq(subscriberAccess.subscriberId, subscriberId));
+}
+
+/** Purchase rows + entitlementKeys from the joined product, used by
+ *  syncAccess to derive the desired entitlement set. */
+export interface PurchaseWithEntitlementKeys {
+  id: string;
+  status: string;
+  expiresDate: Date | null;
+  store: Store;
+  entitlementKeys: string[];
+}
+
+export async function findPurchasesWithEntitlementKeys(
+  db: DbOrTx,
+  subscriberId: string,
+): Promise<PurchaseWithEntitlementKeys[]> {
+  // Inner join on products (required — every purchase has a
+  // product) so we can pull entitlementKeys[] alongside the
+  // purchase columns syncAccess reads.
+  const rows = await db
+    .select({
+      id: purchases.id,
+      status: purchases.status,
+      expiresDate: purchases.expiresDate,
+      store: purchases.store,
+      entitlementKeys: products.entitlementKeys,
+    })
+    .from(purchases)
+    .innerJoin(products, eq(products.id, purchases.productId))
+    .where(eq(purchases.subscriberId, subscriberId));
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    expiresDate: r.expiresDate,
+    store: r.store,
+    entitlementKeys: (r.entitlementKeys ?? []) as string[],
+  }));
+}
+
+/** Flip an access row's `isActive` flag (expiry untouched). */
+export async function setAccessActive(
+  db: DbOrTx,
+  id: string,
+  isActive: boolean,
+): Promise<void> {
+  await db
+    .update(subscriberAccess)
+    .set({ isActive })
+    .where(eq(subscriberAccess.id, id));
+}
+
+/** Flip `isActive` and reset `expiresDate` at the same time. */
+export async function setAccessActiveAndExpiry(
+  db: DbOrTx,
+  id: string,
+  isActive: boolean,
+  expiresDate: Date | null,
+): Promise<void> {
+  await db
+    .update(subscriberAccess)
+    .set({ isActive, expiresDate })
+    .where(eq(subscriberAccess.id, id));
+}
+
+export interface CreateAccessInput {
+  subscriberId: string;
+  purchaseId: string;
+  entitlementKey: string;
+  isActive: boolean;
+  expiresDate: Date | null;
+  store: Store;
+}
+
+/** Insert a new access row. syncAccess inserts one per (key, purchase). */
+export async function createAccess(
+  db: DbOrTx,
+  input: CreateAccessInput,
+): Promise<void> {
+  await db.insert(subscriberAccess).values({
+    subscriberId: input.subscriberId,
+    purchaseId: input.purchaseId,
+    entitlementKey: input.entitlementKey,
+    isActive: input.isActive,
+    expiresDate: input.expiresDate,
+    store: input.store,
+  });
 }

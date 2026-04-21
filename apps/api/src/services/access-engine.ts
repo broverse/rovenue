@@ -1,10 +1,4 @@
-import prisma, {
-  Prisma,
-  PurchaseStatus,
-  drizzle,
-  type Store,
-} from "@rovenue/db";
-import { env } from "../lib/env";
+import { PurchaseStatus, drizzle, type Store } from "@rovenue/db";
 import { logger } from "../lib/logger";
 
 const log = logger.child("access-engine");
@@ -27,17 +21,15 @@ export interface ActiveAccessEntry {
  * webhook workers can't race on the same subscriber.
  */
 export async function syncAccess(subscriberId: string): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+  await drizzle.db.transaction(async (tx) => {
     // Serialize access sync per-subscriber. Non-blocking for different
     // subscribers; blocking for the same one.
-    await tx.$executeRaw(
-      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${subscriberId}, 0))`,
-    );
+    await drizzle.lockRepo.advisoryXactLock(tx, subscriberId);
 
-    const purchases = await tx.purchase.findMany({
-      where: { subscriberId },
-      include: { product: { select: { entitlementKeys: true } } },
-    });
+    const purchases = await drizzle.accessRepo.findPurchasesWithEntitlementKeys(
+      tx,
+      subscriberId,
+    );
 
     const now = new Date();
     interface Target {
@@ -48,10 +40,10 @@ export async function syncAccess(subscriberId: string): Promise<void> {
     const desired = new Map<string, Target>();
 
     for (const purchase of purchases) {
-      if (!ENTITLEMENT_GRANTING_STATUSES.has(purchase.status)) continue;
+      if (!ENTITLEMENT_GRANTING_STATUSES.has(purchase.status as PurchaseStatus)) continue;
       if (purchase.expiresDate && purchase.expiresDate < now) continue;
 
-      for (const key of purchase.product.entitlementKeys) {
+      for (const key of purchase.entitlementKeys) {
         const existing = desired.get(key);
         if (
           !existing ||
@@ -66,18 +58,16 @@ export async function syncAccess(subscriberId: string): Promise<void> {
       }
     }
 
-    const current = await tx.subscriberAccess.findMany({
-      where: { subscriberId },
-    });
+    const current = await drizzle.accessRepo.findAllAccessBySubscriber(
+      tx,
+      subscriberId,
+    );
 
     for (const record of current) {
       const target = desired.get(record.entitlementKey);
       const isSource = target?.purchaseId === record.purchaseId;
       if (!isSource && record.isActive) {
-        await tx.subscriberAccess.update({
-          where: { id: record.id },
-          data: { isActive: false },
-        });
+        await drizzle.accessRepo.setAccessActive(tx, record.id, false);
       }
     }
 
@@ -90,21 +80,21 @@ export async function syncAccess(subscriberId: string): Promise<void> {
         const expiryChanged =
           existing.expiresDate?.getTime() !== target.expiresDate?.getTime();
         if (!existing.isActive || expiryChanged) {
-          await tx.subscriberAccess.update({
-            where: { id: existing.id },
-            data: { isActive: true, expiresDate: target.expiresDate },
-          });
+          await drizzle.accessRepo.setAccessActiveAndExpiry(
+            tx,
+            existing.id,
+            true,
+            target.expiresDate,
+          );
         }
       } else {
-        await tx.subscriberAccess.create({
-          data: {
-            subscriberId,
-            purchaseId: target.purchaseId,
-            entitlementKey: key,
-            isActive: true,
-            expiresDate: target.expiresDate,
-            store: target.store,
-          },
+        await drizzle.accessRepo.createAccess(tx, {
+          subscriberId,
+          purchaseId: target.purchaseId,
+          entitlementKey: key,
+          isActive: true,
+          expiresDate: target.expiresDate,
+          store: target.store,
         });
       }
     }
