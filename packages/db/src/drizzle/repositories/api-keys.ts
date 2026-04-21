@@ -142,6 +142,23 @@ export interface CreateApiKeyInput {
  * embedded in the plaintext secret matches the stored row. See the
  * project create flow for why the id is pre-generated in JS.
  */
+/**
+ * Fire-and-forget lastUsedAt touch. Middleware calls this on every
+ * authenticated request so the dashboard can surface "last seen"
+ * per-key; failures are logged by the caller and swallowed (no
+ * retry).
+ */
+export async function updateApiKeyLastUsed(
+  db: Db,
+  id: string,
+  now: Date,
+): Promise<void> {
+  await db
+    .update(apiKeys)
+    .set({ lastUsedAt: now })
+    .where(eq(apiKeys.id, id));
+}
+
 export async function createApiKey(
   db: Db,
   input: CreateApiKeyInput,

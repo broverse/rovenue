@@ -134,6 +134,7 @@ const { prismaMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
           include: { project: true },
         }),
       ),
+      updateApiKeyLastUsed: vi.fn(async () => undefined),
     },
     projectRepo: {
       findMembership: vi.fn(async () => null),

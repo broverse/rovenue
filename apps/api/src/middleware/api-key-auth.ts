@@ -8,7 +8,7 @@ import {
   HEADER,
   type ApiKeyKind,
 } from "@rovenue/shared";
-import prisma, { drizzle } from "@rovenue/db";
+import { drizzle } from "@rovenue/db";
 import { logger } from "../lib/logger";
 
 const log = logger.child("api-key-auth");
@@ -118,11 +118,8 @@ export function apiKeyAuth(
     });
 
     // Fire-and-forget last-used touch.
-    prisma.apiKey
-      .update({
-        where: { id: record.id },
-        data: { lastUsedAt: now },
-      })
+    drizzle.apiKeyRepo
+      .updateApiKeyLastUsed(drizzle.db, record.id, now)
       .catch((err: unknown) => {
         log.warn("lastUsedAt update failed", {
           apiKeyId: record.id,
