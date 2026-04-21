@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { MiddlewareHandler } from "hono";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const { redisMock, __store } = vi.hoisted(() => {
@@ -121,5 +122,55 @@ describe("webhookReplayGuard", () => {
       .post("/", wrg({ source: "apple" }), (c) => c.json({ ok: true }));
     const res = await app.request("/", { method: "POST" });
     expect(res.status).toBe(200);
+  });
+
+  test("replay guard chained after verifier rejects duplicate delivery", async () => {
+    __store.clear();
+
+    const verifier: MiddlewareHandler = async (c, next) => {
+      c.set("webhookEventId", "stubbed-uuid");
+      c.set("webhookEventTimestamp", Math.floor(Date.now() / 1000));
+      await next();
+    };
+
+    const app = new Hono().post(
+      "/:projectId",
+      verifier,
+      webhookReplayGuard({ source: "apple" }),
+      (c) => c.json({ data: { status: "enqueued" } }, 202),
+    );
+
+    const first = await app.request("/proj_a", { method: "POST" });
+    expect(first.status).toBe(202);
+
+    const second = await app.request("/proj_a", { method: "POST" });
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({
+      data: { status: "duplicate", source: "apple" },
+    });
+  });
+
+  test("distinct event ids each process independently", async () => {
+    __store.clear();
+
+    let idCounter = 0;
+    const verifier: MiddlewareHandler = async (c, next) => {
+      idCounter += 1;
+      c.set("webhookEventId", `uuid-${idCounter}`);
+      c.set("webhookEventTimestamp", Math.floor(Date.now() / 1000));
+      await next();
+    };
+
+    const app = new Hono().post(
+      "/",
+      verifier,
+      webhookReplayGuard({ source: "apple" }),
+      (c) => c.json({ data: { status: "enqueued" } }, 202),
+    );
+
+    const a = await app.request("/", { method: "POST" });
+    const b = await app.request("/", { method: "POST" });
+    expect(a.status).toBe(202);
+    expect(b.status).toBe(202);
   });
 });

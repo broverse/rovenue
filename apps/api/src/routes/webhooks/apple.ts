@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { verifyAppleWebhook } from "../../middleware/webhook-verify";
+import { webhookReplayGuard } from "../../middleware/webhook-replay-guard";
 import { enqueueWebhookEvent } from "../../services/webhook-processor";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
@@ -18,6 +19,7 @@ const log = logger.child("route:webhook:apple");
 export const appleWebhookRoute = new Hono().post(
   "/:projectId",
   verifyAppleWebhook,
+  webhookReplayGuard({ source: "apple" }),
   async (c) => {
     const projectId = c.req.param("projectId");
     const verified = c.get("verifiedWebhook");

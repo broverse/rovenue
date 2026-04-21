@@ -4,6 +4,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { drizzle } from "@rovenue/db";
 import { verifyGoogleWebhook } from "../../middleware/webhook-verify";
+import { webhookReplayGuard } from "../../middleware/webhook-replay-guard";
 import { enqueueWebhookEvent } from "../../services/webhook-processor";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
@@ -30,6 +31,7 @@ export const pushBodySchema = z.object({
 export const googleWebhookRoute = new Hono().post(
   "/:projectId",
   verifyGoogleWebhook,
+  webhookReplayGuard({ source: "google" }),
   zValidator("json", pushBodySchema),
   async (c) => {
     const projectId = c.req.param("projectId");

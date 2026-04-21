@@ -3,6 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import type Stripe from "stripe";
 import { drizzle } from "@rovenue/db";
 import { verifyStripeWebhook } from "../../middleware/webhook-verify";
+import { webhookReplayGuard } from "../../middleware/webhook-replay-guard";
 import { type HandleStripeNotificationResult } from "../../services/stripe/stripe-webhook";
 import { enqueueWebhookEvent } from "../../services/webhook-processor";
 import { ok } from "../../lib/response";
@@ -21,6 +22,7 @@ const log = logger.child("route:webhook:stripe");
 export const stripeWebhookRoute = new Hono().post(
   "/:projectId",
   verifyStripeWebhook,
+  webhookReplayGuard({ source: "stripe" }),
   async (c) => {
     const projectId = c.req.param("projectId");
 
