@@ -116,12 +116,25 @@ export const verifyAppleWebhook: MiddlewareHandler = async (c, next) => {
 
   let verifier: AppleNotificationVerifier;
   if (creds) {
-    verifier = createAppleVerifier({
-      projectId,
-      bundleId: creds.bundleId,
-      appAppleId: creds.appAppleId,
-      environment,
-    });
+    try {
+      verifier = createAppleVerifier({
+        projectId,
+        bundleId: creds.bundleId,
+        appAppleId: creds.appAppleId,
+        environment,
+      });
+    } catch (err) {
+      // loadAppleRootCerts threw — fingerprint mismatch on a pinned
+      // root. Surface to the sender as 503 so stores retry until the
+      // operator redeploys with a fixed cert bundle.
+      log.error("apple webhook rejected: verifier initialization failed", {
+        projectId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      throw new HTTPException(503, {
+        message: "Apple webhook verifier temporarily unavailable",
+      });
+    }
   } else if (env.NODE_ENV === "production") {
     log.warn("apple webhook rejected: no project credentials in production", {
       projectId,

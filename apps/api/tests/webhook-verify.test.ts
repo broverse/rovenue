@@ -207,6 +207,22 @@ describe("verifyAppleWebhook", () => {
     expect(body.eventId).toBe("uuid-stashed");
     expect(body.eventTimestamp).toBe(1_700_000_000);
   });
+
+  test("503 when createAppleVerifier throws (fingerprint mismatch)", async () => {
+    mocks.createAppleVerifier.mockImplementationOnce(() => {
+      throw new Error("Apple root CA fingerprint not in pinned allowlist: ff...");
+    });
+
+    const app = makeApp(verifyAppleWebhook);
+    const res = await app.request("/proj_a", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ signedPayload: "fake.jws" }),
+    });
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("temporarily unavailable");
+  });
 });
 
 // =============================================================
