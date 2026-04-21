@@ -1,4 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+const auditMock = vi.hoisted(() => ({
+  audit: vi.fn(async () => undefined),
+  extractRequestContext: vi.fn(() => ({ ipAddress: null, userAgent: null })),
+  redactCredentials: vi.fn((obj: Record<string, unknown> | null | undefined) => {
+    if (!obj) return null;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(obj)) out[k] = "[REDACTED]";
+    return out;
+  }),
+  verifyAuditChain: vi.fn(async () => ({
+    projectId: "",
+    rowCount: 0,
+    firstVerifiedAt: null,
+    lastVerifiedAt: null,
+    errors: [],
+  })),
+}));
+vi.mock("../src/lib/audit", () => auditMock);
 
 // =============================================================
 // Hoisted mocks
@@ -215,8 +233,8 @@ describe("audit DB write", () => {
       }),
     });
 
-    expect(prismaMock.auditLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    expect(auditMock.audit).toHaveBeenCalledWith(
+      expect.objectContaining({
         projectId: "proj_a",
         userId: "user_1",
         action: "create",
@@ -224,7 +242,7 @@ describe("audit DB write", () => {
         resourceId: "aud_new",
         after: expect.objectContaining({ name: "TR iOS" }),
       }),
-    });
+    );
   });
 
   it("writes before/after on feature flag toggle", async () => {
@@ -246,14 +264,14 @@ describe("audit DB write", () => {
       { method: "POST", headers: authedHeaders() },
     );
 
-    expect(prismaMock.auditLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    expect(auditMock.audit).toHaveBeenCalledWith(
+      expect.objectContaining({
         action: "toggle",
         resource: "feature_flag",
         before: expect.objectContaining({ isEnabled: true }),
         after: expect.objectContaining({ isEnabled: false }),
       }),
-    });
+    );
   });
 
   it("writes experiment.started action on start", async () => {
@@ -276,14 +294,14 @@ describe("audit DB write", () => {
       { method: "POST", headers: authedHeaders() },
     );
 
-    expect(prismaMock.auditLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    expect(auditMock.audit).toHaveBeenCalledWith(
+      expect.objectContaining({
         action: "experiment.started",
         resource: "experiment",
         before: { status: "DRAFT" },
         after: { status: "RUNNING" },
       }),
-    });
+    );
   });
 });
 

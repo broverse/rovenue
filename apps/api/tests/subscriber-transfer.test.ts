@@ -1,4 +1,22 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+const auditMock = vi.hoisted(() => ({
+  audit: vi.fn(async () => undefined),
+  extractRequestContext: vi.fn(() => ({ ipAddress: null, userAgent: null })),
+  redactCredentials: vi.fn((obj: Record<string, unknown> | null | undefined) => {
+    if (!obj) return null;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(obj)) out[k] = "[REDACTED]";
+    return out;
+  }),
+  verifyAuditChain: vi.fn(async () => ({
+    projectId: "",
+    rowCount: 0,
+    firstVerifiedAt: null,
+    lastVerifiedAt: null,
+    errors: [],
+  })),
+}));
+vi.mock("../src/lib/audit", () => auditMock);
 
 // =============================================================
 // Hoisted mocks

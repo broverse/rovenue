@@ -1,4 +1,22 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+const auditMock = vi.hoisted(() => ({
+  audit: vi.fn(async () => undefined),
+  extractRequestContext: vi.fn(() => ({ ipAddress: null, userAgent: null })),
+  redactCredentials: vi.fn((obj: Record<string, unknown> | null | undefined) => {
+    if (!obj) return null;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(obj)) out[k] = "[REDACTED]";
+    return out;
+  }),
+  verifyAuditChain: vi.fn(async () => ({
+    projectId: "",
+    rowCount: 0,
+    firstVerifiedAt: null,
+    lastVerifiedAt: null,
+    errors: [],
+  })),
+}));
+vi.mock("../src/lib/audit", () => auditMock);
 
 const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
   const prismaMock = {
@@ -177,12 +195,14 @@ describe("PUT /dashboard/projects/:projectId/credentials/:store", () => {
     expect(updateCall.data.appleCredentials.enc).not.toContain("BEGIN PRIVATE KEY");
 
     // audit snapshot is redacted
-    const auditCall = prismaMock.auditLog.create.mock.calls[0]![0] as {
-      data: { before: Record<string, string>; after: Record<string, string>; resource: string };
+    const auditCall = auditMock.audit.mock.calls[0]![0] as {
+      before: Record<string, string>;
+      after: Record<string, string>;
+      resource: string;
     };
-    expect(auditCall.data.resource).toBe("credential");
-    expect(auditCall.data.before).toEqual({ apple: "[REDACTED]" });
-    expect(auditCall.data.after).toEqual({ apple: "[REDACTED]" });
+    expect(auditCall.resource).toBe("credential");
+    expect(auditCall.before).toEqual({ apple: "[REDACTED]" });
+    expect(auditCall.after).toEqual({ apple: "[REDACTED]" });
   });
 
   test("rejects invalid payload with 400", async () => {
@@ -195,7 +215,7 @@ describe("PUT /dashboard/projects/:projectId/credentials/:store", () => {
     });
     expect(res.status).toBe(400);
     expect(prismaMock.project.update).not.toHaveBeenCalled();
-    expect(prismaMock.auditLog.create).not.toHaveBeenCalled();
+    expect(auditMock.audit).not.toHaveBeenCalled();
   });
 
   test("rejects unknown store with 400", async () => {
@@ -225,12 +245,14 @@ describe("DELETE /dashboard/projects/:projectId/credentials/:store", () => {
 
     expect(prismaMock.project.update).toHaveBeenCalled();
 
-    const auditCall = prismaMock.auditLog.create.mock.calls[0]![0] as {
-      data: { action: string; before: Record<string, string>; after: unknown };
+    const auditCall = auditMock.audit.mock.calls[0]![0] as {
+      action: string;
+      before: Record<string, string>;
+      after: unknown;
     };
-    expect(auditCall.data.action).toBe("credential.cleared");
-    expect(auditCall.data.before).toEqual({ google: "[REDACTED]" });
-    expect(auditCall.data.after).toBeUndefined();
+    expect(auditCall.action).toBe("credential.cleared");
+    expect(auditCall.before).toEqual({ google: "[REDACTED]" });
+    expect(auditCall.after).toBeNull();
   });
 
   test("ADMIN cannot clear (OWNER only)", async () => {

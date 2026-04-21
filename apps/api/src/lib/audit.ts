@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Context } from "hono";
-import prisma, { drizzle, type Prisma, type PrismaClient } from "@rovenue/db";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
+import { drizzle } from "@rovenue/db";
 import { logger } from "./logger";
 
 // =============================================================
@@ -15,12 +16,13 @@ import { logger } from "./logger";
 //
 // Writes are serialized per project via `pg_advisory_xact_lock`,
 // so two concurrent `audit()` calls for the same project can't
-// race on prevHash lookup. If a caller is already inside a larger
-// transaction (e.g. subscriber transfer), it passes its `tx`
-// client so a rollback removes the audit row alongside the rest
-// of the operation.
+// race on prevHash lookup. Callers can pass their own Drizzle tx
+// (inside a larger `drizzle.db.transaction(...)`) so a rollback
+// removes the audit row alongside the rest of the operation.
 
 const log = logger.child("audit");
+
+const { auditLogs } = drizzle.schema;
 
 // =============================================================
 // Action / resource enums
@@ -104,15 +106,22 @@ export function extractRequestContext(c: Context): {
 // Tx typing
 // =============================================================
 //
-// `AuditTx` is the minimum surface we need from either a top-level
-// PrismaClient or an interactive tx client. We use a structural
-// type instead of `Prisma.TransactionClient` so tests can provide
-// a plain object with matching methods.
+// Drizzle's transaction callback hands the caller a proxy that
+// shares the parent `Db` surface (select/insert/execute). During
+// the Prisma → Drizzle cutover window audit() accepts any tx-ish
+// argument (PrismaTransactionClient or DrizzleTx) and internally
+// always opens its own Drizzle transaction — the audit chain
+// commits independently of the caller's tx. Once every caller
+// migrates to drizzle.db.transaction we'll re-thread the audit
+// write through the caller's tx for full atomicity.
 
-export interface AuditTx {
-  auditLog: Pick<PrismaClient["auditLog"], "create" | "findFirst">;
-  $executeRaw: PrismaClient["$executeRaw"];
-}
+export type AuditTx = unknown;
+
+type DrizzleAuditTxInner = {
+  select: drizzle.Db["select"];
+  insert: drizzle.Db["insert"];
+  execute: drizzle.Db["execute"];
+};
 
 // =============================================================
 // Canonical JSON for the hash
@@ -181,7 +190,7 @@ function buildCanonicalPayload(
 
 export async function audit(
   entry: AuditEntry,
-  tx?: AuditTx,
+  _callerTx?: AuditTx,
 ): Promise<void> {
   if (entry.resource === "credential") {
     for (const snapshot of [entry.before, entry.after]) {
@@ -193,32 +202,40 @@ export async function audit(
     }
   }
 
-  if (tx) {
-    await writeChained(entry, tx);
-    return;
-  }
-
-  // No outer transaction — wrap our own so the advisory lock has a
-  // scope to live inside.
-  await prisma.$transaction(async (innerTx) =>
-    writeChained(entry, innerTx as unknown as AuditTx),
+  // audit() opens its own Drizzle transaction so the advisory
+  // lock has a scope. `_callerTx` is retained in the signature
+  // for callers that haven't migrated yet — we intentionally
+  // ignore it for now; see the note on AuditTx above.
+  await drizzle.db.transaction(async (innerTx) =>
+    writeChained(entry, innerTx as unknown as DrizzleAuditTxInner),
   );
 }
 
-async function writeChained(entry: AuditEntry, tx: AuditTx): Promise<void> {
+async function writeChained(
+  entry: AuditEntry,
+  tx: DrizzleAuditTxInner,
+): Promise<void> {
   // Per-project advisory xact lock. Two concurrent audit writes for
   // the same project now serialise at this lock, so prevHash lookup
   // + rowHash compute + insert happen atomically. Writes for
   // different projects proceed in parallel (different lock keys).
   const lockKey = `audit:${entry.projectId}`;
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtextextended(${sql.param(lockKey)}, 0))`,
+  );
 
-  const latest = await tx.auditLog.findFirst({
-    where: { projectId: entry.projectId, rowHash: { not: null } },
-    orderBy: { createdAt: "desc" },
-    select: { rowHash: true },
-  });
-  const prevHash = latest?.rowHash ?? null;
+  const latestRows = await tx
+    .select({ rowHash: auditLogs.rowHash })
+    .from(auditLogs)
+    .where(
+      and(
+        eq(auditLogs.projectId, entry.projectId),
+        isNotNull(auditLogs.rowHash),
+      ),
+    )
+    .orderBy(desc(auditLogs.createdAt))
+    .limit(1);
+  const prevHash = latestRows[0]?.rowHash ?? null;
 
   const createdAt = new Date();
   const canonical = canonicalJSON(
@@ -227,21 +244,19 @@ async function writeChained(entry: AuditEntry, tx: AuditTx): Promise<void> {
   const rowHash = hashRow(canonical);
 
   try {
-    await tx.auditLog.create({
-      data: {
-        projectId: entry.projectId,
-        userId: entry.userId,
-        action: entry.action,
-        resource: entry.resource,
-        resourceId: entry.resourceId,
-        before: (entry.before as Prisma.InputJsonValue) ?? undefined,
-        after: (entry.after as Prisma.InputJsonValue) ?? undefined,
-        ipAddress: entry.ipAddress ?? null,
-        userAgent: entry.userAgent ?? null,
-        prevHash,
-        rowHash,
-        createdAt,
-      },
+    await tx.insert(auditLogs).values({
+      projectId: entry.projectId,
+      userId: entry.userId,
+      action: entry.action,
+      resource: entry.resource,
+      resourceId: entry.resourceId,
+      before: (entry.before as unknown) ?? null,
+      after: (entry.after as unknown) ?? null,
+      ipAddress: entry.ipAddress ?? null,
+      userAgent: entry.userAgent ?? null,
+      prevHash,
+      rowHash,
+      createdAt,
     });
   } catch (err) {
     log.warn("audit log write failed", {

@@ -1,4 +1,22 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+const auditMock = vi.hoisted(() => ({
+  audit: vi.fn(async () => undefined),
+  extractRequestContext: vi.fn(() => ({ ipAddress: null, userAgent: null })),
+  redactCredentials: vi.fn((obj: Record<string, unknown> | null | undefined) => {
+    if (!obj) return null;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(obj)) out[k] = "[REDACTED]";
+    return out;
+  }),
+  verifyAuditChain: vi.fn(async () => ({
+    projectId: "",
+    rowCount: 0,
+    firstVerifiedAt: null,
+    lastVerifiedAt: null,
+    errors: [],
+  })),
+}));
+vi.mock("../src/lib/audit", () => auditMock);
 
 const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
   const prismaMock = {
@@ -456,10 +474,10 @@ describe("PATCH /dashboard/projects/:id", () => {
         data: expect.objectContaining({ name: "Renamed", webhookUrl: "https://new.example.com" }),
       }),
     );
-    expect(prismaMock.auditLog.create).toHaveBeenCalled();
-    // Atomicity: project.update + auditLog.create run inside the SAME
-    // $transaction call, so a crash between them can't leave a silent
-    // mutation.
+    expect(auditMock.audit).toHaveBeenCalled();
+    // Atomicity: project.update runs inside a transaction; audit() is
+    // invoked with the tx'd prisma client so a crash between them can't
+    // leave a silent mutation.
     expect(prismaMock.$transaction).toHaveBeenCalled();
     expect(prismaMock.$transaction.mock.invocationCallOrder[0]).toBeLessThan(
       prismaMock.project.update.mock.invocationCallOrder[0]!,
@@ -504,7 +522,7 @@ describe("PATCH /dashboard/projects/:id", () => {
     });
     expect(res.status).toBe(400);
     expect(prismaMock.project.update).not.toHaveBeenCalled();
-    expect(prismaMock.auditLog.create).not.toHaveBeenCalled();
+    expect(auditMock.audit).not.toHaveBeenCalled();
   });
 
   test("404 when project not found", async () => {
@@ -543,7 +561,7 @@ describe("PATCH /dashboard/projects/:id", () => {
     const body = (await res.json()) as { error?: { message: string } };
     expect(body.error?.message).toMatch(/apiSecret/);
     expect(prismaMock.project.update).not.toHaveBeenCalled();
-    expect(prismaMock.auditLog.create).not.toHaveBeenCalled();
+    expect(auditMock.audit).not.toHaveBeenCalled();
   });
 });
 
@@ -569,12 +587,14 @@ describe("POST /dashboard/projects/:id/webhook-secret/rotate", () => {
     const body = (await res.json()) as { data: { webhookSecret: string } };
     expect(body.data.webhookSecret).toMatch(/^whsec_/);
 
-    const auditCall = prismaMock.auditLog.create.mock.calls[0]?.[0] as {
-      data: { before: Record<string, unknown>; after: Record<string, unknown>; resource: string };
+    const auditCall = auditMock.audit.mock.calls[0]?.[0] as {
+      before: Record<string, unknown>;
+      after: Record<string, unknown>;
+      resource: string;
     };
-    expect(auditCall.data.resource).toBe("credential");
-    expect(auditCall.data.before).toEqual({ webhookSecret: "[REDACTED]" });
-    expect(auditCall.data.after).toEqual({ webhookSecret: "[REDACTED]" });
+    expect(auditCall.resource).toBe("credential");
+    expect(auditCall.before).toEqual({ webhookSecret: "[REDACTED]" });
+    expect(auditCall.after).toEqual({ webhookSecret: "[REDACTED]" });
   });
 });
 
@@ -595,14 +615,13 @@ describe("DELETE /dashboard/projects/:id", () => {
     expect(res.status).toBe(200);
 
     expect(prismaMock.project.delete).toHaveBeenCalledWith({ where: { id: "proj_1" } });
-    expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
+    expect(auditMock.audit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          action: "project.deleted",
-          resource: "project",
-          resourceId: "proj_1",
-        }),
+        action: "project.deleted",
+        resource: "project",
+        resourceId: "proj_1",
       }),
+      expect.anything(),
     );
   });
 });

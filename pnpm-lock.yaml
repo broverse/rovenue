@@ -56,6 +56,9 @@ importers:
       bullmq:
         specifier: ^5.0.0
         version: 5.73.5
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3))(@types/pg@8.20.0)(kysely@0.28.16)(pg@8.20.0)(prisma@6.19.3(typescript@5.9.3))
       google-auth-library:
         specifier: ^9.6.0
         version: 9.15.1

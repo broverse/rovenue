@@ -1,4 +1,22 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+const auditMock = vi.hoisted(() => ({
+  audit: vi.fn(async () => undefined),
+  extractRequestContext: vi.fn(() => ({ ipAddress: null, userAgent: null })),
+  redactCredentials: vi.fn((obj: Record<string, unknown> | null | undefined) => {
+    if (!obj) return null;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(obj)) out[k] = "[REDACTED]";
+    return out;
+  }),
+  verifyAuditChain: vi.fn(async () => ({
+    projectId: "",
+    rowCount: 0,
+    firstVerifiedAt: null,
+    lastVerifiedAt: null,
+    errors: [],
+  })),
+}));
+vi.mock("../src/lib/audit", () => auditMock);
 
 const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
   const prismaMock = {
@@ -202,10 +220,9 @@ describe("POST /dashboard/projects/:projectId/members", () => {
       data: { member: { email: string; role: string } };
     };
     expect(body.data.member).toMatchObject({ email: "new@x.com", role: "ADMIN" });
-    expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ action: "member.invited" }),
-      }),
+    expect(auditMock.audit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "member.invited" }),
+      expect.anything(),
     );
   });
 });
@@ -230,10 +247,9 @@ describe("PATCH /dashboard/projects/:projectId/members/:userId", () => {
       body: JSON.stringify({ role: "VIEWER" }),
     });
     expect(res.status).toBe(200);
-    expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ action: "member.role_changed" }),
-      }),
+    expect(auditMock.audit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "member.role_changed" }),
+      expect.anything(),
     );
   });
 
@@ -266,10 +282,9 @@ describe("DELETE /dashboard/projects/:projectId/members/:userId", () => {
     });
     expect(res.status).toBe(200);
     expect(prismaMock.projectMember.delete).toHaveBeenCalled();
-    expect(prismaMock.auditLog.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ action: "member.removed" }),
-      }),
+    expect(auditMock.audit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "member.removed" }),
+      expect.anything(),
     );
   });
 
