@@ -222,3 +222,18 @@ export async function revokeAccessByOriginalTransaction(
     .set({ isActive: false })
     .where(inArray(subscriberAccess.id, ids));
 }
+
+/**
+ * Flip every access row for a single purchase to isActive=false.
+ * Used by the Google webhook when a subscription transitions into a
+ * non-entitlement state (cancelled, held, expired).
+ */
+export async function revokeAccessByPurchaseId(
+  db: DbOrTx,
+  purchaseId: string,
+): Promise<void> {
+  await db
+    .update(subscriberAccess)
+    .set({ isActive: false })
+    .where(eq(subscriberAccess.purchaseId, purchaseId));
+}

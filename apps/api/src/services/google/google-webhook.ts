@@ -1,6 +1,5 @@
-import prisma, {
+import {
   Environment,
-  Prisma,
   WebhookEventStatus,
   WebhookSource,
   Store,
@@ -87,14 +86,9 @@ export async function handleGoogleNotification(
 
   const kind = classifyNotification(payload);
 
-  const webhookEvent = await prisma.webhookEvent.upsert({
-    where: {
-      source_storeEventId: {
-        source: WebhookSource.GOOGLE,
-        storeEventId,
-      },
-    },
-    create: {
+  const webhookEvent = await drizzle.webhookEventRepo.upsertWebhookEvent(
+    drizzle.db,
+    {
       projectId: opts.projectId,
       source: WebhookSource.GOOGLE,
       eventType: kind,
@@ -102,8 +96,7 @@ export async function handleGoogleNotification(
       payload: JSON.parse(JSON.stringify(payload)),
       status: WebhookEventStatus.PROCESSING,
     },
-    update: {},
-  });
+  );
 
   if (webhookEvent.status === WebhookEventStatus.PROCESSED) {
     log.info("duplicate notification, skipping", { storeEventId, kind });
@@ -115,13 +108,14 @@ export async function handleGoogleNotification(
       projectId: opts.projectId,
       kind,
     });
-    await prisma.webhookEvent.update({
-      where: { id: webhookEvent.id },
-      data: {
+    await drizzle.webhookEventRepo.updateWebhookEvent(
+      drizzle.db,
+      webhookEvent.id,
+      {
         status: WebhookEventStatus.PROCESSED,
         processedAt: new Date(),
       },
-    });
+    );
     return {
       status: "persisted-no-verify",
       kind,
@@ -151,15 +145,16 @@ export async function handleGoogleNotification(
       });
     }
 
-    await prisma.webhookEvent.update({
-      where: { id: webhookEvent.id },
-      data: {
+    await drizzle.webhookEventRepo.updateWebhookEvent(
+      drizzle.db,
+      webhookEvent.id,
+      {
         status: WebhookEventStatus.PROCESSED,
         processedAt: new Date(),
         subscriberId: outcome.subscriberId,
         purchaseId: outcome.purchaseId,
       },
-    });
+    );
 
     return {
       status: "processed",
@@ -170,14 +165,15 @@ export async function handleGoogleNotification(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await prisma.webhookEvent.update({
-      where: { id: webhookEvent.id },
-      data: {
+    await drizzle.webhookEventRepo.updateWebhookEvent(
+      drizzle.db,
+      webhookEvent.id,
+      {
         status: WebhookEventStatus.FAILED,
         errorMessage: message,
-        retryCount: { increment: 1 },
+        incrementRetryCount: true,
       },
-    });
+    );
     log.error("notification processing failed", {
       storeEventId,
       kind,
@@ -239,13 +235,9 @@ async function processSubscriptionNotification(
     regionCode: purchase.regionCode,
   });
 
-  const persisted = await prisma.purchase.upsert({
-    where: {
-      store_storeTransactionId: {
-        store: Store.PLAY_STORE,
-        storeTransactionId: ctx.notification.purchaseToken,
-      },
-    },
+  const persisted = await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
+    store: Store.PLAY_STORE,
+    storeTransactionId: ctx.notification.purchaseToken,
     create: {
       projectId: ctx.projectId,
       subscriberId: subscriber.id,
@@ -261,7 +253,8 @@ async function processSubscriptionNotification(
       environment: Environment.PRODUCTION,
       autoRenewStatus,
       cancellationDate,
-      priceAmount: pricing?.amount ?? null,
+      // Drizzle decimal columns round-trip as strings.
+      priceAmount: pricing?.amount != null ? pricing.amount.toString() : null,
       priceCurrency: pricing?.currency ?? null,
       verifiedAt: new Date(),
     },
@@ -270,8 +263,10 @@ async function processSubscriptionNotification(
       expiresDate,
       autoRenewStatus,
       cancellationDate,
-      priceAmount: pricing?.amount ?? undefined,
-      priceCurrency: pricing?.currency ?? undefined,
+      ...(pricing?.amount != null && {
+        priceAmount: pricing.amount.toString(),
+      }),
+      ...(pricing?.currency != null && { priceCurrency: pricing.currency }),
       verifiedAt: new Date(),
     },
   });
@@ -284,10 +279,7 @@ async function processSubscriptionNotification(
       expiresDate,
     });
   } else {
-    await prisma.subscriberAccess.updateMany({
-      where: { purchaseId: persisted.id },
-      data: { isActive: false },
-    });
+    await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, persisted.id);
   }
 
   await ensureAcknowledged(ctx, purchase);
@@ -298,19 +290,17 @@ async function processSubscriptionNotification(
   if (revenueEventType) {
     const amount = pricing?.amount ?? 0;
     const currency = pricing?.currency ?? "USD";
-    await prisma.revenueEvent.create({
-      data: {
-        projectId: ctx.projectId,
-        subscriberId: subscriber.id,
-        purchaseId: persisted.id,
-        productId: product.id,
-        type: revenueEventType,
-        amount: new Prisma.Decimal(amount),
-        currency,
-        amountUsd: new Prisma.Decimal(await convertToUsd(amount, currency)),
-        store: Store.PLAY_STORE,
-        eventDate: new Date(),
-      },
+    await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+      projectId: ctx.projectId,
+      subscriberId: subscriber.id,
+      purchaseId: persisted.id,
+      productId: product.id,
+      type: revenueEventType,
+      amount: amount.toString(),
+      currency,
+      amountUsd: (await convertToUsd(amount, currency)).toString(),
+      store: Store.PLAY_STORE,
+      eventDate: new Date(),
     });
   }
 
@@ -381,18 +371,9 @@ async function resolveSubscriber(
     purchase.externalAccountIdentifiers?.obfuscatedExternalAccountId;
 
   if (externalId) {
-    return prisma.subscriber.upsert({
-      where: {
-        projectId_appUserId: {
-          projectId: ctx.projectId,
-          appUserId: externalId,
-        },
-      },
-      update: { lastSeenAt: new Date() },
-      create: {
-        projectId: ctx.projectId,
-        appUserId: externalId,
-      },
+    return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
+      projectId: ctx.projectId,
+      appUserId: externalId,
     });
   }
 
@@ -410,11 +391,9 @@ async function resolveSubscriber(
     if (existingSubscriber) return existingSubscriber;
   }
 
-  return prisma.subscriber.create({
-    data: {
-      projectId: ctx.projectId,
-      appUserId: `google:${ctx.notification.purchaseToken.slice(0, 24)}`,
-    },
+  return drizzle.subscriberRepo.createSubscriber(drizzle.db, {
+    projectId: ctx.projectId,
+    appUserId: `google:${ctx.notification.purchaseToken.slice(0, 24)}`,
   });
 }
 
@@ -434,20 +413,20 @@ async function grantAccess(args: GrantAccessArgs): Promise<void> {
       key,
     );
     if (existing) {
-      await prisma.subscriberAccess.update({
-        where: { id: existing.id },
-        data: { isActive: true, expiresDate: args.expiresDate },
-      });
+      await drizzle.accessRepo.setAccessActiveAndExpiry(
+        drizzle.db,
+        existing.id,
+        true,
+        args.expiresDate,
+      );
     } else {
-      await prisma.subscriberAccess.create({
-        data: {
-          subscriberId: args.subscriberId,
-          purchaseId: args.purchaseId,
-          entitlementKey: key,
-          isActive: true,
-          expiresDate: args.expiresDate,
-          store: Store.PLAY_STORE,
-        },
+      await drizzle.accessRepo.createAccess(drizzle.db, {
+        subscriberId: args.subscriberId,
+        purchaseId: args.purchaseId,
+        entitlementKey: key,
+        isActive: true,
+        expiresDate: args.expiresDate,
+        store: Store.PLAY_STORE,
       });
     }
   }
@@ -471,27 +450,13 @@ async function processVoidedPurchase(
     args.purchaseToken,
   );
 
-  await prisma.purchase.updateMany({
-    where: {
-      projectId: args.projectId,
-      store: Store.PLAY_STORE,
-      storeTransactionId: args.purchaseToken,
-    },
-    data: {
+  if (purchase) {
+    await drizzle.purchaseRepo.updatePurchase(drizzle.db, purchase.id, {
       status: PurchaseStatus.REFUNDED,
       refundDate: new Date(),
-    },
-  });
-  await prisma.subscriberAccess.updateMany({
-    where: {
-      purchase: {
-        projectId: args.projectId,
-        store: Store.PLAY_STORE,
-        storeTransactionId: args.purchaseToken,
-      },
-    },
-    data: { isActive: false },
-  });
+    });
+    await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);
+  }
 
   return purchase
     ? { subscriberId: purchase.subscriberId, purchaseId: purchase.id }
