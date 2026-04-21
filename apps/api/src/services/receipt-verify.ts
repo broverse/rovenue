@@ -1,5 +1,5 @@
 import { HTTPException } from "hono/http-exception";
-import prisma, {
+import {
   Environment,
   ProductType,
   PurchaseStatus,
@@ -158,13 +158,9 @@ async function verifyAppleReceipt(
     (transaction.price ?? 0) === 0;
   const status = isTrial ? PurchaseStatus.TRIAL : PurchaseStatus.ACTIVE;
 
-  const purchase = await prisma.purchase.upsert({
-    where: {
-      store_storeTransactionId: {
-        store: Store.APP_STORE,
-        storeTransactionId: transaction.transactionId,
-      },
-    },
+  const purchase = (await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
+    store: Store.APP_STORE,
+    storeTransactionId: transaction.transactionId,
     create: {
       projectId: args.projectId,
       subscriberId: subscriber.id,
@@ -182,8 +178,11 @@ async function verifyAppleReceipt(
       expiresDate: transaction.expiresDate
         ? new Date(transaction.expiresDate)
         : null,
+      // Drizzle decimal columns round-trip as strings.
       priceAmount:
-        transaction.price != null ? transaction.price / 1_000_000 : null,
+        transaction.price != null
+          ? (transaction.price / 1_000_000).toString()
+          : null,
       priceCurrency: transaction.currency ?? null,
       ownershipType: transaction.inAppOwnershipType,
       verifiedAt: new Date(),
@@ -193,12 +192,15 @@ async function verifyAppleReceipt(
       expiresDate: transaction.expiresDate
         ? new Date(transaction.expiresDate)
         : null,
-      priceAmount:
-        transaction.price != null ? transaction.price / 1_000_000 : undefined,
-      priceCurrency: transaction.currency ?? undefined,
+      ...(transaction.price != null && {
+        priceAmount: (transaction.price / 1_000_000).toString(),
+      }),
+      ...(transaction.currency != null && {
+        priceCurrency: transaction.currency,
+      }),
       verifiedAt: new Date(),
     },
-  });
+  })) as unknown as Purchase;
 
   return { subscriber, product, purchase };
 }
@@ -278,13 +280,9 @@ async function verifyGoogleSubscriptionReceipt(
     ? new Date(subscription.startTime)
     : new Date();
 
-  const purchase = await prisma.purchase.upsert({
-    where: {
-      store_storeTransactionId: {
-        store: Store.PLAY_STORE,
-        storeTransactionId: args.receipt,
-      },
-    },
+  const purchase = (await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
+    store: Store.PLAY_STORE,
+    storeTransactionId: args.receipt,
     create: {
       projectId: args.projectId,
       subscriberId: subscriber.id,
@@ -309,7 +307,7 @@ async function verifyGoogleSubscriptionReceipt(
         lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null,
       verifiedAt: new Date(),
     },
-  });
+  })) as unknown as Purchase;
 
   return { subscriber, product, purchase };
 }
@@ -345,13 +343,9 @@ async function verifyGoogleProductReceipt(
     ? Number(productPurchase.purchaseTimeMillis)
     : Date.now();
 
-  const purchase = await prisma.purchase.upsert({
-    where: {
-      store_storeTransactionId: {
-        store: Store.PLAY_STORE,
-        storeTransactionId: args.receipt,
-      },
-    },
+  const purchase = (await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
+    store: Store.PLAY_STORE,
+    storeTransactionId: args.receipt,
     create: {
       projectId: args.projectId,
       subscriberId: subscriber.id,
@@ -368,7 +362,7 @@ async function verifyGoogleProductReceipt(
     update: {
       verifiedAt: new Date(),
     },
-  });
+  })) as unknown as Purchase;
 
   return { subscriber, product, purchase };
 }
@@ -381,9 +375,9 @@ async function upsertSubscriber(
   projectId: string,
   appUserId: string,
 ): Promise<Subscriber> {
-  return prisma.subscriber.upsert({
-    where: { projectId_appUserId: { projectId, appUserId } },
-    update: { lastSeenAt: new Date() },
-    create: { projectId, appUserId },
+  const row = await drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
+    projectId,
+    appUserId,
   });
+  return row as unknown as Subscriber;
 }
