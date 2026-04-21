@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, { MemberRole } from "@rovenue/db";
+import prisma, { MemberRole, drizzle } from "@rovenue/db";
 import type {
   AddMemberResponse,
   ListMembersResponse,
@@ -56,9 +56,7 @@ function toMemberRow(m: {
 }
 
 async function countOwners(projectId: string): Promise<number> {
-  return prisma.projectMember.count({
-    where: { projectId, role: MemberRole.OWNER },
-  });
+  return drizzle.projectRepo.countProjectOwners(drizzle.db, projectId);
 }
 
 export const membersRoute = new Hono()
@@ -72,11 +70,10 @@ export const membersRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
 
-    const rows = await prisma.projectMember.findMany({
-      where: { projectId },
-      include: { user: { select: { email: true, name: true, image: true } } },
-      orderBy: { createdAt: "asc" },
-    });
+    const rows = await drizzle.projectRepo.listProjectMembers(
+      drizzle.db,
+      projectId,
+    );
 
     const payload: ListMembersResponse = { members: rows.map(toMemberRow) };
     return c.json(ok(payload));
@@ -92,19 +89,21 @@ export const membersRoute = new Hono()
 
     const body = c.req.valid("json");
 
-    const targetUser = await prisma.user.findUnique({
-      where: { email: body.email },
-      select: { id: true, email: true, name: true, image: true },
-    });
+    const targetUser = await drizzle.userRepo.findUserByEmail(
+      drizzle.db,
+      body.email,
+    );
     if (!targetUser) {
       throw new HTTPException(404, {
         message: "No user with that email. Ask them to sign in first.",
       });
     }
 
-    const existing = await prisma.projectMember.findUnique({
-      where: { projectId_userId: { projectId, userId: targetUser.id } },
-    });
+    const existing = await drizzle.projectRepo.findMembership(
+      drizzle.db,
+      projectId,
+      targetUser.id,
+    );
     if (existing) {
       throw new HTTPException(409, {
         message: "That user is already a project member",
@@ -156,10 +155,11 @@ export const membersRoute = new Hono()
 
     const body = c.req.valid("json");
 
-    const target = await prisma.projectMember.findUnique({
-      where: { projectId_userId: { projectId, userId: targetUserId } },
-      select: { id: true, role: true },
-    });
+    const target = await drizzle.projectRepo.findMembership(
+      drizzle.db,
+      projectId,
+      targetUserId,
+    );
     if (!target) throw new HTTPException(404, { message: "Member not found" });
 
     // Demote-last-OWNER guard: if we're moving the only OWNER off the
@@ -209,10 +209,11 @@ export const membersRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id, MemberRole.OWNER);
 
-    const target = await prisma.projectMember.findUnique({
-      where: { projectId_userId: { projectId, userId: targetUserId } },
-      select: { id: true, role: true },
-    });
+    const target = await drizzle.projectRepo.findMembership(
+      drizzle.db,
+      projectId,
+      targetUserId,
+    );
     if (!target) throw new HTTPException(404, { message: "Member not found" });
 
     if (target.role === MemberRole.OWNER) {

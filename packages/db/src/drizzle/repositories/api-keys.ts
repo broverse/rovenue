@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   apiKeys,
@@ -93,4 +93,35 @@ export async function findApiKeyById(
     .where(eq(apiKeys.id, id))
     .limit(1);
   return rows[0] ? rowToRecord(rows[0]) : null;
+}
+
+export interface ActiveApiKeyRow {
+  id: string;
+  label: string;
+  keyPublic: string;
+  environment: "PRODUCTION" | "SANDBOX";
+  createdAt: Date;
+}
+
+/**
+ * Mirrors prisma.apiKey.findMany({ where: { projectId, revokedAt: null }, orderBy: { createdAt: "asc" }, select: {…} }).
+ * Used by the dashboard's project detail endpoint.
+ */
+export async function listActiveApiKeys(
+  db: Db,
+  projectId: string,
+): Promise<ActiveApiKeyRow[]> {
+  return db
+    .select({
+      id: apiKeys.id,
+      label: apiKeys.label,
+      keyPublic: apiKeys.keyPublic,
+      environment: apiKeys.environment,
+      createdAt: apiKeys.createdAt,
+    })
+    .from(apiKeys)
+    .where(
+      and(eq(apiKeys.projectId, projectId), isNull(apiKeys.revokedAt)),
+    )
+    .orderBy(asc(apiKeys.createdAt));
 }

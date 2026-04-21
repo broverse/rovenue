@@ -38,8 +38,27 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
       findProjectById: vi.fn(async () => null),
       findProjectCredentials: vi.fn(async () => null),
       findMembershipsForUser: vi.fn(async () => []),
-      listProjectMembers: vi.fn(async () => []),
-      countProjectOwners: vi.fn(async () => 0),
+      listProjectMembers: vi.fn(async (_db: unknown, projectId: string) => {
+        const rows = await prismaMock.projectMember.findMany({
+          where: { projectId },
+          include: { user: { select: { email: true, name: true, image: true } } },
+          orderBy: { createdAt: "asc" },
+        });
+        return Array.isArray(rows) ? rows : [];
+      }),
+      countProjectOwners: vi.fn(async (_db: unknown, projectId: string) =>
+        prismaMock.projectMember.count({
+          where: { projectId, role: "OWNER" },
+        }),
+      ),
+    },
+    userRepo: {
+      findUserByEmail: vi.fn(async (_db: unknown, email: string) =>
+        prismaMock.user.findUnique({
+          where: { email },
+          select: { id: true, email: true, name: true, image: true },
+        }),
+      ),
     },
     shadowRead: vi.fn(
       async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>

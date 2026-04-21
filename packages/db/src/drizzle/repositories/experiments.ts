@@ -1,9 +1,20 @@
-import { and, eq } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   experiments,
   type Experiment,
 } from "../schema";
+
+export async function countExperiments(
+  db: Db,
+  projectId: string,
+): Promise<number> {
+  const rows = await db
+    .select({ total: count() })
+    .from(experiments)
+    .where(eq(experiments.projectId, projectId));
+  return Number(rows[0]?.total ?? 0);
+}
 
 // =============================================================
 // Experiment reads — Drizzle repository

@@ -25,11 +25,45 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
           select: { id: true, role: true },
         }),
       ),
-      findProjectById: vi.fn(async () => null),
+      findProjectById: vi.fn(async (_db: unknown, id: string) =>
+        prismaMock.project.findUnique({ where: { id } }),
+      ),
       findProjectCredentials: vi.fn(async () => null),
-      findMembershipsForUser: vi.fn(async () => []),
+      findMembershipsForUser: vi.fn(async (_db: unknown, userId: string) => {
+        const rows = await prismaMock.projectMember.findMany({
+          where: { userId },
+          include: { project: true },
+          orderBy: { createdAt: "desc" },
+        });
+        // The drizzle repo returns rows with `project` inlined.
+        return Array.isArray(rows) ? rows : [];
+      }),
       listProjectMembers: vi.fn(async () => []),
       countProjectOwners: vi.fn(async () => 0),
+    },
+    apiKeyRepo: {
+      findApiKeyByPublic: vi.fn(async () => null),
+      findApiKeyById: vi.fn(async () => null),
+      listActiveApiKeys: vi.fn(async (_db: unknown, projectId: string) =>
+        prismaMock.apiKey.findMany({ where: { projectId, revokedAt: null } }),
+      ),
+    },
+    subscriberRepo: {
+      countActiveSubscribers: vi.fn(async (_db: unknown, projectId: string) =>
+        prismaMock.subscriber.count({ where: { projectId, deletedAt: null } }),
+      ),
+    },
+    experimentRepo: {
+      countExperiments: vi.fn(async (_db: unknown, projectId: string) =>
+        prismaMock.experiment.count({ where: { projectId } }),
+      ),
+    },
+    dashboardFeatureFlagRepo: {
+      countFeatureFlags: vi.fn(async (_db: unknown, projectId: string) =>
+        prismaMock.featureFlag.count({ where: { projectId } }),
+      ),
+      listFeatureFlags: vi.fn(async () => []),
+      findFeatureFlagById: vi.fn(async () => null),
     },
     shadowRead: vi.fn(
       async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>

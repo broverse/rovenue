@@ -30,3 +30,4 @@ export * as projectRepo from "./repositories/projects";
 export * as audienceRepo from "./repositories/audiences";
 export * as outgoingWebhookRepo from "./repositories/outgoing-webhooks";
 export * as dashboardFeatureFlagRepo from "./repositories/feature-flags-dashboard";
+export * as userRepo from "./repositories/users";

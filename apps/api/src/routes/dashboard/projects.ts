@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, { Environment, MemberRole, Prisma } from "@rovenue/db";
+import prisma, { Environment, MemberRole, Prisma, drizzle } from "@rovenue/db";
 import {
   API_KEY_KIND,
   API_KEY_PREFIX,
@@ -184,11 +184,10 @@ export const projectsRoute = new Hono()
   .use("*", requireDashboardAuth)
   .get("/", async (c) => {
   const user = c.get("user");
-  const memberships = await prisma.projectMember.findMany({
-    where: { userId: user.id },
-    include: { project: true },
-    orderBy: { createdAt: "desc" },
-  });
+  const memberships = await drizzle.projectRepo.findMembershipsForUser(
+    drizzle.db,
+    user.id,
+  );
   const projects: ProjectSummary[] = memberships.map((m) => ({
     id: m.project.id,
     name: m.project.name,
@@ -204,21 +203,11 @@ export const projectsRoute = new Hono()
   await assertProjectAccess(id, user.id, MemberRole.VIEWER);
 
   const [project, apiKeys, subscribers, experiments, featureFlags] = await Promise.all([
-    prisma.project.findUnique({ where: { id } }),
-    prisma.apiKey.findMany({
-      where: { projectId: id, revokedAt: null },
-      orderBy: { createdAt: "asc" },
-      select: {
-        id: true,
-        label: true,
-        keyPublic: true,
-        environment: true,
-        createdAt: true,
-      },
-    }),
-    prisma.subscriber.count({ where: { projectId: id, deletedAt: null } }),
-    prisma.experiment.count({ where: { projectId: id } }),
-    prisma.featureFlag.count({ where: { projectId: id } }),
+    drizzle.projectRepo.findProjectById(drizzle.db, id),
+    drizzle.apiKeyRepo.listActiveApiKeys(drizzle.db, id),
+    drizzle.subscriberRepo.countActiveSubscribers(drizzle.db, id),
+    drizzle.experimentRepo.countExperiments(drizzle.db, id),
+    drizzle.dashboardFeatureFlagRepo.countFeatureFlags(drizzle.db, id),
   ]);
 
   if (!project) throw new HTTPException(404, { message: "Project not found" });
@@ -316,10 +305,7 @@ export const projectsRoute = new Hono()
 
     // Check existence first so callers hitting a missing resource get a
     // crisp 404 regardless of whether their body would have been valid.
-    const before = await prisma.project.findUnique({
-      where: { id },
-      select: { name: true, webhookUrl: true, settings: true },
-    });
+    const before = await drizzle.projectRepo.findProjectById(drizzle.db, id);
     if (!before) throw new HTTPException(404, { message: "Project not found" });
 
     const body = c.req.valid("json");
@@ -359,20 +345,10 @@ export const projectsRoute = new Hono()
   // Mirror GET /:id's response shape so the dashboard client can refresh
   // its cache from the PATCH response without a follow-up re-fetch.
   const [apiKeys, subscribers, experiments, featureFlags] = await Promise.all([
-    prisma.apiKey.findMany({
-      where: { projectId: id, revokedAt: null },
-      orderBy: { createdAt: "asc" },
-      select: {
-        id: true,
-        label: true,
-        keyPublic: true,
-        environment: true,
-        createdAt: true,
-      },
-    }),
-    prisma.subscriber.count({ where: { projectId: id, deletedAt: null } }),
-    prisma.experiment.count({ where: { projectId: id } }),
-    prisma.featureFlag.count({ where: { projectId: id } }),
+    drizzle.apiKeyRepo.listActiveApiKeys(drizzle.db, id),
+    drizzle.subscriberRepo.countActiveSubscribers(drizzle.db, id),
+    drizzle.experimentRepo.countExperiments(drizzle.db, id),
+    drizzle.dashboardFeatureFlagRepo.countFeatureFlags(drizzle.db, id),
   ]);
 
   const payload = toProjectDetail(project, apiKeys, {

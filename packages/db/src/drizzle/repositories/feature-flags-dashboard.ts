@@ -1,6 +1,17 @@
-import { asc, eq } from "drizzle-orm";
+import { asc, count, eq } from "drizzle-orm";
 import type { Db } from "../client";
 import { featureFlags, type FeatureFlag } from "../schema";
+
+export async function countFeatureFlags(
+  db: Db,
+  projectId: string,
+): Promise<number> {
+  const rows = await db
+    .select({ total: count() })
+    .from(featureFlags)
+    .where(eq(featureFlags.projectId, projectId));
+  return Number(rows[0]?.total ?? 0);
+}
 
 // =============================================================
 // Dashboard feature flag reads — single-project list + lookup

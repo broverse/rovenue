@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, isNull, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, ilike, isNull, lt, or, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   purchases,
@@ -6,6 +6,20 @@ import {
   subscribers,
   type Subscriber,
 } from "../schema";
+
+/** Active (non-soft-deleted) subscriber count for a project. */
+export async function countActiveSubscribers(
+  db: Db,
+  projectId: string,
+): Promise<number> {
+  const rows = await db
+    .select({ total: count() })
+    .from(subscribers)
+    .where(
+      and(eq(subscribers.projectId, projectId), isNull(subscribers.deletedAt)),
+    );
+  return Number(rows[0]?.total ?? 0);
+}
 
 // =============================================================
 // Subscriber read path — Drizzle repository
