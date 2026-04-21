@@ -92,6 +92,13 @@ const { prismaMock, drizzleMock, authMock, flagMock, engineMock } = vi.hoisted((
         async (_db: unknown, input: Record<string, unknown>) =>
           prismaMock.featureFlag.create({ data: input }),
       ),
+      updateFeatureFlag: vi.fn(
+        async (_db: unknown, id: string, patch: Record<string, unknown>) =>
+          prismaMock.featureFlag.update({ where: { id }, data: patch }),
+      ),
+      deleteFeatureFlag: vi.fn(async (_db: unknown, id: string) =>
+        prismaMock.featureFlag.delete({ where: { id } }),
+      ),
     },
     audienceRepo: {
       findDefaultAudience: vi.fn(async () => null),

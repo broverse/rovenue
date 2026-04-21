@@ -2,11 +2,10 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, {
+import {
   FeatureFlagType,
   MemberRole,
   drizzle,
-  type Prisma,
 } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { audit, extractRequestContext } from "../../lib/audit";
@@ -63,17 +62,18 @@ export const featureFlagsRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(body.projectId, user.id, MemberRole.ADMIN);
 
-    const flag = await prisma.featureFlag.create({
-      data: {
+    const flag = await drizzle.dashboardFeatureFlagRepo.createFeatureFlag(
+      drizzle.db,
+      {
         projectId: body.projectId,
         key: body.key,
         type: body.type,
-        defaultValue: body.defaultValue as Prisma.InputJsonValue,
-        rules: body.rules as unknown as Prisma.InputJsonValue,
+        defaultValue: body.defaultValue,
+        rules: body.rules,
         isEnabled: body.isEnabled,
         description: body.description,
       },
-    });
+    );
 
     await invalidateFlagCache(body.projectId);
     await audit({
@@ -133,20 +133,24 @@ export const featureFlagsRoute = new Hono()
     await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
 
     const body = c.req.valid("json");
-    const updates: Prisma.FeatureFlagUpdateInput = {};
-    if (body.defaultValue !== undefined) {
-      updates.defaultValue = body.defaultValue as Prisma.InputJsonValue;
-    }
-    if (body.rules !== undefined) {
-      updates.rules = body.rules as unknown as Prisma.InputJsonValue;
-    }
-    if (body.isEnabled !== undefined) updates.isEnabled = body.isEnabled;
-    if (body.description !== undefined) updates.description = body.description;
 
-    const flag = await prisma.featureFlag.update({
-      where: { id },
-      data: updates,
-    });
+    const flag = await drizzle.dashboardFeatureFlagRepo.updateFeatureFlag(
+      drizzle.db,
+      id,
+      {
+        ...(body.defaultValue !== undefined && {
+          defaultValue: body.defaultValue,
+        }),
+        ...(body.rules !== undefined && { rules: body.rules }),
+        ...(body.isEnabled !== undefined && { isEnabled: body.isEnabled }),
+        ...(body.description !== undefined && {
+          description: body.description,
+        }),
+      },
+    );
+    if (!flag) {
+      throw new HTTPException(404, { message: "Feature flag not found" });
+    }
 
     await invalidateFlagCache(existing.projectId);
     await audit({
@@ -179,10 +183,14 @@ export const featureFlagsRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
 
-    const flag = await prisma.featureFlag.update({
-      where: { id },
-      data: { isEnabled: !existing.isEnabled },
-    });
+    const flag = await drizzle.dashboardFeatureFlagRepo.updateFeatureFlag(
+      drizzle.db,
+      id,
+      { isEnabled: !existing.isEnabled },
+    );
+    if (!flag) {
+      throw new HTTPException(404, { message: "Feature flag not found" });
+    }
 
     await invalidateFlagCache(existing.projectId);
     await audit({
@@ -211,7 +219,7 @@ export const featureFlagsRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
 
-    await prisma.featureFlag.delete({ where: { id } });
+    await drizzle.dashboardFeatureFlagRepo.deleteFeatureFlag(drizzle.db, id);
     await invalidateFlagCache(existing.projectId);
     await audit({
       projectId: existing.projectId,

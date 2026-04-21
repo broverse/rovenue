@@ -128,6 +128,17 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
       findFeatureFlagById: vi.fn(async (_db: unknown, id: string) =>
         prismaMock.featureFlag.findUnique({ where: { id } }),
       ),
+      createFeatureFlag: vi.fn(
+        async (_db: unknown, input: Record<string, unknown>) =>
+          prismaMock.featureFlag.create({ data: input }),
+      ),
+      updateFeatureFlag: vi.fn(
+        async (_db: unknown, id: string, patch: Record<string, unknown>) =>
+          prismaMock.featureFlag.update({ where: { id }, data: patch }),
+      ),
+      deleteFeatureFlag: vi.fn(async (_db: unknown, id: string) =>
+        prismaMock.featureFlag.delete({ where: { id } }),
+      ),
     },
     experimentRepo: {
       findRunningExperimentsByProject: vi.fn(async () => []),
