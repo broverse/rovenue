@@ -93,8 +93,13 @@ const { prismaMock, drizzleMock } = vi.hoisted(() => {
     $transaction,
   };
 
+  const drizzleDb = {
+    transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
+      fn(drizzleDb),
+    ),
+  };
   const drizzleMock = {
-    db: {} as unknown,
+    db: drizzleDb,
     subscriberRepo: {
       findSubscriberAttributes: vi.fn(async () => null),
       findSubscriberByAppUserId: vi.fn(
@@ -108,8 +113,18 @@ const { prismaMock, drizzleMock } = vi.hoisted(() => {
             },
           }),
       ),
+      findSubscriberProjectId: vi.fn(async (_db: unknown, id: string) =>
+        subscriber.findUnique({
+          where: { id },
+          select: { projectId: true },
+        }),
+      ),
       listSubscribers: vi.fn(async () => []),
       countActiveSubscribers: vi.fn(async () => 0),
+    },
+    lockRepo: {
+      advisoryXactLock: vi.fn(async () => undefined),
+      advisoryXactLock2: vi.fn(async () => undefined),
     },
     accessRepo: {
       findActiveAccess: vi.fn(async (_db: unknown, subscriberId: string) =>
@@ -138,6 +153,10 @@ const { prismaMock, drizzleMock } = vi.hoisted(() => {
               referenceId: purchaseId,
             },
           }),
+      ),
+      insertCreditLedger: vi.fn(
+        async (_tx: unknown, entry: Record<string, unknown>) =>
+          creditLedger.create({ data: entry }),
       ),
     },
     productGroupRepo: {

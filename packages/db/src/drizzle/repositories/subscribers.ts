@@ -110,6 +110,23 @@ export async function findSubscriberById(
   return rows[0] ?? null;
 }
 
+/**
+ * Column-scoped lookup — returns just the projectId for a subscriber.
+ * Used by the credit engine so ledger writes carry the correct
+ * projectId without loading the entire row.
+ */
+export async function findSubscriberProjectId(
+  db: DbOrTx,
+  id: string,
+): Promise<{ projectId: string } | null> {
+  const rows = await db
+    .select({ projectId: subscribers.projectId })
+    .from(subscribers)
+    .where(eq(subscribers.id, id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 // =============================================================
 // Dashboard list page
 // =============================================================

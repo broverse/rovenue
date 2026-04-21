@@ -1,10 +1,8 @@
-import prisma, {
+import {
   CreditLedgerType,
-  Prisma,
   drizzle,
   type CreditLedger,
 } from "@rovenue/db";
-import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 
 const log = logger.child("credit-engine");
@@ -38,7 +36,7 @@ export interface AddCreditsArgs {
   referenceType?: string;
   referenceId?: string;
   description?: string;
-  metadata?: Prisma.InputJsonValue;
+  metadata?: unknown;
 }
 
 /**
@@ -52,24 +50,21 @@ export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
   }
   const type = args.type ?? CreditLedgerType.PURCHASE;
 
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw(
-      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${args.subscriberId}, 0))`,
-    );
+  return drizzle.db.transaction(async (tx) => {
+    await drizzle.lockRepo.advisoryXactLock(tx, args.subscriberId);
 
-    const subscriber = await tx.subscriber.findUnique({
-      where: { id: args.subscriberId },
-      select: { projectId: true },
-    });
+    const subscriber = await drizzle.subscriberRepo.findSubscriberProjectId(
+      tx,
+      args.subscriberId,
+    );
     if (!subscriber) {
       throw new Error(`Subscriber ${args.subscriberId} not found`);
     }
 
-    const last = await tx.creditLedger.findFirst({
-      where: { subscriberId: args.subscriberId },
-      orderBy: { createdAt: "desc" },
-      select: { balance: true },
-    });
+    const last = await drizzle.creditLedgerRepo.findLatestBalance(
+      tx,
+      args.subscriberId,
+    );
     const balance = (last?.balance ?? 0) + args.amount;
 
     log.debug("adding credits", {
@@ -78,19 +73,21 @@ export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
       newBalance: balance,
     });
 
-    return tx.creditLedger.create({
-      data: {
-        projectId: subscriber.projectId,
-        subscriberId: args.subscriberId,
-        type,
-        amount: args.amount,
-        balance,
-        referenceType: args.referenceType,
-        referenceId: args.referenceId,
-        description: args.description,
-        metadata: args.metadata,
-      },
+    const row = await drizzle.creditLedgerRepo.insertCreditLedger(tx, {
+      projectId: subscriber.projectId,
+      subscriberId: args.subscriberId,
+      type,
+      amount: args.amount,
+      balance,
+      referenceType: args.referenceType,
+      referenceId: args.referenceId,
+      description: args.description,
+      metadata: args.metadata,
     });
+    // Drizzle's row shape (metadata: unknown) is structurally a
+    // superset of Prisma's CreditLedger (metadata: JsonValue) for
+    // the fields callers actually read. Cast at the service edge.
+    return row as unknown as CreditLedger;
   });
 }
 
@@ -100,7 +97,7 @@ export interface SpendCreditsArgs {
   referenceType?: string;
   referenceId?: string;
   description?: string;
-  metadata?: Prisma.InputJsonValue;
+  metadata?: unknown;
 }
 
 /**
@@ -115,24 +112,21 @@ export async function spendCredits(
     throw new Error("spendCredits: amount must be a positive integer");
   }
 
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw(
-      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${args.subscriberId}, 0))`,
-    );
+  return drizzle.db.transaction(async (tx) => {
+    await drizzle.lockRepo.advisoryXactLock(tx, args.subscriberId);
 
-    const subscriber = await tx.subscriber.findUnique({
-      where: { id: args.subscriberId },
-      select: { projectId: true },
-    });
+    const subscriber = await drizzle.subscriberRepo.findSubscriberProjectId(
+      tx,
+      args.subscriberId,
+    );
     if (!subscriber) {
       throw new Error(`Subscriber ${args.subscriberId} not found`);
     }
 
-    const last = await tx.creditLedger.findFirst({
-      where: { subscriberId: args.subscriberId },
-      orderBy: { createdAt: "desc" },
-      select: { balance: true },
-    });
+    const last = await drizzle.creditLedgerRepo.findLatestBalance(
+      tx,
+      args.subscriberId,
+    );
     const prevBalance = last?.balance ?? 0;
 
     if (prevBalance < args.amount) {
@@ -147,19 +141,18 @@ export async function spendCredits(
       newBalance: balance,
     });
 
-    return tx.creditLedger.create({
-      data: {
-        projectId: subscriber.projectId,
-        subscriberId: args.subscriberId,
-        type: CreditLedgerType.SPEND,
-        amount: -args.amount,
-        balance,
-        referenceType: args.referenceType,
-        referenceId: args.referenceId,
-        description: args.description,
-        metadata: args.metadata,
-      },
+    const row = await drizzle.creditLedgerRepo.insertCreditLedger(tx, {
+      projectId: subscriber.projectId,
+      subscriberId: args.subscriberId,
+      type: CreditLedgerType.SPEND,
+      amount: -args.amount,
+      balance,
+      referenceType: args.referenceType,
+      referenceId: args.referenceId,
+      description: args.description,
+      metadata: args.metadata,
     });
+    return row as unknown as CreditLedger;
   });
 }
 
@@ -169,7 +162,7 @@ export interface RefundCreditsArgs {
   referenceId: string;
   referenceType?: string;
   description?: string;
-  metadata?: Prisma.InputJsonValue;
+  metadata?: unknown;
 }
 
 export async function refundCredits(

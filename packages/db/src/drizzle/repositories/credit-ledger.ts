@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import type { Db } from "../client";
-import { creditLedger } from "../schema";
+import { creditLedger, type CreditLedgerRow } from "../schema";
 import { creditLedgerType } from "../enums";
 
 // Accepts both top-level db and tx handles for transactional writes.
@@ -82,16 +82,22 @@ export interface CreditLedgerEntry {
 export async function insertCreditLedger(
   db: DbOrTx,
   entry: CreditLedgerEntry,
-): Promise<void> {
-  await db.insert(creditLedger).values({
-    projectId: entry.projectId,
-    subscriberId: entry.subscriberId,
-    type: entry.type,
-    amount: entry.amount,
-    balance: entry.balance,
-    referenceType: entry.referenceType ?? null,
-    referenceId: entry.referenceId ?? null,
-    description: entry.description ?? null,
-    metadata: (entry.metadata ?? null) as typeof creditLedger.$inferInsert.metadata,
-  });
+): Promise<CreditLedgerRow> {
+  const rows = await db
+    .insert(creditLedger)
+    .values({
+      projectId: entry.projectId,
+      subscriberId: entry.subscriberId,
+      type: entry.type,
+      amount: entry.amount,
+      balance: entry.balance,
+      referenceType: entry.referenceType ?? null,
+      referenceId: entry.referenceId ?? null,
+      description: entry.description ?? null,
+      metadata: (entry.metadata ?? null) as typeof creditLedger.$inferInsert.metadata,
+    })
+    .returning();
+  const row = rows[0];
+  if (!row) throw new Error("insertCreditLedger: no row returned");
+  return row;
 }
