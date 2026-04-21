@@ -30,7 +30,7 @@ import { ok } from "../../lib/response";
 // PATCH / rotate / DELETE live in Task A5 so this file intentionally
 // stays narrow for now.
 //
-// Create-project semantics: inside one `prisma.$transaction`
+// Create-project semantics: inside one `drizzle.db.transaction`
 //   1. projects row
 //   2. project_members row for the caller (OWNER)
 //   3. default "All Users" audience (isDefault=true)
@@ -67,7 +67,7 @@ function newApiKeyId(): string {
 }
 
 /**
- * Build the ProjectDetail wire payload from a Prisma project row plus
+ * Build the ProjectDetail wire payload from a project row plus
  * the already-loaded (or freshly-created) active ApiKey rows and counts.
  * Shared between GET /:id and POST / so the response shape stays in
  * lockstep; the POST handler passes zeroed counts for the freshly-created

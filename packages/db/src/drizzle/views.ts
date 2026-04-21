@@ -7,10 +7,10 @@ import { decimal, integer, pgMaterializedView, text, timestamp } from "drizzle-o
 // Continuous aggregates are materialised views under the hood —
 // Drizzle treats them the same as any MV. The schemas here MUST
 // stay in lockstep with the `CREATE MATERIALIZED VIEW` statements
-// in prisma/migrations/*_timescaledb_*.sql. A column type or name
-// drift breaks downstream repository types silently; the
-// drizzle-foundation smoke test pins the column-name mapping so
-// the drift surfaces in CI.
+// in the timescaledb migration SQL. A column type or name drift
+// breaks downstream repository types silently; the drizzle-
+// foundation smoke test pins the column-name mapping so the drift
+// surfaces in CI.
 //
 // `daily_mrr` lives in migration 20260421000000_timescaledb_
 // revenue_events_hypertable. Columns:

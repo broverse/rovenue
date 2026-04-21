@@ -18,8 +18,8 @@ const auditMock = vi.hoisted(() => ({
 }));
 vi.mock("../src/lib/audit", () => auditMock);
 
-const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
-  const prismaMock = {
+const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
+  const dbMock = {
     projectMember: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
@@ -35,15 +35,13 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     },
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
-      fn(prismaMock),
+      fn(dbMock),
     ),
   };
 
-  // Drizzle read paths delegate to the already-mocked Prisma
-  // finders so existing test setup (prismaMock.projectMember.
-  // findUnique.mockResolvedValue(...)) keeps working during the
-  // Phase 6 cutover. Each repository method maps to its Prisma
-  // equivalent 1:1.
+  // Drizzle read paths delegate to the dbMock spies so existing
+  // `dbMock.projectMember.findUnique.mockResolvedValue(...)` test
+  // setup keeps driving the assertions 1:1.
   const drizzleDb = {
     transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
       fn(drizzleDb),
@@ -53,7 +51,7 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     db: drizzleDb,
     projectRepo: {
       findMembership: vi.fn(async (_db, projectId, userId) =>
-        prismaMock.projectMember.findUnique({
+        dbMock.projectMember.findUnique({
           where: { projectId_userId: { projectId, userId } },
           select: { id: true, role: true },
         }),
@@ -62,7 +60,7 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
       findProjectCredentials: vi.fn(async () => null),
       findMembershipsForUser: vi.fn(async () => []),
       listProjectMembers: vi.fn(async (_db: unknown, projectId: string) => {
-        const rows = await prismaMock.projectMember.findMany({
+        const rows = await dbMock.projectMember.findMany({
           where: { projectId },
           include: { user: { select: { email: true, name: true, image: true } } },
           orderBy: { createdAt: "asc" },
@@ -70,19 +68,19 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
         return Array.isArray(rows) ? rows : [];
       }),
       countProjectOwners: vi.fn(async (_db: unknown, projectId: string) =>
-        prismaMock.projectMember.count({
+        dbMock.projectMember.count({
           where: { projectId, role: "OWNER" },
         }),
       ),
-      // Write paths. Delegate to the prisma mocks so existing
-      // `prismaMock.projectMember.create.mockResolvedValue(...)`
+      // Write paths. Delegate to the dbMock spies so existing
+      // `dbMock.projectMember.create.mockResolvedValue(...)`
       // setup keeps driving the test assertions.
       createProjectMember: vi.fn(
         async (
           _tx: unknown,
           input: { projectId: string; userId: string; role: string },
         ) =>
-          prismaMock.projectMember.create({
+          dbMock.projectMember.create({
             data: { projectId: input.projectId, userId: input.userId, role: input.role },
           }),
       ),
@@ -93,7 +91,7 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
           userId: string,
           role: string,
         ) =>
-          prismaMock.projectMember.update({
+          dbMock.projectMember.update({
             where: { projectId_userId: { projectId, userId } },
             data: { role },
             include: { user: { select: { email: true, name: true, image: true } } },
@@ -101,14 +99,14 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
       ),
       deleteProjectMember: vi.fn(
         async (_tx: unknown, projectId: string, userId: string) =>
-          prismaMock.projectMember.delete({
+          dbMock.projectMember.delete({
             where: { projectId_userId: { projectId, userId } },
           }),
       ),
     },
     userRepo: {
       findUserByEmail: vi.fn(async (_db: unknown, email: string) =>
-        prismaMock.user.findUnique({
+        dbMock.user.findUnique({
           where: { email },
           select: { id: true, email: true, name: true, image: true },
         }),
@@ -120,7 +118,7 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     ),
   };
   const authMock = { api: { getSession: vi.fn() } };
-  return { prismaMock, drizzleMock, authMock };
+  return { dbMock, drizzleMock, authMock };
 });
 
 vi.mock("@rovenue/db", async () => {
@@ -129,7 +127,7 @@ vi.mock("@rovenue/db", async () => {
   );
   return {
     ...actual,
-    default: prismaMock,
+    default: dbMock,
     drizzle: drizzleMock,
     MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   };
@@ -149,15 +147,15 @@ beforeEach(() => vi.clearAllMocks());
 describe("GET /dashboard/projects/:projectId/members", () => {
   test("forbidden for non-member", async () => {
     signedIn("outsider");
-    prismaMock.projectMember.findUnique.mockResolvedValue(null);
+    dbMock.projectMember.findUnique.mockResolvedValue(null);
     const res = await app.request("/dashboard/projects/proj_1/members");
     expect(res.status).toBe(403);
   });
 
   test("returns list with user fields", async () => {
     signedIn("user_1");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
-    prismaMock.projectMember.findMany.mockResolvedValue([
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    dbMock.projectMember.findMany.mockResolvedValue([
       {
         id: "pm_owner",
         userId: "u1",
@@ -188,7 +186,7 @@ describe("GET /dashboard/projects/:projectId/members", () => {
 describe("POST /dashboard/projects/:projectId/members", () => {
   test("requires OWNER — ADMIN gets 403", async () => {
     signedIn("admin");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "ADMIN" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "ADMIN" });
     const res = await app.request("/dashboard/projects/proj_1/members", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -199,8 +197,8 @@ describe("POST /dashboard/projects/:projectId/members", () => {
 
   test("404 when email doesn't match any registered user", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
-    prismaMock.user.findUnique.mockResolvedValue(null);
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
+    dbMock.user.findUnique.mockResolvedValue(null);
     const res = await app.request("/dashboard/projects/proj_1/members", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -211,10 +209,10 @@ describe("POST /dashboard/projects/:projectId/members", () => {
 
   test("409 when user is already a member", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique
+    dbMock.projectMember.findUnique
       .mockResolvedValueOnce({ id: "pm_caller", role: "OWNER" }) // assertProjectAccess
       .mockResolvedValueOnce({ id: "pm_existing", role: "ADMIN" }); // existing membership
-    prismaMock.user.findUnique.mockResolvedValue({
+    dbMock.user.findUnique.mockResolvedValue({
       id: "u2",
       email: "admin@x.com",
       name: "A",
@@ -230,16 +228,16 @@ describe("POST /dashboard/projects/:projectId/members", () => {
 
   test("OWNER adds member with audit", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique
+    dbMock.projectMember.findUnique
       .mockResolvedValueOnce({ id: "pm_caller", role: "OWNER" })
       .mockResolvedValueOnce(null);
-    prismaMock.user.findUnique.mockResolvedValue({
+    dbMock.user.findUnique.mockResolvedValue({
       id: "u_new",
       email: "new@x.com",
       name: "New",
       image: null,
     });
-    prismaMock.projectMember.create.mockResolvedValue({
+    dbMock.projectMember.create.mockResolvedValue({
       id: "pm_new",
       userId: "u_new",
       role: "ADMIN",
@@ -266,10 +264,10 @@ describe("POST /dashboard/projects/:projectId/members", () => {
 describe("PATCH /dashboard/projects/:projectId/members/:userId", () => {
   test("OWNER changes role with audit", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique
+    dbMock.projectMember.findUnique
       .mockResolvedValueOnce({ id: "pm_caller", role: "OWNER" })
       .mockResolvedValueOnce({ id: "pm_target", role: "ADMIN" });
-    prismaMock.projectMember.update.mockResolvedValue({
+    dbMock.projectMember.update.mockResolvedValue({
       id: "pm_target",
       userId: "u2",
       role: "VIEWER",
@@ -291,10 +289,10 @@ describe("PATCH /dashboard/projects/:projectId/members/:userId", () => {
 
   test("refuses to demote the last OWNER", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique
+    dbMock.projectMember.findUnique
       .mockResolvedValueOnce({ id: "pm_caller", role: "OWNER" })
       .mockResolvedValueOnce({ id: "pm_target", role: "OWNER" });
-    prismaMock.projectMember.count.mockResolvedValue(1);
+    dbMock.projectMember.count.mockResolvedValue(1);
 
     const res = await app.request("/dashboard/projects/proj_1/members/u1", {
       method: "PATCH",
@@ -302,14 +300,14 @@ describe("PATCH /dashboard/projects/:projectId/members/:userId", () => {
       body: JSON.stringify({ role: "VIEWER" }),
     });
     expect(res.status).toBe(400);
-    expect(prismaMock.projectMember.update).not.toHaveBeenCalled();
+    expect(dbMock.projectMember.update).not.toHaveBeenCalled();
   });
 });
 
 describe("DELETE /dashboard/projects/:projectId/members/:userId", () => {
   test("OWNER removes a regular member", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique
+    dbMock.projectMember.findUnique
       .mockResolvedValueOnce({ id: "pm_caller", role: "OWNER" })
       .mockResolvedValueOnce({ id: "pm_target", role: "VIEWER" });
 
@@ -317,7 +315,7 @@ describe("DELETE /dashboard/projects/:projectId/members/:userId", () => {
       method: "DELETE",
     });
     expect(res.status).toBe(200);
-    expect(prismaMock.projectMember.delete).toHaveBeenCalled();
+    expect(dbMock.projectMember.delete).toHaveBeenCalled();
     expect(auditMock.audit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "member.removed" }),
       expect.anything(),
@@ -326,38 +324,38 @@ describe("DELETE /dashboard/projects/:projectId/members/:userId", () => {
 
   test("refuses to remove the last OWNER", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique
+    dbMock.projectMember.findUnique
       .mockResolvedValueOnce({ id: "pm_caller", role: "OWNER" })
       .mockResolvedValueOnce({ id: "pm_target", role: "OWNER" });
-    prismaMock.projectMember.count.mockResolvedValue(1);
+    dbMock.projectMember.count.mockResolvedValue(1);
 
     const res = await app.request("/dashboard/projects/proj_1/members/u1", {
       method: "DELETE",
     });
     expect(res.status).toBe(400);
-    expect(prismaMock.projectMember.delete).not.toHaveBeenCalled();
+    expect(dbMock.projectMember.delete).not.toHaveBeenCalled();
   });
 });
 
 describe("POST /dashboard/projects/:projectId/members/leave", () => {
   test("ADMIN can leave", async () => {
     signedIn("admin");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_self", role: "ADMIN" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_self", role: "ADMIN" });
     const res = await app.request("/dashboard/projects/proj_1/members/leave", {
       method: "POST",
     });
     expect(res.status).toBe(200);
-    expect(prismaMock.projectMember.delete).toHaveBeenCalled();
+    expect(dbMock.projectMember.delete).toHaveBeenCalled();
   });
 
   test("OWNER cannot leave if they are the last OWNER", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_self", role: "OWNER" });
-    prismaMock.projectMember.count.mockResolvedValue(1);
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_self", role: "OWNER" });
+    dbMock.projectMember.count.mockResolvedValue(1);
     const res = await app.request("/dashboard/projects/proj_1/members/leave", {
       method: "POST",
     });
     expect(res.status).toBe(400);
-    expect(prismaMock.projectMember.delete).not.toHaveBeenCalled();
+    expect(dbMock.projectMember.delete).not.toHaveBeenCalled();
   });
 });

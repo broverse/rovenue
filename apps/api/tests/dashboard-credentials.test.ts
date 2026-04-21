@@ -18,8 +18,8 @@ const auditMock = vi.hoisted(() => ({
 }));
 vi.mock("../src/lib/audit", () => auditMock);
 
-const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
-  const prismaMock = {
+const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
+  const dbMock = {
     projectMember: { findUnique: vi.fn() },
     project: { findUnique: vi.fn(), update: vi.fn() },
     auditLog: {
@@ -28,15 +28,15 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     },
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
-      fn(prismaMock),
+      fn(dbMock),
     ),
   };
 
-  // Drizzle reads delegate to the Prisma mock during the cutover
-  // so existing `prismaMock.projectMember.findUnique.
-  // mockResolvedValue(...)` calls keep driving the test. Project
-  // credential loaders go through findProjectCredentials; tests
-  // that need to exercise that path override it explicitly.
+  // Drizzle reads delegate to the dbMock spies so existing
+  // `dbMock.projectMember.findUnique.mockResolvedValue(...)` calls
+  // keep driving the test. Project credential loaders go through
+  // findProjectCredentials; tests that need to exercise that path
+  // override it explicitly.
   const drizzleDb = {
     transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
       fn(drizzleDb),
@@ -46,16 +46,16 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     db: drizzleDb,
     projectRepo: {
       findMembership: vi.fn(async (_db, projectId, userId) =>
-        prismaMock.projectMember.findUnique({
+        dbMock.projectMember.findUnique({
           where: { projectId_userId: { projectId, userId } },
           select: { id: true, role: true },
         }),
       ),
       findProjectById: vi.fn(async (_db: unknown, id: string) =>
-        prismaMock.project.findUnique({ where: { id } }),
+        dbMock.project.findUnique({ where: { id } }),
       ),
       findProjectCredentials: vi.fn(async (_db, id, store) => {
-        const project = await prismaMock.project.findUnique({
+        const project = await dbMock.project.findUnique({
           where: { id },
           select: { [`${store}Credentials`]: true },
         });
@@ -74,7 +74,7 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     ),
   };
   const authMock = { api: { getSession: vi.fn() } };
-  return { prismaMock, drizzleMock, authMock };
+  return { dbMock, drizzleMock, authMock };
 });
 
 vi.mock("@rovenue/db", async () => {
@@ -83,7 +83,7 @@ vi.mock("@rovenue/db", async () => {
   );
   return {
     ...actual,
-    default: prismaMock,
+    default: dbMock,
     drizzle: drizzleMock,
     MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
     // encryptCredential / decryptCredential come from the real module —
@@ -111,15 +111,15 @@ process.env.ENCRYPTION_KEY ??=
 describe("GET /dashboard/projects/:projectId/credentials", () => {
   test("forbidden for non-member", async () => {
     signedIn("outsider");
-    prismaMock.projectMember.findUnique.mockResolvedValue(null);
+    dbMock.projectMember.findUnique.mockResolvedValue(null);
     const res = await app.request("/dashboard/projects/proj_1/credentials");
     expect(res.status).toBe(403);
   });
 
   test("returns configured=false for all stores when project has no credentials", async () => {
     signedIn("user_1");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
-    prismaMock.project.findUnique.mockResolvedValue({
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    dbMock.project.findUnique.mockResolvedValue({
       appleCredentials: null,
       googleCredentials: null,
       stripeCredentials: null,
@@ -136,7 +136,7 @@ describe("GET /dashboard/projects/:projectId/credentials", () => {
 
   test("returns configured=true + safe fields, never plaintext secrets", async () => {
     signedIn("user_1");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
     const key = process.env.ENCRYPTION_KEY!;
     const encryptedApple = encryptCredential(
       { bundleId: "com.acme.app", keyId: "KEY1", privateKey: "LEAKED" },
@@ -146,7 +146,7 @@ describe("GET /dashboard/projects/:projectId/credentials", () => {
       { secretKey: "sk_live_SUPER_SECRET", webhookSecret: "whsec_LEAK" },
       key,
     );
-    prismaMock.project.findUnique.mockResolvedValue({
+    dbMock.project.findUnique.mockResolvedValue({
       appleCredentials: encryptedApple,
       googleCredentials: null,
       stripeCredentials: encryptedStripe,
@@ -172,7 +172,7 @@ describe("GET /dashboard/projects/:projectId/credentials", () => {
 describe("PUT /dashboard/projects/:projectId/credentials/:store", () => {
   test("requires OWNER — ADMIN gets 403", async () => {
     signedIn("admin");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "ADMIN" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "ADMIN" });
     const res = await app.request("/dashboard/projects/proj_1/credentials/apple", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -183,7 +183,7 @@ describe("PUT /dashboard/projects/:projectId/credentials/:store", () => {
 
   test("OWNER writes apple credentials encrypted + audit is redacted", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
 
     const res = await app.request("/dashboard/projects/proj_1/credentials/apple", {
       method: "PUT",
@@ -218,7 +218,7 @@ describe("PUT /dashboard/projects/:projectId/credentials/:store", () => {
 
   test("rejects invalid payload with 400", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
     const res = await app.request("/dashboard/projects/proj_1/credentials/stripe", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -231,7 +231,7 @@ describe("PUT /dashboard/projects/:projectId/credentials/:store", () => {
 
   test("rejects unknown store with 400", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
     const res = await app.request("/dashboard/projects/proj_1/credentials/amazon", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -244,7 +244,7 @@ describe("PUT /dashboard/projects/:projectId/credentials/:store", () => {
 describe("DELETE /dashboard/projects/:projectId/credentials/:store", () => {
   test("OWNER clears credentials + audit after=cleared", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
 
     const res = await app.request("/dashboard/projects/proj_1/credentials/google", {
       method: "DELETE",
@@ -271,7 +271,7 @@ describe("DELETE /dashboard/projects/:projectId/credentials/:store", () => {
 
   test("ADMIN cannot clear (OWNER only)", async () => {
     signedIn("admin");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "ADMIN" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "ADMIN" });
     const res = await app.request("/dashboard/projects/proj_1/credentials/google", {
       method: "DELETE",
     });

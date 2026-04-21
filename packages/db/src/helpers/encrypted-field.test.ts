@@ -20,7 +20,7 @@ describe("encryptCredential / decryptCredential", () => {
     expect(unwrapped).toEqual(creds);
   });
 
-  test("wrapped value is a tagged object Prisma can persist as Json", () => {
+  test("wrapped value is a tagged object safe to persist as JSONB", () => {
     const wrapped = encryptCredential({ x: 1 }, KEY);
 
     expect(isEncryptedCredential(wrapped)).toBe(true);

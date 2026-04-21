@@ -8,11 +8,11 @@ import {
 // Encrypted JSON fields on the Project row
 // =============================================================
 //
-// Credentials are stored as Prisma `Json?` columns. When encryption
-// is active we replace the plaintext object with a tagged wrapper
-// `{ v: 1, enc: "iv:tag:data" }` so callers can tell encrypted rows
-// apart from legacy plaintext rows (which still decrypt as a pass-
-// through during the migration window).
+// Credentials are stored as nullable JSONB columns. When
+// encryption is active we replace the plaintext object with a
+// tagged wrapper `{ v: 1, enc: "iv:tag:data" }` so callers can
+// tell encrypted rows apart from legacy plaintext rows (which
+// still decrypt as a pass-through during the migration window).
 
 const CREDENTIAL_FIELDS = [
   "appleCredentials",

@@ -10,9 +10,8 @@ import { products, purchases, type Purchase } from "../schema";
 // so each module stays focused on one caller type.
 
 /**
- * Lookup a purchase by its store-side transaction id. Mirrors
- * prisma.purchase.findUnique({ where: { store_storeTransactionId } }).
- * Composite-unique index over (store, storeTransactionId).
+ * Lookup a purchase by its store-side transaction id. Composite-
+ * unique index over (store, storeTransactionId).
  */
 export async function findPurchaseByStoreTransaction(
   db: Db,

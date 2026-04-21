@@ -14,9 +14,9 @@ import {
 } from "./google/google-types";
 import { STRIPE_SUBSCRIPTION_STATUS } from "./stripe/stripe-types";
 
-// Type-safe mirror of the Prisma PurchaseStatus enum. `import type` keeps
-// @prisma/client out of this module's runtime graph so tests and tooling
-// can load the state machine without a generated client.
+// Type-safe mirror of the PurchaseStatus enum. `import type` keeps
+// the DB package out of this module's runtime graph so tests and
+// tooling can load the state machine without DB initialization.
 const STATUS = {
   TRIAL: "TRIAL",
   ACTIVE: "ACTIVE",

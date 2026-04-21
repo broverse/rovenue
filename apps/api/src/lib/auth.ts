@@ -1,9 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { drizzle } from "@rovenue/db";
-// Schema table imports come from the Drizzle namespace, not the
-// top-level @rovenue/db, so test mocks of "@rovenue/db" don't need
-// to stub the entire schema surface. See `drizzle.schema.*`.
 import { env } from "./env";
 
 interface OAuthCreds {
@@ -42,16 +39,10 @@ function buildSocialProviders(): SocialProviders {
 const emailPasswordEnabled = env.NODE_ENV !== "production";
 
 export const auth = betterAuth({
-  // Drizzle adapter reads/writes the same user / session / account /
-  // verification tables Better Auth's CLI generated for the Prisma
-  // schema — the Drizzle mirror mirrors those rows byte-for-byte,
-  // so swapping adapters is transparent to existing sessions.
-  //
-  // `schema` is intentionally omitted here: we use the adapter's
-  // default table resolution (it reads table names directly from
-  // `drizzle.db`'s attached schema), which keeps the test mock
-  // surface minimal — a stub db object is all the test surface
-  // needs, no schema-namespace mirroring.
+  // `schema` is intentionally omitted: the adapter's default table
+  // resolution reads tables directly from `drizzle.db`'s attached
+  // schema, which keeps the test mock surface minimal (a stub db
+  // object is all the test surface needs).
   database: drizzleAdapter(drizzle.db, { provider: "pg" }),
   emailAndPassword: {
     enabled: emailPasswordEnabled,

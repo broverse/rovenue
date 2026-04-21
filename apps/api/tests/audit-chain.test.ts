@@ -6,8 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 //
 // Exercises the canonical JSON, the chain linking, and the
 // re-verification helper directly against an in-memory Drizzle
-// mock. The chain writer is fully Drizzle-driven now — no
-// prisma client in this test.
+// mock.
 
 const { drizzleMock, auditStore } = vi.hoisted(() => {
   interface AuditRow {
@@ -142,7 +141,6 @@ const { drizzleMock, auditStore } = vi.hoisted(() => {
 
 vi.mock("@rovenue/db", () => ({
   default: {},
-  Prisma: {},
   drizzle: drizzleMock,
 }));
 

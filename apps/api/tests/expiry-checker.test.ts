@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
+const { dbMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
   const purchase = {
     findMany: vi.fn(),
     updateMany: vi.fn(),
@@ -20,10 +20,11 @@ const { prismaMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
     findFirst: vi.fn(),
     create: vi.fn(),
   };
-  const prismaMock = { purchase, project, outgoingWebhook, revenueEvent };
+  const dbMock = { purchase, project, outgoingWebhook, revenueEvent };
 
-  // Drizzle repo stubs delegate to the existing prisma finders so
-  // Phase 7 cutover doesn't force a rewrite of the test setup.
+  // Drizzle repo stubs delegate to the dbMock spies so existing
+  // setup (.mockResolvedValue / .mockRejectedValue) keeps driving
+  // the test assertions.
   const drizzleMock = {
     db: {} as unknown,
     purchaseExtRepo: {
@@ -32,7 +33,7 @@ const { prismaMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
           _db: unknown,
           args: { now: Date; lookback: Date; statuses: string[] },
         ) => {
-          const rows = await prismaMock.purchase.findMany({
+          const rows = await dbMock.purchase.findMany({
             where: {
               status: { in: args.statuses },
               expiresDate: { lt: args.now, gt: args.lookback },
@@ -45,7 +46,7 @@ const { prismaMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
     purchaseRepo: {
       // updatePurchaseStatusIf is a compare-and-swap: updates the
       // row only when the current status matches `expected`. The
-      // test's prismaMock.purchase.updateMany already returns a
+      // test's dbMock.purchase.updateMany already returns a
       // `{count}` shape so we forward to it.
       updatePurchaseStatusIf: vi.fn(
         async (
@@ -54,7 +55,7 @@ const { prismaMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
           expected: string,
           next: string,
         ) => {
-          const res = await prismaMock.purchase.updateMany({
+          const res = await dbMock.purchase.updateMany({
             where: { id, status: expected },
             data: { status: next },
           });
@@ -64,7 +65,7 @@ const { prismaMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
     },
     projectRepo: {
       findProjectWebhookUrl: vi.fn(async (_db: unknown, id: string) => {
-        const row = await prismaMock.project.findUnique({
+        const row = await dbMock.project.findUnique({
           where: { id },
           select: { webhookUrl: true },
         });
@@ -80,7 +81,7 @@ const { prismaMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
           eventType: string,
           purchaseId: string | null,
         ) =>
-          prismaMock.outgoingWebhook.findFirst({
+          dbMock.outgoingWebhook.findFirst({
             where: {
               projectId,
               eventType,
@@ -91,7 +92,7 @@ const { prismaMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
       ),
       enqueueOutgoingWebhook: vi.fn(
         async (_db: unknown, input: Record<string, unknown>) =>
-          prismaMock.outgoingWebhook.create({
+          dbMock.outgoingWebhook.create({
             data: { ...input, status: "PENDING" },
           }),
       ),
@@ -104,26 +105,26 @@ const { prismaMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
           purchaseId: string,
           type: string,
         ) =>
-          prismaMock.revenueEvent.findFirst({
+          dbMock.revenueEvent.findFirst({
             where: { subscriberId, purchaseId, type },
           }),
       ),
       createRevenueEvent: vi.fn(
         async (_db: unknown, input: Record<string, unknown>) =>
-          prismaMock.revenueEvent.create({ data: input }),
+          dbMock.revenueEvent.create({ data: input }),
       ),
     },
   };
 
   return {
-    prismaMock,
+    dbMock,
     drizzleMock,
     syncAccessMock: vi.fn(async () => undefined),
   };
 });
 
 vi.mock("@rovenue/db", () => ({
-  default: prismaMock,
+  default: dbMock,
   drizzle: drizzleMock,
   PurchaseStatus: {
     TRIAL: "TRIAL",
@@ -152,14 +153,6 @@ vi.mock("@rovenue/db", () => ({
     PENDING: "PENDING",
     SENT: "SENT",
     FAILED: "FAILED",
-  },
-  Prisma: {
-    Decimal: class {
-      constructor(public value: number | string) {}
-      toString() {
-        return String(this.value);
-      }
-    },
   },
 }));
 
@@ -210,15 +203,15 @@ function buildCandidate(over: CandidateOverrides = {}): Record<string, unknown> 
 
 beforeEach(() => {
   vi.clearAllMocks();
-  prismaMock.purchase.findMany.mockResolvedValue([]);
-  prismaMock.purchase.updateMany.mockResolvedValue({ count: 1 });
-  prismaMock.project.findUnique.mockResolvedValue({
+  dbMock.purchase.findMany.mockResolvedValue([]);
+  dbMock.purchase.updateMany.mockResolvedValue({ count: 1 });
+  dbMock.project.findUnique.mockResolvedValue({
     webhookUrl: "https://example.com/hook",
   });
-  prismaMock.outgoingWebhook.findFirst.mockResolvedValue(null);
-  prismaMock.outgoingWebhook.create.mockResolvedValue({ id: "ow_1" });
-  prismaMock.revenueEvent.findFirst.mockResolvedValue(null);
-  prismaMock.revenueEvent.create.mockResolvedValue({ id: "rev_1" });
+  dbMock.outgoingWebhook.findFirst.mockResolvedValue(null);
+  dbMock.outgoingWebhook.create.mockResolvedValue({ id: "ow_1" });
+  dbMock.revenueEvent.findFirst.mockResolvedValue(null);
+  dbMock.revenueEvent.create.mockResolvedValue({ id: "rev_1" });
   syncAccessMock.mockResolvedValue(undefined);
 });
 
@@ -230,8 +223,8 @@ describe("runExpiryCheck — query window", () => {
   test("queries purchases expired in the last 24h across TRIAL/ACTIVE/GRACE_PERIOD", async () => {
     await runExpiryCheck(NOW);
 
-    expect(prismaMock.purchase.findMany).toHaveBeenCalledOnce();
-    const args = prismaMock.purchase.findMany.mock.calls[0]![0] as {
+    expect(dbMock.purchase.findMany).toHaveBeenCalledOnce();
+    const args = dbMock.purchase.findMany.mock.calls[0]![0] as {
       where: {
         status: { in: string[] };
         expiresDate: { lt: Date; gt: Date };
@@ -247,7 +240,7 @@ describe("runExpiryCheck — query window", () => {
   });
 
   test("returns zero-count result when no candidates found", async () => {
-    prismaMock.purchase.findMany.mockResolvedValue([]);
+    dbMock.purchase.findMany.mockResolvedValue([]);
 
     const result = await runExpiryCheck(NOW);
 
@@ -262,25 +255,25 @@ describe("runExpiryCheck — query window", () => {
 
 describe("runExpiryCheck — ACTIVE expiration", () => {
   test("transitions ACTIVE → EXPIRED, syncs access, emits outgoing webhook + revenue event", async () => {
-    prismaMock.purchase.findMany.mockResolvedValue([buildCandidate()]);
+    dbMock.purchase.findMany.mockResolvedValue([buildCandidate()]);
 
     const result = await runExpiryCheck(NOW);
 
-    expect(prismaMock.purchase.updateMany).toHaveBeenCalledWith({
+    expect(dbMock.purchase.updateMany).toHaveBeenCalledWith({
       where: { id: "pur_1", status: "ACTIVE" },
       data: { status: "EXPIRED" },
     });
     expect(syncAccessMock).toHaveBeenCalledWith("sub_1");
-    expect(prismaMock.outgoingWebhook.create).toHaveBeenCalledOnce();
+    expect(dbMock.outgoingWebhook.create).toHaveBeenCalledOnce();
     const webhookCall =
-      prismaMock.outgoingWebhook.create.mock.calls[0]![0] as {
+      dbMock.outgoingWebhook.create.mock.calls[0]![0] as {
         data: { eventType: string; projectId: string; purchaseId: string };
       };
     expect(webhookCall.data.eventType).toBe("EXPIRATION");
     expect(webhookCall.data.purchaseId).toBe("pur_1");
 
-    expect(prismaMock.revenueEvent.create).toHaveBeenCalledOnce();
-    const revenueCall = prismaMock.revenueEvent.create.mock.calls[0]![0] as {
+    expect(dbMock.revenueEvent.create).toHaveBeenCalledOnce();
+    const revenueCall = dbMock.revenueEvent.create.mock.calls[0]![0] as {
       data: { type: string; purchaseId: string; store: string };
     };
     expect(revenueCall.data.type).toBe("CANCELLATION");
@@ -293,7 +286,7 @@ describe("runExpiryCheck — ACTIVE expiration", () => {
   });
 
   test("GRACE_PERIOD → EXPIRED when gracePeriodExpires has passed", async () => {
-    prismaMock.purchase.findMany.mockResolvedValue([
+    dbMock.purchase.findMany.mockResolvedValue([
       buildCandidate({
         id: "pur_2",
         status: "GRACE_PERIOD",
@@ -303,7 +296,7 @@ describe("runExpiryCheck — ACTIVE expiration", () => {
 
     const result = await runExpiryCheck(NOW);
 
-    expect(prismaMock.purchase.updateMany).toHaveBeenCalledWith({
+    expect(dbMock.purchase.updateMany).toHaveBeenCalledWith({
       where: { id: "pur_2", status: "GRACE_PERIOD" },
       data: { status: "EXPIRED" },
     });
@@ -313,7 +306,7 @@ describe("runExpiryCheck — ACTIVE expiration", () => {
 
 describe("runExpiryCheck — grace period transitions", () => {
   test("ACTIVE with future gracePeriodExpires → GRACE_PERIOD (no webhook/revenue event)", async () => {
-    prismaMock.purchase.findMany.mockResolvedValue([
+    dbMock.purchase.findMany.mockResolvedValue([
       buildCandidate({
         status: "ACTIVE",
         gracePeriodExpires: new Date(NOW.getTime() + 60 * 60 * 1000),
@@ -322,13 +315,13 @@ describe("runExpiryCheck — grace period transitions", () => {
 
     const result = await runExpiryCheck(NOW);
 
-    expect(prismaMock.purchase.updateMany).toHaveBeenCalledWith({
+    expect(dbMock.purchase.updateMany).toHaveBeenCalledWith({
       where: { id: "pur_1", status: "ACTIVE" },
       data: { status: "GRACE_PERIOD" },
     });
     expect(syncAccessMock).toHaveBeenCalledWith("sub_1");
-    expect(prismaMock.outgoingWebhook.create).not.toHaveBeenCalled();
-    expect(prismaMock.revenueEvent.create).not.toHaveBeenCalled();
+    expect(dbMock.outgoingWebhook.create).not.toHaveBeenCalled();
+    expect(dbMock.revenueEvent.create).not.toHaveBeenCalled();
     expect(result.movedToGracePeriod).toBe(1);
     expect(result.expired).toBe(0);
   });
@@ -336,57 +329,57 @@ describe("runExpiryCheck — grace period transitions", () => {
 
 describe("runExpiryCheck — idempotency", () => {
   test("skips side effects when updateMany count is 0 (another worker won)", async () => {
-    prismaMock.purchase.findMany.mockResolvedValue([buildCandidate()]);
-    prismaMock.purchase.updateMany.mockResolvedValue({ count: 0 });
+    dbMock.purchase.findMany.mockResolvedValue([buildCandidate()]);
+    dbMock.purchase.updateMany.mockResolvedValue({ count: 0 });
 
     const result = await runExpiryCheck(NOW);
 
     expect(syncAccessMock).not.toHaveBeenCalled();
-    expect(prismaMock.outgoingWebhook.create).not.toHaveBeenCalled();
-    expect(prismaMock.revenueEvent.create).not.toHaveBeenCalled();
+    expect(dbMock.outgoingWebhook.create).not.toHaveBeenCalled();
+    expect(dbMock.revenueEvent.create).not.toHaveBeenCalled();
     expect(result.expired).toBe(0);
   });
 
   test("does not re-emit outgoing webhook if one already exists", async () => {
-    prismaMock.purchase.findMany.mockResolvedValue([buildCandidate()]);
-    prismaMock.outgoingWebhook.findFirst.mockResolvedValue({ id: "ow_existing" });
+    dbMock.purchase.findMany.mockResolvedValue([buildCandidate()]);
+    dbMock.outgoingWebhook.findFirst.mockResolvedValue({ id: "ow_existing" });
 
     await runExpiryCheck(NOW);
 
-    expect(prismaMock.outgoingWebhook.create).not.toHaveBeenCalled();
+    expect(dbMock.outgoingWebhook.create).not.toHaveBeenCalled();
   });
 
   test("does not re-create revenue event if a CANCELLATION already exists for this purchase", async () => {
-    prismaMock.purchase.findMany.mockResolvedValue([buildCandidate()]);
-    prismaMock.revenueEvent.findFirst.mockResolvedValue({ id: "rev_existing" });
+    dbMock.purchase.findMany.mockResolvedValue([buildCandidate()]);
+    dbMock.revenueEvent.findFirst.mockResolvedValue({ id: "rev_existing" });
 
     await runExpiryCheck(NOW);
 
-    expect(prismaMock.revenueEvent.create).not.toHaveBeenCalled();
+    expect(dbMock.revenueEvent.create).not.toHaveBeenCalled();
   });
 
   test("skips outgoing webhook creation when project has no webhook URL", async () => {
-    prismaMock.purchase.findMany.mockResolvedValue([buildCandidate()]);
-    prismaMock.project.findUnique.mockResolvedValue({ webhookUrl: null });
+    dbMock.purchase.findMany.mockResolvedValue([buildCandidate()]);
+    dbMock.project.findUnique.mockResolvedValue({ webhookUrl: null });
 
     await runExpiryCheck(NOW);
 
-    expect(prismaMock.outgoingWebhook.create).not.toHaveBeenCalled();
+    expect(dbMock.outgoingWebhook.create).not.toHaveBeenCalled();
     // But revenue event still recorded
-    expect(prismaMock.revenueEvent.create).toHaveBeenCalled();
+    expect(dbMock.revenueEvent.create).toHaveBeenCalled();
   });
 });
 
 describe("runExpiryCheck — error isolation", () => {
   test("one failing purchase does not stop the batch", async () => {
-    prismaMock.purchase.findMany.mockResolvedValue([
+    dbMock.purchase.findMany.mockResolvedValue([
       buildCandidate({ id: "pur_a", subscriberId: "sub_a" }),
       buildCandidate({ id: "pur_b", subscriberId: "sub_b" }),
       buildCandidate({ id: "pur_c", subscriberId: "sub_c" }),
     ]);
 
     let call = 0;
-    prismaMock.purchase.updateMany.mockImplementation(async () => {
+    dbMock.purchase.updateMany.mockImplementation(async () => {
       call += 1;
       if (call === 2) throw new Error("simulated DB failure");
       return { count: 1 };
@@ -401,13 +394,13 @@ describe("runExpiryCheck — error isolation", () => {
   });
 
   test("syncAccess failure is swallowed and does not block webhook/revenue events", async () => {
-    prismaMock.purchase.findMany.mockResolvedValue([buildCandidate()]);
+    dbMock.purchase.findMany.mockResolvedValue([buildCandidate()]);
     syncAccessMock.mockRejectedValue(new Error("advisory lock failed"));
 
     const result = await runExpiryCheck(NOW);
 
-    expect(prismaMock.outgoingWebhook.create).toHaveBeenCalledOnce();
-    expect(prismaMock.revenueEvent.create).toHaveBeenCalledOnce();
+    expect(dbMock.outgoingWebhook.create).toHaveBeenCalledOnce();
+    expect(dbMock.revenueEvent.create).toHaveBeenCalledOnce();
     expect(result.expired).toBe(1);
     expect(result.errors).toBe(0);
   });

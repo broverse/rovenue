@@ -18,8 +18,8 @@ const auditMock = vi.hoisted(() => ({
 }));
 vi.mock("../src/lib/audit", () => auditMock);
 
-const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
-  const prismaMock = {
+const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
+  const dbMock = {
     projectMember: { findUnique: vi.fn() },
     subscriber: {
       findMany: vi.fn(async () => []),
@@ -39,14 +39,14 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
       findSubscriberAttributes: vi.fn(async () => null),
       findSubscriberByAppUserId: vi.fn(async () => null),
       findSubscriberById: vi.fn(async (_db: unknown, id: string) =>
-        prismaMock.subscriber.findUnique({ where: { id } }),
+        dbMock.subscriber.findUnique({ where: { id } }),
       ),
       listSubscribers: vi.fn(async () => []),
       countActiveSubscribers: vi.fn(async () => 0),
     },
     projectRepo: {
       findMembership: vi.fn(async (_db: unknown, projectId: string, userId: string) =>
-        prismaMock.projectMember.findUnique({
+        dbMock.projectMember.findUnique({
           where: { projectId_userId: { projectId, userId } },
           select: { id: true, role: true },
         }),
@@ -58,27 +58,27 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
       loadSubscriberDetail: vi.fn(async (_db: unknown, subscriberId: string) => {
         const [purchasesRaw, access, ledger, assignmentsRaw, outgoingWebhooks] =
           await Promise.all([
-            prismaMock.purchase.findMany({
+            dbMock.purchase.findMany({
               where: { subscriberId },
               orderBy: { purchaseDate: "desc" },
               take: 50,
               include: { product: { select: { identifier: true } } },
             }),
-            prismaMock.subscriberAccess.findMany({
+            dbMock.subscriberAccess.findMany({
               where: { subscriberId },
               orderBy: { entitlementKey: "asc" },
             }),
-            prismaMock.creditLedger.findMany({
+            dbMock.creditLedger.findMany({
               where: { subscriberId },
               orderBy: { createdAt: "desc" },
               take: 20,
             }),
-            prismaMock.experimentAssignment.findMany({
+            dbMock.experimentAssignment.findMany({
               where: { subscriberId },
               orderBy: { assignedAt: "desc" },
               include: { experiment: { select: { key: true } } },
             }),
-            prismaMock.outgoingWebhook.findMany({
+            dbMock.outgoingWebhook.findMany({
               where: { subscriberId },
               orderBy: { createdAt: "desc" },
               take: 20,
@@ -113,11 +113,11 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     ),
   };
   const authMock = { api: { getSession: vi.fn() } };
-  return { prismaMock, drizzleMock, authMock };
+  return { dbMock, drizzleMock, authMock };
 });
 
 vi.mock("@rovenue/db", () => ({
-  default: prismaMock,
+  default: dbMock,
   drizzle: drizzleMock,
   MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   FeatureFlagType: { BOOLEAN: "BOOLEAN", STRING: "STRING", NUMBER: "NUMBER", JSON: "JSON" },
@@ -162,19 +162,6 @@ vi.mock("@rovenue/db", () => ({
     REACTIVATION: "REACTIVATION",
     CREDIT_PURCHASE: "CREDIT_PURCHASE",
   },
-  Prisma: {
-    sql: (s: TemplateStringsArray, ...v: unknown[]) => ({ strings: s, values: v }),
-    Decimal: class {
-      constructor(public value: number | string) {}
-      toString() {
-        return String(this.value);
-      }
-    },
-    TransactionIsolationLevel: { Serializable: "Serializable" },
-    PrismaClientKnownRequestError: class extends Error {
-      code = "";
-    },
-  },
 }));
 vi.mock("../src/lib/auth", () => ({ auth: authMock }));
 
@@ -189,14 +176,14 @@ beforeEach(() => vi.clearAllMocks());
 describe("GET /dashboard/projects/:projectId/subscribers", () => {
   test("forbidden when the user is not a project member", async () => {
     signedIn("outsider");
-    prismaMock.projectMember.findUnique.mockResolvedValue(null);
+    dbMock.projectMember.findUnique.mockResolvedValue(null);
     const res = await app.request("/dashboard/projects/proj_1/subscribers");
     expect(res.status).toBe(403);
   });
 
   test("returns a page + nextCursor when more rows exist", async () => {
     signedIn("user_1");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
 
     // take: limit + 1 = 51 rows to prove the "has more" probe.
     // The Drizzle list repo returns `purchaseCount` and
@@ -225,7 +212,7 @@ describe("GET /dashboard/projects/:projectId/subscribers", () => {
 
   test("passes projectId to the list repository (soft-delete filter is internal)", async () => {
     signedIn("user_1");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
     drizzleMock.subscriberRepo.listSubscribers.mockResolvedValue([]);
 
     await app.request("/dashboard/projects/proj_1/subscribers");
@@ -237,7 +224,7 @@ describe("GET /dashboard/projects/:projectId/subscribers", () => {
 
   test("forwards ?q to the list repository for case-insensitive search", async () => {
     signedIn("user_1");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
     drizzleMock.subscriberRepo.listSubscribers.mockResolvedValue([]);
 
     await app.request("/dashboard/projects/proj_1/subscribers?q=alice");
@@ -251,23 +238,23 @@ describe("GET /dashboard/projects/:projectId/subscribers", () => {
 describe("GET /dashboard/projects/:projectId/subscribers/:id", () => {
   test("forbidden when not a member", async () => {
     signedIn("outsider");
-    prismaMock.projectMember.findUnique.mockResolvedValue(null);
+    dbMock.projectMember.findUnique.mockResolvedValue(null);
     const res = await app.request("/dashboard/projects/proj_1/subscribers/sub_1");
     expect(res.status).toBe(403);
   });
 
   test("returns 404 when subscriber isn't in project", async () => {
     signedIn("user_1");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
-    prismaMock.subscriber.findUnique.mockResolvedValue(null);
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    dbMock.subscriber.findUnique.mockResolvedValue(null);
     const res = await app.request("/dashboard/projects/proj_1/subscribers/sub_missing");
     expect(res.status).toBe(404);
   });
 
   test("assembles subscriber + purchases + access + ledger + assignments + webhooks", async () => {
     signedIn("user_1");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
-    prismaMock.subscriber.findUnique.mockResolvedValue({
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    dbMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_1",
       projectId: "proj_1",
       appUserId: "user_abc",
@@ -277,7 +264,7 @@ describe("GET /dashboard/projects/:projectId/subscribers/:id", () => {
       deletedAt: null,
       mergedInto: null,
     });
-    prismaMock.purchase.findMany.mockResolvedValue([
+    dbMock.purchase.findMany.mockResolvedValue([
       {
         id: "pur_1",
         productId: "prod_1",
@@ -291,14 +278,14 @@ describe("GET /dashboard/projects/:projectId/subscribers/:id", () => {
         autoRenewStatus: true,
       },
     ]);
-    prismaMock.subscriberAccess.findMany.mockResolvedValue([
+    dbMock.subscriberAccess.findMany.mockResolvedValue([
       { entitlementKey: "premium", isActive: true, expiresDate: null, store: "APP_STORE", purchaseId: "pur_1" },
     ]);
     // Phase 6 cutover: loadSubscriberDetail reads the latest
     // balance from the most-recent ledger row rather than a
     // separate findFirst. The first row's balance becomes
     // `creditBalance` in the response.
-    prismaMock.creditLedger.findMany.mockResolvedValue([
+    dbMock.creditLedger.findMany.mockResolvedValue([
       {
         id: "led_1",
         type: "PURCHASE",
@@ -309,7 +296,7 @@ describe("GET /dashboard/projects/:projectId/subscribers/:id", () => {
         createdAt: new Date("2026-04-12"),
       },
     ]);
-    prismaMock.experimentAssignment.findMany.mockResolvedValue([
+    dbMock.experimentAssignment.findMany.mockResolvedValue([
       {
         experimentId: "exp_1",
         variantId: "v_a",
@@ -319,7 +306,7 @@ describe("GET /dashboard/projects/:projectId/subscribers/:id", () => {
         experiment: { key: "paywall_test" },
       },
     ]);
-    prismaMock.outgoingWebhook.findMany.mockResolvedValue([
+    dbMock.outgoingWebhook.findMany.mockResolvedValue([
       {
         id: "ow_1",
         eventType: "purchase",

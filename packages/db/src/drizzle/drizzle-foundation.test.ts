@@ -41,12 +41,10 @@ import { dailyMrr } from "./views";
 //
 // No live DB here. These tests exercise the schema at the *type*
 // level: columns resolve, inferred types carry nullability, FK
-// references compile. Running queries against a real Postgres is
-// reserved for Phase 1 integration tests once the cutover plan
-// starts swapping callers off Prisma.
+// references compile.
 
 describe("schema shapes compile", () => {
-  it("exposes every table in the Prisma schema", () => {
+  it("exposes every expected table", () => {
     for (const table of [
       user,
       projects,
@@ -71,10 +69,10 @@ describe("schema shapes compile", () => {
     }
   });
 
-  it("maps camelCase columns onto the Prisma on-disk names", () => {
-    // `.name` is the column identifier used in SQL; must match
-    // what schema.prisma emitted in the init migration (quoted
-    // camelCase) so Drizzle reads Prisma-managed rows correctly.
+  it("pins on-disk camelCase column names", () => {
+    // `.name` is the column identifier used in SQL; we pin these
+    // against the live DB shape so renaming a .ts field doesn't
+    // silently regenerate a DROP/ADD migration.
     expect(projects.appleCredentials.name).toBe("appleCredentials");
     expect(projectMembers.projectId.name).toBe("projectId");
     expect(projectMembers.userId.name).toBe("userId");
@@ -268,7 +266,7 @@ describe("productGroupProductsSchema", () => {
 describe("enum membership", () => {
   it("creditLedger.type values match the Postgres enum labels", () => {
     // enumValues is a runtime property exposed by pgEnum — assert
-    // the labels list hasn't drifted from the Prisma definition.
+    // the label list stays pinned to the on-disk enum.
     expect(creditLedger.type.enumValues).toEqual([
       "PURCHASE",
       "SPEND",

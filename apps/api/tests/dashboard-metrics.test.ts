@@ -46,7 +46,7 @@ const { drizzleMock, authMock } = vi.hoisted(() => {
     },
     projectRepo: {
       findMembership: vi.fn(async (_db: unknown, projectId: string, userId: string) =>
-        prismaMock.projectMember.findUnique({
+        dbMock.projectMember.findUnique({
           where: { projectId_userId: { projectId, userId } },
           select: { id: true, role: true },
         }),
@@ -63,8 +63,8 @@ const { drizzleMock, authMock } = vi.hoisted(() => {
   return { drizzleMock, authMock };
 });
 
-const { prismaMock } = vi.hoisted(() => ({
-  prismaMock: {
+const { dbMock } = vi.hoisted(() => ({
+  dbMock: {
     projectMember: { findUnique: vi.fn() },
   },
 }));
@@ -75,7 +75,7 @@ vi.mock("@rovenue/db", async () => {
   );
   return {
     ...actual,
-    default: prismaMock,
+    default: dbMock,
     drizzle: drizzleMock,
   };
 });
@@ -115,7 +115,7 @@ describe("GET /dashboard/projects/:projectId/metrics/mrr", () => {
 
   test("403 when caller is not a project member", async () => {
     signedIn();
-    prismaMock.projectMember.findUnique.mockResolvedValue(null);
+    dbMock.projectMember.findUnique.mockResolvedValue(null);
     const res = await app.request(
       "/dashboard/projects/proj_1/metrics/mrr",
       { headers: authedHeaders },
@@ -125,7 +125,7 @@ describe("GET /dashboard/projects/:projectId/metrics/mrr", () => {
 
   test("returns points for the default 30-day window", async () => {
     signedIn();
-    prismaMock.projectMember.findUnique.mockResolvedValue({
+    dbMock.projectMember.findUnique.mockResolvedValue({
       id: "pm_1",
       role: "VIEWER",
     });
@@ -159,7 +159,7 @@ describe("GET /dashboard/projects/:projectId/metrics/mrr", () => {
 
   test("passes explicit from/to to the repository", async () => {
     signedIn();
-    prismaMock.projectMember.findUnique.mockResolvedValue({
+    dbMock.projectMember.findUnique.mockResolvedValue({
       id: "pm_1",
       role: "VIEWER",
     });
@@ -175,7 +175,7 @@ describe("GET /dashboard/projects/:projectId/metrics/mrr", () => {
 
   test("rejects windows larger than the cap", async () => {
     signedIn();
-    prismaMock.projectMember.findUnique.mockResolvedValue({
+    dbMock.projectMember.findUnique.mockResolvedValue({
       id: "pm_1",
       role: "VIEWER",
     });
@@ -188,7 +188,7 @@ describe("GET /dashboard/projects/:projectId/metrics/mrr", () => {
 
   test("rejects from > to", async () => {
     signedIn();
-    prismaMock.projectMember.findUnique.mockResolvedValue({
+    dbMock.projectMember.findUnique.mockResolvedValue({
       id: "pm_1",
       role: "VIEWER",
     });

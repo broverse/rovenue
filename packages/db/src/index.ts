@@ -2,22 +2,14 @@
 // @rovenue/db — top-level entrypoint
 // =============================================================
 //
-// Prisma has been fully removed from the runtime path as of Phase
-// 7e. Every call-site reads/writes via Drizzle (see
-// `./drizzle/*`). This file is now a thin compatibility layer
-// that:
+// Thin compat layer:
 //
 //   1. Re-exports the Drizzle namespace as `drizzle` so callers
-//      keep writing `import { drizzle } from "@rovenue/db"`.
-//   2. Re-exports the row types + enum value objects Prisma used
-//      to own (MemberRole, PurchaseStatus, etc.) so existing
-//      import sites don't need to know the Drizzle module layout.
+//      write `import { drizzle } from "@rovenue/db"`.
+//   2. Re-exports row types + enum value objects under their
+//      canonical names (MemberRole, PurchaseStatus, …) so call
+//      sites don't need to reach into ./drizzle directly.
 //   3. Re-exports the encryption helpers.
-//
-// Prisma (@prisma/client) remains only as a devDependency — used
-// by the Prisma migrate CLI during the migration window. See
-// drizzle.config.ts for the upcoming drizzle-kit migration
-// runner.
 
 import * as drizzleNamespace from "./drizzle";
 
@@ -25,11 +17,11 @@ import * as drizzleNamespace from "./drizzle";
 // Enum value objects
 // =============================================================
 //
-// Prisma exposes each enum as a const object (e.g. `MemberRole.
-// OWNER === "OWNER"`). Drizzle only ships the pgEnum as a
-// column-type builder whose `.enumValues` is a readonly tuple. We
-// rebuild the Prisma-style objects here so call-site imports
-// (`import { MemberRole } from "@rovenue/db"`) keep compiling.
+// Drizzle ships each pgEnum as a column-type builder whose
+// `.enumValues` is a readonly tuple. We rebuild the runtime-object
+// shape here (e.g. `MemberRole.OWNER === "OWNER"`) so call-site
+// code can use `MemberRole.OWNER` the way TypeScript string enums
+// work.
 
 export const MemberRole = {
   OWNER: "OWNER",
@@ -150,10 +142,9 @@ export type FeatureFlagType =
 // Row types
 // =============================================================
 //
-// Re-exported under the Prisma names (Project, Subscriber, …) for
-// import-site compat. The underlying definitions come from
-// drizzle schema's `$inferSelect` — structurally compatible with
-// Prisma's generated models for every field call sites read.
+// Canonical model names (Project, Subscriber, …) for the
+// import-site surface. Definitions come from drizzle schema's
+// `$inferSelect`.
 
 export type {
   Project,

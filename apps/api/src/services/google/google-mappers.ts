@@ -9,14 +9,14 @@ import {
   type GoogleSubscriptionState,
 } from "./google-types";
 
-// Pure transform functions used by the webhook handler. Split into its own
-// module so tests can load them without dragging @prisma/client — the
-// Prisma types above are `import type` only, so this file has no runtime
-// dependency on the generated client.
+// Pure transform functions used by the webhook handler. Split
+// into its own module so tests can load them without pulling the
+// DB package into the runtime graph — the enum types above are
+// `import type` only.
 //
-// The const objects below mirror the Prisma-generated enum runtime shape
-// (string-valued enums: e.g. PurchaseStatus.ACTIVE === "ACTIVE"). Keep in
-// sync with packages/db/prisma/schema.prisma.
+// The const objects below mirror the pgEnum runtime shape
+// (string-valued: e.g. PurchaseStatus.ACTIVE === "ACTIVE"). Keep
+// in sync with packages/db/src/drizzle/enums.ts.
 
 const PURCHASE_STATUS = {
   TRIAL: "TRIAL",

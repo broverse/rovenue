@@ -64,11 +64,6 @@ async function handleConfig(
   // moves from country=TR to country=US must be reflected in both
   // the evaluation path AND the stored attributes, otherwise the
   // dashboard's "subscribers with country=TR" view goes stale.
-  //
-  // Cutover: this read is Drizzle-only after Phase 5. Shadow
-  // reads against the dashboard list + config attribute fetch
-  // ran clean for a full cycle; the Prisma caller is removed.
-  // Writes (upsert below) stay on Prisma until Phase 6.
   const existing = await drizzle.subscriberRepo.findSubscriberAttributes(
     drizzle.db,
     { projectId: project.id, appUserId },

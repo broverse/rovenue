@@ -4,16 +4,11 @@ import { Pool, type PoolConfig } from "pg";
 // Shared pg Pool
 // =============================================================
 //
-// Drizzle and Prisma both run against Postgres, but Prisma manages
-// its own connection pool internally (via the query engine binary)
-// while Drizzle expects us to bring our own. During the hybrid
-// period where both ORMs coexist we keep them on distinct pools
-// so a leak on one side doesn't starve the other — they share a
-// DATABASE_URL, nothing else.
-//
-// The pool is created lazily so importing this module in a
-// test environment without DATABASE_URL (vitest picks up .env.test
-// later) doesn't crash at import time.
+// Drizzle uses the standard `pg` driver, so we own the pool
+// directly (no managed query engine). The pool is created lazily
+// so importing this module in a test environment without
+// DATABASE_URL (vitest picks up .env.test later) doesn't crash at
+// import time.
 
 const globalForPool = globalThis as unknown as {
   rovenueDrizzlePool?: Pool;
@@ -24,9 +19,8 @@ export interface CreatePoolOptions extends Partial<PoolConfig> {
 }
 
 const DEFAULT_POOL_OPTIONS: PoolConfig = {
-  // Matches Prisma's default connection limit shape — a tiny
-  // default keeps test isolation; real deployments override via
-  // DATABASE_URL `?connection_limit=...` or env overrides.
+  // Conservative default — real deployments override via
+  // DATABASE_URL `?connection_limit=…` or explicit env overrides.
   max: 10,
   idleTimeoutMillis: 30_000,
   // Aggressive connectionTimeoutMillis surfaces bad DSNs fast

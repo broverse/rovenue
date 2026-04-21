@@ -29,36 +29,28 @@ import {
 } from "./enums";
 
 // =============================================================
-// Drizzle schema — full mirror of schema.prisma
+// Drizzle schema — canonical source of truth
 // =============================================================
-//
-// Every Prisma model is mirrored 1:1 here. Column names, nullability,
-// FK cascades, and composite indexes match the init migration byte
-// for byte so Drizzle and Prisma can read each other's writes during
-// the coexistence window.
 //
 // Conventions:
-//   * Columns use camelCase identifiers in TypeScript but snake_case
-//     or Prisma's original quoted camelCase on disk — we pin the DB
-//     column name as the second argument of each column helper so
-//     coexistence with Prisma is byte-exact.
+//   * Columns use camelCase identifiers in TypeScript. DB column
+//     names are pinned as the second argument of each column
+//     helper so on-disk names stay stable across renames.
 //   * FKs point at `id` in the target table; cascade behaviour
-//     matches the Prisma @relation() onDelete directive.
-//   * `@db.Timestamptz` maps to `timestamp({ withTimezone: true })`.
-//   * `@default(cuid(2))` is replaced with a Drizzle `$defaultFn`
-//     running `@paralleldrive/cuid2.createId`, which emits the same
-//     format (22 chars, url-safe) so dashboards and API consumers
-//     don't notice the swap.
+//     is declared via `.references(() => …, { onDelete })`.
+//   * `timestamp({ withTimezone: true })` corresponds to
+//     Postgres `timestamptz`.
+//   * Ids default to `createId()` (`@paralleldrive/cuid2`),
+//     emitting 22-char url-safe strings.
 
 // =============================================================
-// user (Better Auth — owned shape, referenced via FK)
+// user (Better Auth)
 // =============================================================
 //
-// The Better Auth adapter creates and migrates this table from
-// `better-auth generate --adapter prisma`. We redeclare a minimum
-// subset here so Drizzle joins can reach email/name without
-// importing Prisma types. Any schema drift should be resolved on
-// the Prisma side (source of truth) and mirrored here.
+// The Better Auth Drizzle adapter reads/writes this table plus
+// the session/account/verification tables below. Schema shape
+// matches what `better-auth generate` produces so future CLI-
+// regenerated output stays a diff-free drop-in.
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -74,10 +66,9 @@ export const user = pgTable("user", {
 // Better Auth session / account / verification tables
 // =============================================================
 //
-// These mirror the Prisma models Better Auth's CLI generates;
-// keeping column names + nullability byte-for-byte identical so
-// the drizzleAdapter reads/writes the same rows Prisma does during
-// the swap window.
+// Column names + nullability match what `better-auth generate`
+// produces, so swapping adapters (or regenerating the schema via
+// the Better Auth CLI) is a no-op against existing rows.
 
 export const session = pgTable("session", {
   id: text("id").primaryKey(),

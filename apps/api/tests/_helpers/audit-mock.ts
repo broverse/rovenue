@@ -8,10 +8,8 @@ import { vi } from "vitest";
 // specific entry, not about the chain mechanics. This helper
 // returns a bundle of vi.fn stubs that test files wire into
 // vi.mock("../src/lib/audit", ...). Tests assert against
-// `auditMock.audit.mock.calls[n][0]` just like they used to
-// assert against `prismaMock.auditLog.create.mock.calls[n][0]
-// .data` — the shapes match because the entry object is the
-// first argument to both.
+// `auditMock.audit.mock.calls[n][0]` — the first argument is the
+// audit entry object.
 //
 // Chain-behavior tests (audit-chain.test.ts) import the real
 // audit module with a live Drizzle mock that simulates the

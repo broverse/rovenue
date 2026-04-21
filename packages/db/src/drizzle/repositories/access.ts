@@ -68,14 +68,11 @@ export async function findAccessIdsForPurchaseChain(
 export { inArray };
 
 // =============================================================
-// Entitlement access reads — Drizzle repository
+// Entitlement access reads
 // =============================================================
 //
-// Mirrors prisma.subscriberAccess.findMany({ where: { subscriberId,
-// isActive: true, OR: [{ expiresDate: null }, { expiresDate: { gt } }]
-// } }) used by apps/api/src/services/access-engine.ts. The
-// non-expired + active filter defines "live" entitlement: either
-// perpetual (null expiry) or not yet past expiresDate.
+// "Live" entitlement = active AND not past expiresDate. Either
+// perpetual (null expiry) or future-dated rows qualify.
 
 export async function findActiveAccess(
   db: Db,
@@ -200,11 +197,10 @@ export async function createAccess(
 }
 
 /**
- * Revoke every access row joined to a purchase chain (every purchase
- * that shares an originalTransactionId within the given project).
- * Apple-webhook uses this for refund/expire/revoke transitions.
- * Equivalent to Prisma's nested relational filter:
- *   { where: { purchase: { projectId, originalTransactionId } } }
+ * Revoke every access row joined to a purchase chain (every
+ * purchase sharing an originalTransactionId within the given
+ * project). Apple-webhook uses this for refund/expire/revoke
+ * transitions.
  */
 export async function revokeAccessByOriginalTransaction(
   db: DbOrTx,

@@ -12,13 +12,6 @@ import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
 import { encodeCursor, decodeCursor } from "../../lib/pagination";
 
-// NOTE: the list endpoint was shadow-read for a full cycle in
-// Phase 3 with Prisma canonical and Drizzle mirroring. Phase 5
-// cuts over — Drizzle is the only reader now. The detail
-// endpoint below still fans out through Prisma on several
-// tables; Phase 6 consolidates those behind a drizzle
-// subscriberDetail repository.
-
 // =============================================================
 // Dashboard: Subscribers list (Task A6)
 // =============================================================
@@ -28,9 +21,9 @@ import { encodeCursor, decodeCursor } from "../../lib/pagination";
 //
 // Cursor pagination keyed on (createdAt DESC, id DESC) so the same
 // tuple serves as both sort key and tie-breaker. `q` does a simple
-// case-insensitive substring match on appUserId — we intentionally
-// stop there because Prisma 6's JSON filter surface doesn't expose a
-// portable "contains anywhere" over the attributes blob.
+// case-insensitive substring match on appUserId — we stop there
+// because JSON-column "contains anywhere" matching over the
+// attributes blob isn't a portable filter.
 //
 // Detail endpoint lives in Task A7; this file is list-only.
 

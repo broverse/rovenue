@@ -28,22 +28,8 @@ export async function countActiveSubscribers(
 }
 
 // =============================================================
-// Subscriber read path — Drizzle repository
+// Subscriber reads
 // =============================================================
-//
-// Mirrors the Prisma call shapes currently used in
-//   apps/api/src/routes/v1/config.ts           (findUnique)
-//   apps/api/src/routes/dashboard/subscribers.ts (list + detail)
-//
-// Each function returns the same wire shape the Prisma version
-// returns so a shadow read can compare them byte-for-byte. The
-// idea is to route one call site at a time through the shadow
-// helper, watch for divergence, and flip over to Drizzle once a
-// surface has been green for long enough.
-//
-// Any addition here should land with a `getSubscriber…Prisma`
-// counterpart in packages/db/prisma-shadow (the prisma caller
-// stays the canonical reader during the hybrid window).
 
 export interface FindByAppUserIdArgs {
   projectId: string;
@@ -51,12 +37,8 @@ export interface FindByAppUserIdArgs {
 }
 
 /**
- * Matches `prisma.subscriber.findUnique({
- *   where: { projectId_appUserId: { projectId, appUserId } },
- *   select: { attributes: true },
- * })`.
- *
- * Returns `null` when the row doesn't exist.
+ * Attribute-only lookup by (projectId, appUserId). Returns `null`
+ * when the row doesn't exist.
  */
 export async function findSubscriberAttributes(
   db: Db,
@@ -76,10 +58,9 @@ export async function findSubscriberAttributes(
 }
 
 /**
- * Matches `prisma.subscriber.findUnique({
- *   where: { projectId_appUserId: { projectId, appUserId } },
- * })` — full row. Used when the caller needs more than just
- * attributes (e.g. the transfer service reads every column).
+ * Full-row lookup by (projectId, appUserId). Used when the caller
+ * needs more than just attributes (e.g. the transfer service
+ * reads every column).
  */
 export async function findSubscriberByAppUserId(
   db: Db,
@@ -166,8 +147,8 @@ export interface UpsertSubscriberInput {
 }
 
 /**
- * Insert-or-touch a subscriber row keyed on (projectId, appUserId).
- * Mirrors `prisma.subscriber.upsert({ create, update })`:
+ * Insert-or-touch a subscriber row keyed on (projectId, appUserId)
+ * via `INSERT … ON CONFLICT DO UPDATE`:
  * - new row: attributes = createAttributes (defaults to {})
  * - existing: lastSeenAt = now(), attributes optionally merged
  *   when `updateAttributes` is provided.
@@ -229,9 +210,8 @@ export interface ListedSubscriber {
 /**
  * Dashboard list query: keyset pagination on (createdAt, id),
  * optional text search, plus per-row purchase count and active
- * entitlement keys. The Prisma version uses `include: { _count,
- * access: { where: … } }` which we reproduce with a LATERAL
- * subquery pattern — Postgres handles the per-row correlation
+ * entitlement keys. The aggregate fields are fetched via
+ * correlated subqueries — Postgres handles the per-row correlation
  * cleanly and Drizzle's query API doesn't need a raw SQL escape
  * hatch for it.
  */

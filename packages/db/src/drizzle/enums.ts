@@ -4,14 +4,9 @@ import { pgEnum } from "drizzle-orm/pg-core";
 // Postgres enums
 // =============================================================
 //
-// Mirrored from schema.prisma. The string union literals MUST
-// match Prisma's enum labels byte-for-byte — the underlying DB
-// type is shared, so a mismatch would either break migrations
-// (drizzle-kit generates ALTER TYPE diffs) or break reads
-// (Prisma and Drizzle disagree on whether "INITIAL" is a member).
-//
-// When adding a new variant, add it to BOTH Prisma and Drizzle in
-// the same commit. drizzle-kit `check` flags divergence in CI.
+// The string labels below are the on-disk variant names. Adding
+// a new variant requires a drizzle-kit migration (ALTER TYPE …
+// ADD VALUE) — generate it via `pnpm db:migrate:generate`.
 
 export const memberRole = pgEnum("MemberRole", [
   "OWNER",

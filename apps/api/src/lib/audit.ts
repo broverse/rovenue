@@ -107,13 +107,11 @@ export function extractRequestContext(c: Context): {
 // =============================================================
 //
 // Drizzle's transaction callback hands the caller a proxy that
-// shares the parent `Db` surface (select/insert/execute). During
-// the Prisma → Drizzle cutover window audit() accepts any tx-ish
-// argument (PrismaTransactionClient or DrizzleTx) and internally
-// always opens its own Drizzle transaction — the audit chain
-// commits independently of the caller's tx. Once every caller
-// migrates to drizzle.db.transaction we'll re-thread the audit
-// write through the caller's tx for full atomicity.
+// shares the parent `Db` surface (select/insert/execute). audit()
+// currently opens its own inner transaction so the chain commits
+// independently of the caller's tx; callers still pass their tx
+// handle for future re-threading, so we keep the second parameter
+// as `unknown` to stay forward-compatible.
 
 export type AuditTx = unknown;
 

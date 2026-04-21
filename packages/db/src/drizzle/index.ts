@@ -7,8 +7,9 @@
 //
 //   import { db, projects, auditLogs } from "@rovenue/db/drizzle";
 //
-// Prisma remains the default @rovenue/db export during the hybrid
-// period (see packages/db/src/index.ts).
+// The top-level `@rovenue/db` re-exports this namespace as
+// `drizzle` for the common `import { drizzle } from "@rovenue/db"`
+// shape.
 
 export { createPool, getPool, closePool } from "./pool";
 export { createDb, getDb, db, schema, type Db } from "./client";

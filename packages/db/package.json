@@ -12,10 +12,7 @@
     "db:migrate:baseline": "tsx src/migrate-baseline.ts",
     "db:migrate:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:generate": "prisma generate",
-    "prisma:deploy": "prisma migrate deploy",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx seed.ts"
   },
   "dependencies": {
     "@paralleldrive/cuid2": "^3.3.0",
@@ -27,11 +24,9 @@
     "zod": "^3.22.0"
   },
   "devDependencies": {
-    "@prisma/client": "^6.1.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/pg": "^8.20.0",
     "drizzle-kit": "^0.31.10",
-    "prisma": "^6.1.0",
     "tsx": "^4.7.0",
     "typescript": "^5.4.0",
     "vitest": "^1.3.0"

@@ -18,8 +18,8 @@ const auditMock = vi.hoisted(() => ({
 }));
 vi.mock("../src/lib/audit", () => auditMock);
 
-const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
-  const prismaMock = {
+const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
+  const dbMock = {
     projectMember: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
     project: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
     audience: { create: vi.fn() },
@@ -32,7 +32,7 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
       findFirst: vi.fn(async () => null),
     },
     $executeRaw: vi.fn(async () => 0),
-    $transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) => fn(prismaMock)),
+    $transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) => fn(dbMock)),
   };
   const drizzleDb = {
     transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
@@ -43,17 +43,17 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     db: drizzleDb,
     projectRepo: {
       findMembership: vi.fn(async (_db, projectId, userId) =>
-        prismaMock.projectMember.findUnique({
+        dbMock.projectMember.findUnique({
           where: { projectId_userId: { projectId, userId } },
           select: { id: true, role: true },
         }),
       ),
       findProjectById: vi.fn(async (_db: unknown, id: string) =>
-        prismaMock.project.findUnique({ where: { id } }),
+        dbMock.project.findUnique({ where: { id } }),
       ),
       findProjectCredentials: vi.fn(async () => null),
       findMembershipsForUser: vi.fn(async (_db: unknown, userId: string) => {
-        const rows = await prismaMock.projectMember.findMany({
+        const rows = await dbMock.projectMember.findMany({
           where: { userId },
           include: { project: true },
           orderBy: { createdAt: "desc" },
@@ -63,12 +63,12 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
       }),
       listProjectMembers: vi.fn(async () => []),
       countProjectOwners: vi.fn(async () => 0),
-      // --- writes — delegate to the already-mocked Prisma calls.
+      // --- writes — delegate to the dbMock spies.
       createProject: vi.fn(
         async (
           _tx: unknown,
           input: { name: string; slug: string; settings: unknown },
-        ) => prismaMock.project.create({ data: input }),
+        ) => dbMock.project.create({ data: input }),
       ),
       updateProject: vi.fn(
         async (
@@ -76,59 +76,59 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
           id: string,
           patch: Record<string, unknown>,
         ) =>
-          prismaMock.project.update({
+          dbMock.project.update({
             where: { id },
             data: patch,
           }),
       ),
       updateProjectWebhookSecret: vi.fn(
         async (_tx: unknown, id: string, webhookSecret: string) =>
-          prismaMock.project.update({
+          dbMock.project.update({
             where: { id },
             data: { webhookSecret },
           }),
       ),
       deleteProject: vi.fn(
         async (_tx: unknown, id: string) =>
-          prismaMock.project.delete({ where: { id } }),
+          dbMock.project.delete({ where: { id } }),
       ),
       createProjectMember: vi.fn(
         async (
           _tx: unknown,
           input: { projectId: string; userId: string; role: string },
-        ) => prismaMock.projectMember.create({ data: input }),
+        ) => dbMock.projectMember.create({ data: input }),
       ),
     },
     audienceRepo: {
       createAudience: vi.fn(
         async (_tx: unknown, input: Record<string, unknown>) =>
-          prismaMock.audience.create({ data: input }),
+          dbMock.audience.create({ data: input }),
       ),
     },
     apiKeyRepo: {
       findApiKeyByPublic: vi.fn(async () => null),
       findApiKeyById: vi.fn(async () => null),
       listActiveApiKeys: vi.fn(async (_db: unknown, projectId: string) =>
-        prismaMock.apiKey.findMany({ where: { projectId, revokedAt: null } }),
+        dbMock.apiKey.findMany({ where: { projectId, revokedAt: null } }),
       ),
       createApiKey: vi.fn(
         async (_tx: unknown, input: Record<string, unknown>) =>
-          prismaMock.apiKey.create({ data: input }),
+          dbMock.apiKey.create({ data: input }),
       ),
     },
     subscriberRepo: {
       countActiveSubscribers: vi.fn(async (_db: unknown, projectId: string) =>
-        prismaMock.subscriber.count({ where: { projectId, deletedAt: null } }),
+        dbMock.subscriber.count({ where: { projectId, deletedAt: null } }),
       ),
     },
     experimentRepo: {
       countExperiments: vi.fn(async (_db: unknown, projectId: string) =>
-        prismaMock.experiment.count({ where: { projectId } }),
+        dbMock.experiment.count({ where: { projectId } }),
       ),
     },
     dashboardFeatureFlagRepo: {
       countFeatureFlags: vi.fn(async (_db: unknown, projectId: string) =>
-        prismaMock.featureFlag.count({ where: { projectId } }),
+        dbMock.featureFlag.count({ where: { projectId } }),
       ),
       listFeatureFlags: vi.fn(async () => []),
       findFeatureFlagById: vi.fn(async () => null),
@@ -139,11 +139,11 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     ),
   };
   const authMock = { api: { getSession: vi.fn() } };
-  return { prismaMock, drizzleMock, authMock };
+  return { dbMock, drizzleMock, authMock };
 });
 
 vi.mock("@rovenue/db", () => ({
-  default: prismaMock,
+  default: dbMock,
   drizzle: drizzleMock,
   MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   FeatureFlagType: { BOOLEAN: "BOOLEAN", STRING: "STRING", NUMBER: "NUMBER", JSON: "JSON" },
@@ -188,19 +188,6 @@ vi.mock("@rovenue/db", () => ({
     REACTIVATION: "REACTIVATION",
     CREDIT_PURCHASE: "CREDIT_PURCHASE",
   },
-  Prisma: {
-    sql: (s: TemplateStringsArray, ...v: unknown[]) => ({ strings: s, values: v }),
-    Decimal: class {
-      constructor(public value: number | string) {}
-      toString() {
-        return String(this.value);
-      }
-    },
-    TransactionIsolationLevel: { Serializable: "Serializable" },
-    PrismaClientKnownRequestError: class extends Error {
-      code = "";
-    },
-  },
 }));
 vi.mock("../src/lib/auth", () => ({ auth: authMock }));
 
@@ -215,7 +202,7 @@ beforeEach(() => vi.clearAllMocks());
 describe("GET /dashboard/projects", () => {
   test("returns the caller's memberships with role", async () => {
     signedIn("user_1");
-    prismaMock.projectMember.findMany.mockResolvedValue([
+    dbMock.projectMember.findMany.mockResolvedValue([
       {
         role: "OWNER",
         project: {
@@ -253,8 +240,8 @@ describe("GET /dashboard/projects", () => {
 describe("GET /dashboard/projects/:id", () => {
   test("returns project detail with counts + API key metadata (no plaintext secret leak)", async () => {
     signedIn("user_1");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "OWNER" });
-    prismaMock.project.findUnique.mockResolvedValue({
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "OWNER" });
+    dbMock.project.findUnique.mockResolvedValue({
       id: "proj_1",
       name: "Acme",
       slug: "acme",
@@ -264,7 +251,7 @@ describe("GET /dashboard/projects/:id", () => {
       createdAt: new Date("2026-04-01"),
       updatedAt: new Date("2026-04-10"),
     });
-    prismaMock.apiKey.findMany.mockResolvedValue([
+    dbMock.apiKey.findMany.mockResolvedValue([
       {
         id: "k1",
         label: "default",
@@ -274,9 +261,9 @@ describe("GET /dashboard/projects/:id", () => {
         createdAt: new Date("2026-04-01"),
       },
     ]);
-    prismaMock.subscriber.count.mockResolvedValue(42);
-    prismaMock.experiment.count.mockResolvedValue(3);
-    prismaMock.featureFlag.count.mockResolvedValue(5);
+    dbMock.subscriber.count.mockResolvedValue(42);
+    dbMock.experiment.count.mockResolvedValue(3);
+    dbMock.featureFlag.count.mockResolvedValue(5);
 
     const res = await app.request("/dashboard/projects/proj_1");
     expect(res.status).toBe(200);
@@ -307,15 +294,15 @@ describe("GET /dashboard/projects/:id", () => {
 
   test("returns 403 when the user is not a member", async () => {
     signedIn("outsider");
-    prismaMock.projectMember.findUnique.mockResolvedValue(null);
+    dbMock.projectMember.findUnique.mockResolvedValue(null);
     const res = await app.request("/dashboard/projects/proj_1");
     expect(res.status).toBe(403);
   });
 
   test("strips sensitive-looking keys from settings before returning", async () => {
     signedIn("user_1");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "OWNER" });
-    prismaMock.project.findUnique.mockResolvedValue({
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "OWNER" });
+    dbMock.project.findUnique.mockResolvedValue({
       id: "proj_1",
       name: "Acme",
       slug: "acme",
@@ -331,10 +318,10 @@ describe("GET /dashboard/projects/:id", () => {
       createdAt: new Date("2026-04-01"),
       updatedAt: new Date("2026-04-10"),
     });
-    prismaMock.apiKey.findMany.mockResolvedValue([]);
-    prismaMock.subscriber.count.mockResolvedValue(0);
-    prismaMock.experiment.count.mockResolvedValue(0);
-    prismaMock.featureFlag.count.mockResolvedValue(0);
+    dbMock.apiKey.findMany.mockResolvedValue([]);
+    dbMock.subscriber.count.mockResolvedValue(0);
+    dbMock.experiment.count.mockResolvedValue(0);
+    dbMock.featureFlag.count.mockResolvedValue(0);
 
     const res = await app.request("/dashboard/projects/proj_1");
     expect(res.status).toBe(200);
@@ -353,7 +340,7 @@ describe("GET /dashboard/projects/:id", () => {
 describe("POST /dashboard/projects", () => {
   test("creates project + OWNER membership + default audience + api key in one transaction", async () => {
     signedIn("user_1");
-    prismaMock.project.create.mockResolvedValue({
+    dbMock.project.create.mockResolvedValue({
       id: "proj_new",
       name: "Alpha",
       slug: "alpha",
@@ -363,16 +350,16 @@ describe("POST /dashboard/projects", () => {
       createdAt: new Date("2026-04-18"),
       updatedAt: new Date("2026-04-18"),
     });
-    prismaMock.projectMember.create.mockResolvedValue({ id: "pm_new", role: "OWNER" });
-    prismaMock.audience.create.mockResolvedValue({ id: "aud_default", isDefault: true });
-    prismaMock.apiKey.create.mockResolvedValue({
+    dbMock.projectMember.create.mockResolvedValue({ id: "pm_new", role: "OWNER" });
+    dbMock.audience.create.mockResolvedValue({ id: "aud_default", isDefault: true });
+    dbMock.apiKey.create.mockResolvedValue({
       id: "k_new",
       label: "default",
       keyPublic: "rov_pub_new_id_xxxx",
       environment: "PRODUCTION",
       createdAt: new Date("2026-04-18"),
     });
-    prismaMock.apiKey.findMany.mockResolvedValue([
+    dbMock.apiKey.findMany.mockResolvedValue([
       {
         id: "k_new",
         label: "default",
@@ -403,18 +390,18 @@ describe("POST /dashboard/projects", () => {
     expect(body.data.apiKey.publicKey).toBe("rov_pub_new_id_xxxx");
 
     expect(drizzleMock.db.transaction).toHaveBeenCalledTimes(1);
-    expect(prismaMock.project.create).toHaveBeenCalledTimes(1);
-    expect(prismaMock.projectMember.create).toHaveBeenCalledWith(
+    expect(dbMock.project.create).toHaveBeenCalledTimes(1);
+    expect(dbMock.projectMember.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ role: "OWNER", userId: "user_1" }),
       }),
     );
-    expect(prismaMock.audience.create).toHaveBeenCalledWith(
+    expect(dbMock.audience.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ isDefault: true, name: "All Users" }),
       }),
     );
-    expect(prismaMock.apiKey.create).toHaveBeenCalledTimes(1);
+    expect(dbMock.apiKey.create).toHaveBeenCalledTimes(1);
   });
 
   test("returns 400 when name or slug is missing", async () => {
@@ -429,7 +416,7 @@ describe("POST /dashboard/projects", () => {
 
   test("accepts environment override (SANDBOX)", async () => {
     signedIn("user_1");
-    prismaMock.project.create.mockResolvedValue({
+    dbMock.project.create.mockResolvedValue({
       id: "proj_sandbox",
       name: "Sbx",
       slug: "sbx",
@@ -439,16 +426,16 @@ describe("POST /dashboard/projects", () => {
       createdAt: new Date("2026-04-18"),
       updatedAt: new Date("2026-04-18"),
     });
-    prismaMock.projectMember.create.mockResolvedValue({ id: "pm_new", role: "OWNER" });
-    prismaMock.audience.create.mockResolvedValue({ id: "aud_default", isDefault: true });
-    prismaMock.apiKey.create.mockResolvedValue({
+    dbMock.projectMember.create.mockResolvedValue({ id: "pm_new", role: "OWNER" });
+    dbMock.audience.create.mockResolvedValue({ id: "aud_default", isDefault: true });
+    dbMock.apiKey.create.mockResolvedValue({
       id: "k_sbx",
       label: "default",
       keyPublic: "rov_pub_sandbox_yyy",
       environment: "SANDBOX",
       createdAt: new Date("2026-04-18"),
     });
-    prismaMock.apiKey.findMany.mockResolvedValue([
+    dbMock.apiKey.findMany.mockResolvedValue([
       {
         id: "k_sbx",
         label: "default",
@@ -466,7 +453,7 @@ describe("POST /dashboard/projects", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(prismaMock.apiKey.create).toHaveBeenCalledWith(
+    expect(dbMock.apiKey.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ environment: "SANDBOX" }),
       }),
@@ -477,7 +464,7 @@ describe("POST /dashboard/projects", () => {
 describe("PATCH /dashboard/projects/:id", () => {
   test("requires ADMIN role — VIEWER gets 403", async () => {
     signedIn("viewer");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "VIEWER" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "VIEWER" });
     const res = await app.request("/dashboard/projects/proj_1", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -488,14 +475,14 @@ describe("PATCH /dashboard/projects/:id", () => {
 
   test("ADMIN can rename and update webhookUrl; writes an audit entry", async () => {
     signedIn("admin");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
-    prismaMock.project.findUnique.mockResolvedValue({
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
+    dbMock.project.findUnique.mockResolvedValue({
       id: "proj_1",
       name: "Old",
       webhookUrl: null,
       settings: {},
     });
-    prismaMock.project.update.mockResolvedValue({
+    dbMock.project.update.mockResolvedValue({
       id: "proj_1",
       name: "Renamed",
       slug: "proj-1",
@@ -507,10 +494,10 @@ describe("PATCH /dashboard/projects/:id", () => {
     });
     // Reset the count/apiKey mocks to default (clearAllMocks does not
     // undo mockResolvedValue implementations set by earlier tests).
-    prismaMock.apiKey.findMany.mockResolvedValue([]);
-    prismaMock.subscriber.count.mockResolvedValue(0);
-    prismaMock.experiment.count.mockResolvedValue(0);
-    prismaMock.featureFlag.count.mockResolvedValue(0);
+    dbMock.apiKey.findMany.mockResolvedValue([]);
+    dbMock.subscriber.count.mockResolvedValue(0);
+    dbMock.experiment.count.mockResolvedValue(0);
+    dbMock.featureFlag.count.mockResolvedValue(0);
 
     const res = await app.request("/dashboard/projects/proj_1", {
       method: "PATCH",
@@ -518,7 +505,7 @@ describe("PATCH /dashboard/projects/:id", () => {
       body: JSON.stringify({ name: "Renamed", webhookUrl: "https://new.example.com" }),
     });
     expect(res.status).toBe(200);
-    expect(prismaMock.project.update).toHaveBeenCalledWith(
+    expect(dbMock.project.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "proj_1" },
         data: expect.objectContaining({ name: "Renamed", webhookUrl: "https://new.example.com" }),
@@ -531,7 +518,7 @@ describe("PATCH /dashboard/projects/:id", () => {
     expect(drizzleMock.db.transaction).toHaveBeenCalled();
     expect(
       drizzleMock.db.transaction.mock.invocationCallOrder[0]!,
-    ).toBeLessThan(prismaMock.project.update.mock.invocationCallOrder[0]!);
+    ).toBeLessThan(dbMock.project.update.mock.invocationCallOrder[0]!);
 
     const body = (await res.json()) as {
       data: {
@@ -558,8 +545,8 @@ describe("PATCH /dashboard/projects/:id", () => {
 
   test("empty PATCH body returns 400", async () => {
     signedIn("admin");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
-    prismaMock.project.findUnique.mockResolvedValue({
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
+    dbMock.project.findUnique.mockResolvedValue({
       id: "proj_1",
       name: "Old",
       webhookUrl: null,
@@ -571,14 +558,14 @@ describe("PATCH /dashboard/projects/:id", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
-    expect(prismaMock.project.update).not.toHaveBeenCalled();
+    expect(dbMock.project.update).not.toHaveBeenCalled();
     expect(auditMock.audit).not.toHaveBeenCalled();
   });
 
   test("404 when project not found", async () => {
     signedIn("admin");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
-    prismaMock.project.findUnique.mockResolvedValue(null);
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
+    dbMock.project.findUnique.mockResolvedValue(null);
     const res = await app.request("/dashboard/projects/missing", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -592,8 +579,8 @@ describe("PATCH /dashboard/projects/:id", () => {
 
   test("rejects settings keys that look like secrets", async () => {
     signedIn("admin");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
-    prismaMock.project.findUnique.mockResolvedValue({
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
+    dbMock.project.findUnique.mockResolvedValue({
       id: "proj_1",
       name: "Old",
       webhookUrl: null,
@@ -610,7 +597,7 @@ describe("PATCH /dashboard/projects/:id", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error?: { message: string } };
     expect(body.error?.message).toMatch(/apiSecret/);
-    expect(prismaMock.project.update).not.toHaveBeenCalled();
+    expect(dbMock.project.update).not.toHaveBeenCalled();
     expect(auditMock.audit).not.toHaveBeenCalled();
   });
 });
@@ -618,7 +605,7 @@ describe("PATCH /dashboard/projects/:id", () => {
 describe("POST /dashboard/projects/:id/webhook-secret/rotate", () => {
   test("requires OWNER — ADMIN gets 403", async () => {
     signedIn("admin");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
     const res = await app.request("/dashboard/projects/proj_1/webhook-secret/rotate", {
       method: "POST",
     });
@@ -627,8 +614,8 @@ describe("POST /dashboard/projects/:id/webhook-secret/rotate", () => {
 
   test("OWNER rotates the secret; audit before/after are redacted", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "OWNER" });
-    prismaMock.project.update.mockResolvedValue({ id: "proj_1", webhookSecret: "new_placeholder" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "OWNER" });
+    dbMock.project.update.mockResolvedValue({ id: "proj_1", webhookSecret: "new_placeholder" });
 
     const res = await app.request("/dashboard/projects/proj_1/webhook-secret/rotate", {
       method: "POST",
@@ -651,20 +638,20 @@ describe("POST /dashboard/projects/:id/webhook-secret/rotate", () => {
 describe("DELETE /dashboard/projects/:id", () => {
   test("requires OWNER — ADMIN gets 403", async () => {
     signedIn("admin");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "ADMIN" });
     const res = await app.request("/dashboard/projects/proj_1", { method: "DELETE" });
     expect(res.status).toBe(403);
   });
 
   test("OWNER deletes the project AND writes an audit entry first", async () => {
     signedIn("owner");
-    prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "OWNER" });
-    prismaMock.project.delete.mockResolvedValue({ id: "proj_1" });
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm_1", role: "OWNER" });
+    dbMock.project.delete.mockResolvedValue({ id: "proj_1" });
 
     const res = await app.request("/dashboard/projects/proj_1", { method: "DELETE" });
     expect(res.status).toBe(200);
 
-    expect(prismaMock.project.delete).toHaveBeenCalledWith({ where: { id: "proj_1" } });
+    expect(dbMock.project.delete).toHaveBeenCalledWith({ where: { id: "proj_1" } });
     expect(auditMock.audit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "project.deleted",

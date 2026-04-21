@@ -7,17 +7,16 @@ import { getPool } from "./drizzle/pool";
 // =============================================================
 //
 // Applies every SQL file in ./drizzle/migrations/ to the
-// configured DATABASE_URL. Replaces `prisma migrate deploy` in
-// the deployment pipeline. drizzle-orm keeps its own __drizzle_
-// migrations tracking table alongside Prisma's _prisma_migrations
-// — both coexist; they track disjoint migration sets.
+// configured DATABASE_URL. drizzle-orm tracks applied migrations
+// in the __drizzle_migrations metadata table it creates on first
+// run.
 //
 // Usage:
 //   pnpm --filter @rovenue/db db:migrate
 //
 // The CLI entrypoint below invokes the migrator when this module
-// is executed directly (tsx packages/db/src/migrate.ts) and
-// bails with a non-zero exit code on failure so CI/CD can gate.
+// is executed directly (tsx packages/db/src/migrate.ts) and bails
+// with a non-zero exit code on failure so CI/CD can gate.
 
 async function run(): Promise<void> {
   const pool = getPool();

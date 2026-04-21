@@ -8,13 +8,11 @@ type Store = (typeof storeEnum.enumValues)[number];
 type PurchaseStatus = (typeof purchaseStatus.enumValues)[number];
 
 // =============================================================
-// Purchase reads — Drizzle repository
+// Purchase reads
 // =============================================================
 
 /**
  * Fetches purchases by id with the product identifier inlined.
- * Mirrors prisma.purchase.findMany({ where: { id: { in } },
- * include: { product: { select: { identifier } } } }).
  */
 export interface PurchaseWithProductIdentifier extends Purchase {
   product: { identifier: string };
@@ -48,10 +46,8 @@ export type UpdatePurchaseFields = Partial<typeof purchases.$inferInsert>;
 
 /**
  * INSERT ... ON CONFLICT (store, storeTransactionId) DO UPDATE
- * SET …. Mirrors prisma.purchase.upsert({
- *   where: { store_storeTransactionId: { store, storeTransactionId } },
- *   create, update,
- * }). Returns the final row (inserted or updated) via .returning().
+ * SET …. Returns the final row (inserted or updated) via
+ * .returning().
  */
 export async function upsertPurchase(
   db: DbOrTx,

@@ -2,16 +2,15 @@
 // Shadow-read helper
 // =============================================================
 //
-// During the Prisma → Drizzle coexistence window we run every
-// migrated read path through BOTH ORMs, compare the results, and
-// keep returning the Prisma (canonical) answer to the caller.
-// Any structural divergence surfaces in logs with a stable
-// fingerprint so we can chase down shape differences without
+// Runs a primary + shadow function pair, compares the results
+// structurally, and returns the primary's answer while logging any
+// divergence with a stable fingerprint. Used during any future DB
+// or query-builder migration to detect silent shape drift without
 // breaking production.
 //
 // Flip `DB_SHADOW_READS=0` in env to short-circuit the shadow
-// call completely — useful when the worker is under load or the
-// tail latency cost is visible.
+// call entirely — useful when the worker is under load or the tail
+// latency cost is visible.
 
 import type { Logger } from "../types";
 

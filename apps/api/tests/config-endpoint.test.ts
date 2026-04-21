@@ -22,8 +22,8 @@ vi.mock("../src/lib/audit", () => auditMock);
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
-  const prismaMock = {
+const { dbMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
+  const dbMock = {
     apiKey: {
       findUnique: vi.fn(),
       update: vi.fn(),
@@ -41,8 +41,8 @@ const { prismaMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
     },
   };
 
-  // During tests the shadow path is a no-op that just awaits the
-  // Prisma caller. We keep the shape aligned with the real helper
+  // During tests the shadow path is a no-op that awaits the
+  // primary caller. We keep the shape aligned with the real helper
   // (accepts primary + shadow callbacks) so the production code
   // path stays unchanged.
   const drizzleMock = {
@@ -51,7 +51,7 @@ const { prismaMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
       findSubscriberAttributes: vi.fn(async () => null),
       findSubscriberByAppUserId: vi.fn(
         async (_db: unknown, args: { projectId: string; appUserId: string }) =>
-          prismaMock.subscriber.findUnique({
+          dbMock.subscriber.findUnique({
             where: {
               projectId_appUserId: {
                 projectId: args.projectId,
@@ -70,7 +70,7 @@ const { prismaMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
             updateAttributes?: unknown;
           },
         ) =>
-          prismaMock.subscriber.upsert({
+          dbMock.subscriber.upsert({
             where: {
               projectId_appUserId: {
                 projectId: input.projectId,
@@ -94,20 +94,20 @@ const { prismaMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
     productGroupRepo: {
       listProductGroups: vi.fn(async () => []),
       findDefaultProductGroup: vi.fn(async (_db: unknown, projectId: string) =>
-        prismaMock.productGroup.findFirst({
+        dbMock.productGroup.findFirst({
           where: { projectId, isDefault: true },
         }),
       ),
       findProductGroupByIdentifier: vi.fn(
         async (_db: unknown, projectId: string, identifier: string) =>
-          prismaMock.productGroup.findUnique({
+          dbMock.productGroup.findUnique({
             where: { projectId_identifier: { projectId, identifier } },
           }),
       ),
       findProductsByIds: vi.fn(async (_db: unknown, projectId: string, ids: string[]) =>
         ids.length === 0
           ? []
-          : prismaMock.product.findMany({ where: { projectId, id: { in: ids } } }),
+          : dbMock.product.findMany({ where: { projectId, id: { in: ids } } }),
       ),
     },
     experimentRepo: {
@@ -123,13 +123,13 @@ const { prismaMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
     },
     apiKeyRepo: {
       findApiKeyByPublic: vi.fn(async (_db: unknown, keyPublic: string) =>
-        prismaMock.apiKey.findUnique({
+        dbMock.apiKey.findUnique({
           where: { keyPublic },
           include: { project: true },
         }),
       ),
       findApiKeyById: vi.fn(async (_db: unknown, id: string) =>
-        prismaMock.apiKey.findUnique({
+        dbMock.apiKey.findUnique({
           where: { id },
           include: { project: true },
         }),
@@ -161,11 +161,11 @@ const { prismaMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
     invalidateFlagCache: vi.fn(async () => undefined),
   };
 
-  return { prismaMock, drizzleMock, engineMock, flagMock };
+  return { dbMock, drizzleMock, engineMock, flagMock };
 });
 
 vi.mock("@rovenue/db", () => ({
-  default: prismaMock,
+  default: dbMock,
   drizzle: drizzleMock,
   MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   Store: {
@@ -235,22 +235,6 @@ vi.mock("@rovenue/db", () => ({
     NUMBER: "NUMBER",
     JSON: "JSON",
   },
-  Prisma: {
-    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
-      strings,
-      values,
-    }),
-    Decimal: class {
-      constructor(public value: number | string) {}
-      toString() {
-        return String(this.value);
-      }
-    },
-    TransactionIsolationLevel: { Serializable: "Serializable" },
-    PrismaClientKnownRequestError: class extends Error {
-      code = "";
-    },
-  },
 }));
 
 vi.mock("bcryptjs", () => ({
@@ -294,9 +278,9 @@ const apiKeyRecord = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  prismaMock.apiKey.findUnique.mockResolvedValue(apiKeyRecord);
-  prismaMock.apiKey.update.mockResolvedValue(apiKeyRecord);
-  prismaMock.subscriber.upsert.mockResolvedValue({
+  dbMock.apiKey.findUnique.mockResolvedValue(apiKeyRecord);
+  dbMock.apiKey.update.mockResolvedValue(apiKeyRecord);
+  dbMock.subscriber.upsert.mockResolvedValue({
     id: "sub_internal_1",
     projectId: "proj_test",
     appUserId: "user_abc",
@@ -358,7 +342,7 @@ describe("GET /v1/config", () => {
     );
 
     expect(res.status).toBe(200);
-    expect(prismaMock.subscriber.upsert).toHaveBeenCalledWith(
+    expect(dbMock.subscriber.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           projectId_appUserId: {
@@ -401,7 +385,7 @@ describe("POST /v1/config", () => {
     drizzleMock.subscriberRepo.findSubscriberAttributes.mockResolvedValue({
       attributes: { plan: "free", totalRevenue: 0 },
     } as any);
-    prismaMock.subscriber.upsert.mockResolvedValue({
+    dbMock.subscriber.upsert.mockResolvedValue({
       id: "sub_internal_1",
       projectId: "proj_test",
       appUserId: "user_abc",
@@ -523,7 +507,7 @@ describe("POST /v1/experiments/track", () => {
 
 describe("GET /v1/product-groups/:identifier with subscriberId", () => {
   it("applies PRODUCT_GROUP experiment override and sets X-Rovenue-Experiment header", async () => {
-    prismaMock.subscriber.findUnique.mockResolvedValue({
+    dbMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_internal_1",
       projectId: "proj_test",
       appUserId: "user_abc",
@@ -539,14 +523,14 @@ describe("GET /v1/product-groups/:identifier with subscriberId", () => {
         value: "weekly_first",
       },
     });
-    prismaMock.productGroup.findUnique.mockResolvedValue({
+    dbMock.productGroup.findUnique.mockResolvedValue({
       id: "pg_weekly",
       identifier: "weekly_first",
       isDefault: false,
       products: [],
       metadata: {},
     });
-    prismaMock.product.findMany.mockResolvedValue([]);
+    dbMock.product.findMany.mockResolvedValue([]);
 
     const res = await app.request(
       withAuth(
@@ -563,7 +547,7 @@ describe("GET /v1/product-groups/:identifier with subscriberId", () => {
   });
 
   it("falls through to the direct lookup when no subscriberId is provided", async () => {
-    prismaMock.productGroup.findFirst.mockResolvedValue({
+    dbMock.productGroup.findFirst.mockResolvedValue({
       id: "pg_default",
       identifier: "default",
       isDefault: true,

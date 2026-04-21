@@ -5,7 +5,7 @@ import { describe, expect, test, vi } from "vitest";
 // time). We used to prefix with "rovenue:…"; this test is the regression
 // guard that prevents re-introducing that pattern.
 //
-// Each of the four queue-owning modules pulls prisma + ioredis + env via
+// Each of the four queue-owning modules pulls db + ioredis + env via
 // side-effect imports. Mock them so the constants can be loaded without
 // spinning up real connections.
 

@@ -104,8 +104,8 @@ export interface ActiveApiKeyRow {
 }
 
 /**
- * Mirrors prisma.apiKey.findMany({ where: { projectId, revokedAt: null }, orderBy: { createdAt: "asc" }, select: {…} }).
- * Used by the dashboard's project detail endpoint.
+ * List every active (unrevoked) api key for a project, ordered by
+ * createdAt ASC. Used by the dashboard's project detail endpoint.
  */
 export async function listActiveApiKeys(
   db: Db,

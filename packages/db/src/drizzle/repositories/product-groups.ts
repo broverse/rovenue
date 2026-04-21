@@ -76,16 +76,12 @@ export async function findProductsByIds(
 export type ProductStore = "apple" | "google" | "stripe";
 
 /**
- * Find a product by its per-store identifier. Mirrors
- *   prisma.product.findFirst({
- *     where: { projectId, storeIds: { path: [store], equals: storeId } }
- *   })
- *
- * Uses a Postgres JSON operator (`->>`) with a SQL template —
- * both `store` (key path) and `storeId` (value) are bound via
- * sql.param so nothing reaches the query body as raw text. The
- * `store` argument is constrained to a fixed string union so
- * the key lookup can't be coerced into an arbitrary expression.
+ * Find a product by its per-store identifier. Uses a Postgres
+ * JSON operator (`->>`) with a SQL template — both `store` (key
+ * path) and `storeId` (value) are bound via sql.param so nothing
+ * reaches the query body as raw text. The `store` argument is
+ * constrained to a fixed string union so the key lookup can't be
+ * coerced into an arbitrary expression.
  */
 export async function findProductByStoreId(
   db: Db,

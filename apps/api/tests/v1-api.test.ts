@@ -22,7 +22,7 @@ vi.mock("../src/lib/audit", () => auditMock);
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, drizzleMock } = vi.hoisted(() => {
+const { dbMock, drizzleMock } = vi.hoisted(() => {
   const apiKey = {
     findUnique: vi.fn(),
     update: vi.fn(),
@@ -260,11 +260,11 @@ const { prismaMock, drizzleMock } = vi.hoisted(() => {
     ),
   };
 
-  return { prismaMock: mock, drizzleMock };
+  return { dbMock: mock, drizzleMock };
 });
 
 vi.mock("@rovenue/db", () => ({
-  default: prismaMock,
+  default: dbMock,
   drizzle: drizzleMock,
   MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   Store: {
@@ -334,22 +334,6 @@ vi.mock("@rovenue/db", () => ({
     PAUSED: "PAUSED",
     COMPLETED: "COMPLETED",
   },
-  Prisma: {
-    sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
-      strings,
-      values,
-    }),
-    Decimal: class {
-      constructor(public value: number | string) {}
-      toString() {
-        return String(this.value);
-      }
-    },
-    TransactionIsolationLevel: { Serializable: "Serializable" },
-    PrismaClientKnownRequestError: class PrismaClientKnownRequestError extends Error {
-      code = "";
-    },
-  },
 }));
 
 // Stub bcrypt so secret key compare is deterministic in tests
@@ -366,8 +350,8 @@ vi.mock("../src/services/receipt-verify", () => ({
   verifyReceipt: vi.fn(),
 }));
 
-// Stub access-engine.syncAccess so tests aren't exercising the full
-// reconciliation code path on mocked prisma.
+// Stub access-engine.syncAccess so tests aren't exercising the
+// full reconciliation code path against mocked DB spies.
 vi.mock("../src/services/access-engine", async () => {
   const actual = await vi.importActual<
     typeof import("../src/services/access-engine")
@@ -429,12 +413,12 @@ beforeEach(() => {
   vi.clearAllMocks();
 
   // Auth: resolve public key lookup
-  prismaMock.apiKey.findUnique.mockImplementation(async (args: any) => {
+  dbMock.apiKey.findUnique.mockImplementation(async (args: any) => {
     if (args?.where?.keyPublic === PUBLIC_KEY) return apiKeyRecord;
     if (args?.where?.id === "testapikeyid") return apiKeyRecord;
     return null;
   });
-  prismaMock.apiKey.update.mockResolvedValue(apiKeyRecord);
+  dbMock.apiKey.update.mockResolvedValue(apiKeyRecord);
 });
 
 // =============================================================
@@ -469,7 +453,7 @@ describe("POST /v1/receipts", () => {
       purchase: purchaseRow as any,
     });
 
-    prismaMock.subscriberAccess.findMany.mockResolvedValue([
+    dbMock.subscriberAccess.findMany.mockResolvedValue([
       {
         entitlementKey: "premium",
         isActive: true,
@@ -478,8 +462,8 @@ describe("POST /v1/receipts", () => {
         purchaseId: "pur_1",
       },
     ]);
-    prismaMock.purchase.findMany.mockResolvedValue([purchaseRow]);
-    prismaMock.creditLedger.findFirst.mockResolvedValue(null);
+    dbMock.purchase.findMany.mockResolvedValue([purchaseRow]);
+    dbMock.creditLedger.findFirst.mockResolvedValue(null);
 
     const res = await app.request(
       withPublicAuth("/v1/receipts", {
@@ -521,13 +505,13 @@ describe("POST /v1/receipts", () => {
 
 describe("GET /v1/subscribers/:appUserId/access", () => {
   it("returns the active entitlement map", async () => {
-    prismaMock.subscriber.findUnique.mockResolvedValue({
+    dbMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_1",
       projectId: "proj_test",
       appUserId: "user_1",
     } as any);
 
-    prismaMock.subscriberAccess.findMany.mockResolvedValue([
+    dbMock.subscriberAccess.findMany.mockResolvedValue([
       {
         entitlementKey: "premium",
         isActive: true,
@@ -536,7 +520,7 @@ describe("GET /v1/subscribers/:appUserId/access", () => {
         purchaseId: "pur_1",
       },
     ]);
-    prismaMock.purchase.findMany.mockResolvedValue([
+    dbMock.purchase.findMany.mockResolvedValue([
       { id: "pur_1", product: { identifier: "pro_monthly" } },
     ]);
 
@@ -551,7 +535,7 @@ describe("GET /v1/subscribers/:appUserId/access", () => {
   });
 
   it("returns 404 for unknown subscriber", async () => {
-    prismaMock.subscriber.findUnique.mockResolvedValue(null);
+    dbMock.subscriber.findUnique.mockResolvedValue(null);
     const res = await app.request(
       withPublicAuth("/v1/subscribers/ghost/access"),
     );
@@ -570,7 +554,7 @@ describe("POST /v1/subscribers/:appUserId/restore", () => {
       projectId: "proj_test",
       appUserId: "user_1",
     };
-    prismaMock.subscriber.findUnique.mockResolvedValue(subscriberRow as any);
+    dbMock.subscriber.findUnique.mockResolvedValue(subscriberRow as any);
 
     vi.mocked(verifyReceipt).mockResolvedValue({
       subscriber: subscriberRow as any,
@@ -578,7 +562,7 @@ describe("POST /v1/subscribers/:appUserId/restore", () => {
       purchase: { id: "pur_1" } as any,
     });
 
-    prismaMock.subscriberAccess.findMany.mockResolvedValue([]);
+    dbMock.subscriberAccess.findMany.mockResolvedValue([]);
 
     const res = await app.request(
       withPublicAuth("/v1/subscribers/user_1/restore", {
@@ -609,17 +593,17 @@ describe("POST /v1/subscribers/:appUserId/restore", () => {
 
 describe("POST /v1/subscribers/:appUserId/attributes", () => {
   it("merges new attributes with existing ones", async () => {
-    // findSubscriberByAppUserId delegates to prismaMock.subscriber.
+    // findSubscriberByAppUserId delegates to dbMock.subscriber.
     // findUnique (see the drizzleMock above), so we mock the stored
-    // attributes on the Prisma spy. upsertSubscriber delegates to
-    // prismaMock.subscriber.upsert for the return value.
-    prismaMock.subscriber.findUnique.mockResolvedValue({
+    // attributes on that spy. upsertSubscriber delegates to
+    // dbMock.subscriber.upsert for the return value.
+    dbMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_1",
       projectId: "proj_test",
       appUserId: "user_1",
       attributes: { locale: "en" },
     } as any);
-    prismaMock.subscriber.upsert.mockResolvedValue({
+    dbMock.subscriber.upsert.mockResolvedValue({
       id: "sub_1",
       appUserId: "user_1",
       attributes: { locale: "tr", timezone: "Europe/Istanbul" },
@@ -639,7 +623,7 @@ describe("POST /v1/subscribers/:appUserId/attributes", () => {
     const body = (await res.json()) as any;
     expect(body.data.subscriber.attributes.locale).toBe("tr");
     // New flow collapses upsert-then-update into a single upsert.
-    expect(prismaMock.subscriber.upsert).toHaveBeenCalled();
+    expect(dbMock.subscriber.upsert).toHaveBeenCalled();
   });
 });
 
@@ -649,12 +633,12 @@ describe("POST /v1/subscribers/:appUserId/attributes", () => {
 
 describe("GET /v1/subscribers/:appUserId/credits", () => {
   it("returns current ledger balance", async () => {
-    prismaMock.subscriber.findUnique.mockResolvedValue({
+    dbMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_1",
       projectId: "proj_test",
       appUserId: "user_1",
     } as any);
-    prismaMock.creditLedger.findFirst.mockResolvedValue({
+    dbMock.creditLedger.findFirst.mockResolvedValue({
       balance: 290,
     } as any);
 
@@ -673,21 +657,21 @@ describe("GET /v1/subscribers/:appUserId/credits", () => {
 
 describe("POST /v1/subscribers/:appUserId/credits/spend", () => {
   it("records a spend and returns the new balance", async () => {
-    prismaMock.subscriber.findUnique.mockResolvedValue({
+    dbMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_1",
       projectId: "proj_test",
       appUserId: "user_1",
     } as any);
     // credit-engine.spendCredits → tx.subscriber.findUnique + tx.creditLedger.findFirst/create
-    prismaMock.subscriber.findUnique.mockResolvedValue({
+    dbMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_1",
       projectId: "proj_test",
       appUserId: "user_1",
     } as any);
-    prismaMock.creditLedger.findFirst.mockResolvedValue({
+    dbMock.creditLedger.findFirst.mockResolvedValue({
       balance: 290,
     } as any);
-    prismaMock.creditLedger.create.mockResolvedValue({
+    dbMock.creditLedger.create.mockResolvedValue({
       id: "led_1",
       amount: -10,
       balance: 280,
@@ -713,12 +697,12 @@ describe("POST /v1/subscribers/:appUserId/credits/spend", () => {
   });
 
   it("returns 402 when balance is insufficient", async () => {
-    prismaMock.subscriber.findUnique.mockResolvedValue({
+    dbMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_1",
       projectId: "proj_test",
       appUserId: "user_1",
     } as any);
-    prismaMock.creditLedger.findFirst.mockResolvedValue({
+    dbMock.creditLedger.findFirst.mockResolvedValue({
       balance: 5,
     } as any);
 
@@ -751,13 +735,13 @@ describe("POST /v1/subscribers/:appUserId/credits/spend", () => {
 
 describe("POST /v1/subscribers/:appUserId/credits/add", () => {
   it("accepts a secret key and records the grant", async () => {
-    prismaMock.subscriber.findUnique.mockResolvedValue({
+    dbMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_1",
       projectId: "proj_test",
       appUserId: "user_1",
     } as any);
-    prismaMock.creditLedger.findFirst.mockResolvedValue(null);
-    prismaMock.creditLedger.create.mockResolvedValue({
+    dbMock.creditLedger.findFirst.mockResolvedValue(null);
+    dbMock.creditLedger.create.mockResolvedValue({
       id: "led_2",
       amount: 50,
       balance: 330,
@@ -801,7 +785,7 @@ describe("POST /v1/subscribers/:appUserId/credits/add", () => {
 
 describe("GET /v1/product-groups/:identifier", () => {
   it("returns a sorted product list for the named group", async () => {
-    prismaMock.productGroup.findUnique.mockResolvedValue({
+    dbMock.productGroup.findUnique.mockResolvedValue({
       id: "pg_1",
       projectId: "proj_test",
       identifier: "premium",
@@ -822,7 +806,7 @@ describe("GET /v1/product-groups/:identifier", () => {
       ],
       metadata: { title: "Choose your plan" },
     } as any);
-    prismaMock.product.findMany.mockResolvedValue([
+    dbMock.product.findMany.mockResolvedValue([
       {
         id: "prod_1",
         identifier: "pro_monthly",
@@ -856,7 +840,7 @@ describe("GET /v1/product-groups/:identifier", () => {
   });
 
   it("looks up the default group when identifier is 'default'", async () => {
-    prismaMock.productGroup.findFirst.mockResolvedValue({
+    dbMock.productGroup.findFirst.mockResolvedValue({
       id: "pg_1",
       projectId: "proj_test",
       identifier: "default",
@@ -864,7 +848,7 @@ describe("GET /v1/product-groups/:identifier", () => {
       products: [],
       metadata: {},
     } as any);
-    prismaMock.product.findMany.mockResolvedValue([]);
+    dbMock.product.findMany.mockResolvedValue([]);
 
     const res = await app.request(
       withPublicAuth("/v1/product-groups/default"),
@@ -873,7 +857,7 @@ describe("GET /v1/product-groups/:identifier", () => {
   });
 
   it("returns 404 when the group doesn't exist", async () => {
-    prismaMock.productGroup.findUnique.mockResolvedValue(null);
+    dbMock.productGroup.findUnique.mockResolvedValue(null);
     const res = await app.request(
       withPublicAuth("/v1/product-groups/missing"),
     );
@@ -887,7 +871,7 @@ describe("GET /v1/product-groups/:identifier", () => {
 
 describe("GET /v1/product-groups", () => {
   it("lists groups with product counts", async () => {
-    prismaMock.productGroup.findMany.mockResolvedValue([
+    dbMock.productGroup.findMany.mockResolvedValue([
       {
         identifier: "default",
         isDefault: true,

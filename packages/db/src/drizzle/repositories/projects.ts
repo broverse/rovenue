@@ -15,13 +15,11 @@ import {
 export type DbOrTx = Db;
 
 // =============================================================
-// Project + membership reads — Drizzle repository
+// Project + membership reads
 // =============================================================
 //
-// Covers the middleware + dashboard + lib paths that currently
-// call prisma.project.findUnique / prisma.projectMember.findUnique.
-// Every dashboard request hits one of these at least once so we
-// want them clean and single-row.
+// Every dashboard request hits at least one of these so we keep
+// them clean and single-row.
 
 // --- projects ---
 
@@ -302,10 +300,9 @@ export async function writeProjectCredential(
 }
 
 /**
- * Null out the store-specific credential JSONB column (Prisma
- * `JsonNull` equivalent). Uses a sql literal because Drizzle's
- * .set({ col: null }) writes SQL NULL for the row value, which is
- * what we want — the JSONB column is nullable by schema.
+ * Null out the store-specific credential JSONB column. Uses a sql
+ * literal so the column is set to SQL NULL (the JSONB column is
+ * nullable by schema, not JSON null).
  */
 export async function clearProjectCredential(
   db: DbOrTx,

@@ -8,7 +8,7 @@ import { audit } from "../lib/audit";
 // =============================================================
 //
 // `transferSubscriber` moves every asset from one subscriber to
-// another inside a single serialised Prisma transaction. The
+// another inside a single serialised Drizzle transaction. The
 // source subscriber is soft-deleted afterward so it never
 // surfaces in future evaluations or config calls.
 //

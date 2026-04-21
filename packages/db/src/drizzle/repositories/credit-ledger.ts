@@ -6,15 +6,12 @@ import { creditLedgerType } from "../enums";
 // Accepts both top-level db and tx handles for transactional writes.
 type DbOrTx = Db;
 
-/** Public value type for the pgEnum — matches Prisma's CreditLedgerType. */
+/** Public value type for the pgEnum. */
 export type CreditLedgerType = (typeof creditLedgerType.enumValues)[number];
 
 /**
  * Dedup guard used by receipt verification: has this purchase
- * already produced a ledger entry? Exact replica of
- *   prisma.creditLedger.findFirst({
- *     where: { subscriberId, referenceType: "purchase", referenceId: purchaseId },
- *   })
+ * already produced a ledger entry?
  */
 export async function findExistingPurchaseCredit(
   db: Db,

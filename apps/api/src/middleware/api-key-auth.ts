@@ -55,9 +55,6 @@ function parseSecretKeyId(rawKey: string): string | null {
 
 export type ApiKeyRequirement = ApiKeyKind | "any";
 
-// Reads go through Drizzle (Phase 6 cutover). The write side
-// (`apiKey.update` lastUsedAt below) stays on Prisma until the
-// write cutover phase.
 type ApiKeyRecord = Awaited<
   ReturnType<typeof drizzle.apiKeyRepo.findApiKeyByPublic>
 >;

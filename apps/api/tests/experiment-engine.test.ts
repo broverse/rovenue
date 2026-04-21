@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(() => {
+const { dbMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(() => {
   const store = new Map<string, string>();
   let mode: "ok" | "get-fail" = "ok";
 
@@ -25,7 +25,7 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
     }),
   };
 
-  const prismaMock = {
+  const dbMock = {
     experiment: {
       findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => null),
@@ -48,13 +48,13 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
     experimentRepo: {
       findRunningExperimentsByProject: vi.fn(
         async (_db: unknown, projectId: string) =>
-          prismaMock.experiment.findMany({
+          dbMock.experiment.findMany({
             where: { projectId, status: "RUNNING" },
           }),
       ),
       findExperimentsByProject: vi.fn(async () => []),
       findExperimentById: vi.fn(async (_db: unknown, id: string) =>
-        prismaMock.experiment.findUnique({ where: { id } }),
+        dbMock.experiment.findUnique({ where: { id } }),
       ),
       findFirstExperimentByAudience: vi.fn(async () => null),
       countExperiments: vi.fn(async () => 0),
@@ -62,7 +62,7 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
     experimentAssignmentRepo: {
       findSubscriberAssignments: vi.fn(
         async (_db: unknown, _projectId: string, subscriberId: string) => {
-          const rows = await prismaMock.experimentAssignment.findMany({
+          const rows = await dbMock.experimentAssignment.findMany({
             where: { subscriberId },
             include: {
               experiment: {
@@ -75,7 +75,7 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
       ),
       findAssignmentsWithMetrics: vi.fn(
         async (_db: unknown, subscriberId: string) => {
-          const rows = await prismaMock.experimentAssignment.findMany({
+          const rows = await dbMock.experimentAssignment.findMany({
             where: { subscriberId },
             include: { experiment: { select: { metrics: true } } },
           });
@@ -84,7 +84,7 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
       ),
       findAssignmentsByExperiment: vi.fn(
         async (_db: unknown, experimentId: string) => {
-          const rows = await prismaMock.experimentAssignment.findMany({
+          const rows = await dbMock.experimentAssignment.findMany({
             where: { experimentId },
           });
           return Array.isArray(rows) ? rows : [];
@@ -94,7 +94,7 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
       countConvertedAssignments: vi.fn(async () => 0),
       insertAssignmentsSkipDuplicates: vi.fn(
         async (_db: unknown, rows: Array<Record<string, unknown>>) =>
-          prismaMock.experimentAssignment.createMany({
+          dbMock.experimentAssignment.createMany({
             data: rows,
             skipDuplicates: true,
           }),
@@ -110,7 +110,7 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
             revenue?: string;
           },
         ) =>
-          prismaMock.experimentAssignment.update({
+          dbMock.experimentAssignment.update({
             where: { id },
             data: {
               events: patch.events,
@@ -128,13 +128,13 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
     productGroupRepo: {
       listProductGroups: vi.fn(async () => []),
       findDefaultProductGroup: vi.fn(async (_db: unknown, projectId: string) =>
-        prismaMock.productGroup.findFirst({
+        dbMock.productGroup.findFirst({
           where: { projectId, isDefault: true },
         }),
       ),
       findProductGroupByIdentifier: vi.fn(
         async (_db: unknown, projectId: string, identifier: string) =>
-          prismaMock.productGroup.findFirst({
+          dbMock.productGroup.findFirst({
             where: { projectId, identifier },
           }),
       ),
@@ -144,7 +144,7 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
       findFeatureFlagsByProject: vi.fn(async () => []),
       findAudiencesByProject: vi.fn(
         async (_db: unknown, projectId: string) =>
-          prismaMock.audience.findMany({ where: { projectId } }),
+          dbMock.audience.findMany({ where: { projectId } }),
       ),
     },
     accessRepo: {
@@ -160,7 +160,7 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
   };
 
   return {
-    prismaMock,
+    dbMock,
     drizzleMock,
     redisMock,
     redisStore: store,
@@ -171,26 +171,13 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
 });
 
 vi.mock("@rovenue/db", () => ({
-  default: prismaMock,
+  default: dbMock,
   drizzle: drizzleMock,
   ExperimentStatus: {
     DRAFT: "DRAFT",
     RUNNING: "RUNNING",
     PAUSED: "PAUSED",
     COMPLETED: "COMPLETED",
-  },
-  Prisma: {
-    Decimal: class {
-      constructor(public value: number | string) {}
-      toString() {
-        return String(this.value);
-      }
-      toNumber() {
-        return typeof this.value === "number"
-          ? this.value
-          : parseFloat(this.value);
-      }
-    },
   },
 }));
 
@@ -294,10 +281,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   redisStore.clear();
   setRedisMode("ok");
-  prismaMock.experiment.findMany.mockResolvedValue([]);
-  prismaMock.audience.findMany.mockResolvedValue([]);
-  prismaMock.experimentAssignment.findMany.mockResolvedValue([]);
-  prismaMock.experimentAssignment.createMany.mockResolvedValue({ count: 0 });
+  dbMock.experiment.findMany.mockResolvedValue([]);
+  dbMock.audience.findMany.mockResolvedValue([]);
+  dbMock.experimentAssignment.findMany.mockResolvedValue([]);
+  dbMock.experimentAssignment.createMany.mockResolvedValue({ count: 0 });
 });
 
 // =============================================================
@@ -308,16 +295,16 @@ describe("evaluateExperiments — empty state", () => {
   test("no running experiments → empty result", async () => {
     const result = await evaluateExperiments("proj_a", "sub_1", {});
     expect(result).toEqual({});
-    expect(prismaMock.experimentAssignment.createMany).not.toHaveBeenCalled();
+    expect(dbMock.experimentAssignment.createMany).not.toHaveBeenCalled();
   });
 });
 
 describe("evaluateExperiments — new assignment", () => {
   test("assigns subscriber to a variant and persists via createMany", async () => {
-    prismaMock.experiment.findMany.mockResolvedValue([
+    dbMock.experiment.findMany.mockResolvedValue([
       experiment({ key: "pricing-test", type: "PRODUCT_GROUP" }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
 
     const result = await evaluateExperiments("proj_a", "sub_1", {});
 
@@ -327,9 +314,9 @@ describe("evaluateExperiments — new assignment", () => {
     expect(["control", "variant_a"]).toContain(entry!.variantId);
 
     expect(
-      prismaMock.experimentAssignment.createMany,
+      dbMock.experimentAssignment.createMany,
     ).toHaveBeenCalledOnce();
-    const [call] = prismaMock.experimentAssignment.createMany.mock.calls;
+    const [call] = dbMock.experimentAssignment.createMany.mock.calls;
     const data = (call![0] as { data: Array<Record<string, unknown>> }).data;
     expect(data).toHaveLength(1);
     expect(data[0]!.experimentId).toBe("exp_1");
@@ -338,13 +325,13 @@ describe("evaluateExperiments — new assignment", () => {
   });
 
   test("deterministic — same subscriber gets the same variant across calls", async () => {
-    prismaMock.experiment.findMany.mockResolvedValue([
+    dbMock.experiment.findMany.mockResolvedValue([
       experiment({ key: "stable" }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
 
     const a = await evaluateExperiments("proj_a", "sub_stable", {});
-    prismaMock.experimentAssignment.findMany.mockResolvedValue([]);
+    dbMock.experimentAssignment.findMany.mockResolvedValue([]);
     const b = await evaluateExperiments("proj_a", "sub_stable", {});
 
     expect(a["stable"]!.variantId).toBe(b["stable"]!.variantId);
@@ -353,10 +340,10 @@ describe("evaluateExperiments — new assignment", () => {
 
 describe("evaluateExperiments — audience targeting", () => {
   test("subscriber outside the audience is excluded", async () => {
-    prismaMock.experiment.findMany.mockResolvedValue([
+    dbMock.experiment.findMany.mockResolvedValue([
       experiment({ key: "tr-only", audienceId: "aud_tr" }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([
+    dbMock.audience.findMany.mockResolvedValue([
       audience("aud_tr", { country: "TR" }),
     ]);
 
@@ -365,14 +352,14 @@ describe("evaluateExperiments — audience targeting", () => {
     });
 
     expect(result).toEqual({});
-    expect(prismaMock.experimentAssignment.createMany).not.toHaveBeenCalled();
+    expect(dbMock.experimentAssignment.createMany).not.toHaveBeenCalled();
   });
 
   test("subscriber inside the audience gets assigned", async () => {
-    prismaMock.experiment.findMany.mockResolvedValue([
+    dbMock.experiment.findMany.mockResolvedValue([
       experiment({ key: "tr-only", audienceId: "aud_tr" }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([
+    dbMock.audience.findMany.mockResolvedValue([
       audience("aud_tr", { country: "TR" }),
     ]);
 
@@ -386,11 +373,11 @@ describe("evaluateExperiments — audience targeting", () => {
 
 describe("evaluateExperiments — sticky assignment", () => {
   test("existing assignment is reused without a new write", async () => {
-    prismaMock.experiment.findMany.mockResolvedValue([
+    dbMock.experiment.findMany.mockResolvedValue([
       experiment({ id: "exp_1", key: "paywall-summer", type: "PAYWALL" }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
-    prismaMock.experimentAssignment.findMany.mockResolvedValue([
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+    dbMock.experimentAssignment.findMany.mockResolvedValue([
       assignment({
         id: "asg_1",
         experimentId: "exp_1",
@@ -403,22 +390,22 @@ describe("evaluateExperiments — sticky assignment", () => {
 
     expect(result["paywall-summer"]!.variantId).toBe("variant_a");
     expect(
-      prismaMock.experimentAssignment.createMany,
+      dbMock.experimentAssignment.createMany,
     ).not.toHaveBeenCalled();
   });
 });
 
 describe("evaluateExperiments — mutual exclusion", () => {
   test("subscriber already in another experiment of the same namespace is skipped", async () => {
-    prismaMock.experiment.findMany.mockResolvedValue([
+    dbMock.experiment.findMany.mockResolvedValue([
       experiment({
         id: "exp_b",
         key: "paywall_b",
         mutualExclusionGroup: "paywall-tests",
       }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
-    prismaMock.experimentAssignment.findMany.mockResolvedValue([
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+    dbMock.experimentAssignment.findMany.mockResolvedValue([
       assignment({
         id: "asg_a",
         experimentId: "exp_a",
@@ -435,11 +422,11 @@ describe("evaluateExperiments — mutual exclusion", () => {
     const result = await evaluateExperiments("proj_a", "sub_1", {});
 
     expect(result).toEqual({});
-    expect(prismaMock.experimentAssignment.createMany).not.toHaveBeenCalled();
+    expect(dbMock.experimentAssignment.createMany).not.toHaveBeenCalled();
   });
 
   test("within a single call, the first experiment in a namespace blocks the second", async () => {
-    prismaMock.experiment.findMany.mockResolvedValue([
+    dbMock.experiment.findMany.mockResolvedValue([
       experiment({
         id: "exp_a",
         key: "test_a",
@@ -451,7 +438,7 @@ describe("evaluateExperiments — mutual exclusion", () => {
         mutualExclusionGroup: "paywall-tests",
       }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
 
     const result = await evaluateExperiments("proj_a", "sub_1", {});
 
@@ -468,33 +455,33 @@ describe("evaluateExperiments — mutual exclusion", () => {
 
 describe("experiment-engine cache", () => {
   test("first call hits DB; second call uses cache", async () => {
-    prismaMock.experiment.findMany.mockResolvedValue([experiment()]);
-    prismaMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+    dbMock.experiment.findMany.mockResolvedValue([experiment()]);
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
 
     await evaluateExperiments("proj_a", "sub_1", {});
     await evaluateExperiments("proj_a", "sub_2", {});
 
-    expect(prismaMock.experiment.findMany).toHaveBeenCalledTimes(1);
-    expect(prismaMock.audience.findMany).toHaveBeenCalledTimes(1);
+    expect(dbMock.experiment.findMany).toHaveBeenCalledTimes(1);
+    expect(dbMock.audience.findMany).toHaveBeenCalledTimes(1);
   });
 
   test("invalidateExperimentCache forces refresh", async () => {
-    prismaMock.experiment.findMany.mockResolvedValue([experiment()]);
-    prismaMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+    dbMock.experiment.findMany.mockResolvedValue([experiment()]);
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
 
     await evaluateExperiments("proj_a", "sub_1", {});
     await invalidateExperimentCache("proj_a");
     await evaluateExperiments("proj_a", "sub_1", {});
 
-    expect(prismaMock.experiment.findMany).toHaveBeenCalledTimes(2);
+    expect(dbMock.experiment.findMany).toHaveBeenCalledTimes(2);
     expect(redisMock.del).toHaveBeenCalledWith("experiments:proj_a");
   });
 
   test("Redis GET failure falls through to DB", async () => {
-    prismaMock.experiment.findMany.mockResolvedValue([
+    dbMock.experiment.findMany.mockResolvedValue([
       experiment({ key: "live" }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
 
     setRedisMode("get-fail");
     const result = await evaluateExperiments("proj_a", "sub_1", {});
@@ -509,9 +496,9 @@ describe("experiment-engine cache", () => {
 
 describe("resolveProductGroup", () => {
   test("returns requested group when no PRODUCT_GROUP experiment is active", async () => {
-    prismaMock.experiment.findMany.mockResolvedValue([]);
-    prismaMock.audience.findMany.mockResolvedValue([]);
-    prismaMock.productGroup.findFirst.mockResolvedValue({
+    dbMock.experiment.findMany.mockResolvedValue([]);
+    dbMock.audience.findMany.mockResolvedValue([]);
+    dbMock.productGroup.findFirst.mockResolvedValue({
       id: "pg_weekly",
       identifier: "weekly_first",
     } as never);
@@ -519,7 +506,7 @@ describe("resolveProductGroup", () => {
     const group = await resolveProductGroup("sub_1", "proj_a", "weekly_first");
 
     expect(group?.identifier).toBe("weekly_first");
-    expect(prismaMock.productGroup.findFirst).toHaveBeenCalledWith(
+    expect(dbMock.productGroup.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           projectId: "proj_a",
@@ -530,16 +517,16 @@ describe("resolveProductGroup", () => {
   });
 
   test("falls back to the default group when no requestedGroup is supplied", async () => {
-    prismaMock.experiment.findMany.mockResolvedValue([]);
-    prismaMock.audience.findMany.mockResolvedValue([]);
-    prismaMock.productGroup.findFirst.mockResolvedValue({
+    dbMock.experiment.findMany.mockResolvedValue([]);
+    dbMock.audience.findMany.mockResolvedValue([]);
+    dbMock.productGroup.findFirst.mockResolvedValue({
       id: "pg_default",
       identifier: "default",
     } as never);
 
     await resolveProductGroup("sub_1", "proj_a");
 
-    expect(prismaMock.productGroup.findFirst).toHaveBeenCalledWith(
+    expect(dbMock.productGroup.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           projectId: "proj_a",
@@ -550,7 +537,7 @@ describe("resolveProductGroup", () => {
   });
 
   test("active PRODUCT_GROUP experiment overrides the requested group", async () => {
-    prismaMock.experiment.findMany.mockResolvedValue([
+    dbMock.experiment.findMany.mockResolvedValue([
       experiment({
         id: "exp_1",
         key: "pricing-test",
@@ -571,8 +558,8 @@ describe("resolveProductGroup", () => {
         ],
       }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
-    prismaMock.productGroup.findFirst.mockResolvedValue({
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+    dbMock.productGroup.findFirst.mockResolvedValue({
       id: "pg_weekly",
       identifier: "weekly_first",
     } as never);
@@ -580,7 +567,7 @@ describe("resolveProductGroup", () => {
     const group = await resolveProductGroup("sub_1", "proj_a", "default");
 
     expect(group?.identifier).toBe("weekly_first");
-    expect(prismaMock.productGroup.findFirst).toHaveBeenCalledWith(
+    expect(dbMock.productGroup.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           projectId: "proj_a",
@@ -597,7 +584,7 @@ describe("resolveProductGroup", () => {
 
 describe("recordEvent", () => {
   test("appends the event to every active assignment", async () => {
-    prismaMock.experimentAssignment.findMany.mockResolvedValue([
+    dbMock.experimentAssignment.findMany.mockResolvedValue([
       assignment({
         id: "asg_a",
         experimentId: "exp_a",
@@ -614,8 +601,8 @@ describe("recordEvent", () => {
 
     await recordEvent("sub_1", "paywall_viewed");
 
-    expect(prismaMock.experimentAssignment.update).toHaveBeenCalledTimes(2);
-    for (const call of prismaMock.experimentAssignment.update.mock.calls) {
+    expect(dbMock.experimentAssignment.update).toHaveBeenCalledTimes(2);
+    for (const call of dbMock.experimentAssignment.update.mock.calls) {
       const args = call[0] as { data: { events: Array<{ type: string }> } };
       expect(args.data.events).toHaveLength(1);
       expect(args.data.events[0]!.type).toBe("paywall_viewed");
@@ -623,7 +610,7 @@ describe("recordEvent", () => {
   });
 
   test("purchase event sets convertedAt/purchaseId/revenue on matching metrics", async () => {
-    prismaMock.experimentAssignment.findMany.mockResolvedValue([
+    dbMock.experimentAssignment.findMany.mockResolvedValue([
       assignment({
         id: "asg_a",
         events: [],
@@ -636,7 +623,7 @@ describe("recordEvent", () => {
       revenue: 9.99,
     });
 
-    const call = prismaMock.experimentAssignment.update.mock.calls[0]!;
+    const call = dbMock.experimentAssignment.update.mock.calls[0]!;
     const data = (call[0] as { data: Record<string, unknown> }).data;
     expect(data.convertedAt).toBeInstanceOf(Date);
     expect(data.purchaseId).toBe("pur_1");
@@ -644,7 +631,7 @@ describe("recordEvent", () => {
   });
 
   test("non-conversion event type does not set convertedAt", async () => {
-    prismaMock.experimentAssignment.findMany.mockResolvedValue([
+    dbMock.experimentAssignment.findMany.mockResolvedValue([
       assignment({
         id: "asg_a",
         events: [],
@@ -654,14 +641,14 @@ describe("recordEvent", () => {
 
     await recordEvent("sub_1", "cta_clicked");
 
-    const call = prismaMock.experimentAssignment.update.mock.calls[0]!;
+    const call = dbMock.experimentAssignment.update.mock.calls[0]!;
     const data = (call[0] as { data: Record<string, unknown> }).data;
     expect(data.convertedAt).toBeUndefined();
   });
 
   test("does not overwrite an already-converted assignment", async () => {
     const already = new Date("2026-01-01T00:00:00Z");
-    prismaMock.experimentAssignment.findMany.mockResolvedValue([
+    dbMock.experimentAssignment.findMany.mockResolvedValue([
       assignment({
         id: "asg_a",
         events: [],
@@ -672,18 +659,18 @@ describe("recordEvent", () => {
 
     await recordEvent("sub_1", "purchase", { purchaseId: "pur_2", revenue: 5 });
 
-    const call = prismaMock.experimentAssignment.update.mock.calls[0]!;
+    const call = dbMock.experimentAssignment.update.mock.calls[0]!;
     const data = (call[0] as { data: Record<string, unknown> }).data;
     expect(data.convertedAt).toBeUndefined();
     expect(data.purchaseId).toBeUndefined();
   });
 
   test("no active assignments → no writes", async () => {
-    prismaMock.experimentAssignment.findMany.mockResolvedValue([]);
+    dbMock.experimentAssignment.findMany.mockResolvedValue([]);
 
     await recordEvent("sub_1", "paywall_viewed");
 
-    expect(prismaMock.experimentAssignment.update).not.toHaveBeenCalled();
+    expect(dbMock.experimentAssignment.update).not.toHaveBeenCalled();
   });
 });
 
@@ -707,9 +694,9 @@ describe("getExperimentResults", () => {
         },
       ],
     });
-    prismaMock.experiment.findMany.mockResolvedValue([expRow]);
-    prismaMock.experiment.findUnique.mockResolvedValue(expRow as never);
-    prismaMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+    dbMock.experiment.findMany.mockResolvedValue([expRow]);
+    dbMock.experiment.findUnique.mockResolvedValue(expRow as never);
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
 
     // 100 control / 100 variant — 10% vs 20% conversion with revenue
     const assignments: Record<string, unknown>[] = [];
@@ -752,7 +739,7 @@ describe("getExperimentResults", () => {
       });
     }
 
-    prismaMock.experimentAssignment.findMany.mockResolvedValue(assignments);
+    dbMock.experimentAssignment.findMany.mockResolvedValue(assignments);
 
     const result = await getExperimentResults("exp_1");
 

@@ -5,8 +5,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, drizzleMock, redisMock, queueMock } = vi.hoisted(() => {
-  const prismaMock = {
+const { dbMock, drizzleMock, redisMock, queueMock } = vi.hoisted(() => {
+  const dbMock = {
     $queryRaw: vi.fn(async () => [{ "?column?": 1 }]),
     project: {
       findUnique: vi.fn(),
@@ -20,19 +20,19 @@ const { prismaMock, drizzleMock, redisMock, queueMock } = vi.hoisted(() => {
   };
 
   // health.ts pings the DB via drizzle.db.execute(sql`SELECT 1`).
-  // The execute spy delegates to prismaMock.$queryRaw so the
+  // The execute spy delegates to dbMock.$queryRaw so the
   // existing test setup (mockResolvedValue / mockRejectedValue)
   // still controls the health-check outcome.
   const drizzleMock = {
     db: {
       execute: vi.fn(async () => {
-        const rows = await prismaMock.$queryRaw();
+        const rows = await dbMock.$queryRaw();
         return { rows: Array.isArray(rows) ? rows : [] };
       }),
     },
     projectRepo: {
       findMembership: vi.fn(async (_db, projectId, userId) =>
-        prismaMock.projectMember.findUnique({
+        dbMock.projectMember.findUnique({
           where: { projectId_userId: { projectId, userId } },
           select: { id: true, role: true },
         }),
@@ -43,7 +43,7 @@ const { prismaMock, drizzleMock, redisMock, queueMock } = vi.hoisted(() => {
     webhookEventRepo: {
       findLastProcessedWebhookAt: vi.fn(
         async (_db: unknown, projectId: string, source: string) => {
-          const row = await prismaMock.webhookEvent.findFirst({
+          const row = await dbMock.webhookEvent.findFirst({
             where: { projectId, source, status: "PROCESSED" },
             orderBy: { processedAt: "desc" },
             select: { processedAt: true },
@@ -66,11 +66,11 @@ const { prismaMock, drizzleMock, redisMock, queueMock } = vi.hoisted(() => {
     getJobCounts: vi.fn(async () => ({ active: 0, waiting: 0 })),
   };
 
-  return { prismaMock, drizzleMock, redisMock, queueMock };
+  return { dbMock, drizzleMock, redisMock, queueMock };
 });
 
 vi.mock("@rovenue/db", () => ({
-  default: prismaMock,
+  default: dbMock,
   drizzle: drizzleMock,
   WebhookEventStatus: {
     RECEIVED: "RECEIVED",
@@ -139,7 +139,7 @@ function buildApp(): Hono {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  prismaMock.$queryRaw.mockResolvedValue([{ "?column?": 1 }]);
+  dbMock.$queryRaw.mockResolvedValue([{ "?column?": 1 }]);
   redisMock.ping.mockResolvedValue("PONG");
   queueMock.getJobCounts.mockResolvedValue({ active: 2, waiting: 5 });
 });
@@ -199,7 +199,7 @@ describe("GET /health/ready", () => {
   });
 
   test("returns 503 + status degraded when database check fails", async () => {
-    prismaMock.$queryRaw.mockRejectedValue(new Error("connection refused"));
+    dbMock.$queryRaw.mockRejectedValue(new Error("connection refused"));
 
     const res = await buildApp().request("/health/ready");
 
@@ -272,7 +272,7 @@ describe("GET /health/stores", () => {
   });
 
   test("403 when the authenticated user is not a member of the project", async () => {
-    prismaMock.projectMember.findUnique.mockResolvedValue(null);
+    dbMock.projectMember.findUnique.mockResolvedValue(null);
 
     const res = await buildApp().request(
       "/health/stores?projectId=proj_a",
@@ -283,7 +283,7 @@ describe("GET /health/stores", () => {
   });
 
   test("returns connection status, last webhook time, and credential status per store", async () => {
-    prismaMock.projectMember.findUnique.mockResolvedValue({
+    dbMock.projectMember.findUnique.mockResolvedValue({
       id: "pm_1",
       userId: "user_1",
       projectId: "proj_a",
@@ -293,7 +293,7 @@ describe("GET /health/stores", () => {
     const appleTime = new Date("2026-04-14T10:00:00Z");
     const googleTime = new Date("2026-04-14T11:30:00Z");
 
-    prismaMock.webhookEvent.findFirst.mockImplementation(
+    dbMock.webhookEvent.findFirst.mockImplementation(
       async (args: any) => {
         if (args?.where?.source === "APPLE") {
           return { processedAt: appleTime };
@@ -333,14 +333,14 @@ describe("GET /health/stores", () => {
   });
 
   test("reports credentialStatus=missing when a store has no credentials", async () => {
-    prismaMock.projectMember.findUnique.mockResolvedValue({
+    dbMock.projectMember.findUnique.mockResolvedValue({
       id: "pm_1",
       userId: "user_1",
       projectId: "proj_a",
       role: "OWNER",
     });
 
-    prismaMock.webhookEvent.findFirst.mockResolvedValue(null);
+    dbMock.webhookEvent.findFirst.mockResolvedValue(null);
 
     const { loadStripeCredentials } = await import(
       "../src/lib/project-credentials"

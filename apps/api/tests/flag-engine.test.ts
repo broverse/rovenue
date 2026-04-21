@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 // =============================================================
-// Hoisted mocks — prisma + redis
+// Hoisted mocks — db + redis
 // =============================================================
 
-const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(() => {
+const { dbMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(() => {
   const store = new Map<string, string>();
   let mode: "ok" | "get-fail" | "set-fail" | "all-fail" = "ok";
 
@@ -30,7 +30,7 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
     }),
   };
 
-  const prismaMock = {
+  const dbMock = {
     featureFlag: {
       findMany: vi.fn(async () => []),
     },
@@ -47,11 +47,11 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
     featureFlagRepo: {
       findFeatureFlagsByProject: vi.fn(
         async (_db: unknown, projectId: string) =>
-          prismaMock.featureFlag.findMany({ where: { projectId } }),
+          dbMock.featureFlag.findMany({ where: { projectId } }),
       ),
       findAudiencesByProject: vi.fn(
         async (_db: unknown, projectId: string) =>
-          prismaMock.audience.findMany({ where: { projectId } }),
+          dbMock.audience.findMany({ where: { projectId } }),
       ),
     },
     shadowRead: vi.fn(
@@ -61,7 +61,7 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
   };
 
   return {
-    prismaMock,
+    dbMock,
     drizzleMock,
     redisMock,
     redisStore: store,
@@ -72,7 +72,7 @@ const { prismaMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hois
 });
 
 vi.mock("@rovenue/db", () => ({
-  default: prismaMock,
+  default: dbMock,
   drizzle: drizzleMock,
 }));
 
@@ -145,8 +145,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   redisStore.clear();
   setRedisMode("ok");
-  prismaMock.featureFlag.findMany.mockResolvedValue([]);
-  prismaMock.audience.findMany.mockResolvedValue([]);
+  dbMock.featureFlag.findMany.mockResolvedValue([]);
+  dbMock.audience.findMany.mockResolvedValue([]);
 });
 
 // =============================================================
@@ -155,7 +155,7 @@ beforeEach(() => {
 
 describe("evaluateFlag — kill switch", () => {
   test("disabled flag returns defaultValue regardless of rules", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([
+    dbMock.featureFlag.findMany.mockResolvedValue([
       flag({
         key: "kill-me",
         isEnabled: false,
@@ -163,7 +163,7 @@ describe("evaluateFlag — kill switch", () => {
         rules: [{ audienceId: "aud_all", value: true }],
       }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
+    dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
 
     const result = await evaluateFlag("proj_a", "kill-me", "sub_1", {
       country: "TR",
@@ -175,8 +175,8 @@ describe("evaluateFlag — kill switch", () => {
 
 describe("evaluateFlag — unknown flag", () => {
   test("returns null when the flag key does not exist", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([]);
-    prismaMock.audience.findMany.mockResolvedValue([]);
+    dbMock.featureFlag.findMany.mockResolvedValue([]);
+    dbMock.audience.findMany.mockResolvedValue([]);
 
     const result = await evaluateFlag("proj_a", "missing", "sub_1", {});
 
@@ -186,13 +186,13 @@ describe("evaluateFlag — unknown flag", () => {
 
 describe("evaluateFlag — rule matching", () => {
   test("first rule matches → returns its value", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([
+    dbMock.featureFlag.findMany.mockResolvedValue([
       flag({
         key: "new_paywall",
         rules: [{ audienceId: "aud_tr", value: true }],
       }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([
+    dbMock.audience.findMany.mockResolvedValue([
       audience("aud_tr", { country: "TR" }),
     ]);
 
@@ -204,7 +204,7 @@ describe("evaluateFlag — rule matching", () => {
   });
 
   test("first rule's audience misses → second rule wins", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([
+    dbMock.featureFlag.findMany.mockResolvedValue([
       flag({
         key: "new_paywall",
         rules: [
@@ -213,7 +213,7 @@ describe("evaluateFlag — rule matching", () => {
         ],
       }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([
+    dbMock.audience.findMany.mockResolvedValue([
       audience("aud_tr", { country: "TR" }),
       audience("aud_all", {}, { isDefault: true }),
     ]);
@@ -226,14 +226,14 @@ describe("evaluateFlag — rule matching", () => {
   });
 
   test("no rule matches → returns defaultValue", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([
+    dbMock.featureFlag.findMany.mockResolvedValue([
       flag({
         key: "new_paywall",
         defaultValue: "fallback",
         rules: [{ audienceId: "aud_tr", value: "tr_only" }],
       }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([
+    dbMock.audience.findMany.mockResolvedValue([
       audience("aud_tr", { country: "TR" }),
     ]);
 
@@ -245,7 +245,7 @@ describe("evaluateFlag — rule matching", () => {
   });
 
   test("skips rule whose audience no longer exists", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([
+    dbMock.featureFlag.findMany.mockResolvedValue([
       flag({
         key: "new_paywall",
         defaultValue: "fallback",
@@ -255,7 +255,7 @@ describe("evaluateFlag — rule matching", () => {
         ],
       }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([
+    dbMock.audience.findMany.mockResolvedValue([
       audience("aud_all", {}, { isDefault: true }),
     ]);
 
@@ -271,7 +271,7 @@ describe("evaluateFlag — rule matching", () => {
 
 describe("evaluateFlag — rollout", () => {
   test("rolloutPercentage=1 always returns the rule value", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([
+    dbMock.featureFlag.findMany.mockResolvedValue([
       flag({
         key: "new_paywall",
         rules: [
@@ -279,7 +279,7 @@ describe("evaluateFlag — rollout", () => {
         ],
       }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([
+    dbMock.audience.findMany.mockResolvedValue([
       audience("aud_all", {}, { isDefault: true }),
     ]);
 
@@ -295,7 +295,7 @@ describe("evaluateFlag — rollout", () => {
   });
 
   test("rolloutPercentage=0 falls through to next rule / defaultValue", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([
+    dbMock.featureFlag.findMany.mockResolvedValue([
       flag({
         key: "new_paywall",
         defaultValue: "off",
@@ -304,7 +304,7 @@ describe("evaluateFlag — rollout", () => {
         ],
       }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([
+    dbMock.audience.findMany.mockResolvedValue([
       audience("aud_all", {}, { isDefault: true }),
     ]);
 
@@ -314,7 +314,7 @@ describe("evaluateFlag — rollout", () => {
   });
 
   test("10% rollout hits ~10% of subscribers (±2%)", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([
+    dbMock.featureFlag.findMany.mockResolvedValue([
       flag({
         key: "canary",
         defaultValue: false,
@@ -323,13 +323,13 @@ describe("evaluateFlag — rollout", () => {
         ],
       }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([
+    dbMock.audience.findMany.mockResolvedValue([
       audience("aud_all", {}, { isDefault: true }),
     ]);
 
     // Reset the call counters so cache hits still count for the
     // drift measurement below.
-    prismaMock.featureFlag.findMany.mockClear();
+    dbMock.featureFlag.findMany.mockClear();
 
     let hits = 0;
     const N = 5_000;
@@ -342,7 +342,7 @@ describe("evaluateFlag — rollout", () => {
   });
 
   test("subscriber in matching audience but outside rollout falls through to lower-priority rule", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([
+    dbMock.featureFlag.findMany.mockResolvedValue([
       flag({
         key: "tiered",
         defaultValue: "default",
@@ -352,7 +352,7 @@ describe("evaluateFlag — rollout", () => {
         ],
       }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([
+    dbMock.audience.findMany.mockResolvedValue([
       audience("aud_tr", { country: "TR" }),
       audience("aud_all", {}, { isDefault: true }),
     ]);
@@ -371,32 +371,32 @@ describe("evaluateFlag — rollout", () => {
 
 describe("flag-engine cache", () => {
   test("first call hits DB; second call uses Redis cache", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([
+    dbMock.featureFlag.findMany.mockResolvedValue([
       flag({ key: "cached", defaultValue: true }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([]);
+    dbMock.audience.findMany.mockResolvedValue([]);
 
     await evaluateFlag("proj_a", "cached", "sub_1", {});
     await evaluateFlag("proj_a", "cached", "sub_2", {});
 
-    expect(prismaMock.featureFlag.findMany).toHaveBeenCalledTimes(1);
-    expect(prismaMock.audience.findMany).toHaveBeenCalledTimes(1);
+    expect(dbMock.featureFlag.findMany).toHaveBeenCalledTimes(1);
+    expect(dbMock.audience.findMany).toHaveBeenCalledTimes(1);
     expect(redisMock.set).toHaveBeenCalledTimes(1);
   });
 
   test("cache key is scoped by project", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([flag({ key: "f" })]);
-    prismaMock.audience.findMany.mockResolvedValue([]);
+    dbMock.featureFlag.findMany.mockResolvedValue([flag({ key: "f" })]);
+    dbMock.audience.findMany.mockResolvedValue([]);
 
     await evaluateFlag("proj_a", "f", "sub_1", {});
     await evaluateFlag("proj_b", "f", "sub_1", {});
 
-    expect(prismaMock.featureFlag.findMany).toHaveBeenCalledTimes(2);
+    expect(dbMock.featureFlag.findMany).toHaveBeenCalledTimes(2);
   });
 
   test("Redis TTL is 60 seconds", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([flag()]);
-    prismaMock.audience.findMany.mockResolvedValue([]);
+    dbMock.featureFlag.findMany.mockResolvedValue([flag()]);
+    dbMock.audience.findMany.mockResolvedValue([]);
 
     await evaluateFlag("proj_a", "test-flag", "sub_1", {});
 
@@ -406,22 +406,22 @@ describe("flag-engine cache", () => {
   });
 
   test("invalidateFlagCache forces next call to re-fetch from DB", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([flag()]);
-    prismaMock.audience.findMany.mockResolvedValue([]);
+    dbMock.featureFlag.findMany.mockResolvedValue([flag()]);
+    dbMock.audience.findMany.mockResolvedValue([]);
 
     await evaluateFlag("proj_a", "test-flag", "sub_1", {});
     await invalidateFlagCache("proj_a");
     await evaluateFlag("proj_a", "test-flag", "sub_1", {});
 
-    expect(prismaMock.featureFlag.findMany).toHaveBeenCalledTimes(2);
+    expect(dbMock.featureFlag.findMany).toHaveBeenCalledTimes(2);
     expect(redisMock.del).toHaveBeenCalledWith("flags:proj_a");
   });
 
   test("Redis GET failure falls through to DB (fail open)", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([
+    dbMock.featureFlag.findMany.mockResolvedValue([
       flag({ key: "live", defaultValue: "ok" }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([]);
+    dbMock.audience.findMany.mockResolvedValue([]);
 
     setRedisMode("get-fail");
     const result = await evaluateFlag("proj_a", "live", "sub_1", {});
@@ -430,10 +430,10 @@ describe("flag-engine cache", () => {
   });
 
   test("Redis SET failure does not swallow the result", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([
+    dbMock.featureFlag.findMany.mockResolvedValue([
       flag({ key: "live", defaultValue: "ok" }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([]);
+    dbMock.audience.findMany.mockResolvedValue([]);
 
     setRedisMode("set-fail");
     const result = await evaluateFlag("proj_a", "live", "sub_1", {});
@@ -448,7 +448,7 @@ describe("flag-engine cache", () => {
 
 describe("evaluateAllFlags", () => {
   test("returns a map of every enabled flag's evaluated value", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([
+    dbMock.featureFlag.findMany.mockResolvedValue([
       flag({ key: "a", defaultValue: "a_default" }),
       flag({ key: "b", isEnabled: false, defaultValue: "b_default" }),
       flag({
@@ -457,7 +457,7 @@ describe("evaluateAllFlags", () => {
         rules: [{ audienceId: "aud_all", value: 42 }],
       }),
     ]);
-    prismaMock.audience.findMany.mockResolvedValue([
+    dbMock.audience.findMany.mockResolvedValue([
       audience("aud_all", {}, { isDefault: true }),
     ]);
 
@@ -471,8 +471,8 @@ describe("evaluateAllFlags", () => {
   });
 
   test("returns empty object for project with no flags", async () => {
-    prismaMock.featureFlag.findMany.mockResolvedValue([]);
-    prismaMock.audience.findMany.mockResolvedValue([]);
+    dbMock.featureFlag.findMany.mockResolvedValue([]);
+    dbMock.audience.findMany.mockResolvedValue([]);
 
     const result = await evaluateAllFlags("proj_a", "sub_1", {});
 

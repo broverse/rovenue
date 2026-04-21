@@ -14,10 +14,9 @@ import {
   type GoogleRtdnPayload,
 } from "../src/services/google/google-types";
 
-// Note: PurchaseStatus / RevenueEventType are compared as string literals
-// because google-mappers.ts uses `import type` for the Prisma enum types,
-// and tests run without `prisma generate`. The literal values match
-// the generated Prisma enum runtime shape exactly.
+// Note: PurchaseStatus / RevenueEventType are compared as string
+// literals because google-mappers.ts uses `import type` for the
+// enum types. The literals match the pgEnum runtime labels.
 
 describe("parsePushBody", () => {
   it("base64-decodes message.data into the RTDN payload", () => {
@@ -252,7 +251,7 @@ describe("mapRevenueEventType", () => {
 
 describe("isEntitlementGranting", () => {
   it("grants entitlement for ACTIVE / TRIAL / GRACE_PERIOD", () => {
-    // @ts-expect-error — testing runtime values that match the Prisma enum
+    // @ts-expect-error — testing runtime values that match the pgEnum
     expect(isEntitlementGranting("ACTIVE")).toBe(true);
     // @ts-expect-error
     expect(isEntitlementGranting("TRIAL")).toBe(true);

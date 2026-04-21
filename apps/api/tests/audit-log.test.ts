@@ -22,13 +22,12 @@ vi.mock("../src/lib/audit", () => auditMock);
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
-  // Audit chain writer needs $transaction + $executeRaw + auditLog.findFirst
-  // on the tx client. We wire all of them onto the same mock object and
-  // reuse it as both top-level prisma and the tx parameter passed to the
-  // $transaction callback — that's enough for the dashboard routes under
-  // test here, which never care about isolation boundaries.
-  const prismaMock: Record<string, unknown> = {
+const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
+  // Audit chain writer needs $transaction + $executeRaw +
+  // auditLog.findFirst on the tx client. We wire them onto the
+  // same dbMock object and reuse it as both the db and the tx
+  // parameter — enough for the dashboard routes under test here.
+  const dbMock: Record<string, unknown> = {
     projectMember: { findUnique: vi.fn() },
     auditLog: {
       findMany: vi.fn(async () => []),
@@ -62,7 +61,7 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     },
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) =>
-      fn(prismaMock),
+      fn(dbMock),
     ),
   };
 
@@ -94,7 +93,7 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     },
     projectRepo: {
       findMembership: vi.fn(async (_db: unknown, projectId: string, userId: string) =>
-        prismaMock.projectMember.findUnique({
+        dbMock.projectMember.findUnique({
           where: { projectId_userId: { projectId, userId } },
           select: { id: true, role: true },
         }),
@@ -106,54 +105,54 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
       findDefaultAudience: vi.fn(async () => null),
       listAudiences: vi.fn(async () => []),
       findAudienceById: vi.fn(async (_db: unknown, id: string) =>
-        prismaMock.audience.findUnique({ where: { id } }),
+        dbMock.audience.findUnique({ where: { id } }),
       ),
       findAudienceInProject: vi.fn(async (_db, _projectId, id) =>
-        prismaMock.audience.findFirst({ where: { id } }),
+        dbMock.audience.findFirst({ where: { id } }),
       ),
       createAudience: vi.fn(
         async (_db: unknown, input: Record<string, unknown>) =>
-          prismaMock.audience.create({ data: input }),
+          dbMock.audience.create({ data: input }),
       ),
       updateAudience: vi.fn(
         async (_db: unknown, id: string, patch: Record<string, unknown>) =>
-          prismaMock.audience.update({ where: { id }, data: patch }),
+          dbMock.audience.update({ where: { id }, data: patch }),
       ),
       deleteAudience: vi.fn(async (_db: unknown, id: string) =>
-        prismaMock.audience.delete({ where: { id } }),
+        dbMock.audience.delete({ where: { id } }),
       ),
     },
     dashboardFeatureFlagRepo: {
       listFeatureFlags: vi.fn(async () => []),
       findFeatureFlagById: vi.fn(async (_db: unknown, id: string) =>
-        prismaMock.featureFlag.findUnique({ where: { id } }),
+        dbMock.featureFlag.findUnique({ where: { id } }),
       ),
       createFeatureFlag: vi.fn(
         async (_db: unknown, input: Record<string, unknown>) =>
-          prismaMock.featureFlag.create({ data: input }),
+          dbMock.featureFlag.create({ data: input }),
       ),
       updateFeatureFlag: vi.fn(
         async (_db: unknown, id: string, patch: Record<string, unknown>) =>
-          prismaMock.featureFlag.update({ where: { id }, data: patch }),
+          dbMock.featureFlag.update({ where: { id }, data: patch }),
       ),
       deleteFeatureFlag: vi.fn(async (_db: unknown, id: string) =>
-        prismaMock.featureFlag.delete({ where: { id } }),
+        dbMock.featureFlag.delete({ where: { id } }),
       ),
     },
     experimentRepo: {
       findRunningExperimentsByProject: vi.fn(async () => []),
       findExperimentsByProject: vi.fn(async () => []),
       findExperimentById: vi.fn(async (_db: unknown, id: string) =>
-        prismaMock.experiment.findUnique({ where: { id } }),
+        dbMock.experiment.findUnique({ where: { id } }),
       ),
       findFirstExperimentByAudience: vi.fn(async () => null),
       createExperiment: vi.fn(
         async (_db: unknown, input: Record<string, unknown>) =>
-          prismaMock.experiment.create({ data: input }),
+          dbMock.experiment.create({ data: input }),
       ),
       updateExperiment: vi.fn(
         async (_db: unknown, id: string, patch: Record<string, unknown>) =>
-          prismaMock.experiment.update({ where: { id }, data: patch }),
+          dbMock.experiment.update({ where: { id }, data: patch }),
       ),
     },
     shadowRead: vi.fn(
@@ -162,11 +161,11 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     ),
   };
 
-  return { prismaMock, drizzleMock, authMock };
+  return { dbMock, drizzleMock, authMock };
 });
 
 vi.mock("@rovenue/db", () => ({
-  default: prismaMock,
+  default: dbMock,
   drizzle: drizzleMock,
   MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   FeatureFlagType: {
@@ -198,12 +197,6 @@ vi.mock("@rovenue/db", () => ({
     CANCELLATION: "CANCELLATION", REFUND: "REFUND", REACTIVATION: "REACTIVATION",
     CREDIT_PURCHASE: "CREDIT_PURCHASE",
   },
-  Prisma: {
-    sql: (s: TemplateStringsArray, ...v: unknown[]) => ({ strings: s, values: v }),
-    Decimal: class { constructor(public value: number | string) {} toString() { return String(this.value); } },
-    TransactionIsolationLevel: { Serializable: "Serializable" },
-    PrismaClientKnownRequestError: class extends Error { code = ""; },
-  },
 }));
 
 vi.mock("../src/lib/auth", () => authMock);
@@ -233,11 +226,11 @@ beforeEach(() => {
     user: { id: "user_1" },
     session: { id: "sess_1" },
   });
-  prismaMock.projectMember.findUnique.mockResolvedValue({
+  dbMock.projectMember.findUnique.mockResolvedValue({
     id: "pm_1",
     role: "OWNER",
   });
-  prismaMock.auditLog.create.mockResolvedValue({ id: "al_1" });
+  dbMock.auditLog.create.mockResolvedValue({ id: "al_1" });
 });
 
 // =============================================================
@@ -246,8 +239,8 @@ beforeEach(() => {
 
 describe("audit DB write", () => {
   it("writes an audit log row with before/after on audience create", async () => {
-    prismaMock.audience.findFirst.mockResolvedValue({ id: "aud_default" });
-    prismaMock.audience.create.mockResolvedValue({
+    dbMock.audience.findFirst.mockResolvedValue({ id: "aud_default" });
+    dbMock.audience.create.mockResolvedValue({
       id: "aud_new",
       projectId: "proj_a",
       name: "TR iOS",
@@ -276,14 +269,14 @@ describe("audit DB write", () => {
   });
 
   it("writes before/after on feature flag toggle", async () => {
-    prismaMock.featureFlag.findUnique.mockResolvedValue({
+    dbMock.featureFlag.findUnique.mockResolvedValue({
       id: "flag_1",
       projectId: "proj_a",
       key: "feat",
       type: "BOOLEAN",
       isEnabled: true,
     });
-    prismaMock.featureFlag.update.mockResolvedValue({
+    dbMock.featureFlag.update.mockResolvedValue({
       id: "flag_1",
       projectId: "proj_a",
       isEnabled: false,
@@ -305,7 +298,7 @@ describe("audit DB write", () => {
   });
 
   it("writes experiment.started action on start", async () => {
-    prismaMock.experiment.findUnique.mockResolvedValue({
+    dbMock.experiment.findUnique.mockResolvedValue({
       id: "exp_1",
       projectId: "proj_a",
       status: "DRAFT",
@@ -314,7 +307,7 @@ describe("audit DB write", () => {
         { id: "v", weight: 0.5 },
       ],
     });
-    prismaMock.experiment.update.mockResolvedValue({
+    dbMock.experiment.update.mockResolvedValue({
       id: "exp_1",
       status: "RUNNING",
     });

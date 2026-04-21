@@ -3,14 +3,12 @@ import type { Db } from "../client";
 import { auditLogs, user } from "../schema";
 
 // =============================================================
-// Audit log reads — Drizzle repository
+// Audit log reads
 // =============================================================
 //
-// Mirrors the two calls under apps/api/src/routes/dashboard/
+// Covers the two calls under apps/api/src/routes/dashboard/
 // audit-logs.ts: a filtered list with the author `user` joined
-// in, plus a paired total count. Row shape matches the Prisma
-// include so the shadow reader's structural diff sees apples
-// to apples.
+// in, plus a paired total count.
 
 export interface AuditLogFilters {
   projectId: string;

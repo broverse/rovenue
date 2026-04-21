@@ -6,12 +6,6 @@ import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
 
-// NOTE: audit-log reads were shadow-read through Drizzle for a
-// full cycle (Phase 3). Phase 5 cuts over — Drizzle is now the
-// canonical reader and the old Prisma primary is removed. Prisma
-// keeps handling the WRITE side (audit chain writer in
-// apps/api/src/lib/audit.ts) until Phase 6 covers mutations too.
-
 // =============================================================
 // Dashboard: Audit log viewer
 // =============================================================

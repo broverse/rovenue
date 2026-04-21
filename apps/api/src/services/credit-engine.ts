@@ -84,10 +84,7 @@ export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
       description: args.description,
       metadata: args.metadata,
     });
-    // Drizzle's row shape (metadata: unknown) is structurally a
-    // superset of Prisma's CreditLedger (metadata: JsonValue) for
-    // the fields callers actually read. Cast at the service edge.
-    return row as unknown as CreditLedger;
+    return row as CreditLedger;
   });
 }
 

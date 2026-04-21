@@ -4,32 +4,32 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, drizzleMock, fetchMock } = vi.hoisted(() => {
-  const prismaMock = {
+const { dbMock, drizzleMock, fetchMock } = vi.hoisted(() => {
+  const dbMock = {
     outgoingWebhook: {
       update: vi.fn(async (args: any) => ({ id: "ow_1", ...args.data })),
     },
     $queryRaw: vi.fn(async () => [] as Array<Record<string, unknown>>),
   };
 
-  // deliverWebhooks now writes state transitions through the
-  // Drizzle repo. Delegate to the prisma mock so existing
-  // assertions on prismaMock.outgoingWebhook.update keep working.
-  // `claimPendingWebhooks` also delegates to prismaMock.$queryRaw
-  // so the 12 existing `prismaMock.$queryRaw.mockResolvedValue(…)`
-  // setups keep driving the batch under test.
+  // deliverWebhooks writes state transitions through the Drizzle
+  // repo. Delegate to the dbMock.outgoingWebhook.update spy so
+  // existing assertions keep working. `claimPendingWebhooks` also
+  // delegates to dbMock.$queryRaw so the existing
+  // `dbMock.$queryRaw.mockResolvedValue(…)` setups keep driving
+  // the batch under test.
   const drizzleMock = {
     db: {} as unknown,
     outgoingWebhookRepo: {
       claimPendingWebhooks: vi.fn(
         async (_db: unknown, _now: Date, _batchSize: number) => {
-          const rows = await prismaMock.$queryRaw();
+          const rows = await dbMock.$queryRaw();
           return Array.isArray(rows) ? rows : [];
         },
       ),
       updateOutgoingWebhook: vi.fn(
         async (_db: unknown, id: string, patch: Record<string, unknown>) =>
-          prismaMock.outgoingWebhook.update({ where: { id }, data: patch }),
+          dbMock.outgoingWebhook.update({ where: { id }, data: patch }),
       ),
     },
   };
@@ -39,11 +39,11 @@ const { prismaMock, drizzleMock, fetchMock } = vi.hoisted(() => {
     Promise<{ ok: boolean; status: number; text: () => Promise<string> }>
   >();
 
-  return { prismaMock, drizzleMock, fetchMock };
+  return { dbMock, drizzleMock, fetchMock };
 });
 
 vi.mock("@rovenue/db", () => ({
-  default: prismaMock,
+  default: dbMock,
   drizzle: drizzleMock,
   OutgoingWebhookStatus: {
     PENDING: "PENDING",
@@ -83,7 +83,7 @@ function webhook(overrides: Record<string, unknown> = {}): Record<string, unknow
 
 beforeEach(() => {
   vi.clearAllMocks();
-  prismaMock.$queryRaw.mockResolvedValue([]);
+  dbMock.$queryRaw.mockResolvedValue([]);
   fetchMock.mockResolvedValue({
     ok: true,
     status: 200,
@@ -117,7 +117,7 @@ describe("webhook-delivery config", () => {
 
 describe("deliverWebhooks — success", () => {
   test("delivers pending webhooks and marks them SENT", async () => {
-    prismaMock.$queryRaw.mockResolvedValue([webhook()]);
+    dbMock.$queryRaw.mockResolvedValue([webhook()]);
 
     await deliverWebhooks(fetchMock);
 
@@ -129,7 +129,7 @@ describe("deliverWebhooks — success", () => {
       }),
     );
 
-    const updateCall = prismaMock.outgoingWebhook.update.mock.calls[0]![0] as {
+    const updateCall = dbMock.outgoingWebhook.update.mock.calls[0]![0] as {
       data: Record<string, unknown>;
     };
     expect(updateCall.data.status).toBe("SENT");
@@ -144,7 +144,7 @@ describe("deliverWebhooks — success", () => {
     // SKIP LOCKED clause. The worker just invokes it; the SQL shape
     // itself is verified at the repo level, not here. We only
     // assert that the worker dispatches through the repo.
-    prismaMock.$queryRaw.mockResolvedValue([]);
+    dbMock.$queryRaw.mockResolvedValue([]);
 
     await deliverWebhooks(fetchMock);
 
@@ -153,7 +153,7 @@ describe("deliverWebhooks — success", () => {
   });
 
   test("includes HMAC signature + event-id headers when project has a webhook secret", async () => {
-    prismaMock.$queryRaw.mockResolvedValue([
+    dbMock.$queryRaw.mockResolvedValue([
       webhook({ projectWebhookSecret: "topsecret-abc" }),
     ]);
 
@@ -172,7 +172,7 @@ describe("deliverWebhooks — success", () => {
   });
 
   test("omits signature header when project has no webhook secret", async () => {
-    prismaMock.$queryRaw.mockResolvedValue([
+    dbMock.$queryRaw.mockResolvedValue([
       webhook({ projectWebhookSecret: null }),
     ]);
 
@@ -196,12 +196,12 @@ describe("deliverWebhooks — failure + retry", () => {
       status: 500,
       text: async () => "Internal Server Error",
     });
-    prismaMock.$queryRaw.mockResolvedValue([webhook()]);
+    dbMock.$queryRaw.mockResolvedValue([webhook()]);
 
     await deliverWebhooks(fetchMock);
 
     const data = (
-      prismaMock.outgoingWebhook.update.mock.calls[0]![0] as {
+      dbMock.outgoingWebhook.update.mock.calls[0]![0] as {
         data: Record<string, unknown>;
       }
     ).data;
@@ -214,12 +214,12 @@ describe("deliverWebhooks — failure + retry", () => {
 
   test("on network error: records error message, schedules retry", async () => {
     fetchMock.mockRejectedValue(new Error("ECONNREFUSED"));
-    prismaMock.$queryRaw.mockResolvedValue([webhook()]);
+    dbMock.$queryRaw.mockResolvedValue([webhook()]);
 
     await deliverWebhooks(fetchMock);
 
     const data = (
-      prismaMock.outgoingWebhook.update.mock.calls[0]![0] as {
+      dbMock.outgoingWebhook.update.mock.calls[0]![0] as {
         data: Record<string, unknown>;
       }
     ).data;
@@ -239,14 +239,14 @@ describe("deliverWebhooks — dead letter", () => {
       status: 502,
       text: async () => "Bad Gateway",
     });
-    prismaMock.$queryRaw.mockResolvedValue([
+    dbMock.$queryRaw.mockResolvedValue([
       webhook({ attempts: MAX_ATTEMPTS - 1 }),
     ]);
 
     await deliverWebhooks(fetchMock);
 
     const data = (
-      prismaMock.outgoingWebhook.update.mock.calls[0]![0] as {
+      dbMock.outgoingWebhook.update.mock.calls[0]![0] as {
         data: Record<string, unknown>;
       }
     ).data;
@@ -262,12 +262,12 @@ describe("deliverWebhooks — dead letter", () => {
       status: 503,
       text: async () => "Unavailable",
     });
-    prismaMock.$queryRaw.mockResolvedValue([webhook({ attempts: 2 })]);
+    dbMock.$queryRaw.mockResolvedValue([webhook({ attempts: 2 })]);
 
     await deliverWebhooks(fetchMock);
 
     const data = (
-      prismaMock.outgoingWebhook.update.mock.calls[0]![0] as {
+      dbMock.outgoingWebhook.update.mock.calls[0]![0] as {
         data: Record<string, unknown>;
       }
     ).data;
@@ -290,15 +290,15 @@ describe("deliverWebhooks — batch isolation", () => {
       return { ok: true, status: 200, text: async () => "OK" };
     });
 
-    prismaMock.$queryRaw.mockResolvedValue([
+    dbMock.$queryRaw.mockResolvedValue([
       webhook({ id: "ow_fail" }),
       webhook({ id: "ow_ok", url: "https://example.com/hook2" }),
     ]);
 
     await deliverWebhooks(fetchMock);
 
-    expect(prismaMock.outgoingWebhook.update).toHaveBeenCalledTimes(2);
-    const calls = prismaMock.outgoingWebhook.update.mock.calls.map(
+    expect(dbMock.outgoingWebhook.update).toHaveBeenCalledTimes(2);
+    const calls = dbMock.outgoingWebhook.update.mock.calls.map(
       (c: any) => ({ id: c[0].where.id, status: c[0].data.status }),
     );
     expect(calls).toContainEqual({ id: "ow_fail", status: "FAILED" });

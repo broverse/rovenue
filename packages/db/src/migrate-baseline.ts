@@ -6,13 +6,13 @@ import { getPool } from "./drizzle/pool";
 // drizzle-kit baseline helper
 // =============================================================
 //
-// One-shot upgrade script for operators who provisioned their
-// database with Prisma's `prisma migrate deploy` before Phase
-// 7e3 landed. drizzle-orm's migrator tracks applied migrations
-// by hash in the __drizzle_migrations table. Since their DB
-// already has every table / index / enum the 0000 baseline
-// would create, running the migrator directly would fail with
-// "relation already exists".
+// One-shot upgrade helper for operators whose database was
+// provisioned before drizzle-kit became the migration driver.
+// drizzle-orm's migrator tracks applied migrations by hash in
+// the __drizzle_migrations table. On a pre-existing database
+// every table / index / enum the 0000 baseline would create
+// already exists, so running the migrator directly would fail
+// with "relation already exists".
 //
 // This script:
 //   1. Creates the __drizzle_migrations tracking table if absent.
@@ -20,8 +20,8 @@ import { getPool } from "./drizzle/pool";
 //      as "applied" without running its DDL.
 //
 // After this runs, `pnpm db:migrate` applies 0001+ normally.
-// Fresh (Prisma-free) installs skip this script entirely and
-// run `pnpm db:migrate` from a clean database.
+// Fresh installs skip this script and run `pnpm db:migrate`
+// straight against a clean database.
 
 async function run(): Promise<void> {
   const journalUrl = new URL(

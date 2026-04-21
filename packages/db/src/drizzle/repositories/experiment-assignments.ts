@@ -10,17 +10,13 @@ import {
 type DbOrTx = Db;
 
 // =============================================================
-// Experiment assignment reads — Drizzle repository
+// Experiment assignment reads
 // =============================================================
 
 /**
  * All assignments for a subscriber across a single project's
  * experiments, with the experiment's status + mutualExclusionGroup
- * inlined. Mirrors the shape produced by
- *   prisma.experimentAssignment.findMany({
- *     where: { subscriberId, experiment: { projectId } },
- *     include: { experiment: { select: {…} } },
- *   })
+ * inlined via an inner join.
  */
 export interface AssignmentWithExperiment {
   id: string;
@@ -166,8 +162,7 @@ export interface NewAssignmentInput {
 
 /**
  * Batch-insert new assignments, ignoring duplicates on
- * (experimentId, subscriberId). Mirrors Prisma's
- * `createMany({ skipDuplicates: true })` via onConflictDoNothing.
+ * (experimentId, subscriberId) via onConflictDoNothing.
  */
 export async function insertAssignmentsSkipDuplicates(
   db: DbOrTx,

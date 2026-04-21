@@ -26,15 +26,13 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install
 
 # =============================================================
-# Builder — copy sources and generate the Prisma client
+# Builder — copy sources
 # =============================================================
 FROM deps AS builder
 
 COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY apps/api ./apps/api
-
-RUN pnpm --filter @rovenue/db exec prisma generate
 
 # =============================================================
 # Runtime — slim image running the api via tsx
