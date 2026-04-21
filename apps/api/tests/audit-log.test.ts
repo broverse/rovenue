@@ -136,6 +136,14 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
         prismaMock.experiment.findUnique({ where: { id } }),
       ),
       findFirstExperimentByAudience: vi.fn(async () => null),
+      createExperiment: vi.fn(
+        async (_db: unknown, input: Record<string, unknown>) =>
+          prismaMock.experiment.create({ data: input }),
+      ),
+      updateExperiment: vi.fn(
+        async (_db: unknown, id: string, patch: Record<string, unknown>) =>
+          prismaMock.experiment.update({ where: { id }, data: patch }),
+      ),
     },
     shadowRead: vi.fn(
       async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>

@@ -2,11 +2,10 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, {
+import {
   ExperimentStatus,
   FeatureFlagType,
   MemberRole,
-  Prisma,
   drizzle,
   type ExperimentType,
 } from "@rovenue/db";
@@ -137,8 +136,9 @@ export const experimentsRoute = new Hono()
       });
     }
 
-    const experiment = await prisma.experiment.create({
-      data: {
+    const experiment = await drizzle.experimentRepo.createExperiment(
+      drizzle.db,
+      {
         projectId: body.projectId,
         name: body.name,
         description: body.description,
@@ -146,11 +146,11 @@ export const experimentsRoute = new Hono()
         key: body.key,
         audienceId: body.audienceId,
         status: ExperimentStatus.DRAFT,
-        variants: body.variants as unknown as Prisma.InputJsonValue,
-        metrics: body.metrics as Prisma.InputJsonValue | undefined,
+        variants: body.variants,
+        metrics: body.metrics,
         mutualExclusionGroup: body.mutualExclusionGroup,
       },
-    });
+    );
 
     await invalidateExperimentCache(body.projectId);
     await audit({
@@ -253,7 +253,8 @@ export const experimentsRoute = new Hono()
       });
     }
 
-    let updates: Prisma.ExperimentUpdateInput = {};
+    let updates: Parameters<typeof drizzle.experimentRepo.updateExperiment>[2] =
+      {};
 
     if (existing.status === ExperimentStatus.DRAFT) {
       const body = updateDraftExperimentBodySchema.parse(raw);
@@ -288,14 +289,10 @@ export const experimentsRoute = new Hono()
         ...(body.type !== undefined && { type: body.type as ExperimentType }),
         ...(body.key !== undefined && { key: body.key }),
         ...(body.audienceId !== undefined && { audienceId: body.audienceId }),
-        ...(body.variants !== undefined && {
-          variants: body.variants as unknown as Prisma.InputJsonValue,
-        }),
+        ...(body.variants !== undefined && { variants: body.variants }),
         ...(body.metrics !== undefined && {
-          metrics:
-            body.metrics === null
-              ? Prisma.JsonNull
-              : (body.metrics as Prisma.InputJsonValue),
+          // body.metrics === null clears the column via Drizzle NULL.
+          metrics: body.metrics,
         }),
         ...(body.mutualExclusionGroup !== undefined && {
           mutualExclusionGroup: body.mutualExclusionGroup,
@@ -364,14 +361,18 @@ export const experimentsRoute = new Hono()
           });
         }
 
-        updates.variants = updated as unknown as Prisma.InputJsonValue;
+        updates.variants = updated;
       }
     }
 
-    const experiment = await prisma.experiment.update({
-      where: { id },
-      data: updates,
-    });
+    const experiment = await drizzle.experimentRepo.updateExperiment(
+      drizzle.db,
+      id,
+      updates,
+    );
+    if (!experiment) {
+      throw new HTTPException(404, { message: "Experiment not found" });
+    }
 
     await invalidateExperimentCache(existing.projectId);
     await audit({
@@ -406,13 +407,17 @@ export const experimentsRoute = new Hono()
       });
     }
 
-    const experiment = await prisma.experiment.update({
-      where: { id },
-      data: {
+    const experiment = await drizzle.experimentRepo.updateExperiment(
+      drizzle.db,
+      id,
+      {
         status: ExperimentStatus.RUNNING,
         startedAt: new Date(),
       },
-    });
+    );
+    if (!experiment) {
+      throw new HTTPException(404, { message: "Experiment not found" });
+    }
 
     await invalidateExperimentCache(existing.projectId);
     await audit({
@@ -447,10 +452,14 @@ export const experimentsRoute = new Hono()
       });
     }
 
-    const experiment = await prisma.experiment.update({
-      where: { id },
-      data: { status: ExperimentStatus.PAUSED },
-    });
+    const experiment = await drizzle.experimentRepo.updateExperiment(
+      drizzle.db,
+      id,
+      { status: ExperimentStatus.PAUSED },
+    );
+    if (!experiment) {
+      throw new HTTPException(404, { message: "Experiment not found" });
+    }
 
     await invalidateExperimentCache(existing.projectId);
     await audit({
@@ -485,10 +494,14 @@ export const experimentsRoute = new Hono()
       });
     }
 
-    const experiment = await prisma.experiment.update({
-      where: { id },
-      data: { status: ExperimentStatus.RUNNING },
-    });
+    const experiment = await drizzle.experimentRepo.updateExperiment(
+      drizzle.db,
+      id,
+      { status: ExperimentStatus.RUNNING },
+    );
+    if (!experiment) {
+      throw new HTTPException(404, { message: "Experiment not found" });
+    }
 
     await invalidateExperimentCache(existing.projectId);
     await audit({
@@ -532,14 +545,18 @@ export const experimentsRoute = new Hono()
     const raw = await c.req.json().catch(() => ({}));
     const body = stopExperimentBodySchema.parse(raw);
 
-    const experiment = await prisma.experiment.update({
-      where: { id },
-      data: {
+    const experiment = await drizzle.experimentRepo.updateExperiment(
+      drizzle.db,
+      id,
+      {
         status: ExperimentStatus.COMPLETED,
         completedAt: new Date(),
         winnerVariantId: body.winnerVariantId,
       },
-    });
+    );
+    if (!experiment) {
+      throw new HTTPException(404, { message: "Experiment not found" });
+    }
 
     let promotedFlag: { id: string; key: string } | null = null;
     if (body.promoteToFlag && body.winnerVariantId) {
@@ -554,17 +571,18 @@ export const experimentsRoute = new Hono()
         // so SDK consumers calling `useFlag<boolean>` don't get a
         // JSON-wrapped boolean back.
         const flagType = inferPromotedFlagType(existing.type, winner.value);
-        const flag = await prisma.featureFlag.create({
-          data: {
+        const flag = await drizzle.dashboardFeatureFlagRepo.createFeatureFlag(
+          drizzle.db,
+          {
             projectId: existing.projectId,
             key: `${existing.key}_winner`,
             type: flagType,
-            defaultValue: winner.value as Prisma.InputJsonValue,
-            rules: [] as unknown as Prisma.InputJsonValue,
+            defaultValue: winner.value,
+            rules: [],
             isEnabled: true,
             description: `Promoted from experiment ${existing.key} (winner: ${winner.id})`,
           },
-        });
+        );
         promotedFlag = { id: flag.id, key: flag.key };
         await invalidateFlagCache(existing.projectId);
       }

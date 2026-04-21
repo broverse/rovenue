@@ -88,6 +88,10 @@ const { prismaMock, drizzleMock, authMock, flagMock, engineMock } = vi.hoisted((
       findFeatureFlagById: vi.fn(async (_db: unknown, id: string) =>
         prismaMock.featureFlag.findUnique({ where: { id } }),
       ),
+      createFeatureFlag: vi.fn(
+        async (_db: unknown, input: Record<string, unknown>) =>
+          prismaMock.featureFlag.create({ data: input }),
+      ),
     },
     audienceRepo: {
       findDefaultAudience: vi.fn(async () => null),
@@ -121,6 +125,14 @@ const { prismaMock, drizzleMock, authMock, flagMock, engineMock } = vi.hoisted((
           where: { audienceId },
           select: { id: true },
         }),
+      ),
+      createExperiment: vi.fn(
+        async (_db: unknown, input: Record<string, unknown>) =>
+          prismaMock.experiment.create({ data: input }),
+      ),
+      updateExperiment: vi.fn(
+        async (_db: unknown, id: string, patch: Record<string, unknown>) =>
+          prismaMock.experiment.update({ where: { id }, data: patch }),
       ),
     },
     outgoingWebhookRepo: {
