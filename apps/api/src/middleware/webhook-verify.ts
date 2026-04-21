@@ -164,18 +164,21 @@ export const verifyAppleWebhook: MiddlewareHandler = async (c, next) => {
 // Google — Pub/Sub push OIDC bearer token
 // =============================================================
 
-export const verifyGoogleWebhook: MiddlewareHandler = async (c, next) => {
-  // Peek the body first so dev-mode and prod-mode both populate the
-  // ctx vars the downstream replay guard depends on. Use clone() so
-  // the downstream zValidator can still read c.req.raw. Swallow JSON
-  // parse errors so malformed bodies fall through to the descriptive
-  // missing-fields 400 below rather than crashing the middleware.
-  const body = (await c.req.raw
-    .clone()
-    .json()
-    .catch(() => ({}))) as {
-    message?: { messageId?: string; publishTime?: string };
-  };
+// Helper: parse the Pub/Sub push body and pull out the two fields we
+// need for the replay guard. Throws a distinct 400 for malformed JSON
+// vs missing fields so operators can tell them apart in logs.
+async function extractGoogleMessage(
+  c: Parameters<MiddlewareHandler>[0],
+): Promise<{ messageId: string; publishTime: string }> {
+  let body: { message?: { messageId?: string; publishTime?: string } };
+  try {
+    body = (await c.req.raw.clone().json()) as typeof body;
+  } catch {
+    log.warn("google webhook rejected: body is not valid JSON");
+    throw new HTTPException(400, {
+      message: "Google push body is not valid JSON",
+    });
+  }
   const messageId = body.message?.messageId;
   const publishTime = body.message?.publishTime;
   if (!messageId || !publishTime) {
@@ -184,31 +187,42 @@ export const verifyGoogleWebhook: MiddlewareHandler = async (c, next) => {
       message: "Google push body missing message.messageId or publishTime",
     });
   }
+  return { messageId, publishTime };
+}
 
-  // Dev fast-path: PUBSUB_PUSH_AUDIENCE is required in production
-  // (enforced by env.ts). In dev/test we skip identity verification
-  // so local testing works without a Google Cloud setup — but we
-  // still stash ctx so the replay guard and downstream handler work
-  // the same way as prod.
+function stashGoogleCtx(
+  c: Parameters<MiddlewareHandler>[0],
+  messageId: string,
+  publishTime: string,
+): void {
+  c.set("verifiedWebhook", { source: "GOOGLE" });
+  c.set("webhookEventId", messageId);
+  c.set(
+    "webhookEventTimestamp",
+    Math.floor(new Date(publishTime).getTime() / 1000),
+  );
+}
+
+export const verifyGoogleWebhook: MiddlewareHandler = async (c, next) => {
+  // Dev fast-path: identity verification is skipped when
+  // PUBSUB_PUSH_AUDIENCE is unset. The body peek still runs so the
+  // downstream replay guard has the ctx vars it needs.
   if (!env.PUBSUB_PUSH_AUDIENCE) {
     log.debug("google webhook: PUBSUB_PUSH_AUDIENCE unset, skipping verify");
-    c.set("verifiedWebhook", { source: "GOOGLE" });
-    c.set("webhookEventId", messageId);
-    c.set(
-      "webhookEventTimestamp",
-      Math.floor(new Date(publishTime).getTime() / 1000),
-    );
+    const { messageId, publishTime } = await extractGoogleMessage(c);
+    stashGoogleCtx(c, messageId, publishTime);
     await next();
     return;
   }
 
+  // Prod: Bearer + JWT verify first — reject unauthenticated callers
+  // BEFORE we parse their body.
   const header = c.req.header(HEADER.AUTHORIZATION);
   const prefix = `${BEARER_SCHEME.toLowerCase()} `;
   if (!header || !header.toLowerCase().startsWith(prefix)) {
     log.warn("google webhook rejected: missing Bearer token");
     throw new HTTPException(401, { message: "Pub/Sub Bearer token required" });
   }
-
   const idToken = header.slice(prefix.length).trim();
   try {
     await verifyPubSubPushToken(idToken, {
@@ -222,12 +236,9 @@ export const verifyGoogleWebhook: MiddlewareHandler = async (c, next) => {
     throw new HTTPException(401, { message: "Invalid Pub/Sub token" });
   }
 
-  c.set("verifiedWebhook", { source: "GOOGLE" });
-  c.set("webhookEventId", messageId);
-  c.set(
-    "webhookEventTimestamp",
-    Math.floor(new Date(publishTime).getTime() / 1000),
-  );
+  // Identity confirmed — safe to parse the body now.
+  const { messageId, publishTime } = await extractGoogleMessage(c);
+  stashGoogleCtx(c, messageId, publishTime);
   await next();
 };
 

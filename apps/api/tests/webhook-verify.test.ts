@@ -315,6 +315,21 @@ describe("verifyGoogleWebhook", () => {
     );
   });
 
+  test("400 when Google push body is not valid JSON", async () => {
+    const app = makeApp(verifyGoogleWebhook);
+    const res = await app.request("/proj_a", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer valid-id-token",
+      },
+      body: "{this is not json",
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toContain("not valid JSON");
+  });
+
   test("dev-mode passthrough still stashes event id + timestamp", async () => {
     mocks.env.PUBSUB_PUSH_AUDIENCE = undefined;
     const app = makeApp(verifyGoogleWebhook);
