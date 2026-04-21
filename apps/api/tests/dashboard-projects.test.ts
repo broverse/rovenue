@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { prismaMock, authMock } = vi.hoisted(() => {
+const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
   const prismaMock = {
     projectMember: { findMany: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
     project: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() },
@@ -16,12 +16,33 @@ const { prismaMock, authMock } = vi.hoisted(() => {
     $executeRaw: vi.fn(async () => 0),
     $transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) => fn(prismaMock)),
   };
+  const drizzleMock = {
+    db: {} as unknown,
+    projectRepo: {
+      findMembership: vi.fn(async (_db, projectId, userId) =>
+        prismaMock.projectMember.findUnique({
+          where: { projectId_userId: { projectId, userId } },
+          select: { id: true, role: true },
+        }),
+      ),
+      findProjectById: vi.fn(async () => null),
+      findProjectCredentials: vi.fn(async () => null),
+      findMembershipsForUser: vi.fn(async () => []),
+      listProjectMembers: vi.fn(async () => []),
+      countProjectOwners: vi.fn(async () => 0),
+    },
+    shadowRead: vi.fn(
+      async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
+        primary(),
+    ),
+  };
   const authMock = { api: { getSession: vi.fn() } };
-  return { prismaMock, authMock };
+  return { prismaMock, drizzleMock, authMock };
 });
 
 vi.mock("@rovenue/db", () => ({
   default: prismaMock,
+  drizzle: drizzleMock,
   MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   FeatureFlagType: { BOOLEAN: "BOOLEAN", STRING: "STRING", NUMBER: "NUMBER", JSON: "JSON" },
   ExperimentStatus: { DRAFT: "DRAFT", RUNNING: "RUNNING", PAUSED: "PAUSED", COMPLETED: "COMPLETED" },

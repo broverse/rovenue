@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, authMock, flagMock, engineMock } = vi.hoisted(() => {
+const { prismaMock, drizzleMock, authMock, flagMock, engineMock } = vi.hoisted(() => {
   const prismaMock = {
     projectMember: { findUnique: vi.fn() },
     audience: {
@@ -41,6 +41,36 @@ const { prismaMock, authMock, flagMock, engineMock } = vi.hoisted(() => {
     $transaction: vi.fn(async (fn: any) => fn(prismaMock)),
   };
 
+  // Drizzle reads delegate to the existing Prisma mock during
+  // the Phase 6 cutover so the dashboard smoke tests keep
+  // asserting the same behaviours.
+  const drizzleMock = {
+    db: {} as unknown,
+    projectRepo: {
+      findMembership: vi.fn(async (_db: unknown, projectId: string, userId: string) =>
+        prismaMock.projectMember.findUnique({
+          where: { projectId_userId: { projectId, userId } },
+          select: { id: true, role: true },
+        }),
+      ),
+      findProjectById: vi.fn(async () => null),
+      findProjectCredentials: vi.fn(async () => null),
+    },
+    auditLogRepo: {
+      listAuditLogs: vi.fn(async () => []),
+      countAuditLogs: vi.fn(async () => 0),
+      findAuditLogById: vi.fn(async () => null),
+    },
+    featureFlagRepo: {
+      findFeatureFlagsByProject: vi.fn(async () => []),
+      findAudiencesByProject: vi.fn(async () => []),
+    },
+    shadowRead: vi.fn(
+      async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
+        primary(),
+    ),
+  };
+
   const authMock = {
     auth: {
       api: {
@@ -69,11 +99,12 @@ const { prismaMock, authMock, flagMock, engineMock } = vi.hoisted(() => {
     })),
   };
 
-  return { prismaMock, authMock, flagMock, engineMock };
+  return { prismaMock, drizzleMock, authMock, flagMock, engineMock };
 });
 
 vi.mock("@rovenue/db", () => ({
   default: prismaMock,
+  drizzle: drizzleMock,
   MemberRole: {
     OWNER: "OWNER",
     ADMIN: "ADMIN",

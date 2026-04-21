@@ -8,7 +8,7 @@ import {
   HEADER,
   type ApiKeyKind,
 } from "@rovenue/shared";
-import prisma from "@rovenue/db";
+import prisma, { drizzle } from "@rovenue/db";
 import { logger } from "../lib/logger";
 
 const log = logger.child("api-key-auth");
@@ -55,33 +55,22 @@ function parseSecretKeyId(rawKey: string): string | null {
 
 export type ApiKeyRequirement = ApiKeyKind | "any";
 
+// Reads go through Drizzle (Phase 6 cutover). The write side
+// (`apiKey.update` lastUsedAt below) stays on Prisma until the
+// write cutover phase.
 type ApiKeyRecord = Awaited<
-  ReturnType<typeof prisma.apiKey.findUnique>
-> extends infer R
-  ? R extends null
-    ? never
-    : R & { project: { id: string; name: string; slug: string } }
-  : never;
+  ReturnType<typeof drizzle.apiKeyRepo.findApiKeyByPublic>
+>;
 
-async function lookupPublicKey(
-  rawKey: string,
-): Promise<ApiKeyRecord | null> {
-  return prisma.apiKey.findUnique({
-    where: { keyPublic: rawKey },
-    include: { project: true },
-  }) as Promise<ApiKeyRecord | null>;
+async function lookupPublicKey(rawKey: string): Promise<ApiKeyRecord> {
+  return drizzle.apiKeyRepo.findApiKeyByPublic(drizzle.db, rawKey);
 }
 
-async function lookupSecretKey(
-  rawKey: string,
-): Promise<ApiKeyRecord | null> {
+async function lookupSecretKey(rawKey: string): Promise<ApiKeyRecord> {
   const keyId = parseSecretKeyId(rawKey);
   if (!keyId) return null;
 
-  const record = (await prisma.apiKey.findUnique({
-    where: { id: keyId },
-    include: { project: true },
-  })) as ApiKeyRecord | null;
+  const record = await drizzle.apiKeyRepo.findApiKeyById(drizzle.db, keyId);
   if (!record) return null;
 
   const valid = await bcrypt.compare(rawKey, record.keySecretHash);

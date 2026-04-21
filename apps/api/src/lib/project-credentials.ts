@@ -1,4 +1,4 @@
-import prisma, { decryptCredential } from "@rovenue/db";
+import { decryptCredential, drizzle } from "@rovenue/db";
 import { z } from "zod";
 import { env } from "./env";
 import { logger } from "./logger";
@@ -61,11 +61,12 @@ function unwrap(raw: unknown): unknown {
 export async function loadGoogleCredentials(
   projectId: string,
 ): Promise<GoogleCredentials | null> {
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { googleCredentials: true },
-  });
-  const plain = unwrap(project?.googleCredentials ?? null);
+  const row = await drizzle.projectRepo.findProjectCredentials(
+    drizzle.db,
+    projectId,
+    "google",
+  );
+  const plain = unwrap(row?.value ?? null);
   if (!plain) return null;
   const parsed = googleSchema.safeParse(plain);
   if (!parsed.success) {
@@ -81,11 +82,12 @@ export async function loadGoogleCredentials(
 export async function loadStripeCredentials(
   projectId: string,
 ): Promise<StripeCredentials | null> {
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { stripeCredentials: true },
-  });
-  const plain = unwrap(project?.stripeCredentials ?? null);
+  const row = await drizzle.projectRepo.findProjectCredentials(
+    drizzle.db,
+    projectId,
+    "stripe",
+  );
+  const plain = unwrap(row?.value ?? null);
   if (!plain) return null;
   const parsed = stripeSchema.safeParse(plain);
   if (!parsed.success) {
@@ -101,11 +103,12 @@ export async function loadStripeCredentials(
 export async function loadAppleCredentials(
   projectId: string,
 ): Promise<AppleCredentials | null> {
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    select: { appleCredentials: true },
-  });
-  const plain = unwrap(project?.appleCredentials ?? null);
+  const row = await drizzle.projectRepo.findProjectCredentials(
+    drizzle.db,
+    projectId,
+    "apple",
+  );
+  const plain = unwrap(row?.value ?? null);
   if (!plain) return null;
   const parsed = appleSchema.safeParse(plain);
   if (!parsed.success) {

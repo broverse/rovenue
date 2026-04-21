@@ -1,5 +1,5 @@
 import { HTTPException } from "hono/http-exception";
-import prisma, { MemberRole } from "@rovenue/db";
+import { MemberRole, drizzle } from "@rovenue/db";
 
 // =============================================================
 // Project membership guard
@@ -27,10 +27,11 @@ export async function assertProjectAccess(
   userId: string,
   minimumRole: MemberRole = MemberRole.VIEWER,
 ): Promise<ProjectMembership> {
-  const membership = await prisma.projectMember.findUnique({
-    where: { projectId_userId: { projectId, userId } },
-    select: { id: true, role: true },
-  });
+  const membership = await drizzle.projectRepo.findMembership(
+    drizzle.db,
+    projectId,
+    userId,
+  );
   if (!membership) {
     throw new HTTPException(403, {
       message: "Not a member of this project",

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { prismaMock, authMock } = vi.hoisted(() => {
+const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
   const prismaMock = {
     projectMember: {
       findMany: vi.fn(),
@@ -20,8 +20,34 @@ const { prismaMock, authMock } = vi.hoisted(() => {
       fn(prismaMock),
     ),
   };
+
+  // Drizzle read paths delegate to the already-mocked Prisma
+  // finders so existing test setup (prismaMock.projectMember.
+  // findUnique.mockResolvedValue(...)) keeps working during the
+  // Phase 6 cutover. Each repository method maps to its Prisma
+  // equivalent 1:1.
+  const drizzleMock = {
+    db: {} as unknown,
+    projectRepo: {
+      findMembership: vi.fn(async (_db, projectId, userId) =>
+        prismaMock.projectMember.findUnique({
+          where: { projectId_userId: { projectId, userId } },
+          select: { id: true, role: true },
+        }),
+      ),
+      findProjectById: vi.fn(async () => null),
+      findProjectCredentials: vi.fn(async () => null),
+      findMembershipsForUser: vi.fn(async () => []),
+      listProjectMembers: vi.fn(async () => []),
+      countProjectOwners: vi.fn(async () => 0),
+    },
+    shadowRead: vi.fn(
+      async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
+        primary(),
+    ),
+  };
   const authMock = { api: { getSession: vi.fn() } };
-  return { prismaMock, authMock };
+  return { prismaMock, drizzleMock, authMock };
 });
 
 vi.mock("@rovenue/db", async () => {
@@ -31,6 +57,7 @@ vi.mock("@rovenue/db", async () => {
   return {
     ...actual,
     default: prismaMock,
+    drizzle: drizzleMock,
     MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
   };
 });

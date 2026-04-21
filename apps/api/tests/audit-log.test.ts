@@ -63,6 +63,7 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     auditLogRepo: {
       listAuditLogs: vi.fn(async () => []),
       countAuditLogs: vi.fn(async () => 0),
+      findAuditLogById: vi.fn(async () => null),
     },
     featureFlagRepo: {
       findFeatureFlagsByProject: vi.fn(async () => []),
@@ -72,6 +73,16 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
       findSubscriberAttributes: vi.fn(async () => null),
       findSubscriberByAppUserId: vi.fn(async () => null),
       listSubscribers: vi.fn(async () => []),
+    },
+    projectRepo: {
+      findMembership: vi.fn(async (_db: unknown, projectId: string, userId: string) =>
+        prismaMock.projectMember.findUnique({
+          where: { projectId_userId: { projectId, userId } },
+          select: { id: true, role: true },
+        }),
+      ),
+      findProjectById: vi.fn(async () => null),
+      findProjectCredentials: vi.fn(async () => null),
     },
     shadowRead: vi.fn(
       async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>

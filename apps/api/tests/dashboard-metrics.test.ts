@@ -26,6 +26,20 @@ const { drizzleMock, authMock } = vi.hoisted(() => {
         },
       ]),
     },
+    projectRepo: {
+      findMembership: vi.fn(async (_db: unknown, projectId: string, userId: string) =>
+        prismaMock.projectMember.findUnique({
+          where: { projectId_userId: { projectId, userId } },
+          select: { id: true, role: true },
+        }),
+      ),
+      findProjectById: vi.fn(async () => null),
+      findProjectCredentials: vi.fn(async () => null),
+    },
+    shadowRead: vi.fn(
+      async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
+        primary(),
+    ),
   };
   const authMock = { api: { getSession: vi.fn() } };
   return { drizzleMock, authMock };

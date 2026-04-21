@@ -32,6 +32,25 @@ const { prismaMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
     subscriberRepo: {
       findSubscriberAttributes: vi.fn(async () => null),
     },
+    apiKeyRepo: {
+      findApiKeyByPublic: vi.fn(async (_db: unknown, keyPublic: string) =>
+        prismaMock.apiKey.findUnique({
+          where: { keyPublic },
+          include: { project: true },
+        }),
+      ),
+      findApiKeyById: vi.fn(async (_db: unknown, id: string) =>
+        prismaMock.apiKey.findUnique({
+          where: { id },
+          include: { project: true },
+        }),
+      ),
+    },
+    projectRepo: {
+      findMembership: vi.fn(async () => null),
+      findProjectById: vi.fn(async () => null),
+      findProjectCredentials: vi.fn(async () => null),
+    },
     shadowRead: vi.fn(
       async <T>(
         primary: () => Promise<T>,

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const { prismaMock, authMock } = vi.hoisted(() => {
+const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
   const prismaMock = {
     projectMember: { findUnique: vi.fn() },
     project: { findUnique: vi.fn(), update: vi.fn() },
@@ -13,8 +13,38 @@ const { prismaMock, authMock } = vi.hoisted(() => {
       fn(prismaMock),
     ),
   };
+
+  // Drizzle reads delegate to the Prisma mock during the cutover
+  // so existing `prismaMock.projectMember.findUnique.
+  // mockResolvedValue(...)` calls keep driving the test. Project
+  // credential loaders go through findProjectCredentials; tests
+  // that need to exercise that path override it explicitly.
+  const drizzleMock = {
+    db: {} as unknown,
+    projectRepo: {
+      findMembership: vi.fn(async (_db, projectId, userId) =>
+        prismaMock.projectMember.findUnique({
+          where: { projectId_userId: { projectId, userId } },
+          select: { id: true, role: true },
+        }),
+      ),
+      findProjectById: vi.fn(async () => null),
+      findProjectCredentials: vi.fn(async (_db, id, store) => {
+        const project = await prismaMock.project.findUnique({
+          where: { id },
+          select: { [`${store}Credentials`]: true },
+        });
+        const value = project?.[`${store}Credentials`];
+        return value != null ? { value } : null;
+      }),
+    },
+    shadowRead: vi.fn(
+      async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
+        primary(),
+    ),
+  };
   const authMock = { api: { getSession: vi.fn() } };
-  return { prismaMock, authMock };
+  return { prismaMock, drizzleMock, authMock };
 });
 
 vi.mock("@rovenue/db", async () => {
@@ -24,6 +54,7 @@ vi.mock("@rovenue/db", async () => {
   return {
     ...actual,
     default: prismaMock,
+    drizzle: drizzleMock,
     MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
     // encryptCredential / decryptCredential come from the real module —
     // tests verify both the write shape (encrypted tag) and the round
