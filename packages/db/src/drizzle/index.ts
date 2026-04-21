@@ -27,3 +27,6 @@ export * as accessRepo from "./repositories/access";
 export * as creditLedgerRepo from "./repositories/credit-ledger";
 export * as apiKeyRepo from "./repositories/api-keys";
 export * as projectRepo from "./repositories/projects";
+export * as audienceRepo from "./repositories/audiences";
+export * as outgoingWebhookRepo from "./repositories/outgoing-webhooks";
+export * as dashboardFeatureFlagRepo from "./repositories/feature-flags-dashboard";

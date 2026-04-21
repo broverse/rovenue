@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, { MemberRole, type Prisma } from "@rovenue/db";
+import prisma, { MemberRole, drizzle, type Prisma } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { assertProjectAccess } from "../../lib/project-access";
@@ -21,10 +21,10 @@ import { validateAudienceRules } from "../../lib/targeting";
 const DEFAULT_AUDIENCE_NAME = "All Users";
 
 async function ensureDefaultAudience(projectId: string): Promise<void> {
-  const existing = await prisma.audience.findFirst({
-    where: { projectId, isDefault: true },
-    select: { id: true },
-  });
+  const existing = await drizzle.audienceRepo.findDefaultAudience(
+    drizzle.db,
+    projectId,
+  );
   if (existing) return;
   await prisma.audience.create({
     data: {
@@ -70,10 +70,10 @@ export const audiencesRoute = new Hono()
 
     await ensureDefaultAudience(projectId);
 
-    const audiences = await prisma.audience.findMany({
-      where: { projectId },
-      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-    });
+    const audiences = await drizzle.audienceRepo.listAudiences(
+      drizzle.db,
+      projectId,
+    );
 
     return c.json(ok({ audiences }));
   })
@@ -119,7 +119,7 @@ export const audiencesRoute = new Hono()
   // ----- GET /dashboard/audiences/:id -----
   .get("/:id", async (c) => {
     const id = c.req.param("id");
-    const audience = await prisma.audience.findUnique({ where: { id } });
+    const audience = await drizzle.audienceRepo.findAudienceById(drizzle.db, id);
     if (!audience) {
       throw new HTTPException(404, { message: "Audience not found" });
     }
@@ -131,7 +131,7 @@ export const audiencesRoute = new Hono()
   // ----- PATCH /dashboard/audiences/:id -----
   .patch("/:id", zValidator("json", updateAudienceBodySchema), async (c) => {
     const id = c.req.param("id");
-    const existing = await prisma.audience.findUnique({ where: { id } });
+    const existing = await drizzle.audienceRepo.findAudienceById(drizzle.db, id);
     if (!existing) {
       throw new HTTPException(404, { message: "Audience not found" });
     }
@@ -177,7 +177,7 @@ export const audiencesRoute = new Hono()
   // ----- DELETE /dashboard/audiences/:id -----
   .delete("/:id", async (c) => {
     const id = c.req.param("id");
-    const existing = await prisma.audience.findUnique({ where: { id } });
+    const existing = await drizzle.audienceRepo.findAudienceById(drizzle.db, id);
     if (!existing) {
       throw new HTTPException(404, { message: "Audience not found" });
     }
@@ -190,10 +190,10 @@ export const audiencesRoute = new Hono()
       });
     }
 
-    const inUse = await prisma.experiment.findFirst({
-      where: { audienceId: id },
-      select: { id: true },
-    });
+    const inUse = await drizzle.experimentRepo.findFirstExperimentByAudience(
+      drizzle.db,
+      id,
+    );
     if (inUse) {
       throw new HTTPException(409, {
         message: "Audience is in use by at least one experiment",

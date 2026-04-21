@@ -3,7 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import prisma, {
   MemberRole,
   OutgoingWebhookStatus,
-  type Prisma,
+  drizzle,
 } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
@@ -33,19 +33,13 @@ export const webhooksDashboardRoute = new Hono()
   const limit = Math.min(rawLimit ? parseInt(rawLimit, 10) || 50 : 50, 200);
   const offset = rawOffset ? parseInt(rawOffset, 10) || 0 : 0;
 
-  const where: Prisma.OutgoingWebhookWhereInput = {
-    projectId,
-    status: OutgoingWebhookStatus.DEAD,
-  };
-
   const [webhooks, total] = await Promise.all([
-    prisma.outgoingWebhook.findMany({
-      where,
-      orderBy: { deadAt: "desc" },
-      take: limit,
-      skip: offset,
+    drizzle.outgoingWebhookRepo.listDeadWebhooks(drizzle.db, {
+      projectId,
+      limit,
+      offset,
     }),
-    prisma.outgoingWebhook.count({ where }),
+    drizzle.outgoingWebhookRepo.countDeadWebhooks(drizzle.db, projectId),
   ]);
 
     return c.json(
@@ -65,9 +59,10 @@ export const webhooksDashboardRoute = new Hono()
   // it up again with a fresh attempt counter.
   .post("/:id/retry", async (c) => {
   const id = c.req.param("id");
-  const existing = await prisma.outgoingWebhook.findUnique({
-    where: { id },
-  });
+  const existing = await drizzle.outgoingWebhookRepo.findOutgoingWebhookById(
+    drizzle.db,
+    id,
+  );
   if (!existing) {
     throw new HTTPException(404, { message: "Webhook not found" });
   }
@@ -100,9 +95,10 @@ export const webhooksDashboardRoute = new Hono()
   // permanently removed from the active dead-letter view.
   .post("/:id/dismiss", async (c) => {
   const id = c.req.param("id");
-  const existing = await prisma.outgoingWebhook.findUnique({
-    where: { id },
-  });
+  const existing = await drizzle.outgoingWebhookRepo.findOutgoingWebhookById(
+    drizzle.db,
+    id,
+  );
   if (!existing) {
     throw new HTTPException(404, { message: "Webhook not found" });
   }
@@ -135,13 +131,11 @@ export const webhooksDashboardRoute = new Hono()
   await assertProjectAccess(projectId, user.id);
 
   const since = new Date(Date.now() - DEAD_ALERT_WINDOW_MS);
-  const deadCount = await prisma.outgoingWebhook.count({
-    where: {
-      projectId,
-      status: OutgoingWebhookStatus.DEAD,
-      deadAt: { gte: since },
-    },
-  });
+  const deadCount = await drizzle.outgoingWebhookRepo.countRecentDeadWebhooks(
+    drizzle.db,
+    projectId,
+    since,
+  );
 
     return c.json(
       ok({

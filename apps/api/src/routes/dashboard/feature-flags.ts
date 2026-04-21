@@ -2,7 +2,12 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, { FeatureFlagType, MemberRole, type Prisma } from "@rovenue/db";
+import prisma, {
+  FeatureFlagType,
+  MemberRole,
+  drizzle,
+  type Prisma,
+} from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { assertProjectAccess } from "../../lib/project-access";
@@ -92,17 +97,20 @@ export const featureFlagsRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id);
 
-    const flags = await prisma.featureFlag.findMany({
-      where: { projectId },
-      orderBy: { key: "asc" },
-    });
+    const flags = await drizzle.dashboardFeatureFlagRepo.listFeatureFlags(
+      drizzle.db,
+      projectId,
+    );
 
     return c.json(ok({ flags }));
   })
   // ----- GET /dashboard/feature-flags/:id -----
   .get("/:id", async (c) => {
     const id = c.req.param("id");
-    const flag = await prisma.featureFlag.findUnique({ where: { id } });
+    const flag = await drizzle.dashboardFeatureFlagRepo.findFeatureFlagById(
+      drizzle.db,
+      id,
+    );
     if (!flag) {
       throw new HTTPException(404, { message: "Feature flag not found" });
     }
@@ -114,7 +122,10 @@ export const featureFlagsRoute = new Hono()
   // ----- PATCH /dashboard/feature-flags/:id -----
   .patch("/:id", zValidator("json", updateFlagBodySchema), async (c) => {
     const id = c.req.param("id");
-    const existing = await prisma.featureFlag.findUnique({ where: { id } });
+    const existing = await drizzle.dashboardFeatureFlagRepo.findFeatureFlagById(
+      drizzle.db,
+      id,
+    );
     if (!existing) {
       throw new HTTPException(404, { message: "Feature flag not found" });
     }
@@ -158,7 +169,10 @@ export const featureFlagsRoute = new Hono()
   // ----- POST /dashboard/feature-flags/:id/toggle -----
   .post("/:id/toggle", async (c) => {
     const id = c.req.param("id");
-    const existing = await prisma.featureFlag.findUnique({ where: { id } });
+    const existing = await drizzle.dashboardFeatureFlagRepo.findFeatureFlagById(
+      drizzle.db,
+      id,
+    );
     if (!existing) {
       throw new HTTPException(404, { message: "Feature flag not found" });
     }
@@ -187,7 +201,10 @@ export const featureFlagsRoute = new Hono()
   // ----- DELETE /dashboard/feature-flags/:id -----
   .delete("/:id", async (c) => {
     const id = c.req.param("id");
-    const existing = await prisma.featureFlag.findUnique({ where: { id } });
+    const existing = await drizzle.dashboardFeatureFlagRepo.findFeatureFlagById(
+      drizzle.db,
+      id,
+    );
     if (!existing) {
       throw new HTTPException(404, { message: "Feature flag not found" });
     }

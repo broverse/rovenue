@@ -65,6 +65,41 @@ const { prismaMock, drizzleMock, authMock, flagMock, engineMock } = vi.hoisted((
       findFeatureFlagsByProject: vi.fn(async () => []),
       findAudiencesByProject: vi.fn(async () => []),
     },
+    dashboardFeatureFlagRepo: {
+      listFeatureFlags: vi.fn(async () => []),
+      findFeatureFlagById: vi.fn(async (_db: unknown, id: string) =>
+        prismaMock.featureFlag.findUnique({ where: { id } }),
+      ),
+    },
+    audienceRepo: {
+      findDefaultAudience: vi.fn(async () => null),
+      listAudiences: vi.fn(async () => []),
+      findAudienceById: vi.fn(async (_db: unknown, id: string) =>
+        prismaMock.audience.findUnique({ where: { id } }),
+      ),
+      findAudienceInProject: vi.fn(async (_db, _projectId, id) =>
+        prismaMock.audience.findFirst({ where: { id } }),
+      ),
+    },
+    experimentRepo: {
+      findRunningExperimentsByProject: vi.fn(async () => []),
+      findExperimentsByProject: vi.fn(async () => []),
+      findExperimentById: vi.fn(async (_db: unknown, id: string) =>
+        prismaMock.experiment.findUnique({ where: { id } }),
+      ),
+      findFirstExperimentByAudience: vi.fn(async (_db: unknown, audienceId: string) =>
+        prismaMock.experiment.findFirst({
+          where: { audienceId },
+          select: { id: true },
+        }),
+      ),
+    },
+    outgoingWebhookRepo: {
+      listDeadWebhooks: vi.fn(async () => []),
+      countDeadWebhooks: vi.fn(async () => 0),
+      countRecentDeadWebhooks: vi.fn(async () => 0),
+      findOutgoingWebhookById: vi.fn(async () => null),
+    },
     shadowRead: vi.fn(
       async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
         primary(),

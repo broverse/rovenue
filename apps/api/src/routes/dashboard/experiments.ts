@@ -7,6 +7,7 @@ import prisma, {
   FeatureFlagType,
   MemberRole,
   Prisma,
+  drizzle,
   type ExperimentType,
 } from "@rovenue/db";
 import {
@@ -125,10 +126,11 @@ export const experimentsRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(body.projectId, user.id, MemberRole.ADMIN);
 
-    const audience = await prisma.audience.findFirst({
-      where: { id: body.audienceId, projectId: body.projectId },
-      select: { id: true },
-    });
+    const audience = await drizzle.audienceRepo.findAudienceInProject(
+      drizzle.db,
+      body.projectId,
+      body.audienceId,
+    );
     if (!audience) {
       throw new HTTPException(400, {
         message: "audienceId does not belong to this project",
@@ -175,21 +177,24 @@ export const experimentsRoute = new Hono()
     const statusFilter = c.req.query("status");
     const typeFilter = c.req.query("type");
 
-    const experiments = await prisma.experiment.findMany({
-      where: {
+    const experiments = await drizzle.experimentRepo.findExperimentsByProject(
+      drizzle.db,
+      {
         projectId,
-        ...(statusFilter ? { status: statusFilter as ExperimentStatus } : {}),
-        ...(typeFilter ? { type: typeFilter as ExperimentType } : {}),
+        status: statusFilter as ExperimentStatus | undefined,
+        type: typeFilter as ExperimentType | undefined,
       },
-      orderBy: { createdAt: "desc" },
-    });
+    );
 
     return c.json(ok({ experiments }));
   })
   // ----- GET /dashboard/experiments/:id -----
   .get("/:id", async (c) => {
     const id = c.req.param("id");
-    const experiment = await prisma.experiment.findUnique({ where: { id } });
+    const experiment = await drizzle.experimentRepo.findExperimentById(
+      drizzle.db,
+      id,
+    );
     if (!experiment) {
       throw new HTTPException(404, { message: "Experiment not found" });
     }
@@ -224,7 +229,10 @@ export const experimentsRoute = new Hono()
   // exported schemas as single source of truth.
   .patch("/:id", async (c) => {
     const id = c.req.param("id");
-    const existing = await prisma.experiment.findUnique({ where: { id } });
+    const existing = await drizzle.experimentRepo.findExperimentById(
+      drizzle.db,
+      id,
+    );
     if (!existing) {
       throw new HTTPException(404, { message: "Experiment not found" });
     }
@@ -379,7 +387,10 @@ export const experimentsRoute = new Hono()
   // ----- POST /dashboard/experiments/:id/start -----
   .post("/:id/start", async (c) => {
     const id = c.req.param("id");
-    const existing = await prisma.experiment.findUnique({ where: { id } });
+    const existing = await drizzle.experimentRepo.findExperimentById(
+      drizzle.db,
+      id,
+    );
     if (!existing) {
       throw new HTTPException(404, { message: "Experiment not found" });
     }
@@ -417,7 +428,10 @@ export const experimentsRoute = new Hono()
   // ----- POST /dashboard/experiments/:id/pause -----
   .post("/:id/pause", async (c) => {
     const id = c.req.param("id");
-    const existing = await prisma.experiment.findUnique({ where: { id } });
+    const existing = await drizzle.experimentRepo.findExperimentById(
+      drizzle.db,
+      id,
+    );
     if (!existing) {
       throw new HTTPException(404, { message: "Experiment not found" });
     }
@@ -452,7 +466,10 @@ export const experimentsRoute = new Hono()
   // ----- POST /dashboard/experiments/:id/resume -----
   .post("/:id/resume", async (c) => {
     const id = c.req.param("id");
-    const existing = await prisma.experiment.findUnique({ where: { id } });
+    const existing = await drizzle.experimentRepo.findExperimentById(
+      drizzle.db,
+      id,
+    );
     if (!existing) {
       throw new HTTPException(404, { message: "Experiment not found" });
     }
@@ -487,7 +504,10 @@ export const experimentsRoute = new Hono()
   // ----- POST /dashboard/experiments/:id/stop -----
   .post("/:id/stop", async (c) => {
     const id = c.req.param("id");
-    const existing = await prisma.experiment.findUnique({ where: { id } });
+    const existing = await drizzle.experimentRepo.findExperimentById(
+      drizzle.db,
+      id,
+    );
     if (!existing) {
       throw new HTTPException(404, { message: "Experiment not found" });
     }
@@ -568,7 +588,10 @@ export const experimentsRoute = new Hono()
   // ----- GET /dashboard/experiments/:id/results -----
   .get("/:id/results", async (c) => {
     const id = c.req.param("id");
-    const experiment = await prisma.experiment.findUnique({ where: { id } });
+    const experiment = await drizzle.experimentRepo.findExperimentById(
+      drizzle.db,
+      id,
+    );
     if (!experiment) {
       throw new HTTPException(404, { message: "Experiment not found" });
     }
