@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   productGroups,
@@ -73,8 +73,63 @@ export async function findProductsByIds(
     .where(and(eq(products.projectId, projectId), inArray(products.id, ids)));
 }
 
-// NOTE: product lookup by (projectId, store, storeId) needs a
-// typed JSONB path selector that Drizzle doesn't expose cleanly
-// in v0.45. Webhook + receipt-verify callers stay on the Prisma
-// `storeIds: { path: [store], equals: storeId }` pattern for
-// now — those paths migrate in the webhook-cutover phase.
+export type ProductStore = "apple" | "google" | "stripe";
+
+/**
+ * Find a product by its per-store identifier. Mirrors
+ *   prisma.product.findFirst({
+ *     where: { projectId, storeIds: { path: [store], equals: storeId } }
+ *   })
+ *
+ * Uses a Postgres JSON operator (`->>`) with a SQL template —
+ * both `store` (key path) and `storeId` (value) are bound via
+ * sql.param so nothing reaches the query body as raw text. The
+ * `store` argument is constrained to a fixed string union so
+ * the key lookup can't be coerced into an arbitrary expression.
+ */
+export async function findProductByStoreId(
+  db: Db,
+  projectId: string,
+  store: ProductStore,
+  storeId: string,
+): Promise<Product | null> {
+  const rows = await db
+    .select()
+    .from(products)
+    .where(
+      and(
+        eq(products.projectId, projectId),
+        sql`${products.storeIds}->>${sql.param(store)} = ${sql.param(storeId)}`,
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * Receipt-verification lookup: match a product by either its
+ * canonical `identifier` OR its per-store id in the `storeIds`
+ * JSONB blob. Used by verifyAppleReceipt / verifyGoogleReceipt
+ * where the caller passes their own productId and we cross-
+ * reference against the platform transaction's productId.
+ */
+export async function findProductByIdentifierOrStoreId(
+  db: Db,
+  projectId: string,
+  identifier: string,
+  store: ProductStore,
+  storeId: string,
+): Promise<Product | null> {
+  const rows = await db
+    .select()
+    .from(products)
+    .where(
+      and(
+        eq(products.projectId, projectId),
+        sql`(${products.identifier} = ${sql.param(identifier)}
+             OR ${products.storeIds}->>${sql.param(store)} = ${sql.param(storeId)})`,
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}

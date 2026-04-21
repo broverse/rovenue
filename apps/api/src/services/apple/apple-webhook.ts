@@ -6,6 +6,7 @@ import prisma, {
   Store,
   WebhookEventStatus,
   WebhookSource,
+  drizzle,
 } from "@rovenue/db";
 import { env } from "../../lib/env";
 import { logger } from "../../lib/logger";
@@ -345,19 +346,17 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
   });
   await revokeAccessForTransaction(ctx);
 
-  const purchase = await prisma.purchase.findUnique({
-    where: {
-      store_storeTransactionId: {
-        store: Store.APP_STORE,
-        storeTransactionId: ctx.transaction.transactionId,
-      },
-    },
-  });
+  const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
+    drizzle.db,
+    Store.APP_STORE,
+    ctx.transaction.transactionId,
+  );
   if (!purchase) return;
 
-  const subscriber = await prisma.subscriber.findUnique({
-    where: { id: purchase.subscriberId },
-  });
+  const subscriber = await drizzle.subscriberRepo.findSubscriberById(
+    drizzle.db,
+    purchase.subscriberId,
+  );
   if (!subscriber) return;
 
   ctx.outcome.subscriberId = subscriber.id;
@@ -422,15 +421,19 @@ async function resolveSubscriber(ctx: DispatchContext) {
     });
   }
 
-  const existing = await prisma.purchase.findFirst({
-    where: {
+  const existingPurchase =
+    await drizzle.purchaseExtRepo.findPurchaseByOriginalTransaction(
+      drizzle.db,
       projectId,
-      originalTransactionId: transaction.originalTransactionId,
-    },
-    include: { subscriber: true },
-    orderBy: { createdAt: "desc" },
-  });
-  if (existing?.subscriber) return existing.subscriber;
+      transaction.originalTransactionId,
+    );
+  if (existingPurchase) {
+    const existingSubscriber = await drizzle.subscriberRepo.findSubscriberById(
+      drizzle.db,
+      existingPurchase.subscriberId,
+    );
+    if (existingSubscriber) return existingSubscriber;
+  }
 
   return prisma.subscriber.create({
     data: {
@@ -451,12 +454,12 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
   const { ctx, subscriberId, status, autoRenewStatus } = args;
   const tx = ctx.transaction;
 
-  const product = await prisma.product.findFirst({
-    where: {
-      projectId: ctx.projectId,
-      storeIds: { path: ["apple"], equals: tx.productId },
-    },
-  });
+  const product = await drizzle.productGroupRepo.findProductByStoreId(
+    drizzle.db,
+    ctx.projectId,
+    "apple",
+    tx.productId,
+  );
   if (!product) {
     throw new Error(
       `No product mapped for Apple productId ${tx.productId} in project ${ctx.projectId}`,
@@ -517,13 +520,12 @@ async function grantAccess(args: GrantAccessArgs): Promise<void> {
     : null;
 
   for (const key of product.entitlementKeys) {
-    const existing = await prisma.subscriberAccess.findFirst({
-      where: {
-        subscriberId: subscriber.id,
-        purchaseId: purchase.id,
-        entitlementKey: key,
-      },
-    });
+    const existing = await drizzle.accessRepo.findAccessByPurchaseAndKey(
+      drizzle.db,
+      subscriber.id,
+      purchase.id,
+      key,
+    );
     if (existing) {
       await prisma.subscriberAccess.update({
         where: { id: existing.id },
@@ -598,17 +600,18 @@ async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
 }
 
 async function emitCancellationEvent(ctx: DispatchContext): Promise<void> {
-  const purchase = await prisma.purchase.findFirst({
-    where: {
-      projectId: ctx.projectId,
-      originalTransactionId: ctx.transaction.originalTransactionId,
-    },
-  });
+  const purchase =
+    await drizzle.purchaseExtRepo.findPurchaseByOriginalTransaction(
+      drizzle.db,
+      ctx.projectId,
+      ctx.transaction.originalTransactionId,
+    );
   if (!purchase) return;
 
-  const subscriber = await prisma.subscriber.findUnique({
-    where: { id: purchase.subscriberId },
-  });
+  const subscriber = await drizzle.subscriberRepo.findSubscriberById(
+    drizzle.db,
+    purchase.subscriberId,
+  );
   if (!subscriber) return;
 
   ctx.outcome.subscriberId = subscriber.id;

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma from "@rovenue/db";
+import { drizzle } from "@rovenue/db";
 import { verifyGoogleWebhook } from "../../middleware/webhook-verify";
 import { enqueueWebhookEvent } from "../../services/webhook-processor";
 import { ok } from "../../lib/response";
@@ -34,10 +34,10 @@ export const googleWebhookRoute = new Hono().post(
   async (c) => {
     const projectId = c.req.param("projectId");
 
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { id: true },
-    });
+    const project = await drizzle.projectRepo.findProjectById(
+      drizzle.db,
+      projectId,
+    );
     if (!project) {
       throw new HTTPException(404, { message: "Project not found" });
     }

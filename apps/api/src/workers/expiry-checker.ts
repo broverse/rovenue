@@ -5,6 +5,7 @@ import prisma, {
   Prisma,
   PurchaseStatus,
   RevenueEventType,
+  drizzle,
   type Store,
 } from "@rovenue/db";
 import { env } from "../lib/env";
@@ -68,30 +69,18 @@ export async function runExpiryCheck(
 ): Promise<ExpiryCheckResult> {
   const lookback = new Date(now.getTime() - LOOKBACK_MS);
 
-  const candidates = (await prisma.purchase.findMany({
-    where: {
-      status: {
-        in: [
-          PurchaseStatus.ACTIVE,
-          PurchaseStatus.GRACE_PERIOD,
-          PurchaseStatus.TRIAL,
-        ],
-      },
-      expiresDate: { lt: now, gt: lookback },
+  const candidates = (await drizzle.purchaseExtRepo.findPurchasesNearExpiry(
+    drizzle.db,
+    {
+      now,
+      lookback,
+      statuses: [
+        PurchaseStatus.ACTIVE,
+        PurchaseStatus.GRACE_PERIOD,
+        PurchaseStatus.TRIAL,
+      ],
     },
-    select: {
-      id: true,
-      projectId: true,
-      subscriberId: true,
-      productId: true,
-      status: true,
-      store: true,
-      expiresDate: true,
-      gracePeriodExpires: true,
-      priceAmount: true,
-      priceCurrency: true,
-    },
-  })) as unknown as Candidate[];
+  )) as unknown as Candidate[];
 
   let expired = 0;
   let movedToGracePeriod = 0;
@@ -175,21 +164,20 @@ async function safeSyncAccess(subscriberId: string): Promise<void> {
 }
 
 async function enqueueExpirationWebhook(candidate: Candidate): Promise<void> {
-  const project = await prisma.project.findUnique({
-    where: { id: candidate.projectId },
-    select: { webhookUrl: true },
-  });
-  if (!project?.webhookUrl) return;
+  const webhookUrl = await drizzle.projectRepo.findProjectWebhookUrl(
+    drizzle.db,
+    candidate.projectId,
+  );
+  if (!webhookUrl) return;
 
-  const existing = await prisma.outgoingWebhook.findFirst({
-    where: {
-      projectId: candidate.projectId,
-      eventType: EXPIRATION_EVENT_TYPE,
-      purchaseId: candidate.id,
-      subscriberId: candidate.subscriberId,
-    },
-    select: { id: true },
-  });
+  const existing =
+    await drizzle.outgoingWebhookRepo.findRecentOutgoingByPurchaseAndType(
+      drizzle.db,
+      candidate.projectId,
+      candidate.subscriberId,
+      EXPIRATION_EVENT_TYPE,
+      candidate.id,
+    );
   if (existing) return;
 
   const payload: Prisma.InputJsonValue = {
@@ -206,7 +194,7 @@ async function enqueueExpirationWebhook(candidate: Candidate): Promise<void> {
       subscriberId: candidate.subscriberId,
       purchaseId: candidate.id,
       payload,
-      url: project.webhookUrl,
+      url: webhookUrl,
       status: OutgoingWebhookStatus.PENDING,
     },
   });
@@ -216,13 +204,13 @@ async function recordCancellationRevenue(
   candidate: Candidate,
   now: Date,
 ): Promise<void> {
-  const existing = await prisma.revenueEvent.findFirst({
-    where: {
-      purchaseId: candidate.id,
-      type: RevenueEventType.CANCELLATION,
-    },
-    select: { id: true },
-  });
+  const existing = await drizzle.revenueEventRepo.findRecentRevenueEvent(
+    drizzle.db,
+    candidate.subscriberId,
+    candidate.id,
+    RevenueEventType.CANCELLATION,
+    new Date(0),
+  );
   if (existing) return;
 
   const currency = candidate.priceCurrency ?? "USD";

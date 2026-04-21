@@ -8,6 +8,7 @@ import prisma, {
   Store,
   WebhookEventStatus,
   WebhookSource,
+  drizzle,
 } from "@rovenue/db";
 import { logger } from "../../lib/logger";
 import { convertToUsd } from "../fx";
@@ -239,14 +240,11 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
 async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
   const subscription = ctx.event.data.object as Stripe.Subscription;
 
-  const purchase = await prisma.purchase.findUnique({
-    where: {
-      store_storeTransactionId: {
-        store: Store.STRIPE,
-        storeTransactionId: subscription.id,
-      },
-    },
-  });
+  const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
+    drizzle.db,
+    Store.STRIPE,
+    subscription.id,
+  );
   if (!purchase) return;
 
   ctx.outcome.subscriberId = purchase.subscriberId;
@@ -296,14 +294,11 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
     return;
   }
 
-  const purchase = await prisma.purchase.findUnique({
-    where: {
-      store_storeTransactionId: {
-        store: Store.STRIPE,
-        storeTransactionId: subscriptionId,
-      },
-    },
-  });
+  const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
+    drizzle.db,
+    Store.STRIPE,
+    subscriptionId,
+  );
   if (!purchase) {
     log.warn("invoice.paid for unknown purchase", { subscriptionId });
     return;
@@ -396,14 +391,11 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
     return;
   }
 
-  const purchase = await prisma.purchase.findUnique({
-    where: {
-      store_storeTransactionId: {
-        store: Store.STRIPE,
-        storeTransactionId: subscriptionId,
-      },
-    },
-  });
+  const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
+    drizzle.db,
+    Store.STRIPE,
+    subscriptionId,
+  );
   if (!purchase) {
     log.warn("charge.refunded for unknown purchase", { subscriptionId });
     return;
@@ -518,12 +510,12 @@ async function upsertPurchaseFromSubscription(
   }
   const priceId = item.price.id;
 
-  const product = await prisma.product.findFirst({
-    where: {
-      projectId: ctx.projectId,
-      storeIds: { path: ["stripe"], equals: priceId },
-    },
-  });
+  const product = await drizzle.productGroupRepo.findProductByStoreId(
+    drizzle.db,
+    ctx.projectId,
+    "stripe",
+    priceId,
+  );
   if (!product) {
     throw new Error(
       `No product mapped for Stripe price ${priceId} in project ${ctx.projectId}`,
@@ -594,13 +586,12 @@ interface GrantAccessArgs {
 
 async function grantAccess(args: GrantAccessArgs): Promise<void> {
   for (const key of args.entitlementKeys) {
-    const existing = await prisma.subscriberAccess.findFirst({
-      where: {
-        subscriberId: args.subscriberId,
-        purchaseId: args.purchaseId,
-        entitlementKey: key,
-      },
-    });
+    const existing = await drizzle.accessRepo.findAccessByPurchaseAndKey(
+      drizzle.db,
+      args.subscriberId,
+      args.purchaseId,
+      key,
+    );
     if (existing) {
       await prisma.subscriberAccess.update({
         where: { id: existing.id },

@@ -5,6 +5,7 @@ import prisma, {
   CreditLedgerType,
   OutgoingWebhookStatus,
   ProductType,
+  drizzle,
   type Prisma as PrismaTypes,
 } from "@rovenue/db";
 import { env } from "../lib/env";
@@ -233,26 +234,22 @@ async function maybeCreditConsumablePurchase(
   subscriberId: string,
   purchaseId: string,
 ): Promise<void> {
-  const purchase = await prisma.purchase.findUnique({
-    where: { id: purchaseId },
-    include: {
-      product: { select: { type: true, creditAmount: true } },
-    },
-  });
+  const purchase = await drizzle.purchaseExtRepo.findPurchaseWithCreditInfo(
+    drizzle.db,
+    purchaseId,
+  );
   if (!purchase) return;
   if (purchase.product.type !== ProductType.CONSUMABLE) return;
   if (!purchase.product.creditAmount || purchase.product.creditAmount <= 0) {
     return;
   }
 
-  const existing = await prisma.creditLedger.findFirst({
-    where: {
+  const existing =
+    await drizzle.creditLedgerRepo.findExistingPurchaseCredit(
+      drizzle.db,
       subscriberId,
-      referenceType: "purchase",
-      referenceId: purchaseId,
-    },
-    select: { id: true },
-  });
+      purchaseId,
+    );
   if (existing) return;
 
   await addCredits({
@@ -281,22 +278,21 @@ interface EnqueueOutgoingWebhookArgs {
 async function enqueueOutgoingWebhook(
   args: EnqueueOutgoingWebhookArgs,
 ): Promise<void> {
-  const project = await prisma.project.findUnique({
-    where: { id: args.projectId },
-    select: { webhookUrl: true },
-  });
-  if (!project?.webhookUrl) return;
+  const webhookUrl = await drizzle.projectRepo.findProjectWebhookUrl(
+    drizzle.db,
+    args.projectId,
+  );
+  if (!webhookUrl) return;
 
   if (args.purchaseId) {
-    const existing = await prisma.outgoingWebhook.findFirst({
-      where: {
-        projectId: args.projectId,
-        eventType: args.eventType,
-        purchaseId: args.purchaseId,
-        subscriberId: args.subscriberId,
-      },
-      select: { id: true },
-    });
+    const existing =
+      await drizzle.outgoingWebhookRepo.findRecentOutgoingByPurchaseAndType(
+        drizzle.db,
+        args.projectId,
+        args.subscriberId,
+        args.eventType,
+        args.purchaseId,
+      );
     if (existing) return;
   }
 
@@ -314,7 +310,7 @@ async function enqueueOutgoingWebhook(
       subscriberId: args.subscriberId,
       purchaseId: args.purchaseId,
       payload,
-      url: project.webhookUrl,
+      url: webhookUrl,
       status: OutgoingWebhookStatus.PENDING,
     },
   });

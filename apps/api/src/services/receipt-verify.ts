@@ -4,6 +4,7 @@ import prisma, {
   ProductType,
   PurchaseStatus,
   Store,
+  drizzle,
   type Product,
   type Purchase,
   type Subscriber,
@@ -133,15 +134,13 @@ async function verifyAppleReceipt(
     );
   }
 
-  const product = await prisma.product.findFirst({
-    where: {
-      projectId: args.projectId,
-      OR: [
-        { identifier: args.productId },
-        { storeIds: { path: ["apple"], equals: transaction.productId } },
-      ],
-    },
-  });
+  const product = (await drizzle.productGroupRepo.findProductByIdentifierOrStoreId(
+    drizzle.db,
+    args.projectId,
+    args.productId,
+    "apple",
+    transaction.productId,
+  )) as Product | null;
   if (!product) {
     throw new HTTPException(404, {
       message: `Product not found for Apple productId ${transaction.productId}`,
@@ -228,15 +227,13 @@ async function verifyGoogleReceipt(
 ): Promise<VerifyReceiptResult> {
   const verifyConfig = await loadGoogleConfig(args.projectId);
 
-  const product = await prisma.product.findFirst({
-    where: {
-      projectId: args.projectId,
-      OR: [
-        { identifier: args.productId },
-        { storeIds: { path: ["google"], equals: args.productId } },
-      ],
-    },
-  });
+  const product = (await drizzle.productGroupRepo.findProductByIdentifierOrStoreId(
+    drizzle.db,
+    args.projectId,
+    args.productId,
+    "google",
+    args.productId,
+  )) as Product | null;
   if (!product) {
     throw new HTTPException(404, {
       message: `Product not found: ${args.productId}`,

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, syncAccessMock } = vi.hoisted(() => {
+const { prismaMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
   const purchase = {
     findMany: vi.fn(),
     updateMany: vi.fn(),
@@ -20,14 +20,81 @@ const { prismaMock, syncAccessMock } = vi.hoisted(() => {
     findFirst: vi.fn(),
     create: vi.fn(),
   };
+  const prismaMock = { purchase, project, outgoingWebhook, revenueEvent };
+
+  // Drizzle repo stubs delegate to the existing prisma finders so
+  // Phase 7 cutover doesn't force a rewrite of the test setup.
+  const drizzleMock = {
+    db: {} as unknown,
+    purchaseExtRepo: {
+      findPurchasesNearExpiry: vi.fn(
+        async (
+          _db: unknown,
+          args: { now: Date; lookback: Date; statuses: string[] },
+        ) => {
+          const rows = await prismaMock.purchase.findMany({
+            where: {
+              status: { in: args.statuses },
+              expiresDate: { lt: args.now, gt: args.lookback },
+            },
+          });
+          return Array.isArray(rows) ? rows : [];
+        },
+      ),
+    },
+    projectRepo: {
+      findProjectWebhookUrl: vi.fn(async (_db: unknown, id: string) => {
+        const row = await prismaMock.project.findUnique({
+          where: { id },
+          select: { webhookUrl: true },
+        });
+        return row?.webhookUrl ?? null;
+      }),
+    },
+    outgoingWebhookRepo: {
+      findRecentOutgoingByPurchaseAndType: vi.fn(
+        async (
+          _db: unknown,
+          projectId: string,
+          subscriberId: string,
+          eventType: string,
+          purchaseId: string | null,
+        ) =>
+          prismaMock.outgoingWebhook.findFirst({
+            where: {
+              projectId,
+              eventType,
+              purchaseId,
+              subscriberId,
+            },
+          }),
+      ),
+    },
+    revenueEventRepo: {
+      findRecentRevenueEvent: vi.fn(
+        async (
+          _db: unknown,
+          subscriberId: string,
+          purchaseId: string,
+          type: string,
+        ) =>
+          prismaMock.revenueEvent.findFirst({
+            where: { subscriberId, purchaseId, type },
+          }),
+      ),
+    },
+  };
+
   return {
-    prismaMock: { purchase, project, outgoingWebhook, revenueEvent },
+    prismaMock,
+    drizzleMock,
     syncAccessMock: vi.fn(async () => undefined),
   };
 });
 
 vi.mock("@rovenue/db", () => ({
   default: prismaMock,
+  drizzle: drizzleMock,
   PurchaseStatus: {
     TRIAL: "TRIAL",
     ACTIVE: "ACTIVE",

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type Stripe from "stripe";
-import prisma from "@rovenue/db";
+import { drizzle } from "@rovenue/db";
 import { verifyStripeWebhook } from "../../middleware/webhook-verify";
 import { type HandleStripeNotificationResult } from "../../services/stripe/stripe-webhook";
 import { enqueueWebhookEvent } from "../../services/webhook-processor";
@@ -24,10 +24,10 @@ export const stripeWebhookRoute = new Hono().post(
   async (c) => {
     const projectId = c.req.param("projectId");
 
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { id: true },
-    });
+    const project = await drizzle.projectRepo.findProjectById(
+      drizzle.db,
+      projectId,
+    );
     if (!project) {
       throw new HTTPException(404, { message: "Project not found" });
     }

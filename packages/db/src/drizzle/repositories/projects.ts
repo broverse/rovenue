@@ -32,6 +32,19 @@ export async function findProjectById(
   return rows[0] ?? null;
 }
 
+/** Scoped read for webhook-processor — only webhookUrl. */
+export async function findProjectWebhookUrl(
+  db: Db,
+  id: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ webhookUrl: projects.webhookUrl })
+    .from(projects)
+    .where(eq(projects.id, id))
+    .limit(1);
+  return rows[0]?.webhookUrl ?? null;
+}
+
 export interface ProjectCredentialsFields {
   appleCredentials: unknown;
   googleCredentials: unknown;

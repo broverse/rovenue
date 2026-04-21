@@ -1,10 +1,35 @@
 import { and, count, desc, eq, gte } from "drizzle-orm";
 import type { Db } from "../client";
-import {
-  outgoingWebhookStatus,
-  outgoingWebhooks,
-  type OutgoingWebhook,
-} from "../schema";
+import { outgoingWebhooks, type OutgoingWebhook } from "../schema";
+
+/**
+ * Dedup check: has this subscriber already been notified for
+ * this event type + purchase? Used by webhook-processor to avoid
+ * fan-out duplicates when a store retries the same notification.
+ */
+export async function findRecentOutgoingByPurchaseAndType(
+  db: Db,
+  projectId: string,
+  subscriberId: string,
+  eventType: string,
+  purchaseId: string | null,
+): Promise<OutgoingWebhook | null> {
+  const clauses = [
+    eq(outgoingWebhooks.projectId, projectId),
+    eq(outgoingWebhooks.subscriberId, subscriberId),
+    eq(outgoingWebhooks.eventType, eventType),
+  ];
+  if (purchaseId !== null) {
+    clauses.push(eq(outgoingWebhooks.purchaseId, purchaseId));
+  }
+  const rows = await db
+    .select()
+    .from(outgoingWebhooks)
+    .where(and(...clauses))
+    .orderBy(desc(outgoingWebhooks.createdAt))
+    .limit(1);
+  return rows[0] ?? null;
+}
 
 // =============================================================
 // Outgoing webhook reads — Drizzle repository
