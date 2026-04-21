@@ -91,7 +91,10 @@ vi.mock("../src/lib/redis", () => ({ redis: redisMock }));
 // =============================================================
 
 import { dashboardUserRateLimit, rateLimit } from "../src/middleware/rate-limit";
-import { __resetInsurance } from "../src/middleware/insurance-rate-limit";
+import {
+  __resetInsurance,
+  insuranceConsume,
+} from "../src/middleware/insurance-rate-limit";
 
 function buildApp(middlewareArgs: {
   windowMs: number;
@@ -278,7 +281,31 @@ describe("rateLimit middleware", () => {
     }
     const capped = await app.request("/");
     expect(capped.status).toBe(429);
+  });
 
-    setRedisDown(false);
+  test("insurance limiter sweeps stale buckets past threshold", () => {
+    __resetInsurance();
+    const originalNow = Date.now;
+    try {
+      // Seed 10_001 distinct keys at t=0 — past the sweep threshold.
+      let t = 1_000_000;
+      Date.now = () => t;
+      for (let i = 0; i < 10_001; i++) {
+        insuranceConsume(`k_${i}`);
+      }
+
+      // Jump forward past the window — these buckets are now stale.
+      t = 1_000_000 + 120_000;
+      // Single consume triggers the sweep because size >= threshold.
+      insuranceConsume("trigger");
+
+      // Probe a few seeded keys: they should be gone (fresh bucket
+      // returns true because it's a first-ever call for the key).
+      expect(insuranceConsume("k_0")).toBe(true);
+      expect(insuranceConsume("k_5000")).toBe(true);
+    } finally {
+      Date.now = originalNow;
+      __resetInsurance();
+    }
   });
 });

@@ -30,6 +30,25 @@ function clientIp(c: Context): string {
   );
 }
 
+function rateLimitedResponse(
+  retryAfterSeconds: number,
+  extraHeaders: Record<string, string> = {},
+): Response {
+  return new Response(
+    JSON.stringify({
+      error: { code: "RATE_LIMITED", message: "Too many requests" },
+    }),
+    {
+      status: 429,
+      headers: {
+        "content-type": "application/json",
+        [RETRY_AFTER_HEADER]: String(retryAfterSeconds),
+        ...extraHeaders,
+      },
+    },
+  );
+}
+
 // =============================================================
 // Sliding-window Redis limiter backed by a sorted set.
 //
@@ -75,21 +94,11 @@ export function rateLimit(options: RateLimitOptions): MiddlewareHandler {
 
       if (count > options.max) {
         const retryAfter = Math.max(1, Math.ceil((resetMs - now) / 1000));
-        const response = new Response(
-          JSON.stringify({
-            error: { code: "RATE_LIMITED", message: "Too many requests" },
-          }),
-          {
-            status: 429,
-            headers: {
-              "content-type": "application/json",
-              [HEADER.X_RATE_LIMIT_LIMIT]: String(options.max),
-              [HEADER.X_RATE_LIMIT_REMAINING]: "0",
-              [RESET_HEADER]: String(resetSeconds),
-              [RETRY_AFTER_HEADER]: String(retryAfter),
-            },
-          },
-        );
+        const response = rateLimitedResponse(retryAfter, {
+          [HEADER.X_RATE_LIMIT_LIMIT]: String(options.max),
+          [HEADER.X_RATE_LIMIT_REMAINING]: "0",
+          [RESET_HEADER]: String(resetSeconds),
+        });
         throw new HTTPException(429, { res: response });
       }
     } catch (err) {
@@ -99,18 +108,7 @@ export function rateLimit(options: RateLimitOptions): MiddlewareHandler {
       });
       const { insuranceConsume } = await import("./insurance-rate-limit");
       if (!insuranceConsume(key)) {
-        const response = new Response(
-          JSON.stringify({
-            error: { code: "RATE_LIMITED", message: "Too many requests" },
-          }),
-          {
-            status: 429,
-            headers: {
-              "content-type": "application/json",
-              [RETRY_AFTER_HEADER]: "60",
-            },
-          },
-        );
+        const response = rateLimitedResponse(60);
         throw new HTTPException(429, { res: response });
       }
     }
