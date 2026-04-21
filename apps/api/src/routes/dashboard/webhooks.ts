@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import prisma, {
+import {
   MemberRole,
   OutgoingWebhookStatus,
   drizzle,
@@ -75,18 +75,13 @@ export const webhooksDashboardRoute = new Hono()
     });
   }
 
-  const webhook = await prisma.outgoingWebhook.update({
-    where: { id },
-    data: {
-      status: OutgoingWebhookStatus.PENDING,
-      attempts: 0,
-      nextRetryAt: null,
-      deadAt: null,
-      httpStatus: null,
-      responseBody: null,
-      lastErrorMessage: null,
-    },
-  });
+  const webhook = await drizzle.outgoingWebhookRepo.resetWebhookForRetry(
+    drizzle.db,
+    id,
+  );
+  if (!webhook) {
+    throw new HTTPException(404, { message: "Webhook not found" });
+  }
 
     return c.json(ok({ webhook }));
   })
@@ -111,10 +106,13 @@ export const webhooksDashboardRoute = new Hono()
     });
   }
 
-    const webhook = await prisma.outgoingWebhook.update({
-      where: { id },
-      data: { status: OutgoingWebhookStatus.DISMISSED },
-    });
+    const webhook = await drizzle.outgoingWebhookRepo.markWebhookDismissed(
+      drizzle.db,
+      id,
+    );
+    if (!webhook) {
+      throw new HTTPException(404, { message: "Webhook not found" });
+    }
 
     return c.json(ok({ webhook }));
   })

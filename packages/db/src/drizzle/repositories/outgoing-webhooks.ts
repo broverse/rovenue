@@ -2,6 +2,9 @@ import { and, count, desc, eq, gte } from "drizzle-orm";
 import type { Db } from "../client";
 import { outgoingWebhooks, type OutgoingWebhook } from "../schema";
 
+// DB or Drizzle tx handle — writes accept either.
+type DbOrTx = Db;
+
 /**
  * Dedup check: has this subscriber already been notified for
  * this event type + purchase? Used by webhook-processor to avoid
@@ -105,5 +108,51 @@ export async function findOutgoingWebhookById(
     .from(outgoingWebhooks)
     .where(eq(outgoingWebhooks.id, id))
     .limit(1);
+  return rows[0] ?? null;
+}
+
+// =============================================================
+// Writes
+// =============================================================
+
+/**
+ * Reset a DEAD webhook back to PENDING — used by the dashboard
+ * retry endpoint. Clears every field that a previous attempt
+ * could have populated so the worker starts from a clean slate.
+ */
+export async function resetWebhookForRetry(
+  db: DbOrTx,
+  id: string,
+): Promise<OutgoingWebhook | null> {
+  const rows = await db
+    .update(outgoingWebhooks)
+    .set({
+      status: "PENDING",
+      attempts: 0,
+      nextRetryAt: null,
+      deadAt: null,
+      httpStatus: null,
+      responseBody: null,
+      lastErrorMessage: null,
+    })
+    .where(eq(outgoingWebhooks.id, id))
+    .returning();
+  return rows[0] ?? null;
+}
+
+/**
+ * Mark a DEAD webhook as DISMISSED. Operators dismiss a dead
+ * delivery when they've handled the underlying failure out of band
+ * (e.g. redelivered manually) and want the banner cleared.
+ */
+export async function markWebhookDismissed(
+  db: DbOrTx,
+  id: string,
+): Promise<OutgoingWebhook | null> {
+  const rows = await db
+    .update(outgoingWebhooks)
+    .set({ status: "DISMISSED" })
+    .where(eq(outgoingWebhooks.id, id))
+    .returning();
   return rows[0] ?? null;
 }
