@@ -91,6 +91,7 @@ vi.mock("../src/lib/redis", () => ({ redis: redisMock }));
 // =============================================================
 
 import { dashboardUserRateLimit, rateLimit } from "../src/middleware/rate-limit";
+import { __resetInsurance } from "../src/middleware/insurance-rate-limit";
 
 function buildApp(middlewareArgs: {
   windowMs: number;
@@ -114,6 +115,7 @@ function buildApp(middlewareArgs: {
 beforeEach(() => {
   __store.clear();
   setRedisDown(false);
+  __resetInsurance();
   vi.restoreAllMocks();
 });
 
@@ -259,5 +261,24 @@ describe("rateLimit middleware", () => {
     // user-b untouched
     const other = await app.request("/", { headers: { "x-test-user": "user-b" } });
     expect(other.status).toBe(200);
+  });
+
+  test("insurance limiter caps requests when redis is down", async () => {
+    setRedisDown(true);
+
+    const app = new Hono()
+      .use("*", rateLimit({ windowMs: 60_000, max: 100, keyPrefix: "rl:test" }))
+      .get("/", (c) => c.json({ ok: true }));
+
+    // Insurance cap is 50/min/key. With Redis dead, the 51st request
+    // hits the insurance 429.
+    for (let i = 0; i < 50; i++) {
+      const r = await app.request("/");
+      expect(r.status).toBe(200);
+    }
+    const capped = await app.request("/");
+    expect(capped.status).toBe(429);
+
+    setRedisDown(false);
   });
 });

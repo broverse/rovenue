@@ -94,9 +94,25 @@ export function rateLimit(options: RateLimitOptions): MiddlewareHandler {
       }
     } catch (err) {
       if (err instanceof HTTPException) throw err;
-      log.warn("redis error, failing open", {
+      log.warn("redis error, falling back to insurance limiter", {
         err: err instanceof Error ? err.message : String(err),
       });
+      const { insuranceConsume } = await import("./insurance-rate-limit");
+      if (!insuranceConsume(key)) {
+        const response = new Response(
+          JSON.stringify({
+            error: { code: "RATE_LIMITED", message: "Too many requests" },
+          }),
+          {
+            status: 429,
+            headers: {
+              "content-type": "application/json",
+              [RETRY_AFTER_HEADER]: "60",
+            },
+          },
+        );
+        throw new HTTPException(429, { res: response });
+      }
     }
 
     await next();
