@@ -119,6 +119,30 @@ export async function updatePurchasesByOriginalTransaction(
 }
 
 /**
+ * Partial update keyed on (store, storeTransactionId). Both
+ * Stripe's invoice.payment_failed and Google's voided-purchase
+ * paths need to transition a row without first looking it up by
+ * id.
+ */
+export async function updatePurchaseByStoreTransaction(
+  db: DbOrTx,
+  store: Store,
+  storeTransactionId: string,
+  patch: UpdatePurchaseFields,
+): Promise<void> {
+  if (Object.keys(patch).length === 0) return;
+  await db
+    .update(purchases)
+    .set(patch)
+    .where(
+      and(
+        eq(purchases.store, store),
+        eq(purchases.storeTransactionId, storeTransactionId),
+      ),
+    );
+}
+
+/**
  * Compare-and-swap status flip for the expiry worker.
  * `WHERE id = $1 AND status = $2` ensures two concurrent workers
  * can't both transition the same row — the second one sees 0 rows

@@ -1,8 +1,7 @@
 import Stripe from "stripe";
 import { HTTPException } from "hono/http-exception";
-import prisma, {
+import {
   Environment,
-  Prisma,
   PurchaseStatus,
   RevenueEventType,
   Store,
@@ -109,14 +108,9 @@ export async function processStripeEvent(
 ): Promise<HandleStripeNotificationResult> {
   const { event, projectId, stripe } = opts;
 
-  const webhookEvent = await prisma.webhookEvent.upsert({
-    where: {
-      source_storeEventId: {
-        source: WebhookSource.STRIPE,
-        storeEventId: event.id,
-      },
-    },
-    create: {
+  const webhookEvent = await drizzle.webhookEventRepo.upsertWebhookEvent(
+    drizzle.db,
+    {
       projectId,
       source: WebhookSource.STRIPE,
       eventType: event.type,
@@ -124,8 +118,7 @@ export async function processStripeEvent(
       payload: JSON.parse(JSON.stringify(event)),
       status: WebhookEventStatus.PROCESSING,
     },
-    update: {},
-  });
+  );
 
   if (webhookEvent.status === WebhookEventStatus.PROCESSED) {
     log.info("duplicate event, skipping", {
@@ -139,15 +132,16 @@ export async function processStripeEvent(
     const outcome: StripeDispatchOutcome = {};
     await dispatch({ projectId, event, stripe, outcome });
 
-    await prisma.webhookEvent.update({
-      where: { id: webhookEvent.id },
-      data: {
+    await drizzle.webhookEventRepo.updateWebhookEvent(
+      drizzle.db,
+      webhookEvent.id,
+      {
         status: WebhookEventStatus.PROCESSED,
         processedAt: new Date(),
         subscriberId: outcome.subscriberId,
         purchaseId: outcome.purchaseId,
       },
-    });
+    );
 
     return {
       status: "processed",
@@ -158,14 +152,15 @@ export async function processStripeEvent(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await prisma.webhookEvent.update({
-      where: { id: webhookEvent.id },
-      data: {
+    await drizzle.webhookEventRepo.updateWebhookEvent(
+      drizzle.db,
+      webhookEvent.id,
+      {
         status: WebhookEventStatus.FAILED,
         errorMessage: message,
-        retryCount: { increment: 1 },
+        incrementRetryCount: true,
       },
-    });
+    );
     log.error("event processing failed", {
       id: event.id,
       type: event.type,
@@ -230,10 +225,7 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
       expiresDate: purchase.expiresDate,
     });
   } else {
-    await prisma.subscriberAccess.updateMany({
-      where: { purchaseId: purchase.id },
-      data: { isActive: false },
-    });
+    await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);
   }
 }
 
@@ -250,35 +242,27 @@ async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
   ctx.outcome.subscriberId = purchase.subscriberId;
   ctx.outcome.purchaseId = purchase.id;
 
-  await prisma.purchase.update({
-    where: { id: purchase.id },
-    data: {
-      status: PurchaseStatus.EXPIRED,
-      cancellationDate: subscription.canceled_at
-        ? new Date(subscription.canceled_at * 1000)
-        : new Date(),
-      autoRenewStatus: false,
-    },
+  await drizzle.purchaseRepo.updatePurchase(drizzle.db, purchase.id, {
+    status: PurchaseStatus.EXPIRED,
+    cancellationDate: subscription.canceled_at
+      ? new Date(subscription.canceled_at * 1000)
+      : new Date(),
+    autoRenewStatus: false,
   });
 
-  await prisma.subscriberAccess.updateMany({
-    where: { purchaseId: purchase.id },
-    data: { isActive: false },
-  });
+  await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);
 
-  await prisma.revenueEvent.create({
-    data: {
-      projectId: ctx.projectId,
-      subscriberId: purchase.subscriberId,
-      purchaseId: purchase.id,
-      productId: purchase.productId,
-      type: RevenueEventType.CANCELLATION,
-      amount: new Prisma.Decimal(0),
-      currency: purchase.priceCurrency ?? "USD",
-      amountUsd: new Prisma.Decimal(0),
-      store: Store.STRIPE,
-      eventDate: new Date(),
-    },
+  await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+    projectId: ctx.projectId,
+    subscriberId: purchase.subscriberId,
+    purchaseId: purchase.id,
+    productId: purchase.productId,
+    type: RevenueEventType.CANCELLATION,
+    amount: "0",
+    currency: purchase.priceCurrency ?? "USD",
+    amountUsd: "0",
+    store: Store.STRIPE,
+    eventDate: new Date(),
   });
 }
 
@@ -323,9 +307,8 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
   }
 
   if (purchase.isTrial) {
-    await prisma.purchase.update({
-      where: { id: purchase.id },
-      data: { isTrial: false },
+    await drizzle.purchaseRepo.updatePurchase(drizzle.db, purchase.id, {
+      isTrial: false,
     });
   }
 
@@ -333,19 +316,17 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
     ? new Date(invoice.created * 1000)
     : new Date();
 
-  await prisma.revenueEvent.create({
-    data: {
-      projectId: ctx.projectId,
-      subscriberId: purchase.subscriberId,
-      purchaseId: purchase.id,
-      productId: purchase.productId,
-      type,
-      amount: new Prisma.Decimal(amount),
-      currency,
-      amountUsd: new Prisma.Decimal(amountUsd),
-      store: Store.STRIPE,
-      eventDate,
-    },
+  await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+    projectId: ctx.projectId,
+    subscriberId: purchase.subscriberId,
+    purchaseId: purchase.id,
+    productId: purchase.productId,
+    type,
+    amount: amount.toString(),
+    currency,
+    amountUsd: amountUsd.toString(),
+    store: Store.STRIPE,
+    eventDate,
   });
 }
 
@@ -359,13 +340,12 @@ async function applyInvoicePaymentFailed(
       : invoice.subscription?.id;
   if (!subscriptionId) return;
 
-  await prisma.purchase.updateMany({
-    where: {
-      store: Store.STRIPE,
-      storeTransactionId: subscriptionId,
-    },
-    data: { status: PurchaseStatus.GRACE_PERIOD },
-  });
+  await drizzle.purchaseRepo.updatePurchaseByStoreTransaction(
+    drizzle.db,
+    Store.STRIPE,
+    subscriptionId,
+    { status: PurchaseStatus.GRACE_PERIOD },
+  );
 
   log.info("moved purchase to grace period after invoice payment failure", {
     subscriptionId,
@@ -404,37 +384,29 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
   ctx.outcome.subscriberId = purchase.subscriberId;
   ctx.outcome.purchaseId = purchase.id;
 
-  await prisma.purchase.update({
-    where: { id: purchase.id },
-    data: {
-      status: PurchaseStatus.REFUNDED,
-      refundDate: new Date(),
-    },
+  await drizzle.purchaseRepo.updatePurchase(drizzle.db, purchase.id, {
+    status: PurchaseStatus.REFUNDED,
+    refundDate: new Date(),
   });
 
-  await prisma.subscriberAccess.updateMany({
-    where: { purchaseId: purchase.id },
-    data: { isActive: false },
-  });
+  await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);
 
   const amount = (charge.amount_refunded ?? 0) / 100;
   const currency =
     charge.currency?.toUpperCase() ?? purchase.priceCurrency ?? "USD";
   const amountUsd = await convertToUsd(-amount, currency);
 
-  await prisma.revenueEvent.create({
-    data: {
-      projectId: ctx.projectId,
-      subscriberId: purchase.subscriberId,
-      purchaseId: purchase.id,
-      productId: purchase.productId,
-      type: RevenueEventType.REFUND,
-      amount: new Prisma.Decimal(-amount),
-      currency,
-      amountUsd: new Prisma.Decimal(amountUsd),
-      store: Store.STRIPE,
-      eventDate: new Date(),
-    },
+  await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+    projectId: ctx.projectId,
+    subscriberId: purchase.subscriberId,
+    purchaseId: purchase.id,
+    productId: purchase.productId,
+    type: RevenueEventType.REFUND,
+    amount: (-amount).toString(),
+    currency,
+    amountUsd: amountUsd.toString(),
+    store: Store.STRIPE,
+    eventDate: new Date(),
   });
 }
 
@@ -485,16 +457,10 @@ async function resolveSubscriber(
     subscription.metadata?.appUserId ??
     `stripe:${customerId}`;
 
-  return prisma.subscriber.upsert({
-    where: {
-      projectId_appUserId: { projectId: ctx.projectId, appUserId },
-    },
-    update: { lastSeenAt: new Date() },
-    create: {
-      projectId: ctx.projectId,
-      appUserId,
-      attributes: { stripe_customer_id: customerId },
-    },
+  return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
+    projectId: ctx.projectId,
+    appUserId,
+    createAttributes: { stripe_customer_id: customerId },
   });
 }
 
@@ -536,13 +502,9 @@ async function upsertPurchaseFromSubscription(
     ? new Date(subscription.canceled_at * 1000)
     : null;
 
-  const purchase = await prisma.purchase.upsert({
-    where: {
-      store_storeTransactionId: {
-        store: Store.STRIPE,
-        storeTransactionId: subscription.id,
-      },
-    },
+  const purchase = await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
+    store: Store.STRIPE,
+    storeTransactionId: subscription.id,
     create: {
       projectId: ctx.projectId,
       subscriberId,
@@ -556,7 +518,8 @@ async function upsertPurchaseFromSubscription(
       originalPurchaseDate: startDate,
       expiresDate,
       environment: Environment.PRODUCTION,
-      priceAmount,
+      // Drizzle decimal columns round-trip as strings.
+      priceAmount: priceAmount != null ? priceAmount.toString() : null,
       priceCurrency,
       autoRenewStatus: !subscription.cancel_at_period_end,
       cancellationDate,
@@ -566,8 +529,8 @@ async function upsertPurchaseFromSubscription(
       status,
       isTrial,
       expiresDate,
-      priceAmount: priceAmount ?? undefined,
-      priceCurrency: priceCurrency ?? undefined,
+      ...(priceAmount != null && { priceAmount: priceAmount.toString() }),
+      ...(priceCurrency != null && { priceCurrency }),
       autoRenewStatus: !subscription.cancel_at_period_end,
       cancellationDate,
       verifiedAt: new Date(),
@@ -593,20 +556,20 @@ async function grantAccess(args: GrantAccessArgs): Promise<void> {
       key,
     );
     if (existing) {
-      await prisma.subscriberAccess.update({
-        where: { id: existing.id },
-        data: { isActive: true, expiresDate: args.expiresDate },
-      });
+      await drizzle.accessRepo.setAccessActiveAndExpiry(
+        drizzle.db,
+        existing.id,
+        true,
+        args.expiresDate,
+      );
     } else {
-      await prisma.subscriberAccess.create({
-        data: {
-          subscriberId: args.subscriberId,
-          purchaseId: args.purchaseId,
-          entitlementKey: key,
-          isActive: true,
-          expiresDate: args.expiresDate,
-          store: Store.STRIPE,
-        },
+      await drizzle.accessRepo.createAccess(drizzle.db, {
+        subscriberId: args.subscriberId,
+        purchaseId: args.purchaseId,
+        entitlementKey: key,
+        isActive: true,
+        expiresDate: args.expiresDate,
+        store: Store.STRIPE,
       });
     }
   }
