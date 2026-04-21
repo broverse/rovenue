@@ -37,8 +37,13 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
   // mockResolvedValue(...)` calls keep driving the test. Project
   // credential loaders go through findProjectCredentials; tests
   // that need to exercise that path override it explicitly.
+  const drizzleDb = {
+    transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
+      fn(drizzleDb),
+    ),
+  };
   const drizzleMock = {
-    db: {} as unknown,
+    db: drizzleDb,
     projectRepo: {
       findMembership: vi.fn(async (_db, projectId, userId) =>
         prismaMock.projectMember.findUnique({
@@ -57,6 +62,11 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
         const value = project?.[`${store}Credentials`];
         return value != null ? { value } : null;
       }),
+      // Write paths — the route hands these the tx handle from
+      // drizzle.db.transaction. Test assertions pin the call args
+      // directly on these spies.
+      writeProjectCredential: vi.fn(async () => undefined),
+      clearProjectCredential: vi.fn(async () => undefined),
     },
     shadowRead: vi.fn(
       async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
@@ -174,7 +184,6 @@ describe("PUT /dashboard/projects/:projectId/credentials/:store", () => {
   test("OWNER writes apple credentials encrypted + audit is redacted", async () => {
     signedIn("owner");
     prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
-    prismaMock.project.update.mockResolvedValue({ id: "proj_1" });
 
     const res = await app.request("/dashboard/projects/proj_1/credentials/apple", {
       method: "PUT",
@@ -186,13 +195,15 @@ describe("PUT /dashboard/projects/:projectId/credentials/:store", () => {
     expect(body.data.credential).toEqual({ store: "apple", configured: true });
 
     // update payload carries the encrypted wrapper, not the plaintext
-    const updateCall = prismaMock.project.update.mock.calls[0]![0] as {
-      data: { appleCredentials: { v: number; enc: string } };
-    };
-    expect(updateCall.data.appleCredentials.v).toBe(1);
-    expect(typeof updateCall.data.appleCredentials.enc).toBe("string");
-    expect(updateCall.data.appleCredentials.enc).not.toContain("com.acme.app");
-    expect(updateCall.data.appleCredentials.enc).not.toContain("BEGIN PRIVATE KEY");
+    const writeCall = drizzleMock.projectRepo.writeProjectCredential.mock
+      .calls[0]! as [unknown, string, string, { v: number; enc: string }];
+    expect(writeCall[1]).toBe("proj_1");
+    expect(writeCall[2]).toBe("apple");
+    const encrypted = writeCall[3];
+    expect(encrypted.v).toBe(1);
+    expect(typeof encrypted.enc).toBe("string");
+    expect(encrypted.enc).not.toContain("com.acme.app");
+    expect(encrypted.enc).not.toContain("BEGIN PRIVATE KEY");
 
     // audit snapshot is redacted
     const auditCall = auditMock.audit.mock.calls[0]![0] as {
@@ -214,7 +225,7 @@ describe("PUT /dashboard/projects/:projectId/credentials/:store", () => {
       body: JSON.stringify({ secretKey: "" }), // empty, invalid
     });
     expect(res.status).toBe(400);
-    expect(prismaMock.project.update).not.toHaveBeenCalled();
+    expect(drizzleMock.projectRepo.writeProjectCredential).not.toHaveBeenCalled();
     expect(auditMock.audit).not.toHaveBeenCalled();
   });
 
@@ -234,7 +245,6 @@ describe("DELETE /dashboard/projects/:projectId/credentials/:store", () => {
   test("OWNER clears credentials + audit after=cleared", async () => {
     signedIn("owner");
     prismaMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
-    prismaMock.project.update.mockResolvedValue({ id: "proj_1" });
 
     const res = await app.request("/dashboard/projects/proj_1/credentials/google", {
       method: "DELETE",
@@ -243,7 +253,11 @@ describe("DELETE /dashboard/projects/:projectId/credentials/:store", () => {
     const body = (await res.json()) as { data: { credential: { configured: boolean } } };
     expect(body.data.credential.configured).toBe(false);
 
-    expect(prismaMock.project.update).toHaveBeenCalled();
+    expect(drizzleMock.projectRepo.clearProjectCredential).toHaveBeenCalledWith(
+      expect.anything(),
+      "proj_1",
+      "google",
+    );
 
     const auditCall = auditMock.audit.mock.calls[0]![0] as {
       action: string;

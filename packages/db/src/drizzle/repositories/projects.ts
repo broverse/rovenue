@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   memberRole,
@@ -8,6 +8,11 @@ import {
   type Project,
   type ProjectMember,
 } from "../schema";
+
+// `Db` covers both the top-level drizzle client AND the tx handle
+// passed to `db.transaction(async (tx) => ...)`. Callers can pass
+// either — the query surface is identical for ordinary CRUD.
+export type DbOrTx = Db;
 
 // =============================================================
 // Project + membership reads — Drizzle repository
@@ -179,4 +184,52 @@ export async function countProjectOwners(
       ),
     );
   return rows.length;
+}
+
+// --- credential writes ---
+
+/**
+ * Write an encrypted credential blob to the store-specific JSONB
+ * column. Called from the dashboard credentials PUT route inside a
+ * Drizzle transaction alongside an audit write.
+ */
+export async function writeProjectCredential(
+  db: DbOrTx,
+  projectId: string,
+  store: "apple" | "google" | "stripe",
+  encrypted: unknown,
+): Promise<void> {
+  const column =
+    store === "apple"
+      ? "appleCredentials"
+      : store === "google"
+        ? "googleCredentials"
+        : "stripeCredentials";
+  await db
+    .update(projects)
+    .set({ [column]: encrypted } as Partial<typeof projects.$inferInsert>)
+    .where(eq(projects.id, projectId));
+}
+
+/**
+ * Null out the store-specific credential JSONB column (Prisma
+ * `JsonNull` equivalent). Uses a sql literal because Drizzle's
+ * .set({ col: null }) writes SQL NULL for the row value, which is
+ * what we want — the JSONB column is nullable by schema.
+ */
+export async function clearProjectCredential(
+  db: DbOrTx,
+  projectId: string,
+  store: "apple" | "google" | "stripe",
+): Promise<void> {
+  const column =
+    store === "apple"
+      ? "appleCredentials"
+      : store === "google"
+        ? "googleCredentials"
+        : "stripeCredentials";
+  await db
+    .update(projects)
+    .set({ [column]: sql`NULL` } as Partial<typeof projects.$inferInsert>)
+    .where(eq(projects.id, projectId));
 }

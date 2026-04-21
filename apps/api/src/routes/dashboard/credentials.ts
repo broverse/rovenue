@@ -1,9 +1,8 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import prisma, {
+import {
   MemberRole,
-  Prisma,
   decryptCredential,
   drizzle,
   encryptCredential,
@@ -115,12 +114,6 @@ function decryptField<T>(raw: unknown): T | null {
   }
 }
 
-function columnForStore(store: CredentialStore): keyof Prisma.ProjectSelect {
-  if (store === "apple") return "appleCredentials";
-  if (store === "google") return "googleCredentials";
-  return "stripeCredentials";
-}
-
 export const credentialsRoute = new Hono()
   .use("*", requireDashboardAuth)
   // =============================================================
@@ -214,13 +207,9 @@ export const credentialsRoute = new Hono()
   }
 
   const encrypted = encryptCredential(body, env.ENCRYPTION_KEY);
-  const column = columnForStore(store);
 
-  await prisma.$transaction(async (tx) => {
-    await tx.project.update({
-      where: { id: projectId },
-      data: { [column]: encrypted as unknown as Prisma.InputJsonValue },
-    });
+  await drizzle.db.transaction(async (tx) => {
+    await drizzle.projectRepo.writeProjectCredential(tx, projectId, store, encrypted);
     await audit(
       {
         projectId,
@@ -256,12 +245,8 @@ export const credentialsRoute = new Hono()
   const user = c.get("user");
   await assertProjectAccess(projectId, user.id, MemberRole.OWNER);
 
-  const column = columnForStore(store);
-  await prisma.$transaction(async (tx) => {
-    await tx.project.update({
-      where: { id: projectId },
-      data: { [column]: Prisma.JsonNull },
-    });
+  await drizzle.db.transaction(async (tx) => {
+    await drizzle.projectRepo.clearProjectCredential(tx, projectId, store);
     await audit(
       {
         projectId,
