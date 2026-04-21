@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import prisma, { MemberRole, drizzle, type Prisma } from "@rovenue/db";
+import { MemberRole, drizzle } from "@rovenue/db";
 import type {
   SubscriberDetail,
   SubscriberListItem,
@@ -118,56 +118,25 @@ export const subscribersRoute = new Hono()
   const user = c.get("user");
   await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
 
-  const subscriber = await prisma.subscriber.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      projectId: true,
-      appUserId: true,
-      attributes: true,
-      firstSeenAt: true,
-      lastSeenAt: true,
-      deletedAt: true,
-      mergedInto: true,
-    },
-  });
+  const subscriber = await drizzle.subscriberRepo.findSubscriberById(
+    drizzle.db,
+    id,
+  );
   if (!subscriber || subscriber.projectId !== projectId) {
     throw new HTTPException(404, { message: "Subscriber not found" });
   }
 
-  const [purchases, access, latestLedger, ledger, assignments, outgoingWebhooks] =
-    await Promise.all([
-      prisma.purchase.findMany({
-        where: { subscriberId: id },
-        orderBy: { purchaseDate: "desc" },
-        take: 50,
-        include: { product: { select: { identifier: true } } },
-      }),
-      prisma.subscriberAccess.findMany({
-        where: { subscriberId: id },
-        orderBy: { entitlementKey: "asc" },
-      }),
-      prisma.creditLedger.findFirst({
-        where: { subscriberId: id },
-        orderBy: { createdAt: "desc" },
-        select: { balance: true },
-      }),
-      prisma.creditLedger.findMany({
-        where: { subscriberId: id },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-      }),
-      prisma.experimentAssignment.findMany({
-        where: { subscriberId: id },
-        orderBy: { assignedAt: "desc" },
-        include: { experiment: { select: { key: true } } },
-      }),
-      prisma.outgoingWebhook.findMany({
-        where: { subscriberId: id },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-      }),
-    ]);
+  const {
+    access,
+    purchases,
+    latestBalance,
+    ledger,
+    assignments,
+    outgoingWebhooks,
+  } = await drizzle.subscriberDetailRepo.loadSubscriberDetail(
+    drizzle.db,
+    id,
+  );
 
   const payload: SubscriberDetail = {
     id: subscriber.id,
@@ -187,7 +156,7 @@ export const subscribersRoute = new Hono()
     purchases: purchases.map((p) => ({
       id: p.id,
       productId: p.productId,
-      productIdentifier: p.product.identifier,
+      productIdentifier: p.productIdentifier,
       store: p.store,
       status: p.status,
       priceAmount: p.priceAmount?.toString() ?? null,
@@ -196,19 +165,19 @@ export const subscribersRoute = new Hono()
       expiresDate: p.expiresDate?.toISOString() ?? null,
       autoRenewStatus: p.autoRenewStatus,
     })),
-    creditBalance: latestLedger?.balance.toString() ?? "0",
+    creditBalance: String(latestBalance),
     creditLedger: ledger.map((l) => ({
       id: l.id,
       type: l.type,
-      amount: l.amount.toString(),
-      balance: l.balance.toString(),
+      amount: String(l.amount),
+      balance: String(l.balance),
       referenceType: l.referenceType,
       description: l.description,
       createdAt: l.createdAt.toISOString(),
     })),
     assignments: assignments.map((a) => ({
       experimentId: a.experimentId,
-      experimentKey: a.experiment.key,
+      experimentKey: a.experimentKey,
       variantId: a.variantId,
       assignedAt: a.assignedAt.toISOString(),
       convertedAt: a.convertedAt?.toISOString() ?? null,

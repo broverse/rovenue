@@ -20,7 +20,11 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
     subscriberRepo: {
       findSubscriberAttributes: vi.fn(async () => null),
       findSubscriberByAppUserId: vi.fn(async () => null),
+      findSubscriberById: vi.fn(async (_db: unknown, id: string) =>
+        prismaMock.subscriber.findUnique({ where: { id } }),
+      ),
       listSubscribers: vi.fn(async () => []),
+      countActiveSubscribers: vi.fn(async () => 0),
     },
     projectRepo: {
       findMembership: vi.fn(async (_db: unknown, projectId: string, userId: string) =>
@@ -31,6 +35,59 @@ const { prismaMock, drizzleMock, authMock } = vi.hoisted(() => {
       ),
       findProjectById: vi.fn(async () => null),
       findProjectCredentials: vi.fn(async () => null),
+    },
+    subscriberDetailRepo: {
+      loadSubscriberDetail: vi.fn(async (_db: unknown, subscriberId: string) => {
+        const [purchasesRaw, access, ledger, assignmentsRaw, outgoingWebhooks] =
+          await Promise.all([
+            prismaMock.purchase.findMany({
+              where: { subscriberId },
+              orderBy: { purchaseDate: "desc" },
+              take: 50,
+              include: { product: { select: { identifier: true } } },
+            }),
+            prismaMock.subscriberAccess.findMany({
+              where: { subscriberId },
+              orderBy: { entitlementKey: "asc" },
+            }),
+            prismaMock.creditLedger.findMany({
+              where: { subscriberId },
+              orderBy: { createdAt: "desc" },
+              take: 20,
+            }),
+            prismaMock.experimentAssignment.findMany({
+              where: { subscriberId },
+              orderBy: { assignedAt: "desc" },
+              include: { experiment: { select: { key: true } } },
+            }),
+            prismaMock.outgoingWebhook.findMany({
+              where: { subscriberId },
+              orderBy: { createdAt: "desc" },
+              take: 20,
+            }),
+          ]);
+        const purchases = (Array.isArray(purchasesRaw) ? purchasesRaw : []).map(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (p: any) => ({ ...p, productIdentifier: p.product?.identifier }),
+        );
+        const assignments = (
+          Array.isArray(assignmentsRaw) ? assignmentsRaw : []
+        ).map(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (a: any) => ({ ...a, experimentKey: a.experiment?.key }),
+        );
+        const latestBalance = (Array.isArray(ledger) ? ledger : [])[0]?.balance ?? 0;
+        return {
+          access: Array.isArray(access) ? access : [],
+          purchases,
+          latestBalance,
+          ledger: Array.isArray(ledger) ? ledger : [],
+          assignments,
+          outgoingWebhooks: Array.isArray(outgoingWebhooks)
+            ? outgoingWebhooks
+            : [],
+        };
+      }),
     },
     shadowRead: vi.fn(
       async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
@@ -219,13 +276,16 @@ describe("GET /dashboard/projects/:projectId/subscribers/:id", () => {
     prismaMock.subscriberAccess.findMany.mockResolvedValue([
       { entitlementKey: "premium", isActive: true, expiresDate: null, store: "APP_STORE", purchaseId: "pur_1" },
     ]);
-    prismaMock.creditLedger.findFirst.mockResolvedValue({ balance: "42" });
+    // Phase 6 cutover: loadSubscriberDetail reads the latest
+    // balance from the most-recent ledger row rather than a
+    // separate findFirst. The first row's balance becomes
+    // `creditBalance` in the response.
     prismaMock.creditLedger.findMany.mockResolvedValue([
       {
         id: "led_1",
         type: "PURCHASE",
         amount: "100",
-        balance: "100",
+        balance: "42",
         referenceType: "purchase",
         description: null,
         createdAt: new Date("2026-04-12"),

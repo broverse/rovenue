@@ -35,3 +35,4 @@ export * as productGroupRepo from "./repositories/product-groups";
 export * as experimentAssignmentRepo from "./repositories/experiment-assignments";
 export * as purchaseRepo from "./repositories/purchases";
 export * as webhookEventRepo from "./repositories/webhook-events";
+export * as subscriberDetailRepo from "./repositories/subscriber-detail";

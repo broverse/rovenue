@@ -92,6 +92,18 @@ export async function findSubscriberByAppUserId(
   return rows[0] ?? null;
 }
 
+export async function findSubscriberById(
+  db: Db,
+  id: string,
+): Promise<Subscriber | null> {
+  const rows = await db
+    .select()
+    .from(subscribers)
+    .where(eq(subscribers.id, id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 // =============================================================
 // Dashboard list page
 // =============================================================
