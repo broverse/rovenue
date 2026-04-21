@@ -2,7 +2,7 @@ import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, { drizzle, type Prisma } from "@rovenue/db";
+import { drizzle } from "@rovenue/db";
 import { evaluateAllFlags } from "../../services/flag-engine";
 import { evaluateExperiments } from "../../services/experiment-engine";
 import { ok } from "../../lib/response";
@@ -79,22 +79,15 @@ async function handleConfig(
   };
 
   const hasNewAttributes = Object.keys(requestAttributes).length > 0;
-  const subscriber = await prisma.subscriber.upsert({
-    where: {
-      projectId_appUserId: { projectId: project.id, appUserId },
-    },
-    create: {
+  const subscriber = await drizzle.subscriberRepo.upsertSubscriber(
+    drizzle.db,
+    {
       projectId: project.id,
       appUserId,
-      attributes: requestAttributes as Prisma.InputJsonValue,
+      createAttributes: requestAttributes,
+      ...(hasNewAttributes && { updateAttributes: mergedAttributes }),
     },
-    update: {
-      lastSeenAt: new Date(),
-      ...(hasNewAttributes && {
-        attributes: mergedAttributes as Prisma.InputJsonValue,
-      }),
-    },
-  });
+  );
 
   const [flags, experiments] = await Promise.all([
     evaluateAllFlags(project.id, subscriber.id, mergedAttributes),

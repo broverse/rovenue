@@ -127,6 +127,50 @@ export async function findSubscriberProjectId(
   return rows[0] ?? null;
 }
 
+export interface UpsertSubscriberInput {
+  projectId: string;
+  appUserId: string;
+  /** Applied ONLY on insert. */
+  createAttributes?: unknown;
+  /** Applied ONLY on update. Omit for lastSeenAt-only touches. */
+  updateAttributes?: unknown;
+}
+
+/**
+ * Insert-or-touch a subscriber row keyed on (projectId, appUserId).
+ * Mirrors `prisma.subscriber.upsert({ create, update })`:
+ * - new row: attributes = createAttributes (defaults to {})
+ * - existing: lastSeenAt = now(), attributes optionally merged
+ *   when `updateAttributes` is provided.
+ */
+export async function upsertSubscriber(
+  db: DbOrTx,
+  input: UpsertSubscriberInput,
+): Promise<Subscriber> {
+  const now = new Date();
+  const update: Partial<typeof subscribers.$inferInsert> = { lastSeenAt: now };
+  if (input.updateAttributes !== undefined) {
+    update.attributes =
+      input.updateAttributes as typeof subscribers.$inferInsert.attributes;
+  }
+  const rows = await db
+    .insert(subscribers)
+    .values({
+      projectId: input.projectId,
+      appUserId: input.appUserId,
+      attributes: (input.createAttributes ??
+        {}) as typeof subscribers.$inferInsert.attributes,
+    })
+    .onConflictDoUpdate({
+      target: [subscribers.projectId, subscribers.appUserId],
+      set: update,
+    })
+    .returning();
+  const row = rows[0];
+  if (!row) throw new Error("upsertSubscriber: no row returned");
+  return row;
+}
+
 // =============================================================
 // Dashboard list page
 // =============================================================

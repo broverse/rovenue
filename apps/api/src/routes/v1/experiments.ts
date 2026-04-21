@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, { type Prisma } from "@rovenue/db";
+import { drizzle } from "@rovenue/db";
 import { recordEvent } from "../../services/experiment-engine";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
@@ -60,17 +60,14 @@ export const experimentsRoute = new Hono().post(
 
     const body = c.req.valid("json");
 
-    const subscriber = await prisma.subscriber.upsert({
-      where: {
-        projectId_appUserId: { projectId: project.id, appUserId },
-      },
-      create: {
+    const subscriber = await drizzle.subscriberRepo.upsertSubscriber(
+      drizzle.db,
+      {
         projectId: project.id,
         appUserId,
-        attributes: {} as Prisma.InputJsonValue,
+        createAttributes: {},
       },
-      update: { lastSeenAt: new Date() },
-    });
+    );
 
     for (const event of body.events) {
       const metadata: Record<string, unknown> = {

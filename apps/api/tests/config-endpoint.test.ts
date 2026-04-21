@@ -60,6 +60,36 @@ const { prismaMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
             },
           }),
       ),
+      upsertSubscriber: vi.fn(
+        async (
+          _tx: unknown,
+          input: {
+            projectId: string;
+            appUserId: string;
+            createAttributes?: unknown;
+            updateAttributes?: unknown;
+          },
+        ) =>
+          prismaMock.subscriber.upsert({
+            where: {
+              projectId_appUserId: {
+                projectId: input.projectId,
+                appUserId: input.appUserId,
+              },
+            },
+            create: {
+              projectId: input.projectId,
+              appUserId: input.appUserId,
+              attributes: input.createAttributes ?? {},
+            },
+            update: {
+              lastSeenAt: new Date(),
+              ...(input.updateAttributes !== undefined && {
+                attributes: input.updateAttributes,
+              }),
+            },
+          }),
+      ),
     },
     productGroupRepo: {
       listProductGroups: vi.fn(async () => []),
