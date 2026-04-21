@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const { redisMock, __store } = vi.hoisted(() => {
   const store = new Map<string, string>();
@@ -33,6 +33,11 @@ import { webhookReplayGuard } from "../src/middleware/webhook-replay-guard";
 describe("webhookReplayGuard", () => {
   beforeEach(() => {
     __store.clear();
+  });
+
+  afterEach(() => {
+    vi.doUnmock("../src/lib/redis");
+    vi.resetModules();
   });
 
   test("rejects when context missing webhookEventId or timestamp", async () => {
@@ -116,7 +121,5 @@ describe("webhookReplayGuard", () => {
       .post("/", wrg({ source: "apple" }), (c) => c.json({ ok: true }));
     const res = await app.request("/", { method: "POST" });
     expect(res.status).toBe(200);
-    vi.doUnmock("../src/lib/redis");
-    vi.resetModules();
   });
 });
