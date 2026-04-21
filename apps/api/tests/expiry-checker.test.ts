@@ -42,6 +42,26 @@ const { prismaMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
         },
       ),
     },
+    purchaseRepo: {
+      // updatePurchaseStatusIf is a compare-and-swap: updates the
+      // row only when the current status matches `expected`. The
+      // test's prismaMock.purchase.updateMany already returns a
+      // `{count}` shape so we forward to it.
+      updatePurchaseStatusIf: vi.fn(
+        async (
+          _db: unknown,
+          id: string,
+          expected: string,
+          next: string,
+        ) => {
+          const res = await prismaMock.purchase.updateMany({
+            where: { id, status: expected },
+            data: { status: next },
+          });
+          return res?.count ?? 0;
+        },
+      ),
+    },
     projectRepo: {
       findProjectWebhookUrl: vi.fn(async (_db: unknown, id: string) => {
         const row = await prismaMock.project.findUnique({
@@ -69,6 +89,12 @@ const { prismaMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
             },
           }),
       ),
+      enqueueOutgoingWebhook: vi.fn(
+        async (_db: unknown, input: Record<string, unknown>) =>
+          prismaMock.outgoingWebhook.create({
+            data: { ...input, status: "PENDING" },
+          }),
+      ),
     },
     revenueEventRepo: {
       findRecentRevenueEvent: vi.fn(
@@ -81,6 +107,10 @@ const { prismaMock, drizzleMock, syncAccessMock } = vi.hoisted(() => {
           prismaMock.revenueEvent.findFirst({
             where: { subscriberId, purchaseId, type },
           }),
+      ),
+      createRevenueEvent: vi.fn(
+        async (_db: unknown, input: Record<string, unknown>) =>
+          prismaMock.revenueEvent.create({ data: input }),
       ),
     },
   };

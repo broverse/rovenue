@@ -1,8 +1,6 @@
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
-import prisma, {
-  OutgoingWebhookStatus,
-  Prisma,
+import {
   PurchaseStatus,
   RevenueEventType,
   drizzle,
@@ -51,7 +49,7 @@ interface Candidate {
   store: Store;
   expiresDate: Date | null;
   gracePeriodExpires: Date | null;
-  priceAmount: Prisma.Decimal | number | null;
+  priceAmount: string | number | null;
   priceCurrency: string | null;
 }
 
@@ -126,21 +124,25 @@ async function processCandidate(
     candidate.gracePeriodExpires > now;
 
   if (hasActiveGrace) {
-    const updated = await prisma.purchase.updateMany({
-      where: { id: candidate.id, status: candidate.status },
-      data: { status: PurchaseStatus.GRACE_PERIOD },
-    });
-    if (updated.count === 0) return "SKIPPED";
+    const updated = await drizzle.purchaseRepo.updatePurchaseStatusIf(
+      drizzle.db,
+      candidate.id,
+      candidate.status as PurchaseStatus,
+      PurchaseStatus.GRACE_PERIOD,
+    );
+    if (updated === 0) return "SKIPPED";
 
     await safeSyncAccess(candidate.subscriberId);
     return "GRACE_PERIOD";
   }
 
-  const updated = await prisma.purchase.updateMany({
-    where: { id: candidate.id, status: candidate.status },
-    data: { status: PurchaseStatus.EXPIRED },
-  });
-  if (updated.count === 0) return "SKIPPED";
+  const updated = await drizzle.purchaseRepo.updatePurchaseStatusIf(
+    drizzle.db,
+    candidate.id,
+    candidate.status as PurchaseStatus,
+    PurchaseStatus.EXPIRED,
+  );
+  if (updated === 0) return "SKIPPED";
 
   await safeSyncAccess(candidate.subscriberId);
   await enqueueExpirationWebhook(candidate);
@@ -180,23 +182,20 @@ async function enqueueExpirationWebhook(candidate: Candidate): Promise<void> {
     );
   if (existing) return;
 
-  const payload: Prisma.InputJsonValue = {
+  const payload = {
     eventType: EXPIRATION_EVENT_TYPE,
     subscriberId: candidate.subscriberId,
     purchaseId: candidate.id,
     timestamp: new Date().toISOString(),
   };
 
-  await prisma.outgoingWebhook.create({
-    data: {
-      projectId: candidate.projectId,
-      eventType: EXPIRATION_EVENT_TYPE,
-      subscriberId: candidate.subscriberId,
-      purchaseId: candidate.id,
-      payload,
-      url: webhookUrl,
-      status: OutgoingWebhookStatus.PENDING,
-    },
+  await drizzle.outgoingWebhookRepo.enqueueOutgoingWebhook(drizzle.db, {
+    projectId: candidate.projectId,
+    eventType: EXPIRATION_EVENT_TYPE,
+    subscriberId: candidate.subscriberId,
+    purchaseId: candidate.id,
+    payload,
+    url: webhookUrl,
   });
 }
 
@@ -215,19 +214,18 @@ async function recordCancellationRevenue(
 
   const currency = candidate.priceCurrency ?? "USD";
 
-  await prisma.revenueEvent.create({
-    data: {
-      projectId: candidate.projectId,
-      subscriberId: candidate.subscriberId,
-      purchaseId: candidate.id,
-      productId: candidate.productId,
-      type: RevenueEventType.CANCELLATION,
-      amount: new Prisma.Decimal(0),
-      currency,
-      amountUsd: new Prisma.Decimal(0),
-      store: candidate.store,
-      eventDate: now,
-    },
+  await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+    projectId: candidate.projectId,
+    subscriberId: candidate.subscriberId,
+    purchaseId: candidate.id,
+    productId: candidate.productId,
+    type: RevenueEventType.CANCELLATION,
+    // Drizzle decimal columns round-trip as strings.
+    amount: "0",
+    currency,
+    amountUsd: "0",
+    store: candidate.store,
+    eventDate: now,
   });
 }
 

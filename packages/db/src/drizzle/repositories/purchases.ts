@@ -1,10 +1,11 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { products, purchases, type Purchase } from "../schema";
-import { store as storeEnum } from "../enums";
+import { purchaseStatus, store as storeEnum } from "../enums";
 
 type DbOrTx = Db;
 type Store = (typeof storeEnum.enumValues)[number];
+type PurchaseStatus = (typeof purchaseStatus.enumValues)[number];
 
 // =============================================================
 // Purchase reads — Drizzle repository
@@ -115,4 +116,26 @@ export async function updatePurchasesByOriginalTransaction(
         eq(purchases.originalTransactionId, originalTransactionId),
       ),
     );
+}
+
+/**
+ * Compare-and-swap status flip for the expiry worker.
+ * `WHERE id = $1 AND status = $2` ensures two concurrent workers
+ * can't both transition the same row — the second one sees 0 rows
+ * updated and skips. Returns the count of rows actually updated.
+ */
+export async function updatePurchaseStatusIf(
+  db: DbOrTx,
+  id: string,
+  expectedStatus: PurchaseStatus,
+  newStatus: PurchaseStatus,
+): Promise<number> {
+  const result = await db
+    .update(purchases)
+    .set({ status: newStatus })
+    .where(
+      and(eq(purchases.id, id), eq(purchases.status, expectedStatus)),
+    )
+    .returning({ id: purchases.id });
+  return result.length;
 }
