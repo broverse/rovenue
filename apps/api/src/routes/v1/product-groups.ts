@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { drizzle, type Prisma } from "@rovenue/db";
+import { drizzle } from "@rovenue/db";
 import { evaluateExperiments } from "../../services/experiment-engine";
 import { ok } from "../../lib/response";
 
@@ -38,7 +38,7 @@ interface GroupProductEntry {
   isPromoted: boolean;
   creditAmount: number | null;
   entitlementKeys: string[];
-  metadata: Prisma.JsonValue;
+  metadata: unknown;
 }
 
 export const productGroupsRoute = new Hono()
@@ -168,7 +168,7 @@ export const productGroupsRoute = new Hono()
         isPromoted: entry.isPromoted,
         creditAmount: product.creditAmount,
         entitlementKeys: product.entitlementKeys,
-        metadata: (entry.metadata ?? {}) as Prisma.JsonValue,
+        metadata: entry.metadata ?? {},
       };
     })
     .filter((p): p is GroupProductEntry => p !== null);

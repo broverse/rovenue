@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import prisma, { ProductType, drizzle, type Prisma } from "@rovenue/db";
+import { ProductType, drizzle } from "@rovenue/db";
 import { addCredits } from "../../services/credit-engine";
 import { getActiveAccess, syncAccess } from "../../services/access-engine";
 import { recordEvent } from "../../services/experiment-engine";
@@ -118,7 +118,7 @@ export const receiptsRoute = new Hono().post(
         subscriber: {
           id: subscriber.id,
           appUserId: subscriber.appUserId,
-          attributes: subscriber.attributes as Prisma.JsonValue,
+          attributes: subscriber.attributes,
         },
         access,
         credits: { balance },
