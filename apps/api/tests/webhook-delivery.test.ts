@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // Hoisted mocks
 // =============================================================
 
-const { prismaMock, fetchMock } = vi.hoisted(() => {
+const { prismaMock, drizzleMock, fetchMock } = vi.hoisted(() => {
   const prismaMock = {
     outgoingWebhook: {
       update: vi.fn(async (args: any) => ({ id: "ow_1", ...args.data })),
@@ -12,16 +12,30 @@ const { prismaMock, fetchMock } = vi.hoisted(() => {
     $queryRaw: vi.fn(async () => [] as Array<Record<string, unknown>>),
   };
 
+  // deliverWebhooks now writes state transitions through the
+  // Drizzle repo. Delegate to the prisma mock so existing
+  // assertions on prismaMock.outgoingWebhook.update keep working.
+  const drizzleMock = {
+    db: {} as unknown,
+    outgoingWebhookRepo: {
+      updateOutgoingWebhook: vi.fn(
+        async (_db: unknown, id: string, patch: Record<string, unknown>) =>
+          prismaMock.outgoingWebhook.update({ where: { id }, data: patch }),
+      ),
+    },
+  };
+
   const fetchMock = vi.fn<
     [string, RequestInit?],
     Promise<{ ok: boolean; status: number; text: () => Promise<string> }>
   >();
 
-  return { prismaMock, fetchMock };
+  return { prismaMock, drizzleMock, fetchMock };
 });
 
 vi.mock("@rovenue/db", () => ({
   default: prismaMock,
+  drizzle: drizzleMock,
   OutgoingWebhookStatus: {
     PENDING: "PENDING",
     SENT: "SENT",

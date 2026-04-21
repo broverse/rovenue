@@ -157,6 +157,45 @@ export async function markWebhookDismissed(
   return rows[0] ?? null;
 }
 
+export interface UpdateOutgoingWebhookInput {
+  status?: "PENDING" | "SENT" | "FAILED" | "DEAD" | "DISMISSED";
+  httpStatus?: number | null;
+  responseBody?: string | null;
+  lastErrorMessage?: string | null;
+  attempts?: number;
+  sentAt?: Date | null;
+  deadAt?: Date | null;
+  nextRetryAt?: Date | null;
+}
+
+/**
+ * Partial update used by the delivery worker to record state
+ * transitions (PENDING → SENT/DEAD/FAILED). Every field is
+ * optional — omit the ones this transition doesn't touch.
+ */
+export async function updateOutgoingWebhook(
+  db: DbOrTx,
+  id: string,
+  patch: UpdateOutgoingWebhookInput,
+): Promise<void> {
+  const data: Partial<typeof outgoingWebhooks.$inferInsert> = {};
+  if (patch.status !== undefined) data.status = patch.status;
+  if (patch.httpStatus !== undefined) data.httpStatus = patch.httpStatus;
+  if (patch.responseBody !== undefined) data.responseBody = patch.responseBody;
+  if (patch.lastErrorMessage !== undefined) {
+    data.lastErrorMessage = patch.lastErrorMessage;
+  }
+  if (patch.attempts !== undefined) data.attempts = patch.attempts;
+  if (patch.sentAt !== undefined) data.sentAt = patch.sentAt;
+  if (patch.deadAt !== undefined) data.deadAt = patch.deadAt;
+  if (patch.nextRetryAt !== undefined) data.nextRetryAt = patch.nextRetryAt;
+  if (Object.keys(data).length === 0) return;
+  await db
+    .update(outgoingWebhooks)
+    .set(data)
+    .where(eq(outgoingWebhooks.id, id));
+}
+
 export interface EnqueueOutgoingWebhookInput {
   projectId: string;
   eventType: string;

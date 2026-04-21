@@ -1,7 +1,7 @@
 import { createHmac } from "node:crypto";
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
-import prisma, { OutgoingWebhookStatus } from "@rovenue/db";
+import prisma, { OutgoingWebhookStatus, drizzle } from "@rovenue/db";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 
@@ -150,9 +150,10 @@ async function attemptDelivery(
     responseBody = await res.text().catch(() => null);
 
     if (res.ok) {
-      await prisma.outgoingWebhook.update({
-        where: { id: wh.id },
-        data: {
+      await drizzle.outgoingWebhookRepo.updateOutgoingWebhook(
+        drizzle.db,
+        wh.id,
+        {
           status: OutgoingWebhookStatus.SENT,
           httpStatus,
           responseBody,
@@ -160,7 +161,7 @@ async function attemptDelivery(
           sentAt: now,
           nextRetryAt: null,
         },
-      });
+      );
       return "SENT";
     }
 
@@ -171,9 +172,10 @@ async function attemptDelivery(
 
   // Failed — dead letter or schedule retry
   if (newAttempts >= MAX_ATTEMPTS) {
-    await prisma.outgoingWebhook.update({
-      where: { id: wh.id },
-      data: {
+    await drizzle.outgoingWebhookRepo.updateOutgoingWebhook(
+      drizzle.db,
+      wh.id,
+      {
         status: OutgoingWebhookStatus.DEAD,
         httpStatus,
         responseBody,
@@ -182,7 +184,7 @@ async function attemptDelivery(
         deadAt: now,
         nextRetryAt: null,
       },
-    });
+    );
     log.warn("webhook moved to dead letter", {
       webhookId: wh.id,
       attempts: newAttempts,
@@ -194,9 +196,10 @@ async function attemptDelivery(
   const backoffMs = BACKOFF_SCHEDULE_MS[newAttempts - 1] ?? BACKOFF_SCHEDULE_MS.at(-1)!;
   const nextRetryAt = new Date(now.getTime() + backoffMs);
 
-  await prisma.outgoingWebhook.update({
-    where: { id: wh.id },
-    data: {
+  await drizzle.outgoingWebhookRepo.updateOutgoingWebhook(
+    drizzle.db,
+    wh.id,
+    {
       status: OutgoingWebhookStatus.FAILED,
       httpStatus,
       responseBody,
@@ -204,7 +207,7 @@ async function attemptDelivery(
       attempts: newAttempts,
       nextRetryAt,
     },
-  });
+  );
   return "FAILED";
 }
 
