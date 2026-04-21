@@ -1,6 +1,11 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { webhookEvents, type WebhookEvent } from "../schema";
+import { webhookEventStatus, webhookSource } from "../enums";
+
+type DbOrTx = Db;
+type WebhookSource = (typeof webhookSource.enumValues)[number];
+type WebhookEventStatus = (typeof webhookEventStatus.enumValues)[number];
 
 /** Idempotency lookup by (source, storeEventId) unique index. */
 export async function findWebhookEventByStoreId(
@@ -57,4 +62,85 @@ export async function findLastProcessedWebhookAt(
     .orderBy(desc(webhookEvents.processedAt))
     .limit(1);
   return rows[0]?.processedAt ?? null;
+}
+
+// =============================================================
+// Writes
+// =============================================================
+
+export interface UpsertWebhookEventInput {
+  projectId: string;
+  source: WebhookSource;
+  eventType: string;
+  storeEventId: string;
+  payload: unknown;
+  status: WebhookEventStatus;
+}
+
+/**
+ * Idempotent insert keyed on (source, storeEventId). On conflict
+ * the existing row is returned unmodified — callers inspect the
+ * returned `status` to decide whether to skip (PROCESSED) or
+ * continue claiming the event.
+ */
+export async function upsertWebhookEvent(
+  db: DbOrTx,
+  input: UpsertWebhookEventInput,
+): Promise<WebhookEvent> {
+  const rows = await db
+    .insert(webhookEvents)
+    .values({
+      projectId: input.projectId,
+      source: input.source,
+      eventType: input.eventType,
+      storeEventId: input.storeEventId,
+      payload: input.payload as typeof webhookEvents.$inferInsert.payload,
+      status: input.status,
+    })
+    .onConflictDoUpdate({
+      target: [webhookEvents.source, webhookEvents.storeEventId],
+      // Setting source back to itself is a no-op that still lets
+      // .returning() return the conflict-losing row.
+      set: { source: input.source },
+    })
+    .returning();
+  const row = rows[0];
+  if (!row) throw new Error("upsertWebhookEvent: no row returned");
+  return row;
+}
+
+export interface UpdateWebhookEventInput {
+  status?: WebhookEventStatus;
+  processedAt?: Date | null;
+  errorMessage?: string | null;
+  subscriberId?: string | null;
+  purchaseId?: string | null;
+  incrementRetryCount?: boolean;
+}
+
+/**
+ * Partial update for the processor's state transitions
+ * (PROCESSING → PROCESSED | FAILED). `incrementRetryCount` uses
+ * a SQL expression so concurrent workers can't clobber each
+ * other's increments.
+ */
+export async function updateWebhookEvent(
+  db: DbOrTx,
+  id: string,
+  patch: UpdateWebhookEventInput,
+): Promise<void> {
+  const data: Partial<typeof webhookEvents.$inferInsert> = {};
+  if (patch.status !== undefined) data.status = patch.status;
+  if (patch.processedAt !== undefined) data.processedAt = patch.processedAt;
+  if (patch.errorMessage !== undefined) data.errorMessage = patch.errorMessage;
+  if (patch.subscriberId !== undefined) data.subscriberId = patch.subscriberId;
+  if (patch.purchaseId !== undefined) data.purchaseId = patch.purchaseId;
+  if (patch.incrementRetryCount) {
+    data.retryCount = sql`${webhookEvents.retryCount} + 1` as unknown as number;
+  }
+  if (Object.keys(data).length === 0) return;
+  await db
+    .update(webhookEvents)
+    .set(data)
+    .where(eq(webhookEvents.id, id));
 }

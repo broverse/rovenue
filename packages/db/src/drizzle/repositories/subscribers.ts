@@ -127,6 +127,35 @@ export async function findSubscriberProjectId(
   return rows[0] ?? null;
 }
 
+export interface CreateSubscriberInput {
+  projectId: string;
+  appUserId: string;
+  attributes?: unknown;
+}
+
+/**
+ * Plain INSERT (no upsert semantics). Used when the caller already
+ * knows the (projectId, appUserId) pair doesn't exist, e.g. the
+ * Apple webhook minting a synthetic `apple:<origTxId>` subscriber.
+ */
+export async function createSubscriber(
+  db: DbOrTx,
+  input: CreateSubscriberInput,
+): Promise<Subscriber> {
+  const rows = await db
+    .insert(subscribers)
+    .values({
+      projectId: input.projectId,
+      appUserId: input.appUserId,
+      attributes: (input.attributes ??
+        {}) as typeof subscribers.$inferInsert.attributes,
+    })
+    .returning();
+  const row = rows[0];
+  if (!row) throw new Error("createSubscriber: no row returned");
+  return row;
+}
+
 export interface UpsertSubscriberInput {
   projectId: string;
   appUserId: string;

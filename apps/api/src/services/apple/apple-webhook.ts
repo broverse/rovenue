@@ -1,6 +1,5 @@
-import prisma, {
+import {
   Environment,
-  Prisma,
   PurchaseStatus,
   RevenueEventType,
   Store,
@@ -83,14 +82,9 @@ export async function handleAppleNotification(
 
   // Idempotent insert — concurrent workers see the same row and we check
   // the claimed status below.
-  const webhookEvent = await prisma.webhookEvent.upsert({
-    where: {
-      source_storeEventId: {
-        source: WebhookSource.APPLE,
-        storeEventId: notification.notificationUUID,
-      },
-    },
-    create: {
+  const webhookEvent = await drizzle.webhookEventRepo.upsertWebhookEvent(
+    drizzle.db,
+    {
       projectId: opts.projectId,
       source: WebhookSource.APPLE,
       eventType: notification.notificationType,
@@ -98,8 +92,7 @@ export async function handleAppleNotification(
       payload: JSON.parse(JSON.stringify(notification)),
       status: WebhookEventStatus.PROCESSING,
     },
-    update: {},
-  });
+  );
 
   if (webhookEvent.status === WebhookEventStatus.PROCESSED) {
     log.info("duplicate notification, skipping", {
@@ -138,15 +131,16 @@ export async function handleAppleNotification(
       });
     }
 
-    await prisma.webhookEvent.update({
-      where: { id: webhookEvent.id },
-      data: {
+    await drizzle.webhookEventRepo.updateWebhookEvent(
+      drizzle.db,
+      webhookEvent.id,
+      {
         status: WebhookEventStatus.PROCESSED,
         processedAt: new Date(),
         subscriberId: outcome.subscriberId,
         purchaseId: outcome.purchaseId,
       },
-    });
+    );
 
     return {
       status: "processed",
@@ -157,14 +151,15 @@ export async function handleAppleNotification(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await prisma.webhookEvent.update({
-      where: { id: webhookEvent.id },
-      data: {
+    await drizzle.webhookEventRepo.updateWebhookEvent(
+      drizzle.db,
+      webhookEvent.id,
+      {
         status: WebhookEventStatus.FAILED,
         errorMessage: message,
-        retryCount: { increment: 1 },
+        incrementRetryCount: true,
       },
-    });
+    );
     log.error("notification processing failed", {
       uuid: notification.notificationUUID,
       type: notification.notificationType,
@@ -291,13 +286,12 @@ async function applyRenewal(ctx: DispatchContext): Promise<void> {
 
 async function applyRenewalStatusChange(ctx: DispatchContext): Promise<void> {
   const autoRenewStatus = ctx.renewalInfo?.autoRenewStatus === 1;
-  await prisma.purchase.updateMany({
-    where: {
-      projectId: ctx.projectId,
-      originalTransactionId: ctx.transaction.originalTransactionId,
-    },
-    data: { autoRenewStatus },
-  });
+  await drizzle.purchaseRepo.updatePurchasesByOriginalTransaction(
+    drizzle.db,
+    ctx.projectId,
+    ctx.transaction.originalTransactionId,
+    { autoRenewStatus },
+  );
 }
 
 async function applyFailedRenewal(ctx: DispatchContext): Promise<void> {
@@ -307,43 +301,47 @@ async function applyFailedRenewal(ctx: DispatchContext): Promise<void> {
     ? new Date(ctx.renewalInfo.gracePeriodExpiresDate)
     : null;
 
-  await prisma.purchase.updateMany({
-    where: {
-      projectId: ctx.projectId,
-      originalTransactionId: ctx.transaction.originalTransactionId,
-    },
-    data: {
+  await drizzle.purchaseRepo.updatePurchasesByOriginalTransaction(
+    drizzle.db,
+    ctx.projectId,
+    ctx.transaction.originalTransactionId,
+    {
       status: inGrace ? PurchaseStatus.GRACE_PERIOD : PurchaseStatus.ACTIVE,
       gracePeriodExpires,
     },
-  });
+  );
 }
 
 async function applyExpired(ctx: DispatchContext): Promise<void> {
-  await prisma.purchase.updateMany({
-    where: {
-      projectId: ctx.projectId,
-      originalTransactionId: ctx.transaction.originalTransactionId,
-    },
-    data: { status: PurchaseStatus.EXPIRED },
-  });
+  await drizzle.purchaseRepo.updatePurchasesByOriginalTransaction(
+    drizzle.db,
+    ctx.projectId,
+    ctx.transaction.originalTransactionId,
+    { status: PurchaseStatus.EXPIRED },
+  );
   await revokeAccessForTransaction(ctx);
   await emitCancellationEvent(ctx);
 }
 
 async function applyRefund(ctx: DispatchContext): Promise<void> {
   const refundDate = new Date(ctx.transaction.signedDate);
-  await prisma.purchase.updateMany({
-    where: {
-      projectId: ctx.projectId,
-      store: Store.APP_STORE,
-      storeTransactionId: ctx.transaction.transactionId,
-    },
-    data: {
+  // Refund targets the specific transaction by (store, storeTxnId),
+  // not the whole chain. updatePurchasesByOriginalTransaction is the
+  // chain-wide helper; we need a scoped write, so use the upsert's
+  // update branch via a tiny inline repo call. In practice only one
+  // purchase row shares this (store, storeTxnId) because the column
+  // pair has a unique index.
+  const found = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
+    drizzle.db,
+    Store.APP_STORE,
+    ctx.transaction.transactionId,
+  );
+  if (found) {
+    await drizzle.purchaseRepo.updatePurchase(drizzle.db, found.id, {
       status: PurchaseStatus.REFUNDED,
       refundDate,
-    },
-  });
+    });
+  }
   await revokeAccessForTransaction(ctx);
 
   const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
@@ -373,13 +371,12 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
 }
 
 async function applyRevoke(ctx: DispatchContext): Promise<void> {
-  await prisma.purchase.updateMany({
-    where: {
-      projectId: ctx.projectId,
-      originalTransactionId: ctx.transaction.originalTransactionId,
-    },
-    data: { status: PurchaseStatus.REVOKED },
-  });
+  await drizzle.purchaseRepo.updatePurchasesByOriginalTransaction(
+    drizzle.db,
+    ctx.projectId,
+    ctx.transaction.originalTransactionId,
+    { status: PurchaseStatus.REVOKED },
+  );
   await revokeAccessForTransaction(ctx);
 }
 
@@ -406,18 +403,9 @@ async function resolveSubscriber(ctx: DispatchContext) {
   const { projectId, transaction } = ctx;
 
   if (transaction.appAccountToken) {
-    return prisma.subscriber.upsert({
-      where: {
-        projectId_appUserId: {
-          projectId,
-          appUserId: transaction.appAccountToken,
-        },
-      },
-      update: { lastSeenAt: new Date() },
-      create: {
-        projectId,
-        appUserId: transaction.appAccountToken,
-      },
+    return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
+      projectId,
+      appUserId: transaction.appAccountToken,
     });
   }
 
@@ -435,11 +423,9 @@ async function resolveSubscriber(ctx: DispatchContext) {
     if (existingSubscriber) return existingSubscriber;
   }
 
-  return prisma.subscriber.create({
-    data: {
-      projectId,
-      appUserId: `apple:${transaction.originalTransactionId}`,
-    },
+  return drizzle.subscriberRepo.createSubscriber(drizzle.db, {
+    projectId,
+    appUserId: `apple:${transaction.originalTransactionId}`,
   });
 }
 
@@ -467,13 +453,9 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
   }
 
   const environment = mapEnvironment(tx);
-  const purchase = await prisma.purchase.upsert({
-    where: {
-      store_storeTransactionId: {
-        store: Store.APP_STORE,
-        storeTransactionId: tx.transactionId,
-      },
-    },
+  const purchase = await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
+    store: Store.APP_STORE,
+    storeTransactionId: tx.transactionId,
     create: {
       projectId: ctx.projectId,
       subscriberId,
@@ -489,7 +471,9 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
       purchaseDate: new Date(tx.purchaseDate),
       originalPurchaseDate: new Date(tx.originalPurchaseDate),
       expiresDate: tx.expiresDate ? new Date(tx.expiresDate) : null,
-      priceAmount: tx.price != null ? tx.price / 1_000_000 : null,
+      // Drizzle decimal columns round-trip as strings.
+      priceAmount:
+        tx.price != null ? (tx.price / 1_000_000).toString() : null,
       priceCurrency: tx.currency ?? null,
       autoRenewStatus,
       ownershipType: tx.inAppOwnershipType,
@@ -527,35 +511,31 @@ async function grantAccess(args: GrantAccessArgs): Promise<void> {
       key,
     );
     if (existing) {
-      await prisma.subscriberAccess.update({
-        where: { id: existing.id },
-        data: { isActive: true, expiresDate },
-      });
+      await drizzle.accessRepo.setAccessActiveAndExpiry(
+        drizzle.db,
+        existing.id,
+        true,
+        expiresDate,
+      );
     } else {
-      await prisma.subscriberAccess.create({
-        data: {
-          subscriberId: subscriber.id,
-          purchaseId: purchase.id,
-          entitlementKey: key,
-          isActive: true,
-          expiresDate,
-          store: Store.APP_STORE,
-        },
+      await drizzle.accessRepo.createAccess(drizzle.db, {
+        subscriberId: subscriber.id,
+        purchaseId: purchase.id,
+        entitlementKey: key,
+        isActive: true,
+        expiresDate,
+        store: Store.APP_STORE,
       });
     }
   }
 }
 
 async function revokeAccessForTransaction(ctx: DispatchContext): Promise<void> {
-  await prisma.subscriberAccess.updateMany({
-    where: {
-      purchase: {
-        projectId: ctx.projectId,
-        originalTransactionId: ctx.transaction.originalTransactionId,
-      },
-    },
-    data: { isActive: false },
-  });
+  await drizzle.accessRepo.revokeAccessByOriginalTransaction(
+    drizzle.db,
+    ctx.projectId,
+    ctx.transaction.originalTransactionId,
+  );
 }
 
 interface EmitRevenueArgs {
@@ -583,19 +563,17 @@ async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
   const signed = negative ? -amount : amount;
   const amountUsd = await convertToUsd(signed, tx.currency);
 
-  await prisma.revenueEvent.create({
-    data: {
-      projectId: ctx.projectId,
-      subscriberId,
-      purchaseId,
-      productId,
-      type,
-      amount: new Prisma.Decimal(signed),
-      currency: tx.currency,
-      amountUsd: new Prisma.Decimal(amountUsd),
-      store: Store.APP_STORE,
-      eventDate: new Date(tx.purchaseDate),
-    },
+  await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+    projectId: ctx.projectId,
+    subscriberId,
+    purchaseId,
+    productId,
+    type,
+    amount: signed.toString(),
+    currency: tx.currency,
+    amountUsd: amountUsd.toString(),
+    store: Store.APP_STORE,
+    eventDate: new Date(tx.purchaseDate),
   });
 }
 

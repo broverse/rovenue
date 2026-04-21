@@ -198,3 +198,27 @@ export async function createAccess(
     store: input.store,
   });
 }
+
+/**
+ * Revoke every access row joined to a purchase chain (every purchase
+ * that shares an originalTransactionId within the given project).
+ * Apple-webhook uses this for refund/expire/revoke transitions.
+ * Equivalent to Prisma's nested relational filter:
+ *   { where: { purchase: { projectId, originalTransactionId } } }
+ */
+export async function revokeAccessByOriginalTransaction(
+  db: DbOrTx,
+  projectId: string,
+  originalTransactionId: string,
+): Promise<void> {
+  const ids = await findAccessIdsForPurchaseChain(
+    db,
+    projectId,
+    originalTransactionId,
+  );
+  if (ids.length === 0) return;
+  await db
+    .update(subscriberAccess)
+    .set({ isActive: false })
+    .where(inArray(subscriberAccess.id, ids));
+}
