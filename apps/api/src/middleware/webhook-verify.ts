@@ -69,6 +69,8 @@ export type VerifiedWebhook = VerifiedApple | VerifiedGoogle | VerifiedStripe;
 declare module "hono" {
   interface ContextVariableMap {
     verifiedWebhook?: VerifiedWebhook;
+    webhookEventId?: string;
+    webhookEventTimestamp?: number;
   }
 }
 
@@ -150,6 +152,11 @@ export const verifyAppleWebhook: MiddlewareHandler = async (c, next) => {
     signedPayload: body.signedPayload,
     notification,
   });
+  c.set("webhookEventId", notification.notificationUUID);
+  c.set(
+    "webhookEventTimestamp",
+    Math.floor(new Date(notification.signedDate).getTime() / 1000),
+  );
   await next();
 };
 
@@ -188,7 +195,23 @@ export const verifyGoogleWebhook: MiddlewareHandler = async (c, next) => {
     throw new HTTPException(401, { message: "Invalid Pub/Sub token" });
   }
 
+  // Google puts identity in the header, but we still need the body's
+  // messageId + publishTime for replay guarding. Parse once and stash
+  // on ctx so the route handler's zValidator can read it from raw again.
+  const body = (await c.req.raw.clone().json()) as {
+    message?: { messageId?: string; publishTime?: string };
+  };
+  const messageId = body.message?.messageId;
+  const publishTime = body.message?.publishTime;
+  if (!messageId || !publishTime) {
+    throw new HTTPException(400, {
+      message: "Google push body missing message.messageId or publishTime",
+    });
+  }
+
   c.set("verifiedWebhook", { source: "GOOGLE" });
+  c.set("webhookEventId", messageId);
+  c.set("webhookEventTimestamp", Math.floor(new Date(publishTime).getTime() / 1000));
   await next();
 };
 
@@ -239,5 +262,7 @@ export const verifyStripeWebhook: MiddlewareHandler = async (c, next) => {
   }
 
   c.set("verifiedWebhook", { source: "STRIPE", rawBody, event });
+  c.set("webhookEventId", event.id);
+  c.set("webhookEventTimestamp", event.created);
   await next();
 };

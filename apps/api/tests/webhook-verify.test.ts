@@ -96,7 +96,12 @@ function makeApp(
   });
   app.post("/:projectId", middleware, (c) => {
     const verified = c.get("verifiedWebhook");
-    return c.json({ ok: true, source: verified?.source });
+    return c.json({
+      ok: true,
+      source: verified?.source,
+      eventId: c.get("webhookEventId"),
+      eventTimestamp: c.get("webhookEventTimestamp"),
+    });
   });
   return app;
 }
@@ -183,6 +188,23 @@ describe("verifyAppleWebhook", () => {
     expect(res.status).toBe(401);
     expect(mocks.createAppleVerifier).not.toHaveBeenCalled();
   });
+
+  test("stashes notificationUUID + signedDate on ctx", async () => {
+    mocks.appleVerifier.verifyNotification.mockResolvedValue({
+      notificationType: "SUBSCRIBED",
+      notificationUUID: "uuid-stashed",
+      signedDate: 1_700_000_000_000, // ms since epoch, as Apple sends
+    });
+    const app = makeApp(verifyAppleWebhook);
+    const res = await app.request("/proj_a", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ signedPayload: "fake.jws" }),
+    });
+    const body = (await res.json()) as { eventId: string; eventTimestamp: number };
+    expect(body.eventId).toBe("uuid-stashed");
+    expect(body.eventTimestamp).toBe(1_700_000_000);
+  });
 });
 
 // =============================================================
@@ -265,6 +287,31 @@ describe("verifyGoogleWebhook", () => {
     expect(res.status).toBe(200);
     expect(mocks.verifyPubSubPushToken).not.toHaveBeenCalled();
   });
+
+  test("stashes message.messageId + publishTime on ctx", async () => {
+    mocks.verifyPubSubPushToken.mockResolvedValue(undefined);
+    const app = makeApp(verifyGoogleWebhook);
+    const res = await app.request("/proj_a", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer valid-id-token",
+      },
+      body: JSON.stringify({
+        message: {
+          data: "eyJ4Ijoxfg==",
+          messageId: "msg-xyz",
+          publishTime: "2026-04-21T10:00:00Z",
+        },
+        subscription: "projects/p/subscriptions/s",
+      }),
+    });
+    const body = (await res.json()) as { eventId: string; eventTimestamp: number };
+    expect(body.eventId).toBe("msg-xyz");
+    expect(body.eventTimestamp).toBe(
+      Math.floor(new Date("2026-04-21T10:00:00Z").getTime() / 1000),
+    );
+  });
 });
 
 // =============================================================
@@ -342,5 +389,25 @@ describe("verifyStripeWebhook", () => {
 
     expect(res.status).toBe(401);
     expect(mocks.stripeClient.webhooks.constructEvent).not.toHaveBeenCalled();
+  });
+
+  test("stashes event.id + event.created on ctx", async () => {
+    mocks.stripeClient.webhooks.constructEvent.mockReturnValue({
+      id: "evt_stripe_1",
+      created: 1_700_000_123,
+      type: "invoice.paid",
+    } as never);
+    const app = makeApp(verifyStripeWebhook);
+    const res = await app.request("/proj_a", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "stripe-signature": "t=1,v1=fake",
+      },
+      body: '{"raw":true}',
+    });
+    const body = (await res.json()) as { eventId: string; eventTimestamp: number };
+    expect(body.eventId).toBe("evt_stripe_1");
+    expect(body.eventTimestamp).toBe(1_700_000_123);
   });
 });
