@@ -15,6 +15,10 @@ import {
   createDeliveryWorker,
   scheduleDelivery,
 } from "./workers/webhook-delivery";
+import {
+  createWebhookRetentionWorker,
+  scheduleWebhookRetention,
+} from "./workers/webhook-retention";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -41,6 +45,16 @@ scheduleFxFetch().catch((err: unknown) => {
 createDeliveryWorker();
 scheduleDelivery().catch((err: unknown) => {
   logger.error("failed to schedule webhook delivery", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// webhook_events retention — nightly DELETE pass for rows older
+// than 90 days. Replaces a hypertable drop_chunks policy; see
+// workers/webhook-retention.ts for the rationale.
+createWebhookRetentionWorker();
+scheduleWebhookRetention().catch((err: unknown) => {
+  logger.error("failed to schedule webhook retention", {
     err: err instanceof Error ? err.message : String(err),
   });
 });

@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, lt, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { webhookEvents, type WebhookEvent } from "../schema";
 import { webhookEventStatus, webhookSource } from "../enums";
@@ -143,4 +143,26 @@ export async function updateWebhookEvent(
     .update(webhookEvents)
     .set(data)
     .where(eq(webhookEvents.id, id));
+}
+
+/**
+ * Bulk-delete webhook_events rows older than the retention cutoff.
+ * Used by the nightly webhook-retention BullMQ job. Returns the
+ * count of rows removed.
+ *
+ * Rationale: webhook_events is not a hypertable (the UNIQUE
+ * (source, storeEventId) key is load-bearing for the upsert
+ * dedup contract — see upsertWebhookEvent above). Retention is
+ * handled at the application layer via this DELETE instead of a
+ * TimescaleDB drop_chunks policy.
+ */
+export async function deleteWebhookEventsOlderThan(
+  db: DbOrTx,
+  cutoff: Date,
+): Promise<number> {
+  const result = await db
+    .delete(webhookEvents)
+    .where(lt(webhookEvents.createdAt, cutoff))
+    .returning({ id: webhookEvents.id });
+  return result.length;
 }
