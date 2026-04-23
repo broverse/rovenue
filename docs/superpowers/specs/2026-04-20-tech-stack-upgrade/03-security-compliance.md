@@ -1244,18 +1244,24 @@ Aggressive audit write concurrency: `FOR UPDATE` lock her audit insert'inde tutu
 
 ## 16. Sonraki adım
 
-Implementation plan dosyası: `docs/superpowers/plans/2026-04-XX-security-compliance.md`. Tahmini iş:
+Implementation plan dosyası: `docs/superpowers/plans/2026-04-21-security-compliance.md` (tamamlandı 2026-04-23, branch `feat/alan-3-security-compliance`).
 
-- Apple JWS + fingerprint pinning: 1 gün.
-- Google Pub/Sub auth: 1 gün.
-- Replay guard middleware: yarım gün.
-- Envelope encryption + rotation script: 2 gün.
-- Audit chain + trigger + verifier: 2-3 gün.
-- Rate limiter v2: 1 gün.
-- Anonymization flow: 1 gün.
-- Infisical integration: 1-2 gün (ops'tan bağımsız).
+Tamamlanan iş:
 
-Toplam: ~2 sprint.
+- Apple JWS + fingerprint pinning ✅ (Task 2.1 + 2.2, sticky-error cache + 503 translation)
+- Google Pub/Sub auth ✅ (pre-existing, dev-mode body peek eklendi Task 1.3'te)
+- Replay guard middleware ✅ (Task 1.2 + 1.3)
+- Audit chain + trigger + verifier ✅ (pre-existing, `audit.ts`)
+- Rate limiter v2 ✅ (Task 3.1 per-user dashboard limiter + Task 3.2 in-memory insurance fallback + sweep)
+- Anonymization flow ✅ (Task 4.1 service + Task 4.2 endpoint, peppered HMAC + audit, cross-project bypass fix)
+- GDPR right-to-access ✅ (Task 4.3 export service + endpoint)
+
+Out of scope (ayrı plan/spec):
+
+- Envelope encryption + rotation (§7) — ops KMS kararı gerekli.
+- Infisical integration (§9) — ops self-host kararı gerekli.
+
+Gerçekleşen: 11 task + 10 review-driven fixup commits, 36 yeni test (346 → 382 geçen, 1 skipped fixture).
 
 ---
 
