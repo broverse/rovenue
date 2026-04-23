@@ -15,7 +15,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "vitest"
+    "test": "vitest run"
   },
   "dependencies": {
     "@apple/app-store-server-library": "^1.4.0",
