@@ -9,6 +9,11 @@ const envSchema = z
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional(),
     DATABASE_URL: z.string().url().optional(),
     REDIS_URL: z.string().url().default("redis://localhost:6379"),
+    // ClickHouse read replica for analytics. Optional in dev (analytics
+    // router degrades to "no data" responses); required in production.
+    CLICKHOUSE_URL: z.string().url().optional(),
+    CLICKHOUSE_USER: z.string().min(1).default("rovenue_reader"),
+    CLICKHOUSE_PASSWORD: z.string().min(1).optional(),
     BETTER_AUTH_SECRET: z.string().min(1).optional(),
     BETTER_AUTH_URL: z.string().url().default("http://localhost:3000"),
     DASHBOARD_URL: z.string().url().default("http://localhost:5173"),
@@ -79,6 +84,16 @@ const envSchema = z
       data.BETTER_AUTH_SECRET,
       "BETTER_AUTH_SECRET",
       "session encryption key must be set",
+    );
+    require(
+      data.CLICKHOUSE_URL,
+      "CLICKHOUSE_URL",
+      "analytics queries require a ClickHouse cluster in production",
+    );
+    require(
+      data.CLICKHOUSE_PASSWORD,
+      "CLICKHOUSE_PASSWORD",
+      "analytics reader must authenticate in production",
     );
   });
 
