@@ -1,3 +1,0 @@
-[submodule "peerdb-upstream"]
-	path = deploy/peerdb/upstream
-	url = https://github.com/PeerDB-io/peerdb.git
