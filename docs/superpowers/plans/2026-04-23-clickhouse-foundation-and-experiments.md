@@ -38,11 +38,13 @@
 ### Create
 
 **Docker / infra:**
-- `deploy/peerdb/docker-compose.peerdb.yml` — PeerDB self-host bundle (catalog postgres + peerdb-server + peerdb-ui + peerdb-flow-worker), pinned image tags. Included from `docker-compose.yml` via `extends`/`-f` overlay.
-- `deploy/peerdb/mirror-rovenue-analytics.yaml` — declarative PeerDB mirror spec committed in repo (reproducible bootstrap; see Phase 4).
+- `deploy/peerdb/upstream/` — git submodule pinned to PeerDB `stable-v0.36.17`. PeerDB ships its own ~9-service docker-compose bundle; we vendor and boot it via `./run-peerdb.sh`.
+- `deploy/peerdb/README.md` — bootstrap instructions (submodule init, `run-peerdb.sh`, `psql setup.sql`).
+- `deploy/peerdb/setup.sql` — `CREATE PEER` + `CREATE MIRROR` SQL applied against PeerDB's wire endpoint (`localhost:9900`) to create the `rovenue_analytics` mirror (Phase 4).
 - `deploy/clickhouse/config.d/rovenue.xml` — ClickHouse server overrides (max_memory_usage, max_execution_time, enable_http_compression).
 - `deploy/clickhouse/users.d/rovenue.xml` — ClickHouse user `rovenue` with read+insert grants on `rovenue` database, read-only user `rovenue_reader` for analytics-router.
 - `deploy/clickhouse/backup.sh` — `clickhouse-backup`-based daily backup to S3-compatible storage. Referenced in Phase 10 but not scheduled by the plan (ops concern); the script must be runnable standalone.
+- `.gitmodules` — top-level submodule config for `deploy/peerdb/upstream`.
 
 **ClickHouse migrations (new directory):**
 - `packages/db/clickhouse/migrations/0001_init_schema.sql` — creates the `rovenue` database and the `_migrations` tracking table.
@@ -146,18 +148,14 @@ git pull origin main
 
 Expected: clean tree, HEAD at `1b9bcf9` (the ClickHouse spec addendum) or later.
 
-- [ ] **Step 2: Verify docker daemon is running and images are pullable**
+- [ ] **Step 2: Verify docker daemon is running and the ClickHouse image is pullable**
 
 Run:
 ```bash
 docker pull clickhouse/clickhouse-server:24.3-alpine
-docker pull ghcr.io/peerdb-io/peerdb-server:stable-v0.22
-docker pull ghcr.io/peerdb-io/flow-api:stable-v0.22
-docker pull ghcr.io/peerdb-io/flow-worker:stable-v0.22
-docker pull ghcr.io/peerdb-io/peerdb-ui:stable-v0.22
 ```
 
-Expected: all four images pulled. If any tag is missing, PeerDB rotated versions — before editing the plan, open `https://github.com/PeerDB-io/peerdb/releases` and substitute the latest `stable-v0.*` tag; apply the same substitution everywhere in Phase 1.
+Expected: image pulled. PeerDB is NOT pre-pulled here — PeerDB is deployed as a vendored git submodule in Phase 1 Task 1.2 via its own `run-peerdb.sh`, which pulls the correct image tags itself (they move frequently and are pinned inside PeerDB's upstream compose file).
 
 - [ ] **Step 3: Start the current stack and run the baseline test suite**
 
@@ -336,142 +334,162 @@ curl -s http://localhost:8124/ping
 
 Expected: `Ok.` on the `/ping` response. If unhealthy after 60s, `docker compose logs clickhouse` — most common issue is a malformed users.xml; fix and `docker compose restart clickhouse`.
 
-### Task 1.2: Add the PeerDB overlay
+### Task 1.2: Vendor PeerDB as a git submodule
 
 **Files:**
-- Create: `deploy/peerdb/docker-compose.peerdb.yml`
-- Modify: `docker-compose.yml` (documentation comment only)
+- Create: `deploy/peerdb/README.md`
+- Create: `deploy/peerdb/upstream/` (submodule reference)
+- Modify: `.gitmodules` (add PeerDB submodule)
+- Modify: `docker-compose.yml` (header comment only)
 
-- [ ] **Step 1: Write the PeerDB overlay**
+**Rationale for not re-authoring PeerDB's compose:** PeerDB ships its own multi-service bundle (catalog Postgres + 3 temporal services + flow-api + flow-snapshot-worker + flow-worker + peerdb-server + peerdb-ui, ~9 services total) and explicitly recommends cloning their repo and running `./run-peerdb.sh`. The service topology drifts between minor versions (temporal setup, worker splits, UI port). Per PeerDB's own [quickstart](https://docs.peerdb.io/quickstart/quickstart#deploying-peerdb), we vendor their compose via git submodule pinned to a specific tag and treat it as an external dependency — rovenue only owns the `peer` + `mirror` SQL configuration (Phase 4).
 
-Create `deploy/peerdb/docker-compose.peerdb.yml`:
+- [ ] **Step 1: Add PeerDB as a git submodule pinned to a stable tag**
 
-```yaml
-# PeerDB overlay. Boot with:
-#
-#   docker compose -f docker-compose.yml -f deploy/peerdb/docker-compose.peerdb.yml up -d
-#
-# Kept out of the main compose file because PeerDB bundles four
-# services; most developers do not need it on every local spin-up.
-# The overlay joins the same default network as the root compose,
-# which lets peerdb-server dial `db:5432` and `clickhouse:8123`
-# directly.
-#
-# Image tags pinned to stable-v0.22 (2026-03 series). When upgrading,
-# update all four tags in lockstep and re-run `pnpm test:parity` to
-# confirm replication parity still holds.
-services:
-  peerdb-catalog:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: peerdb
-      POSTGRES_PASSWORD: peerdb
-      POSTGRES_DB: peerdb
-    volumes:
-      - peerdb-catalog-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U peerdb"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    restart: unless-stopped
-
-  peerdb-server:
-    image: ghcr.io/peerdb-io/peerdb-server:stable-v0.22
-    environment:
-      PEERDB_CATALOG_HOST: peerdb-catalog
-      PEERDB_CATALOG_PORT: 5432
-      PEERDB_CATALOG_USER: peerdb
-      PEERDB_CATALOG_PASSWORD: peerdb
-      PEERDB_CATALOG_DATABASE: peerdb
-      PEERDB_PASSWORD: ${PEERDB_PASSWORD:-peerdb}
-      PEERDB_FLOW_SERVER_ADDRESS: flow-api:8112
-    depends_on:
-      peerdb-catalog: { condition: service_healthy }
-    ports:
-      - "9900:9900"   # gRPC for the UI
-    restart: unless-stopped
-
-  peerdb-flow-api:
-    image: ghcr.io/peerdb-io/flow-api:stable-v0.22
-    environment:
-      PEERDB_CATALOG_HOST: peerdb-catalog
-      PEERDB_CATALOG_PORT: 5432
-      PEERDB_CATALOG_USER: peerdb
-      PEERDB_CATALOG_PASSWORD: peerdb
-      PEERDB_CATALOG_DATABASE: peerdb
-      TEMPORAL_HOST: peerdb-temporal:7233
-    depends_on:
-      peerdb-catalog: { condition: service_healthy }
-    ports:
-      - "8112:8112"
-    restart: unless-stopped
-
-  peerdb-flow-worker:
-    image: ghcr.io/peerdb-io/flow-worker:stable-v0.22
-    environment:
-      TEMPORAL_HOST: peerdb-temporal:7233
-      PEERDB_CATALOG_HOST: peerdb-catalog
-      PEERDB_CATALOG_PORT: 5432
-      PEERDB_CATALOG_USER: peerdb
-      PEERDB_CATALOG_PASSWORD: peerdb
-      PEERDB_CATALOG_DATABASE: peerdb
-    depends_on:
-      peerdb-catalog: { condition: service_healthy }
-    restart: unless-stopped
-
-  peerdb-ui:
-    image: ghcr.io/peerdb-io/peerdb-ui:stable-v0.22
-    environment:
-      PEERDB_SERVER_ADDRESS: peerdb-server:9900
-    depends_on:
-      - peerdb-server
-    ports:
-      - "3030:3000"
-    restart: unless-stopped
-
-volumes:
-  peerdb-catalog-data:
+```bash
+git submodule add --name peerdb-upstream \
+    https://github.com/PeerDB-io/peerdb.git \
+    deploy/peerdb/upstream
+cd deploy/peerdb/upstream
+git checkout stable-v0.36.17
+cd ../../..
+git add .gitmodules deploy/peerdb/upstream
 ```
 
-- [ ] **Step 2: Document the overlay in the main compose file**
+Expected: `.gitmodules` contains the `peerdb-upstream` entry; `deploy/peerdb/upstream/` is pinned to tag `stable-v0.36.17`.
+
+**Version-bump hygiene:** when upgrading the submodule, `cd deploy/peerdb/upstream && git fetch && git checkout stable-v0.X.Y`, re-run `./run-peerdb.sh`, and confirm `deploy/peerdb/setup.sql` (Phase 4) still applies against the new peerdb-server. The PeerDB UI `/mirrors` page should list `rovenue_analytics` as running after the upgrade.
+
+- [ ] **Step 2: Write the rovenue-side PeerDB README**
+
+Create `deploy/peerdb/README.md`:
+
+```markdown
+# PeerDB bootstrap for rovenue analytics
+
+PeerDB is vendored as a git submodule at `deploy/peerdb/upstream/`,
+pinned to `stable-v0.36.17`. We deploy it via PeerDB's own
+`run-peerdb.sh` script — NOT via rovenue's `docker-compose.yml` —
+because PeerDB bundles ~9 interdependent services whose topology
+drifts between versions.
+
+## First-time setup
+
+```bash
+# 1. Ensure rovenue's Postgres + ClickHouse are running and published
+#    on the host (default: localhost:5433 and localhost:8124).
+docker compose up -d db redis clickhouse
+
+# 2. Initialise the PeerDB submodule if not yet done.
+git submodule update --init --recursive
+
+# 3. Boot PeerDB. This runs on its own docker network; it reaches
+#    rovenue's services via host.docker.internal.
+cd deploy/peerdb/upstream
+./run-peerdb.sh
+
+# 4. Wait for the PeerDB UI to be reachable at http://localhost:3000
+#    and the Postgres wire endpoint to be reachable at
+#    localhost:9900 (user `peerdb`, password `peerdb`).
+
+# 5. Apply the rovenue mirror config (Phase 4 creates setup.sql).
+psql "postgresql://peerdb:peerdb@localhost:9900/peerdb" \
+     -f deploy/peerdb/setup.sql
+```
+
+## Connecting PeerDB to rovenue services
+
+PeerDB runs in its own docker network (created by `run-peerdb.sh`),
+so its containers cannot resolve `db` or `clickhouse`. From inside
+PeerDB's network, rovenue is reachable via:
+
+- Postgres: `host.docker.internal:5433` (rovenue user/password)
+- ClickHouse: `host.docker.internal:8124` (rovenue user/password)
+
+`deploy/peerdb/setup.sql` uses these host addresses in the `CREATE
+PEER ... WITH (...)` statements.
+
+## UI
+
+- Dashboard: http://localhost:3000 — mirrors, peers, sync status.
+- psql wire: localhost:9900 — scriptable via `psql`.
+
+## Stopping PeerDB
+
+```bash
+cd deploy/peerdb/upstream
+docker compose down
+```
+
+This leaves rovenue's own stack untouched. PeerDB's catalog state
+persists in PeerDB's docker volumes; on next boot mirrors resume.
+
+## Upgrading
+
+See "Version-bump hygiene" in the Phase 1 Task 1.2 step notes of
+`docs/superpowers/plans/2026-04-23-clickhouse-foundation-and-experiments.md`.
+Pin the submodule to a newer `stable-v0.*.*` tag, rerun `./run-peerdb.sh`,
+then re-apply `deploy/peerdb/setup.sql` if the peer/mirror schema changed.
+
+## Production (Coolify / hosted)
+
+Production runbook is out of scope for Plan 1. The simplest Coolify
+deployment publishes PeerDB as an independent service stack
+alongside rovenue's own stack, with ClickHouse and Postgres reachable
+over the Coolify internal network (not host.docker.internal).
+Operator notes land with Plan 2.
+```
+
+- [ ] **Step 3: Document the two-stack boot sequence in the main compose file**
 
 At the very top of `docker-compose.yml`, add a header comment block:
 
 ```yaml
-# Rovenue local stack.
+# Rovenue local stack — rovenue's own services (api, db, redis, clickhouse).
 #
-# Default boot (no PeerDB, no analytics replication):
+# Default boot:
 #   docker compose up -d
 #
-# Full-fidelity boot (includes PeerDB replication Postgres → ClickHouse):
-#   docker compose -f docker-compose.yml -f deploy/peerdb/docker-compose.peerdb.yml up -d
+# PeerDB (Postgres → ClickHouse replication) is a VENDORED external
+# bundle, NOT a service in this file. See deploy/peerdb/README.md.
+# Boot PeerDB separately:
+#   cd deploy/peerdb/upstream && ./run-peerdb.sh
 #
 # Most development does not need PeerDB running — the API treats the
 # ClickHouse database as empty and the analytics-router falls back
 # to "no data" responses. Integration tests in apps/api/tests/
-# replication-parity.test.ts spin the overlay via testcontainers.
+# replication-parity.test.ts spin a minimal PeerDB via testcontainers.
 ```
 
-- [ ] **Step 3: Boot the overlay and confirm PeerDB is up**
+- [ ] **Step 4: Smoke-test the full two-stack boot**
 
 ```bash
-docker compose -f docker-compose.yml -f deploy/peerdb/docker-compose.peerdb.yml up -d
-sleep 20
-curl -s http://localhost:8112/health
+# Rovenue stack
+docker compose up -d db redis clickhouse
+until docker compose ps db clickhouse | grep -c healthy | grep -q 2; do sleep 2; done
+
+# PeerDB stack
+cd deploy/peerdb/upstream
+./run-peerdb.sh
+cd ../../..
 ```
 
-Expected: non-empty response from the flow-api (typically `{"status":"ok"}` or a peerdb-specific shape). If flow-api fails, check `docker compose logs peerdb-flow-api peerdb-temporal` — the most common issue is the temporal sidecar being out-of-date. If PeerDB has replaced the temporal dependency in a newer `stable-v0.*` tag, follow their upgrade notes and mirror changes into the overlay above.
+Expected: `./run-peerdb.sh` runs to completion and prints PeerDB's UI URL (typically `http://localhost:3000`). Open it and confirm the "Peers" and "Mirrors" pages load (empty — they are populated by Phase 4 Task 4.2).
 
-- [ ] **Step 4: Commit the infrastructure work**
+If `run-peerdb.sh` fails, check `deploy/peerdb/upstream/docker-compose.yml` for service health, then `docker compose -f deploy/peerdb/upstream/docker-compose.yml logs` for the failing service. Most likely causes: port conflict on 3000 (rovenue's dashboard), 9900 (occupied by something else), or the vendored version requires a newer docker compose major version.
+
+- [ ] **Step 5: Commit the infrastructure work**
 
 ```bash
 git add docker-compose.yml \
         deploy/clickhouse/config.d/rovenue.xml \
         deploy/clickhouse/users.d/rovenue.xml \
-        deploy/peerdb/docker-compose.peerdb.yml
-git commit -m "chore(infra): add ClickHouse and PeerDB compose services"
+        deploy/peerdb/README.md \
+        .gitmodules
+git commit -m "chore(infra): vendor PeerDB via submodule + ClickHouse compose"
 ```
+
+Note: `deploy/peerdb/upstream` is tracked as a submodule reference (single gitlink entry), not as files. `git add` of the parent path plus the `.gitmodules` entry is sufficient.
 
 ### Task 1.3: Extend the API env schema
 
@@ -1170,6 +1188,36 @@ git commit -m "test(db): lint clickhouse migration filenames + semicolons"
 **Files:**
 - Create: `packages/db/drizzle/migrations/0010_postgres_publication.sql`
 - Modify: `packages/db/drizzle/migrations/meta/_journal.json`
+- Modify: `docker-compose.yml` (enable logical replication on `db` service)
+
+- [ ] **Step 0: Enable logical replication on the Postgres service**
+
+Logical replication is a cluster-level setting; without `wal_level=logical` the `CREATE PUBLICATION` below is technically accepted but PeerDB cannot actually consume it. The `timescale/timescaledb:2.17.2-pg16` image defaults to `wal_level=replica`. Open `docker-compose.yml`, find the `db` service, and add a `command:` key alongside the existing `environment:`:
+
+```yaml
+  db:
+    image: timescale/timescaledb:2.17.2-pg16
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "max_replication_slots=10"
+    environment:
+      # ...existing vars...
+```
+
+Then recreate the container so the new `postgres` command-line takes effect (a SIGHUP is NOT enough — these three settings require a full restart):
+
+```bash
+docker compose up -d --force-recreate db
+until docker compose ps db | grep -q healthy; do sleep 2; done
+docker compose exec db psql -U rovenue -d rovenue -c "SHOW wal_level"
+```
+
+Expected: `wal_level` prints `logical`. Proceed only after this succeeds.
 
 - [ ] **Step 1: Author the SQL**
 
@@ -1248,205 +1296,135 @@ Expected: table list shows all six replicated tables.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add packages/db/drizzle/migrations/0010_postgres_publication.sql \
+git add docker-compose.yml \
+        packages/db/drizzle/migrations/0010_postgres_publication.sql \
         packages/db/drizzle/migrations/meta/_journal.json
-git commit -m "feat(db): create rovenue_analytics logical publication"
+git commit -m "feat(db): enable logical replication + rovenue_analytics publication"
 ```
 
-### Task 4.2: Write the PeerDB mirror spec
+### Task 4.2: Write the PeerDB setup SQL and bootstrap the mirror
 
 **Files:**
-- Create: `deploy/peerdb/mirror-rovenue-analytics.yaml`
-- Create: `deploy/peerdb/README.md`
+- Create: `deploy/peerdb/setup.sql`
 
-- [ ] **Step 1: Author the mirror YAML**
+**Rationale:** PeerDB exposes a Postgres-wire endpoint at `localhost:9900` that accepts its own dialect of SQL (`CREATE PEER`, `CREATE MIRROR`, `DROP MIRROR`). There is no declarative YAML format — peers and mirrors are created via SQL (or the UI, which is a wrapper around the same SQL). We commit the SQL to the repo so the bootstrap is reproducible.
 
-Create `deploy/peerdb/mirror-rovenue-analytics.yaml`:
+- [ ] **Step 1: Author `deploy/peerdb/setup.sql`**
 
-```yaml
-# Declarative PeerDB mirror for the rovenue analytics pipeline.
-# Loaded by `peerdb apply -f deploy/peerdb/mirror-rovenue-analytics.yaml`
-# (run from the host against the peerdb-server at localhost:9900).
-#
-# Source: the local Postgres on `db:5432`, database `rovenue`,
-# publication `rovenue_analytics` (created by Drizzle migration 0010).
-# Target: local ClickHouse on `clickhouse:8123`, database `rovenue`.
-#
-# Table mapping renames source PK columns to match the ClickHouse
-# schemas from Phase 2. PeerDB issues `OPTIMIZE ... FINAL` on refresh,
-# so ReplacingMergeTree convergence is not load-bearing at read time,
-# but we still use FINAL in sensitive analytics queries to be safe.
-apiVersion: peerdb.io/v1
-kind: Mirror
-metadata:
-  name: rovenue-analytics
-spec:
-  sourcePeer: rovenue-postgres
-  targetPeer: rovenue-clickhouse
-  flowJobName: rovenue_analytics
-  publicationName: rovenue_analytics
-  replicationSlotName: rovenue_peerdb
-  softDelete: true
-  tableMappings:
-    - sourceTableIdentifier: public.revenue_events
-      destinationTableIdentifier: rovenue.raw_revenue_events
-      columnMappings:
-        id: event_id
-        project_id: project_id
-        subscriber_id: subscriber_id
-        product_id: product_id
-        country: country
-        platform: platform
-        type: type
-        amount_cents: amount_cents
-        currency: currency
-        period_months: period_months
-        occurred_at: occurred_at
-      excludedColumns: []
-    - sourceTableIdentifier: public.credit_ledger
-      destinationTableIdentifier: rovenue.raw_credit_ledger
-      columnMappings:
-        id: entry_id
-        project_id: project_id
-        subscriber_id: subscriber_id
-        type: type
-        amount: amount
-        balance_after: balance_after
-        source_ref: source_ref
-        metadata: metadata
-        created_at: created_at
-    - sourceTableIdentifier: public.subscribers
-      destinationTableIdentifier: rovenue.raw_subscribers
-      columnMappings:
-        id: subscriber_id
-        project_id: project_id
-        anonymous_id: anonymous_id
-        user_id: user_id
-        attributes: attributes
-        platform: platform
-        country: country
-        created_at: created_at
-        updated_at: updated_at
-    - sourceTableIdentifier: public.purchases
-      destinationTableIdentifier: rovenue.raw_purchases
-      columnMappings:
-        id: purchase_id
-        project_id: project_id
-        subscriber_id: subscriber_id
-        product_id: product_id
-        platform: platform
-        store_transaction_id: store_transaction_id
-        status: status
-        price_cents: price_cents
-        currency: currency
-        original_purchase_at: original_purchase_at
-        purchased_at: purchased_at
-        expires_at: expires_at
-    - sourceTableIdentifier: public.experiment_assignments
-      destinationTableIdentifier: rovenue.raw_experiment_assignments
-      columnMappings:
-        id: id
-        project_id: project_id
-        experiment_id: experiment_id
-        subscriber_id: subscriber_id
-        variant_id: variant_id
-        hash_version: hash_version
-        assigned_at: assigned_at
-    - sourceTableIdentifier: public.exposure_events
-      destinationTableIdentifier: rovenue.raw_exposures
-      columnMappings:
-        id: exposure_id
-        experiment_id: experiment_id
-        variant_id: variant_id
-        project_id: project_id
-        subscriber_id: subscriber_id
-        platform: platform
-        country: country
-        exposed_at: exposed_at
-  syncMode: cdc
-  initialCopy:
-    enabled: true
-    parallelism: 2
-    batchSizeRows: 10000
+```sql
+-- deploy/peerdb/setup.sql
+--
+-- One-shot bootstrap for the rovenue analytics mirror. Apply against
+-- PeerDB's wire endpoint with:
+--
+--   psql "postgresql://peerdb:peerdb@localhost:9900/peerdb" \
+--        -f deploy/peerdb/setup.sql
+--
+-- Re-running is mostly idempotent — CREATE PEER / CREATE MIRROR
+-- fail loudly if the named object already exists, so operators
+-- either DROP first or edit-in-place via the UI. This file is the
+-- canonical initial state.
+--
+-- Host addresses: PeerDB runs in its own docker network (deployed
+-- via deploy/peerdb/upstream/run-peerdb.sh), so rovenue's services
+-- are reachable at host.docker.internal. On Linux hosts without
+-- Docker Desktop, add `--add-host=host.docker.internal:host-gateway`
+-- to the PeerDB compose services (PeerDB's own run-peerdb.sh
+-- already does this on recent versions).
+
+-- Source: rovenue's Postgres (with TimescaleDB).
+CREATE PEER rovenue_postgres FROM POSTGRES WITH (
+  host = 'host.docker.internal',
+  port = '5433',
+  user = 'rovenue',
+  password = 'rovenue',
+  database = 'rovenue'
+);
+
+-- Target: rovenue's ClickHouse. disable_tls is fine for local dev;
+-- production uses TLS terminated by a reverse proxy.
+CREATE PEER rovenue_clickhouse FROM CLICKHOUSE WITH (
+  host = 'host.docker.internal',
+  port = 8124,
+  user = 'rovenue',
+  password = 'rovenue',
+  database = 'rovenue',
+  disable_tls = true
+);
+
+-- Mirror: continuous CDC from Postgres → ClickHouse. Uses the
+-- publication created by Drizzle migration 0010
+-- (packages/db/drizzle/migrations/0010_postgres_publication.sql).
+--
+-- Table mapping: source `public.<table>` → target `<ch_table>`. Per
+-- PeerDB docs, ClickHouse target tables MUST NOT be schema-qualified
+-- (the database is set at peer level).
+--
+-- soft_delete = true keeps Postgres DELETEs as tombstones in
+-- ClickHouse (row marked _peerdb_is_deleted = 1) rather than
+-- physical removal — matches rovenue's 7-year retention intent.
+CREATE MIRROR rovenue_analytics
+FROM rovenue_postgres TO rovenue_clickhouse
+WITH TABLE MAPPING (
+  public.revenue_events:raw_revenue_events,
+  public.credit_ledger:raw_credit_ledger,
+  public.subscribers:raw_subscribers,
+  public.purchases:raw_purchases,
+  public.experiment_assignments:raw_experiment_assignments,
+  public.exposure_events:raw_exposures
+)
+WITH (
+  do_initial_copy = true,
+  publication_name = 'rovenue_analytics',
+  soft_delete = true,
+  synced_at_col_name = '_peerdb_synced_at',
+  soft_delete_col_name = '_peerdb_is_deleted',
+  snapshot_num_tables_in_parallel = 2,
+  snapshot_num_rows_per_partition = 100000,
+  max_batch_size = 100000,
+  sync_interval = 60
+);
 ```
 
-- [ ] **Step 2: Author the README**
+**Note on column renames and schema drift:** the ClickHouse tables from Phase 2 use different PK column names than Postgres (`event_id` vs `id` in `revenue_events`, `entry_id` vs `id` in `credit_ledger`, etc.). PeerDB's CREATE MIRROR table mapping as written above maps the tables 1:1 but relies on matching column NAMES between source and target. We therefore need the ClickHouse target columns to **match Postgres source names** for the mirror to work without per-column `exclude`/rename plumbing (which PeerDB's CREATE MIRROR SQL does not support in the simple form).
 
-Create `deploy/peerdb/README.md`:
+**Action required before bootstrap:** amend Phase 2 migrations 0002-0007 to use Postgres column names directly:
+- `raw_revenue_events.event_id` → rename to `id`
+- `raw_credit_ledger.entry_id` → rename to `id`
+- `raw_subscribers.subscriber_id` → keep as `id` (matches Postgres `subscribers.id`)
+- `raw_purchases.purchase_id` → rename to `id`
+- `raw_exposures.exposure_id` → rename to `id`
 
-```markdown
-# PeerDB mirror bootstrap
+Keep the ORDER BY semantics (e.g. `ORDER BY (project_id, occurred_at, id)` in `raw_revenue_events`). Update `packages/db/scripts/verify-clickhouse.ts` EXPECTED constants and any SQL in `apps/api/src/services/analytics-router.ts` / `experiment-results.ts` that references the old names. If Phase 2 has already been implemented, write a Phase 2.11 follow-up migration `0009_rename_pk_columns.sql` that performs `ALTER TABLE rovenue.raw_<n> RENAME COLUMN <old> TO id` before Phase 4 runs.
 
-This directory holds the PeerDB configuration that streams Postgres
-→ ClickHouse for Rovenue's analytics layer.
-
-## One-time bootstrap
+- [ ] **Step 2: Boot the full stack and apply the setup**
 
 ```bash
-# 1. Start the stack
-docker compose -f docker-compose.yml -f deploy/peerdb/docker-compose.peerdb.yml up -d
-
-# 2. Register the source and target peers (one-time)
-docker compose exec peerdb-server peerdb peers create \
-    --name rovenue-postgres \
-    --type postgres \
-    --host db --port 5432 --database rovenue --user rovenue \
-    --password rovenue
-docker compose exec peerdb-server peerdb peers create \
-    --name rovenue-clickhouse \
-    --type clickhouse \
-    --host clickhouse --port 8123 --database rovenue \
-    --user rovenue --password rovenue
-
-# 3. Apply the mirror spec
-docker compose exec peerdb-server peerdb apply \
-    -f /workspace/deploy/peerdb/mirror-rovenue-analytics.yaml
-
-# 4. Verify
-docker compose exec peerdb-server peerdb mirrors status rovenue_analytics
-```
-
-## UI
-
-The PeerDB UI at <http://localhost:3030> shows the mirror, lag, and
-row-count convergence. Use it when debugging — `docker compose logs
-peerdb-flow-worker` is the second stop.
-
-## Replacing the mirror
-
-PeerDB does not support in-place column additions via `apply`. To
-extend the mirror (e.g. Plan 2 adding new source tables):
-
-1. Drop the mirror: `peerdb mirrors drop rovenue_analytics`.
-2. Update `mirror-rovenue-analytics.yaml`.
-3. Apply again. PeerDB re-runs the initial copy, so expect ~5 min of
-   downtime on a small dev DB.
-
-This is acceptable pre-launch. Post-launch, we'll switch to
-side-by-side mirrors with cutover.
-```
-
-- [ ] **Step 3: Run the bootstrap locally and confirm replication**
-
-```bash
-# Assumes db + redis + clickhouse + peerdb overlay are all up
+# Rovenue services
+docker compose up -d db redis clickhouse
 pnpm --filter @rovenue/db db:migrate
-docker compose exec peerdb-server peerdb peers create \
-    --name rovenue-postgres --type postgres \
-    --host db --port 5432 --database rovenue --user rovenue --password rovenue
-docker compose exec peerdb-server peerdb peers create \
-    --name rovenue-clickhouse --type clickhouse \
-    --host clickhouse --port 8123 --database rovenue \
-    --user rovenue --password rovenue
+CLICKHOUSE_URL=http://localhost:8124 \
+CLICKHOUSE_USER=rovenue \
+CLICKHOUSE_PASSWORD=rovenue \
+pnpm --filter @rovenue/db db:clickhouse:migrate
 
-# Mount the repo inside peerdb-server so it can read the YAML. If your
-# compose override doesn't mount /workspace, copy the file in first:
-docker compose cp deploy/peerdb/mirror-rovenue-analytics.yaml \
-    peerdb-server:/tmp/mirror.yaml
-docker compose exec peerdb-server peerdb apply -f /tmp/mirror.yaml
+# PeerDB services (submodule, Phase 1 Task 1.2)
+(cd deploy/peerdb/upstream && ./run-peerdb.sh)
+
+# Wait for PeerDB to be ready
+until psql "postgresql://peerdb:peerdb@localhost:9900/peerdb" -c 'SELECT 1' >/dev/null 2>&1; do
+  echo "waiting for peerdb..."
+  sleep 3
+done
+
+# Apply the rovenue mirror setup
+psql "postgresql://peerdb:peerdb@localhost:9900/peerdb" \
+     -f deploy/peerdb/setup.sql
 ```
 
-- [ ] **Step 4: Insert a Postgres row and watch it land in ClickHouse**
+Expected: every statement prints `CREATE PEER` / `CREATE MIRROR` and `psql` exits 0. Re-running the file prints a duplicate-name error — that is expected and tells you the bootstrap has already been applied.
+
+- [ ] **Step 3: Insert a Postgres row and watch it land in ClickHouse**
 
 ```bash
 docker compose exec db psql -U rovenue -d rovenue <<'SQL'
@@ -1460,21 +1438,26 @@ INSERT INTO revenue_events (
 );
 SQL
 
-sleep 10
+# Wait one sync interval + a little.
+sleep 75
 docker compose exec clickhouse clickhouse-client \
     --user=rovenue --password=rovenue \
     --query "SELECT count() FROM rovenue.raw_revenue_events"
 ```
 
-Expected: ClickHouse reports `1` within ~10s. If 0, check PeerDB UI for the `rovenue_analytics` mirror status and any reported errors.
+Expected: `1`. If `0`, open the PeerDB UI at http://localhost:3000, click the `rovenue_analytics` mirror, and read the "Sync Status" + "Errors" tabs. Common causes:
+- Publication `rovenue_analytics` not present on source (Task 4.1 not applied).
+- Postgres `wal_level` is not `logical` (requires a restart; default of the `timescale/timescaledb:2.17.2-pg16` image is `replica`). If this is the issue, add `command: ["postgres", "-c", "wal_level=logical", "-c", "max_wal_senders=10", "-c", "max_replication_slots=10"]` to the `db` service in `docker-compose.yml` and `docker compose up -d --force-recreate db`.
+- Column name mismatch between Postgres source and ClickHouse target — see Step 1 note.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit the setup SQL**
 
 ```bash
-git add deploy/peerdb/mirror-rovenue-analytics.yaml \
-        deploy/peerdb/README.md
-git commit -m "feat(infra): PeerDB mirror spec for Postgres → ClickHouse"
+git add deploy/peerdb/setup.sql
+git commit -m "feat(infra): PeerDB CREATE PEER + CREATE MIRROR bootstrap"
 ```
+
+Note: `deploy/peerdb/README.md` is already committed by Phase 1 Task 1.2 Step 5 — do NOT re-create it here. If the bootstrap-in-README section needs edits based on what was learned running Steps 2-3 above, amend the README in a separate follow-up commit.
 
 ---
 
@@ -3253,6 +3236,8 @@ git commit -m "test(api): mv_experiment_daily parity with raw GROUP BY"
 - Modify: `apps/api/src/lib/metrics.ts`
 - Modify: `apps/api/src/index.ts`
 
+**Note on the PeerDB API endpoint:** PeerDB's REST API surface drifts between versions. Before implementing this task, consult `https://docs.peerdb.io/peerdb-api/reference` (or the `/api` routes in the vendored `deploy/peerdb/upstream/flow/cmd/api` source) to find the current "mirror stats" endpoint — it returns lag in seconds among other sync metrics. The skeleton below assumes a `GET /v1/mirrors/{name}` shape with a `replication_lag_seconds` field; adjust the URL + JSON parsing if PeerDB's current release uses a different shape.
+
 - [ ] **Step 1: Write the poller**
 
 ```typescript
@@ -3272,7 +3257,9 @@ async function tick(): Promise<void> {
     return;
   }
   try {
-    const res = await fetch(`${url}/mirrors/${PEERDB_MIRROR}/stats`, {
+    // Endpoint shape per PeerDB API reference at implementation time.
+    // Verify against docs.peerdb.io/peerdb-api/reference before merging.
+    const res = await fetch(`${url}/v1/mirrors/${PEERDB_MIRROR}`, {
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {
