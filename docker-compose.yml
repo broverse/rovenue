@@ -23,6 +23,7 @@ services:
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: rovenue_reader
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
+      KAFKA_BROKERS: redpanda:9092
     ports:
       - "3000:3000"
     depends_on:
@@ -31,6 +32,8 @@ services:
       redis:
         condition: service_started
       clickhouse:
+        condition: service_healthy
+      redpanda:
         condition: service_healthy
     restart: unless-stopped
 
@@ -135,6 +138,60 @@ services:
       retries: 20
     restart: unless-stopped
 
+  redpanda:
+    # Redpanda 24.2 — Kafka-wire-compatible single Go binary. Spec
+    # §14.3 point 4 argues the single-node config (one container)
+    # beats Kafka+ZK+Schema-Registry (≥5 containers) on ops weight
+    # for a self-hosted subscription platform. Rovenue does not need
+    # multi-broker durability at Plan 1 scale.
+    image: redpandadata/redpanda:v24.2.13
+    container_name: rovenue-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      # External (host) listener on 19092 so apps running on the
+      # host (pnpm dev) connect without a docker-network round-trip.
+      # Internal listener on 9092 for other compose services.
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092,EXTERNAL://localhost:19092
+      - --rpc-addr=0.0.0.0:33145
+      - --advertise-rpc-addr=redpanda:33145
+    ports:
+      - "19092:19092"
+      - "9644:9644"
+    volumes:
+      - rovenue-redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  redpanda-console:
+    # Web UI for Redpanda — topic inspector, consumer-group lag,
+    # message browser. Only bound to localhost in production (this
+    # compose is self-host dev; Coolify operator should put it
+    # behind basic auth if exposed).
+    image: redpandadata/console:v2.6.1
+    container_name: rovenue-redpanda-console
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      SERVER_LISTENPORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   rovenue-data:
   rovenue-clickhouse-data:
+  rovenue-redpanda-data:
