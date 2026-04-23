@@ -48,13 +48,8 @@
 
 **ClickHouse migrations (new directory):**
 - `packages/db/clickhouse/migrations/0001_init_schema.sql` — creates the `rovenue` database and the `_migrations` tracking table.
-- `packages/db/clickhouse/migrations/0002_raw_revenue_events.sql` — `raw_revenue_events` ReplacingMergeTree.
-- `packages/db/clickhouse/migrations/0003_raw_credit_ledger.sql` — `raw_credit_ledger` ReplacingMergeTree.
-- `packages/db/clickhouse/migrations/0004_raw_subscribers.sql` — `raw_subscribers` ReplacingMergeTree (for denormalised joins; latest attributes win).
-- `packages/db/clickhouse/migrations/0005_raw_purchases.sql` — `raw_purchases` ReplacingMergeTree.
-- `packages/db/clickhouse/migrations/0006_raw_experiment_assignments.sql` — `raw_experiment_assignments` ReplacingMergeTree.
-- `packages/db/clickhouse/migrations/0007_raw_exposures.sql` — `raw_exposures` MergeTree (append-only).
-- `packages/db/clickhouse/migrations/0008_mv_experiment_daily.sql` — `mv_experiment_daily` SummingMergeTree materialised view targeting `raw_exposures` joined with `raw_revenue_events` for conversion counting.
+- The six `raw_*` tables (`raw_revenue_events`, `raw_credit_ledger`, `raw_subscribers`, `raw_purchases`, `raw_experiment_assignments`, `raw_exposures`) are **NOT hand-authored migrations**. PeerDB auto-creates them at mirror bootstrap in Phase 4 with its canonical schema (`ReplacingMergeTree(_peerdb_version)`, `ORDER BY id`, `_peerdb_synced_at`/`_peerdb_is_deleted`/`_peerdb_version` metadata columns). See the Phase 2 scope note.
+- `packages/db/clickhouse/migrations/0002_mv_experiment_daily.sql` — `mv_experiment_daily` SummingMergeTree materialised view over the PeerDB-managed `raw_exposures` table. **Authored in Phase 4.5**, not here.
 
 **ClickHouse migration runner + verifier:**
 - `packages/db/src/clickhouse-migrate.ts` — CLI that connects via `CLICKHOUSE_URL`, reads `packages/db/clickhouse/migrations/*.sql` in order, and applies new ones. Records filename + SHA-256 + applied_at in `_migrations`. Re-runnable (no-op on applied files). Wired as `pnpm --filter @rovenue/db db:clickhouse:migrate`.
@@ -571,7 +566,9 @@ git commit -m "feat(env): declare CLICKHOUSE_URL/USER/PASSWORD"
 
 ---
 
-## Phase 2 — ClickHouse schema: migration runner + raw tables
+## Phase 2 — ClickHouse schema: migration runner + init
+
+**Scope:** Ship only the tooling needed to apply hand-authored CH migrations and the initial `CREATE DATABASE rovenue` migration. The six `raw_*` tables and `mv_experiment_daily` that earlier drafts put here are moved out per the scope note below Task 2.2 — raw tables are owned by PeerDB (Phase 4), materialised views live in Phase 4.5.
 
 ### Task 2.1: Add `@clickhouse/client` dependency and write the migration runner
 
@@ -786,358 +783,22 @@ git add packages/db/clickhouse/migrations/0001_init_schema.sql
 git commit -m "feat(db): clickhouse 0001 — init rovenue database"
 ```
 
-### Task 2.3: Write migration 0002 (`raw_revenue_events`)
+> **Scope note — raw_\* tables removed from Phase 2 (2026-04-24):**
+>
+> An earlier draft of this plan included Tasks 2.3–2.9 that hand-wrote CH `CREATE TABLE` DDL for each replicated Postgres table (`raw_revenue_events`, `raw_credit_ledger`, `raw_subscribers`, `raw_purchases`, `raw_experiment_assignments`, `raw_exposures`) plus `mv_experiment_daily`. Discovery during Task 2.1 validation surfaced two problems:
+>
+> 1. **Column mismatch:** The draft schemas used snake_case names (`project_id`, `occurred_at`, etc.) and invented columns that do not exist in Postgres (`country`, `platform`, `amount_cents`, `period_months`, etc.). The real Drizzle schema uses camelCase identifiers (`projectId`, `eventDate`, `amountUsd`, `store`, `productId`, …). A PeerDB mirror built against fabricated target tables would fail column mapping at bootstrap.
+> 2. **PeerDB convention:** Per [`docs.peerdb.io/bestpractices/clickhouse_datamodeling`](https://docs.peerdb.io/bestpractices/clickhouse_datamodeling), PeerDB auto-creates ClickHouse target tables with its canonical schema (`_peerdb_synced_at DateTime64(9)`, `_peerdb_is_deleted Int8`, `_peerdb_version Int64` metadata columns, `ReplacingMergeTree(_peerdb_version)` engine, `ORDER BY id`). The recommended flow for customising ORDER BY is: let PeerDB create the default table first, then either build a shadow MV with the desired ordering key or swap in a renamed copy. Pre-creating target tables with our own DDL fights the tool.
+>
+> **New split:**
+>
+> - Phase 2 (this phase) now ships only the migration runner (Task 2.1), the 0001 init migration (Task 2.2), and the idempotency test (Task 2.3 below).
+> - Phase 4 adds the publication + PeerDB mirror bootstrap. PeerDB auto-creates the six `raw_*` tables from the mirror's table mapping. **This is the moment raw_\* schemas come into existence**, owned by PeerDB, not by us.
+> - Phase 4.5 (new, inserted after Phase 4) creates the CH materialized views we own on top of the PeerDB-managed raw tables — in particular `mv_experiment_daily` (reads from `raw_exposures`), and any ORDER BY customisation we need for dashboard query performance. Those migrations live in `packages/db/clickhouse/migrations/` as `0002_<name>.sql` onwards.
+>
+> This keeps rovenue's migration chain to SQL we actually own and trusts PeerDB to manage the raw fact tables it replicates into.
 
-**Files:**
-- Create: `packages/db/clickhouse/migrations/0002_raw_revenue_events.sql`
-
-- [ ] **Step 1: Author the SQL**
-
-Create `packages/db/clickhouse/migrations/0002_raw_revenue_events.sql`:
-
-```sql
--- 0002_raw_revenue_events.sql
--- Fact table fed by PeerDB from Postgres `revenue_events`. Uses
--- ReplacingMergeTree keyed on `version` so CDC UPDATEs (e.g. a refund
--- flipping amount_cents) converge to the latest row. `version` mirrors
--- Postgres `xmin`; PeerDB sets it via the `_PEERDB_LSN_VERSION` meta
--- column which we receive as UInt64.
---
--- ORDER BY picks (project_id, occurred_at, event_id) because every
--- dashboard query filters on project_id + date range. event_id is the
--- tiebreaker for uniqueness.
---
--- LowCardinality on country, platform, currency: ISO-scale dictionaries,
--- ~10× compression.
---
--- TTL: 7 years (VUK retention). Older chunks are dropped automatically.
-CREATE TABLE IF NOT EXISTS rovenue.raw_revenue_events (
-  event_id UUID,
-  project_id String,
-  subscriber_id String,
-  product_id String,
-  country LowCardinality(String),
-  platform LowCardinality(String),
-  type Enum8(
-    'INITIAL' = 1,
-    'RENEWAL' = 2,
-    'REFUND' = 3,
-    'TRIAL_START' = 4,
-    'EXPIRY' = 5,
-    'UPGRADE' = 6,
-    'DOWNGRADE' = 7
-  ),
-  amount_cents Int64,
-  currency LowCardinality(String),
-  period_months UInt8,
-  occurred_at DateTime64(3, 'UTC'),
-  ingested_at DateTime64(3, 'UTC') DEFAULT now64(3, 'UTC'),
-  version UInt64
-)
-ENGINE = ReplacingMergeTree(version)
-PARTITION BY toYYYYMM(occurred_at)
-ORDER BY (project_id, occurred_at, event_id)
-TTL toDateTime(occurred_at) + INTERVAL 7 YEAR;
-```
-
-- [ ] **Step 2: Apply and verify**
-
-```bash
-CLICKHOUSE_URL=http://localhost:8124 \
-CLICKHOUSE_USER=rovenue \
-CLICKHOUSE_PASSWORD=rovenue \
-pnpm --filter @rovenue/db db:clickhouse:migrate
-```
-
-Expected:
-```
-apply 0002_raw_revenue_events.sql
-clickhouse-migrate: 1 new / 2 total
-```
-
-Confirm:
-```bash
-docker compose exec clickhouse clickhouse-client --query \
-  "SHOW CREATE TABLE rovenue.raw_revenue_events FORMAT TSVRaw"
-```
-
-Expected: the returned DDL matches the file, with engine `ReplacingMergeTree(version)` and the 7-year TTL clause.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add packages/db/clickhouse/migrations/0002_raw_revenue_events.sql
-git commit -m "feat(db): clickhouse 0002 — raw_revenue_events"
-```
-
-### Task 2.4: Write migration 0003 (`raw_credit_ledger`)
-
-**Files:**
-- Create: `packages/db/clickhouse/migrations/0003_raw_credit_ledger.sql`
-
-- [ ] **Step 1: Author the SQL**
-
-```sql
--- 0003_raw_credit_ledger.sql
--- Credit grant + spend ledger. Postgres source is TimescaleDB-
--- hypertabled; it is append-only in Postgres but we still use
--- ReplacingMergeTree because PeerDB's CDC path may re-emit rows on
--- replication restart and we want idempotent convergence.
-CREATE TABLE IF NOT EXISTS rovenue.raw_credit_ledger (
-  entry_id UUID,
-  project_id String,
-  subscriber_id String,
-  type Enum8('GRANT' = 1, 'SPEND' = 2, 'EXPIRE' = 3, 'ADJUST' = 4),
-  amount Int64,
-  balance_after Int64,
-  source_ref String,
-  metadata String,
-  created_at DateTime64(3, 'UTC'),
-  version UInt64
-)
-ENGINE = ReplacingMergeTree(version)
-PARTITION BY toYYYYMM(created_at)
-ORDER BY (project_id, created_at, entry_id)
-TTL toDateTime(created_at) + INTERVAL 7 YEAR;
-```
-
-- [ ] **Step 2: Apply, verify, commit**
-
-```bash
-CLICKHOUSE_URL=http://localhost:8124 \
-CLICKHOUSE_USER=rovenue \
-CLICKHOUSE_PASSWORD=rovenue \
-pnpm --filter @rovenue/db db:clickhouse:migrate
-
-docker compose exec clickhouse clickhouse-client --query \
-  "SHOW CREATE TABLE rovenue.raw_credit_ledger FORMAT TSVRaw"
-
-git add packages/db/clickhouse/migrations/0003_raw_credit_ledger.sql
-git commit -m "feat(db): clickhouse 0003 — raw_credit_ledger"
-```
-
-### Task 2.5: Write migration 0004 (`raw_subscribers`)
-
-**Files:**
-- Create: `packages/db/clickhouse/migrations/0004_raw_subscribers.sql`
-
-- [ ] **Step 1: Author the SQL**
-
-```sql
--- 0004_raw_subscribers.sql
--- Slowly-changing dimension. ReplacingMergeTree keeps the latest
--- version of each subscriber; joins against raw_revenue_events for
--- denormalised cohort / LTV queries land here (Plan 2).
---
--- ORDER BY (project_id, subscriber_id) — point-lookup optimised;
--- subscribers are rarely range-scanned.
-CREATE TABLE IF NOT EXISTS rovenue.raw_subscribers (
-  subscriber_id String,
-  project_id String,
-  anonymous_id String,
-  user_id String,
-  attributes String,      -- JSON blob from Postgres subscribers.attributes
-  platform LowCardinality(String),
-  country LowCardinality(String),
-  created_at DateTime64(3, 'UTC'),
-  updated_at DateTime64(3, 'UTC'),
-  version UInt64
-)
-ENGINE = ReplacingMergeTree(version)
-ORDER BY (project_id, subscriber_id)
-TTL toDateTime(updated_at) + INTERVAL 7 YEAR;
-```
-
-- [ ] **Step 2: Apply, verify, commit**
-
-```bash
-pnpm --filter @rovenue/db db:clickhouse:migrate
-docker compose exec clickhouse clickhouse-client --query \
-  "SHOW CREATE TABLE rovenue.raw_subscribers FORMAT TSVRaw"
-git add packages/db/clickhouse/migrations/0004_raw_subscribers.sql
-git commit -m "feat(db): clickhouse 0004 — raw_subscribers"
-```
-
-### Task 2.6: Write migration 0005 (`raw_purchases`)
-
-**Files:**
-- Create: `packages/db/clickhouse/migrations/0005_raw_purchases.sql`
-
-- [ ] **Step 1: Author the SQL**
-
-```sql
--- 0005_raw_purchases.sql
--- Purchase receipts (App Store / Play / Stripe). Source is Postgres
--- `purchases`; replicated for cross-referencing with revenue_events
--- during funnel / LTV queries.
-CREATE TABLE IF NOT EXISTS rovenue.raw_purchases (
-  purchase_id UUID,
-  project_id String,
-  subscriber_id String,
-  product_id String,
-  platform LowCardinality(String),
-  store_transaction_id String,
-  status Enum8('ACTIVE' = 1, 'CANCELLED' = 2, 'REFUNDED' = 3, 'EXPIRED' = 4),
-  price_cents Int64,
-  currency LowCardinality(String),
-  original_purchase_at DateTime64(3, 'UTC'),
-  purchased_at DateTime64(3, 'UTC'),
-  expires_at Nullable(DateTime64(3, 'UTC')),
-  version UInt64
-)
-ENGINE = ReplacingMergeTree(version)
-PARTITION BY toYYYYMM(purchased_at)
-ORDER BY (project_id, purchased_at, purchase_id)
-TTL toDateTime(purchased_at) + INTERVAL 7 YEAR;
-```
-
-- [ ] **Step 2: Apply, verify, commit**
-
-```bash
-pnpm --filter @rovenue/db db:clickhouse:migrate
-docker compose exec clickhouse clickhouse-client --query \
-  "SHOW CREATE TABLE rovenue.raw_purchases FORMAT TSVRaw"
-git add packages/db/clickhouse/migrations/0005_raw_purchases.sql
-git commit -m "feat(db): clickhouse 0005 — raw_purchases"
-```
-
-### Task 2.7: Write migration 0006 (`raw_experiment_assignments`)
-
-**Files:**
-- Create: `packages/db/clickhouse/migrations/0006_raw_experiment_assignments.sql`
-
-- [ ] **Step 1: Author the SQL**
-
-```sql
--- 0006_raw_experiment_assignments.sql
--- Sticky assignment log replicated from Postgres. Same shape as
--- Drizzle's experimentAssignments table. Used to resolve "which
--- variant was user X in for experiment Y" during stratified stats.
-CREATE TABLE IF NOT EXISTS rovenue.raw_experiment_assignments (
-  id String,
-  project_id String,
-  experiment_id String,
-  subscriber_id String,
-  variant_id String,
-  hash_version UInt16,
-  assigned_at DateTime64(3, 'UTC'),
-  version UInt64
-)
-ENGINE = ReplacingMergeTree(version)
-ORDER BY (experiment_id, subscriber_id);
-```
-
-- [ ] **Step 2: Apply, verify, commit**
-
-```bash
-pnpm --filter @rovenue/db db:clickhouse:migrate
-docker compose exec clickhouse clickhouse-client --query \
-  "SHOW CREATE TABLE rovenue.raw_experiment_assignments FORMAT TSVRaw"
-git add packages/db/clickhouse/migrations/0006_raw_experiment_assignments.sql
-git commit -m "feat(db): clickhouse 0006 — raw_experiment_assignments"
-```
-
-### Task 2.8: Write migration 0007 (`raw_exposures`)
-
-**Files:**
-- Create: `packages/db/clickhouse/migrations/0007_raw_exposures.sql`
-
-- [ ] **Step 1: Author the SQL**
-
-```sql
--- 0007_raw_exposures.sql
--- Append-only exposure stream. Source is the Postgres hypertable
--- `exposure_events` we create in Phase 3. Plain MergeTree because
--- there are no updates — every row represents a distinct impression.
---
--- TTL 90 days: exposure volume is the highest of any table; the
--- long-lived aggregates in mv_experiment_daily handle historical
--- queries beyond that window (spec §4.5).
-CREATE TABLE IF NOT EXISTS rovenue.raw_exposures (
-  exposure_id UUID,
-  experiment_id String,
-  variant_id String,
-  project_id String,
-  subscriber_id String,
-  platform LowCardinality(String),
-  country LowCardinality(String),
-  exposed_at DateTime64(3, 'UTC')
-)
-ENGINE = MergeTree()
-PARTITION BY toYYYYMM(exposed_at)
-ORDER BY (experiment_id, exposed_at, subscriber_id)
-TTL toDateTime(exposed_at) + INTERVAL 90 DAY;
-```
-
-- [ ] **Step 2: Apply, verify, commit**
-
-```bash
-pnpm --filter @rovenue/db db:clickhouse:migrate
-docker compose exec clickhouse clickhouse-client --query \
-  "SHOW CREATE TABLE rovenue.raw_exposures FORMAT TSVRaw"
-git add packages/db/clickhouse/migrations/0007_raw_exposures.sql
-git commit -m "feat(db): clickhouse 0007 — raw_exposures"
-```
-
-### Task 2.9: Write migration 0008 (`mv_experiment_daily`)
-
-**Files:**
-- Create: `packages/db/clickhouse/migrations/0008_mv_experiment_daily.sql`
-
-- [ ] **Step 1: Author the SQL**
-
-```sql
--- 0008_mv_experiment_daily.sql
--- Materialised view: per-day/per-variant exposure counts + unique
--- users, grouped by stratification dimensions (country, platform).
--- The stats endpoint reads from this MV and feeds the per-day counts
--- into analyzeConversion / analyzeRevenue / checkSRM in
--- apps/api/src/lib/experiment-stats.ts.
---
--- SummingMergeTree sums the count column at merge time. uniqState
--- stores a HyperLogLog sketch; the read path calls uniqMerge to get
--- approximate distinct-user count. The approximation is acceptable:
--- SRM check + conversion Z-test tolerate ~1% error on large cohorts,
--- and the space saving (tens of bytes per state vs. millions of rows)
--- is load-bearing.
---
--- NOTE: conversion counting (linking an exposure to the subsequent
--- revenue event) happens at *read* time, not here. Plan 1 ships the
--- exposure side; Plan 2 may add a second MV that joins purchases.
--- Keeping the MV narrow keeps refresh cheap.
-CREATE MATERIALIZED VIEW IF NOT EXISTS rovenue.mv_experiment_daily
-ENGINE = SummingMergeTree()
-PARTITION BY toYYYYMM(day)
-ORDER BY (experiment_id, variant_id, day, country, platform)
-POPULATE
-AS SELECT
-  experiment_id,
-  variant_id,
-  toStartOfDay(exposed_at) AS day,
-  country,
-  platform,
-  count() AS exposures,
-  uniqState(subscriber_id) AS unique_users_state
-FROM rovenue.raw_exposures
-GROUP BY experiment_id, variant_id, day, country, platform;
-```
-
-- [ ] **Step 2: Apply, verify, commit**
-
-```bash
-pnpm --filter @rovenue/db db:clickhouse:migrate
-docker compose exec clickhouse clickhouse-client --query \
-  "SHOW CREATE TABLE rovenue.mv_experiment_daily FORMAT TSVRaw"
-```
-
-Expected: the DDL includes `SummingMergeTree()` and the GROUP BY columns. `POPULATE` runs once at creation — on an empty `raw_exposures` it completes instantly.
-
-```bash
-git add packages/db/clickhouse/migrations/0008_mv_experiment_daily.sql
-git commit -m "feat(db): clickhouse 0008 — mv_experiment_daily"
-```
-
-### Task 2.10: Migration idempotency test
+### Task 2.3: Migration runner idempotency + lint test
 
 **Files:**
 - Create: `packages/db/tests/clickhouse-migrations.test.ts`
@@ -1408,16 +1069,7 @@ WITH (
 );
 ```
 
-**Note on column renames and schema drift:** the ClickHouse tables from Phase 2 use different PK column names than Postgres (`event_id` vs `id` in `revenue_events`, `entry_id` vs `id` in `credit_ledger`, etc.). PeerDB's CREATE MIRROR table mapping as written above maps the tables 1:1 but relies on matching column NAMES between source and target. We therefore need the ClickHouse target columns to **match Postgres source names** for the mirror to work without per-column `exclude`/rename plumbing (which PeerDB's CREATE MIRROR SQL does not support in the simple form).
-
-**Action required before bootstrap:** amend Phase 2 migrations 0002-0007 to use Postgres column names directly:
-- `raw_revenue_events.event_id` → rename to `id`
-- `raw_credit_ledger.entry_id` → rename to `id`
-- `raw_subscribers.subscriber_id` → keep as `id` (matches Postgres `subscribers.id`)
-- `raw_purchases.purchase_id` → rename to `id`
-- `raw_exposures.exposure_id` → rename to `id`
-
-Keep the ORDER BY semantics (e.g. `ORDER BY (project_id, occurred_at, id)` in `raw_revenue_events`). Update `packages/db/scripts/verify-clickhouse.ts` EXPECTED constants and any SQL in `apps/api/src/services/analytics-router.ts` / `experiment-results.ts` that references the old names. If Phase 2 has already been implemented, write a Phase 2.11 follow-up migration `0009_rename_pk_columns.sql` that performs `ALTER TABLE rovenue.raw_<n> RENAME COLUMN <old> TO id` before Phase 4 runs.
+**Note on column naming:** the table mapping above relies on PeerDB using Postgres source column names unchanged in the ClickHouse target. Per the Phase 2 scope note, we do NOT pre-create the target tables — PeerDB auto-creates them with the source columns verbatim (camelCase: `id`, `projectId`, `eventDate`, …) plus its three metadata columns (`_peerdb_synced_at`, `_peerdb_is_deleted`, `_peerdb_version`). After this Task runs, Phase 4.5 inspects the PeerDB-generated DDL before building any MV on top.
 
 - [ ] **Step 2: Boot the full stack and apply the setup**
 
@@ -1480,6 +1132,105 @@ git commit -m "feat(infra): PeerDB CREATE PEER + CREATE MIRROR bootstrap"
 ```
 
 Note: `deploy/peerdb/README.md` is already committed by Phase 1 Task 1.2 Step 5 — do NOT re-create it here. If the bootstrap-in-README section needs edits based on what was learned running Steps 2-3 above, amend the README in a separate follow-up commit.
+
+---
+
+## Phase 4.5 — Post-PeerDB ClickHouse customisation
+
+> **File-order note:** Phase 4.5 executes immediately after Phase 4 completes (PeerDB mirror bootstrap). By this point the six `raw_*` tables exist in ClickHouse, auto-created by PeerDB with `ORDER BY id` and PeerDB's metadata columns (`_peerdb_synced_at`, `_peerdb_is_deleted`, `_peerdb_version`). This phase layers rovenue-owned views and MVs on top.
+
+### Task 4.5.1: Inspect the PeerDB-generated `raw_exposures` schema
+
+**Files:** none
+
+- [ ] **Step 1: Dump the actual DDL PeerDB created**
+
+```bash
+docker compose exec clickhouse clickhouse-client \
+    --user=rovenue --password=rovenue \
+    --query "SHOW CREATE TABLE rovenue.raw_exposures FORMAT TSVRaw"
+```
+
+Expected: the DDL includes every column from Postgres `exposure_events` (`id`, `experimentId`, `variantId`, `projectId`, `subscriberId`, `platform`, `country`, `exposedAt`) plus three PeerDB metadata columns. Note the exact CH types PeerDB chose — the `0002_mv_experiment_daily.sql` migration below must reference them verbatim.
+
+- [ ] **Step 2: Same inspection for every other raw_\* table**
+
+Repeat the `SHOW CREATE TABLE` for `raw_revenue_events`, `raw_credit_ledger`, `raw_subscribers`, `raw_purchases`, `raw_experiment_assignments`. Any type-mapping surprises (e.g. Postgres `decimal(12,4)` → CH `Decimal(P,S)` with different precision, or `jsonb` → `String` vs `Object`) should be captured in `deploy/clickhouse/README.md` as "observed PeerDB type mappings" for future reference.
+
+If a type mapping is unacceptable (e.g. `numeric` lands as `String`), the fix is to amend the source Postgres schema or add a `swapTable` step here — NOT to pre-create the CH table, because PeerDB will reject the mirror if the schema deviates.
+
+### Task 4.5.2: Write migration `0002_mv_experiment_daily.sql`
+
+**Files:**
+- Create: `packages/db/clickhouse/migrations/0002_mv_experiment_daily.sql`
+
+- [ ] **Step 1: Author the SQL**
+
+The MV dedupes `raw_exposures` at read time (`_peerdb_is_deleted = 0` filter) and rolls up exposures per-day / per-variant / per-stratification-dim.
+
+```sql
+-- 0002_mv_experiment_daily.sql
+-- Aggregate view over raw_exposures (PeerDB-managed). Read-path
+-- dedup: we filter _peerdb_is_deleted = 0 inside the SELECT so
+-- soft-deleted exposures never contribute to the aggregate.
+--
+-- SummingMergeTree sums the exposures counter at merge time; the
+-- uniqState / uniqMerge pattern stores a HyperLogLog sketch for
+-- approximate distinct subscriber count.
+CREATE MATERIALIZED VIEW IF NOT EXISTS rovenue.mv_experiment_daily
+ENGINE = SummingMergeTree()
+PARTITION BY toYYYYMM(day)
+ORDER BY (experimentId, variantId, day, country, platform)
+POPULATE
+AS SELECT
+  experimentId,
+  variantId,
+  toStartOfDay(exposedAt) AS day,
+  country,
+  platform,
+  count() AS exposures,
+  uniqState(subscriberId) AS unique_users_state
+FROM rovenue.raw_exposures
+WHERE _peerdb_is_deleted = 0
+GROUP BY experimentId, variantId, day, country, platform;
+```
+
+- [ ] **Step 2: Apply and verify**
+
+```bash
+CLICKHOUSE_URL=http://localhost:8124 \
+CLICKHOUSE_USER=rovenue \
+CLICKHOUSE_PASSWORD=rovenue \
+pnpm --filter @rovenue/db db:clickhouse:migrate
+docker compose exec clickhouse clickhouse-client \
+    --user=rovenue --password=rovenue \
+    --query "SHOW CREATE TABLE rovenue.mv_experiment_daily FORMAT TSVRaw"
+```
+
+Expected: `apply 0002_mv_experiment_daily.sql` + the DDL returned matches the source. Re-running the migrator is a no-op.
+
+**Gotcha:** `POPULATE` runs once at creation. If raw_exposures is empty, the MV starts empty; new exposure events flowing through PeerDB will automatically update it. If raw_exposures already has rows at migration time, `POPULATE` runs the initial aggregate — cost is proportional to row count.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add packages/db/clickhouse/migrations/0002_mv_experiment_daily.sql
+git commit -m "feat(db): clickhouse 0002 — mv_experiment_daily over raw_exposures"
+```
+
+### Task 4.5.3 (optional): Ordering-key shadow MVs
+
+If dashboard queries against a specific `raw_*` table are measurably slow on the default `ORDER BY id`, add a shadow MV with the right ordering key per PeerDB's "predefine target tables" pattern:
+
+```sql
+-- 000N_raw_revenue_events_by_project.sql — EXAMPLE only, not required.
+CREATE MATERIALIZED VIEW IF NOT EXISTS rovenue.raw_revenue_events_by_project
+ENGINE = ReplacingMergeTree(_peerdb_version)
+ORDER BY (projectId, eventDate, id)
+POPULATE AS SELECT * FROM rovenue.raw_revenue_events;
+```
+
+Don't write these speculatively — each one doubles storage. Only add in response to an EXPLAIN / profiler hotspot. For Plan 1 launch, rely on PeerDB's default `ORDER BY id` and keep an eye on slow-query logs. Plan 2's revenue analytics phase revisits this with concrete query patterns.
 
 ---
 
@@ -2876,55 +2627,37 @@ git commit -m "feat(api): GET /v1/experiments/:id/results public route"
 import { createClient } from "@clickhouse/client";
 
 interface TableExpectation {
-  engine: string;           // e.g. "ReplacingMergeTree(version)" or "MergeTree"
-  orderBy: readonly string[];
-  partitionBy?: string;     // e.g. "toYYYYMM(occurred_at)"
-  ttl?: string;             // e.g. "toDateTime(occurred_at) + toIntervalYear(7)"
+  // `peerdb` for tables that PeerDB owns (we only check existence +
+  // that it's a ReplacingMergeTree on _peerdb_version). `rovenue`
+  // for MVs we own (strict ORDER BY + PARTITION BY pins).
+  owner: "peerdb" | "rovenue";
+  engineStartsWith?: string;     // e.g. "ReplacingMergeTree" or "SummingMergeTree"
+  orderBy?: readonly string[];   // strict match for rovenue-owned
+  partitionBy?: string;          // strict match for rovenue-owned
 }
 
 const EXPECTED_TABLES: Record<string, TableExpectation> = {
-  raw_revenue_events: {
-    engine: "ReplacingMergeTree(version)",
-    orderBy: ["project_id", "occurred_at", "event_id"],
-    partitionBy: "toYYYYMM(occurred_at)",
-    ttl: "toDateTime(occurred_at) + toIntervalYear(7)",
-  },
-  raw_credit_ledger: {
-    engine: "ReplacingMergeTree(version)",
-    orderBy: ["project_id", "created_at", "entry_id"],
-    partitionBy: "toYYYYMM(created_at)",
-    ttl: "toDateTime(created_at) + toIntervalYear(7)",
-  },
-  raw_subscribers: {
-    engine: "ReplacingMergeTree(version)",
-    orderBy: ["project_id", "subscriber_id"],
-    ttl: "toDateTime(updated_at) + toIntervalYear(7)",
-  },
-  raw_purchases: {
-    engine: "ReplacingMergeTree(version)",
-    orderBy: ["project_id", "purchased_at", "purchase_id"],
-    partitionBy: "toYYYYMM(purchased_at)",
-    ttl: "toDateTime(purchased_at) + toIntervalYear(7)",
-  },
-  raw_experiment_assignments: {
-    engine: "ReplacingMergeTree(version)",
-    orderBy: ["experiment_id", "subscriber_id"],
-  },
-  raw_exposures: {
-    engine: "MergeTree",
-    orderBy: ["experiment_id", "exposed_at", "subscriber_id"],
-    partitionBy: "toYYYYMM(exposed_at)",
-    ttl: "toDateTime(exposed_at) + toIntervalDay(90)",
-  },
+  // PeerDB-owned raw facts. Existence check only; schema belongs to
+  // PeerDB's auto-create flow (Phase 4).
+  raw_revenue_events: { owner: "peerdb", engineStartsWith: "ReplacingMergeTree" },
+  raw_credit_ledger:  { owner: "peerdb", engineStartsWith: "ReplacingMergeTree" },
+  raw_subscribers:    { owner: "peerdb", engineStartsWith: "ReplacingMergeTree" },
+  raw_purchases:      { owner: "peerdb", engineStartsWith: "ReplacingMergeTree" },
+  raw_experiment_assignments: { owner: "peerdb", engineStartsWith: "ReplacingMergeTree" },
+  raw_exposures:      { owner: "peerdb", engineStartsWith: "ReplacingMergeTree" },
+
+  // rovenue-owned MVs. Strict pin: every attribute must match.
   mv_experiment_daily: {
-    engine: "SummingMergeTree",
-    orderBy: ["experiment_id", "variant_id", "day", "country", "platform"],
+    owner: "rovenue",
+    engineStartsWith: "SummingMergeTree",
+    orderBy: ["experimentId", "variantId", "day", "country", "platform"],
     partitionBy: "toYYYYMM(day)",
   },
 };
 
 const client = createClient({
-  host: process.env.CLICKHOUSE_URL!,
+  // `host` is deprecated in @clickhouse/client >=1.18; use `url`.
+  url: process.env.CLICKHOUSE_URL!,
   username: process.env.CLICKHOUSE_USER ?? "rovenue_reader",
   password: process.env.CLICKHOUSE_PASSWORD!,
   database: "rovenue",
@@ -2964,19 +2697,24 @@ async function main(): Promise<void> {
       continue;
     }
 
-    // engine_full is the canonical string including parameters.
-    if (!row.engine_full.startsWith(expected.engine)) {
+    if (expected.engineStartsWith && !row.engine_full.startsWith(expected.engineStartsWith)) {
       drift.push(
-        `engine mismatch on ${name}: expected ${expected.engine}, got ${row.engine_full}`,
+        `engine mismatch on ${name}: expected starts-with ${expected.engineStartsWith}, got ${row.engine_full}`,
       );
     }
 
-    const actualOrder = row.sorting_key.split(",").map((s) => s.trim());
-    const expectedOrder = [...expected.orderBy];
-    if (JSON.stringify(actualOrder) !== JSON.stringify(expectedOrder)) {
-      drift.push(
-        `ORDER BY mismatch on ${name}: expected [${expectedOrder.join(", ")}], got [${actualOrder.join(", ")}]`,
-      );
+    // PeerDB-owned tables: existence + engine family is all we check.
+    // ORDER BY / PARTITION BY are PeerDB's choice.
+    if (expected.owner === "peerdb") continue;
+
+    if (expected.orderBy) {
+      const actualOrder = row.sorting_key.split(",").map((s) => s.trim());
+      const expectedOrder = [...expected.orderBy];
+      if (JSON.stringify(actualOrder) !== JSON.stringify(expectedOrder)) {
+        drift.push(
+          `ORDER BY mismatch on ${name}: expected [${expectedOrder.join(", ")}], got [${actualOrder.join(", ")}]`,
+        );
+      }
     }
 
     if (expected.partitionBy && row.partition_key.trim() !== expected.partitionBy) {
