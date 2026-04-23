@@ -86,6 +86,12 @@ export * from "./crypto";
 export * from "./experiments";
 
 // =============================================================
+// Experiments runtime — bucketing + targeting
+// =============================================================
+
+export * from "./experiments/index";
+
+// =============================================================
 // Dashboard API request/response types
 // =============================================================
 
