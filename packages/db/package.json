@@ -11,6 +11,7 @@
     "db:migrate": "tsx src/migrate.ts",
     "db:migrate:baseline": "tsx src/migrate-baseline.ts",
     "db:migrate:generate": "drizzle-kit generate",
+    "db:verify:timescale": "tsx scripts/verify-timescale.ts",
     "db:studio": "drizzle-kit studio",
     "seed": "tsx seed.ts"
   },
