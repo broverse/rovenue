@@ -2,7 +2,7 @@ import { drizzle } from "@rovenue/db";
 import { isInRollout } from "../lib/bucketing";
 import { logger } from "../lib/logger";
 import { redis } from "../lib/redis";
-import { matchesAudience } from "../lib/targeting";
+import { matchesAudience } from "@rovenue/shared";
 
 // =============================================================
 // Feature flag evaluation engine

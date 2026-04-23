@@ -9,7 +9,7 @@ import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
 import { invalidateFlagCache } from "../../services/flag-engine";
 import { invalidateExperimentCache } from "../../services/experiment-engine";
-import { validateAudienceRules } from "../../lib/targeting";
+import { validateAudienceRules } from "@rovenue/shared";
 
 // =============================================================
 // Dashboard: Audiences CRUD

@@ -19,7 +19,7 @@ import {
 import { assignBucket, selectVariant } from "../lib/bucketing";
 import { logger } from "../lib/logger";
 import { redis } from "../lib/redis";
-import { matchesAudience } from "../lib/targeting";
+import { matchesAudience } from "@rovenue/shared";
 
 // =============================================================
 // Experiment engine
