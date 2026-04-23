@@ -18,6 +18,14 @@ const auditMock = vi.hoisted(() => ({
 }));
 vi.mock("../src/lib/audit", () => auditMock);
 
+const anonymizeMock = vi.hoisted(() => ({
+  anonymizeSubscriber: vi.fn(async () => ({
+    anonymousId: "anon_abcdef1234567890abcdef12",
+    deletedAt: new Date("2026-04-21T10:00:00.000Z"),
+  })),
+}));
+vi.mock("../src/services/gdpr/anonymize-subscriber", () => anonymizeMock);
+
 const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
   const dbMock = {
     projectMember: { findUnique: vi.fn() },
@@ -329,5 +337,66 @@ describe("GET /dashboard/projects/:projectId/subscribers/:id", () => {
     expect(s.creditBalance).toBe("42");
     expect(Array.isArray(s.assignments)).toBe(true);
     expect(Array.isArray(s.outgoingWebhooks)).toBe(true);
+  });
+});
+
+describe("POST /dashboard/projects/:projectId/subscribers/:id/anonymize", () => {
+  test("POST /:id/anonymize with ADMIN returns anonymousId", async () => {
+    authMock.api.getSession.mockResolvedValue({
+      user: { id: "user_admin" },
+    });
+    dbMock.projectMember.findUnique.mockResolvedValue({
+      id: "m1",
+      role: "ADMIN",
+    });
+
+    const res = await app.request(
+      "/dashboard/projects/proj_1/subscribers/sub_1/anonymize",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: "rovenue.session=test",
+        },
+        body: JSON.stringify({ reason: "gdpr_request" }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { anonymousId: string; deletedAt: string };
+    };
+    expect(body.data.anonymousId).toBe("anon_abcdef1234567890abcdef12");
+    expect(anonymizeMock.anonymizeSubscriber).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subscriberId: "sub_1",
+        projectId: "proj_1",
+        actorUserId: "user_admin",
+        reason: "gdpr_request",
+      }),
+    );
+  });
+
+  test("POST /:id/anonymize as VIEWER is 403", async () => {
+    authMock.api.getSession.mockResolvedValue({
+      user: { id: "user_viewer" },
+    });
+    dbMock.projectMember.findUnique.mockResolvedValue({
+      id: "m2",
+      role: "VIEWER",
+    });
+
+    const res = await app.request(
+      "/dashboard/projects/proj_1/subscribers/sub_1/anonymize",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: "rovenue.session=test",
+        },
+        body: "{}",
+      },
+    );
+    expect(res.status).toBe(403);
+    expect(anonymizeMock.anonymizeSubscriber).not.toHaveBeenCalled();
   });
 });

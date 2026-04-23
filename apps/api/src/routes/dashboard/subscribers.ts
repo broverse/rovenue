@@ -11,6 +11,8 @@ import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
 import { encodeCursor, decodeCursor } from "../../lib/pagination";
+import { extractRequestContext } from "../../lib/audit";
+import { anonymizeSubscriber } from "../../services/gdpr/anonymize-subscriber";
 
 // =============================================================
 // Dashboard: Subscribers list (Task A6)
@@ -31,6 +33,15 @@ const listQuerySchema = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   q: z.string().trim().min(1).max(200).optional(),
+});
+
+// POST /:id/anonymize — GDPR / KVKK right-to-erasure. The body is
+// optional (default `gdpr_request`) so the dashboard can fire the
+// request without having to infer the legal basis up front.
+const anonymizeBodySchema = z.object({
+  reason: z
+    .enum(["gdpr_request", "kvkk_request", "retention_policy"])
+    .default("gdpr_request"),
 });
 
 export const subscribersRoute = new Hono()
@@ -189,4 +200,45 @@ export const subscribersRoute = new Hono()
   };
 
     return c.json(ok({ subscriber: payload }));
+  })
+  // =============================================================
+  // Dashboard: Anonymize subscriber (Task 4.2 — GDPR / KVKK)
+  // =============================================================
+  //
+  // POST /dashboard/projects/:projectId/subscribers/:id/anonymize
+  //
+  // ADMIN-and-above only. Delegates to the Task 4.1 service which
+  // hard-replaces appUserId with a deterministic `anon_<hmac[:24]>`
+  // token, clears attributes, stamps deletedAt, and writes a
+  // tamper-evident audit entry inside a single transaction.
+  .post("/:id/anonymize", async (c) => {
+    const projectId = c.req.param("projectId");
+    const subscriberId = c.req.param("id");
+    if (!projectId || !subscriberId) {
+      throw new HTTPException(400, { message: "Missing path parameters" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+
+    let body: z.infer<typeof anonymizeBodySchema>;
+    try {
+      body = anonymizeBodySchema.parse(
+        await c.req.json().catch(() => ({})),
+      );
+    } catch {
+      throw new HTTPException(400, { message: "Invalid body" });
+    }
+
+    const { ipAddress, userAgent } = extractRequestContext(c);
+
+    const result = await anonymizeSubscriber({
+      subscriberId,
+      projectId,
+      actorUserId: user.id,
+      reason: body.reason,
+      ipAddress,
+      userAgent,
+    });
+
+    return c.json(ok(result));
   });
