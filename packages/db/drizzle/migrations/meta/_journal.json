@@ -92,6 +92,13 @@
       "when": 1777510800000,
       "tag": "0012_drop_exposure_events",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1777514400000,
+      "tag": "0013_outbox_events",
+      "breakpoints": true
     }
   ]
 }
