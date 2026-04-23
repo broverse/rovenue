@@ -80,6 +80,17 @@ describe("schema shapes compile", () => {
     expect(auditLogs.rowHash.name).toBe("rowHash");
     expect(auditLogs.prevHash.name).toBe("prevHash");
   });
+
+  it("revenueEvents uses a composite (id, eventDate) primary key for hypertable partitioning", () => {
+    // The underlying DB constraint is a composite PK. Drizzle stores
+    // that as an extra-config entry on the table; it is NOT reachable
+    // via a public helper on the table object, so we assert the
+    // column-level `.primary` flag is false on `id` (which would have
+    // been true under the previous single-column PK definition).
+    const idColumn = revenueEvents.id as unknown as { primary: boolean };
+    expect(idColumn.primary).toBe(false);
+    expect(revenueEvents.eventDate.name).toBe("eventDate");
+  });
 });
 
 describe("inferred types", () => {

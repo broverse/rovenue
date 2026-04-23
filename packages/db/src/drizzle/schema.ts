@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -565,7 +566,9 @@ export const outgoingWebhooks = pgTable(
 export const revenueEvents = pgTable(
   "revenue_events",
   {
-    id: text("id").primaryKey().$defaultFn(() => createId()),
+    // `.primaryKey()` removed — hypertable partition column must be in
+    // the PK. The table-level primaryKey below declares (id, eventDate).
+    id: text("id").notNull().$defaultFn(() => createId()),
     projectId: text("projectId")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -589,6 +592,11 @@ export const revenueEvents = pgTable(
       .defaultNow(),
   },
   (t) => ({
+    // Hypertable partition column (eventDate) must appear in the PK.
+    // The cuid2 id alone is still globally unique at the application
+    // layer; no external table FKs into revenue_events, so losing the
+    // single-column uniqueness at the DB level is safe.
+    pk: primaryKey({ columns: [t.id, t.eventDate] }),
     projectIdEventDateIdx: index(
       "revenue_events_projectId_eventDate_idx",
     ).on(t.projectId, t.eventDate),
