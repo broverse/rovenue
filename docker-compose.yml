@@ -123,12 +123,18 @@ services:
       - ./deploy/clickhouse/config.d:/etc/clickhouse-server/config.d:ro
       - ./deploy/clickhouse/users.d:/etc/clickhouse-server/users.d:ro
     ports:
-      # Host 8124 → container 8123 (HTTP) to avoid colliding with any
-      # other CH on 8123. 9001 → 9000 (native TCP) for `clickhouse-client`.
+      # Host 8124 → container 8123 (HTTP), 9102 → 9000 (native TCP).
+      # 9001/9002 are both claimed by PeerDB's vendored minio service
+      # (deploy/peerdb/upstream/docker-compose.yml minio API+console),
+      # so CH native TCP lives at 9102 to stay out of that range.
       - "8124:8123"
-      - "9001:9000"
+      - "9102:9000"
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      # Use 127.0.0.1 instead of `localhost` — alpine's wget resolves
+      # localhost to the IPv6 loopback first and CH binds IPv4 only by
+      # default, so the healthcheck was failing even though the server
+      # was reachable.
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 20
