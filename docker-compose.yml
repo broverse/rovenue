@@ -1,17 +1,14 @@
-# Rovenue local stack — rovenue's own services (api, db, redis, clickhouse).
+# Rovenue local stack — rovenue's own services (api, db, redis,
+# clickhouse, redpanda, redpanda-console).
 #
 # Default boot:
 #   docker compose up -d
 #
-# PeerDB (Postgres → ClickHouse replication) is a VENDORED external
-# bundle, NOT a service in this file. See deploy/peerdb/README.md.
-# Boot PeerDB separately:
-#   cd deploy/peerdb/upstream && ./run-peerdb.sh
-#
-# Most development does not need PeerDB running — the API treats the
-# ClickHouse database as empty and the analytics-router falls back
-# to "no data" responses. Integration tests in apps/api/tests/
-# replication-parity.test.ts spin a minimal PeerDB via testcontainers.
+# Analytics ingestion runs on an outbox + Kafka pipeline:
+# app writes outbox_events in the same tx as the OLTP write, the
+# outbox-dispatcher worker (apps/api/src/workers/outbox-dispatcher.ts)
+# drains it into Redpanda, and ClickHouse's Kafka Engine consumes
+# the topic. No CDC. See docs/superpowers/specs/2026-04-20-tech-stack-upgrade/06-clickhouse.md §14.
 services:
   api:
     build:
@@ -123,12 +120,10 @@ services:
       - ./deploy/clickhouse/config.d:/etc/clickhouse-server/config.d:ro
       - ./deploy/clickhouse/users.d:/etc/clickhouse-server/users.d:ro
     ports:
-      # Host 8124 → container 8123 (HTTP), 9102 → 9000 (native TCP).
-      # 9001/9002 are both claimed by PeerDB's vendored minio service
-      # (deploy/peerdb/upstream/docker-compose.yml minio API+console),
-      # so CH native TCP lives at 9102 to stay out of that range.
+      # Host 8124 → container 8123 (HTTP). CH native-TCP (9000) is
+      # not exposed — the API hits CH over HTTP via @clickhouse/client,
+      # and integration tests spin their own container.
       - "8124:8123"
-      - "9102:9000"
     healthcheck:
       # Use 127.0.0.1 instead of `localhost` — alpine's wget resolves
       # localhost to the IPv6 loopback first and CH binds IPv4 only by
