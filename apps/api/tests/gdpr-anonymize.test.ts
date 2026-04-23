@@ -26,6 +26,12 @@ vi.mock("@rovenue/db", () => ({
   drizzle: drizzleMock,
 }));
 vi.mock("../src/lib/audit", () => auditMock);
+vi.mock("../src/lib/env", () => ({
+  env: {
+    ENCRYPTION_KEY:
+      "6ecfcd0f73d5afe055ff651e0e4ce85679cdd12bb4cede7aa4338b693047b8f1",
+  },
+}));
 
 import { anonymizeSubscriber } from "../src/services/gdpr/anonymize-subscriber";
 
@@ -40,12 +46,14 @@ describe("anonymizeSubscriber", () => {
       subscriberId: "sub_abc",
       projectId: "proj_1",
       actorUserId: "user_actor",
+      reason: "gdpr_request",
     });
     expect(result.anonymousId).toMatch(/^anon_[0-9a-f]{24}$/);
     const again = await anonymizeSubscriber({
       subscriberId: "sub_abc",
       projectId: "proj_1",
       actorUserId: "user_actor",
+      reason: "gdpr_request",
     });
     expect(again.anonymousId).toBe(result.anonymousId);
   });
@@ -55,6 +63,7 @@ describe("anonymizeSubscriber", () => {
       subscriberId: "sub_xyz",
       projectId: "proj_1",
       actorUserId: "user_actor",
+      reason: "gdpr_request",
     });
     expect(drizzleMock.subscriberRepo.anonymizeSubscriberRow).toHaveBeenCalledWith(
       expect.anything(),
@@ -82,6 +91,10 @@ describe("anonymizeSubscriber", () => {
         userId: "user_actor",
         ipAddress: "203.0.113.5",
         userAgent: "test-ua",
+        after: expect.objectContaining({
+          reason: "gdpr_request",
+          anonymousId: expect.stringMatching(/^anon_[0-9a-f]{24}$/),
+        }),
       }),
       expect.anything(),
     );
@@ -92,7 +105,18 @@ describe("anonymizeSubscriber", () => {
       subscriberId: "sub_tx",
       projectId: "proj_1",
       actorUserId: "user_actor",
+      reason: "gdpr_request",
     });
     expect(drizzleMock.db.transaction).toHaveBeenCalledTimes(1);
+  });
+
+  test("returns deletedAt alongside anonymousId", async () => {
+    const result = await anonymizeSubscriber({
+      subscriberId: "sub_dt",
+      projectId: "proj_1",
+      actorUserId: "user_actor",
+      reason: "gdpr_request",
+    });
+    expect(result.deletedAt).toBeInstanceOf(Date);
   });
 });

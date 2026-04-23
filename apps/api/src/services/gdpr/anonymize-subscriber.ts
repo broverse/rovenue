@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { drizzle } from "@rovenue/db";
 import { audit } from "../../lib/audit";
 import { logger } from "../../lib/logger";
+import { env } from "../../lib/env";
 
 // =============================================================
 // GDPR / KVKK right-to-erasure — subscriber anonymization
@@ -11,7 +12,7 @@ import { logger } from "../../lib/logger";
 // make a hard DELETE impossible without breaking referential
 // integrity and tamper-evident chains. Instead we anonymize: the
 // subscriber row's appUserId is replaced with a deterministic
-// `anon_<sha256[:24]>` token derived from the subscriberId, the
+// `anon_<hmac[:24]>` token derived from the subscriberId, the
 // attributes JSON is cleared, and deletedAt is stamped.
 //
 // The anonymous id is *deterministic* so re-running anonymization
@@ -29,19 +30,28 @@ export interface AnonymizeSubscriberInput {
   subscriberId: string;
   projectId: string;
   actorUserId: string;
-  reason?: AnonymizeReason;
+  reason: AnonymizeReason;
   ipAddress?: string | null;
   userAgent?: string | null;
 }
 
+// Derive a per-deployment anonymous id. Using HMAC with the master
+// encryption key as the pepper means the mapping from subscriberId →
+// anonymousId cannot be recomputed by anyone without the key — even
+// if they know the subscriberId (which, being a cuid2, appears in
+// logs, webhooks, and other retained records). Deterministic within
+// a deployment so retries are idempotent; breaks across deployments
+// with rotated keys, which is the correct security/operational trade
+// (rotating the pepper re-anonymizes everyone, intentionally).
 function deriveAnonymousId(subscriberId: string): string {
-  const hex = createHash("sha256").update(subscriberId).digest("hex");
+  const key = Buffer.from(env.ENCRYPTION_KEY as string, "hex");
+  const hex = createHmac("sha256", key).update(subscriberId).digest("hex");
   return `anon_${hex.slice(0, 24)}`;
 }
 
 export async function anonymizeSubscriber(
   input: AnonymizeSubscriberInput,
-): Promise<{ anonymousId: string }> {
+): Promise<{ anonymousId: string; deletedAt: Date }> {
   const anonymousId = deriveAnonymousId(input.subscriberId);
   const deletedAt = new Date();
 
@@ -53,6 +63,12 @@ export async function anonymizeSubscriber(
       deletedAt,
     );
 
+    // TODO(audit-tx): once audit() re-threads _callerTx we should
+    // pass `tx` to guarantee atomicity with the row update. Today
+    // audit() opens its own transaction (see apps/api/src/lib/
+    // audit.ts:205-212 comment), so the row update and audit entry
+    // commit independently. Pre-existing limitation, not a Task 4.1
+    // regression.
     await audit(
       {
         projectId: input.projectId,
@@ -61,7 +77,7 @@ export async function anonymizeSubscriber(
         resource: "subscriber",
         resourceId: input.subscriberId,
         before: null,
-        after: null,
+        after: { reason: input.reason, anonymousId },
         ipAddress: input.ipAddress ?? null,
         userAgent: input.userAgent ?? null,
       },
@@ -71,9 +87,10 @@ export async function anonymizeSubscriber(
 
   log.info("subscriber anonymized", {
     subscriberId: input.subscriberId,
+    anonymousId,
     projectId: input.projectId,
-    reason: input.reason ?? "gdpr_request",
+    reason: input.reason,
   });
 
-  return { anonymousId };
+  return { anonymousId, deletedAt };
 }
