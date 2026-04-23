@@ -15,6 +15,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import {
+  aggregateTypeEnum,
   creditLedgerType,
   environment,
   experimentStatus,
@@ -769,6 +770,37 @@ export const featureFlags = pgTable(
     ).on(t.projectId, t.isEnabled),
   }),
 );
+
+// =============================================================
+// outbox_events (transactional outbox feeding Kafka)
+// =============================================================
+//
+// Written in the same transaction as the corresponding OLTP row
+// (e.g., an exposure publish also writes a revenueEvent in Plan 2,
+// but Plan 1 ships only EXPOSURE). The outbox-dispatcher worker
+// drains unpublished rows into Redpanda and flips publishedAt.
+// See apps/api/src/services/event-bus.ts for the write side.
+
+export const outboxEvents = pgTable(
+  "outbox_events",
+  {
+    id: text("id").notNull().primaryKey().$defaultFn(() => createId()),
+    aggregateType: aggregateTypeEnum("aggregateType").notNull(),
+    aggregateId: text("aggregateId").notNull(),
+    eventType: text("eventType").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    publishedAt: timestamp("publishedAt", { withTimezone: true }),
+  },
+  (t) => ({
+    unpublishedIdx: index("outbox_events_unpublished_idx").on(t.createdAt),
+  }),
+);
+
+export type OutboxEvent = typeof outboxEvents.$inferSelect;
+export type NewOutboxEvent = typeof outboxEvents.$inferInsert;
 
 // =============================================================
 // Inferred types
