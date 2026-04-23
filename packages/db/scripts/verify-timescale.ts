@@ -25,7 +25,7 @@ interface Cagg {
 interface Policy {
   proc_name: string;
   hypertable_name: string | null;
-  view_name: string | null;
+  scheduled: boolean;
 }
 
 const EXPECTED_HYPERTABLES = [
@@ -68,6 +68,16 @@ async function main(): Promise<void> {
     for (const name of EXPECTED_HYPERTABLES) {
       if (!actualHt.has(name)) problems.push(`missing hypertable: ${name}`);
     }
+    for (const h of hypertables) {
+      if (
+        EXPECTED_COMPRESSION_POLICIES.includes(h.hypertable_name) &&
+        !h.compression_enabled
+      ) {
+        problems.push(
+          `compression disabled on hypertable: ${h.hypertable_name}`,
+        );
+      }
+    }
 
     const caggs = (
       await pool.query<Cagg>(
@@ -83,11 +93,7 @@ async function main(): Promise<void> {
 
     const policies = (
       await pool.query<Policy>(
-        `SELECT proc_name,
-                (config ->> 'hypertable_id')::int AS _ignore_hid,
-                hypertable_name,
-                (config ->> 'mat_hypertable_id') AS _ignore_mh,
-                NULL::text AS view_name
+        `SELECT proc_name, hypertable_name, scheduled
          FROM timescaledb_information.jobs
          WHERE proc_name IN (
            'policy_compression',
@@ -103,7 +109,9 @@ async function main(): Promise<void> {
     // hypertable). Print the raw rows so the operator can eyeball.
     console.log("\nPolicies:");
     for (const p of policies) {
-      console.log(`  ${p.proc_name}  on  ${p.hypertable_name ?? "(null)"}`);
+      console.log(
+        `  ${p.proc_name}  on  ${p.hypertable_name ?? "(null)"}  scheduled=${p.scheduled}`,
+      );
     }
 
     const compressionTargets = new Set(
@@ -136,6 +144,14 @@ async function main(): Promise<void> {
       problems.push(
         `expected >= ${EXPECTED_REFRESH_POLICIES.length} refresh policies, found ${refreshCount}`,
       );
+    }
+
+    for (const p of policies) {
+      if (!p.scheduled) {
+        problems.push(
+          `policy not scheduled: ${p.proc_name} on ${p.hypertable_name ?? "(null)"}`,
+        );
+      }
     }
 
     if (problems.length) {
