@@ -8,6 +8,13 @@
       "when": 1776797490680,
       "tag": "0000_flippant_ezekiel",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1776947522381,
+      "tag": "0001_timescaledb_extension",
+      "breakpoints": true
     }
   ]
 }
