@@ -980,4 +980,141 @@ Açık sorular:
 
 ---
 
+## 13. 2026-04-23 Addendum — drift ve plan kararları
+
+Bu bölüm orijinal spec (2026-04-20) ile repo'nun 2026-04-23 hâli arasındaki drift'i ve implementation plan'e geçmeden kilitlenen kararları içerir. Yukarıdaki bölümlerle çelişen her şeyde **bu addendum kazanır**.
+
+### 13.1 Repo durumu (2026-04-23 itibarıyla)
+
+In-tree implementation `packages/shared` yerine `apps/api` altına yazılmış durumda:
+
+```
+apps/api/src/lib/bucketing.ts          65 LOC
+apps/api/src/lib/targeting.ts          95 LOC
+apps/api/src/lib/experiment-stats.ts   269 LOC
+apps/api/src/services/flag-engine.ts   213 LOC
+apps/api/src/services/experiment-engine.ts 614 LOC
++ 1,893 LOC vitest coverage
+```
+
+SDK tarafı (SSE client, identity merge, `getVariant`), SSE endpoint, exposure buffer, dashboard UI — henüz yok.
+
+Alan 4 (TimescaleDB) shipped ancak `experiment_assignments` hypertable'ını `UNIQUE(experimentId, subscriberId)` + partition-key çakışması nedeniyle **defer etti** (bkz. `docs/superpowers/plans/2026-04-23-timescaledb.md` scope note). Spec §8.3'ün `exposure_events` hypertable planı değişmiyor; sadece `experiment_assignments` için yaklaşım yeniden seçiliyor (bkz. §13.3).
+
+### 13.2 Kod lokasyonu — karışık yerleşim (supersedes §9.1 üstü)
+
+- `packages/shared/src/experiments/bucketing.ts` — correctness-critical, SDK + server **aynı implementation'ı import eder**.
+- `packages/shared/src/experiments/targeting.ts` — rule validator + sift-backed evaluator; SDK offline eval yapabilmek için shared.
+- `apps/api/src/services/flag-engine.ts`, `experiment-engine.ts` — DB orchestration, server-only; shared'dan bucketing+targeting import eder.
+- `apps/api/src/lib/experiment-stats.ts` — server-only, SDK'ya hiç girmez (CUPED/mSPRT/sample-size).
+
+Rasyonel: Cross-platform assignment tutarlılığı parity vector test'lerinin **önleyeceği** değil, **yakalayacağı** bir sorun. Tek kaynak zorunlu. 160 LOC'luk relocation, plan'ın ilk task'ı.
+
+### 13.3 `experiment_assignments` — vanilla Postgres tablo (supersedes §5 implicit varsayımı)
+
+Hypertable **değil**. Bu tablo event değil state: "user X, experiment Y için variant Z" kaydı sticky — immutable değil ama time-series de değil. Shape:
+
+```typescript
+export const experimentAssignments = pgTable(
+  "experiment_assignments",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("project_id").notNull(),
+    experimentId: text("experiment_id").notNull(),
+    subscriberId: text("subscriber_id").notNull(),
+    variantId: text("variant_id").notNull(),
+    hashVersion: smallint("hash_version").notNull().default(1),
+    assignedAt: timestamp("assigned_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    stickyUnique: uniqueIndex("experiment_assignments_sticky_unique")
+      .on(t.experimentId, t.subscriberId),
+    projectExpIdx: index("experiment_assignments_project_exp_idx")
+      .on(t.projectId, t.experimentId),
+  }),
+);
+```
+
+`UNIQUE(experimentId, subscriberId)` korunur. Archived experiment'ler silinmez (spec §T4).
+
+Ölçek kontrolü: 100K subscriber × 20 eşzamanlı experiment = 2M row. Postgres tek tablo için sorun değil; partition/hypertable gerektirmiyor.
+
+`exposure_events` zaten time-series, Alan 4 pattern'ıyla hypertable kalır (spec §8.3).
+
+### 13.4 Hash algoritması — SHA-256, mevcut API korunur (supersedes §3.2, §3.3, §12 soru 1)
+
+**Mevcut durum (2026-04-23):** `apps/api/src/lib/bucketing.ts` `murmurhash-js.murmur3` (32-bit) kullanıyor ve **10,000 discrete bucket** API'si sunuyor: `assignBucket(subscriberId, seed) → int [0, 9999]`. Spec §3 float [0,1) varsayıyordu — yanlıştı, in-tree discrete-bucket API korunacak.
+
+**Değişen tek şey:** hash fonksiyonu. `murmur3` → SHA-256 ilk 32 bit.
+
+Rasyonel:
+- `murmurhash-js` RN'de native destek yok, SDK'ya pure-JS olarak girse de Android/iOS native ekiplere parity implementasyonu yazdırmak külfet.
+- SHA-256 üç platformda da built-in: Node `crypto`, WebCrypto, RN `crypto.subtle` (0.73+) / Kotlin `MessageDigest` / Swift `CryptoKit`.
+- Perf farkı hot path değil — assignBucket her `assignVariant` başına bir kez çalışır.
+
+**10,000-bucket API** (korunur, sadece hash iç) — current `assignBucket`/`selectVariant`/`isInRollout` signatüreleri aynı kalır:
+
+```typescript
+// packages/shared/src/experiments/bucketing.ts
+import { createHash } from "node:crypto";
+
+const BUCKET_COUNT = 10_000;
+
+export function assignBucket(subscriberId: string, seed: string): number {
+  const digest = createHash("sha256").update(`${subscriberId}:${seed}`).digest();
+  // İlk 4 byte big-endian u32 → bucket space'e mod. Full 64-bit'e
+  // gerek yok; 2^32 mod 10000 bias ihmal edilebilir.
+  const hash = digest.readUInt32BE(0);
+  return hash % BUCKET_COUNT;
+}
+```
+
+`selectVariant` ve `isInRollout` fonksiyon gövdeleri **aynen korunur** — sadece hash import'u değişir.
+
+**Platform adapter:** `packages/shared` zaten Node runtime'ı hedefliyor (API + dashboard build-time); SDK için iki yol var:
+
+- **(i) Pure-JS SHA-256**: SDK tarafı `js-sha256` (~3KB minified) bağımlılığı ile shared bucketing.ts'yi doğrudan import eder. Bundle ≤15KB hedefi için yeterli.
+- **(ii) Platform-injected adapter**: Shared bucketing `(subscriberId, seed) → Uint8Array` signatüre'lü bir hash fn kabul eder; server `crypto.createHash`, RN `react-native-quick-crypto` kullanır.
+
+**Plan A bu seçimi içerir** — yukarıdaki kod (i) ile daha basit; (ii) SDK bundle'ında byte kazandırır. Plan yazma aşamasında performans/size ölçümü yapılıp karar netleşir. **Her iki durumda da shared modül bucket sayıları aynı output üretir** — bu invariant parity vector test'iyle pinlenir.
+
+### 13.5 Plan splitting (supersedes §12 "~2 sprint tek plan")
+
+Tek plan yerine iki ayrı implementation plan:
+
+**Plan A — `2026-04-23-experiment-engine-core.md`** (Faz 1-3, ~1 sprint)
+1. Bucketing'i SHA-256'ya çevir, `packages/shared/src/experiments/` taşı, parity vector fixture üret.
+2. Targeting'i `packages/shared/src/experiments/` taşı.
+3. `experiment_assignments` tablosu (§13.3 shape) + Drizzle migration.
+4. `flag-engine.ts` / `experiment-engine.ts` import'ları shared'a çevir.
+5. Dashboard CRUD: flags + experiments + targeting editor + exclusion groups.
+6. Test coverage: determinism, uniform dağılım (chi-square), parity, rule injection (`$where`/`$regex` reject), SRM check helper.
+
+**Plan B — `2026-04-XX-experiment-delivery.md`** (Faz 4-7, ~1 sprint, Plan A merge sonrası yazılır)
+1. SSE endpoint (`GET /v1/config/stream`) + Redis pub/sub invalidation.
+2. Exposure buffer + `exposure_events` hypertable (Alan 4 pattern).
+3. SDK-RN: identity merge, SSE client with backoff, `getVariant`/`isEnabled`, MMKV offline exposure queue.
+4. Stats endpoint (`GET /experiments/:id/results`) — CUPED + mSPRT + sample-size calc.
+5. Dashboard results UI — stratified (country/platform) view, SRM warning, sample-size progress.
+6. `size-limit` CI guard (SDK core ≤15KB gzip).
+
+Plan B'nin detaylı şekli Plan A sonuçlarından sonra yazılır (subagent-driven-development disiplinine uygun).
+
+### 13.6 Spec §12 kalan açık soruları — karar
+
+1. **Native hash library:** iptal. SHA-256 (§13.4).
+2. **Stats library:** `simple-statistics` + elle yazılmış CUPED/mSPRT (spec §7 zaten bu şekilde). YAGNI — precision sorun olursa sonra upgrade.
+3. **MVT:** v1'de skip. Plan "out of scope" notu şart.
+4. **Flag vs experiment targeting UI:** shared validator (`validateTargetingRule`), ayrı dashboard component (`<FlagTargetingEditor>` ve `<ExperimentTargetingEditor>`). Tek validation, iki UX affordance.
+
+### 13.7 Hash algoritma migration (supersedes spec T1)
+
+Spec §T1 "MurmurHash → xxhash" geçişini engellemek için `hashVersion` field önerir. Bu addendum xxhash yolunu tamamen iptal ettiği için migration basit:
+
+- **Mevcut in-tree kod** `murmurhash-js.murmur3` kullanıyor. Pre-launch'ta olduğumuz için aktif assignment yok → SHA-256'ya doğrudan geçilir, parity vector fixture SHA-256'dan baştan üretilir.
+- **Yeni experiment'ler**: `hashVersion = 1` (SHA-256 bucketing) — ilk sürüm için default ve tek versiyon.
+- `hashVersion` field tabloda kalır; ileride algoritma değişirse aktif experiment'leri bozmadan versiyonlu bucketing yapılabilir (spec §T1'in orijinal niyeti).
+
+---
+
 *Alan 5 sonu. Sonraki: Alan 6 — ClickHouse Analytics Layer.*
