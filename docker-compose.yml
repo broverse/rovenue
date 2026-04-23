@@ -26,6 +26,13 @@ services:
     # protocol; the timescaledb extension is opted into per-database
     # via `CREATE EXTENSION timescaledb` in migrations/.
     image: timescale/timescaledb:2.17.2-pg16
+    # AGPLv3 guardrail: pin TimescaleDB to its Apache-2 community code
+    # path. Default `timescale` enables TSL (enterprise) code paths
+    # that rovenue must not ship against. Spec §11 (T11).
+    command:
+      - "postgres"
+      - "-c"
+      - "timescaledb.license=apache"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-rovenue}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rovenue}
