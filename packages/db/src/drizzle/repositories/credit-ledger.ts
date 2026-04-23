@@ -36,7 +36,7 @@ export async function findExistingPurchaseCredit(
 // Credit ledger reads — Drizzle repository
 // =============================================================
 //
-// The ledger is append-only (DB triggers block UPDATE), and
+// The ledger is append-only by convention (repo never issues UPDATE), and
 // every write carries the running balance forward. That means
 // "current balance" is always the balance column of the most
 // recent row for the subscriber — a single index-driven lookup.
@@ -55,7 +55,8 @@ export async function findLatestBalance(
 }
 
 // =============================================================
-// Writes (append-only — DB trigger blocks UPDATE/DELETE)
+// Writes (append-only by convention — this module owns the only
+// write path and never issues UPDATE/DELETE)
 // =============================================================
 
 export interface CreditLedgerEntry {

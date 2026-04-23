@@ -204,7 +204,9 @@ export const subscribers = pgTable(
 );
 
 // =============================================================
-// credit_ledger (append-only; mutations blocked by DB trigger)
+// credit_ledger (append-only by repository-layer convention — no
+// DB-level enforcement; every call site uses .insert() and no
+// UPDATE/DELETE paths exist in the @rovenue/db repositories)
 // =============================================================
 
 export const creditLedger = pgTable(

@@ -48,22 +48,29 @@ Bonus:
 
 TimescaleDB Apache 2.0 (community features) + TSL (enterprise features). Rovenue için ihtiyaç duyduğumuz her şey **Community edition** içinde:
 
-- Hypertables ✅
-- Continuous aggregates ✅ (Apache 2)
-- Compression ✅ (Apache 2 since v2.x)
-- Retention policies ✅
+- Hypertables ✅ (Apache 2)
+- Continuous aggregates ⚠️ **TSL** — `timescaledb.license=timescale` required
+- Compression ⚠️ **TSL**
+- Retention policies ⚠️ **TSL** (add_retention_policy uses the TSL job scheduler)
+- Background-job scheduler ⚠️ **TSL**
 
-Multi-node + data tiering TSL — bizim ölçeğimizde gereksiz. Self-host docker image AGPLv3 ile uyumlu.
+TSL'in getirdiği kısıtlama: "TimescaleDB'yi DBaaS olarak 3. taraflara satma." Rovenue self-hosted subscription-management uygulaması, DBaaS değil — TSL kapsamında kalması problem değil. AGPLv3 uygulama kodu TSL runtime'a bağımlı ama iki ayrı süreç, iki ayrı lisans — çatışma yok. Multi-node + data tiering gibi TSL-only "enterprise" özellikler bizim ölçeğimizde gereksiz.
 
 ### 1.5 Karar
 
-**Evet, TimescaleDB'ye geç**; ama seçici. Tüm tabloları değil, yalnızca:
-- `revenue_events`
-- `credit_ledger`
-- `webhook_events`
-- `outgoing_webhooks` (belki)
-- `experiment_assignments`
-- `audit_log`
+**Evet, TimescaleDB'ye geç**; ama seçici. Üç kategori var:
+
+**Hypertable'a çevrilenler (Alan 4 tamamlandı):**
+- `revenue_events` — 1 gün chunk, compression 30d, no retention (VUK 7y)
+- `credit_ledger` — 1 gün chunk, compression 30d, no retention (VUK 7y)
+- `outgoing_webhooks` — 6 saat chunk, compression 7d, retention 90d
+
+**Hypertable'a aday, ayrı plan gerektiriyor:**
+- `webhook_events` — `UNIQUE(source, storeEventId)` idempotency key'i redesign gerektirir; Alan 3 Redis replay guard app-layer dedup sağlıyor, DB unique'i düşürüp hypertable'layabiliriz.
+
+**Intentionally vanilla (hypertable'a çevrilmeyecek):**
+- `experiment_assignments` — büyüme zaman değil user×experiment, retention long-horizon, hypertable kazancı düşük, `UNIQUE(experimentId, subscriberId)` sticky-assignment invariant'ı redesign maliyeti yüksek.
+- `audit_logs` — retention ∞ (SOC 2), `UNIQUE(rowHash)` hash-chain integrity'nin DB-level parçası, compression hash chain verifier için risk. Hypertable değeri çok düşük.
 
 Projects, Subscribers, Products gibi OLTP tabloları **vanilla kalır** — hypertable her tablo için optimal değil (küçük tablolarda overhead getirir).
 
@@ -822,11 +829,21 @@ TimescaleDB 2.13+ `finalized` flag'i ile aggregate davranışı değişti. Yeni 
 
 ### T11 — Timescale license (TSL) sızması
 
-Community features Apache 2 ama `timescaledb-tsl` extension'ı yanlışlıkla yüklenirse TSL kod path'i aktif olur. Rovenue açık kaynak projesi olarak TSL'e bağımlı kalmamalı. Deploy config'te:
+Community features Apache 2 ama cagg, compression, retention, ve
+background-job scheduler **TSL'e tabi** (2.17 empirik olarak doğrulandı,
+Alan 4 uygulaması sırasında). Rovenue bu özellikleri kullandığı için
+`timescaledb.license=timescale` (default) ile çalışır; apache pin'i
+cagg/compression/retention migration'larının uygulanmasını engeller.
+
+Doğrulama:
 
 ```sql
-SHOW timescaledb.license; -- should be "apache"
+SHOW timescaledb.license; -- should be "timescale" for rovenue's feature set
 ```
+
+TSL'in tek kısıtı (self-host rovenue için): "TimescaleDB'nin kendisini
+managed DB service olarak satamazsın." Rovenue subscription-management
+uygulaması, DBaaS değil — TSL kapsamı içinde kalır.
 
 ### T12 — JSON aggregation ve compression
 
