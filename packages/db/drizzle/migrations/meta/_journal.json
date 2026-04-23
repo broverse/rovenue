@@ -43,6 +43,13 @@
       "when": 1776954938603,
       "tag": "0005_cagg_daily_mrr",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776955535301,
+      "tag": "0006_compression_policies",
+      "breakpoints": true
     }
   ]
 }
