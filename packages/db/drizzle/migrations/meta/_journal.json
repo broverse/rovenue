@@ -57,6 +57,13 @@
       "when": 1776955883796,
       "tag": "0007_retention_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1776965592853,
+      "tag": "0008_experiment_assignments_hash_version",
+      "breakpoints": true
     }
   ]
 }

@@ -6,7 +6,7 @@ import {
   type FlagValue,
   type PaywallConfig,
   variantSchema,
-} from "./experiments";
+} from "./types";
 
 // =============================================================
 // EXPERIMENT_TYPE

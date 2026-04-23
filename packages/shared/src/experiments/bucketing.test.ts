@@ -1,13 +1,14 @@
+import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import {
   assignBucket,
   isInRollout,
   selectVariant,
-} from "../src/lib/bucketing";
+} from "./bucketing";
 
 // =============================================================
-// assignBucket — deterministic murmurhash bucketing
+// assignBucket — deterministic SHA-256 bucketing
 // =============================================================
 
 describe("assignBucket", () => {
@@ -145,4 +146,34 @@ describe("isInRollout", () => {
       );
     }
   });
+});
+
+// =============================================================
+// Parity vectors — frozen SHA-256 outputs
+// =============================================================
+
+interface ParityVector {
+  subscriberId: string;
+  seed: string;
+  bucket: number;
+}
+
+describe("assignBucket — parity vectors", () => {
+  const vectors: ParityVector[] = JSON.parse(
+    readFileSync(
+      new URL("./bucketing-parity-vectors.json", import.meta.url),
+      "utf8",
+    ),
+  );
+
+  test("JSON loaded and non-empty", () => {
+    expect(vectors.length).toBeGreaterThan(0);
+  });
+
+  test.each(vectors)(
+    "$subscriberId / $seed → bucket $bucket",
+    ({ subscriberId, seed, bucket }) => {
+      expect(assignBucket(subscriberId, seed)).toBe(bucket);
+    },
+  );
 });

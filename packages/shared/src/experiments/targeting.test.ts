@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { matchesAudience, validateAudienceRules } from "../src/lib/targeting";
+import { matchesAudience, validateAudienceRules } from "./targeting";
 
 // =============================================================
 // Empty rules — "All Users"

@@ -8,6 +8,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -706,6 +707,7 @@ export const experimentAssignments = pgTable(
       .notNull()
       .references(() => subscribers.id, { onDelete: "cascade" }),
     variantId: text("variantId").notNull(),
+    hashVersion: smallint("hashVersion").notNull().default(1),
     assignedAt: timestamp("assignedAt", { withTimezone: true })
       .notNull()
       .defaultNow(),

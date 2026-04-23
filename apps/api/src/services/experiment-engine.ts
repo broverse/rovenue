@@ -16,10 +16,9 @@ import {
   type RevenueAnalysis,
   type SRMResult,
 } from "../lib/experiment-stats";
-import { assignBucket, selectVariant } from "../lib/bucketing";
 import { logger } from "../lib/logger";
 import { redis } from "../lib/redis";
-import { matchesAudience } from "../lib/targeting";
+import { assignBucket, matchesAudience, selectVariant } from "@rovenue/shared";
 
 // =============================================================
 // Experiment engine
@@ -29,7 +28,7 @@ import { matchesAudience } from "../lib/targeting";
 // loads the project's RUNNING experiments and audiences from a
 // single cached bundle, applies audience targeting + mutual
 // exclusion, reuses sticky assignments, and assigns any
-// newcomers via the deterministic murmurhash bucketer.
+// newcomers via the deterministic SHA-256 bucketer.
 //
 // Implementation note — the spec called for queuing assignment
 // writes through BullMQ. We instead batch every new assignment
@@ -248,6 +247,7 @@ export async function evaluateExperiments(
         experimentId: exp.id,
         subscriberId,
         variantId: variant.id,
+        hashVersion: 1,
       });
       if (exp.mutualExclusionGroup) {
         namespacesClaimed.add(exp.mutualExclusionGroup);

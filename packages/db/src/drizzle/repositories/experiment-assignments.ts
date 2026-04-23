@@ -158,6 +158,7 @@ export interface NewAssignmentInput {
   experimentId: string;
   subscriberId: string;
   variantId: string;
+  hashVersion?: number;
 }
 
 /**
@@ -171,7 +172,12 @@ export async function insertAssignmentsSkipDuplicates(
   if (rows.length === 0) return;
   await db
     .insert(experimentAssignments)
-    .values(rows)
+    .values(
+      rows.map((r) => ({
+        ...r,
+        hashVersion: r.hashVersion ?? 1,
+      })),
+    )
     .onConflictDoNothing({
       target: [
         experimentAssignments.experimentId,
