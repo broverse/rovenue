@@ -5,6 +5,11 @@
   Query limits keep a runaway dashboard query from monopolising RAM.
 -->
 <clickhouse>
+  <!-- Bind to all interfaces. Default CH config is 127.0.0.1 only,
+       which prevents Docker port-forwarding from host to container.
+       0.0.0.0 covers IPv4; `::` would cover IPv6 too but fails on
+       alpine containers where IPv6 is not enabled by default. -->
+  <listen_host>0.0.0.0</listen_host>
   <max_server_memory_usage_to_ram_ratio>0.7</max_server_memory_usage_to_ram_ratio>
   <profiles>
     <default>

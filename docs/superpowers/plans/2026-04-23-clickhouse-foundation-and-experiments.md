@@ -211,6 +211,11 @@ Create `deploy/clickhouse/config.d/rovenue.xml`:
   Query limits keep a runaway dashboard query from monopolising RAM.
 -->
 <clickhouse>
+  <!-- Bind to all interfaces. CH defaults to 127.0.0.1 inside the
+       container, which blocks Docker port-forwarding from host to
+       container. 0.0.0.0 covers IPv4; `::` would cover IPv6 too but
+       alpine containers ship with IPv6 disabled and startup fails. -->
+  <listen_host>0.0.0.0</listen_host>
   <max_server_memory_usage_to_ram_ratio>0.7</max_server_memory_usage_to_ram_ratio>
   <profiles>
     <default>
@@ -609,7 +614,10 @@ if (!password) throw new Error("CLICKHOUSE_PASSWORD is required");
 // read-only `rovenue_reader`. Production CI must supply the owner
 // password here, and the API process uses the reader password.
 const client = createClient({
-  host: url,
+  // @clickhouse/client >=1.18 renamed `host` → `url`. The old
+  // field still works with a deprecation warning; prefer `url` so
+  // future removals don't break us.
+  url,
   username: user,
   password,
   database: "default", // 0001 creates `rovenue`; earlier we cannot scope
