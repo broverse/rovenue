@@ -235,8 +235,19 @@ Create `deploy/clickhouse/users.d/rovenue.xml`:
   runner + PeerDB target; `rovenue_reader` is read-only and is what
   the API's analytics-router uses for dashboard queries. The default
   user is disabled so nothing runs without explicit credentials.
+
+  readonly must be expressed as a profile setting, not a per-user
+  field — the per-user <readonly> tag is silently ignored. We define
+  a `readonly_analytics` profile with readonly=2 (SELECT + SHOW only,
+  settings changes blocked from the client side) and apply it to
+  rovenue_reader.
 -->
 <clickhouse>
+  <profiles>
+    <readonly_analytics>
+      <readonly>2</readonly>
+    </readonly_analytics>
+  </profiles>
   <users>
     <default remove="remove"/>
     <rovenue>
@@ -253,13 +264,11 @@ Create `deploy/clickhouse/users.d/rovenue.xml`:
     <rovenue_reader>
       <password_sha256_hex from_env="CLICKHOUSE_READER_PASSWORD_SHA256"/>
       <networks><ip>::/0</ip></networks>
-      <profile>default</profile>
+      <profile>readonly_analytics</profile>
       <quota>default</quota>
       <databases>
         <rovenue/>
       </databases>
-      <!-- read-only: SELECT + SHOW only -->
-      <readonly>1</readonly>
     </rovenue_reader>
   </users>
 </clickhouse>
@@ -277,14 +286,19 @@ Open `docker-compose.yml`. Immediately after the `redis` service and before the 
     # 24-series but should trigger a verify-clickhouse run.
     image: clickhouse/clickhouse-server:24.3-alpine
     environment:
+      # CLICKHOUSE_DB creates the rovenue database on first boot. We
+      # intentionally do NOT set CLICKHOUSE_USER/CLICKHOUSE_PASSWORD —
+      # the image's entrypoint would generate a second user definition
+      # that conflicts with users.d/rovenue.xml ("more than one
+      # 'password' field for user rovenue"). Authoritative user config
+      # lives in users.d; env vars only feed the hex password via
+      # from_env in the XML.
       CLICKHOUSE_DB: rovenue
-      CLICKHOUSE_USER: rovenue
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-rovenue}
-      # Hex-encoded SHA-256 of the password; computed in CI from
-      # CLICKHOUSE_PASSWORD via `printf '%s' $CLICKHOUSE_PASSWORD |
-      # sha256sum`. Locally we pin both to the same demo literal.
-      CLICKHOUSE_PASSWORD_SHA256: ${CLICKHOUSE_PASSWORD_SHA256:-bcd1a6e5e3bffcab27d8929e5eceb0cc9d03bb4aac9e0f59a3b2a69f5b4ffd7c}
-      CLICKHOUSE_READER_PASSWORD_SHA256: ${CLICKHOUSE_READER_PASSWORD_SHA256:-bcd1a6e5e3bffcab27d8929e5eceb0cc9d03bb4aac9e0f59a3b2a69f5b4ffd7c}
+      # Hex-encoded SHA-256 of the password `rovenue`. Compute a new
+      # hash for any non-default password with:
+      #   printf '%s' "$CLICKHOUSE_PASSWORD" | shasum -a 256
+      CLICKHOUSE_PASSWORD_SHA256: ${CLICKHOUSE_PASSWORD_SHA256:-460592d4be24af16128f6ee18ca9bef3527fec9d74281c13a860572d09e975c2}
+      CLICKHOUSE_READER_PASSWORD_SHA256: ${CLICKHOUSE_READER_PASSWORD_SHA256:-460592d4be24af16128f6ee18ca9bef3527fec9d74281c13a860572d09e975c2}
     ulimits:
       nofile:
         soft: 262144
