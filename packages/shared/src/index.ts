@@ -80,16 +80,11 @@ export * from "./logger";
 export * from "./crypto";
 
 // =============================================================
-// Experiment types (Flag / ProductGroup / Paywall / Element)
+// Experiments — types (Flag / ProductGroup / Paywall / Element),
+// bucketing primitives, and audience targeting
 // =============================================================
 
 export * from "./experiments";
-
-// =============================================================
-// Experiments runtime — bucketing + targeting
-// =============================================================
-
-export * from "./experiments/index";
 
 // =============================================================
 // Dashboard API request/response types
