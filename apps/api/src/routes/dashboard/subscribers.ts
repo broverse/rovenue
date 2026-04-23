@@ -13,6 +13,7 @@ import { ok } from "../../lib/response";
 import { encodeCursor, decodeCursor } from "../../lib/pagination";
 import { extractRequestContext } from "../../lib/audit";
 import { anonymizeSubscriber } from "../../services/gdpr/anonymize-subscriber";
+import { exportSubscriber } from "../../services/gdpr/export-subscriber";
 
 // =============================================================
 // Dashboard: Subscribers list (Task A6)
@@ -241,4 +242,40 @@ export const subscribersRoute = new Hono()
     });
 
     return c.json(ok(result));
+  })
+  // =============================================================
+  // Dashboard: Export subscriber (Task 4.3 — GDPR Art. 15)
+  // =============================================================
+  //
+  // GET /dashboard/projects/:projectId/subscribers/:id/export
+  //
+  // ADMIN-and-above only. Produces a JSON dump of every row we
+  // hold for the subscriber (subscriber + purchases + access +
+  // credit ledger) and writes a `subscriber.exported` audit
+  // entry. `content-disposition: attachment` hints the browser
+  // to save-as rather than render inline.
+  .get("/:id/export", async (c) => {
+    const projectId = c.req.param("projectId");
+    const subscriberId = c.req.param("id");
+    if (!projectId || !subscriberId) {
+      throw new HTTPException(400, { message: "Missing path parameters" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+
+    const { ipAddress, userAgent } = extractRequestContext(c);
+
+    const dump = await exportSubscriber({
+      subscriberId,
+      projectId,
+      actorUserId: user.id,
+      ipAddress,
+      userAgent,
+    });
+
+    c.header(
+      "content-disposition",
+      `attachment; filename="subscriber-${subscriberId}.json"`,
+    );
+    return c.json(ok(dump));
   });

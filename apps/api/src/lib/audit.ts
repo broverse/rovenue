@@ -62,6 +62,7 @@ export type AuditAction =
   | "subscriber.access_granted"
   | "subscriber.credits_added"
   | "subscriber.anonymized"
+  | "subscriber.exported"
   // --- members ---
   | "member.invited"
   | "member.role_changed"

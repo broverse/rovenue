@@ -26,6 +26,17 @@ const anonymizeMock = vi.hoisted(() => ({
 }));
 vi.mock("../src/services/gdpr/anonymize-subscriber", () => anonymizeMock);
 
+const exportMock = vi.hoisted(() => ({
+  exportSubscriber: vi.fn(async () => ({
+    subscriber: { id: "sub_1" },
+    purchases: [],
+    access: [],
+    creditLedger: [],
+    exportedAt: "2026-04-21T10:00:00.000Z",
+  })),
+}));
+vi.mock("../src/services/gdpr/export-subscriber", () => exportMock);
+
 const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
   const dbMock = {
     projectMember: { findUnique: vi.fn() },
@@ -398,5 +409,33 @@ describe("POST /dashboard/projects/:projectId/subscribers/:id/anonymize", () => 
     );
     expect(res.status).toBe(403);
     expect(anonymizeMock.anonymizeSubscriber).not.toHaveBeenCalled();
+  });
+
+  test("GET /:id/export returns export blob + content-disposition", async () => {
+    authMock.api.getSession.mockResolvedValue({ user: { id: "user_admin" } });
+    dbMock.projectMember.findUnique.mockResolvedValue({
+      id: "m1",
+      role: "ADMIN",
+    });
+
+    const res = await app.request(
+      "/dashboard/projects/proj_1/subscribers/sub_1/export",
+      { headers: { cookie: "rovenue.session=test" } },
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-disposition")).toContain(
+      'filename="subscriber-sub_1.json"',
+    );
+    const body = (await res.json()) as {
+      data: { subscriber: { id: string } };
+    };
+    expect(body.data.subscriber.id).toBe("sub_1");
+    expect(exportMock.exportSubscriber).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subscriberId: "sub_1",
+        projectId: "proj_1",
+        actorUserId: "user_admin",
+      }),
+    );
   });
 });
