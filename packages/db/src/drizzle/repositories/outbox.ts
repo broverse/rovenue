@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, inArray, isNull, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   outboxEvents,
