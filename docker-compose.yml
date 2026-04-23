@@ -1,3 +1,17 @@
+# Rovenue local stack — rovenue's own services (api, db, redis, clickhouse).
+#
+# Default boot:
+#   docker compose up -d
+#
+# PeerDB (Postgres → ClickHouse replication) is a VENDORED external
+# bundle, NOT a service in this file. See deploy/peerdb/README.md.
+# Boot PeerDB separately:
+#   cd deploy/peerdb/upstream && ./run-peerdb.sh
+#
+# Most development does not need PeerDB running — the API treats the
+# ClickHouse database as empty and the analytics-router falls back
+# to "no data" responses. Integration tests in apps/api/tests/
+# replication-parity.test.ts spin a minimal PeerDB via testcontainers.
 services:
   api:
     build:

@@ -38,7 +38,7 @@
 ### Create
 
 **Docker / infra:**
-- `deploy/peerdb/upstream/` — git submodule pinned to PeerDB `stable-v0.36.17`. PeerDB ships its own ~9-service docker-compose bundle; we vendor and boot it via `./run-peerdb.sh`.
+- `deploy/peerdb/upstream/` — git submodule pinned to PeerDB `v0.36.18`. PeerDB ships its own ~9-service docker-compose bundle; we vendor and boot it via `./run-peerdb.sh`.
 - `deploy/peerdb/README.md` — bootstrap instructions (submodule init, `run-peerdb.sh`, `psql setup.sql`).
 - `deploy/peerdb/setup.sql` — `CREATE PEER` + `CREATE MIRROR` SQL applied against PeerDB's wire endpoint (`localhost:9900`) to create the `rovenue_analytics` mirror (Phase 4).
 - `deploy/clickhouse/config.d/rovenue.xml` — ClickHouse server overrides (max_memory_usage, max_execution_time, enable_http_compression).
@@ -365,12 +365,12 @@ git submodule add --name peerdb-upstream \
     https://github.com/PeerDB-io/peerdb.git \
     deploy/peerdb/upstream
 cd deploy/peerdb/upstream
-git checkout stable-v0.36.17
+git checkout v0.36.18
 cd ../../..
 git add .gitmodules deploy/peerdb/upstream
 ```
 
-Expected: `.gitmodules` contains the `peerdb-upstream` entry; `deploy/peerdb/upstream/` is pinned to tag `stable-v0.36.17`.
+Expected: `.gitmodules` contains the `peerdb-upstream` entry; `deploy/peerdb/upstream/` is pinned to tag `v0.36.18`.
 
 **Version-bump hygiene:** when upgrading the submodule, `cd deploy/peerdb/upstream && git fetch && git checkout stable-v0.X.Y`, re-run `./run-peerdb.sh`, and confirm `deploy/peerdb/setup.sql` (Phase 4) still applies against the new peerdb-server. The PeerDB UI `/mirrors` page should list `rovenue_analytics` as running after the upgrade.
 
@@ -382,7 +382,7 @@ Create `deploy/peerdb/README.md`:
 # PeerDB bootstrap for rovenue analytics
 
 PeerDB is vendored as a git submodule at `deploy/peerdb/upstream/`,
-pinned to `stable-v0.36.17`. We deploy it via PeerDB's own
+pinned to `v0.36.18`. We deploy it via PeerDB's own
 `run-peerdb.sh` script — NOT via rovenue's `docker-compose.yml` —
 because PeerDB bundles ~9 interdependent services whose topology
 drifts between versions.
