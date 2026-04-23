@@ -12,6 +12,7 @@
     "db:migrate:baseline": "tsx src/migrate-baseline.ts",
     "db:migrate:generate": "drizzle-kit generate",
     "db:verify:timescale": "tsx scripts/verify-timescale.ts",
+    "db:verify:clickhouse": "tsx scripts/verify-clickhouse.ts",
     "db:clickhouse:migrate": "tsx src/clickhouse-migrate.ts",
     "db:studio": "drizzle-kit studio",
     "seed": "tsx seed.ts"
