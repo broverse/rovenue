@@ -97,6 +97,12 @@ describe("schema shapes compile", () => {
     expect(idColumn.primary).toBe(false);
     expect(creditLedger.createdAt.name).toBe("createdAt");
   });
+
+  it("outgoingWebhooks uses a composite (id, createdAt) primary key for hypertable partitioning", () => {
+    const idColumn = outgoingWebhooks.id as unknown as { primary: boolean };
+    expect(idColumn.primary).toBe(false);
+    expect(outgoingWebhooks.createdAt.name).toBe("createdAt");
+  });
 });
 
 describe("inferred types", () => {

@@ -530,7 +530,7 @@ export const webhookEvents = pgTable(
 export const outgoingWebhooks = pgTable(
   "outgoing_webhooks",
   {
-    id: text("id").primaryKey().$defaultFn(() => createId()),
+    id: text("id").notNull().$defaultFn(() => createId()),
     projectId: text("projectId")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -554,6 +554,7 @@ export const outgoingWebhooks = pgTable(
       .defaultNow(),
   },
   (t) => ({
+    pk: primaryKey({ columns: [t.id, t.createdAt] }),
     statusNextRetryAtIdx: index(
       "outgoing_webhooks_status_nextRetryAt_idx",
     ).on(t.status, t.nextRetryAt),
