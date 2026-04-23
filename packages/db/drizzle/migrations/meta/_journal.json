@@ -15,6 +15,13 @@
       "when": 1776947522381,
       "tag": "0001_timescaledb_extension",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776949569595,
+      "tag": "0002_hypertable_revenue_events",
+      "breakpoints": true
     }
   ]
 }
