@@ -53,6 +53,20 @@ services:
     # TimescaleDB itself as a managed DB service"; Rovenue is a
     # subscription-management application, not a DBaaS, so we're safely
     # inside TSL's permitted self-host use case.
+    #
+    # wal_level=logical + replication slots are required for PeerDB's
+    # CDC mirror (Phase 4). Defaults are 'replica' / no slots, which
+    # silently accepts CREATE PUBLICATION but blocks actual streaming.
+    # Full Postgres restart (not SIGHUP) is required after changing
+    # these, so they live in `command` rather than postgresql.conf.
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "max_replication_slots=10"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-rovenue}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rovenue}
