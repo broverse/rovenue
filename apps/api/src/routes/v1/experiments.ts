@@ -5,6 +5,7 @@ import { z } from "zod";
 import { drizzle, getDb } from "@rovenue/db";
 import { recordEvent } from "../../services/experiment-engine";
 import { eventBus } from "../../services/event-bus";
+import { computeExperimentResults } from "../../services/experiment-results";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
 
@@ -155,4 +156,19 @@ export const experimentsRoute = new Hono()
 
       return c.json(ok({ accepted: true }));
     },
-  );
+  )
+  .get("/:id/results", async (c) => {
+    // =============================================================
+    // GET /v1/experiments/:id/results
+    // =============================================================
+    //
+    // Source: superseded plan Task 8.2, copied per Phase F.5.
+    // Returns CH-backed experiment statistics (SRM + per-variant
+    // exposures today; CUPED / revenue deltas when the MV chain
+    // lands in Plan 2). Scoped to the authenticated project so a
+    // cross-project id leak surfaces as "experiment not found".
+    const experimentId = c.req.param("id");
+    const project = c.get("project");
+    const results = await computeExperimentResults(experimentId, project.id);
+    return c.json(ok(results));
+  });
