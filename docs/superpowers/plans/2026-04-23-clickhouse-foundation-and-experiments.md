@@ -1,5 +1,11 @@
 # Alan 6 Plan 1 — ClickHouse Foundation + Experiments Backend Implementation Plan
 
+> **SUPERSEDED 2026-04-24.** Phase 4 smoke testing on branch `feat/clickhouse-analytics` proved that TimescaleDB hypertable INSERTs are not captured by Postgres logical replication (pgoutput publication lives on the parent hypertable; physical writes go to `_timescaledb_internal._hyper_N_M_chunk` tables that are not in the publication). PeerDB, Debezium, or any other CDC tool built on `pg_replication_slot` would hit the same wall. The project has pivoted to application-layer outbox pattern + Redpanda + ClickHouse Kafka Engine — see `docs/superpowers/specs/2026-04-20-tech-stack-upgrade/06-clickhouse.md` §14 (2026-04-24 addendum) and the successor plan `docs/superpowers/plans/2026-04-24-kafka-analytics-foundation.md`.
+>
+> Phases 0-3 of this plan (infra baseline, ClickHouse docker service, env schema, CH migration runner + init + lint test, exposure_events Postgres hypertable + Drizzle schema + repo) are shipped commits on the same branch and are partially reusable. Phase 4 artifacts (publication migration `0010_postgres_publication.sql`, PeerDB submodule + setup.sql) will be reverted by the successor plan's rollback phase before new Kafka-based work lands.
+>
+> This file is kept in-tree as history of the PeerDB route that was tried and retired. Do not execute from here.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Stand up a production-grade ClickHouse OLAP read replica of Postgres (via PeerDB), add the `exposure_events` pipeline so every variant impression flows into ClickHouse, and rewire `GET /v1/experiments/:id/results` to compute CUPED / mSPRT / sample-size from the ClickHouse materialised view `mv_experiment_daily`. No SDK-RN, no dashboard UI, no revenue analytics — this plan is strictly server-side ClickHouse foundation + experiment analytics backend.

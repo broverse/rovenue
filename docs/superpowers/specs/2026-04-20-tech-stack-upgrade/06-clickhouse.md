@@ -968,6 +968,101 @@ Alan 5 spec §13.5'teki Plan B referansı tarihsel bir not olarak kalır; fiilî
 
 ---
 
+## 14. 2026-04-24 Addendum — CDC pivot to Kafka + outbox
+
+Bu bölüm, §13 addendum'un implementasyon sırasında yaşanan ingestion-layer çöküşünü belgeler ve PeerDB-merkezli yaklaşımdan Kafka+outbox mimarisine geçişin kararını pin'ler. §13 hâlâ mimari hedefi (Postgres OLTP + ClickHouse OLAP) ve Plan 1/2/3/4 parçalanmasını yönetir; **tek değişiklik**: §3'te ingestion seçimi PeerDB'den (§3.5) uygulama-katmanlı outbox pattern'e (yeni §3.7) geçer.
+
+### 14.1 Blocker — TimescaleDB hypertable + Postgres logical replication uyumsuzluğu
+
+Phase 4 smoke testinde Plan 1 Branch `feat/clickhouse-analytics` commit `d6773a5` altında empirik olarak doğrulandı:
+
+| Test senaryosu | Sonuç |
+|---|---|
+| Vanilla Postgres tablosu (subscribers) INSERT → PeerDB replicate | ✅ ~70 saniyede ClickHouse'ta |
+| TimescaleDB hypertable (exposure_events) INSERT → PeerDB replicate | ❌ 5+ dakikada 0 satır |
+
+Kök neden: TimescaleDB hypertable INSERT'leri fiziksel olarak `_timescaledb_internal._hyper_N_M_chunk` child tablolarına yazılır. Postgres logical replication publication parent hypertable üstünde; child chunk'lar publication'da yok; replication slot'u bu WAL yazımlarını görmez.
+
+- `ALTER PUBLICATION … SET (publish_via_partition_root = true)` **etkisiz** — TimescaleDB chunk'ları native Postgres partition değil.
+- Debezium da aynı `pg_replication_slot`'tan okuyor — **aynı körlük onda da olur**. Bu PeerDB'ye özgü değil, pgoutput logical decoding'in TimescaleDB chunk partitioning'iyle uyumsuzluğu.
+- Workaround (chunk auto-add trigger): her chunk oluştuğunda `ALTER PUBLICATION … ADD TABLE <chunk>` çalıştıran DDL trigger fragile; Plan 1 scope'unda risk/kazanç oranı kötü.
+
+Plan 1'in analytics yükünün üçü hypertable (`revenue_events`, `credit_ledger`, `exposure_events`) — CDC tabanlı bir mimari bu üçünü de replike edemez. Mimari değişiklik kaçınılmaz.
+
+### 14.2 Yeni pozisyon — Opsiyon **Y′** (Opsiyon Y'nin güncellenmiş hali)
+
+§13.1 Opsiyon Y duruşu (Postgres+TS = OLTP source, ClickHouse = OLAP replica) **korunur**. Değişen sadece replication mekanizması:
+
+- **Eski (PeerDB CDC)**: Postgres WAL → PeerDB logical replication slot → ClickHouse raw tables. Hypertable körlüğü yüzünden çalışmaz.
+- **Yeni (Application outbox + Kafka)**: Uygulama katmanı, her analytics-eligible yazımı aynı transaction'da `outbox_events` tablosuna da yazar. Async outbox-dispatcher worker outbox'ı tüketip Redpanda topic'lerine publish eder. ClickHouse Kafka Engine table'ı topic'ten tüketir; MV target'a aktarır. CDC tamamen devrede dışı.
+
+```mermaid
+graph LR
+  A[App request] -->|same tx| B[(Postgres<br/>revenue_events / credit_ledger / etc.)]
+  A -->|same tx| C[(Postgres<br/>outbox_events)]
+  C -->|async worker| D[Redpanda<br/>rovenue.revenue / rovenue.credit / …]
+  D -->|Kafka Engine| E[(ClickHouse<br/>raw_* target tables)]
+  E -->|MV| F[(ClickHouse<br/>mv_experiment_daily etc.)]
+```
+
+### 14.3 Neden event-driven CDC'yi yener — bu projede
+
+1. **TimescaleDB sorunu irrelevant**: events Postgres'ten Kafka'ya CDC üstünden değil, app dispatch üstünden gider. Hypertable chunk'ları invisible değil — biz direkt yazarız.
+2. **Exposure events için dogmatik fit**: `exposure_events` saf bir analytics event'idir — OLTP read path'i yoktur, Postgres'te bulunmasına gerek yok. §13 Alan 5 Plan B absorpsiyonunda Postgres hypertable'lanmıştı; Opsiyon Y′'de bu tablo tamamen kaldırılır, exposures yalnızca Kafka → ClickHouse akışında yaşar.
+3. **Revenue/credit için outbox safety**: finansal data Postgres'te VUK 7 yıl source of truth olarak kalır; aynı transaction'da outbox INSERT atılır; fan-out async. Bu §3'te "kötü choice" denilen "§3.4 direct dual-write"in transactional versiyonu — outbox pattern iki yazımı tek transaction'da atomic yapar, eventual-consistency'li ama inconsistency'siz.
+4. **Operasyonel ağırlık ≤ PeerDB**: PeerDB self-host ~9 container (catalog + temporal stack + 3 flow workers + server + ui + minio). Redpanda single-node (1 container) + Redpanda Console (1 container). Debezium+Kafka+ZK+Schema Registry yaklaşık 5 container olurdu.
+5. **Kafka ikinci kullanımlar**: Redpanda topic'leri webhook delivery, outgoing webhook retry, audit fan-out gibi gelecek use-case'ler için hazır backbone. BullMQ+Redis'ten çıkış yolu.
+
+### 14.4 §3 ingestion tablosu — güncelleme
+
+Önceki §3 ingestion seçeneklerinden (PeerDB, MaterializedPostgreSQL, Debezium+Kafka, direct dual-write) **yedi**'nci seçenek eklenir ve önerilir:
+
+**§3.7 Outbox pattern + Redpanda + ClickHouse Kafka Engine**
+- **Ne**: App same-tx yazar `outbox_events`'e; async worker topic'e publish eder; CH Kafka Engine tüketir.
+- **Artı**: CDC'den bağımsız; hypertable sorunu yok; transactional safety outbox ile; operasyonel olarak §3.5 PeerDB'den hafif.
+- **Eksi**: Her yazma path'i outbox INSERT eklemeli (kod değişikliği); async worker bakımı; at-least-once semantik (CH Kafka Engine `kafka_group_name` + replay-idempotent ID'ler ile dedup).
+- **Latency**: sub-saniye (app write → topic publish <100ms; Redpanda → CH consume <1s).
+
+**Yeni öneri**: §3.7 — **Plan 1-yeni** için tek ingestion yolu. §3.5 PeerDB `feat/clickhouse-analytics` commit'lerinde denendi, yukarıdaki TimescaleDB körlüğü yüzünden terk edildi.
+
+### 14.5 Plan dosyası durum değişikliği
+
+- `docs/superpowers/plans/2026-04-23-clickhouse-foundation-and-experiments.md` → **SUPERSEDED (2026-04-24)**. Commit history'deki Phase 0-3 implementation (infra + migration runner + exposure_events hypertable + publication) ya aynen kullanılır (Phase 0-3), ya revert edilir (Phase 4, Phase 3'ün hypertable kısmı). Karar Plan 1-yeni yazımında verilir.
+- Yeni plan: `docs/superpowers/plans/2026-04-24-kafka-analytics-foundation.md`. §14.2-§14.4 referansıyla mimariyi yürürlüğe koyar. Phase-by-phase yeniden tasarlanmış:
+  - Phase A: eski PeerDB/hypertable artifacts rollback (0010 publication DROP, 0009 exposure_events table DROP, PeerDB submodule delete, setup.sql delete)
+  - Phase B: Redpanda single-node in `docker-compose.yml` + Redpanda Console overlay
+  - Phase C: Postgres `outbox_events` tablosu (migration 0009-new) + Drizzle schema + repo
+  - Phase D: `apps/api/src/lib/kafka.ts` (kafkajs client) + `apps/api/src/services/event-bus.ts` (same-tx outbox writer) + `apps/api/src/workers/outbox-dispatcher.ts`
+  - Phase E: ClickHouse migrations — `0002_kafka_engine_exposures.sql` (Kafka Engine + MV + target), `0003_kafka_engine_revenue.sql`, `0003_kafka_engine_credit.sql`
+  - Phase F-onward: Alan 5 Plan B SSE + stats endpoint (CH-backed, okuma tarafı §13.2 ile aynı)
+
+### 14.6 Branch stratejisi
+
+Mevcut `feat/clickhouse-analytics` branch'inde devam:
+- Phase 0-3 commit'leri (f4695d7 → 2044272) temiz infra iş, korunur
+- Phase 4 yatırımı (2249741 publication, d6773a5 PeerDB setup.sql) honest history için kalır — rollback commit'leri bu commit'leri revert eder, hiçbir zaman squash edilmez. PR reader'ı "PeerDB denendi, TS-CDC çatışması yüzünden Kafka+outbox'a pivot edildi" hikayesini commit sırasından okur.
+- Yeni Plan 1 dosyası (`2026-04-24-kafka-analytics-foundation.md`) aynı branch'te oluşturulur.
+- Eski Plan 1 dosyası header'ına SUPERSEDED notu eklenir ama silinmez (history).
+
+### 14.7 Karar özeti
+
+| Konu | Değer |
+|---|---|
+| Ingestion | **§3.7 Outbox + Redpanda + CH Kafka Engine** (PeerDB reddedildi) |
+| Event bus | Redpanda single-node (Kafka-protocol, self-host-friendly) |
+| `exposure_events` Postgres tablosu | **Kaldırılır** — saf analytics event, OLTP'de yeri yok |
+| `revenue_events` / `credit_ledger` Postgres hypertable | **Kalır** — source of truth, outbox aynı tx'te yazılır |
+| TimescaleDB (§13.1 Opsiyon Y) | **Kalır** — compression + retention hâlâ load-bearing |
+| ClickHouse rolü | **Kalır** — OLAP read layer, raw_* tabloları Kafka Engine'den doldurulur |
+| Plan 1 dosyası | Eski SUPERSEDED, yeni `2026-04-24-kafka-analytics-foundation.md` |
+| Branch | `feat/clickhouse-analytics` devam, revert commit'leriyle honest history |
+
+---
+
+*Alan 6 + 2026-04-24 Kafka pivot addendum sonu.*
+
+---
+
 ## Son not — 6 alan birbirini nasıl tamamlıyor
 
 - **Alan 1 (Drizzle)** foundation — type-safe DB layer.
