@@ -836,25 +836,41 @@ SHOW timescaledb.license; -- should be "apache"
 
 ## 12. Sonraki adım
 
-Implementation plan: `docs/superpowers/plans/2026-04-XX-timescaledb.md`.
+Implementation plan: `docs/superpowers/plans/2026-04-23-timescaledb.md` (tamamlandı 2026-04-23, doğrudan `main`'e commit edildi).
 
-Faz sıralaması:
+Tamamlanan iş:
 
-1. **Faz 0** (yarım gün): Docker image değiştir, extension install, tuning config.
-2. **Faz 1** (1 gün): `webhook_events` hypertable migration (en düşük risk, en yüksek fayda).
-3. **Faz 2** (1-2 gün): `revenue_events` + `credit_ledger` hypertable.
-4. **Faz 3** (1-2 gün): Continuous aggregates (daily_mrr, trial_cohort, churn, experiment_variant).
-5. **Faz 4** (1 gün): Compression + retention policies.
-6. **Faz 5** (1 gün): Drizzle helper'lar, dashboard query'lerinin aggregate'lere bağlanması.
-7. **Faz 6** (ongoing): Monitoring dashboard + performans benchmark testleri.
+- TimescaleDB extension registration ✅ (Task 1.1, migration 0001)
+- `revenue_events` hypertable ✅ (Task 2.1 + 2.2, composite PK (id, eventDate), 1-day chunks)
+- `credit_ledger` hypertable ✅ (Task 3.1 + 3.2, composite PK (id, createdAt), 1-day chunks)
+- `outgoing_webhooks` hypertable ✅ (Task 4.1 + 4.2, composite PK (id, createdAt), 6-hour chunks)
+- `daily_mrr` continuous aggregate ✅ (Task 5.1, time_bucket 1 day, refresh policy 10min/7d/1h)
+- Compression policies ✅ (Task 6.1, segmentby=projectId on all three; 30d cutoff for revenue_events + credit_ledger, 7d for outgoing_webhooks)
+- Retention policy ✅ (Task 7.1, 90d on outgoing_webhooks only; finansal tablolar retention'sız, VUK 5-yıl+)
+- `db:verify:timescale` CLI ✅ (Task 8.1, assertion coverage: hypertables, cagg, compression_enabled, policy existence, scheduled=true)
+- TSL license kararı ✅ (deneysel olarak doğrulandı: cagg+compression+scheduler Apache altında çalışmıyor; TSL'in tek kısıtı "TimescaleDB'yi DBaaS olarak sunma" — rovenue DBaaS değil)
 
-Toplam: ~1 sprint (2 hafta).
+Out of scope (ayrı plan/spec):
 
-Açık sorular:
+- `webhook_events` hypertable — `UNIQUE(source, storeEventId)` idempotency key partition kolonunu içermiyor, redesign lazım.
+- `experiment_assignments` hypertable — `UNIQUE(experimentId, subscriberId)` sticky assignment guarantee aynı şekilde redesign ister.
+- `audit_logs` hypertable — `UNIQUE(rowHash)` hash-chain integrity için load-bearing, SOC 2 karar turu gerektiriyor.
+- Postgres tuning config (§8.3) — target VPS shape belli olunca.
+- Backup strategy (§8.4, pgBackRest + S3-compatible archive) — disk 50 GB'a yaklaşınca.
 
-1. **Hypertable convert sırasında downtime kabul edilebilir mi?** Staging'de önce dene; prod'da maintenance window'u koordine et.
-2. **Backup strategy:** pg_dump vs pgBackRest — rovenue'nun mevcut backup'ı var mı, yoksa bu migration sırasında setup edilsin mi?
-3. **PostGIS gerekiyor mu?** Data residency için geographic queries yapılıyorsa PostGIS + TimescaleDB birlikte çalışır ama extension çakışmalarına dikkat.
+Gerçekleşen: 8 migration + 3 schema commit + 1 license pivot + 1 verify CLI (2 commit) = 14 commit main'de. Workspace test sayıları: `@rovenue/db` 42→45, `@rovenue/api` 382 (değişmedi, ilgili kod cagg reader üstü hazır halde zaten in-tree'ydi), `@rovenue/dashboard` 5 (değişmedi).
+
+Açık sorular (log'lanmış follow-up'lar):
+
+- `daily_mrr` cagg `start_offset=7d` — Apple/Google late-arriving webhook backfill senaryosu (task #27).
+- Dashboard manual-retry (`resetWebhookForRetry`, `markWebhookDismissed`) 7 günlük compression cutoff'unun üstündeki DEAD webhook'ları decompress edebilir (task #21).
+- Policy migration'larında `if_not_exists => true` eksik (tasks #26).
+- `credit_ledger` "append-only by DB trigger" iddiası yanlış; trigger yok, sadece repo-level convention (task #19).
+- `gross_usd` typmod drift + nullability drift between MV and Drizzle binding (task #24).
+- `COUNT(DISTINCT)` caggs scale consideration (task #22).
+- Cagg backfill step in verify CLI (task #23).
+- Migration 0004 comment sayıları (task #20).
+- Plan doc compression_settings query column names (task #25).
 
 ---
 
