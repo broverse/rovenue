@@ -1,5 +1,7 @@
 import { createHmac } from "node:crypto";
 import { drizzle } from "@rovenue/db";
+import { eq } from "drizzle-orm";
+import { HTTPException } from "hono/http-exception";
 import { audit } from "../../lib/audit";
 import { logger } from "../../lib/logger";
 import { env } from "../../lib/env";
@@ -52,6 +54,32 @@ function deriveAnonymousId(subscriberId: string): string {
 export async function anonymizeSubscriber(
   input: AnonymizeSubscriberInput,
 ): Promise<{ anonymousId: string; deletedAt: Date }> {
+  // Verify the subscriber belongs to this project before doing any
+  // work. Route-level `assertProjectAccess` only checks that the
+  // caller is an ADMIN of the project in the URL — it doesn't tie the
+  // subscriberId to that project. Without this check an ADMIN of
+  // project A who knows a subscriberId from project B could anonymize
+  // (or export) that row. Return 404 instead of 403 so we don't leak
+  // the existence of the subscriber across tenants.
+  const [subscriberRow] = await drizzle.db
+    .select({
+      id: drizzle.schema.subscribers.id,
+      projectId: drizzle.schema.subscribers.projectId,
+    })
+    .from(drizzle.schema.subscribers)
+    .where(eq(drizzle.schema.subscribers.id, input.subscriberId));
+
+  if (!subscriberRow) {
+    throw new HTTPException(404, {
+      message: `Subscriber not found: ${input.subscriberId}`,
+    });
+  }
+  if (subscriberRow.projectId !== input.projectId) {
+    throw new HTTPException(404, {
+      message: `Subscriber not found: ${input.subscriberId}`,
+    });
+  }
+
   const anonymousId = deriveAnonymousId(input.subscriberId);
   const deletedAt = new Date();
 

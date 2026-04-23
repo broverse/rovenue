@@ -1,5 +1,6 @@
 import { drizzle } from "@rovenue/db";
 import { eq } from "drizzle-orm";
+import { HTTPException } from "hono/http-exception";
 import { audit } from "../../lib/audit";
 import { logger } from "../../lib/logger";
 
@@ -48,7 +49,17 @@ export async function exportSubscriber(
     .where(eq(subscribers.id, input.subscriberId));
 
   if (!subscriberRow) {
-    throw new Error(`Subscriber not found: ${input.subscriberId}`);
+    throw new HTTPException(404, {
+      message: `Subscriber not found: ${input.subscriberId}`,
+    });
+  }
+  if (subscriberRow.projectId !== input.projectId) {
+    // Treat cross-project lookups as 404 rather than 403 so we don't
+    // leak the existence of the subscriber to callers who have access
+    // to a different project.
+    throw new HTTPException(404, {
+      message: `Subscriber not found: ${input.subscriberId}`,
+    });
   }
 
   const [purchaseRows, accessRows, ledgerRows] = await Promise.all([

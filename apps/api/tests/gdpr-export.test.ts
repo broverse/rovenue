@@ -105,4 +105,33 @@ describe("exportSubscriber", () => {
       }),
     ).rejects.toThrow(/not found/i);
   });
+
+  test("throws when subscriber belongs to a different project", async () => {
+    // Override the first select to return a subscriber whose projectId
+    // does NOT match the requested project. The service must treat
+    // this as 404 (not 403) so it can't be used as an existence oracle
+    // across tenants.
+    drizzleMock.drizzle.db.select.mockReset();
+    drizzleMock.drizzle.db.select.mockImplementationOnce(() => ({
+      from: () => ({
+        where: () =>
+          Promise.resolve([
+            {
+              id: "sub_other",
+              projectId: "proj_different",
+              appUserId: "app_user",
+              attributes: {},
+              deletedAt: null,
+            },
+          ]),
+      }),
+    }));
+    await expect(
+      exportSubscriber({
+        subscriberId: "sub_other",
+        projectId: "proj_1",
+        actorUserId: "user_actor",
+      }),
+    ).rejects.toThrow(/not found/i);
+  });
 });

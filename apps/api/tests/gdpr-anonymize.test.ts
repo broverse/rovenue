@@ -10,9 +10,18 @@ const { drizzleMock, auditMock } = vi.hoisted(() => {
   };
   const drizzleMock = {
     db: {
+      select: vi.fn(() => ({
+        from: () => ({
+          where: () =>
+            Promise.resolve([{ id: "default", projectId: "proj_1" }]),
+        }),
+      })),
       transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
         cb({}),
       ),
+    },
+    schema: {
+      subscribers: { id: "id", projectId: "projectId" },
     },
     subscriberRepo: {
       anonymizeSubscriberRow: vi.fn(async () => undefined),
@@ -25,6 +34,7 @@ vi.mock("@rovenue/db", () => ({
   default: {},
   drizzle: drizzleMock,
 }));
+vi.mock("drizzle-orm", () => ({ eq: () => ({}) }));
 vi.mock("../src/lib/audit", () => auditMock);
 vi.mock("../src/lib/env", () => ({
   env: {
@@ -37,6 +47,12 @@ import { anonymizeSubscriber } from "../src/services/gdpr/anonymize-subscriber";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  drizzleMock.db.select.mockReturnValue({
+    from: () => ({
+      where: () =>
+        Promise.resolve([{ id: "default", projectId: "proj_1" }]),
+    }),
+  } as never);
   drizzleMock.db.transaction.mockImplementation(async (cb) => cb({}));
 });
 
@@ -118,5 +134,46 @@ describe("anonymizeSubscriber", () => {
       reason: "gdpr_request",
     });
     expect(result.deletedAt).toBeInstanceOf(Date);
+  });
+
+  test("throws when subscriber belongs to a different project", async () => {
+    drizzleMock.db.select.mockReturnValueOnce({
+      from: () => ({
+        where: () =>
+          Promise.resolve([
+            { id: "sub_other", projectId: "proj_other" },
+          ]),
+      }),
+    } as never);
+    await expect(
+      anonymizeSubscriber({
+        subscriberId: "sub_other",
+        projectId: "proj_1",
+        actorUserId: "user_actor",
+        reason: "gdpr_request",
+      }),
+    ).rejects.toThrow(/not found/i);
+    expect(
+      drizzleMock.subscriberRepo.anonymizeSubscriberRow,
+    ).not.toHaveBeenCalled();
+  });
+
+  test("throws when subscriber is missing entirely", async () => {
+    drizzleMock.db.select.mockReturnValueOnce({
+      from: () => ({
+        where: () => Promise.resolve([]),
+      }),
+    } as never);
+    await expect(
+      anonymizeSubscriber({
+        subscriberId: "sub_missing",
+        projectId: "proj_1",
+        actorUserId: "user_actor",
+        reason: "gdpr_request",
+      }),
+    ).rejects.toThrow(/not found/i);
+    expect(
+      drizzleMock.subscriberRepo.anonymizeSubscriberRow,
+    ).not.toHaveBeenCalled();
   });
 });
