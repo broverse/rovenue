@@ -45,7 +45,12 @@ export async function runOutboxDispatcher(): Promise<void> {
     await assertTopic(topic);
   }
 
-  logger.info("outbox-dispatcher: started");
+  // Log the broker URL we actually resolved so integration tests can
+  // prove the dispatcher is hitting the testcontainer and not the
+  // developer's dev-compose Redpanda.
+  logger.info("outbox-dispatcher: started", {
+    brokers: process.env.KAFKA_BROKERS ?? "<env>",
+  });
 
   while (!stopFlag) {
     try {
@@ -106,6 +111,11 @@ export async function runOutboxDispatcher(): Promise<void> {
         );
       }
     } catch (err) {
+      // TODO(plan-phase-G): per-topic isolation + exponential backoff.
+      // Today a single permanently-broken topic (or bad payload) causes
+      // the whole batch to re-fetch every 500ms forever. Switch to
+      // Promise.allSettled + per-topic failure tracking so healthy
+      // topics keep draining while the sick one backs off.
       logger.error("outbox-dispatcher: loop error, backing off", {
         err: err instanceof Error ? err.message : String(err),
       });
