@@ -1250,29 +1250,27 @@ Open `packages/db/src/drizzle/schema.ts`. After the `experimentAssignments` defi
 export const exposureEvents = pgTable(
   "exposure_events",
   {
-    id: text("id")
-      .primaryKey()
-      .$defaultFn(() => createId()),
-    experimentId: text("experiment_id").notNull(),
-    variantId: text("variant_id").notNull(),
-    projectId: text("project_id").notNull(),
-    subscriberId: text("subscriber_id").notNull(),
+    // `.primaryKey()` removed — hypertable partition column must be
+    // in every UNIQUE/PK constraint (see migration 0009 below).
+    id: text("id").notNull().$defaultFn(() => createId()),
+    experimentId: text("experimentId").notNull(),
+    variantId: text("variantId").notNull(),
+    projectId: text("projectId").notNull(),
+    subscriberId: text("subscriberId").notNull(),
     platform: text("platform"),
     country: text("country"),
-    exposedAt: timestamp("exposed_at", { withTimezone: true })
+    exposedAt: timestamp("exposedAt", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (t) => ({
-    // Composite PK is required once this becomes a TimescaleDB
-    // hypertable in migration 0009; the partition column (exposedAt)
-    // must appear in every UNIQUE or PRIMARY KEY constraint.
+    // (id, exposedAt) composite PK — exposedAt is the partition column.
     pk: primaryKey({ columns: [t.id, t.exposedAt] }),
-    experimentIdx: index("exposure_events_experiment_idx").on(
+    experimentIdx: index("exposure_events_experimentId_exposedAt_idx").on(
       t.experimentId,
       t.exposedAt,
     ),
-    projectIdx: index("exposure_events_project_idx").on(
+    projectIdx: index("exposure_events_projectId_exposedAt_idx").on(
       t.projectId,
       t.exposedAt,
     ),
@@ -1283,28 +1281,29 @@ export type ExposureEvent = typeof exposureEvents.$inferSelect;
 export type NewExposureEvent = typeof exposureEvents.$inferInsert;
 ```
 
-Also ensure `primaryKey` and `index` are imported from `drizzle-orm/pg-core` at the top of the file if they aren't already.
+**Column naming is camelCase on-disk** (`text("experimentId")`, not `text("experiment_id")`) per the rovenue convention established in every other hypertable (revenueEvents, creditLedger, experimentAssignments). Keeping camelCase is load-bearing for PeerDB's default Postgres↔ClickHouse column mapping — source and target must match verbatim or the mirror needs explicit rename plumbing which PeerDB's `CREATE MIRROR` SQL doesn't support in its simple form.
+
+`primaryKey` and `index` are already imported from `drizzle-orm/pg-core` at the top of `schema.ts`.
 
 - [ ] **Step 2: Extend the foundation test**
 
 Open `packages/db/src/drizzle/drizzle-foundation.test.ts`. After the `experimentAssignments` assertions, append:
 
 ```typescript
-  it("exposureEvents has a composite (id, exposedAt) primary key", () => {
-    const config = exposureEvents[Symbol.for("drizzle:PgInlineForeignKeys")];
-    const pkSymbol = Symbol.for("drizzle:ExtraConfigBuilder");
-    // Delegate to the public schema API when available; fall back to
-    // invariants we can reach: column existence.
-    expect(exposureEvents.id).toBeDefined();
-    expect(exposureEvents.exposedAt).toBeDefined();
-    expect(exposureEvents.experimentId).toBeDefined();
-    expect(exposureEvents.variantId).toBeDefined();
-    expect(exposureEvents.projectId).toBeDefined();
-    expect(exposureEvents.subscriberId).toBeDefined();
+  it("exposureEvents uses a composite (id, exposedAt) primary key for hypertable partitioning", () => {
+    const idColumn = exposureEvents.id as unknown as { primary: boolean };
+    expect(idColumn.primary).toBe(false);
+    expect(exposureEvents.exposedAt.name).toBe("exposedAt");
+    // Pin camelCase names across the board; PeerDB's default column
+    // mapping relies on source ↔ target names matching verbatim.
+    expect(exposureEvents.experimentId.name).toBe("experimentId");
+    expect(exposureEvents.variantId.name).toBe("variantId");
+    expect(exposureEvents.projectId.name).toBe("projectId");
+    expect(exposureEvents.subscriberId.name).toBe("subscriberId");
   });
 ```
 
-(Drizzle's PK introspection API is fragile across versions; asserting column existence is the pragmatic floor. The hypertable assertion in Phase 9's verify-clickhouse-sibling `db:verify:timescale` is authoritative for the PK shape.)
+Also add `exposureEvents` to the schema import at the top of the test file and to the `schema shapes compile` loop. Pattern matches the existing composite-PK assertions for revenueEvents, creditLedger, outgoingWebhooks.
 
 - [ ] **Step 3: Run the schema tests**
 
@@ -1331,50 +1330,59 @@ git commit -m "feat(db): define exposure_events drizzle schema"
 - [ ] **Step 1: Author the SQL**
 
 ```sql
--- 0009_exposure_events.sql
--- exposure_events: time-series hypertable with high insert rate.
--- Chunk interval 1 hour (vs. 1 day for revenue_events) because
--- insert throughput per project is ~100× higher — every variant
--- impression is a row.
+-- exposure_events: one row per variant impression. Every call to
+-- getVariant() on a live experiment writes here. Higher insert rate
+-- than revenue_events (~10-100x per project), so we partition on
+-- 1-hour chunks instead of 1-day and keep only 90 days in Postgres
+-- — ClickHouse mv_experiment_daily (Phase 4.5) owns the long-term
+-- aggregates.
 --
--- Compression after 7 days, retention 90 days. Long-term analytics
--- reads from ClickHouse mv_experiment_daily aggregates, so raw
--- Postgres retention doesn't need to span years.
-CREATE TABLE exposure_events (
-  id TEXT NOT NULL DEFAULT gen_random_uuid()::text,
-  experiment_id TEXT NOT NULL,
-  variant_id TEXT NOT NULL,
-  project_id TEXT NOT NULL,
-  subscriber_id TEXT NOT NULL,
-  platform TEXT,
-  country TEXT,
-  exposed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  PRIMARY KEY (id, exposed_at)
+-- Column names are double-quoted camelCase so they survive PG's
+-- default identifier lowercasing and match the rovenue on-disk
+-- convention (revenueEvents, creditLedger etc).
+--
+-- drizzle-orm's migrator wraps each .sql in a transaction — no
+-- BEGIN/COMMIT here.
+
+CREATE TABLE "exposure_events" (
+  "id" TEXT NOT NULL,
+  "experimentId" TEXT NOT NULL,
+  "variantId" TEXT NOT NULL,
+  "projectId" TEXT NOT NULL,
+  "subscriberId" TEXT NOT NULL,
+  "platform" TEXT,
+  "country" TEXT,
+  "exposedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT "exposure_events_pkey" PRIMARY KEY ("id", "exposedAt")
 );
 
-CREATE INDEX exposure_events_experiment_idx
-  ON exposure_events (experiment_id, exposed_at DESC);
-CREATE INDEX exposure_events_project_idx
-  ON exposure_events (project_id, exposed_at DESC);
+CREATE INDEX "exposure_events_experimentId_exposedAt_idx"
+  ON "exposure_events" ("experimentId", "exposedAt" DESC);
+CREATE INDEX "exposure_events_projectId_exposedAt_idx"
+  ON "exposure_events" ("projectId", "exposedAt" DESC);
 
--- Convert to hypertable. `migrate_data => true` is safe; table is empty.
+-- Convert to a hypertable. Matches the pattern in 0002/0003/0004.
 SELECT create_hypertable(
-  'exposure_events',
-  'exposed_at',
-  chunk_time_interval => INTERVAL '1 hour',
-  migrate_data => TRUE
+  '"exposure_events"',
+  by_range('exposedAt', INTERVAL '1 hour'),
+  migrate_data => true,
+  if_not_exists => true
 );
 
--- Compression: group same-experiment rows together for columnar reuse.
-ALTER TABLE exposure_events SET (
+-- Compression: segment by experiment so same-experiment rows share
+-- columnar encoding. Segmenting by projectId instead would collapse
+-- all experiments of a given project — the experiment_id dimension
+-- is the hot filter (stats endpoints group by variant within a
+-- single experiment).
+ALTER TABLE "exposure_events" SET (
   timescaledb.compress,
-  timescaledb.compress_segmentby = 'experiment_id',
-  timescaledb.compress_orderby = 'exposed_at DESC'
+  timescaledb.compress_segmentby = '"experimentId"',
+  timescaledb.compress_orderby = '"exposedAt" DESC'
 );
 SELECT add_compression_policy('exposure_events', INTERVAL '7 days');
 
--- Retention: drop chunks older than 90 days. Plan 2's MVs preserve
--- long-term aggregates.
+-- Retention: drop chunks older than 90 days. Plan 1 Phase 4.5
+-- mv_experiment_daily owns long-term aggregates.
 SELECT add_retention_policy('exposure_events', INTERVAL '90 days');
 ```
 
@@ -1435,7 +1443,7 @@ git commit -m "feat(db): exposure_events hypertable + compression + retention"
 
 ```typescript
 import { and, eq, gte, sql } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import type { Db } from "../client";
 import {
   exposureEvents,
   type ExposureEvent,
@@ -1443,11 +1451,11 @@ import {
 } from "../schema";
 
 export async function insertMany(
-  db: NodePgDatabase,
+  db: Db,
   rows: NewExposureEvent[],
 ): Promise<void> {
   if (rows.length === 0) return;
-  // Chunked insert to stay under the 65k parameter limit.
+  // Chunked insert to stay under Postgres' 65k parameter limit.
   const CHUNK = 500;
   for (let i = 0; i < rows.length; i += CHUNK) {
     await db.insert(exposureEvents).values(rows.slice(i, i + CHUNK));
@@ -1455,7 +1463,7 @@ export async function insertMany(
 }
 
 export async function countSince(
-  db: NodePgDatabase,
+  db: Db,
   projectId: string,
   since: Date,
 ): Promise<number> {
@@ -1474,17 +1482,17 @@ export async function countSince(
 export type { ExposureEvent, NewExposureEvent };
 ```
 
+(`Db` is the rovenue-local Drizzle client type exported by `packages/db/src/drizzle/client.ts` — all repositories in the package take it as their first argument; do NOT pull in `NodePgDatabase` directly, it breaks the shared client pool.)
+
 - [ ] **Step 2: Wire the barrel**
 
-Open `packages/db/src/drizzle/repositories/index.ts`. Add:
+There is no `repositories/index.ts` in this package — every repository is re-exported as a namespace directly from `packages/db/src/drizzle/index.ts`. Add the new repo alongside the others:
 
 ```typescript
-import * as exposureEvents from "./exposure-events";
-// ...inside the default export / namespace object:
-export const exposureRepo = exposureEvents;
+export * as exposureEventRepo from "./repositories/exposure-events";
 ```
 
-Follow the existing export pattern in the file — don't invent a new one.
+Match the existing export pattern (`* as <name>Repo`). Callers reach it via `drizzle.exposureEventRepo.insertMany(...)`.
 
 - [ ] **Step 3: Commit**
 
