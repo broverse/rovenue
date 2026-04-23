@@ -16,6 +16,14 @@ import { ok } from "../../lib/response";
 const DEAD_ALERT_THRESHOLD = 5;
 const DEAD_ALERT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+// Matches the compression policy in migration 0006_compression_policies.sql
+// (outgoing_webhooks rows older than this are compressed). Operators
+// cannot retry/dismiss older rows because UPDATEs on compressed chunks
+// force a decompress and permanently bloat disk until the next
+// compression policy pass. If the policy's INTERVAL changes, update
+// this value + the rejection message below in lockstep.
+const OUTGOING_WEBHOOK_COMPRESSION_CUTOFF_MS = 7 * 24 * 60 * 60 * 1000;
+
 export const webhooksDashboardRoute = new Hono()
   .use("*", requireDashboardAuth)
   // ----- GET /dashboard/webhooks/failed?projectId= -----
@@ -75,6 +83,14 @@ export const webhooksDashboardRoute = new Hono()
     });
   }
 
+  const ageMs = Date.now() - existing.createdAt.getTime();
+  if (ageMs > OUTGOING_WEBHOOK_COMPRESSION_CUTOFF_MS) {
+    const ageDays = Math.floor(ageMs / (24 * 60 * 60 * 1000));
+    throw new HTTPException(410, {
+      message: `Cannot retry webhook older than 7 days (age: ${ageDays} days). Row is in a compressed TimescaleDB chunk.`,
+    });
+  }
+
   const webhook = await drizzle.outgoingWebhookRepo.resetWebhookForRetry(
     drizzle.db,
     id,
@@ -103,6 +119,14 @@ export const webhooksDashboardRoute = new Hono()
   if (existing.status !== OutgoingWebhookStatus.DEAD) {
     throw new HTTPException(400, {
       message: `Can only dismiss DEAD webhooks (current: ${existing.status})`,
+    });
+  }
+
+  const ageMs = Date.now() - existing.createdAt.getTime();
+  if (ageMs > OUTGOING_WEBHOOK_COMPRESSION_CUTOFF_MS) {
+    const ageDays = Math.floor(ageMs / (24 * 60 * 60 * 1000));
+    throw new HTTPException(410, {
+      message: `Cannot dismiss webhook older than 7 days (age: ${ageDays} days). Row is in a compressed TimescaleDB chunk.`,
     });
   }
 
