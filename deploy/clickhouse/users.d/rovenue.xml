@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<!--
+  Two users: `rovenue` owns the schema and is used by the migration
+  runner + PeerDB target; `rovenue_reader` is read-only and is what
+  the API's analytics-router uses for dashboard queries. The default
+  user is disabled so nothing runs without explicit credentials.
+
+  readonly must be expressed as a profile setting, not a per-user
+  field — the per-user <readonly> tag is silently ignored. We define
+  a `readonly_analytics` profile with readonly=2 (SELECT + SHOW only,
+  settings changes blocked from the client side but allowed from
+  profile) and apply it to rovenue_reader.
+-->
+<clickhouse>
+  <profiles>
+    <readonly_analytics>
+      <readonly>2</readonly>
+    </readonly_analytics>
+  </profiles>
+  <users>
+    <default remove="remove"/>
+    <rovenue>
+      <password_sha256_hex from_env="CLICKHOUSE_PASSWORD_SHA256"/>
+      <networks><ip>::/0</ip></networks>
+      <profile>default</profile>
+      <quota>default</quota>
+      <access_management>0</access_management>
+      <named_collection_control>0</named_collection_control>
+      <databases>
+        <rovenue/>
+      </databases>
+    </rovenue>
+    <rovenue_reader>
+      <password_sha256_hex from_env="CLICKHOUSE_READER_PASSWORD_SHA256"/>
+      <networks><ip>::/0</ip></networks>
+      <profile>readonly_analytics</profile>
+      <quota>default</quota>
+      <databases>
+        <rovenue/>
+      </databases>
+    </rovenue_reader>
+  </users>
+</clickhouse>

@@ -9,6 +9,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
       REDIS_URL: redis://redis:6379
       PORT: 3000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: rovenue_reader
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
     ports:
       - "3000:3000"
     depends_on:
@@ -16,6 +19,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      clickhouse:
+        condition: service_healthy
     restart: unless-stopped
 
   db:
@@ -64,5 +69,43 @@ services:
       retries: 10
     restart: unless-stopped
 
+  clickhouse:
+    # Pinned to 24.3 LTS — the oldest series that carries
+    # `windowFunnel`, projections, and the @clickhouse/client 1.x wire
+    # protocol we depend on. Upgrading to 24.x+ is safe within the
+    # 24-series but should trigger a verify-clickhouse run.
+    image: clickhouse/clickhouse-server:24.3-alpine
+    environment:
+      # CLICKHOUSE_DB creates the rovenue database on first boot. We
+      # intentionally do NOT set CLICKHOUSE_USER/CLICKHOUSE_PASSWORD —
+      # the image's entrypoint would generate a second user definition
+      # that conflicts with users.d/rovenue.xml ("more than one
+      # 'password' field for user rovenue"). Authoritative user config
+      # lives in users.d; env vars only feed the hex password via
+      # from_env in the XML.
+      CLICKHOUSE_DB: rovenue
+      CLICKHOUSE_PASSWORD_SHA256: ${CLICKHOUSE_PASSWORD_SHA256:-460592d4be24af16128f6ee18ca9bef3527fec9d74281c13a860572d09e975c2}
+      CLICKHOUSE_READER_PASSWORD_SHA256: ${CLICKHOUSE_READER_PASSWORD_SHA256:-460592d4be24af16128f6ee18ca9bef3527fec9d74281c13a860572d09e975c2}
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - rovenue-clickhouse-data:/var/lib/clickhouse
+      - ./deploy/clickhouse/config.d:/etc/clickhouse-server/config.d:ro
+      - ./deploy/clickhouse/users.d:/etc/clickhouse-server/users.d:ro
+    ports:
+      # Host 8124 → container 8123 (HTTP) to avoid colliding with any
+      # other CH on 8123. 9001 → 9000 (native TCP) for `clickhouse-client`.
+      - "8124:8123"
+      - "9001:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
 volumes:
   rovenue-data:
+  rovenue-clickhouse-data:
