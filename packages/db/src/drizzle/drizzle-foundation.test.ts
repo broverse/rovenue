@@ -1,5 +1,5 @@
 import { eq, sql } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, test } from "vitest";
 import {
   apiKeys,
   audiences,
@@ -348,5 +348,19 @@ describe("dailyMrr view", () => {
     expect(dailyMrr.grossUsd.name).toBe("gross_usd");
     expect(dailyMrr.eventCount.name).toBe("event_count");
     expect(dailyMrr.activeSubscribers.name).toBe("active_subscribers");
+  });
+});
+
+describe("experimentAssignments schema", () => {
+  test("experimentAssignments has hashVersion column with default 1", () => {
+    const col = experimentAssignments.hashVersion;
+    expect(col).toBeDefined();
+    // Pin the Postgres column name — snake_case in SQL, camelCase in TS.
+    expect(col.name).toBe("hashVersion");
+    // smallint is the narrowest sensible width; default 1 means every
+    // row written today reflects the SHA-256 algorithm chosen in
+    // spec §13.4.
+    expect((col as unknown as { notNull?: boolean }).notNull).toBe(true);
+    expect((col as unknown as { hasDefault?: boolean }).hasDefault).toBe(true);
   });
 });

@@ -247,6 +247,7 @@ export async function evaluateExperiments(
         experimentId: exp.id,
         subscriberId,
         variantId: variant.id,
+        hashVersion: 1,
       });
       if (exp.mutualExclusionGroup) {
         namespacesClaimed.add(exp.mutualExclusionGroup);
