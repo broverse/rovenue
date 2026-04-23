@@ -36,6 +36,13 @@
       "when": 1776952380764,
       "tag": "0004_hypertable_outgoing_webhooks",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776954938603,
+      "tag": "0005_cagg_daily_mrr",
+      "breakpoints": true
     }
   ]
 }
