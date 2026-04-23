@@ -85,6 +85,13 @@
       "when": 1777507200000,
       "tag": "0011_drop_publication",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1777510800000,
+      "tag": "0012_drop_exposure_events",
+      "breakpoints": true
     }
   ]
 }
