@@ -12,10 +12,11 @@
 
 export * from "./types";
 
-// bucketing is added to this barrel in Group 3 (Task 2.2) once
-// bucketing.ts lands in this directory. Re-exporting it before the
-// file exists would break module resolution for every consumer of
-// `@rovenue/shared`.
+export {
+  assignBucket,
+  isInRollout,
+  selectVariant,
+} from "./bucketing";
 
 export {
   matchesAudience,

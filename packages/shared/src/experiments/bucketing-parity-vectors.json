@@ -1,0 +1,162 @@
+[
+  {
+    "subscriberId": "sub_1",
+    "seed": "paywall-summer",
+    "bucket": 641
+  },
+  {
+    "subscriberId": "sub_2",
+    "seed": "paywall-summer",
+    "bucket": 381
+  },
+  {
+    "subscriberId": "sub_3",
+    "seed": "paywall-summer",
+    "bucket": 677
+  },
+  {
+    "subscriberId": "sub_4",
+    "seed": "trial-length-v2",
+    "bucket": 7065
+  },
+  {
+    "subscriberId": "sub_5",
+    "seed": "trial-length-v2",
+    "bucket": 226
+  },
+  {
+    "subscriberId": "anon_01234567-89ab-cdef-0123-456789abcdef",
+    "seed": "onboarding-flow",
+    "bucket": 7443
+  },
+  {
+    "subscriberId": "anon_fedcba98-7654-3210-fedc-ba9876543210",
+    "seed": "onboarding-flow",
+    "bucket": 4587
+  },
+  {
+    "subscriberId": "user_short",
+    "seed": "a",
+    "bucket": 7260
+  },
+  {
+    "subscriberId": "user_short",
+    "seed": "b",
+    "bucket": 2986
+  },
+  {
+    "subscriberId": "user_short",
+    "seed": "c",
+    "bucket": 9924
+  },
+  {
+    "subscriberId": "user_with_email_like_id@example.com",
+    "seed": "paywall-summer",
+    "bucket": 247
+  },
+  {
+    "subscriberId": "🔥🚀",
+    "seed": "emoji-bucket",
+    "bucket": 4593
+  },
+  {
+    "subscriberId": "用户_中文",
+    "seed": "i18n-bucket",
+    "bucket": 2606
+  },
+  {
+    "subscriberId": "x",
+    "seed": "single-char-id",
+    "bucket": 4725
+  },
+  {
+    "subscriberId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "seed": "long-id",
+    "bucket": 5206
+  },
+  {
+    "subscriberId": "same_sub",
+    "seed": "seed_1",
+    "bucket": 7340
+  },
+  {
+    "subscriberId": "same_sub",
+    "seed": "seed_2",
+    "bucket": 8847
+  },
+  {
+    "subscriberId": "same_sub",
+    "seed": "seed_3",
+    "bucket": 3556
+  },
+  {
+    "subscriberId": "same_sub",
+    "seed": "seed_4",
+    "bucket": 5980
+  },
+  {
+    "subscriberId": "same_sub",
+    "seed": "seed_5",
+    "bucket": 4937
+  },
+  {
+    "subscriberId": "rollout_test_a",
+    "seed": "flag-rollout-50",
+    "bucket": 6794
+  },
+  {
+    "subscriberId": "rollout_test_b",
+    "seed": "flag-rollout-50",
+    "bucket": 4382
+  },
+  {
+    "subscriberId": "rollout_test_c",
+    "seed": "flag-rollout-50",
+    "bucket": 7239
+  },
+  {
+    "subscriberId": "rollout_test_d",
+    "seed": "flag-rollout-50",
+    "bucket": 2237
+  },
+  {
+    "subscriberId": "rollout_test_e",
+    "seed": "flag-rollout-50",
+    "bucket": 4056
+  },
+  {
+    "subscriberId": "rollout_test_f",
+    "seed": "flag-rollout-50",
+    "bucket": 1653
+  },
+  {
+    "subscriberId": "rollout_test_g",
+    "seed": "flag-rollout-50",
+    "bucket": 75
+  },
+  {
+    "subscriberId": "rollout_test_h",
+    "seed": "flag-rollout-50",
+    "bucket": 1981
+  },
+  {
+    "subscriberId": "rollout_test_i",
+    "seed": "flag-rollout-50",
+    "bucket": 6072
+  },
+  {
+    "subscriberId": "rollout_test_j",
+    "seed": "flag-rollout-50",
+    "bucket": 6621
+  },
+  {
+    "subscriberId": "",
+    "seed": "empty-subscriber-id",
+    "bucket": 3658
+  },
+  {
+    "subscriberId": "no-seed",
+    "seed": "",
+    "bucket": 1005
+  }
+]
