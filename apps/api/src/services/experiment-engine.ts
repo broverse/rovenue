@@ -121,6 +121,19 @@ async function loadBundleFromDb(projectId: string): Promise<ExperimentBundle> {
   };
 }
 
+/**
+ * Public alias used by the SSE config-stream route. Returns the
+ * current experiment bundle for a project, hitting Redis first
+ * and falling back to Postgres. Kept as a wrapper (not a rename)
+ * so the existing `loadBundle` callsites in this file stay
+ * internal and symmetric with the cache discipline.
+ */
+export async function loadBundleFromCache(
+  projectId: string,
+): Promise<ExperimentBundle> {
+  return loadBundle(projectId);
+}
+
 async function loadBundle(projectId: string): Promise<ExperimentBundle> {
   const key = cacheKey(projectId);
 
