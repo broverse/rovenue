@@ -50,6 +50,13 @@
       "when": 1776955535301,
       "tag": "0006_compression_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776955883796,
+      "tag": "0007_retention_policies",
+      "breakpoints": true
     }
   ]
 }
