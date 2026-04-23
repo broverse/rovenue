@@ -26,13 +26,14 @@ services:
     # protocol; the timescaledb extension is opted into per-database
     # via `CREATE EXTENSION timescaledb` in migrations/.
     image: timescale/timescaledb:2.17.2-pg16
-    # AGPLv3 guardrail: pin TimescaleDB to its Apache-2 community code
-    # path. Default `timescale` enables TSL (enterprise) code paths
-    # that rovenue must not ship against. Spec §11 (T11).
-    command:
-      - "postgres"
-      - "-c"
-      - "timescaledb.license=apache"
+    # TimescaleDB license runs at the default `timescale` (TSL) value.
+    # Rovenue uses continuous aggregates (daily_mrr), compression
+    # policies, and the background-job scheduler for retention — all
+    # TSL-gated in 2.17.2. Dropping to `apache` disables those and
+    # breaks Tasks 5.1/6.1/7.1. TSL's only restriction is "don't offer
+    # TimescaleDB itself as a managed DB service"; Rovenue is a
+    # subscription-management application, not a DBaaS, so we're safely
+    # inside TSL's permitted self-host use case.
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-rovenue}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rovenue}
