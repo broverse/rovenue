@@ -1,3 +1,11 @@
+// NOT parallel-safe: binds host port 19093. If a developer's dev compose
+// holds 19092/19093 or parallel Vitest shards run, this test will
+// EADDRINUSE. Single shard + no local redpanda on 19093 is a hard
+// requirement. Dynamic port mapping conflicts with Redpanda's
+// --advertise-kafka-addr which must be set at container start — see the
+// dual-listener dance below. Phase G may swap for a simpler single
+// listener + getMappedPort() once we're willing to restart the container
+// after discovering the port.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { Kafka } from "kafkajs";
@@ -7,6 +15,7 @@ import {
   runOutboxDispatcher,
   stopOutboxDispatcher,
 } from "../src/workers/outbox-dispatcher";
+import { getResolvedBrokers } from "../src/lib/kafka";
 
 let redpanda: StartedTestContainer;
 let brokerUrl: string;
@@ -52,6 +61,12 @@ afterAll(async () => {
 
 describe("outbox-dispatcher integration", () => {
   it("publishes an EXPOSURE row to rovenue.exposures", async () => {
+    // 0. Prove the dispatcher-under-test will connect to our
+    //    testcontainer broker, not a stale value from `.env`. If the
+    //    late-binding in lib/kafka.ts regresses, this fails fast rather
+    //    than silently testing the developer's dev-compose Redpanda.
+    expect(getResolvedBrokers()).toBe(brokerUrl);
+
     // 1. Insert a row via the repo.
     const db = getDb();
     // Drain any stale unpublished test rows left from previous runs
