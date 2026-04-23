@@ -736,48 +736,6 @@ export const experimentAssignments = pgTable(
 );
 
 // =============================================================
-// exposure_events (time-series, hypertable in migration 0009)
-// =============================================================
-//
-// Every variant impression is one row. TimescaleDB hypertable with
-// 1-hour chunks (vs. 1-day on revenue_events) because per-project
-// insert rate is much higher. PeerDB replicates into ClickHouse
-// raw_exposures for long-term analytics; Postgres keeps 90 days.
-
-export const exposureEvents = pgTable(
-  "exposure_events",
-  {
-    // `.primaryKey()` removed — hypertable partition column must be
-    // in every UNIQUE/PK constraint.
-    id: text("id").notNull().$defaultFn(() => createId()),
-    experimentId: text("experimentId").notNull(),
-    variantId: text("variantId").notNull(),
-    projectId: text("projectId").notNull(),
-    subscriberId: text("subscriberId").notNull(),
-    platform: text("platform"),
-    country: text("country"),
-    exposedAt: timestamp("exposedAt", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (t) => ({
-    // (id, exposedAt) PK — exposedAt is the partition column.
-    pk: primaryKey({ columns: [t.id, t.exposedAt] }),
-    experimentIdx: index("exposure_events_experimentId_exposedAt_idx").on(
-      t.experimentId,
-      t.exposedAt,
-    ),
-    projectIdx: index("exposure_events_projectId_exposedAt_idx").on(
-      t.projectId,
-      t.exposedAt,
-    ),
-  }),
-);
-
-export type ExposureEvent = typeof exposureEvents.$inferSelect;
-export type NewExposureEvent = typeof exposureEvents.$inferInsert;
-
-// =============================================================
 // feature_flags (standalone, rule-ordered)
 // =============================================================
 

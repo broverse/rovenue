@@ -7,7 +7,6 @@ import {
   creditLedger,
   experimentAssignments,
   experiments,
-  exposureEvents,
   featureFlags,
   outgoingWebhooks,
   productGroups,
@@ -63,7 +62,6 @@ describe("schema shapes compile", () => {
       audiences,
       experiments,
       experimentAssignments,
-      exposureEvents,
       featureFlags,
       auditLogs,
     ]) {
@@ -106,17 +104,6 @@ describe("schema shapes compile", () => {
     expect(outgoingWebhooks.createdAt.name).toBe("createdAt");
   });
 
-  it("exposureEvents uses a composite (id, exposedAt) primary key for hypertable partitioning", () => {
-    const idColumn = exposureEvents.id as unknown as { primary: boolean };
-    expect(idColumn.primary).toBe(false);
-    expect(exposureEvents.exposedAt.name).toBe("exposedAt");
-    // Pin camelCase names across the board; PeerDB's default column
-    // mapping relies on source ↔ target names matching verbatim.
-    expect(exposureEvents.experimentId.name).toBe("experimentId");
-    expect(exposureEvents.variantId.name).toBe("variantId");
-    expect(exposureEvents.projectId.name).toBe("projectId");
-    expect(exposureEvents.subscriberId.name).toBe("subscriberId");
-  });
 });
 
 describe("inferred types", () => {
