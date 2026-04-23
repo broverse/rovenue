@@ -91,6 +91,12 @@ describe("schema shapes compile", () => {
     expect(idColumn.primary).toBe(false);
     expect(revenueEvents.eventDate.name).toBe("eventDate");
   });
+
+  it("creditLedger uses a composite (id, createdAt) primary key for hypertable partitioning", () => {
+    const idColumn = creditLedger.id as unknown as { primary: boolean };
+    expect(idColumn.primary).toBe(false);
+    expect(creditLedger.createdAt.name).toBe("createdAt");
+  });
 });
 
 describe("inferred types", () => {

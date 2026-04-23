@@ -210,7 +210,9 @@ export const subscribers = pgTable(
 export const creditLedger = pgTable(
   "credit_ledger",
   {
-    id: text("id").primaryKey().$defaultFn(() => createId()),
+    // `.primaryKey()` removed — hypertable partition column must be in
+    // the PK. The table-level primaryKey below declares (id, createdAt).
+    id: text("id").notNull().$defaultFn(() => createId()),
     projectId: text("projectId")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
@@ -233,6 +235,8 @@ export const creditLedger = pgTable(
       .defaultNow(),
   },
   (t) => ({
+    // (id, createdAt) PK — createdAt is the partition column.
+    pk: primaryKey({ columns: [t.id, t.createdAt] }),
     subscriberIdCreatedAtIdx: index(
       "credit_ledger_subscriberId_createdAt_idx",
     ).on(t.subscriberId, t.createdAt),
