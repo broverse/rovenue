@@ -63,7 +63,7 @@ export async function clickhouseListDailyMrr(
     FROM rovenue.mv_mrr_daily_target FINAL
     WHERE projectId = {projectId:String}
       AND day >= {from:Date}
-      AND day <  {to:Date}
+      AND day <= {to:Date}
     GROUP BY projectId, day, gross_usd, event_count
     ORDER BY day ASC
   `;
@@ -74,7 +74,10 @@ export async function clickhouseListDailyMrr(
   });
 
   return rows.map((r) => ({
-    bucket: new Date(r.bucket),
+    // CH serializes DateTime as 'YYYY-MM-DD HH:mm:ss' with no timezone suffix;
+    // V8 would parse this as local time. Force UTC so .toISOString() matches
+    // the Timescale path's Drizzle-typed Date.
+    bucket: new Date(r.bucket.replace(' ', 'T') + 'Z'),
     grossUsd: r.gross_usd,
     eventCount: Number(r.event_count),
     activeSubscribers: Number(r.active_subscribers),

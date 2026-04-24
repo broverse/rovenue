@@ -816,7 +816,7 @@ SELECT
 FROM rovenue.mv_mrr_daily_target FINAL
 WHERE projectId = {projectId:String}
   AND day >= {from:Date}
-  AND day <  {to:Date}
+  AND day <= {to:Date}
 GROUP BY projectId, day, gross_usd, event_count
 ORDER BY day ASC
 ```
