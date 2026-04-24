@@ -170,6 +170,14 @@ describe("createRevenueEvent", () => {
 
     const nonExistentPurchaseId = "nonexistent-purchase-id-that-does-not-exist";
 
+    // Snapshot counts BEFORE the failing call.
+    const revenueCountBefore = await db
+      .select({ count: sql<string>`count(*)` })
+      .from(schema.revenueEvents);
+    const outboxCountBefore = await db
+      .select({ count: sql<string>`count(*)` })
+      .from(schema.outboxEvents);
+
     await expect(
       createRevenueEvent(db, {
         projectId: project.id,
@@ -185,23 +193,15 @@ describe("createRevenueEvent", () => {
       }),
     ).rejects.toThrow();
 
-    // Revenue row must NOT exist.
-    const revenueCount = await db
+    // Neither revenue_events nor outbox_events should have grown.
+    const revenueCountAfter = await db
       .select({ count: sql<string>`count(*)` })
-      .from(schema.revenueEvents)
-      .where(eq(schema.revenueEvents.purchaseId, nonExistentPurchaseId));
-    expect(Number(revenueCount[0]!.count)).toBe(0);
+      .from(schema.revenueEvents);
+    const outboxCountAfter = await db
+      .select({ count: sql<string>`count(*)` })
+      .from(schema.outboxEvents);
 
-    // Outbox row must NOT exist.
-    const outboxCount = await db
-      .select({ count: sql<string>`count(*)` })
-      .from(schema.outboxEvents)
-      .where(
-        and(
-          eq(schema.outboxEvents.aggregateType, "REVENUE_EVENT"),
-          eq(schema.outboxEvents.aggregateId, nonExistentPurchaseId),
-        ),
-      );
-    expect(Number(outboxCount[0]!.count)).toBe(0);
+    expect(revenueCountAfter[0]!.count).toBe(revenueCountBefore[0]!.count);
+    expect(outboxCountAfter[0]!.count).toBe(outboxCountBefore[0]!.count);
   });
 });

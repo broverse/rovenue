@@ -118,6 +118,14 @@ describe("insertCreditLedger", () => {
 
     const nonExistentSubscriberId = "nonexistent-subscriber-id-that-does-not-exist";
 
+    // Snapshot counts BEFORE the failing call.
+    const ledgerCountBefore = await db
+      .select({ count: sql<string>`count(*)` })
+      .from(schema.creditLedger);
+    const outboxCountBefore = await db
+      .select({ count: sql<string>`count(*)` })
+      .from(schema.outboxEvents);
+
     await expect(
       insertCreditLedger(db, {
         projectId: project.id,
@@ -128,23 +136,15 @@ describe("insertCreditLedger", () => {
       }),
     ).rejects.toThrow();
 
-    // Credit ledger row must NOT exist.
-    const ledgerCount = await db
+    // Neither credit_ledger nor outbox_events should have grown.
+    const ledgerCountAfter = await db
       .select({ count: sql<string>`count(*)` })
-      .from(schema.creditLedger)
-      .where(eq(schema.creditLedger.subscriberId, nonExistentSubscriberId));
-    expect(Number(ledgerCount[0]!.count)).toBe(0);
+      .from(schema.creditLedger);
+    const outboxCountAfter = await db
+      .select({ count: sql<string>`count(*)` })
+      .from(schema.outboxEvents);
 
-    // Outbox row must NOT exist.
-    const outboxCount = await db
-      .select({ count: sql<string>`count(*)` })
-      .from(schema.outboxEvents)
-      .where(
-        and(
-          eq(schema.outboxEvents.aggregateType, "CREDIT_LEDGER"),
-          eq(schema.outboxEvents.aggregateId, nonExistentSubscriberId),
-        ),
-      );
-    expect(Number(outboxCount[0]!.count)).toBe(0);
+    expect(ledgerCountAfter[0]!.count).toBe(ledgerCountBefore[0]!.count);
+    expect(outboxCountAfter[0]!.count).toBe(outboxCountBefore[0]!.count);
   });
 });
