@@ -42,4 +42,93 @@ async function publishExposure(
   });
 }
 
-export const eventBus = { publishExposure };
+// =============================================================
+// Revenue / credit fan-out (Plan 2)
+// =============================================================
+//
+// Both helpers assume the OLTP business row (revenue_events or
+// credit_ledger) has already been inserted on the same `tx` —
+// see packages/db/src/drizzle/repositories/revenue-events.ts
+// and credit-ledger.ts (Phase C). The outbox insert is the last
+// statement of the repository's co-write wrapper so that
+// Postgres' commit order matches arrival order on the dispatcher.
+
+export interface PublishRevenueEventInput {
+  revenueEventId: string;       // revenue_events.id (cuid2)
+  projectId: string;
+  subscriberId: string;
+  purchaseId: string;
+  productId: string;
+  type: string;                 // revenueEventType enum value (INITIAL_PURCHASE | RENEWAL | REFUND | ...)
+  store: string;                // 'APP_STORE' | 'PLAY_STORE' | 'STRIPE'
+  amount: string;               // decimal(12,4) as string — preserves precision over JSON
+  amountUsd: string;            // decimal(12,4) as string
+  currency: string;             // ISO-4217
+  eventDate: Date;
+}
+
+async function publishRevenueEvent(
+  tx: Db,
+  input: PublishRevenueEventInput,
+): Promise<void> {
+  const payload = {
+    revenueEventId: input.revenueEventId,
+    projectId: input.projectId,
+    subscriberId: input.subscriberId,
+    purchaseId: input.purchaseId,
+    productId: input.productId,
+    type: input.type,
+    store: input.store,
+    amount: input.amount,
+    amountUsd: input.amountUsd,
+    currency: input.currency,
+    eventDate: input.eventDate.toISOString(),
+  };
+  await drizzle.outboxRepo.insert(tx, {
+    aggregateType: "REVENUE_EVENT",
+    aggregateId: input.revenueEventId,
+    eventType: "revenue.event.recorded",
+    payload,
+  });
+}
+
+export interface PublishCreditLedgerEntryInput {
+  creditLedgerId: string;       // credit_ledger.id
+  projectId: string;
+  subscriberId: string;
+  type: string;                 // creditLedgerType enum (GRANT | DEBIT | REFUND | ADJUSTMENT | ...)
+  amount: number;               // signed integer
+  balance: number;              // running balance AFTER this row
+  referenceType: string | null;
+  referenceId: string | null;
+  createdAt: Date;
+}
+
+async function publishCreditLedgerEntry(
+  tx: Db,
+  input: PublishCreditLedgerEntryInput,
+): Promise<void> {
+  const payload = {
+    creditLedgerId: input.creditLedgerId,
+    projectId: input.projectId,
+    subscriberId: input.subscriberId,
+    type: input.type,
+    amount: input.amount,
+    balance: input.balance,
+    referenceType: input.referenceType,
+    referenceId: input.referenceId,
+    createdAt: input.createdAt.toISOString(),
+  };
+  await drizzle.outboxRepo.insert(tx, {
+    aggregateType: "CREDIT_LEDGER",
+    aggregateId: input.creditLedgerId,
+    eventType: "credit.ledger.appended",
+    payload,
+  });
+}
+
+export const eventBus = {
+  publishExposure,
+  publishRevenueEvent,
+  publishCreditLedgerEntry,
+};
