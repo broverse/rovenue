@@ -19,6 +19,10 @@ import {
   createWebhookRetentionWorker,
   scheduleWebhookRetention,
 } from "./workers/webhook-retention";
+import {
+  runOutboxDispatcher,
+  stopOutboxDispatcher,
+} from "./workers/outbox-dispatcher";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -59,6 +63,20 @@ scheduleWebhookRetention().catch((err: unknown) => {
   });
 });
 
+// Shutdown handler — signals the outbox dispatcher loop to exit
+// so the Kafka producer disconnects cleanly before the process
+// terminates. Other BullMQ workers close via their own lifecycle.
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => {
+    logger.info("shutdown requested", { sig });
+    stopOutboxDispatcher();
+  });
+}
+
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   logger.info("listening", { url: `http://localhost:${info.port}` });
 });
+
+// Outbox → Redpanda dispatcher loop. Fire-and-forget; the loop
+// handles its own errors and will no-op when KAFKA_BROKERS is unset.
+void runOutboxDispatcher();

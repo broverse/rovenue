@@ -1,0 +1,22 @@
+<!--
+  ClickHouse Kafka Engine global config. Per-table overrides go in
+  the CREATE TABLE ... SETTINGS clause, but the broker list and the
+  default debug level live here so we don't leak them into the
+  migration SQL (which is hashed and immutable after apply).
+
+  When redpanda resolves as the docker-compose hostname, CH sees the
+  internal listener at 9092. Integration tests (testcontainers) set
+  the broker via SETTINGS override.
+
+  Note: children of <kafka> are forwarded to librdkafka with
+  underscores translated to dots. Only valid librdkafka property
+  names work here (e.g. bootstrap_servers → bootstrap.servers).
+  Per-table `kafka_group_name` in CREATE TABLE SETTINGS takes care
+  of consumer-group identity, so we don't set a group prefix here.
+-->
+<clickhouse>
+  <kafka>
+    <bootstrap_servers>redpanda:9092</bootstrap_servers>
+    <debug>broker,fetch</debug>
+  </kafka>
+</clickhouse>

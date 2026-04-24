@@ -102,3 +102,9 @@ export const featureFlagType = pgEnum("FeatureFlagType", [
   "NUMBER",
   "JSON",
 ]);
+
+export const aggregateTypeEnum = pgEnum("aggregate_type", [
+  "EXPOSURE",
+  "REVENUE_EVENT",
+  "CREDIT_LEDGER",
+]);

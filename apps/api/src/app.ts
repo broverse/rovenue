@@ -12,6 +12,7 @@ import {
   v1Route,
   webhooksRoute,
 } from "./routes";
+import { configStreamRoute } from "./routes/v1/config-stream";
 
 // =============================================================
 // Hono app + RPC-ready AppType export
@@ -86,6 +87,7 @@ export function createApp() {
     .route("/api/auth", authRoute)
     .route("/webhooks", webhooksRoute)
     .route("/v1", v1Route)
+    .route("/", configStreamRoute)
     .route("/dashboard", dashboardRoute);
 
   app.onError(errorHandler);

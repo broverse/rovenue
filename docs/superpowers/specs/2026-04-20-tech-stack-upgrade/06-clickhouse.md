@@ -855,7 +855,211 @@ Açık sorular:
 
 ---
 
+## 13. 2026-04-23 Addendum — karar kilitleri
+
+Bu bölüm orijinal spec (2026-04-20) ile 2026-04-23 tarihli brainstorming oturumu arasında kilitlenen implementasyon kararlarını içerir. Yukarıdaki bölümlerle çelişen her şeyde **bu addendum kazanır**.
+
+### 13.1 Mimari pozisyon — TimescaleDB tutulur, continuous aggregate'lar düşürülür
+
+Orijinal spec §1.5 "planla, hemen kurma" diyordu; eşikler görülmeden yatırım önerilmiyordu. 2026-04-23 kararı bunu tersine çevirdi: **Opsiyon Y** seçildi — Rovenue v1 launch'ı ClickHouse ile ship eder. RevenueCat Charts parity MVP olarak değil production-grade hedefleniyor.
+
+Üç katmanlı ayrım:
+
+- **Postgres (OLTP source of truth)** — transactional writes, point lookups, audit trail. Projects, subscribers, products, products_groups, api_keys, audit_logs, vs. Analytical yük atılmaz.
+- **TimescaleDB (Postgres extension, hayatta kalır)** — `revenue_events`, `credit_ledger`, `outgoing_webhooks`, yeni gelen `exposure_events` hypertables. Rolü **storage optimization** (compression 10-20x) + chunk-level retention. Analytical query **atmaz**; dashboard hiçbir chart için TS'yi hedeflemez.
+- **ClickHouse (OLAP read replica)** — PeerDB üstünden Postgres'ten replike edilir. Dashboard'un tüm analytical query'leri buradan çıkar.
+
+TS niye tutuldu (Opsiyon X — "TS'i kaldır" — reddedildi):
+- VUK 7-yıl retention Postgres'te source of truth. Compression olmadan 7 yılda disk şişer; self-host müşteri için disk maliyeti OSS dostu değil.
+- CH çökerse analytics kaybolur ama source data güvende kalır. CH durability'sine 7-yıl regülatör retention'ı bağlamak OSS self-host ölçeğinde kabul edilemez risk.
+- PeerDB lag (5-30s) sırasında "show subscriber X" gibi point query'ler Postgres'ten anında döner.
+
+TS continuous aggregate'lar niye düşürülüyor:
+- CH'taki eşdeğer materialized view'lar (`mv_daily_revenue`, `mv_cohort_retention`, `mv_experiment_daily`) aynı işi daha hızlı yapar.
+- Çift aggregate sürdürmek §11 T7'deki "farklı sayı dönme" (replication lag + floating-point order-of-ops) problemini kronikleştirir.
+- Concrete drop: `packages/db/drizzle/migrations/0005_cagg_daily_mrr.sql`'in kurduğu `daily_mrr` CA, Plan 2 kapsamında `0009_drop_daily_mrr_cagg.sql` ile kaldırılır (aşağıda §13.2).
+
+### 13.2 Plan splitting — dört sprint, server-first sıralama
+
+Tek plan yerine dört ayrı implementation plan. Sıralama ilkesi **server → client**; 2026-04-23 direktifi gereği UI + SDK-RN işleri en sona bırakıldı.
+
+**Plan 1 — `docs/superpowers/plans/2026-04-23-clickhouse-foundation-and-experiments.md`** (~3-3.5 hafta, bu addendum'un hemen ardından yazılır)
+
+Scope (server-only):
+- CH cluster + PeerDB Docker Compose + env skelet + `verify-clickhouse` CLI (Alan 4 pattern)
+- Postgres `CREATE PUBLICATION rovenue_analytics` migration + PeerDB mirror config (repo-içinde reproducible)
+- CH raw tabloları: `raw_revenue_events`, `raw_credit_ledger`, `raw_subscribers`, `raw_purchases`, `raw_experiment_assignments`, `raw_exposures`
+- `exposure_events` Postgres hypertable (Alan 5 Plan B'den absorbe, §13.3)
+- `mv_experiment_daily` materialized view
+- `POST /v1/experiments/:id/expose` endpoint + Redis batched flush buffer
+- `GET /v1/config/stream` SSE endpoint + Redis pub/sub invalidation
+- `apps/api/src/lib/clickhouse.ts` client wrapper + `apps/api/src/services/analytics-router.ts` dispatcher (spec §6)
+- `GET /experiments/:id/results` stats endpoint — CUPED + mSPRT + sample-size, CH'tan okur
+- Integration tests: replication parity (§10.1), aggregate correctness (§10.2), supertest coverage
+- PeerDB lag metric → Prometheus alert (>300s), CH backup cron (`clickhouse-backup` to S3)
+- CI: `verify-clickhouse` post-migrate smoke
+
+Out of scope: SDK-RN, dashboard UI, revenue cohort/funnel/LTV aggregates.
+
+**Plan 2 — `docs/superpowers/plans/2026-05-XX-clickhouse-revenue-analytics.md`** (~2-2.5 hafta, Plan 1 merge sonrası yazılır)
+
+Scope (server-only):
+- `mv_daily_revenue`, `mv_cohort_retention`, LTV aggregate MV'leri
+- Revenue analytics Hono endpoint'leri: cohort retention, funnel (windowFunnel), LTV curves, geo breakdown, event timeline — hepsi JSON contract
+- TS `daily_mrr` continuous aggregate drop migration (`0009_drop_daily_mrr_cagg.sql`)
+- `/dashboard/projects/:projectId/metrics/mrr` route `analytics-router` üstünden CH `mv_daily_revenue`'ye cutover (feature-flag A/B, sonra flag kaldırılır)
+- Aggregate parity tests her MV için
+
+Out of scope: SDK-RN, dashboard UI.
+
+**Plan 3 — `docs/superpowers/plans/2026-05-XX-experiment-delivery-sdk.md`** (~1.5-2 hafta, Plan 1-2 merge sonrası)
+
+Scope (client — SDK-RN):
+- Identity merge, SSE client with exponential backoff, `getVariant`, `isEnabled`, MMKV offline exposure queue
+- `size-limit` CI guard (SDK core ≤15KB gzip)
+
+**Plan 4 — `docs/superpowers/plans/2026-06-XX-dashboard-analytics-ui.md`** (~2 hafta, tüm backend + SDK ship sonrası)
+
+Scope (client — dashboard):
+- Experiment results UI (stratified country/platform view, SRM warning, sample-size progress)
+- Revenue charts (cohort retention, funnel, LTV curves, geo breakdown, event timeline)
+- Analytics-router tüketim katmanı
+
+Toplam roadmap: ~8-10 hafta. Her plan kendi başına ship edilebilir; her merge sonrası main stabil.
+
+### 13.3 Alan 5 Plan B — Plan 1 + Plan 3 + Plan 4'e paylaştırıldı
+
+Alan 5 spec §13.5'te Plan B olarak ayrılan işler (SSE endpoint, exposure buffer, `exposure_events` hypertable, stats endpoint, SDK-RN, dashboard results UI) tek plan olarak yazılmaz. Dağılım:
+
+| Alan 5 Plan B item | Yeni yer |
+|---|---|
+| SSE endpoint `GET /v1/config/stream` + Redis pub/sub | Plan 1 Faz 2 |
+| `exposure_events` Postgres hypertable | Plan 1 Faz 2 |
+| Exposure buffer (Redis batched flush) | Plan 1 Faz 2 |
+| Stats endpoint `GET /experiments/:id/results` (CUPED/mSPRT) | Plan 1 Faz 3 (CH'tan okur) |
+| SDK-RN: identity merge, SSE client, `getVariant`, MMKV queue | Plan 3 |
+| `size-limit` CI guard | Plan 3 |
+| Dashboard results UI (stratified, SRM, sample-size) | Plan 4 |
+
+Gerekçe:
+- `exposure_events` pipeline ClickHouse'un en kritik okuyucusu; ayrı plan'da Postgres-only inşa edilip sonradan CH'a bağlanması iki kez iş anlamına gelir.
+- Stats endpoint orijinal Plan B'de Postgres'ten okuyacaktı. Plan 1 CH'tan okur — interim Postgres query'si hiç yazılmaz.
+- Server-first direktifi gereği client-side parçalar (SDK-RN, dashboard UI) arkaya çekildi.
+
+Alan 5 spec §13.5'teki Plan B referansı tarihsel bir not olarak kalır; fiilî implementation bu addendum'u takip eder. Alan 5 Plan B için ayrı dosya yazılmayacak.
+
+### 13.4 Karar özeti
+
+| Karar | Değer |
+|---|---|
+| Mimari pozisyon | Opsiyon Y — Postgres+TS (OLTP + compressed source) + ClickHouse (OLAP read replica) |
+| Ingestion tool | PeerDB (spec §3.5 korunur) |
+| Deployment topolojisi | Coolify single-VPS co-located (CX31 sınıfı, 4 vCPU / 16GB); ölçek sinyalinde (§1.3) ayrı VPS'e taşınır |
+| TimescaleDB `daily_mrr` CA | Plan 2 kapsamında drop edilir |
+| TimescaleDB hypertables | Kalır (compression + retention policies load-bearing) |
+| Plan sayısı | 4 (server-first sıralama) |
+| Alan 5 Plan B | Plan 1 + Plan 3 + Plan 4'e paylaştırıldı; ayrı dosya yazılmaz |
+| Test stratejisi | Alan 4 pattern — `verify-clickhouse` CLI + vitest integration (testcontainer) + replication parity + aggregate correctness |
+| Branch | `feat/clickhouse-analytics`, main'den (main şu an temiz) |
+
+---
+
 *Alan 6 sonu. Bütün alanlar tamam.*
+
+---
+
+## 14. 2026-04-24 Addendum — CDC pivot to Kafka + outbox
+
+Bu bölüm, §13 addendum'un implementasyon sırasında yaşanan ingestion-layer çöküşünü belgeler ve PeerDB-merkezli yaklaşımdan Kafka+outbox mimarisine geçişin kararını pin'ler. §13 hâlâ mimari hedefi (Postgres OLTP + ClickHouse OLAP) ve Plan 1/2/3/4 parçalanmasını yönetir; **tek değişiklik**: §3'te ingestion seçimi PeerDB'den (§3.5) uygulama-katmanlı outbox pattern'e (yeni §3.7) geçer.
+
+### 14.1 Blocker — TimescaleDB hypertable + Postgres logical replication uyumsuzluğu
+
+Phase 4 smoke testinde Plan 1 Branch `feat/clickhouse-analytics` commit `d6773a5` altında empirik olarak doğrulandı:
+
+| Test senaryosu | Sonuç |
+|---|---|
+| Vanilla Postgres tablosu (subscribers) INSERT → PeerDB replicate | ✅ ~70 saniyede ClickHouse'ta |
+| TimescaleDB hypertable (exposure_events) INSERT → PeerDB replicate | ❌ 5+ dakikada 0 satır |
+
+Kök neden: TimescaleDB hypertable INSERT'leri fiziksel olarak `_timescaledb_internal._hyper_N_M_chunk` child tablolarına yazılır. Postgres logical replication publication parent hypertable üstünde; child chunk'lar publication'da yok; replication slot'u bu WAL yazımlarını görmez.
+
+- `ALTER PUBLICATION … SET (publish_via_partition_root = true)` **etkisiz** — TimescaleDB chunk'ları native Postgres partition değil.
+- Debezium da aynı `pg_replication_slot`'tan okuyor — **aynı körlük onda da olur**. Bu PeerDB'ye özgü değil, pgoutput logical decoding'in TimescaleDB chunk partitioning'iyle uyumsuzluğu.
+- Workaround (chunk auto-add trigger): her chunk oluştuğunda `ALTER PUBLICATION … ADD TABLE <chunk>` çalıştıran DDL trigger fragile; Plan 1 scope'unda risk/kazanç oranı kötü.
+
+Plan 1'in analytics yükünün üçü hypertable (`revenue_events`, `credit_ledger`, `exposure_events`) — CDC tabanlı bir mimari bu üçünü de replike edemez. Mimari değişiklik kaçınılmaz.
+
+### 14.2 Yeni pozisyon — Opsiyon **Y′** (Opsiyon Y'nin güncellenmiş hali)
+
+§13.1 Opsiyon Y duruşu (Postgres+TS = OLTP source, ClickHouse = OLAP replica) **korunur**. Değişen sadece replication mekanizması:
+
+- **Eski (PeerDB CDC)**: Postgres WAL → PeerDB logical replication slot → ClickHouse raw tables. Hypertable körlüğü yüzünden çalışmaz.
+- **Yeni (Application outbox + Kafka)**: Uygulama katmanı, her analytics-eligible yazımı aynı transaction'da `outbox_events` tablosuna da yazar. Async outbox-dispatcher worker outbox'ı tüketip Redpanda topic'lerine publish eder. ClickHouse Kafka Engine table'ı topic'ten tüketir; MV target'a aktarır. CDC tamamen devrede dışı.
+
+```mermaid
+graph LR
+  A[App request] -->|same tx| B[(Postgres<br/>revenue_events / credit_ledger / etc.)]
+  A -->|same tx| C[(Postgres<br/>outbox_events)]
+  C -->|async worker| D[Redpanda<br/>rovenue.revenue / rovenue.credit / …]
+  D -->|Kafka Engine| E[(ClickHouse<br/>raw_* target tables)]
+  E -->|MV| F[(ClickHouse<br/>mv_experiment_daily etc.)]
+```
+
+### 14.3 Neden event-driven CDC'yi yener — bu projede
+
+1. **TimescaleDB sorunu irrelevant**: events Postgres'ten Kafka'ya CDC üstünden değil, app dispatch üstünden gider. Hypertable chunk'ları invisible değil — biz direkt yazarız.
+2. **Exposure events için dogmatik fit**: `exposure_events` saf bir analytics event'idir — OLTP read path'i yoktur, Postgres'te bulunmasına gerek yok. §13 Alan 5 Plan B absorpsiyonunda Postgres hypertable'lanmıştı; Opsiyon Y′'de bu tablo tamamen kaldırılır, exposures yalnızca Kafka → ClickHouse akışında yaşar.
+3. **Revenue/credit için outbox safety**: finansal data Postgres'te VUK 7 yıl source of truth olarak kalır; aynı transaction'da outbox INSERT atılır; fan-out async. Bu §3'te "kötü choice" denilen "§3.4 direct dual-write"in transactional versiyonu — outbox pattern iki yazımı tek transaction'da atomic yapar, eventual-consistency'li ama inconsistency'siz.
+4. **Operasyonel ağırlık ≤ PeerDB**: PeerDB self-host ~9 container (catalog + temporal stack + 3 flow workers + server + ui + minio). Redpanda single-node (1 container) + Redpanda Console (1 container). Debezium+Kafka+ZK+Schema Registry yaklaşık 5 container olurdu.
+5. **Kafka ikinci kullanımlar**: Redpanda topic'leri webhook delivery, outgoing webhook retry, audit fan-out gibi gelecek use-case'ler için hazır backbone. BullMQ+Redis'ten çıkış yolu.
+
+### 14.4 §3 ingestion tablosu — güncelleme
+
+Önceki §3 ingestion seçeneklerinden (PeerDB, MaterializedPostgreSQL, Debezium+Kafka, direct dual-write) **yedi**'nci seçenek eklenir ve önerilir:
+
+**§3.7 Outbox pattern + Redpanda + ClickHouse Kafka Engine**
+- **Ne**: App same-tx yazar `outbox_events`'e; async worker topic'e publish eder; CH Kafka Engine tüketir.
+- **Artı**: CDC'den bağımsız; hypertable sorunu yok; transactional safety outbox ile; operasyonel olarak §3.5 PeerDB'den hafif.
+- **Eksi**: Her yazma path'i outbox INSERT eklemeli (kod değişikliği); async worker bakımı; at-least-once semantik (CH Kafka Engine `kafka_group_name` + replay-idempotent ID'ler ile dedup).
+- **Latency**: sub-saniye (app write → topic publish <100ms; Redpanda → CH consume <1s).
+
+**Yeni öneri**: §3.7 — **Plan 1-yeni** için tek ingestion yolu. §3.5 PeerDB `feat/clickhouse-analytics` commit'lerinde denendi, yukarıdaki TimescaleDB körlüğü yüzünden terk edildi.
+
+### 14.5 Plan dosyası durum değişikliği
+
+- `docs/superpowers/plans/2026-04-23-clickhouse-foundation-and-experiments.md` → **SUPERSEDED (2026-04-24)**. Commit history'deki Phase 0-3 implementation (infra + migration runner + exposure_events hypertable + publication) ya aynen kullanılır (Phase 0-3), ya revert edilir (Phase 4, Phase 3'ün hypertable kısmı). Karar Plan 1-yeni yazımında verilir.
+- Yeni plan: `docs/superpowers/plans/2026-04-24-kafka-analytics-foundation.md`. §14.2-§14.4 referansıyla mimariyi yürürlüğe koyar. Phase-by-phase yeniden tasarlanmış:
+  - Phase A: eski PeerDB/hypertable artifacts rollback (0010 publication DROP, 0009 exposure_events table DROP, PeerDB submodule delete, setup.sql delete)
+  - Phase B: Redpanda single-node in `docker-compose.yml` + Redpanda Console overlay
+  - Phase C: Postgres `outbox_events` tablosu (migration 0009-new) + Drizzle schema + repo
+  - Phase D: `apps/api/src/lib/kafka.ts` (kafkajs client) + `apps/api/src/services/event-bus.ts` (same-tx outbox writer) + `apps/api/src/workers/outbox-dispatcher.ts`
+  - Phase E: ClickHouse migrations — `0002_kafka_engine_exposures.sql` (Kafka Engine + MV + target), `0003_kafka_engine_revenue.sql`, `0003_kafka_engine_credit.sql`
+  - Phase F-onward: Alan 5 Plan B SSE + stats endpoint (CH-backed, okuma tarafı §13.2 ile aynı)
+
+### 14.6 Branch stratejisi
+
+Mevcut `feat/clickhouse-analytics` branch'inde devam:
+- Phase 0-3 commit'leri (f4695d7 → 2044272) temiz infra iş, korunur
+- Phase 4 yatırımı (2249741 publication, d6773a5 PeerDB setup.sql) honest history için kalır — rollback commit'leri bu commit'leri revert eder, hiçbir zaman squash edilmez. PR reader'ı "PeerDB denendi, TS-CDC çatışması yüzünden Kafka+outbox'a pivot edildi" hikayesini commit sırasından okur.
+- Yeni Plan 1 dosyası (`2026-04-24-kafka-analytics-foundation.md`) aynı branch'te oluşturulur.
+- Eski Plan 1 dosyası header'ına SUPERSEDED notu eklenir ama silinmez (history).
+
+### 14.7 Karar özeti
+
+| Konu | Değer |
+|---|---|
+| Ingestion | **§3.7 Outbox + Redpanda + CH Kafka Engine** (PeerDB reddedildi) |
+| Event bus | Redpanda single-node (Kafka-protocol, self-host-friendly) |
+| `exposure_events` Postgres tablosu | **Kaldırılır** — saf analytics event, OLTP'de yeri yok |
+| `revenue_events` / `credit_ledger` Postgres hypertable | **Kalır** — source of truth, outbox aynı tx'te yazılır |
+| TimescaleDB (§13.1 Opsiyon Y) | **Kalır** — compression + retention hâlâ load-bearing |
+| ClickHouse rolü | **Kalır** — OLAP read layer, raw_* tabloları Kafka Engine'den doldurulur |
+| Plan 1 dosyası | Eski SUPERSEDED, yeni `2026-04-24-kafka-analytics-foundation.md` |
+| Branch | `feat/clickhouse-analytics` devam, revert commit'leriyle honest history |
+
+---
+
+*Alan 6 + 2026-04-24 Kafka pivot addendum sonu.*
 
 ---
 

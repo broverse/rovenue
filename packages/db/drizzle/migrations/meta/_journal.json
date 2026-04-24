@@ -64,6 +64,41 @@
       "when": 1776965592853,
       "tag": "0008_experiment_assignments_hash_version",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777334400000,
+      "tag": "0009_exposure_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1777420800000,
+      "tag": "0010_postgres_publication",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777507200000,
+      "tag": "0011_drop_publication",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1777510800000,
+      "tag": "0012_drop_exposure_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1777514400000,
+      "tag": "0013_outbox_events",
+      "breakpoints": true
     }
   ]
 }

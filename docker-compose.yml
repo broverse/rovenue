@@ -1,3 +1,14 @@
+# Rovenue local stack — rovenue's own services (api, db, redis,
+# clickhouse, redpanda, redpanda-console).
+#
+# Default boot:
+#   docker compose up -d
+#
+# Analytics ingestion runs on an outbox + Kafka pipeline:
+# app writes outbox_events in the same tx as the OLTP write, the
+# outbox-dispatcher worker (apps/api/src/workers/outbox-dispatcher.ts)
+# drains it into Redpanda, and ClickHouse's Kafka Engine consumes
+# the topic. No CDC. See docs/superpowers/specs/2026-04-20-tech-stack-upgrade/06-clickhouse.md §14.
 services:
   api:
     build:
@@ -9,6 +20,10 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
       REDIS_URL: redis://redis:6379
       PORT: 3000
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: rovenue_reader
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
+      KAFKA_BROKERS: redpanda:9092
     ports:
       - "3000:3000"
     depends_on:
@@ -16,6 +31,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      clickhouse:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
     restart: unless-stopped
 
   db:
@@ -34,6 +53,20 @@ services:
     # TimescaleDB itself as a managed DB service"; Rovenue is a
     # subscription-management application, not a DBaaS, so we're safely
     # inside TSL's permitted self-host use case.
+    #
+    # wal_level=logical + replication slots are required for PeerDB's
+    # CDC mirror (Phase 4). Defaults are 'replica' / no slots, which
+    # silently accepts CREATE PUBLICATION but blocks actual streaming.
+    # Full Postgres restart (not SIGHUP) is required after changing
+    # these, so they live in `command` rather than postgresql.conf.
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_wal_senders=10"
+      - "-c"
+      - "max_replication_slots=10"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-rovenue}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rovenue}
@@ -64,5 +97,101 @@ services:
       retries: 10
     restart: unless-stopped
 
+  clickhouse:
+    # Pinned to 24.3 LTS — the oldest series that carries
+    # `windowFunnel`, projections, and the @clickhouse/client 1.x wire
+    # protocol we depend on. Upgrading to 24.x+ is safe within the
+    # 24-series but should trigger a verify-clickhouse run.
+    image: clickhouse/clickhouse-server:24.3-alpine
+    environment:
+      # CLICKHOUSE_DB creates the rovenue database on first boot. We
+      # intentionally do NOT set CLICKHOUSE_USER/CLICKHOUSE_PASSWORD —
+      # the image's entrypoint would generate a second user definition
+      # that conflicts with users.d/rovenue.xml ("more than one
+      # 'password' field for user rovenue"). Authoritative user config
+      # lives in users.d; env vars only feed the hex password via
+      # from_env in the XML.
+      CLICKHOUSE_DB: rovenue
+      CLICKHOUSE_PASSWORD_SHA256: ${CLICKHOUSE_PASSWORD_SHA256:-460592d4be24af16128f6ee18ca9bef3527fec9d74281c13a860572d09e975c2}
+      CLICKHOUSE_READER_PASSWORD_SHA256: ${CLICKHOUSE_READER_PASSWORD_SHA256:-460592d4be24af16128f6ee18ca9bef3527fec9d74281c13a860572d09e975c2}
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - rovenue-clickhouse-data:/var/lib/clickhouse
+      - ./deploy/clickhouse/config.d:/etc/clickhouse-server/config.d:ro
+      - ./deploy/clickhouse/users.d:/etc/clickhouse-server/users.d:ro
+    ports:
+      # Host 8124 → container 8123 (HTTP). CH native-TCP (9000) is
+      # not exposed — the API hits CH over HTTP via @clickhouse/client,
+      # and integration tests spin their own container.
+      - "8124:8123"
+    healthcheck:
+      # Use 127.0.0.1 instead of `localhost` — alpine's wget resolves
+      # localhost to the IPv6 loopback first and CH binds IPv4 only by
+      # default, so the healthcheck was failing even though the server
+      # was reachable.
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redpanda:
+    # Redpanda 24.2 — Kafka-wire-compatible single Go binary. Spec
+    # §14.3 point 4 argues the single-node config (one container)
+    # beats Kafka+ZK+Schema-Registry (≥5 containers) on ops weight
+    # for a self-hosted subscription platform. Rovenue does not need
+    # multi-broker durability at Plan 1 scale.
+    image: redpandadata/redpanda:v24.2.13
+    container_name: rovenue-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      # External (host) listener on 19092 so apps running on the
+      # host (pnpm dev) connect without a docker-network round-trip.
+      # Internal listener on 9092 for other compose services.
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092,EXTERNAL://localhost:19092
+      - --rpc-addr=0.0.0.0:33145
+      - --advertise-rpc-addr=redpanda:33145
+    ports:
+      - "19092:19092"
+      - "9644:9644"
+    volumes:
+      - rovenue-redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  redpanda-console:
+    # Web UI for Redpanda — topic inspector, consumer-group lag,
+    # message browser. Only bound to localhost in production (this
+    # compose is self-host dev; Coolify operator should put it
+    # behind basic auth if exposed).
+    image: redpandadata/console:v2.6.1
+    container_name: rovenue-redpanda-console
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      SERVER_LISTENPORT: "8080"
+    ports:
+      - "8080:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   rovenue-data:
+  rovenue-clickhouse-data:
+  rovenue-redpanda-data:

@@ -162,6 +162,8 @@ export type {
   SubscriberAccessRow,
   AuditLogRow,
   CreditLedgerRow as CreditLedger,
+  OutboxEvent,
+  NewOutboxEvent,
 } from "./drizzle/schema";
 
 // =============================================================
@@ -176,3 +178,4 @@ export * from "./helpers/encrypted-field";
 
 export const drizzle = drizzleNamespace;
 export type { Db } from "./drizzle";
+export { getDb, createDb, db } from "./drizzle";

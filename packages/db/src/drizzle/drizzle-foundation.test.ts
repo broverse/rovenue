@@ -8,6 +8,7 @@ import {
   experimentAssignments,
   experiments,
   featureFlags,
+  outboxEvents,
   outgoingWebhooks,
   productGroups,
   products,
@@ -23,6 +24,7 @@ import {
   type NewAuditLogRow,
   type NewProject,
 } from "./schema";
+import { aggregateTypeEnum } from "./enums";
 import {
   experimentVariantsSchema,
   featureFlagRulesSchema,
@@ -103,6 +105,7 @@ describe("schema shapes compile", () => {
     expect(idColumn.primary).toBe(false);
     expect(outgoingWebhooks.createdAt.name).toBe("createdAt");
   });
+
 });
 
 describe("inferred types", () => {
@@ -362,5 +365,30 @@ describe("experimentAssignments schema", () => {
     // spec §13.4.
     expect((col as unknown as { notNull?: boolean }).notNull).toBe(true);
     expect((col as unknown as { hasDefault?: boolean }).hasDefault).toBe(true);
+  });
+});
+
+describe("outboxEvents", () => {
+  it("has the expected columns", () => {
+    const cols = Object.keys(outboxEvents);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "id",
+        "aggregateType",
+        "aggregateId",
+        "eventType",
+        "payload",
+        "createdAt",
+        "publishedAt",
+      ]),
+    );
+  });
+
+  it("enumerates aggregate_type values", () => {
+    expect(aggregateTypeEnum.enumValues).toEqual([
+      "EXPOSURE",
+      "REVENUE_EVENT",
+      "CREDIT_LEDGER",
+    ]);
   });
 });
