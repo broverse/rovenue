@@ -73,7 +73,7 @@ The spec's §13 Option Y decision matrix remains authoritative:
 ### CQRS split for credits (explicit, for reviewer scrutiny)
 
 - **Stays OLTP (Postgres)**: balance check during consumption (`findLatestBalance`), GDPR export, subscriber-transfer balance handoff. These require strict consistency with the running `balance` column; CH's eventual consistency window (seconds) would introduce double-spend windows.
-- **Migrates to CH in Plan 3 (NOT this plan)**: subscriber-detail credit-history pagination (read-heavy, tolerates seconds of lag), consumption-rate charts, top-spender leaderboards.
+- **Migrates to CH in Plan 3 (NOT this plan)**: subscriber-detail credit-history pagination (read-heavy, tolerates seconds of lag), top-spender leaderboards. (Consumption-rate aggregate moved **into Plan 2** as Task B.5 per Q5 sign-off.)
 
 Plan 2 ships only the write-side fan-out and the aggregate MVs. Read-path migration is Plan 3.
 
@@ -90,7 +90,8 @@ packages/db/
 │   ├── 0004_revenue_kafka_engine.sql     # NEW — Phase B.1
 │   ├── 0005_credit_kafka_engine.sql      # NEW — Phase B.2
 │   ├── 0006_mv_mrr_daily.sql             # NEW — Phase B.3
-│   └── 0007_mv_credit_balance.sql        # NEW — Phase B.4
+│   ├── 0007_mv_credit_balance.sql        # NEW — Phase B.4
+│   └── 0008_mv_credit_consumption_daily.sql  # NEW — Phase B.5
 
 apps/api/src/
 ├── services/
@@ -311,7 +312,18 @@ describe("eventBus.publishCreditLedgerEntry", () => {
 
 ## Phase B — ClickHouse migrations
 
-**Goal**: four new CH migrations (`0004`–`0007`) establishing the Kafka Engine tables + rollups. Follow the exact pattern of Plan 1's `0002` and `0003`.
+**Goal**: five new CH migrations (`0004`–`0008`) establishing the Kafka Engine tables + rollups. Follow the exact pattern of Plan 1's `0002` and `0003`.
+
+### ADR B.0: CH retention horizon (2 years) vs Timescale (7 years)
+
+Postgres TimescaleDB hypertables (`revenue_events`, `credit_ledger`) are the **VUK-compliant 7-year authoritative store**. ClickHouse `raw_*` tables intentionally carry a shorter 2-year TTL:
+
+- Analytics query patterns are recent-dominated (MRR trends, churn, consumption rates). Deep-history drilldown falls back to Timescale.
+- CH disk cost + merge pressure drop materially at 2y vs 7y.
+- Materialized-view targets (`mv_mrr_daily_target`, `mv_credit_balance_target`, `mv_credit_consumption_daily_target`) hold pre-aggregated state and are **independent** of raw-table TTL — retention trim on raw does not affect aggregate correctness.
+- If Plan 4+ ever needs deeper CH history, backfill via `INSERT ... SELECT FROM postgres_fdw` from Timescale; no data is lost.
+
+Confirmed during Plan 2 sign-off on 2026-04-25.
 
 ### Task B.1: Migration 0004 — revenue Kafka Engine + `raw_revenue_events`
 
@@ -369,7 +381,7 @@ CREATE TABLE IF NOT EXISTS rovenue.raw_revenue_events
 ENGINE = ReplacingMergeTree(_version)
 ORDER BY (projectId, eventId)
 PARTITION BY toYYYYMM(eventDate)
-TTL toDateTime(eventDate) + INTERVAL 7 YEAR DELETE;  -- VUK horizon parity
+TTL toDateTime(eventDate) + INTERVAL 2 YEAR DELETE;  -- see ADR below; Timescale holds 7y authoritative
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS rovenue.mv_revenue_to_raw
 TO rovenue.raw_revenue_events AS
@@ -443,7 +455,7 @@ CREATE TABLE IF NOT EXISTS rovenue.raw_credit_ledger
 ENGINE = ReplacingMergeTree(_version)
 ORDER BY (projectId, eventId)
 PARTITION BY toYYYYMM(createdAt)
-TTL toDateTime(createdAt) + INTERVAL 7 YEAR DELETE;
+TTL toDateTime(createdAt) + INTERVAL 2 YEAR DELETE;  -- see ADR B.0; Timescale holds 7y authoritative
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS rovenue.mv_credit_to_raw
 TO rovenue.raw_credit_ledger AS
@@ -498,7 +510,7 @@ CREATE TABLE IF NOT EXISTS rovenue.mv_mrr_daily_target
 ENGINE = SummingMergeTree
 ORDER BY (projectId, day)
 PARTITION BY toYYYYMM(day)
-TTL day + INTERVAL 7 YEAR DELETE;
+TTL day + INTERVAL 2 YEAR DELETE;  -- see ADR B.0; backfill from Timescale if deeper history needed
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS rovenue.mv_mrr_daily
 TO rovenue.mv_mrr_daily_target AS
@@ -524,7 +536,7 @@ GROUP BY projectId, day;
 **Files:**
 - Create: `packages/db/clickhouse/migrations/0007_mv_credit_balance.sql`
 
-Per-subscriber state: the *most recent* `balance` for each `(projectId, subscriberId)`. AggregatingMergeTree with `argMaxState(balance, createdAt)` gives us O(1) reads even across months of data. Consumption-rate charts in Plan 3 will layer on top via a second MV (sketched in the appendix).
+Per-subscriber state: the *most recent* `balance` for each `(projectId, subscriberId)`. AggregatingMergeTree with `argMaxState(balance, createdAt)` gives us O(1) reads even across months of data. Consumption-rate charts land in a sibling MV — see Task B.5.
 
 ```sql
 -- 0007_mv_credit_balance.sql
@@ -533,8 +545,8 @@ Per-subscriber state: the *most recent* `balance` for each `(projectId, subscrib
 -- recent ledger row; the MV pre-aggregates partial states so
 -- read-side queries only need a FINAL + -Merge combinator.
 --
--- This is snapshot state, not a running log. For the running-log
--- view, Plan 3 will add mv_credit_flow_daily (consumption rate).
+-- This is snapshot state, not a running log. Running-log (consumption
+-- rate) lives in the sibling MV mv_credit_consumption_daily (Task B.5).
 
 CREATE TABLE IF NOT EXISTS rovenue.mv_credit_balance_target
 (
@@ -577,6 +589,67 @@ GROUP BY projectId, subscriberId;
   ```
 
   returns the post-seed expected row.
+
+### Task B.5: Migration 0008 — `mv_credit_consumption_daily` SummingMergeTree
+
+**Files:**
+- Create: `packages/db/clickhouse/migrations/0008_mv_credit_consumption_daily.sql`
+
+Sibling to `mv_credit_balance` (snapshot state). This MV answers **"how much credit did subscribers grant vs debit per day?"** — consumption-rate charts, leaderboards, velocity trends. Separate MV from the balance snapshot so each answers one question at native speed; mixing them into one aggregate makes both slow.
+
+```sql
+-- 0008_mv_credit_consumption_daily.sql
+-- Daily per-project credit flow (granted vs debited, event count,
+-- unique-subscriber HLL). SummingMergeTree for O(1) rollup reads;
+-- pair with uniqMerge(subscribersHll) for distinct-subscriber queries.
+
+CREATE TABLE IF NOT EXISTS rovenue.mv_credit_consumption_daily_target
+(
+  projectId        String,
+  day              Date,
+  granted_credits  Int64,
+  debited_credits  Int64,
+  net_flow         Int64,
+  event_count      UInt64,
+  subscribersHll   AggregateFunction(uniq, String)
+)
+ENGINE = SummingMergeTree
+ORDER BY (projectId, day)
+PARTITION BY toYYYYMM(day)
+TTL day + INTERVAL 2 YEAR DELETE;  -- see ADR B.0
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS rovenue.mv_credit_consumption_daily
+TO rovenue.mv_credit_consumption_daily_target AS
+SELECT
+  projectId,
+  toDate(createdAt)                                    AS day,
+  sumIf(amount, amount > 0)                            AS granted_credits,
+  sumIf(-amount, amount < 0)                           AS debited_credits,
+  sum(amount)                                          AS net_flow,
+  count()                                              AS event_count,
+  uniqState(subscriberId)                              AS subscribersHll
+FROM rovenue.raw_credit_ledger
+GROUP BY projectId, day;
+```
+
+**Acceptance:**
+- Migration applies cleanly.
+- Smoke query after seeding 5 credit events across two days:
+
+  ```sql
+  SELECT
+    day,
+    sum(granted_credits) AS granted,
+    sum(debited_credits) AS debited,
+    sum(net_flow)        AS net,
+    uniqMerge(subscribersHll) AS unique_subs
+  FROM rovenue.mv_credit_consumption_daily_target
+  WHERE projectId = 'prj_smoke'
+  GROUP BY day
+  ORDER BY day;
+  ```
+
+  returns one row per day with grant + debit sums matching the seed.
 
 ---
 
@@ -859,6 +932,8 @@ Append to the `EXPECTED_TABLES` array:
 { name: "mv_mrr_daily",            engine: "MaterializedView" },
 { name: "mv_credit_balance_target", engine: "AggregatingMergeTree" },
 { name: "mv_credit_balance",       engine: "MaterializedView" },
+{ name: "mv_credit_consumption_daily_target", engine: "SummingMergeTree" },
+{ name: "mv_credit_consumption_daily",        engine: "MaterializedView" },
 ```
 
 Add a new diagnostic section: **outbox backlog per aggregate**. SQL:
@@ -870,13 +945,18 @@ WHERE "publishedAt" IS NULL
 GROUP BY "aggregateType";
 ```
 
-This runs against Postgres (reuse the existing Pg connection from `verify-timescale.ts`, or simply run it via `psql` subshell). Print per-aggregate backlog; exit 2 if any aggregate backlog exceeds 10 000 (configurable via env `OUTBOX_BACKLOG_ALERT_THRESHOLD`).
+This runs against Postgres (reuse the existing Pg connection from `verify-timescale.ts`, or simply run it via `psql` subshell). Print per-aggregate backlog. Two-tier thresholds:
+
+- **WARN** (exit 0, print warning): any aggregate backlog ≥ `OUTBOX_BACKLOG_WARN_THRESHOLD` (default **1 000**).
+- **CRIT** (exit 2, page-worthy): any aggregate backlog ≥ `OUTBOX_BACKLOG_CRIT_THRESHOLD` (default **10 000**).
+
+Steady-state should be ~0 (dispatcher drains continuously). 1k sustained is the "investigate" signal; 10k is "wake someone up". Thresholds re-tuned after 30 days of production data.
 
 Also extend the Kafka consumer-lag section (already present in Plan 1 Phase G.3) to include the two new consumer groups `rovenue-ch-revenue` and `rovenue-ch-credit`. The existing `SELECT ... FROM system.kafka_consumers` query returns all groups; just pretty-print per-group.
 
 **Acceptance:**
 - `pnpm --filter @rovenue/db db:verify:clickhouse` returns 0 in a healthy state.
-- Manually stopping the dispatcher for 60 s and inserting >10 000 outbox rows triggers exit 2 — restart dispatcher and confirm exit 0 returns after backlog drains.
+- Manually stopping the dispatcher and inserting >1 000 outbox rows surfaces a WARN (exit 0, warning printed); >10 000 triggers CRIT (exit 2). Restart dispatcher and confirm exit 0 with no warnings after backlog drains.
 
 ### Task E.4: Postgres-vs-CH MRR correlation test
 
@@ -917,7 +997,7 @@ gh pr create --title "feat(ch): revenue + credit outbox fan-out (Plan 2)" --body
 ## Summary
 
 - Extends the Kafka+outbox analytics pipeline (Plan 1) to cover `revenue_events` and `credit_ledger`. TimescaleDB hypertables remain the source of truth (VUK 7-year retention); ClickHouse receives a transactional fan-out for analytics read paths.
-- Ships four new CH migrations: `0004` (revenue Kafka Engine + raw_revenue_events), `0005` (credit Kafka Engine + raw_credit_ledger), `0006` (mv_mrr_daily SummingMergeTree), `0007` (mv_credit_balance AggregatingMergeTree).
+- Ships five new CH migrations: `0004` (revenue Kafka Engine + raw_revenue_events), `0005` (credit Kafka Engine + raw_credit_ledger), `0006` (mv_mrr_daily SummingMergeTree), `0007` (mv_credit_balance AggregatingMergeTree), `0008` (mv_credit_consumption_daily SummingMergeTree).
 - Dashboard MRR endpoint enters **dual-read** mode behind `MRR_READ_SOURCE` env flag. Default remains Timescale; `dual` mode runs both and logs drift; `clickhouse` mode is ready for Plan 3's cutover.
 - Fixes the Plan 1 Phase G TODO: outbox-dispatcher now has per-topic isolation + exponential backoff so a single bad topic no longer halts healthy ones.
 - `verify-clickhouse` CLI gains per-aggregate outbox backlog + consumer-lag for revenue/credit groups.
@@ -932,13 +1012,16 @@ gh pr create --title "feat(ch): revenue + credit outbox fan-out (Plan 2)" --body
 
 ## Migration checklist (Coolify)
 
-- [ ] Apply CH migrations `0004`-`0007` (auto via startup migrator).
+- [ ] Apply CH migrations `0004`-`0008` (auto via startup migrator).
 - [ ] Default `MRR_READ_SOURCE=timescale` — no behavior change.
-- [ ] After 48h of clean `dual` mode logs in staging, flip to `dual` in production; after 14d of clean drift, flip to `clickhouse` (Plan 3).
+- [ ] After 48h of clean `dual` mode logs in staging, flip to `dual` in production.
+- [ ] **Cutover quality gate** (both must pass before Plan 3 flips to `clickhouse`):
+  - [ ] **Time gate**: ≥14 calendar days in production `dual` mode (covers 2 full monthly billing cycles).
+  - [ ] **Checksum gate**: daily correlation job (`apps/api/scripts/mrr-checksum.ts`, stub in Phase E.4) compares CH `sumMerge(net_usd)` vs Timescale `daily_mrr.gross_usd` per project per day; asserts `|delta| < 1¢` for **7 consecutive days** with zero alerts. Time gate alone is a weak signal; the checksum is the real sign-off.
 
 ## Deferred to Plan 3
 - Outbox retention worker.
-- Read-path migration for credit-history, top-spenders, consumption-rate.
+- Read-path migration for credit-history and top-spenders.
 - LTV / churn / refund-rate CH MVs.
 - Grafana observability dashboards.
 EOF
@@ -972,20 +1055,16 @@ ORDER BY (projectId, subscriberId);
 
 Needs subscriber cohort join with a still-to-be-decided `subscribers` CH table. Deferred.
 
-### Credit consumption rate (MV over raw_credit_ledger)
-
-Daily SUM of negative-amount rows per `(projectId, subscriberId)` — straightforward SummingMergeTree once `raw_credit_ledger` (Task B.2) lands.
-
 ### Top spenders leaderboard
 
 Same MV as LTV, just read-path ordering by `sumMerge(ltvUsdState)` descending with a LIMIT.
 
 ---
 
-## Open questions for user sign-off
+## Sign-off (resolved 2026-04-25)
 
-1. **`amount` serialization as string**: Phase A encodes `amount` and `amountUsd` as strings in the outbox payload to avoid JSON number precision loss. CH side `toDecimal128(..., 4)` recovers precision. This is the financial-correctness hot path — confirm before implementation.
-2. **7-year TTL on `raw_revenue_events`**: parity with the VUK retention horizon for the Postgres hypertable. Confirm this is the right horizon for CH too, or should CH hold less (e.g. 2 years, Timescale is authoritative for deep history)?
-3. **Backlog alert threshold**: 10 000 unpublished outbox rows as the exit-2 threshold in `verify-clickhouse` is a guess. What's the expected steady-state backlog in production?
-4. **`dual` mode rollout window**: plan assumes 14 days of clean drift before Plan 3 cutover. Is that aggressive enough / too aggressive?
-5. **`lastActivityAt` on credit balance MV**: is `SimpleAggregateFunction(max)` enough, or do we want full history for consumption-rate charts? Current shape covers the snapshot use case only.
+1. **Q1 — `amount` serialization as string in outbox payload**: ✅ **Confirmed.** JSON number precision drift (IEEE 754) is unacceptable on the financial hot path. String + `toDecimal128(..., 4)` on CH ingest.
+2. **Q2 — CH raw-table retention**: 🔄 **Reduced to 2 years** (see ADR B.0). Timescale remains 7-year VUK-authoritative. Backfill from Timescale if deeper CH history ever required.
+3. **Q3 — Outbox backlog alert thresholds**: 🔄 **Two-tier**: `OUTBOX_BACKLOG_WARN_THRESHOLD` default 1 000 (WARN, exit 0), `OUTBOX_BACKLOG_CRIT_THRESHOLD` default 10 000 (CRIT, exit 2). Re-tune after 30d production data.
+4. **Q4 — `dual` mode cutover window**: ✅ **14 days kept, quality gate added.** Cutover to `clickhouse` requires **both** time gate (≥14 calendar days in `dual`) **and** checksum gate (`|CH_MRR - Timescale_MRR| < 1¢` for 7 consecutive days). See Migration checklist.
+5. **Q5 — Credit consumption-rate aggregate**: 🔄 **Moved into Plan 2 as Task B.5.** `mv_credit_balance` stays snapshot-only (`SimpleAggregateFunction(max)` for `lastActivityAt`); sibling `mv_credit_consumption_daily` SummingMergeTree handles flow/velocity.
