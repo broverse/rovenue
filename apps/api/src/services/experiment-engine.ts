@@ -219,6 +219,7 @@ export async function evaluateExperiments(
     experimentId: string;
     subscriberId: string;
     variantId: string;
+    hashVersion: number;
   }> = [];
 
   for (const exp of bundle.experiments) {
