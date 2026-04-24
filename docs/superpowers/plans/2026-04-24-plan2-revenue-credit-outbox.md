@@ -379,7 +379,7 @@ CREATE TABLE IF NOT EXISTS rovenue.raw_revenue_events
   _version         UInt64
 )
 ENGINE = ReplacingMergeTree(_version)
-ORDER BY (projectId, eventId)
+ORDER BY (projectId, eventDate, eventId)
 PARTITION BY toYYYYMM(eventDate)
 TTL toDateTime(eventDate) + INTERVAL 2 YEAR DELETE;  -- see ADR below; Timescale holds 7y authoritative
 
@@ -453,7 +453,7 @@ CREATE TABLE IF NOT EXISTS rovenue.raw_credit_ledger
   _version       UInt64
 )
 ENGINE = ReplacingMergeTree(_version)
-ORDER BY (projectId, eventId)
+ORDER BY (projectId, createdAt, eventId)
 PARTITION BY toYYYYMM(createdAt)
 TTL toDateTime(createdAt) + INTERVAL 2 YEAR DELETE;  -- see ADR B.0; Timescale holds 7y authoritative
 

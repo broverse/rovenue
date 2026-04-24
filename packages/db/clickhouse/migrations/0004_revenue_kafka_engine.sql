@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS rovenue.raw_revenue_events
   _version       UInt64
 )
 ENGINE = ReplacingMergeTree(_version)
-ORDER BY (projectId, eventId)
+ORDER BY (projectId, eventDate, eventId)
 PARTITION BY toYYYYMM(eventDate)
 -- 2y hot TTL; Postgres/Timescale holds the 7y authoritative record (see ADR B.0)
 TTL toDateTime(eventDate) + INTERVAL 2 YEAR DELETE;
