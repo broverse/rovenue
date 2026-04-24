@@ -2,10 +2,11 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { drizzle, MemberRole } from "@rovenue/db";
+import { MemberRole } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
+import * as mrrAdapter from "../../services/metrics/mrr-adapter";
 
 // =============================================================
 // Dashboard: Project metrics
@@ -74,11 +75,7 @@ export const metricsRoute = new Hono()
 
     const { from, to } = c.req.valid("query");
 
-    const points = await drizzle.metricsRepo.listDailyMrr(drizzle.db, {
-      projectId,
-      from,
-      to,
-    });
+    const points = await mrrAdapter.listDailyMrr({ projectId, from, to });
 
     return c.json(
       ok({
