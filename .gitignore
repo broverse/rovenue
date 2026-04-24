@@ -6,6 +6,8 @@ coverage/
 .env
 .env.local
 .env.*.local
+.env.test
+!.env.test.example
 *.log
 .DS_Store
 .vscode/
