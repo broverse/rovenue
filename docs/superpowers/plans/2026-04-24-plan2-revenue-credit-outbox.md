@@ -425,8 +425,7 @@ CREATE TABLE IF NOT EXISTS rovenue.credit_queue
   eventId     String,
   aggregateId String,
   eventType   String,
-  payload     String,
-  ingestedAt  DateTime64(3) DEFAULT now64()
+  payload     String
 )
 ENGINE = Kafka
 SETTINGS
@@ -465,13 +464,13 @@ SELECT
   JSONExtractString(payload, 'projectId')      AS projectId,
   JSONExtractString(payload, 'subscriberId')   AS subscriberId,
   JSONExtractString(payload, 'type')           AS type,
-  toInt64OrZero(JSONExtractString(payload, 'amount'))  AS amount,
-  toInt64OrZero(JSONExtractString(payload, 'balance')) AS balance,
-  JSONExtractString(payload, 'referenceType')  AS referenceType,
-  JSONExtractString(payload, 'referenceId')    AS referenceId,
+  JSONExtractInt(payload, 'amount')                        AS amount,
+  JSONExtractInt(payload, 'balance')                       AS balance,
+  nullIf(JSONExtractString(payload, 'referenceType'), '')  AS referenceType,
+  nullIf(JSONExtractString(payload, 'referenceId'),   '')  AS referenceId,
   parseDateTime64BestEffort(JSONExtractString(payload, 'createdAt'), 3) AS createdAt,
-  ingestedAt,
-  toUnixTimestamp64Milli(ingestedAt)           AS _version
+  now64(3, 'UTC')                              AS ingestedAt,
+  toUnixTimestamp64Milli(now64(3, 'UTC'))      AS _version
 FROM rovenue.credit_queue;
 ```
 
