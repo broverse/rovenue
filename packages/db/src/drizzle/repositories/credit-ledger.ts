@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import type { Db } from "../client";
 import { creditLedger, type CreditLedgerRow } from "../schema";
 import { creditLedgerType } from "../enums";
+import * as outboxRepo from "./outbox";
 
 // Accepts both top-level db and tx handles for transactional writes.
 type DbOrTx = Db;
@@ -76,26 +77,49 @@ export interface CreditLedgerEntry {
  * compute the running balance (previous latest balance +/- amount).
  * The DB has no BEFORE INSERT trigger that normalises this — keeping
  * the balance consistent is the caller's contract.
+ *
+ * Co-writes a CREDIT_LEDGER outbox row in the same transaction so
+ * both inserts commit or roll back together.
  */
 export async function insertCreditLedger(
   db: DbOrTx,
   entry: CreditLedgerEntry,
 ): Promise<CreditLedgerRow> {
-  const rows = await db
-    .insert(creditLedger)
-    .values({
-      projectId: entry.projectId,
-      subscriberId: entry.subscriberId,
-      type: entry.type,
-      amount: entry.amount,
-      balance: entry.balance,
-      referenceType: entry.referenceType ?? null,
-      referenceId: entry.referenceId ?? null,
-      description: entry.description ?? null,
-      metadata: (entry.metadata ?? null) as typeof creditLedger.$inferInsert.metadata,
-    })
-    .returning();
-  const row = rows[0];
-  if (!row) throw new Error("insertCreditLedger: no row returned");
-  return row;
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .insert(creditLedger)
+      .values({
+        projectId: entry.projectId,
+        subscriberId: entry.subscriberId,
+        type: entry.type,
+        amount: entry.amount,
+        balance: entry.balance,
+        referenceType: entry.referenceType ?? null,
+        referenceId: entry.referenceId ?? null,
+        description: entry.description ?? null,
+        metadata: (entry.metadata ?? null) as typeof creditLedger.$inferInsert.metadata,
+      })
+      .returning();
+    const inserted = rows[0];
+    if (!inserted) throw new Error("insertCreditLedger: no row returned");
+
+    await outboxRepo.insert(tx, {
+      aggregateType: "CREDIT_LEDGER",
+      aggregateId: inserted.id,
+      eventType: "credit.ledger.appended",
+      payload: {
+        creditLedgerId: inserted.id,
+        projectId: inserted.projectId,
+        subscriberId: inserted.subscriberId,
+        type: inserted.type,
+        amount: inserted.amount,
+        balance: inserted.balance,
+        referenceType: inserted.referenceType,
+        referenceId: inserted.referenceId,
+        createdAt: inserted.createdAt.toISOString(),
+      },
+    });
+
+    return inserted;
+  });
 }
