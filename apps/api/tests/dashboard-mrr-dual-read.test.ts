@@ -500,70 +500,27 @@ beforeAll(async () => {
     return Number(rows[0]?.c ?? 0) >= 5;
   }, 90_000);
 
-  // 3. Ensure mv_mrr_daily_target has the expected 2 day-bucket rows.
+  // 3. Wait for mv_mrr_daily_target to have >= 2 day-bucket rows via the
+  //    real MV chain: Kafka Engine → mv_revenue_to_raw → raw_revenue_events
+  //    → mv_mrr_daily → mv_mrr_daily_target.
   //
-  // CH 24.3-alpine does not reliably trigger chained MVs when the source
-  // table is written to by a Kafka Engine + MV pipeline (the intermediate
-  // MV insertion does not always re-trigger subsequent MVs in the same
-  // batch cycle). To keep the test deterministic, we:
-  //   a) Poll briefly (10s) to let natural MV chaining work if it does.
-  //   b) If the table is still empty, INSERT directly from raw_revenue_events
-  //      so the adapter tests can exercise the read path against real data.
+  // The chain fires end-to-end (verified live: 1 rpk message → both raw and
+  // rollup populate within ~5s in this environment). The Kafka Engine's
+  // default stream_flush_interval_ms = 7500ms plus dispatcher publish latency
+  // means ~10–15s is typical for the full chain. We poll up to 60s to give
+  // adequate margin for CI variability.
   //
-  // This does NOT affect what the adapter test is proving: the adapter
-  // reads mv_mrr_daily_target FINAL and returns MrrPoints — whether that
-  // table was populated by the MV or by a direct INSERT is irrelevant to
-  // the adapter's read logic.
-  let mvPopulatedNaturally = false;
-  try {
-    await waitFor(async () => {
-      const res = await ch.query({
-        query: `SELECT count() AS c FROM rovenue.mv_mrr_daily_target WHERE projectId = {projectId:String}`,
-        query_params: { projectId: PROJECT_ID },
-        format: "JSONEachRow",
-      });
-      const rows = (await res.json()) as Array<{ c: string | number }>;
-      return Number(rows[0]?.c ?? 0) >= 2;
-    }, 10_000);
-    mvPopulatedNaturally = true;
-  } catch {
-    // MV chain didn't fire within the short window — backfill manually.
-  }
-
-  if (!mvPopulatedNaturally) {
-    // Backfill mv_mrr_daily_target by running the same aggregation the MV
-    // would have run, directly from raw_revenue_events. This is a faithful
-    // replica of the MV body in 0006_mv_mrr_daily.sql.
-    await ch.command({
-      query: `
-        INSERT INTO rovenue.mv_mrr_daily_target
-        SELECT
-          projectId,
-          toDate(eventDate)                                                   AS day,
-          sumIf(amountUsd, type NOT IN ('REFUND', 'CHARGEBACK'))              AS gross_usd,
-          sumIf(amountUsd, type IN ('REFUND', 'CHARGEBACK'))                  AS refunds_usd,
-          sumIf(amountUsd, type NOT IN ('REFUND', 'CHARGEBACK'))
-            - sumIf(amountUsd, type IN ('REFUND', 'CHARGEBACK'))              AS net_usd,
-          count()                                                             AS event_count,
-          uniqState(subscriberId)                                             AS subscribersHll
-        FROM rovenue.raw_revenue_events
-        WHERE projectId = {projectId:String}
-        GROUP BY projectId, day
-      `,
-      query_params: { projectId: PROJECT_ID },
-    });
-  }
-
-  // Final convergence check — must have >= 2 rows now.
+  // FINAL forces merge-on-read for the SummingMergeTree target so counts
+  // reflect the collapsed (merged) state rather than un-merged parts.
   await waitFor(async () => {
     const res = await ch.query({
-      query: `SELECT count() AS c FROM rovenue.mv_mrr_daily_target WHERE projectId = {projectId:String}`,
+      query: `SELECT count() AS c FROM rovenue.mv_mrr_daily_target FINAL WHERE projectId = {projectId:String}`,
       query_params: { projectId: PROJECT_ID },
       format: "JSONEachRow",
     });
     const rows = (await res.json()) as Array<{ c: string | number }>;
     return Number(rows[0]?.c ?? 0) >= 2;
-  }, 15_000);
+  }, 60_000);
 
   await ch.close();
 
