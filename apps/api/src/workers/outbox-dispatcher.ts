@@ -97,13 +97,13 @@ export function stopOutboxDispatcher(): void {
 
 export async function runOnce(
   producer: NonNullable<Awaited<ReturnType<typeof getProducer>>>,
-): Promise<void> {
+): Promise<boolean> {
   const db = getDb();
   const batch = await db.transaction(async (tx) => {
     return drizzle.outboxRepo.claimBatch(tx, BATCH_SIZE);
   });
 
-  if (batch.length === 0) return;
+  if (batch.length === 0) return false;
 
   // Partition into "ready" (topic not backing off) and "deferred"
   // (topic in backoff window). Deferred rows are left untouched in
@@ -121,7 +121,7 @@ export async function runOnce(
     eligible.push(row);
   }
 
-  if (eligible.length === 0) return;
+  if (eligible.length === 0) return false;
 
   // Group eligible rows by topic.
   const byTopic = new Map<string, OutboxEvent[]>();
@@ -201,7 +201,9 @@ export async function runOnce(
       );
     });
     logger.debug("outbox-dispatcher: flushed batch", { size: succeeded.length });
+    return true;
   }
+  return false;
 }
 
 export async function runOutboxDispatcher(): Promise<void> {
@@ -225,13 +227,12 @@ export async function runOutboxDispatcher(): Promise<void> {
 
   while (!stopFlag) {
     try {
-      await runOnce(producer);
-      // If batch was empty, runOnce returns early; we sleep to avoid
-      // a hot-loop on an empty queue. If the batch had rows, we
-      // immediately re-poll (no sleep needed — the next loop iteration
-      // calls runOnce again at once). We use a short yield so the
-      // loop remains interruptable via stopFlag.
-      await sleep(POLL_INTERVAL_MS);
+      const processed = await runOnce(producer);
+      // Sleep only when nothing was processed (empty queue or all
+      // eligible rows deferred by topic backoff). When rows flushed,
+      // immediately re-poll to drain the backlog without burning a
+      // 500ms gap per batch.
+      if (!processed) await sleep(POLL_INTERVAL_MS);
     } catch (err) {
       logger.error("outbox-dispatcher: loop error, backing off", {
         err: err instanceof Error ? err.message : String(err),
