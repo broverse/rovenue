@@ -311,6 +311,11 @@ async function main() {
         )
         .limit(1);
       if (existingRev.length === 0) {
+        // Intentional repo bypass: dev seeding does not flow through
+        // revenueEventRepo.createRevenueEvent so the outbox is not
+        // populated. Keeps bootstrap offline-friendly (no Redpanda
+        // required to seed) and avoids dispatcher backlog on fresh
+        // dev setups. Production code paths all go through the repo.
         await db.insert(revenueEvents).values({
           projectId: DEMO_PROJECT_ID,
           subscriberId: subId,
@@ -341,6 +346,8 @@ async function main() {
         )
         .limit(1);
       if (existingCredit.length === 0) {
+        // Intentional repo bypass — same reasoning as the revenue
+        // insert above; outbox not populated for dev seed data.
         await db.insert(creditLedger).values({
           projectId: DEMO_PROJECT_ID,
           subscriberId: subId,

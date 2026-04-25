@@ -20,6 +20,9 @@ const envSchema = z
     // land in outbox_events, pending a dispatcher). Required in
     // production; without it exposure events never reach CH.
     KAFKA_BROKERS: z.string().min(1).optional(),
+    // Feature flag for dashboard MRR reads. Controls which analytics backend
+    // to query: timescale (legacy), clickhouse (new), or dual (both for comparison).
+    MRR_READ_SOURCE: z.enum(["timescale", "clickhouse", "dual"]).default("timescale"),
     BETTER_AUTH_SECRET: z.string().min(1).optional(),
     BETTER_AUTH_URL: z.string().url().default("http://localhost:3000"),
     DASHBOARD_URL: z.string().url().default("http://localhost:5173"),

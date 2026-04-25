@@ -2,6 +2,7 @@ import { and, desc, eq, gte } from "drizzle-orm";
 import type { Db } from "../client";
 import { revenueEvents, type RevenueEvent } from "../schema";
 import { revenueEventType, store as storeEnum } from "../enums";
+import * as outboxRepo from "./outbox";
 
 type DbOrTx = Db;
 type Store = (typeof storeEnum.enumValues)[number];
@@ -60,22 +61,53 @@ export interface CreateRevenueEventInput {
  * Append a new revenue_events row. The table is append-only by
  * convention (analytics love immutability) — callers never UPDATE
  * an existing row, they always insert a new one for the latest
- * observation of the same purchase.
+ * observation of the same purchase. Co-writes a REVENUE_EVENT outbox
+ * row in the same transaction so both inserts commit or roll back together.
  */
 export async function createRevenueEvent(
   db: DbOrTx,
   input: CreateRevenueEventInput,
-): Promise<void> {
-  await db.insert(revenueEvents).values({
-    projectId: input.projectId,
-    subscriberId: input.subscriberId,
-    purchaseId: input.purchaseId,
-    productId: input.productId,
-    type: input.type,
-    amount: input.amount,
-    currency: input.currency,
-    amountUsd: input.amountUsd,
-    store: input.store,
-    eventDate: input.eventDate,
+): Promise<RevenueEvent> {
+  return db.transaction(async (tx) => {
+    const [inserted] = await tx
+      .insert(revenueEvents)
+      .values({
+        projectId: input.projectId,
+        subscriberId: input.subscriberId,
+        purchaseId: input.purchaseId,
+        productId: input.productId,
+        type: input.type,
+        amount: input.amount,
+        currency: input.currency,
+        amountUsd: input.amountUsd,
+        store: input.store,
+        eventDate: input.eventDate,
+      })
+      .returning();
+
+    if (!inserted) {
+      throw new Error("createRevenueEvent: insert returned no rows");
+    }
+
+    await outboxRepo.insert(tx, {
+      aggregateType: "REVENUE_EVENT",
+      aggregateId: inserted.id,
+      eventType: "revenue.event.recorded",
+      payload: {
+        revenueEventId: inserted.id,
+        projectId: inserted.projectId,
+        subscriberId: inserted.subscriberId,
+        purchaseId: inserted.purchaseId,
+        productId: inserted.productId,
+        type: inserted.type,
+        store: inserted.store,
+        amount: inserted.amount,
+        amountUsd: inserted.amountUsd,
+        currency: inserted.currency,
+        eventDate: inserted.eventDate.toISOString(),
+      },
+    });
+
+    return inserted;
   });
 }
