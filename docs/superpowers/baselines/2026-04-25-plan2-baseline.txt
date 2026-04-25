@@ -1,0 +1,87 @@
+# Plan 2 baseline snapshot — 2026-04-25
+
+Branch: feat/plan2-revenue-credit-outbox
+Commit count: 23 ahead of main
+
+## Test counts (workspace, Apr 25)
+- @rovenue/db: 55/55 ✓
+- @rovenue/api: 297 pass / 79 fail / 1 skip — 79 are pre-existing dashboard-401 baseline (unrelated)
+- @rovenue/shared: 89/89 ✓
+- @rovenue/dashboard: 5/5 ✓
+
+## tsc build
+- @rovenue/db: exit 0
+- @rovenue/api: exit 0
+
+## ClickHouse schema (rovenue.* — Plan 2 additions)
+
+### revenue_queue
+```sql
+CREATE TABLE rovenue.revenue_queue\n(\n    `eventId` String,\n    `aggregateId` String,\n    `eventType` String,\n    `payload` String\n)\nENGINE = Kafka\nSETTINGS kafka_broker_list = \'redpanda:9092\', kafka_topic_list = \'rovenue.revenue\', kafka_group_name = \'rovenue-ch-revenue\', kafka_format = \'JSONEachRow\', kafka_num_consumers = 1, kafka_max_block_size = 1048576, kafka_skip_broken_messages = 10
+```
+
+### raw_revenue_events
+```sql
+CREATE TABLE rovenue.raw_revenue_events\n(\n    `eventId` String,\n    `revenueEventId` String,\n    `projectId` String,\n    `subscriberId` String,\n    `purchaseId` String,\n    `productId` String,\n    `type` LowCardinality(String),\n    `store` LowCardinality(String),\n    `amount` Decimal(12, 4),\n    `amountUsd` Decimal(12, 4),\n    `currency` LowCardinality(String),\n    `eventDate` DateTime64(3, \'UTC\'),\n    `ingestedAt` DateTime64(3, \'UTC\'),\n    `_version` UInt64\n)\nENGINE = ReplacingMergeTree(_version)\nPARTITION BY toYYYYMM(eventDate)\nORDER BY (projectId, eventDate, eventId)\nTTL toDateTime(eventDate) + toIntervalYear(2)\nSETTINGS index_granularity = 8192
+```
+
+### mv_revenue_to_raw
+```sql
+CREATE MATERIALIZED VIEW rovenue.mv_revenue_to_raw TO rovenue.raw_revenue_events\n(\n    `eventId` String,\n    `revenueEventId` String,\n    `projectId` String,\n    `subscriberId` String,\n    `purchaseId` String,\n    `productId` String,\n    `type` String,\n    `store` String,\n    `amount` Decimal(38, 4),\n    `amountUsd` Decimal(38, 4),\n    `currency` String,\n    `eventDate` DateTime64(3),\n    `ingestedAt` DateTime64(3, \'UTC\'),\n    `_version` Int64\n)\nAS SELECT\n    eventId,\n    JSONExtractString(payload, \'revenueEventId\') AS revenueEventId,\n    JSONExtractString(payload, \'projectId\') AS projectId,\n    JSONExtractString(payload, \'subscriberId\') AS subscriberId,\n    JSONExtractString(payload, \'purchaseId\') AS purchaseId,\n    JSONExtractString(payload, \'productId\') AS productId,\n    JSONExtractString(payload, \'type\') AS type,\n    JSONExtractString(payload, \'store\') AS store,\n    toDecimal128(JSONExtractString(payload, \'amount\'), 4) AS amount,\n    toDecimal128(JSONExtractString(payload, \'amountUsd\'), 4) AS amountUsd,\n    JSONExtractString(payload, \'currency\') AS currency,\n    parseDateTime64BestEffort(JSONExtractString(payload, \'eventDate\'), 3) AS eventDate,\n    now64(3, \'UTC\') AS ingestedAt,\n    toUnixTimestamp64Milli(now64(3, \'UTC\')) AS _version\nFROM rovenue.revenue_queue
+```
+
+### credit_queue
+```sql
+CREATE TABLE rovenue.credit_queue\n(\n    `eventId` String,\n    `aggregateId` String,\n    `eventType` String,\n    `payload` String\n)\nENGINE = Kafka\nSETTINGS kafka_broker_list = \'redpanda:9092\', kafka_topic_list = \'rovenue.credit\', kafka_group_name = \'rovenue-ch-credit\', kafka_format = \'JSONEachRow\', kafka_num_consumers = 1, kafka_max_block_size = 1048576, kafka_skip_broken_messages = 10
+```
+
+### raw_credit_ledger
+```sql
+CREATE TABLE rovenue.raw_credit_ledger\n(\n    `eventId` String,\n    `creditLedgerId` String,\n    `projectId` String,\n    `subscriberId` String,\n    `type` LowCardinality(String),\n    `amount` Int64,\n    `balance` Int64,\n    `referenceType` Nullable(String),\n    `referenceId` Nullable(String),\n    `createdAt` DateTime64(3, \'UTC\'),\n    `ingestedAt` DateTime64(3, \'UTC\'),\n    `_version` UInt64\n)\nENGINE = ReplacingMergeTree(_version)\nPARTITION BY toYYYYMM(createdAt)\nORDER BY (projectId, createdAt, eventId)\nTTL toDateTime(createdAt) + toIntervalYear(2)\nSETTINGS index_granularity = 8192
+```
+
+### mv_credit_to_raw
+```sql
+CREATE MATERIALIZED VIEW rovenue.mv_credit_to_raw TO rovenue.raw_credit_ledger\n(\n    `eventId` String,\n    `creditLedgerId` String,\n    `projectId` String,\n    `subscriberId` String,\n    `type` String,\n    `amount` Int64,\n    `balance` Int64,\n    `referenceType` Nullable(String),\n    `referenceId` Nullable(String),\n    `createdAt` DateTime64(3),\n    `ingestedAt` DateTime64(3, \'UTC\'),\n    `_version` Int64\n)\nAS SELECT\n    eventId,\n    JSONExtractString(payload, \'creditLedgerId\') AS creditLedgerId,\n    JSONExtractString(payload, \'projectId\') AS projectId,\n    JSONExtractString(payload, \'subscriberId\') AS subscriberId,\n    JSONExtractString(payload, \'type\') AS type,\n    JSONExtractInt(payload, \'amount\') AS amount,\n    JSONExtractInt(payload, \'balance\') AS balance,\n    nullIf(JSONExtractString(payload, \'referenceType\'), \'\') AS referenceType,\n    nullIf(JSONExtractString(payload, \'referenceId\'), \'\') AS referenceId,\n    parseDateTime64BestEffort(JSONExtractString(payload, \'createdAt\'), 3) AS createdAt,\n    now64(3, \'UTC\') AS ingestedAt,\n    toUnixTimestamp64Milli(now64(3, \'UTC\')) AS _version\nFROM rovenue.credit_queue
+```
+
+### mv_mrr_daily_target
+```sql
+CREATE TABLE rovenue.mv_mrr_daily_target\n(\n    `projectId` String,\n    `day` Date,\n    `gross_usd` Decimal(18, 4),\n    `refunds_usd` Decimal(18, 4),\n    `net_usd` Decimal(18, 4),\n    `event_count` UInt64,\n    `subscribersHll` AggregateFunction(uniq, String)\n)\nENGINE = SummingMergeTree\nPARTITION BY toYYYYMM(day)\nORDER BY (projectId, day)\nTTL day + toIntervalYear(2)\nSETTINGS index_granularity = 8192
+```
+
+### mv_mrr_daily
+```sql
+CREATE MATERIALIZED VIEW rovenue.mv_mrr_daily TO rovenue.mv_mrr_daily_target\n(\n    `projectId` String,\n    `day` Date,\n    `gross_usd` Decimal(38, 4),\n    `refunds_usd` Decimal(38, 4),\n    `net_usd` Decimal(38, 4),\n    `event_count` UInt64,\n    `subscribersHll` AggregateFunction(uniq, String)\n)\nAS SELECT\n    projectId,\n    toDate(eventDate) AS day,\n    sumIf(amountUsd, type NOT IN (\'REFUND\', \'CHARGEBACK\')) AS gross_usd,\n    sumIf(amountUsd, type IN (\'REFUND\', \'CHARGEBACK\')) AS refunds_usd,\n    sumIf(amountUsd, type NOT IN (\'REFUND\', \'CHARGEBACK\')) - sumIf(amountUsd, type IN (\'REFUND\', \'CHARGEBACK\')) AS net_usd,\n    count() AS event_count,\n    uniqState(subscriberId) AS subscribersHll\nFROM rovenue.raw_revenue_events\nGROUP BY\n    projectId,\n    day
+```
+
+### mv_credit_balance_target
+```sql
+CREATE TABLE rovenue.mv_credit_balance_target\n(\n    `projectId` String,\n    `subscriberId` String,\n    `latestBalanceState` AggregateFunction(argMax, Int64, DateTime64(3)),\n    `totalGrantedState` AggregateFunction(sum, Int64),\n    `totalDebitedState` AggregateFunction(sum, Int64),\n    `lastActivityAt` SimpleAggregateFunction(max, DateTime64(3))\n)\nENGINE = AggregatingMergeTree\nORDER BY (projectId, subscriberId)\nSETTINGS index_granularity = 8192
+```
+
+### mv_credit_balance
+```sql
+CREATE MATERIALIZED VIEW rovenue.mv_credit_balance TO rovenue.mv_credit_balance_target\n(\n    `projectId` String,\n    `subscriberId` String,\n    `latestBalanceState` AggregateFunction(argMax, Int64, DateTime64(3, \'UTC\')),\n    `totalGrantedState` AggregateFunction(sum, Int64),\n    `totalDebitedState` AggregateFunction(sum, Int64),\n    `lastActivityAt` DateTime64(3, \'UTC\')\n)\nAS SELECT\n    projectId,\n    subscriberId,\n    argMaxState(balance, createdAt) AS latestBalanceState,\n    sumState(if(amount > 0, amount, toInt64(0))) AS totalGrantedState,\n    sumState(if(amount < 0, -amount, toInt64(0))) AS totalDebitedState,\n    max(createdAt) AS lastActivityAt\nFROM rovenue.raw_credit_ledger\nGROUP BY\n    projectId,\n    subscriberId
+```
+
+### mv_credit_consumption_daily_target
+```sql
+CREATE TABLE rovenue.mv_credit_consumption_daily_target\n(\n    `projectId` String,\n    `day` Date,\n    `granted_credits` Int64,\n    `debited_credits` Int64,\n    `net_flow` Int64,\n    `event_count` UInt64,\n    `subscribersHll` AggregateFunction(uniq, String)\n)\nENGINE = SummingMergeTree\nPARTITION BY toYYYYMM(day)\nORDER BY (projectId, day)\nTTL day + toIntervalYear(2)\nSETTINGS index_granularity = 8192
+```
+
+### mv_credit_consumption_daily
+```sql
+CREATE MATERIALIZED VIEW rovenue.mv_credit_consumption_daily TO rovenue.mv_credit_consumption_daily_target\n(\n    `projectId` String,\n    `day` Date,\n    `granted_credits` Int64,\n    `debited_credits` Int64,\n    `net_flow` Int64,\n    `event_count` UInt64,\n    `subscribersHll` AggregateFunction(uniq, String)\n)\nAS SELECT\n    projectId,\n    toDate(createdAt) AS day,\n    sumIf(amount, amount > 0) AS granted_credits,\n    sumIf(-amount, amount < 0) AS debited_credits,\n    sum(amount) AS net_flow,\n    count() AS event_count,\n    uniqState(subscriberId) AS subscribersHll\nFROM rovenue.raw_credit_ledger\nGROUP BY\n    projectId,\n    day
+```
+
+## Outbox aggregateType enum (unchanged from Plan 1, all reserved values now in use)
+- EXPOSURE        (Plan 1 — A/B test exposures)
+- REVENUE_EVENT   (Plan 2 — revenue/payment events)
+- CREDIT_LEDGER   (Plan 2 — credit ledger entries)
+(Reserved enum slots from Plan 1 schema — see packages/db/src/drizzle/schema.ts outbox_aggregate_type)
+
+## Env defaults (apps/api/src/lib/env.ts)
+- MRR_READ_SOURCE default: timescale
+- OUTBOX_BACKLOG_WARN_THRESHOLD default: 1000
+- OUTBOX_BACKLOG_CRIT_THRESHOLD default: 10000
