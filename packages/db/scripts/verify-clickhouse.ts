@@ -9,24 +9,37 @@
 // pipeline tables and their engines.
 //
 // What it checks:
-//   1. The five expected tables exist in database `rovenue` and
+//   1. The expected tables exist in database `rovenue` and
 //      carry the right ENGINE (Kafka, ReplacingMergeTree,
-//      MaterializedView, SummingMergeTree).
+//      MaterializedView, SummingMergeTree, AggregatingMergeTree).
+//      Covers Plan 1 (exposure pipeline) and Plan 2 (revenue +
+//      credit Kafka chains, MRR/credit-balance rollups).
 //   2. Kafka consumer state — last_poll_time, num_messages_read,
 //      and any recent librdkafka exceptions. Useful for spotting
 //      a mis-configured broker or a CH container that booted
-//      before Redpanda.
+//      before Redpanda. Includes Plan 2 consumer groups
+//      rovenue-ch-revenue and rovenue-ch-credit.
+//   3. Outbox-backlog diagnostic — queries Postgres
+//      outbox_events WHERE publishedAt IS NULL, grouped by
+//      aggregateType. Two-tier threshold:
+//        WARN (default 1 000, env OUTBOX_BACKLOG_WARN_THRESHOLD)
+//          → prints warning, exit 0.
+//        CRIT (default 10 000, env OUTBOX_BACKLOG_CRIT_THRESHOLD)
+//          → prints error, exit 2.
+//      Steady-state should be ~0; sustained 1k = look, 10k = page.
 //
 // Usage:
 //   CLICKHOUSE_URL=http://localhost:8124 \
 //   CLICKHOUSE_USER=rovenue \
 //   CLICKHOUSE_PASSWORD=rovenue \
+//   DATABASE_URL=postgresql://rovenue:rovenue@localhost:5432/rovenue \
 //     pnpm --filter @rovenue/db db:verify:clickhouse
 //
 // Exits non-zero if any expected table is missing or on the
 // wrong engine.
 
 import { createClient } from "@clickhouse/client";
+import { Client as PgClient } from "pg";
 
 const url = process.env.CLICKHOUSE_URL;
 const user = process.env.CLICKHOUSE_USER ?? "rovenue";
@@ -53,11 +66,29 @@ const client = createClient({
 // engines declared in packages/db/clickhouse/migrations/*.sql.
 // -------------------------------------------------------------
 const EXPECTED_TABLES: ReadonlyArray<{ name: string; engine: string }> = [
+  // Plan 1 — exposure pipeline
   { name: "exposures_queue", engine: "Kafka" },
   { name: "raw_exposures", engine: "ReplacingMergeTree" },
   { name: "mv_exposures_to_raw", engine: "MaterializedView" },
   { name: "mv_experiment_daily", engine: "MaterializedView" },
   { name: "mv_experiment_daily_target", engine: "SummingMergeTree" },
+  // Plan 2 — revenue Kafka chain
+  { name: "revenue_queue", engine: "Kafka" },
+  { name: "raw_revenue_events", engine: "ReplacingMergeTree" },
+  { name: "mv_revenue_to_raw", engine: "MaterializedView" },
+  // Plan 2 — credit Kafka chain
+  { name: "credit_queue", engine: "Kafka" },
+  { name: "raw_credit_ledger", engine: "ReplacingMergeTree" },
+  { name: "mv_credit_to_raw", engine: "MaterializedView" },
+  // Plan 2 — MRR rollup
+  { name: "mv_mrr_daily_target", engine: "SummingMergeTree" },
+  { name: "mv_mrr_daily", engine: "MaterializedView" },
+  // Plan 2 — credit balance rollup
+  { name: "mv_credit_balance_target", engine: "AggregatingMergeTree" },
+  { name: "mv_credit_balance", engine: "MaterializedView" },
+  // Plan 2 — credit consumption rollup
+  { name: "mv_credit_consumption_daily_target", engine: "SummingMergeTree" },
+  { name: "mv_credit_consumption_daily", engine: "MaterializedView" },
 ];
 
 interface TableRow {
@@ -143,6 +174,62 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   console.log("\nClickHouse schema: OK");
+
+  // ---------- Outbox backlog per aggregate ----------
+  //
+  // Healthy steady-state: 0 unpublished rows per aggregate.
+  // WARN: any aggregate >= OUTBOX_BACKLOG_WARN_THRESHOLD (default 1 000)
+  //   → exit 0 but print a warning header.
+  // CRIT: any aggregate >= OUTBOX_BACKLOG_CRIT_THRESHOLD (default 10 000)
+  //   → exit 2.
+  //
+  // Thresholds re-tunable per env after 30 days of prod data.
+
+  const WARN_THRESHOLD = Number(
+    process.env.OUTBOX_BACKLOG_WARN_THRESHOLD ?? 1_000,
+  );
+  const CRIT_THRESHOLD = Number(
+    process.env.OUTBOX_BACKLOG_CRIT_THRESHOLD ?? 10_000,
+  );
+
+  const pg = new PgClient({ connectionString: process.env.DATABASE_URL });
+  await pg.connect();
+  try {
+    const { rows } = await pg.query<{
+      aggregate_type: string;
+      backlog: number;
+    }>(`
+      SELECT "aggregateType" AS aggregate_type, count(*)::int AS backlog
+      FROM outbox_events
+      WHERE "publishedAt" IS NULL
+      GROUP BY "aggregateType"
+      ORDER BY "aggregateType"
+    `);
+    console.log("\nOutbox backlog per aggregate:");
+    if (rows.length === 0) {
+      console.log("  (all aggregates drained — backlog = 0)");
+    } else {
+      for (const r of rows) {
+        console.log(`  ${r.aggregate_type}: ${r.backlog.toLocaleString()}`);
+      }
+    }
+    const maxBacklog =
+      rows.length === 0 ? 0 : Math.max(...rows.map((r) => r.backlog));
+    if (maxBacklog >= CRIT_THRESHOLD) {
+      console.error(
+        `\nCRIT: outbox backlog ${maxBacklog} >= ${CRIT_THRESHOLD} (env OUTBOX_BACKLOG_CRIT_THRESHOLD)`,
+      );
+      process.exit(2);
+    }
+    if (maxBacklog >= WARN_THRESHOLD) {
+      console.warn(
+        `\nWARN: outbox backlog ${maxBacklog} >= ${WARN_THRESHOLD} (env OUTBOX_BACKLOG_WARN_THRESHOLD)`,
+      );
+    }
+  } finally {
+    await pg.end();
+  }
+
   process.exit(0);
 }
 
