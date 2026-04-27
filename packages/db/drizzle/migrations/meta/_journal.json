@@ -148,6 +148,13 @@
       "when": 1777682400000,
       "tag": "0017a_drop_outgoing_webhooks_legacy",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1777682500000,
+      "tag": "0018_drop_timescaledb_extension",
+      "breakpoints": true
     }
   ]
 }
