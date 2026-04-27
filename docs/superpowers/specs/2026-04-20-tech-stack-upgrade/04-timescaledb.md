@@ -1,5 +1,7 @@
 # Alan 4 — TimescaleDB Integration
 
+> **⚠️ DEPRECATED (2026-04-27).** TimescaleDB has been removed from Rovenue's stack as of Plan 3 (`docs/superpowers/plans/2026-04-25-plan3-timescale-removal.md`). The system now uses vanilla PostgreSQL 16 with declarative range partitioning (PG-native) plus `pg_partman` for partition lifecycle, and ClickHouse remains the exclusive analytics read path. Hypertables, continuous aggregates, compression policies, and `daily_mrr` no longer exist. This spec is preserved for historical context only — do not implement against it.
+
 > **Status:** Design (2026-04-20) · **Priority:** 4/6 (scale öncesi)
 > **Target:** PostgreSQL üzerinde TimescaleDB extension, time-series veriler için hypertable + continuous aggregates + compression
 
