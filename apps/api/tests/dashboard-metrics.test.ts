@@ -22,8 +22,8 @@ vi.mock("../src/lib/audit", () => auditMock);
 // Dashboard: MRR metrics endpoint
 // =============================================================
 //
-// The endpoint is a thin wrapper around drizzle.metricsRepo.
-// listDailyMrr, so the tests exercise:
+// The endpoint is a thin wrapper around `services/metrics/mrr.ts`
+// (CH-only since Plan 3). The unit test exercises:
 //   1. dashboard-auth gating (cookie missing → 401)
 //   2. project access enforcement (non-member → 403)
 //   3. default window (30 days when no query params)
@@ -31,19 +31,22 @@ vi.mock("../src/lib/audit", () => auditMock);
 //   5. window cap (>365 days → 400)
 //   6. from > to (→ 400)
 
+const { mrrMock } = vi.hoisted(() => ({
+  mrrMock: {
+    listDailyMrr: vi.fn(async () => [
+      {
+        bucket: new Date("2026-04-01T00:00:00Z"),
+        grossUsd: "99.90",
+        eventCount: 10,
+        activeSubscribers: 8,
+      },
+    ]),
+  },
+}));
+
 const { drizzleMock, authMock } = vi.hoisted(() => {
   const drizzleMock = {
     db: {} as unknown,
-    metricsRepo: {
-      listDailyMrr: vi.fn(async () => [
-        {
-          bucket: new Date("2026-04-01T00:00:00Z"),
-          grossUsd: "99.90",
-          eventCount: 10,
-          activeSubscribers: 8,
-        },
-      ]),
-    },
     projectRepo: {
       findMembership: vi.fn(async (_db: unknown, projectId: string, userId: string) =>
         dbMock.projectMember.findUnique({
@@ -79,6 +82,7 @@ vi.mock("@rovenue/db", async () => {
     drizzle: drizzleMock,
   };
 });
+vi.mock("../src/services/metrics/mrr", () => mrrMock);
 vi.mock("../src/lib/auth", () => ({ auth: authMock }));
 
 import { app } from "../src/app";
@@ -91,7 +95,7 @@ function signedIn(userId = "u_1"): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  drizzleMock.metricsRepo.listDailyMrr.mockResolvedValue([
+  mrrMock.listDailyMrr.mockResolvedValue([
     {
       bucket: new Date("2026-04-01T00:00:00Z"),
       grossUsd: "99.90",
@@ -167,7 +171,7 @@ describe("GET /dashboard/projects/:projectId/metrics/mrr", () => {
       "/dashboard/projects/proj_1/metrics/mrr?from=2026-03-01T00:00:00Z&to=2026-03-15T00:00:00Z",
       { headers: authedHeaders },
     );
-    const call = drizzleMock.metricsRepo.listDailyMrr.mock.calls[0]![1];
+    const call = mrrMock.listDailyMrr.mock.calls[0]![0];
     expect(call.projectId).toBe("proj_1");
     expect(call.from.toISOString()).toBe("2026-03-01T00:00:00.000Z");
     expect(call.to.toISOString()).toBe("2026-03-15T00:00:00.000Z");
