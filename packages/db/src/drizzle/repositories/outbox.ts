@@ -67,4 +67,34 @@ export async function countUnpublished(db: Db): Promise<number> {
   return Number(result[0]?.count ?? 0);
 }
 
+/**
+ * Deletes up to `batchSize` rows whose `publishedAt` is set and is
+ * older than `cutoff`. Returns the number of rows actually deleted —
+ * caller loops until 0 to drain. Used by the outbox-cleanup worker
+ * (Plan 3 §F.2). The outbox is fan-out, not a journal: 24h is
+ * enough headroom for replay; longer-window replays come from the
+ * authoritative `revenue_events` / `credit_ledger` tables.
+ */
+export async function deletePublishedOlderThan(
+  db: Db,
+  cutoff: Date,
+  batchSize: number,
+): Promise<number> {
+  const result = await db.execute(sql`
+    DELETE FROM ${outboxEvents}
+     WHERE id IN (
+       SELECT id FROM ${outboxEvents}
+        WHERE ${outboxEvents.publishedAt} IS NOT NULL
+          AND ${outboxEvents.publishedAt} < ${cutoff}
+        ORDER BY ${outboxEvents.publishedAt} ASC
+        LIMIT ${batchSize}
+     )
+  `);
+  // node-postgres returns rowCount on Result; drizzle's execute
+  // returns the underlying QueryResult. Both expose `rowCount`.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rowCount = (result as any)?.rowCount ?? 0;
+  return Number(rowCount);
+}
+
 export type { OutboxEvent, NewOutboxEvent };

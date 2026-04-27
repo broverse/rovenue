@@ -20,6 +20,14 @@ import {
   scheduleWebhookRetention,
 } from "./workers/webhook-retention";
 import {
+  createOutboxCleanupWorker,
+  scheduleOutboxCleanup,
+} from "./workers/outbox-cleanup";
+import {
+  createPartitionMaintenanceWorker,
+  schedulePartitionMaintenance,
+} from "./workers/partition-maintenance";
+import {
   runOutboxDispatcher,
   stopOutboxDispatcher,
 } from "./workers/outbox-dispatcher";
@@ -59,6 +67,26 @@ scheduleDelivery().catch((err: unknown) => {
 createWebhookRetentionWorker();
 scheduleWebhookRetention().catch((err: unknown) => {
   logger.error("failed to schedule webhook retention", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// outbox_events cleanup — hourly DELETE pass for rows older than
+// 24h whose publishedAt is set (Plan 3 §F.2). Replaces the
+// timescale retention policy on the outbox topic-source table.
+createOutboxCleanupWorker();
+scheduleOutboxCleanup().catch((err: unknown) => {
+  logger.error("failed to schedule outbox cleanup", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Partition maintenance — daily 03:00 UTC. Calls
+// partman.run_maintenance_proc() and pre-creates the next-month
+// partition for outgoing_webhooks (NOT pg_partman-managed).
+createPartitionMaintenanceWorker();
+schedulePartitionMaintenance().catch((err: unknown) => {
+  logger.error("failed to schedule partition maintenance", {
     err: err instanceof Error ? err.message : String(err),
   });
 });

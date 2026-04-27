@@ -155,6 +155,13 @@
       "when": 1777682500000,
       "tag": "0018_drop_timescaledb_extension",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1777682600000,
+      "tag": "0019_install_pg_partman",
+      "breakpoints": true
     }
   ]
 }
