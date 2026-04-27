@@ -9,16 +9,10 @@ import { createHash } from "node:crypto";
 //   Apple Root CA - G3 (ECC, used for StoreKit signing)
 //   Apple Inc. Root (RSA, legacy — keep while some apps still route
 //   through the old chain)
-//
-// PLACEHOLDERS: the hashes below must be replaced with the canonical
-// values published at apple.com/certificateauthority before merging.
-// Compute with:
-//   openssl x509 -in AppleRootCA-G3.cer -inform DER -noout \
-//     -fingerprint -sha256 | awk -F= '{print tolower($2)}' | tr -d ':'
 const frozen = new Set<string>([
-  // @placeholder:apple-root-fingerprint — replace before production
-  "63343abfb89a6a03ebb57e9b3f5fa7be7c4f5c7a8d1ba7e3e5f4eae1f9b2c7dc",
-  // @placeholder:apple-root-fingerprint — replace before production
+  // Apple Root CA - G3 (ECC) — apple.com/certificateauthority
+  "63343abfb89a6a03ebb57e9b3f5fa7be7c4f5c756f3017b3a8c488c3653e9179",
+  // Apple Inc. Root Certificate (RSA, legacy)
   "b0b1730ecbc7ff4505142c49f1295e6eda6bcaed7e2c68c5be91b5a11001f024",
 ]);
 frozen.add = () => {
