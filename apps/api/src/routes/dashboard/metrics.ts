@@ -6,21 +6,20 @@ import { MemberRole } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
-import * as mrrAdapter from "../../services/metrics/mrr-adapter";
+import { listDailyMrr } from "../../services/metrics/mrr";
 
 // =============================================================
 // Dashboard: Project metrics
 // =============================================================
 //
-// Thin surface over the TimescaleDB continuous aggregates. The
-// MRR endpoint reads daily_mrr (refreshed every ~10 minutes with
-// a 1-hour real-time tail) so the chart stays constant-time even
-// as the revenue_events hypertable grows past billions of rows.
+// Thin surface over the ClickHouse `mv_mrr_daily_target`
+// aggregate. The endpoint reads CH exclusively (Plan 3); the
+// freshness budget is set by the outbox dispatcher cadence
+// (≤5s p95, ≤30s p99 from PG commit to CH visibility).
 //
 // Window defaults to the trailing 30 days. Callers may override
-// with `from` / `to` as ISO-8601 strings; the endpoint clamps
-// `to` at now + 24h to block open-ended future-dated reads that
-// would scan empty chunks and return nothing useful.
+// with `from` / `to` as ISO-8601 strings; the schema rejects
+// windows wider than MRR_WINDOW_MAX_DAYS or where from > to.
 
 const MRR_WINDOW_MAX_DAYS = 365;
 const DEFAULT_WINDOW_DAYS = 30;
@@ -75,7 +74,7 @@ export const metricsRoute = new Hono()
 
     const { from, to } = c.req.valid("query");
 
-    const points = await mrrAdapter.listDailyMrr({ projectId, from, to });
+    const points = await listDailyMrr({ projectId, from, to });
 
     return c.json(
       ok({

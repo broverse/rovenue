@@ -14,6 +14,48 @@ import { encodeCursor, decodeCursor } from "../../lib/pagination";
 import { extractRequestContext } from "../../lib/audit";
 import { anonymizeSubscriber } from "../../services/gdpr/anonymize-subscriber";
 import { exportSubscriber } from "../../services/gdpr/export-subscriber";
+import { listCreditHistory } from "../../services/credit-history";
+
+const CREDIT_PREVIEW_LIMIT = 20;
+const CREDIT_HISTORY_DEFAULT_LIMIT = 50;
+const CREDIT_HISTORY_MAX_LIMIT = 100;
+
+const creditHistoryQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(CREDIT_HISTORY_MAX_LIMIT)
+    .default(CREDIT_HISTORY_DEFAULT_LIMIT),
+});
+
+function decodeCreditHistoryCursor(
+  raw: string | undefined,
+): { createdAt: string; id: string } | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(raw, "base64url").toString("utf8"),
+    ) as { createdAt?: unknown; id?: unknown };
+    if (
+      typeof parsed.createdAt !== "string" ||
+      typeof parsed.id !== "string"
+    ) {
+      return null;
+    }
+    return { createdAt: parsed.createdAt, id: parsed.id };
+  } catch {
+    return null;
+  }
+}
+
+function encodeCreditHistoryCursor(cursor: {
+  createdAt: string;
+  id: string;
+}): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
 
 // =============================================================
 // Dashboard: Subscribers list (Task A6)
@@ -131,17 +173,22 @@ export const subscribersRoute = new Hono()
     throw new HTTPException(404, { message: "Subscriber not found" });
   }
 
-  const {
-    access,
-    purchases,
-    latestBalance,
-    ledger,
-    assignments,
-    outgoingWebhooks,
-  } = await drizzle.subscriberDetailRepo.loadSubscriberDetail(
-    drizzle.db,
-    id,
-  );
+  const [
+    { access, purchases, assignments, outgoingWebhooks },
+    creditPreview,
+  ] = await Promise.all([
+    drizzle.subscriberDetailRepo.loadSubscriberDetail(drizzle.db, id),
+    listCreditHistory({
+      projectId,
+      subscriberId: id,
+      limit: CREDIT_PREVIEW_LIMIT,
+    }),
+  ]);
+
+  // The CH preview is sorted createdAt DESC, so the head row is the
+  // most recent ledger entry — its `balance` is the running balance
+  // post-mutation. Falls back to "0" for greenfield subscribers.
+  const creditBalance = creditPreview.entries[0]?.balance ?? "0";
 
   const payload: SubscriberDetail = {
     id: subscriber.id,
@@ -170,16 +217,8 @@ export const subscribersRoute = new Hono()
       expiresDate: p.expiresDate?.toISOString() ?? null,
       autoRenewStatus: p.autoRenewStatus,
     })),
-    creditBalance: String(latestBalance),
-    creditLedger: ledger.map((l) => ({
-      id: l.id,
-      type: l.type,
-      amount: String(l.amount),
-      balance: String(l.balance),
-      referenceType: l.referenceType,
-      description: l.description,
-      createdAt: l.createdAt.toISOString(),
-    })),
+    creditBalance,
+    creditLedger: creditPreview.entries,
     assignments: assignments.map((a) => ({
       experimentId: a.experimentId,
       experimentKey: a.experimentKey,
@@ -201,6 +240,66 @@ export const subscribersRoute = new Hono()
   };
 
     return c.json(ok({ subscriber: payload }));
+  })
+  // =============================================================
+  // Dashboard: Subscriber credit history (Plan 3 §B.1)
+  // =============================================================
+  //
+  // GET /dashboard/projects/:projectId/subscribers/:id/credit-history
+  //   ?cursor=<opaque>&limit=<1..100>
+  //
+  // Paginated CH-backed read of `raw_credit_ledger`. Keyset on
+  // (createdAt DESC, eventId DESC) — opaque cursor encodes both.
+  // Eventual consistency: rows just inserted into Postgres
+  // `credit_ledger` may not appear until the outbox dispatcher
+  // publishes (≤2s p99). Documented in Plan 3 ADR / §B.1.
+  .get("/:id/credit-history", async (c) => {
+    const projectId = c.req.param("projectId");
+    const subscriberId = c.req.param("id");
+    if (!projectId || !subscriberId) {
+      throw new HTTPException(400, { message: "Missing path parameters" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+
+    let query: z.infer<typeof creditHistoryQuerySchema>;
+    try {
+      query = creditHistoryQuerySchema.parse({
+        cursor: c.req.query("cursor"),
+        limit: c.req.query("limit"),
+      });
+    } catch (err) {
+      throw new HTTPException(400, {
+        message:
+          err instanceof z.ZodError
+            ? err.errors[0]?.message ?? "Invalid query parameters"
+            : "Invalid query parameters",
+      });
+    }
+
+    // Cross-project hardening: 404 if the subscriber lives in a
+    // different project (matches the detail endpoint's behaviour).
+    const subscriber = await drizzle.subscriberRepo.findSubscriberById(
+      drizzle.db,
+      subscriberId,
+    );
+    if (!subscriber || subscriber.projectId !== projectId) {
+      throw new HTTPException(404, { message: "Subscriber not found" });
+    }
+
+    const { entries, nextCursor } = await listCreditHistory({
+      projectId,
+      subscriberId,
+      limit: query.limit,
+      cursor: decodeCreditHistoryCursor(query.cursor),
+    });
+
+    return c.json(
+      ok({
+        entries,
+        nextCursor: nextCursor ? encodeCreditHistoryCursor(nextCursor) : null,
+      }),
+    );
   })
   // =============================================================
   // Dashboard: Anonymize subscriber (Task 4.2 — GDPR / KVKK)

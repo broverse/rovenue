@@ -37,6 +37,14 @@ const exportMock = vi.hoisted(() => ({
 }));
 vi.mock("../src/services/gdpr/export-subscriber", () => exportMock);
 
+const creditHistoryMock = vi.hoisted(() => ({
+  listCreditHistory: vi.fn(async () => ({
+    entries: [],
+    nextCursor: null as null | { createdAt: string; id: string },
+  })),
+}));
+vi.mock("../src/services/credit-history", () => creditHistoryMock);
+
 const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
   const dbMock = {
     projectMember: { findUnique: vi.fn() },
@@ -74,8 +82,10 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
       findProjectCredentials: vi.fn(async () => null),
     },
     subscriberDetailRepo: {
+      // Plan 3 §B.1: ledger/latestBalance moved to ClickHouse; PG path
+      // returns access + purchases + assignments + outgoingWebhooks.
       loadSubscriberDetail: vi.fn(async (_db: unknown, subscriberId: string) => {
-        const [purchasesRaw, access, ledger, assignmentsRaw, outgoingWebhooks] =
+        const [purchasesRaw, access, assignmentsRaw, outgoingWebhooks] =
           await Promise.all([
             dbMock.purchase.findMany({
               where: { subscriberId },
@@ -86,11 +96,6 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
             dbMock.subscriberAccess.findMany({
               where: { subscriberId },
               orderBy: { entitlementKey: "asc" },
-            }),
-            dbMock.creditLedger.findMany({
-              where: { subscriberId },
-              orderBy: { createdAt: "desc" },
-              take: 20,
             }),
             dbMock.experimentAssignment.findMany({
               where: { subscriberId },
@@ -113,12 +118,9 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (a: any) => ({ ...a, experimentKey: a.experiment?.key }),
         );
-        const latestBalance = (Array.isArray(ledger) ? ledger : [])[0]?.balance ?? 0;
         return {
           access: Array.isArray(access) ? access : [],
           purchases,
-          latestBalance,
-          ledger: Array.isArray(ledger) ? ledger : [],
           assignments,
           outgoingWebhooks: Array.isArray(outgoingWebhooks)
             ? outgoingWebhooks
@@ -300,21 +302,22 @@ describe("GET /dashboard/projects/:projectId/subscribers/:id", () => {
     dbMock.subscriberAccess.findMany.mockResolvedValue([
       { entitlementKey: "premium", isActive: true, expiresDate: null, store: "APP_STORE", purchaseId: "pur_1" },
     ]);
-    // Phase 6 cutover: loadSubscriberDetail reads the latest
-    // balance from the most-recent ledger row rather than a
-    // separate findFirst. The first row's balance becomes
-    // `creditBalance` in the response.
-    dbMock.creditLedger.findMany.mockResolvedValue([
-      {
-        id: "led_1",
-        type: "PURCHASE",
-        amount: "100",
-        balance: "42",
-        referenceType: "purchase",
-        description: null,
-        createdAt: new Date("2026-04-12"),
-      },
-    ]);
+    // Plan 3 §B.1: credit history + latest balance now come from
+    // ClickHouse. The CH preview's first row supplies `creditBalance`.
+    creditHistoryMock.listCreditHistory.mockResolvedValueOnce({
+      entries: [
+        {
+          id: "led_1",
+          type: "PURCHASE",
+          amount: "100",
+          balance: "42",
+          referenceType: "purchase",
+          description: null,
+          createdAt: "2026-04-12T00:00:00.000Z",
+        },
+      ],
+      nextCursor: null,
+    });
     dbMock.experimentAssignment.findMany.mockResolvedValue([
       {
         experimentId: "exp_1",

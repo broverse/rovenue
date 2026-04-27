@@ -1,14 +1,12 @@
 import { and, desc, asc, eq } from "drizzle-orm";
 import type { Db } from "../client";
 import {
-  creditLedger,
   experimentAssignments,
   experiments,
   outgoingWebhooks,
   products,
   purchases,
   subscriberAccess,
-  type CreditLedgerRow,
   type OutgoingWebhook,
   type SubscriberAccessRow,
 } from "../schema";
@@ -78,19 +76,6 @@ export async function listPurchasesBySubscriber(
   return rows;
 }
 
-export async function listCreditLedgerBySubscriber(
-  db: Db,
-  subscriberId: string,
-  limit: number,
-): Promise<CreditLedgerRow[]> {
-  return db
-    .select()
-    .from(creditLedger)
-    .where(eq(creditLedger.subscriberId, subscriberId))
-    .orderBy(desc(creditLedger.createdAt))
-    .limit(limit);
-}
-
 export interface SubscriberAssignmentDetail {
   experimentId: string;
   experimentKey: string;
@@ -136,36 +121,29 @@ export async function listOutgoingWebhooksBySubscriber(
     .limit(limit);
 }
 
-// Helper that bundles all 5 fan-out reads into one call for the
-// dashboard's detail endpoint.
+// Helper that bundles the PG-side fan-out reads for the dashboard's
+// detail endpoint. Plan 3 §B.1 moved credit ledger preview + balance
+// to ClickHouse (`listCreditHistory`); the route composes them on
+// top of this PG-only payload.
 export async function loadSubscriberDetail(
   db: Db,
   subscriberId: string,
 ): Promise<{
   access: SubscriberAccessRow[];
   purchases: SubscriberDetailPurchase[];
-  latestBalance: number;
-  ledger: CreditLedgerRow[];
   assignments: SubscriberAssignmentDetail[];
   outgoingWebhooks: OutgoingWebhook[];
 }> {
-  const [access, purchasesRows, ledger, assignments, outgoingWebhooksRows] =
+  const [access, purchasesRows, assignments, outgoingWebhooksRows] =
     await Promise.all([
       listAccessBySubscriber(db, subscriberId),
       listPurchasesBySubscriber(db, subscriberId, 50),
-      listCreditLedgerBySubscriber(db, subscriberId, 20),
       listAssignmentsBySubscriber(db, subscriberId),
       listOutgoingWebhooksBySubscriber(db, subscriberId, 20),
     ]);
-  // Latest balance is the most recent entry in the ledger slice
-  // (we already sorted DESC), falling back to 0 for greenfield
-  // subscribers.
-  const latestBalance = ledger[0]?.balance ?? 0;
   return {
     access,
     purchases: purchasesRows,
-    latestBalance,
-    ledger,
     assignments,
     outgoingWebhooks: outgoingWebhooksRows,
   };

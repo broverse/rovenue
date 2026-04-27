@@ -214,8 +214,10 @@ export const subscribers = pgTable(
 export const creditLedger = pgTable(
   "credit_ledger",
   {
-    // `.primaryKey()` removed — hypertable partition column must be in
-    // the PK. The table-level primaryKey below declares (id, createdAt).
+    // `.primaryKey()` removed — declarative range partitioning
+    // requires the partition column in every UNIQUE / PRIMARY KEY.
+    // The table-level primaryKey below declares (id, createdAt). The
+    // cuid2 id alone is still globally unique at the application layer.
     id: text("id").notNull().$defaultFn(() => createId()),
     projectId: text("projectId")
       .notNull()
@@ -239,7 +241,7 @@ export const creditLedger = pgTable(
       .defaultNow(),
   },
   (t) => ({
-    // (id, createdAt) PK — createdAt is the partition column.
+    // (id, createdAt) PK — createdAt is the monthly range partition key.
     pk: primaryKey({ columns: [t.id, t.createdAt] }),
     subscriberIdCreatedAtIdx: index(
       "credit_ledger_subscriberId_createdAt_idx",
@@ -575,8 +577,12 @@ export const outgoingWebhooks = pgTable(
 export const revenueEvents = pgTable(
   "revenue_events",
   {
-    // `.primaryKey()` removed — hypertable partition column must be in
-    // the PK. The table-level primaryKey below declares (id, eventDate).
+    // `.primaryKey()` removed — declarative range partitioning requires
+    // the partition column in every UNIQUE / PRIMARY KEY. The table-
+    // level primaryKey below declares (id, eventDate). cuid2 keeps id
+    // globally unique at the application layer; no external table FKs
+    // into revenue_events, so losing the single-column DB-level
+    // uniqueness is safe.
     id: text("id").notNull().$defaultFn(() => createId()),
     projectId: text("projectId")
       .notNull()
@@ -601,10 +607,7 @@ export const revenueEvents = pgTable(
       .defaultNow(),
   },
   (t) => ({
-    // Hypertable partition column (eventDate) must appear in the PK.
-    // The cuid2 id alone is still globally unique at the application
-    // layer; no external table FKs into revenue_events, so losing the
-    // single-column uniqueness at the DB level is safe.
+    // (id, eventDate) PK — eventDate is the monthly range partition key.
     pk: primaryKey({ columns: [t.id, t.eventDate] }),
     projectIdEventDateIdx: index(
       "revenue_events_projectId_eventDate_idx",

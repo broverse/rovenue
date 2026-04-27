@@ -1,0 +1,22 @@
+-- 0018_drop_timescaledb_extension.sql
+-- Plan 3 §E.1 — drop the TimescaleDB extension once every Timescale
+-- artefact has been replaced with a vanilla equivalent.
+--
+-- Pre-req: 0014 (cagg drop) + 0015–0017 (partition creates) +
+--          0015a–0017a (legacy hypertable drops, gated on
+--          PLAN3_LEGACY_DROP_VERIFIED=1) have all applied. Validate with:
+--            SELECT relname FROM pg_class WHERE relname LIKE '%_legacy_hypertable';
+--          (must return zero rows before this migration runs.)
+--
+-- After this migration the database has no Timescale-specific objects.
+-- IMPORTANT: the Postgres image (deploy/postgres/Dockerfile, Phase G)
+-- MUST be swapped from `timescale/timescaledb:2.17.2-pg16` to vanilla
+-- `postgres:16-bookworm + pg_partman` in the SAME deploy unit. Otherwise
+-- the next restart fails because `shared_preload_libraries=timescaledb`
+-- still tries to load the binary.
+--
+-- CASCADE removes any residual policy rows in `_timescaledb_catalog`
+-- that the legacy-table drops in 0015a–0017a may have orphaned. The
+-- background worker scheduler stops as soon as the extension is gone.
+
+DROP EXTENSION IF EXISTS timescaledb CASCADE;

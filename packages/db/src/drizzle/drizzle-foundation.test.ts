@@ -35,7 +35,6 @@ import {
   subscriberInsertSchema,
 } from "./validators";
 import { nowMinus, timeBucket } from "./sql-helpers";
-import { dailyMrr } from "./views";
 
 // =============================================================
 // Drizzle foundation — smoke tests
@@ -83,7 +82,7 @@ describe("schema shapes compile", () => {
     expect(auditLogs.prevHash.name).toBe("prevHash");
   });
 
-  it("revenueEvents uses a composite (id, eventDate) primary key for hypertable partitioning", () => {
+  it("revenueEvents uses a composite (id, eventDate) primary key for declarative range partitioning", () => {
     // The underlying DB constraint is a composite PK. Drizzle stores
     // that as an extra-config entry on the table; it is NOT reachable
     // via a public helper on the table object, so we assert the
@@ -94,13 +93,13 @@ describe("schema shapes compile", () => {
     expect(revenueEvents.eventDate.name).toBe("eventDate");
   });
 
-  it("creditLedger uses a composite (id, createdAt) primary key for hypertable partitioning", () => {
+  it("creditLedger uses a composite (id, createdAt) primary key for declarative range partitioning", () => {
     const idColumn = creditLedger.id as unknown as { primary: boolean };
     expect(idColumn.primary).toBe(false);
     expect(creditLedger.createdAt.name).toBe("createdAt");
   });
 
-  it("outgoingWebhooks uses a composite (id, createdAt) primary key for hypertable partitioning", () => {
+  it("outgoingWebhooks uses a composite (id, createdAt) primary key for declarative range partitioning", () => {
     const idColumn = outgoingWebhooks.id as unknown as { primary: boolean };
     expect(idColumn.primary).toBe(false);
     expect(outgoingWebhooks.createdAt.name).toBe("createdAt");
@@ -341,16 +340,6 @@ describe("nowMinus", () => {
   it("binds the offset argument as a Param", () => {
     const fragment = nowMinus("30 days");
     expect(containsParam(fragment, "30 days")).toBe(true);
-  });
-});
-
-describe("dailyMrr view", () => {
-  it("exposes the cagg column surface (projectId, bucket, gross_usd, …)", () => {
-    expect(dailyMrr.projectId.name).toBe("projectId");
-    expect(dailyMrr.bucket.name).toBe("bucket");
-    expect(dailyMrr.grossUsd.name).toBe("gross_usd");
-    expect(dailyMrr.eventCount.name).toBe("event_count");
-    expect(dailyMrr.activeSubscribers.name).toBe("active_subscribers");
   });
 });
 
