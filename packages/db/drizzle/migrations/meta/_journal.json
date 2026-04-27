@@ -99,6 +99,13 @@
       "when": 1777514400000,
       "tag": "0013_outbox_events",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1777681800000,
+      "tag": "0014_drop_daily_mrr_cagg",
+      "breakpoints": true
     }
   ]
 }

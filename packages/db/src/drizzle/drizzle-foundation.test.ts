@@ -35,7 +35,6 @@ import {
   subscriberInsertSchema,
 } from "./validators";
 import { nowMinus, timeBucket } from "./sql-helpers";
-import { dailyMrr } from "./views";
 
 // =============================================================
 // Drizzle foundation — smoke tests
@@ -341,16 +340,6 @@ describe("nowMinus", () => {
   it("binds the offset argument as a Param", () => {
     const fragment = nowMinus("30 days");
     expect(containsParam(fragment, "30 days")).toBe(true);
-  });
-});
-
-describe("dailyMrr view", () => {
-  it("exposes the cagg column surface (projectId, bucket, gross_usd, …)", () => {
-    expect(dailyMrr.projectId.name).toBe("projectId");
-    expect(dailyMrr.bucket.name).toBe("bucket");
-    expect(dailyMrr.grossUsd.name).toBe("gross_usd");
-    expect(dailyMrr.eventCount.name).toBe("event_count");
-    expect(dailyMrr.activeSubscribers.name).toBe("active_subscribers");
   });
 });
 
