@@ -205,6 +205,11 @@ export function createAppleVerifier(
   }
 
   if (!certs || certs.length === 0) {
+    if (env.NODE_ENV === "production") {
+      throw new Error(
+        "Apple root certs unavailable (APPLE_ROOT_CERTS_DIR unset, missing, or empty) — refusing to construct an unchained verifier in production",
+      );
+    }
     log.warn("falling back to jose verifier (no Apple root certs)", {
       projectId: opts.projectId,
     });
