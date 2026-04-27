@@ -106,6 +106,48 @@
       "when": 1777681800000,
       "tag": "0014_drop_daily_mrr_cagg",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1777681900000,
+      "tag": "0015_partition_revenue_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1777682000000,
+      "tag": "0016_partition_credit_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1777682100000,
+      "tag": "0017_partition_outgoing_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1777682200000,
+      "tag": "0015a_drop_revenue_events_legacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1777682300000,
+      "tag": "0016a_drop_credit_ledger_legacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1777682400000,
+      "tag": "0017a_drop_outgoing_webhooks_legacy",
+      "breakpoints": true
     }
   ]
 }

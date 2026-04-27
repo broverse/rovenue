@@ -82,7 +82,7 @@ describe("schema shapes compile", () => {
     expect(auditLogs.prevHash.name).toBe("prevHash");
   });
 
-  it("revenueEvents uses a composite (id, eventDate) primary key for hypertable partitioning", () => {
+  it("revenueEvents uses a composite (id, eventDate) primary key for declarative range partitioning", () => {
     // The underlying DB constraint is a composite PK. Drizzle stores
     // that as an extra-config entry on the table; it is NOT reachable
     // via a public helper on the table object, so we assert the
@@ -93,13 +93,13 @@ describe("schema shapes compile", () => {
     expect(revenueEvents.eventDate.name).toBe("eventDate");
   });
 
-  it("creditLedger uses a composite (id, createdAt) primary key for hypertable partitioning", () => {
+  it("creditLedger uses a composite (id, createdAt) primary key for declarative range partitioning", () => {
     const idColumn = creditLedger.id as unknown as { primary: boolean };
     expect(idColumn.primary).toBe(false);
     expect(creditLedger.createdAt.name).toBe("createdAt");
   });
 
-  it("outgoingWebhooks uses a composite (id, createdAt) primary key for hypertable partitioning", () => {
+  it("outgoingWebhooks uses a composite (id, createdAt) primary key for declarative range partitioning", () => {
     const idColumn = outgoingWebhooks.id as unknown as { primary: boolean };
     expect(idColumn.primary).toBe(false);
     expect(outgoingWebhooks.createdAt.name).toBe("createdAt");
