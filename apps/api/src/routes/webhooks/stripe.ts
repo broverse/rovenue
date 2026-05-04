@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import type Stripe from "stripe";
 import { drizzle } from "@rovenue/db";
 import { verifyStripeWebhook } from "../../middleware/webhook-verify";
 import { webhookReplayGuard } from "../../middleware/webhook-replay-guard";
@@ -44,7 +43,7 @@ export const stripeWebhookRoute = new Hono().post(
     const job = await enqueueWebhookEvent({
       source: "STRIPE",
       projectId,
-      event: JSON.parse(JSON.stringify(event)) as Stripe.Event,
+      event,
     });
 
     log.info("stripe notification enqueued", {
