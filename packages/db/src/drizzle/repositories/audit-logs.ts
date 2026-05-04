@@ -91,9 +91,12 @@ export async function listAuditLogs(
     .limit(args.limit)
     .offset(args.offset);
 
+  // The WHERE clause matches `auditLogs.projectId = f.projectId`,
+  // which excludes orphan rows whose projectId was nulled by the
+  // ON DELETE SET NULL FK — hence the non-null assertion is sound.
   return rows.map((r) => ({
     id: r.id,
-    projectId: r.projectId,
+    projectId: r.projectId!,
     userId: r.userId,
     action: r.action,
     resource: r.resource,
@@ -154,7 +157,9 @@ export async function findProjectChain(
     .from(auditLogs)
     .where(eq(auditLogs.projectId, projectId))
     .orderBy(auditLogs.createdAt, auditLogs.id);
-  return rows;
+  // WHERE filters to a specific projectId, so orphan rows with
+  // null projectId (post-cascade SET NULL) cannot appear here.
+  return rows.map((r) => ({ ...r, projectId: r.projectId! }));
 }
 
 /**
@@ -192,9 +197,12 @@ export async function findAuditLogById(
     .limit(1);
   const r = rows[0];
   if (!r) return null;
+  // findAuditLogById is reached only from project-scoped routes
+  // that already verified the row belongs to a live project, so
+  // the projectId is guaranteed non-null in this path.
   return {
     id: r.id,
-    projectId: r.projectId,
+    projectId: r.projectId!,
     userId: r.userId,
     action: r.action,
     resource: r.resource,

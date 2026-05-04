@@ -381,18 +381,15 @@ export const projectsRoute = new Hono()
     const payload: RotateWebhookSecretResponse = { webhookSecret };
     return c.json(ok(payload));
   })
-  // DELETE /:id — OWNER only. We intentionally write the audit row
-  // BEFORE the project row is deleted so the audit.projectId foreign
-  // key still resolves. Cascading delete on the project table would
-  // take the audit row with it if we ran these in the opposite order.
+  // DELETE /:id — OWNER only. The audit row records who deleted the
+  // project; it survives the delete because the FK is ON DELETE SET
+  // NULL (audit_logs.projectId becomes null after the cascade, but
+  // resourceId still holds the original project id).
   .delete("/:id", async (c) => {
     const id = c.req.param("id");
     const user = c.get("user");
     await assertProjectAccess(id, user.id, MemberRole.OWNER);
 
-    // Atomic. Note the ordering constraint: audit FIRST so the fk
-    // (audit.projectId → project.id) resolves before cascade delete
-    // takes the project row out.
     await drizzle.db.transaction(async (tx) => {
       await audit(
         {

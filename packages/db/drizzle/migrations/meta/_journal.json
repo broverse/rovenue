@@ -162,6 +162,13 @@
       "when": 1777682600000,
       "tag": "0019_install_pg_partman",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1777881637539,
+      "tag": "0023_audit_logs_project_set_null",
+      "breakpoints": true
     }
   ]
 }

@@ -260,9 +260,14 @@ export const auditLogs = pgTable(
   "audit_logs",
   {
     id: text("id").primaryKey().$defaultFn(() => createId()),
-    projectId: text("projectId")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" }),
+    // Nullable + ON DELETE SET NULL so deleting a project preserves
+    // its audit history as orphan rows (the original project id is
+    // still queryable via `resourceId` for "project.deleted"
+    // entries). New inserts always set projectId at the app layer
+    // — see lib/audit.ts.
+    projectId: text("projectId").references(() => projects.id, {
+      onDelete: "set null",
+    }),
     userId: text("userId")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
