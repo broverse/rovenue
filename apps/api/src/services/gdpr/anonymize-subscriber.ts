@@ -91,12 +91,6 @@ export async function anonymizeSubscriber(
       deletedAt,
     );
 
-    // TODO(audit-tx): once audit() re-threads _callerTx we should
-    // pass `tx` to guarantee atomicity with the row update. Today
-    // audit() opens its own transaction (see apps/api/src/lib/
-    // audit.ts:205-212 comment), so the row update and audit entry
-    // commit independently. Pre-existing limitation, not a Task 4.1
-    // regression.
     await audit(
       {
         projectId: input.projectId,

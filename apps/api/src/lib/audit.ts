@@ -108,17 +108,15 @@ export function extractRequestContext(c: Context): {
 // =============================================================
 //
 // Drizzle's transaction callback hands the caller a proxy that
-// shares the parent `Db` surface (select/insert/execute). audit()
-// currently opens its own inner transaction so the chain commits
-// independently of the caller's tx; callers still pass their tx
-// handle for future re-threading, so we keep the second parameter
-// as `unknown` to stay forward-compatible.
-
-export type AuditTx = unknown;
+// shares the parent `Db` surface (select/insert/execute). When a
+// caller passes their tx, audit() runs the chain write inside it
+// so the audit row commits/rolls back atomically with the caller's
+// domain row. Without a callerTx, audit() opens its own inner tx
+// just for advisory-lock scope.
 
 import type { Db as DrizzleDb } from "@rovenue/db";
 
-type DrizzleAuditTxInner = {
+export type AuditTx = {
   select: DrizzleDb["select"];
   insert: DrizzleDb["insert"];
   execute: DrizzleDb["execute"];
@@ -191,7 +189,7 @@ function buildCanonicalPayload(
 
 export async function audit(
   entry: AuditEntry,
-  _callerTx?: AuditTx,
+  callerTx?: AuditTx,
 ): Promise<void> {
   if (entry.resource === "credential") {
     for (const snapshot of [entry.before, entry.after]) {
@@ -203,18 +201,19 @@ export async function audit(
     }
   }
 
-  // audit() opens its own Drizzle transaction so the advisory
-  // lock has a scope. `_callerTx` is retained in the signature
-  // for callers that haven't migrated yet — we intentionally
-  // ignore it for now; see the note on AuditTx above.
+  if (callerTx) {
+    await writeChained(entry, callerTx);
+    return;
+  }
+
   await drizzle.db.transaction(async (innerTx) =>
-    writeChained(entry, innerTx as unknown as DrizzleAuditTxInner),
+    writeChained(entry, innerTx as unknown as AuditTx),
   );
 }
 
 async function writeChained(
   entry: AuditEntry,
-  tx: DrizzleAuditTxInner,
+  tx: AuditTx,
 ): Promise<void> {
   // Per-project advisory xact lock. Two concurrent audit writes for
   // the same project now serialise at this lock, so prevHash lookup
