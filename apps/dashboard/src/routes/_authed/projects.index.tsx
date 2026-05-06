@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Button, Spinner } from "@heroui/react";
+import { useTranslation } from "react-i18next";
 import { TopNav } from "../../components/layout/TopNav";
 import { ProjectCard } from "../../components/projects/ProjectCard";
 import { useProjects } from "../../lib/hooks/useProjects";
@@ -9,6 +10,7 @@ export const Route = createFileRoute("/_authed/projects/")({
 });
 
 export function ProjectsList() {
+  const { t } = useTranslation();
   const { data, isLoading, error } = useProjects();
 
   return (
@@ -16,15 +18,15 @@ export function ProjectsList() {
       <TopNav />
       <div className="mx-auto max-w-6xl px-6 py-8">
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">Projects</h1>
+          <h1 className="text-2xl font-semibold">{t("projects.list.title")}</h1>
           <Link to="/projects/new">
-            <Button variant="primary">New project</Button>
+            <Button variant="primary">{t("projects.list.newProject")}</Button>
           </Link>
         </div>
 
         {isLoading && (
           <div className="flex items-center gap-2 text-default-500">
-            <Spinner /> <span className="text-sm">Loading...</span>
+            <Spinner /> <span className="text-sm">{t("common.loading")}</span>
           </div>
         )}
         {error && (
@@ -34,7 +36,7 @@ export function ProjectsList() {
         )}
         {data?.length === 0 && (
           <div className="rounded-lg border border-dashed border-default-300 p-12 text-center text-default-500">
-            No projects yet. Create your first one to get started.
+            {t("projects.list.empty")}
           </div>
         )}
         {data && data.length > 0 && (

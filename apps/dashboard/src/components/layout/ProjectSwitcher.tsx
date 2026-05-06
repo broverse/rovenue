@@ -1,15 +1,17 @@
 import { useNavigate } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 import { useProjects } from "../../lib/hooks/useProjects";
 
 // HeroUI v3 Select is a complex react-aria composition; a native <select>
 // keeps the switcher small and accessible without pulling that machinery in.
 export function ProjectSwitcher({ currentProjectId }: { currentProjectId: string }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { data } = useProjects();
 
   return (
     <select
-      aria-label="Switch project"
+      aria-label={t("projectSwitcher.ariaLabel")}
       value={currentProjectId}
       onChange={(e) => {
         const nextId = e.target.value;
@@ -30,7 +32,7 @@ export function ProjectSwitcher({ currentProjectId }: { currentProjectId: string
         <option key={p.id} value={p.id}>
           {p.name}
         </option>
-      )) ?? <option value={currentProjectId}>Loading...</option>}
+      )) ?? <option value={currentProjectId}>{t("projectSwitcher.loading")}</option>}
     </select>
   );
 }

@@ -1,16 +1,18 @@
 import { Button } from "@heroui/react";
 import { Link, useNavigate } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 import { signOut, useSession } from "../../lib/auth";
 import { ThemeToggle } from "./ThemeToggle";
 
 export function TopNav() {
+  const { t } = useTranslation();
   const { data } = useSession();
   const navigate = useNavigate();
   return (
     <header className="border-b border-default-200 bg-content1">
       <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
         <Link to="/projects" className="text-lg font-semibold">
-          Rovenue
+          {t("topNav.appName")}
         </Link>
         <div className="flex items-center gap-3">
           <ThemeToggle />
@@ -23,7 +25,7 @@ export function TopNav() {
               await navigate({ to: "/login", search: { error: undefined } });
             }}
           >
-            Sign out
+            {t("common.signOut")}
           </Button>
         </div>
       </div>

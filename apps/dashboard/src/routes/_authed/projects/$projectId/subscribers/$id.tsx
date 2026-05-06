@@ -1,5 +1,6 @@
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { Spinner } from "@heroui/react";
+import { useTranslation } from "react-i18next";
 import { useSubscriber } from "../../../../../lib/hooks/useSubscriber";
 import { SubscriberDetailPanel } from "../../../../../components/subscribers/SubscriberDetailPanel";
 
@@ -19,12 +20,13 @@ export function SubscriberDetailPage({
   projectId: string;
   id: string;
 }) {
+  const { t } = useTranslation();
   const { data, isLoading, error } = useSubscriber(projectId, id);
 
   if (isLoading) {
     return (
       <div className="flex items-center gap-2 text-default-500">
-        <Spinner /> <span className="text-sm">Loading...</span>
+        <Spinner /> <span className="text-sm">{t("common.loading")}</span>
       </div>
     );
   }

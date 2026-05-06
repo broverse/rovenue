@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button } from "@heroui/react";
+import { useTranslation } from "react-i18next";
 import { authClient } from "../../lib/auth";
 
 const DEV_EMAIL = "dev@rovenue.local";
@@ -15,6 +16,7 @@ const DEV_NAME = "Dev User";
  * and fall back to signUp when the account doesn't exist yet.
  */
 export function DevLoginButton() {
+  const { t } = useTranslation();
   const [isPending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +35,7 @@ export function DevLoginButton() {
           name: DEV_NAME,
         });
         if (signUp.error) {
-          throw new Error(signUp.error.message ?? "Dev sign-up failed");
+          throw new Error(signUp.error.message ?? t("auth.devSignUpFailed"));
         }
       }
       window.location.href = "/projects";
@@ -47,7 +49,7 @@ export function DevLoginButton() {
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2 text-xs text-default-400">
         <span className="h-px flex-1 bg-default-200" />
-        <span>dev only</span>
+        <span>{t("common.devOnly")}</span>
         <span className="h-px flex-1 bg-default-200" />
       </div>
       <Button
@@ -56,7 +58,7 @@ export function DevLoginButton() {
         isPending={isPending}
         onPress={loginOrCreate}
       >
-        Continue as Dev User
+        {t("auth.continueAsDev")}
       </Button>
       {error && (
         <div role="alert" className="text-sm text-danger-500">

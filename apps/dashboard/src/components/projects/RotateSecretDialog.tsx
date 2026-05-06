@@ -9,6 +9,7 @@ import {
   ModalFooter,
   ModalHeader,
 } from "@heroui/react";
+import { useTranslation } from "react-i18next";
 import { useRotateWebhookSecret } from "../../lib/hooks/useRotateWebhookSecret";
 
 interface Props {
@@ -16,6 +17,7 @@ interface Props {
 }
 
 export function RotateSecretDialog({ projectId }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [revealed, setRevealed] = useState<string | null>(null);
   const { mutate, isPending, error, reset } = useRotateWebhookSecret(projectId);
@@ -29,7 +31,7 @@ export function RotateSecretDialog({ projectId }: Props) {
   return (
     <>
       <Button variant="outline" onPress={() => setOpen(true)}>
-        Rotate webhook secret
+        {t("projects.rotateSecret.trigger")}
       </Button>
 
       <Modal isOpen={open}>
@@ -38,13 +40,9 @@ export function RotateSecretDialog({ projectId }: Props) {
             <ModalDialog>
               {revealed === null ? (
                 <>
-                  <ModalHeader>Rotate webhook secret?</ModalHeader>
+                  <ModalHeader>{t("projects.rotateSecret.header")}</ModalHeader>
                   <ModalBody className="gap-3">
-                    <p className="text-sm text-default-500">
-                      This invalidates the current secret immediately. Any
-                      webhook delivery signed with the old secret will fail
-                      verification until you update the receiving endpoint.
-                    </p>
+                    <p className="text-sm text-default-500">{t("projects.rotateSecret.body")}</p>
                     {error && (
                       <div role="alert" className="text-sm text-danger-500">
                         {error.message}
@@ -53,7 +51,7 @@ export function RotateSecretDialog({ projectId }: Props) {
                   </ModalBody>
                   <ModalFooter>
                     <Button variant="ghost" onPress={close} isDisabled={isPending}>
-                      Cancel
+                      {t("common.cancel")}
                     </Button>
                     <Button
                       variant="danger"
@@ -64,25 +62,22 @@ export function RotateSecretDialog({ projectId }: Props) {
                         })
                       }
                     >
-                      Rotate secret
+                      {t("projects.rotateSecret.confirm")}
                     </Button>
                   </ModalFooter>
                 </>
               ) : (
                 <>
-                  <ModalHeader>Copy the new secret</ModalHeader>
+                  <ModalHeader>{t("projects.rotateSecret.copyHeader")}</ModalHeader>
                   <ModalBody className="gap-3">
-                    <p className="text-sm text-default-500">
-                      This is the only time we'll show the secret. Store it in
-                      your deployment secrets before closing this dialog.
-                    </p>
+                    <p className="text-sm text-default-500">{t("projects.rotateSecret.copyBody")}</p>
                     <pre className="overflow-x-auto rounded bg-default-100 p-3 font-mono text-xs">
                       {revealed}
                     </pre>
                   </ModalBody>
                   <ModalFooter>
                     <Button variant="primary" onPress={close}>
-                      I've copied it
+                      {t("projects.rotateSecret.copied")}
                     </Button>
                   </ModalFooter>
                 </>

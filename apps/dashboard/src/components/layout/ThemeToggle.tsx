@@ -1,15 +1,11 @@
 import { useEffect, useState } from "react";
 import { Button } from "@heroui/react";
 import { useTheme } from "next-themes";
+import { useTranslation } from "react-i18next";
 
 type Mode = "light" | "dark" | "system";
 
 const ORDER: Mode[] = ["light", "dark", "system"];
-const LABEL: Record<Mode, string> = {
-  light: "Light",
-  dark: "Dark",
-  system: "System",
-};
 
 function SunIcon() {
   return (
@@ -50,6 +46,7 @@ const ICON: Record<Mode, React.ReactNode> = {
  * tells us the current value.
  */
 export function ThemeToggle() {
+  const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
@@ -69,7 +66,7 @@ export function ThemeToggle() {
       size="sm"
       variant="ghost"
       onPress={cycle}
-      aria-label={`Theme: ${LABEL[current]} (click to change)`}
+      aria-label={t("common.themeAria", { label: t(`themes.${current}`) })}
       className="min-w-8 px-2"
     >
       {ICON[current]}

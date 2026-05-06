@@ -6,6 +6,7 @@ import {
   Label,
   TextField,
 } from "@heroui/react";
+import { useTranslation } from "react-i18next";
 import type { CreateProjectResponse } from "@rovenue/shared";
 import { useCreateProject } from "../../lib/hooks/useCreateProject";
 
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export function CreateProjectForm({ onCreated }: Props) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const { mutate, isPending, error } = useCreateProject();
@@ -30,13 +32,13 @@ export function CreateProjectForm({ onCreated }: Props) {
       className="flex flex-col gap-4"
     >
       <TextField value={name} onChange={setName} isRequired>
-        <Label>Project name</Label>
-        <Input placeholder="Acme" />
+        <Label>{t("projects.form.name")}</Label>
+        <Input placeholder={t("projects.form.namePlaceholder")} />
       </TextField>
       <TextField value={slug} onChange={setSlug} isRequired>
-        <Label>Slug</Label>
-        <Input placeholder="acme" />
-        <Description>Lowercase letters, numbers, and dashes only</Description>
+        <Label>{t("projects.form.slug")}</Label>
+        <Input placeholder={t("projects.form.slugPlaceholder")} />
+        <Description>{t("projects.form.slugDescription")}</Description>
       </TextField>
       {error && (
         <div role="alert" className="text-sm text-danger-500">
@@ -49,7 +51,7 @@ export function CreateProjectForm({ onCreated }: Props) {
         isPending={isPending}
         isDisabled={!canSubmit}
       >
-        Create project
+        {t("projects.form.createProject")}
       </Button>
     </form>
   );

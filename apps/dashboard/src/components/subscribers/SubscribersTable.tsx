@@ -1,5 +1,6 @@
 import { Chip } from "@heroui/react";
 import { Link } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 import type { SubscriberListItem } from "@rovenue/shared";
 
 interface Props {
@@ -8,10 +9,11 @@ interface Props {
 }
 
 export function SubscribersTable({ projectId, rows }: Props) {
+  const { t } = useTranslation();
   if (rows.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-default-300 p-12 text-center text-default-500">
-        No subscribers
+        {t("subscribers.empty")}
       </div>
     );
   }
@@ -20,10 +22,10 @@ export function SubscribersTable({ projectId, rows }: Props) {
       <table className="w-full text-sm">
         <thead className="text-left text-xs uppercase text-default-500">
           <tr className="border-b border-default-200">
-            <th className="py-2 pr-4">App user id</th>
-            <th className="py-2 pr-4">Last seen</th>
-            <th className="py-2 pr-4">Purchases</th>
-            <th className="py-2">Active access</th>
+            <th className="py-2 pr-4">{t("subscribers.table.appUserId")}</th>
+            <th className="py-2 pr-4">{t("subscribers.table.lastSeen")}</th>
+            <th className="py-2 pr-4">{t("subscribers.table.purchases")}</th>
+            <th className="py-2">{t("subscribers.table.activeAccess")}</th>
           </tr>
         </thead>
         <tbody>

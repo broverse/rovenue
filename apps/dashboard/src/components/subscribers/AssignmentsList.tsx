@@ -1,4 +1,5 @@
 import { Chip } from "@heroui/react";
+import { useTranslation } from "react-i18next";
 import type { SubscriberAssignment } from "@rovenue/shared";
 
 interface Props {
@@ -6,10 +7,11 @@ interface Props {
 }
 
 export function AssignmentsList({ rows }: Props) {
+  const { t } = useTranslation();
   if (rows.length === 0) {
     return (
       <div className="text-sm text-default-500">
-        Not in any active experiments.
+        {t("subscribers.assignments.empty")}
       </div>
     );
   }
@@ -23,14 +25,14 @@ export function AssignmentsList({ rows }: Props) {
           <div className="flex flex-col">
             <span className="font-semibold">{a.experimentKey}</span>
             <span className="text-xs text-default-500">
-              variant {a.variantId}
+              {t("subscribers.assignments.variantPrefix", { id: a.variantId })}
             </span>
           </div>
           <Chip
             size="sm"
             color={a.convertedAt ? "success" : "default"}
           >
-            {a.convertedAt ? "Converted" : "Active"}
+            {a.convertedAt ? t("subscribers.assignments.converted") : t("subscribers.assignments.active")}
           </Chip>
         </li>
       ))}

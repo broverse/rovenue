@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Card } from "@heroui/react";
+import { useTranslation } from "react-i18next";
 import { OAuthButton } from "../components/auth/OAuthButton";
 import { DevLoginButton } from "../components/auth/DevLoginButton";
 
@@ -16,14 +17,13 @@ function LoginRouteComponent() {
 }
 
 export function LoginPage({ error }: { error?: string }) {
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-screen items-center justify-center p-6">
       <Card className="w-full max-w-md p-6">
         <div className="mb-4 flex flex-col gap-1">
-          <h1 className="text-xl font-semibold">Sign in to Rovenue</h1>
-          <p className="text-sm text-default-500">
-            Continue with GitHub or Google to manage your projects.
-          </p>
+          <h1 className="text-xl font-semibold">{t("auth.title")}</h1>
+          <p className="text-sm text-default-500">{t("auth.subtitle")}</p>
         </div>
         <div className="flex flex-col gap-3">
           {error && (
@@ -34,8 +34,8 @@ export function LoginPage({ error }: { error?: string }) {
               {error}
             </div>
           )}
-          <OAuthButton provider="github">Continue with GitHub</OAuthButton>
-          <OAuthButton provider="google">Continue with Google</OAuthButton>
+          <OAuthButton provider="github">{t("auth.continueWithGithub")}</OAuthButton>
+          <OAuthButton provider="google">{t("auth.continueWithGoogle")}</OAuthButton>
           {import.meta.env.DEV && <DevLoginButton />}
         </div>
       </Card>

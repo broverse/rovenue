@@ -1,5 +1,6 @@
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { Card } from "@heroui/react";
+import { useTranslation } from "react-i18next";
 import { useProject } from "../../../../lib/hooks/useProject";
 import { SettingsForm } from "../../../../components/projects/SettingsForm";
 import { RotateSecretDialog } from "../../../../components/projects/RotateSecretDialog";
@@ -10,6 +11,7 @@ export const Route = createFileRoute("/_authed/projects/$projectId/settings")({
 });
 
 function ProjectSettingsPage() {
+  const { t } = useTranslation();
   const { projectId } = useParams({ from: "/_authed/projects/$projectId/settings" });
   const { data: project } = useProject(projectId);
 
@@ -18,26 +20,26 @@ function ProjectSettingsPage() {
   return (
     <div className="flex flex-col gap-6">
       <Card className="p-6">
-        <h2 className="mb-4 text-lg font-semibold">General</h2>
+        <h2 className="mb-4 text-lg font-semibold">{t("projects.settings.general")}</h2>
         <SettingsForm project={project} />
       </Card>
 
       <Card className="p-6">
-        <h2 className="mb-2 text-lg font-semibold">Webhook secret</h2>
+        <h2 className="mb-2 text-lg font-semibold">{t("projects.settings.webhookSecretHeader")}</h2>
         <p className="mb-4 text-sm text-default-500">
           {project.hasWebhookSecret
-            ? "A webhook signing secret is currently configured. Rotating generates a new one and invalidates the old value immediately."
-            : "No webhook secret is set. Rotate to generate one."}
+            ? t("projects.settings.webhookSecretConfigured")
+            : t("projects.settings.webhookSecretMissing")}
         </p>
         <RotateSecretDialog projectId={project.id} />
       </Card>
 
       <Card className="border border-danger-200 p-6">
         <h2 className="mb-2 text-lg font-semibold text-danger-500">
-          Danger zone
+          {t("projects.settings.dangerZone")}
         </h2>
         <p className="mb-4 text-sm text-default-500">
-          Deleting a project is permanent and cannot be undone.
+          {t("projects.settings.dangerZoneDescription")}
         </p>
         <DeleteProjectDialog
           projectId={project.id}

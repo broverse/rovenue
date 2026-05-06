@@ -6,6 +6,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { ThemeProvider } from "next-themes";
 import { router } from "./router";
 import { queryClient } from "./lib/queryClient";
+import "./i18n/config";
 import "./index.css";
 
 declare module "@tanstack/react-router" {

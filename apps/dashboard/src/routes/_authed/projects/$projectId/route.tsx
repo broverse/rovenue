@@ -1,16 +1,34 @@
-import { createFileRoute, Link, Outlet, useParams } from "@tanstack/react-router";
+import { createFileRoute, Outlet, useChildMatches, useParams } from "@tanstack/react-router";
 import { Spinner } from "@heroui/react";
+import { useTranslation } from "react-i18next";
 import { TopNav } from "../../../../components/layout/TopNav";
-import { ProjectSwitcher } from "../../../../components/layout/ProjectSwitcher";
+import { DashboardShell } from "../../../../components/dashboard";
 import { useProject } from "../../../../lib/hooks/useProject";
 
 export const Route = createFileRoute("/_authed/projects/$projectId")({
   component: ProjectLayout,
 });
 
+/**
+ * Best-effort breadcrumb key derived from the deepest active route id.
+ * Returns an i18n key that the layout resolves via `t()` so the displayed
+ * label stays localized.
+ */
+function useBreadcrumbTitleKey(): string {
+  const matches = useChildMatches();
+  const last = matches[matches.length - 1];
+  const id = last?.routeId ?? "";
+  if (id.includes("/subscribers/$id")) return "breadcrumb.subscriber";
+  if (id.includes("/subscribers/")) return "breadcrumb.subscribers";
+  if (id.includes("/settings")) return "breadcrumb.settings";
+  return "breadcrumb.overview";
+}
+
 function ProjectLayout() {
+  const { t } = useTranslation();
   const { projectId } = useParams({ from: "/_authed/projects/$projectId" });
   const { data: project, isLoading, error } = useProject(projectId);
+  const current = t(useBreadcrumbTitleKey());
 
   if (isLoading) {
     return (
@@ -18,7 +36,7 @@ function ProjectLayout() {
         <TopNav />
         <div className="mx-auto flex max-w-6xl items-center gap-2 px-6 py-8 text-default-500">
           <Spinner />
-          <span className="text-sm">Loading project...</span>
+          <span className="text-sm">{t("common.loadingProject")}</span>
         </div>
       </>
     );
@@ -30,50 +48,16 @@ function ProjectLayout() {
         <TopNav />
         <div className="mx-auto max-w-6xl px-6 py-8">
           <div role="alert" className="rounded-lg border border-default-200 p-6 text-default-500">
-            Project not found.
+            {t("common.projectNotFound")}
           </div>
         </div>
       </>
     );
   }
 
-  const activeLinkProps = { className: "font-semibold text-primary" };
-
   return (
-    <>
-      <TopNav />
-      <div className="border-b border-default-200 bg-content1">
-        <div className="mx-auto flex h-12 max-w-6xl items-center gap-6 px-6">
-          <ProjectSwitcher currentProjectId={project.id} />
-          <nav className="flex items-center gap-4 text-sm text-default-600">
-            <Link
-              to="/projects/$projectId"
-              params={{ projectId: project.id }}
-              activeOptions={{ exact: true }}
-              activeProps={activeLinkProps}
-            >
-              Overview
-            </Link>
-            <Link
-              to="/projects/$projectId/subscribers"
-              params={{ projectId: project.id }}
-              activeProps={activeLinkProps}
-            >
-              Subscribers
-            </Link>
-            <Link
-              to="/projects/$projectId/settings"
-              params={{ projectId: project.id }}
-              activeProps={activeLinkProps}
-            >
-              Settings
-            </Link>
-          </nav>
-        </div>
-      </div>
-      <div className="mx-auto max-w-6xl px-6 py-8">
-        <Outlet />
-      </div>
-    </>
+    <DashboardShell projectId={project.id} projectName={project.name} current={current}>
+      <Outlet />
+    </DashboardShell>
   );
 }

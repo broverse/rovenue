@@ -6,6 +6,7 @@ import {
   Label,
   TextField,
 } from "@heroui/react";
+import { useTranslation } from "react-i18next";
 import type { ProjectDetail, UpdateProjectRequest } from "@rovenue/shared";
 import { useUpdateProject } from "../../lib/hooks/useUpdateProject";
 
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export function SettingsForm({ project }: Props) {
+  const { t } = useTranslation();
   const [name, setName] = useState(project.name);
   const [webhookUrl, setWebhookUrl] = useState(project.webhookUrl ?? "");
   const { mutate, isPending, error } = useUpdateProject(project.id);
@@ -39,15 +41,13 @@ export function SettingsForm({ project }: Props) {
       className="flex flex-col gap-4"
     >
       <TextField value={name} onChange={setName} isRequired>
-        <Label>Project name</Label>
-        <Input placeholder="Acme" />
+        <Label>{t("projects.form.name")}</Label>
+        <Input placeholder={t("projects.form.namePlaceholder")} />
       </TextField>
       <TextField value={webhookUrl} onChange={setWebhookUrl}>
-        <Label>Webhook URL</Label>
-        <Input placeholder="https://example.com/hooks/rovenue" />
-        <Description>
-          Outgoing webhooks post here. Leave blank to disable delivery.
-        </Description>
+        <Label>{t("projects.settingsForm.webhookUrl")}</Label>
+        <Input placeholder={t("projects.settingsForm.webhookUrlPlaceholder")} />
+        <Description>{t("projects.settingsForm.webhookUrlDescription")}</Description>
       </TextField>
       {error && (
         <div role="alert" className="text-sm text-danger-500">
@@ -61,10 +61,10 @@ export function SettingsForm({ project }: Props) {
           isPending={isPending}
           isDisabled={!canSubmit}
         >
-          Save changes
+          {t("common.saveChanges")}
         </Button>
         {!hasChanges && (
-          <span className="text-xs text-default-500">No changes to save.</span>
+          <span className="text-xs text-default-500">{t("common.noChanges")}</span>
         )}
       </div>
     </form>

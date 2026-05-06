@@ -14,6 +14,7 @@ import {
   TextField,
 } from "@heroui/react";
 import { useNavigate } from "@tanstack/react-router";
+import { Trans, useTranslation } from "react-i18next";
 import { useDeleteProject } from "../../lib/hooks/useDeleteProject";
 
 interface Props {
@@ -22,6 +23,7 @@ interface Props {
 }
 
 export function DeleteProjectDialog({ projectId, projectName }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const navigate = useNavigate();
@@ -38,28 +40,31 @@ export function DeleteProjectDialog({ projectId, projectName }: Props) {
   return (
     <>
       <Button variant="danger" onPress={() => setOpen(true)}>
-        Delete project
+        {t("projects.delete.trigger")}
       </Button>
 
       <Modal isOpen={open}>
         <ModalBackdrop isDismissable={!isPending}>
           <ModalContainer>
             <ModalDialog>
-              <ModalHeader>Delete this project?</ModalHeader>
+              <ModalHeader>{t("projects.delete.header")}</ModalHeader>
               <ModalBody className="gap-3">
                 <p className="text-sm text-default-500">
-                  This action is permanent. All subscribers, purchases, API
-                  keys, and webhook configuration for{" "}
-                  <span className="font-semibold text-foreground">
-                    {projectName}
-                  </span>{" "}
-                  will be removed.
+                  <Trans
+                    i18nKey="projects.delete.body"
+                    values={{ name: projectName }}
+                    components={[<span key="n" className="font-semibold text-foreground" />]}
+                  />
                 </p>
                 <TextField value={confirmText} onChange={setConfirmText}>
-                  <Label>Type the project name to confirm</Label>
+                  <Label>{t("projects.delete.confirmLabel")}</Label>
                   <Input placeholder={projectName} autoComplete="off" />
                   <Description>
-                    Enter <span className="font-mono">{projectName}</span> exactly.
+                    <Trans
+                      i18nKey="projects.delete.confirmDescription"
+                      values={{ name: projectName }}
+                      components={[<span key="n" className="font-mono" />]}
+                    />
                   </Description>
                 </TextField>
                 {error && (
@@ -70,7 +75,7 @@ export function DeleteProjectDialog({ projectId, projectName }: Props) {
               </ModalBody>
               <ModalFooter>
                 <Button variant="ghost" onPress={close} isDisabled={isPending}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 <Button
                   variant="danger"
@@ -90,7 +95,7 @@ export function DeleteProjectDialog({ projectId, projectName }: Props) {
                     })
                   }
                 >
-                  Delete project
+                  {t("projects.delete.confirm")}
                 </Button>
               </ModalFooter>
             </ModalDialog>

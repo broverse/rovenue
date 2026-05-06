@@ -1,5 +1,6 @@
 import { Card, Chip } from "@heroui/react";
 import { Link } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 import type { ProjectSummary } from "@rovenue/shared";
 
 // HeroUI v3 Chip colors: accent | danger | default | success | warning.
@@ -11,6 +12,7 @@ const roleColor: Record<string, "success" | "accent" | "default"> = {
 };
 
 export function ProjectCard({ project }: { project: ProjectSummary }) {
+  const { t } = useTranslation();
   return (
     <Link
       to="/projects/$projectId"
@@ -25,7 +27,7 @@ export function ProjectCard({ project }: { project: ProjectSummary }) {
           </Chip>
         </div>
         <div className="mt-2 text-xs text-default-500">
-          Created {new Date(project.createdAt).toLocaleDateString()}
+          {t("projects.card.createdOn", { date: new Date(project.createdAt).toLocaleDateString() })}
         </div>
       </Card>
     </Link>

@@ -11,6 +11,7 @@ import {
   ModalFooter,
   ModalHeader,
 } from "@heroui/react";
+import { useTranslation } from "react-i18next";
 import { TopNav } from "../../components/layout/TopNav";
 import { CreateProjectForm } from "../../components/projects/CreateProjectForm";
 import type { CreateProjectResponse } from "@rovenue/shared";
@@ -20,6 +21,7 @@ export const Route = createFileRoute("/_authed/projects/new")({
 });
 
 export function NewProjectPage() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [result, setResult] = useState<CreateProjectResponse | null>(null);
 
@@ -28,7 +30,7 @@ export function NewProjectPage() {
       <TopNav />
       <div className="mx-auto max-w-md px-6 py-8">
         <Card className="p-6">
-          <h1 className="mb-4 text-xl font-semibold">New project</h1>
+          <h1 className="mb-4 text-xl font-semibold">{t("projects.new.title")}</h1>
           <CreateProjectForm onCreated={setResult} />
         </Card>
       </div>
@@ -37,15 +39,12 @@ export function NewProjectPage() {
         <ModalBackdrop isDismissable={false}>
           <ModalContainer>
             <ModalDialog>
-              <ModalHeader>Save your API keys</ModalHeader>
+              <ModalHeader>{t("projects.new.saveKeysHeader")}</ModalHeader>
               <ModalBody className="gap-4">
-                <p className="text-sm text-default-500">
-                  These are shown only once. Copy them now — you can always
-                  rotate the webhook secret later from project settings.
-                </p>
+                <p className="text-sm text-default-500">{t("projects.new.saveKeysBody")}</p>
                 <div>
                   <div className="text-xs font-medium text-default-500">
-                    Public key
+                    {t("projects.new.publicKey")}
                   </div>
                   <pre className="mt-1 overflow-x-auto rounded bg-default-100 p-2 font-mono text-xs">
                     {result?.apiKey.publicKey ?? ""}
@@ -53,7 +52,7 @@ export function NewProjectPage() {
                 </div>
                 <div>
                   <div className="text-xs font-medium text-default-500">
-                    Secret key
+                    {t("projects.new.secretKey")}
                   </div>
                   <pre className="mt-1 overflow-x-auto rounded bg-default-100 p-2 font-mono text-xs">
                     {result?.apiKey.secretKey ?? ""}
@@ -72,7 +71,7 @@ export function NewProjectPage() {
                     });
                   }}
                 >
-                  I've copied them, take me to the project
+                  {t("projects.new.copiedTakeMe")}
                 </Button>
               </ModalFooter>
             </ModalDialog>
