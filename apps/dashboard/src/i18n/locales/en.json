@@ -113,7 +113,9 @@
     "liveEvents": "Live events",
     "products": "Products",
     "productGroups": "Product groups",
-    "transactions": "Transactions"
+    "transactions": "Transactions",
+    "featureFlags": "Feature flags",
+    "experiments": "Experiments"
   },
   "overview": {
     "title": "Overview",
@@ -937,6 +939,250 @@
     },
     "live": {
       "updated": "updated {{value}} ago"
+    }
+  },
+  "featureFlags": {
+    "title": "Feature flags",
+    "subtitle": "Remote-configure behavior without shipping an update. Rules evaluate top-down on each SDK check; changes propagate in under 30 seconds via the edge cache.",
+    "actions": {
+      "sdkDocs": "SDK docs",
+      "import": "Import from file",
+      "newFlag": "New flag"
+    },
+    "kpi": {
+      "totalProd": "TOTAL FLAGS · PROD",
+      "totalProdBreakdown": "{{on}} on · {{off}} off · {{killed}} killed",
+      "evaluations": "EVALUATIONS · 24H",
+      "evaluationsLatency": "p99 12ms · p50 3.1ms",
+      "linkedExperiments": "LINKED EXPERIMENTS",
+      "linkedExperimentsDescription": "traffic split by hash(user_id)",
+      "staleFlags": "STALE FLAGS",
+      "staleFlagsDescription": "not evaluated in 30+ days"
+    },
+    "env": {
+      "ariaLabel": "Environment"
+    },
+    "search": {
+      "placeholder": "Search flag key, description, or tag…"
+    },
+    "scope": {
+      "ariaLabel": "Flag scope",
+      "all": "All",
+      "on": "On",
+      "off": "Off",
+      "killed": "Killed",
+      "experiment": "Tied to exp"
+    },
+    "cols": {
+      "flag": "Flag",
+      "rollout": "Rollout",
+      "evals24h": "Evals · 24h",
+      "lastChanged": "Last changed",
+      "on": "On"
+    },
+    "row": {
+      "killed": "killed",
+      "expPrefix": "exp:",
+      "nWay": "{{count}}-way",
+      "toggleOnTitle": "On",
+      "toggleOffTitle": "Off",
+      "toggleKilledTitle": "Killed — click to re-enable"
+    },
+    "list": {
+      "empty": "No flags match this filter."
+    },
+    "eval": {
+      "reqPerSec": "{{value}} req/s",
+      "summary": "{{count}} evaluations · last 24h · p99 12ms"
+    },
+    "detail": {
+      "typeLabel": "type: {{type}}",
+      "variantSplit": "Variant split",
+      "variantCount": "{{count}} values",
+      "targeting": "Targeting rules",
+      "ruleCount": "{{count}} rule(s) · top-down",
+      "sdkUsage": "SDK usage",
+      "copyHint": "copy",
+      "changelog": "Change log",
+      "eventCount": "{{count}} events"
+    },
+    "rules": {
+      "matchLabel": "If · match rule",
+      "defaultLabel": "Default · fallback",
+      "elseOrdinal": "else",
+      "serve": "Serve",
+      "partialRollout": "to {{pct}}% of matches"
+    },
+    "kill": {
+      "title": "Kill switch active",
+      "body": "All rules bypassed. Returning <0>false</0> to every caller until re-enabled.",
+      "reenable": "Re-enable"
+    }
+  },
+  "experiments": {
+    "title": "Experiments",
+    "subtitle": "Run A/B and multi-arm tests on pricing, paywalls, and onboarding. Traffic allocation is deterministic on ",
+    "subtitleSuffix": " — no flicker between sessions.",
+    "actions": {
+      "runbook": "Runbook",
+      "importFromSdk": "Import from SDK",
+      "newExperiment": "New experiment",
+      "duplicate": "Duplicate",
+      "stop": "Stop",
+      "shipWinner": "Ship winner",
+      "rerun": "Re-run",
+      "more": "More options"
+    },
+    "kpi": {
+      "running": "RUNNING",
+      "runningDescription": "{{withPower}} with enough power · {{gathering}} gathering",
+      "usersAssigned": "USERS IN EXPERIMENTS · 28D",
+      "usersAssignedDescription": "{{share}}% of new installs",
+      "shippedWins": "SHIPPED WINS · QTD",
+      "shippedWinsDescription": "est. +{{impact}} MRR impact",
+      "timeToDecision": "AVG TIME TO DECISION",
+      "timeToDecisionDescription": "target ≤ {{target}}d · on track"
+    },
+    "list": {
+      "scopeAriaLabel": "Experiment scope",
+      "scope": {
+        "running": "Running",
+        "completed": "Done",
+        "draft": "Draft",
+        "all": "All"
+      },
+      "variants": "{{count}}v",
+      "assignedUsers": "{{value}} users",
+      "age": {
+        "runningDays": "{{days}}d running",
+        "completedOn": "Completed {{date}}",
+        "stoppedOn": "Stopped {{date}}",
+        "draft": "Draft"
+      },
+      "shippedWinner": "✓ Shipped {{id}}",
+      "keptControl": "✓ Kept control",
+      "empty": "No experiments match this scope."
+    },
+    "status": {
+      "running": "Running",
+      "completed": "Completed",
+      "stopped": "Stopped",
+      "draft": "Draft"
+    },
+    "groups": {
+      "pricing": "Pricing",
+      "trial": "Trial",
+      "paywall": "Paywall",
+      "onboarding": "Onboarding",
+      "engagement": "Engagement",
+      "monetization": "Monetization"
+    },
+    "hero": {
+      "metricLabel": "metric",
+      "meta": {
+        "started": "Started",
+        "assigned": "Assigned",
+        "acrossVariants": "across {{count}} variants",
+        "confidence": "Confidence",
+        "confidenceTarget": "target ≥ 80%",
+        "lift": "Est. lift",
+        "vsControl": "vs control",
+        "power": "Sample power",
+        "powerDetail": "MDE ±3.0% · α=0.05"
+      },
+      "winnerBanner": {
+        "message": "<0>{{variant}}</0> is the leader at <1>{{confidence}}% confidence</1>",
+        "sub": "Est. +{{lift}}% lift on {{metric}}. CI excludes zero. Safe to ship.",
+        "cta": "Ship {{variant}}"
+      }
+    },
+    "variants": {
+      "title": "Variants",
+      "subtitle": "Metric: {{metric}} · CI shown at 95%",
+      "control": "control",
+      "baseline": "baseline",
+      "cols": {
+        "variant": "Variant",
+        "users": "Users",
+        "conversions": "Conversions",
+        "rate": "Rate",
+        "arpu": "ARPU",
+        "lift": "Lift · 95% CI"
+      }
+    },
+    "cumulative": {
+      "title": "Cumulative {{metric}}",
+      "subtitle": "Daily cumulative rate per variant — shaded region is 95% CI band"
+    },
+    "funnel": {
+      "title": "Conversion funnel",
+      "stages": {
+        "viewed": {
+          "title": "Paywall viewed",
+          "sub": "Sees the onboarding paywall"
+        },
+        "cta": {
+          "title": "CTA tapped",
+          "sub": "Tapped \"Start trial\""
+        },
+        "trial": {
+          "title": "Trial started",
+          "sub": "Entered payment sheet & confirmed"
+        },
+        "paid": {
+          "title": "Trial → paid",
+          "sub": "Converted to paid sub after trial"
+        }
+      }
+    },
+    "timeline": {
+      "title": "Timeline",
+      "daysAgo": "{{days}} days ago",
+      "justNow": "just now",
+      "entries": {
+        "started": {
+          "title": "Experiment started",
+          "sub": "furkan · auto-ramp disabled · initial 100% allocation"
+        },
+        "srm": {
+          "title": "SRM check passed",
+          "sub": "Chi-square p=0.42 · allocation healthy"
+        },
+        "guardrail": {
+          "title": "Guardrail alert: refund rate",
+          "sub": "Variant A +12% refund rate · dismissed, within tolerance"
+        },
+        "sample": {
+          "title": "Sample size target reached",
+          "sub": "9k+ per variant · continuing for seasonality control"
+        },
+        "latest": {
+          "title": "Latest reading",
+          "sub": "Variant B leading at 64% confidence · 80% target"
+        }
+      }
+    },
+    "allocation": {
+      "title": "Allocation",
+      "traffic": "traffic"
+    },
+    "configuration": {
+      "title": "Configuration",
+      "metric": "Metric",
+      "owner": "Owner",
+      "allocationKey": "Allocation key",
+      "segments": "Segments",
+      "duration": "Duration",
+      "alpha": "Alpha (α)",
+      "mde": "Min. detectable effect",
+      "srm": "SRM check",
+      "srmPassed": "passed · p=0.42"
+    },
+    "metric": {
+      "trialStartRate": {
+        "name": "Trial start rate",
+        "description": "Share of users who start a trial after viewing the onboarding paywall."
+      }
     }
   }
 }

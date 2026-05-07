@@ -85,8 +85,14 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
   {
     sectionKey: "growth",
     items: [
-      { id: "experiments", labelKey: "sidebar.items.experiments", icon: FlaskConical, soon: true, badge: "3" },
-      { id: "flags", labelKey: "sidebar.items.flags", icon: Flag, soon: true },
+      {
+        id: "experiments",
+        labelKey: "sidebar.items.experiments",
+        icon: FlaskConical,
+        to: "/projects/$projectId/experiments",
+        badge: "3",
+      },
+      { id: "flags", labelKey: "sidebar.items.flags", icon: Flag, to: "/projects/$projectId/feature-flags" },
       { id: "cohorts", labelKey: "sidebar.items.cohorts", icon: Users2, soon: true },
     ],
   },
