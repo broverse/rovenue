@@ -7,7 +7,7 @@ export function ResourcesCard() {
 
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1">
-      <header className="border-b border-rv-divider px-5 py-4">
+      <header className="border-b border-rv-divider px-4 py-4 sm:px-5">
         <h3 className="text-[14px] font-semibold leading-5 text-foreground">
           {t("sdkApi.resources.title")}
         </h3>
@@ -15,7 +15,7 @@ export function ResourcesCard() {
           {t("sdkApi.resources.subtitle")}
         </p>
       </header>
-      <ul className="grid gap-2 px-5 py-4 sm:grid-cols-2">
+      <ul className="grid gap-2 px-4 py-4 sm:grid-cols-2 sm:px-5">
         {RESOURCES.map((resource) => {
           const Icon = resource.icon;
           return (

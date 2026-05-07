@@ -38,7 +38,7 @@ function AppearancePage() {
       />
 
       <SectionCard title={t("account.appearance.theme.title")}>
-        <div className="grid grid-cols-3 gap-2.5 max-[720px]:grid-cols-1">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
           {THEMES.map((tm) => (
             <button
               type="button"

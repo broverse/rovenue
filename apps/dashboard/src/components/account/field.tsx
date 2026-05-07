@@ -42,7 +42,7 @@ export function FieldRow({ children, className }: { children: ReactNode; classNa
   return (
     <div
       className={cn(
-        "grid gap-3.5 max-[720px]:grid-cols-1 grid-cols-2",
+        "grid grid-cols-1 gap-3.5 sm:grid-cols-2",
         className,
       )}
     >

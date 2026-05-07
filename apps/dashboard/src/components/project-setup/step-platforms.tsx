@@ -143,7 +143,7 @@ export function StepPlatforms({
             label={t("projectSetup.platforms.web.account")}
             optional={t("projectSetup.basics.required")}
           >
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <Input
                 mono
                 placeholder="acct_…"

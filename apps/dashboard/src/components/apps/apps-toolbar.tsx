@@ -25,14 +25,14 @@ export function AppsToolbar({
 }: Props) {
   const { t } = useTranslation();
   return (
-    <div className="mb-3.5 flex flex-wrap items-center gap-2.5 rounded-lg border border-rv-divider bg-rv-c1 px-3.5 py-2.5">
+    <div className="mb-3.5 flex flex-wrap items-center gap-2.5 rounded-lg border border-rv-divider bg-rv-c1 px-3 py-2.5 sm:px-3.5">
       <SearchInput
         value={query}
         onValueChange={onQueryChange}
         placeholder={t("apps.toolbar.searchPlaceholder")}
         aria-label={t("apps.toolbar.searchAria")}
         size="md"
-        rootClassName="min-w-[220px] flex-1"
+        rootClassName="w-full min-w-0 flex-1 sm:w-auto sm:min-w-[220px]"
       />
       <div className="inline-flex items-center gap-0.5 rounded-md border border-rv-divider bg-rv-c2 p-0.5">
         {(["grid", "list"] as const).map((option) => {
@@ -55,14 +55,14 @@ export function AppsToolbar({
           );
         })}
       </div>
-      <div className="inline-flex items-center gap-0.5 rounded-md border border-rv-divider bg-rv-c2 p-0.5">
+      <div className="inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-md border border-rv-divider bg-rv-c2 p-0.5">
         {TIERS.map((option) => (
           <button
             key={option}
             type="button"
             onClick={() => onTierChange(option)}
             className={cn(
-              "inline-flex h-[26px] cursor-pointer items-center rounded px-2.5 text-[11.5px] transition",
+              "inline-flex h-[26px] shrink-0 cursor-pointer items-center rounded px-2.5 text-[11.5px] transition",
               tier === option
                 ? "bg-rv-c4 text-foreground"
                 : "text-rv-mute-600 hover:text-foreground",

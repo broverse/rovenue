@@ -30,15 +30,28 @@ export function DashboardShell({
 }: Props) {
   const [range, setRange] = useState<DateRange>(initialRange);
   const [liveOn, setLiveOn] = useState(true);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
-    <div
-      className="dark grid min-h-screen bg-rv-bg font-[Geist,ui-sans-serif,system-ui,sans-serif] text-foreground antialiased"
-      style={{ gridTemplateColumns: "240px 1fr" }}
-    >
-      <Sidebar projectId={projectId} projectName={projectName} envLabel={envLabel} />
+    <div className="dark min-h-screen bg-rv-bg font-[Geist,ui-sans-serif,system-ui,sans-serif] text-foreground antialiased">
+      <Sidebar
+        projectId={projectId}
+        projectName={projectName}
+        envLabel={envLabel}
+        open={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
+      />
 
-      <div className="flex min-w-0 flex-col">
+      {mobileNavOpen ? (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          onClick={() => setMobileNavOpen(false)}
+          className="fixed inset-0 z-30 bg-black/55 backdrop-blur-[2px] lg:hidden"
+        />
+      ) : null}
+
+      <div className="flex min-w-0 flex-col lg:ml-60">
         <Topbar
           projectName={projectName}
           current={current}
@@ -46,8 +59,9 @@ export function DashboardShell({
           onRangeChange={setRange}
           liveOn={liveOn}
           onToggleLive={() => setLiveOn((v) => !v)}
+          onMenuClick={() => setMobileNavOpen(true)}
         />
-        <div className="mx-auto w-full max-w-[1536px] px-6 pb-10 pt-5">
+        <div className="mx-auto w-full max-w-[1536px] px-4 pb-10 pt-5 sm:px-6">
           {typeof children === "function" ? children({ range, liveOn }) : children}
         </div>
       </div>

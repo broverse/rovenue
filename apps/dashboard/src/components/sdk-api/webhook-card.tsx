@@ -21,7 +21,7 @@ export function WebhookCard() {
 
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1">
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-rv-divider px-5 py-4">
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-rv-divider px-4 py-4 sm:px-5">
         <div className="min-w-0">
           <h3 className="text-[14px] font-semibold leading-5 text-foreground">
             {t("sdkApi.webhooks.title")}
@@ -36,7 +36,7 @@ export function WebhookCard() {
         </Button>
       </header>
 
-      <div className="grid gap-3 border-b border-rv-divider px-5 py-4 sm:grid-cols-2">
+      <div className="grid gap-3 border-b border-rv-divider px-4 py-4 sm:grid-cols-2 sm:px-5">
         <div>
           <div className="text-[11px] font-medium uppercase tracking-wider text-rv-mute-500">
             {t("sdkApi.webhooks.endpoint")}
@@ -69,7 +69,7 @@ export function WebhookCard() {
         </div>
       </div>
 
-      <div className="px-5 py-4">
+      <div className="px-4 py-4 sm:px-5">
         <div className="mb-2.5 flex items-baseline justify-between">
           <h4 className="text-[12px] font-semibold uppercase tracking-wider text-rv-mute-600">
             {t("sdkApi.webhooks.recent.title")}

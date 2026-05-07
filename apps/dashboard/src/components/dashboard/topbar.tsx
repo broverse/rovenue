@@ -9,6 +9,7 @@ import {
   Flag,
   FlaskConical,
   Key,
+  Menu as MenuIcon,
   Plus,
   Settings,
   Webhook,
@@ -47,6 +48,8 @@ type TopbarProps = {
   onRangeChange: (next: DateRange) => void;
   liveOn: boolean;
   onToggleLive: () => void;
+  /** Mobile-only: opens the sidebar drawer. */
+  onMenuClick?: () => void;
 };
 
 const POPUP_CLASS =
@@ -66,20 +69,30 @@ export function Topbar({
   onRangeChange,
   liveOn,
   onToggleLive,
+  onMenuClick,
 }: TopbarProps) {
   const { t } = useTranslation();
 
   return (
-    <div className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-rv-divider bg-rv-bg/80 px-6 backdrop-blur-sm">
-      <div className="flex items-center gap-1.5 text-[13px] text-rv-mute-600">
-        <span>{projectName}</span>
-        <span className="text-rv-mute-400">/</span>
-        <span className="font-medium text-foreground">{current}</span>
+    <div className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-rv-divider bg-rv-bg/80 px-3 backdrop-blur-sm sm:px-4 lg:px-6">
+      <button
+        type="button"
+        onClick={onMenuClick}
+        aria-label="Open navigation"
+        className="-ml-1 flex size-9 shrink-0 items-center justify-center rounded-md text-rv-mute-600 transition hover:bg-rv-c2 hover:text-foreground lg:hidden"
+      >
+        <MenuIcon size={18} />
+      </button>
+
+      <div className="flex min-w-0 items-center gap-1.5 text-[13px] text-rv-mute-600">
+        <span className="hidden truncate sm:inline">{projectName}</span>
+        <span className="hidden text-rv-mute-400 sm:inline">/</span>
+        <span className="truncate font-medium text-foreground">{current}</span>
 
         <Menu.Root>
-          <Menu.Trigger className="ml-2 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-transparent px-2 text-[13px] text-rv-mute-600 transition hover:border-rv-divider hover:bg-rv-c2 hover:text-foreground">
+          <Menu.Trigger className="ml-1 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-transparent px-2 text-[13px] text-rv-mute-600 transition hover:border-rv-divider hover:bg-rv-c2 hover:text-foreground sm:ml-2">
             <Calendar size={13} />
-            <span>{t(RANGE_KEYS[range])}</span>
+            <span className="hidden sm:inline">{t(RANGE_KEYS[range])}</span>
             <ChevronDown size={12} />
           </Menu.Trigger>
           <Menu.Portal>
@@ -104,13 +117,13 @@ export function Topbar({
         </Menu.Root>
       </div>
 
-      <div className="ml-auto flex items-center gap-1.5">
+      <div className="ml-auto flex items-center gap-1 sm:gap-1.5">
         <button
           type="button"
           onClick={onToggleLive}
           aria-pressed={liveOn}
           aria-label={liveOn ? t("topbar.liveOnAria") : t("topbar.liveOffAria")}
-          className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full border border-rv-success/25 bg-rv-success/10 px-2.5 text-xs font-medium text-rv-success transition hover:bg-rv-success/15"
+          className="hidden h-7 cursor-pointer items-center gap-1.5 rounded-full border border-rv-success/25 bg-rv-success/10 px-2.5 text-xs font-medium text-rv-success transition hover:bg-rv-success/15 sm:inline-flex"
         >
           {liveOn && (
             <span className="relative inline-block size-1.5 rounded-full bg-rv-success">
@@ -121,10 +134,13 @@ export function Topbar({
         </button>
 
         <Menu.Root>
-          <Menu.Trigger className={cn(buttonVariants({ variant: "solid-primary", size: "sm" }))}>
+          <Menu.Trigger
+            className={cn(buttonVariants({ variant: "solid-primary", size: "sm" }), "px-2 sm:px-3")}
+            aria-label={t("topbar.newMenu.trigger")}
+          >
             <Plus size={14} />
-            <span>{t("topbar.newMenu.trigger")}</span>
-            <ChevronDown size={12} />
+            <span className="hidden sm:inline">{t("topbar.newMenu.trigger")}</span>
+            <ChevronDown size={12} className="hidden sm:inline" />
           </Menu.Trigger>
           <Menu.Portal>
             <Menu.Positioner sideOffset={4} align="end" className="z-50">
@@ -148,7 +164,7 @@ export function Topbar({
           </Menu.Portal>
         </Menu.Root>
 
-        <Button variant="light" size="icon" aria-label={t("topbar.settings")}>
+        <Button variant="light" size="icon" aria-label={t("topbar.settings")} className="hidden sm:inline-flex">
           <Settings size={16} />
         </Button>
         <Button variant="light" size="icon" aria-label={t("topbar.notifications")} className="relative">

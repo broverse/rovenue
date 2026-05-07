@@ -48,7 +48,7 @@ export function MemberRow({
       <Select
         value={member.role}
         onChange={(event) => onRoleChange(event.target.value as RoleId)}
-        className="h-8 w-[132px] py-1 pr-7 text-[12px]"
+        className="h-8 w-[100px] shrink-0 py-1 pr-7 text-[12px] sm:w-[132px]"
       >
         {ROLES.map((role) => (
           <option key={role.id} value={role.id}>

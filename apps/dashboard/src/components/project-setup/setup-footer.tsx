@@ -42,11 +42,11 @@ export function SetupFooter({
   const isLast = step >= STEPS.length;
 
   return (
-    <div className="sticky bottom-0 flex items-center justify-between border-t border-rv-divider bg-rv-c1 px-8 py-3.5 sm:px-14">
-      <div className="font-rv-mono text-[12px] text-rv-mute-500">
+    <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-rv-divider bg-rv-c1 px-4 py-3 sm:flex-nowrap sm:px-8 sm:py-3.5 lg:px-14">
+      <div className="hidden font-rv-mono text-[12px] text-rv-mute-500 sm:block">
         {meta ?? fallbackMeta}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
         {!isUpdate && step > 1 ? (
           <Button type="button" variant="flat" onClick={onBack}>
             {t("projectSetup.footer.back")}

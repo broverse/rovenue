@@ -2278,6 +2278,11 @@
   "queries": {
     "title": "Queries",
     "subtitle": "SQL workbench against your Rovenue data warehouse — saved queries, scheduled refreshes, and downloadable CSV/Parquet exports.",
+    "mobile": {
+      "paneEditor": "Editor",
+      "paneTablistAria": "Workbench panes",
+      "newShort": "New"
+    },
     "actions": {
       "sqlReference": "SQL reference",
       "scheduledCount": "Scheduled ({{count}})",

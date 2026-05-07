@@ -8,7 +8,7 @@ export function SdkPackagesGrid() {
 
   return (
     <section className="mb-4 rounded-lg border border-rv-divider bg-rv-c1">
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-rv-divider px-5 py-4">
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-rv-divider px-4 py-4 sm:px-5">
         <div className="min-w-0">
           <h3 className="text-[14px] font-semibold leading-5 text-foreground">
             {t("sdkApi.packages.title")}
@@ -25,7 +25,7 @@ export function SdkPackagesGrid() {
           <ArrowUpRight size={12} />
         </a>
       </header>
-      <div className="grid gap-3 px-5 py-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 px-4 py-4 sm:px-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         {SDK_PACKAGES.map((pkg) => (
           <SdkPackageCard key={pkg.id} pkg={pkg} />
         ))}

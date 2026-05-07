@@ -20,7 +20,7 @@ export function AccountShell({ active, children }: AccountShellProps) {
       <AccountNavMobile active={active} />
       <div className="flex min-h-[calc(100vh-3.5rem)]">
         <AccountNav active={active} />
-        <main className="mx-auto w-full max-w-[920px] px-12 pb-20 pt-9 max-[1080px]:px-7 max-[1080px]:pb-15">
+        <main className="mx-auto w-full max-w-[920px] px-4 pb-12 pt-6 sm:px-7 sm:pb-15 sm:pt-9 lg:px-12 lg:pb-20">
           {children}
         </main>
       </div>

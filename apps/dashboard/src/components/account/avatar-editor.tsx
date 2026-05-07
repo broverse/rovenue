@@ -24,7 +24,7 @@ export function AvatarEditor({ initials, color, onColorChange }: AvatarEditorPro
   const { t } = useTranslation();
 
   return (
-    <div className="flex items-center gap-4">
+    <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
       <div
         className="relative flex size-[76px] shrink-0 items-center justify-center rounded-full font-rv-mono text-[28px] font-semibold text-white"
         style={{ background: color }}
@@ -34,8 +34,8 @@ export function AvatarEditor({ initials, color, onColorChange }: AvatarEditorPro
           <Pencil size={11} />
         </span>
       </div>
-      <div className="flex-1">
-        <div className="mb-2 flex gap-2">
+      <div className="w-full flex-1">
+        <div className="mb-2 flex flex-wrap gap-2">
           <Button variant="flat" size="sm">
             <Upload size={13} />
             {t("account.profile.photo.upload")}
@@ -44,7 +44,7 @@ export function AvatarEditor({ initials, color, onColorChange }: AvatarEditorPro
             {t("account.profile.photo.remove")}
           </Button>
         </div>
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           {SWATCHES.map((c) => (
             <button
               type="button"

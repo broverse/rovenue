@@ -33,8 +33,8 @@ export function ResultsPanel({ query, resultTab, onResultTabChange }: Props) {
 
   return (
     <section className="mt-3.5 overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">
-      <header className="flex h-10 items-center gap-3 border-b border-rv-divider px-3.5">
-        <div className="flex">
+      <header className="flex flex-wrap items-center gap-3 border-b border-rv-divider px-3.5 sm:h-10 sm:flex-nowrap">
+        <div className="flex overflow-x-auto">
           {TABS.map((tab) => {
             const active = resultTab === tab.k;
             return (
@@ -43,7 +43,7 @@ export function ResultsPanel({ query, resultTab, onResultTabChange }: Props) {
                 type="button"
                 onClick={() => onResultTabChange(tab.k)}
                 className={cn(
-                  "-mb-px flex h-10 cursor-pointer items-center gap-1.5 border-b-2 px-3 text-[12px] transition",
+                  "-mb-px flex h-10 shrink-0 cursor-pointer items-center gap-1.5 border-b-2 px-3 text-[12px] transition",
                   active
                     ? "border-rv-accent-500 text-rv-accent-400"
                     : "border-transparent text-rv-mute-600 hover:text-foreground",
@@ -66,12 +66,12 @@ export function ResultsPanel({ query, resultTab, onResultTabChange }: Props) {
             );
           })}
         </div>
-        <div className="ml-auto flex items-center gap-3.5 font-rv-mono text-[11px] text-rv-mute-500">
+        <div className="flex w-full flex-wrap items-center gap-x-3.5 gap-y-1 pb-2 font-rv-mono text-[11px] text-rv-mute-500 sm:ml-auto sm:w-auto sm:flex-nowrap sm:pb-0">
           <span className="flex items-center gap-1">
             <span className="size-1.5 rounded-full bg-rv-success" aria-hidden />
             <b className="font-medium text-rv-success">{t("queries.results.success")}</b>
           </span>
-          <span>
+          <span className="hidden sm:inline">
             ·{" "}
             <b className="font-medium text-foreground">
               {t("queries.results.duration", { ms: query.durationMs })}
@@ -82,7 +82,12 @@ export function ResultsPanel({ query, resultTab, onResultTabChange }: Props) {
               bytes: query.bytesScanned ?? "—",
             })}
           </span>
-          <Button variant="light" className="h-6 text-[11px]">
+          <span className="sm:hidden">
+            <b className="font-medium text-foreground">
+              {t("queries.results.duration", { ms: query.durationMs })}
+            </b>
+          </span>
+          <Button variant="light" className="ml-auto h-6 text-[11px] sm:ml-0">
             <ArrowDown size={11} />
             {t("queries.results.exportCsv")}
           </Button>
@@ -180,14 +185,14 @@ function ResultsChart({ query, maxBarValue }: { query: SavedQuery; maxBarValue: 
   }
   return (
     <div className="p-4.5">
-      <div className="mb-3 flex items-baseline gap-2.5">
+      <div className="mb-3 flex flex-wrap items-baseline gap-2.5">
         <h4 className="text-[13px] font-medium">
           {t("queries.results.chart.title", { name: query.name })}
         </h4>
         <span className="text-[11px] text-rv-mute-500">
           {t("queries.results.chart.subtitle", { count: query.rowCount ?? 0 })}
         </span>
-        <div className="ml-auto flex gap-1.5">
+        <div className="ml-auto flex flex-wrap gap-1.5">
           <Button variant="light" className="h-6 text-[11px]">
             <BarChart3 size={11} />
             {t("queries.results.chart.bar")}
@@ -225,7 +230,7 @@ function ResultsChart({ query, maxBarValue }: { query: SavedQuery; maxBarValue: 
 
 function ResultsPlan() {
   return (
-    <div className="p-4.5 font-rv-mono text-[11.5px] leading-[1.8] text-rv-mute-700">
+    <div className="overflow-x-auto p-4.5 font-rv-mono text-[11.5px] leading-[1.8] text-rv-mute-700">
       {QUERY_PLAN.map((node, i) => (
         <div
           key={i}
@@ -245,7 +250,7 @@ function ResultsPlan() {
 function ResultsLogs() {
   const { t } = useTranslation();
   return (
-    <div className="p-4.5 font-rv-mono text-[11.5px] leading-[1.8] text-rv-mute-700">
+    <div className="overflow-x-auto p-4.5 font-rv-mono text-[11.5px] leading-[1.8] text-rv-mute-700">
       {QUERY_LOGS.map((log, i) => (
         <div key={i}>
           <span className="text-rv-mute-500">{log.ts}</span>{" "}

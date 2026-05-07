@@ -47,7 +47,7 @@ function InvoicesPage() {
         title={t("account.invoices.history.title")}
         description={t("account.invoices.history.subtitle", { count: 24 })}
         right={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="flat">
               <ArrowDownToLine size={13} />
               {t("account.invoices.exportCsv")}
@@ -60,52 +60,54 @@ function InvoicesPage() {
         }
         bodyClassName="p-0"
       >
-        <table className="w-full border-collapse text-[12px]">
-          <thead>
-            <tr>
-              {[
-                { key: "invoice", w: 130 },
-                { key: "date", w: 100 },
-                { key: "description" },
-                { key: "status", w: 110 },
-                { key: "amount", w: 100, num: true },
-                { w: 100 },
-              ].map((c, i) => (
-                <th
-                  key={i}
-                  style={c.w ? { width: c.w } : undefined}
-                  className={`border-b border-rv-divider bg-rv-c2 px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-rv-mute-500 ${c.num ? "text-right" : "text-left"}`}
-                >
-                  {c.key ? t(`account.invoices.cols.${c.key}`) : ""}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {INVOICES.map((inv) => (
-              <tr key={inv.id} className="hover:bg-rv-c2">
-                <td className="border-b border-white/[0.04] px-3 py-3 font-rv-mono text-[11px] text-rv-mute-700">
-                  {inv.id}
-                </td>
-                <td className="border-b border-white/[0.04] px-3 py-3 font-rv-mono text-[11px] text-rv-mute-500">
-                  {inv.date}
-                </td>
-                <td className="border-b border-white/[0.04] px-3 py-3">{inv.desc}</td>
-                <td className="border-b border-white/[0.04] px-3 py-3">
-                  <InvoiceStatusChip status={inv.status} />
-                </td>
-                <td className="border-b border-white/[0.04] px-3 py-3 text-right font-rv-mono">
-                  {inv.amount < 0 ? "-" : ""}${Math.abs(inv.amount).toFixed(2)}
-                </td>
-                <td className="border-b border-white/[0.04] px-3 py-3 text-right">
-                  <Button variant="light" className="h-6 px-2 text-[11px]">
-                    {t("account.invoices.pdf")}
-                  </Button>
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] border-collapse text-[12px]">
+            <thead>
+              <tr>
+                {[
+                  { key: "invoice", w: 130 },
+                  { key: "date", w: 100, hideMobile: true },
+                  { key: "description" },
+                  { key: "status", w: 110 },
+                  { key: "amount", w: 100, num: true },
+                  { w: 100 },
+                ].map((c, i) => (
+                  <th
+                    key={i}
+                    style={c.w ? { width: c.w } : undefined}
+                    className={`border-b border-rv-divider bg-rv-c2 px-3 py-2.5 text-[10px] font-medium uppercase tracking-wider text-rv-mute-500 ${c.num ? "text-right" : "text-left"} ${c.hideMobile ? "hidden sm:table-cell" : ""}`}
+                  >
+                    {c.key ? t(`account.invoices.cols.${c.key}`) : ""}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {INVOICES.map((inv) => (
+                <tr key={inv.id} className="hover:bg-rv-c2">
+                  <td className="border-b border-white/[0.04] px-3 py-3 font-rv-mono text-[11px] text-rv-mute-700">
+                    {inv.id}
+                  </td>
+                  <td className="hidden border-b border-white/[0.04] px-3 py-3 font-rv-mono text-[11px] text-rv-mute-500 sm:table-cell">
+                    {inv.date}
+                  </td>
+                  <td className="border-b border-white/[0.04] px-3 py-3">{inv.desc}</td>
+                  <td className="border-b border-white/[0.04] px-3 py-3">
+                    <InvoiceStatusChip status={inv.status} />
+                  </td>
+                  <td className="border-b border-white/[0.04] px-3 py-3 text-right font-rv-mono">
+                    {inv.amount < 0 ? "-" : ""}${Math.abs(inv.amount).toFixed(2)}
+                  </td>
+                  <td className="border-b border-white/[0.04] px-3 py-3 text-right">
+                    <Button variant="light" className="h-6 px-2 text-[11px]">
+                      {t("account.invoices.pdf")}
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </SectionCard>
     </AccountShell>
   );

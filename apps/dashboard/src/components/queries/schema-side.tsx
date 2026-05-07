@@ -10,7 +10,7 @@ import { AI_SUGGESTIONS, SCHEMA_TABLES } from "./mock-data";
 export function SchemaSide() {
   const { t } = useTranslation();
   return (
-    <aside className="sticky top-[76px] flex max-h-[calc(100vh-96px)] flex-col overflow-y-auto rounded-lg border border-rv-divider bg-rv-c1">
+    <aside className="flex max-h-[70vh] flex-col overflow-y-auto rounded-lg border border-rv-divider bg-rv-c1 min-[1481px]:sticky min-[1481px]:top-[76px] min-[1481px]:max-h-[calc(100vh-96px)]">
       <header className="border-b border-rv-divider px-3 py-2.5">
         <h3 className="text-[11px] font-medium uppercase tracking-wider text-rv-mute-500">
           {t("queries.schema.title")}

@@ -24,7 +24,7 @@ export function SecretRow({ secret, readOnly = false }: Props) {
   const [revealed, setRevealed] = useState(!isHideable);
 
   return (
-    <div className="grid items-center gap-3 rounded-md border border-rv-divider bg-rv-c2 px-3.5 py-3 grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)_auto]">
+    <div className="grid items-center gap-3 rounded-md border border-rv-divider bg-rv-c2 px-3 py-3 sm:px-3.5 grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1.6fr)_auto]">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[13px] font-medium leading-5">
@@ -40,7 +40,7 @@ export function SecretRow({ secret, readOnly = false }: Props) {
         </div>
       </div>
 
-      <div className="hidden min-w-0 sm:block">
+      <div className="hidden min-w-0 lg:block">
         <code className="block truncate rounded border border-rv-divider bg-rv-c3 px-2 py-1.5 font-rv-mono text-[11.5px] text-rv-mute-700">
           {revealed ? secret.value : secret.preview}
         </code>
@@ -72,7 +72,7 @@ export function SecretRow({ secret, readOnly = false }: Props) {
         ) : null}
       </div>
 
-      <div className="col-span-2 sm:hidden">
+      <div className="col-span-2 lg:hidden">
         <code className="block truncate rounded border border-rv-divider bg-rv-c3 px-2 py-1.5 font-rv-mono text-[11.5px] text-rv-mute-700">
           {revealed ? secret.value : secret.preview}
         </code>

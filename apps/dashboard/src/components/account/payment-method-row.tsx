@@ -24,7 +24,7 @@ export function PaymentMethodRow({
   return (
     <div
       className={cn(
-        "mb-2 flex items-center gap-3 rounded-md border bg-rv-c2 px-3.5 py-3 last:mb-0",
+        "mb-2 flex flex-wrap items-center gap-3 rounded-md border bg-rv-c2 px-3.5 py-3 last:mb-0",
         isDefault ? "border-rv-accent-500/40" : "border-rv-divider",
       )}
     >
@@ -35,15 +35,17 @@ export function PaymentMethodRow({
         {brand}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="font-rv-mono text-[13px]">{number}</div>
-        <div className="mt-0.5 font-rv-mono text-[11px] text-rv-mute-500">{meta}</div>
+        <div className="truncate font-rv-mono text-[13px]">{number}</div>
+        <div className="mt-0.5 truncate font-rv-mono text-[11px] text-rv-mute-500">{meta}</div>
       </div>
       {isDefault ? (
         <span className="rounded bg-rv-accent-500/15 px-2 py-0.5 font-rv-mono text-[10px] text-rv-accent-400">
           {t("account.billing.payment.default")}
         </span>
       ) : null}
-      {actions ?? <Button variant="light">{t("common.edit")}</Button>}
+      <div className="ml-auto flex flex-wrap gap-2 sm:ml-0">
+        {actions ?? <Button variant="light">{t("common.edit")}</Button>}
+      </div>
     </div>
   );
 }

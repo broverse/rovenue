@@ -45,7 +45,7 @@ export function StepTeam({ form, onUpdate }: StepTeamProps) {
         description={t("projectSetup.team.description")}
       />
 
-      <div className="mb-5 flex gap-2">
+      <div className="mb-5 flex flex-col gap-2 sm:flex-row">
         <Input
           type="email"
           className="flex-1"
@@ -61,26 +61,28 @@ export function StepTeam({ form, onUpdate }: StepTeamProps) {
             }
           }}
         />
-        <Select
-          value={draft.role}
-          onChange={(event) =>
-            setDraft((current) => ({
-              ...current,
-              role: event.target.value as RoleId,
-            }))
-          }
-          className="w-[140px]"
-        >
-          {ROLES.map((role) => (
-            <option key={role.id} value={role.id}>
-              {t(`projectSetup.roles.${role.id}.name`)}
-            </option>
-          ))}
-        </Select>
-        <Button type="button" variant="solid-primary" onClick={addMember}>
-          <Plus className="size-3.5" aria-hidden="true" />
-          {t("projectSetup.team.invite")}
-        </Button>
+        <div className="flex gap-2">
+          <Select
+            value={draft.role}
+            onChange={(event) =>
+              setDraft((current) => ({
+                ...current,
+                role: event.target.value as RoleId,
+              }))
+            }
+            className="flex-1 sm:w-[140px] sm:flex-none"
+          >
+            {ROLES.map((role) => (
+              <option key={role.id} value={role.id}>
+                {t(`projectSetup.roles.${role.id}.name`)}
+              </option>
+            ))}
+          </Select>
+          <Button type="button" variant="solid-primary" onClick={addMember} className="shrink-0">
+            <Plus className="size-3.5" aria-hidden="true" />
+            {t("projectSetup.team.invite")}
+          </Button>
+        </div>
       </div>
 
       {form.members.length > 0 ? (
@@ -121,7 +123,7 @@ export function StepTeam({ form, onUpdate }: StepTeamProps) {
         {ROLES.map((role) => (
           <div
             key={role.id}
-            className="grid grid-cols-[120px_1fr] gap-3 border-b border-white/5 py-2 text-[12px] last:border-b-0"
+            className="grid grid-cols-1 gap-1 border-b border-white/5 py-2 text-[12px] last:border-b-0 sm:grid-cols-[120px_1fr] sm:gap-3"
           >
             <div className="font-medium text-foreground">
               {t(`projectSetup.roles.${role.id}.name`)}

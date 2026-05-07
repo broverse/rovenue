@@ -17,8 +17,8 @@ export function UsageRow({ name, description, capLabel, current, limit }: UsageR
   const tone = pct > 90 ? "bg-rv-danger" : pct > 75 ? "bg-rv-warning" : "bg-rv-accent-500";
 
   return (
-    <div className="grid items-center gap-3.5 border-b border-white/5 py-2.5 last:border-b-0 grid-cols-[200px_1fr_80px] max-[720px]:grid-cols-1 max-[720px]:gap-1.5">
-      <div className="min-w-0">
+    <div className="grid grid-cols-[1fr_auto] items-center gap-x-3.5 gap-y-1.5 border-b border-white/5 py-2.5 last:border-b-0 sm:grid-cols-[200px_1fr_80px] sm:gap-3.5">
+      <div className="col-span-2 min-w-0 sm:col-span-1">
         <div className="text-[12px] text-rv-mute-700">{name}</div>
         {description || capLabel ? (
           <div className="mt-0.5 text-[11px] text-rv-mute-500">
@@ -27,7 +27,7 @@ export function UsageRow({ name, description, capLabel, current, limit }: UsageR
           </div>
         ) : null}
       </div>
-      <div>
+      <div className="min-w-0">
         <div className="h-1.5 overflow-hidden rounded-[3px] bg-rv-c3">
           <div
             className={cn("h-full rounded-[3px]", tone)}

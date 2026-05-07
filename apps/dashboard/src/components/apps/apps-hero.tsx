@@ -31,24 +31,24 @@ export function AppsHero({ totalApps, connectedApps, events, successRate }: Prop
   return (
     <div
       style={heroStyle}
-      className="mb-4 grid grid-cols-1 items-center gap-6 rounded-[10px] border border-rv-divider px-7 py-6 lg:grid-cols-[1fr_auto]"
+      className="mb-4 grid grid-cols-1 items-center gap-5 rounded-[10px] border border-rv-divider px-4 py-5 sm:gap-6 sm:px-7 sm:py-6 lg:grid-cols-[1fr_auto]"
     >
       <div>
-        <h2 className="text-[22px] font-semibold leading-snug text-foreground">
+        <h2 className="text-[18px] font-semibold leading-snug text-foreground sm:text-[22px]">
           {t("apps.hero.title")}
         </h2>
-        <p className="mt-1.5 max-w-[620px] text-[13px] leading-[1.55] text-rv-mute-600">
+        <p className="mt-1.5 max-w-[620px] text-[12.5px] leading-[1.55] text-rv-mute-600 sm:text-[13px]">
           {t("apps.hero.description", { count: totalApps })}
         </p>
       </div>
-      <div className="flex flex-wrap gap-7">
+      <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-7">
         {stats.map((stat) => (
           <div key={stat.labelKey}>
             <div
               className={
                 stat.tone === "success"
-                  ? "font-rv-mono text-[22px] font-medium leading-none text-rv-success"
-                  : "font-rv-mono text-[22px] font-medium leading-none text-foreground"
+                  ? "font-rv-mono text-[18px] font-medium leading-none text-rv-success sm:text-[22px]"
+                  : "font-rv-mono text-[18px] font-medium leading-none text-foreground sm:text-[22px]"
               }
             >
               {stat.value}

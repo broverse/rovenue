@@ -25,7 +25,7 @@ export function PlanCard({
   return (
     <div
       className={cn(
-        "mb-4 grid items-center gap-5 rounded-lg border border-rv-accent-500/35 bg-gradient-to-br from-rv-accent-500/20 to-rv-c1 p-6 max-[720px]:grid-cols-1 grid-cols-[1fr_auto]",
+        "mb-4 grid grid-cols-1 items-center gap-5 rounded-lg border border-rv-accent-500/35 bg-gradient-to-br from-rv-accent-500/20 to-rv-c1 p-4 sm:p-6 md:grid-cols-[1fr_auto]",
         className,
       )}
     >

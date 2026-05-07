@@ -27,7 +27,30 @@ export function StepperRail({
   const progress = ((step - 1) / (STEPS.length - 1)) * 100;
 
   return (
-    <aside className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-[280px] shrink-0 overflow-y-auto border-r border-rv-divider bg-rv-c1 px-6 py-7 md:block">
+    <>
+      <div className="sticky top-14 z-[5] flex items-center gap-3 border-b border-rv-divider bg-rv-c1 px-4 py-3 md:hidden">
+        <span className="font-rv-mono text-[11px] uppercase tracking-wider text-rv-mute-500">
+          {t("projectSetup.footer.stepMeta", {
+            step,
+            total: STEPS.length,
+            label: "",
+          }).replace(/\s*·\s*$/, "")}
+        </span>
+        <div className="h-1 flex-1 overflow-hidden rounded-full bg-rv-c3">
+          <div
+            className="h-full rounded-full bg-rv-accent-500 transition-[width] duration-200 ease-out"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <span className="truncate text-[12px] font-medium text-foreground">
+          {t(
+            `projectSetup.steps.${
+              STEPS.find((entry) => entry.id === step)?.key ?? "basics"
+            }.label`,
+          )}
+        </span>
+      </div>
+      <aside className="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-[280px] shrink-0 overflow-y-auto border-r border-rv-divider bg-rv-c1 px-6 py-7 md:block">
       <h2 className="mb-1 text-[18px] font-semibold text-foreground">
         {t(
           isUpdate
@@ -123,5 +146,6 @@ export function StepperRail({
         {t("projectSetup.rail.tipBody")}
       </div>
     </aside>
+    </>
   );
 }

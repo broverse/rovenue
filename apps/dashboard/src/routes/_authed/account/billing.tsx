@@ -86,7 +86,7 @@ function BillingPage() {
           number="Mastercard •••• 8821"
           meta="Expires 02/28 · Lumen Labs Inc."
           actions={
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button variant="light">{t("account.billing.payment.setDefault")}</Button>
               <Button variant="light">{t("account.billing.payment.remove")}</Button>
             </div>

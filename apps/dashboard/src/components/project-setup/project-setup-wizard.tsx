@@ -99,7 +99,7 @@ export function ProjectSetupWizard({
     <div className="min-h-screen bg-rv-bg text-foreground">
       <SetupTopbar mode={mode} projectName={projectName ?? null} />
 
-      <div className="flex min-h-[calc(100vh-3.5rem)]">
+      <div className="flex min-h-[calc(100vh-3.5rem)] flex-col md:flex-row">
         <StepperRail
           mode={mode}
           step={step}
@@ -107,7 +107,7 @@ export function ProjectSetupWizard({
           onJump={goto}
         />
         <main className="flex min-w-0 flex-1 flex-col">
-          <div className="mx-auto w-full max-w-[920px] flex-1 px-8 py-10 sm:px-14">
+          <div className="mx-auto w-full max-w-[920px] flex-1 px-4 py-6 sm:px-8 sm:py-10 md:px-10 lg:px-14">
             {step === 1 ? (
               <StepBasics form={form} mode={mode} onUpdate={update} />
             ) : null}

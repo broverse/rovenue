@@ -27,19 +27,19 @@ export function SetupTopbar({
   const isUpdate = mode === "update";
 
   return (
-    <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b border-rv-divider bg-rv-c1 px-6">
-      <Link to="/projects" className="flex items-center gap-2 font-semibold">
+    <header className="sticky top-0 z-10 flex h-14 items-center gap-2 border-b border-rv-divider bg-rv-c1 px-4 sm:gap-4 sm:px-6">
+      <Link to="/projects" className="flex shrink-0 items-center gap-2 font-semibold">
         <span className="inline-flex size-6 items-center justify-center rounded-md bg-gradient-to-br from-rv-accent-400 to-rv-accent-700 font-rv-mono text-[12px] text-white">
           R
         </span>
-        <span>{t("topNav.appName")}</span>
+        <span className="hidden sm:inline">{t("topNav.appName")}</span>
       </Link>
-      <nav className="flex items-center gap-2 text-[13px] text-rv-mute-500">
-        <span>{t("projectSetup.crumb.workspace")}</span>
-        <span className="text-rv-mute-400">/</span>
-        <span>{t("projectSetup.crumb.projects")}</span>
-        <span className="text-rv-mute-400">/</span>
-        <strong className="font-medium text-foreground">
+      <nav className="flex min-w-0 items-center gap-2 text-[13px] text-rv-mute-500">
+        <span className="hidden md:inline">{t("projectSetup.crumb.workspace")}</span>
+        <span className="hidden text-rv-mute-400 md:inline">/</span>
+        <span className="hidden sm:inline">{t("projectSetup.crumb.projects")}</span>
+        <span className="hidden text-rv-mute-400 sm:inline">/</span>
+        <strong className="truncate font-medium text-foreground">
           {isUpdate && projectName
             ? projectName
             : t("projectSetup.crumb.newProject")}
@@ -47,7 +47,7 @@ export function SetupTopbar({
       </nav>
       <div className="flex-1" />
       {showModeSwitch && onModeChange ? (
-        <div className="inline-flex gap-0.5 rounded-md border border-rv-divider bg-rv-c2 p-0.5">
+        <div className="hidden gap-0.5 rounded-md border border-rv-divider bg-rv-c2 p-0.5 sm:inline-flex">
           {(["create", "update"] as const).map((option) => (
             <button
               type="button"

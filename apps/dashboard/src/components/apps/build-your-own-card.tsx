@@ -5,7 +5,7 @@ import { Button } from "../../ui/button";
 export function BuildYourOwnCard() {
   const { t } = useTranslation();
   return (
-    <section className="mt-6 grid grid-cols-1 items-center gap-5 rounded-lg border border-dashed border-rv-divider bg-rv-c1 p-6 lg:grid-cols-[1fr_auto]">
+    <section className="mt-6 grid grid-cols-1 items-center gap-4 rounded-lg border border-dashed border-rv-divider bg-rv-c1 p-4 sm:gap-5 sm:p-6 lg:grid-cols-[1fr_auto]">
       <div>
         <h3 className="text-[14px] font-semibold text-foreground">
           {t("apps.buildYourOwn.title")}

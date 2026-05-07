@@ -11,7 +11,13 @@ type Common = {
 };
 
 type SidebarNavLinkProps =
-  | (Common & { kind: "link"; to: string; params?: Record<string, string>; exact?: boolean })
+  | (Common & {
+      kind: "link";
+      to: string;
+      params?: Record<string, string>;
+      exact?: boolean;
+      onNavigate?: () => void;
+    })
   | (Common & { kind: "soon" });
 
 const baseClass =
@@ -57,6 +63,7 @@ export function SidebarNavLink(props: SidebarNavLinkProps) {
         activeOptions={props.exact ? { exact: true } : undefined}
         activeProps={{ className: `${baseClass} ${activeClass}` }}
         className={baseClass}
+        onClick={() => props.onNavigate?.()}
       >
         {inner}
       </Link>

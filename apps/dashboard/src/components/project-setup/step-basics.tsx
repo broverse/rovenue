@@ -34,7 +34,7 @@ export function StepBasics({ form, mode, onUpdate }: StepBasicsProps) {
         description={t("projectSetup.basics.description")}
       />
 
-      <div className="mb-6 flex items-start gap-4">
+      <div className="mb-6 flex flex-col items-start gap-4 sm:flex-row">
         <IconPicker
           iconText={form.icon}
           name={form.name}

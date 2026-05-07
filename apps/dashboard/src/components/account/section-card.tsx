@@ -39,7 +39,7 @@ export function SectionCard({
     >
       <header
         className={cn(
-          "flex items-start justify-between gap-3 border-b px-5 py-4",
+          "flex flex-wrap items-start justify-between gap-3 border-b px-4 py-4 sm:px-5",
           danger ? "border-rv-danger/25 bg-rv-danger/5" : "border-rv-divider",
         )}
       >
@@ -61,10 +61,10 @@ export function SectionCard({
         {right ? <div className="shrink-0">{right}</div> : null}
       </header>
 
-      <div className={cn("px-5 py-4", bodyClassName)}>{children}</div>
+      <div className={cn("px-4 py-4 sm:px-5", bodyClassName)}>{children}</div>
 
       {footer || meta ? (
-        <footer className="flex items-center justify-end gap-2 rounded-b-lg border-t border-rv-divider bg-rv-c2 px-5 py-3 text-[12px] text-rv-mute-500">
+        <footer className="flex flex-wrap items-center justify-end gap-2 rounded-b-lg border-t border-rv-divider bg-rv-c2 px-4 py-3 text-[12px] text-rv-mute-500 sm:px-5">
           {meta ? (
             <span className="flex-1 truncate font-rv-mono text-[11px] text-rv-mute-500">
               {meta}

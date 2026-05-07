@@ -42,7 +42,7 @@ export function EndpointsCard() {
 
   return (
     <section className="mb-4 rounded-lg border border-rv-divider bg-rv-c1">
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-rv-divider px-5 py-4">
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-rv-divider px-4 py-4 sm:px-5">
         <div className="min-w-0">
           <h3 className="text-[14px] font-semibold leading-5 text-foreground">
             {t("sdkApi.endpoints.title")}
@@ -60,23 +60,23 @@ export function EndpointsCard() {
         </a>
       </header>
 
-      <div className="flex flex-wrap items-center gap-2 border-b border-rv-divider px-5 py-3">
+      <div className="flex flex-wrap items-center gap-2 border-b border-rv-divider px-4 py-3 sm:px-5">
         <SearchInput
           value={query}
           onValueChange={setQuery}
           placeholder={t("sdkApi.endpoints.searchPlaceholder")}
           aria-label={t("sdkApi.endpoints.searchAria")}
           size="md"
-          rootClassName="min-w-[200px] flex-1"
+          rootClassName="w-full min-w-0 flex-1 sm:w-auto sm:min-w-[200px]"
         />
-        <div className="inline-flex items-center gap-0.5 rounded-md border border-rv-divider bg-rv-c2 p-0.5">
+        <div className="inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-md border border-rv-divider bg-rv-c2 p-0.5">
           {SCOPE_FILTERS.map((option) => (
             <button
               key={option}
               type="button"
               onClick={() => setScope(option)}
               className={cn(
-                "inline-flex h-[26px] cursor-pointer items-center rounded px-2.5 text-[11.5px] transition",
+                "inline-flex h-[26px] shrink-0 cursor-pointer items-center rounded px-2.5 text-[11.5px] transition",
                 scope === option
                   ? "bg-rv-c4 text-foreground"
                   : "text-rv-mute-600 hover:text-foreground",
@@ -90,7 +90,7 @@ export function EndpointsCard() {
 
       <ul className="divide-y divide-rv-divider">
         {filtered.length === 0 ? (
-          <li className="flex flex-col items-center gap-1.5 px-5 py-10 text-center">
+          <li className="flex flex-col items-center gap-1.5 px-4 py-10 text-center sm:px-5">
             <Search size={18} className="text-rv-mute-500" />
             <span className="text-[13px] text-rv-mute-700">
               {t("sdkApi.endpoints.empty.title")}
@@ -103,7 +103,7 @@ export function EndpointsCard() {
           filtered.map((endpoint) => (
             <li
               key={endpoint.id}
-              className="grid items-center gap-3 px-5 py-2.5 grid-cols-[64px_minmax(0,1fr)_auto] sm:grid-cols-[72px_minmax(0,2fr)_minmax(0,1.5fr)_auto]"
+              className="grid items-center gap-3 px-4 py-2.5 sm:px-5 grid-cols-[64px_minmax(0,1fr)_auto] sm:grid-cols-[72px_minmax(0,2fr)_minmax(0,1.5fr)_auto]"
             >
               <Chip tone={METHOD_TONE[endpoint.method]}>{endpoint.method}</Chip>
               <code className="truncate font-rv-mono text-[12px] text-foreground">

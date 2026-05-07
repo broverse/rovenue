@@ -11,8 +11,8 @@ export function ConnectedStrip({ apps }: Props) {
   const { t } = useTranslation();
   if (apps.length === 0) return null;
   return (
-    <section className="mb-3.5 rounded-lg border border-rv-divider bg-rv-c1 px-5 py-3.5">
-      <header className="mb-3 flex items-center justify-between">
+    <section className="mb-3.5 rounded-lg border border-rv-divider bg-rv-c1 px-4 py-3.5 sm:px-5">
+      <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-[13px] font-semibold text-foreground">
           {t("apps.connected.title", { count: apps.length })}
         </h3>

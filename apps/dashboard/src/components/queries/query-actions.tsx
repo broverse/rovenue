@@ -46,18 +46,18 @@ export function QueryActions({ mode, onModeChange, savedAgoLabel }: Props) {
         {savedAgoLabel}
       </span>
 
-      <div className="ml-auto flex items-center gap-1.5">
-        <Button variant="light" className="h-[26px]">
+      <div className="ml-auto flex flex-wrap items-center gap-1.5">
+        <Button variant="light" className="h-[26px]" aria-label={t("queries.actions.schedule")}>
           <Calendar size={12} />
-          {t("queries.actions.schedule")}
+          <span className="hidden sm:inline">{t("queries.actions.schedule")}</span>
         </Button>
-        <Button variant="light" className="h-[26px]">
+        <Button variant="light" className="h-[26px]" aria-label={t("queries.actions.format")}>
           <Wand2 size={12} />
-          {t("queries.actions.format")}
+          <span className="hidden sm:inline">{t("queries.actions.format")}</span>
         </Button>
-        <Button variant="flat" className="h-[26px]">
+        <Button variant="flat" className="h-[26px]" aria-label={t("queries.actions.save")}>
           <Save size={12} />
-          {t("queries.actions.save")}
+          <span className="hidden sm:inline">{t("queries.actions.save")}</span>
         </Button>
         <button
           type="button"
@@ -65,7 +65,7 @@ export function QueryActions({ mode, onModeChange, savedAgoLabel }: Props) {
         >
           <Zap size={12} />
           {t("queries.actions.run")}
-          <Kbd className="bg-white/20 text-white">⌘ ⏎</Kbd>
+          <Kbd className="hidden bg-white/20 text-white sm:inline-flex">⌘ ⏎</Kbd>
         </button>
       </div>
     </div>

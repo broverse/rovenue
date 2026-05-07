@@ -21,13 +21,13 @@ export function FeaturedRecipeBanner() {
   return (
     <section
       style={bannerStyle}
-      className="mb-4 grid grid-cols-1 items-center gap-5 rounded-[10px] border border-rv-divider px-6 py-5 lg:grid-cols-[1fr_auto]"
+      className="mb-4 grid grid-cols-1 items-center gap-4 rounded-[10px] border border-rv-divider px-4 py-4 sm:gap-5 sm:px-6 sm:py-5 lg:grid-cols-[1fr_auto]"
     >
       <div>
         <div className="font-rv-mono text-[11px] font-medium uppercase tracking-wider text-rv-accent-400">
           {t("apps.featured.eyebrow")}
         </div>
-        <h3 className="mt-1.5 text-[18px] font-semibold leading-snug text-foreground">
+        <h3 className="mt-1.5 text-[16px] font-semibold leading-snug text-foreground sm:text-[18px]">
           {t("apps.featured.title")}
         </h3>
         <p className="mt-1.5 max-w-[540px] text-[12.5px] leading-[1.55] text-rv-mute-600">
@@ -42,7 +42,7 @@ export function FeaturedRecipeBanner() {
           </Button>
         </div>
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {apps.map((app) => (
           <AppLogo key={app.id} logo={app.logo} size="lg" />
         ))}

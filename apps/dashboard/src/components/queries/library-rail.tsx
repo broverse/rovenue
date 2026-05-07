@@ -95,7 +95,7 @@ export function LibraryRail({ selectedId, onSelect }: Props) {
   ].filter((s) => s.ids.length > 0);
 
   return (
-    <aside className="sticky top-[76px] flex max-h-[calc(100vh-96px)] flex-col overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">
+    <aside className="flex max-h-[70vh] flex-col overflow-hidden rounded-lg border border-rv-divider bg-rv-c1 min-[1024px]:sticky min-[1024px]:top-[76px] min-[1024px]:max-h-[calc(100vh-96px)]">
       <div className="flex items-center gap-1.5 border-b border-rv-divider px-3 py-2.5">
         <h3 className="flex-1 text-[11px] font-medium uppercase tracking-wider text-rv-mute-500">
           {t("queries.library.title")}

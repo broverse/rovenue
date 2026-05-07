@@ -43,10 +43,11 @@ type ReviewRowProps = {
 
 export function ReviewRow({ label, value, empty }: ReviewRowProps) {
   return (
-    <div className="grid grid-cols-[200px_1fr] gap-3 border-b border-white/5 py-2 text-[12px] last:border-b-0">
+    <div className="grid grid-cols-1 gap-1 border-b border-white/5 py-2 text-[12px] last:border-b-0 sm:grid-cols-[200px_1fr] sm:gap-3">
       <div className="text-rv-mute-500">{label}</div>
       <div
         className={cn(
+          "min-w-0 break-words",
           empty
             ? "italic text-rv-mute-500"
             : "font-rv-mono text-rv-mute-700",

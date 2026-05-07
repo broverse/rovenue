@@ -138,14 +138,14 @@ function ProfilePage() {
           optional={t("account.profile.contact.primary")}
           hint={t("account.profile.contact.emailHint")}
         >
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Input
               mono
               value={profile.email}
               onChange={(e) => update("email", e.target.value)}
-              className="flex-1"
+              className="min-w-0 flex-1"
             />
-            <span className="self-center rounded bg-rv-success/15 px-2.5 py-1 font-rv-mono text-[11px] text-rv-success">
+            <span className="rounded bg-rv-success/15 px-2.5 py-1 font-rv-mono text-[11px] text-rv-success">
               {t("account.profile.contact.verified")}
             </span>
           </div>
