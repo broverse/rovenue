@@ -37,6 +37,285 @@
     "dark": "Dark",
     "system": "System"
   },
+  "projectSetup": {
+    "close": "Close",
+    "mode": {
+      "create": "create",
+      "update": "update"
+    },
+    "crumb": {
+      "workspace": "Workspace",
+      "projects": "Projects",
+      "newProject": "New project"
+    },
+    "rail": {
+      "titleCreate": "Create a project",
+      "titleUpdate": "Edit project",
+      "subtitleCreate": "A project is a single billable app or website. You can add more platforms later.",
+      "subtitleUpdate": "Each step is independently saveable. Changes to platform credentials trigger a re-import.",
+      "tipLabel": "Tip:",
+      "tipBody": "You can leave platforms and connectors empty for now and complete them after creation. Changes here never delete revenue history."
+    },
+    "steps": {
+      "basics": { "label": "Project basics", "desc": "Name, slug, description" },
+      "platforms": { "label": "App platforms", "desc": "iOS, Android, Web, Stripe" },
+      "currency": { "label": "Currency & timezone", "desc": "Reporting defaults" },
+      "connectors": { "label": "Connectors", "desc": "Optional integrations" },
+      "team": { "label": "Team access", "desc": "Members & roles" },
+      "review": { "label": "Review", "desc": "Confirm and create" }
+    },
+    "footer": {
+      "back": "Back",
+      "continue": "Continue",
+      "discard": "Discard changes",
+      "saveAll": "Save all changes",
+      "create": "Create project",
+      "editing": "Editing project",
+      "stepMeta": "Step {{step}} of {{total}} · {{label}}"
+    },
+    "basics": {
+      "eyebrow": "STEP 1 OF 6 · BASICS",
+      "title": "Project basics",
+      "description": "Give the project a name and a short description. The slug becomes the URL prefix and cannot be changed after creation without a manual ticket.",
+      "icon": "Icon",
+      "colorOption": "Use color {{color}}",
+      "name": "Project name",
+      "namePlaceholder": "e.g. Lumen — Photo & Video",
+      "nameHint": "Shown in dashboards, exports, and webhook payloads. {{count}}/{{max}}.",
+      "slug": "Slug",
+      "slugAuto": "auto-generated, editable",
+      "slugLocked": "locked after creation",
+      "slugPlaceholder": "lumen-prod",
+      "slugHintEmpty": "Lowercase letters, numbers, and dashes. Will appear after typing a name.",
+      "descLabel": "Description",
+      "descriptionPlaceholder": "What this project tracks, who owns it, any special handling…",
+      "descriptionHint": "{{count}}/{{max}}. Visible to all members.",
+      "environment": "Environment",
+      "envOptions": {
+        "production": {
+          "name": "Production",
+          "desc": "Real customers, real revenue. Strict change controls."
+        },
+        "staging": {
+          "name": "Staging",
+          "desc": "Pre-prod copy. Receives sandbox webhooks."
+        },
+        "sandbox": {
+          "name": "Sandbox",
+          "desc": "Synthetic data. Free tier; resets weekly."
+        }
+      },
+      "tags": "Tags",
+      "tagsPlaceholder": "mobile, b2c, photo …",
+      "tagsHint": "Press Enter or comma to add. Useful for filtering across many projects.",
+      "required": "required",
+      "optional": "optional"
+    },
+    "platforms": {
+      "eyebrow": "STEP 2 OF 6 · PLATFORMS",
+      "title": "Pick your app platforms",
+      "description": "Choose every billing surface that earns money for this project. Each platform requires its own credentials — you can paste them now or skip and add later.",
+      "options": {
+        "ios": {
+          "name": "iOS — App Store",
+          "desc": "StoreKit, App Store Connect API. Auto-imports subscriptions, IAPs, and family-share data."
+        },
+        "android": {
+          "name": "Android — Play Store",
+          "desc": "Play Billing v6+, Google Play Developer API. Auto-imports SKUs and grace periods."
+        },
+        "web": {
+          "name": "Web — Stripe",
+          "desc": "Stripe checkout, customer portal, billing webhooks. Idempotent transactional imports."
+        },
+        "paddle": {
+          "name": "Web — Paddle",
+          "desc": "Paddle Billing. Used for global VAT/MoR handling and ad-hoc usage."
+        },
+        "amazon": {
+          "name": "Amazon Appstore",
+          "desc": "Amazon IAP. Optional — only if you ship Fire TV / Fire Tablet."
+        },
+        "roku": {
+          "name": "Roku Channel Store",
+          "desc": "Roku Pay. Streaming/connected-TV billing."
+        }
+      },
+      "ios": {
+        "title": "App Store Connect credentials",
+        "bundleId": "Bundle ID",
+        "issuerId": "Issuer ID",
+        "keyId": "Key ID",
+        "privateKey": "Private key (.p8)",
+        "uploadP8": "Upload .p8 file"
+      },
+      "android": {
+        "title": "Play Console credentials",
+        "packageName": "Package name",
+        "serviceAccount": "Service account JSON",
+        "uploadJson": "Upload service-account.json"
+      },
+      "web": {
+        "title": "Stripe account",
+        "account": "Stripe account",
+        "oauthConnect": "OAuth connect"
+      },
+      "mirror": {
+        "title": "Mirror to sandbox project",
+        "description": "A read-only sandbox copy will receive synthetic events at 5% of production volume — handy for QAing dashboards without touching real numbers."
+      }
+    },
+    "currency": {
+      "eyebrow": "STEP 3 OF 6 · REPORTING",
+      "title": "Currency & timezone",
+      "description": "These settings control how revenue is normalized and how time-bucketed metrics roll up. They can be changed later, but historical reports will be re-aggregated.",
+      "reportingCurrency": "Reporting currency",
+      "reportingCurrencyHint": "All MRR/ARR/revenue figures are converted to this currency using daily rates.",
+      "fxSource": "FX rate source",
+      "fxOptions": {
+        "ecb": {
+          "name": "ECB",
+          "desc": "European Central Bank · daily reference rates · free"
+        },
+        "oanda": {
+          "name": "OANDA",
+          "desc": "Mid-market hourly rates · paid · GAAP-friendly"
+        },
+        "custom": {
+          "name": "Custom",
+          "desc": "Upload your own daily rates as CSV via API"
+        }
+      },
+      "timezone": "Reporting timezone",
+      "timezoneHint": "Daily/weekly/monthly buckets snap to this zone.",
+      "weekStart": "Week starts on",
+      "weekOptions": {
+        "monday": "Monday (ISO)",
+        "sunday": "Sunday (US)",
+        "saturday": "Saturday (MENA)"
+      },
+      "fiscalYear": "Fiscal year starts",
+      "fiscalYearOptional": "for cohort + retention math",
+      "months": {
+        "jan": "Jan",
+        "feb": "Feb",
+        "mar": "Mar",
+        "apr": "Apr",
+        "may": "May",
+        "jun": "Jun",
+        "jul": "Jul",
+        "aug": "Aug",
+        "sep": "Sep",
+        "oct": "Oct",
+        "nov": "Nov",
+        "dec": "Dec"
+      },
+      "refundPolicy": "Refund handling",
+      "refundPolicyOptional": "applied to historical recompute",
+      "refundOptions": {
+        "partial-window": {
+          "name": "Partial — within window",
+          "desc": "Subtract refunded amount only inside the 30-day refund window. GAAP-aligned."
+        },
+        "full-clawback": {
+          "name": "Full clawback",
+          "desc": "Refunds always reverse the original revenue line, regardless of date."
+        }
+      },
+      "autoImport": {
+        "title": "Auto-import on schedule",
+        "description": "Pull store data hourly. Recommended unless you have your own ETL syncing into Rovenue."
+      }
+    },
+    "connectors": {
+      "eyebrow": "STEP 4 OF 6 · CONNECTORS",
+      "title": "Optional integrations",
+      "description": "Pipe Rovenue events into your analytics stack, push alerts to your team, and stream raw rows to your warehouse. All connectors can be added later from Settings → Connectors.",
+      "empty": "No connectors selected. You can skip this step — the project will still capture all billing data.",
+      "broadcast": {
+        "title": "Send subscription_created webhook to all selected connectors",
+        "description": "Forwards a normalized event for every new paid subscription. Disable if you only want analytics, not real-time signals."
+      }
+    },
+    "team": {
+      "eyebrow": "STEP 5 OF 6 · TEAM",
+      "title": "Invite your team",
+      "description": "Add teammates by email. They'll receive an invite link valid for 7 days. You can change roles or revoke access anytime from Settings → Members.",
+      "emailPlaceholder": "teammate@company.com",
+      "invite": "Invite",
+      "remove": "Remove member",
+      "empty": "No teammates yet — you'll be the only member.",
+      "roleReference": "Role reference"
+    },
+    "roles": {
+      "owner": {
+        "name": "Owner",
+        "desc": "Full access. Can transfer ownership and delete the project."
+      },
+      "admin": {
+        "name": "Admin",
+        "desc": "Full access except billing and project deletion."
+      },
+      "analyst": {
+        "name": "Analyst",
+        "desc": "Read-only across data. Can save charts and export."
+      },
+      "developer": {
+        "name": "Developer",
+        "desc": "API key & webhook management. Can edit experiments and flags."
+      },
+      "viewer": {
+        "name": "Viewer",
+        "desc": "Read-only. Cannot export raw rows."
+      }
+    },
+    "review": {
+      "eyebrow": "STEP 6 OF 6 · REVIEW",
+      "titleCreate": "Review and create project",
+      "titleUpdate": "Review and save changes",
+      "descriptionCreate": "Double-check the configuration. After you create the project, the slug becomes permanent and the first import will start within 60 seconds.",
+      "descriptionUpdate": "Double-check the configuration. Modified sections will save independently.",
+      "edit": "Edit",
+      "notSet": "Not set",
+      "none": "None",
+      "platformsEmpty": "None — add later",
+      "fxFrom": "FX from {{source}}",
+      "memberCount_one": "{{count}} member",
+      "memberCount_other": "{{count}} members",
+      "justYou": "Just you",
+      "headsUpLabel": "Heads up:",
+      "headsUpBefore": "the slug",
+      "headsUpAfter": "becomes permanent after creation. Renaming the project later doesn't change the URL.",
+      "fields": {
+        "name": "Name",
+        "url": "URL",
+        "environment": "Environment",
+        "description": "Description",
+        "tags": "Tags",
+        "activePlatforms": "Active platforms",
+        "iosBundle": "iOS bundle",
+        "androidPackage": "Android package",
+        "stripeAccount": "Stripe account",
+        "sandboxMirror": "Sandbox mirror",
+        "reportingCurrency": "Reporting currency",
+        "timezone": "Timezone",
+        "weekStart": "Week starts on",
+        "fiscalYear": "Fiscal year",
+        "refundPolicy": "Refund policy",
+        "autoImport": "Auto-import",
+        "selected": "Selected",
+        "membersInvited": "Members invited"
+      },
+      "toggle": {
+        "enabled": "Enabled",
+        "disabled": "Disabled"
+      },
+      "autoImport": {
+        "hourly": "Hourly",
+        "manual": "Manual"
+      }
+    }
+  },
   "sidebar": {
     "primaryAria": "Primary",
     "search": "Search",

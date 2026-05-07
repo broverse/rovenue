@@ -1,4 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Button, Spinner } from "@heroui/react";
 import { useTranslation } from "react-i18next";
 import { TopNav } from "../../components/layout/TopNav";
@@ -11,7 +12,14 @@ export const Route = createFileRoute("/_authed/projects/")({
 
 export function ProjectsList() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { data, isLoading, error } = useProjects();
+
+  useEffect(() => {
+    if (data && data.length === 0) {
+      navigate({ to: "/projects/setup", replace: true });
+    }
+  }, [data, navigate]);
 
   return (
     <>
@@ -19,7 +27,7 @@ export function ProjectsList() {
       <div className="mx-auto max-w-6xl px-6 py-8">
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-semibold">{t("projects.list.title")}</h1>
-          <Link to="/projects/new">
+          <Link to="/projects/setup">
             <Button variant="primary">{t("projects.list.newProject")}</Button>
           </Link>
         </div>
@@ -32,11 +40,6 @@ export function ProjectsList() {
         {error && (
           <div role="alert" className="text-danger-500">
             {error.message}
-          </div>
-        )}
-        {data?.length === 0 && (
-          <div className="rounded-lg border border-dashed border-default-300 p-12 text-center text-default-500">
-            {t("projects.list.empty")}
           </div>
         )}
         {data && data.length > 0 && (
