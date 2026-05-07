@@ -1184,5 +1184,118 @@
         "description": "Share of users who start a trial after viewing the onboarding paywall."
       }
     }
+  },
+  "cohorts": {
+    "title": "Cohorts",
+    "subtitle": "Group subscribers by behavior, acquisition channel, or lifecycle stage. Compare retention, revenue, and LTV across segments — then sync cohorts to ad platforms or use them as targeting rules.",
+    "actions": {
+      "howCohortsWork": "How cohorts work",
+      "exportCsv": "Export CSV",
+      "newCohort": "New cohort",
+      "duplicate": "Duplicate",
+      "save": "Save",
+      "csv": "CSV"
+    },
+    "kpi": {
+      "saved": "SAVED COHORTS",
+      "savedBreakdown": "{{groups}} groups · {{synced}} sync'd to Meta",
+      "avgRetention": "AVG W4 RETENTION",
+      "avgRetentionDelta": "▲ +{{value}}pp vs prior 12w",
+      "bestCohort": "BEST COHORT · W4",
+      "bestCohortValue": "{{value}}% · {{users}} users",
+      "blendedLtv": "BLENDED 90-DAY LTV",
+      "blendedLtvDelta": "▲ +${{value}} vs prior period"
+    },
+    "saved": {
+      "heading": "Saved cohorts",
+      "newAria": "New cohort",
+      "filterPlaceholder": "Filter cohorts…",
+      "groups": {
+        "Behavior": "Behavior",
+        "Lifecycle": "Lifecycle",
+        "Risk": "Risk",
+        "Acquisition": "Acquisition"
+      },
+      "sizeLabel": "{{size}} · ",
+      "tooltipChange": "{{value}} this week"
+    },
+    "hero": {
+      "groupCohort": "{{group}} cohort",
+      "memberMore": "+ {{count}} more",
+      "size": "Size",
+      "sizeDelta": "{{value}} this week",
+      "w4Retention": "W4 retention",
+      "w4RetentionValue": "62.4%",
+      "w4RetentionDelta": "▲ +2.1pp",
+      "ltv90": "90-day LTV",
+      "ltv90Value": "$32.14",
+      "ltv90Delta": "▲ +$3.40",
+      "monthlyChurn": "Monthly churn",
+      "monthlyChurnValue": "2.8%",
+      "monthlyChurnDelta": "▼ -0.4pp"
+    },
+    "builder": {
+      "heading": "Cohort definition",
+      "include": "INCLUDE",
+      "exclude": "EXCLUDE",
+      "anchor": "ANCHOR",
+      "and": "AND",
+      "addCondition": "+ Add condition",
+      "cohortBy": "cohort by",
+      "bucket": "bucket",
+      "bucketValue": "weekly",
+      "anchorValue": "first_subscription.start_date",
+      "matches": "Matches <0>{{count}}</0> users · refreshed {{ago}}",
+      "refreshedAgo": "2m ago"
+    },
+    "retention": {
+      "headingRetention": "Retention by cohort",
+      "headingRevenue": "Revenue retention by cohort",
+      "headingCount": "Active users by cohort",
+      "subtitle": "Weekly · cohort by signup week · {{cohort}}",
+      "cohortHeader": "Cohort",
+      "metricRetention": "Retention %",
+      "metricRevenue": "Revenue ret.",
+      "metricCount": "Active #",
+      "hover": "<0>{{cohort}}</0> · W{{week}} · {{value}} ({{active}} of {{size}})",
+      "hoverActive": "{{count}} active"
+    },
+    "ltv": {
+      "title": "Cumulative LTV by cohort",
+      "subtitle": "Weekly USD · 4 recent cohorts",
+      "toDate": "— ${{value}} to date",
+      "yAxisFormat": "${{value}}"
+    },
+    "breakdown": {
+      "title": "Breakdown by country",
+      "subtitle": "Within selected cohort",
+      "cols": {
+        "country": "Country",
+        "users": "Users",
+        "w4": "W4 ret.",
+        "ltv": "LTV 90d",
+        "churn": "Churn",
+        "vsAvg": "vs avg"
+      }
+    },
+    "sync": {
+      "title": "Use this cohort",
+      "subtitle": "Sync to destinations or target from experiments & flags",
+      "items": {
+        "metaAds": "Meta Ads",
+        "tiktokAds": "TikTok Ads",
+        "experiments": "Target in experiments",
+        "featureFlag": "Use in feature flag"
+      },
+      "states": {
+        "syncedAgo": "Synced · updated {{ago}}",
+        "notSynced": "Not synced",
+        "activeCount": "{{count}} active",
+        "ruleReferences": "{{count}} rule references"
+      }
+    },
+    "topbar": {
+      "range": "Weekly · last 12 weeks"
+    }
   }
 }

@@ -93,7 +93,7 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
         badge: "3",
       },
       { id: "flags", labelKey: "sidebar.items.flags", icon: Flag, to: "/projects/$projectId/feature-flags" },
-      { id: "cohorts", labelKey: "sidebar.items.cohorts", icon: Users2, soon: true },
+      { id: "cohorts", labelKey: "sidebar.items.cohorts", icon: Users2, to: "/projects/$projectId/cohorts" },
     ],
   },
   {
