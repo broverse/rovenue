@@ -30,7 +30,8 @@
     "member": "Member",
     "devOnly": "dev only",
     "theme": "Theme",
-    "themeAria": "Theme: {{label}} (click to change)"
+    "themeAria": "Theme: {{label}} (click to change)",
+    "edit": "Edit"
   },
   "themes": {
     "light": "Light",
@@ -1832,6 +1833,440 @@
     "sql": {
       "title": "SQL preview",
       "openInQueries": "Open in Queries"
+    }
+  },
+  "account": {
+    "topbar": {
+      "breadcrumb": "Account"
+    },
+    "nav": {
+      "aria": "Account settings",
+      "sections": {
+        "account": "ACCOUNT",
+        "workspace": "WORKSPACE",
+        "preferences": "PREFERENCES"
+      },
+      "items": {
+        "profile": "Profile",
+        "security": "Security",
+        "notifications": "Notifications",
+        "connected": "Connected accounts",
+        "billing": "Billing & plan",
+        "invoices": "Invoices",
+        "usage": "Usage",
+        "api": "API & webhooks",
+        "team": "Team",
+        "appearance": "Appearance",
+        "export": "Export & danger zone"
+      }
+    },
+    "profile": {
+      "title": "Profile",
+      "subtitle": "This is how you appear in Rovenue. Some fields are visible to your teammates.",
+      "photo": {
+        "title": "Photo & display",
+        "subtitle": "Your avatar shows up in comments, audit logs, and the activity feed.",
+        "upload": "Upload image",
+        "remove": "Remove",
+        "hint": "PNG, JPG, or GIF · max 2 MB · 240×240 recommended"
+      },
+      "info": {
+        "title": "Personal information",
+        "subtitle": "Your legal name is used on invoices and tax documents.",
+        "firstName": "First name",
+        "lastName": "Last name",
+        "displayName": "Display name",
+        "displayNameHint": "shown to team",
+        "role": "Job title",
+        "company": "Company",
+        "bio": "Bio",
+        "bioOptional": "optional · 280 chars",
+        "bioCount": "{{count}}/280 · Visible to teammates in your profile card.",
+        "lastEdited": "Last edited {{when}} by you",
+        "lastEditedRel": "2 days ago",
+        "save": "Save profile"
+      },
+      "contact": {
+        "title": "Contact",
+        "subtitle": "Where we reach you for security alerts and account recovery.",
+        "email": "Email",
+        "primary": "primary",
+        "verified": "verified",
+        "emailHint": "Changing your email requires confirmation from both addresses.",
+        "phone": "Phone",
+        "phoneHint": "used for SMS 2FA"
+      },
+      "locale": {
+        "title": "Locale & timezone",
+        "subtitle": "Affects only your view — team-wide reporting timezone is set per project.",
+        "language": "Language",
+        "timezone": "Timezone",
+        "dateFormat": "Date format"
+      },
+      "activity": {
+        "title": "Activity & visibility",
+        "profileVisible": "Profile visible to teammates",
+        "profileVisibleDesc": "Your name, avatar, and bio appear in shared dashboards.",
+        "statusVisible": "Show typing & presence indicators",
+        "statusVisibleDesc": "Lets teammates see when you're viewing the same dashboard."
+      }
+    },
+    "security": {
+      "title": "Security",
+      "subtitle": "Authentication, devices, and recovery options for your account.",
+      "password": {
+        "title": "Password",
+        "subtitle": "Choose a strong password unique to Rovenue. Minimum 12 characters.",
+        "current": "Current password",
+        "new": "New password",
+        "confirm": "Confirm new password",
+        "lastChanged": "Last changed {{count}} days ago",
+        "update": "Update password"
+      },
+      "twofa": {
+        "title": "Two-factor authentication",
+        "subtitle": "Add a second step at sign-in. Required for owners on production projects.",
+        "authenticator": {
+          "title": "Authenticator app",
+          "desc": "Use 1Password, Authy, or Google Authenticator to generate codes. Configured Apr 2."
+        },
+        "reconfigure": "Reconfigure",
+        "hardware": {
+          "title": "Hardware security key",
+          "desc": "YubiKey, Titan, or any FIDO2 key. Recommended for highest assurance.",
+          "add": "Add key"
+        },
+        "sms": {
+          "title": "SMS backup",
+          "desc": "Code via text to {{phone}}. Avoid if your phone supports an authenticator."
+        },
+        "recovery": {
+          "title": "Recovery codes",
+          "desc": "10 single-use codes for when you can't access 2FA. {{remaining}} of 10 remaining.",
+          "view": "View codes"
+        }
+      },
+      "sessions": {
+        "title": "Active sessions",
+        "subtitle": "Devices currently signed in. Revoke any you don't recognize.",
+        "thisDevice": "this device",
+        "revoke": "Revoke",
+        "count_one": "{{count}} active session",
+        "count_other": "{{count}} active sessions",
+        "signOutAll": "Sign out everywhere",
+        "devices": {
+          "macChrome": {
+            "device": "MacBook Pro · Chrome 134",
+            "meta": "Istanbul, TR · 31.32.x.x · Active now"
+          },
+          "iphone": {
+            "device": "iPhone 15 Pro · Rovenue iOS 2.4",
+            "meta": "Istanbul, TR · 88.241.x.x · 4 minutes ago"
+          },
+          "ipad": {
+            "device": "iPad Air · Safari 17",
+            "meta": "Istanbul, TR · 31.32.x.x · Yesterday at 22:14"
+          },
+          "linux": {
+            "device": "Linux · Chrome 133",
+            "meta": "Berlin, DE · 95.91.x.x · 6 days ago"
+          }
+        }
+      }
+    },
+    "notifications": {
+      "title": "Notifications",
+      "subtitle": "Choose what we ping you about and where it lands.",
+      "channels": {
+        "title": "Channels",
+        "subtitle": "Where notifications are delivered. Critical security alerts always go to email."
+      },
+      "revenue": {
+        "title": "Revenue & growth",
+        "subtitle": "Daily, weekly, and threshold-triggered updates."
+      },
+      "billing": {
+        "title": "Billing & operational",
+        "subtitle": "Account-level notifications you usually want on."
+      },
+      "marketing": {
+        "title": "Marketing",
+        "subtitle": "Optional. We won't share your email."
+      },
+      "items": {
+        "email": { "title": "Email", "desc": "Goes to your verified email." },
+        "slack": { "title": "Slack DM", "desc": "Connected to Lumen workspace · @aiden" },
+        "push": { "title": "Mobile push", "desc": "Rovenue iOS app on iPhone 15 Pro" },
+        "daily_digest": {
+          "title": "Daily digest",
+          "desc": "Yesterday's MRR, new subs, churn at 9:00 in your timezone."
+        },
+        "weekly_summary": {
+          "title": "Weekly summary",
+          "desc": "Sent Mondays. Full revenue + cohort recap."
+        },
+        "anomaly": {
+          "title": "Anomaly detection",
+          "desc": "Real-time alert when MRR, churn, or refunds deviate >3σ from forecast."
+        },
+        "milestone": {
+          "title": "Milestone reached",
+          "desc": "$10k MRR, 1k subscribers, etc."
+        },
+        "churn_spike": {
+          "title": "Churn spike",
+          "desc": "When daily churn exceeds 1.5× the 7-day rolling average."
+        },
+        "invoice": { "title": "New invoice issued", "desc": "" },
+        "refund_alert": { "title": "Customer refund processed", "desc": "" },
+        "low_balance": {
+          "title": "Credit balance low",
+          "desc": "When your account credit drops below $50."
+        },
+        "product_news": {
+          "title": "Product news",
+          "desc": "Monthly product updates and changelog highlights."
+        },
+        "marketing": {
+          "title": "Marketing & events",
+          "desc": "Webinars, case studies, occasional surveys."
+        }
+      }
+    },
+    "connected": {
+      "title": "Connected accounts",
+      "subtitle": "Sign-in providers and third-party apps with access to your Rovenue account.",
+      "providers": {
+        "title": "Sign-in methods",
+        "subtitle": "You can sign in to Rovenue with any of the following.",
+        "primary": "primary",
+        "actions": {
+          "connect": "Connect",
+          "configure": "Configure",
+          "disconnect": "Disconnect"
+        },
+        "items": {
+          "google": {
+            "name": "Google",
+            "connected": "aiden@lumen.co · connected Mar 12, 2026"
+          },
+          "github": {
+            "name": "GitHub",
+            "connected": "aidenkow · connected Apr 4, 2026"
+          },
+          "apple": {
+            "name": "Apple",
+            "disconnected": "Not connected"
+          },
+          "sso": {
+            "name": "SAML SSO (lumen.co)",
+            "disconnected": "Not connected"
+          }
+        }
+      },
+      "apps": {
+        "title": "OAuth apps with access",
+        "subtitle": "Third-party apps you've authorized. Revoke anytime.",
+        "revoke": "Revoke",
+        "items": {
+          "linear": {
+            "name": "Linear",
+            "meta": "read:experiments, write:annotations · Authorized Apr 18"
+          },
+          "zapier": {
+            "name": "Zapier",
+            "meta": "read:metrics · Authorized Feb 22"
+          },
+          "raycast": {
+            "name": "Raycast",
+            "meta": "read:dashboard · Authorized Jan 9"
+          }
+        }
+      }
+    },
+    "billing": {
+      "title": "Billing & plan",
+      "subtitle": "Manage your subscription, payment method, and billing address.",
+      "plan": {
+        "eyebrow": "CURRENT PLAN",
+        "name": "Scale",
+        "description": "Up to 50,000 tracked subscribers · 10M events/mo · Unlimited dashboards · Priority support",
+        "stats": {
+          "monthly": "Monthly",
+          "perMonth": "/mo",
+          "nextBill": "Next bill",
+          "cycle": "Billing cycle",
+          "cycleValue": "Monthly · auto-renew"
+        },
+        "upgrade": "Upgrade plan",
+        "switchAnnual": "Switch to annual",
+        "save": "save 20%",
+        "cancel": "Cancel subscription"
+      },
+      "payment": {
+        "title": "Payment method",
+        "subtitle": "All cards are tokenized — we never see the full PAN.",
+        "default": "default",
+        "setDefault": "Set default",
+        "remove": "Remove",
+        "add": "Add payment method"
+      },
+      "details": {
+        "title": "Billing details",
+        "subtitle": "Used on every invoice. Make sure these match your tax records.",
+        "savedAuto": "Saved automatically",
+        "legalEntity": "Legal entity",
+        "taxId": "Tax ID / VAT",
+        "billingEmail": "Billing email",
+        "billingEmailHint": "invoices go here",
+        "country": "Country",
+        "zip": "Zip / postal code",
+        "address": "Address",
+        "memo": "Invoice memo",
+        "memoHint": "optional · appears on every invoice"
+      }
+    },
+    "invoices": {
+      "title": "Invoices",
+      "subtitle": "All Rovenue subscription and usage invoices.",
+      "history": {
+        "title": "History",
+        "subtitle": "{{count}} invoices · all-time"
+      },
+      "exportCsv": "Export CSV",
+      "downloadAll": "Download all (ZIP)",
+      "pdf": "PDF",
+      "cols": {
+        "invoice": "Invoice",
+        "date": "Date",
+        "description": "Description",
+        "status": "Status",
+        "amount": "Amount"
+      },
+      "status": {
+        "paid": "paid",
+        "open": "open",
+        "refunded": "refunded"
+      }
+    },
+    "usage": {
+      "title": "Usage",
+      "subtitle": "Your current billing period · May 1 – May 8, 2026 (8 of 31 days).",
+      "limits": {
+        "title": "Plan limits",
+        "subtitle": "Hard caps trigger overage billing at $0.05 per 10k events. Soft caps are alerts only.",
+        "resets": "Resets June 1, 2026 · {{remaining}} days remaining"
+      },
+      "cap": {
+        "hard": "hard cap",
+        "soft": "soft cap"
+      },
+      "items": {
+        "subscribers": {
+          "name": "Tracked subscribers",
+          "desc": "Unique paying users"
+        },
+        "events": {
+          "name": "Events ingested",
+          "desc": "Webhooks + SDK calls"
+        },
+        "charts": {
+          "name": "Saved charts",
+          "desc": "Pinned + dashboard widgets"
+        },
+        "seats": {
+          "name": "Team seats",
+          "desc": "Active members"
+        },
+        "api": {
+          "name": "API requests",
+          "desc": "REST + GraphQL · last 24h"
+        },
+        "sql": {
+          "name": "SQL credits",
+          "desc": "Ad-hoc warehouse queries"
+        }
+      }
+    },
+    "api": {
+      "title": "API & webhooks",
+      "subtitle": "Personal API keys for scripts and integrations. For project-level keys see Project → API.",
+      "revoke": "Revoke",
+      "tokens": {
+        "title": "Personal access tokens",
+        "subtitle": "Tokens inherit your account permissions. Rotate every 90 days.",
+        "new": "New token",
+        "items": {
+          "scripts": {
+            "name": "Ad-hoc scripts",
+            "meta": "Created Apr 4 · last used 12m ago"
+          },
+          "linear": {
+            "name": "Linear bot",
+            "meta": "Created Feb 22 · last used 2h ago"
+          },
+          "local": {
+            "name": "Local dev",
+            "meta": "Created Jan 9 · last used 6 days ago"
+          }
+        }
+      }
+    },
+    "team": {
+      "title": "Team",
+      "subtitle": "Manage workspace members.",
+      "placeholder": {
+        "title": "Workspace team",
+        "body": "See <b>Workspace → Team</b> for invitations and roles."
+      }
+    },
+    "appearance": {
+      "title": "Appearance",
+      "subtitle": "Local preferences for how Rovenue looks on this device.",
+      "theme": {
+        "title": "Theme",
+        "options": {
+          "dark": { "name": "Dark", "desc": "Default. Lower eye strain at night." },
+          "light": { "name": "Light", "desc": "High contrast for bright rooms." },
+          "system": { "name": "Match system", "desc": "Follows OS appearance setting." }
+        }
+      },
+      "density": {
+        "title": "Density",
+        "subtitle": "Tables and lists."
+      },
+      "numbers": {
+        "title": "Number format",
+        "compact": {
+          "title": "Compact large numbers",
+          "desc": "Show $1.2M instead of $1,234,567 in dashboards."
+        },
+        "currency": {
+          "title": "Show currency symbol always",
+          "desc": "Affects table cells and tooltips."
+        }
+      }
+    },
+    "export": {
+      "title": "Export & danger zone",
+      "subtitle": "Download your account data, or close your account.",
+      "data": {
+        "title": "Export account data",
+        "subtitle": "Includes profile, preferences, comments, saved charts, and audit log entries.",
+        "action": "Request data export (.zip)",
+        "hint": "You'll receive a download link by email within 24 hours. Project-level data is exported separately from each project."
+      },
+      "transfer": {
+        "title": "Transfer account ownership",
+        "subtitle": "Move ownership of all your projects to another team member.",
+        "action": "Transfer ownership"
+      },
+      "close": {
+        "title": "Close account",
+        "subtitle": "Permanently delete your Rovenue account, all personal data, and revoke all sessions. Project data is retained if you have co-owners.",
+        "warning": "<b>This is irreversible.</b> Once closed, your account cannot be recovered. Active subscriptions will be canceled and prorated. You'll have 30 days to download exports before they're purged.",
+        "action": "Close my account"
+      }
     }
   }
 }

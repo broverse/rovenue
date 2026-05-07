@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Menu } from "@base-ui-components/react/menu";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, UserCog } from "lucide-react";
 import { signOut, useSession } from "../../lib/auth";
 import { ThemeToggle } from "../layout/ThemeToggle";
 
@@ -44,6 +44,13 @@ export function SidebarUserMenu({ initials, name, role }: Props) {
               <ThemeToggle />
             </div>
             <div className="my-1 h-px bg-rv-divider" />
+            <Menu.Item
+              onClick={() => navigate({ to: "/account/profile" })}
+              className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-rv-mute-700 outline-none data-[highlighted]:bg-rv-c4 data-[highlighted]:text-foreground"
+            >
+              <UserCog size={13} />
+              {t("account.nav.items.profile")}
+            </Menu.Item>
             <Menu.Item
               onClick={async () => {
                 await signOut();
