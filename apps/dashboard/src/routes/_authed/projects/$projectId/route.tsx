@@ -21,6 +21,7 @@ function useBreadcrumbTitleKey(): string {
   if (id.includes("/subscribers/$id")) return "breadcrumb.subscriber";
   if (id.includes("/subscribers/")) return "breadcrumb.subscribers";
   if (id.includes("/settings")) return "breadcrumb.settings";
+  if (id.includes("/live-events")) return "breadcrumb.liveEvents";
   return "breadcrumb.overview";
 }
 

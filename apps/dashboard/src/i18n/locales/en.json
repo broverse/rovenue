@@ -108,7 +108,8 @@
     "subscriber": "Subscriber",
     "subscribers": "Subscribers",
     "settings": "Settings",
-    "overview": "Overview"
+    "overview": "Overview",
+    "liveEvents": "Live events"
   },
   "overview": {
     "title": "Overview",
@@ -241,6 +242,86 @@
       "copyHeader": "Copy the new secret",
       "copyBody": "This is the only time we'll show the secret. Store it in your deployment secrets before closing this dialog.",
       "copied": "I've copied it"
+    }
+  },
+  "liveEvents": {
+    "title": "Live events",
+    "subtitle": "Real-time event stream",
+    "eventsToday": "events today",
+    "websocketConnected": "WebSocket connected ·",
+    "showing": "Showing",
+    "of": "of",
+    "status": {
+      "streaming": "Streaming",
+      "paused": "Paused"
+    },
+    "categories": {
+      "all": "All",
+      "subscription": "Subscriptions",
+      "billing": "Billing",
+      "entitlement": "Entitlements",
+      "ledger": "Ledger"
+    },
+    "platforms": {
+      "all": "All platforms"
+    },
+    "actions": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "export": "Export",
+      "replay": "Replay",
+      "columns": "Columns",
+      "sort": "Sort",
+      "clear": "Clear"
+    },
+    "search": {
+      "placeholder": "Search by user, event type, product, country, txn id…"
+    },
+    "cols": {
+      "time": "Time",
+      "type": "Type",
+      "user": "User",
+      "product": "Product",
+      "platform": "Platform",
+      "amount": "Amount",
+      "country": "Country"
+    },
+    "empty": {
+      "title": "No events match",
+      "body": "Try clearing filters or widening your search.",
+      "reset": "Reset filters"
+    },
+    "rate": {
+      "throughput": "throughput:",
+      "lastEvent": "last event:",
+      "ingestLag": "ingest lag:",
+      "retention": "retention:",
+      "kbdHint": {
+        "before": "Press",
+        "middle": "to pause ·",
+        "after": "to inspect"
+      }
+    },
+    "detail": {
+      "emptyTitle": "Select an event",
+      "emptyBody": "Click any row in the stream to inspect its full payload, timeline and related records.",
+      "copyId": "Copy ID",
+      "close": "Close",
+      "copy": "Copy",
+      "jsonPayload": "JSON payload",
+      "viewSubscriber": "View subscriber",
+      "replayWebhook": "Replay webhook",
+      "tabs": {
+        "overview": "Overview",
+        "payload": "Payload",
+        "timeline": "Timeline"
+      }
+    },
+    "timeline": {
+      "normalized": "+12ms · schema v2026-03",
+      "entitlements": "+34ms · 1 entitlement granted",
+      "webhook": "+128ms · 2 endpoints · 200 OK",
+      "persisted": "+162ms · stored in events_2026_04"
     }
   },
   "subscribers": {

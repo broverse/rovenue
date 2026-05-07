@@ -50,7 +50,7 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
     sectionKey: "overview",
     items: [
       { id: "dashboard", labelKey: "sidebar.items.dashboard", icon: IconGrid, to: "/projects/$projectId" },
-      { id: "live", labelKey: "sidebar.items.live", icon: IconZap, soon: true, badgeLive: true },
+      { id: "live", labelKey: "sidebar.items.live", icon: IconZap, to: "/projects/$projectId/live-events", badgeLive: true },
     ],
   },
   {
