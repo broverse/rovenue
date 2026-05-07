@@ -1,4 +1,16 @@
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "drizzle-kit";
+
+// drizzle-kit ignores Node's --env-file flag, so the config loads the
+// repo-root `.env` itself when present. Production / CI inject env vars
+// directly, and the call is a no-op in that case.
+const here = dirname(fileURLToPath(import.meta.url));
+const repoRootEnv = resolve(here, "../../.env");
+if (existsSync(repoRootEnv)) {
+  process.loadEnvFile(repoRootEnv);
+}
 
 // =============================================================
 // drizzle-kit configuration

@@ -8,14 +8,15 @@
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "db:migrate": "tsx src/migrate.ts",
-    "db:migrate:baseline": "tsx src/migrate-baseline.ts",
+    "db:migrate": "tsx --env-file-if-exists=../../.env src/migrate.ts",
+    "db:migrate:fresh": "tsx --env-file-if-exists=../../.env src/migrate-fresh.ts",
+    "db:migrate:baseline": "tsx --env-file-if-exists=../../.env src/migrate-baseline.ts",
     "db:migrate:generate": "drizzle-kit generate",
-    "db:verify:clickhouse": "tsx scripts/verify-clickhouse.ts",
-    "db:partition:migrate": "tsx scripts/migrate-hypertable-to-partitioned.ts",
-    "db:clickhouse:migrate": "tsx src/clickhouse-migrate.ts",
+    "db:verify:clickhouse": "tsx --env-file-if-exists=../../.env scripts/verify-clickhouse.ts",
+    "db:partition:migrate": "tsx --env-file-if-exists=../../.env scripts/migrate-hypertable-to-partitioned.ts",
+    "db:clickhouse:migrate": "tsx --env-file-if-exists=../../.env src/clickhouse-migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "seed": "tsx seed.ts"
+    "seed": "tsx --env-file-if-exists=../../.env seed.ts"
   },
   "dependencies": {
     "@clickhouse/client": "^1.9.0",

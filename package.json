@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@9.0.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.7"
   },
   "workspaces": [
     "apps/*",
@@ -19,6 +19,7 @@
     "format:check": "prettier --check .",
     "test": "turbo run test",
     "db:migrate": "pnpm --filter @rovenue/db db:migrate",
+    "db:migrate:fresh": "pnpm --filter @rovenue/db db:migrate:fresh",
     "db:migrate:generate": "pnpm --filter @rovenue/db db:migrate:generate",
     "db:seed": "pnpm --filter @rovenue/db seed"
   },
