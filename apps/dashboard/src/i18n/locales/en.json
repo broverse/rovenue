@@ -1401,5 +1401,158 @@
       "reconcile": "Run reconciliation",
       "breakageReport": "Send breakage report"
     }
+  },
+  "charts": {
+    "title": "Charts",
+    "subtitle": "Pre-built revenue, retention, and conversion charts. Pick from the library on the left, slice with filters on the right, save as a view, or pin to the dashboard. Every chart is a SQL query under the hood — open in Queries to edit.",
+    "actions": {
+      "openInQueries": "Open in Queries",
+      "exportCsv": "Export CSV",
+      "newChart": "New chart"
+    },
+    "categories": {
+      "revenue": "Revenue",
+      "growth": "Growth",
+      "retention": "Retention",
+      "conversion": "Conversion",
+      "credits": "Credits"
+    },
+    "items": {
+      "mrr": "MRR",
+      "arr": "ARR",
+      "arpu": "ARPU",
+      "rev_per_install": "Revenue per install",
+      "gross_vs_net": "Gross vs net revenue",
+      "new_subs": "New subscribers",
+      "trials_started": "Trials started",
+      "reactivations": "Reactivations",
+      "churn": "Churn rate",
+      "retention_curve": "Retention curve",
+      "ltv": "LTV by cohort",
+      "trial_to_paid": "Trial → paid",
+      "paywall_view_rate": "Paywall view rate",
+      "paywall_purchase": "Paywall → purchase",
+      "credit_burn": "Credit burn",
+      "liability": "Outstanding liability"
+    },
+    "catalog": {
+      "searchPlaceholder": "Find chart…",
+      "searchAria": "Search charts",
+      "empty": "No charts match your search."
+    },
+    "toolbar": {
+      "version": "v3.4 · auto-updated 2m ago",
+      "chartType": "Chart type",
+      "range": "Range",
+      "compare": "Compare",
+      "more": "More options",
+      "star": "Star this chart",
+      "unstar": "Unstar this chart"
+    },
+    "mrr": {
+      "headLabel": "Current month · MRR",
+      "momDelta": "MoM · {{value}}",
+      "legendCurrent": "Current",
+      "legendPrev": "Prev period",
+      "legendAnnotations": "Annotations",
+      "tooltipPrev": "prev: {{value}}"
+    },
+    "decomposition": {
+      "newMrr": "New MRR",
+      "expansion": "Expansion",
+      "contraction": "Contraction",
+      "churned": "Churned"
+    },
+    "channels": {
+      "title": "Acquisition channel split",
+      "subtitle": "28d new MRR",
+      "total": "total",
+      "organic": "Organic",
+      "asa": "Apple Search Ads",
+      "meta": "Meta",
+      "tiktok": "TikTok",
+      "referral": "Referral"
+    },
+    "funnel": {
+      "title": "Install → paid funnel",
+      "subtitle": "28d",
+      "install": "Install",
+      "onboarding": "Onboarding done",
+      "paywall": "Paywall view",
+      "trial": "Trial started",
+      "paid": "Trial → paid"
+    },
+    "heatmap": {
+      "title": "Purchase volume by hour × day",
+      "subtitle": "last 4 weeks · UTC",
+      "peak": "Peak: Sat 19:00 UTC · 218 purchases/h",
+      "low": "low",
+      "high": "high"
+    },
+    "days": {
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat",
+      "sun": "Sun"
+    },
+    "annotations": {
+      "title": "Annotations on this chart",
+      "add": "Add annotation",
+      "v31": {
+        "label": "v3.1 launch",
+        "sub": "Hero paywall + annual anchor"
+      },
+      "holiday": {
+        "label": "Holiday promo",
+        "sub": "40% off annual · 14d run"
+      },
+      "pricing": {
+        "label": "Pricing test",
+        "sub": "Variant B shipped (+6.2% lift)"
+      },
+      "refund": {
+        "label": "Refund self-serve",
+        "sub": "Killed at hour 18 — refund spike"
+      }
+    },
+    "filters": {
+      "title": "Filters",
+      "add": "Add filter",
+      "remove": "Remove filter"
+    },
+    "groupBy": {
+      "title": "Group by",
+      "options": {
+        "none": "none",
+        "platform": "platform",
+        "country": "country",
+        "product": "product",
+        "channel": "channel",
+        "cohort_month": "cohort_month"
+      }
+    },
+    "savedViews": {
+      "title": "Saved views",
+      "saveCurrent": "+ save current view",
+      "iosOnly": {
+        "name": "MRR · iOS only",
+        "meta": "filters: platform=iOS · 12mo"
+      },
+      "annual": {
+        "name": "MRR · annual subs",
+        "meta": "period=year · 6mo"
+      },
+      "topCountries": {
+        "name": "MRR · top 5 countries",
+        "meta": "group_by=country · 6mo"
+      }
+    },
+    "sql": {
+      "title": "SQL preview",
+      "openInQueries": "Open in Queries"
+    }
   }
 }

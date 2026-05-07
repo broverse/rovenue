@@ -111,7 +111,12 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
   {
     sectionKey: "insights",
     items: [
-      { id: "charts", labelKey: "sidebar.items.charts", icon: LineChart, soon: true },
+      {
+        id: "charts",
+        labelKey: "sidebar.items.charts",
+        icon: LineChart,
+        to: "/projects/$projectId/charts",
+      },
       { id: "queries", labelKey: "sidebar.items.queries", icon: Search, soon: true },
     ],
   },
