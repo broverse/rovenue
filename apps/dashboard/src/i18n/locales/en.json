@@ -115,7 +115,8 @@
     "productGroups": "Product groups",
     "transactions": "Transactions",
     "featureFlags": "Feature flags",
-    "experiments": "Experiments"
+    "experiments": "Experiments",
+    "credits": "Credits"
   },
   "overview": {
     "title": "Overview",
@@ -1296,6 +1297,109 @@
     },
     "topbar": {
       "range": "Weekly · last 12 weeks"
+    }
+  },
+  "credits": {
+    "title": "Credits",
+    "subtitle": "Virtual-currency ledger. Every grant, purchase, and consumption is double-entry; balances reconcile to the second. Use this view to monitor liability, package mix, and burn-rate per feature.",
+    "actions": {
+      "schema": "Schema",
+      "exportLedger": "Export ledger",
+      "grantCredits": "Grant credits"
+    },
+    "kpi": {
+      "outstandingBalance": "OUTSTANDING BALANCE",
+      "outstandingDescription": "across {{wallets}} wallets",
+      "issued28d": "ISSUED · 28D",
+      "issuedDelta": "+18.4% vs prev",
+      "burned28d": "BURNED · 28D",
+      "burnedRate": "{{rate}} burn rate",
+      "revenue28d": "REVENUE · 28D",
+      "revenueAvg": "avg {{avg}} / credit",
+      "breakage": "BREAKAGE FORECAST",
+      "breakageDescription": "est. expiring next 30d"
+    },
+    "flow": {
+      "inflow": "Inflow · 28d",
+      "balance": "Wallet balance · now",
+      "outflow": "Outflow · 28d",
+      "purchases": "Purchases",
+      "promo": "Promo / bonus",
+      "supportComps": "Support comps",
+      "refundReturns": "Refund returns",
+      "paidLiability": "Paid (liability)",
+      "bonusPromo": "Bonus / promo",
+      "goodwill": "Goodwill / comp",
+      "expiringSoon": "Expiring < 30d",
+      "consumed": "Consumed",
+      "expired": "Expired",
+      "refundClawback": "Refund clawback",
+      "adjustments": "Adjustments"
+    },
+    "volume": {
+      "title": "Credit volume · last 28 days",
+      "subtitle": "Daily issuance vs burn — net positive means liability is growing",
+      "issued": "issued",
+      "burned": "burned",
+      "net": "net"
+    },
+    "scope": {
+      "all": "All",
+      "purchase": "Purchases",
+      "consume": "Consume",
+      "bonus": "Bonus",
+      "refund": "Refund",
+      "adjust": "Adjust",
+      "expire": "Expire"
+    },
+    "source": {
+      "purchase": "Purchase",
+      "bonus": "Bonus",
+      "consume": "Consume",
+      "refund": "Refund",
+      "expire": "Expire",
+      "adjust": "Adjust"
+    },
+    "ledger": {
+      "title": "Ledger · live",
+      "count": "{{visible}} of {{total}}",
+      "empty": "No credit movements match this filter.",
+      "cols": {
+        "time": "Time",
+        "user": "User",
+        "source": "Source",
+        "note": "Note · ref",
+        "delta": "Δ credits",
+        "balance": "Balance",
+        "actions": "Open ledger entry"
+      }
+    },
+    "liability": {
+      "title": "Outstanding liability",
+      "sub": "paid / total",
+      "gaugeCaption": "paid",
+      "paidLabel": "Paid (deferred rev)",
+      "promoLabel": "Promo / goodwill",
+      "avgAge": "Avg age",
+      "reserveLabel": "Reserve check:",
+      "reserveBody": "liability <0>{{delta}}</0> MoM. Consider increasing GAAP reserve by <1>{{amount}}</1>."
+    },
+    "packs": {
+      "title": "Package mix · 28d",
+      "sold": "{{count}} sold",
+      "unitsSold": "{{count}} sold",
+      "free": "free"
+    },
+    "burners": {
+      "title": "Top consumers · 28d",
+      "sub": "by credits burned"
+    },
+    "quickActions": {
+      "title": "Quick actions",
+      "bulkGrant": "Bulk grant from CSV",
+      "expiryPolicy": "Configure expiry policy",
+      "reconcile": "Run reconciliation",
+      "breakageReport": "Send breakage report"
     }
   }
 }

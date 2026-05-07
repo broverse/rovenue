@@ -99,7 +99,12 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
   {
     sectionKey: "ledger",
     items: [
-      { id: "credits", labelKey: "sidebar.items.credits", icon: CirclePlus, soon: true },
+      {
+        id: "credits",
+        labelKey: "sidebar.items.credits",
+        icon: CirclePlus,
+        to: "/projects/$projectId/credits",
+      },
       { id: "adjustments", labelKey: "sidebar.items.adjustments", icon: ChevronsUpDown, soon: true },
     ],
   },
