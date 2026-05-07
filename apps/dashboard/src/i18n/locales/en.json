@@ -477,14 +477,119 @@
   },
   "subscribers": {
     "title": "Subscribers",
+    "subtitle": "End users with at least one purchase, trial, or granted entitlement on {{project}} · Production.",
     "searchAria": "Search",
     "searchPlaceholder": "Search by app user id...",
     "empty": "No subscribers",
+    "actions": {
+      "findById": "Find by ID",
+      "exportCsv": "Export CSV",
+      "grantEntitlement": "Grant entitlement"
+    },
+    "kpi": {
+      "total": "Total subscribers",
+      "totalDelta": "▲ +382 · last 28d",
+      "active": "Active",
+      "activeBreakdown": "{{percent}}% of total · ",
+      "activeDelta": "▲ {{value}}pp",
+      "trial": "In trial",
+      "trialBreakdown": "{{percent}}% avg trial-to-paid",
+      "risk": "Churn risk ≥ 70",
+      "riskBreakdown": "est. {{amount}} MRR at risk"
+    },
+    "scope": {
+      "all": "All",
+      "active": "Active",
+      "trial": "Trial",
+      "grace": "Grace",
+      "churn": "Churned",
+      "vip": "VIP",
+      "risk": "At risk"
+    },
+    "toolbar": {
+      "lastRange": "Last 28d",
+      "sortByActivity": "Sort: Last activity",
+      "of": "of"
+    },
+    "filters": {
+      "search": "Search by user_id, email, country…",
+      "addFilter": "Add filter",
+      "any": "any"
+    },
+    "filterKeys": {
+      "entitlement": "entitlement",
+      "platform": "platform",
+      "country": "country",
+      "ltv": "ltv"
+    },
     "table": {
       "appUserId": "App user id",
       "lastSeen": "Last seen",
       "purchases": "Purchases",
-      "activeAccess": "Active access"
+      "activeAccess": "Active access",
+      "user": "User",
+      "plan": "Plan",
+      "status": "Status",
+      "entitlements": "Entitlements",
+      "country": "Country",
+      "platform": "Platform",
+      "ltv": "LTV",
+      "mrr": "MRR",
+      "risk": "Churn risk",
+      "lastActivity": "Last activity",
+      "selectAllAria": "Select all visible subscribers",
+      "renewsIn": "renews in {{value}}",
+      "billing": "billing"
+    },
+    "status": {
+      "active": "Active",
+      "trial": "Trial",
+      "grace": "Grace",
+      "churned": "Churned",
+      "canceled": "Canceled"
+    },
+    "paginator": {
+      "showing": "Showing {{from}}–{{to}} of <0>{{total}}</0>",
+      "previous": "Previous page",
+      "next": "Next page"
+    },
+    "panel": {
+      "tabs": {
+        "activity": "Activity",
+        "subs": "Subscriptions",
+        "entitlements": "Entitlements"
+      },
+      "lastEvents": "Last events",
+      "noGrants": "No active grants.",
+      "viaProduct": "via {{product}}",
+      "viaStore": "via {{store}}",
+      "stores": {
+        "appStore": "App Store Connect",
+        "play": "Play Console",
+        "stripe": "Stripe",
+        "web": "Web"
+      },
+      "kv": {
+        "started": "Started",
+        "renews": "Renews",
+        "price": "Price",
+        "storeId": "Store ID"
+      },
+      "actions": {
+        "grant": "Grant",
+        "refund": "Refund",
+        "more": "More"
+      }
+    },
+    "timeline": {
+      "events": {
+        "initial_purchase": "initial_purchase",
+        "subscription_renewed": "subscription_renewed",
+        "trial_converted": "trial_converted",
+        "trial_started": "trial_started",
+        "session_paywall_v2": "session · paywall_v2",
+        "billing_issue_retry": "billing_issue · retry"
+      }
     },
     "detail": {
       "firstSeen": "First seen: {{date}}",
