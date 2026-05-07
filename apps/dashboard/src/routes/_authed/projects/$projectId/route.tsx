@@ -27,6 +27,7 @@ function useBreadcrumbTitleKey(): string {
   if (id.includes("/transactions")) return "breadcrumb.transactions";
   if (id.includes("/feature-flags")) return "breadcrumb.featureFlags";
   if (id.includes("/experiments")) return "breadcrumb.experiments";
+  if (id.includes("/apps")) return "breadcrumb.apps";
   return "breadcrumb.overview";
 }
 

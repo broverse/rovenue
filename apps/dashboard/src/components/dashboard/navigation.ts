@@ -8,6 +8,7 @@ import {
   Layers,
   LayoutGrid,
   LineChart,
+  Plug,
   Receipt,
   RotateCw,
   Search,
@@ -123,6 +124,7 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
   {
     sectionKey: "integrations",
     items: [
+      { id: "apps", labelKey: "sidebar.items.apps", icon: Plug, to: "/projects/$projectId/apps" },
       { id: "webhooks", labelKey: "sidebar.items.webhooks", icon: Webhook, soon: true },
       { id: "sdk", labelKey: "sidebar.items.sdk", icon: Terminal, soon: true },
     ],

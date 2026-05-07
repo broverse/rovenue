@@ -346,6 +346,7 @@
       "adjustments": "Adjustments",
       "charts": "Charts",
       "queries": "Queries",
+      "apps": "Apps & integrations",
       "webhooks": "Webhooks",
       "sdk": "SDK & API keys"
     },
@@ -396,7 +397,8 @@
     "transactions": "Transactions",
     "featureFlags": "Feature flags",
     "experiments": "Experiments",
-    "credits": "Credits"
+    "credits": "Credits",
+    "apps": "Apps & integrations"
   },
   "overview": {
     "title": "Overview",
@@ -2266,6 +2268,420 @@
         "subtitle": "Permanently delete your Rovenue account, all personal data, and revoke all sessions. Project data is retained if you have co-owners.",
         "warning": "<b>This is irreversible.</b> Once closed, your account cannot be recovered. Active subscriptions will be canceled and prorated. You'll have 30 days to download exports before they're purged.",
         "action": "Close my account"
+      }
+    }
+  },
+  "apps": {
+    "title": "Apps & integrations",
+    "subtitle": "Connect Rovenue to attribution, ad networks, analytics, data warehouses, and lifecycle tools — server-side, signed, and replayable.",
+    "actions": {
+      "docs": "Integration docs",
+      "customWebhook": "Custom webhook",
+      "request": "Request integration"
+    },
+    "hero": {
+      "title": "Stream every revenue event, everywhere it matters.",
+      "description": "{{count}} prebuilt integrations across attribution, ads, CDPs, warehouses, lifecycle, and automation. All deliveries are HMAC-signed, retried automatically for 24h, and replayable from the dashboard.",
+      "stats": {
+        "apps": "Apps",
+        "connected": "Connected",
+        "events": "Events / 24h",
+        "successRate": "Success rate"
+      }
+    },
+    "rail": {
+      "consoleHelp": "Don't see your tool? Build a custom integration with our REST API or webhooks.",
+      "openConsole": "Open API console",
+      "sections": {
+        "byUseCase": "By use case"
+      }
+    },
+    "categories": {
+      "all": "All apps",
+      "connected": "Connected",
+      "attribution": "Attribution & MMP",
+      "ads": "Ads & marketing",
+      "analytics": "Product analytics",
+      "data": "Data warehouse",
+      "lifecycle": "CRM & lifecycle",
+      "communication": "Communication",
+      "automation": "Automation",
+      "identity": "Auth & identity",
+      "billing": "Billing sources"
+    },
+    "categoryShort": {
+      "attribution": "Attribution",
+      "ads": "Ads",
+      "analytics": "Analytics",
+      "data": "Data",
+      "lifecycle": "Lifecycle",
+      "communication": "Comms",
+      "automation": "Automation",
+      "identity": "Identity",
+      "billing": "Billing"
+    },
+    "sections": {
+      "attribution": {
+        "title": "Attribution & MMPs",
+        "subtitle": "Mobile measurement partners. AppsFlyer, Adjust, Branch, Singular."
+      },
+      "ads": {
+        "title": "Ad networks & marketing",
+        "subtitle": "Server-side conversion APIs. Meta, Google, TikTok and more."
+      },
+      "analytics": {
+        "title": "Product analytics",
+        "subtitle": "Forward Rovenue revenue events into your analytics stack."
+      },
+      "data": {
+        "title": "Data warehouses & CDPs",
+        "subtitle": "Stream events into Snowflake, BigQuery, Redshift, S3."
+      },
+      "lifecycle": {
+        "title": "CRM & lifecycle marketing",
+        "subtitle": "Trigger lifecycle messages from subscription state."
+      },
+      "communication": {
+        "title": "Communication & alerts",
+        "subtitle": "Real-time alerts to Slack, Discord, PagerDuty."
+      },
+      "automation": {
+        "title": "Workflow automation",
+        "subtitle": "No-code workflow tools and project tracking."
+      },
+      "identity": {
+        "title": "Auth & identity",
+        "subtitle": "Map auth provider user IDs to Rovenue subscribers."
+      },
+      "billing": {
+        "title": "Billing sources",
+        "subtitle": "Where the money comes from — Stripe, Paddle, App Store, Play."
+      }
+    },
+    "section": {
+      "viewAll": "View all {{count}} →"
+    },
+    "toolbar": {
+      "searchPlaceholder": "Search 50+ apps by name, category, or vendor…",
+      "searchAria": "Search apps",
+      "view": {
+        "grid": "Grid",
+        "list": "List"
+      },
+      "tiers": {
+        "all": "All",
+        "official": "Official",
+        "partner": "Partner",
+        "selfHosted": "Self-hosted"
+      }
+    },
+    "featured": {
+      "eyebrow": "Featured · Attribution",
+      "title": "Pipe Apple Search Ads + Meta CAPI in two clicks",
+      "description": "Turn-key recipe: AppsFlyer + Meta Ads + Apple Search Ads, pre-mapped with subscription value, trial conversions, and refund clawbacks. Ships with a saved dashboard.",
+      "install": "Install recipe",
+      "guide": "Read guide"
+    },
+    "connected": {
+      "title": "Your connected apps · {{count}}",
+      "lastSync": "Last sync · {{value}}",
+      "ok": "OK"
+    },
+    "card": {
+      "featured": "Featured",
+      "connect": "Connect",
+      "configure": "Configure",
+      "connected": "Connected",
+      "tags": {
+        "new": "NEW",
+        "beta": "BETA",
+        "partner": "Partner"
+      }
+    },
+    "results": {
+      "for": "Results for \"{{query}}\"",
+      "count_one": "{{count}} app",
+      "count_other": "{{count}} apps",
+      "empty": "No apps match your filter",
+      "emptyHelp": "Try a broader search or request a custom integration."
+    },
+    "buildYourOwn": {
+      "title": "Build your own integration",
+      "description": "Subscribe to any combination of Rovenue events from your own service. HMAC-signed payloads, configurable retries, replayable from the dashboard.",
+      "newWebhook": "New webhook",
+      "apiReference": "API reference"
+    },
+    "vendors": {
+      "appsflyer": "AppsFlyer Inc.",
+      "adjust": "Adjust GmbH",
+      "branch": "Branch Metrics",
+      "kochava": "Kochava Inc.",
+      "singular": "Singular Labs",
+      "tenjin": "Tenjin Inc.",
+      "meta": "Meta Platforms",
+      "google": "Google LLC",
+      "googleCloud": "Google Cloud",
+      "bytedance": "ByteDance",
+      "snap": "Snap Inc.",
+      "apple": "Apple Inc.",
+      "reddit": "Reddit Inc.",
+      "pinterest": "Pinterest Inc.",
+      "linkedin": "LinkedIn",
+      "amplitude": "Amplitude Inc.",
+      "mixpanel": "Mixpanel Inc.",
+      "posthog": "PostHog Inc.",
+      "heap": "Heap Inc.",
+      "twilio": "Twilio",
+      "rudderstack": "RudderStack Inc.",
+      "snowflake": "Snowflake Inc.",
+      "aws": "AWS",
+      "databricks": "Databricks Inc.",
+      "braze": "Braze Inc.",
+      "iterable": "Iterable Inc.",
+      "customerio": "Customer.io",
+      "klaviyo": "Klaviyo Inc.",
+      "onesignal": "OneSignal Inc.",
+      "hubspot": "HubSpot Inc.",
+      "salesforce": "Salesforce Inc.",
+      "slack": "Slack Technologies",
+      "discord": "Discord Inc.",
+      "pagerduty": "PagerDuty Inc.",
+      "intercom": "Intercom Inc.",
+      "zendesk": "Zendesk Inc.",
+      "zapier": "Zapier Inc.",
+      "make": "Make.com",
+      "n8n": "n8n GmbH",
+      "linear": "Linear",
+      "notion": "Notion Labs",
+      "okta": "Okta",
+      "clerk": "Clerk Inc.",
+      "supabase": "Supabase Inc.",
+      "stripe": "Stripe Inc.",
+      "paddle": "Paddle.com",
+      "lemonsqueezy": "Lemon Squeezy",
+      "amazon": "Amazon",
+      "roku": "Roku Inc."
+    },
+    "items": {
+      "appsflyer": {
+        "name": "AppsFlyer",
+        "description": "Mobile attribution & marketing analytics. Sync postbacks for installs, in-app purchases, and re-engagement."
+      },
+      "adjust": {
+        "name": "Adjust",
+        "description": "Attribution, fraud prevention, and audience builder. Forwards subscription events to your Adjust dashboard."
+      },
+      "branch": {
+        "name": "Branch",
+        "description": "Deep linking + attribution platform. Map subscription LTV to acquisition channels."
+      },
+      "kochava": {
+        "name": "Kochava",
+        "description": "Omnichannel attribution and identity resolution."
+      },
+      "singular": {
+        "name": "Singular",
+        "description": "Marketing analytics with cost aggregation across 2,500+ ad networks."
+      },
+      "tenjin": {
+        "name": "Tenjin",
+        "description": "Mobile measurement for indie studios and growing apps."
+      },
+      "meta-ads": {
+        "name": "Meta Ads",
+        "description": "Send conversion events to Facebook & Instagram CAPI. Optimize for purchase and subscription value."
+      },
+      "google-ads": {
+        "name": "Google Ads",
+        "description": "Send conversions and offline data via Enhanced Conversions API."
+      },
+      "tiktok-ads": {
+        "name": "TikTok Ads",
+        "description": "Forward purchase and subscription events to TikTok Events API for ROAS optimization."
+      },
+      "snapchat-ads": {
+        "name": "Snapchat Ads",
+        "description": "Pipe conversions to Snap Conversions API."
+      },
+      "reddit-ads": {
+        "name": "Reddit Ads",
+        "description": "Server-side conversion API for Reddit advertising."
+      },
+      "apple-search-ads": {
+        "name": "Apple Search Ads",
+        "description": "iOS app store search attribution and post-install events."
+      },
+      "pinterest": {
+        "name": "Pinterest",
+        "description": "Conversion API for Pinterest campaigns."
+      },
+      "linkedin-ads": {
+        "name": "LinkedIn Ads",
+        "description": "B2B conversion tracking for sponsored campaigns."
+      },
+      "amplitude": {
+        "name": "Amplitude",
+        "description": "Stream Rovenue revenue events into Amplitude for funnel and cohort analysis."
+      },
+      "mixpanel": {
+        "name": "Mixpanel",
+        "description": "Cohort analysis, retention, and behavioral analytics."
+      },
+      "posthog": {
+        "name": "PostHog",
+        "description": "Open-source product analytics. Self-hostable."
+      },
+      "heap": {
+        "name": "Heap",
+        "description": "Auto-captured product analytics with a Rovenue revenue layer."
+      },
+      "ga4": {
+        "name": "Google Analytics 4",
+        "description": "GA4 Measurement Protocol — server-side revenue events."
+      },
+      "firebase": {
+        "name": "Firebase Analytics",
+        "description": "Mobile-first analytics with Rovenue subscription state."
+      },
+      "segment": {
+        "name": "Segment",
+        "description": "Forward all Rovenue events through your Segment workspace to 300+ destinations."
+      },
+      "rudderstack": {
+        "name": "RudderStack",
+        "description": "Open-source customer data platform."
+      },
+      "snowflake": {
+        "name": "Snowflake",
+        "description": "Sync subscriptions, transactions, and ledger events into your Snowflake warehouse hourly."
+      },
+      "bigquery": {
+        "name": "BigQuery",
+        "description": "Stream events into Google BigQuery for SQL analytics."
+      },
+      "redshift": {
+        "name": "Amazon Redshift",
+        "description": "Bulk + streaming sync to Redshift clusters."
+      },
+      "databricks": {
+        "name": "Databricks",
+        "description": "Lakehouse sync via Delta tables."
+      },
+      "s3": {
+        "name": "Amazon S3",
+        "description": "Hourly Parquet exports to your S3 bucket."
+      },
+      "braze": {
+        "name": "Braze",
+        "description": "Trigger lifecycle messages on subscription milestones, churn risk, and trial conversions."
+      },
+      "iterable": {
+        "name": "Iterable",
+        "description": "Cross-channel marketing automation triggered by subscription events."
+      },
+      "customerio": {
+        "name": "Customer.io",
+        "description": "Trigger emails, push, and SMS based on Rovenue events."
+      },
+      "klaviyo": {
+        "name": "Klaviyo",
+        "description": "Email + SMS lifecycle marketing."
+      },
+      "onesignal": {
+        "name": "OneSignal",
+        "description": "Push notifications by subscription state."
+      },
+      "hubspot": {
+        "name": "HubSpot",
+        "description": "Sync subscribers as contacts with revenue properties."
+      },
+      "salesforce": {
+        "name": "Salesforce",
+        "description": "Push subscription events to SF Sales/Service Cloud."
+      },
+      "slack": {
+        "name": "Slack",
+        "description": "Real-time alerts to Slack channels — milestones, anomalies, refunds."
+      },
+      "discord": {
+        "name": "Discord",
+        "description": "Webhook posts to Discord servers."
+      },
+      "pagerduty": {
+        "name": "PagerDuty",
+        "description": "Trigger incidents on revenue anomalies and ingest failures."
+      },
+      "intercom": {
+        "name": "Intercom",
+        "description": "Show subscription state in your Intercom support inbox."
+      },
+      "zendesk": {
+        "name": "Zendesk",
+        "description": "Surface customer revenue in support tickets."
+      },
+      "zapier": {
+        "name": "Zapier",
+        "description": "7,000+ app integrations via no-code Zaps."
+      },
+      "make": {
+        "name": "Make",
+        "description": "Visual workflow automation. Formerly Integromat."
+      },
+      "n8n": {
+        "name": "n8n",
+        "description": "Self-hostable workflow automation. Open source."
+      },
+      "linear": {
+        "name": "Linear",
+        "description": "Open issues for negative experiments and churn anomalies."
+      },
+      "notion": {
+        "name": "Notion",
+        "description": "Push weekly metric snapshots into Notion databases."
+      },
+      "auth0": {
+        "name": "Auth0",
+        "description": "Map Auth0 user IDs to Rovenue subscribers."
+      },
+      "firebase-auth": {
+        "name": "Firebase Auth",
+        "description": "Use Firebase user IDs as the Rovenue subscriber identity."
+      },
+      "clerk": {
+        "name": "Clerk",
+        "description": "Drop-in user management with Rovenue identity sync."
+      },
+      "supabase": {
+        "name": "Supabase",
+        "description": "Postgres + auth. Sync user IDs and subscription state."
+      },
+      "stripe": {
+        "name": "Stripe",
+        "description": "Source-of-truth for web payments. Two-way sync of customers, subscriptions, refunds."
+      },
+      "paddle": {
+        "name": "Paddle",
+        "description": "Merchant of record for SaaS. Handles tax globally."
+      },
+      "lemonsqueezy": {
+        "name": "Lemon Squeezy",
+        "description": "Merchant of record platform for digital products."
+      },
+      "apple-iap": {
+        "name": "Apple In-App Purchases",
+        "description": "iOS, iPadOS, tvOS, macOS subscriptions and one-time purchases. App Store Server Notifications v2."
+      },
+      "play-billing": {
+        "name": "Google Play Billing",
+        "description": "Android subscriptions and in-app purchases. Real-time developer notifications."
+      },
+      "amazon-iap": {
+        "name": "Amazon In-App Purchasing",
+        "description": "Amazon Appstore and Fire devices."
+      },
+      "roku": {
+        "name": "Roku Pay",
+        "description": "Subscriptions on Roku channels."
       }
     }
   }
