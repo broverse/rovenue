@@ -110,7 +110,8 @@
     "settings": "Settings",
     "overview": "Overview",
     "liveEvents": "Live events",
-    "products": "Products"
+    "products": "Products",
+    "productGroups": "Product groups"
   },
   "overview": {
     "title": "Overview",
@@ -403,6 +404,75 @@
       "before": "Tip: press",
       "create": "to create a product",
       "search": "to focus search"
+    }
+  },
+  "productGroups": {
+    "title": "Product groups",
+    "subtitle": "Bundles of products that share entitlements. Offerings pick which products to show on a paywall.",
+    "actions": {
+      "guide": "Groups guide",
+      "newGroup": "New group",
+      "linkProduct": "Link product",
+      "addEntitlement": "Add entitlement",
+      "newOffering": "New offering",
+      "add": "Add",
+      "more": "More"
+    },
+    "search": {
+      "placeholder": "Search groups…",
+      "empty": "No groups match"
+    },
+    "card": {
+      "products": "products",
+      "offerings": "offerings",
+      "perMonth": "/mo"
+    },
+    "kpi": {
+      "mrr": "MRR",
+      "activeSubs": "Active subs",
+      "products": "Products",
+      "offerings": "Offerings",
+      "mrr28d": "MRR · last 28d",
+      "deltaMrr": "▲ 9.1%",
+      "deltaSubs": "▲ 42",
+      "productsBreakdown": "{{archived}} archived · {{draft}} draft",
+      "offeringsDefault": "{{count}} default"
+    },
+    "entitlements": {
+      "heading": "Entitlements",
+      "subtitle": "Keys granted by any product in this group. Subscribers inherit all grants of their active product.",
+      "grantedBy": "granted by <0>{{count}}</0> products",
+      "empty": {
+        "title": "No entitlements",
+        "body": "This group is consumable-only. Products in it don't grant any access keys."
+      }
+    },
+    "matrix": {
+      "heading": "Products in this group",
+      "subtitle": "Which products grant which entitlements on purchase.",
+      "legend": "granted on purchase",
+      "cols": {
+        "product": "Product",
+        "duration": "Duration",
+        "price": "Price",
+        "subs": "Subs",
+        "mrr": "MRR",
+        "status": "Status"
+      }
+    },
+    "offerings": {
+      "heading": "Offerings",
+      "subtitle": "Paywall configurations referencing products in this group. The <0>default</0> offering is served when no experiment or override matches.",
+      "default": "default",
+      "views": "views",
+      "conv": "conv"
+    },
+    "duration": {
+      "weekly": "weekly",
+      "monthly": "monthly",
+      "yearly": "yearly",
+      "lifetime": "lifetime",
+      "consumable": "consumable"
     }
   },
   "subscribers": {
