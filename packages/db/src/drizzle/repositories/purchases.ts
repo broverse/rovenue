@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "../client";
 import { products, purchases, type Purchase } from "../schema";
 import { purchaseStatus, store as storeEnum } from "../enums";

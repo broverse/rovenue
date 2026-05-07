@@ -61,10 +61,6 @@ export const STATIC_USD_RATES: Readonly<Record<string, number>> = {
   SAR: 0.267,
 };
 
-const SUPPORTED_CURRENCIES = Object.keys(STATIC_USD_RATES).filter(
-  (c) => c !== "USD",
-);
-
 const CACHE_TTL_SECONDS = 24 * 60 * 60;
 
 function dateKey(date: string, from: string): string {

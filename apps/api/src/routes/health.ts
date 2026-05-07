@@ -1,10 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import {
-  WebhookSource,
-  WebhookEventStatus,
-  drizzle,
-} from "@rovenue/db";
+import { WebhookSource, drizzle } from "@rovenue/db";
 import { sql } from "drizzle-orm";
 import { getStoreCircuits, type CircuitBreakerStats } from "../lib/circuit-breaker";
 import { redis } from "../lib/redis";
