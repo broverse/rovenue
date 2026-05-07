@@ -25,8 +25,7 @@ const log = logger.child("config-stream");
 const INVALIDATE_CHANNEL = "rovenue:experiments:invalidate";
 
 export const configStreamRoute = new Hono()
-  .use("*", apiKeyAuth("any"))
-  .get("/v1/config/stream", (c) =>
+  .get("/v1/config/stream", apiKeyAuth("any"), (c) =>
     streamSSE(c, async (stream) => {
       const project = c.get("project");
       const projectId = project.id;
