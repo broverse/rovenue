@@ -107,6 +107,7 @@
   "breadcrumb": {
     "subscriber": "Subscriber",
     "subscribers": "Subscribers",
+    "subscriptions": "Subscriptions",
     "settings": "Settings",
     "overview": "Overview",
     "liveEvents": "Live events",
@@ -767,6 +768,175 @@
         "refund": "Refund",
         "redeliver": "Re-deliver"
       }
+    }
+  },
+  "subscriptions": {
+    "title": "Subscriptions",
+    "subtitle": "Every billing relationship — one row per subscription, not per user. Track renewals, grace, billing retries.",
+    "actions": {
+      "schedule": "Schedule",
+      "exportCsv": "Export CSV",
+      "newSubscription": "New subscription"
+    },
+    "kpi": {
+      "totalActive": "TOTAL ACTIVE",
+      "totalActiveDelta": "▲ +248 · last 28d",
+      "renewing7": "RENEWING NEXT 7D",
+      "renewing7Description": "$13,420 projected",
+      "graceRetry": "GRACE / BILLING RETRY",
+      "graceRetryDescription": "63.1% usually recover",
+      "canceling": "CANCELING",
+      "cancelingDescription": "▼ retention -1.2pp"
+    },
+    "composition": {
+      "title": "Subscription composition",
+      "subtitle": "{{total}} subscriptions across iOS, Google Play, Stripe",
+      "segments": {
+        "active": "Active",
+        "trial": "Trial",
+        "canceling": "Canceling",
+        "grace": "Grace / retry",
+        "paused": "Paused"
+      }
+    },
+    "calendar": {
+      "title": "Renewal calendar",
+      "subtitle": "Upcoming renewals, trials converting, grace periods ending.",
+      "today": "Today",
+      "legend": {
+        "renewals": "Renewals",
+        "trials": "Trial converting",
+        "grace": "Grace ending",
+        "failed": "Failed (past)"
+      },
+      "tooltipPast": "Day −{{day}} · {{failed}} failed",
+      "tooltipToday": "Today · {{total}} events",
+      "tooltipFuture": "Day +{{day}} · {{total}} events"
+    },
+    "scope": {
+      "ariaLabel": "Subscription scope",
+      "all": "All",
+      "active": "Active",
+      "trial": "Trial",
+      "grace": "Grace",
+      "canceling": "Canceling",
+      "issues": "Issues",
+      "churned": "Churned"
+    },
+    "toolbar": {
+      "sortNextRenewal": "Sort: Next renewal",
+      "more": "More options"
+    },
+    "filters": {
+      "search": "Search by sub_id, user_id, or product…",
+      "addFilter": "Add filter",
+      "of": "of",
+      "store": "store",
+      "storeValue": "iOS + Play",
+      "product": "product",
+      "autoRenew": "auto-renew",
+      "autoRenewValue": "on",
+      "any": "any"
+    },
+    "status": {
+      "active": "Active",
+      "trial": "Trial",
+      "grace": "Grace",
+      "canceling": "Canceling",
+      "churned": "Churned"
+    },
+    "stores": {
+      "ios": { "label": "App Store", "full": "App Store Connect" },
+      "play": { "label": "Play", "full": "Google Play" },
+      "stripe": { "label": "Stripe", "full": "Stripe" },
+      "web": { "label": "Web", "full": "Web" }
+    },
+    "table": {
+      "subscription": "Subscription",
+      "user": "User",
+      "product": "Product",
+      "status": "Status",
+      "store": "Store",
+      "price": "Price",
+      "term": "Term",
+      "lifecycle": "Lifecycle",
+      "nextEvent": "Next event",
+      "selectAll": "Select all visible subscriptions",
+      "selectRow": "Select subscription {{id}}",
+      "autoRenew": "↻ auto-renew",
+      "manual": "○ manual",
+      "intro": "intro",
+      "empty": "No subscriptions match the current filters.",
+      "footerHint": "Click any row to inspect lifecycle, billing, and grants.",
+      "rowCount": "{{count}} rows"
+    },
+    "countdown": {
+      "endedAgo": "ended {{days}}d ago",
+      "endsIn": "ends in {{days}}d",
+      "retryToday": "retry today",
+      "daysShort": "{{days}}d"
+    },
+    "expanded": {
+      "lifecycle": {
+        "heading": "Lifecycle",
+        "trialStarted": "trial_started",
+        "initialPurchase": "initial_purchase",
+        "trialConverted": "trial_converted · ${{price}}",
+        "renewed": "subscription_renewed · ${{price}}",
+        "billingIssue": "billing_issue",
+        "willNotRenew": "will_not_renew · scheduled",
+        "ended": "subscription_ended",
+        "nextRenewal": "next_renewal · scheduled",
+        "cycles": "{{count}} cycles",
+        "recent": "recent",
+        "today": "today",
+        "inDays": "in {{days}}d",
+        "daysAgo": "{{days}}d ago"
+      },
+      "billing": {
+        "heading": "Billing",
+        "price": "Price",
+        "autoRenew": "Auto-renew",
+        "store": "Store",
+        "intro": "Intro offer",
+        "cancelPolicy": "Cancel policy",
+        "cancelReason": "Cancel reason",
+        "on": "on",
+        "off": "off",
+        "applied": "applied"
+      },
+      "grants": {
+        "heading": "Grants",
+        "empty": "No active entitlements",
+        "active": "active",
+        "refund": "Refund",
+        "override": "Override",
+        "more": "More actions"
+      }
+    },
+    "billingIssues": {
+      "title": "Billing issues",
+      "subtitle": "Subscriptions in retry, grace, or pending manual review",
+      "viewAll": "View all",
+      "attempt": "attempt {{count}}"
+    },
+    "cohort": {
+      "title": "Cohort retention",
+      "subtitle": "Monthly subscribers by month-1…6",
+      "cohortLabel": "Cohort",
+      "period": {
+        "monthly": "monthly",
+        "yearly": "yearly"
+      },
+      "footer": {
+        "m1Median": "M1 median: ",
+        "m6Median": "M6 median: ",
+        "trending": "trending",
+        "vsPriorQtr": "vs prior qtr"
+      }
+    },
+    "live": {
+      "updated": "updated {{value}} ago"
     }
   }
 }
