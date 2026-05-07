@@ -398,7 +398,11 @@
     "featureFlags": "Feature flags",
     "experiments": "Experiments",
     "credits": "Credits",
-    "apps": "Apps & integrations"
+    "apps": "Apps & integrations",
+    "charts": "Charts",
+    "queries": "Queries",
+    "cohorts": "Cohorts",
+    "sdk": "SDK & API"
   },
   "overview": {
     "title": "Overview",
@@ -2271,6 +2275,102 @@
       }
     }
   },
+  "queries": {
+    "title": "Queries",
+    "subtitle": "SQL workbench against your Rovenue data warehouse — saved queries, scheduled refreshes, and downloadable CSV/Parquet exports.",
+    "actions": {
+      "sqlReference": "SQL reference",
+      "scheduledCount": "Scheduled ({{count}})",
+      "newQuery": "New query",
+      "datasource": "warehouse · production",
+      "modeSql": "SQL",
+      "modeVisual": "Visual builder",
+      "savedAgo": "Saved · {{minutes}} min ago by {{user}}",
+      "schedule": "Schedule",
+      "format": "Format",
+      "save": "Save",
+      "run": "Run"
+    },
+    "library": {
+      "title": "Library",
+      "newAria": "New query",
+      "searchPlaceholder": "Search queries…",
+      "searchAria": "Search saved queries",
+      "sections": {
+        "pinned": "PINNED",
+        "revenue": "REVENUE",
+        "retentionPlatform": "RETENTION & PLATFORM",
+        "recentRuns": "RECENT RUNS"
+      }
+    },
+    "recent": {
+      "when": {
+        "minutesAgo_2": "2 min ago",
+        "minutesAgo_14": "14 min ago",
+        "hoursAgo_1": "1 hr ago",
+        "hoursAgo_2": "2 hr ago",
+        "hoursAgo_4": "4 hr ago",
+        "yesterday": "Yesterday"
+      }
+    },
+    "tabs": {
+      "close": "Close tab",
+      "new": "New tab"
+    },
+    "footer": {
+      "compiled": "Compiled",
+      "lineChars": "{{lines}} lines · {{chars}} chars",
+      "cost": "Estimated cost: {{bytes}} scan",
+      "cache": "Cache: HIT (2m ttl)",
+      "runtime": "Runtime: ClickHouse 24.3"
+    },
+    "results": {
+      "tabs": {
+        "results": "Results",
+        "visualization": "Visualization",
+        "plan": "Query plan",
+        "logs": "Logs"
+      },
+      "success": "● Success",
+      "duration": "{{ms}}ms",
+      "rowsScanned": "{{rows}} rows · {{bytes}} scanned",
+      "exportCsv": "Export CSV",
+      "empty": "No rows to display.",
+      "chart": {
+        "title": "{{name}}",
+        "subtitle": "Bar · top {{count}}",
+        "bar": "Bar",
+        "line": "Line",
+        "pie": "Pie"
+      },
+      "logs": {
+        "level": {
+          "info": "info",
+          "warn": "warn",
+          "error": "error"
+        }
+      }
+    },
+    "schema": {
+      "title": "Schema · production"
+    },
+    "suggestions": {
+      "title": "AI suggestions",
+      "items": {
+        "addMomDelta": "Add 7d MoM delta",
+        "filterIos": "Filter by platform=ios",
+        "convertWeekly": "Convert to weekly cohort",
+        "groupByProduct": "Group by product_id",
+        "limitTopFive": "Limit to top 5"
+      }
+    },
+    "schedule": {
+      "title": "Schedule",
+      "cadence": "Every hour",
+      "active": "active",
+      "next": "Next: 15:00 UTC · Slack #revenue + S3 export"
+    }
+  },
   "apps": {
     "title": "Apps & integrations",
     "subtitle": "Connect Rovenue to attribution, ad networks, analytics, data warehouses, and lifecycle tools — server-side, signed, and replayable.",
@@ -2682,6 +2782,208 @@
       "roku": {
         "name": "Roku Pay",
         "description": "Subscriptions on Roku channels."
+      }
+    }
+  },
+  "sdkApi": {
+    "title": "SDK & API",
+    "subtitle": "Drop the Rovenue SDK into your app, manage project keys, and explore the public REST surface — versioned, signed, replayable.",
+    "actions": {
+      "docs": "Open docs",
+      "manageKeys": "Manage keys"
+    },
+    "copy": {
+      "idle": "Copy",
+      "copied": "Copied"
+    },
+    "hero": {
+      "eyebrow": "Developer surface",
+      "versionLabel": "API · {{version}}",
+      "title": "One SDK, every platform — production telemetry built in.",
+      "description": "Native StoreKit 2 + Play Billing 6 under the hood, JWS-verified server-side, and a single REST surface that everything else talks to. Track latency and success rate live across every install.",
+      "actions": {
+        "generateKey": "Generate API key",
+        "openDocs": "API reference"
+      },
+      "stats": {
+        "calls": "API calls / 24h",
+        "success": "Success rate",
+        "latency": "p95 latency",
+        "installs": "Active SDKs",
+        "callsDescription": "{{delta}} vs. last week",
+        "successDescription": "Across all platforms",
+        "latencyDescription": "Edge → origin · 7d",
+        "installsDescription": "Pinged in the last hour"
+      },
+      "healthcheckLabel": "Live healthcheck",
+      "healthcheckFile": "terminal",
+      "healthcheckCaption": "Returns 200 + region routing metadata. Use this in CI to gate deploys."
+    },
+    "quickstart": {
+      "title": "Quickstart",
+      "subtitle": "Pick a target — install, configure, and read entitlements in under five minutes.",
+      "tabsAria": "Quickstart platform",
+      "platforms": {
+        "reactNative": "React Native",
+        "ios": "iOS · Swift",
+        "android": "Android · Kotlin",
+        "web": "Web",
+        "rest": "REST"
+      },
+      "installLabel": "Install",
+      "installHint": "Add the package to your project.",
+      "initLabel": "Initialise",
+      "initHint": "Configure once at startup with your publishable key."
+    },
+    "keys": {
+      "title": "Project keys",
+      "subtitle": "Publishable keys ship in your app. Secret keys stay on your servers — rotate any time without downtime.",
+      "actions": {
+        "create": "New key",
+        "reveal": "Reveal",
+        "hide": "Hide",
+        "rotate": "Rotate"
+      },
+      "kinds": {
+        "publishable": "Publishable",
+        "secret": "Secret",
+        "webhook": "Webhook"
+      },
+      "environments": {
+        "production": "Production",
+        "sandbox": "Sandbox"
+      },
+      "items": {
+        "publishableProd": "Publishable key",
+        "publishableSandbox": "Publishable key",
+        "secretProd": "Secret key",
+        "webhookSigning": "Webhook signing secret"
+      },
+      "created": {
+        "createdAtProd": "Created Apr 12, 2026 · last used 2m ago",
+        "createdAtSandbox": "Created Apr 12, 2026 · last used 1h ago"
+      },
+      "footer": {
+        "note": "All key activity is hash-chained to the audit log.",
+        "audit": "Open audit log →"
+      }
+    },
+    "packages": {
+      "title": "SDK packages",
+      "subtitle": "Open-source clients. Pin a version or follow the floating release channel.",
+      "changelog": "View changelog",
+      "items": {
+        "reactNative": "@rovenue/react-native",
+        "ios": "rovenue-ios",
+        "android": "rovenue-android",
+        "web": "@rovenue/web",
+        "node": "@rovenue/node",
+        "go": "rovenue-go"
+      },
+      "targets": {
+        "reactNative": "Expo & bare React Native · iOS + Android",
+        "ios": "iOS 15+ · Swift 5.9 · StoreKit 2",
+        "android": "Android 8+ · Kotlin · Play Billing 6",
+        "web": "Browsers · Stripe Checkout adapter",
+        "server": "Server-side · Node 20+ / Go 1.22+"
+      },
+      "status": {
+        "stable": "Stable",
+        "beta": "Beta",
+        "preview": "Preview",
+        "planned": "Planned"
+      },
+      "published": {
+        "publishedDays": "3 days ago",
+        "publishedWeeks": "2 weeks ago",
+        "publishedNew": "fresh from the oven"
+      },
+      "docsLinks": {
+        "rnDocs": "RN guide",
+        "iosDocs": "iOS guide",
+        "androidDocs": "Android guide",
+        "webDocs": "Web guide",
+        "nodeDocs": "Node guide",
+        "goDocs": "Go guide"
+      }
+    },
+    "endpoints": {
+      "title": "REST endpoints",
+      "subtitle": "All requests authenticate with your secret key. Base URL: {{baseUrl}}",
+      "openReference": "Full reference",
+      "searchPlaceholder": "Search by path or summary…",
+      "searchAria": "Search REST endpoints",
+      "scopes": {
+        "all": "All",
+        "read": "Read",
+        "write": "Write",
+        "admin": "Admin"
+      },
+      "items": {
+        "subscribersGet": "Read subscriber profile + entitlements",
+        "subscribersAttrs": "Set subscriber attributes",
+        "receipts": "Validate Apple / Google / Stripe receipt",
+        "creditsGrant": "Grant credits with idempotency key",
+        "creditsBalance": "Read current credit balance",
+        "entitlementsGet": "List active entitlements",
+        "experimentsAssign": "Record an experiment assignment",
+        "subscribersDelete": "GDPR / KVKK anonymise + export"
+      },
+      "empty": {
+        "title": "No endpoints match",
+        "body": "Try a broader query or switch the scope filter."
+      }
+    },
+    "webhooks": {
+      "title": "Webhooks",
+      "subtitle": "Server → server delivery with HMAC signing, automatic retries for 24h, and replay from the dashboard.",
+      "endpoint": "Endpoint URL",
+      "signingSecret": "Signing secret",
+      "actions": {
+        "test": "Send test event"
+      },
+      "recent": {
+        "title": "Recent deliveries",
+        "viewAll": "All deliveries"
+      },
+      "events": {
+        "subscriptionRenewed": "subscription.renewed",
+        "trialStarted": "trial.started",
+        "subscriptionExpired": "subscription.expired",
+        "creditsGranted": "credits.granted",
+        "purchaseRefunded": "purchase.refunded"
+      },
+      "status": {
+        "ok": "200",
+        "retry": "Retrying",
+        "failed": "Failed"
+      },
+      "age": {
+        "secondsAgo": "8s ago",
+        "secondsAgoLong": "42s ago",
+        "minutesAgo": "3m ago",
+        "minutesAgoLong": "12m ago",
+        "hoursAgo": "1h ago"
+      }
+    },
+    "resources": {
+      "title": "Resources",
+      "subtitle": "Everything you need to ship.",
+      "items": {
+        "docs": "Documentation",
+        "openapi": "OpenAPI 3.1 schema",
+        "guides": "Implementation guides",
+        "github": "GitHub organisation",
+        "status": "Service status",
+        "security": "Security & compliance"
+      },
+      "descriptions": {
+        "docs": "Concepts, tutorials, and reference.",
+        "openapi": "Generate clients straight from the spec.",
+        "guides": "Step-by-step from onboarding to GDPR.",
+        "github": "All SDKs are AGPL-3.0 and self-hostable.",
+        "status": "Live uptime + incident history.",
+        "security": "SOC 2, KVKK, GDPR posture and reports."
       }
     }
   }

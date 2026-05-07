@@ -118,7 +118,12 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
         icon: LineChart,
         to: "/projects/$projectId/charts",
       },
-      { id: "queries", labelKey: "sidebar.items.queries", icon: Search, soon: true },
+      {
+        id: "queries",
+        labelKey: "sidebar.items.queries",
+        icon: Search,
+        to: "/projects/$projectId/queries",
+      },
     ],
   },
   {
@@ -126,7 +131,7 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
     items: [
       { id: "apps", labelKey: "sidebar.items.apps", icon: Plug, to: "/projects/$projectId/apps" },
       { id: "webhooks", labelKey: "sidebar.items.webhooks", icon: Webhook, soon: true },
-      { id: "sdk", labelKey: "sidebar.items.sdk", icon: Terminal, soon: true },
+      { id: "sdk", labelKey: "sidebar.items.sdk", icon: Terminal, to: "/projects/$projectId/sdk" },
     ],
   },
 ];

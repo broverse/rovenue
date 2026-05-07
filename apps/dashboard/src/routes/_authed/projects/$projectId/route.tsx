@@ -28,6 +28,11 @@ function useBreadcrumbTitleKey(): string {
   if (id.includes("/feature-flags")) return "breadcrumb.featureFlags";
   if (id.includes("/experiments")) return "breadcrumb.experiments";
   if (id.includes("/apps")) return "breadcrumb.apps";
+  if (id.includes("/sdk")) return "breadcrumb.sdk";
+  if (id.includes("/queries")) return "breadcrumb.queries";
+  if (id.includes("/charts")) return "breadcrumb.charts";
+  if (id.includes("/credits")) return "breadcrumb.credits";
+  if (id.includes("/cohorts")) return "breadcrumb.cohorts";
   return "breadcrumb.overview";
 }
 
