@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
+import { Layers, Tag } from "lucide-react";
 import { Button } from "../../ui/button";
 import { SearchInput } from "../../ui/search-input";
-import { IconLayers, IconTag } from "../dashboard/icons";
 
 type Props = {
   search: string;
@@ -28,11 +28,11 @@ export function ProductsToolbar({ search, onSearchChange, visible, total }: Prop
         showSlashHint
       />
       <Button variant="flat" size="sm">
-        <IconLayers size={13} />
+        <Layers size={13} />
         {t("products.toolbar.columns")}
       </Button>
       <Button variant="flat" size="sm">
-        <IconTag size={13} />
+        <Tag size={13} />
         {t("products.toolbar.filter")}
       </Button>
       <span className="ml-auto font-rv-mono text-[11px] text-rv-mute-500">

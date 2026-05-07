@@ -1,6 +1,6 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import { forwardRef, type InputHTMLAttributes } from "react";
-import { IconSearch, IconX } from "../components/dashboard/icons";
+import { Search, X } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Kbd } from "./kbd";
 
@@ -40,7 +40,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(functi
 ) {
   return (
     <label className={cn(searchInputVariants({ size }), rootClassName)}>
-      <IconSearch size={12} className="text-rv-mute-500" />
+      <Search size={12} className="text-rv-mute-500" />
       <input
         {...rest}
         ref={ref}
@@ -58,7 +58,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(functi
           aria-label="Clear search"
           className="cursor-pointer text-rv-mute-500 transition hover:text-foreground"
         >
-          <IconX size={12} />
+          <X size={12} />
         </button>
       )}
       {showSlashHint && !value && <Kbd>/</Kbd>}

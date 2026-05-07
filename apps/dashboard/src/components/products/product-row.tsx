@@ -1,7 +1,7 @@
 import { cn } from "../../lib/cn";
 import { Button } from "../../ui/button";
+import { MoreHorizontal } from "lucide-react";
 import { Checkbox } from "../../ui/checkbox";
-import { IconMore } from "../dashboard/icons";
 import { DurationTag } from "./duration-tag";
 import { EntitlementList } from "./entitlement-chip";
 import { formatDuration, formatPrice } from "./format";
@@ -91,7 +91,7 @@ export function ProductRow({ product, selected, active, onToggleSelected, onOpen
           className="size-6 opacity-0 group-hover:opacity-100"
           onClick={(e) => e.stopPropagation()}
         >
-          <IconMore size={14} />
+          <MoreHorizontal size={14} />
         </Button>
       </td>
     </tr>

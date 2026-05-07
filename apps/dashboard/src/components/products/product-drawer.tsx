@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Dialog } from "@base-ui-components/react/dialog";
 import { Button } from "../../ui/button";
 import { cn } from "../../lib/cn";
+import { ArrowUp, Key, X } from "lucide-react";
 import { Sparkline } from "../dashboard/sparkline";
-import { IconArrowUp, IconKey, IconX } from "../dashboard/icons";
 import { DurationTag } from "./duration-tag";
 import { formatDuration, formatPrice } from "./format";
 import { ProductIcon } from "./product-icon";
@@ -92,7 +92,7 @@ function DrawerContent({ product, onClose }: { product: Product; onClose: () => 
             aria-label={t("products.drawer.close")}
             onClick={onClose}
           >
-            <IconX size={14} />
+            <X size={14} />
           </Button>
         </div>
       </header>
@@ -219,7 +219,7 @@ function EntitlementsTab({ product }: { product: Product }) {
             key={e}
             className="flex items-center gap-2.5 border-b border-rv-divider py-2 text-[12px] last:border-b-0"
           >
-            <IconKey size={14} className="text-rv-violet" />
+            <Key size={14} className="text-rv-violet" />
             <code className="font-rv-mono text-[12px] text-rv-mute-800">{e}</code>
             <span className="ml-auto font-rv-mono text-[11px] text-rv-mute-500">
               {t("products.drawer.grantedOnPurchase")}
@@ -298,7 +298,7 @@ function MiniKpi({
           positive ? "text-rv-success" : "text-rv-mute-500",
         )}
       >
-        {positive && <IconArrowUp size={9} />}
+        {positive && <ArrowUp size={9} />}
         {delta}
       </div>
     </div>

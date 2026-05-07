@@ -1,6 +1,6 @@
 import { Trans, useTranslation } from "react-i18next";
+import { Key, MoreHorizontal, Plus } from "lucide-react";
 import { Button } from "../../ui/button";
-import { IconKey, IconMore, IconPlus } from "../dashboard/icons";
 import type { EntitlementGrant, ProductGroup } from "./types";
 
 type Props = {
@@ -25,7 +25,7 @@ export function EntitlementsSection({ group }: Props) {
           </p>
         </div>
         <Button variant="flat" size="sm">
-          <IconPlus size={13} />
+          <Plus size={13} />
           {t("productGroups.actions.add")}
         </Button>
       </header>
@@ -33,7 +33,7 @@ export function EntitlementsSection({ group }: Props) {
       {group.entitlements.length === 0 ? (
         <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
           <div className="mb-3 flex size-10 items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-500">
-            <IconKey size={16} />
+            <Key size={16} />
           </div>
           <h4 className="mb-1 text-[13px] font-semibold">
             {t("productGroups.entitlements.empty.title")}
@@ -63,7 +63,7 @@ function EntitlementRow({ entitlement, grantingProducts }: RowProps) {
       <div>
         <div className="flex items-center gap-2.5 font-rv-mono text-[13px] font-semibold">
           <span className="inline-flex size-6 items-center justify-center rounded-md bg-rv-violet/15 text-[color-mix(in_srgb,var(--color-rv-violet)_25%,white)]">
-            <IconKey size={12} />
+            <Key size={12} />
           </span>
           <span>{entitlement.key}</span>
         </div>
@@ -77,7 +77,7 @@ function EntitlementRow({ entitlement, grantingProducts }: RowProps) {
         />
       </div>
       <Button variant="light" size="icon" aria-label={t("productGroups.actions.more")}>
-        <IconMore size={14} />
+        <MoreHorizontal size={14} />
       </Button>
     </div>
   );

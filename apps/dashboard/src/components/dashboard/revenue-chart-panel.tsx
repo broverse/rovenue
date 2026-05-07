@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Menu } from "@base-ui-components/react/menu";
+import { Check, ChevronDown } from "lucide-react";
 import { buttonVariants } from "../../ui/button";
 import { Card, CardHeader } from "../../ui/card";
 import { cn } from "../../lib/cn";
 import { StackedAreaChart, type ChartSeries } from "./stacked-area-chart";
-import { IconCheck, IconChevronDown } from "./icons";
 
 type Props = {
   /** Map of metric label → series. Keys become the metric switcher. */
@@ -37,7 +37,7 @@ export function RevenueChartPanel({ metrics, categories, initialMetric }: Props)
               className={cn(buttonVariants({ variant: "flat", size: "sm" }), "h-7 text-xs")}
             >
               {metric}
-              <IconChevronDown size={12} />
+              <ChevronDown size={12} />
             </Menu.Trigger>
             <Menu.Portal>
               <Menu.Positioner sideOffset={4} align="end" className="z-50">
@@ -48,7 +48,7 @@ export function RevenueChartPanel({ metrics, categories, initialMetric }: Props)
                       onClick={() => setMetric(k)}
                       className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-rv-mute-700 outline-none data-[highlighted]:bg-rv-c4 data-[highlighted]:text-foreground"
                     >
-                      {k === metric ? <IconCheck size={13} /> : <span className="size-[13px]" />}
+                      {k === metric ? <Check size={13} /> : <span className="size-[13px]" />}
                       {k}
                     </Menu.Item>
                   ))}

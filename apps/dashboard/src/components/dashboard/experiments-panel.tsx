@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
+import { Check } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Card, CardFooter, CardHeader } from "../../ui/card";
 import { Chip } from "../../ui/chip";
 import { Segmented } from "../../ui/segmented";
-import { IconCheck } from "./icons";
 
 export type Experiment = {
   key: string;
@@ -63,7 +63,7 @@ export function ExperimentsPanel({ experiments }: Props) {
           <div key={x.key} className="border-b border-rv-divider py-3 last:border-b-0">
             <div className="flex items-center gap-2">
               {x.status === "completed" ? (
-                <IconCheck size={12} className="text-rv-success" />
+                <Check size={12} className="text-rv-success" />
               ) : (
                 <span
                   className="size-2 rounded-full bg-rv-accent-500"

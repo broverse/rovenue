@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { BookOpen, Users, Webhook, X, Zap } from "lucide-react";
 import { Button } from "../../ui/button";
-import { IconBook, IconUsers, IconWebhook, IconX, IconZap } from "../dashboard/icons";
 import { cn } from "../../lib/cn";
 import { formatAmount } from "./format";
 import { buildEventPayload, PayloadViewer } from "./payload-viewer";
@@ -31,7 +31,7 @@ export function EventDetailPanel({ event, onClose }: Props) {
       <aside className="sticky top-[72px] flex max-h-[calc(100vh-96px)] flex-col overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">
         <div className="flex flex-col items-center justify-center px-6 py-16 text-center text-[12px] text-rv-mute-500">
           <div className="mb-3 flex size-10 items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-500">
-            <IconZap size={16} />
+            <Zap size={16} />
           </div>
           <div className="mb-1 text-[13px] font-semibold text-rv-mute-700">
             {t("liveEvents.detail.emptyTitle")}
@@ -73,7 +73,7 @@ export function EventDetailPanel({ event, onClose }: Props) {
             title={t("liveEvents.detail.copyId")}
             onClick={copyId}
           >
-            <IconBook size={13} />
+            <BookOpen size={13} />
           </Button>
           <Button
             variant="light"
@@ -81,7 +81,7 @@ export function EventDetailPanel({ event, onClose }: Props) {
             aria-label={t("liveEvents.detail.close")}
             onClick={onClose}
           >
-            <IconX size={14} />
+            <X size={14} />
           </Button>
         </div>
       </div>
@@ -180,11 +180,11 @@ function OverviewTab({ event }: { event: LiveEvent }) {
       </dl>
       <div className="mt-4 flex flex-wrap gap-2">
         <Button variant="flat" size="sm">
-          <IconUsers size={13} />
+          <Users size={13} />
           {t("liveEvents.detail.viewSubscriber")}
         </Button>
         <Button variant="flat" size="sm">
-          <IconWebhook size={13} />
+          <Webhook size={13} />
           {t("liveEvents.detail.replayWebhook")}
         </Button>
       </div>

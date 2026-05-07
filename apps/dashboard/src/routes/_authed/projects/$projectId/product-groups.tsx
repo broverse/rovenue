@@ -2,8 +2,8 @@ import { useMemo, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../ui/button";
+import { BookOpen, Plus } from "lucide-react";
 import { useProject } from "../../../../lib/hooks/useProject";
-import { IconBook, IconPlus } from "../../../../components/dashboard/icons";
 import {
   EntitlementsSection,
   OfferingsSection,
@@ -55,11 +55,11 @@ function ProductGroupsPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="flat" size="sm">
-            <IconBook size={13} />
+            <BookOpen size={13} />
             {t("productGroups.actions.guide")}
           </Button>
           <Button variant="solid-primary" size="sm">
-            <IconPlus size={13} />
+            <Plus size={13} />
             {t("productGroups.actions.newGroup")}
           </Button>
         </div>

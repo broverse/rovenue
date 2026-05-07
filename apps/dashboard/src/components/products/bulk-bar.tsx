@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
+import { X } from "lucide-react";
 import { Button } from "../../ui/button";
-import { IconX } from "../dashboard/icons";
 
 type Props = {
   selectedCount: number;
@@ -38,7 +38,7 @@ export function BulkBar({ selectedCount, onClear }: Props) {
         aria-label={t("products.bulk.clearSelection")}
         onClick={onClear}
       >
-        <IconX size={13} />
+        <X size={13} />
       </Button>
     </div>
   );

@@ -1,8 +1,8 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Menu } from "@base-ui-components/react/menu";
+import { ChevronDown } from "lucide-react";
 import { useProjects } from "../../lib/hooks/useProjects";
-import { IconChevronDown } from "./icons";
 
 type AppSwitcherProps = {
   projectId: string;
@@ -37,7 +37,7 @@ export function AppSwitcher({ projectId, projectName, envLabel = "prod" }: AppSw
             {envLabel}
           </div>
         </div>
-        <IconChevronDown size={14} className="text-rv-mute-500" />
+        <ChevronDown size={14} className="text-rv-mute-500" />
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner sideOffset={4} align="start" className="z-50 w-[var(--anchor-width)]">

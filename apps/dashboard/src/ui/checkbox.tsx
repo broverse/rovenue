@@ -1,5 +1,6 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import type { MouseEvent } from "react";
+import { Check } from "lucide-react";
 import { cn } from "../lib/cn";
 
 export const checkboxVariants = cva(
@@ -62,18 +63,7 @@ export function Checkbox({
       className={cn(checkboxVariants({ size, state }), className)}
     >
       {state === "checked" && (
-        <svg
-          viewBox="0 0 14 14"
-          className="size-3 text-white"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2.4}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <polyline points="3 7.5 6 10.5 11 4.5" />
-        </svg>
+        <Check className="size-3 text-white" strokeWidth={2.4} aria-hidden="true" />
       )}
       {state === "indeterminate" && <span className="block h-[1.5px] w-[7px] bg-white" />}
     </button>

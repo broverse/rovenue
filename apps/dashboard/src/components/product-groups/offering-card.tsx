@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
+import { Tag } from "lucide-react";
 import { Chip } from "../../ui/chip";
-import { IconTag } from "../dashboard/icons";
 import { cn } from "../../lib/cn";
 import type { Offering } from "./types";
 
@@ -26,7 +26,7 @@ export function OfferingCard({ offering }: Props) {
     >
       <div className="flex items-center justify-between">
         <div className="flex min-w-0 items-center gap-2">
-          <IconTag size={13} className="text-rv-accent-500" />
+          <Tag size={13} className="text-rv-accent-500" />
           <span className="font-rv-mono text-[11px] text-rv-mute-500">{offering.name}</span>
         </div>
         {offering.isDefault && <Chip tone="primary">{t("productGroups.offerings.default")}</Chip>}

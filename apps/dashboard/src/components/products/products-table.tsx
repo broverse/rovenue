@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "../../ui/button";
 import { Checkbox } from "../../ui/checkbox";
+import { Box, Plus } from "lucide-react";
 import { cn } from "../../lib/cn";
-import { IconBox, IconPlus } from "../dashboard/icons";
 import { ProductRow } from "./product-row";
 import type { Product, SortDir, SortKey } from "./types";
 
@@ -113,7 +113,7 @@ export function ProductsTable({
       {products.length === 0 && (
         <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
           <div className="mb-3 flex size-10 items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-500">
-            <IconBox size={18} />
+            <Box size={18} />
           </div>
           <h3 className="mb-1 text-[13px] font-semibold">{t("products.empty.title")}</h3>
           <p className="mb-3 max-w-[280px] text-[12px] text-rv-mute-500">
@@ -124,7 +124,7 @@ export function ProductsTable({
               {t("products.empty.clear")}
             </Button>
             <Button variant="solid-primary" size="sm">
-              <IconPlus size={13} />
+              <Plus size={13} />
               {t("products.actions.create")}
             </Button>
           </div>

@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "../../ui/button";
+import { Key, Layers, MoreHorizontal, Tag } from "lucide-react";
 import { Sparkline } from "../dashboard/sparkline";
-import { IconKey, IconLayers, IconMore, IconTag } from "../dashboard/icons";
 import { ProductGroupIcon } from "./product-group-icon";
 import type { ProductGroup } from "./types";
 
@@ -40,19 +40,19 @@ export function ProductGroupHeader({ group }: Props) {
 
         <div className="flex flex-wrap gap-1.5">
           <Button variant="flat" size="sm">
-            <IconLayers size={13} />
+            <Layers size={13} />
             {t("productGroups.actions.linkProduct")}
           </Button>
           <Button variant="flat" size="sm">
-            <IconKey size={13} />
+            <Key size={13} />
             {t("productGroups.actions.addEntitlement")}
           </Button>
           <Button variant="flat" size="sm">
-            <IconTag size={13} />
+            <Tag size={13} />
             {t("productGroups.actions.newOffering")}
           </Button>
           <Button variant="light" size="icon" aria-label={t("productGroups.actions.more")}>
-            <IconMore size={14} />
+            <MoreHorizontal size={14} />
           </Button>
         </div>
       </div>

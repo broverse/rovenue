@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
+import { ArrowDown, ArrowUp, MoreHorizontal, RotateCw, TriangleAlert } from "lucide-react";
 import { Card, CardFooter, CardHeader } from "../../ui/card";
 import { Button } from "../../ui/button";
-import { IconAlert, IconArrowDown, IconArrowUp, IconMore, IconRotate } from "./icons";
 
 export type ActivityKind = "up" | "down" | "renew" | "alert";
 
@@ -32,10 +32,10 @@ function ActivityIcon({ kind, color }: { kind: ActivityKind; color: string }) {
       className="flex size-5 items-center justify-center rounded"
       style={{ background: `color-mix(in srgb, ${color} 15%, transparent)`, color }}
     >
-      {kind === "up" && <IconArrowUp {...props} />}
-      {kind === "down" && <IconArrowDown {...props} />}
-      {kind === "renew" && <IconRotate {...props} />}
-      {kind === "alert" && <IconAlert {...props} />}
+      {kind === "up" && <ArrowUp {...props} />}
+      {kind === "down" && <ArrowDown {...props} />}
+      {kind === "renew" && <RotateCw {...props} />}
+      {kind === "alert" && <TriangleAlert {...props} />}
     </div>
   );
 }
@@ -70,7 +70,7 @@ export function RecentActivityPanel({ events, live }: Props) {
         subtitle={t("panels.activity.subtitle")}
         right={
           <Button variant="light" size="icon" aria-label={t("panels.activity.filter")}>
-            <IconMore size={14} />
+            <MoreHorizontal size={14} />
           </Button>
         }
       />

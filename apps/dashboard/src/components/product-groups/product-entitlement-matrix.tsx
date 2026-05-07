@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { DurationTag } from "../products/duration-tag";
 import { ProductIcon } from "../products/product-icon";
+import { Check, X } from "lucide-react";
 import { StatusChip } from "../products/status-chip";
-import { IconCheck, IconX } from "../dashboard/icons";
 import { cn } from "../../lib/cn";
 import type { ProductGroup } from "./types";
 
@@ -100,7 +100,7 @@ export function ProductEntitlementMatrix({ group }: Props) {
                             : "text-rv-mute-400",
                         )}
                       >
-                        {granted ? <IconCheck size={11} /> : <IconX size={10} />}
+                        {granted ? <Check size={11} /> : <X size={10} />}
                       </span>
                     </td>
                   );

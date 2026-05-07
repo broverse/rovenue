@@ -3,8 +3,8 @@ import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../ui/button";
 import { StatCard } from "../../../../ui/stat-card";
+import { Layers, Plus, Terminal } from "lucide-react";
 import { useProject } from "../../../../lib/hooks/useProject";
-import { IconLayers, IconPlus, IconTerminal } from "../../../../components/dashboard/icons";
 import {
   BulkBar,
   GroupSidebar,
@@ -148,15 +148,15 @@ function ProductsPage() {
         </div>
         <div className="flex gap-2">
           <Button variant="flat" size="sm">
-            <IconLayers size={13} />
+            <Layers size={13} />
             {t("products.actions.importFromStore")}
           </Button>
           <Button variant="flat" size="sm">
-            <IconTerminal size={13} />
+            <Terminal size={13} />
             {t("products.actions.sdkSnippet")}
           </Button>
           <Button variant="solid-primary" size="sm">
-            <IconPlus size={13} />
+            <Plus size={13} />
             {t("products.actions.create")}
           </Button>
         </div>

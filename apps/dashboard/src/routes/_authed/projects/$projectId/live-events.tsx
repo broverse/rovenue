@@ -4,14 +4,14 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../../../../ui/button";
 import { Sparkline } from "../../../../components/dashboard/sparkline";
 import {
-  IconArrows,
-  IconLayers,
-  IconSearch,
-  IconTerminal,
-  IconWebhook,
-  IconX,
-  IconZap,
-} from "../../../../components/dashboard/icons";
+  ChevronsUpDown,
+  Layers,
+  Search,
+  Terminal,
+  Webhook,
+  X,
+  Zap,
+} from "lucide-react";
 import {
   EVENT_CATEGORIES,
   EventDetailPanel,
@@ -224,15 +224,15 @@ function LiveEventsPage({ projectName }: { projectName: string }) {
             />
           </span>
           <Button variant="flat" size="sm" onClick={() => setPaused((p) => !p)}>
-            {paused ? <IconZap size={13} /> : <IconX size={13} />}
+            {paused ? <Zap size={13} /> : <X size={13} />}
             {paused ? t("liveEvents.actions.resume") : t("liveEvents.actions.pause")}
           </Button>
           <Button variant="flat" size="sm">
-            <IconTerminal size={13} />
+            <Terminal size={13} />
             {t("liveEvents.actions.export")}
           </Button>
           <Button variant="flat" size="sm">
-            <IconWebhook size={13} />
+            <Webhook size={13} />
             {t("liveEvents.actions.replay")}
           </Button>
         </div>
@@ -265,7 +265,7 @@ function LiveEventsPage({ projectName }: { projectName: string }) {
             {[...typeFilters].map((type) => (
               <EventFilterPill key={type} active onClick={() => toggleType(type)}>
                 <span className="font-rv-mono text-[11px]">{type}</span>
-                <IconX size={10} />
+                <X size={10} />
               </EventFilterPill>
             ))}
             <Button
@@ -296,11 +296,11 @@ function LiveEventsPage({ projectName }: { projectName: string }) {
               placeholder={t("liveEvents.search.placeholder")}
             />
             <Button variant="flat" size="sm">
-              <IconLayers size={13} />
+              <Layers size={13} />
               {t("liveEvents.actions.columns")}
             </Button>
             <Button variant="flat" size="sm">
-              <IconArrows size={13} />
+              <ChevronsUpDown size={13} />
               {t("liveEvents.actions.sort")}
             </Button>
             <span className="ml-auto font-rv-mono text-[11px] text-rv-mute-500">
@@ -339,7 +339,7 @@ function SearchInput({
 }) {
   return (
     <label className="flex h-[30px] min-w-[220px] flex-1 items-center gap-1.5 rounded-md border border-rv-divider bg-rv-c2 px-2.5 transition focus-within:border-rv-accent-500">
-      <IconSearch size={12} className="text-rv-mute-500" />
+      <Search size={12} className="text-rv-mute-500" />
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -353,7 +353,7 @@ function SearchInput({
           className="cursor-pointer text-rv-mute-500 hover:text-foreground"
           aria-label="Clear search"
         >
-          <IconX size={12} />
+          <X size={12} />
         </button>
       )}
       <span className="inline-flex h-[18px] items-center rounded border border-rv-divider bg-rv-c4 px-1.5 font-rv-mono text-[10px] text-rv-mute-600">

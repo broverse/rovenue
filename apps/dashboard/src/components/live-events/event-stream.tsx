@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
+import { Search } from "lucide-react";
 import { Button } from "../../ui/button";
-import { IconSearch } from "../dashboard/icons";
 import { EventRow } from "./event-row";
 import type { LiveEvent } from "./types";
 
@@ -40,7 +40,7 @@ export function EventStream({ events, selectedId, onSelect, onResetFilters }: Pr
         {events.length === 0 ? (
           <div className="flex flex-col items-center justify-center px-5 py-16 text-center">
             <div className="mb-3 flex size-10 items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-500">
-              <IconSearch size={18} />
+              <Search size={18} />
             </div>
             <h3 className="m-0 mb-1 text-[13px] font-semibold">
               {t("liveEvents.empty.title")}

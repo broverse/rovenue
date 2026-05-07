@@ -10,8 +10,8 @@ import {
   SystemHealthPanel,
   TopProductsPanel,
 } from "../../../../components/dashboard";
+import { RefreshCw } from "lucide-react";
 import { Button } from "../../../../ui";
-import { IconRefresh } from "../../../../components/dashboard/icons";
 import {
   activeSeries,
   categories,
@@ -78,7 +78,7 @@ function ProjectOverview() {
         </div>
         <div className="flex gap-2">
           <Button variant="flat">
-            <IconRefresh size={13} />
+            <RefreshCw size={13} />
             {t("common.refresh")}
           </Button>
           <Button variant="flat">{t("common.export")}</Button>

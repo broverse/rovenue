@@ -1,18 +1,18 @@
 import { useTranslation } from "react-i18next";
 import { Menu } from "@base-ui-components/react/menu";
 import {
-  IconBell,
-  IconBox,
-  IconCalendar,
-  IconCheck,
-  IconChevronDown,
-  IconFlag,
-  IconFlask,
-  IconKey,
-  IconPlus,
-  IconSettings,
-  IconWebhook,
-} from "./icons";
+  Bell,
+  Box,
+  Calendar,
+  Check,
+  ChevronDown,
+  Flag,
+  FlaskConical,
+  Key,
+  Plus,
+  Settings,
+  Webhook,
+} from "lucide-react";
 import { Button, buttonVariants } from "../../ui/button";
 import { cn } from "../../lib/cn";
 
@@ -78,9 +78,9 @@ export function Topbar({
 
         <Menu.Root>
           <Menu.Trigger className="ml-2 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-transparent px-2 text-[13px] text-rv-mute-600 transition hover:border-rv-divider hover:bg-rv-c2 hover:text-foreground">
-            <IconCalendar size={13} />
+            <Calendar size={13} />
             <span>{t(RANGE_KEYS[range])}</span>
-            <IconChevronDown size={12} />
+            <ChevronDown size={12} />
           </Menu.Trigger>
           <Menu.Portal>
             <Menu.Positioner sideOffset={4} align="start" className="z-50">
@@ -94,7 +94,7 @@ export function Topbar({
                     onClick={() => onRangeChange(r)}
                     className={ITEM_CLASS}
                   >
-                    {r === range ? <IconCheck size={13} /> : <span className="size-[13px]" />}
+                    {r === range ? <Check size={13} /> : <span className="size-[13px]" />}
                     <span>{t(RANGE_KEYS[r])}</span>
                   </Menu.Item>
                 ))}
@@ -122,37 +122,37 @@ export function Topbar({
 
         <Menu.Root>
           <Menu.Trigger className={cn(buttonVariants({ variant: "solid-primary", size: "sm" }))}>
-            <IconPlus size={14} />
+            <Plus size={14} />
             <span>{t("topbar.newMenu.trigger")}</span>
-            <IconChevronDown size={12} />
+            <ChevronDown size={12} />
           </Menu.Trigger>
           <Menu.Portal>
             <Menu.Positioner sideOffset={4} align="end" className="z-50">
               <Menu.Popup className={POPUP_CLASS}>
-                <NewMenuItem icon={<IconBox size={13} />} label={t("topbar.newMenu.product")} kbd="C P" />
+                <NewMenuItem icon={<Box size={13} />} label={t("topbar.newMenu.product")} kbd="C P" />
                 <NewMenuItem
-                  icon={<IconFlask size={13} />}
+                  icon={<FlaskConical size={13} />}
                   label={t("topbar.newMenu.experiment")}
                   kbd="C E"
                 />
                 <NewMenuItem
-                  icon={<IconFlag size={13} />}
+                  icon={<Flag size={13} />}
                   label={t("topbar.newMenu.featureFlag")}
                   kbd="C F"
                 />
                 <div className="my-1 h-px bg-rv-divider" />
-                <NewMenuItem icon={<IconWebhook size={13} />} label={t("topbar.newMenu.webhook")} />
-                <NewMenuItem icon={<IconKey size={13} />} label={t("topbar.newMenu.apiKey")} />
+                <NewMenuItem icon={<Webhook size={13} />} label={t("topbar.newMenu.webhook")} />
+                <NewMenuItem icon={<Key size={13} />} label={t("topbar.newMenu.apiKey")} />
               </Menu.Popup>
             </Menu.Positioner>
           </Menu.Portal>
         </Menu.Root>
 
         <Button variant="light" size="icon" aria-label={t("topbar.settings")}>
-          <IconSettings size={16} />
+          <Settings size={16} />
         </Button>
         <Button variant="light" size="icon" aria-label={t("topbar.notifications")} className="relative">
-          <IconBell size={16} />
+          <Bell size={16} />
           <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-rv-danger" />
         </Button>
       </div>

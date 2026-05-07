@@ -1,10 +1,9 @@
 import { Link } from "@tanstack/react-router";
-import type { ComponentType } from "react";
+import type { LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { IconProps } from "./icons";
 
 type Common = {
-  icon: ComponentType<IconProps>;
+  icon: LucideIcon;
   label: string;
   badge?: string;
   badgeLive?: boolean;

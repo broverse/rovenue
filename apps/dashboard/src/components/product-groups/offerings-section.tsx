@@ -1,6 +1,6 @@
 import { Trans, useTranslation } from "react-i18next";
+import { Plus } from "lucide-react";
 import { Button } from "../../ui/button";
-import { IconPlus } from "../dashboard/icons";
 import { OfferingCard } from "./offering-card";
 import type { ProductGroup } from "./types";
 
@@ -32,7 +32,7 @@ export function OfferingsSection({ group }: Props) {
           </p>
         </div>
         <Button variant="flat" size="sm">
-          <IconPlus size={13} />
+          <Plus size={13} />
           {t("productGroups.actions.newOffering")}
         </Button>
       </div>

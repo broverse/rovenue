@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import { Card } from "../../ui/card";
 import { Chip } from "../../ui/chip";
 import { Sparkline } from "./sparkline";
-import { IconArrowDown, IconArrowUp } from "./icons";
 
 type DeltaKind = "success" | "danger" | "warning";
 
@@ -37,7 +37,7 @@ export function KpiCard({ label, value, currency, unit, delta, deltaKind = "succ
         </div>
         {delta && (
           <Chip tone={deltaKind}>
-            {deltaKind === "success" ? <IconArrowUp size={10} /> : <IconArrowDown size={10} />}
+            {deltaKind === "success" ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
             {delta}
           </Chip>
         )}

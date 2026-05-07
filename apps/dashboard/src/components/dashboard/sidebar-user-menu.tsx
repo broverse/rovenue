@@ -1,8 +1,8 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Menu } from "@base-ui-components/react/menu";
+import { MoreHorizontal } from "lucide-react";
 import { signOut, useSession } from "../../lib/auth";
-import { IconMore } from "./icons";
 import { ThemeToggle } from "../layout/ThemeToggle";
 
 type Props = {
@@ -31,7 +31,7 @@ export function SidebarUserMenu({ initials, name, role }: Props) {
           <div className="truncate text-[13px] text-rv-mute-800">{name}</div>
           <div className="text-[12px] text-rv-mute-500">{resolvedRole}</div>
         </div>
-        <IconMore size={14} className="text-rv-mute-500" />
+        <MoreHorizontal size={14} className="text-rv-mute-500" />
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner sideOffset={4} side="top" align="start" className="z-50 w-[var(--anchor-width)]">

@@ -1,33 +1,30 @@
-import type { ComponentType } from "react";
 import {
-  IconArrows,
-  IconBox,
-  IconChart,
-  IconCohort,
-  IconCoin,
-  IconFlag,
-  IconFlask,
-  IconGrid,
-  IconKey,
-  IconLayers,
-  IconReceipt,
-  IconRotate,
-  IconSearch,
-  IconTag,
-  IconTerminal,
-  IconUsers,
-  IconWebhook,
-  IconZap,
-  type IconProps,
-} from "./icons";
-
-type IconComponent = ComponentType<IconProps>;
+  Box,
+  ChevronsUpDown,
+  CirclePlus,
+  Flag,
+  FlaskConical,
+  Key,
+  Layers,
+  LayoutGrid,
+  LineChart,
+  Receipt,
+  RotateCw,
+  Search,
+  Tag,
+  Terminal,
+  Users,
+  Users2,
+  Webhook,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 
 export type NavItem = {
   id: string;
   /** i18n key resolved by the Sidebar via `t()`. */
   labelKey: string;
-  icon: IconComponent;
+  icon: LucideIcon;
   /**
    * When set, the item renders as a TanStack Router `<Link>` to this path.
    * `:projectId` is interpolated by the Sidebar before rendering.
@@ -49,8 +46,8 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
   {
     sectionKey: "overview",
     items: [
-      { id: "dashboard", labelKey: "sidebar.items.dashboard", icon: IconGrid, to: "/projects/$projectId" },
-      { id: "live", labelKey: "sidebar.items.live", icon: IconZap, to: "/projects/$projectId/live-events", badgeLive: true },
+      { id: "dashboard", labelKey: "sidebar.items.dashboard", icon: LayoutGrid, to: "/projects/$projectId" },
+      { id: "live", labelKey: "sidebar.items.live", icon: Zap, to: "/projects/$projectId/live-events", badgeLive: true },
     ],
   },
   {
@@ -59,54 +56,54 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
       {
         id: "products",
         labelKey: "sidebar.items.products",
-        icon: IconBox,
+        icon: Box,
         to: "/projects/$projectId/products",
       },
-      { id: "entitlements", labelKey: "sidebar.items.entitlements", icon: IconKey, soon: true },
+      { id: "entitlements", labelKey: "sidebar.items.entitlements", icon: Key, soon: true },
       {
         id: "groups",
         labelKey: "sidebar.items.groups",
-        icon: IconLayers,
+        icon: Layers,
         to: "/projects/$projectId/product-groups",
       },
-      { id: "offerings", labelKey: "sidebar.items.offerings", icon: IconTag, soon: true },
+      { id: "offerings", labelKey: "sidebar.items.offerings", icon: Tag, soon: true },
     ],
   },
   {
     sectionKey: "customers",
     items: [
-      { id: "subscribers", labelKey: "sidebar.items.subscribers", icon: IconUsers, to: "/projects/$projectId/subscribers" },
-      { id: "subscriptions", labelKey: "sidebar.items.subscriptions", icon: IconRotate, soon: true },
-      { id: "transactions", labelKey: "sidebar.items.transactions", icon: IconReceipt, soon: true },
+      { id: "subscribers", labelKey: "sidebar.items.subscribers", icon: Users, to: "/projects/$projectId/subscribers" },
+      { id: "subscriptions", labelKey: "sidebar.items.subscriptions", icon: RotateCw, soon: true },
+      { id: "transactions", labelKey: "sidebar.items.transactions", icon: Receipt, soon: true },
     ],
   },
   {
     sectionKey: "growth",
     items: [
-      { id: "experiments", labelKey: "sidebar.items.experiments", icon: IconFlask, soon: true, badge: "3" },
-      { id: "flags", labelKey: "sidebar.items.flags", icon: IconFlag, soon: true },
-      { id: "cohorts", labelKey: "sidebar.items.cohorts", icon: IconCohort, soon: true },
+      { id: "experiments", labelKey: "sidebar.items.experiments", icon: FlaskConical, soon: true, badge: "3" },
+      { id: "flags", labelKey: "sidebar.items.flags", icon: Flag, soon: true },
+      { id: "cohorts", labelKey: "sidebar.items.cohorts", icon: Users2, soon: true },
     ],
   },
   {
     sectionKey: "ledger",
     items: [
-      { id: "credits", labelKey: "sidebar.items.credits", icon: IconCoin, soon: true },
-      { id: "adjustments", labelKey: "sidebar.items.adjustments", icon: IconArrows, soon: true },
+      { id: "credits", labelKey: "sidebar.items.credits", icon: CirclePlus, soon: true },
+      { id: "adjustments", labelKey: "sidebar.items.adjustments", icon: ChevronsUpDown, soon: true },
     ],
   },
   {
     sectionKey: "insights",
     items: [
-      { id: "charts", labelKey: "sidebar.items.charts", icon: IconChart, soon: true },
-      { id: "queries", labelKey: "sidebar.items.queries", icon: IconSearch, soon: true },
+      { id: "charts", labelKey: "sidebar.items.charts", icon: LineChart, soon: true },
+      { id: "queries", labelKey: "sidebar.items.queries", icon: Search, soon: true },
     ],
   },
   {
     sectionKey: "integrations",
     items: [
-      { id: "webhooks", labelKey: "sidebar.items.webhooks", icon: IconWebhook, soon: true },
-      { id: "sdk", labelKey: "sidebar.items.sdk", icon: IconTerminal, soon: true },
+      { id: "webhooks", labelKey: "sidebar.items.webhooks", icon: Webhook, soon: true },
+      { id: "sdk", labelKey: "sidebar.items.sdk", icon: Terminal, soon: true },
     ],
   },
 ];
