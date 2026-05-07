@@ -111,7 +111,8 @@
     "overview": "Overview",
     "liveEvents": "Live events",
     "products": "Products",
-    "productGroups": "Product groups"
+    "productGroups": "Product groups",
+    "transactions": "Transactions"
   },
   "overview": {
     "title": "Overview",
@@ -633,6 +634,139 @@
       "variantPrefix": "variant {{id}}",
       "converted": "Converted",
       "active": "Active"
+    }
+  },
+  "transactions": {
+    "title": "Transactions",
+    "subtitle": "Every paid, refunded, or disputed event across App Store, Google Play, Stripe, and web. One row per store transaction.",
+    "actions": {
+      "syncStores": "Sync stores",
+      "exportCsv": "Export CSV",
+      "issueRefund": "Issue refund",
+      "lastRange": "Last 28d",
+      "sortNewest": "Sort: Newest"
+    },
+    "kpi": {
+      "gross28d": "GROSS · 28D",
+      "grossDelta": "▲ +9.8% vs prev",
+      "net28d": "NET · 28D",
+      "netDescription": "75.0% of gross · store fees $38k",
+      "refunds": "REFUNDS",
+      "refundsDescription": "1.54% of gross · 187 events",
+      "chargebacks": "CHARGEBACKS",
+      "chargebacksDescription": "0.02% rate · within target"
+    },
+    "flow": {
+      "title": "Revenue flow · last 28 days",
+      "subtitle": "From gross receipts to realized net, by platform",
+      "lastSync": "last sync 12s ago · store reconciliation in green",
+      "gross": "Gross receipts",
+      "grossDetail": "14,281 events",
+      "fees": "Store fees",
+      "feesDetail": "avg 15.0% (mix)",
+      "refunds": "Refunds + tax",
+      "refundsDetail": "10.0% of gross",
+      "net": "Net revenue",
+      "netDetail": "▲ +11.2% vs prev"
+    },
+    "volume": {
+      "today": "Today",
+      "rangeStart": "28d ago",
+      "purchases": "Purchases",
+      "renewals": "Renewals",
+      "refunds": "Refunds",
+      "tooltip": "${{total}}k · {{when}}",
+      "tooltipToday": "today",
+      "tooltipDayAgo": "day {{day}} ago"
+    },
+    "stores": {
+      "appStore": "App Store",
+      "play": "Google Play",
+      "stripe": "Stripe",
+      "web": "Web / direct",
+      "feeShort": "fees {{value}} · {{percent}}",
+      "selfBilled": "fees $0 · self-billed"
+    },
+    "scope": {
+      "all": "All",
+      "purchase": "Purchases",
+      "renewal": "Renewals",
+      "refund": "Refunds",
+      "trial": "Trials",
+      "failed": "Failed"
+    },
+    "filters": {
+      "searchPlaceholder": "Search tx_id, user_id, order_id, receipt…",
+      "amount": "amount",
+      "amountValue": "≥ $0.01",
+      "store": "store",
+      "currency": "currency",
+      "country": "country",
+      "any": "any",
+      "addFilter": "Add filter",
+      "showing": "{{visible}} of {{total}}"
+    },
+    "table": {
+      "transaction": "Transaction",
+      "userSubscription": "User / subscription",
+      "product": "Product",
+      "store": "Store",
+      "gross": "Gross",
+      "fee": "Fee",
+      "net": "Net",
+      "status": "Status",
+      "when": "When",
+      "selectAllAria": "Select all visible transactions",
+      "selectRowAria": "Select transaction {{id}}"
+    },
+    "type": {
+      "purchase": "Purchase",
+      "renewal": "Renewal",
+      "refund": "Refund",
+      "trial": "Trial",
+      "chargeback": "Chargeback",
+      "credit": "Credit"
+    },
+    "status": {
+      "paid": "Paid",
+      "failed": "Failed",
+      "disputed": "Disputed",
+      "disputing": "Disputing",
+      "refunded": "Refunded"
+    },
+    "paginator": {
+      "showing": "Showing 1–{{visible}} of <0>{{total}}</0>",
+      "previous": "Previous page",
+      "next": "Next page"
+    },
+    "inspector": {
+      "subTitle": "{{type}} · {{at}}",
+      "copyId": "Copy ID",
+      "more": "More",
+      "amountSubtitle": "net {{currency}} · realized",
+      "breakdown": {
+        "gross": "gross",
+        "fee": "fee",
+        "tax": "tax"
+      },
+      "receipt": "Receipt",
+      "receiptStoreFee": "{{store}} fee",
+      "receiptTax": "Tax ({{country}})",
+      "receiptNet": "Net to Rovenue",
+      "references": "References",
+      "ref": {
+        "subscription": "Subscription",
+        "subscriber": "Subscriber",
+        "product": "Product",
+        "store": "Store",
+        "country": "Country",
+        "method": "Method"
+      },
+      "payload": "Webhook payload",
+      "footer": {
+        "refund": "Refund",
+        "redeliver": "Re-deliver"
+      }
     }
   }
 }

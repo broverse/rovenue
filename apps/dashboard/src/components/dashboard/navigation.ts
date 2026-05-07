@@ -74,7 +74,12 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
     items: [
       { id: "subscribers", labelKey: "sidebar.items.subscribers", icon: Users, to: "/projects/$projectId/subscribers" },
       { id: "subscriptions", labelKey: "sidebar.items.subscriptions", icon: RotateCw, soon: true },
-      { id: "transactions", labelKey: "sidebar.items.transactions", icon: Receipt, soon: true },
+      {
+        id: "transactions",
+        labelKey: "sidebar.items.transactions",
+        icon: Receipt,
+        to: "/projects/$projectId/transactions",
+      },
     ],
   },
   {
