@@ -15,7 +15,11 @@ export function OAuthButton({ provider, children }: Props) {
       variant="outline"
       className="w-full justify-center"
       onPress={() =>
-        signIn.social({ provider, callbackURL: "/projects" })
+        signIn.social({
+          provider,
+          callbackURL: `${window.location.origin}/projects`,
+          errorCallbackURL: `${window.location.origin}/login`,
+        })
       }
     >
       {children}
