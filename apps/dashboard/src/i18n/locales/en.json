@@ -109,7 +109,8 @@
     "subscribers": "Subscribers",
     "settings": "Settings",
     "overview": "Overview",
-    "liveEvents": "Live events"
+    "liveEvents": "Live events",
+    "products": "Products"
   },
   "overview": {
     "title": "Overview",
@@ -322,6 +323,86 @@
       "entitlements": "+34ms · 1 entitlement granted",
       "webhook": "+128ms · 2 endpoints · 200 OK",
       "persisted": "+162ms · stored in events_2026_04"
+    }
+  },
+  "products": {
+    "title": "Products",
+    "subtitle": "Subscriptions, one-time purchases and consumables across all stores",
+    "actions": {
+      "create": "Create product",
+      "importFromStore": "Import from store",
+      "sdkSnippet": "SDK snippet"
+    },
+    "stats": {
+      "total": "Total products",
+      "totalBreakdown": "{{active}} active · {{draft}} draft · {{archived}} archived",
+      "combinedMrr": "Combined MRR",
+      "vsPrev": "vs prev 28d",
+      "activeSubs": "Active subscribers",
+      "acrossProducts": "across {{count}} products",
+      "entitlements": "Entitlements"
+    },
+    "groups": {
+      "heading": "Groups"
+    },
+    "status": {
+      "heading": "Status"
+    },
+    "toolbar": {
+      "searchPlaceholder": "Search products, SKUs, IDs…",
+      "columns": "Columns",
+      "filter": "Filter",
+      "of": "of"
+    },
+    "bulk": {
+      "selected": "selected",
+      "changeGroup": "Change group…",
+      "linkEntitlement": "Link entitlement…",
+      "archive": "Archive",
+      "delete": "Delete",
+      "clearSelection": "Clear selection"
+    },
+    "table": {
+      "selectAll": "Select all visible products"
+    },
+    "empty": {
+      "title": "No products match",
+      "body": "Try widening your filters or creating a new product.",
+      "clear": "Clear filters"
+    },
+    "kpi": {
+      "mrr": "MRR",
+      "activeSubs": "Active subs",
+      "conversion": "Conversion"
+    },
+    "drawer": {
+      "edit": "Edit",
+      "close": "Close",
+      "performance": "Performance · last 28 days",
+      "details": "Details",
+      "storePricing": "Store pricing",
+      "regionalNote": "Regional pricing, tax handling and promo offers are inherited from the {{group}} product group.",
+      "grantsOnPurchase": "Grants on purchase",
+      "grantedOnPurchase": "granted on purchase",
+      "consumableNoGrants": "This product grants no entitlements (consumable).",
+      "noSubscribersConsumable": "No subscribers (consumable)",
+      "activeSubscribersCount": "{{count}} active subscribers",
+      "openFullList": "Open the full subscriber list →",
+      "recentChanges": "Recent changes",
+      "trialToPaid": "trial → paid",
+      "noTrial": "no trial",
+      "tabs": {
+        "overview": "Overview",
+        "pricing": "Pricing",
+        "entitlements": "Entitlements",
+        "subscribers": "Subscribers",
+        "activity": "Activity"
+      }
+    },
+    "tip": {
+      "before": "Tip: press",
+      "create": "to create a product",
+      "search": "to focus search"
     }
   },
   "subscribers": {

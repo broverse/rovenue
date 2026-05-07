@@ -56,7 +56,12 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
   {
     sectionKey: "catalog",
     items: [
-      { id: "products", labelKey: "sidebar.items.products", icon: IconBox, soon: true },
+      {
+        id: "products",
+        labelKey: "sidebar.items.products",
+        icon: IconBox,
+        to: "/projects/$projectId/products",
+      },
       { id: "entitlements", labelKey: "sidebar.items.entitlements", icon: IconKey, soon: true },
       { id: "groups", labelKey: "sidebar.items.groups", icon: IconLayers, soon: true },
       { id: "offerings", labelKey: "sidebar.items.offerings", icon: IconTag, soon: true },
