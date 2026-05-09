@@ -6,6 +6,7 @@ export {
   formatLtv,
   formatMoney,
   initialsFor,
+  mapApiSubscriber,
   riskColor,
 } from "./format";
 export { COUNTRIES, SUBSCRIBERS, TIMELINE_MOCK } from "./mock-data";

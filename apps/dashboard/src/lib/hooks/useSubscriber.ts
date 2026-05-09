@@ -5,6 +5,7 @@ import { api } from "../api";
 export function useSubscriber(projectId: string, id: string) {
   return useQuery({
     queryKey: ["subscriber", projectId, id],
+    enabled: !!id,
     queryFn: () =>
       api<{ subscriber: SubscriberDetail }>(
         `/dashboard/projects/${projectId}/subscribers/${id}`,

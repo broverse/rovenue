@@ -1,4 +1,47 @@
+import type { SubscriberListItem } from "@rovenue/shared";
 import { AVATAR_GRADIENTS } from "./mock-data";
+import type { CountryCode, Subscriber } from "./types";
+
+const VALID_COUNTRY_CODES = new Set<string>([
+  "US", "DE", "TR", "JP", "BR", "GB", "FR", "IN", "CA", "AU", "NL", "KR",
+]);
+
+function toCountryCode(value: unknown): CountryCode {
+  if (typeof value === "string" && VALID_COUNTRY_CODES.has(value)) {
+    return value as CountryCode;
+  }
+  return "US";
+}
+
+/**
+ * Maps a `SubscriberListItem` from the API to the richer `Subscriber` shape
+ * used by the dashboard table. Fields not returned by the API are filled with
+ * safe blanks so the UI stays functional.
+ */
+export function mapApiSubscriber(item: SubscriberListItem): Subscriber {
+  const full = item.appUserId;
+  const truncated = full.length > 20 ? `${full.slice(0, 17)}...` : full;
+  const alias = full.length > 24 ? `${full.slice(0, 21)}...` : full;
+  const status = item.activeEntitlementKeys.length > 0 ? "active" : "churned";
+  const country = toCountryCode(item.attributes["country"]);
+
+  return {
+    id: truncated,
+    full,
+    alias,
+    country,
+    entitlements: item.activeEntitlementKeys,
+    product: "—",
+    status,
+    ltv: 0,
+    mrr: 0,
+    created: item.firstSeenAt,
+    renew: "—",
+    platforms: [],
+    risk: 0,
+    plan: item.activeEntitlementKeys.length > 0 ? item.activeEntitlementKeys[0]! : "—",
+  };
+}
 
 /**
  * Picks a stable avatar gradient for a user based on a 4-char slice of

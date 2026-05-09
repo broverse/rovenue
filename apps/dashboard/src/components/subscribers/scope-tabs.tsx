@@ -15,8 +15,8 @@ const SCOPES: ReadonlyArray<SubscriberScope> = [
 type Props = {
   value: SubscriberScope;
   onChange: (next: SubscriberScope) => void;
-  /** Display counts shown to the right of each label. */
-  counts: Readonly<Record<SubscriberScope, string>>;
+  /** Display counts shown to the right of each label. Omit to hide badges. */
+  counts?: Readonly<Partial<Record<SubscriberScope, string>>>;
 };
 
 /** Segmented control with monospace count badges — matches the design's `.scope-tabs`. */
@@ -45,14 +45,16 @@ export function ScopeTabs({ value, onChange, counts }: Props) {
             )}
           >
             {t(`subscribers.scope.${scope}`)}
-            <span
-              className={cn(
-                "rounded-[3px] px-1 py-px font-rv-mono text-[10px] tabular-nums",
-                active ? "bg-rv-c2 text-rv-mute-700" : "bg-rv-c3 text-rv-mute-500",
-              )}
-            >
-              {counts[scope]}
-            </span>
+            {counts?.[scope] !== undefined && (
+              <span
+                className={cn(
+                  "rounded-[3px] px-1 py-px font-rv-mono text-[10px] tabular-nums",
+                  active ? "bg-rv-c2 text-rv-mute-700" : "bg-rv-c3 text-rv-mute-500",
+                )}
+              >
+                {counts[scope]}
+              </span>
+            )}
           </button>
         );
       })}

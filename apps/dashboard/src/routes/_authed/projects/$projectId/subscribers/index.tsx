@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../../../../../ui/button";
 import { StatCard } from "../../../../../ui/stat-card";
 import { useProject } from "../../../../../lib/hooks/useProject";
+import { useSubscribers } from "../../../../../lib/hooks/useSubscribers";
+import { useSubscriber } from "../../../../../lib/hooks/useSubscriber";
 import {
   Calendar,
   ChevronsUpDown,
@@ -15,11 +17,9 @@ import {
 import {
   FilterPill,
   ScopeTabs,
-  SUBSCRIBERS,
   SubscriberDetailPanel,
-  SubscribersPaginator,
   SubscribersTable,
-  TIMELINE_MOCK,
+  mapApiSubscriber,
   type Subscriber,
   type SubscriberScope,
 } from "../../../../../components/subscribers";
@@ -30,33 +30,27 @@ export const Route = createFileRoute(
   component: SubscribersRouteComponent,
 });
 
-const TOTAL_SUBSCRIBERS = 24812;
-const TOTAL_PAGES = 248;
-
-const SCOPE_COUNTS: Record<SubscriberScope, string> = {
-  all: "24.8k",
-  active: "19.2k",
-  trial: "1,421",
-  grace: "84",
-  churn: "4.1k",
-  vip: "312",
-  risk: "487",
-};
-
 function SubscribersRouteComponent() {
   const { projectId } = useParams({
     from: "/_authed/projects/$projectId/subscribers/",
   });
   const { data: project } = useProject(projectId);
   if (!project) return null;
-  return <SubscribersPage projectName={project.name} />;
+  return <SubscribersPage projectId={projectId} projectName={project.name} />;
 }
 
-function SubscribersPage({ projectName }: { projectName: string }) {
+function SubscribersPage({
+  projectId,
+  projectName,
+}: {
+  projectId: string;
+  projectName: string;
+}) {
   const { t } = useTranslation();
   const [scope, setScope] = useState<SubscriberScope>("all");
   const [search, setSearch] = useState("");
-  const [activeId, setActiveId] = useState<string>("user_7c9e22...");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -66,33 +60,111 @@ function SubscribersPage({ projectName }: { projectName: string }) {
     country: false,
     ltv: false,
   });
-  const [page, setPage] = useState(1);
 
+  // Debounce search input by 300ms before hitting the API.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+  } = useSubscribers({
+    projectId,
+    q: debouncedSearch || undefined,
+    limit: 50,
+  });
+
+  // Flatten all loaded pages and map to the UI Subscriber shape.
+  const flat = useMemo<ReadonlyArray<Subscriber>>(() => {
+    if (!data) return [];
+    return data.pages.flatMap((page) =>
+      page.subscribers.map(mapApiSubscriber),
+    );
+  }, [data]);
+
+  // Client-side scope filter over loaded pages (acceptable degradation).
   const filtered = useMemo<ReadonlyArray<Subscriber>>(() => {
-    let arr: ReadonlyArray<Subscriber> = SUBSCRIBERS;
-    if (scope === "active") arr = arr.filter((s) => s.status === "active");
-    if (scope === "trial") arr = arr.filter((s) => s.status === "trial");
-    if (scope === "grace") arr = arr.filter((s) => s.status === "grace");
+    if (scope === "all") return flat;
+    if (scope === "active") return flat.filter((s) => s.status === "active");
+    if (scope === "trial") return flat.filter((s) => s.status === "trial");
+    if (scope === "grace") return flat.filter((s) => s.status === "grace");
     if (scope === "churn")
-      arr = arr.filter((s) => s.status === "churned" || s.status === "canceled");
-    if (scope === "vip") arr = arr.filter((s) => s.vip);
-    if (scope === "risk") arr = arr.filter((s) => s.risk >= 70);
-    const q = search.trim().toLowerCase();
-    if (q) {
-      arr = arr.filter(
-        (s) =>
-          s.full.toLowerCase().includes(q) ||
-          s.alias.toLowerCase().includes(q) ||
-          s.country.toLowerCase() === q,
-      );
-    }
-    return arr;
-  }, [scope, search]);
+      return flat.filter((s) => s.status === "churned" || s.status === "canceled");
+    if (scope === "vip") return flat.filter((s) => s.vip);
+    if (scope === "risk") return flat.filter((s) => s.risk >= 70);
+    return flat;
+  }, [flat, scope]);
 
-  const selected = useMemo<Subscriber>(
-    () => SUBSCRIBERS.find((s) => s.id === activeId) ?? SUBSCRIBERS[0]!,
-    [activeId],
+  // Scope counts over loaded items only.
+  const scopeCounts = useMemo<Partial<Record<SubscriberScope, string>>>(() => {
+    const activeCount = flat.filter((s) => s.status === "active").length;
+    const trialCount = flat.filter((s) => s.status === "trial").length;
+    const graceCount = flat.filter((s) => s.status === "grace").length;
+    const churnCount = flat.filter(
+      (s) => s.status === "churned" || s.status === "canceled",
+    ).length;
+    const vipCount = flat.filter((s) => s.vip).length;
+    const riskCount = flat.filter((s) => s.risk >= 70).length;
+    return {
+      all: flat.length.toLocaleString() + (hasNextPage ? "+" : ""),
+      active: activeCount.toLocaleString(),
+      trial: trialCount.toLocaleString(),
+      grace: graceCount.toLocaleString(),
+      churn: churnCount.toLocaleString(),
+      vip: vipCount.toLocaleString(),
+      risk: riskCount.toLocaleString(),
+    };
+  }, [flat, hasNextPage]);
+
+  // Detail panel: fetch real subscriber when one is selected.
+  const { data: detailData } = useSubscriber(
+    projectId,
+    activeId ?? "",
   );
+
+  // Map SubscriberDetail → Subscriber for the panel.
+  const selectedSubscriber = useMemo<Subscriber | null>(() => {
+    if (detailData) {
+      const status = detailData.access.some((a) => a.isActive) ? "active" : "churned";
+      return {
+        id: detailData.appUserId.length > 20
+          ? `${detailData.appUserId.slice(0, 17)}...`
+          : detailData.appUserId,
+        full: detailData.appUserId,
+        alias:
+          detailData.appUserId.length > 24
+            ? `${detailData.appUserId.slice(0, 21)}...`
+            : detailData.appUserId,
+        country: "US",
+        entitlements: detailData.access
+          .filter((a) => a.isActive)
+          .map((a) => a.entitlementKey),
+        product:
+          detailData.purchases[0]?.productIdentifier ?? "—",
+        status,
+        ltv: 0,
+        mrr: 0,
+        created: detailData.firstSeenAt,
+        renew: detailData.purchases[0]?.expiresDate ?? "—",
+        platforms: [],
+        risk: 0,
+        plan:
+          detailData.access
+            .filter((a) => a.isActive)
+            .map((a) => a.entitlementKey)[0] ?? "—",
+      };
+    }
+    // Fallback to flat list while detail loads.
+    if (activeId) {
+      return flat.find((s) => s.full === activeId) ?? null;
+    }
+    return null;
+  }, [detailData, activeId, flat]);
 
   const toggleOne = (id: string) =>
     setSelectedIds((prev) => {
@@ -132,8 +204,7 @@ function SubscribersPage({ projectName }: { projectName: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const visibleFrom = filtered.length === 0 ? 0 : 1;
-  const visibleTo = filtered.length;
+  const totalLoaded = flat.length;
 
   return (
     <>
@@ -162,41 +233,31 @@ function SubscribersPage({ projectName }: { projectName: string }) {
         </div>
       </header>
 
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label={t("subscribers.kpi.total")}
-          value={TOTAL_SUBSCRIBERS.toLocaleString()}
-          description={t("subscribers.kpi.totalDelta")}
-          descriptionTone="success"
+          value={
+            isLoading
+              ? "—"
+              : totalLoaded.toLocaleString() + (hasNextPage ? "+" : "")
+          }
         />
         <StatCard
           label={t("subscribers.kpi.active")}
-          value={(19204).toLocaleString()}
-          description={
-            <>
-              {t("subscribers.kpi.activeBreakdown", { percent: "77.4" })}
-              <span className="text-rv-success">
-                {t("subscribers.kpi.activeDelta", { value: "1.8" })}
-              </span>
-            </>
-          }
+          value="—"
         />
         <StatCard
           label={t("subscribers.kpi.trial")}
-          value={(1421).toLocaleString()}
-          description={t("subscribers.kpi.trialBreakdown", { percent: "42.8" })}
+          value="—"
         />
         <StatCard
           label={t("subscribers.kpi.risk")}
-          value={
-            <span className="text-rv-warning">{(487).toLocaleString()}</span>
-          }
-          description={t("subscribers.kpi.riskBreakdown", { amount: "$2,840" })}
+          value="—"
         />
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <ScopeTabs value={scope} onChange={setScope} counts={SCOPE_COUNTS} />
+        <ScopeTabs value={scope} onChange={setScope} counts={scopeCounts} />
         <div className="ml-auto flex gap-1.5">
           <Button variant="light" size="sm">
             <Calendar size={13} />
@@ -248,8 +309,7 @@ function SubscribersPage({ projectName }: { projectName: string }) {
           {t("subscribers.filters.addFilter")}
         </FilterPill>
         <span className="ml-auto font-rv-mono text-[12px] text-rv-mute-500">
-          {filtered.length.toLocaleString()} {t("subscribers.toolbar.of")}{" "}
-          {TOTAL_SUBSCRIBERS.toLocaleString()}
+          {filtered.length.toLocaleString()}
         </span>
       </div>
 
@@ -263,17 +323,35 @@ function SubscribersPage({ projectName }: { projectName: string }) {
             onToggleSelectAll={toggleAll}
             onOpen={setActiveId}
           />
-          <SubscribersPaginator
-            from={visibleFrom}
-            to={visibleTo}
-            total={TOTAL_SUBSCRIBERS}
-            page={page}
-            totalPages={TOTAL_PAGES}
-            onPageChange={setPage}
-          />
+
+          {/* Load more / end-of-list indicator */}
+          <div className="flex items-center justify-between border-t border-rv-divider px-3.5 py-2.5 text-[12px] text-rv-mute-600">
+            <span className="font-rv-mono">
+              {isLoading
+                ? t("subscribers.paginator.loading", "Loading…")
+                : `${totalLoaded.toLocaleString()}${hasNextPage ? "+" : ""} ${t("subscribers.toolbar.subscribers", "subscribers")}`}
+            </span>
+            {hasNextPage && (
+              <Button
+                variant="flat"
+                size="sm"
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+              >
+                {isFetchingNextPage
+                  ? t("subscribers.paginator.loading", "Loading…")
+                  : t("subscribers.paginator.loadMore", "Load more")}
+              </Button>
+            )}
+          </div>
         </div>
 
-        <SubscriberDetailPanel subscriber={selected} timeline={TIMELINE_MOCK} />
+        {selectedSubscriber && (
+          <SubscriberDetailPanel
+            subscriber={selectedSubscriber}
+            timeline={[]}
+          />
+        )}
       </div>
     </>
   );
