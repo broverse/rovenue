@@ -1,10 +1,8 @@
 import {
   Box,
-  ChevronsUpDown,
   CirclePlus,
   Flag,
   FlaskConical,
-  Key,
   Layers,
   LayoutGrid,
   LineChart,
@@ -12,11 +10,9 @@ import {
   Receipt,
   RotateCw,
   Search,
-  Tag,
   Terminal,
   Users,
   Users2,
-  Webhook,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -60,14 +56,12 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
         icon: Box,
         to: "/projects/$projectId/products",
       },
-      { id: "entitlements", labelKey: "sidebar.items.entitlements", icon: Key, soon: true },
       {
         id: "groups",
         labelKey: "sidebar.items.groups",
         icon: Layers,
         to: "/projects/$projectId/product-groups",
       },
-      { id: "offerings", labelKey: "sidebar.items.offerings", icon: Tag, soon: true },
     ],
   },
   {
@@ -106,7 +100,6 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
         icon: CirclePlus,
         to: "/projects/$projectId/credits",
       },
-      { id: "adjustments", labelKey: "sidebar.items.adjustments", icon: ChevronsUpDown, soon: true },
     ],
   },
   {
@@ -130,7 +123,6 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
     sectionKey: "integrations",
     items: [
       { id: "apps", labelKey: "sidebar.items.apps", icon: Plug, to: "/projects/$projectId/apps" },
-      { id: "webhooks", labelKey: "sidebar.items.webhooks", icon: Webhook, soon: true },
       { id: "sdk", labelKey: "sidebar.items.sdk", icon: Terminal, to: "/projects/$projectId/sdk" },
     ],
   },

@@ -333,9 +333,7 @@
       "dashboard": "Dashboard",
       "live": "Live events",
       "products": "Products",
-      "entitlements": "Entitlements",
       "groups": "Product groups",
-      "offerings": "Offerings",
       "subscribers": "Subscribers",
       "subscriptions": "Subscriptions",
       "transactions": "Transactions",
@@ -343,11 +341,9 @@
       "flags": "Feature flags",
       "cohorts": "Cohorts",
       "credits": "Credits",
-      "adjustments": "Adjustments",
       "charts": "Charts",
       "queries": "Queries",
       "apps": "Apps & integrations",
-      "webhooks": "Webhooks",
       "sdk": "SDK & API keys"
     },
     "footer": {
