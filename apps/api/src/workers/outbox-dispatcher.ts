@@ -1,6 +1,61 @@
 import { drizzle, getDb, type OutboxEvent } from "@rovenue/db";
 import { assertTopic, disconnectKafka, getProducer } from "../lib/kafka";
 import { logger } from "../lib/logger";
+import { redis } from "../lib/redis";
+
+// =============================================================
+// Live-events Redis side-channel (Phase 4.3)
+// =============================================================
+//
+// After each successful Kafka publish, fan the same row out to a
+// per-project Redis pub/sub channel so the dashboard's live-events
+// SSE endpoint can consume the stream without polling the outbox.
+// Subscribers are project-scoped — channel name is
+// `rovenue:dashboard:events:<projectId>`. Best-effort: if Redis is
+// unreachable the dispatcher still succeeds (Kafka is the source
+// of truth for downstream consumers; Redis pub/sub is a courtesy
+// surface for dashboard live view).
+
+export const LIVE_EVENTS_CHANNEL_PREFIX = "rovenue:dashboard:events:";
+
+export function liveEventsChannelFor(projectId: string): string {
+  return `${LIVE_EVENTS_CHANNEL_PREFIX}${projectId}`;
+}
+
+function projectIdOf(row: OutboxEvent): string | null {
+  const p = (row.payload as { projectId?: unknown } | null)?.projectId;
+  return typeof p === "string" && p.length > 0 ? p : null;
+}
+
+async function publishToLiveEvents(rows: ReadonlyArray<OutboxEvent>): Promise<void> {
+  if (rows.length === 0) return;
+  await Promise.allSettled(
+    rows.map(async (row) => {
+      const projectId = projectIdOf(row);
+      if (!projectId) return;
+      try {
+        await redis.publish(
+          liveEventsChannelFor(projectId),
+          JSON.stringify({
+            eventId: row.id,
+            eventType: row.eventType,
+            aggregateType: row.aggregateType,
+            aggregateId: row.aggregateId,
+            payload: row.payload,
+            occurredAt: row.createdAt.toISOString(),
+          }),
+        );
+      } catch (err) {
+        // Pub/sub is best-effort — log and move on. The dispatcher
+        // already counts the row as successfully published to Kafka.
+        logger.debug("outbox.dispatcher.live-publish-failed", {
+          eventId: row.id,
+          reason: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }),
+  );
+}
 
 // =============================================================
 // outbox-dispatcher
@@ -200,6 +255,10 @@ export async function runOnce(
         succeeded.map((r) => r.id),
       );
     });
+    // Side-channel fan-out for the dashboard's live-events page.
+    // Runs after markPublished so the SSE stream never sees an
+    // event the OLTP write hasn't already committed.
+    void publishToLiveEvents(succeeded);
     logger.debug("outbox-dispatcher: flushed batch", { size: succeeded.length });
     return true;
   }

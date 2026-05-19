@@ -975,6 +975,29 @@ export interface AppConnectionsResponse {
 }
 
 // =============================================================
+// Live events SSE (Phase 4.3)
+// =============================================================
+//
+// Wire shape for each `event: live` SSE message. The outbox
+// dispatcher fans every published row into a per-project Redis
+// channel; the SSE endpoint replays them as JSON.
+
+export type LiveEventAggregateType =
+  | "EXPOSURE"
+  | "REVENUE_EVENT"
+  | "CREDIT_LEDGER";
+
+export interface LiveEventMessage {
+  eventId: string;
+  eventType: string;
+  aggregateType: LiveEventAggregateType;
+  aggregateId: string;
+  payload: Record<string, unknown>;
+  /** ISO-8601 UTC timestamp the OLTP write committed. */
+  occurredAt: string;
+}
+
+// =============================================================
 // Audit logs (read-only viewer)
 // =============================================================
 
