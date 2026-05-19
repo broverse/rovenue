@@ -123,6 +123,42 @@ export const verification = pgTable("verification", {
 });
 
 // =============================================================
+// personal_access_tokens — Phase 2 Account / Identity
+// =============================================================
+//
+// Per-user API tokens issued from the dashboard's account page.
+// Plaintext is shown once on create; `tokenHash` is what the
+// API auth path verifies against (SHA-256, mirroring how
+// `api_keys.keySecretHash` is stored). `prefix` keeps the
+// publicly-visible "rvn_pat_<first6>…<last4>" string so the
+// dashboard can display revoked tokens without ever needing the
+// plaintext again.
+
+export const personalAccessTokens = pgTable(
+  "personal_access_tokens",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    prefix: text("prefix").notNull(),
+    tokenHash: text("tokenHash").notNull().unique(),
+    lastUsedAt: timestamp("lastUsedAt", { withTimezone: true }),
+    expiresAt: timestamp("expiresAt", { withTimezone: true }),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    userIdIdx: index("personal_access_tokens_userId_idx").on(t.userId),
+  }),
+);
+
+export type PersonalAccessToken = typeof personalAccessTokens.$inferSelect;
+export type NewPersonalAccessToken = typeof personalAccessTokens.$inferInsert;
+
+// =============================================================
 // projects
 // =============================================================
 

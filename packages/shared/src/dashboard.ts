@@ -517,3 +517,36 @@ export interface MyLinkedAccount {
 export interface MyAccountsResponse {
   accounts: MyLinkedAccount[];
 }
+
+// =============================================================
+// Personal access tokens — /dashboard/me/pats
+// =============================================================
+
+export interface MyPersonalAccessToken {
+  id: string;
+  name: string;
+  /** Public-safe shortform, e.g. "rvn_pat_a82f…d11c". */
+  prefix: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export interface MyPersonalAccessTokensResponse {
+  tokens: MyPersonalAccessToken[];
+}
+
+export interface CreatePersonalAccessTokenRequest {
+  name: string;
+  /** Optional ISO-8601 expiry; omit for non-expiring tokens. */
+  expiresAt?: string;
+}
+
+export interface CreatePersonalAccessTokenResponse {
+  token: MyPersonalAccessToken;
+  /**
+   * Plaintext token, ONLY returned on create. Display once then
+   * discard — there is no read path that recovers it.
+   */
+  plaintext: string;
+}

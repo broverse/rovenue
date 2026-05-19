@@ -1,18 +1,76 @@
+import { createHash, randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { drizzle } from "@rovenue/db";
 import type {
+  CreatePersonalAccessTokenResponse,
   CurrentUser,
   MeResponse,
   MyAccountsResponse,
   MyLinkedAccount,
+  MyPersonalAccessToken,
+  MyPersonalAccessTokensResponse,
   MySession,
   MySessionsResponse,
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { ok } from "../../lib/response";
+
+// =============================================================
+// Personal access token helpers
+// =============================================================
+//
+// Format: "rvn_pat_" + 40 hex chars (160 bits). Plaintext is
+// returned exactly once at create-time; the row only stores a
+// SHA-256 of the plaintext + a display prefix.
+
+const PAT_PLAINTEXT_PREFIX = "rvn_pat_";
+const PAT_PLAINTEXT_BYTES = 20; // → 40 hex chars
+
+function generatePatPlaintext(): string {
+  return `${PAT_PLAINTEXT_PREFIX}${randomBytes(PAT_PLAINTEXT_BYTES).toString(
+    "hex",
+  )}`;
+}
+
+function hashToken(plaintext: string): string {
+  return createHash("sha256").update(plaintext).digest("hex");
+}
+
+/** Compact "rvn_pat_a82f…d11c" tail-revealed identifier for UI. */
+function patDisplayPrefix(plaintext: string): string {
+  // 8 chars after the "rvn_pat_" prefix + last 4 chars of the
+  // hex tail — keeps the display short while still being
+  // identifiable by the user.
+  const head = plaintext.slice(0, PAT_PLAINTEXT_PREFIX.length + 4);
+  const tail = plaintext.slice(-4);
+  return `${head}…${tail}`;
+}
+
+function toMyPat(row: {
+  id: string;
+  name: string;
+  prefix: string;
+  lastUsedAt: Date | null;
+  expiresAt: Date | null;
+  createdAt: Date;
+}): MyPersonalAccessToken {
+  return {
+    id: row.id,
+    name: row.name,
+    prefix: row.prefix,
+    lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+export const createPatBodySchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  expiresAt: z.string().datetime().optional(),
+});
 
 // =============================================================
 // Dashboard: Authenticated user — /dashboard/me
@@ -219,4 +277,65 @@ export const meRoute = new Hono()
     }
 
     return c.json(ok({ disconnected: provider }));
+  })
+  // =============================================================
+  // Personal access tokens
+  // =============================================================
+  //
+  // The plaintext token is returned exactly once on create; from
+  // then on only the tail-revealed `prefix` is displayed and the
+  // SHA-256 hash backs API authentication.
+  //
+  // ----- GET /dashboard/me/pats -----
+  .get("/pats", async (c) => {
+    const sessionUser = c.get("user");
+    const rows = await drizzle.personalAccessTokenRepo.listTokensByUser(
+      drizzle.db,
+      sessionUser.id,
+    );
+    const payload: MyPersonalAccessTokensResponse = {
+      tokens: rows.map(toMyPat),
+    };
+    return c.json(ok(payload));
+  })
+  // ----- POST /dashboard/me/pats -----
+  .post("/pats", zValidator("json", createPatBodySchema), async (c) => {
+    const sessionUser = c.get("user");
+    const body = c.req.valid("json");
+
+    const plaintext = generatePatPlaintext();
+    const prefix = patDisplayPrefix(plaintext);
+    const tokenHash = hashToken(plaintext);
+    const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
+
+    const row = await drizzle.personalAccessTokenRepo.createToken(drizzle.db, {
+      userId: sessionUser.id,
+      name: body.name,
+      prefix,
+      tokenHash,
+      expiresAt,
+    });
+
+    const payload: CreatePersonalAccessTokenResponse = {
+      token: toMyPat(row),
+      plaintext,
+    };
+    return c.json(ok(payload));
+  })
+  // ----- DELETE /dashboard/me/pats/:id -----
+  .delete("/pats/:id", async (c) => {
+    const id = c.req.param("id");
+    const sessionUser = c.get("user");
+
+    const owned = await drizzle.personalAccessTokenRepo.isTokenOwnedBy(
+      drizzle.db,
+      id,
+      sessionUser.id,
+    );
+    if (!owned) {
+      throw new HTTPException(404, { message: "Token not found" });
+    }
+
+    await drizzle.personalAccessTokenRepo.deleteTokenById(drizzle.db, id);
+    return c.json(ok({ revoked: true }));
   });
