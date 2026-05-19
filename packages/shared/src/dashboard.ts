@@ -550,3 +550,27 @@ export interface CreatePersonalAccessTokenResponse {
    */
   plaintext: string;
 }
+
+// =============================================================
+// User preferences — /dashboard/me/preferences
+// =============================================================
+//
+// The backend stores both blobs opaquely so the dashboard can
+// add keys without a schema change. Each PATCH is a shallow
+// merge per blob, so saving from the notifications page never
+// clobbers the appearance settings (and vice versa).
+
+export interface MyPreferences {
+  notifications: Record<string, unknown>;
+  appearance: Record<string, unknown>;
+  updatedAt: string;
+}
+
+export interface MyPreferencesResponse {
+  preferences: MyPreferences;
+}
+
+export interface UpdatePreferencesRequest {
+  notifications?: Record<string, unknown>;
+  appearance?: Record<string, unknown>;
+}

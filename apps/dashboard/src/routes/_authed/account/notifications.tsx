@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -7,6 +7,10 @@ import {
   AccountToggleRow,
   SectionCard,
 } from "../../../components/account";
+import {
+  useMyPreferences,
+  useUpdatePreferences,
+} from "../../../lib/hooks/useMyPreferences";
 
 export const Route = createFileRoute("/_authed/account/notifications")({
   component: NotificationsPage,
@@ -48,8 +52,34 @@ const DEFAULTS: Record<NotifKey, boolean> = {
 
 function NotificationsPage() {
   const { t } = useTranslation();
+  const { data: preferences } = useMyPreferences();
+  const updatePrefs = useUpdatePreferences();
   const [state, setState] = useState<Record<NotifKey, boolean>>(DEFAULTS);
-  const toggle = (k: NotifKey) => setState((s) => ({ ...s, [k]: !s[k] }));
+
+  // Hydrate from the API when it lands. We keep the toggles as
+  // local state and persist each flip individually so the user
+  // sees immediate UI feedback even if the network round-trip is
+  // slow — the backend PATCH is a shallow merge so concurrent
+  // saves stay safe.
+  useEffect(() => {
+    if (!preferences) return;
+    setState((prev) => {
+      const merged = { ...prev };
+      for (const key of KEYS) {
+        const value = (preferences.notifications as Record<string, unknown>)[
+          key
+        ];
+        if (typeof value === "boolean") merged[key] = value;
+      }
+      return merged;
+    });
+  }, [preferences]);
+
+  const toggle = (k: NotifKey) => {
+    const next = !state[k];
+    setState((s) => ({ ...s, [k]: next }));
+    updatePrefs.mutate({ notifications: { [k]: next } });
+  };
 
   const groups = [
     {

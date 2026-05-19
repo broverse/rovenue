@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -9,6 +9,10 @@ import {
 } from "../../../components/account";
 import { Segmented } from "../../../ui/segmented";
 import { cn } from "../../../lib/cn";
+import {
+  useMyPreferences,
+  useUpdatePreferences,
+} from "../../../lib/hooks/useMyPreferences";
 
 export const Route = createFileRoute("/_authed/account/appearance")({
   component: AppearancePage,
@@ -23,12 +27,56 @@ const THEMES = [
 const DENSITIES = ["compact", "comfortable", "spacious"] as const;
 type Density = (typeof DENSITIES)[number];
 
+type ThemeId = (typeof THEMES)[number]["id"];
+
+function isThemeId(value: unknown): value is ThemeId {
+  return value === "dark" || value === "light" || value === "system";
+}
+
+function isDensity(value: unknown): value is Density {
+  return value === "compact" || value === "comfortable" || value === "spacious";
+}
+
 function AppearancePage() {
   const { t } = useTranslation();
-  const [theme, setTheme] = useState<(typeof THEMES)[number]["id"]>("dark");
+  const { data: preferences } = useMyPreferences();
+  const updatePrefs = useUpdatePreferences();
+
+  const [theme, setTheme] = useState<ThemeId>("dark");
   const [density, setDensity] = useState<Density>("comfortable");
   const [compactNumbers, setCompactNumbers] = useState(true);
   const [showCurrency, setShowCurrency] = useState(true);
+
+  // Hydrate from the API; bail on the field if it's missing or
+  // shaped unexpectedly so a malformed blob can't soft-brick the
+  // page.
+  useEffect(() => {
+    if (!preferences) return;
+    const a = preferences.appearance as Record<string, unknown>;
+    if (isThemeId(a.theme)) setTheme(a.theme);
+    if (isDensity(a.density)) setDensity(a.density);
+    if (typeof a.compactNumbers === "boolean") setCompactNumbers(a.compactNumbers);
+    if (typeof a.showCurrency === "boolean") setShowCurrency(a.showCurrency);
+  }, [preferences]);
+
+  // Persist each control as it changes — the backend merges per
+  // column so independent toggles don't race.
+  const saveTheme = (next: ThemeId) => {
+    setTheme(next);
+    updatePrefs.mutate({ appearance: { theme: next } });
+  };
+  const saveDensity = (next: Density) => {
+    setDensity(next);
+    updatePrefs.mutate({ appearance: { density: next } });
+  };
+  const saveCompactNumbers = (next: boolean) => {
+    setCompactNumbers(next);
+    updatePrefs.mutate({ appearance: { compactNumbers: next } });
+  };
+  const saveShowCurrency = (next: boolean) => {
+    setShowCurrency(next);
+    updatePrefs.mutate({ appearance: { showCurrency: next } });
+  };
 
   return (
     <AccountShell active="appearance">
@@ -43,7 +91,7 @@ function AppearancePage() {
             <button
               type="button"
               key={tm.id}
-              onClick={() => setTheme(tm.id)}
+              onClick={() => saveTheme(tm.id)}
               className={cn(
                 "rounded-md border bg-rv-c2 p-3 text-left transition",
                 theme === tm.id ? "border-rv-accent-500" : "border-rv-divider hover:border-rv-divider-strong",
@@ -71,7 +119,7 @@ function AppearancePage() {
         <Segmented
           options={DENSITIES}
           value={density}
-          onChange={setDensity}
+          onChange={saveDensity}
           ariaLabel={t("account.appearance.density.title")}
         />
       </SectionCard>
@@ -81,13 +129,13 @@ function AppearancePage() {
           title={t("account.appearance.numbers.compact.title")}
           description={t("account.appearance.numbers.compact.desc")}
           checked={compactNumbers}
-          onChange={setCompactNumbers}
+          onChange={saveCompactNumbers}
         />
         <AccountToggleRow
           title={t("account.appearance.numbers.currency.title")}
           description={t("account.appearance.numbers.currency.desc")}
           checked={showCurrency}
-          onChange={setShowCurrency}
+          onChange={saveShowCurrency}
         />
       </SectionCard>
     </AccountShell>

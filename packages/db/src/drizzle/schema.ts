@@ -159,6 +159,30 @@ export type PersonalAccessToken = typeof personalAccessTokens.$inferSelect;
 export type NewPersonalAccessToken = typeof personalAccessTokens.$inferInsert;
 
 // =============================================================
+// user_preferences — Phase 2 Account / Identity
+// =============================================================
+//
+// One row per user, keyed on userId. Two open JSON columns
+// (`notifications`, `appearance`) so the schema can absorb new
+// dashboard preferences without a migration each time. The
+// dashboard owns the shape of each blob; the backend treats them
+// as opaque storage.
+
+export const userPreferences = pgTable("user_preferences", {
+  userId: text("userId")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  notifications: jsonb("notifications").notNull().default(sql`'{}'::jsonb`),
+  appearance: jsonb("appearance").notNull().default(sql`'{}'::jsonb`),
+  updatedAt: timestamp("updatedAt", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type UserPreferences = typeof userPreferences.$inferSelect;
+export type NewUserPreferences = typeof userPreferences.$inferInsert;
+
+// =============================================================
 // projects
 // =============================================================
 

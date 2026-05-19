@@ -13,6 +13,8 @@ import type {
   MyLinkedAccount,
   MyPersonalAccessToken,
   MyPersonalAccessTokensResponse,
+  MyPreferences,
+  MyPreferencesResponse,
   MySession,
   MySessionsResponse,
 } from "@rovenue/shared";
@@ -360,4 +362,62 @@ export const meRoute = new Hono()
       `attachment; filename="rovenue-account-${sessionUser.id}.json"`,
     );
     return c.json(ok(dump));
-  });
+  })
+  // =============================================================
+  // Preferences — notifications + appearance JSON blobs
+  // =============================================================
+  //
+  // GET upserts an empty row on first read so the dashboard
+  // never has to branch on 404. PATCH does a server-side jsonb
+  // shallow merge per column, which means saving from the
+  // notifications page can't clobber appearance keys (and vice
+  // versa) — important since the two pages are independent.
+  //
+  // ----- GET /dashboard/me/preferences -----
+  .get("/preferences", async (c) => {
+    const sessionUser = c.get("user");
+    const row = await drizzle.userPreferencesRepo.ensurePreferences(
+      drizzle.db,
+      sessionUser.id,
+    );
+    const preferences: MyPreferences = {
+      notifications: row.notifications,
+      appearance: row.appearance,
+      updatedAt: row.updatedAt.toISOString(),
+    };
+    const payload: MyPreferencesResponse = { preferences };
+    return c.json(ok(payload));
+  })
+  // ----- PATCH /dashboard/me/preferences -----
+  .patch(
+    "/preferences",
+    zValidator(
+      "json",
+      z
+        .object({
+          notifications: z.record(z.unknown()).optional(),
+          appearance: z.record(z.unknown()).optional(),
+        })
+        .refine(
+          (v) =>
+            v.notifications !== undefined || v.appearance !== undefined,
+          { message: "At least one of notifications/appearance is required" },
+        ),
+    ),
+    async (c) => {
+      const sessionUser = c.get("user");
+      const body = c.req.valid("json");
+      const row = await drizzle.userPreferencesRepo.mergePreferences(
+        drizzle.db,
+        sessionUser.id,
+        body,
+      );
+      const preferences: MyPreferences = {
+        notifications: row.notifications,
+        appearance: row.appearance,
+        updatedAt: row.updatedAt.toISOString(),
+      };
+      const payload: MyPreferencesResponse = { preferences };
+      return c.json(ok(payload));
+    },
+  );
