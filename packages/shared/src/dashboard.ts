@@ -383,6 +383,129 @@ export interface MrrSeriesResponse {
 }
 
 // =============================================================
+// Project overview — KPI summary + panels (Phase 3.1)
+// =============================================================
+//
+// One read fans out into MRR series, active-subscriber count,
+// top products, recent activity, and a system-health snapshot.
+// The page falls back to mock data while the query is loading,
+// so every numeric field carries enough context (current +
+// previous window, plus a spark series) to render the KPI card
+// without a second roundtrip.
+
+/** ClickHouse-side ordering of revenue event types — matches the PG enum. */
+export type RevenueEventTypeName =
+  | "INITIAL"
+  | "RENEWAL"
+  | "TRIAL_CONVERSION"
+  | "CANCELLATION"
+  | "REFUND"
+  | "REACTIVATION"
+  | "CREDIT_PURCHASE";
+
+export interface OverviewMrrKpi {
+  /** Latest day's gross USD. Decimal-as-string for precision. */
+  current: string;
+  /** Same-length prior window's last day for delta computation. */
+  previous: string;
+  /** (current - previous) / previous * 100. null when previous is 0/missing. */
+  deltaPct: number | null;
+  /** Per-day gross USD (decimal-as-string) for the sparkline. */
+  spark: string[];
+}
+
+export interface OverviewActiveSubsKpi {
+  /** uniqExact(subscriberId) across the current window. */
+  current: number;
+  previous: number;
+  deltaAbs: number;
+  /** Per-day uniqExact across the current window. */
+  spark: number[];
+}
+
+/**
+ * Trial→paid conversion rate, percent. The full lifecycle proxy
+ * lands in Phase 3.3 once the subscriptions rollup exists; for
+ * now the API returns `null` so the UI can keep a placeholder.
+ */
+export interface OverviewTrialKpi {
+  ratePct: number | null;
+  previousRatePct: number | null;
+  deltaPp: number | null;
+  spark: number[];
+}
+
+/**
+ * Net churn proxy: refunds_usd / gross_usd × 100 across the
+ * window. Subscription-lifecycle churn arrives with Phase 3.3.
+ */
+export interface OverviewNetChurnKpi {
+  current: number | null;
+  previous: number | null;
+  deltaPp: number | null;
+  spark: number[];
+}
+
+export interface OverviewKpis {
+  mrr: OverviewMrrKpi;
+  activeSubscribers: OverviewActiveSubsKpi;
+  trialToPaid: OverviewTrialKpi;
+  netChurnPct: OverviewNetChurnKpi;
+}
+
+export interface OverviewTopProduct {
+  productId: string;
+  /** Project-scoped SKU (`products.identifier`). */
+  identifier: string;
+  displayName: string;
+  /** Decimal-as-string gross USD across the window. */
+  grossUsd: string;
+  /** Share of total gross in the window, 0–100 with one decimal. */
+  pct: number;
+  subscriberCount: number;
+}
+
+export interface OverviewActivityEvent {
+  id: string;
+  type: RevenueEventTypeName;
+  productId: string;
+  productName: string | null;
+  subscriberId: string;
+  /** Decimal-as-string. null for events where we don't surface an amount. */
+  amountUsd: string | null;
+  currency: string;
+  store: string;
+  /** ISO-8601 UTC. */
+  eventDate: string;
+}
+
+export type SystemHealthStatus = "operational" | "degraded" | "down";
+
+export interface OverviewSystemHealth {
+  /** Stable identifier for i18n/test selectors. */
+  key: string;
+  /** Localizable label suggestion; UI may override. */
+  name: string;
+  status: SystemHealthStatus;
+  /** Short metric line (e.g. "Last sync 4m ago", "12 pending"). */
+  metric: string;
+}
+
+export interface ProjectOverviewResponse {
+  window: {
+    from: string;
+    to: string;
+    days: number;
+    prevFrom: string;
+    prevTo: string;
+  };
+  kpis: OverviewKpis;
+  topProducts: OverviewTopProduct[];
+  recentActivity: OverviewActivityEvent[];
+  systemHealth: OverviewSystemHealth[];
+}
+
+// =============================================================
 // Audit logs (read-only viewer)
 // =============================================================
 

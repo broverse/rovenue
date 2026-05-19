@@ -10,6 +10,7 @@ import { leaderboardsRoute } from "./leaderboards";
 import { meRoute } from "./me";
 import { membersRoute } from "./members";
 import { metricsRoute } from "./metrics";
+import { overviewRoute } from "./overview";
 import { projectsRoute } from "./projects";
 import { subscribersRoute } from "./subscribers";
 import { webhooksDashboardRoute } from "./webhooks";
@@ -41,5 +42,6 @@ export const dashboardRoute = new Hono()
   .route("/projects/:projectId/leaderboards", leaderboardsRoute)
   .route("/projects/:projectId/members", membersRoute)
   .route("/projects/:projectId/metrics", metricsRoute)
+  .route("/projects/:projectId/overview", overviewRoute)
   .route("/projects/:projectId/subscribers", subscribersRoute)
   .route("/webhooks", webhooksDashboardRoute);

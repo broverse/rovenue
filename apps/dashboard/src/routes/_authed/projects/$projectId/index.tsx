@@ -3,6 +3,7 @@ import { createFileRoute, useParams } from "@tanstack/react-router";
 import { Trans, useTranslation } from "react-i18next";
 import { useProject } from "../../../../lib/hooks/useProject";
 import { useProjectMrr } from "../../../../lib/hooks/useProjectMrr";
+import { useProjectOverview } from "../../../../lib/hooks/useProjectOverview";
 import {
   ExperimentsPanel,
   KpiCard,
@@ -25,7 +26,18 @@ import {
   topProducts,
   trialSeries,
 } from "../../../../components/dashboard/mock-data";
-import type { ActivityEvent } from "../../../../components/dashboard";
+import type {
+  ActivityEvent,
+  ActivityKind,
+  HealthService,
+  TopProduct,
+} from "../../../../components/dashboard";
+import type {
+  OverviewActivityEvent,
+  OverviewSystemHealth,
+  OverviewTopProduct,
+  RevenueEventTypeName,
+} from "@rovenue/shared";
 
 const USD = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
@@ -60,6 +72,118 @@ function mrrDelta(
   return { value: `${sign}${pct.toFixed(1)}%`, kind };
 }
 
+function formatPctDelta(
+  value: number | null,
+): { value: string; kind: "success" | "danger" } | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  const sign = value >= 0 ? "+" : "";
+  return {
+    value: `${sign}${value.toFixed(1)}%`,
+    kind: value >= 0 ? "success" : "danger",
+  };
+}
+
+function formatAbsDelta(value: number): { value: string; kind: "success" | "danger" } {
+  const sign = value >= 0 ? "+" : "";
+  return {
+    value: `${sign}${value.toLocaleString()}`,
+    kind: value >= 0 ? "success" : "danger",
+  };
+}
+
+/**
+ * Net-churn is inverted for KPI presentation: lower is better, so
+ * a positive Δpp renders as danger and negative as success.
+ */
+function formatChurnDeltaPp(
+  value: number | null,
+): { value: string; kind: "success" | "danger" } | null {
+  if (value === null || !Number.isFinite(value)) return null;
+  const sign = value >= 0 ? "+" : "";
+  return {
+    value: `${sign}${value.toFixed(2)}pp`,
+    kind: value <= 0 ? "success" : "danger",
+  };
+}
+
+// =============================================================
+// Overview-response → panel-prop adapters
+// =============================================================
+
+const ACTIVITY_VISUAL: Record<
+  RevenueEventTypeName,
+  { icon: ActivityKind; color: string; labelKey: string; signAmount: 1 | -1 }
+> = {
+  INITIAL: { icon: "up", color: "var(--color-rv-accent-500)", labelKey: "new_subscription", signAmount: 1 },
+  RENEWAL: { icon: "renew", color: "var(--color-rv-success)", labelKey: "renewal", signAmount: 1 },
+  TRIAL_CONVERSION: { icon: "up", color: "var(--color-rv-cyan)", labelKey: "trial_started", signAmount: 1 },
+  CANCELLATION: { icon: "down", color: "var(--color-rv-warning)", labelKey: "cancellation", signAmount: 1 },
+  REFUND: { icon: "down", color: "var(--color-rv-mute-600)", labelKey: "refund", signAmount: -1 },
+  REACTIVATION: { icon: "up", color: "var(--color-rv-accent-500)", labelKey: "renewal", signAmount: 1 },
+  CREDIT_PURCHASE: { icon: "up", color: "var(--color-rv-cyan)", labelKey: "new_subscription", signAmount: 1 },
+};
+
+function shortSubscriberId(id: string): string {
+  // The panel renders short identifiers; trim long uuids/cuids to
+  // an 8-char display. Avoids a layout shift between mock + real
+  // events.
+  if (id.length <= 12) return id;
+  return `${id.slice(0, 4)}…${id.slice(-4)}`;
+}
+
+function secondsAgo(iso: string, nowMs: number): number {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return 0;
+  return Math.max(0, Math.floor((nowMs - t) / 1000));
+}
+
+function toPanelActivity(
+  events: ReadonlyArray<OverviewActivityEvent>,
+  nowMs: number,
+): ActivityEvent[] {
+  return events.map((e) => {
+    const v = ACTIVITY_VISUAL[e.type];
+    const amountNum = e.amountUsd !== null ? Number(e.amountUsd) : null;
+    const signedAmount =
+      amountNum === null || !Number.isFinite(amountNum)
+        ? null
+        : amountNum * v.signAmount;
+    return {
+      id: e.id,
+      type: e.type,
+      color: v.color,
+      icon: v.icon,
+      label: v.labelKey,
+      user: shortSubscriberId(e.subscriberId),
+      product: e.productName ?? e.productId,
+      amount: signedAmount,
+      secondsAgo: secondsAgo(e.eventDate, nowMs),
+    };
+  });
+}
+
+function toPanelTopProducts(
+  rows: ReadonlyArray<OverviewTopProduct>,
+): TopProduct[] {
+  return rows.map((r) => ({
+    name: r.displayName,
+    sku: r.identifier,
+    rev: Math.round(Number(r.grossUsd)),
+    pct: Math.round(r.pct),
+    subs: r.subscriberCount,
+  }));
+}
+
+function toPanelSystemHealth(
+  rows: ReadonlyArray<OverviewSystemHealth>,
+): HealthService[] {
+  return rows.map((r) => ({
+    name: r.name,
+    status: r.status,
+    metric: r.metric,
+  }));
+}
+
 export const Route = createFileRoute("/_authed/projects/$projectId/")({
   component: ProjectOverview,
 });
@@ -72,14 +196,30 @@ function ProjectOverview() {
   const { projectId } = useParams({ from: "/_authed/projects/$projectId/" });
   const { data: project } = useProject(projectId);
   const { data: mrr } = useProjectMrr({ projectId });
+  const { data: overview } = useProjectOverview({ projectId });
   const [events, setEvents] = useState<ActivityEvent[]>(() => genActivity(10));
+  const [now, setNow] = useState<number>(() => Date.now());
 
-  // Derive the MRR KPI card inputs from the daily-series response.
-  // Fall back to mock series while the query is loading so the
-  // page never renders a blank tile.
+  // -------- KPI cards --------
+
+  // MRR — prefer the dedicated `mrr` series since the overview's
+  // gross_usd is a per-day decimal-as-string and the page already
+  // builds the "latest day" delta from the MRR endpoint. Falls
+  // back to the overview spark when the MRR query is in flight.
   const mrrCard = useMemo(() => {
     const points = mrr?.points ?? [];
     if (points.length === 0) {
+      const ov = overview?.kpis.mrr;
+      if (ov && ov.spark.length > 0) {
+        const last = Number(ov.current);
+        const delta = formatPctDelta(ov.deltaPct);
+        return {
+          value: Number.isFinite(last) ? USD.format(last) : ov.current,
+          delta: delta?.value ?? null,
+          deltaKind: delta?.kind ?? ("success" as const),
+          sparkData: ov.spark.map((v) => Number(v)),
+        };
+      }
       return {
         value: "12,847.20",
         delta: "12.4%",
@@ -94,15 +234,106 @@ function ProjectOverview() {
       deltaKind: delta?.kind ?? ("success" as const),
       sparkData: points.map((p) => Number(p.grossUsd)),
     };
-  }, [mrr]);
+  }, [mrr, overview]);
 
-  // Live ticker — bumps secondsAgo on existing rows and occasionally drops
-  // a new one in. The DashboardShell owns the global liveOn flag; for now
-  // we just always animate while this page is mounted.
+  const activeSubsCard = useMemo(() => {
+    const k = overview?.kpis.activeSubscribers;
+    if (!k) {
+      return {
+        value: "2,431",
+        delta: "184",
+        deltaKind: "success" as const,
+        sparkData: activeSeries,
+      };
+    }
+    const delta = formatAbsDelta(k.deltaAbs);
+    return {
+      value: k.current.toLocaleString(),
+      delta: delta.value,
+      deltaKind: delta.kind,
+      sparkData: k.spark,
+    };
+  }, [overview]);
+
+  const trialCard = useMemo(() => {
+    const k = overview?.kpis.trialToPaid;
+    if (!k || k.ratePct === null) {
+      // Backend returns null until Phase 3.3 ships the
+      // subscription-lifecycle rollup that this metric needs.
+      return {
+        value: "42.8",
+        unit: "%",
+        delta: "1.1pp",
+        deltaKind: "danger" as const,
+        sparkData: trialSeries,
+      };
+    }
+    const delta = formatPctDelta(k.deltaPp);
+    return {
+      value: k.ratePct.toFixed(1),
+      unit: "%",
+      delta: delta?.value ?? null,
+      deltaKind: delta?.kind ?? ("success" as const),
+      sparkData: k.spark,
+    };
+  }, [overview]);
+
+  const churnCard = useMemo(() => {
+    const k = overview?.kpis.netChurnPct;
+    if (!k || k.current === null) {
+      return {
+        value: "-3.2",
+        unit: "%",
+        delta: t("overview.kpi.improved"),
+        deltaKind: "success" as const,
+        sparkData: churnSeries,
+      };
+    }
+    const delta = formatChurnDeltaPp(k.deltaPp);
+    return {
+      value: k.current.toFixed(1),
+      unit: "%",
+      delta: delta?.value ?? null,
+      deltaKind: delta?.kind ?? ("success" as const),
+      sparkData: k.spark,
+    };
+  }, [overview, t]);
+
+  // -------- Panels --------
+
+  const realActivity = useMemo<ActivityEvent[] | null>(() => {
+    if (!overview || overview.recentActivity.length === 0) return null;
+    return toPanelActivity(overview.recentActivity, now);
+  }, [overview, now]);
+
+  const panelTopProducts = useMemo<ReadonlyArray<TopProduct>>(() => {
+    if (!overview || overview.topProducts.length === 0) return topProducts;
+    return toPanelTopProducts(overview.topProducts);
+  }, [overview]);
+
+  const panelHealth = useMemo<ReadonlyArray<HealthService>>(() => {
+    if (!overview || overview.systemHealth.length === 0) return healthServices;
+    return toPanelSystemHealth(overview.systemHealth);
+  }, [overview]);
+
+  // Live ticker — when real activity is available, age the
+  // existing rows and roll the real list back in periodically so
+  // the panel still feels alive. The mock-row drop continues when
+  // we're still on mock data (e.g. before the first fetch lands or
+  // the project has no events yet).
   useEffect(() => {
     const id = setInterval(() => {
+      setNow(Date.now());
+      if (realActivity) {
+        setEvents(realActivity);
+        return;
+      }
       setEvents((prev) => {
-        const aged: ActivityEvent[] = prev.map((e) => ({ ...e, secondsAgo: e.secondsAgo + 4, isNew: false }));
+        const aged: ActivityEvent[] = prev.map((e) => ({
+          ...e,
+          secondsAgo: e.secondsAgo + 4,
+          isNew: false,
+        }));
         if (Math.random() < NEW_EVENT_PROB) {
           const fresh: ActivityEvent = {
             ...genActivity(1)[0]!,
@@ -116,7 +347,11 @@ function ProjectOverview() {
       });
     }, LIVE_TICK_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [realActivity]);
+
+  useEffect(() => {
+    if (realActivity) setEvents(realActivity);
+  }, [realActivity]);
 
   if (!project) return null;
 
@@ -157,32 +392,32 @@ function ProjectOverview() {
         <div className="col-span-12 md:col-span-3">
           <KpiCard
             label={t("overview.kpi.activeSubs")}
-            value="2,431"
-            delta="184"
-            deltaKind="success"
-            sparkData={activeSeries}
+            value={activeSubsCard.value}
+            delta={activeSubsCard.delta}
+            deltaKind={activeSubsCard.deltaKind}
+            sparkData={activeSubsCard.sparkData}
             sparkColor="var(--color-rv-success)"
           />
         </div>
         <div className="col-span-12 md:col-span-3">
           <KpiCard
             label={t("overview.kpi.trialToPaid")}
-            value="42.8"
-            unit="%"
-            delta="1.1pp"
-            deltaKind="danger"
-            sparkData={trialSeries}
+            value={trialCard.value}
+            unit={trialCard.unit}
+            delta={trialCard.delta}
+            deltaKind={trialCard.deltaKind}
+            sparkData={trialCard.sparkData}
             sparkColor="var(--color-rv-warning)"
           />
         </div>
         <div className="col-span-12 md:col-span-3">
           <KpiCard
             label={t("overview.kpi.netChurn")}
-            value="-3.2"
-            unit="%"
-            delta={t("overview.kpi.improved")}
-            deltaKind="success"
-            sparkData={churnSeries}
+            value={churnCard.value}
+            unit={churnCard.unit}
+            delta={churnCard.delta}
+            deltaKind={churnCard.deltaKind}
+            sparkData={churnCard.sparkData}
             sparkColor="var(--color-rv-danger)"
           />
         </div>
@@ -193,7 +428,7 @@ function ProjectOverview() {
           <RevenueChartPanel metrics={revenueMetrics} categories={categories} initialMetric="MRR" />
         </div>
         <div className="col-span-12 lg:col-span-4">
-          <TopProductsPanel products={topProducts} />
+          <TopProductsPanel products={panelTopProducts} />
         </div>
       </div>
 
@@ -207,7 +442,7 @@ function ProjectOverview() {
       </div>
 
       <div className="mt-4">
-        <SystemHealthPanel services={healthServices} />
+        <SystemHealthPanel services={panelHealth} />
       </div>
 
       <div className="mt-8 flex items-center justify-between border-t border-rv-divider pt-4 text-[12px] text-rv-mute-500">
