@@ -1,5 +1,13 @@
 import { useTranslation } from "react-i18next";
 import { VOLUME_MAX, VOLUME_SERIES } from "./mock-data";
+import type { VolumeBar } from "./types";
+
+type VolumeGraphProps = {
+  /** Optional override; falls back to the design-spec mock series. */
+  series?: ReadonlyArray<VolumeBar>;
+  /** Optional override for the max-bar scaling denominator. */
+  max?: number;
+};
 
 /**
  * 28-bar stacked timeline showing purchases · renewals · refunds for the
@@ -7,17 +15,27 @@ import { VOLUME_MAX, VOLUME_SERIES } from "./mock-data";
  * proportion to its category total. The rightmost bar uses the lighter
  * accent shade to signal "today".
  */
-export function VolumeGraph() {
+export function VolumeGraph({ series, max }: VolumeGraphProps = {}) {
   const { t } = useTranslation();
+  const bars: ReadonlyArray<VolumeBar> =
+    series && series.length > 0 ? series : VOLUME_SERIES;
+  const denom =
+    max ??
+    (series
+      ? Math.max(
+          1,
+          ...bars.map((b) => b.purchases + b.renewals + b.refunds),
+        )
+      : VOLUME_MAX);
   return (
     <>
-      <div className="mt-3.5 grid h-24 items-end gap-px" style={{ gridTemplateColumns: "repeat(28, 1fr)" }}>
-        {VOLUME_SERIES.map((bar, i) => {
+      <div className="mt-3.5 grid h-24 items-end gap-px" style={{ gridTemplateColumns: `repeat(${bars.length}, 1fr)` }}>
+        {bars.map((bar, i) => {
           const total = bar.purchases + bar.renewals + bar.refunds;
-          const height = Math.max(6, (total / VOLUME_MAX) * 100);
+          const height = Math.max(6, (total / denom) * 100);
           const tooltip = bar.today
             ? t("transactions.volume.tooltipToday")
-            : t("transactions.volume.tooltipDayAgo", { day: 28 - i });
+            : t("transactions.volume.tooltipDayAgo", { day: bars.length - i });
           return (
             <div
               key={i}

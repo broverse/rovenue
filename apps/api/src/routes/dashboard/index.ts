@@ -13,6 +13,7 @@ import { metricsRoute } from "./metrics";
 import { overviewRoute } from "./overview";
 import { projectsRoute } from "./projects";
 import { subscribersRoute } from "./subscribers";
+import { transactionsRoute } from "./transactions";
 import { webhooksDashboardRoute } from "./webhooks";
 
 // =============================================================
@@ -44,4 +45,5 @@ export const dashboardRoute = new Hono()
   .route("/projects/:projectId/metrics", metricsRoute)
   .route("/projects/:projectId/overview", overviewRoute)
   .route("/projects/:projectId/subscribers", subscribersRoute)
+  .route("/projects/:projectId/transactions", transactionsRoute)
   .route("/webhooks", webhooksDashboardRoute);

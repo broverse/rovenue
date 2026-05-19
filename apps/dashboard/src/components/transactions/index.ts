@@ -1,7 +1,7 @@
-export { RevenueFlow } from "./revenue-flow";
+export { RevenueFlow, type RevenueFlowTotals } from "./revenue-flow";
 export { ScopeTabs } from "./scope-tabs";
 export { StoreAvatar, StoreInlineBadge, type StoreAvatarProps } from "./store-badge";
-export { StoreBreakdown } from "./store-breakdown";
+export { StoreBreakdown, type StoreBreakdownRow } from "./store-breakdown";
 export { TransactionInspector } from "./transaction-inspector";
 export { TransactionRow } from "./transaction-row";
 export { TransactionsPaginator } from "./transactions-paginator";

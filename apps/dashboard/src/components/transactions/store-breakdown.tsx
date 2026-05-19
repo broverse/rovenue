@@ -10,16 +10,34 @@ const STORE_NAME_KEY: Record<TxStore, string> = {
   web: "transactions.stores.web",
 };
 
+export type StoreBreakdownRow = {
+  store: TxStore;
+  /** Pre-formatted revenue string. */
+  revenue: string;
+  /** Pre-formatted fee total; `null` for self-billed (web) stores. */
+  fee: string | null;
+  /** Pre-formatted fee percentage; `null` for self-billed stores. */
+  feePercent: string | null;
+  /** Pre-formatted share string with the % suffix. */
+  share: string;
+};
+
+type StoreBreakdownProps = {
+  rows?: ReadonlyArray<StoreBreakdownRow>;
+};
+
 /**
  * Per-store revenue strip that lives below the volume graph in the
  * Revenue Flow card. Renders a 4-column row at desktop widths, collapsing
  * to two columns under 1180px.
  */
-export function StoreBreakdown() {
+export function StoreBreakdown({ rows }: StoreBreakdownProps = {}) {
   const { t } = useTranslation();
+  const data: ReadonlyArray<StoreBreakdownRow> =
+    rows && rows.length > 0 ? rows : STORE_BREAKDOWN;
   return (
     <div className="mt-4 grid grid-cols-2 gap-3 border-t border-rv-divider pt-4 max-[1180px]:grid-cols-2 lg:grid-cols-4">
-      {STORE_BREAKDOWN.map((row) => {
+      {data.map((row) => {
         const feeLine =
           row.fee && row.feePercent
             ? t("transactions.stores.feeShort", { value: row.fee, percent: row.feePercent })

@@ -506,6 +506,74 @@ export interface ProjectOverviewResponse {
 }
 
 // =============================================================
+// Transactions — list + volume + store breakdown (Phase 3.2)
+// =============================================================
+//
+// `TransactionRow` is the cursor-paginated wire shape served by
+// `GET /dashboard/projects/:id/transactions`. The UI's richer
+// `Transaction` type (fee/tax/method/status) is derived client-
+// side from this minimum core; the lifecycle status (`paid` /
+// `failed` / `disputed`) is not separately tracked in the
+// `revenue_events` ledger today, so the API returns each row as
+// a settled event and the dashboard renders status accordingly.
+
+export type TransactionScope =
+  | "all"
+  | "purchase"
+  | "renewal"
+  | "refund"
+  | "trial"
+  | "failed";
+
+export interface TransactionRow {
+  id: string;
+  type: RevenueEventTypeName;
+  subscriberId: string;
+  purchaseId: string;
+  productId: string;
+  productName: string | null;
+  productIdentifier: string | null;
+  store: string;
+  amountUsd: string;
+  currency: string;
+  eventDate: string;
+}
+
+export interface TransactionsListResponse {
+  rows: TransactionRow[];
+  /** Opaque cursor for the next page; null when the page is the last one. */
+  nextCursor: string | null;
+}
+
+export interface TransactionsVolumePoint {
+  /** ISO date `YYYY-MM-DD` (UTC). */
+  day: string;
+  purchases: number;
+  renewals: number;
+  refunds: number;
+}
+
+export interface TransactionsVolumeResponse {
+  windowDays: number;
+  points: TransactionsVolumePoint[];
+}
+
+export interface TransactionsStoreBreakdownRow {
+  store: string;
+  /** Decimal-as-string gross USD across the window. */
+  grossUsd: string;
+  /** Share of the window total, 0–100 with one decimal. */
+  pct: number;
+  eventCount: number;
+}
+
+export interface TransactionsStoreBreakdownResponse {
+  windowDays: number;
+  rows: TransactionsStoreBreakdownRow[];
+  totalUsd: string;
+}
+
+// =============================================================
 // Audit logs (read-only viewer)
 // =============================================================
 

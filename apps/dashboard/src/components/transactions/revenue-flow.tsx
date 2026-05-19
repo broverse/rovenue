@@ -1,7 +1,23 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/cn";
-import { StoreBreakdown } from "./store-breakdown";
+import { StoreBreakdown, type StoreBreakdownRow } from "./store-breakdown";
 import { VolumeGraph } from "./volume-graph";
+import type { VolumeBar } from "./types";
+
+export type RevenueFlowTotals = {
+  /** Pre-formatted gross USD (e.g. "$248,192"). */
+  gross?: string;
+  /** Pre-formatted refunds total. */
+  refunds?: string;
+  /** Pre-formatted net (gross − refunds when fees aren't known). */
+  net?: string;
+};
+
+type RevenueFlowProps = {
+  totals?: RevenueFlowTotals;
+  volume?: ReadonlyArray<VolumeBar>;
+  storeRows?: ReadonlyArray<StoreBreakdownRow>;
+};
 
 type FlowNodeProps = {
   label: string;
@@ -61,7 +77,7 @@ function FlowOp({ children }: { children: string }) {
  * row of value boxes joined by mathematical operators, then the 28-day
  * stacked volume graph and the per-store breakdown underneath.
  */
-export function RevenueFlow() {
+export function RevenueFlow({ totals, volume, storeRows }: RevenueFlowProps = {}) {
   const { t } = useTranslation();
   return (
     <section className="mb-4 rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
@@ -78,7 +94,7 @@ export function RevenueFlow() {
       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-3">
         <FlowNode
           label={t("transactions.flow.gross")}
-          value="$248,192"
+          value={totals?.gross ?? "$248,192"}
           detail={t("transactions.flow.grossDetail")}
         />
         <FlowOp>−</FlowOp>
@@ -91,22 +107,22 @@ export function RevenueFlow() {
         <FlowOp>−</FlowOp>
         <FlowNode
           label={t("transactions.flow.refunds")}
-          value="$24,823"
+          value={totals?.refunds ?? "$24,823"}
           detail={t("transactions.flow.refundsDetail")}
           tone="warning"
         />
         <FlowOp>=</FlowOp>
         <FlowNode
           label={t("transactions.flow.net")}
-          value="$186,140"
+          value={totals?.net ?? "$186,140"}
           detail={t("transactions.flow.netDetail")}
           tone="primary"
           detailTone="success"
         />
       </div>
 
-      <VolumeGraph />
-      <StoreBreakdown />
+      <VolumeGraph series={volume} />
+      <StoreBreakdown rows={storeRows} />
     </section>
   );
 }
