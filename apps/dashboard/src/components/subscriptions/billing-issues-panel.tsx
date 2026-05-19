@@ -3,7 +3,11 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../../ui/button";
 import { cn } from "../../lib/cn";
 import { BILLING_ISSUES } from "./mock-data";
-import type { IssueSeverity } from "./types";
+import type { BillingIssue, IssueSeverity } from "./types";
+
+type BillingIssuesPanelProps = {
+  issues?: ReadonlyArray<BillingIssue>;
+};
 
 const ICON_TONE: Record<IssueSeverity, string> = {
   high: "bg-rv-danger/15 text-rv-danger border-rv-danger/25",
@@ -19,8 +23,9 @@ const NEXT_TONE: Record<IssueSeverity, string> = {
   resolved: "text-rv-success",
 };
 
-export function BillingIssuesPanel() {
+export function BillingIssuesPanel({ issues }: BillingIssuesPanelProps = {}) {
   const { t } = useTranslation();
+  const data = issues && issues.length > 0 ? issues : BILLING_ISSUES;
   return (
     <section className="overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">
       <header className="flex items-baseline justify-between border-b border-rv-divider px-4 py-3.5">
@@ -39,7 +44,7 @@ export function BillingIssuesPanel() {
       </header>
 
       <ul>
-        {BILLING_ISSUES.map((i) => (
+        {data.map((i) => (
           <li
             key={`${i.id}-${i.issue}`}
             className="grid cursor-pointer items-center gap-3 border-b border-white/[0.04] px-4 py-3 transition last:border-b-0 hover:bg-rv-c2 grid-cols-[auto_1fr_auto_auto]"

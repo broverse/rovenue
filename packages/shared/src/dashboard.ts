@@ -574,6 +574,126 @@ export interface TransactionsStoreBreakdownResponse {
 }
 
 // =============================================================
+// Subscriptions — list + composition + KPIs + calendar (Phase 3.3)
+// =============================================================
+//
+// `SubscriptionRow` is the cursor-paginated wire shape. The page's
+// richer `Subscription` UI type (term / lifecycle strip / cancel
+// reason copy) is derived client-side from this minimum core.
+//
+// `SubscriptionUiStatus` mirrors the dashboard's filter scope: the
+// DB-side `PurchaseStatus` enum is collapsed/mapped server-side so
+// the wire response is already in UI-friendly shape.
+
+export type SubscriptionUiStatus =
+  | "active"
+  | "trial"
+  | "grace"
+  | "canceling"
+  | "churned";
+
+export type SubscriptionScopeName =
+  | "all"
+  | "active"
+  | "trial"
+  | "grace"
+  | "canceling"
+  | "issues"
+  | "churned";
+
+export interface SubscriptionRow {
+  id: string;
+  subscriberId: string;
+  productId: string;
+  productName: string | null;
+  productIdentifier: string | null;
+  store: string;
+  status: SubscriptionUiStatus;
+  /** Decimal-as-string. May be null when the price wasn't captured. */
+  priceAmount: string | null;
+  priceCurrency: string | null;
+  isTrial: boolean;
+  isIntroOffer: boolean;
+  autoRenew: boolean | null;
+  /** ISO-8601 UTC. */
+  purchaseDate: string;
+  expiresDate: string | null;
+  gracePeriodExpires: string | null;
+  cancellationDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** True when there's an issue flag the panel surfaces (grace + auto-renew on). */
+  hasIssue: boolean;
+}
+
+export interface SubscriptionsListResponse {
+  rows: SubscriptionRow[];
+  nextCursor: string | null;
+}
+
+export interface SubscriptionsKpis {
+  totalActive: number;
+  renewing7: number;
+  graceRetry: number;
+  canceling: number;
+  /** All-time terminal count, useful for descriptive copy under tiles. */
+  churned: number;
+}
+
+export interface SubscriptionsCompositionSegment {
+  /** UI key used by the page for color / i18n. */
+  key: SubscriptionUiStatus;
+  count: number;
+  /** Share of the live total, 0–100 with one decimal. */
+  share: number;
+}
+
+export interface SubscriptionsCompositionResponse {
+  segments: SubscriptionsCompositionSegment[];
+  total: number;
+}
+
+export interface RenewalCalendarDay {
+  /** ISO date `YYYY-MM-DD`, anchored to UTC midnight. */
+  day: string;
+  /** Offset relative to the response's `todayIndex`. */
+  offset: number;
+  today: boolean;
+  past: boolean;
+  renewals: number;
+  trials: number;
+  grace: number;
+  /** Failed/expired retries — only populated for past days. */
+  failed: number;
+}
+
+export interface RenewalCalendarResponse {
+  /** Inclusive list spanning `pastDays` ago through `futureDays` ahead. */
+  days: RenewalCalendarDay[];
+  todayIndex: number;
+}
+
+export interface BillingIssueRow {
+  purchaseId: string;
+  subscriberId: string;
+  productId: string;
+  productName: string | null;
+  /** Decimal-as-string of the last known price. */
+  priceAmount: string | null;
+  priceCurrency: string | null;
+  store: string;
+  /** ISO-8601 UTC; grace expiry or refund date depending on cause. */
+  signalAt: string;
+  /** UI-friendly description (e.g. `Card declined`). */
+  issue: string;
+  severity: "high" | "medium" | "low";
+}
+
+export interface BillingIssuesResponse {
+  rows: BillingIssueRow[];
+}
+
+// =============================================================
 // Audit logs (read-only viewer)
 // =============================================================
 

@@ -14,7 +14,7 @@ const LEGEND: ReadonlyArray<{
   { key: "failed",   color: "var(--color-rv-danger)" },
 ];
 
-const MAX_TOTAL = Math.max(
+const MOCK_MAX_TOTAL = Math.max(
   ...CALENDAR_DAYS.map((d) => d.renewals + d.trials + d.grace + d.failed),
 );
 
@@ -30,12 +30,24 @@ function tooltipFor(d: CalendarDay, t: TFunction): string {
   return t("subscriptions.calendar.tooltipFuture", { day: d.day, total });
 }
 
+type RenewalCalendarProps = {
+  /** Optional override; defaults to the design-spec 28-day mock. */
+  days?: ReadonlyArray<CalendarDay>;
+};
+
 /**
  * 28-day stacked-bar calendar. Today is rendered with a dashed primary
  * marker; past slots only carry failed-event counts.
  */
-export function RenewalCalendar() {
+export function RenewalCalendar({ days }: RenewalCalendarProps = {}) {
   const { t } = useTranslation();
+  const data = days && days.length > 0 ? days : CALENDAR_DAYS;
+  const maxTotal = days
+    ? Math.max(
+        1,
+        ...data.map((d) => d.renewals + d.trials + d.grace + d.failed),
+      )
+    : MOCK_MAX_TOTAL;
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
@@ -63,10 +75,13 @@ export function RenewalCalendar() {
         </ul>
       </div>
 
-      <div className="grid h-[120px] items-end gap-[3px] grid-cols-[repeat(28,minmax(0,1fr))]">
-        {CALENDAR_DAYS.map((d, i) => {
+      <div
+        className="grid h-[120px] items-end gap-[3px]"
+        style={{ gridTemplateColumns: `repeat(${data.length}, minmax(0, 1fr))` }}
+      >
+        {data.map((d, i) => {
           const total = d.renewals + d.trials + d.grace + d.failed;
-          const heightPct = Math.max(4, (total / MAX_TOTAL) * 100);
+          const heightPct = Math.max(4, (total / maxTotal) * 100);
           return (
             <div
               key={i}
@@ -119,8 +134,11 @@ export function RenewalCalendar() {
         })}
       </div>
 
-      <div className="mt-1.5 grid gap-[3px] grid-cols-[repeat(28,minmax(0,1fr))] font-rv-mono text-[9px] text-rv-mute-500">
-        {CALENDAR_DAYS.map((d, i) => (
+      <div
+        className="mt-1.5 grid gap-[3px] font-rv-mono text-[9px] text-rv-mute-500"
+        style={{ gridTemplateColumns: `repeat(${data.length}, minmax(0, 1fr))` }}
+      >
+        {data.map((d, i) => (
           <span
             key={i}
             className={cn(
