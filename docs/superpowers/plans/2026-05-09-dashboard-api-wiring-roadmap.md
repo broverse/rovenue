@@ -68,9 +68,9 @@
 4. **Faz 4** diferansiyasyon: cohorts + queries + live events rakipleri geçtiğimiz noktalar.
 5. **Faz 5** temizlik.
 
-## Açık kararlar
+## Kararlar (2026-05-19 itibarıyla)
 
-- Self-hosted'da billing/invoices/usage sayfaları gerçekten gerekli mi? (Faz 2'de skip önerildi)
-- Apps catalog statik mi, marketplace mi olacak?
-- Live events SSE mi, WebSocket mi?
-- Queries playground'da AI suggest gerçekten v1'de gerekli mi?
+- ~~Self-hosted'da billing/invoices/usage sayfaları gerçekten gerekli mi?~~ → **Skip.** Self-host'ta gerekmiyor; mevcut statik sayfalar yerinde kalabilir, backend açılmayacak.
+- ~~Apps catalog statik mi, marketplace mi olacak?~~ → **Statik.** Dinamik marketplace yok.
+- ~~Live events SSE mi, WebSocket mi?~~ → **SSE.** `GET /dashboard/projects/:id/events/stream` Server-Sent Events.
+- ~~Queries playground'da AI suggest gerçekten v1'de gerekli mi?~~ → **v1'de değil.** Sonraki sürümlere ertelendi.
