@@ -38,7 +38,13 @@ export function createApp() {
   // from localhost call the production API with user cookies.
   const origins = [env.DASHBOARD_URL];
   if (env.NODE_ENV !== "production") {
-    origins.push("http://localhost:5173");
+    // Vite picks the next free port (5174, 5175, …) when 5173 is in use,
+    // so allow the small fallback range instead of hard-coding 5173.
+    origins.push(
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "http://localhost:5175",
+    );
   }
 
   // ── Pipeline ──────────────────────────────────────────────
