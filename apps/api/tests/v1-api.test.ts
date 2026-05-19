@@ -422,10 +422,10 @@ beforeEach(() => {
 });
 
 // =============================================================
-// POST /v1/receipts
+// POST /v1/receipts/apple + /google
 // =============================================================
 
-describe("POST /v1/receipts", () => {
+describe("POST /v1/receipts/apple", () => {
   it("verifies receipt, syncs access, and returns subscriber + access + credits", async () => {
     const subscriberRow = {
       id: "sub_1",
@@ -466,11 +466,10 @@ describe("POST /v1/receipts", () => {
     dbMock.creditLedger.findFirst.mockResolvedValue(null);
 
     const res = await app.request(
-      withPublicAuth("/v1/receipts", {
+      withPublicAuth("/v1/receipts/apple", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          store: "APP_STORE",
           receipt: "jws_fake",
           appUserId: "user_1",
           productId: "pro_monthly",
@@ -485,17 +484,68 @@ describe("POST /v1/receipts", () => {
     expect(body.data.access.premium.productIdentifier).toBe("pro_monthly");
     expect(body.data.credits.balance).toBe(0);
     expect(verifyReceipt).toHaveBeenCalledOnce();
+    expect(vi.mocked(verifyReceipt).mock.calls[0][0].store).toBe("APP_STORE");
   });
 
   it("rejects invalid body", async () => {
     const res = await app.request(
-      withPublicAuth("/v1/receipts", {
+      withPublicAuth("/v1/receipts/apple", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ store: "APP_STORE" }),
+        body: JSON.stringify({ appUserId: "user_1" }),
       }),
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /v1/receipts/google", () => {
+  it("dispatches the verifier with PLAY_STORE", async () => {
+    const subscriberRow = {
+      id: "sub_1",
+      appUserId: "user_1",
+      attributes: {},
+    };
+    const productRow = {
+      id: "prod_1",
+      identifier: "pro_monthly",
+      type: "SUBSCRIPTION",
+      displayName: "Pro Monthly",
+      creditAmount: null,
+      entitlementKeys: ["premium"],
+      isActive: true,
+    };
+    const purchaseRow = {
+      id: "pur_1",
+      productId: "prod_1",
+      product: { identifier: "pro_monthly" },
+    };
+
+    vi.mocked(verifyReceipt).mockResolvedValue({
+      subscriber: subscriberRow as any,
+      product: productRow as any,
+      purchase: purchaseRow as any,
+    });
+
+    dbMock.subscriberAccess.findMany.mockResolvedValue([]);
+    dbMock.purchase.findMany.mockResolvedValue([purchaseRow]);
+    dbMock.creditLedger.findFirst.mockResolvedValue(null);
+
+    const res = await app.request(
+      withPublicAuth("/v1/receipts/google", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          receipt: "play_token_fake",
+          appUserId: "user_1",
+          productId: "pro_monthly",
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(verifyReceipt).toHaveBeenCalledOnce();
+    expect(vi.mocked(verifyReceipt).mock.calls[0][0].store).toBe("PLAY_STORE");
   });
 });
 
@@ -894,5 +944,190 @@ describe("GET /v1/product-groups", () => {
     expect(body.data.groups[0].identifier).toBe("default");
     expect(body.data.groups[0].productCount).toBe(1);
     expect(body.data.groups[1].productCount).toBe(2);
+  });
+});
+
+// =============================================================
+// /v1/me — subscriber-scoped SDK routes
+// =============================================================
+
+function withAppUser(url: string, init: RequestInit = {}): Request {
+  const headers = new Headers(init.headers);
+  headers.set("authorization", `Bearer ${PUBLIC_KEY}`);
+  headers.set("x-rovenue-app-user-id", "user_1");
+  return new Request(`http://localhost${url}`, { ...init, headers });
+}
+
+describe("GET /v1/me", () => {
+  it("returns subscriber profile + entitlements + credit balance", async () => {
+    dbMock.subscriber.findUnique.mockResolvedValue({
+      id: "sub_1",
+      projectId: "proj_test",
+      appUserId: "user_1",
+      attributes: { plan: "pro" },
+    } as any);
+    dbMock.subscriberAccess.findMany.mockResolvedValue([
+      {
+        entitlementKey: "premium",
+        isActive: true,
+        expiresDate: new Date("2026-05-01T00:00:00Z"),
+        store: "APP_STORE",
+        purchaseId: "pur_1",
+      },
+    ]);
+    dbMock.purchase.findMany.mockResolvedValue([
+      { id: "pur_1", product: { identifier: "pro_monthly" } },
+    ]);
+    dbMock.creditLedger.findFirst.mockResolvedValue({ balance: 175 } as any);
+
+    const res = await app.request(withAppUser("/v1/me"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.data.subscriber.appUserId).toBe("user_1");
+    expect(body.data.subscriber.attributes.plan).toBe("pro");
+    expect(body.data.entitlements.premium.isActive).toBe(true);
+    expect(body.data.entitlements.premium.productIdentifier).toBe("pro_monthly");
+    expect(body.data.credits.balance).toBe(175);
+  });
+
+  it("rejects when X-Rovenue-App-User-Id header is missing", async () => {
+    const res = await app.request(withPublicAuth("/v1/me"));
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 when the subscriber does not exist", async () => {
+    dbMock.subscriber.findUnique.mockResolvedValue(null);
+    const res = await app.request(withAppUser("/v1/me"));
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /v1/me/entitlements", () => {
+  it("returns only the entitlement map", async () => {
+    dbMock.subscriber.findUnique.mockResolvedValue({
+      id: "sub_1",
+      projectId: "proj_test",
+      appUserId: "user_1",
+      attributes: {},
+    } as any);
+    dbMock.subscriberAccess.findMany.mockResolvedValue([
+      {
+        entitlementKey: "premium",
+        isActive: true,
+        expiresDate: null,
+        store: "PLAY_STORE",
+        purchaseId: "pur_2",
+      },
+    ]);
+    dbMock.purchase.findMany.mockResolvedValue([
+      { id: "pur_2", product: { identifier: "pro_annual" } },
+    ]);
+
+    const res = await app.request(withAppUser("/v1/me/entitlements"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.data.entitlements.premium.store).toBe("PLAY_STORE");
+  });
+});
+
+describe("GET /v1/me/credits", () => {
+  it("returns the balance", async () => {
+    dbMock.subscriber.findUnique.mockResolvedValue({
+      id: "sub_1",
+      projectId: "proj_test",
+      appUserId: "user_1",
+      attributes: {},
+    } as any);
+    dbMock.creditLedger.findFirst.mockResolvedValue({ balance: 42 } as any);
+
+    const res = await app.request(withAppUser("/v1/me/credits"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.data.balance).toBe(42);
+  });
+});
+
+describe("POST /v1/me/credits/spend", () => {
+  it("accepts a public key + idempotency key and records spend", async () => {
+    dbMock.subscriber.findUnique.mockResolvedValue({
+      id: "sub_1",
+      projectId: "proj_test",
+      appUserId: "user_1",
+      attributes: {},
+    } as any);
+    dbMock.creditLedger.findFirst.mockResolvedValue({ balance: 100 } as any);
+    dbMock.creditLedger.create.mockResolvedValue({
+      id: "led_1",
+      amount: -25,
+      balance: 75,
+      type: "SPEND",
+      createdAt: new Date("2026-05-01T00:00:00Z"),
+    } as any);
+
+    const res = await app.request(
+      withAppUser("/v1/me/credits/spend", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "spend-001",
+        },
+        body: JSON.stringify({ amount: 25, description: "image gen" }),
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.data.balance).toBe(75);
+    expect(body.data.ledgerEntry.amount).toBe(-25);
+  });
+
+  it("returns 402 when balance is insufficient", async () => {
+    dbMock.subscriber.findUnique.mockResolvedValue({
+      id: "sub_1",
+      projectId: "proj_test",
+      appUserId: "user_1",
+      attributes: {},
+    } as any);
+    dbMock.creditLedger.findFirst.mockResolvedValue({ balance: 5 } as any);
+
+    const res = await app.request(
+      withAppUser("/v1/me/credits/spend", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "spend-002",
+        },
+        body: JSON.stringify({ amount: 10 }),
+      }),
+    );
+    expect(res.status).toBe(402);
+  });
+});
+
+describe("POST /v1/me/attributes", () => {
+  it("merges attributes for the resolved subscriber", async () => {
+    dbMock.subscriber.findUnique.mockResolvedValue({
+      id: "sub_1",
+      projectId: "proj_test",
+      appUserId: "user_1",
+      attributes: { tier: "free" },
+    } as any);
+    dbMock.subscriber.upsert.mockResolvedValue({
+      id: "sub_1",
+      appUserId: "user_1",
+      attributes: { tier: "free", country: "TR" },
+    } as any);
+
+    const res = await app.request(
+      withAppUser("/v1/me/attributes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ attributes: { country: "TR" } }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.data.subscriber.attributes.tier).toBe("free");
+    expect(body.data.subscriber.attributes.country).toBe("TR");
   });
 });

@@ -266,9 +266,16 @@ export const REST_ENDPOINTS: ReadonlyArray<RestEndpoint> = [
     scopeKey: "write",
   },
   {
-    id: "purchase-receipts",
+    id: "purchase-receipts-apple",
     method: "POST",
-    path: "/v1/receipts",
+    path: "/v1/receipts/apple",
+    summaryKey: "receipts",
+    scopeKey: "write",
+  },
+  {
+    id: "purchase-receipts-google",
+    method: "POST",
+    path: "/v1/receipts/google",
     summaryKey: "receipts",
     scopeKey: "write",
   },

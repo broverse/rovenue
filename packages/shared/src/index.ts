@@ -47,6 +47,7 @@ export const HEADER = {
   X_FORWARDED_FOR: "x-forwarded-for",
   X_RATE_LIMIT_LIMIT: "X-RateLimit-Limit",
   X_RATE_LIMIT_REMAINING: "X-RateLimit-Remaining",
+  X_ROVENUE_APP_USER_ID: "x-rovenue-app-user-id",
 } as const;
 export type HeaderName = (typeof HEADER)[keyof typeof HEADER];
 

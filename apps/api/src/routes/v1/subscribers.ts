@@ -2,26 +2,21 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import {
-  CreditLedgerType,
-  drizzle,
-  type Subscriber,
-} from "@rovenue/db";
+import { CreditLedgerType, drizzle, type Subscriber } from "@rovenue/db";
 import {
   addCredits,
   getBalance,
   InsufficientCreditsError,
   spendCredits,
 } from "../../services/credit-engine";
-import {
-  getActiveAccess,
-  syncAccess,
-} from "../../services/access-engine";
+import { syncAccess } from "../../services/access-engine";
 import { verifyReceipt } from "../../services/receipt-verify";
 import { transferSubscriber } from "../../services/subscriber-transfer";
 import { requireSecretKey } from "../../middleware/api-key-auth";
 import { idempotency } from "../../middleware/idempotency";
 import { endpointRateLimit } from "../../middleware/rate-limit";
+import { buildAccessResponse } from "../../lib/access-response";
+import { resolveSubscriber } from "../../lib/resolve-subscriber";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
 
@@ -80,56 +75,6 @@ export const transferBodySchema = z.object({
 // =============================================================
 // Helpers
 // =============================================================
-
-async function resolveSubscriber(
-  projectId: string,
-  appUserId: string,
-): Promise<Subscriber> {
-  const subscriber = await drizzle.subscriberRepo.findSubscriberByAppUserId(
-    drizzle.db,
-    { projectId, appUserId },
-  );
-  if (!subscriber) {
-    throw new HTTPException(404, {
-      message: `Subscriber ${appUserId} not found`,
-    });
-  }
-  return subscriber as Subscriber;
-}
-
-async function buildAccessResponse(subscriberId: string) {
-  const raw = await getActiveAccess(subscriberId);
-  const purchaseIds = Array.from(
-    new Set(Object.values(raw).map((entry) => entry.purchaseId)),
-  );
-  const purchases = await drizzle.purchaseRepo.findPurchasesByIds(
-    drizzle.db,
-    purchaseIds,
-  );
-  const productByPurchase = new Map(
-    purchases.map((p) => [p.id, p.product.identifier] as const),
-  );
-
-  const access: Record<
-    string,
-    {
-      isActive: boolean;
-      expiresDate: string | null;
-      store: string;
-      productIdentifier: string;
-    }
-  > = {};
-  for (const [key, entry] of Object.entries(raw)) {
-    access[key] = {
-      isActive: entry.isActive,
-      expiresDate: entry.expiresDate ? entry.expiresDate.toISOString() : null,
-      store: entry.store,
-      productIdentifier:
-        productByPurchase.get(entry.purchaseId) ?? "unknown",
-    };
-  }
-  return access;
-}
 
 // Throttle spend per *subscriber*, not per API key, so one noisy
 // user can't DoS another's credits but multiple users share the

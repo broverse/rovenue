@@ -3,6 +3,7 @@ import { apiKeyAuth } from "../../middleware/api-key-auth";
 import { apiKeyRateLimit } from "../../middleware/rate-limit";
 import { configRoute } from "./config";
 import { experimentsRoute } from "./experiments";
+import { meRoute } from "./me";
 import { receiptsRoute } from "./receipts";
 import { subscribersRoute } from "./subscribers";
 import { productGroupsRoute } from "./product-groups";
@@ -34,6 +35,7 @@ export const v1Route = new Hono()
   .use("*", apiKeyRateLimit())
   .route("/config", configRoute)
   .route("/experiments", experimentsRoute)
+  .route("/me", meRoute)
   .route("/receipts", receiptsRoute)
   .route("/subscribers", subscribersRoute)
   .route("/product-groups", productGroupsRoute);
