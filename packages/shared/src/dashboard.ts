@@ -364,3 +364,20 @@ export interface CreditHistoryResponse {
   entries: CreditHistoryEntry[];
   nextCursor: string | null;
 }
+
+// =============================================================
+// Metrics — MRR daily series
+// =============================================================
+
+export interface MrrSeriesPoint {
+  bucket: string; // ISO timestamp at start-of-day UTC
+  grossUsd: string; // decimal-as-string for precision
+  eventCount: number;
+  activeSubscribers: number;
+}
+
+export interface MrrSeriesResponse {
+  from: string;
+  to: string;
+  points: MrrSeriesPoint[];
+}

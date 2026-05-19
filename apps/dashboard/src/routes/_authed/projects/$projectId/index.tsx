@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { Trans, useTranslation } from "react-i18next";
 import { useProject } from "../../../../lib/hooks/useProject";
+import { useProjectMrr } from "../../../../lib/hooks/useProjectMrr";
 import {
   ExperimentsPanel,
   KpiCard,
@@ -26,6 +27,39 @@ import {
 } from "../../../../components/dashboard/mock-data";
 import type { ActivityEvent } from "../../../../components/dashboard";
 
+const USD = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+/** Latest day's grossUsd, formatted as "12,847.20". */
+function formatLatestMrr(points: ReadonlyArray<{ grossUsd: string }>): string {
+  if (points.length === 0) return "0.00";
+  const last = Number(points[points.length - 1]!.grossUsd);
+  if (!Number.isFinite(last)) return points[points.length - 1]!.grossUsd;
+  return USD.format(last);
+}
+
+/**
+ * % change between the first and last grossUsd value in the
+ * window. Returns null for sparse windows where a delta would
+ * be misleading.
+ */
+function mrrDelta(
+  points: ReadonlyArray<{ grossUsd: string }>,
+): { value: string; kind: "success" | "danger" } | null {
+  if (points.length < 2) return null;
+  const first = Number(points[0]!.grossUsd);
+  const last = Number(points[points.length - 1]!.grossUsd);
+  if (!Number.isFinite(first) || !Number.isFinite(last) || first === 0) {
+    return null;
+  }
+  const pct = ((last - first) / first) * 100;
+  const kind = pct >= 0 ? "success" : "danger";
+  const sign = pct >= 0 ? "+" : "";
+  return { value: `${sign}${pct.toFixed(1)}%`, kind };
+}
+
 export const Route = createFileRoute("/_authed/projects/$projectId/")({
   component: ProjectOverview,
 });
@@ -37,7 +71,30 @@ function ProjectOverview() {
   const { t } = useTranslation();
   const { projectId } = useParams({ from: "/_authed/projects/$projectId/" });
   const { data: project } = useProject(projectId);
+  const { data: mrr } = useProjectMrr({ projectId });
   const [events, setEvents] = useState<ActivityEvent[]>(() => genActivity(10));
+
+  // Derive the MRR KPI card inputs from the daily-series response.
+  // Fall back to mock series while the query is loading so the
+  // page never renders a blank tile.
+  const mrrCard = useMemo(() => {
+    const points = mrr?.points ?? [];
+    if (points.length === 0) {
+      return {
+        value: "12,847.20",
+        delta: "12.4%",
+        deltaKind: "success" as const,
+        sparkData: mrrSeries,
+      };
+    }
+    const delta = mrrDelta(points);
+    return {
+      value: formatLatestMrr(points),
+      delta: delta?.value ?? null,
+      deltaKind: delta?.kind ?? ("success" as const),
+      sparkData: points.map((p) => Number(p.grossUsd)),
+    };
+  }, [mrr]);
 
   // Live ticker — bumps secondsAgo on existing rows and occasionally drops
   // a new one in. The DashboardShell owns the global liveOn flag; for now
@@ -90,10 +147,10 @@ function ProjectOverview() {
           <KpiCard
             label={t("overview.kpi.mrr")}
             currency="$"
-            value="12,847.20"
-            delta="12.4%"
-            deltaKind="success"
-            sparkData={mrrSeries}
+            value={mrrCard.value}
+            delta={mrrCard.delta}
+            deltaKind={mrrCard.deltaKind}
+            sparkData={mrrCard.sparkData}
             sparkColor="var(--color-rv-accent-500)"
           />
         </div>
