@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { drizzle } from "@rovenue/db";
+import { exportUser } from "../../services/gdpr/export-user";
 import type {
   CreatePersonalAccessTokenResponse,
   CurrentUser,
@@ -338,4 +339,25 @@ export const meRoute = new Hono()
 
     await drizzle.personalAccessTokenRepo.deleteTokenById(drizzle.db, id);
     return c.json(ok({ revoked: true }));
+  })
+  // =============================================================
+  // Self-export — GDPR Art. 15 right-to-access
+  // =============================================================
+  //
+  // Bundles every row this deployment holds about the caller —
+  // user / sessions / linked accounts / PATs (metadata) / project
+  // memberships — and ships it back as a downloadable JSON dump.
+  // GET keeps the verb consistent with the subscriber-export
+  // endpoint; an audit entry for account-level exports lands once
+  // the audit() helper widens to project-less entries.
+  //
+  // ----- GET /dashboard/me/export -----
+  .get("/export", async (c) => {
+    const sessionUser = c.get("user");
+    const dump = await exportUser({ userId: sessionUser.id });
+    c.header(
+      "content-disposition",
+      `attachment; filename="rovenue-account-${sessionUser.id}.json"`,
+    );
+    return c.json(ok(dump));
   });

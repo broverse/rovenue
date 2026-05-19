@@ -8,6 +8,7 @@ import {
   SectionCard,
 } from "../../../components/account";
 import { Button } from "../../../ui/button";
+import { useExportMe } from "../../../lib/hooks/useExportMe";
 
 export const Route = createFileRoute("/_authed/account/export")({
   component: ExportPage,
@@ -15,6 +16,7 @@ export const Route = createFileRoute("/_authed/account/export")({
 
 function ExportPage() {
   const { t } = useTranslation();
+  const exportMe = useExportMe();
 
   return (
     <AccountShell active="export">
@@ -27,13 +29,24 @@ function ExportPage() {
         title={t("account.export.data.title")}
         description={t("account.export.data.subtitle")}
       >
-        <Button variant="flat">
+        <Button
+          variant="flat"
+          onClick={() => exportMe.mutate()}
+          disabled={exportMe.isPending}
+        >
           <Download size={13} />
-          {t("account.export.data.action")}
+          {exportMe.isPending
+            ? t("account.export.data.preparing", "Preparing…")
+            : t("account.export.data.action")}
         </Button>
         <p className="mt-2 text-[11px] leading-relaxed text-rv-mute-500">
           {t("account.export.data.hint")}
         </p>
+        {exportMe.isError && (
+          <p className="mt-2 text-[11px] text-rv-danger">
+            {exportMe.error?.message}
+          </p>
+        )}
       </SectionCard>
 
       <SectionCard
