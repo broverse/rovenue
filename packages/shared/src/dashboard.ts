@@ -299,3 +299,41 @@ export interface StopExperimentRequest {
   winnerVariantId?: string;
   promoteToFlag?: boolean;
 }
+
+// =============================================================
+// Feature flags
+// =============================================================
+//
+// Wire shape for `/dashboard/feature-flags`. The dashboard maps
+// this onto a richer UI type — backend only carries the
+// configuration the engine cares about (rules + default value),
+// not analytics or environment partitions.
+
+export type DashboardFlagType = "BOOLEAN" | "STRING" | "NUMBER" | "JSON";
+
+export interface DashboardFlagRule {
+  audienceId: string;
+  value: unknown;
+  rolloutPercentage?: number | null;
+}
+
+export interface FeatureFlagListItem {
+  id: string;
+  projectId: string;
+  key: string;
+  type: DashboardFlagType;
+  defaultValue: unknown;
+  rules: DashboardFlagRule[];
+  isEnabled: boolean;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FeatureFlagListResponse {
+  flags: FeatureFlagListItem[];
+}
+
+export interface FeatureFlagDetailResponse {
+  flag: FeatureFlagListItem;
+}

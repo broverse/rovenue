@@ -12,16 +12,18 @@ import { Segmented } from "../../../../ui/segmented";
 import { StatCard } from "../../../../ui/stat-card";
 import { useProject } from "../../../../lib/hooks/useProject";
 import {
-  FEATURE_FLAGS,
   FlagDetail,
   FlagsList,
-  STALE_FLAGS_COUNT,
   ScopeTabs,
-  TOTAL_EVALUATIONS_24H,
+  mapApiFeatureFlag,
   type FeatureFlag,
   type FlagEnv,
   type FlagScope,
 } from "../../../../components/feature-flags";
+import {
+  useFeatureFlags,
+  useToggleFeatureFlag,
+} from "../../../../lib/hooks/useFeatureFlags";
 
 export const Route = createFileRoute(
   "/_authed/projects/$projectId/feature-flags",
@@ -37,16 +39,31 @@ function FeatureFlagsRouteComponent() {
   });
   const { data: project } = useProject(projectId);
   if (!project) return null;
-  return <FeatureFlagsPage />;
+  return <FeatureFlagsPage projectId={projectId} />;
 }
 
-function FeatureFlagsPage() {
+function FeatureFlagsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [env, setEnv] = useState<FlagEnv>("prod");
   const [scope, setScope] = useState<FlagScope>("all");
   const [search, setSearch] = useState("");
-  const [flags, setFlags] = useState<ReadonlyArray<FeatureFlag>>(FEATURE_FLAGS);
-  const [selectedKey, setSelectedKey] = useState<string>(FEATURE_FLAGS[0].key);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  const { data: apiFlags = [] } = useFeatureFlags(projectId);
+  const toggleFlagMutation = useToggleFeatureFlag();
+
+  // Backend addresses flags by id; the UI works in `key` space.
+  // Keep a key → id map so the toggle handler can resolve back.
+  const keyToId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const f of apiFlags) m.set(f.key, f.id);
+    return m;
+  }, [apiFlags]);
+
+  const flags = useMemo<ReadonlyArray<FeatureFlag>>(
+    () => apiFlags.map(mapApiFeatureFlag),
+    [apiFlags],
+  );
 
   const counts = useMemo<Record<FlagScope, number>>(
     () => ({
@@ -80,29 +97,33 @@ function FeatureFlagsPage() {
     return arr;
   }, [flags, scope, search]);
 
-  const selected = useMemo(
-    () => flags.find((f) => f.key === selectedKey) ?? flags[0],
-    [flags, selectedKey],
-  );
+  // Default selection to the first visible flag whenever the
+  // current selection is stale or absent.
+  useEffect(() => {
+    if (visible.length === 0) {
+      if (selectedKey !== null) setSelectedKey(null);
+      return;
+    }
+    if (!selectedKey || !visible.some((f) => f.key === selectedKey)) {
+      setSelectedKey(visible[0]!.key);
+    }
+  }, [visible, selectedKey]);
 
-  const selectedSeed = useMemo(
-    () => flags.findIndex((f) => f.key === selected.key),
-    [flags, selected.key],
-  );
+  const selected = useMemo<FeatureFlag | null>(() => {
+    if (!selectedKey) return null;
+    return flags.find((f) => f.key === selectedKey) ?? null;
+  }, [flags, selectedKey]);
+
+  const selectedSeed = useMemo(() => {
+    if (!selected) return 0;
+    const idx = flags.findIndex((f) => f.key === selected.key);
+    return idx >= 0 ? idx : 0;
+  }, [flags, selected]);
 
   const toggleFlag = (key: string) => {
-    setFlags((prev) =>
-      prev.map((f) =>
-        f.key === key
-          ? {
-              ...f,
-              enabled: !f.enabled,
-              killed: false,
-              rolloutPct: f.enabled ? 0 : f.rolloutPct || 100,
-            }
-          : f,
-      ),
-    );
+    const id = keyToId.get(key);
+    if (!id) return;
+    toggleFlagMutation.mutate(id);
   };
 
   const totalProd = flags.filter((f) => f.env === "prod").length;
@@ -168,7 +189,7 @@ function FeatureFlagsPage() {
         />
         <StatCard
           label={t("featureFlags.kpi.evaluations")}
-          value={TOTAL_EVALUATIONS_24H}
+          value={0}
           description={t("featureFlags.kpi.evaluationsLatency")}
         />
         <StatCard
@@ -178,9 +199,7 @@ function FeatureFlagsPage() {
         />
         <StatCard
           label={t("featureFlags.kpi.staleFlags")}
-          value={
-            <span className="text-rv-warning">{STALE_FLAGS_COUNT}</span>
-          }
+          value={<span className="text-rv-warning">0</span>}
           description={t("featureFlags.kpi.staleFlagsDescription")}
           descriptionTone="warning"
         />
@@ -210,16 +229,22 @@ function FeatureFlagsPage() {
       <div className="grid items-start gap-4 max-[1280px]:grid-cols-1 grid-cols-[minmax(0,1fr)_460px]">
         <FlagsList
           flags={visible}
-          selectedKey={selected.key}
+          selectedKey={selected?.key ?? ""}
           onSelect={setSelectedKey}
           onToggle={toggleFlag}
         />
 
-        <FlagDetail
-          flag={selected}
-          seed={selectedSeed >= 0 ? selectedSeed : 0}
-          onToggle={() => toggleFlag(selected.key)}
-        />
+        {selected ? (
+          <FlagDetail
+            flag={selected}
+            seed={selectedSeed}
+            onToggle={() => toggleFlag(selected.key)}
+          />
+        ) : (
+          <div className="flex h-[200px] items-center justify-center rounded-lg border border-rv-divider bg-rv-c1 text-[13px] text-rv-mute-500">
+            {t("featureFlags.empty", "No feature flags yet.")}
+          </div>
+        )}
       </div>
     </>
   );

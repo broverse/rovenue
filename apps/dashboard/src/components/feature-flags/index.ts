@@ -18,7 +18,7 @@ export {
   STALE_FLAGS_COUNT,
   TOTAL_EVALUATIONS_24H,
 } from "./mock-data";
-export { evalSparkSeries, formatEvalCount } from "./format";
+export { evalSparkSeries, formatEvalCount, mapApiFeatureFlag } from "./format";
 export type {
   Condition,
   FeatureFlag,
