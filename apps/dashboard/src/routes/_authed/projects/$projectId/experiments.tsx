@@ -43,7 +43,7 @@ function ExperimentsRouteComponent() {
 // docs/superpowers/plans/2026-05-09-dashboard-api-wiring-roadmap.md).
 const DETAIL_FALLBACK_KEY = "paywall_v2_pricing";
 
-function ExperimentsPage({ projectId }: { projectId: string }) {
+export function ExperimentsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const { data: experiments = [] } = useExperiments({ projectId });
 

@@ -1,8 +1,4 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   DashboardFlagRule,
   DashboardFlagType,
@@ -10,15 +6,15 @@ import type {
   FeatureFlagListItem,
   FeatureFlagListResponse,
 } from "@rovenue/shared";
-import { api } from "../api";
+import { rpc, unwrap } from "../api";
 
 export function useFeatureFlags(projectId: string) {
   return useQuery({
     queryKey: ["feature-flags", projectId],
     enabled: Boolean(projectId),
     queryFn: () =>
-      api<FeatureFlagListResponse>(
-        `/dashboard/feature-flags?projectId=${encodeURIComponent(projectId)}`,
+      unwrap<FeatureFlagListResponse>(
+        rpc.dashboard["feature-flags"].$get({ query: { projectId } }),
       ),
     select: (res) => res.flags,
   });
@@ -29,7 +25,9 @@ export function useFeatureFlag(id: string | undefined) {
     queryKey: ["feature-flag", id],
     enabled: Boolean(id),
     queryFn: () =>
-      api<FeatureFlagDetailResponse>(`/dashboard/feature-flags/${id}`),
+      unwrap<FeatureFlagDetailResponse>(
+        rpc.dashboard["feature-flags"][":id"].$get({ param: { id: id! } }),
+      ),
     select: (res) => res.flag,
   });
 }
@@ -38,9 +36,10 @@ export function useToggleFeatureFlag() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      api<FeatureFlagDetailResponse>(
-        `/dashboard/feature-flags/${id}/toggle`,
-        { method: "POST" },
+      unwrap<FeatureFlagDetailResponse>(
+        rpc.dashboard["feature-flags"][":id"].toggle.$post({
+          param: { id },
+        }),
       ),
     onMutate: async (id) => {
       // Optimistically flip the toggle so the UI reflects the
@@ -83,17 +82,16 @@ export interface CreateFlagVars {
   defaultValue: unknown;
   rules?: DashboardFlagRule[];
   isEnabled?: boolean;
-  description?: string | null;
+  description?: string;
 }
 
 export function useCreateFeatureFlag() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (vars: CreateFlagVars) =>
-      api<FeatureFlagDetailResponse>("/dashboard/feature-flags", {
-        method: "POST",
-        body: JSON.stringify(vars),
-      }),
+      unwrap<FeatureFlagDetailResponse>(
+        rpc.dashboard["feature-flags"].$post({ json: vars }),
+      ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["feature-flags"] });
     },
@@ -114,10 +112,12 @@ export function useUpdateFeatureFlag() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: UpdateFlagVars) =>
-      api<FeatureFlagDetailResponse>(`/dashboard/feature-flags/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      }),
+      unwrap<FeatureFlagDetailResponse>(
+        rpc.dashboard["feature-flags"][":id"].$patch({
+          param: { id },
+          json: body,
+        }),
+      ),
     onSuccess: (_data, { id }) => {
       qc.invalidateQueries({ queryKey: ["feature-flags"] });
       qc.invalidateQueries({ queryKey: ["feature-flag", id] });
@@ -129,9 +129,9 @@ export function useDeleteFeatureFlag() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      api<{ deleted: true }>(`/dashboard/feature-flags/${id}`, {
-        method: "DELETE",
-      }),
+      unwrap<{ deleted: true }>(
+        rpc.dashboard["feature-flags"][":id"].$delete({ param: { id } }),
+      ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["feature-flags"] });
     },

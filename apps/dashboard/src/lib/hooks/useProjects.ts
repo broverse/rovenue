@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ProjectSummary } from "@rovenue/shared";
-import { api } from "../api";
+import { rpc, unwrap } from "../api";
 
 export function useProjects() {
   return useQuery({
     queryKey: ["projects"],
-    queryFn: () => api<{ projects: ProjectSummary[] }>("/dashboard/projects"),
+    queryFn: () =>
+      unwrap<{ projects: ProjectSummary[] }>(rpc.dashboard.projects.$get()),
     select: (res) => res.projects,
   });
 }

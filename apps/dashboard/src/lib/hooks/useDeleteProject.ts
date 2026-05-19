@@ -1,11 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { rpc, unwrap } from "../api";
 
 export function useDeleteProject() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (projectId: string) =>
-      api<{ id: string }>(`/dashboard/projects/${projectId}`, { method: "DELETE" }),
+      unwrap<{ id: string }>(
+        rpc.dashboard.projects[":id"].$delete({ param: { id: projectId } }),
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
   });
 }

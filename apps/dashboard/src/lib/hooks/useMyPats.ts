@@ -1,20 +1,16 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
   MyPersonalAccessTokensResponse,
 } from "@rovenue/shared";
-import { api } from "../api";
+import { rpc, unwrap } from "../api";
 
 export function useMyPats() {
   return useQuery({
     queryKey: ["me", "pats"],
     queryFn: () =>
-      api<MyPersonalAccessTokensResponse>("/dashboard/me/pats"),
+      unwrap<MyPersonalAccessTokensResponse>(rpc.dashboard.me.pats.$get()),
     select: (res) => res.tokens,
   });
 }
@@ -23,10 +19,9 @@ export function useCreatePat() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: CreatePersonalAccessTokenRequest) =>
-      api<CreatePersonalAccessTokenResponse>("/dashboard/me/pats", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+      unwrap<CreatePersonalAccessTokenResponse>(
+        rpc.dashboard.me.pats.$post({ json: body }),
+      ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["me", "pats"] });
     },
@@ -37,9 +32,9 @@ export function useRevokePat() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      api<{ revoked: true }>(`/dashboard/me/pats/${id}`, {
-        method: "DELETE",
-      }),
+      unwrap<{ revoked: true }>(
+        rpc.dashboard.me.pats[":id"].$delete({ param: { id } }),
+      ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["me", "pats"] });
     },

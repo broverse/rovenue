@@ -42,7 +42,7 @@ function FeatureFlagsRouteComponent() {
   return <FeatureFlagsPage projectId={projectId} />;
 }
 
-function FeatureFlagsPage({ projectId }: { projectId: string }) {
+export function FeatureFlagsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [env, setEnv] = useState<FlagEnv>("prod");
   const [scope, setScope] = useState<FlagScope>("all");

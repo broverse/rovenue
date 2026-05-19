@@ -57,8 +57,13 @@
 ## Faz 5 — Polish
 
 - [ ] Mock-data dosyalarını sil (`components/*/mock-data.ts`)
-- [ ] Hono RPC client'a tam migrasyon (şu an `api()` helper string path kullanıyor → `rpc.dashboard.…` tip-güvenli)
-- [ ] E2E testler: her sayfa için en az bir happy-path
+  - 15 dosya halen aktif olarak import ediliyor (2026-05-19 itibarıyla). Silmek için önce her sayfayı backend'e bağlamak gerek:
+    - `products.tsx`, `product-groups.tsx` → Faz 4'te CRUD endpoint açıldı, sayfalar hâlâ `PRODUCTS_CATALOG` / `PRODUCT_GROUPS` mock'larından besleniyor.
+    - `dashboard/mock-data.ts` → overview KPI panel'lerinin fallback'i (mrrSeries, activeSeries, vb.) ve `RevenueChartPanel` / `ExperimentsPanel` (henüz hiç wire değil).
+    - `charts/*`, `cohorts/*`, `credits/*`, `subscriptions/*`, `transactions/*`, `queries/*`, `apps/*`, `experiments/*`, `feature-flags/*`, `subscribers/*`, `sdk-api/*`, `project-setup/*` → ilgili sayfa parçaları hâlâ mock'tan besleniyor.
+  - Doğru sıra: önce her tüketici sayfasını wire et, sonra mock dosyasını sil. Tek tek silmek yerine sayfa-bazlı.
+- [x] Hono RPC client'a tam migrasyon (şu an `api()` helper string path kullanıyor → `rpc.dashboard.…` tip-güvenli) — **kısmen**: 2026-05-19'da `useProjects`, `useProject`, `useCreateProject`, `useUpdateProject`, `useDeleteProject`, `useMe`, `useMySessions`, `useMyAccounts`, `useMyPats`, `useProjectMrr`, `useFeatureFlags`, `useExperiments`, `useSubscriber` rpc'ye geçti. Kalanlar: query-string'i `zValidator` ile validate etmeyen route'ları (örn. `subscribers`) — önce backend zValidator eklensin, sonra hook'lar geçer.
+- [ ] E2E testler: her sayfa için en az bir happy-path (vitest + msw)
 
 ## Sıralama gerekçesi
 

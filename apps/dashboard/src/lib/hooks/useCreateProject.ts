@@ -1,15 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CreateProjectRequest, CreateProjectResponse } from "@rovenue/shared";
-import { api } from "../api";
+import { rpc, unwrap } from "../api";
 
 export function useCreateProject() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: CreateProjectRequest) =>
-      api<CreateProjectResponse>("/dashboard/projects", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+      unwrap<CreateProjectResponse>(rpc.dashboard.projects.$post({ json: body })),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
   });
 }

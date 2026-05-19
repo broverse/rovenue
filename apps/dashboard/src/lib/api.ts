@@ -39,7 +39,12 @@ export type { InferRequestType, InferResponseType };
 // `res.json()` returns the union of every status's response shape,
 // so we narrow to `data` after checking `res.ok` and surface a
 // typed `ApiError` for callers (matches the previous `api()` helper).
-export async function unwrap<T>(res: Response): Promise<T> {
+// Accepts either an awaited `Response` or the bare promise the
+// `hc<AppType>()` client returns, so call sites can drop the `await`.
+export async function unwrap<T>(
+  source: Response | Promise<Response>,
+): Promise<T> {
+  const res = await source;
   const envelope = (await res.json().catch(() => null)) as
     | Envelope<T>
     | null;

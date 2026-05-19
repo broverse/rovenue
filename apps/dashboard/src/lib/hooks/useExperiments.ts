@@ -1,8 +1,4 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   DashboardExperimentStatus,
   DashboardExperimentType,
@@ -12,7 +8,7 @@ import type {
   ExperimentListItem,
   StopExperimentRequest,
 } from "@rovenue/shared";
-import { api } from "../api";
+import { rpc, unwrap } from "../api";
 
 interface ListParams {
   projectId: string;
@@ -24,14 +20,16 @@ export function useExperiments({ projectId, status, type }: ListParams) {
   return useQuery({
     queryKey: ["experiments", projectId, { status, type }],
     enabled: Boolean(projectId),
-    queryFn: () => {
-      const params = new URLSearchParams({ projectId });
-      if (status) params.set("status", status);
-      if (type) params.set("type", type);
-      return api<ExperimentListResponse>(
-        `/dashboard/experiments?${params.toString()}`,
-      );
-    },
+    queryFn: () =>
+      unwrap<ExperimentListResponse>(
+        rpc.dashboard.experiments.$get({
+          query: {
+            projectId,
+            ...(status ? { status } : {}),
+            ...(type ? { type } : {}),
+          },
+        }),
+      ),
     select: (res) => res.experiments,
   });
 }
@@ -41,7 +39,9 @@ export function useExperiment(id: string | undefined) {
     queryKey: ["experiment", id],
     enabled: Boolean(id),
     queryFn: () =>
-      api<ExperimentDetailResponse>(`/dashboard/experiments/${id}`),
+      unwrap<ExperimentDetailResponse>(
+        rpc.dashboard.experiments[":id"].$get({ param: { id: id! } }),
+      ),
   });
 }
 
@@ -53,11 +53,12 @@ export function useExperiment(id: string | undefined) {
 // status dots + scope counts refresh, plus the specific detail
 // query for the experiment it touched.
 
-function lifecycleAction(action: "start" | "pause" | "resume") {
+type LifecycleVerb = "start" | "pause" | "resume";
+
+function lifecycleAction(action: LifecycleVerb) {
   return (id: string) =>
-    api<ExperimentLifecycleResponse>(
-      `/dashboard/experiments/${id}/${action}`,
-      { method: "POST" },
+    unwrap<ExperimentLifecycleResponse>(
+      rpc.dashboard.experiments[":id"][action].$post({ param: { id } }),
     );
 }
 
@@ -95,12 +96,11 @@ export function useStopExperiment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: StopExperimentVars) =>
-      api<ExperimentLifecycleResponse>(
-        `/dashboard/experiments/${id}/stop`,
-        {
-          method: "POST",
-          body: body ? JSON.stringify(body) : undefined,
-        },
+      unwrap<ExperimentLifecycleResponse>(
+        rpc.dashboard.experiments[":id"].stop.$post({
+          param: { id },
+          ...(body ? { json: body } : { json: {} }),
+        }),
       ),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["experiments"] });

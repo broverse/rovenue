@@ -120,4 +120,70 @@ export const handlers = [
       },
     }),
   ),
+
+  http.get(`${BASE}/dashboard/experiments`, () =>
+    HttpResponse.json({
+      data: {
+        experiments: [
+          {
+            id: "exp_1",
+            projectId: "proj_1",
+            name: "Paywall v2 pricing",
+            description: null,
+            type: "PRICING",
+            key: "paywall_v2_pricing",
+            audienceId: "aud_default",
+            status: "RUNNING",
+            variants: [
+              { id: "v_a", key: "a", weight: 50, payload: null },
+              { id: "v_b", key: "b", weight: 50, payload: null },
+            ],
+            metrics: null,
+            mutualExclusionGroup: null,
+            startedAt: "2026-04-01T00:00:00Z",
+            completedAt: null,
+            winnerVariantId: null,
+            createdAt: "2026-03-25T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+          },
+        ],
+      },
+    }),
+  ),
+
+  http.get(`${BASE}/dashboard/feature-flags`, () =>
+    HttpResponse.json({
+      data: {
+        flags: [
+          {
+            id: "ff_1",
+            key: "show_credits_in_paywall",
+            description: "Surface the credit pack picker on the paywall.",
+            type: "BOOLEAN",
+            defaultValue: false,
+            rules: [],
+            isEnabled: true,
+            createdAt: "2026-03-21T00:00:00Z",
+            updatedAt: "2026-04-09T00:00:00Z",
+          },
+        ],
+      },
+    }),
+  ),
+
+  http.get(`${BASE}/dashboard/me`, () =>
+    HttpResponse.json({
+      data: {
+        user: {
+          id: "u1",
+          email: "tester@example.com",
+          name: "Test User",
+          image: null,
+          locale: "en",
+          timezone: "UTC",
+          createdAt: "2026-03-01T00:00:00Z",
+        },
+      },
+    }),
+  ),
 ];
