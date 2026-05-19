@@ -24,6 +24,8 @@ import {
   type RailEntryId,
 } from "../../../../components/apps";
 import { useProject } from "../../../../lib/hooks/useProject";
+import { useProjectAppConnections } from "../../../../lib/hooks/useProjectAppConnections";
+import type { AppConnectionRow } from "@rovenue/shared";
 
 export const Route = createFileRoute("/_authed/projects/$projectId/apps")({
   component: AppsRoute,
@@ -33,20 +35,50 @@ function AppsRoute() {
   const { projectId } = useParams({ from: "/_authed/projects/$projectId/apps" });
   const { data: project } = useProject(projectId);
   if (!project) return null;
-  return <AppsPage />;
+  return <AppsPage projectId={projectId} />;
 }
 
-function AppsPage() {
+/**
+ * Overlay merge — for each catalog entry that the API knows
+ * something about (Apple / Google / Stripe / outgoing webhooks),
+ * we swap in the live status / lastSync / account fields. Every
+ * other entry stays exactly as the static catalog defines it.
+ */
+function applyConnectionOverlay(
+  catalog: ReadonlyArray<AppDescriptor>,
+  overlay: ReadonlyArray<AppConnectionRow>,
+): ReadonlyArray<AppDescriptor> {
+  if (overlay.length === 0) return catalog;
+  const byId = new Map(overlay.map((c) => [c.appId, c] as const));
+  return catalog.map((app) => {
+    const real = byId.get(app.id);
+    if (!real) return app;
+    return {
+      ...app,
+      status: real.status,
+      account: real.account ?? app.account,
+      lastSync: real.lastSyncLabel ?? app.lastSync,
+    };
+  });
+}
+
+function AppsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [active, setActive] = useState<RailEntryId>("all");
   const [query, setQuery] = useState("");
   const [view, setView] = useState<AppView>("grid");
   const [tier, setTier] = useState<AppTier>("all");
+  const connections = useProjectAppConnections(projectId);
 
-  const counts = useMemo(() => computeCategoryCounts(APPS), []);
+  const apps = useMemo<ReadonlyArray<AppDescriptor>>(
+    () => applyConnectionOverlay(APPS, connections.data?.connections ?? []),
+    [connections.data],
+  );
+
+  const counts = useMemo(() => computeCategoryCounts(apps), [apps]);
   const connected = useMemo(
-    () => APPS.filter((app) => app.status === "connected"),
-    [],
+    () => apps.filter((app) => app.status === "connected"),
+    [apps],
   );
 
   const resolveSearchText = (app: AppDescriptor) => [
@@ -57,15 +89,16 @@ function AppsPage() {
   ];
 
   const filtered = useMemo<ReadonlyArray<AppDescriptor>>(() => {
-    return APPS.filter((app) => {
+    return apps.filter((app) => {
       if (active === "connected" && app.status !== "connected") return false;
       if (active !== "all" && active !== "connected" && app.category !== active) return false;
       return matchesQuery(app, query, resolveSearchText);
     });
-    // resolveSearchText recreated each render but t is stable per language;
-    // re-running on language change is desirable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, query, t]);
+    // resolveSearchText is recreated each render but `t` is stable
+    // per language — including it as a dep makes language switches
+    // re-filter (desirable), so depend on `t` rather than the
+    // helper instance.
+  }, [active, query, t, apps]);
 
   const showHomepage = active === "all" && query.trim() === "";
 
@@ -122,7 +155,7 @@ function AppsPage() {
                 <AppsSection
                   key={category}
                   category={category}
-                  apps={APPS.filter((app) => app.category === category).slice(0, 4)}
+                  apps={apps.filter((app) => app.category === category).slice(0, 4)}
                   totalCount={counts[category] ?? 0}
                   onViewAll={(next) => setActive(next)}
                 />

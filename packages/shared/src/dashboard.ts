@@ -946,6 +946,35 @@ export interface DashboardProductGroupUpdateInput {
 }
 
 // =============================================================
+// Apps catalog connections overlay (Phase 4.2)
+// =============================================================
+//
+// The apps catalog itself stays static (decision: no
+// marketplace). This endpoint reports the *real* connection
+// state for catalog entries the platform actually has backing
+// for — Apple / Google / Stripe webhooks + outbound webhook
+// endpoints — so the page can render `connected` status from
+// truth instead of mock.
+
+export type AppConnectionStatus = "connected" | "available" | "error";
+
+export interface AppConnectionRow {
+  /** Catalog app id (e.g. "apple-app-store", "google-play"). */
+  appId: string;
+  status: AppConnectionStatus;
+  /** Last activity timestamp (ISO-8601). null when never connected. */
+  lastActivityAt: string | null;
+  /** Pre-formatted "Last sync 4m ago" hint. */
+  lastSyncLabel: string | null;
+  /** Short status / account label (e.g. "12 endpoints", "Live"). */
+  account: string | null;
+}
+
+export interface AppConnectionsResponse {
+  connections: AppConnectionRow[];
+}
+
+// =============================================================
 // Audit logs (read-only viewer)
 // =============================================================
 

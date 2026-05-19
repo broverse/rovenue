@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { dashboardUserRateLimit } from "../../middleware/rate-limit";
+import { appsRoute } from "./apps";
 import { audiencesRoute } from "./audiences";
 import { auditLogsRoute } from "./audit-logs";
 import { chartsRoute } from "./charts";
@@ -44,6 +45,7 @@ export const dashboardRoute = new Hono()
   .route("/feature-flags", featureFlagsRoute)
   .route("/me", meRoute)
   .route("/projects", projectsRoute)
+  .route("/projects/:projectId/apps", appsRoute)
   .route("/projects/:projectId/charts", chartsRoute)
   .route("/projects/:projectId/credentials", credentialsRoute)
   .route("/projects/:projectId/credits", creditsRoute)
