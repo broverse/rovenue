@@ -1,4 +1,114 @@
-import type { VariantColorToken } from "./types";
+import type {
+  DashboardExperimentStatus,
+  DashboardExperimentType,
+  ExperimentListItem,
+} from "@rovenue/shared";
+import type {
+  ExperimentGroup,
+  ExperimentStatus,
+  ExperimentSummary,
+  VariantColorToken,
+} from "./types";
+
+// =============================================================
+// API → UI mapping
+// =============================================================
+//
+// Backend stores its own enum (DRAFT/RUNNING/PAUSED/COMPLETED).
+// The dashboard's `ExperimentSummary` was designed pre-API and
+// only carries lowercase states — PAUSED has no UI today, so we
+// collapse it onto RUNNING for now and add a dedicated state
+// once the page grows lifecycle controls.
+function uiStatus(s: DashboardExperimentStatus): ExperimentStatus {
+  if (s === "DRAFT") return "draft";
+  if (s === "COMPLETED") return "completed";
+  return "running";
+}
+
+// The dashboard tags experiments with a `group` chip purely for
+// visual grouping. The backend doesn't carry that signal, so we
+// derive a reasonable default from the experiment type until the
+// dashboard exposes a real group field.
+function groupFromType(t: DashboardExperimentType): ExperimentGroup {
+  if (t === "PAYWALL") return "paywall";
+  if (t === "FLAG") return "engagement";
+  if (t === "PRODUCT_GROUP") return "monetization";
+  return "onboarding";
+}
+
+function daysSince(iso: string | null): number {
+  if (!iso) return 0;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  return Math.floor(ms / 86_400_000);
+}
+
+function shortMonthDay(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+interface AgeLabel {
+  ageLabelKey: string;
+  ageLabelValues?: Readonly<Record<string, string | number>>;
+}
+
+function ageLabel(
+  status: ExperimentStatus,
+  startedAt: string | null,
+  completedAt: string | null,
+): AgeLabel {
+  if (status === "draft") {
+    return { ageLabelKey: "experiments.list.age.draft" };
+  }
+  if (status === "completed" && completedAt) {
+    return {
+      ageLabelKey: "experiments.list.age.completedOn",
+      ageLabelValues: { date: shortMonthDay(completedAt) },
+    };
+  }
+  // running / paused — count days since startedAt
+  return {
+    ageLabelKey: "experiments.list.age.runningDays",
+    ageLabelValues: { days: daysSince(startedAt) },
+  };
+}
+
+/**
+ * Maps an `ExperimentListItem` from the API to the richer
+ * `ExperimentSummary` shape the dashboard's list + hero render
+ * against. Fields the API does not surface yet (`assigned`,
+ * `confidence`, `outcome`, `lift`) default to neutral values so
+ * the UI degrades gracefully — Phase 3 will hydrate them from
+ * the results endpoint.
+ */
+export function mapApiExperiment(item: ExperimentListItem): ExperimentSummary {
+  const status = uiStatus(item.status);
+  const metric = item.metrics?.[0] ?? "";
+  const description = item.description ?? "";
+  const age = ageLabel(status, item.startedAt, item.completedAt);
+
+  return {
+    id: item.key,
+    status,
+    description,
+    metric,
+    started: item.startedAt,
+    days: daysSince(item.startedAt),
+    ageLabelKey: age.ageLabelKey,
+    ...(age.ageLabelValues ? { ageLabelValues: age.ageLabelValues } : {}),
+    variantCount: item.variants.length,
+    assigned: 0,
+    confidence: 0,
+    outcome: "",
+    group: groupFromType(item.type),
+    lift: 0,
+    winner: item.winnerVariantId,
+  };
+}
+
 
 /**
  * Maps a variant color token to its CSS color value. The accent token

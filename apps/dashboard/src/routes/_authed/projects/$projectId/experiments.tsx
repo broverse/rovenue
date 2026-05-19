@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { ArrowDownToLine, BookOpen, Plus } from "lucide-react";
@@ -10,16 +10,17 @@ import {
   ConfigurationCard,
   ConversionFunnel,
   CumulativeChart,
-  EXPERIMENTS,
   EXPERIMENTS_KPI,
   EXPERIMENT_DETAILS,
   ExperimentHero,
   ExperimentTimeline,
   ExperimentsList,
-  SCOPE_COUNTS,
   VariantsTable,
+  mapApiExperiment,
   type ExperimentScope,
+  type ExperimentSummary,
 } from "../../../../components/experiments";
+import { useExperiments } from "../../../../lib/hooks/useExperiments";
 import { useProject } from "../../../../lib/hooks/useProject";
 
 export const Route = createFileRoute(
@@ -34,27 +35,62 @@ function ExperimentsRouteComponent() {
   });
   const { data: project } = useProject(projectId);
   if (!project) return null;
-  return <ExperimentsPage />;
+  return <ExperimentsPage projectId={projectId} />;
 }
 
-const FALLBACK_DETAIL_ID = "paywall_v2_pricing";
+// Mock keys are still used as the detail fallback while the funnel,
+// timeline, and cumulative-trend rollups land in Phase 3 (see
+// docs/superpowers/plans/2026-05-09-dashboard-api-wiring-roadmap.md).
+const DETAIL_FALLBACK_KEY = "paywall_v2_pricing";
 
-function ExperimentsPage() {
+function ExperimentsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
+  const { data: experiments = [] } = useExperiments({ projectId });
+
   const [scope, setScope] = useState<ExperimentScope>("running");
-  const [selectedId, setSelectedId] = useState<string>(FALLBACK_DETAIL_ID);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const scoped = useMemo(() => {
-    if (scope === "all") return EXPERIMENTS;
-    return EXPERIMENTS.filter((e) => e.status === scope);
-  }, [scope]);
+  const summaries = useMemo<ReadonlyArray<ExperimentSummary>>(
+    () => experiments.map(mapApiExperiment),
+    [experiments],
+  );
 
-  const selected = useMemo(() => {
-    return EXPERIMENTS.find((e) => e.id === selectedId) ?? EXPERIMENTS[0]!;
-  }, [selectedId]);
+  const scoped = useMemo<ReadonlyArray<ExperimentSummary>>(() => {
+    if (scope === "all") return summaries;
+    return summaries.filter((e) => e.status === scope);
+  }, [scope, summaries]);
+
+  const scopeCounts = useMemo(
+    () => ({
+      running: summaries.filter((e) => e.status === "running").length,
+      completed: summaries.filter((e) => e.status === "completed").length,
+      draft: summaries.filter((e) => e.status === "draft").length,
+      all: summaries.length,
+    }),
+    [summaries],
+  );
+
+  // When the list loads (or the scope filters everything out), default
+  // the selection to the first visible row. Guards against stale ids
+  // sticking around after lifecycle changes or scope swaps.
+  useEffect(() => {
+    if (scoped.length === 0) {
+      if (selectedId !== null) setSelectedId(null);
+      return;
+    }
+    if (!selectedId || !scoped.some((e) => e.id === selectedId)) {
+      setSelectedId(scoped[0]!.id);
+    }
+  }, [scoped, selectedId]);
+
+  const selected = useMemo<ExperimentSummary | null>(() => {
+    if (!selectedId) return null;
+    return summaries.find((e) => e.id === selectedId) ?? null;
+  }, [selectedId, summaries]);
 
   const detail =
-    EXPERIMENT_DETAILS[selected.id] ?? EXPERIMENT_DETAILS[FALLBACK_DETAIL_ID]!;
+    (selected && EXPERIMENT_DETAILS[selected.id]) ??
+    EXPERIMENT_DETAILS[DETAIL_FALLBACK_KEY]!;
 
   return (
     <>
@@ -90,7 +126,7 @@ function ExperimentsPage() {
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           label={t("experiments.kpi.running")}
-          value={EXPERIMENTS_KPI.running.toLocaleString()}
+          value={scopeCounts.running.toLocaleString()}
           description={t("experiments.kpi.runningDescription", {
             withPower: EXPERIMENTS_KPI.runningPower,
             gathering: EXPERIMENTS_KPI.runningGathering,
@@ -106,7 +142,9 @@ function ExperimentsPage() {
         <StatCard
           label={t("experiments.kpi.shippedWins")}
           value={
-            <span className="text-rv-success">{EXPERIMENTS_KPI.shippedWins}</span>
+            <span className="text-rv-success">
+              {scopeCounts.completed}
+            </span>
           }
           description={t("experiments.kpi.shippedWinsDescription", {
             impact: EXPERIMENTS_KPI.shippedMrrImpact,
@@ -127,26 +165,37 @@ function ExperimentsPage() {
           experiments={scoped}
           scope={scope}
           onScopeChange={setScope}
-          selectedId={selected.id}
+          selectedId={selected?.id ?? ""}
           onSelect={setSelectedId}
-          scopeCounts={SCOPE_COUNTS}
+          scopeCounts={scopeCounts}
         />
 
         <div className="flex min-w-0 flex-col gap-4">
-          <ExperimentHero experiment={selected} />
-          <VariantsTable
-            variants={detail.variants}
-            metricNameKey={detail.metricNameKey}
-          />
-          <CumulativeChart points={CUMULATIVE_TREND} metricNameKey={detail.metricNameKey} />
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <ConversionFunnel stages={detail.funnel} />
-            <ExperimentTimeline entries={detail.timeline} />
-          </div>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <AllocationCard variants={detail.variants} />
-            <ConfigurationCard experiment={selected} detail={detail} />
-          </div>
+          {selected ? (
+            <>
+              <ExperimentHero experiment={selected} />
+              <VariantsTable
+                variants={detail.variants}
+                metricNameKey={detail.metricNameKey}
+              />
+              <CumulativeChart
+                points={CUMULATIVE_TREND}
+                metricNameKey={detail.metricNameKey}
+              />
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <ConversionFunnel stages={detail.funnel} />
+                <ExperimentTimeline entries={detail.timeline} />
+              </div>
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <AllocationCard variants={detail.variants} />
+                <ConfigurationCard experiment={selected} detail={detail} />
+              </div>
+            </>
+          ) : (
+            <div className="flex h-[200px] items-center justify-center rounded-lg border border-rv-divider bg-rv-c1 text-[13px] text-rv-mute-500">
+              {t("experiments.list.empty")}
+            </div>
+          )}
         </div>
       </div>
     </>

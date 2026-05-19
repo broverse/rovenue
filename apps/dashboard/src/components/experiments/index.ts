@@ -8,6 +8,7 @@ export { ExperimentStatusDot } from "./experiment-status-dot";
 export { ExperimentTimeline } from "./experiment-timeline";
 export { ExperimentsList } from "./experiments-list";
 export { LiftPill } from "./lift-pill";
+export { mapApiExperiment } from "./format";
 export { VariantsTable } from "./variants-table";
 export {
   CUMULATIVE_TREND,

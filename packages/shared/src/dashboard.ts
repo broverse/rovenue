@@ -225,3 +225,77 @@ export interface SubscriberDetail {
   assignments: SubscriberAssignment[];
   outgoingWebhooks: SubscriberOutgoingWebhook[];
 }
+
+// =============================================================
+// Experiments
+// =============================================================
+//
+// Wire shape for `/dashboard/experiments`. Mirrors the drizzle row
+// with timestamps serialised to ISO strings. `variants` is opaque
+// JSON on the backend; we narrow to the runtime shape the engine
+// actually writes so the dashboard can map weights + ids without
+// guessing.
+
+export type DashboardExperimentType =
+  | "FLAG"
+  | "PRODUCT_GROUP"
+  | "PAYWALL"
+  | "ELEMENT";
+
+export type DashboardExperimentStatus =
+  | "DRAFT"
+  | "RUNNING"
+  | "PAUSED"
+  | "COMPLETED";
+
+export interface DashboardExperimentVariant {
+  id: string;
+  name: string;
+  value: unknown;
+  weight: number;
+}
+
+export interface ExperimentListItem {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  type: DashboardExperimentType;
+  key: string;
+  audienceId: string;
+  status: DashboardExperimentStatus;
+  variants: DashboardExperimentVariant[];
+  metrics: string[] | null;
+  mutualExclusionGroup: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  winnerVariantId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExperimentListResponse {
+  experiments: ExperimentListItem[];
+}
+
+export interface ExperimentSummaryStats {
+  totalUsers: number;
+  conversions: number;
+  conversionRate: number;
+}
+
+export interface ExperimentDetailResponse {
+  experiment: ExperimentListItem;
+  summary: ExperimentSummaryStats;
+}
+
+export interface ExperimentLifecycleResponse {
+  experiment: ExperimentListItem;
+  /** Present only on `/stop` when `promoteToFlag: true` was sent. */
+  promotedFlag?: { id: string; key: string } | null;
+}
+
+export interface StopExperimentRequest {
+  winnerVariantId?: string;
+  promoteToFlag?: boolean;
+}
