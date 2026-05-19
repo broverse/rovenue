@@ -876,6 +876,99 @@ export type OutboxEvent = typeof outboxEvents.$inferSelect;
 export type NewOutboxEvent = typeof outboxEvents.$inferInsert;
 
 // =============================================================
+// saved_chart_views (Phase 3.5)
+// =============================================================
+//
+// User-saved chart configurations. Each row is opaque JSON
+// payload-wise so the dashboard can evolve the chart schema
+// (filters, group-by, range, type) without a migration. Scoped
+// to (projectId, userId) — saved views are per-user, not shared
+// across the team. Stays read-light: one indexed lookup by
+// project, ordered by `updatedAt` for the "recent" list.
+
+export const savedChartViews = pgTable(
+  "saved_chart_views",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    /** Opaque JSON — chart id, type, range, filters, group-by. */
+    config: jsonb("config")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectIdUpdatedAtIdx: index(
+      "saved_chart_views_projectId_updatedAt_idx",
+    ).on(t.projectId, t.updatedAt),
+    projectIdUserIdIdx: index(
+      "saved_chart_views_projectId_userId_idx",
+    ).on(t.projectId, t.userId),
+  }),
+);
+
+export type SavedChartView = typeof savedChartViews.$inferSelect;
+export type NewSavedChartView = typeof savedChartViews.$inferInsert;
+
+// =============================================================
+// chart_annotations (Phase 3.5)
+// =============================================================
+//
+// Project-scoped annotations pinned to a specific instant (or
+// span) on chart timelines. Free-text label + optional URL +
+// optional color. Authored by a user but visible to the whole
+// project — annotations are how teams explain spikes & drops.
+
+export const chartAnnotations = pgTable(
+  "chart_annotations",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** Author of the annotation. Null on legacy rows / imports. */
+    userId: text("userId").references(() => user.id, { onDelete: "set null" }),
+    /** Instant the annotation pins to. */
+    occurredAt: timestamp("occurredAt", { withTimezone: true }).notNull(),
+    /** Optional end of a range; null for point-in-time annotations. */
+    endsAt: timestamp("endsAt", { withTimezone: true }),
+    label: text("label").notNull(),
+    description: text("description"),
+    /** Hex color or design-token name for the annotation marker. */
+    color: text("color"),
+    /** Optional URL the annotation links out to (PR, ticket, blog). */
+    url: text("url"),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectIdOccurredAtIdx: index(
+      "chart_annotations_projectId_occurredAt_idx",
+    ).on(t.projectId, t.occurredAt),
+  }),
+);
+
+export type ChartAnnotation = typeof chartAnnotations.$inferSelect;
+export type NewChartAnnotation = typeof chartAnnotations.$inferInsert;
+
+// =============================================================
 // Inferred types
 // =============================================================
 //

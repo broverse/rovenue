@@ -777,6 +777,92 @@ export interface CreditsRollupResponse {
 }
 
 // =============================================================
+// Charts — channels / funnel / heatmap (Phase 3.5)
+// =============================================================
+
+export interface ChartChannelsRow {
+  store: string;
+  /** Decimal-as-string gross USD in the window. */
+  grossUsd: string;
+  pct: number;
+  eventCount: number;
+}
+
+export interface ChartChannelsResponse {
+  windowDays: number;
+  totalUsd: string;
+  rows: ChartChannelsRow[];
+}
+
+export interface ChartFunnelStep {
+  /** Stable identifier, e.g. `purchase` / `trial` / `renewal`. */
+  key: "purchase" | "trial" | "trial_to_paid" | "renewal";
+  count: number;
+  /** Share of step-0 count, 0–100 with one decimal. */
+  pct: number;
+}
+
+export interface ChartFunnelResponse {
+  windowDays: number;
+  steps: ChartFunnelStep[];
+}
+
+export interface ChartHeatmapCell {
+  /** 0=Sun … 6=Sat (UTC). */
+  dow: number;
+  /** 0–23 hour bucket (UTC). */
+  hour: number;
+  /** Event count in the window for that (dow, hour). */
+  count: number;
+}
+
+export interface ChartHeatmapResponse {
+  windowDays: number;
+  cells: ChartHeatmapCell[];
+}
+
+// =============================================================
+// Saved chart views (Phase 3.5)
+// =============================================================
+
+export interface SavedChartView {
+  id: string;
+  projectId: string;
+  userId: string;
+  name: string;
+  description: string | null;
+  config: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SavedChartViewsResponse {
+  views: SavedChartView[];
+}
+
+// =============================================================
+// Chart annotations (Phase 3.5)
+// =============================================================
+
+export interface ChartAnnotation {
+  id: string;
+  projectId: string;
+  userId: string | null;
+  occurredAt: string;
+  endsAt: string | null;
+  label: string;
+  description: string | null;
+  color: string | null;
+  url: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChartAnnotationsResponse {
+  annotations: ChartAnnotation[];
+}
+
+// =============================================================
 // Audit logs (read-only viewer)
 // =============================================================
 
