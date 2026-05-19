@@ -1028,6 +1028,57 @@ export type Cohort = typeof cohorts.$inferSelect;
 export type NewCohort = typeof cohorts.$inferInsert;
 
 // =============================================================
+// saved_queries (Phase 4.5 — queries playground)
+// =============================================================
+//
+// Per-user saved SQL queries authored against the ClickHouse
+// playground. The `sql` column stores the query text verbatim
+// so the user can revise it across sessions; project isolation
+// is enforced at execution time by binding `projectId` server-
+// side and requiring the query body to reference
+// `{projectId:String}` (rejected otherwise).
+
+export const savedQueries = pgTable(
+  "saved_queries",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    sql: text("sql").notNull(),
+    /** "sql" | "builder" — the editor mode this query was saved in. */
+    mode: text("mode").notNull().default("sql"),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectIdUpdatedAtIdx: index(
+      "saved_queries_projectId_updatedAt_idx",
+    ).on(t.projectId, t.updatedAt),
+    projectIdUserIdIdx: index("saved_queries_projectId_userId_idx").on(
+      t.projectId,
+      t.userId,
+    ),
+  }),
+);
+
+export type SavedQuery = typeof savedQueries.$inferSelect;
+export type NewSavedQuery = typeof savedQueries.$inferInsert;
+
+// =============================================================
 // Inferred types
 // =============================================================
 //

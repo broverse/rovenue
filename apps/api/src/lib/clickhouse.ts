@@ -79,6 +79,20 @@ export function isClickHouseConfigured(): boolean {
   return Boolean(env.CLICKHOUSE_URL && env.CLICKHOUSE_PASSWORD);
 }
 
+/**
+ * Direct access to the underlying client. Reserved for callers
+ * that need to drive `c.query` with custom settings or formats
+ * (e.g. the playground executor that swaps in JSON+columns
+ * format and per-call readonly / max_result_rows limits). The
+ * regular call path is `queryAnalytics`, which guarantees
+ * project-scoped parameter binding.
+ */
+export function getClickHouseClient(): ClickHouseClient {
+  const c = getClient();
+  if (!c) throw new ClickHouseUnavailableError();
+  return c;
+}
+
 // Exported for tests that want to reset the singleton between cases.
 export function __resetClickHouseForTests(): void {
   client = null;

@@ -1082,6 +1082,82 @@ export interface CohortRetentionResponse {
 }
 
 // =============================================================
+// Queries playground (Phase 4.5)
+// =============================================================
+
+export interface DashboardSavedQuery {
+  id: string;
+  projectId: string;
+  userId: string;
+  name: string;
+  description: string | null;
+  sql: string;
+  mode: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DashboardSavedQueriesListResponse {
+  queries: DashboardSavedQuery[];
+}
+
+export interface DashboardSavedQueryCreateInput {
+  name: string;
+  description?: string | null;
+  sql: string;
+  mode?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface DashboardSavedQueryUpdateInput {
+  name?: string;
+  description?: string | null;
+  sql?: string;
+  mode?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface QueryExecuteRequest {
+  sql: string;
+}
+
+export interface QueryExecuteColumn {
+  name: string;
+  /** ClickHouse type string, e.g. "Decimal(12,4)". */
+  type: string;
+}
+
+export interface QueryExecuteResponse {
+  columns: QueryExecuteColumn[];
+  /** Each row is an ordered array aligned with `columns`. */
+  rows: unknown[][];
+  /** Total rows returned (may equal the cap if truncated). */
+  rowCount: number;
+  /** True when result was truncated by the playground cap. */
+  truncated: boolean;
+  /** Server-side execution time in milliseconds. */
+  durationMs: number;
+}
+
+export interface QuerySchemaColumn {
+  name: string;
+  type: string;
+}
+
+export interface QuerySchemaTable {
+  name: string;
+  columns: QuerySchemaColumn[];
+  /** Number of rows in the table at sample time; optional. */
+  rowEstimate?: number | null;
+}
+
+export interface QuerySchemaResponse {
+  database: string;
+  tables: QuerySchemaTable[];
+}
+
+// =============================================================
 // Audit logs (read-only viewer)
 // =============================================================
 
