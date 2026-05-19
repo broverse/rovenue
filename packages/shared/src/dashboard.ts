@@ -483,3 +483,18 @@ export interface UpdateMeRequest {
   locale?: string;
   timezone?: string;
 }
+
+export interface MySession {
+  id: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  /** True for the session backing the current request. */
+  current: boolean;
+}
+
+export interface MySessionsResponse {
+  sessions: MySession[];
+}

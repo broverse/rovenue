@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
+import type { MySession } from "@rovenue/shared";
 import {
   AccountPageHeader,
   AccountShell,
@@ -12,22 +13,70 @@ import {
 } from "../../../components/account";
 import { Button } from "../../../ui/button";
 import { Input } from "../../../ui/input";
+import {
+  useMySessions,
+  useRevokeSession,
+} from "../../../lib/hooks/useMySessions";
 
 export const Route = createFileRoute("/_authed/account/security")({
   component: SecurityPage,
 });
 
-type SessionDef = { id: string; deviceKey: string; metaKey: string; current?: boolean };
+// =============================================================
+// userAgent → "Browser on OS" parser
+// =============================================================
+//
+// Intentionally minimal — we hit the common cases (Chrome / Safari
+// / Firefox / Edge on macOS / Windows / iOS / Android / Linux)
+// and fall back to a generic "Unknown device" rather than pulling
+// in ua-parser-js for a single screen.
 
-const SESSIONS: ReadonlyArray<SessionDef> = [
-  { id: "mac-chrome", deviceKey: "macChrome", metaKey: "macChrome", current: true },
-  { id: "iphone", deviceKey: "iphone", metaKey: "iphone" },
-  { id: "ipad", deviceKey: "ipad", metaKey: "ipad" },
-  { id: "linux", deviceKey: "linux", metaKey: "linux" },
-];
+function describeDevice(userAgent: string | null): string {
+  if (!userAgent) return "Unknown device";
+  const ua = userAgent;
+
+  let os = "Unknown OS";
+  if (/iPhone/.test(ua)) os = "iPhone";
+  else if (/iPad/.test(ua)) os = "iPad";
+  else if (/Android/.test(ua)) os = "Android";
+  else if (/Mac OS X|Macintosh/.test(ua)) os = "macOS";
+  else if (/Windows/.test(ua)) os = "Windows";
+  else if (/Linux/.test(ua)) os = "Linux";
+
+  let browser = "Browser";
+  // Order matters — Edge/Chrome both report "Chrome", and Safari's
+  // UA contains "Safari" alongside other browsers, so test the
+  // more specific tokens first.
+  if (/Edg\//.test(ua)) browser = "Edge";
+  else if (/Firefox/.test(ua)) browser = "Firefox";
+  else if (/Chrome\//.test(ua)) browser = "Chrome";
+  else if (/Safari/.test(ua)) browser = "Safari";
+
+  return `${browser} on ${os}`;
+}
+
+function formatLastSeen(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return iso;
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function describeMeta(s: MySession): string {
+  const ip = s.ipAddress ?? "unknown ip";
+  return `${ip} · last active ${formatLastSeen(s.updatedAt)}`;
+}
 
 function SecurityPage() {
   const { t } = useTranslation();
+  const { data: sessions = [], isLoading } = useMySessions();
+  const revokeSession = useRevokeSession();
 
   return (
     <AccountShell active="security">
@@ -99,17 +148,35 @@ function SecurityPage() {
       <SectionCard
         title={t("account.security.sessions.title")}
         description={t("account.security.sessions.subtitle")}
-        meta={t("account.security.sessions.count", { count: SESSIONS.length })}
-        footer={<Button variant="flat">{t("account.security.sessions.signOutAll")}</Button>}
+        meta={t("account.security.sessions.count", { count: sessions.length })}
+        footer={
+          <Button variant="flat">
+            {t("account.security.sessions.signOutAll")}
+          </Button>
+        }
       >
-        {SESSIONS.map((s) => (
-          <SessionRow
-            key={s.id}
-            device={t(`account.security.sessions.devices.${s.deviceKey}.device`)}
-            meta={t(`account.security.sessions.devices.${s.metaKey}.meta`)}
-            current={s.current}
-          />
-        ))}
+        {isLoading && sessions.length === 0 ? (
+          <div className="py-3 text-[12px] text-rv-mute-500">
+            {t("common.loading", "Loading…")}
+          </div>
+        ) : sessions.length === 0 ? (
+          <div className="py-3 text-[12px] text-rv-mute-500">
+            {t(
+              "account.security.sessions.empty",
+              "No active sessions besides this one.",
+            )}
+          </div>
+        ) : (
+          sessions.map((s) => (
+            <SessionRow
+              key={s.id}
+              device={describeDevice(s.userAgent)}
+              meta={describeMeta(s)}
+              current={s.current}
+              onRevoke={() => revokeSession.mutate(s.id)}
+            />
+          ))
+        )}
       </SectionCard>
     </AccountShell>
   );
