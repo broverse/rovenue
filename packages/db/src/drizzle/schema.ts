@@ -969,6 +969,65 @@ export type ChartAnnotation = typeof chartAnnotations.$inferSelect;
 export type NewChartAnnotation = typeof chartAnnotations.$inferInsert;
 
 // =============================================================
+// cohorts (Phase 4.4)
+// =============================================================
+//
+// User-defined cohorts built from a structured rule JSON. The
+// `rules` column stays opaque to the DB so the builder DSL can
+// evolve (new filter fields, new operators) without a migration
+// per change. Authoring is per-user; reading is project-wide.
+// `syncDestinations` is an array of webhook endpoints the cohort
+// fans members out to — runtime delivery is wired separately,
+// the column just stores the config.
+
+export const cohorts = pgTable(
+  "cohorts",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** Author (creator). Null on legacy rows / imports. */
+    userId: text("userId").references(() => user.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    /** Opaque rule JSON — see DashboardCohortRule wire shape. */
+    rules: jsonb("rules")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    /** Optional array of sync targets (webhook urls + format). */
+    syncDestinations: jsonb("syncDestinations")
+      .$type<Record<string, unknown>[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectIdUpdatedAtIdx: index("cohorts_projectId_updatedAt_idx").on(
+      t.projectId,
+      t.updatedAt,
+    ),
+    projectIdNameKey: uniqueIndex("cohorts_projectId_name_key").on(
+      t.projectId,
+      t.name,
+    ),
+  }),
+);
+
+export type Cohort = typeof cohorts.$inferSelect;
+export type NewCohort = typeof cohorts.$inferInsert;
+
+// =============================================================
 // Inferred types
 // =============================================================
 //

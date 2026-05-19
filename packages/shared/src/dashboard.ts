@@ -998,6 +998,90 @@ export interface LiveEventMessage {
 }
 
 // =============================================================
+// Cohorts (Phase 4.4)
+// =============================================================
+//
+// Structured rule DSL. The builder UI emits `CohortRule` shapes;
+// the API validates with the same Zod schema before storing, and
+// the retention/LTV services compile rules to CH WHERE clauses.
+// Fields stay narrowly typed so a typo in the dashboard surfaces
+// at compile-time instead of as an opaque CH parse error.
+
+export type CohortFilterField =
+  | "country"
+  | "store"
+  | "productId"
+  | "purchaseType"
+  | "firstSeenAfter"
+  | "firstSeenBefore";
+
+export type CohortOperator = "eq" | "in" | "gte" | "lte" | "between";
+
+export type CohortFilterValue =
+  | string
+  | string[]
+  | number
+  | { min: number; max: number };
+
+export interface CohortFilter {
+  field: CohortFilterField;
+  op: CohortOperator;
+  value: CohortFilterValue;
+}
+
+export interface CohortRule {
+  match: "all" | "any";
+  filters: CohortFilter[];
+}
+
+export interface CohortSyncDestination {
+  /** Display label shown in the sync-destinations panel. */
+  label: string;
+  /** HTTPS endpoint that receives `cohort.membership` POSTs. */
+  url: string;
+  /** Optional shared-secret HMAC; null leaves the call unsigned. */
+  secret?: string | null;
+  /** Wire format. Always `json` today; reserved for future tools. */
+  format?: "json";
+}
+
+export interface CohortRow {
+  id: string;
+  projectId: string;
+  userId: string | null;
+  name: string;
+  description: string | null;
+  rules: CohortRule;
+  syncDestinations: CohortSyncDestination[];
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CohortsListResponse {
+  cohorts: CohortRow[];
+}
+
+export interface CohortRetentionPoint {
+  /** Period index (0 = activation period, 1 = next, …). */
+  period: number;
+  /** Number of cohort members active in this period. */
+  active: number;
+  /** Share of the original cohort size, 0–100 with one decimal. */
+  pct: number;
+}
+
+export interface CohortRetentionResponse {
+  /** Total cohort size (subscribers matched by the rules). */
+  size: number;
+  /** Period granularity used to bucket retention. */
+  granularity: "day" | "week" | "month";
+  /** Number of periods returned (including period 0). */
+  periods: number;
+  points: CohortRetentionPoint[];
+}
+
+// =============================================================
 // Audit logs (read-only viewer)
 // =============================================================
 

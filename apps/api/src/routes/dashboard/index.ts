@@ -5,6 +5,7 @@ import { appsRoute } from "./apps";
 import { audiencesRoute } from "./audiences";
 import { auditLogsRoute } from "./audit-logs";
 import { chartsRoute } from "./charts";
+import { cohortsRoute } from "./cohorts";
 import { credentialsRoute } from "./credentials";
 import { creditsRoute } from "./credits";
 import { eventsStreamRoute } from "./events-stream";
@@ -48,6 +49,7 @@ export const dashboardRoute = new Hono()
   .route("/projects", projectsRoute)
   .route("/projects/:projectId/apps", appsRoute)
   .route("/projects/:projectId/charts", chartsRoute)
+  .route("/projects/:projectId/cohorts", cohortsRoute)
   .route("/projects/:projectId/credentials", credentialsRoute)
   .route("/projects/:projectId/credits", creditsRoute)
   .route("/projects/:projectId/events", eventsStreamRoute)
