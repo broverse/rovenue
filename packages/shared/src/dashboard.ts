@@ -465,10 +465,21 @@ export interface CurrentUser {
   email: string;
   emailVerified: boolean;
   image: string | null;
+  /** BCP-47, e.g. "en-US". */
+  locale: string;
+  /** IANA tz database name, e.g. "Europe/Istanbul". */
+  timezone: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface MeResponse {
   user: CurrentUser;
+}
+
+export interface UpdateMeRequest {
+  name?: string;
+  image?: string | null;
+  locale?: string;
+  timezone?: string;
 }

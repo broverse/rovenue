@@ -15,7 +15,7 @@ import { Input } from "../../../ui/input";
 import { Select } from "../../../ui/select";
 import { Textarea } from "../../../ui/textarea";
 import { Segmented } from "../../../ui/segmented";
-import { useMe } from "../../../lib/hooks/useMe";
+import { useMe, useUpdateMe } from "../../../lib/hooks/useMe";
 
 /**
  * Splits a Better Auth display name into ("first", "rest") so the
@@ -63,6 +63,7 @@ type DateFormat = (typeof DATE_FORMATS)[number];
 function ProfilePage() {
   const { t } = useTranslation();
   const { data: me } = useMe();
+  const updateMe = useUpdateMe();
 
   // The Better Auth `user` row only carries name / email / image
   // today; the rest of the form (phone, role, company, bio, …)
@@ -97,11 +98,28 @@ function ProfilePage() {
       lastName: split.lastName,
       displayName: prev.displayName || me.name,
       email: me.email,
+      locale: me.locale,
+      timezone: me.timezone,
     }));
   }, [me]);
 
   const initials = (profile.firstName[0] ?? "") + (profile.lastName[0] ?? "");
   const emailVerified = me?.emailVerified ?? false;
+
+  const handleSave = () => {
+    // Re-assemble Better Auth's `name` from the first/last inputs,
+    // collapse blanks. Only the three persisted fields ride along
+    // — the rest of the form is local-mock for now.
+    const name = [profile.firstName, profile.lastName]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    updateMe.mutate({
+      ...(name && { name }),
+      locale: profile.locale,
+      timezone: profile.timezone,
+    });
+  };
 
   return (
     <AccountShell active="profile">
@@ -127,8 +145,18 @@ function ProfilePage() {
         meta={t("account.profile.info.lastEdited", { when: t("account.profile.info.lastEditedRel") })}
         footer={
           <>
-            <Button variant="light">{t("common.cancel")}</Button>
-            <Button variant="solid-primary">{t("account.profile.info.save")}</Button>
+            <Button variant="light" disabled={updateMe.isPending}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              variant="solid-primary"
+              onClick={handleSave}
+              disabled={updateMe.isPending}
+            >
+              {updateMe.isPending
+                ? t("common.saving", "Saving…")
+                : t("account.profile.info.save")}
+            </Button>
           </>
         }
       >

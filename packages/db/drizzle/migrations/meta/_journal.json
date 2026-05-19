@@ -169,6 +169,13 @@
       "when": 1777881637539,
       "tag": "0023_audit_logs_project_set_null",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1779208143468,
+      "tag": "0024_user_locale_timezone",
+      "breakpoints": true
     }
   ]
 }

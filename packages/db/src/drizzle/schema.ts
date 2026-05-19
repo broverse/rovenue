@@ -61,6 +61,11 @@ export const user = pgTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("emailVerified").notNull(),
   image: text("image"),
+  // Dashboard-side preferences. Better Auth doesn't touch these
+  // columns — the dashboard's profile PATCH owns the write side
+  // exclusively. BCP-47 locale tag + IANA tz database name.
+  locale: text("locale").notNull().default("en-US"),
+  timezone: text("timezone").notNull().default("UTC"),
   createdAt: timestamp("createdAt", { withTimezone: false }).notNull(),
   updatedAt: timestamp("updatedAt", { withTimezone: false }).notNull(),
 });
