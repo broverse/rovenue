@@ -45,3 +45,4 @@ export * as revenueEventRepo from "./repositories/revenue-events";
 export * as lockRepo from "./repositories/locks";
 export * as savedChartViewRepo from "./repositories/saved-chart-views";
 export * as chartAnnotationRepo from "./repositories/chart-annotations";
+export * as productRepo from "./repositories/products";

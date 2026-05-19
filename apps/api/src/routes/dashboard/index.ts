@@ -13,6 +13,8 @@ import { meRoute } from "./me";
 import { membersRoute } from "./members";
 import { metricsRoute } from "./metrics";
 import { overviewRoute } from "./overview";
+import { productGroupsDashboardRoute } from "./product-groups";
+import { productsDashboardRoute } from "./products";
 import { projectsRoute } from "./projects";
 import { subscribersRoute } from "./subscribers";
 import { subscriptionsRoute } from "./subscriptions";
@@ -49,6 +51,8 @@ export const dashboardRoute = new Hono()
   .route("/projects/:projectId/members", membersRoute)
   .route("/projects/:projectId/metrics", metricsRoute)
   .route("/projects/:projectId/overview", overviewRoute)
+  .route("/projects/:projectId/product-groups", productGroupsDashboardRoute)
+  .route("/projects/:projectId/products", productsDashboardRoute)
   .route("/projects/:projectId/subscribers", subscribersRoute)
   .route("/projects/:projectId/subscriptions", subscriptionsRoute)
   .route("/projects/:projectId/transactions", transactionsRoute)

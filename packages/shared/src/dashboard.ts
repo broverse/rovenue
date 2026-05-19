@@ -863,6 +863,89 @@ export interface ChartAnnotationsResponse {
 }
 
 // =============================================================
+// Products + Product Groups dashboard CRUD (Phase 4.1)
+// =============================================================
+
+export type ProductTypeName = "SUBSCRIPTION" | "CONSUMABLE" | "NON_CONSUMABLE";
+
+export interface DashboardProductRow {
+  id: string;
+  identifier: string;
+  type: ProductTypeName;
+  displayName: string;
+  storeIds: Record<string, string>;
+  entitlementKeys: string[];
+  creditAmount: number | null;
+  isActive: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DashboardProductsListResponse {
+  products: DashboardProductRow[];
+  nextCursor: string | null;
+}
+
+export interface DashboardProductCreateInput {
+  identifier: string;
+  type: ProductTypeName;
+  displayName: string;
+  storeIds?: Record<string, string>;
+  entitlementKeys?: string[];
+  creditAmount?: number | null;
+  isActive?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface DashboardProductUpdateInput {
+  identifier?: string;
+  type?: ProductTypeName;
+  displayName?: string;
+  storeIds?: Record<string, string>;
+  entitlementKeys?: string[];
+  creditAmount?: number | null;
+  isActive?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+/** Membership entry inside a `ProductGroup.products` JSONB column. */
+export interface ProductGroupMembership {
+  productId: string;
+  order: number;
+  isPromoted: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface DashboardProductGroupRow {
+  id: string;
+  identifier: string;
+  isDefault: boolean;
+  products: ProductGroupMembership[];
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DashboardProductGroupsListResponse {
+  groups: DashboardProductGroupRow[];
+}
+
+export interface DashboardProductGroupCreateInput {
+  identifier: string;
+  isDefault?: boolean;
+  products?: ProductGroupMembership[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface DashboardProductGroupUpdateInput {
+  identifier?: string;
+  isDefault?: boolean;
+  products?: ProductGroupMembership[];
+  metadata?: Record<string, unknown>;
+}
+
+// =============================================================
 // Audit logs (read-only viewer)
 // =============================================================
 

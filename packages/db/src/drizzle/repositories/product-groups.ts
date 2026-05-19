@@ -1,8 +1,9 @@
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   productGroups,
   products,
+  type NewProductGroup,
   type Product,
   type ProductGroup,
 } from "../schema";
@@ -100,6 +101,108 @@ export async function findProductByStoreId(
     )
     .limit(1);
   return rows[0] ?? null;
+}
+
+// =============================================================
+// Dashboard mutations
+// =============================================================
+//
+// The SDK reads above stay narrowly typed and hot-path-friendly.
+// Mutation helpers below back the dashboard CRUD route — they're
+// fine to bundle here so the read + write surfaces share the
+// uniqueness constraints around `identifier` and `isDefault`.
+
+export async function findProductGroupById(
+  db: Db,
+  projectId: string,
+  id: string,
+): Promise<ProductGroup | null> {
+  const rows = await db
+    .select()
+    .from(productGroups)
+    .where(
+      and(eq(productGroups.projectId, projectId), eq(productGroups.id, id)),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function createProductGroup(
+  db: Db,
+  input: NewProductGroup,
+): Promise<ProductGroup> {
+  return db.transaction(async (tx) => {
+    if (input.isDefault) {
+      // Only one default per project. Clear the flag on any
+      // existing default in the same transaction so the unique
+      // (projectId, isDefault=true) invariant survives concurrent
+      // creates — the trailing UPDATE in this branch + the INSERT
+      // below run inside the same tx and serialise via the row
+      // lock the UPDATE takes.
+      await tx
+        .update(productGroups)
+        .set({ isDefault: false, updatedAt: new Date() })
+        .where(
+          and(
+            eq(productGroups.projectId, input.projectId),
+            eq(productGroups.isDefault, true),
+          ),
+        );
+    }
+    const [row] = await tx.insert(productGroups).values(input).returning();
+    return row!;
+  });
+}
+
+export interface UpdateProductGroupInput {
+  identifier?: string;
+  isDefault?: boolean;
+  products?: unknown;
+  metadata?: Record<string, unknown>;
+}
+
+export async function updateProductGroup(
+  db: Db,
+  projectId: string,
+  id: string,
+  patch: UpdateProductGroupInput,
+): Promise<ProductGroup | null> {
+  return db.transaction(async (tx) => {
+    if (patch.isDefault === true) {
+      await tx
+        .update(productGroups)
+        .set({ isDefault: false, updatedAt: new Date() })
+        .where(
+          and(
+            eq(productGroups.projectId, projectId),
+            eq(productGroups.isDefault, true),
+            ne(productGroups.id, id),
+          ),
+        );
+    }
+    const [row] = await tx
+      .update(productGroups)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(
+        and(eq(productGroups.projectId, projectId), eq(productGroups.id, id)),
+      )
+      .returning();
+    return row ?? null;
+  });
+}
+
+export async function deleteProductGroup(
+  db: Db,
+  projectId: string,
+  id: string,
+): Promise<boolean> {
+  const rows = await db
+    .delete(productGroups)
+    .where(
+      and(eq(productGroups.projectId, projectId), eq(productGroups.id, id)),
+    )
+    .returning({ id: productGroups.id });
+  return rows.length > 0;
 }
 
 /**
