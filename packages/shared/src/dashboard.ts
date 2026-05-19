@@ -498,3 +498,22 @@ export interface MySession {
 export interface MySessionsResponse {
   sessions: MySession[];
 }
+
+/**
+ * OAuth providers recognised by Better Auth on the API today.
+ * Apple / SSO are placeholder UI rows — they don't have a
+ * matching provider configured server-side yet.
+ */
+export type OAuthProvider = "github" | "google";
+
+export interface MyLinkedAccount {
+  id: string;
+  providerId: OAuthProvider | string;
+  accountId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MyAccountsResponse {
+  accounts: MyLinkedAccount[];
+}

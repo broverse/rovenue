@@ -6,6 +6,8 @@ import { drizzle } from "@rovenue/db";
 import type {
   CurrentUser,
   MeResponse,
+  MyAccountsResponse,
+  MyLinkedAccount,
   MySession,
   MySessionsResponse,
 } from "@rovenue/shared";
@@ -161,4 +163,60 @@ export const meRoute = new Hono()
 
     await drizzle.sessionRepo.deleteSessionById(drizzle.db, id);
     return c.json(ok({ revoked: true }));
+  })
+  // =============================================================
+  // OAuth accounts
+  // =============================================================
+  //
+  // Lists the linked providers (github / google today) and lets
+  // the user disconnect a provider — except when it's the last
+  // login method on file. The OAuth-only deployment means the
+  // final delete would lock the account out of sign-in, so the
+  // DELETE 400s in that case.
+  //
+  // ----- GET /dashboard/me/accounts -----
+  .get("/accounts", async (c) => {
+    const sessionUser = c.get("user");
+    const rows = await drizzle.accountRepo.listAccountsByUser(
+      drizzle.db,
+      sessionUser.id,
+    );
+
+    const accounts: MyLinkedAccount[] = rows.map((row) => ({
+      id: row.id,
+      providerId: row.providerId,
+      accountId: row.accountId,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    }));
+
+    const payload: MyAccountsResponse = { accounts };
+    return c.json(ok(payload));
+  })
+  // ----- DELETE /dashboard/me/accounts/:provider -----
+  .delete("/accounts/:provider", async (c) => {
+    const provider = c.req.param("provider");
+    const sessionUser = c.get("user");
+
+    const total = await drizzle.accountRepo.countAccountsByUser(
+      drizzle.db,
+      sessionUser.id,
+    );
+    if (total <= 1) {
+      throw new HTTPException(400, {
+        message:
+          "Cannot disconnect the only remaining login method. Link another provider first.",
+      });
+    }
+
+    const removed = await drizzle.accountRepo.deleteAccountByProvider(
+      drizzle.db,
+      sessionUser.id,
+      provider,
+    );
+    if (!removed) {
+      throw new HTTPException(404, { message: "Provider not linked" });
+    }
+
+    return c.json(ok({ disconnected: provider }));
   });
