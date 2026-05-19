@@ -1,6 +1,7 @@
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { ArrowUpRight, BookOpen, KeyRound } from "lucide-react";
+import type { ProjectDetail } from "@rovenue/shared";
 import { Button } from "../../../../ui/button";
 import {
   EndpointsCard,
@@ -22,10 +23,10 @@ function SdkRoute() {
   const { projectId } = useParams({ from: "/_authed/projects/$projectId/sdk" });
   const { data: project } = useProject(projectId);
   if (!project) return null;
-  return <SdkPage />;
+  return <SdkPage project={project} />;
 }
 
-function SdkPage() {
+function SdkPage({ project }: { project: ProjectDetail }) {
   const { t } = useTranslation();
 
   return (
@@ -52,13 +53,16 @@ function SdkPage() {
 
       <SdkHero stats={HERO_STATS} />
       <QuickstartCard />
-      <KeysCard />
+      <KeysCard apiKeys={project.apiKeys} />
       <SdkPackagesGrid />
 
       <div className="grid items-start gap-4 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
         <EndpointsCard />
         <div className="flex flex-col gap-4">
-          <WebhookCard />
+          <WebhookCard
+            endpoint={project.webhookUrl}
+            hasSecret={project.hasWebhookSecret}
+          />
           <ResourcesCard />
         </div>
       </div>

@@ -6,18 +6,28 @@ import { CopyButton } from "../../ui/copy-button";
 import { WEBHOOK_DELIVERIES } from "./mock-data";
 import type { WebhookDelivery } from "./types";
 
+interface Props {
+  /** Project webhook URL — null when the operator hasn't set one yet. */
+  endpoint: string | null;
+  /**
+   * Whether the webhook signing secret is currently set. The server
+   * never echoes the secret on read; it's only revealed once at
+   * rotation time, so the card just surfaces a configured/missing
+   * indicator here.
+   */
+  hasSecret: boolean;
+}
+
 const STATUS_TONE: Record<WebhookDelivery["status"], NonNullable<ChipProps["tone"]>> = {
   ok: "success",
   retry: "warning",
   failed: "danger",
 };
 
-const ENDPOINT = "https://hooks.acme.app/rovenue";
-const SIGNING_SECRET = "whsec_3b94c0f7aa8b4d2c9b6e1f4d2a73c0e8";
-const SIGNING_PREVIEW = "whsec_3b94…c0e8";
-
-export function WebhookCard() {
+export function WebhookCard({ endpoint, hasSecret }: Props) {
   const { t } = useTranslation();
+  const endpointDisplay =
+    endpoint ?? t("sdkApi.webhooks.endpointMissing", "Not configured");
 
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1">
@@ -30,7 +40,7 @@ export function WebhookCard() {
             {t("sdkApi.webhooks.subtitle")}
           </p>
         </div>
-        <Button variant="flat" size="sm">
+        <Button variant="flat" size="sm" disabled={!endpoint}>
           <RotateCw size={13} />
           {t("sdkApi.webhooks.actions.test")}
         </Button>
@@ -42,13 +52,21 @@ export function WebhookCard() {
             {t("sdkApi.webhooks.endpoint")}
           </div>
           <div className="mt-1 flex items-center gap-2 rounded-md border border-rv-divider bg-rv-c2 px-3 py-1.5">
-            <code className="truncate font-rv-mono text-[12px] text-foreground">{ENDPOINT}</code>
-            <CopyButton
-              size="xs"
-              value={ENDPOINT}
-              label={t("sdkApi.copy.idle")}
-              copiedLabel={t("sdkApi.copy.copied")}
-            />
+            <code
+              className={`truncate font-rv-mono text-[12px] ${
+                endpoint ? "text-foreground" : "text-rv-mute-500"
+              }`}
+            >
+              {endpointDisplay}
+            </code>
+            {endpoint && (
+              <CopyButton
+                size="xs"
+                value={endpoint}
+                label={t("sdkApi.copy.idle")}
+                copiedLabel={t("sdkApi.copy.copied")}
+              />
+            )}
           </div>
         </div>
         <div>
@@ -56,15 +74,17 @@ export function WebhookCard() {
             {t("sdkApi.webhooks.signingSecret")}
           </div>
           <div className="mt-1 flex items-center gap-2 rounded-md border border-rv-divider bg-rv-c2 px-3 py-1.5">
-            <code className="truncate font-rv-mono text-[12px] text-rv-mute-700">
-              {SIGNING_PREVIEW}
-            </code>
-            <CopyButton
-              size="xs"
-              value={SIGNING_SECRET}
-              label={t("sdkApi.copy.idle")}
-              copiedLabel={t("sdkApi.copy.copied")}
-            />
+            <Chip tone={hasSecret ? "success" : "warning"}>
+              {hasSecret
+                ? t("sdkApi.webhooks.secretConfigured", "Configured")
+                : t("sdkApi.webhooks.secretMissing", "Not set")}
+            </Chip>
+            <span className="text-[11px] text-rv-mute-500">
+              {t(
+                "sdkApi.webhooks.secretHint",
+                "Rotate to reveal the signing secret.",
+              )}
+            </span>
           </div>
         </div>
       </div>
@@ -82,6 +102,12 @@ export function WebhookCard() {
             <ArrowUpRight size={11} />
           </a>
         </div>
+        {/*
+         * Recent delivery rows stay on mock data here — the dashboard
+         * only has /webhooks/failed (dead-letter only) right now, which
+         * is the wrong dataset for a "last successful + retry" stream.
+         * A dedicated recent-deliveries endpoint lands in Phase 3.
+         */}
         <ul className="flex flex-col gap-1.5">
           {WEBHOOK_DELIVERIES.map((delivery) => {
             const Icon = delivery.status === "ok" ? CircleCheck : CircleAlert;
