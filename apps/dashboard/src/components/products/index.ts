@@ -21,7 +21,6 @@ export {
   storeBadgeVariants,
   type StoreBadgeProps,
 } from "./store-badge";
-export { PRODUCTS_CATALOG, PRODUCT_GROUPS } from "./mock-data";
 export type {
   Currency,
   DurationCode,

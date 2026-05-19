@@ -5,11 +5,11 @@ import { Button } from "../../../../ui/button";
 import { StatCard } from "../../../../ui/stat-card";
 import { Layers, Plus, Terminal } from "lucide-react";
 import { useProject } from "../../../../lib/hooks/useProject";
+import { useProjectProducts } from "../../../../lib/hooks/useProjectProducts";
+import { rowToUiProduct } from "../../../../lib/dashboard-mappers";
 import {
   BulkBar,
   GroupSidebar,
-  PRODUCTS_CATALOG,
-  PRODUCT_GROUPS,
   ProductDrawer,
   ProductsTable,
   ProductsToolbar,
@@ -29,10 +29,10 @@ function ProductsRoute() {
   const { projectId } = useParams({ from: "/_authed/projects/$projectId/products" });
   const { data: project } = useProject(projectId);
   if (!project) return null;
-  return <ProductsPage />;
+  return <ProductsPage projectId={projectId} />;
 }
 
-function ProductsPage() {
+function ProductsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [group, setGroup] = useState<string>("All");
   const [status, setStatus] = useState<StatusFilter>("active");
@@ -42,17 +42,43 @@ function ProductsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [drawerId, setDrawerId] = useState<string | null>(null);
 
+  const productsQuery = useProjectProducts({
+    projectId,
+    includeInactive: true,
+    limit: 100,
+  });
+
+  const products = useMemo<ReadonlyArray<Product>>(() => {
+    const pages = productsQuery.data?.pages ?? [];
+    return pages.flatMap((page) => page.products.map(rowToUiProduct));
+  }, [productsQuery.data]);
+
+  // Sidebar group list comes from whatever distinct `metadata.group`
+  // values the project has actually used. "All" is always first; the
+  // rest are sorted alphabetically for stable ordering across reloads.
+  const groupList = useMemo<ReadonlyArray<string>>(() => {
+    const set = new Set<string>();
+    for (const p of products) set.add(p.group);
+    return ["All", ...Array.from(set).sort()];
+  }, [products]);
+
   const groupCounts = useMemo<Record<string, number>>(() => {
-    const m: Record<string, number> = { All: PRODUCTS_CATALOG.length };
-    for (const g of PRODUCT_GROUPS.slice(1)) {
-      m[g] = PRODUCTS_CATALOG.filter((p) => p.group === g).length;
+    const m: Record<string, number> = { All: products.length };
+    for (const g of groupList.slice(1)) {
+      m[g] = products.filter((p) => p.group === g).length;
     }
     return m;
-  }, []);
+  }, [products, groupList]);
+
+  // Reset the sidebar group selection if the active label disappears
+  // after a refetch (e.g. last product in that group was archived).
+  useEffect(() => {
+    if (group !== "All" && !groupList.includes(group)) setGroup("All");
+  }, [group, groupList]);
 
   const filtered = useMemo<ReadonlyArray<Product>>(() => {
     const q = search.trim().toLowerCase();
-    const list = PRODUCTS_CATALOG.filter((p) => {
+    const list = products.filter((p) => {
       if (group !== "All" && p.group !== group) return false;
       if (status !== "all" && p.status !== status) return false;
       if (q) {
@@ -74,7 +100,7 @@ function ProductsPage() {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [group, status, search, sortKey, sortDir]);
+  }, [products, group, status, search, sortKey, sortDir]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -107,19 +133,22 @@ function ProductsPage() {
     setSearch("");
   };
 
-  // KPIs computed off the unfiltered catalog so they reflect the whole project.
-  const totalMrr = PRODUCTS_CATALOG.reduce((s, p) => s + p.mrr, 0);
-  const totalSubs = PRODUCTS_CATALOG.reduce((s, p) => s + (p.subs ?? 0), 0);
-  const activeCount = PRODUCTS_CATALOG.filter((p) => p.status === "active").length;
-  const draftCount = PRODUCTS_CATALOG.filter((p) => p.status === "draft").length;
-  const archivedCount = PRODUCTS_CATALOG.length - activeCount - draftCount;
+  const totalMrr = products.reduce((s, p) => s + p.mrr, 0);
+  const totalSubs = products.reduce((s, p) => s + (p.subs ?? 0), 0);
+  const activeCount = products.filter((p) => p.status === "active").length;
+  const draftCount = products.filter((p) => p.status === "draft").length;
+  const archivedCount = products.length - activeCount - draftCount;
+  const entitlementCount = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of products) for (const k of p.entitlements) s.add(k);
+    return s.size;
+  }, [products]);
 
   const drawerProduct = useMemo<Product | null>(
-    () => PRODUCTS_CATALOG.find((p) => p.id === drawerId) ?? null,
-    [drawerId],
+    () => products.find((p) => p.id === drawerId) ?? null,
+    [products, drawerId],
   );
 
-  // Press `/` to focus the search input. Mirrors the keyboard tip below.
   const searchAreaRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -165,7 +194,7 @@ function ProductsPage() {
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           label={t("products.stats.total")}
-          value={PRODUCTS_CATALOG.length}
+          value={products.length}
           description={t("products.stats.totalBreakdown", {
             active: activeCount,
             draft: draftCount,
@@ -175,8 +204,6 @@ function ProductsPage() {
         <StatCard
           label={t("products.stats.combinedMrr")}
           value={`$${totalMrr.toLocaleString()}`}
-          description={`▲ 11.3% ${t("products.stats.vsPrev")}`}
-          descriptionTone="success"
         />
         <StatCard
           label={t("products.stats.activeSubs")}
@@ -185,8 +212,7 @@ function ProductsPage() {
         />
         <StatCard
           label={t("products.stats.entitlements")}
-          value={6}
-          description="premium · pro · basic · team_features · unlimited_exports · lifetime_badge"
+          value={entitlementCount}
         />
       </div>
 
@@ -196,7 +222,7 @@ function ProductsPage() {
             groups: t("products.groups.heading"),
             status: t("products.status.heading"),
           }}
-          groups={PRODUCT_GROUPS}
+          groups={groupList}
           groupCounts={groupCounts}
           selectedGroup={group}
           onSelectGroup={setGroup}
@@ -210,7 +236,7 @@ function ProductsPage() {
               search={search}
               onSearchChange={setSearch}
               visible={filtered.length}
-              total={PRODUCTS_CATALOG.length}
+              total={products.length}
             />
           </div>
 

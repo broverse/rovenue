@@ -1,16 +1,19 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../ui/button";
 import { BookOpen, Plus } from "lucide-react";
 import { useProject } from "../../../../lib/hooks/useProject";
+import { useProjectProductGroups } from "../../../../lib/hooks/useProjectProductGroups";
+import { useProjectProducts } from "../../../../lib/hooks/useProjectProducts";
+import { rowToUiProductGroup } from "../../../../lib/dashboard-mappers";
 import {
   EntitlementsSection,
   OfferingsSection,
-  PRODUCT_GROUPS,
   ProductEntitlementMatrix,
   ProductGroupHeader,
   ProductGroupList,
+  type ProductGroup,
 } from "../../../../components/product-groups";
 
 export const Route = createFileRoute("/_authed/projects/$projectId/product-groups")({
@@ -21,25 +24,59 @@ function ProductGroupsRoute() {
   const { projectId } = useParams({ from: "/_authed/projects/$projectId/product-groups" });
   const { data: project } = useProject(projectId);
   if (!project) return null;
-  return <ProductGroupsPage />;
+  return <ProductGroupsPage projectId={projectId} />;
 }
 
-function ProductGroupsPage() {
+function ProductGroupsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
-  const [selectedId, setSelectedId] = useState<string>(PRODUCT_GROUPS[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState<string>("");
   const [search, setSearch] = useState("");
+
+  const groupsQuery = useProjectProductGroups(projectId);
+  // Pull enough products to resolve every group membership in one shot.
+  // The CRUD layer caps lists at 100; bumping to 200 keeps lookups
+  // O(1) and avoids a second roundtrip per group selection.
+  const productsQuery = useProjectProducts({
+    projectId,
+    includeInactive: true,
+    limit: 200,
+  });
+
+  const productById = useMemo(() => {
+    const pages = productsQuery.data?.pages ?? [];
+    const m = new Map<string, (typeof pages)[number]["products"][number]>();
+    for (const page of pages) for (const row of page.products) m.set(row.id, row);
+    return m;
+  }, [productsQuery.data]);
+
+  const groups = useMemo<ReadonlyArray<ProductGroup>>(() => {
+    const rows = groupsQuery.data?.groups ?? [];
+    return rows.map((row) => rowToUiProductGroup(row, productById));
+  }, [groupsQuery.data, productById]);
+
+  // Keep the selection sticky across refetches; fall back to the first
+  // group only when nothing valid is selected anymore.
+  useEffect(() => {
+    if (groups.length === 0) {
+      if (selectedId !== "") setSelectedId("");
+      return;
+    }
+    if (!groups.some((g) => g.id === selectedId)) {
+      setSelectedId(groups[0]!.id);
+    }
+  }, [groups, selectedId]);
 
   const filteredGroups = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return PRODUCT_GROUPS;
-    return PRODUCT_GROUPS.filter(
+    if (!q) return groups;
+    return groups.filter(
       (g) => g.name.toLowerCase().includes(q) || g.key.toLowerCase().includes(q),
     );
-  }, [search]);
+  }, [groups, search]);
 
   const selected = useMemo(
-    () => PRODUCT_GROUPS.find((g) => g.id === selectedId) ?? PRODUCT_GROUPS[0]!,
-    [selectedId],
+    () => groups.find((g) => g.id === selectedId) ?? groups[0] ?? null,
+    [groups, selectedId],
   );
 
   return (
@@ -65,22 +102,36 @@ function ProductGroupsPage() {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[320px_minmax(0,1fr)] xl:gap-5 max-xl:lg:grid-cols-[260px_minmax(0,1fr)]">
-        <ProductGroupList
-          groups={filteredGroups}
-          selectedId={selected.id}
-          onSelect={setSelectedId}
-          search={search}
-          onSearchChange={setSearch}
-        />
+      {selected ? (
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[320px_minmax(0,1fr)] xl:gap-5 max-xl:lg:grid-cols-[260px_minmax(0,1fr)]">
+          <ProductGroupList
+            groups={filteredGroups}
+            selectedId={selected.id}
+            onSelect={setSelectedId}
+            search={search}
+            onSearchChange={setSearch}
+          />
 
-        <div className="flex min-w-0 flex-col gap-4">
-          <ProductGroupHeader group={selected} />
-          <EntitlementsSection group={selected} />
-          <ProductEntitlementMatrix group={selected} />
-          <OfferingsSection group={selected} />
+          <div className="flex min-w-0 flex-col gap-4">
+            <ProductGroupHeader group={selected} />
+            <EntitlementsSection group={selected} />
+            <ProductEntitlementMatrix group={selected} />
+            <OfferingsSection group={selected} />
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex min-h-[240px] flex-col items-center justify-center rounded-lg border border-dashed border-rv-divider bg-rv-c1 px-6 py-12 text-center">
+          <h2 className="text-[15px] font-semibold">
+            {t("productGroups.empty.title", "No product groups yet")}
+          </h2>
+          <p className="mt-1 max-w-[420px] text-[13px] text-rv-mute-500">
+            {t(
+              "productGroups.empty.body",
+              "Create a product group to bundle SKUs and entitlements that ship together.",
+            )}
+          </p>
+        </div>
+      )}
     </>
   );
 }
