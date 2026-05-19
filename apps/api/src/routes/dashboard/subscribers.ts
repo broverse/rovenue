@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { zValidator } from "@hono/zod-validator";
 import { MemberRole, drizzle } from "@rovenue/db";
 import type {
   SubscriberDetail,
@@ -87,9 +88,27 @@ const anonymizeBodySchema = z.object({
     .default("gdpr_request"),
 });
 
+// zValidator's default failure response is `{ success: false, error }`
+// which doesn't go through our global error handler. Re-throwing as
+// HTTPException routes the failure through `errorHandler` → the
+// canonical `fail(VALIDATION_ERROR, message)` envelope.
+function throwOnInvalid(
+  result: { success: true } | { success: false; error: z.ZodError },
+): void {
+  if (!result.success) {
+    throw new HTTPException(400, {
+      message:
+        result.error.errors[0]?.message ?? "Invalid query parameters",
+    });
+  }
+}
+
 export const subscribersRoute = new Hono()
   .use("*", requireDashboardAuth)
-  .get("/", async (c) => {
+  .get(
+    "/",
+    zValidator("query", listQuerySchema, throwOnInvalid),
+    async (c) => {
   const projectId = c.req.param("projectId");
   if (!projectId) {
     throw new HTTPException(400, { message: "Missing projectId" });
@@ -97,22 +116,7 @@ export const subscribersRoute = new Hono()
   const user = c.get("user");
   await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
 
-  let query: z.infer<typeof listQuerySchema>;
-  try {
-    query = listQuerySchema.parse({
-      cursor: c.req.query("cursor"),
-      limit: c.req.query("limit"),
-      q: c.req.query("q"),
-    });
-  } catch (err) {
-    throw new HTTPException(400, {
-      message:
-        err instanceof z.ZodError
-          ? err.errors[0]?.message ?? "Invalid query parameters"
-          : "Invalid query parameters",
-    });
-  }
-
+  const query = c.req.valid("query");
   const cursor = decodeCursor(query.cursor);
 
   // listSubscribers builds its own WHERE internally (projectId +
@@ -253,7 +257,10 @@ export const subscribersRoute = new Hono()
   // Eventual consistency: rows just inserted into Postgres
   // `credit_ledger` may not appear until the outbox dispatcher
   // publishes (≤2s p99). Documented in Plan 3 ADR / §B.1.
-  .get("/:id/credit-history", async (c) => {
+  .get(
+    "/:id/credit-history",
+    zValidator("query", creditHistoryQuerySchema, throwOnInvalid),
+    async (c) => {
     const projectId = c.req.param("projectId");
     const subscriberId = c.req.param("id");
     if (!projectId || !subscriberId) {
@@ -262,20 +269,7 @@ export const subscribersRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
 
-    let query: z.infer<typeof creditHistoryQuerySchema>;
-    try {
-      query = creditHistoryQuerySchema.parse({
-        cursor: c.req.query("cursor"),
-        limit: c.req.query("limit"),
-      });
-    } catch (err) {
-      throw new HTTPException(400, {
-        message:
-          err instanceof z.ZodError
-            ? err.errors[0]?.message ?? "Invalid query parameters"
-            : "Invalid query parameters",
-      });
-    }
+    const query = c.req.valid("query");
 
     // Cross-project hardening: 404 if the subscriber lives in a
     // different project (matches the detail endpoint's behaviour).
