@@ -327,7 +327,8 @@
       "growth": "GROWTH",
       "ledger": "LEDGER",
       "insights": "INSIGHTS",
-      "integrations": "INTEGRATIONS"
+      "integrations": "INTEGRATIONS",
+      "admin": "ADMIN"
     },
     "items": {
       "dashboard": "Dashboard",
@@ -339,12 +340,16 @@
       "transactions": "Transactions",
       "experiments": "Experiments",
       "flags": "Feature flags",
+      "audiences": "Audiences",
       "cohorts": "Cohorts",
       "credits": "Credits",
       "charts": "Charts",
       "queries": "Queries",
+      "leaderboards": "Leaderboards",
       "apps": "Apps & integrations",
-      "sdk": "SDK & API keys"
+      "sdk": "SDK & API keys",
+      "members": "Members",
+      "auditLogs": "Audit log"
     },
     "footer": {
       "docs": "Docs",
@@ -398,7 +403,11 @@
     "charts": "Charts",
     "queries": "Queries",
     "cohorts": "Cohorts",
-    "sdk": "SDK & API"
+    "sdk": "SDK & API",
+    "audiences": "Audiences",
+    "leaderboards": "Leaderboards",
+    "members": "Members",
+    "auditLogs": "Audit log"
   },
   "overview": {
     "title": "Overview",

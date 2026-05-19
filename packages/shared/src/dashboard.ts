@@ -381,3 +381,71 @@ export interface MrrSeriesResponse {
   to: string;
   points: MrrSeriesPoint[];
 }
+
+// =============================================================
+// Audit logs (read-only viewer)
+// =============================================================
+
+export interface AuditLogEntry {
+  id: string;
+  projectId: string | null;
+  userId: string;
+  action: string;
+  resource: string;
+  resourceId: string;
+  before: unknown;
+  after: unknown;
+  ipAddress: string | null;
+  userAgent: string | null;
+  prevHash: string | null;
+  rowHash: string | null;
+  createdAt: string;
+}
+
+export interface OffsetPagination {
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+export interface AuditLogsListResponse {
+  logs: AuditLogEntry[];
+  pagination: OffsetPagination;
+}
+
+// =============================================================
+// Audiences
+// =============================================================
+
+export interface AudienceRow {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  rules: Record<string, unknown>;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AudiencesListResponse {
+  audiences: AudienceRow[];
+}
+
+// =============================================================
+// Leaderboards (top spenders / top consumers)
+// =============================================================
+
+export interface LeaderboardEntry {
+  subscriberId: string;
+  /** Decimal-as-string. Negative for top-consumers (credits debited). */
+  totalUsd: string;
+  eventCount: number;
+}
+
+export interface LeaderboardResponse {
+  from: string;
+  to: string;
+  entries: LeaderboardEntry[];
+}

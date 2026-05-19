@@ -33,6 +33,10 @@ function useBreadcrumbTitleKey(): string {
   if (id.includes("/charts")) return "breadcrumb.charts";
   if (id.includes("/credits")) return "breadcrumb.credits";
   if (id.includes("/cohorts")) return "breadcrumb.cohorts";
+  if (id.includes("/audit-logs")) return "breadcrumb.auditLogs";
+  if (id.includes("/audiences")) return "breadcrumb.audiences";
+  if (id.includes("/leaderboards")) return "breadcrumb.leaderboards";
+  if (id.includes("/members")) return "breadcrumb.members";
   return "breadcrumb.overview";
 }
 

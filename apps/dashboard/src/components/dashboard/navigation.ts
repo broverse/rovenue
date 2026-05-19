@@ -3,6 +3,7 @@ import {
   CirclePlus,
   Flag,
   FlaskConical,
+  History,
   Layers,
   LayoutGrid,
   LineChart,
@@ -10,7 +11,10 @@ import {
   Receipt,
   RotateCw,
   Search,
+  Target,
   Terminal,
+  Trophy,
+  UserCog,
   Users,
   Users2,
   Zap,
@@ -88,6 +92,12 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
         badge: "3",
       },
       { id: "flags", labelKey: "sidebar.items.flags", icon: Flag, to: "/projects/$projectId/feature-flags" },
+      {
+        id: "audiences",
+        labelKey: "sidebar.items.audiences",
+        icon: Target,
+        to: "/projects/$projectId/audiences",
+      },
       { id: "cohorts", labelKey: "sidebar.items.cohorts", icon: Users2, to: "/projects/$projectId/cohorts" },
     ],
   },
@@ -117,6 +127,12 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
         icon: Search,
         to: "/projects/$projectId/queries",
       },
+      {
+        id: "leaderboards",
+        labelKey: "sidebar.items.leaderboards",
+        icon: Trophy,
+        to: "/projects/$projectId/leaderboards",
+      },
     ],
   },
   {
@@ -126,4 +142,22 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
       { id: "sdk", labelKey: "sidebar.items.sdk", icon: Terminal, to: "/projects/$projectId/sdk" },
     ],
   },
+  {
+    sectionKey: "admin",
+    items: [
+      {
+        id: "members",
+        labelKey: "sidebar.items.members",
+        icon: UserCog,
+        to: "/projects/$projectId/members",
+      },
+      {
+        id: "audit-logs",
+        labelKey: "sidebar.items.auditLogs",
+        icon: History,
+        to: "/projects/$projectId/audit-logs",
+      },
+    ],
+  },
 ];
+
