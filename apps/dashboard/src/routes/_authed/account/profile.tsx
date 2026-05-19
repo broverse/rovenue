@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -15,6 +15,23 @@ import { Input } from "../../../ui/input";
 import { Select } from "../../../ui/select";
 import { Textarea } from "../../../ui/textarea";
 import { Segmented } from "../../../ui/segmented";
+import { useMe } from "../../../lib/hooks/useMe";
+
+/**
+ * Splits a Better Auth display name into ("first", "rest") so the
+ * existing two-input UI keeps working. Email-style or single-token
+ * names fall back to "" for the last name.
+ */
+function splitName(name: string): { firstName: string; lastName: string } {
+  const trimmed = name.trim();
+  if (!trimmed) return { firstName: "", lastName: "" };
+  const space = trimmed.indexOf(" ");
+  if (space === -1) return { firstName: trimmed, lastName: "" };
+  return {
+    firstName: trimmed.slice(0, space),
+    lastName: trimmed.slice(space + 1),
+  };
+}
 
 export const Route = createFileRoute("/_authed/account/profile")({
   component: ProfilePage,
@@ -45,11 +62,17 @@ type DateFormat = (typeof DATE_FORMATS)[number];
 
 function ProfilePage() {
   const { t } = useTranslation();
+  const { data: me } = useMe();
+
+  // The Better Auth `user` row only carries name / email / image
+  // today; the rest of the form (phone, role, company, bio, …)
+  // stays on local mock state until the schema grows those columns
+  // (tracked in the Phase 2 roadmap).
   const [profile, setProfile] = useState({
-    firstName: "Aiden",
-    lastName: "Kowalski",
-    displayName: "Aiden K.",
-    email: "aiden@lumen.co",
+    firstName: "",
+    lastName: "",
+    displayName: "",
+    email: "",
     phone: "+1 (415) 555-0188",
     role: "Founder & Head of Growth",
     company: "Lumen Labs, Inc.",
@@ -62,7 +85,23 @@ function ProfilePage() {
   const update = <K extends keyof typeof profile>(k: K, v: (typeof profile)[K]) =>
     setProfile((p) => ({ ...p, [k]: v }));
 
+  // Hydrate identity fields once the /me response lands. The form
+  // remains editable but `email` is treated read-only since it
+  // also drives Better Auth + invite-by-email lookups.
+  useEffect(() => {
+    if (!me) return;
+    const split = splitName(me.name);
+    setProfile((prev) => ({
+      ...prev,
+      firstName: split.firstName,
+      lastName: split.lastName,
+      displayName: prev.displayName || me.name,
+      email: me.email,
+    }));
+  }, [me]);
+
   const initials = (profile.firstName[0] ?? "") + (profile.lastName[0] ?? "");
+  const emailVerified = me?.emailVerified ?? false;
 
   return (
     <AccountShell active="profile">
@@ -139,15 +178,23 @@ function ProfilePage() {
           hint={t("account.profile.contact.emailHint")}
         >
           <div className="flex flex-wrap items-center gap-2">
+            {/* Email is owned by Better Auth — read-only here. A
+                change-email flow lands separately. */}
             <Input
               mono
               value={profile.email}
-              onChange={(e) => update("email", e.target.value)}
+              readOnly
               className="min-w-0 flex-1"
             />
-            <span className="rounded bg-rv-success/15 px-2.5 py-1 font-rv-mono text-[11px] text-rv-success">
-              {t("account.profile.contact.verified")}
-            </span>
+            {emailVerified ? (
+              <span className="rounded bg-rv-success/15 px-2.5 py-1 font-rv-mono text-[11px] text-rv-success">
+                {t("account.profile.contact.verified")}
+              </span>
+            ) : (
+              <span className="rounded bg-rv-warning/15 px-2.5 py-1 font-rv-mono text-[11px] text-rv-warning">
+                {t("account.profile.contact.unverified", "Unverified")}
+              </span>
+            )}
           </div>
         </Field>
         <Field

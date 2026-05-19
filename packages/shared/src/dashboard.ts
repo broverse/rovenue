@@ -449,3 +449,26 @@ export interface LeaderboardResponse {
   to: string;
   entries: LeaderboardEntry[];
 }
+
+// =============================================================
+// Authenticated user — /dashboard/me
+// =============================================================
+//
+// Phase 2 — Account / Identity. The shape mirrors the Better
+// Auth `user` row that the API reads off the session; locale/
+// timezone columns get added in the following commit so callers
+// can already key off the field names.
+
+export interface CurrentUser {
+  id: string;
+  name: string;
+  email: string;
+  emailVerified: boolean;
+  image: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MeResponse {
+  user: CurrentUser;
+}

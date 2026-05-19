@@ -7,6 +7,7 @@ import { credentialsRoute } from "./credentials";
 import { experimentsRoute } from "./experiments";
 import { featureFlagsRoute } from "./feature-flags";
 import { leaderboardsRoute } from "./leaderboards";
+import { meRoute } from "./me";
 import { membersRoute } from "./members";
 import { metricsRoute } from "./metrics";
 import { projectsRoute } from "./projects";
@@ -34,6 +35,7 @@ export const dashboardRoute = new Hono()
   .route("/audit-logs", auditLogsRoute)
   .route("/experiments", experimentsRoute)
   .route("/feature-flags", featureFlagsRoute)
+  .route("/me", meRoute)
   .route("/projects", projectsRoute)
   .route("/projects/:projectId/credentials", credentialsRoute)
   .route("/projects/:projectId/leaderboards", leaderboardsRoute)
