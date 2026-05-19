@@ -32,5 +32,5 @@ export function SubscriberDetailPage({
   }
   if (error) return <div className="text-danger-500">{error.message}</div>;
   if (!data) return null;
-  return <SubscriberDetailPanel data={data} />;
+  return <SubscriberDetailPanel data={data} projectId={projectId} />;
 }

@@ -337,3 +337,30 @@ export interface FeatureFlagListResponse {
 export interface FeatureFlagDetailResponse {
   flag: FeatureFlagListItem;
 }
+
+// =============================================================
+// Subscriber GDPR / credits — dashboard action endpoints
+// =============================================================
+
+export type AnonymizeSubscriberReason =
+  | "gdpr_request"
+  | "kvkk_request"
+  | "retention_policy";
+
+export interface AnonymizeSubscriberRequest {
+  reason?: AnonymizeSubscriberReason;
+}
+
+export interface AnonymizeSubscriberResponse {
+  subscriberId: string;
+  anonymizedAppUserId: string;
+  deletedAt: string;
+}
+
+/** Identical wire shape to {@link SubscriberCreditLedgerRow}. */
+export type CreditHistoryEntry = SubscriberCreditLedgerRow;
+
+export interface CreditHistoryResponse {
+  entries: CreditHistoryEntry[];
+  nextCursor: string | null;
+}
