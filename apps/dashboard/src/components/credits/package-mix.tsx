@@ -1,14 +1,20 @@
 import { useTranslation } from "react-i18next";
 import { PACKS } from "./mock-data";
+import type { CreditPack } from "./types";
+
+type PackageMixProps = {
+  packs?: ReadonlyArray<CreditPack>;
+};
 
 /**
  * Package-mix card — top-N credit packs sold in the last 28 days, with
  * a thin pack-color rail under each row encoding share. The header sub
  * shows the running total of units sold across all packs.
  */
-export function PackageMix() {
+export function PackageMix({ packs }: PackageMixProps = {}) {
   const { t } = useTranslation();
-  const totalSold = PACKS.reduce((sum, pack) => sum + pack.sold, 0);
+  const data = packs && packs.length > 0 ? packs : PACKS;
+  const totalSold = data.reduce((sum, pack) => sum + pack.sold, 0);
 
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
@@ -19,7 +25,7 @@ export function PackageMix() {
         </span>
       </header>
       <div className="flex flex-col">
-        {PACKS.map((pack) => (
+        {data.map((pack) => (
           <div
             key={pack.id}
             className="grid grid-cols-[1fr_auto_auto] items-center gap-2.5 border-b border-white/[0.05] py-2.5 last:border-none"

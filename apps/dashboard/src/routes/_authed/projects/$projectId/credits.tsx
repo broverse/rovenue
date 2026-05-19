@@ -14,10 +14,22 @@ import {
   VolumeChart,
   WALLET_STATS,
   WalletStat,
+  type CreditBurner,
+  type CreditPack,
+  type CreditSource,
   type LedgerEntry,
   type LedgerScope,
+  type VolumePoint,
 } from "../../../../components/credits";
 import { useProject } from "../../../../lib/hooks/useProject";
+import { useProjectCreditsRollup } from "../../../../lib/hooks/useProjectCredits";
+import type {
+  CreditLedgerType,
+  CreditsLedgerRow,
+  CreditsPackageRow,
+  CreditsTopBurnerRow,
+  CreditsVolumePoint,
+} from "@rovenue/shared";
 
 export const Route = createFileRoute("/_authed/projects/$projectId/credits")({
   component: CreditsRoute,
@@ -29,17 +41,162 @@ function CreditsRoute() {
   });
   const { data: project } = useProject(projectId);
   if (!project) return null;
-  return <CreditsPage />;
+  return <CreditsPage projectId={projectId} />;
 }
 
-function CreditsPage() {
+// =============================================================
+// Wire → UI adapters
+// =============================================================
+
+const LEDGER_TYPE_TO_SOURCE: Record<CreditLedgerType, CreditSource> = {
+  PURCHASE: "purchase",
+  BONUS: "bonus",
+  SPEND: "consume",
+  REFUND: "refund",
+  EXPIRE: "expire",
+  TRANSFER_IN: "adjust",
+  TRANSFER_OUT: "adjust",
+};
+
+const AVATAR_PALETTE: ReadonlyArray<string> = [
+  "#3B82F6",
+  "#8B5CF6",
+  "#10B981",
+  "#F59E0B",
+  "#EC4899",
+  "#06B6D4",
+  "#F97316",
+  "#84CC16",
+];
+
+function avatarColorFor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  }
+  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length]!;
+}
+
+function shortId(id: string): string {
+  if (id.length <= 12) return id;
+  return `${id.slice(0, 4)}…${id.slice(-4)}`;
+}
+
+const TIME_FMT = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+function toUiLedgerEntry(row: CreditsLedgerRow): LedgerEntry {
+  return {
+    id: row.id,
+    ts: TIME_FMT.format(new Date(row.createdAt)),
+    user: shortId(row.subscriberId),
+    uid: row.subscriberId,
+    avatarColor: avatarColorFor(row.subscriberId),
+    source: LEDGER_TYPE_TO_SOURCE[row.type] ?? "consume",
+    delta: row.amount,
+    balance: row.balance,
+    note:
+      row.description ??
+      [row.referenceType, row.referenceId].filter(Boolean).join(" · ") ??
+      "",
+    extId: row.referenceId ?? undefined,
+  };
+}
+
+const PACK_PALETTE: ReadonlyArray<string> = [
+  "var(--color-rv-accent-500)",
+  "var(--color-rv-success)",
+  "var(--color-rv-violet)",
+  "var(--color-rv-warning)",
+  "var(--color-rv-cyan)",
+  "var(--color-rv-mute-600)",
+];
+
+function toUiPacks(rows: ReadonlyArray<CreditsPackageRow>): ReadonlyArray<CreditPack> {
+  return rows.map((row, i) => {
+    const rev = Number(row.revenueUsd);
+    return {
+      id: row.productId,
+      name: row.displayName ?? row.identifier ?? row.productId,
+      price: row.sold > 0 ? Math.round((rev / row.sold) * 100) / 100 : 0,
+      sold: row.sold,
+      share: Math.round(row.pct),
+      color: PACK_PALETTE[i % PACK_PALETTE.length]!,
+    };
+  });
+}
+
+const BURNER_LABEL: Record<string, string> = {
+  other: "Other",
+  purchase: "Top-ups",
+  consume: "Consumption",
+};
+
+function toUiBurners(rows: ReadonlyArray<CreditsTopBurnerRow>): ReadonlyArray<CreditBurner> {
+  return rows.map((row) => ({
+    id: row.key,
+    feature: BURNER_LABEL[row.key] ?? row.key,
+    description: "Credits debited",
+    cost: `${row.pct.toFixed(1)}% share`,
+    burnedM: Math.round((row.burned / 1_000_000) * 10) / 10,
+    pct: Math.round(row.pct),
+  }));
+}
+
+function toUiVolume(points: ReadonlyArray<CreditsVolumePoint>): ReadonlyArray<VolumePoint> {
+  return points.map((p, i) => ({
+    d: i,
+    issued: p.issued,
+    burned: p.burned,
+    net: p.net,
+  }));
+}
+
+// =============================================================
+// Page
+// =============================================================
+
+function CreditsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [scope, setScope] = useState<LedgerScope>("all");
+  const { data } = useProjectCreditsRollup({ projectId });
+
+  // Derive UI shapes from the wire response, falling back to
+  // the design-spec mocks so the page stays populated while
+  // the rollup query is in flight.
+  const ui = useMemo(() => {
+    if (!data) return null;
+    return {
+      ledger: data.ledger.map(toUiLedgerEntry),
+      packs: toUiPacks(data.packages),
+      burners: toUiBurners(data.topBurners),
+      volume: toUiVolume(data.volume),
+      response: data,
+    };
+  }, [data]);
 
   const visible = useMemo<ReadonlyArray<LedgerEntry>>(() => {
-    if (scope === "all") return LEDGER_ENTRIES;
-    return LEDGER_ENTRIES.filter((entry) => entry.source === scope);
-  }, [scope]);
+    const entries = ui?.ledger ?? LEDGER_ENTRIES;
+    if (scope === "all") return entries;
+    return entries.filter((entry) => entry.source === scope);
+  }, [ui, scope]);
+
+  const walletValues = useMemo(() => {
+    if (!ui) return null;
+    const { kpis } = ui.response;
+    return {
+      outstandingValue: kpis.outstanding.toLocaleString(),
+      issuedValue: kpis.issued28d.toLocaleString(),
+      burnedValue: kpis.burned28d.toLocaleString(),
+      revenueValue: `$${Math.round(Number(kpis.revenue28dUsd)).toLocaleString()}`,
+      breakageValue:
+        kpis.breakagePct !== null ? `${kpis.breakagePct.toFixed(1)}%` : "—",
+    };
+  }, [ui]);
 
   return (
     <>
@@ -72,7 +229,7 @@ function CreditsPage() {
         <WalletStat
           accent
           label={t("credits.kpi.outstandingBalance")}
-          value={WALLET_STATS.outstandingValue}
+          value={walletValues?.outstandingValue ?? WALLET_STATS.outstandingValue}
           unit={WALLET_STATS.outstandingUnit}
           description={t(
             WALLET_STATS.outstandingDescriptionKey,
@@ -83,7 +240,7 @@ function CreditsPage() {
         />
         <WalletStat
           label={t("credits.kpi.issued28d")}
-          value={WALLET_STATS.issuedValue}
+          value={walletValues?.issuedValue ?? WALLET_STATS.issuedValue}
           unit={WALLET_STATS.issuedUnit}
           description={t(WALLET_STATS.issuedDescriptionKey)}
           descriptionTone="success"
@@ -92,7 +249,7 @@ function CreditsPage() {
         />
         <WalletStat
           label={t("credits.kpi.burned28d")}
-          value={WALLET_STATS.burnedValue}
+          value={walletValues?.burnedValue ?? WALLET_STATS.burnedValue}
           unit={WALLET_STATS.burnedUnit}
           description={t(
             WALLET_STATS.burnedDescriptionKey,
@@ -103,7 +260,7 @@ function CreditsPage() {
         />
         <WalletStat
           label={t("credits.kpi.revenue28d")}
-          value={WALLET_STATS.revenueValue}
+          value={walletValues?.revenueValue ?? WALLET_STATS.revenueValue}
           unit={WALLET_STATS.revenueUnit}
           description={t(
             WALLET_STATS.revenueDescriptionKey,
@@ -114,7 +271,7 @@ function CreditsPage() {
         />
         <WalletStat
           label={t("credits.kpi.breakage")}
-          value={WALLET_STATS.breakageValue}
+          value={walletValues?.breakageValue ?? WALLET_STATS.breakageValue}
           unit={WALLET_STATS.breakageUnit}
           description={t(WALLET_STATS.breakageDescriptionKey)}
           sparkSeed={9}
@@ -123,14 +280,14 @@ function CreditsPage() {
       </div>
 
       <CreditFlow />
-      <VolumeChart />
+      <VolumeChart series={ui?.volume} />
 
       <div className="grid items-start gap-4 max-[1280px]:grid-cols-1 grid-cols-[minmax(0,1fr)_380px]">
         <LedgerTable entries={visible} scope={scope} onScopeChange={setScope} />
         <div className="flex flex-col gap-4">
           <LiabilityGauge />
-          <PackageMix />
-          <TopBurners />
+          <PackageMix packs={ui?.packs} />
+          <TopBurners burners={ui?.burners} />
           <QuickActions />
         </div>
       </div>

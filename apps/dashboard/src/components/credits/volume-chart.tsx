@@ -1,6 +1,11 @@
 import { useTranslation } from "react-i18next";
 import { formatCompact } from "./format";
 import { VOLUME_DAY_COUNT, VOLUME_SERIES } from "./mock-data";
+import type { VolumePoint } from "./types";
+
+type VolumeChartProps = {
+  series?: ReadonlyArray<VolumePoint>;
+};
 
 const VW = 760;
 const VH = 200;
@@ -16,22 +21,23 @@ const INNER_H = VH - PAD_T - PAD_B;
  * success green, burned is a line in violet, net (issued − burned) is
  * a thin accent bar so days where liability grew read at a glance.
  */
-export function VolumeChart() {
+export function VolumeChart({ series }: VolumeChartProps = {}) {
   const { t } = useTranslation();
-  const maxV = Math.max(
-    ...VOLUME_SERIES.flatMap((p) => [p.issued, p.burned]),
-  );
-  const x = (i: number) => PAD_L + (i / (VOLUME_DAY_COUNT - 1)) * INNER_W;
+  const data = series && series.length > 0 ? series : VOLUME_SERIES;
+  const dayCount = series ? data.length : VOLUME_DAY_COUNT;
+  const maxV =
+    Math.max(1, ...data.flatMap((p) => [p.issued, p.burned]));
+  const x = (i: number) => PAD_L + (i / Math.max(1, dayCount - 1)) * INNER_W;
   const y = (v: number) => PAD_T + (1 - v / maxV) * INNER_H;
   const yZero = PAD_T + INNER_H;
 
-  const issuedPath = VOLUME_SERIES.map(
+  const issuedPath = data.map(
     (p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.issued).toFixed(1)}`,
   ).join(" ");
-  const burnedPath = VOLUME_SERIES.map(
+  const burnedPath = data.map(
     (p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.burned).toFixed(1)}`,
   ).join(" ");
-  const issuedArea = `${issuedPath} L ${x(VOLUME_DAY_COUNT - 1)},${yZero} L ${PAD_L},${yZero} Z`;
+  const issuedArea = `${issuedPath} L ${x(dayCount - 1)},${yZero} L ${PAD_L},${yZero} Z`;
 
   return (
     <section className="mb-4 rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
@@ -99,7 +105,7 @@ export function VolumeChart() {
         <path d={issuedArea} fill="var(--color-rv-success)" opacity={0.1} />
         <path d={issuedPath} fill="none" stroke="var(--color-rv-success)" strokeWidth={2} />
         <path d={burnedPath} fill="none" stroke="var(--color-rv-violet)" strokeWidth={2} />
-        {VOLUME_SERIES.map((p, i) => {
+        {data.map((p, i) => {
           const yz = PAD_T + (1 - p.net / maxV) * INNER_H;
           return (
             <rect

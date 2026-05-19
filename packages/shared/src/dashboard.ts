@@ -694,6 +694,89 @@ export interface BillingIssuesResponse {
 }
 
 // =============================================================
+// Credits — rollup endpoint (Phase 3.4)
+// =============================================================
+//
+// One response serves the credits page in a single roundtrip:
+// KPI tiles, 28-day volume series, credit-pack mix, top burners,
+// recent ledger, and the outstanding-liability gauge.
+
+export type CreditLedgerType =
+  | "PURCHASE"
+  | "SPEND"
+  | "REFUND"
+  | "BONUS"
+  | "EXPIRE"
+  | "TRANSFER_IN"
+  | "TRANSFER_OUT";
+
+export interface CreditsKpis {
+  /** Outstanding credit liability — sum of latest balances per subscriber. */
+  outstanding: number;
+  issued28d: number;
+  burned28d: number;
+  /** Decimal-as-string USD revenue from CREDIT_PURCHASE events in window. */
+  revenue28dUsd: string;
+  /** Approximate breakage rate: EXPIRE / (PURCHASE + BONUS) × 100. */
+  breakagePct: number | null;
+}
+
+export interface CreditsVolumePoint {
+  day: string;
+  issued: number;
+  burned: number;
+  /** issued − burned; can be negative. */
+  net: number;
+}
+
+export interface CreditsPackageRow {
+  productId: string;
+  identifier: string | null;
+  displayName: string | null;
+  /** Decimal-as-string. */
+  revenueUsd: string;
+  sold: number;
+  /** Share of pack revenue in window, 0–100 with one decimal. */
+  pct: number;
+  /** Credits per unit from `products.creditAmount`; null when unset. */
+  creditAmount: number | null;
+}
+
+export interface CreditsTopBurnerRow {
+  /** Bucket label — `referenceType` from credit_ledger, or "Other". */
+  key: string;
+  burned: number;
+  /** Share of total burned credits in window, 0–100 with one decimal. */
+  pct: number;
+}
+
+export interface CreditsLedgerRow {
+  id: string;
+  subscriberId: string;
+  type: CreditLedgerType;
+  /** Signed delta; positive = grant, negative = burn. */
+  amount: number;
+  balance: number;
+  referenceType: string | null;
+  referenceId: string | null;
+  description: string | null;
+  createdAt: string;
+}
+
+export interface CreditsRollupResponse {
+  window: {
+    from: string;
+    to: string;
+    days: number;
+  };
+  kpis: CreditsKpis;
+  volume: CreditsVolumePoint[];
+  packages: CreditsPackageRow[];
+  topBurners: CreditsTopBurnerRow[];
+  ledger: CreditsLedgerRow[];
+}
+
+// =============================================================
 // Audit logs (read-only viewer)
 // =============================================================
 
