@@ -1,7 +1,6 @@
 import { createFileRoute, Outlet, useChildMatches, useParams } from "@tanstack/react-router";
 import { Spinner } from "@heroui/react";
 import { useTranslation } from "react-i18next";
-import { TopNav } from "../../../../components/layout/TopNav";
 import { DashboardShell } from "../../../../components/dashboard";
 import { useProject } from "../../../../lib/hooks/useProject";
 
@@ -48,26 +47,20 @@ function ProjectLayout() {
 
   if (isLoading) {
     return (
-      <>
-        <TopNav />
-        <div className="mx-auto flex max-w-6xl items-center gap-2 px-6 py-8 text-default-500">
-          <Spinner />
-          <span className="text-sm">{t("common.loadingProject")}</span>
-        </div>
-      </>
+      <div className="mx-auto flex max-w-6xl items-center gap-2 px-6 py-8 text-default-500">
+        <Spinner />
+        <span className="text-sm">{t("common.loadingProject")}</span>
+      </div>
     );
   }
 
   if (error || !project) {
     return (
-      <>
-        <TopNav />
-        <div className="mx-auto max-w-6xl px-6 py-8">
-          <div role="alert" className="rounded-lg border border-default-200 p-6 text-default-500">
-            {t("common.projectNotFound")}
-          </div>
+      <div className="mx-auto max-w-6xl px-6 py-8">
+        <div role="alert" className="rounded-lg border border-default-200 p-6 text-default-500">
+          {t("common.projectNotFound")}
         </div>
-      </>
+      </div>
     );
   }
 
