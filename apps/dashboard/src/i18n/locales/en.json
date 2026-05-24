@@ -40,6 +40,7 @@
   },
   "projectSetup": {
     "close": "Close",
+    "cancel": "Cancel",
     "mode": {
       "create": "create",
       "update": "update"

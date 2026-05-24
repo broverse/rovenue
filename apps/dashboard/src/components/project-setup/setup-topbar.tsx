@@ -10,6 +10,7 @@ type SetupTopbarProps = {
   projectName: string | null;
   onModeChange?: (next: SetupMode) => void;
   showModeSwitch?: boolean;
+  onCancel?: () => void;
 };
 
 /**
@@ -22,6 +23,7 @@ export function SetupTopbar({
   projectName,
   onModeChange,
   showModeSwitch,
+  onCancel,
 }: SetupTopbarProps) {
   const { t } = useTranslation();
   const isUpdate = mode === "update";
@@ -65,11 +67,23 @@ export function SetupTopbar({
           ))}
         </div>
       ) : null}
-      <Link to="/projects">
-        <Button variant="light" size="icon" aria-label={t("projectSetup.close")}>
-          <X className="size-3.5" strokeWidth={2} aria-hidden="true" />
+      {onCancel ? (
+        <Button
+          type="button"
+          variant="light"
+          size="sm"
+          onClick={onCancel}
+          className="text-rv-mute-600 hover:text-foreground"
+        >
+          {t("projectSetup.cancel")}
         </Button>
-      </Link>
+      ) : (
+        <Link to="/">
+          <Button variant="light" size="icon" aria-label={t("projectSetup.close")}>
+            <X className="size-3.5" strokeWidth={2} aria-hidden="true" />
+          </Button>
+        </Link>
+      )}
     </header>
   );
 }
