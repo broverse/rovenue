@@ -90,7 +90,7 @@ export function DeleteProjectDialog({ projectId, projectName }: Props) {
                           // ignore storage failures
                         }
                         close();
-                        void navigate({ to: "/projects" });
+                        void navigate({ to: "/" });
                       },
                     })
                   }

@@ -22,7 +22,7 @@ export function AccountTopbar({ current }: AccountTopbarProps) {
 
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-rv-divider bg-rv-c1 px-3 sm:gap-4 sm:px-6">
-      <Link to="/projects" className="flex shrink-0 items-center gap-2 font-semibold">
+      <Link to="/" className="flex shrink-0 items-center gap-2 font-semibold">
         <span className="inline-flex size-6 items-center justify-center rounded-md bg-gradient-to-br from-rv-accent-400 to-rv-accent-700 font-rv-mono text-[12px] text-white">
           R
         </span>
