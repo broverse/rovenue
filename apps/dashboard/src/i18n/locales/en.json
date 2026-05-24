@@ -489,21 +489,8 @@
     "loading": "Loading..."
   },
   "projects": {
-    "list": {
-      "title": "Projects",
-      "newProject": "New project",
-      "empty": "No projects yet. Create your first one to get started."
-    },
     "card": {
       "createdOn": "Created {{date}}"
-    },
-    "new": {
-      "title": "New project",
-      "saveKeysHeader": "Save your API keys",
-      "saveKeysBody": "These are shown only once. Copy them now — you can always rotate the webhook secret later from project settings.",
-      "publicKey": "Public key",
-      "secretKey": "Secret key",
-      "copiedTakeMe": "I've copied them, take me to the project"
     },
     "form": {
       "name": "Project name",
