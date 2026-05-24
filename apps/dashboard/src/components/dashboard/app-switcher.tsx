@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Menu } from "@base-ui-components/react/menu";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Plus } from "lucide-react";
 import { useProjects } from "../../lib/hooks/useProjects";
 
 type AppSwitcherProps = {
@@ -68,6 +68,14 @@ export function AppSwitcher({ projectId, projectName, envLabel = "prod" }: AppSw
                 )}
               </Menu.Item>
             ))}
+            <div className="my-1 h-px bg-rv-divider" />
+            <Menu.Item
+              onClick={() => void navigate({ to: "/projects/setup" })}
+              className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-rv-mute-700 outline-none data-[highlighted]:bg-rv-c4 data-[highlighted]:text-foreground"
+            >
+              <Plus size={13} className="text-rv-mute-500" />
+              <span className="flex-1">{t("appSwitcher.newProject")}</span>
+            </Menu.Item>
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>
