@@ -384,7 +384,8 @@
   },
   "appSwitcher": {
     "switchProject": "Switch project",
-    "projects": "Projects"
+    "projects": "Projects",
+    "newProject": "New project"
   },
   "breadcrumb": {
     "subscriber": "Subscriber",
