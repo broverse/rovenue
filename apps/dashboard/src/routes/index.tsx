@@ -1,7 +1,7 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import type { ProjectSummary } from "@rovenue/shared";
 import { getSession } from "../lib/auth";
-import { rpc, unwrap } from "../lib/api";
+import { ApiError, rpc, unwrap } from "../lib/api";
 import { queryClient } from "../lib/queryClient";
 
 export type LandingTarget =
@@ -36,11 +36,21 @@ export const Route = createFileRoute("/")({
       throw redirect({ to: "/login", search: { error: undefined } });
     }
 
-    const res = await queryClient.ensureQueryData({
-      queryKey: ["projects"],
-      queryFn: () =>
-        unwrap<{ projects: ProjectSummary[] }>(rpc.dashboard.projects.$get()),
-    });
+    let res: { projects: ProjectSummary[] };
+    try {
+      res = await queryClient.ensureQueryData({
+        queryKey: ["projects"],
+        queryFn: () =>
+          unwrap<{ projects: ProjectSummary[] }>(rpc.dashboard.projects.$get()),
+      });
+    } catch (err) {
+      const expired = err instanceof ApiError && err.status === 401;
+      console.error("[/] failed to load projects", err);
+      throw redirect({
+        to: "/login",
+        search: { error: expired ? "session_expired" : "load_failed" },
+      });
+    }
 
     const target = resolveLandingTarget(res.projects);
     if (target.kind === "setup") {
