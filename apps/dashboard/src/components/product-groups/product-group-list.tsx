@@ -14,7 +14,7 @@ type Props = {
 
 /**
  * Sticky left rail listing every product group in the project. Each card
- * surfaces the icon, key, product/offering counts and MRR, with a vertical
+ * surfaces the icon, key, product count and MRR, with a vertical
  * accent stripe + tinted background on the active row.
  */
 export function ProductGroupList({
@@ -90,10 +90,11 @@ function ProductGroupCard({ group, active, onClick }: CardProps) {
           <span className="text-rv-mute-800">{group.products.length}</span>{" "}
           {t("productGroups.card.products")}
         </span>
-        <span>
-          <span className="text-rv-mute-800">{group.offerings.length}</span>{" "}
-          {t("productGroups.card.offerings")}
-        </span>
+        {group.isDefault && (
+          <span className="rounded-sm bg-rv-accent-500/15 px-1.5 py-px text-[10px] uppercase tracking-wider text-rv-accent-500">
+            {t("productGroups.card.default", "Default")}
+          </span>
+        )}
         <span className="ml-auto">
           ${group.mrr.toLocaleString()}
           <span className="text-rv-mute-400">{t("productGroups.card.perMonth")}</span>

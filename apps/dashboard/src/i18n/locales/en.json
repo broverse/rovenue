@@ -31,7 +31,9 @@
     "devOnly": "dev only",
     "theme": "Theme",
     "themeAria": "Theme: {{label}} (click to change)",
-    "edit": "Edit"
+    "edit": "Edit",
+    "close": "Close",
+    "optional": "optional"
   },
   "themes": {
     "light": "Light",
@@ -59,10 +61,22 @@
       "tipBody": "You can leave platforms empty for now and complete them after creation. Changes here never delete revenue history."
     },
     "steps": {
-      "basics": { "label": "Project basics", "desc": "Name, icon, description" },
-      "platforms": { "label": "App platforms", "desc": "iOS, Android, Stripe" },
-      "currency": { "label": "Currency & timezone", "desc": "Reporting defaults" },
-      "review": { "label": "Review", "desc": "Confirm and create" }
+      "basics": {
+        "label": "Project basics",
+        "desc": "Name, icon, description"
+      },
+      "platforms": {
+        "label": "App platforms",
+        "desc": "iOS, Android, Stripe"
+      },
+      "currency": {
+        "label": "Currency & timezone",
+        "desc": "Reporting defaults"
+      },
+      "review": {
+        "label": "Review",
+        "desc": "Confirm and create"
+      }
     },
     "footer": {
       "back": "Back",
@@ -568,10 +582,7 @@
       "guide": "Groups guide",
       "newGroup": "New group",
       "linkProduct": "Link product",
-      "addEntitlement": "Add entitlement",
-      "newOffering": "New offering",
-      "add": "Add",
-      "more": "More"
+      "more": "More actions"
     },
     "search": {
       "placeholder": "Search groups…",
@@ -579,48 +590,17 @@
     },
     "card": {
       "products": "products",
-      "offerings": "offerings",
-      "perMonth": "/mo"
+      "perMonth": "/mo",
+      "default": "Default"
     },
     "kpi": {
       "mrr": "MRR",
       "activeSubs": "Active subs",
       "products": "Products",
-      "offerings": "Offerings",
       "mrr28d": "MRR · last 28d",
       "deltaMrr": "▲ 9.1%",
       "deltaSubs": "▲ 42",
-      "productsBreakdown": "{{archived}} archived · {{draft}} draft",
-      "offeringsDefault": "{{count}} default"
-    },
-    "entitlements": {
-      "heading": "Entitlements",
-      "subtitle": "Keys granted by any product in this group. Subscribers inherit all grants of their active product.",
-      "grantedBy": "granted by <0>{{count}}</0> products",
-      "empty": {
-        "title": "No entitlements",
-        "body": "This group is consumable-only. Products in it don't grant any access keys."
-      }
-    },
-    "matrix": {
-      "heading": "Products in this group",
-      "subtitle": "Which products grant which entitlements on purchase.",
-      "legend": "granted on purchase",
-      "cols": {
-        "product": "Product",
-        "duration": "Duration",
-        "price": "Price",
-        "subs": "Subs",
-        "mrr": "MRR",
-        "status": "Status"
-      }
-    },
-    "offerings": {
-      "heading": "Offerings",
-      "subtitle": "Paywall configurations referencing products in this group. The <0>default</0> offering is served when no experiment or override matches.",
-      "default": "default",
-      "views": "views",
-      "conv": "conv"
+      "productsBreakdown": "{{archived}} archived · {{draft}} draft"
     },
     "duration": {
       "weekly": "weekly",
@@ -628,6 +608,117 @@
       "yearly": "yearly",
       "lifetime": "lifetime",
       "consumable": "consumable"
+    },
+    "products": {
+      "heading": "Products in this group",
+      "subtitle": "Subscribers who buy any product below enter this group.",
+      "link": "Link product",
+      "remove": "Remove from group",
+      "col": {
+        "product": "Product",
+        "duration": "Duration",
+        "price": "Price",
+        "subs": "Subs",
+        "mrr": "MRR"
+      },
+      "empty": {
+        "title": "No products linked yet",
+        "body": "Link existing products from your catalog to grant this group's entitlements on purchase."
+      }
+    },
+    "removeProduct": {
+      "title": "Remove product from group?",
+      "subtitle": "The product stays in your catalog. Existing subscribers keep their access; new buyers won't enter this group.",
+      "from": "From {{name}}",
+      "confirm": "Remove product",
+      "removing": "Removing…",
+      "errors": {
+        "generic": "Could not remove the product. Please try again."
+      }
+    },
+    "header": {
+      "default": "Default"
+    },
+    "empty": {
+      "title": "No product groups yet",
+      "body": "Create a product group to bundle SKUs that grant the same entitlements.",
+      "cta": "New group"
+    },
+    "linkProducts": {
+      "title": "Link products",
+      "subtitle": "Add products to {{name}}.",
+      "search": "Search products…",
+      "counter": "{{count}} selected",
+      "submit": "Link selected",
+      "submitting": "Linking…",
+      "empty": {
+        "allLinked": "All products are already in this group",
+        "none": "No products match",
+        "hint": "Inactive products are hidden. Create a product in the catalog first."
+      },
+      "type": {
+        "subscription": "Subscription",
+        "consumable": "Consumable",
+        "nonConsumable": "Lifetime"
+      },
+      "errors": {
+        "generic": "Could not link the selected products. Please try again."
+      }
+    },
+    "form": {
+      "createTitle": "New product group",
+      "editTitle": "Edit product group",
+      "createSubtitle": "Bundle SKUs that grant the same entitlements. You can link products afterwards.",
+      "editSubtitle": "Update the group's name, identifier or description. Linked products stay attached.",
+      "saveCreate": "Create group",
+      "savingCreate": "Creating…",
+      "saveEdit": "Save changes",
+      "savingEdit": "Saving…",
+      "name": {
+        "label": "Name",
+        "placeholder": "e.g. Pro subscriptions",
+        "hint": "Shown across the dashboard and on paywalls."
+      },
+      "identifier": {
+        "label": "Identifier",
+        "hint": "Stable key referenced by the SDK and webhooks. Changing it will break existing client integrations.",
+        "invalid": "Use lowercase letters, numbers, hyphens or underscores.",
+        "taken": "An existing group already uses this identifier."
+      },
+      "description": {
+        "label": "Description",
+        "placeholder": "What does this group unlock for the user?",
+        "hint": "Optional context for teammates browsing the catalog."
+      },
+      "default": {
+        "label": "Set as default group",
+        "hint": "New subscribers fall into this group when no other group matches."
+      },
+      "errors": {
+        "generic": "Could not save the group. Please try again."
+      }
+    },
+    "menu": {
+      "edit": "Edit group",
+      "setDefault": "Set as default",
+      "unsetDefault": "Remove as default",
+      "copyIdentifier": "Copy identifier",
+      "copyId": "Copy group ID",
+      "copied": "Copied",
+      "delete": "Delete group"
+    },
+    "delete": {
+      "title": "Delete product group",
+      "subtitle": "Permanently remove this group. Linked products will not be deleted.",
+      "confirmLabel": "Type {{identifier}} to confirm",
+      "confirm": "Delete group",
+      "deleting": "Deleting…",
+      "productCount_one": "{{count}} linked product",
+      "productCount_other": "{{count}} linked products",
+      "defaultWarning": "This is the default group. New subscribers without a matching group will no longer fall back here.",
+      "errors": {
+        "generic": "Could not delete the group. Please try again."
+      }
     }
   },
   "subscribers": {
@@ -1037,10 +1128,22 @@
       "churned": "Churned"
     },
     "stores": {
-      "ios": { "label": "App Store", "full": "App Store Connect" },
-      "play": { "label": "Play", "full": "Google Play" },
-      "stripe": { "label": "Stripe", "full": "Stripe" },
-      "web": { "label": "Web", "full": "Web" }
+      "ios": {
+        "label": "App Store",
+        "full": "App Store Connect"
+      },
+      "play": {
+        "label": "Play",
+        "full": "Google Play"
+      },
+      "stripe": {
+        "label": "Stripe",
+        "full": "Stripe"
+      },
+      "web": {
+        "label": "Web",
+        "full": "Web"
+      }
     },
     "table": {
       "subscription": "Subscription",
@@ -1902,9 +2005,18 @@
         "subtitle": "Optional. We won't share your email."
       },
       "items": {
-        "email": { "title": "Email", "desc": "Goes to your verified email." },
-        "slack": { "title": "Slack DM", "desc": "Connected to Lumen workspace · @aiden" },
-        "push": { "title": "Mobile push", "desc": "Rovenue iOS app on iPhone 15 Pro" },
+        "email": {
+          "title": "Email",
+          "desc": "Goes to your verified email."
+        },
+        "slack": {
+          "title": "Slack DM",
+          "desc": "Connected to Lumen workspace · @aiden"
+        },
+        "push": {
+          "title": "Mobile push",
+          "desc": "Rovenue iOS app on iPhone 15 Pro"
+        },
         "daily_digest": {
           "title": "Daily digest",
           "desc": "Yesterday's MRR, new subs, churn at 9:00 in your timezone."
@@ -1925,8 +2037,14 @@
           "title": "Churn spike",
           "desc": "When daily churn exceeds 1.5× the 7-day rolling average."
         },
-        "invoice": { "title": "New invoice issued", "desc": "" },
-        "refund_alert": { "title": "Customer refund processed", "desc": "" },
+        "invoice": {
+          "title": "New invoice issued",
+          "desc": ""
+        },
+        "refund_alert": {
+          "title": "Customer refund processed",
+          "desc": ""
+        },
         "low_balance": {
           "title": "Credit balance low",
           "desc": "When your account credit drops below $50."
@@ -2134,9 +2252,18 @@
       "theme": {
         "title": "Theme",
         "options": {
-          "dark": { "name": "Dark", "desc": "Default. Lower eye strain at night." },
-          "light": { "name": "Light", "desc": "High contrast for bright rooms." },
-          "system": { "name": "Match system", "desc": "Follows OS appearance setting." }
+          "dark": {
+            "name": "Dark",
+            "desc": "Default. Lower eye strain at night."
+          },
+          "light": {
+            "name": "Light",
+            "desc": "High contrast for bright rooms."
+          },
+          "system": {
+            "name": "Match system",
+            "desc": "Follows OS appearance setting."
+          }
         }
       },
       "density": {

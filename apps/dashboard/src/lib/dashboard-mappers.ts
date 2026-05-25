@@ -10,7 +10,6 @@ import type {
   StoreId,
 } from "../components/products/types";
 import type {
-  EntitlementGrant,
   GroupDuration,
   GroupProduct,
   GroupProductStatus,
@@ -139,13 +138,14 @@ function rowToGroupProduct(row: DashboardProductRow): GroupProduct {
   const ui = rowToUiProduct(row);
   const { price, currency } = priceFromRow(row);
   return {
+    id: row.id,
     sku: row.identifier,
+    name: row.displayName || row.identifier,
     duration: DURATION_TO_GROUP[ui.duration],
     price: price ? `${currency} ${price.toFixed(2)}` : "—",
     subs: ui.subs,
     mrr: ui.mrr,
     status: ui.status as GroupProductStatus,
-    grants: row.entitlementKeys,
   };
 }
 
@@ -158,14 +158,6 @@ export function rowToUiProductGroup(
     .sort((a, b) => a.order - b.order)
     .map((m) => productById.get(m.productId))
     .filter((r): r is DashboardProductRow => Boolean(r));
-
-  const entitlementKeys = Array.from(
-    new Set(members.flatMap((r) => r.entitlementKeys)),
-  );
-  const entitlements: EntitlementGrant[] = entitlementKeys.map((key) => ({
-    key,
-    description: "",
-  }));
 
   const groupProducts = members.map(rowToGroupProduct);
   const meta = row.metadata ?? {};
@@ -180,9 +172,8 @@ export function rowToUiProductGroup(
     initials: initialsOf(metaName || row.identifier),
     tint: pickTint(row.identifier),
     description,
-    entitlements,
+    isDefault: row.isDefault,
     products: groupProducts,
-    offerings: [],
     mrr: 0,
     subs: groupProducts.some((p) => p.subs !== null) ? 0 : null,
     spark: deterministicSpark(row.identifier),

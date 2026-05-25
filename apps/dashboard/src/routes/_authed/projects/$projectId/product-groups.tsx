@@ -8,9 +8,10 @@ import { useProjectProductGroups } from "../../../../lib/hooks/useProjectProduct
 import { useProjectProducts } from "../../../../lib/hooks/useProjectProducts";
 import { rowToUiProductGroup } from "../../../../lib/dashboard-mappers";
 import {
-  EntitlementsSection,
-  OfferingsSection,
-  ProductEntitlementMatrix,
+  DeleteProductGroupDialog,
+  GroupProductsSection,
+  LinkProductsDialog,
+  ProductGroupFormDialog,
   ProductGroupHeader,
   ProductGroupList,
   type ProductGroup,
@@ -31,6 +32,10 @@ function ProductGroupsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [selectedId, setSelectedId] = useState<string>("");
   const [search, setSearch] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
 
   const groupsQuery = useProjectProductGroups(projectId);
   // Pull enough products to resolve every group membership in one shot.
@@ -42,12 +47,16 @@ function ProductGroupsPage({ projectId }: { projectId: string }) {
     limit: 200,
   });
 
+  const allProducts = useMemo(
+    () => (productsQuery.data?.pages ?? []).flatMap((page) => page.products),
+    [productsQuery.data],
+  );
+
   const productById = useMemo(() => {
-    const pages = productsQuery.data?.pages ?? [];
-    const m = new Map<string, (typeof pages)[number]["products"][number]>();
-    for (const page of pages) for (const row of page.products) m.set(row.id, row);
+    const m = new Map<string, (typeof allProducts)[number]>();
+    for (const row of allProducts) m.set(row.id, row);
     return m;
-  }, [productsQuery.data]);
+  }, [allProducts]);
 
   const groups = useMemo<ReadonlyArray<ProductGroup>>(() => {
     const rows = groupsQuery.data?.groups ?? [];
@@ -95,7 +104,11 @@ function ProductGroupsPage({ projectId }: { projectId: string }) {
             <BookOpen size={13} />
             {t("productGroups.actions.guide")}
           </Button>
-          <Button variant="solid-primary" size="sm">
+          <Button
+            variant="solid-primary"
+            size="sm"
+            onClick={() => setCreateOpen(true)}
+          >
             <Plus size={13} />
             {t("productGroups.actions.newGroup")}
           </Button>
@@ -113,10 +126,18 @@ function ProductGroupsPage({ projectId }: { projectId: string }) {
           />
 
           <div className="flex min-w-0 flex-col gap-4">
-            <ProductGroupHeader group={selected} />
-            <EntitlementsSection group={selected} />
-            <ProductEntitlementMatrix group={selected} />
-            <OfferingsSection group={selected} />
+            <ProductGroupHeader
+              projectId={projectId}
+              group={selected}
+              onLinkProduct={() => setLinkOpen(true)}
+              onEdit={() => setEditOpen(true)}
+              onDelete={() => setDeleteOpen(true)}
+            />
+            <GroupProductsSection
+              projectId={projectId}
+              group={selected}
+              onLinkProduct={() => setLinkOpen(true)}
+            />
           </div>
         </div>
       ) : (
@@ -127,11 +148,54 @@ function ProductGroupsPage({ projectId }: { projectId: string }) {
           <p className="mt-1 max-w-[420px] text-[13px] text-rv-mute-500">
             {t(
               "productGroups.empty.body",
-              "Create a product group to bundle SKUs and entitlements that ship together.",
+              "Create a product group to bundle SKUs that grant the same entitlements.",
             )}
           </p>
+          <Button
+            variant="solid-primary"
+            size="sm"
+            className="mt-4"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus size={13} />
+            {t("productGroups.empty.cta", "New group")}
+          </Button>
         </div>
       )}
+
+      <ProductGroupFormDialog
+        mode="create"
+        projectId={projectId}
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(id) => setSelectedId(id)}
+      />
+
+      {selected && (
+        <ProductGroupFormDialog
+          mode="edit"
+          projectId={projectId}
+          group={selected}
+          open={editOpen}
+          onClose={() => setEditOpen(false)}
+        />
+      )}
+
+      <LinkProductsDialog
+        projectId={projectId}
+        group={selected}
+        allProducts={allProducts}
+        open={linkOpen}
+        onClose={() => setLinkOpen(false)}
+      />
+
+      <DeleteProductGroupDialog
+        projectId={projectId}
+        group={selected}
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onDeleted={() => setSelectedId("")}
+      />
     </>
   );
 }

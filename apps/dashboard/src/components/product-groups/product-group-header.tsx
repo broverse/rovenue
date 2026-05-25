@@ -1,24 +1,34 @@
 import { useTranslation } from "react-i18next";
+import { Layers } from "lucide-react";
 import { Button } from "../../ui/button";
-import { Key, Layers, MoreHorizontal, Tag } from "lucide-react";
 import { Sparkline } from "../dashboard/sparkline";
+import { ProductGroupActionsMenu } from "./product-group-actions-menu";
 import { ProductGroupIcon } from "./product-group-icon";
 import type { ProductGroup } from "./types";
 
 type Props = {
+  projectId: string;
   group: ProductGroup;
+  onLinkProduct: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
 };
 
 /**
  * Top header card for a selected product group. Renders the gradient
- * identity, description, primary actions, and a 5-cell KPI strip ending
+ * identity, description, primary actions, and a 4-cell KPI strip ending
  * with an inline 28-day MRR sparkline.
  */
-export function ProductGroupHeader({ group }: Props) {
+export function ProductGroupHeader({
+  projectId,
+  group,
+  onLinkProduct,
+  onEdit,
+  onDelete,
+}: Props) {
   const { t } = useTranslation();
   const archived = group.products.filter((p) => p.status === "archived").length;
   const draft = group.products.filter((p) => p.status === "draft").length;
-  const defaults = group.offerings.filter((o) => o.isDefault).length;
 
   return (
     <div className="rounded-lg border border-rv-divider bg-rv-c1 p-5">
@@ -27,37 +37,43 @@ export function ProductGroupHeader({ group }: Props) {
           <div className="flex items-center gap-3">
             <ProductGroupIcon initials={group.initials} tint={group.tint} size="lg" />
             <div className="min-w-0">
-              <h2 className="text-[22px] font-semibold leading-7 tracking-tight">
-                {group.name}
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-[22px] font-semibold leading-7 tracking-tight">
+                  {group.name}
+                </h2>
+                {group.isDefault && (
+                  <span className="rounded-full border border-rv-accent-500/30 bg-rv-accent-500/10 px-2 py-0.5 font-rv-mono text-[10px] uppercase tracking-wider text-rv-accent-500">
+                    {t("productGroups.header.default", "Default")}
+                  </span>
+                )}
+              </div>
               <div className="mt-0.5 font-rv-mono text-[12px] text-rv-mute-500">
                 {group.key}
               </div>
             </div>
           </div>
-          <p className="mt-2 max-w-[600px] text-[13px] text-rv-mute-600">{group.description}</p>
+          {group.description && (
+            <p className="mt-2 max-w-[600px] text-[13px] text-rv-mute-600">
+              {group.description}
+            </p>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-1.5">
-          <Button variant="flat" size="sm">
+          <Button variant="flat" size="sm" onClick={onLinkProduct}>
             <Layers size={13} />
             {t("productGroups.actions.linkProduct")}
           </Button>
-          <Button variant="flat" size="sm">
-            <Key size={13} />
-            {t("productGroups.actions.addEntitlement")}
-          </Button>
-          <Button variant="flat" size="sm">
-            <Tag size={13} />
-            {t("productGroups.actions.newOffering")}
-          </Button>
-          <Button variant="light" size="icon" aria-label={t("productGroups.actions.more")}>
-            <MoreHorizontal size={14} />
-          </Button>
+          <ProductGroupActionsMenu
+            projectId={projectId}
+            group={group}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-y-4 border-t border-rv-divider pt-4 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mt-4 grid grid-cols-2 gap-y-4 border-t border-rv-divider pt-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCell
           label={t("productGroups.kpi.mrr")}
           value={`$${group.mrr.toLocaleString()}`}
@@ -75,11 +91,6 @@ export function ProductGroupHeader({ group }: Props) {
           label={t("productGroups.kpi.products")}
           value={group.products.length.toString()}
           delta={t("productGroups.kpi.productsBreakdown", { archived, draft })}
-        />
-        <KpiCell
-          label={t("productGroups.kpi.offerings")}
-          value={group.offerings.length.toString()}
-          delta={t("productGroups.kpi.offeringsDefault", { count: defaults })}
         />
         <KpiCell label={t("productGroups.kpi.mrr28d")} last>
           <div className="mt-0.5">
