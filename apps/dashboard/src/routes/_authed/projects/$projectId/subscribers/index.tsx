@@ -11,7 +11,7 @@ import { StatCard } from "../../../../../ui/stat-card";
 import { useProject } from "../../../../../lib/hooks/useProject";
 import { useSubscribers } from "../../../../../lib/hooks/useSubscribers";
 import { useSubscriber } from "../../../../../lib/hooks/useSubscriber";
-import { Plus, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import {
   DateRangePopover,
   FilterPill,
@@ -341,21 +341,25 @@ function SubscribersPage({
     }
   };
 
-  // Press `/` to focus the search input.
   const searchAreaRef = useRef<HTMLDivElement>(null);
+  const focusSearchInput = () => {
+    const input =
+      searchAreaRef.current?.querySelector<HTMLInputElement>("input[type='text']");
+    if (input) {
+      input.focus();
+      input.select();
+    }
+  };
+
+  // Press `/` to focus the search input.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "/") return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA"))
         return;
-      const input =
-        searchAreaRef.current?.querySelector<HTMLInputElement>("input[type='text']");
-      if (input) {
-        e.preventDefault();
-        input.focus();
-        input.select();
-      }
+      e.preventDefault();
+      focusSearchInput();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -381,13 +385,9 @@ function SubscribersPage({
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="flat" size="sm">
+          <Button variant="flat" size="sm" onClick={focusSearchInput}>
             <Search size={13} />
             {t("subscribers.actions.findById")}
-          </Button>
-          <Button variant="solid-primary" size="sm">
-            <Plus size={13} />
-            {t("subscribers.actions.grantEntitlement")}
           </Button>
         </div>
       </header>

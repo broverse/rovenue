@@ -728,8 +728,7 @@
     "searchPlaceholder": "Search by app user id...",
     "empty": "No subscribers",
     "actions": {
-      "findById": "Find by ID",
-      "grantEntitlement": "Grant entitlement"
+      "findById": "Find by ID"
     },
     "kpi": {
       "total": "Total subscribers",
