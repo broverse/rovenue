@@ -1,6 +1,6 @@
 export { DashboardShell } from "./dashboard-shell";
 export { Sidebar } from "./sidebar";
-export { Topbar, type DateRange } from "./topbar";
+export { Topbar } from "./topbar";
 
 export { Sparkline } from "./sparkline";
 export { StackedAreaChart, type ChartSeries } from "./stacked-area-chart";

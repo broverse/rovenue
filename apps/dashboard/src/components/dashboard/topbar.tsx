@@ -3,8 +3,6 @@ import { Menu } from "@base-ui-components/react/menu";
 import {
   Bell,
   Box,
-  Calendar,
-  Check,
   ChevronDown,
   Flag,
   FlaskConical,
@@ -17,35 +15,9 @@ import {
 import { Button, buttonVariants } from "../../ui/button";
 import { cn } from "../../lib/cn";
 
-const RANGES = [
-  "Today",
-  "Last 7 days",
-  "Last 28 days",
-  "Last 90 days",
-  "MTD",
-  "QTD",
-  "YTD",
-  "Custom…",
-] as const;
-
-export type DateRange = (typeof RANGES)[number];
-
-const RANGE_KEYS: Record<DateRange, string> = {
-  "Today": "topbar.ranges.today",
-  "Last 7 days": "topbar.ranges.last7",
-  "Last 28 days": "topbar.ranges.last28",
-  "Last 90 days": "topbar.ranges.last90",
-  "MTD": "topbar.ranges.mtd",
-  "QTD": "topbar.ranges.qtd",
-  "YTD": "topbar.ranges.ytd",
-  "Custom…": "topbar.ranges.custom",
-};
-
 type TopbarProps = {
   projectName: string;
   current: string;
-  range: DateRange;
-  onRangeChange: (next: DateRange) => void;
   liveOn: boolean;
   onToggleLive: () => void;
   /** Mobile-only: opens the sidebar drawer. */
@@ -59,14 +31,12 @@ const ITEM_CLASS =
   "flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-rv-mute-700 outline-none data-[highlighted]:bg-rv-c4 data-[highlighted]:text-foreground";
 
 /**
- * Sticky page topbar — breadcrumb + date range on the left, live chip / new
- * dropdown / settings / notifications on the right.
+ * Sticky page topbar — breadcrumb on the left, live chip / new dropdown /
+ * settings / notifications on the right.
  */
 export function Topbar({
   projectName,
   current,
-  range,
-  onRangeChange,
   liveOn,
   onToggleLive,
   onMenuClick,
@@ -88,33 +58,6 @@ export function Topbar({
         <span className="hidden truncate sm:inline">{projectName}</span>
         <span className="hidden text-rv-mute-400 sm:inline">/</span>
         <span className="truncate font-medium text-foreground">{current}</span>
-
-        <Menu.Root>
-          <Menu.Trigger className="ml-1 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-transparent px-2 text-[13px] text-rv-mute-600 transition hover:border-rv-divider hover:bg-rv-c2 hover:text-foreground sm:ml-2">
-            <Calendar size={13} />
-            <span className="hidden sm:inline">{t(RANGE_KEYS[range])}</span>
-            <ChevronDown size={12} />
-          </Menu.Trigger>
-          <Menu.Portal>
-            <Menu.Positioner sideOffset={4} align="start" className="z-50">
-              <Menu.Popup className={POPUP_CLASS}>
-                <div className="px-2 pb-1 pt-1.5 text-[11px] uppercase tracking-wider text-rv-mute-500">
-                  {t("topbar.dateRange")}
-                </div>
-                {RANGES.map((r) => (
-                  <Menu.Item
-                    key={r}
-                    onClick={() => onRangeChange(r)}
-                    className={ITEM_CLASS}
-                  >
-                    {r === range ? <Check size={13} /> : <span className="size-[13px]" />}
-                    <span>{t(RANGE_KEYS[r])}</span>
-                  </Menu.Item>
-                ))}
-              </Menu.Popup>
-            </Menu.Positioner>
-          </Menu.Portal>
-        </Menu.Root>
       </div>
 
       <div className="ml-auto flex items-center gap-1 sm:gap-1.5">
