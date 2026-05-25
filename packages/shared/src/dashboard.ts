@@ -166,6 +166,22 @@ export interface UpdateMemberRoleRequest {
   role: MemberRoleName;
 }
 
+export type SubscriberListPlatform = "ios" | "android" | "web";
+
+export type SubscriberListStatusFilter =
+  | "active"
+  | "trial"
+  | "grace"
+  | "churned";
+
+/** Sort modes accepted by the subscribers list endpoint. Every mode
+ *  is DESC on its primary key with `id DESC` as tiebreaker. */
+export type SubscriberListSortMode =
+  | "last_activity"
+  | "created"
+  | "ltv"
+  | "purchases";
+
 export interface SubscriberListItem {
   id: string;
   appUserId: string;
@@ -174,6 +190,25 @@ export interface SubscriberListItem {
   lastSeenAt: string;
   purchaseCount: number;
   activeEntitlementKeys: string[];
+  /** Lifetime gross from `purchases.priceAmount`, decimal-as-string. */
+  ltvUsd: string;
+  /** Distinct platforms across all purchases. */
+  platforms: SubscriberListPlatform[];
+}
+
+export interface SubscriberListFilters {
+  /** Free-text appUserId substring (case-insensitive). */
+  q?: string;
+  /** Derived lifecycle status — drives the dashboard scope tabs. */
+  status?: SubscriberListStatusFilter;
+  /** Entitlement key the subscriber must currently hold. */
+  entitlement?: string;
+  /** Any-of platform filter (`ios`/`android`/`web`). */
+  platforms?: ReadonlyArray<SubscriberListPlatform>;
+  /** 2-letter country code (case-insensitive). */
+  country?: string;
+  /** Minimum lifetime gross in USD. */
+  ltvMin?: number;
 }
 
 export interface SubscriberListResponse {

@@ -254,6 +254,99 @@ describe("GET /dashboard/projects/:projectId/subscribers", () => {
     };
     expect(call.q).toBe("alice");
   });
+
+  test("forwards structured filter params to the list repository", async () => {
+    signedIn("user_1");
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    drizzleMock.subscriberRepo.listSubscribers.mockResolvedValue([]);
+
+    await app.request(
+      "/dashboard/projects/proj_1/subscribers?status=trial&entitlement=premium&platform=ios,android&country=tr&ltvMin=25",
+    );
+    const call = drizzleMock.subscriberRepo.listSubscribers.mock.calls[0]?.[1] as {
+      status?: string;
+      entitlementKey?: string;
+      platforms?: ReadonlyArray<string>;
+      country?: string;
+      ltvMin?: number;
+    };
+    expect(call.status).toBe("trial");
+    expect(call.entitlementKey).toBe("premium");
+    expect(call.platforms).toEqual(["ios", "android"]);
+    // Country casing is normalised inside the repo (UPPER on both
+    // sides); the route preserves whatever the URL carried.
+    expect(call.country).toBe("tr");
+    expect(call.ltvMin).toBe(25);
+  });
+
+  test("rejects unknown status values with 400", async () => {
+    signedIn("user_1");
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    drizzleMock.subscriberRepo.listSubscribers.mockResolvedValue([]);
+
+    const res = await app.request(
+      "/dashboard/projects/proj_1/subscribers?status=bogus",
+    );
+    expect(res.status).toBe(400);
+    expect(drizzleMock.subscriberRepo.listSubscribers).not.toHaveBeenCalled();
+  });
+
+  test("widens YYYY-MM-DD date bounds to whole-day [from, to] window", async () => {
+    signedIn("user_1");
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    drizzleMock.subscriberRepo.listSubscribers.mockResolvedValue([]);
+
+    await app.request(
+      "/dashboard/projects/proj_1/subscribers?from=2026-04-01&to=2026-04-28",
+    );
+    const call = drizzleMock.subscriberRepo.listSubscribers.mock.calls[0]?.[1] as {
+      lastSeenFrom?: Date;
+      lastSeenTo?: Date;
+    };
+    expect(call.lastSeenFrom?.toISOString()).toBe("2026-04-01T00:00:00.000Z");
+    expect(call.lastSeenTo?.toISOString()).toBe("2026-04-28T23:59:59.999Z");
+  });
+
+  test("defaults to `last_activity` sort and forwards ?sort overrides", async () => {
+    signedIn("user_1");
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    drizzleMock.subscriberRepo.listSubscribers.mockResolvedValue([]);
+
+    await app.request("/dashboard/projects/proj_1/subscribers");
+    expect(
+      (drizzleMock.subscriberRepo.listSubscribers.mock.calls[0]?.[1] as { sort?: string }).sort,
+    ).toBe("last_activity");
+
+    drizzleMock.subscriberRepo.listSubscribers.mockClear();
+    await app.request("/dashboard/projects/proj_1/subscribers?sort=ltv");
+    expect(
+      (drizzleMock.subscriberRepo.listSubscribers.mock.calls[0]?.[1] as { sort?: string }).sort,
+    ).toBe("ltv");
+  });
+
+  test("rejects unknown sort values with 400", async () => {
+    signedIn("user_1");
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    drizzleMock.subscriberRepo.listSubscribers.mockResolvedValue([]);
+
+    const res = await app.request(
+      "/dashboard/projects/proj_1/subscribers?sort=bogus",
+    );
+    expect(res.status).toBe(400);
+    expect(drizzleMock.subscriberRepo.listSubscribers).not.toHaveBeenCalled();
+  });
+
+  test("rejects inverted date ranges with 400", async () => {
+    signedIn("user_1");
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+    drizzleMock.subscriberRepo.listSubscribers.mockResolvedValue([]);
+
+    const res = await app.request(
+      "/dashboard/projects/proj_1/subscribers?from=2026-05-01&to=2026-04-01",
+    );
+    expect(res.status).toBe(400);
+    expect(drizzleMock.subscriberRepo.listSubscribers).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /dashboard/projects/:projectId/subscribers/:id", () => {

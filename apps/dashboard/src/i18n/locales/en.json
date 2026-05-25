@@ -638,7 +638,6 @@
     "empty": "No subscribers",
     "actions": {
       "findById": "Find by ID",
-      "exportCsv": "Export CSV",
       "grantEntitlement": "Grant entitlement"
     },
     "kpi": {
@@ -676,6 +675,45 @@
       "platform": "platform",
       "country": "country",
       "ltv": "ltv"
+    },
+    "filterPopover": {
+      "statusHeading": "Status",
+      "platformHeading": "Platforms",
+      "refineHeading": "Refine",
+      "entitlementLabel": "Entitlement key",
+      "entitlementPlaceholder": "e.g. premium",
+      "countryLabel": "Country (ISO-3166)",
+      "countryPlaceholder": "e.g. US",
+      "ltvMinLabel": "Min LTV (USD)",
+      "platforms": {
+        "ios": "iOS",
+        "android": "Android",
+        "web": "Web"
+      },
+      "apply": "Apply",
+      "clear": "Clear all"
+    },
+    "sort": {
+      "label": "Sort: {{mode}}",
+      "modes": {
+        "last_activity": "Last activity",
+        "created": "Newest",
+        "ltv": "Highest LTV",
+        "purchases": "Most purchases"
+      }
+    },
+    "dateRange": {
+      "allTime": "All time",
+      "lastNd": "Last {{days}}d",
+      "customRange": "{{from}} → {{to}}",
+      "sinceX": "Since {{date}}",
+      "untilX": "Until {{date}}",
+      "presetsHeading": "Quick ranges",
+      "customHeading": "Custom range",
+      "from": "From",
+      "to": "To",
+      "apply": "Apply",
+      "clear": "Clear"
     },
     "table": {
       "appUserId": "App user id",

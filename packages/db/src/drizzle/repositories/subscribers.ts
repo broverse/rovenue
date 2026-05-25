@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ilike, isNull, lt, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, isNull, lte, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   experimentAssignments,
@@ -185,15 +185,54 @@ export async function upsertSubscriber(
 // Dashboard list page
 // =============================================================
 
+export type SubscriberStatusFilter = "active" | "trial" | "grace" | "churned";
+export type SubscriberPlatformFilter = "ios" | "android" | "web";
+/** Sort key + implicit direction:
+ *  - `last_activity`  — `lastSeenAt DESC` (default)
+ *  - `created`        — `createdAt DESC`
+ *  - `ltv`            — sum of `purchases.priceAmount` DESC
+ *  - `purchases`      — count of `purchases` DESC
+ *  Every mode tiebreaks on `id DESC` so the keyset stays unique. */
+export type SubscriberSortMode =
+  | "last_activity"
+  | "created"
+  | "ltv"
+  | "purchases";
+
+/** Friendly platform alias → on-disk `Store` enum variant. */
+const PLATFORM_TO_STORE: Record<SubscriberPlatformFilter, string> = {
+  ios: "APP_STORE",
+  android: "PLAY_STORE",
+  web: "STRIPE",
+};
+
 export interface ListSubscribersArgs {
   projectId: string;
-  /** Keyset cursor: (createdAt, id). */
-  cursor?: { createdAt: Date; id: string };
+  /** Keyset cursor: (sortValue, id) — `sortValue` is interpreted
+   *  according to `sort`. ISO timestamp for date sorts, decimal
+   *  string for ltv, integer string for purchases. */
+  cursor?: { value: string; id: string };
+  /** Defaults to `last_activity` when omitted. */
+  sort?: SubscriberSortMode;
   /** Page size, 1..100. The caller fetches `limit + 1` to detect
    *  the "has more" flag and trims here. */
   limit: number;
   /** Case-insensitive substring match on appUserId. */
   q?: string;
+  /** Derived lifecycle status — matches the dashboard scope tabs. */
+  status?: SubscriberStatusFilter;
+  /** Subscriber must have an *active* entitlement with this key. */
+  entitlementKey?: string;
+  /** Subscriber must have at least one purchase from this platform. */
+  platforms?: ReadonlyArray<SubscriberPlatformFilter>;
+  /** Match on `attributes->>'country'` (exact, case-insensitive). */
+  country?: string;
+  /** Sum of purchase priceAmount across the subscriber ≥ ltvMin (USD-as-is). */
+  ltvMin?: number;
+  /** Inclusive lower bound on `lastSeenAt`. */
+  lastSeenFrom?: Date;
+  /** Inclusive upper bound on `lastSeenAt`. */
+  lastSeenTo?: Date;
 }
 
 export interface ListedSubscriber {
@@ -205,15 +244,30 @@ export interface ListedSubscriber {
   createdAt: Date;
   purchaseCount: number;
   activeEntitlementKeys: string[];
+  /** Lifetime gross from `purchases.priceAmount`, decimal-as-string. */
+  ltvUsd: string;
+  /** Distinct platforms across all purchases (ios/android/web). */
+  platforms: SubscriberPlatformFilter[];
+  /** Cursor boundary value for the page this row appeared on —
+   *  format matches `sort`. ISO timestamp for date sorts, decimal
+   *  string for ltv, integer string for purchases. */
+  sortValue: string;
 }
+
+const STORE_TO_PLATFORM: Record<string, SubscriberPlatformFilter> = {
+  APP_STORE: "ios",
+  PLAY_STORE: "android",
+  STRIPE: "web",
+};
 
 /**
  * Dashboard list query: keyset pagination on (createdAt, id),
- * optional text search, plus per-row purchase count and active
- * entitlement keys. The aggregate fields are fetched via
- * correlated subqueries — Postgres handles the per-row correlation
- * cleanly and Drizzle's query API doesn't need a raw SQL escape
- * hatch for it.
+ * optional text search + structured filters (status / entitlement /
+ * platform / country / ltvMin), plus per-row purchase count, LTV,
+ * platforms, and active entitlement keys. Aggregate fields are
+ * fetched via correlated subqueries — Postgres handles the per-row
+ * correlation cleanly and Drizzle's query API doesn't need a raw
+ * SQL escape hatch for it.
  */
 export async function listSubscribers(
   db: Db,
@@ -226,26 +280,152 @@ export async function listSubscribers(
   if (args.q) {
     whereClauses.push(ilike(subscribers.appUserId, `%${args.q}%`));
   }
-  if (args.cursor) {
+
+  // --- status (derived from access + purchase rows) -----------
+  if (args.status === "active") {
+    whereClauses.push(sql`EXISTS (
+      SELECT 1 FROM ${subscriberAccess}
+      WHERE ${subscriberAccess.subscriberId} = ${subscribers.id}
+        AND ${subscriberAccess.isActive} = TRUE
+        AND (${subscriberAccess.expiresDate} IS NULL
+             OR ${subscriberAccess.expiresDate} > NOW())
+    )`);
+  } else if (args.status === "trial") {
+    whereClauses.push(sql`EXISTS (
+      SELECT 1 FROM ${purchases}
+      WHERE ${purchases.subscriberId} = ${subscribers.id}
+        AND ${purchases.status} = 'TRIAL'
+        AND (${purchases.expiresDate} IS NULL
+             OR ${purchases.expiresDate} > NOW())
+    )`);
+  } else if (args.status === "grace") {
+    whereClauses.push(sql`EXISTS (
+      SELECT 1 FROM ${purchases}
+      WHERE ${purchases.subscriberId} = ${subscribers.id}
+        AND ${purchases.status} = 'GRACE_PERIOD'
+        AND (${purchases.gracePeriodExpires} IS NULL
+             OR ${purchases.gracePeriodExpires} > NOW())
+    )`);
+  } else if (args.status === "churned") {
+    // No live access today but has had at least one purchase (so
+    // greenfield subscribers don't bleed into the "churned" tab).
+    whereClauses.push(sql`NOT EXISTS (
+      SELECT 1 FROM ${subscriberAccess}
+      WHERE ${subscriberAccess.subscriberId} = ${subscribers.id}
+        AND ${subscriberAccess.isActive} = TRUE
+        AND (${subscriberAccess.expiresDate} IS NULL
+             OR ${subscriberAccess.expiresDate} > NOW())
+    )`);
+    whereClauses.push(sql`EXISTS (
+      SELECT 1 FROM ${purchases}
+      WHERE ${purchases.subscriberId} = ${subscribers.id}
+    )`);
+  }
+
+  // --- entitlement key (must be currently active) -------------
+  if (args.entitlementKey) {
+    whereClauses.push(sql`EXISTS (
+      SELECT 1 FROM ${subscriberAccess}
+      WHERE ${subscriberAccess.subscriberId} = ${subscribers.id}
+        AND ${subscriberAccess.entitlementKey} = ${args.entitlementKey}
+        AND ${subscriberAccess.isActive} = TRUE
+        AND (${subscriberAccess.expiresDate} IS NULL
+             OR ${subscriberAccess.expiresDate} > NOW())
+    )`);
+  }
+
+  // --- platform (any-of) --------------------------------------
+  if (args.platforms && args.platforms.length > 0) {
+    const stores = args.platforms.map((p) => PLATFORM_TO_STORE[p]);
+    whereClauses.push(sql`EXISTS (
+      SELECT 1 FROM ${purchases}
+      WHERE ${purchases.subscriberId} = ${subscribers.id}
+        AND ${purchases.store}::text = ANY(${stores})
+    )`);
+  }
+
+  // --- country (attributes JSON) ------------------------------
+  if (args.country) {
     whereClauses.push(
-      or(
-        lt(subscribers.createdAt, args.cursor.createdAt),
-        and(
-          eq(subscribers.createdAt, args.cursor.createdAt),
-          lt(subscribers.id, args.cursor.id),
-        ),
-      )!,
+      sql`UPPER(${subscribers.attributes}->>'country') = ${args.country.toUpperCase()}`,
     );
+  }
+
+  // --- ltv minimum (sum of purchase prices) -------------------
+  if (typeof args.ltvMin === "number" && Number.isFinite(args.ltvMin)) {
+    whereClauses.push(sql`(
+      SELECT COALESCE(SUM(${purchases.priceAmount}), 0)
+      FROM ${purchases}
+      WHERE ${purchases.subscriberId} = ${subscribers.id}
+    ) >= ${args.ltvMin}`);
+  }
+
+  // --- lastSeenAt range (inclusive) ---------------------------
+  if (args.lastSeenFrom) {
+    whereClauses.push(gte(subscribers.lastSeenAt, args.lastSeenFrom));
+  }
+  if (args.lastSeenTo) {
+    whereClauses.push(lte(subscribers.lastSeenAt, args.lastSeenTo));
   }
 
   // Correlated subqueries keep the round-trip to one SELECT. The
   // COALESCE on the entitlement array drops rows with no active
-  // access down to an empty array rather than null.
-  const purchaseCountSql = sql<number>`(
+  // access down to an empty array rather than null. The LTV +
+  // purchase-count expressions are reused both as SELECT columns
+  // and (when the matching sort mode is active) as the ORDER BY
+  // expression + keyset boundary.
+  const purchaseCountExpr = sql<number>`(
     SELECT COUNT(*)::int
     FROM ${purchases}
     WHERE ${purchases.subscriberId} = ${subscribers.id}
   )`;
+  const ltvExpr = sql<string>`(
+    SELECT COALESCE(SUM(${purchases.priceAmount}), 0)
+    FROM ${purchases}
+    WHERE ${purchases.subscriberId} = ${subscribers.id}
+  )`;
+
+  // Sort + keyset construction. `sortExpr` is the column / expression
+  // the ORDER BY tiebreaks on (id is always the secondary key). When a
+  // cursor is present, we WHERE the same expression on the (value, id)
+  // boundary so the next page starts strictly after it.
+  const sortMode: SubscriberSortMode = args.sort ?? "last_activity";
+  let sortExpr: ReturnType<typeof sql>;
+  let castedCursorValue: ReturnType<typeof sql> | null = null;
+  switch (sortMode) {
+    case "last_activity":
+      sortExpr = sql`${subscribers.lastSeenAt}`;
+      if (args.cursor) {
+        castedCursorValue = sql`${args.cursor.value}::timestamptz`;
+      }
+      break;
+    case "created":
+      sortExpr = sql`${subscribers.createdAt}`;
+      if (args.cursor) {
+        castedCursorValue = sql`${args.cursor.value}::timestamptz`;
+      }
+      break;
+    case "ltv":
+      sortExpr = ltvExpr;
+      if (args.cursor) {
+        castedCursorValue = sql`${args.cursor.value}::numeric`;
+      }
+      break;
+    case "purchases":
+      sortExpr = purchaseCountExpr;
+      if (args.cursor) {
+        castedCursorValue = sql`${args.cursor.value}::int`;
+      }
+      break;
+  }
+
+  if (args.cursor && castedCursorValue) {
+    whereClauses.push(sql`(
+      ${sortExpr} < ${castedCursorValue}
+      OR (${sortExpr} = ${castedCursorValue} AND ${subscribers.id} < ${args.cursor.id})
+    )`);
+  }
+
   const entitlementsSql = sql<string[]>`(
     SELECT COALESCE(
       ARRAY_AGG(DISTINCT ${subscriberAccess.entitlementKey}),
@@ -257,6 +437,22 @@ export async function listSubscribers(
       AND (${subscriberAccess.expiresDate} IS NULL
            OR ${subscriberAccess.expiresDate} > NOW())
   )`;
+  // Reuse the same correlated subquery defined above for ltvExpr,
+  // but cast to text so the value round-trips through the wire
+  // unambiguously.
+  const ltvSql = sql<string>`(${ltvExpr})::text`;
+  const platformsSql = sql<string[]>`(
+    SELECT COALESCE(
+      ARRAY_AGG(DISTINCT ${purchases.store}::text),
+      ARRAY[]::text[]
+    )
+    FROM ${purchases}
+    WHERE ${purchases.subscriberId} = ${subscribers.id}
+  )`;
+  // Surface the sort boundary as a string the route can re-encode
+  // into the next cursor without re-deriving it. Timestamps come
+  // through as ISO strings; numerics as plain decimal strings.
+  const sortValueSql = sql<string>`(${sortExpr})::text`;
 
   const rows = await db
     .select({
@@ -266,18 +462,26 @@ export async function listSubscribers(
       firstSeenAt: subscribers.firstSeenAt,
       lastSeenAt: subscribers.lastSeenAt,
       createdAt: subscribers.createdAt,
-      purchaseCount: purchaseCountSql,
+      purchaseCount: purchaseCountExpr,
       activeEntitlementKeys: entitlementsSql,
+      ltvUsd: ltvSql,
+      platforms: platformsSql,
+      sortValue: sortValueSql,
     })
     .from(subscribers)
     .where(and(...whereClauses))
-    .orderBy(desc(subscribers.createdAt), desc(subscribers.id))
+    .orderBy(sql`${sortExpr} DESC`, desc(subscribers.id))
     .limit(args.limit);
 
   return rows.map((r) => ({
     ...r,
     purchaseCount: Number(r.purchaseCount) || 0,
     activeEntitlementKeys: r.activeEntitlementKeys ?? [],
+    ltvUsd: typeof r.ltvUsd === "string" ? r.ltvUsd : "0",
+    platforms: (r.platforms ?? [])
+      .map((s) => STORE_TO_PLATFORM[s])
+      .filter((p): p is SubscriberPlatformFilter => Boolean(p)),
+    sortValue: typeof r.sortValue === "string" ? r.sortValue : "",
   }));
 }
 

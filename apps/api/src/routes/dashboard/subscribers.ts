@@ -11,7 +11,6 @@ import type {
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
-import { encodeCursor, decodeCursor } from "../../lib/pagination";
 import { extractRequestContext } from "../../lib/audit";
 import { anonymizeSubscriber } from "../../services/gdpr/anonymize-subscriber";
 import { exportSubscriber } from "../../services/gdpr/export-subscriber";
@@ -73,10 +72,111 @@ function encodeCreditHistoryCursor(cursor: {
 //
 // Detail endpoint lives in Task A7; this file is list-only.
 
+// Recognise the `YYYY-MM-DD` calendar shape so it can be widened to
+// the whole-day [00:00:00Z, 23:59:59.999Z] window on the way into the
+// repo. Anything else (full ISO timestamp with time/zone) flows
+// through unchanged.
+const CALENDAR_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function widenLowerBound(parsed: Date, raw: string): Date {
+  if (!CALENDAR_DAY_RE.test(raw)) return parsed;
+  const widened = new Date(parsed);
+  widened.setUTCHours(0, 0, 0, 0);
+  return widened;
+}
+
+function widenUpperBound(parsed: Date, raw: string): Date {
+  if (!CALENDAR_DAY_RE.test(raw)) return parsed;
+  const widened = new Date(parsed);
+  widened.setUTCHours(23, 59, 59, 999);
+  return widened;
+}
+
+// Comma-separated platform list (`?platform=ios,android`) — kept as a
+// single repeated key so the URL stays compact for shareable links.
+const platformSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(50)
+  .transform((raw) =>
+    raw
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s.length > 0),
+  )
+  .pipe(z.array(z.enum(["ios", "android", "web"])).min(1).max(3));
+
+// Accepts either `YYYY-MM-DD` (treated as that day in UTC) or any
+// ISO-8601 timestamp Date() can parse. Half-open dates (only `from`
+// or only `to`) are supported so the popover can express "since X"
+// or "until Y" without a fallback timestamp.
+const dateBoundSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(40)
+  .transform((raw, ctx) => {
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Invalid date",
+      });
+      return z.NEVER;
+    }
+    return parsed;
+  });
+
+// Sort-aware cursor: `{ v: string, id: string }`. `v` is the raw
+// SQL `text` representation of the previous page's last sort value
+// (ISO timestamp for date sorts, decimal/integer for numeric ones).
+// The repo casts it back to the column type per sort mode.
+interface SubscribersCursor {
+  v: string;
+  id: string;
+}
+
+function decodeListCursor(raw: string | undefined): SubscribersCursor | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(raw, "base64url").toString("utf8"),
+    ) as { v?: unknown; id?: unknown };
+    if (typeof parsed.v !== "string" || typeof parsed.id !== "string") {
+      return null;
+    }
+    return { v: parsed.v, id: parsed.id };
+  } catch {
+    return null;
+  }
+}
+
+function encodeListCursor(cursor: SubscribersCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
 const listQuerySchema = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   q: z.string().trim().min(1).max(200).optional(),
+  status: z.enum(["active", "trial", "grace", "churned"]).optional(),
+  entitlement: z.string().trim().min(1).max(200).optional(),
+  platform: platformSchema.optional(),
+  // 2-letter country code; we upper-case both sides on the SQL side
+  // so the input casing is forgiving.
+  country: z.string().trim().length(2).optional(),
+  ltvMin: z.coerce.number().min(0).max(1_000_000).optional(),
+  // `lastSeenAt` range (inclusive). The route widens `from` to the
+  // start of the day (UTC) and `to` to the end so a `YYYY-MM-DD`
+  // pair behaves as the visible calendar range.
+  from: dateBoundSchema.optional(),
+  to: dateBoundSchema.optional(),
+  // Sort key — default `last_activity` matches the toolbar control.
+  // Each mode tiebreaks on `id DESC` so the keyset stays unique.
+  sort: z
+    .enum(["last_activity", "created", "ltv", "purchases"])
+    .default("last_activity"),
 });
 
 // POST /:id/anonymize — GDPR / KVKK right-to-erasure. The body is
@@ -117,24 +217,50 @@ export const subscribersRoute = new Hono()
   await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
 
   const query = c.req.valid("query");
-  const cursor = decodeCursor(query.cursor);
+  const cursor = decodeListCursor(query.cursor);
+
+  // Widen calendar-day inputs (`YYYY-MM-DD`) to whole-day bounds so
+  // the inclusive UI semantics match SQL. Full ISO timestamps with
+  // time/zone information come through untouched.
+  const lastSeenFrom = query.from
+    ? widenLowerBound(query.from, c.req.query("from") ?? "")
+    : undefined;
+  const lastSeenTo = query.to
+    ? widenUpperBound(query.to, c.req.query("to") ?? "")
+    : undefined;
+  if (lastSeenFrom && lastSeenTo && lastSeenFrom > lastSeenTo) {
+    throw new HTTPException(400, {
+      message: "`from` must be earlier than `to`",
+    });
+  }
 
   // listSubscribers builds its own WHERE internally (projectId +
-  // deletedAt IS NULL + optional text search + optional keyset
-  // cursor) — see packages/db/src/drizzle/repositories/subscribers.ts.
+  // deletedAt IS NULL + optional text search + structured filters +
+  // optional keyset cursor) — see
+  // packages/db/src/drizzle/repositories/subscribers.ts.
   const fetchLimit = query.limit + 1;
   const rows = await drizzle.subscriberRepo.listSubscribers(drizzle.db, {
     projectId,
-    cursor: cursor ?? undefined,
+    cursor: cursor ? { value: cursor.v, id: cursor.id } : undefined,
+    sort: query.sort,
     limit: fetchLimit,
     q: query.q,
+    status: query.status,
+    entitlementKey: query.entitlement,
+    platforms: query.platform,
+    country: query.country,
+    ltvMin: query.ltvMin,
+    lastSeenFrom,
+    lastSeenTo,
   });
 
   const hasMore = rows.length > query.limit;
   const page = hasMore ? rows.slice(0, query.limit) : rows;
   const last = page[page.length - 1];
   const nextCursor =
-    hasMore && last ? encodeCursor({ createdAt: last.createdAt, id: last.id }) : null;
+    hasMore && last
+      ? encodeListCursor({ v: last.sortValue, id: last.id })
+      : null;
 
   const subscribers: SubscriberListItem[] = page.map((s) => ({
     id: s.id,
@@ -144,6 +270,8 @@ export const subscribersRoute = new Hono()
     lastSeenAt: s.lastSeenAt.toISOString(),
     purchaseCount: s.purchaseCount,
     activeEntitlementKeys: s.activeEntitlementKeys,
+    ltvUsd: s.ltvUsd,
+    platforms: s.platforms,
   }));
 
     const response: SubscriberListResponse = { subscribers, nextCursor };
