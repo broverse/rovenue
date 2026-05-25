@@ -44,7 +44,7 @@ afterAll(async () => {
 async function seedProject() {
   const [project] = await db
     .insert(schema.projects)
-    .values({ name: "Test Project", slug: `test-proj-cl-${Date.now()}` })
+    .values({ name: "Test Project" })
     .returning();
   if (!project) throw new Error("seedProject: no row returned");
   return project;

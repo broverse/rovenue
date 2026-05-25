@@ -3,28 +3,16 @@ import { Input } from "../../ui/input";
 import { Textarea } from "../../ui/textarea";
 import { Field } from "./field";
 import { IconPicker } from "./icon-picker";
-import { PrefixInput } from "./prefix-input";
-import { TagInput } from "./tag-input";
-import { CardPick, CardPickGrid } from "./card-pick";
 import { StepHead } from "./step-head";
-import { sanitizeSlug } from "./format";
-import type { EnvironmentId, SetupForm, SetupMode } from "./types";
+import type { SetupForm } from "./types";
 
 type StepBasicsProps = {
   form: SetupForm;
-  mode: SetupMode;
   onUpdate: <Key extends keyof SetupForm>(key: Key, value: SetupForm[Key]) => void;
 };
 
-const ENV_OPTIONS: ReadonlyArray<EnvironmentId> = [
-  "production",
-  "staging",
-  "sandbox",
-];
-
-export function StepBasics({ form, mode, onUpdate }: StepBasicsProps) {
+export function StepBasics({ form, onUpdate }: StepBasicsProps) {
   const { t } = useTranslation();
-  const isUpdate = mode === "update";
 
   return (
     <>
@@ -58,30 +46,6 @@ export function StepBasics({ form, mode, onUpdate }: StepBasicsProps) {
               onChange={(event) => onUpdate("name", event.target.value)}
             />
           </Field>
-
-          <Field
-            label={t("projectSetup.basics.slug")}
-            optional={t(
-              isUpdate
-                ? "projectSetup.basics.slugLocked"
-                : "projectSetup.basics.slugAuto",
-            )}
-            hint={
-              form.slug
-                ? `app.rovenue.io/${form.slug}`
-                : t("projectSetup.basics.slugHintEmpty")
-            }
-          >
-            <PrefixInput
-              prefix="app.rovenue.io /"
-              value={form.slug}
-              disabled={isUpdate}
-              placeholder={t("projectSetup.basics.slugPlaceholder")}
-              onChange={(event) =>
-                onUpdate("slug", sanitizeSlug(event.target.value))
-              }
-            />
-          </Field>
         </div>
       </div>
 
@@ -98,35 +62,6 @@ export function StepBasics({ form, mode, onUpdate }: StepBasicsProps) {
           value={form.desc}
           maxLength={400}
           onChange={(event) => onUpdate("desc", event.target.value)}
-        />
-      </Field>
-
-      <Field
-        label={t("projectSetup.basics.environment")}
-        optional={t("projectSetup.basics.required")}
-      >
-        <CardPickGrid columns={3}>
-          {ENV_OPTIONS.map((option) => (
-            <CardPick
-              key={option}
-              selected={form.env === option}
-              onSelect={() => onUpdate("env", option)}
-              title={t(`projectSetup.basics.envOptions.${option}.name`)}
-              description={t(`projectSetup.basics.envOptions.${option}.desc`)}
-            />
-          ))}
-        </CardPickGrid>
-      </Field>
-
-      <Field
-        label={t("projectSetup.basics.tags")}
-        optional={t("projectSetup.basics.optional")}
-        hint={t("projectSetup.basics.tagsHint")}
-      >
-        <TagInput
-          value={form.tags}
-          onChange={(next) => onUpdate("tags", next)}
-          placeholder={t("projectSetup.basics.tagsPlaceholder")}
         />
       </Field>
     </>

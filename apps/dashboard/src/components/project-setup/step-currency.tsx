@@ -1,9 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Select } from "../../ui/select";
-import { CardPick, CardPickGrid } from "./card-pick";
 import { Field } from "./field";
 import { StepHead } from "./step-head";
-import { ToggleRow } from "./toggle-row";
 import {
   CURRENCIES,
   FISCAL_MONTHS,
@@ -11,8 +9,6 @@ import {
 } from "./mock-data";
 import type {
   FiscalMonth,
-  FxSourceId,
-  RefundPolicy,
   SetupForm,
   WeekStart,
 } from "./types";
@@ -22,11 +18,6 @@ type StepCurrencyProps = {
   onUpdate: <Key extends keyof SetupForm>(key: Key, value: SetupForm[Key]) => void;
 };
 
-const FX_SOURCES: ReadonlyArray<FxSourceId> = ["ecb", "oanda", "custom"];
-const REFUND_POLICIES: ReadonlyArray<RefundPolicy> = [
-  "partial-window",
-  "full-clawback",
-];
 const WEEK_STARTS: ReadonlyArray<WeekStart> = [
   "monday",
   "sunday",
@@ -61,18 +52,23 @@ export function StepCurrency({ form, onUpdate }: StepCurrencyProps) {
         </Select>
       </Field>
 
-      <Field label={t("projectSetup.currency.fxSource")}>
-        <CardPickGrid columns={3}>
-          {FX_SOURCES.map((source) => (
-            <CardPick
-              key={source}
-              selected={form.fxSource === source}
-              onSelect={() => onUpdate("fxSource", source)}
-              title={t(`projectSetup.currency.fxOptions.${source}.name`)}
-              description={t(`projectSetup.currency.fxOptions.${source}.desc`)}
-            />
-          ))}
-        </CardPickGrid>
+      <Field
+        label={t("projectSetup.currency.fxSource")}
+        hint={t("projectSetup.currency.fxSourceHint")}
+      >
+        <div className="flex items-center justify-between rounded-md border border-rv-divider bg-rv-c2 px-3 py-2.5">
+          <div>
+            <div className="text-[13px] font-medium text-foreground">
+              {t("projectSetup.currency.fxOptions.ecb.name")}
+            </div>
+            <div className="text-[12px] text-rv-mute-600">
+              {t("projectSetup.currency.fxOptions.ecb.desc")}
+            </div>
+          </div>
+          <span className="rounded-sm bg-rv-c3 px-1.5 py-0.5 font-rv-mono text-[10px] uppercase tracking-wider text-rv-mute-500">
+            {t("projectSetup.currency.fxLocked")}
+          </span>
+        </div>
       </Field>
 
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
@@ -127,30 +123,6 @@ export function StepCurrency({ form, onUpdate }: StepCurrencyProps) {
           ))}
         </Select>
       </Field>
-
-      <Field
-        label={t("projectSetup.currency.refundPolicy")}
-        optional={t("projectSetup.currency.refundPolicyOptional")}
-      >
-        <CardPickGrid>
-          {REFUND_POLICIES.map((policy) => (
-            <CardPick
-              key={policy}
-              selected={form.refundPolicy === policy}
-              onSelect={() => onUpdate("refundPolicy", policy)}
-              title={t(`projectSetup.currency.refundOptions.${policy}.name`)}
-              description={t(`projectSetup.currency.refundOptions.${policy}.desc`)}
-            />
-          ))}
-        </CardPickGrid>
-      </Field>
-
-      <ToggleRow
-        title={t("projectSetup.currency.autoImport.title")}
-        description={t("projectSetup.currency.autoImport.description")}
-        checked={form.autoImport}
-        onChange={(next) => onUpdate("autoImport", next)}
-      />
     </>
   );
 }

@@ -5,11 +5,8 @@ import { StepperRail } from "./stepper-rail";
 import { StepBasics } from "./step-basics";
 import { StepPlatforms } from "./step-platforms";
 import { StepCurrency } from "./step-currency";
-import { StepConnectors } from "./step-connectors";
-import { StepTeam } from "./step-team";
 import { StepReview } from "./step-review";
 import { EMPTY_FORM, STEPS } from "./mock-data";
-import { slugify } from "./format";
 import type { PlatformId, SetupForm, SetupMode } from "./types";
 
 type ProjectSetupWizardProps = {
@@ -24,7 +21,7 @@ type ProjectSetupWizardProps = {
 const isStepCompleteFor = (form: SetupForm, stepId: number): boolean => {
   switch (stepId) {
     case 1:
-      return form.name.length >= 2 && form.slug.length >= 2;
+      return form.name.length >= 2;
     case 2:
       return form.platforms.length > 0;
     case 3:
@@ -35,9 +32,9 @@ const isStepCompleteFor = (form: SetupForm, stepId: number): boolean => {
 };
 
 /**
- * The full six-step setup experience. Owns transient form state, step
- * gating, and the auto-slug derivation that fires while the slug field is
- * still empty in create mode.
+ * The four-step setup experience: basics → platforms → currency →
+ * review. Owns transient form state and step gating; the post-submit
+ * navigation (and member invite handoff) lives in the route layer.
  */
 export function ProjectSetupWizard({
   mode,
@@ -53,17 +50,11 @@ export function ProjectSetupWizard({
   );
   const [form, setForm] = useState<SetupForm>(seed);
   const [step, setStep] = useState(1);
-  const isUpdate = mode === "update";
 
   useEffect(() => {
     setForm(seed);
     setStep(1);
   }, [seed]);
-
-  useEffect(() => {
-    if (isUpdate || !form.name || form.slug) return;
-    setForm((current) => ({ ...current, slug: slugify(current.name) }));
-  }, [form.name, form.slug, isUpdate]);
 
   const update = <Key extends keyof SetupForm>(key: Key, value: SetupForm[Key]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -75,14 +66,6 @@ export function ProjectSetupWizard({
       platforms: current.platforms.includes(id)
         ? current.platforms.filter((existing) => existing !== id)
         : [...current.platforms, id],
-    }));
-
-  const toggleConnector = (id: string) =>
-    setForm((current) => ({
-      ...current,
-      connectors: current.connectors.includes(id)
-        ? current.connectors.filter((existing) => existing !== id)
-        : [...current.connectors, id],
     }));
 
   const isDone = (id: number) => isStepCompleteFor(form, id);
@@ -111,7 +94,7 @@ export function ProjectSetupWizard({
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="mx-auto w-full max-w-[920px] flex-1 px-4 py-6 sm:px-8 sm:py-10 md:px-10 lg:px-14">
             {step === 1 ? (
-              <StepBasics form={form} mode={mode} onUpdate={update} />
+              <StepBasics form={form} onUpdate={update} />
             ) : null}
             {step === 2 ? (
               <StepPlatforms
@@ -124,13 +107,6 @@ export function ProjectSetupWizard({
               <StepCurrency form={form} onUpdate={update} />
             ) : null}
             {step === 4 ? (
-              <StepConnectors
-                form={form}
-                onToggleConnector={toggleConnector}
-              />
-            ) : null}
-            {step === 5 ? <StepTeam form={form} onUpdate={update} /> : null}
-            {step === 6 ? (
               <StepReview form={form} mode={mode} onJump={goto} />
             ) : null}
           </div>

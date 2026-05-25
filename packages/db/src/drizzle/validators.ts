@@ -33,7 +33,6 @@ export const userSelectSchema = createSelectSchema(t.user);
 export const projectSelectSchema = createSelectSchema(t.projects);
 export const projectInsertSchema = createInsertSchema(t.projects, {
   name: (s) => s.min(1).max(120),
-  slug: (s) => s.regex(/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/),
 });
 
 // =============================================================

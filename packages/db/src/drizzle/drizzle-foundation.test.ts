@@ -108,10 +108,10 @@ describe("schema shapes compile", () => {
 });
 
 describe("inferred types", () => {
-  it("NewProject makes id/slug/name mandatory; settings/timestamps optional", () => {
+  it("NewProject makes id/name mandatory; settings/timestamps optional", () => {
     // Type-level assertion — if this compiles, the insert type is
     // correctly shaped. Runtime body is intentionally empty.
-    const _ok: NewProject = { name: "Acme", slug: "acme" };
+    const _ok: NewProject = { name: "Acme" };
     expect(_ok.name).toBe("Acme");
   });
 
@@ -142,7 +142,7 @@ describe("query builder typing", () => {
   });
 
   it("sql template tag accepts drizzle columns", () => {
-    const frag = sql`SELECT ${projects.slug} FROM ${projects}`;
+    const frag = sql`SELECT ${projects.name} FROM ${projects}`;
     expect(frag).toBeDefined();
   });
 });
@@ -169,19 +169,13 @@ describe("NewAuditLogRow hash chain columns", () => {
 describe("projectInsertSchema", () => {
   it("accepts a valid project", () => {
     expect(() =>
-      projectInsertSchema.parse({ name: "Acme", slug: "acme" }),
+      projectInsertSchema.parse({ name: "Acme" }),
     ).not.toThrow();
-  });
-
-  it("rejects an invalid slug", () => {
-    expect(() =>
-      projectInsertSchema.parse({ name: "Acme", slug: "Acme!" }),
-    ).toThrow();
   });
 
   it("rejects an empty name", () => {
     expect(() =>
-      projectInsertSchema.parse({ name: "", slug: "acme" }),
+      projectInsertSchema.parse({ name: "" }),
     ).toThrow();
   });
 });

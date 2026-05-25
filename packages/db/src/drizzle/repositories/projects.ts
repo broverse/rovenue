@@ -188,7 +188,6 @@ export async function countProjectOwners(
 
 export interface CreateProjectInput {
   name: string;
-  slug: string;
   settings: unknown;
 }
 
@@ -205,7 +204,6 @@ export async function createProject(
     .insert(projects)
     .values({
       name: input.name,
-      slug: input.slug,
       settings: input.settings as typeof projects.$inferInsert.settings,
     })
     .returning();

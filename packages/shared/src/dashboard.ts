@@ -12,7 +12,6 @@ export type ApiKeyEnvironment = "PRODUCTION" | "SANDBOX";
 export interface ProjectSummary {
   id: string;
   name: string;
-  slug: string;
   role: MemberRoleName;
   createdAt: string; // ISO
 }
@@ -28,7 +27,6 @@ export interface ProjectApiKey {
 export interface ProjectDetail {
   id: string;
   name: string;
-  slug: string;
   webhookUrl: string | null;
   hasWebhookSecret: boolean;
   settings: Record<string, unknown>;
@@ -43,10 +41,34 @@ export interface ProjectDetail {
   apiKeys: ProjectApiKey[];
 }
 
+/**
+ * Reporting defaults captured at project-create time and stored
+ * inside `projects.settings`. The dashboard wizard collects these
+ * on the Currency step; the FX source is fixed to "ECB" today.
+ */
+export interface ProjectReportingSettings {
+  reportingCurrency: string;
+  fxSource: "ecb";
+  timezone: string;
+  weekStart: "monday" | "sunday" | "saturday";
+  fiscalMonth:
+    | "jan"
+    | "feb"
+    | "mar"
+    | "apr"
+    | "may"
+    | "jun"
+    | "jul"
+    | "aug"
+    | "sep"
+    | "oct"
+    | "nov"
+    | "dec";
+}
+
 export interface CreateProjectRequest {
   name: string;
-  slug: string;
-  environment?: ApiKeyEnvironment; // default PRODUCTION
+  reporting?: Partial<ProjectReportingSettings>;
 }
 
 export interface CreateProjectResponse {

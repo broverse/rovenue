@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { CardPick, CardPickGrid } from "./card-pick";
-import { CheckboxRow } from "./checkbox-row";
 import { CredentialCard } from "./credential-card";
 import { Field } from "./field";
 import { PlatformIcon } from "./platform-icon";
@@ -132,15 +131,15 @@ export function StepPlatforms({
         </CredentialCard>
       ) : null}
 
-      {form.platforms.includes("web") ? (
+      {form.platforms.includes("stripe") ? (
         <CredentialCard
           iconBg="#635BFF"
-          iconLabel="Sw"
-          title={t("projectSetup.platforms.web.title")}
+          iconLabel="St"
+          title={t("projectSetup.platforms.stripe.title")}
         >
           <Field
             className="mb-0"
-            label={t("projectSetup.platforms.web.account")}
+            label={t("projectSetup.platforms.stripe.account")}
             optional={t("projectSetup.basics.required")}
           >
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -153,21 +152,12 @@ export function StepPlatforms({
               />
               <Button type="button" variant="flat" className="h-9 shrink-0">
                 <Webhook className="size-3.5" aria-hidden="true" />
-                {t("projectSetup.platforms.web.oauthConnect")}
+                {t("projectSetup.platforms.stripe.oauthConnect")}
               </Button>
             </div>
           </Field>
         </CredentialCard>
       ) : null}
-
-      <div className="mt-5">
-        <CheckboxRow
-          checked={form.sandbox}
-          onChange={() => onUpdate("sandbox", !form.sandbox)}
-          title={t("projectSetup.platforms.mirror.title")}
-          description={t("projectSetup.platforms.mirror.description")}
-        />
-      </div>
     </>
   );
 }

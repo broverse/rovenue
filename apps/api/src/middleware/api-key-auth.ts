@@ -16,7 +16,6 @@ const log = logger.child("api-key-auth");
 export interface AuthenticatedProject {
   id: string;
   name: string;
-  slug: string;
   keyKind: ApiKeyKind;
   apiKeyId: string;
 }
@@ -109,7 +108,6 @@ export function apiKeyAuth(
     c.set("project", {
       id: record.project.id,
       name: record.project.name,
-      slug: record.project.slug,
       keyKind: detected,
       apiKeyId: record.id,
     });

@@ -27,14 +27,13 @@ function ProjectSetupEdit() {
       ...EMPTY_FORM,
       ...settings,
       name: project.name,
-      slug: project.slug,
     };
   }, [project]);
 
   if (isLoading || !project || !initialForm) return null;
 
   const handleSubmit = (form: SetupForm) => {
-    const { name, slug: _slug, ...settings } = form;
+    const { name, ...settings } = form;
     updateProject.mutate(
       { name, settings },
       {

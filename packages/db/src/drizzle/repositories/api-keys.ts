@@ -15,7 +15,7 @@ import {
 // both lookups (keyPublic UNIQUE, or id PK).
 
 type ApiKeyWithProject = ApiKey & {
-  project: { id: string; name: string; slug: string };
+  project: { id: string; name: string };
 };
 
 function rowToRecord(r: {
@@ -31,7 +31,6 @@ function rowToRecord(r: {
   createdAt: Date;
   updatedAt: Date;
   projectName: string;
-  projectSlug: string;
 }): ApiKeyWithProject {
   return {
     id: r.id,
@@ -48,7 +47,6 @@ function rowToRecord(r: {
     project: {
       id: r.projectId,
       name: r.projectName,
-      slug: r.projectSlug,
     },
   };
 }
@@ -66,7 +64,6 @@ const selection = {
   createdAt: apiKeys.createdAt,
   updatedAt: apiKeys.updatedAt,
   projectName: projects.name,
-  projectSlug: projects.slug,
 };
 
 export async function findApiKeyByPublic(

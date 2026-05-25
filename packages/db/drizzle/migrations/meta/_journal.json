@@ -211,6 +211,13 @@
       "when": 1779214709636,
       "tag": "0029_true_sasquatch",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1779744181442,
+      "tag": "0030_drop_projects_slug",
+      "breakpoints": true
     }
   ]
 }

@@ -76,7 +76,6 @@ function newApiKeyId(): string {
 type ProjectRow = {
   id: string;
   name: string;
-  slug: string;
   webhookUrl: string | null;
   webhookSecret: string | null;
   settings: unknown;
@@ -144,7 +143,6 @@ function toProjectDetail(
   return {
     id: project.id,
     name: project.name,
-    slug: project.slug,
     webhookUrl: project.webhookUrl,
     hasWebhookSecret: Boolean(project.webhookSecret),
     settings: sanitizeSettings(project.settings),
@@ -155,19 +153,34 @@ function toProjectDetail(
   };
 }
 
+const reportingSettingsSchema = z
+  .object({
+    reportingCurrency: z.string().trim().length(3).optional(),
+    fxSource: z.literal("ecb").optional(),
+    timezone: z.string().trim().min(1).optional(),
+    weekStart: z.enum(["monday", "sunday", "saturday"]).optional(),
+    fiscalMonth: z
+      .enum([
+        "jan",
+        "feb",
+        "mar",
+        "apr",
+        "may",
+        "jun",
+        "jul",
+        "aug",
+        "sep",
+        "oct",
+        "nov",
+        "dec",
+      ])
+      .optional(),
+  })
+  .strict();
+
 export const createProjectBodySchema = z.object({
   name: z.string().trim().min(2).max(80),
-  slug: z
-    .string()
-    .trim()
-    .min(2)
-    .max(80)
-    .regex(/^[a-z0-9-]+$/, {
-      message: "slug must be lowercase alphanumeric with dashes",
-    }),
-  environment: z
-    .enum([Environment.PRODUCTION, Environment.SANDBOX])
-    .default(Environment.PRODUCTION),
+  reporting: reportingSettingsSchema.optional(),
 });
 
 export const updateProjectBodySchema = z
@@ -191,7 +204,6 @@ export const projectsRoute = new Hono()
   const projects: ProjectSummary[] = memberships.map((m) => ({
     id: m.project.id,
     name: m.project.name,
-    slug: m.project.slug,
     role: m.role,
     createdAt: m.project.createdAt.toISOString(),
   }));
@@ -229,10 +241,13 @@ export const projectsRoute = new Hono()
   const keyPublic = `${API_KEY_PREFIX[API_KEY_KIND.PUBLIC]}${urlSafeRandom(24)}`;
 
   const { project, apiKey, secretKey } = await drizzle.db.transaction(async (tx) => {
+    // Reporting defaults captured by the dashboard wizard land in
+    // `projects.settings`; the schema stays opaque so future fields
+    // can ride along without a migration.
+    const settings = body.reporting ? { reporting: body.reporting } : {};
     const createdProject = await drizzle.projectRepo.createProject(tx, {
       name: body.name,
-      slug: body.slug,
-      settings: {},
+      settings,
     });
 
     await drizzle.projectRepo.createProjectMember(tx, {
@@ -262,7 +277,7 @@ export const projectsRoute = new Hono()
       label: DEFAULT_API_KEY_LABEL,
       keyPublic,
       keySecretHash,
-      environment: body.environment,
+      environment: Environment.PRODUCTION,
     });
 
     return { project: createdProject, apiKey: createdApiKey, secretKey: secretPlaintext };
