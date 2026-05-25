@@ -53,6 +53,11 @@ const envSchema = z
       .enum(["0", "1"])
       .default("0")
       .transform((v) => v === "1"),
+    // OpenExchangeRates app_id for the daily FX worker. Free tier
+    // is USD-base + /latest only — exactly what we need. When blank
+    // the worker logs and skips the fetch; convertToUsd then falls
+    // through to Redis cache → Postgres fx_rates → static table.
+    OPEN_EXCHANGE_RATES_APP_ID: z.string().min(1).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== "production") return;

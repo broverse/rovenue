@@ -1,5 +1,6 @@
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
+import { drizzle, type Db } from "@rovenue/db";
 import { redis } from "../lib/redis";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
@@ -8,28 +9,40 @@ import { logger } from "../lib/logger";
 // Currency conversion with layered caching
 // =============================================================
 //
-// Rates are stored in Redis under two key patterns:
+// Storage layers, in lookup order from `convertToUsd`:
 //
-//   fx:{date}:{from}:USD  → rate for a specific day
-//   fx:latest:{from}:USD  → most recent rate (fallback)
+//   1. Redis fx:{date}:{from}:USD   → hot cache, USD-per-foreign
+//   2. Redis fx:latest:{from}:USD   → most recent rate (forward-fill)
+//   3. Postgres fx_rates            → canonical durable snapshot
+//   4. Static fallback table        → degrades when everything is down
 //
-// `convertToUsd` checks date-specific → latest → static table.
-// Every Redis read is wrapped in a try/catch so a cache outage
-// degrades to the built-in static rates — never blocks revenue
-// recording.
+// Reasons for the split:
+//
+//   * Redis cache keeps the webhook hot-path sync-fast (single
+//     roundtrip per revenue event).
+//   * Postgres fx_rates is the source of truth for the dashboard's
+//     display-currency switch — it lets us convert each historical
+//     event using *that day's* rate so reports don't drift as live
+//     rates move (RevenueCat-style locking, but on display).
+//   * Static rates exist so revenue recording never blocks on infra
+//     outages; convertToUsd is async but never throws.
 //
 // A BullMQ repeatable job fetches fresh rates daily at 00:05 UTC
-// from api.exchangerate.host (free, no API key required).
+// from OpenExchangeRates (free tier: USD-base + /latest only, which
+// is exactly what we need — ~30 requests/month). On success it
+// writes Postgres first (canonical) then mirrors to Redis (cache).
 //
-// RevenueCat difference: we use the exchange rate from the
-// purchase date, not the report date. The original amount +
-// currency are always preserved in the RevenueEvent row.
+// RevenueCat difference: we lock conversion at the purchase date,
+// not the report date. The original amount + currency are always
+// preserved in the RevenueEvent row.
 
 const log = logger.child("fx");
 
 // =============================================================
 // Static fallback rates (snapshot 2026-04)
 // =============================================================
+//
+// USD-per-foreign — multiplied directly on the convertToUsd path.
 
 export const STATIC_USD_RATES: Readonly<Record<string, number>> = {
   USD: 1,
@@ -83,13 +96,14 @@ export async function convertToUsd(
   amount: number,
   currency: string,
   date?: Date,
+  db: Db = drizzle.db,
 ): Promise<number> {
   const upper = currency.toUpperCase();
   if (upper === "USD") return amount;
 
   const dateStr = date ? formatDate(date) : formatDate(new Date());
 
-  // 1. Date-specific cache
+  // 1. Date-specific Redis cache
   try {
     const cached = await redis.get(dateKey(dateStr, upper));
     if (cached) return amount * parseFloat(cached);
@@ -97,7 +111,7 @@ export async function convertToUsd(
     // fall through
   }
 
-  // 2. Latest cache
+  // 2. Latest Redis cache
   try {
     const latest = await redis.get(latestKey(upper));
     if (latest) return amount * parseFloat(latest);
@@ -105,51 +119,83 @@ export async function convertToUsd(
     // fall through
   }
 
-  // 3. Static fallback
+  // 3. Postgres fx_rates — canonical store. `rate` is foreign-per-USD
+  //    (e.g. EUR=0.93). To convert foreign → USD we divide.
+  try {
+    const pgRate = await drizzle.fxRateRepo.getRate(db, dateStr, upper);
+    if (pgRate) {
+      const numeric = parseFloat(pgRate);
+      if (numeric > 0) return amount / numeric;
+    }
+  } catch (err) {
+    log.warn("fx Postgres lookup failed", {
+      dateStr,
+      currency: upper,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // 4. Static fallback
   const staticRate = STATIC_USD_RATES[upper];
   if (staticRate !== undefined) return amount * staticRate;
 
-  // 4. Unknown currency — pass through 1:1 to avoid zeroing
+  // 5. Unknown currency — pass through 1:1 to avoid zeroing
   return amount;
 }
 
 // =============================================================
-// Fetch rates from API + cache
+// Fetch rates from API + persist to Postgres + Redis
 // =============================================================
 //
-// Uses open.er-api.com — free, no API key, daily update. Always
-// returns the latest rates; `dateStr` is used as the cache bucket
-// key (so yesterday's recorded rate isn't clobbered by today's
-// fetch), not as an API parameter.
+// Uses OpenExchangeRates /latest.json — free tier, USD base, no
+// historical endpoint required (we only need today's rates each
+// day; `dateStr` is just the bucket key). Response shape:
+//
+//   { base: "USD", rates: { EUR: 0.93, … }, timestamp: 1234567890 }
+//
+// On API/network failure we log and return — the worker swallows
+// the miss because convertToUsd already has Postgres + static
+// fallbacks. We never want a rate fetch to take down the API.
 
-const API_BASE = "https://open.er-api.com/v6/latest/USD";
+const API_BASE = "https://openexchangerates.org/api/latest.json";
 export const FX_LAST_SUCCESS_KEY = "fx:last-success-at";
 
 export async function fetchAndCacheRates(
   dateStr: string,
   fetchFn: typeof globalThis.fetch = globalThis.fetch,
+  db: Db = drizzle.db,
 ): Promise<void> {
+  const appId = env.OPEN_EXCHANGE_RATES_APP_ID;
+  if (!appId) {
+    log.warn(
+      "OPEN_EXCHANGE_RATES_APP_ID not set — skipping FX fetch (convertToUsd will fall back to static rates)",
+      { dateStr },
+    );
+    return;
+  }
+
   let rates: Record<string, number>;
   try {
-    const res = await fetchFn(API_BASE);
+    const url = `${API_BASE}?app_id=${encodeURIComponent(appId)}&prettyprint=false`;
+    const res = await fetchFn(url);
     if (!res.ok) {
-      log.warn("fx API returned non-ok", { status: (res as Response).status, dateStr });
+      log.warn("fx API returned non-ok", {
+        status: (res as Response).status,
+        dateStr,
+      });
       return;
     }
     const data = (await res.json()) as {
-      result?: string;
-      success?: boolean;
+      error?: boolean;
       base?: string;
-      base_code?: string;
       rates?: Record<string, number>;
-      quotes?: Record<string, number>;
+      timestamp?: number;
     };
-    rates = data.rates ?? data.quotes ?? {};
-    const ok = data.result === "success" || data.success === true || Object.keys(rates).length > 0;
-    if (!ok) {
+    if (data.error || !data.rates || Object.keys(data.rates).length === 0) {
       log.warn("fx API returned unsuccessful payload", { dateStr });
       return;
     }
+    rates = data.rates;
   } catch (err) {
     log.warn("fx API fetch failed", {
       dateStr,
@@ -158,11 +204,35 @@ export async function fetchAndCacheRates(
     return;
   }
 
-  // Rates come as foreign-per-USD (e.g. USDEUR=0.93).
-  // We store USD-per-foreign (1/rate) so multiply is amount * storedRate.
+  // ---- Postgres upsert (canonical) ------------------------------------
+  // `fx_rates.rate` stores foreign-per-USD as returned by the API.
+  // Dashboard display path: `amountUsd × rate = quote_amount`.
+  try {
+    const pgRows = Object.entries(rates)
+      .filter(([quote, value]) => quote && quote !== "USD" && value > 0)
+      .map(([quote, value]) => ({
+        date: dateStr,
+        base: "USD",
+        quote: quote.toUpperCase(),
+        rate: value.toString(),
+      }));
+    if (pgRows.length > 0) {
+      await drizzle.fxRateRepo.upsertDailyRates(db, pgRows);
+    }
+  } catch (err) {
+    log.warn("fx Postgres upsert failed", {
+      dateStr,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    // Continue to Redis — Redis cache is still useful even if PG fails.
+  }
+
+  // ---- Redis cache (hot path) -----------------------------------------
+  // Stored inverted (USD-per-foreign) so the write-path multiplication
+  // in convertToUsd stays a single arithmetic op.
   const entries: Array<[string, string]> = [];
   for (const [rawKey, foreignPerUsd] of Object.entries(rates)) {
-    const from = rawKey.replace(/^USD/, "").toUpperCase();
+    const from = rawKey.toUpperCase();
     if (!from || from === "USD" || foreignPerUsd <= 0) continue;
     const usdPerForeign = String(1 / foreignPerUsd);
     entries.push([dateKey(dateStr, from), usdPerForeign]);

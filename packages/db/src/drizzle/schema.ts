@@ -2,6 +2,7 @@ import { createId } from "@paralleldrive/cuid2";
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  date,
   decimal,
   index,
   integer,
@@ -1076,6 +1077,40 @@ export const savedQueries = pgTable(
 
 export type SavedQuery = typeof savedQueries.$inferSelect;
 export type NewSavedQuery = typeof savedQueries.$inferInsert;
+
+// =============================================================
+// fx_rates (daily FX snapshots, USD base)
+// =============================================================
+//
+// Canonical source for historical currency conversion. Populated
+// daily by the fx-rates worker (OpenExchangeRates /latest.json).
+// `revenue_events.amountUsd` is the locked transaction-time USD
+// figure; this table feeds the dashboard's display-currency switch
+// by giving us the USD→quote rate for the same date as each event.
+//
+// PK (date, base, quote) — one row per currency per day; idempotent
+// upserts.
+
+export const fxRates = pgTable(
+  "fx_rates",
+  {
+    date: date("date").notNull(),
+    base: text("base").notNull().default("USD"),
+    quote: text("quote").notNull(),
+    // foreign-per-base (e.g. base=USD, quote=EUR, rate=0.93 → 1 USD = 0.93 EUR).
+    rate: decimal("rate", { precision: 18, scale: 8 }).notNull(),
+    fetchedAt: timestamp("fetchedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.date, t.base, t.quote] }),
+    quoteDateIdx: index("fx_rates_quote_date_idx").on(t.quote, t.date),
+  }),
+);
+
+export type FxRate = typeof fxRates.$inferSelect;
+export type NewFxRate = typeof fxRates.$inferInsert;
 
 // =============================================================
 // Inferred types
