@@ -1,5 +1,8 @@
 export { BulkBar } from "./bulk-bar";
 export { DurationTag, durationTagVariants, type DurationTagProps } from "./duration-tag";
+export { FilterPopover, type FilterValue } from "./filter-popover";
+export { ImportFromStoreModal } from "./import-from-store-modal";
+export { ProductFormModal } from "./product-form-modal";
 export {
   EntitlementChip,
   EntitlementList,

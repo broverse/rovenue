@@ -1,10 +1,17 @@
-import { and, asc, count, desc, eq, ilike, inArray, lt, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, lt, or, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   products,
   type NewProduct,
   type Product,
 } from "../schema";
+
+const ALLOWED_STORE_KEYS = ["ios", "android", "web"] as const;
+type AllowedStoreKey = (typeof ALLOWED_STORE_KEYS)[number];
+
+function isAllowedStoreKey(key: string): key is AllowedStoreKey {
+  return (ALLOWED_STORE_KEYS as ReadonlyArray<string>).includes(key);
+}
 
 // =============================================================
 // products repository (dashboard CRUD)
@@ -22,6 +29,10 @@ export interface ListProductsInput {
   includeInactive?: boolean;
   /** Free-text — matches identifier, displayName, or id (case-insensitive). */
   search?: string | null;
+  /** Restrict to one or more product types. */
+  types?: ReadonlyArray<Product["type"]> | null;
+  /** Restrict to products that have a non-empty id for any of these stores. */
+  stores?: ReadonlyArray<AllowedStoreKey> | null;
   /** Optional cursor: ISO timestamp of last row's `createdAt`. */
   cursor?: { createdAt: Date; id: string } | null;
   limit?: number;
@@ -44,6 +55,20 @@ export async function listProducts(
         ilike(products.id, needle),
       )!,
     );
+  }
+  if (input.types && input.types.length > 0) {
+    where.push(inArray(products.type, [...input.types]));
+  }
+  if (input.stores && input.stores.length > 0) {
+    // `storeIds ?| ARRAY[...]` — true when any of the supplied store keys
+    // is present in the JSONB blob. Keys are constrained to the allowed
+    // union above, so the param array is safe to bind.
+    const safeStores = input.stores.filter(isAllowedStoreKey);
+    if (safeStores.length > 0) {
+      where.push(
+        sql`${products.storeIds} ?| ${sql.param(safeStores as string[])}::text[]`,
+      );
+    }
   }
   if (input.cursor) {
     where.push(
@@ -158,6 +183,141 @@ export async function deleteProduct(
     .where(and(eq(products.projectId, projectId), eq(products.id, id)))
     .returning({ id: products.id });
   return rows.length > 0;
+}
+
+export interface BulkCreateProductsInput {
+  projectId: string;
+  /** Store key the SKUs were copied from — written into each row's `storeIds`. */
+  store: AllowedStoreKey;
+  items: ReadonlyArray<{
+    identifier: string;
+    displayName: string;
+    type: Product["type"];
+    storeId: string;
+    entitlementKeys?: ReadonlyArray<string>;
+    creditAmount?: number | null;
+    metadata?: Record<string, unknown>;
+  }>;
+}
+
+export type BulkCreateSkipReason =
+  | "duplicate-identifier"
+  | "duplicate-store-id";
+
+export interface BulkCreateProductsResult {
+  created: ReadonlyArray<Product>;
+  skipped: ReadonlyArray<{
+    identifier: string;
+    storeId: string;
+    reason: BulkCreateSkipReason;
+  }>;
+}
+
+/**
+ * Insert many products in a single transaction. Per-row conflicts
+ * (duplicate identifier in this project, duplicate storeId on the
+ * target store, or any duplicates inside the same payload) are
+ * returned as `skipped` instead of aborting the whole batch — the
+ * caller can surface them to the user.
+ */
+export async function bulkCreateProducts(
+  db: Db,
+  input: BulkCreateProductsInput,
+): Promise<BulkCreateProductsResult> {
+  if (input.items.length === 0) {
+    return { created: [], skipped: [] };
+  }
+
+  return db.transaction(async (tx) => {
+    const identifiers = Array.from(new Set(input.items.map((i) => i.identifier)));
+    const storeIdValues = Array.from(new Set(input.items.map((i) => i.storeId)));
+
+    const existingByIdentifier = identifiers.length
+      ? await tx
+          .select({
+            id: products.id,
+            identifier: products.identifier,
+          })
+          .from(products)
+          .where(
+            and(
+              eq(products.projectId, input.projectId),
+              inArray(products.identifier, identifiers),
+            ),
+          )
+      : [];
+    const takenIdentifiers = new Set(existingByIdentifier.map((r) => r.identifier));
+
+    const existingByStoreId = storeIdValues.length
+      ? await tx
+          .select({
+            id: products.id,
+            storeIds: products.storeIds,
+          })
+          .from(products)
+          .where(
+            and(
+              eq(products.projectId, input.projectId),
+              sql`${products.storeIds}->>${sql.param(input.store)} = ANY(${sql.param(storeIdValues)}::text[])`,
+            ),
+          )
+      : [];
+    const takenStoreIds = new Set(
+      existingByStoreId
+        .map((r) => {
+          const map = r.storeIds as Record<string, string> | null;
+          return map?.[input.store];
+        })
+        .filter((s): s is string => typeof s === "string"),
+    );
+
+    const seenIdentifiers = new Set<string>();
+    const seenStoreIds = new Set<string>();
+    const toInsert: NewProduct[] = [];
+    const skipped: Array<{
+      identifier: string;
+      storeId: string;
+      reason: BulkCreateSkipReason;
+    }> = [];
+
+    for (const item of input.items) {
+      if (takenIdentifiers.has(item.identifier) || seenIdentifiers.has(item.identifier)) {
+        skipped.push({
+          identifier: item.identifier,
+          storeId: item.storeId,
+          reason: "duplicate-identifier",
+        });
+        continue;
+      }
+      if (takenStoreIds.has(item.storeId) || seenStoreIds.has(item.storeId)) {
+        skipped.push({
+          identifier: item.identifier,
+          storeId: item.storeId,
+          reason: "duplicate-store-id",
+        });
+        continue;
+      }
+      seenIdentifiers.add(item.identifier);
+      seenStoreIds.add(item.storeId);
+      toInsert.push({
+        projectId: input.projectId,
+        identifier: item.identifier,
+        type: item.type,
+        displayName: item.displayName,
+        storeIds: { [input.store]: item.storeId },
+        entitlementKeys: item.entitlementKeys ? [...item.entitlementKeys] : [],
+        creditAmount: item.creditAmount ?? null,
+        isActive: true,
+        metadata: item.metadata ?? {},
+      });
+    }
+
+    const created = toInsert.length
+      ? await tx.insert(products).values(toInsert).returning()
+      : [];
+
+    return { created, skipped };
+  });
 }
 
 export async function countProducts(

@@ -1,9 +1,18 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog } from "@base-ui-components/react/dialog";
-import { Button } from "../../ui/button";
+import { Popover } from "@base-ui-components/react/popover";
+import { ArrowUp, Check, Layers, Plus, X } from "lucide-react";
+import type {
+  DashboardProductGroupRow,
+  ProductGroupMembership,
+} from "@rovenue/shared";
+import { Button, buttonVariants } from "../../ui/button";
 import { cn } from "../../lib/cn";
-import { ArrowUp, Key, X } from "lucide-react";
+import {
+  useProjectProductGroups,
+  useUpdateProductGroup,
+} from "../../lib/hooks/useProjectProductGroups";
 import { Sparkline } from "../dashboard/sparkline";
 import { DurationTag } from "./duration-tag";
 import { formatDuration, formatPrice } from "./format";
@@ -12,19 +21,21 @@ import { StatusChip } from "./status-chip";
 import { StoreBadges } from "./store-badge";
 import type { Product } from "./types";
 
-const TABS = ["overview", "pricing", "entitlements", "subscribers", "activity"] as const;
+const TABS = ["overview", "pricing", "groups", "subscribers", "activity"] as const;
 type Tab = (typeof TABS)[number];
 
 type Props = {
+  projectId: string;
   product: Product | null;
   onClose: () => void;
+  onEdit?: (productId: string) => void;
 };
 
 /**
  * Right-side slide-over with tabbed product detail. Backed by base-ui Dialog
  * for focus trapping + escape-to-close + return-focus on dismiss.
  */
-export function ProductDrawer({ product, onClose }: Props) {
+export function ProductDrawer({ projectId, product, onClose, onEdit }: Props) {
   return (
     <Dialog.Root
       open={product != null}
@@ -41,14 +52,31 @@ export function ProductDrawer({ product, onClose }: Props) {
             "focus:outline-none",
           )}
         >
-          {product && <DrawerContent product={product} onClose={onClose} />}
+          {product && (
+            <DrawerContent
+              projectId={projectId}
+              product={product}
+              onClose={onClose}
+              onEdit={onEdit}
+            />
+          )}
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
   );
 }
 
-function DrawerContent({ product, onClose }: { product: Product; onClose: () => void }) {
+function DrawerContent({
+  projectId,
+  product,
+  onClose,
+  onEdit,
+}: {
+  projectId: string;
+  product: Product;
+  onClose: () => void;
+  onEdit?: (productId: string) => void;
+}) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("overview");
 
@@ -83,7 +111,12 @@ function DrawerContent({ product, onClose }: { product: Product; onClose: () => 
           </div>
         </div>
         <div className="flex shrink-0 gap-1">
-          <Button variant="flat" size="sm" className="h-7">
+          <Button
+            variant="flat"
+            size="sm"
+            className="h-7"
+            onClick={() => onEdit?.(product.id)}
+          >
             {t("products.drawer.edit")}
           </Button>
           <Button
@@ -118,7 +151,7 @@ function DrawerContent({ product, onClose }: { product: Product; onClose: () => 
       <div className="flex-1 overflow-y-auto px-5 pb-10 pt-4 [scrollbar-color:var(--color-rv-c4)_transparent] [scrollbar-width:thin]">
         {tab === "overview" && <OverviewTab product={product} series={series} />}
         {tab === "pricing" && <PricingTab product={product} />}
-        {tab === "entitlements" && <EntitlementsTab product={product} />}
+        {tab === "groups" && <GroupsTab projectId={projectId} product={product} />}
         {tab === "subscribers" && <SubscribersTab product={product} />}
         {tab === "activity" && <ActivityTab product={product} />}
       </div>
@@ -206,28 +239,190 @@ function PricingTab({ product }: { product: Product }) {
   );
 }
 
-function EntitlementsTab({ product }: { product: Product }) {
+function GroupsTab({ projectId, product }: { projectId: string; product: Product }) {
   const { t } = useTranslation();
+  const groupsQuery = useProjectProductGroups(projectId);
+  const updateGroup = useUpdateProductGroup(projectId);
+
+  const allGroups = groupsQuery.data?.groups ?? [];
+
+  const memberOf = useMemo(
+    () => allGroups.filter((g) => g.products.some((m) => m.productId === product.id)),
+    [allGroups, product.id],
+  );
+  const candidates = useMemo(
+    () => allGroups.filter((g) => !g.products.some((m) => m.productId === product.id)),
+    [allGroups, product.id],
+  );
+
+  const link = (group: DashboardProductGroupRow) => {
+    const nextOrder =
+      group.products.length === 0
+        ? 0
+        : Math.max(...group.products.map((m) => m.order ?? 0)) + 1;
+    const nextProducts: ProductGroupMembership[] = [
+      ...group.products,
+      { productId: product.id, order: nextOrder, isPromoted: false },
+    ];
+    void updateGroup.mutateAsync({ id: group.id, products: nextProducts });
+  };
+
+  const unlink = (group: DashboardProductGroupRow) => {
+    const nextProducts = group.products.filter((m) => m.productId !== product.id);
+    void updateGroup.mutateAsync({ id: group.id, products: nextProducts });
+  };
+
   return (
     <section>
-      <SectionHeading>{t("products.drawer.grantsOnPurchase")}</SectionHeading>
-      {product.entitlements.length === 0 ? (
-        <p className="text-[12px] text-rv-mute-500">{t("products.drawer.consumableNoGrants")}</p>
+      <div className="mb-2 flex items-center justify-between">
+        <SectionHeading>{t("products.drawer.groups.heading")}</SectionHeading>
+        {candidates.length > 0 && (
+          <LinkGroupMenu candidates={candidates} onPick={link} />
+        )}
+      </div>
+
+      {groupsQuery.isPending ? (
+        <p className="text-[12px] text-rv-mute-500">{t("common.loading")}</p>
+      ) : memberOf.length === 0 ? (
+        <EmptyGroups
+          hasCandidates={candidates.length > 0}
+          onPick={link}
+          candidates={candidates}
+        />
       ) : (
-        product.entitlements.map((e) => (
-          <div
-            key={e}
-            className="flex items-center gap-2.5 border-b border-rv-divider py-2 text-[12px] last:border-b-0"
-          >
-            <Key size={14} className="text-rv-violet" />
-            <code className="font-rv-mono text-[12px] text-rv-mute-800">{e}</code>
-            <span className="ml-auto font-rv-mono text-[11px] text-rv-mute-500">
-              {t("products.drawer.grantedOnPurchase")}
-            </span>
-          </div>
-        ))
+        <ul className="m-0 list-none p-0">
+          {memberOf.map((g) => {
+            const membership = g.products.find((m) => m.productId === product.id);
+            return (
+              <li
+                key={g.id}
+                className="flex items-center gap-2.5 border-b border-rv-divider py-2 text-[12px] last:border-b-0"
+              >
+                <Layers size={14} className="text-rv-accent-500" />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-rv-mono text-[12px] text-foreground">
+                    {g.identifier}
+                  </div>
+                  <div className="mt-0.5 truncate font-rv-mono text-[11px] text-rv-mute-500">
+                    {g.isDefault
+                      ? t("products.drawer.groups.defaultBadge")
+                      : t("products.drawer.groups.memberCount", {
+                          count: g.products.length,
+                        })}
+                    {membership?.isPromoted && (
+                      <>
+                        {" · "}
+                        {t("products.drawer.groups.promoted")}
+                      </>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => unlink(g)}
+                  disabled={updateGroup.isPending}
+                  className="rounded-md p-1 text-rv-mute-500 transition hover:bg-rv-c2 hover:text-rv-danger disabled:opacity-60"
+                  aria-label={t("products.drawer.groups.unlink", { name: g.identifier })}
+                  title={t("products.drawer.groups.unlink", { name: g.identifier })}
+                >
+                  <X size={13} />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {updateGroup.isError && (
+        <p className="mt-2 text-[11px] text-rv-danger" role="alert">
+          {updateGroup.error instanceof Error
+            ? updateGroup.error.message
+            : t("products.drawer.groups.error")}
+        </p>
       )}
     </section>
+  );
+}
+
+function EmptyGroups({
+  hasCandidates,
+  onPick,
+  candidates,
+}: {
+  hasCandidates: boolean;
+  onPick: (group: DashboardProductGroupRow) => void;
+  candidates: ReadonlyArray<DashboardProductGroupRow>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="rounded-md border border-dashed border-rv-divider bg-rv-c2/40 px-3 py-4 text-center">
+      <p className="text-[12px] text-rv-mute-500">{t("products.drawer.groups.empty")}</p>
+      {hasCandidates && (
+        <div className="mt-2 inline-flex">
+          <LinkGroupMenu candidates={candidates} onPick={onPick} variant="primary" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LinkGroupMenu({
+  candidates,
+  onPick,
+  variant = "flat",
+}: {
+  candidates: ReadonlyArray<DashboardProductGroupRow>;
+  onPick: (group: DashboardProductGroupRow) => void;
+  variant?: "flat" | "primary";
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger
+        className={cn(
+          buttonVariants({
+            variant: variant === "primary" ? "solid-primary" : "flat",
+            size: "sm",
+          }),
+          "h-7",
+        )}
+      >
+        <Plus size={12} />
+        {t("products.drawer.groups.linkButton")}
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Positioner sideOffset={6} align="end" className="z-[60]">
+          <Popover.Popup className="max-h-[260px] w-[240px] overflow-y-auto rounded-lg border border-rv-divider-strong bg-rv-c3 p-1 shadow-[0_10px_30px_rgba(0,0,0,0.5)] focus:outline-none animate-rv-menu-in">
+            {candidates.length === 0 ? (
+              <div className="px-3 py-2 text-[12px] text-rv-mute-500">
+                {t("products.drawer.groups.noCandidates")}
+              </div>
+            ) : (
+              candidates.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => {
+                    onPick(g);
+                    setOpen(false);
+                  }}
+                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-rv-mute-700 outline-none hover:bg-rv-c4 hover:text-foreground"
+                >
+                  <Check size={12} className="text-rv-accent-500 opacity-0" />
+                  <span className="truncate font-rv-mono text-[12px]">{g.identifier}</span>
+                  {g.isDefault && (
+                    <span className="ml-auto rounded bg-rv-accent-500/[0.15] px-1 py-0.5 text-[10px] text-rv-accent-500">
+                      {t("products.drawer.groups.defaultBadge")}
+                    </span>
+                  )}
+                </button>
+              ))
+            )}
+          </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 

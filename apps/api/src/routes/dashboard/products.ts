@@ -7,6 +7,8 @@ import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
 import type {
+  DashboardProductImportResponse,
+  DashboardProductImportResultRow,
   DashboardProductRow,
   DashboardProductsListResponse,
   ProductTypeName,
@@ -61,11 +63,30 @@ const productType = z.enum([
   "NON_CONSUMABLE",
 ] as const);
 
+const storeKey = z.enum(["ios", "android", "web"] as const);
+
 const storeIdsSchema = z.record(z.string().min(1).max(200));
+
+/** `type=A&type=B` and `type=A,B` both decode to `["A","B"]`. */
+function csvList<T extends z.ZodTypeAny>(item: T) {
+  return z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((raw) => {
+      if (raw === undefined) return undefined;
+      const parts = (Array.isArray(raw) ? raw : raw.split(","))
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      return parts.length > 0 ? parts : undefined;
+    })
+    .pipe(z.array(item).optional());
+}
 
 const listQuerySchema = z.object({
   search: z.string().trim().min(1).max(200).optional(),
   includeInactive: z.coerce.boolean().default(true),
+  type: csvList(productType),
+  store: csvList(storeKey),
   limit: z.coerce
     .number()
     .int()
@@ -84,6 +105,21 @@ const createBodySchema = z.object({
   creditAmount: z.number().int().nullable().optional(),
   isActive: z.boolean().optional(),
   metadata: z.record(z.unknown()).optional(),
+});
+
+const importItemSchema = z.object({
+  storeId: z.string().trim().min(1).max(200),
+  identifier: z.string().trim().min(1).max(160).optional(),
+  displayName: z.string().trim().min(1).max(200).optional(),
+  type: productType,
+  entitlementKeys: z.array(z.string().trim().min(1).max(120)).optional(),
+  creditAmount: z.number().int().nullable().optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+const importBodySchema = z.object({
+  store: storeKey,
+  items: z.array(importItemSchema).min(1).max(500),
 });
 
 const updateBodySchema = z
@@ -140,8 +176,14 @@ export const productsDashboardRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
 
-    const { search, includeInactive, limit, cursor: rawCursor } =
-      c.req.valid("query");
+    const {
+      search,
+      includeInactive,
+      type: types,
+      store: stores,
+      limit,
+      cursor: rawCursor,
+    } = c.req.valid("query");
     const cursor = rawCursor ? decodeCursor(rawCursor) : null;
     if (rawCursor && !cursor) {
       throw new HTTPException(400, { message: "Invalid cursor" });
@@ -151,6 +193,8 @@ export const productsDashboardRoute = new Hono()
       projectId,
       includeInactive,
       search: search ?? null,
+      types: types ?? null,
+      stores: stores ?? null,
       cursor,
       limit: limit + 1,
     });
@@ -200,6 +244,56 @@ export const productsDashboardRoute = new Hono()
       metadata: body.metadata ?? {},
     });
     return c.json(ok({ product: toWire(row) }));
+  })
+  .post("/import", zValidator("json", importBodySchema), async (c) => {
+    const projectId = c.req.param("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "Missing projectId" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+    const body = c.req.valid("json");
+
+    const normalised = body.items.map((item) => {
+      const identifier = (item.identifier ?? item.storeId).trim();
+      const displayName = (item.displayName ?? item.storeId).trim();
+      return {
+        identifier,
+        displayName,
+        type: item.type,
+        storeId: item.storeId,
+        entitlementKeys: item.entitlementKeys ?? [],
+        creditAmount: item.creditAmount ?? null,
+        metadata: item.metadata ?? {},
+      };
+    });
+
+    const { created, skipped } = await drizzle.productRepo.bulkCreateProducts(
+      drizzle.db,
+      { projectId, store: body.store, items: normalised },
+    );
+
+    const results: DashboardProductImportResultRow[] = [
+      ...created.map((row): DashboardProductImportResultRow => ({
+        storeId: (row.storeIds as Record<string, string>)[body.store] ?? "",
+        identifier: row.identifier,
+        status: "created" as const,
+        productId: row.id,
+      })),
+      ...skipped.map((row): DashboardProductImportResultRow => ({
+        storeId: row.storeId,
+        identifier: row.identifier,
+        status: "skipped" as const,
+        reason: row.reason,
+      })),
+    ];
+
+    const payload: DashboardProductImportResponse = {
+      created: created.length,
+      skipped: skipped.length,
+      results,
+    };
+    return c.json(ok(payload));
   })
   .get("/:id", async (c) => {
     const projectId = c.req.param("projectId");

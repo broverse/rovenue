@@ -966,6 +966,46 @@ export interface DashboardProductUpdateInput {
   metadata?: Record<string, unknown>;
 }
 
+/** Per-row input for bulk import from a store. */
+export interface DashboardProductImportItem {
+  /** Per-store SKU as it lives in App Store Connect / Play / Stripe. */
+  storeId: string;
+  /** Optional override; defaults to `storeId` when omitted. */
+  identifier?: string;
+  /** Optional override; defaults to `storeId` when omitted. */
+  displayName?: string;
+  type: ProductTypeName;
+  entitlementKeys?: string[];
+  creditAmount?: number | null;
+  /** Optional metadata blob (e.g. `{ period: "P1M" }` for subscriptions). */
+  metadata?: Record<string, unknown>;
+}
+
+export interface DashboardProductImportInput {
+  /** Which store the SKUs were copied from. Persisted under `storeIds[store]`. */
+  store: "ios" | "android" | "web";
+  items: DashboardProductImportItem[];
+}
+
+export type DashboardProductImportSkipReason =
+  | "duplicate-identifier"
+  | "duplicate-store-id"
+  | "invalid";
+
+export interface DashboardProductImportResultRow {
+  storeId: string;
+  identifier: string;
+  status: "created" | "skipped";
+  reason?: DashboardProductImportSkipReason;
+  productId?: string;
+}
+
+export interface DashboardProductImportResponse {
+  created: number;
+  skipped: number;
+  results: DashboardProductImportResultRow[];
+}
+
 /** Membership entry inside a `ProductGroup.products` JSONB column. */
 export interface ProductGroupMembership {
   productId: string;
