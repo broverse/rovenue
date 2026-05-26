@@ -274,6 +274,13 @@
       "when": 1780000000000,
       "tag": "0038_member_role_rebuild",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1780000003000,
+      "tag": "0039_project_invitations",
+      "breakpoints": true
     }
   ]
 }
