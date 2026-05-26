@@ -18,7 +18,13 @@ fn registered_observer_receives_events() {
     bus.emit(ChangeEvent::EntitlementsChanged);
     bus.emit(ChangeEvent::IdentityChanged);
     let seen = cap.0.lock().unwrap().clone();
-    assert_eq!(seen, vec![ChangeEvent::EntitlementsChanged, ChangeEvent::IdentityChanged]);
+    assert_eq!(
+        seen,
+        vec![
+            ChangeEvent::EntitlementsChanged,
+            ChangeEvent::IdentityChanged
+        ]
+    );
 }
 
 #[test]

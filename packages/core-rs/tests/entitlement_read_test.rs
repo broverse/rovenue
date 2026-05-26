@@ -42,13 +42,10 @@ fn refresh_populates_cache_and_emits_observer() {
         Arc::clone(&bus),
         Arc::new(SystemClock),
     ));
-    let reader = EntitlementReader::new(
-        Arc::clone(&store),
-        Arc::clone(&identity),
-    )
-    .with_http(Arc::new(http_client(&server.url())))
-    .with_observer_bus(Arc::clone(&bus))
-    .with_clock(Arc::new(SystemClock));
+    let reader = EntitlementReader::new(Arc::clone(&store), Arc::clone(&identity))
+        .with_http(Arc::new(http_client(&server.url())))
+        .with_observer_bus(Arc::clone(&bus))
+        .with_clock(Arc::new(SystemClock));
 
     // First read: empty cache → None.
     assert!(reader.get("pro").unwrap().is_none());

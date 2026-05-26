@@ -56,7 +56,13 @@ fn identify_is_idempotent_for_same_known_id() {
     bus.register(Arc::clone(&cap) as Arc<dyn Observer>);
     mgr.identify("user_42".into()).unwrap();
     mgr.identify("user_42".into()).unwrap();
-    let n = cap.0.lock().unwrap().iter().filter(|e| **e == ChangeEvent::IdentityChanged).count();
+    let n = cap
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|e| **e == ChangeEvent::IdentityChanged)
+        .count();
     assert_eq!(n, 1, "second identify with same id should not re-emit");
 }
 

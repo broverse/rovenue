@@ -37,7 +37,12 @@ impl PollingScheduler {
         }
     }
 
-    pub fn register(&self, name: &str, interval: Duration, tick: impl Fn() + Send + Sync + 'static) {
+    pub fn register(
+        &self,
+        name: &str,
+        interval: Duration,
+        tick: impl Fn() + Send + Sync + 'static,
+    ) {
         let mut regs = self.inner.registrations.lock().expect("regs poisoned");
         regs.push((
             name.to_string(),

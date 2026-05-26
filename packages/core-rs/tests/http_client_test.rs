@@ -28,7 +28,9 @@ fn happy_path_get_returns_body_and_etag() {
 
     let c = client(&server.url());
     let resp = c
-        .get_json::<DummyEntitlements>(HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"))
+        .get_json::<DummyEntitlements>(
+            HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"),
+        )
         .unwrap();
     assert_eq!(resp.status, 200);
     assert_eq!(resp.etag.as_deref(), Some("\"abc\""));
@@ -73,9 +75,13 @@ fn retries_on_503_then_succeeds() {
         .expect(1)
         .create();
 
-    let c = client(&server.url()).with_max_attempts(3).with_min_backoff(Duration::from_millis(1));
+    let c = client(&server.url())
+        .with_max_attempts(3)
+        .with_min_backoff(Duration::from_millis(1));
     let resp = c
-        .get_json::<DummyEntitlements>(HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"))
+        .get_json::<DummyEntitlements>(
+            HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"),
+        )
         .unwrap();
     assert_eq!(resp.status, 200);
     m1.assert();
@@ -93,7 +99,9 @@ fn forbidden_is_fatal_no_retry() {
 
     let c = client(&server.url()).with_max_attempts(5);
     let err = c
-        .get_json::<DummyEntitlements>(HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"))
+        .get_json::<DummyEntitlements>(
+            HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"),
+        )
         .unwrap_err();
     assert!(matches!(err, rovenue::RovenueError::ServerError));
     m.assert();
@@ -111,7 +119,9 @@ fn rate_limit_returns_rate_limited_error() {
 
     let c = client(&server.url()).with_max_attempts(1);
     let err = c
-        .get_json::<DummyEntitlements>(HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"))
+        .get_json::<DummyEntitlements>(
+            HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"),
+        )
         .unwrap_err();
     assert!(matches!(err, rovenue::RovenueError::RateLimited));
     m.assert();

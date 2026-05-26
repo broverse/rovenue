@@ -1,5 +1,5 @@
+use rovenue::cache::identity::{IdentityRepo, IdentityRow};
 use rovenue::cache::CacheStore;
-use rovenue::cache::identity::{IdentityRow, IdentityRepo};
 
 #[test]
 fn no_identity_returns_none() {

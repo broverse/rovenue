@@ -5,7 +5,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::{RovenueError, RovenueResult};
 
-use super::schema::{MIGRATIONS, LATEST};
+use super::schema::{LATEST, MIGRATIONS};
 
 pub struct CacheStore {
     conn: Mutex<Connection>,
@@ -18,13 +18,17 @@ impl CacheStore {
         conn.pragma_update(None, "synchronous", "NORMAL").ok();
         conn.pragma_update(None, "foreign_keys", "ON").ok();
         Self::run_migrations(&conn)?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     pub fn open_in_memory() -> RovenueResult<Self> {
         let conn = Connection::open_in_memory().map_err(|_| RovenueError::Storage)?;
         Self::run_migrations(&conn)?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     fn run_migrations(conn: &Connection) -> RovenueResult<()> {
@@ -47,7 +51,9 @@ impl CacheStore {
     pub fn schema_version(&self) -> RovenueResult<u32> {
         let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
         guard
-            .query_row("SELECT version FROM schema_meta LIMIT 1", [], |r| r.get::<_, u32>(0))
+            .query_row("SELECT version FROM schema_meta LIMIT 1", [], |r| {
+                r.get::<_, u32>(0)
+            })
             .map_err(|_| RovenueError::Storage)
     }
 
@@ -64,7 +70,10 @@ impl CacheStore {
     }
 
     /// Internal accessor used by sibling modules (identity, entitlements, etag).
-    pub fn with_conn<R>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<R>) -> RovenueResult<R> {
+    pub fn with_conn<R>(
+        &self,
+        f: impl FnOnce(&Connection) -> rusqlite::Result<R>,
+    ) -> RovenueResult<R> {
         let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
         f(&guard).map_err(|_| RovenueError::Storage)
     }

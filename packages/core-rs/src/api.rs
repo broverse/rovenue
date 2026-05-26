@@ -40,7 +40,10 @@ impl RovenueCore {
             Arc::clone(&bus),
             Arc::clone(&clock),
         ));
-        let http = Arc::new(HttpClient::new(config.base_url.clone(), config.api_key.clone()));
+        let http = Arc::new(HttpClient::new(
+            config.base_url.clone(),
+            config.api_key.clone(),
+        ));
         let reader = Arc::new(
             EntitlementReader::new(Arc::clone(&store), Arc::clone(&identity))
                 .with_http(Arc::clone(&http))
@@ -138,7 +141,10 @@ fn dirs_path() -> Option<PathBuf> {
     Some(p)
 }
 
-#[cfg(all(target_os = "linux", not(any(target_os = "android", target_os = "ios"))))]
+#[cfg(all(
+    target_os = "linux",
+    not(any(target_os = "android", target_os = "ios"))
+))]
 fn dirs_path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)

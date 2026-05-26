@@ -8,7 +8,11 @@ pub struct HttpRequest<'a> {
 
 impl<'a> HttpRequest<'a> {
     pub fn new(path: &'a str) -> Self {
-        Self { path, user_scope: None, etag: None }
+        Self {
+            path,
+            user_scope: None,
+            etag: None,
+        }
     }
     pub fn user_scope(mut self, scope: &'a str) -> Self {
         self.user_scope = Some(scope);

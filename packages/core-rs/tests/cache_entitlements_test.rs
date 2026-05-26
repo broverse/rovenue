@@ -1,6 +1,6 @@
-use rovenue::cache::CacheStore;
 use rovenue::cache::entitlements::{EntitlementRow, EntitlementsRepo};
 use rovenue::cache::etag::EtagRepo;
+use rovenue::cache::CacheStore;
 
 #[test]
 fn upsert_and_get_one() {

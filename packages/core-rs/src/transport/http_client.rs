@@ -53,7 +53,10 @@ impl HttpClient {
         self
     }
 
-    pub fn get_json<T: DeserializeOwned>(&self, req: HttpRequest<'_>) -> RovenueResult<HttpResponse<T>> {
+    pub fn get_json<T: DeserializeOwned>(
+        &self,
+        req: HttpRequest<'_>,
+    ) -> RovenueResult<HttpResponse<T>> {
         let url = format!("{}{}", self.base_url, req.path);
         let mut rng = rand::thread_rng();
         let mut last_err = RovenueError::NetworkUnavailable;
@@ -92,7 +95,11 @@ impl HttpClient {
                             } else {
                                 Some(resp.json::<T>().map_err(|_| RovenueError::Internal)?)
                             };
-                            return Ok(HttpResponse { status, etag: etag_out, body });
+                            return Ok(HttpResponse {
+                                status,
+                                etag: etag_out,
+                                body,
+                            });
                         }
                         RetryDecision::Retryable => {
                             last_err = if (500..600).contains(&status) {

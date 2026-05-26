@@ -71,7 +71,12 @@ impl IdentityManager {
         };
         if changed {
             let row = IdentityRow {
-                anon_id: self.cached.lock().expect("identity mutex poisoned").anon_id.clone(),
+                anon_id: self
+                    .cached
+                    .lock()
+                    .expect("identity mutex poisoned")
+                    .anon_id
+                    .clone(),
                 known_user_id: Some(known_user_id),
                 created_at_ms: self.clock.now_unix_ms(),
             };

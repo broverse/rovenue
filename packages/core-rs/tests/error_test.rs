@@ -25,7 +25,10 @@ fn internal_displays() {
 
 #[test]
 fn network_unavailable_displays() {
-    assert_eq!(format!("{}", RovenueError::NetworkUnavailable), "network unavailable");
+    assert_eq!(
+        format!("{}", RovenueError::NetworkUnavailable),
+        "network unavailable"
+    );
 }
 
 #[test]

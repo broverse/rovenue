@@ -25,7 +25,13 @@ pub struct EntitlementReader {
 
 impl EntitlementReader {
     pub fn new(store: Arc<CacheStore>, identity: Arc<IdentityManager>) -> Self {
-        Self { store, identity, http: None, bus: None, clock: None }
+        Self {
+            store,
+            identity,
+            http: None,
+            bus: None,
+            clock: None,
+        }
     }
 
     pub fn with_http(mut self, http: Arc<HttpClient>) -> Self {
@@ -50,7 +56,11 @@ impl EntitlementReader {
     pub fn list_all(&self) -> RovenueResult<Vec<Entitlement>> {
         let scope = self.identity.current_user_scope();
         let repo = EntitlementsRepo::new(&self.store);
-        Ok(repo.list(&scope)?.into_iter().map(row_to_entitlement).collect())
+        Ok(repo
+            .list(&scope)?
+            .into_iter()
+            .map(row_to_entitlement)
+            .collect())
     }
 
     pub fn refresh(&self) -> RovenueResult<()> {
