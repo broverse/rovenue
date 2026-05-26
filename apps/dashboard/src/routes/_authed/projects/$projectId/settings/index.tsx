@@ -3,6 +3,7 @@ import { Card } from "@heroui/react";
 import { useTranslation } from "react-i18next";
 import { useProject } from "../../../../../lib/hooks/useProject";
 import { SettingsForm } from "../../../../../components/projects/SettingsForm";
+import { ReportingForm } from "../../../../../components/projects/ReportingForm";
 import { DeleteProjectDialog } from "../../../../../components/projects/DeleteProjectDialog";
 
 export const Route = createFileRoute("/_authed/projects/$projectId/settings/")({
@@ -19,8 +20,23 @@ function ProjectGeneralSettingsPage() {
   return (
     <div className="flex flex-col gap-6">
       <Card className="p-6">
-        <h2 className="mb-4 text-lg font-semibold">{t("projects.settings.general")}</h2>
+        <div className="mb-4">
+          <h2 className="text-lg font-semibold">{t("projects.settings.basicsHeader")}</h2>
+          <p className="mt-1 text-sm text-default-500">
+            {t("projects.settings.basicsDescription")}
+          </p>
+        </div>
         <SettingsForm project={project} />
+      </Card>
+
+      <Card className="p-6">
+        <div className="mb-4">
+          <h2 className="text-lg font-semibold">{t("projects.settings.reportingHeader")}</h2>
+          <p className="mt-1 text-sm text-default-500">
+            {t("projects.settings.reportingDescription")}
+          </p>
+        </div>
+        <ReportingForm project={project} />
       </Card>
 
       <Card className="border border-danger-200 p-6">
