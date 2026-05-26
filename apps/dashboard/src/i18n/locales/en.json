@@ -1857,6 +1857,10 @@
       "blendedLtv": "BLENDED 90-DAY LTV",
       "blendedLtvDelta": "▲ +${{value}} vs prior period"
     },
+    "mockBadge": {
+      "label": "Mock",
+      "tooltip": "Backend not wired yet — showing placeholder data"
+    },
     "saved": {
       "heading": "Saved cohorts",
       "newAria": "New cohort",
@@ -1953,38 +1957,34 @@
     "title": "Credits",
     "subtitle": "Virtual-currency ledger. Every grant, purchase, and consumption is double-entry; balances reconcile to the second. Use this view to monitor liability, package mix, and burn-rate per feature.",
     "actions": {
-      "schema": "Schema",
-      "exportLedger": "Export ledger",
       "grantCredits": "Grant credits"
     },
     "kpi": {
       "outstandingBalance": "OUTSTANDING BALANCE",
       "outstandingDescription": "across {{wallets}} wallets",
       "issued28d": "ISSUED · 28D",
-      "issuedDelta": "+18.4% vs prev",
+      "issuedDelta": "vs prev window",
       "burned28d": "BURNED · 28D",
       "burnedRate": "{{rate}} burn rate",
       "revenue28d": "REVENUE · 28D",
       "revenueAvg": "avg {{avg}} / credit",
-      "breakage": "BREAKAGE FORECAST",
-      "breakageDescription": "est. expiring next 30d"
+      "breakage": "BREAKAGE",
+      "breakageDescription": "expired / granted"
     },
     "flow": {
       "inflow": "Inflow · 28d",
       "balance": "Wallet balance · now",
       "outflow": "Outflow · 28d",
       "purchases": "Purchases",
-      "promo": "Promo / bonus",
-      "supportComps": "Support comps",
-      "refundReturns": "Refund returns",
+      "bonus": "Bonus",
+      "refund": "Refund",
+      "transferIn": "Transfer in",
       "paidLiability": "Paid (liability)",
       "bonusPromo": "Bonus / promo",
-      "goodwill": "Goodwill / comp",
-      "expiringSoon": "Expiring < 30d",
+      "transferShare": "Transfer in",
       "consumed": "Consumed",
       "expired": "Expired",
-      "refundClawback": "Refund clawback",
-      "adjustments": "Adjustments"
+      "transferOut": "Transfer out"
     },
     "volume": {
       "title": "Credit volume · last 28 days",
@@ -2031,8 +2031,11 @@
       "paidLabel": "Paid (deferred rev)",
       "promoLabel": "Promo / goodwill",
       "avgAge": "Avg age",
+      "avgAgeDays": "{{days}}d",
+      "avgAgeUnknown": "—",
       "reserveLabel": "Reserve check:",
-      "reserveBody": "liability <0>{{delta}}</0> MoM. Consider increasing GAAP reserve by <1>{{amount}}</1>."
+      "reserveBody": "paid liability moved <0>{{delta}}</0> vs prev window. Suggested reserve <1>{{amount}}</1>.",
+      "reserveBodyFlat": "Suggested reserve <0>{{amount}}</0> for the paid liability."
     },
     "packs": {
       "title": "Package mix · 28d",
@@ -2044,12 +2047,33 @@
       "title": "Top consumers · 28d",
       "sub": "by credits burned"
     },
-    "quickActions": {
-      "title": "Quick actions",
-      "bulkGrant": "Bulk grant from CSV",
-      "expiryPolicy": "Configure expiry policy",
-      "reconcile": "Run reconciliation",
-      "breakageReport": "Send breakage report"
+    "grant": {
+      "title": "Grant credits",
+      "subtitle": "Append a manual entry to a subscriber's credit ledger.",
+      "submit": "Grant credits",
+      "submitting": "Granting…",
+      "fields": {
+        "subscriber": "Subscriber",
+        "subscriberSearch": "Search by user ID…",
+        "subscriberPlaceholder": "— select subscriber —",
+        "type": "Type",
+        "amount": "Amount",
+        "amountPlaceholder": "e.g. 500",
+        "referenceType": "Reference type",
+        "referenceTypePlaceholder": "e.g. support_comp",
+        "referenceId": "Reference ID",
+        "referenceIdPlaceholder": "e.g. SUP-2841",
+        "description": "Description",
+        "descriptionPlaceholder": "Why is this credit being granted?"
+      },
+      "types": {
+        "BONUS": "Bonus",
+        "PURCHASE": "Purchase",
+        "REFUND": "Refund"
+      },
+      "errors": {
+        "unknown": "Something went wrong."
+      }
     }
   },
   "charts": {
