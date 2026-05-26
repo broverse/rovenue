@@ -53,3 +53,4 @@ export * as fxRateRepo from "./repositories/fx-rates";
 export * as scheduledActionsRepo from "./repositories/scheduled-actions";
 export * as invitationRepo from "./repositories/invitations";
 export * as notificationRepo from "./repositories/notifications";
+export * as notificationPreferencesRepo from "./repositories/notification-preferences";
