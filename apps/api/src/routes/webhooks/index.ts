@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { endpointRateLimit } from "../../middleware/rate-limit";
 import { appleWebhookRoute } from "./apple";
 import { googleWebhookRoute } from "./google";
+import { sesEventsRoute } from "./ses-events";
 import { stripeWebhookRoute } from "./stripe";
 
 // =============================================================
@@ -39,4 +40,5 @@ export const webhooksRoute = new Hono()
   .use("/stripe/*", storeLimit("stripe"))
   .route("/apple", appleWebhookRoute)
   .route("/google", googleWebhookRoute)
+  .route("/ses-events", sesEventsRoute)
   .route("/stripe", stripeWebhookRoute);
