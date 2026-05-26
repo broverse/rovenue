@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../../../../../ui/button";
 import { useProject } from "../../../../../lib/hooks/useProject";
 import { useAuditLogs } from "../../../../../lib/hooks/useProjectAdmin";
+import { formatAuditEntry } from "../../../../../lib/audit-format";
 
 export const Route = createFileRoute("/_authed/projects/$projectId/settings/audit-logs")({
   component: AuditLogsRoute,
@@ -53,12 +54,10 @@ function AuditLogsPage({ projectId }: { projectId: string }) {
             })}
           </span>
         </div>
-        <div className="grid grid-cols-[140px_minmax(0,1fr)_120px_120px_180px] gap-3 border-b border-rv-divider bg-rv-c2 px-4 py-2 text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
+        <div className="grid grid-cols-[180px_minmax(0,1fr)_220px] gap-3 border-b border-rv-divider bg-rv-c2 px-4 py-2 text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
           <span>{t("auditLogs.cols.when", "When")}</span>
-          <span>{t("auditLogs.cols.action", "Action")}</span>
-          <span>{t("auditLogs.cols.resource", "Resource")}</span>
-          <span>{t("auditLogs.cols.user", "User")}</span>
-          <span className="font-rv-mono">{t("auditLogs.cols.id", "ID")}</span>
+          <span>{t("auditLogs.cols.event", "Event")}</span>
+          <span>{t("auditLogs.cols.actor", "Actor")}</span>
         </div>
         {rows.length === 0 ? (
           <div className="px-4 py-8 text-center text-[12px] text-rv-mute-500">
@@ -68,19 +67,25 @@ function AuditLogsPage({ projectId }: { projectId: string }) {
           rows.map((row) => (
             <div
               key={row.id}
-              className="grid grid-cols-[140px_minmax(0,1fr)_120px_120px_180px] items-center gap-3 border-b border-rv-divider px-4 py-2 text-[12px] last:border-b-0"
+              className="grid grid-cols-[180px_minmax(0,1fr)_220px] items-start gap-3 border-b border-rv-divider px-4 py-3 text-[12px] last:border-b-0"
             >
               <span className="font-rv-mono text-rv-mute-500">
                 {new Date(row.createdAt).toLocaleString()}
               </span>
-              <span className="truncate font-rv-mono">{row.action}</span>
-              <span className="truncate">{row.resource}</span>
-              <span className="truncate font-rv-mono text-rv-mute-500">
-                {row.userId.slice(0, 12)}…
-              </span>
-              <span className="truncate font-rv-mono text-rv-mute-500">
-                {row.resourceId}
-              </span>
+              <div className="min-w-0">
+                <div className="truncate">
+                  {formatAuditEntry(row)}
+                </div>
+                <div className="mt-0.5 truncate font-rv-mono text-[11px] text-rv-mute-500">
+                  {row.resource} · {row.resourceId}
+                </div>
+              </div>
+              <div className="min-w-0">
+                <div className="truncate">{row.user.name}</div>
+                <div className="mt-0.5 truncate text-[11px] text-rv-mute-500">
+                  {row.user.email}
+                </div>
+              </div>
             </div>
           ))
         )}

@@ -1545,6 +1545,13 @@ export interface QuerySchemaResponse {
 // Audit logs (read-only viewer)
 // =============================================================
 
+export interface AuditLogEntryUser {
+  id: string;
+  name: string;
+  email: string;
+  image: string | null;
+}
+
 export interface AuditLogEntry {
   id: string;
   projectId: string | null;
@@ -1559,6 +1566,7 @@ export interface AuditLogEntry {
   prevHash: string | null;
   rowHash: string | null;
   createdAt: string;
+  user: AuditLogEntryUser;
 }
 
 export interface OffsetPagination {
