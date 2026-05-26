@@ -5,11 +5,18 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type {
+  AssignableRole,
   AudienceRow,
   AudiencesListResponse,
   AuditLogsListResponse,
+  CreateInvitationRequest,
+  CreateInvitationResponse,
   LeaderboardResponse,
+  ListInvitationsResponse,
   ListMembersResponse,
+  ProjectMemberRow,
+  TransferOwnershipRequest,
+  UpdateMemberRoleRequest,
 } from "@rovenue/shared";
 import { api } from "../api";
 
@@ -117,6 +124,152 @@ export function useProjectMembers(projectId: string) {
     queryFn: () =>
       api<ListMembersResponse>(`/dashboard/projects/${projectId}/members`),
     select: (res) => res.members,
+  });
+}
+
+// =============================================================
+// Member management mutations
+// =============================================================
+
+export function useUpdateMemberRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      userId,
+      role,
+    }: {
+      projectId: string;
+      userId: string;
+      role: AssignableRole;
+    }) =>
+      api<{ member: ProjectMemberRow }>(
+        `/dashboard/projects/${projectId}/members/${userId}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ role } satisfies UpdateMemberRoleRequest),
+        },
+      ),
+    onSuccess: (_d, vars) =>
+      qc.invalidateQueries({ queryKey: ["members", vars.projectId] }),
+  });
+}
+
+export function useRemoveMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      userId,
+    }: {
+      projectId: string;
+      userId: string;
+    }) =>
+      api(`/dashboard/projects/${projectId}/members/${userId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: (_d, vars) =>
+      qc.invalidateQueries({ queryKey: ["members", vars.projectId] }),
+  });
+}
+
+export function useLeaveProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId }: { projectId: string }) =>
+      api(`/dashboard/projects/${projectId}/members/leave`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useTransferOwnership() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      toUserId,
+    }: {
+      projectId: string;
+      toUserId: string;
+    }) =>
+      api(`/dashboard/projects/${projectId}/members/transfer`, {
+        method: "POST",
+        body: JSON.stringify({ toUserId } satisfies TransferOwnershipRequest),
+      }),
+    onSuccess: (_d, vars) =>
+      qc.invalidateQueries({ queryKey: ["members", vars.projectId] }),
+  });
+}
+
+// =============================================================
+// Invitations
+// =============================================================
+
+export function useProjectInvitations(projectId: string) {
+  return useQuery({
+    queryKey: ["invitations", projectId],
+    enabled: Boolean(projectId),
+    queryFn: () =>
+      api<ListInvitationsResponse>(
+        `/dashboard/projects/${projectId}/invitations`,
+      ),
+    select: (res) => res.invitations,
+  });
+}
+
+export function useCreateInvitation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      email,
+      role,
+    }: { projectId: string } & CreateInvitationRequest) =>
+      api<CreateInvitationResponse>(
+        `/dashboard/projects/${projectId}/invitations`,
+        {
+          method: "POST",
+          body: JSON.stringify({ email, role } satisfies CreateInvitationRequest),
+        },
+      ),
+    onSuccess: (_d, vars) =>
+      qc.invalidateQueries({ queryKey: ["invitations", vars.projectId] }),
+  });
+}
+
+export function useRevokeInvitation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      invitationId,
+    }: {
+      projectId: string;
+      invitationId: string;
+    }) =>
+      api(`/dashboard/projects/${projectId}/invitations/${invitationId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: (_d, vars) =>
+      qc.invalidateQueries({ queryKey: ["invitations", vars.projectId] }),
+  });
+}
+
+export function useResendInvitation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      projectId,
+      invitationId,
+    }: {
+      projectId: string;
+      invitationId: string;
+    }) =>
+      api(`/dashboard/projects/${projectId}/invitations/${invitationId}/resend`, {
+        method: "POST",
+      }),
+    onSuccess: (_d, vars) =>
+      qc.invalidateQueries({ queryKey: ["invitations", vars.projectId] }),
   });
 }
 
