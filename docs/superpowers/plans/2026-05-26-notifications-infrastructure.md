@@ -16,6 +16,14 @@
 
 **Source spec:** `docs/superpowers/specs/2026-05-26-notifications-design.md`
 
+## Execution corrections (applied at runtime — read before implementing any DB task)
+
+Discovered during Task 1.2 execution:
+
+1. **No pg_partman.** The extension is not installed on the dev stack and the existing hot tables (`revenue_events_*`, `credit_ledger_*`) are also unmanaged plain heap partitions, not partman-managed. **All notification tables ship as plain (non-partitioned) tables for v1.** Drop every `PARTITION BY RANGE (createdAt)`, every `partman.create_parent(...)` call, every composite `(id, createdAt)` PK that was only there to satisfy partition-key-in-PK. Retention via simple cron is a future spec.
+2. **IDs are `text` + cuid2, not `uuid`.** The runtime schema uses `text("id").$defaultFn(() => createId())` for all primary keys (existing `user.id`, `projects.id`, etc. are text/cuid2). FK columns must match. Wherever this plan shows `uuid("id").primaryKey().defaultRandom()` or `uuid("userId").references(() => user.id)`, substitute `text("id").$defaultFn(() => createId())` / `text("userId").references(...)`. The implementer in Task 1.2 already did this for `notifications` and `notification_deliveries`; subsequent tasks (1.3 push_devices, 1.4 prefs, 7.0 suppression) follow the same substitution.
+3. **Migration journal hand-bump.** A forward-dated 0040 journal entry causes `pnpm db:migrate` to silently skip newly-generated migrations. After running `pnpm db:migrate:generate`, if the apply step reports zero new migrations, bump the new migration's `when` in `packages/db/drizzle/migrations/meta/_journal.json` past the highest applied `when` (currently `1780000020000` after 0042). Pattern visible in 0041 and 0042 commits.
+
 **Hard dependency:** This plan assumes the `2026-05-26-project-members-invite-design.md` work has merged first. Specifically it consumes:
 
 - `MemberRole` enum with five values (`OWNER, ADMIN, DEVELOPER, GROWTH, CUSTOMER_SUPPORT`)
