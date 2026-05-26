@@ -1,7 +1,7 @@
 import { FeatureFlagEnv, drizzle } from "@rovenue/db";
 import { logger } from "../lib/logger";
 import { redis } from "../lib/redis";
-import { isInRollout, matchesAudience } from "@rovenue/shared";
+import { isInRollout, matchesAudience } from "@rovenue/shared/experiments";
 
 // =============================================================
 // Feature flag evaluation engine

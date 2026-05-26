@@ -16,7 +16,11 @@ import {
 } from "../lib/experiment-stats";
 import { logger } from "../lib/logger";
 import { redis } from "../lib/redis";
-import { assignBucket, matchesAudience, selectVariant } from "@rovenue/shared";
+import {
+  assignBucket,
+  matchesAudience,
+  selectVariant,
+} from "@rovenue/shared/experiments";
 
 // =============================================================
 // Experiment engine

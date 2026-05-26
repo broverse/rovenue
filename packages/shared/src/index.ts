@@ -78,14 +78,20 @@ export * from "./logger";
 // AES-256-GCM encryption utility
 // =============================================================
 
-export * from "./crypto";
+// `./crypto` is intentionally NOT re-exported here — it depends on
+// `node:crypto` and would crash the dashboard Vite bundle. Server-side
+// callers import it explicitly via `@rovenue/shared/crypto`.
 
 // =============================================================
 // Experiments — types (Flag / ProductGroup / Paywall / Element),
 // bucketing primitives, and audience targeting
 // =============================================================
 
-export * from "./experiments";
+// Only re-export the experiment Zod types + constants here. The runtime
+// bucketing / audience-targeting helpers depend on `node:crypto` and
+// must not be pulled into the dashboard's browser bundle — server
+// callers import them via `@rovenue/shared/experiments`.
+export * from "./experiments/types";
 
 // =============================================================
 // Dashboard API request/response types

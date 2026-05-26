@@ -8,7 +8,7 @@ import {
   MemberRole,
   drizzle,
 } from "@rovenue/db";
-import { validateAudienceRules } from "@rovenue/shared";
+import { validateAudienceRules } from "@rovenue/shared/experiments";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { assertProjectAccess } from "../../lib/project-access";

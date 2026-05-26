@@ -1,4 +1,4 @@
-import { generateKey } from "@rovenue/shared";
+import { generateKey } from "@rovenue/shared/crypto";
 import { describe, expect, test } from "vitest";
 import {
   decryptCredential,

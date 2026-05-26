@@ -2,7 +2,7 @@ import {
   decryptJson,
   encryptJson,
   isEncryptedString,
-} from "@rovenue/shared";
+} from "@rovenue/shared/crypto";
 
 // =============================================================
 // Encrypted JSON fields on the Project row

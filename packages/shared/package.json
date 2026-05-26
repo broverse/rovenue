@@ -5,6 +5,20 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./crypto": {
+      "types": "./src/crypto.ts",
+      "default": "./src/crypto.ts"
+    },
+    "./experiments": {
+      "types": "./src/experiments/index.ts",
+      "default": "./src/experiments/index.ts"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run"
