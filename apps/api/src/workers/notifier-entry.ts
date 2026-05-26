@@ -1,3 +1,4 @@
+import { Redis } from "ioredis";
 import { getDb } from "@rovenue/db";
 import { env } from "../lib/env";
 import { assertTopic, getKafka } from "../lib/kafka";
@@ -11,11 +12,9 @@ import {
   processNotification,
   type ProcessNotificationDeps,
 } from "../services/notifications/process-notification";
-import type {
-  SendEmailJob,
-  SendEmailQueue,
-  SendPushJob,
-  SendPushQueue,
+import {
+  createNotifierQueues,
+  type NotifierQueues,
 } from "../queues/notifier";
 import {
   NOTIFICATIONS_DLQ_TOPIC,
@@ -40,33 +39,23 @@ import {
 
 let running: Awaited<ReturnType<typeof startNotifier>> | null = null;
 let activeCache: PrefsCache | null = null;
+let activeQueues: NotifierQueues | null = null;
+let queueConnection: Redis | null = null;
 
-// Phase 10 will swap these for real BullMQ queues. Until then the
-// notifier-worker process boots and consumes correctly but emails
-// and push notifications are only logged — the delivery rows still
-// land in Postgres with status='queued' so a follow-up redeploy of
-// the send workers can drain them once they exist.
-function buildStubQueues(): { email: SendEmailQueue; push: SendPushQueue } {
-  return {
-    email: {
-      add: async (job: SendEmailJob) => {
-        logger.info("notifier.stub.email", {
-          deliveryId: job.deliveryId,
-          to: job.to,
-          subject: job.subject,
-        });
-      },
-    },
-    push: {
-      add: async (job: SendPushJob) => {
-        logger.info("notifier.stub.push", {
-          deliveryId: job.deliveryId,
-          userId: job.userId,
-          title: job.title,
-        });
-      },
-    },
-  };
+// BullMQ requires its connection to never throw on retries
+// (`maxRetriesPerRequest: null`), so we open a second ioredis
+// client dedicated to the queue producers rather than reusing
+// the app-wide singleton.
+function getQueueConnection(): Redis {
+  if (queueConnection) return queueConnection;
+  queueConnection = new Redis(env.REDIS_URL, {
+    maxRetriesPerRequest: null,
+    lazyConnect: false,
+  });
+  queueConnection.on("error", (err: Error) => {
+    logger.error("notifier-entry.queue_connection", { err: err.message });
+  });
+  return queueConnection;
 }
 
 export interface RunNotifierOverrides {
@@ -92,7 +81,15 @@ export async function runNotifier(
     activeCache = createPrefsCache(redis);
   }
 
-  const stubs = buildStubQueues();
+  // Build the BullMQ producer queues lazily so the test path
+  // (which always passes overrides.deps.sendEmailQueue +
+  // sendPushQueue) never opens a queue Redis connection.
+  const needsProdQueues =
+    !overrides.deps?.sendEmailQueue || !overrides.deps?.sendPushQueue;
+  if (needsProdQueues && !activeQueues) {
+    activeQueues = createNotifierQueues(getQueueConnection());
+  }
+
   const deps: ProcessNotificationDeps = {
     db: overrides.deps?.db ?? getDb(),
     env: overrides.deps?.env ?? {
@@ -101,8 +98,10 @@ export async function runNotifier(
       UNSUB_MAILTO: env.UNSUB_MAILTO,
     },
     prefsCache: overrides.deps?.prefsCache ?? activeCache!,
-    sendEmailQueue: overrides.deps?.sendEmailQueue ?? stubs.email,
-    sendPushQueue: overrides.deps?.sendPushQueue ?? stubs.push,
+    sendEmailQueue:
+      overrides.deps?.sendEmailQueue ?? activeQueues!.emailEnqueue,
+    sendPushQueue:
+      overrides.deps?.sendPushQueue ?? activeQueues!.pushEnqueue,
   };
 
   const processMessage =
@@ -140,5 +139,13 @@ export async function stopNotifier(): Promise<void> {
   if (activeCache) {
     await activeCache.close();
     activeCache = null;
+  }
+  if (activeQueues) {
+    await activeQueues.close();
+    activeQueues = null;
+  }
+  if (queueConnection) {
+    queueConnection.disconnect();
+    queueConnection = null;
   }
 }
