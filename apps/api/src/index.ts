@@ -31,6 +31,11 @@ import {
   runOutboxDispatcher,
   stopOutboxDispatcher,
 } from "./workers/outbox-dispatcher";
+import {
+  ensureRepeatable as ensureScheduledActionsRepeatable,
+  getScheduledActionsQueue,
+  getScheduledActionsWorker,
+} from "./workers/scheduled-actions";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -91,6 +96,14 @@ schedulePartitionMaintenance().catch((err: unknown) => {
   });
 });
 
+// Scheduled-actions sweep — every 60 seconds via BullMQ repeatable job.
+getScheduledActionsWorker();
+ensureScheduledActionsRepeatable().catch((err: unknown) => {
+  logger.error("failed to schedule scheduled-actions sweep", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
 // Shutdown handler — signals the outbox dispatcher loop to exit
 // so the Kafka producer disconnects cleanly before the process
 // terminates. Other BullMQ workers close via their own lifecycle.
@@ -98,6 +111,8 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     logger.info("shutdown requested", { sig });
     stopOutboxDispatcher();
+    void getScheduledActionsWorker().close();
+    void getScheduledActionsQueue().close();
   });
 }
 
