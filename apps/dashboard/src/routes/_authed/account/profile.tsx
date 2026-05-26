@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import {
   AccountPageHeader,
   AccountShell,
-  AccountToggleRow,
   AvatarEditor,
   Field,
   FieldRow,
@@ -16,6 +15,10 @@ import { Select } from "../../../ui/select";
 import { Textarea } from "../../../ui/textarea";
 import { Segmented } from "../../../ui/segmented";
 import { useMe, useUpdateMe } from "../../../lib/hooks/useMe";
+import {
+  useMyPreferences,
+  useUpdatePreferences,
+} from "../../../lib/hooks/useMyPreferences";
 
 /**
  * Splits a Better Auth display name into ("first", "rest") so the
@@ -59,36 +62,51 @@ const LOCALES = [
 
 const DATE_FORMATS = ["ISO (2026-05-08)", "US (5/8/26)", "EU (08/05/26)"] as const;
 type DateFormat = (typeof DATE_FORMATS)[number];
+const DEFAULT_DATE_FORMAT: DateFormat = "ISO (2026-05-08)";
+const DEFAULT_AVATAR_COLOR = "#8B5CF6";
+
+function isDateFormat(value: unknown): value is DateFormat {
+  return (
+    typeof value === "string" &&
+    (DATE_FORMATS as readonly string[]).includes(value)
+  );
+}
+
+function pickString(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value : fallback;
+}
 
 function ProfilePage() {
   const { t } = useTranslation();
   const { data: me } = useMe();
+  const { data: preferences } = useMyPreferences();
   const updateMe = useUpdateMe();
+  const updatePrefs = useUpdatePreferences();
 
-  // The Better Auth `user` row only carries name / email / image
-  // today; the rest of the form (phone, role, company, bio, …)
-  // stays on local mock state until the schema grows those columns
-  // (tracked in the Phase 2 roadmap).
+  // The Better Auth `user` row carries name / email / image /
+  // locale / timezone; everything else (displayName, phone, role,
+  // company, bio, avatarColor) lives on `user_preferences.profile`
+  // and dateFormat lives on `user_preferences.appearance` —
+  // hydrated below from the /me/preferences response.
   const [profile, setProfile] = useState({
     firstName: "",
     lastName: "",
     displayName: "",
     email: "",
-    phone: "+1 (415) 555-0188",
-    role: "Founder & Head of Growth",
-    company: "Lumen Labs, Inc.",
-    timezone: "Europe/Istanbul",
+    role: "",
+    company: "",
+    timezone: "UTC",
     locale: "en-US",
-    bio: "Building Lumen — a photo & video app for everyday creators. Previously product at two consumer subscription startups.",
-    avatarColor: "#8B5CF6",
+    bio: "",
+    avatarColor: DEFAULT_AVATAR_COLOR,
   });
-  const [dateFormat, setDateFormat] = useState<DateFormat>("ISO (2026-05-08)");
+  const [dateFormat, setDateFormat] = useState<DateFormat>(DEFAULT_DATE_FORMAT);
   const update = <K extends keyof typeof profile>(k: K, v: (typeof profile)[K]) =>
     setProfile((p) => ({ ...p, [k]: v }));
 
-  // Hydrate identity fields once the /me response lands. The form
-  // remains editable but `email` is treated read-only since it
-  // also drives Better Auth + invite-by-email lookups.
+  // Hydrate identity fields once the /me response lands. Email
+  // stays read-only since it also drives Better Auth + invite-by-
+  // email lookups.
   useEffect(() => {
     if (!me) return;
     const split = splitName(me.name);
@@ -103,13 +121,36 @@ function ProfilePage() {
     }));
   }, [me]);
 
-  const initials = (profile.firstName[0] ?? "") + (profile.lastName[0] ?? "");
+  // Hydrate the preference-backed fields. Each value is defensive
+  // (string fallback) so a malformed blob can't soft-brick the
+  // page.
+  useEffect(() => {
+    if (!preferences) return;
+    const p = preferences.profile as Record<string, unknown>;
+    setProfile((prev) => ({
+      ...prev,
+      displayName: pickString(p.displayName, prev.displayName),
+      role: pickString(p.role, prev.role),
+      company: pickString(p.company, prev.company),
+      bio: pickString(p.bio, prev.bio),
+      avatarColor: pickString(p.avatarColor, prev.avatarColor),
+    }));
+    const a = preferences.appearance as Record<string, unknown>;
+    if (isDateFormat(a.dateFormat)) setDateFormat(a.dateFormat);
+  }, [preferences]);
+
+  const initials = useMemo(
+    () =>
+      ((profile.firstName[0] ?? "") + (profile.lastName[0] ?? "")).toUpperCase(),
+    [profile.firstName, profile.lastName],
+  );
   const emailVerified = me?.emailVerified ?? false;
+  const saving = updateMe.isPending || updatePrefs.isPending;
 
   const handleSave = () => {
-    // Re-assemble Better Auth's `name` from the first/last inputs,
-    // collapse blanks. Only the three persisted fields ride along
-    // — the rest of the form is local-mock for now.
+    // Better Auth's `name` is rebuilt from the two name inputs,
+    // collapsing blanks. Identity fields ride /me; the rest go
+    // through /me/preferences (profile + appearance blobs).
     const name = [profile.firstName, profile.lastName]
       .filter(Boolean)
       .join(" ")
@@ -118,6 +159,16 @@ function ProfilePage() {
       ...(name && { name }),
       locale: profile.locale,
       timezone: profile.timezone,
+    });
+    updatePrefs.mutate({
+      profile: {
+        displayName: profile.displayName,
+        role: profile.role,
+        company: profile.company,
+        bio: profile.bio,
+        avatarColor: profile.avatarColor,
+      },
+      appearance: { dateFormat },
     });
   };
 
@@ -133,7 +184,7 @@ function ProfilePage() {
         description={t("account.profile.photo.subtitle")}
       >
         <AvatarEditor
-          initials={initials.toUpperCase()}
+          initials={initials}
           color={profile.avatarColor}
           onColorChange={(c) => update("avatarColor", c)}
         />
@@ -142,18 +193,17 @@ function ProfilePage() {
       <SectionCard
         title={t("account.profile.info.title")}
         description={t("account.profile.info.subtitle")}
-        meta={t("account.profile.info.lastEdited", { when: t("account.profile.info.lastEditedRel") })}
         footer={
           <>
-            <Button variant="light" disabled={updateMe.isPending}>
+            <Button variant="light" disabled={saving}>
               {t("common.cancel")}
             </Button>
             <Button
               variant="solid-primary"
               onClick={handleSave}
-              disabled={updateMe.isPending}
+              disabled={saving}
             >
-              {updateMe.isPending
+              {saving
                 ? t("common.saving", "Saving…")
                 : t("account.profile.info.save")}
             </Button>
@@ -225,16 +275,6 @@ function ProfilePage() {
             )}
           </div>
         </Field>
-        <Field
-          label={t("account.profile.contact.phone")}
-          optional={t("account.profile.contact.phoneHint")}
-        >
-          <Input
-            mono
-            value={profile.phone}
-            onChange={(e) => update("phone", e.target.value)}
-          />
-        </Field>
       </SectionCard>
 
       <SectionCard
@@ -275,21 +315,6 @@ function ProfilePage() {
             ariaLabel={t("account.profile.locale.dateFormat")}
           />
         </Field>
-      </SectionCard>
-
-      <SectionCard title={t("account.profile.activity.title")}>
-        <AccountToggleRow
-          title={t("account.profile.activity.profileVisible")}
-          description={t("account.profile.activity.profileVisibleDesc")}
-          checked
-          onChange={() => undefined}
-        />
-        <AccountToggleRow
-          title={t("account.profile.activity.statusVisible")}
-          description={t("account.profile.activity.statusVisibleDesc")}
-          checked={false}
-          onChange={() => undefined}
-        />
       </SectionCard>
     </AccountShell>
   );

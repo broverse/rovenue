@@ -383,6 +383,7 @@ export const meRoute = new Hono()
     const preferences: MyPreferences = {
       notifications: row.notifications,
       appearance: row.appearance,
+      profile: row.profile,
       updatedAt: row.updatedAt.toISOString(),
     };
     const payload: MyPreferencesResponse = { preferences };
@@ -397,11 +398,17 @@ export const meRoute = new Hono()
         .object({
           notifications: z.record(z.unknown()).optional(),
           appearance: z.record(z.unknown()).optional(),
+          profile: z.record(z.unknown()).optional(),
         })
         .refine(
           (v) =>
-            v.notifications !== undefined || v.appearance !== undefined,
-          { message: "At least one of notifications/appearance is required" },
+            v.notifications !== undefined ||
+            v.appearance !== undefined ||
+            v.profile !== undefined,
+          {
+            message:
+              "At least one of notifications/appearance/profile is required",
+          },
         ),
     ),
     async (c) => {
@@ -415,6 +422,7 @@ export const meRoute = new Hono()
       const preferences: MyPreferences = {
         notifications: row.notifications,
         appearance: row.appearance,
+        profile: row.profile,
         updatedAt: row.updatedAt.toISOString(),
       };
       const payload: MyPreferencesResponse = { preferences };

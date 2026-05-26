@@ -2468,8 +2468,6 @@
         "bio": "Bio",
         "bioOptional": "optional · 280 chars",
         "bioCount": "{{count}}/280 · Visible to teammates in your profile card.",
-        "lastEdited": "Last edited {{when}} by you",
-        "lastEditedRel": "2 days ago",
         "save": "Save profile"
       },
       "contact": {
@@ -2478,9 +2476,7 @@
         "email": "Email",
         "primary": "primary",
         "verified": "verified",
-        "emailHint": "Changing your email requires confirmation from both addresses.",
-        "phone": "Phone",
-        "phoneHint": "used for SMS 2FA"
+        "emailHint": "Changing your email requires confirmation from both addresses."
       },
       "locale": {
         "title": "Locale & timezone",
@@ -2488,13 +2484,6 @@
         "language": "Language",
         "timezone": "Timezone",
         "dateFormat": "Date format"
-      },
-      "activity": {
-        "title": "Activity & visibility",
-        "profileVisible": "Profile visible to teammates",
-        "profileVisibleDesc": "Your name, avatar, and bio appear in shared dashboards.",
-        "statusVisible": "Show typing & presence indicators",
-        "statusVisibleDesc": "Lets teammates see when you're viewing the same dashboard."
       }
     },
     "security": {

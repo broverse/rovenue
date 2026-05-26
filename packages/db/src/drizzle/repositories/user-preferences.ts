@@ -15,6 +15,7 @@ export interface UserPreferencesRow {
   userId: string;
   notifications: Record<string, unknown>;
   appearance: Record<string, unknown>;
+  profile: Record<string, unknown>;
   updatedAt: Date;
 }
 
@@ -49,13 +50,14 @@ export async function ensurePreferences(
 export interface UpdatePreferencesInput {
   notifications?: Record<string, unknown>;
   appearance?: Record<string, unknown>;
+  profile?: Record<string, unknown>;
 }
 
 /**
  * Shallow-merges the supplied blob into the existing JSON
- * column server-side via `jsonb || excluded`, so two different
- * pages (notifications + appearance) can save concurrently
- * without clobbering each other's untouched keys.
+ * column server-side via `jsonb || excluded`, so independent
+ * pages (notifications / appearance / profile) can save
+ * concurrently without clobbering each other's untouched keys.
  */
 export async function mergePreferences(
   db: Db,
@@ -75,6 +77,11 @@ export async function mergePreferences(
       ...(input.appearance !== undefined && {
         appearance: sql`${userPreferences.appearance} || ${JSON.stringify(
           input.appearance,
+        )}::jsonb`,
+      }),
+      ...(input.profile !== undefined && {
+        profile: sql`${userPreferences.profile} || ${JSON.stringify(
+          input.profile,
         )}::jsonb`,
       }),
       updatedAt: new Date(),

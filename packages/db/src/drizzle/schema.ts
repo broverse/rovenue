@@ -178,6 +178,10 @@ export const userPreferences = pgTable("user_preferences", {
     .references(() => user.id, { onDelete: "cascade" }),
   notifications: jsonb("notifications").notNull().default(sql`'{}'::jsonb`),
   appearance: jsonb("appearance").notNull().default(sql`'{}'::jsonb`),
+  // Profile-page fields that don't live on Better Auth's `user`
+  // row: displayName, phone, role, company, bio, avatarColor.
+  // Kept opaque on the backend — the dashboard owns the shape.
+  profile: jsonb("profile").notNull().default(sql`'{}'::jsonb`),
   updatedAt: timestamp("updatedAt", { withTimezone: true })
     .notNull()
     .defaultNow(),

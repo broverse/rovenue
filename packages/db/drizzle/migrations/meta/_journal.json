@@ -260,6 +260,13 @@
       "when": 1779795846711,
       "tag": "0036_huge_network",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1779800000000,
+      "tag": "0037_user_preferences_profile",
+      "breakpoints": true
     }
   ]
 }

@@ -1730,6 +1730,12 @@ export interface CreatePersonalAccessTokenResponse {
 export interface MyPreferences {
   notifications: Record<string, unknown>;
   appearance: Record<string, unknown>;
+  /**
+   * Profile-page fields that don't live on Better Auth's `user`
+   * row: displayName, phone, role, company, bio, avatarColor.
+   * Shape is owned by the dashboard; the backend is opaque.
+   */
+  profile: Record<string, unknown>;
   updatedAt: string;
 }
 
@@ -1740,6 +1746,7 @@ export interface MyPreferencesResponse {
 export interface UpdatePreferencesRequest {
   notifications?: Record<string, unknown>;
   appearance?: Record<string, unknown>;
+  profile?: Record<string, unknown>;
 }
 
 // =============================================================
