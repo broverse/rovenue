@@ -5,7 +5,6 @@ CREATE TYPE "public"."billing_meter_key" AS ENUM('mtr', 'events', 'sql_queries')
 CREATE TYPE "public"."billing_pending_action" AS ENUM('downgrade_to_free', 'pause', 'delete');--> statement-breakpoint
 CREATE TYPE "public"."billing_state" AS ENUM('free', 'active', 'past_due', 'paused', 'deleted');--> statement-breakpoint
 CREATE TYPE "public"."billing_tier" AS ENUM('free', 'indie', 'pro', 'scale', 'growth', 'enterprise');--> statement-breakpoint
-CREATE TYPE "public"."InvitationDeliveryStatus" AS ENUM('PENDING', 'DELIVERED', 'BOUNCED', 'COMPLAINED', 'SUPPRESSED');--> statement-breakpoint
 CREATE TABLE "billing_dunning_state" (
 	"project_id" text PRIMARY KEY NOT NULL,
 	"first_failure_at" timestamp with time zone NOT NULL,
@@ -83,24 +82,6 @@ CREATE TABLE "billing_tier_limits" (
 	CONSTRAINT "billing_tier_limits_tier_cycle_pk" PRIMARY KEY("tier","cycle")
 );
 --> statement-breakpoint
-CREATE TABLE "project_invitations" (
-	"id" text PRIMARY KEY NOT NULL,
-	"projectId" text NOT NULL,
-	"email" text NOT NULL,
-	"role" "MemberRole" NOT NULL,
-	"tokenHash" text NOT NULL,
-	"invitedByUserId" text NOT NULL,
-	"expiresAt" timestamp with time zone NOT NULL,
-	"acceptedAt" timestamp with time zone,
-	"revokedAt" timestamp with time zone,
-	"deliveryStatus" "InvitationDeliveryStatus" DEFAULT 'PENDING' NOT NULL,
-	"deliveryError" text,
-	"lastSentAt" timestamp with time zone,
-	"sesMessageId" text,
-	"createdAt" timestamp with time zone DEFAULT now() NOT NULL,
-	"updatedAt" timestamp with time zone DEFAULT now() NOT NULL
-);
---> statement-breakpoint
 CREATE TABLE "usage_snapshots" (
 	"project_id" text NOT NULL,
 	"meter_key" "billing_meter_key" NOT NULL,
@@ -114,26 +95,13 @@ CREATE TABLE "usage_snapshots" (
 	CONSTRAINT "usage_snapshots_project_id_meter_key_period_start_pk" PRIMARY KEY("project_id","meter_key","period_start")
 );
 --> statement-breakpoint
-ALTER TABLE "project_invitations" ALTER COLUMN "role" SET DATA TYPE text;--> statement-breakpoint
-ALTER TABLE "project_members" ALTER COLUMN "role" SET DATA TYPE text;--> statement-breakpoint
-DROP TYPE "public"."MemberRole";--> statement-breakpoint
-CREATE TYPE "public"."MemberRole" AS ENUM('OWNER', 'ADMIN', 'DEVELOPER', 'GROWTH', 'CUSTOMER_SUPPORT');--> statement-breakpoint
-ALTER TABLE "project_invitations" ALTER COLUMN "role" SET DATA TYPE "public"."MemberRole" USING "role"::"public"."MemberRole";--> statement-breakpoint
-ALTER TABLE "project_members" ALTER COLUMN "role" SET DATA TYPE "public"."MemberRole" USING "role"::"public"."MemberRole";--> statement-breakpoint
 ALTER TABLE "billing_dunning_state" ADD CONSTRAINT "billing_dunning_state_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "billing_invoices" ADD CONSTRAINT "billing_invoices_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "billing_payment_methods" ADD CONSTRAINT "billing_payment_methods_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "billing_subscriptions" ADD CONSTRAINT "billing_subscriptions_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "project_invitations" ADD CONSTRAINT "project_invitations_projectId_projects_id_fk" FOREIGN KEY ("projectId") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "project_invitations" ADD CONSTRAINT "project_invitations_invitedByUserId_user_id_fk" FOREIGN KEY ("invitedByUserId") REFERENCES "public"."user"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "usage_snapshots" ADD CONSTRAINT "usage_snapshots_project_id_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "billing_invoices_project_created_idx" ON "billing_invoices" USING btree ("project_id","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "billing_payment_methods_default_uq" ON "billing_payment_methods" USING btree ("project_id") WHERE "billing_payment_methods"."is_default" = true;--> statement-breakpoint
 CREATE INDEX "billing_payment_methods_project_idx" ON "billing_payment_methods" USING btree ("project_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "billing_subscriptions_project_active_uq" ON "billing_subscriptions" USING btree ("project_id") WHERE "billing_subscriptions"."state" != 'deleted';--> statement-breakpoint
-CREATE UNIQUE INDEX "billing_subscriptions_stripe_subscription_id_uq" ON "billing_subscriptions" USING btree ("stripe_subscription_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "project_invitations_pending_uniq" ON "project_invitations" USING btree ("projectId","email") WHERE accepted_at IS NULL AND revoked_at IS NULL;--> statement-breakpoint
-CREATE UNIQUE INDEX "project_invitations_token_hash_key" ON "project_invitations" USING btree ("tokenHash");--> statement-breakpoint
-CREATE INDEX "project_invitations_expiresAt_idx" ON "project_invitations" USING btree ("expiresAt");--> statement-breakpoint
-CREATE INDEX "project_invitations_sesMessageId_idx" ON "project_invitations" USING btree ("sesMessageId");--> statement-breakpoint
-CREATE INDEX "project_invitations_projectId_email_idx" ON "project_invitations" USING btree ("projectId","email");
+CREATE UNIQUE INDEX "billing_subscriptions_stripe_subscription_id_uq" ON "billing_subscriptions" USING btree ("stripe_subscription_id");
