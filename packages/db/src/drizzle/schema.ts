@@ -30,6 +30,7 @@ import {
   outgoingWebhookStatus,
   productType,
   purchaseStatus,
+  pushPlatform,
   revenueEventType,
   scheduledActionStatus,
   scheduledActionType,
@@ -217,6 +218,11 @@ export const userPreferences = pgTable("user_preferences", {
   // row: displayName, phone, role, company, bio, avatarColor.
   // Kept opaque on the backend — the dashboard owns the shape.
   profile: jsonb("profile").notNull().default(sql`'{}'::jsonb`),
+  // Locale + timezone surface on user_preferences (not just on
+  // push_devices) so email/digest templates can render even when
+  // the user has no registered push device.
+  locale: text("locale").notNull().default("en"),
+  timezone: text("timezone").notNull().default("UTC"),
   updatedAt: timestamp("updatedAt", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -1389,6 +1395,109 @@ export const notificationDeliveries = pgTable(
     ),
   }),
 );
+
+// =============================================================
+// push_devices
+// =============================================================
+//
+// Registered push tokens per user. Unique on (platform, token) so
+// the same device cannot register twice; partial index on userId
+// where revokedAt IS NULL accelerates the active-devices lookup
+// the dispatcher does on every push delivery.
+
+export const pushDevices = pgTable(
+  "push_devices",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    platform: pushPlatform("platform").notNull(),
+    token: text("token").notNull(),
+    appBundleId: text("appBundleId").notNull(),
+    locale: text("locale").notNull(),
+    timezone: text("timezone").notNull(),
+    lastSeenAt: timestamp("lastSeenAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    revokedAt: timestamp("revokedAt", { withTimezone: true }),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    platformTokenKey: uniqueIndex("push_devices_platform_token_key").on(
+      t.platform,
+      t.token,
+    ),
+    userIdActiveIdx: index("push_devices_userId_active_idx")
+      .on(t.userId)
+      .where(sql`"revokedAt" IS NULL`),
+  }),
+);
+
+export type PushDevice = typeof pushDevices.$inferSelect;
+export type NewPushDevice = typeof pushDevices.$inferInsert;
+
+// =============================================================
+// user_project_notification_prefs + project_notification_defaults
+// =============================================================
+//
+// Per-(user, project) override map keyed by event_key — opaque
+// JSONB owned by the dashboard. project_notification_defaults
+// holds the project-wide defaults a workspace admin sets; the
+// resolver merges defaults <- per-user overrides at send time.
+
+export const userProjectNotificationPrefs = pgTable(
+  "user_project_notification_prefs",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    overrides: jsonb("overrides").notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    userIdProjectIdKey: uniqueIndex(
+      "user_project_notification_prefs_userId_projectId_key",
+    ).on(t.userId, t.projectId),
+    userIdIdx: index("user_project_notification_prefs_userId_idx").on(t.userId),
+    projectIdIdx: index("user_project_notification_prefs_projectId_idx").on(
+      t.projectId,
+    ),
+  }),
+);
+
+export const projectNotificationDefaults = pgTable(
+  "project_notification_defaults",
+  {
+    projectId: text("projectId")
+      .primaryKey()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    defaults: jsonb("defaults").notNull().default(sql`'{}'::jsonb`),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+);
+
+export type UserProjectNotificationPrefs =
+  typeof userProjectNotificationPrefs.$inferSelect;
+export type NewUserProjectNotificationPrefs =
+  typeof userProjectNotificationPrefs.$inferInsert;
+export type ProjectNotificationDefaults =
+  typeof projectNotificationDefaults.$inferSelect;
+export type NewProjectNotificationDefaults =
+  typeof projectNotificationDefaults.$inferInsert;
 
 // =============================================================
 // Inferred types
