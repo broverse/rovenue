@@ -85,6 +85,9 @@ async function main() {
     { tier: "enterprise", cycle: "annual",  priceCents:       0, mtrMin: 1000000, mtrMax:     null, events:         null, sql:   null, retention: 1825, audit: 1825 },
   ] as const;
 
+  const indieMonthlyPriceId =
+    process.env.STRIPE_BILLING_INDIE_MONTHLY_PRICE_ID ?? null;
+
   await db
     .insert(billingTierLimits)
     .values(
@@ -92,7 +95,10 @@ async function main() {
         tier: r.tier,
         cycle: r.cycle,
         priceUsdCents: r.priceCents,
-        stripePriceId: null,
+        stripePriceId:
+          r.tier === "indie" && r.cycle === "monthly"
+            ? indieMonthlyPriceId
+            : null,
         mtrMin: String(r.mtrMin),
         mtrMax: r.mtrMax === null ? null : String(r.mtrMax),
         eventsLimit: r.events,
