@@ -2,6 +2,7 @@ pub mod api;
 pub mod config;
 pub mod error;
 pub mod observer;
+pub mod time;
 pub mod version;
 
 pub use api::RovenueCore;
