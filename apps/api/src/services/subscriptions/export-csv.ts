@@ -80,6 +80,9 @@ export async function* streamSubscriptionsCsv(
   let rowCount = 0;
   let truncated = false;
 
+  // Export is a one-shot bulk drain — pin to the default
+  // `started_desc` sort and skip all filter inputs.
+  const EXPORT_SORT = "started_desc" as const;
   while (true) {
     const page = await listSubscriptions({
       projectId: params.projectId,
@@ -87,6 +90,17 @@ export async function* streamSubscriptionsCsv(
       limit: PAGE,
       cursor,
       search: params.search,
+      sort: EXPORT_SORT,
+      store: null,
+      productId: null,
+      autoRenew: null,
+      isTrial: null,
+      isIntro: null,
+      hasIssue: false,
+      purchasedFrom: null,
+      purchasedTo: null,
+      expiresFrom: null,
+      expiresTo: null,
     });
 
     for (const row of page.rows) {
@@ -100,7 +114,7 @@ export async function* streamSubscriptionsCsv(
     }
 
     if (!page.nextCursor) break;
-    const next = decodeSubsCursor(page.nextCursor);
+    const next = decodeSubsCursor(page.nextCursor, EXPORT_SORT);
     if (!next) break;
     cursor = next;
   }

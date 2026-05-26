@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, ilike, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
 import type {
   BillingIssueRow,
@@ -7,6 +7,8 @@ import type {
   RenewalCalendarResponse,
   SubscriptionRow,
   SubscriptionScopeName,
+  SubscriptionSortKey,
+  SubscriptionStoreCode,
   SubscriptionUiStatus,
   SubscriptionsCompositionResponse,
   SubscriptionsKpis,
@@ -96,29 +98,40 @@ function mapStatus(row: {
 }
 
 // =============================================================
-// Cursor encoding (createdAt + id tuple)
+// Cursor v2 (sortKey + sortValue + id)
 // =============================================================
 
-const CURSOR_VERSION = "v1";
+const CURSOR_VERSION = "v2";
 
 export interface ParsedSubsCursor {
-  createdAt: Date;
+  sort: SubscriptionSortKey;
+  /** ISO timestamp / decimal string / status enum / "" when sortValue is NULL. */
+  sortValue: string;
   id: string;
 }
 
 export function encodeSubsCursor(c: ParsedSubsCursor): string {
-  const raw = `${CURSOR_VERSION}|${c.createdAt.toISOString()}|${c.id}`;
+  const raw = `${CURSOR_VERSION}|${c.sort}|${c.sortValue}|${c.id}`;
   return Buffer.from(raw, "utf8").toString("base64url");
 }
 
-export function decodeSubsCursor(cursor: string): ParsedSubsCursor | null {
+export function decodeSubsCursor(
+  cursor: string,
+  expectedSort: SubscriptionSortKey,
+): ParsedSubsCursor | null {
   try {
     const raw = Buffer.from(cursor, "base64url").toString("utf8");
-    const [version, dateStr, id] = raw.split("|");
-    if (version !== CURSOR_VERSION || !dateStr || !id) return null;
-    const d = new Date(dateStr);
-    if (Number.isNaN(d.getTime())) return null;
-    return { createdAt: d, id };
+    const parts = raw.split("|");
+    if (parts.length !== 4) return null;
+    const [version, sort, sortValue, id] = parts;
+    if (version !== CURSOR_VERSION) return null;
+    if (sort !== expectedSort) return null;
+    if (!id) return null;
+    return {
+      sort: sort as SubscriptionSortKey,
+      sortValue,
+      id,
+    };
   } catch {
     return null;
   }
@@ -199,6 +212,228 @@ export interface ListSubscriptionsInput {
   limit: number;
   cursor: ParsedSubsCursor | null;
   search: string | null;
+  sort: SubscriptionSortKey;
+  store: ReadonlyArray<SubscriptionStoreCode> | null;
+  productId: ReadonlyArray<string> | null;
+  autoRenew: boolean | null;
+  isTrial: boolean | null;
+  isIntro: boolean | null;
+  hasIssue: boolean;
+  purchasedFrom: string | null;
+  purchasedTo: string | null;
+  expiresFrom: string | null;
+  expiresTo: string | null;
+}
+
+function buildListFilters(input: ListSubscriptionsInput) {
+  const p = drizzle.schema.purchases;
+  const filters: ReturnType<typeof and>[] = [];
+
+  if (input.store && input.store.length > 0) {
+    filters.push(inArray(p.store, [...input.store]));
+  }
+  if (input.productId && input.productId.length > 0) {
+    filters.push(inArray(p.productId, [...input.productId]));
+  }
+  if (input.autoRenew !== null) {
+    filters.push(eq(p.autoRenewStatus, input.autoRenew));
+  }
+  if (input.isTrial !== null) filters.push(eq(p.isTrial, input.isTrial));
+  if (input.isIntro !== null) filters.push(eq(p.isIntroOffer, input.isIntro));
+  if (input.hasIssue) {
+    filters.push(
+      and(
+        eq(p.status, "GRACE_PERIOD"),
+        or(isNull(p.autoRenewStatus), eq(p.autoRenewStatus, true)),
+      )!,
+    );
+  }
+  if (input.purchasedFrom) {
+    filters.push(gte(p.purchaseDate, new Date(input.purchasedFrom)));
+  }
+  if (input.purchasedTo) {
+    // Inclusive end-of-day so YYYY-MM-DD bounds work intuitively.
+    const end = new Date(input.purchasedTo);
+    end.setUTCHours(23, 59, 59, 999);
+    filters.push(lte(p.purchaseDate, end));
+  }
+  if (input.expiresFrom) {
+    filters.push(gte(p.expiresDate, new Date(input.expiresFrom)));
+  }
+  if (input.expiresTo) {
+    const end = new Date(input.expiresTo);
+    end.setUTCHours(23, 59, 59, 999);
+    filters.push(lte(p.expiresDate, end));
+  }
+  if (input.search) {
+    const needle = `%${input.search.toLowerCase()}%`;
+    filters.push(
+      or(
+        ilike(p.id, needle),
+        ilike(p.subscriberId, needle),
+        ilike(p.storeTransactionId, needle),
+      )!,
+    );
+  }
+  return filters;
+}
+
+// Column accessor + direction descriptor per sort key. `nullable`
+// flags the keys whose sort column can be NULL — those need an extra
+// CASE expression to keep NULL rows at the end and still cursor through.
+const SORT_DESCRIPTORS: Record<
+  SubscriptionSortKey,
+  {
+    column: (p: typeof drizzle.schema.purchases) => any;
+    direction: "asc" | "desc";
+    nullable: boolean;
+  }
+> = {
+  started_desc: {
+    column: (p) => p.purchaseDate,
+    direction: "desc",
+    nullable: false,
+  },
+  started_asc: {
+    column: (p) => p.purchaseDate,
+    direction: "asc",
+    nullable: false,
+  },
+  renews_asc: {
+    column: (p) => p.expiresDate,
+    direction: "asc",
+    nullable: true,
+  },
+  renews_desc: {
+    column: (p) => p.expiresDate,
+    direction: "desc",
+    nullable: true,
+  },
+  price_desc: {
+    column: (p) => p.priceAmount,
+    direction: "desc",
+    nullable: true,
+  },
+  price_asc: {
+    column: (p) => p.priceAmount,
+    direction: "asc",
+    nullable: true,
+  },
+  status: { column: (p) => p.status, direction: "asc", nullable: false },
+};
+
+function nullFlag(column: any) {
+  // Postgres-side: 0 for non-NULL rows, 1 for NULL — sorted ASC keeps
+  // NULL rows after everything else regardless of `direction`.
+  return sql<number>`CASE WHEN ${column} IS NULL THEN 1 ELSE 0 END`;
+}
+
+function buildOrderBy(sort: SubscriptionSortKey) {
+  const p = drizzle.schema.purchases;
+  const desc_ = SORT_DESCRIPTORS[sort];
+  const col = desc_.column(p);
+  const dir = desc_.direction;
+  const id = p.id;
+  const order = [
+    desc_.nullable ? asc(nullFlag(col)) : null,
+    dir === "asc" ? asc(col) : desc(col),
+    dir === "asc" ? asc(id) : desc(id),
+  ].filter(Boolean) as any[];
+  return order;
+}
+
+// Build the cursor WHERE: keeps the row order strictly monotonic across
+// pages. Tuple compare in SQL using the same nullFlag-then-col-then-id
+// shape as ORDER BY.
+function cursorWhere(input: ListSubscriptionsInput): ReturnType<typeof and> | undefined {
+  const cur = input.cursor;
+  if (!cur) return undefined;
+  const desc_ = SORT_DESCRIPTORS[input.sort];
+  const p = drizzle.schema.purchases;
+  const col = desc_.column(p);
+  const id = p.id;
+  const dir = desc_.direction;
+
+  const wasNull = desc_.nullable && cur.sortValue === "";
+
+  // Coerce string sortValue into the column's expected type for SQL compare.
+  const valueLiteral = wasNull
+    ? null
+    : input.sort === "status"
+      ? sql`${cur.sortValue}::text`
+      : input.sort.startsWith("price")
+        ? sql`${cur.sortValue}::numeric`
+        : sql`${cur.sortValue}::timestamptz`;
+
+  // Build the strictly-after-cursor predicate based on direction.
+  // For nullable sorts: the cursor is either in the non-NULL bucket
+  // (nullFlag=0) or NULL bucket (nullFlag=1). Rows AFTER the cursor are
+  // either the same bucket with a later col/id, or the NULL bucket (only
+  // when the cursor is in non-NULL).
+  if (!desc_.nullable) {
+    if (dir === "desc") {
+      return or(
+        lt(col, valueLiteral as any),
+        and(eq(col, valueLiteral as any), lt(id, cur.id)),
+      )!;
+    }
+    return or(
+      gt(col, valueLiteral as any),
+      and(eq(col, valueLiteral as any), gt(id, cur.id)),
+    )!;
+  }
+
+  if (wasNull) {
+    // Already in the NULL bucket — id-only tiebreaker.
+    return and(isNull(col), dir === "desc" ? lt(id, cur.id) : gt(id, cur.id));
+  }
+  // Non-NULL bucket; either advance within bucket or move to NULL bucket.
+  const sameBucket =
+    dir === "desc"
+      ? or(
+          and(
+            isNotNull(col),
+            or(
+              lt(col, valueLiteral as any),
+              and(eq(col, valueLiteral as any), lt(id, cur.id)),
+            ),
+          ),
+        )
+      : or(
+          and(
+            isNotNull(col),
+            or(
+              gt(col, valueLiteral as any),
+              and(eq(col, valueLiteral as any), gt(id, cur.id)),
+            ),
+          ),
+        );
+  return or(sameBucket, isNull(col));
+}
+
+function encodeNextCursor(
+  sort: SubscriptionSortKey,
+  row: typeof drizzle.schema.purchases.$inferSelect,
+): string {
+  let sortValue = "";
+  switch (sort) {
+    case "started_desc":
+    case "started_asc":
+      sortValue = row.purchaseDate.toISOString();
+      break;
+    case "renews_asc":
+    case "renews_desc":
+      sortValue = row.expiresDate ? row.expiresDate.toISOString() : "";
+      break;
+    case "price_asc":
+    case "price_desc":
+      sortValue = row.priceAmount ?? "";
+      break;
+    case "status":
+      sortValue = row.status;
+      break;
+  }
+  return encodeSubsCursor({ sort, sortValue, id: row.id });
 }
 
 export async function listSubscriptions(
@@ -212,31 +447,17 @@ export async function listSubscriptions(
   const where = [eq(p.projectId, input.projectId)];
   const scoped = scopeWhere(input.scope, now);
   if (scoped) where.push(scoped);
-  if (input.cursor) {
-    // tuple cursor: (createdAt, id) < (cursorCreatedAt, cursorId)
-    where.push(
-      or(
-        lt(p.createdAt, input.cursor.createdAt),
-        and(eq(p.createdAt, input.cursor.createdAt), lt(p.id, input.cursor.id)),
-      )!,
-    );
+  for (const f of buildListFilters(input)) {
+    if (f) where.push(f);
   }
-  if (input.search) {
-    const needle = `%${input.search.toLowerCase()}%`;
-    where.push(
-      or(
-        ilike(p.id, needle),
-        ilike(p.subscriberId, needle),
-        ilike(p.storeTransactionId, needle),
-      )!,
-    );
-  }
+  const curWhere = cursorWhere(input);
+  if (curWhere) where.push(curWhere);
 
   const rows = await drizzle.db
     .select()
     .from(p)
     .where(and(...where))
-    .orderBy(desc(p.createdAt), desc(p.id))
+    .orderBy(...buildOrderBy(input.sort))
     .limit(fetchLimit);
 
   const hasMore = rows.length > limit;
@@ -277,11 +498,7 @@ export async function listSubscriptions(
   });
 
   const last = page[page.length - 1];
-  const nextCursor =
-    hasMore && last
-      ? encodeSubsCursor({ createdAt: last.createdAt, id: last.id })
-      : null;
-
+  const nextCursor = hasMore && last ? encodeNextCursor(input.sort, last) : null;
   return { rows: mapped, nextCursor };
 }
 
