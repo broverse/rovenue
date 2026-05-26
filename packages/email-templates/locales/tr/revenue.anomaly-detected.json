@@ -1,0 +1,9 @@
+{
+  "subject": "{{projectName}} projesinde anomali",
+  "preview": "Son {{windowMinutes}} dakikada {{metric}} %{{magnitudePct}} {{direction}}",
+  "headline": "{{projectName}} projesinde anomali",
+  "body": "Son {{windowMinutes}} dakikada {{metric}} %{{magnitudePct}} {{direction}} yönde hareket etti — proje baseline değerini aştı.",
+  "cta": "Dashboard'u aç",
+  "push.title": "{{projectName}} — anomali",
+  "push.body": "{{metric}} %{{magnitudePct}} {{direction}} / {{windowMinutes}} dk"
+}
