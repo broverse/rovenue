@@ -92,6 +92,11 @@ const envSchema = z
       .string()
       .regex(/^[0-9a-fA-F]{64}$/, "32 bytes in hex (64 chars)")
       .optional(),
+    // Static mailbox advertised in the `mailto:` half of the
+    // List-Unsubscribe header. Inbox providers fall back to this
+    // when the one-click URL is unreachable; the address is read
+    // by an ops mailbox that forwards to the suppression worker.
+    UNSUB_MAILTO: z.string().email().default("unsubscribe@rovenue.io"),
     // ---- Push notifications (optional; enables iOS push) -------
     // Token-based APNs auth. APNS_KEY_P8 is the .p8 file contents
     // verbatim (BEGIN/END lines included); APNS_ENVIRONMENT picks
