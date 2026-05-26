@@ -77,6 +77,25 @@ export async function tryClaim(
   return updated ?? null;
 }
 
+/**
+ * Rotate the stored hash for an unclaimed token. Used when the
+ * SDK redeems a deferred claim via fingerprint match or magic
+ * link — the original plaintext (which traveled through a URL
+ * or referrer) is replaced with a fresh secret known only to
+ * the device making the claim, so the URL trail can't be
+ * replayed.
+ */
+export async function rotateHash(
+  db: Db,
+  id: string,
+  newHash: string,
+): Promise<void> {
+  await db
+    .update(funnelClaimTokens)
+    .set({ tokenHash: newHash })
+    .where(and(eq(funnelClaimTokens.id, id), isNull(funnelClaimTokens.claimedAt)));
+}
+
 export async function markExpired(db: Db, now: Date): Promise<number> {
   const rows = await db
     .delete(funnelClaimTokens)
