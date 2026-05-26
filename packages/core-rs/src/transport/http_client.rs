@@ -67,7 +67,7 @@ impl HttpClient {
                 .get(&url)
                 .header("Authorization", format!("Bearer {}", self.api_key));
             if let Some(scope) = req.user_scope {
-                builder = builder.header("X-Rovenue-User", scope);
+                builder = builder.header("X-Rovenue-App-User-Id", scope);
             }
             if let Some(etag) = req.etag {
                 builder = builder.header("If-None-Match", etag);

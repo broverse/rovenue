@@ -23,7 +23,7 @@ fn happy_path_get_returns_body_and_etag() {
         .with_header("ETag", "\"abc\"")
         .with_body(r#"{"entitlements": ["pro"]}"#)
         .match_header("authorization", "Bearer pk_test_abc")
-        .match_header("x-rovenue-user", "anon_123")
+        .match_header("x-rovenue-app-user-id", "anon_123")
         .create();
 
     let c = client(&server.url());
