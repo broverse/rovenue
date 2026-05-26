@@ -11,14 +11,6 @@ export { TxIcon, txIconVariants } from "./tx-icon";
 export { TxStatusChip } from "./tx-status-chip";
 export { VolumeGraph } from "./volume-graph";
 export {
-  STORE_BREAKDOWN,
-  SCOPE_TOTAL_COUNTS,
-  TRANSACTIONS,
-  TX_TOTAL_EVENTS,
-  VOLUME_MAX,
-  VOLUME_SERIES,
-} from "./mock-data";
-export {
   avatarColorFor,
   avatarInitialsFor,
   formatAbsMoney,

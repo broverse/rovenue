@@ -924,32 +924,47 @@
     "actions": {
       "syncStores": "Sync stores",
       "exportCsv": "Export CSV",
-      "issueRefund": "Issue refund",
       "lastRange": "Last 28d",
-      "sortNewest": "Sort: Newest"
+      "sortNewest": "Sort: Newest",
+      "sortOldest": "Sort: Oldest",
+      "sortAmountDesc": "Sort: Amount (high → low)",
+      "sortAmountAsc": "Sort: Amount (low → high)"
     },
     "kpi": {
       "gross28d": "GROSS · 28D",
       "grossDelta": "▲ +9.8% vs prev",
+      "grossDeltaUp": "▲ +{{percent}}% vs prev",
+      "grossDeltaDown": "▼ −{{percent}}% vs prev",
+      "grossDeltaFlat": "no prior data",
       "net28d": "NET · 28D",
-      "netDescription": "75.0% of gross · store fees $38k",
+      "netLabel": "NET · 28D",
+      "netDescription": "gross − fees − refunds",
       "refunds": "REFUNDS",
-      "refundsDescription": "1.54% of gross · 187 events",
+      "refundsDescription": "awaiting refund events",
+      "refundsCount": "{{count}} refund events",
+      "feesLabel": "STORE FEES · 28D",
+      "feesDescription": "estimated · avg {{percent}}% (mix)",
+      "feesDescriptionAwaiting": "awaiting data",
       "chargebacks": "CHARGEBACKS",
       "chargebacksDescription": "0.02% rate · within target"
     },
     "flow": {
       "title": "Revenue flow · last 28 days",
       "subtitle": "From gross receipts to realized net, by platform",
-      "lastSync": "last sync 12s ago · store reconciliation in green",
+      "lastSync": "last sync {{when}}",
+      "lastSyncUnknown": "awaiting data",
+      "awaiting": "awaiting data",
+      "awaitingStores": "Per-store revenue will appear here once events ship.",
       "gross": "Gross receipts",
-      "grossDetail": "14,281 events",
-      "fees": "Store fees",
-      "feesDetail": "avg 15.0% (mix)",
-      "refunds": "Refunds + tax",
-      "refundsDetail": "10.0% of gross",
+      "grossDetail": "{{count}} events",
+      "fees": "Store fees (est.)",
+      "feesDetail": "est. avg {{percent}}% (mix)",
+      "refunds": "Refunds",
+      "refundsDetail": "{{percent}}% of gross",
       "net": "Net revenue",
-      "netDetail": "▲ +11.2% vs prev"
+      "netDetailUp": "▲ +{{percent}}% vs prev",
+      "netDetailDown": "▼ −{{percent}}% vs prev",
+      "netDetailFlat": "no prior window"
     },
     "volume": {
       "today": "Today",
@@ -979,15 +994,34 @@
     },
     "filters": {
       "searchPlaceholder": "Search tx_id, user_id, order_id, receipt…",
+      "clearSearch": "Clear search",
       "amount": "amount",
       "amountValue": "≥ $0.01",
+      "amountMinLabel": "Minimum amount (USD)",
       "store": "store",
       "currency": "currency",
+      "currencyLabel": "Currencies (ISO-4217, comma-separated)",
       "country": "country",
       "any": "any",
       "addFilter": "Add filter",
+      "apply": "Apply",
+      "clear": "Clear",
+      "clearAll": "Clear filters",
+      "nSelected": "{{count}} selected",
       "showing": "{{visible}} of {{total}}"
     },
+    "storeFilter": {
+      "ios": "App Store",
+      "play": "Google Play",
+      "stripe": "Stripe",
+      "web": "Web / direct"
+    },
+    "syncStatus": {
+      "synced": "Synced · {{pending}} pending",
+      "syncing": "Syncing…",
+      "syncFailed": "Sync failed"
+    },
+    "empty": "No transactions match these filters.",
     "table": {
       "transaction": "Transaction",
       "userSubscription": "User / subscription",
@@ -1018,6 +1052,7 @@
     },
     "paginator": {
       "showing": "Showing 1–{{visible}} of <0>{{total}}</0>",
+      "page": "Page <0>{{page}}</0> · {{visible}} rows",
       "previous": "Previous page",
       "next": "Next page"
     },

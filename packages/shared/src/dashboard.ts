@@ -584,6 +584,38 @@ export type TransactionScope =
   | "trial"
   | "failed";
 
+/** UI store buckets — mapped server-side to the raw `store` column. */
+export type TransactionStoreFilter = "ios" | "play" | "stripe" | "web";
+
+/** Sort key accepted by the transactions list endpoint. */
+export type TransactionsListSort =
+  | "newest"
+  | "oldest"
+  | "amount_desc"
+  | "amount_asc";
+
+export interface TransactionsListFilters {
+  /** Free-text substring against subscriberId / purchaseId / productId. */
+  q?: string;
+  /** Any-of store filter (`ios`/`play`/`stripe`/`web`). */
+  stores?: ReadonlyArray<TransactionStoreFilter>;
+  /** Any-of ISO-4217 currency codes (case-insensitive). */
+  currencies?: ReadonlyArray<string>;
+  /** Minimum gross USD across the row. */
+  amountMin?: number;
+  /** Inclusive `eventDate` lower bound, ISO date or full ISO timestamp. */
+  from?: string;
+  /** Inclusive `eventDate` upper bound, ISO date or full ISO timestamp. */
+  to?: string;
+}
+
+export interface TransactionsSyncResponse {
+  /** ISO-8601 UTC timestamp when the sync was acknowledged. */
+  syncedAt: string;
+  /** Outbox events not yet published to ClickHouse. */
+  pendingOutbox: number;
+}
+
 export interface TransactionRow {
   id: string;
   type: RevenueEventTypeName;
@@ -624,12 +656,33 @@ export interface TransactionsStoreBreakdownRow {
   /** Share of the window total, 0–100 with one decimal. */
   pct: number;
   eventCount: number;
+  /**
+   * Estimated store fee USD across the window — derived from
+   * known per-store rates (15% iOS / 15% Play / 2.9% Stripe /
+   * 0% web). Decimal-as-string. We don't record actual fees in
+   * `revenue_events`, so this is an estimate.
+   */
+  estimatedFeeUsd: string;
+  /** Estimated fee rate, 0–100 with one decimal. */
+  estimatedFeePct: number;
 }
 
 export interface TransactionsStoreBreakdownResponse {
   windowDays: number;
   rows: TransactionsStoreBreakdownRow[];
   totalUsd: string;
+  /** Decimal-as-string total event count across the window. */
+  eventCount: number;
+  /** Refunds USD across the same window. Decimal-as-string. */
+  refundsUsd: string;
+  /** Gross USD across the previous window of equal length. */
+  previousTotalUsd: string;
+  /** (current − previous) / previous × 100. null when previous is 0. */
+  deltaPct: number | null;
+  /** Estimated mix-weighted store fee USD, sum of per-store estimates. */
+  estimatedFeesUsd: string;
+  /** Average estimated fee rate, weighted by gross. 0–100 with one decimal. */
+  estimatedFeePct: number;
 }
 
 // =============================================================

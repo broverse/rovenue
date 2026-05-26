@@ -21,7 +21,12 @@ type Props = {
   transactions: ReadonlyArray<Transaction>;
   selectedIds: ReadonlySet<string>;
   activeId: string | null;
-  total: number;
+  page: number;
+  canPrev: boolean;
+  canNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+  isLoading?: boolean;
   onToggleSelect: (id: string) => void;
   onToggleSelectAll: () => void;
   onOpen: (id: string) => void;
@@ -31,7 +36,12 @@ export function TransactionsTable({
   transactions,
   selectedIds,
   activeId,
-  total,
+  page,
+  canPrev,
+  canNext,
+  onPrev,
+  onNext,
+  isLoading,
   onToggleSelect,
   onToggleSelectAll,
   onOpen,
@@ -84,10 +94,12 @@ export function TransactionsTable({
 
       <TransactionsPaginator
         visible={transactions.length}
-        total={total}
-        page={1}
-        totalPages={4}
-        onPageChange={() => {}}
+        page={page}
+        canPrev={canPrev}
+        canNext={canNext}
+        onPrev={onPrev}
+        onNext={onNext}
+        isLoading={isLoading}
       />
     </div>
   );

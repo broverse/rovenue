@@ -1,35 +1,41 @@
 import { useTranslation } from "react-i18next";
-import { VOLUME_MAX, VOLUME_SERIES } from "./mock-data";
 import type { VolumeBar } from "./types";
 
 type VolumeGraphProps = {
-  /** Optional override; falls back to the design-spec mock series. */
+  /** Daily stacked bars. When omitted/empty an awaiting-data strip renders. */
   series?: ReadonlyArray<VolumeBar>;
   /** Optional override for the max-bar scaling denominator. */
   max?: number;
 };
 
 /**
- * 28-bar stacked timeline showing purchases · renewals · refunds for the
- * last four weeks. Each bar is a column with three flex segments sized in
- * proportion to its category total. The rightmost bar uses the lighter
- * accent shade to signal "today".
+ * 28-bar stacked timeline showing purchases · renewals · refunds. Each
+ * bar is a column with three flex segments sized in proportion to its
+ * category total. The rightmost bar uses the lighter accent shade to
+ * signal "today".
  */
 export function VolumeGraph({ series, max }: VolumeGraphProps = {}) {
   const { t } = useTranslation();
-  const bars: ReadonlyArray<VolumeBar> =
-    series && series.length > 0 ? series : VOLUME_SERIES;
+  const bars = series ?? [];
+  const hasData = bars.length > 0 && bars.some((b) => b.purchases + b.renewals + b.refunds > 0);
+
+  if (!hasData) {
+    return (
+      <div className="mt-3.5 flex h-24 items-center justify-center rounded-md border border-dashed border-rv-divider bg-rv-c2 text-[12px] text-rv-mute-500">
+        {t("transactions.flow.awaiting")}
+      </div>
+    );
+  }
+
   const denom =
-    max ??
-    (series
-      ? Math.max(
-          1,
-          ...bars.map((b) => b.purchases + b.renewals + b.refunds),
-        )
-      : VOLUME_MAX);
+    max ?? Math.max(1, ...bars.map((b) => b.purchases + b.renewals + b.refunds));
+
   return (
     <>
-      <div className="mt-3.5 grid h-24 items-end gap-px" style={{ gridTemplateColumns: `repeat(${bars.length}, 1fr)` }}>
+      <div
+        className="mt-3.5 grid h-24 items-end gap-px"
+        style={{ gridTemplateColumns: `repeat(${bars.length}, 1fr)` }}
+      >
         {bars.map((bar, i) => {
           const total = bar.purchases + bar.renewals + bar.refunds;
           const height = Math.max(6, (total / denom) * 100);

@@ -1,14 +1,21 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import { ArrowUpDown, Calendar, Plus, RefreshCw } from "lucide-react";
+import { ArrowUpDown, Calendar, Loader2, RefreshCw } from "lucide-react";
+import type {
+  RevenueEventTypeName,
+  TransactionRow,
+  TransactionScope,
+  TransactionStoreFilter,
+  TransactionsListSort,
+  TransactionsStoreBreakdownResponse,
+  TransactionsVolumeResponse,
+} from "@rovenue/shared";
 import { Button } from "../../../../ui/button";
 import { StatCard } from "../../../../ui/stat-card";
 import {
   RevenueFlow,
   ScopeTabs,
-  TRANSACTIONS,
-  TX_TOTAL_EVENTS,
   TransactionInspector,
   TransactionsTable,
   TxFilterBar,
@@ -21,18 +28,123 @@ import {
 } from "../../../../components/transactions";
 import { useProject } from "../../../../lib/hooks/useProject";
 import {
+  buildTransactionsExportUrl,
   useProjectTransactions,
   useProjectTransactionsStoreBreakdown,
+  useProjectTransactionsSync,
   useProjectTransactionsVolume,
 } from "../../../../lib/hooks/useProjectTransactions";
-import type {
-  RevenueEventTypeName,
-  TransactionRow,
-  TransactionsStoreBreakdownResponse,
-  TransactionsVolumeResponse,
-} from "@rovenue/shared";
+
+const API_BASE_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:3000";
+
+// =============================================================
+// URL search-param schema
+// =============================================================
+
+const SCOPE_VALUES: ReadonlyArray<TransactionScope> = [
+  "all",
+  "purchase",
+  "renewal",
+  "refund",
+  "trial",
+  "failed",
+];
+
+const STORE_VALUES: ReadonlyArray<TransactionStoreFilter> = [
+  "ios",
+  "play",
+  "stripe",
+  "web",
+];
+
+const SORT_VALUES: ReadonlyArray<TransactionsListSort> = [
+  "newest",
+  "oldest",
+  "amount_desc",
+  "amount_asc",
+];
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+interface TransactionsSearch {
+  scope: TransactionScope;
+  q?: string;
+  stores?: TransactionStoreFilter[];
+  currencies?: string[];
+  amountMin?: number;
+  from?: string;
+  to?: string;
+  sort: TransactionsListSort;
+}
+
+function parseScope(raw: unknown): TransactionScope {
+  return typeof raw === "string" && (SCOPE_VALUES as ReadonlyArray<string>).includes(raw)
+    ? (raw as TransactionScope)
+    : "all";
+}
+
+function parseSort(raw: unknown): TransactionsListSort {
+  return typeof raw === "string" && (SORT_VALUES as ReadonlyArray<string>).includes(raw)
+    ? (raw as TransactionsListSort)
+    : "newest";
+}
+
+function parseStores(raw: unknown): TransactionStoreFilter[] | undefined {
+  const candidates = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string" && raw.length > 0
+      ? raw.split(",")
+      : [];
+  const allowed = new Set(STORE_VALUES as ReadonlyArray<string>);
+  const matched = candidates
+    .map((s) => String(s).trim().toLowerCase())
+    .filter((s): s is TransactionStoreFilter => allowed.has(s));
+  return matched.length > 0 ? Array.from(new Set(matched)) : undefined;
+}
+
+function parseCurrencies(raw: unknown): string[] | undefined {
+  const candidates = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string" && raw.length > 0
+      ? raw.split(",")
+      : [];
+  const matched = candidates
+    .map((s) => String(s).trim().toUpperCase())
+    .filter((s) => /^[A-Z]{3}$/.test(s));
+  return matched.length > 0 ? Array.from(new Set(matched)) : undefined;
+}
+
+function parseAmountMin(raw: unknown): number | undefined {
+  if (typeof raw === "number" && Number.isFinite(raw) && raw >= 0) return raw;
+  if (typeof raw === "string" && raw.length > 0) {
+    const n = Number.parseFloat(raw);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return undefined;
+}
+
+function parseDateBound(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || !ISO_DATE_RE.test(raw)) return undefined;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? undefined : raw;
+}
 
 export const Route = createFileRoute("/_authed/projects/$projectId/transactions")({
+  validateSearch: (search: Record<string, unknown>): TransactionsSearch => {
+    const from = parseDateBound(search.from);
+    const to = parseDateBound(search.to);
+    return {
+      scope: parseScope(search.scope),
+      q:
+        typeof search.q === "string" && search.q.length > 0 ? search.q : undefined,
+      stores: parseStores(search.stores),
+      currencies: parseCurrencies(search.currencies),
+      amountMin: parseAmountMin(search.amountMin),
+      from: from && to && from > to ? undefined : from,
+      to: from && to && from > to ? undefined : to,
+      sort: parseSort(search.sort),
+    };
+  },
   component: TransactionsRoute,
 });
 
@@ -48,15 +160,6 @@ function TransactionsRoute() {
 // =============================================================
 // Adapters — wire shape → UI Transaction
 // =============================================================
-//
-// `revenue_events` doesn't carry fee / tax / country / payment-method
-// today, so the fields the table renders for those columns are
-// derived rather than authoritative: `fee` and `tax` default to
-// zero (gross == net), `country` falls back to an em dash, and
-// `method` is filled with a short store name. Lifecycle status
-// is always `paid` because the table is fed off a settled-event
-// ledger; failed-attempt logging will populate the other statuses
-// when that pipeline lands.
 
 const TYPE_MAP: Record<RevenueEventTypeName, TxType> = {
   INITIAL: "purchase",
@@ -131,10 +234,6 @@ function toUiTransaction(row: TransactionRow, nowMs: number): Transaction {
   };
 }
 
-// -------------------------------------------------------------
-// Volume + store-breakdown adapters
-// -------------------------------------------------------------
-
 function toVolumeBars(
   response: TransactionsVolumeResponse | undefined,
 ): ReadonlyArray<VolumeBar> | undefined {
@@ -149,16 +248,17 @@ function toVolumeBars(
   }));
 }
 
-const STORE_ROW_NAME: Record<TxStore, string> = {
-  ios: "App Store",
-  play: "Google Play",
-  stripe: "Stripe",
-  web: "Web",
-};
+const USD_INT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const USD_K = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
 
-const USD_INT = new Intl.NumberFormat("en-US", {
-  maximumFractionDigits: 0,
-});
+function formatUsd(value: number): string {
+  return `$${USD_INT.format(Math.round(value))}`;
+}
+
+function formatFeeShort(value: number): string {
+  if (value >= 10_000) return `$${USD_K.format(value / 1000)}k`;
+  return `$${USD_INT.format(Math.round(value))}`;
+}
 
 function toStoreBreakdownRows(
   response: TransactionsStoreBreakdownResponse | undefined,
@@ -166,56 +266,140 @@ function toStoreBreakdownRows(
   if (!response || response.rows.length === 0) return undefined;
   return response.rows.map((r) => {
     const store = mapStore(r.store);
-    void STORE_ROW_NAME[store];
+    const feeUsd = Number(r.estimatedFeeUsd);
+    const isSelfBilled = r.estimatedFeePct === 0;
     return {
       store,
-      revenue: `$${USD_INT.format(Math.round(Number(r.grossUsd)))}`,
-      fee: null,
-      feePercent: null,
+      revenue: formatUsd(Number(r.grossUsd)),
+      fee: isSelfBilled ? null : formatFeeShort(feeUsd),
+      feePercent: isSelfBilled ? null : `${r.estimatedFeePct.toFixed(1)}%`,
       share: `${r.pct.toFixed(1)}%`,
     };
   });
+}
+
+function nextSort(sort: TransactionsListSort): TransactionsListSort {
+  switch (sort) {
+    case "newest":
+      return "oldest";
+    case "oldest":
+      return "amount_desc";
+    case "amount_desc":
+      return "amount_asc";
+    case "amount_asc":
+    default:
+      return "newest";
+  }
+}
+
+function sortLabelKey(sort: TransactionsListSort): string {
+  switch (sort) {
+    case "oldest":
+      return "transactions.actions.sortOldest";
+    case "amount_desc":
+      return "transactions.actions.sortAmountDesc";
+    case "amount_asc":
+      return "transactions.actions.sortAmountAsc";
+    case "newest":
+    default:
+      return "transactions.actions.sortNewest";
+  }
 }
 
 // =============================================================
 // Page
 // =============================================================
 
+const PAGE_LIMIT = 50;
+
 function TransactionsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
-  const [scope, setScope] = useState<TxScope>("all");
-  const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
 
-  // Live queries
-  const list = useProjectTransactions({ projectId, scope });
+  const {
+    scope,
+    q: urlQ,
+    stores,
+    currencies,
+    amountMin,
+    from,
+    to,
+    sort,
+  } = search;
+
+  // Cursor stack: index 0 is the first page (no cursor), every
+  // subsequent entry holds the cursor that opens that page.
+  const [cursorStack, setCursorStack] = useState<Array<string | undefined>>([
+    undefined,
+  ]);
+  const pageIndex = cursorStack.length - 1;
+  const activeCursor = cursorStack[pageIndex];
+
+  // Local-mirror search input for responsive typing; debounced
+  // into the URL.
+  const [searchInput, setSearchInput] = useState(urlQ ?? "");
+  useEffect(() => {
+    setSearchInput(urlQ ?? "");
+  }, [urlQ]);
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      const next = searchInput.trim();
+      if ((next || undefined) === urlQ) return;
+      setCursorStack([undefined]);
+      void navigate({
+        search: (prev) => ({ ...prev, q: next.length > 0 ? next : undefined }),
+        replace: true,
+      });
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchInput, urlQ, navigate]);
+
+  // Any change to filters/scope/sort resets the cursor stack.
+  const filterKey = JSON.stringify({
+    scope,
+    urlQ,
+    stores,
+    currencies,
+    amountMin,
+    from,
+    to,
+    sort,
+  });
+  const lastFilterKey = useRef(filterKey);
+  useEffect(() => {
+    if (lastFilterKey.current !== filterKey) {
+      lastFilterKey.current = filterKey;
+      setCursorStack([undefined]);
+    }
+  }, [filterKey]);
+
+  const list = useProjectTransactions({
+    projectId,
+    scope,
+    sort,
+    cursor: activeCursor ?? null,
+    limit: PAGE_LIMIT,
+    q: urlQ,
+    stores,
+    currencies,
+    amountMin,
+    from,
+    to,
+  });
   const volume = useProjectTransactionsVolume({ projectId });
   const breakdown = useProjectTransactionsStoreBreakdown({ projectId });
+  const sync = useProjectTransactionsSync(projectId);
 
-  const nowMs = useMemo(() => Date.now(), [list.data?.pageParams.length, list.dataUpdatedAt]);
+  const nowMs = useMemo(() => Date.now(), [list.data, list.dataUpdatedAt]);
 
-  // Flatten paged results and apply the client-side free-text
-  // filter against id / user / product / country / method — the
-  // server only filters by scope.
   const transactions = useMemo<ReadonlyArray<Transaction>>(() => {
-    const pages = list.data?.pages;
-    if (!pages || pages.length === 0) return TRANSACTIONS;
-    const flat = pages.flatMap((p) => p.rows.map((r) => toUiTransaction(r, nowMs)));
-    if (flat.length === 0) return [];
-    return flat;
+    if (!list.data) return [];
+    return list.data.rows.map((r) => toUiTransaction(r, nowMs));
   }, [list.data, nowMs]);
 
-  const filtered = useMemo<ReadonlyArray<Transaction>>(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return transactions;
-    return transactions.filter((tx) => {
-      const haystack = [tx.id, tx.user, tx.sub, tx.product, tx.country, tx.method]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [transactions, search]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
 
   const selected = useMemo<Transaction | null>(() => {
     if (transactions.length === 0) return null;
@@ -235,33 +419,145 @@ function TransactionsPage({ projectId }: { projectId: string }) {
     });
 
   const toggleAll = () => {
-    if (filtered.length === 0) return;
-    if (filtered.every((tx) => selectedIds.has(tx.id))) {
+    if (transactions.length === 0) return;
+    if (transactions.every((tx) => selectedIds.has(tx.id))) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(filtered.map((tx) => tx.id)));
+      setSelectedIds(new Set(transactions.map((tx) => tx.id)));
     }
   };
 
-  // Total / KPI numbers — derive from the store-breakdown rollup
-  // which already has the project-wide window total. Falls back
-  // to the design-mock copy while the query is in flight.
+  // KPI numbers
   const breakdownTotal = breakdown.data ? Number(breakdown.data.totalUsd) : null;
-  const refundsUsd = useMemo(() => {
+  const breakdownRefunds = breakdown.data ? Number(breakdown.data.refundsUsd) : null;
+  const breakdownFees = breakdown.data ? Number(breakdown.data.estimatedFeesUsd) : null;
+  const breakdownNet =
+    breakdownTotal !== null && breakdownFees !== null && breakdownRefunds !== null
+      ? breakdownTotal - breakdownFees - breakdownRefunds
+      : null;
+  const refundEventCount = useMemo(() => {
     if (!volume.data) return null;
     return volume.data.points.reduce((a, p) => a + p.refunds, 0);
   }, [volume.data]);
 
-  const grossLabel =
-    breakdownTotal !== null
-      ? `$${USD_INT.format(Math.round(breakdownTotal))}`
-      : "$248,192";
+  const grossLabel = breakdownTotal !== null ? formatUsd(breakdownTotal) : "—";
 
   const realVolume = toVolumeBars(volume.data);
   const realBreakdown = toStoreBreakdownRows(breakdown.data);
 
-  const totalEvents =
-    list.data?.pages.reduce((a, p) => a + p.rows.length, 0) ?? TX_TOTAL_EVENTS;
+  const flowTotals = breakdown.data
+    ? {
+        gross: grossLabel,
+        fees: breakdownFees !== null ? formatUsd(breakdownFees) : undefined,
+        refunds: breakdownRefunds !== null ? formatUsd(breakdownRefunds) : undefined,
+        net: breakdownNet !== null ? formatUsd(breakdownNet) : undefined,
+        eventCount: breakdown.data.eventCount,
+        estimatedFeePct: breakdown.data.estimatedFeePct,
+        refundsPct:
+          breakdownTotal && breakdownTotal > 0 && breakdownRefunds !== null
+            ? Math.round((breakdownRefunds / breakdownTotal) * 1000) / 10
+            : 0,
+        deltaPct: breakdown.data.deltaPct,
+        lastSyncMs: breakdown.dataUpdatedAt,
+      }
+    : undefined;
+
+  // Pagination
+  const canPrev = pageIndex > 0;
+  const canNext = Boolean(list.data?.nextCursor);
+  const onPrev = () => {
+    if (!canPrev) return;
+    setCursorStack((s) => s.slice(0, -1));
+  };
+  const onNext = () => {
+    if (!canNext || !list.data?.nextCursor) return;
+    setCursorStack((s) => [...s, list.data!.nextCursor!]);
+  };
+
+  // Filter mutators — all collapse the cursor stack on change so
+  // the user lands back on page 1.
+  const setScope = (next: TxScope) => {
+    setCursorStack([undefined]);
+    void navigate({ search: (prev) => ({ ...prev, scope: next }), replace: false });
+  };
+  const setStores = (next: ReadonlyArray<TransactionStoreFilter>) =>
+    void navigate({
+      search: (prev) => ({
+        ...prev,
+        stores: next.length > 0 ? [...next] : undefined,
+      }),
+      replace: false,
+    });
+  const setCurrencies = (next: ReadonlyArray<string>) =>
+    void navigate({
+      search: (prev) => ({
+        ...prev,
+        currencies: next.length > 0 ? [...next] : undefined,
+      }),
+      replace: false,
+    });
+  const setAmountMin = (next: number | undefined) =>
+    void navigate({
+      search: (prev) => ({ ...prev, amountMin: next }),
+      replace: false,
+    });
+  const toggleSort = () =>
+    void navigate({
+      search: (prev) => ({ ...prev, sort: nextSort(sort) }),
+      replace: false,
+    });
+  const clearAll = () =>
+    void navigate({
+      search: (prev) => ({
+        ...prev,
+        q: undefined,
+        stores: undefined,
+        currencies: undefined,
+        amountMin: undefined,
+        from: undefined,
+        to: undefined,
+      }),
+      replace: false,
+    });
+
+  const handleExport = () => {
+    const url = buildTransactionsExportUrl(API_BASE_URL, {
+      projectId,
+      scope,
+      sort,
+      q: urlQ,
+      stores,
+      currencies,
+      amountMin,
+      from,
+      to,
+    });
+    // Use a hidden anchor so the auth cookies ride along with the
+    // request (we have credentials: "include" on api(), but a
+    // direct navigation matches the dashboard's cross-origin
+    // cookie setup too).
+    const a = document.createElement("a");
+    a.href = url;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const handleSync = () => {
+    if (sync.isPending) return;
+    sync.mutate();
+  };
+
+  const syncLabel = sync.isPending
+    ? t("transactions.syncStatus.syncing")
+    : sync.data
+      ? t("transactions.syncStatus.synced", {
+          pending: sync.data.pendingOutbox.toLocaleString(),
+        })
+      : sync.error
+        ? t("transactions.syncStatus.syncFailed")
+        : t("transactions.actions.syncStores");
 
   return (
     <>
@@ -275,17 +571,17 @@ function TransactionsPage({ projectId }: { projectId: string }) {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="flat" size="sm" onClick={() => void list.refetch()}>
-            <RefreshCw size={13} />
-            {t("transactions.actions.syncStores")}
+          <Button variant="flat" size="sm" onClick={handleSync} disabled={sync.isPending}>
+            {sync.isPending ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <RefreshCw size={13} />
+            )}
+            {syncLabel}
           </Button>
-          <Button variant="flat" size="sm">
+          <Button variant="flat" size="sm" onClick={handleExport}>
             <ArrowUpDown size={13} />
             {t("transactions.actions.exportCsv")}
-          </Button>
-          <Button variant="solid-primary" size="sm">
-            <Plus size={13} />
-            {t("transactions.actions.issueRefund")}
           </Button>
         </div>
       </header>
@@ -294,45 +590,73 @@ function TransactionsPage({ projectId }: { projectId: string }) {
         <StatCard
           label={t("transactions.kpi.gross28d")}
           value={grossLabel}
-          description={t("transactions.kpi.grossDelta")}
-          descriptionTone="success"
+          description={
+            breakdown.data && breakdown.data.deltaPct !== null
+              ? t(
+                  breakdown.data.deltaPct >= 0
+                    ? "transactions.kpi.grossDeltaUp"
+                    : "transactions.kpi.grossDeltaDown",
+                  { percent: Math.abs(breakdown.data.deltaPct).toFixed(1) },
+                )
+              : t("transactions.kpi.grossDeltaFlat")
+          }
+          descriptionTone={
+            breakdown.data && breakdown.data.deltaPct !== null
+              ? breakdown.data.deltaPct >= 0
+                ? "success"
+                : "danger"
+              : undefined
+          }
         />
         <StatCard
           label={t("transactions.kpi.net28d")}
-          value={grossLabel}
+          value={
+            breakdownNet !== null ? (
+              formatUsd(breakdownNet)
+            ) : (
+              <span className="text-rv-mute-500">—</span>
+            )
+          }
           description={t("transactions.kpi.netDescription")}
         />
         <StatCard
           label={t("transactions.kpi.refunds")}
           value={
-            refundsUsd !== null ? (
-              <span className="text-rv-danger">{refundsUsd.toLocaleString()}</span>
+            breakdownRefunds !== null ? (
+              <span className="text-rv-danger">{formatUsd(breakdownRefunds)}</span>
             ) : (
-              <span className="text-rv-danger">−$3,842.18</span>
+              <span className="text-rv-mute-500">—</span>
             )
           }
-          description={t("transactions.kpi.refundsDescription")}
+          description={
+            refundEventCount !== null
+              ? t("transactions.kpi.refundsCount", {
+                  count: refundEventCount.toLocaleString(),
+                })
+              : t("transactions.kpi.refundsDescription")
+          }
         />
         <StatCard
-          label={t("transactions.kpi.chargebacks")}
-          value={<span className="text-rv-danger">12</span>}
-          description={t("transactions.kpi.chargebacksDescription")}
+          label={t("transactions.kpi.feesLabel")}
+          value={
+            breakdownFees !== null ? (
+              formatUsd(breakdownFees)
+            ) : (
+              <span className="text-rv-mute-500">—</span>
+            )
+          }
+          description={
+            breakdown.data
+              ? t("transactions.kpi.feesDescription", {
+                  percent: breakdown.data.estimatedFeePct.toFixed(1),
+                })
+              : t("transactions.kpi.feesDescriptionAwaiting")
+          }
         />
       </div>
 
       <RevenueFlow
-        totals={
-          breakdownTotal !== null
-            ? {
-                gross: grossLabel,
-                refunds:
-                  refundsUsd !== null
-                    ? `${refundsUsd.toLocaleString()}`
-                    : undefined,
-                net: grossLabel,
-              }
-            : undefined
-        }
+        totals={flowTotals}
         volume={realVolume}
         storeRows={realBreakdown}
       />
@@ -340,51 +664,56 @@ function TransactionsPage({ projectId }: { projectId: string }) {
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <ScopeTabs value={scope} onChange={setScope} />
         <div className="ml-auto flex gap-1.5">
-          <Button variant="light" size="sm">
+          <Button variant="light" size="sm" disabled>
             <Calendar size={13} />
             {t("transactions.actions.lastRange")}
           </Button>
-          <Button variant="light" size="sm">
+          <Button variant="light" size="sm" onClick={toggleSort}>
             <ArrowUpDown size={13} />
-            {t("transactions.actions.sortNewest")}
+            {t(sortLabelKey(sort))}
           </Button>
         </div>
       </div>
 
       <TxFilterBar
-        search={search}
-        onSearchChange={setSearch}
-        visible={filtered.length}
-        total={totalEvents}
+        search={searchInput}
+        onSearchChange={setSearchInput}
+        stores={stores ?? []}
+        onStoresChange={setStores}
+        currencies={currencies ?? []}
+        onCurrenciesChange={setCurrencies}
+        amountMin={amountMin}
+        onAmountMinChange={setAmountMin}
+        visible={transactions.length}
+        total={transactions.length + (canNext ? 1 : 0)}
+        onClearAll={clearAll}
       />
 
       <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <TransactionsTable
-          transactions={filtered}
-          selectedIds={selectedIds}
-          activeId={selected?.id ?? null}
-          total={totalEvents}
-          onToggleSelect={toggleOne}
-          onToggleSelectAll={toggleAll}
-          onOpen={setSelectedId}
-        />
+        <div className="min-w-0">
+          {transactions.length === 0 && !list.isLoading ? (
+            <div className="rounded-lg border border-rv-divider bg-rv-c1 px-6 py-12 text-center text-[13px] text-rv-mute-500">
+              {t("transactions.empty")}
+            </div>
+          ) : (
+            <TransactionsTable
+              transactions={transactions}
+              selectedIds={selectedIds}
+              activeId={selected?.id ?? null}
+              page={pageIndex + 1}
+              canPrev={canPrev}
+              canNext={canNext}
+              onPrev={onPrev}
+              onNext={onNext}
+              isLoading={list.isFetching}
+              onToggleSelect={toggleOne}
+              onToggleSelectAll={toggleAll}
+              onOpen={setSelectedId}
+            />
+          )}
+        </div>
         {selected ? <TransactionInspector tx={selected} /> : null}
       </div>
-
-      {list.hasNextPage ? (
-        <div className="mt-3 flex justify-center">
-          <Button
-            variant="flat"
-            size="sm"
-            disabled={list.isFetchingNextPage}
-            onClick={() => void list.fetchNextPage()}
-          >
-            {list.isFetchingNextPage
-              ? t("common.loading")
-              : t("common.loadMore")}
-          </Button>
-        </div>
-      ) : null}
     </>
   );
 }

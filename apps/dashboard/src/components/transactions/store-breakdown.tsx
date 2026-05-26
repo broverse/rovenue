@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { STORE_BREAKDOWN } from "./mock-data";
 import { StoreAvatar } from "./store-badge";
 import type { TxStore } from "./types";
 
@@ -29,15 +28,23 @@ type StoreBreakdownProps = {
 /**
  * Per-store revenue strip that lives below the volume graph in the
  * Revenue Flow card. Renders a 4-column row at desktop widths, collapsing
- * to two columns under 1180px.
+ * to two columns under 1180px. Renders an empty / "awaiting data" state
+ * when no rows are available rather than falling back to fixtures.
  */
 export function StoreBreakdown({ rows }: StoreBreakdownProps = {}) {
   const { t } = useTranslation();
-  const data: ReadonlyArray<StoreBreakdownRow> =
-    rows && rows.length > 0 ? rows : STORE_BREAKDOWN;
+
+  if (!rows || rows.length === 0) {
+    return (
+      <div className="mt-4 flex items-center justify-center rounded-md border border-dashed border-rv-divider bg-rv-c2 px-4 py-6 text-[12px] text-rv-mute-500">
+        {t("transactions.flow.awaitingStores")}
+      </div>
+    );
+  }
+
   return (
     <div className="mt-4 grid grid-cols-2 gap-3 border-t border-rv-divider pt-4 max-[1180px]:grid-cols-2 lg:grid-cols-4">
-      {data.map((row) => {
+      {rows.map((row) => {
         const feeLine =
           row.fee && row.feePercent
             ? t("transactions.stores.feeShort", { value: row.fee, percent: row.feePercent })

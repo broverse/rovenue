@@ -1,6 +1,5 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/cn";
-import { SCOPE_TOTAL_COUNTS } from "./mock-data";
 import type { TxScope } from "./types";
 
 const SCOPES: ReadonlyArray<TxScope> = ["all", "purchase", "renewal", "refund", "trial", "failed"];
@@ -8,6 +7,8 @@ const SCOPES: ReadonlyArray<TxScope> = ["all", "purchase", "renewal", "refund", 
 type Props = {
   value: TxScope;
   onChange: (next: TxScope) => void;
+  /** Optional per-scope counts; omitted scopes render an em dash. */
+  counts?: Partial<Record<TxScope, number>>;
 };
 
 /**
@@ -15,7 +16,7 @@ type Props = {
  * as the subscribers page but with transaction-shaped labels and counts.
  * Counts are display-only constants pulled from `mock-data`.
  */
-export function ScopeTabs({ value, onChange }: Props) {
+export function ScopeTabs({ value, onChange, counts }: Props) {
   const { t } = useTranslation();
   return (
     <div
@@ -40,14 +41,16 @@ export function ScopeTabs({ value, onChange }: Props) {
             )}
           >
             {t(`transactions.scope.${scope}`)}
-            <span
-              className={cn(
-                "rounded-[3px] px-1 py-px font-rv-mono text-[10px] tabular-nums",
-                active ? "bg-rv-c2 text-rv-mute-700" : "bg-rv-c3 text-rv-mute-500",
-              )}
-            >
-              {SCOPE_TOTAL_COUNTS[scope]}
-            </span>
+            {counts && typeof counts[scope] === "number" ? (
+              <span
+                className={cn(
+                  "rounded-[3px] px-1 py-px font-rv-mono text-[10px] tabular-nums",
+                  active ? "bg-rv-c2 text-rv-mute-700" : "bg-rv-c3 text-rv-mute-500",
+                )}
+              >
+                {(counts[scope] as number).toLocaleString()}
+              </span>
+            ) : null}
           </button>
         );
       })}
