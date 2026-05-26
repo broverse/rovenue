@@ -51,3 +51,4 @@ export * as cohortRepo from "./repositories/cohorts";
 export * as savedQueryRepo from "./repositories/saved-queries";
 export * as fxRateRepo from "./repositories/fx-rates";
 export * as scheduledActionsRepo from "./repositories/scheduled-actions";
+export * as invitationRepo from "./repositories/invitations";

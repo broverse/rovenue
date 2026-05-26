@@ -36,6 +36,7 @@ import {
   getScheduledActionsQueue,
   getScheduledActionsWorker,
 } from "./workers/scheduled-actions";
+import { createEmailWorker } from "./workers/email";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -103,6 +104,9 @@ ensureScheduledActionsRepeatable().catch((err: unknown) => {
     err: err instanceof Error ? err.message : String(err),
   });
 });
+
+// Outgoing transactional email (invitations today; reusable for more flows).
+createEmailWorker();
 
 // Shutdown handler — signals the outbox dispatcher loop to exit
 // so the Kafka producer disconnects cleanly before the process
