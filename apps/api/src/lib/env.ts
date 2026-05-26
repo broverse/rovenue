@@ -58,6 +58,16 @@ const envSchema = z
     // the worker logs and skips the fetch; convertToUsd then falls
     // through to Redis cache → Postgres fx_rates → static table.
     OPEN_EXCHANGE_RATES_APP_ID: z.string().min(1).optional(),
+    // ---- Amazon SES (optional; enables transactional emails) ----
+    // Credentials come from the default AWS SDK provider chain
+    // (env vars, EC2/ECS/Fargate IAM role, ~/.aws/credentials).
+    AWS_SES_REGION: z.string().min(1).default("us-east-1"),
+    AWS_SES_FROM_EMAIL: z.string().email().optional(),
+    AWS_SES_CONFIGURATION_SET: z.string().min(1).optional(),
+    AWS_SES_EVENTS_VERIFY_SIGNATURE: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== "production") return;
