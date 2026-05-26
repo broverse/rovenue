@@ -5,7 +5,7 @@ export type TxType = "purchase" | "renewal" | "refund" | "trial" | "chargeback" 
 export type TxStatus = "paid" | "failed" | "disputed" | "disputing" | "refunded";
 
 /** Source store the transaction was recorded against. */
-export type TxStore = "ios" | "play" | "stripe" | "web";
+export type TxStore = "ios" | "play" | "stripe" | "web" | "manual";
 
 /**
  * Scope tabs at the top of the table. `refund` covers both refunds and

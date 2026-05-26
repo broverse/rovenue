@@ -191,6 +191,7 @@ const STORE_FILTER_MAP: Record<TransactionStoreFilter, ReadonlyArray<string>> = 
   play: ["PLAY_STORE", "GOOGLE", "PLAY"],
   stripe: ["STRIPE"],
   web: ["WEB", "DIRECT"],
+  manual: ["MANUAL"],
 };
 
 function expandStoreFilters(
@@ -675,6 +676,8 @@ const STORE_FEE_RATE: Record<string, number> = {
   STRIPE: 0.029,
   WEB: 0,
   DIRECT: 0,
+  // Manual subscriptions are self-billed — no store fee applies.
+  MANUAL: 0,
 };
 
 function feeRateFor(store: string): number {

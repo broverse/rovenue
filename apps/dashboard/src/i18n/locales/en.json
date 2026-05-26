@@ -986,6 +986,7 @@
       "play": "Google Play",
       "stripe": "Stripe",
       "web": "Web / direct",
+      "manual": "Manual",
       "feeShort": "fees {{value}} · {{percent}}",
       "selfBilled": "fees $0 · self-billed"
     },
@@ -1182,6 +1183,10 @@
       "web": {
         "label": "Web",
         "full": "Web"
+      },
+      "manual": {
+        "label": "Manual",
+        "full": "Manual"
       }
     },
     "table": {
@@ -1357,7 +1362,12 @@
     "actions": {
       "runbook": "Runbook",
       "newExperiment": "New experiment",
+      "edit": "Edit",
       "duplicate": "Duplicate",
+      "delete": "Delete",
+      "deleteConfirm": "Delete experiment \"{{name}}\"? This can only be done while the experiment is still a draft, and cannot be undone.",
+      "deleteFailed": "Could not delete experiment. It may already be running or completed.",
+      "duplicateFailed": "Could not duplicate experiment. Please try again.",
       "stop": "Stop",
       "shipWinner": "Ship winner",
       "rerun": "Re-run",
@@ -1491,6 +1501,14 @@
         "invalid": "invalid JSON",
         "format": "Format"
       }
+    },
+    "edit": {
+      "title": "Edit experiment",
+      "subtitle": "Tweak targeting, variants and traffic weights. Editable while the experiment is still a draft.",
+      "submit": "Save changes",
+      "submitting": "Saving…",
+      "backToList": "Back to experiments",
+      "notFound": "Experiment not found, or you don't have access to it."
     },
     "list": {
       "scopeAriaLabel": "Experiment scope",

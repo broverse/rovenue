@@ -5,7 +5,7 @@ export type SubscriptionStatus =
   | "canceling"
   | "churned";
 
-export type SubscriptionStore = "ios" | "play" | "stripe" | "web";
+export type SubscriptionStore = "ios" | "play" | "stripe" | "web" | "manual";
 
 export type SubscriptionScope =
   | "all"

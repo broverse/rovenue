@@ -23,6 +23,7 @@ export const storeAvatarVariants = cva(
         play: "bg-gradient-to-br from-emerald-500 to-blue-500 text-white",
         stripe: "bg-[#635BFF] text-white",
         web: "border border-rv-divider bg-rv-c3 text-rv-mute-700",
+        manual: "border border-rv-divider bg-rv-c3 text-rv-mute-700",
       },
     },
     defaultVariants: { size: "sm", store: "ios" },
@@ -39,6 +40,7 @@ const GLYPH: Record<TxStore, string> = {
   play: "▶",
   stripe: "S",
   web: "W",
+  manual: "M",
 };
 
 /** Square brand chip — used as a stand-alone visual mark. */
@@ -62,7 +64,9 @@ export function StoreInlineBadge({ store }: { store: TxStore }) {
           ? "Play"
           : store === "stripe"
             ? "Stripe"
-            : "Web"}
+            : store === "manual"
+              ? "Manual"
+              : "Web"}
     </span>
   );
 }

@@ -1,4 +1,4 @@
-import { Apple, CreditCard, Globe, Play } from "lucide-react";
+import { Apple, CreditCard, Globe, PenLine, Play } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/cn";
 import type { SubscriptionStore } from "./types";
@@ -18,6 +18,7 @@ const STORE_LOGO: Record<SubscriptionStore, { className: string; icon: React.Com
     icon: CreditCard,
   },
   web: { className: "bg-rv-c3 text-rv-mute-700", icon: Globe },
+  manual: { className: "bg-rv-c3 text-rv-mute-700", icon: PenLine },
 };
 
 type Props = {

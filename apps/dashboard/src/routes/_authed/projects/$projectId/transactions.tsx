@@ -181,6 +181,7 @@ const STORE_MAP: Record<string, TxStore> = {
   PLAY: "play",
   STRIPE: "stripe",
   WEB: "web",
+  MANUAL: "manual",
 };
 
 function mapStore(raw: string): TxStore {
@@ -193,6 +194,7 @@ const STORE_METHOD: Record<TxStore, string> = {
   play: "Google Play",
   stripe: "Stripe",
   web: "Web",
+  manual: "Manual",
 };
 
 const RELATIVE_FORMAT = new Intl.RelativeTimeFormat("en", { numeric: "auto" });

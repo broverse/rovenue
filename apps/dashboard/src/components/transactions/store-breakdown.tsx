@@ -7,6 +7,7 @@ const STORE_NAME_KEY: Record<TxStore, string> = {
   play: "transactions.stores.play",
   stripe: "transactions.stores.stripe",
   web: "transactions.stores.web",
+  manual: "transactions.stores.manual",
 };
 
 export type StoreBreakdownRow = {

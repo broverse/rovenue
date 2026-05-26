@@ -222,7 +222,7 @@ export interface SubscriberPurchase {
   id: string;
   productId: string;
   productIdentifier: string;
-  store: "APP_STORE" | "PLAY_STORE" | "STRIPE";
+  store: "APP_STORE" | "PLAY_STORE" | "STRIPE" | "MANUAL";
   status: string;
   priceAmount: string | null;
   priceCurrency: string | null;
@@ -235,7 +235,7 @@ export interface SubscriberAccessRow {
   entitlementKey: string;
   isActive: boolean;
   expiresDate: string | null;
-  store: "APP_STORE" | "PLAY_STORE" | "STRIPE";
+  store: "APP_STORE" | "PLAY_STORE" | "STRIPE" | "MANUAL";
   purchaseId: string;
 }
 
@@ -357,6 +357,14 @@ export interface ExperimentLifecycleResponse {
 export interface StopExperimentRequest {
   winnerVariantId?: string;
   promoteToFlag?: boolean;
+}
+
+export interface DeleteExperimentResponse {
+  id: string;
+}
+
+export interface DuplicateExperimentResponse {
+  experiment: ExperimentListItem;
 }
 
 // =============================================================
@@ -585,7 +593,7 @@ export type TransactionScope =
   | "failed";
 
 /** UI store buckets — mapped server-side to the raw `store` column. */
-export type TransactionStoreFilter = "ios" | "play" | "stripe" | "web";
+export type TransactionStoreFilter = "ios" | "play" | "stripe" | "web" | "manual";
 
 /** Sort key accepted by the transactions list endpoint. */
 export type TransactionsListSort =

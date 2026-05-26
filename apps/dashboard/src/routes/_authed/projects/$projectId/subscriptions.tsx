@@ -85,6 +85,7 @@ const STORE_MAP: Record<string, SubscriptionStore> = {
   PLAY: "play",
   STRIPE: "stripe",
   WEB: "web",
+  MANUAL: "manual",
 };
 
 function mapStore(raw: string): SubscriptionStore {
