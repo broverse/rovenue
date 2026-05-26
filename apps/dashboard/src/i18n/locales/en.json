@@ -33,7 +33,8 @@
     "themeAria": "Theme: {{label}} (click to change)",
     "edit": "Edit",
     "close": "Close",
-    "optional": "optional"
+    "optional": "optional",
+    "retry": "Retry"
   },
   "themes": {
     "light": "Light",
@@ -1925,6 +1926,7 @@
       "avgRetentionDelta": "▲ +{{value}}pp vs prior 12w",
       "bestCohort": "BEST COHORT · W4",
       "bestCohortValue": "{{value}}% · {{users}} users",
+      "bestCohortPending": "Awaiting aggregate endpoint",
       "blendedLtv": "BLENDED 90-DAY LTV",
       "blendedLtvDelta": "▲ +${{value}} vs prior period"
     },
@@ -1943,7 +1945,8 @@
         "Acquisition": "Acquisition"
       },
       "sizeLabel": "{{size}} · ",
-      "tooltipChange": "{{value}} this week"
+      "tooltipChange": "{{value}} this week",
+      "filterEmpty": "No cohorts match this filter."
     },
     "hero": {
       "groupCohort": "{{group}} cohort",
@@ -1958,7 +1961,10 @@
       "ltv90Delta": "▲ +$3.40",
       "monthlyChurn": "Monthly churn",
       "monthlyChurnValue": "2.8%",
-      "monthlyChurnDelta": "▼ -0.4pp"
+      "monthlyChurnDelta": "▼ -0.4pp",
+      "emptyState": "Create your first cohort to see retention",
+      "retentionFailed": "Couldn't load retention",
+      "defaultGroup": "Cohort"
     },
     "builder": {
       "heading": "Cohort definition",
@@ -1988,7 +1994,15 @@
       "metricRevenue": "Revenue ret.",
       "metricCount": "Active #",
       "hover": "<0>{{cohort}}</0> · W{{week}} · {{value}} ({{active}} of {{size}})",
-      "hoverActive": "{{count}} active"
+      "hoverActive": "{{count}} active",
+      "activation": "W0",
+      "loading": "Loading retention…"
+    },
+    "list": {
+      "allHeading": "All cohorts",
+      "empty": "No cohorts yet",
+      "emptyCta": "Group your subscribers by behaviour or acquisition channel.",
+      "loadFailed": "Couldn't load cohorts."
     },
     "ltv": {
       "title": "Cumulative LTV by cohort",

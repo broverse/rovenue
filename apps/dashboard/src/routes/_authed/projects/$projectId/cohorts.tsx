@@ -1,29 +1,44 @@
-import { useMemo, useState } from "react";
-import { createFileRoute, useParams } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import {
+  createFileRoute,
+  useNavigate,
+  useParams,
+  useSearch,
+} from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { BookOpen, Download, Plus } from "lucide-react";
 import { Button } from "../../../../ui/button";
 import { StatCard } from "../../../../ui/stat-card";
 import { useProject } from "../../../../lib/hooks/useProject";
 import {
-  CohortBuilder,
+  useCohortRetention,
+  useProjectCohorts,
+} from "../../../../lib/hooks/useProjectCohorts";
+import {
+  CohortDefinitionCard,
   CohortHero,
   CountryBreakdown,
   KPI_VALUES,
   LtvCurves,
+  MockBadge,
   RetentionHeatmap,
-  SAMPLE_MEMBERS,
-  SAVED_COHORTS,
   SavedCohortsRail,
   SyncDestinations,
+  w4Pct,
   type RetentionMetric,
-  type SavedCohort,
 } from "../../../../components/cohorts";
+
+interface CohortsSearch {
+  selected?: string;
+}
 
 export const Route = createFileRoute(
   "/_authed/projects/$projectId/cohorts",
 )({
   component: CohortsRouteComponent,
+  validateSearch: (raw: Record<string, unknown>): CohortsSearch => ({
+    selected: typeof raw["selected"] === "string" ? raw["selected"] : undefined,
+  }),
 });
 
 function CohortsRouteComponent() {
@@ -32,18 +47,76 @@ function CohortsRouteComponent() {
   });
   const { data: project } = useProject(projectId);
   if (!project) return null;
-  return <CohortsPage />;
+  return <CohortsPage projectId={projectId} />;
 }
 
-function CohortsPage() {
+function CohortsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
-  const [selectedId, setSelectedId] = useState<string>(SAVED_COHORTS[0].id);
+  const navigate = useNavigate();
+  const search = useSearch({
+    from: "/_authed/projects/$projectId/cohorts",
+  });
+
+  const list = useProjectCohorts(projectId);
+  const cohorts = list.data?.cohorts ?? [];
+
+  const selectedId = useMemo(() => {
+    if (search.selected && cohorts.some((c) => c.id === search.selected)) {
+      return search.selected;
+    }
+    return cohorts[0]?.id ?? null;
+  }, [search.selected, cohorts]);
+
+  // Reconcile the URL if the selected id is missing or invalid.
+  useEffect(() => {
+    if (
+      search.selected &&
+      cohorts.length > 0 &&
+      !cohorts.some((c) => c.id === search.selected)
+    ) {
+      navigate({
+        to: "/projects/$projectId/cohorts",
+        params: { projectId },
+        search: selectedId ? { selected: selectedId } : {},
+        replace: true,
+      });
+    }
+  }, [search.selected, cohorts, selectedId, navigate, projectId]);
+
+  const selected = cohorts.find((c) => c.id === selectedId) ?? null;
+
+  const retention = useCohortRetention({
+    projectId,
+    id: selectedId ?? "",
+    granularity: "week",
+    periods: 13,
+  });
+
   const [metric, setMetric] = useState<RetentionMetric>("retention");
 
-  const selected: SavedCohort = useMemo(
-    () => SAVED_COHORTS.find((c) => c.id === selectedId) ?? SAVED_COHORTS[0],
-    [selectedId],
-  );
+  const onSelect = (id: string) =>
+    navigate({
+      to: "/projects/$projectId/cohorts",
+      params: { projectId },
+      search: { selected: id },
+      replace: true,
+    });
+
+  const goNew = () =>
+    navigate({
+      to: "/projects/$projectId/cohorts/new",
+      params: { projectId },
+    });
+
+  const retentionPoints = retention.data?.points ?? [];
+  const retentionSize = retention.data?.size ?? null;
+  const retentionW4 = retention.data ? w4Pct(retention.data.points) : null;
+  const retentionError = retention.error
+    ? t("cohorts.hero.retentionFailed")
+    : null;
+  const refreshedLabel = retention.dataUpdatedAt
+    ? new Date(retention.dataUpdatedAt).toLocaleTimeString()
+    : "—";
 
   return (
     <>
@@ -65,7 +138,7 @@ function CohortsPage() {
             <Download size={13} />
             {t("cohorts.actions.exportCsv")}
           </Button>
-          <Button variant="solid-primary" size="sm">
+          <Button variant="solid-primary" size="sm" onClick={goNew}>
             <Plus size={13} />
             {t("cohorts.actions.newCohort")}
           </Button>
@@ -75,14 +148,19 @@ function CohortsPage() {
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
           label={t("cohorts.kpi.saved")}
-          value={SAVED_COHORTS.length}
+          value={cohorts.length}
           description={t("cohorts.kpi.savedBreakdown", {
             groups: KPI_VALUES.groupCount,
             synced: KPI_VALUES.syncedCount,
           })}
         />
         <StatCard
-          label={t("cohorts.kpi.avgRetention")}
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              {t("cohorts.kpi.avgRetention")}
+              <MockBadge />
+            </span>
+          }
           value="40.1%"
           description={t("cohorts.kpi.avgRetentionDelta", {
             value: KPI_VALUES.avgRetentionDelta,
@@ -90,15 +168,22 @@ function CohortsPage() {
           descriptionTone="success"
         />
         <StatCard
-          label={t("cohorts.kpi.bestCohort")}
-          value={KPI_VALUES.bestCohortName}
-          description={t("cohorts.kpi.bestCohortValue", {
-            value: KPI_VALUES.bestCohortValue,
-            users: KPI_VALUES.bestCohortUsers,
-          })}
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              {t("cohorts.kpi.bestCohort")}
+              <MockBadge />
+            </span>
+          }
+          value="—"
+          description={t("cohorts.kpi.bestCohortPending")}
         />
         <StatCard
-          label={t("cohorts.kpi.blendedLtv")}
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              {t("cohorts.kpi.blendedLtv")}
+              <MockBadge />
+            </span>
+          }
           value={KPI_VALUES.blendedLtv}
           description={t("cohorts.kpi.blendedLtvDelta", {
             value: KPI_VALUES.blendedLtvDelta,
@@ -109,28 +194,101 @@ function CohortsPage() {
 
       <div className="grid items-start gap-4 max-[1280px]:grid-cols-1 grid-cols-[260px_minmax(0,1fr)]">
         <SavedCohortsRail
-          cohorts={SAVED_COHORTS}
-          selectedId={selected.id}
-          onSelect={setSelectedId}
+          cohorts={cohorts}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onNew={goNew}
         />
 
         <div className="flex flex-col gap-4">
-          <CohortHero cohort={selected} members={SAMPLE_MEMBERS} />
-          <CohortBuilder matchCount={selected.size} />
-          <RetentionHeatmap
-            cohortName={selected.name}
-            metric={metric}
-            onMetricChange={setMetric}
-          />
+          {list.isLoading && cohorts.length === 0 ? (
+            <div className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-10 text-center text-[13px] text-rv-mute-500">
+              {t("common.loading")}
+            </div>
+          ) : list.error ? (
+            <div className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-10 text-center">
+              <p className="text-[13px] text-rv-danger">
+                {t("cohorts.list.loadFailed")}
+              </p>
+              <div className="mt-3 inline-flex">
+                <Button
+                  variant="flat"
+                  size="sm"
+                  onClick={() => list.refetch()}
+                >
+                  {t("common.retry")}
+                </Button>
+              </div>
+            </div>
+          ) : !selected ? (
+            <EmptyState onNew={goNew} />
+          ) : (
+            <>
+              <CohortHero
+                cohort={selected}
+                size={retentionSize}
+                w4Pct={retentionW4}
+              />
+              <CohortDefinitionCard
+                projectId={projectId}
+                cohort={selected}
+                matchCount={retentionSize}
+                refreshedLabel={refreshedLabel}
+              />
+              <RetentionHeatmap
+                cohortName={selected.name}
+                metric={metric}
+                onMetricChange={setMetric}
+                points={retentionPoints}
+                size={retentionSize}
+                loading={retention.isLoading}
+                error={retentionError}
+                onRetry={() => retention.refetch()}
+              />
 
-          <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-            <LtvCurves />
-            <CountryBreakdown />
-          </div>
+              <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+                <div className="relative">
+                  <div className="absolute right-3 top-3 z-10">
+                    <MockBadge />
+                  </div>
+                  <LtvCurves />
+                </div>
+                <div className="relative">
+                  <div className="absolute right-3 top-3 z-10">
+                    <MockBadge />
+                  </div>
+                  <CountryBreakdown />
+                </div>
+              </div>
 
-          <SyncDestinations />
+              <div className="relative">
+                <div className="absolute right-3 top-3 z-10">
+                  <MockBadge />
+                </div>
+                <SyncDestinations />
+              </div>
+            </>
+          )}
         </div>
       </div>
     </>
+  );
+}
+
+function EmptyState({ onNew }: { onNew: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-12 text-center">
+      <h3 className="text-[15px] font-semibold">{t("cohorts.hero.emptyState")}</h3>
+      <p className="mt-1 text-[12px] text-rv-mute-500">
+        {t("cohorts.list.emptyCta")}
+      </p>
+      <div className="mt-4 inline-flex">
+        <Button variant="solid-primary" size="sm" onClick={onNew}>
+          <Plus size={13} />
+          {t("cohorts.actions.newCohort")}
+        </Button>
+      </div>
+    </div>
   );
 }
