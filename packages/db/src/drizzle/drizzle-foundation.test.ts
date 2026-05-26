@@ -439,3 +439,125 @@ describe("billing enums", () => {
     ]);
   });
 });
+
+import {
+  billingSubscriptions,
+  billingPaymentMethods,
+  billingInvoices,
+  billingDunningState,
+  billingTierLimits,
+  usageSnapshots,
+} from "./schema";
+
+describe("billing tables", () => {
+  it("billing_subscriptions has the columns the spec defines", () => {
+    const cols = Object.keys(billingSubscriptions);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "id",
+        "projectId",
+        "stripeCustomerId",
+        "stripeSubscriptionId",
+        "state",
+        "tier",
+        "cycle",
+        "currentPeriodStart",
+        "currentPeriodEnd",
+        "trialEnd",
+        "pausedAt",
+        "deletedAt",
+        "pendingAction",
+        "createdAt",
+        "updatedAt",
+      ]),
+    );
+  });
+  it("billing_payment_methods has Stripe-PM mirror columns", () => {
+    const cols = Object.keys(billingPaymentMethods);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "id",
+        "projectId",
+        "stripePaymentMethodId",
+        "brand",
+        "last4",
+        "expMonth",
+        "expYear",
+        "isDefault",
+        "createdAt",
+      ]),
+    );
+  });
+  it("billing_invoices has Stripe-invoice mirror columns + refunded", () => {
+    const cols = Object.keys(billingInvoices);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "id",
+        "projectId",
+        "stripeInvoiceId",
+        "number",
+        "periodStart",
+        "periodEnd",
+        "amountDue",
+        "amountPaid",
+        "refundedAmount",
+        "currency",
+        "status",
+        "hostedInvoiceUrl",
+        "pdfUrl",
+        "attemptCount",
+        "nextPaymentAttempt",
+        "createdAt",
+      ]),
+    );
+  });
+  it("billing_dunning_state has the FSM columns", () => {
+    const cols = Object.keys(billingDunningState);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "projectId",
+        "firstFailureAt",
+        "attemptCount",
+        "currentPhase",
+        "uiLockedAt",
+        "sdkLockedAt",
+        "recoveredAt",
+        "lastEmailSentAt",
+        "updatedAt",
+      ]),
+    );
+  });
+  it("billing_tier_limits has reference data columns", () => {
+    const cols = Object.keys(billingTierLimits);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "tier",
+        "cycle",
+        "priceUsdCents",
+        "stripePriceId",
+        "mtrMin",
+        "mtrMax",
+        "eventsLimit",
+        "sqlLimit",
+        "retentionDays",
+        "auditLogDays",
+      ]),
+    );
+  });
+  it("usage_snapshots has the PG rollup columns", () => {
+    const cols = Object.keys(usageSnapshots);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "projectId",
+        "meterKey",
+        "periodStart",
+        "periodEnd",
+        "currentValue",
+        "limitValue",
+        "softCapWarnedAt",
+        "hardCapWarnedAt",
+        "updatedAt",
+      ]),
+    );
+  });
+});
