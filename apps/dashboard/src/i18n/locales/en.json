@@ -2073,6 +2073,10 @@
         "nameRequired": "Name is required.",
         "nameInUse": "A cohort with this name already exists."
       }
+    },
+    "new": {
+      "title": "New cohort",
+      "subtitle": "Group subscribers by behaviour or acquisition channel."
     }
   },
   "credits": {
