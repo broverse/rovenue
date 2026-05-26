@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { ArrowDown, ArrowUp, MoreHorizontal, RotateCw, TriangleAlert } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, MoreHorizontal, RotateCw, TriangleAlert } from "lucide-react";
 import { Card, CardFooter, CardHeader } from "../../ui/card";
 import { Button } from "../../ui/button";
 
@@ -75,6 +75,17 @@ export function RecentActivityPanel({ events, live }: Props) {
         }
       />
       <div className="flex-1 overflow-hidden px-5 pb-1 pt-1">
+        {events.length === 0 && (
+          <div className="flex h-full flex-col items-center justify-center py-10 text-center">
+            <div className="mb-3 flex size-9 items-center justify-center rounded-lg border border-rv-divider bg-rv-c2 text-rv-mute-500">
+              <Activity size={16} />
+            </div>
+            <h3 className="mb-1 text-[13px] font-semibold">{t("panels.activity.empty.title")}</h3>
+            <p className="max-w-[260px] text-[12px] text-rv-mute-500">
+              {t("panels.activity.empty.body")}
+            </p>
+          </div>
+        )}
         {events.slice(0, 6).map((e, i) => (
           <div
             key={e.id}

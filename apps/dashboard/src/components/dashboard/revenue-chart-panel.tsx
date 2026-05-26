@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Menu } from "@base-ui-components/react/menu";
-import { Check, ChevronDown } from "lucide-react";
+import { BarChart3, Check, ChevronDown } from "lucide-react";
 import { buttonVariants } from "../../ui/button";
 import { Card, CardHeader } from "../../ui/card";
 import { cn } from "../../lib/cn";
@@ -13,6 +13,11 @@ type Props = {
   categories: string[];
   initialMetric?: string;
 };
+
+function isEmpty(series: ReadonlyArray<ChartSeries>): boolean {
+  if (series.length === 0) return true;
+  return series.every((s) => s.data.length === 0 || s.data.every((v) => v === 0));
+}
 
 /**
  * Stacked-area revenue chart with a Base UI menu metric switcher. Subtitle
@@ -59,16 +64,30 @@ export function RevenueChartPanel({ metrics, categories, initialMetric }: Props)
         }
       />
       <div className="flex-1 px-5 pb-5 pt-4">
-        <StackedAreaChart series={series} categories={categories} />
-        <div className="mt-2 flex flex-wrap gap-4">
-          {series.map((s) => (
-            <span key={s.key} className="inline-flex items-center gap-1.5 text-[12px] text-rv-mute-600">
-              <span className="size-2 rounded-sm" style={{ background: s.color }} />
-              {s.label}
-              {s.negative && ` ${t("panels.revenue.neg")}`}
-            </span>
-          ))}
-        </div>
+        {isEmpty(series) ? (
+          <div className="flex h-full min-h-[260px] flex-col items-center justify-center py-10 text-center">
+            <div className="mb-3 flex size-10 items-center justify-center rounded-lg border border-rv-divider bg-rv-c2 text-rv-mute-500">
+              <BarChart3 size={18} />
+            </div>
+            <h3 className="mb-1 text-[13px] font-semibold">{t("panels.revenue.empty.title")}</h3>
+            <p className="max-w-[280px] text-[12px] text-rv-mute-500">
+              {t("panels.revenue.empty.body")}
+            </p>
+          </div>
+        ) : (
+          <>
+            <StackedAreaChart series={series} categories={categories} />
+            <div className="mt-2 flex flex-wrap gap-4">
+              {series.map((s) => (
+                <span key={s.key} className="inline-flex items-center gap-1.5 text-[12px] text-rv-mute-600">
+                  <span className="size-2 rounded-sm" style={{ background: s.color }} />
+                  {s.label}
+                  {s.negative && ` ${t("panels.revenue.neg")}`}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </Card>
   );

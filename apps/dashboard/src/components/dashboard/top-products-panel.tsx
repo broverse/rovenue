@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { PackageOpen } from "lucide-react";
 import { Card, CardHeader } from "../../ui/card";
 import { Button } from "../../ui/button";
 
@@ -29,6 +30,17 @@ export function TopProductsPanel({ products }: Props) {
         }
       />
       <div className="flex-1 px-5 pb-4 pt-1">
+        {products.length === 0 && (
+          <div className="flex h-full flex-col items-center justify-center py-10 text-center">
+            <div className="mb-3 flex size-9 items-center justify-center rounded-lg border border-rv-divider bg-rv-c2 text-rv-mute-500">
+              <PackageOpen size={16} />
+            </div>
+            <h3 className="mb-1 text-[13px] font-semibold">{t("panels.topProducts.empty.title")}</h3>
+            <p className="max-w-[260px] text-[12px] text-rv-mute-500">
+              {t("panels.topProducts.empty.body")}
+            </p>
+          </div>
+        )}
         {products.map((p) => (
           <div
             key={p.sku}

@@ -209,7 +209,6 @@
   },
   "sidebar": {
     "primaryAria": "Primary",
-    "search": "Search",
     "sections": {
       "overview": "OVERVIEW",
       "catalog": "CATALOG",
@@ -238,14 +237,12 @@
       "leaderboards": "Leaderboards",
       "apps": "Apps & integrations",
       "settings": "Settings"
-    },
-    "footer": {
-      "docs": "Docs",
-      "github": "GitHub",
-      "selfHost": "self-host"
     }
   },
   "topbar": {
+    "search": "Search",
+    "docs": "Docs",
+    "github": "GitHub",
     "ranges": {
       "today": "Today",
       "last7": "Last 7 days",
@@ -413,16 +410,12 @@
     },
     "settings": {
       "general": "General",
-      "webhookSecretHeader": "Webhook secret",
-      "webhookSecretConfigured": "A webhook signing secret is currently configured. Rotating generates a new one and invalidates the old value immediately.",
-      "webhookSecretMissing": "No webhook secret is set. Rotate to generate one.",
+      "basicsHeader": "Project basics",
+      "basicsDescription": "Name shown in dashboards, exports, and webhook payloads.",
+      "reportingHeader": "Currency & timezone",
+      "reportingDescription": "How revenue is normalized and how time-bucketed metrics roll up. Historical reports will be re-aggregated when these change.",
       "dangerZone": "Danger zone",
       "dangerZoneDescription": "Deleting a project is permanent and cannot be undone."
-    },
-    "settingsForm": {
-      "webhookUrl": "Webhook URL",
-      "webhookUrlPlaceholder": "https://example.com/hooks/rovenue",
-      "webhookUrlDescription": "Outgoing webhooks post here. Leave blank to disable delivery."
     },
     "delete": {
       "trigger": "Delete project",
@@ -431,15 +424,6 @@
       "confirmLabel": "Type the project name to confirm",
       "confirmDescription": "Enter <0>{{name}}</0> exactly.",
       "confirm": "Delete project"
-    },
-    "rotateSecret": {
-      "trigger": "Rotate webhook secret",
-      "header": "Rotate webhook secret?",
-      "body": "This invalidates the current secret immediately. Any webhook delivery signed with the old secret will fail verification until you update the receiving endpoint.",
-      "confirm": "Rotate secret",
-      "copyHeader": "Copy the new secret",
-      "copyBody": "This is the only time we'll show the secret. Store it in your deployment secrets before closing this dialog.",
-      "copied": "I've copied it"
     }
   },
   "settings": {

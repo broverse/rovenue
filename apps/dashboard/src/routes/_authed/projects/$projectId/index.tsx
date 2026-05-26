@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { Trans, useTranslation } from "react-i18next";
+import { RefreshCw } from "lucide-react";
 import { useProject } from "../../../../lib/hooks/useProject";
 import { useProjectMrr } from "../../../../lib/hooks/useProjectMrr";
 import { useProjectOverview } from "../../../../lib/hooks/useProjectOverview";
+import { useExperiments } from "../../../../lib/hooks/useExperiments";
 import {
   ExperimentsPanel,
   KpiCard,
@@ -12,30 +14,21 @@ import {
   SystemHealthPanel,
   TopProductsPanel,
 } from "../../../../components/dashboard";
-import { RefreshCw } from "lucide-react";
-import { Button } from "../../../../ui";
-import {
-  activeSeries,
-  categories,
-  churnSeries,
-  experiments,
-  genActivity,
-  healthServices,
-  mrrSeries,
-  revenueMetrics,
-  topProducts,
-  trialSeries,
-} from "../../../../components/dashboard/mock-data";
 import type {
   ActivityEvent,
   ActivityKind,
+  Experiment,
   HealthService,
   TopProduct,
 } from "../../../../components/dashboard";
+import type { ChartSeries } from "../../../../components/dashboard";
+import { Button } from "../../../../ui";
 import type {
+  ExperimentListItem,
   OverviewActivityEvent,
   OverviewSystemHealth,
   OverviewTopProduct,
+  ProjectOverviewResponse,
   RevenueEventTypeName,
 } from "@rovenue/shared";
 
@@ -44,19 +37,17 @@ const USD = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
+const NULL_DASH = "—";
+
 /** Latest day's grossUsd, formatted as "12,847.20". */
 function formatLatestMrr(points: ReadonlyArray<{ grossUsd: string }>): string {
-  if (points.length === 0) return "0.00";
+  if (points.length === 0) return NULL_DASH;
   const last = Number(points[points.length - 1]!.grossUsd);
   if (!Number.isFinite(last)) return points[points.length - 1]!.grossUsd;
   return USD.format(last);
 }
 
-/**
- * % change between the first and last grossUsd value in the
- * window. Returns null for sparse windows where a delta would
- * be misleading.
- */
+/** % delta across the visible series. Returns null for sparse windows. */
 function mrrDelta(
   points: ReadonlyArray<{ grossUsd: string }>,
 ): { value: string; kind: "success" | "danger" } | null {
@@ -91,10 +82,7 @@ function formatAbsDelta(value: number): { value: string; kind: "success" | "dang
   };
 }
 
-/**
- * Net-churn is inverted for KPI presentation: lower is better, so
- * a positive Δpp renders as danger and negative as success.
- */
+/** Net-churn is inverted: lower is better, so a positive Δpp renders as danger. */
 function formatChurnDeltaPp(
   value: number | null,
 ): { value: string; kind: "success" | "danger" } | null {
@@ -124,9 +112,6 @@ const ACTIVITY_VISUAL: Record<
 };
 
 function shortSubscriberId(id: string): string {
-  // The panel renders short identifiers; trim long uuids/cuids to
-  // an 8-char display. Avoids a layout shift between mock + real
-  // events.
   if (id.length <= 12) return id;
   return `${id.slice(0, 4)}…${id.slice(-4)}`;
 }
@@ -184,21 +169,146 @@ function toPanelSystemHealth(
   }));
 }
 
+// =============================================================
+// Experiments — list-item → panel adapter
+// =============================================================
+//
+// The list endpoint doesn't (yet) carry a Bayesian-confidence or
+// uplift number — those land with the analytics rollup. Until
+// then we pass `confidence: null` and `uplift: null`; the panel
+// hides the progress bar and trims its description text.
+
+const DAY_MS = 86_400_000;
+
+function statusToPanel(s: ExperimentListItem["status"]): Experiment["status"] | null {
+  switch (s) {
+    case "RUNNING":
+    case "PAUSED":
+      return "running";
+    case "COMPLETED":
+      return "completed";
+    case "DRAFT":
+      return null;
+  }
+}
+
+function daysSince(iso: string | null, nowMs: number): number | undefined {
+  if (!iso) return undefined;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return undefined;
+  return Math.max(0, Math.floor((nowMs - t) / DAY_MS));
+}
+
+function toPanelExperiments(
+  rows: ReadonlyArray<ExperimentListItem>,
+  nowMs: number,
+): Experiment[] {
+  const out: Experiment[] = [];
+  for (const row of rows) {
+    const status = statusToPanel(row.status);
+    if (!status) continue;
+    const winnerName = row.winnerVariantId
+      ? (row.variants.find((v) => v.id === row.winnerVariantId)?.name ?? row.winnerVariantId)
+      : undefined;
+    out.push({
+      key: row.key,
+      status,
+      days: daysSince(row.startedAt, nowMs),
+      variants: row.variants.length,
+      confidence: null,
+      uplift: null,
+      winner: winnerName,
+    });
+  }
+  // Most recently active first — running before completed, then by start.
+  return out.sort((a, b) => {
+    if (a.status !== b.status) return a.status === "running" ? -1 : 1;
+    return (b.days ?? 0) - (a.days ?? 0);
+  });
+}
+
+// =============================================================
+// Revenue chart — overview sparks → ChartSeries
+// =============================================================
+//
+// The overview gives us three daily series across the comparison
+// window: gross USD, active subscribers, and net-churn %. We map
+// each to a single-series ChartSeries so the panel's metric
+// switcher can flip between them without a second fetch.
+
+function buildCategories(fromIso: string, days: number): string[] {
+  const start = new Date(fromIso);
+  if (Number.isNaN(start.getTime())) return [];
+  const out: string[] = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start.getTime() + i * DAY_MS);
+    out.push(`${d.toLocaleString("en", { month: "short" })} ${d.getDate()}`);
+  }
+  return out;
+}
+
+function buildRevenueMetrics(
+  overview: ProjectOverviewResponse,
+  t: (k: string) => string,
+): { metrics: Record<string, ChartSeries[]>; categories: string[] } {
+  const categories = buildCategories(overview.window.from, overview.window.days);
+  const gross = overview.kpis.mrr.spark.map((s) => Number(s) || 0);
+  const active = overview.kpis.activeSubscribers.spark.map((n) => Number(n) || 0);
+  const churn = overview.kpis.netChurnPct.spark.map((n) => Number(n) || 0);
+
+  const metrics: Record<string, ChartSeries[]> = {
+    [t("panels.revenue.metrics.mrr")]: [
+      {
+        key: "gross",
+        label: t("panels.revenue.series.gross"),
+        color: "var(--color-rv-accent-500)",
+        data: gross,
+      },
+    ],
+    [t("panels.revenue.metrics.activeSubs")]: [
+      {
+        key: "active",
+        label: t("panels.revenue.series.active"),
+        color: "var(--color-rv-success)",
+        data: active,
+      },
+    ],
+    [t("panels.revenue.metrics.netChurn")]: [
+      {
+        key: "churn",
+        label: t("panels.revenue.series.churn"),
+        color: "var(--color-rv-danger)",
+        data: churn,
+      },
+    ],
+  };
+  return { metrics, categories };
+}
+
 export const Route = createFileRoute("/_authed/projects/$projectId/")({
   component: ProjectOverview,
 });
 
 const LIVE_TICK_MS = 3200;
-const NEW_EVENT_PROB = 0.55;
 
 function ProjectOverview() {
   const { t } = useTranslation();
   const { projectId } = useParams({ from: "/_authed/projects/$projectId/" });
   const { data: project } = useProject(projectId);
   const { data: mrr } = useProjectMrr({ projectId });
-  const { data: overview } = useProjectOverview({ projectId });
-  const [events, setEvents] = useState<ActivityEvent[]>(() => genActivity(10));
+  const { data: overview, refetch: refetchOverview } = useProjectOverview({ projectId });
+  const { data: experiments, refetch: refetchExperiments } = useExperiments({
+    projectId,
+  });
   const [now, setNow] = useState<number>(() => Date.now());
+
+  // Re-render every few seconds so the "Xm ago" labels stay
+  // current without refetching. Refetches are user-initiated via
+  // the Refresh button.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), LIVE_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
 
   // -------- KPI cards --------
 
@@ -221,10 +331,10 @@ function ProjectOverview() {
         };
       }
       return {
-        value: "12,847.20",
-        delta: "12.4%",
+        value: NULL_DASH,
+        delta: null,
         deltaKind: "success" as const,
-        sparkData: mrrSeries,
+        sparkData: [] as number[],
       };
     }
     const delta = mrrDelta(points);
@@ -240,10 +350,10 @@ function ProjectOverview() {
     const k = overview?.kpis.activeSubscribers;
     if (!k) {
       return {
-        value: "2,431",
-        delta: "184",
+        value: NULL_DASH,
+        delta: null,
         deltaKind: "success" as const,
-        sparkData: activeSeries,
+        sparkData: [] as number[],
       };
     }
     const delta = formatAbsDelta(k.deltaAbs);
@@ -261,11 +371,11 @@ function ProjectOverview() {
       // Backend returns null until Phase 3.3 ships the
       // subscription-lifecycle rollup that this metric needs.
       return {
-        value: "42.8",
-        unit: "%",
-        delta: "1.1pp",
-        deltaKind: "danger" as const,
-        sparkData: trialSeries,
+        value: NULL_DASH,
+        unit: undefined as string | undefined,
+        delta: null,
+        deltaKind: "success" as const,
+        sparkData: k?.spark ?? ([] as number[]),
       };
     }
     const delta = formatPctDelta(k.deltaPp);
@@ -282,11 +392,11 @@ function ProjectOverview() {
     const k = overview?.kpis.netChurnPct;
     if (!k || k.current === null) {
       return {
-        value: "-3.2",
-        unit: "%",
-        delta: t("overview.kpi.improved"),
+        value: NULL_DASH,
+        unit: undefined as string | undefined,
+        delta: null,
         deltaKind: "success" as const,
-        sparkData: churnSeries,
+        sparkData: k?.spark ?? ([] as number[]),
       };
     }
     const delta = formatChurnDeltaPp(k.deltaPp);
@@ -297,61 +407,45 @@ function ProjectOverview() {
       deltaKind: delta?.kind ?? ("success" as const),
       sparkData: k.spark,
     };
-  }, [overview, t]);
+  }, [overview]);
 
   // -------- Panels --------
 
-  const realActivity = useMemo<ActivityEvent[] | null>(() => {
-    if (!overview || overview.recentActivity.length === 0) return null;
+  const panelActivity = useMemo<ReadonlyArray<ActivityEvent>>(() => {
+    if (!overview) return [];
     return toPanelActivity(overview.recentActivity, now);
   }, [overview, now]);
 
   const panelTopProducts = useMemo<ReadonlyArray<TopProduct>>(() => {
-    if (!overview || overview.topProducts.length === 0) return topProducts;
+    if (!overview) return [];
     return toPanelTopProducts(overview.topProducts);
   }, [overview]);
 
   const panelHealth = useMemo<ReadonlyArray<HealthService>>(() => {
-    if (!overview || overview.systemHealth.length === 0) return healthServices;
+    if (!overview) return [];
     return toPanelSystemHealth(overview.systemHealth);
   }, [overview]);
 
-  // Live ticker — when real activity is available, age the
-  // existing rows and roll the real list back in periodically so
-  // the panel still feels alive. The mock-row drop continues when
-  // we're still on mock data (e.g. before the first fetch lands or
-  // the project has no events yet).
-  useEffect(() => {
-    const id = setInterval(() => {
-      setNow(Date.now());
-      if (realActivity) {
-        setEvents(realActivity);
-        return;
-      }
-      setEvents((prev) => {
-        const aged: ActivityEvent[] = prev.map((e) => ({
-          ...e,
-          secondsAgo: e.secondsAgo + 4,
-          isNew: false,
-        }));
-        if (Math.random() < NEW_EVENT_PROB) {
-          const fresh: ActivityEvent = {
-            ...genActivity(1)[0]!,
-            secondsAgo: 1,
-            isNew: true,
-            id: `evt_${Math.random().toString(36).slice(2, 10)}`,
-          };
-          return [fresh, ...aged].slice(0, 10);
-        }
-        return aged;
-      });
-    }, LIVE_TICK_MS);
-    return () => clearInterval(id);
-  }, [realActivity]);
+  const panelExperiments = useMemo<ReadonlyArray<Experiment>>(() => {
+    if (!experiments) return [];
+    return toPanelExperiments(experiments, now);
+  }, [experiments, now]);
 
-  useEffect(() => {
-    if (realActivity) setEvents(realActivity);
-  }, [realActivity]);
+  const revenueChart = useMemo(() => {
+    if (!overview) {
+      return {
+        metrics: {} as Record<string, ChartSeries[]>,
+        categories: [] as string[],
+        initial: undefined as string | undefined,
+      };
+    }
+    const { metrics, categories } = buildRevenueMetrics(overview, t);
+    return {
+      metrics,
+      categories,
+      initial: t("panels.revenue.metrics.mrr"),
+    };
+  }, [overview, t]);
 
   if (!project) return null;
 
@@ -369,7 +463,13 @@ function ProjectOverview() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="flat">
+          <Button
+            variant="flat"
+            onClick={() => {
+              void refetchOverview();
+              void refetchExperiments();
+            }}
+          >
             <RefreshCw size={13} />
             {t("common.refresh")}
           </Button>
@@ -381,7 +481,7 @@ function ProjectOverview() {
         <div className="col-span-12 md:col-span-3">
           <KpiCard
             label={t("overview.kpi.mrr")}
-            currency="$"
+            currency={mrrCard.value === NULL_DASH ? undefined : "$"}
             value={mrrCard.value}
             delta={mrrCard.delta}
             deltaKind={mrrCard.deltaKind}
@@ -425,7 +525,11 @@ function ProjectOverview() {
 
       <div className="mt-4 grid grid-cols-12 gap-4">
         <div className="col-span-12 lg:col-span-8">
-          <RevenueChartPanel metrics={revenueMetrics} categories={categories} initialMetric="MRR" />
+          <RevenueChartPanel
+            metrics={revenueChart.metrics}
+            categories={revenueChart.categories}
+            initialMetric={revenueChart.initial}
+          />
         </div>
         <div className="col-span-12 lg:col-span-4">
           <TopProductsPanel products={panelTopProducts} />
@@ -434,10 +538,10 @@ function ProjectOverview() {
 
       <div className="mt-4 grid grid-cols-12 gap-4">
         <div className="col-span-12 lg:col-span-6">
-          <RecentActivityPanel events={events} live />
+          <RecentActivityPanel events={panelActivity} live />
         </div>
         <div className="col-span-12 lg:col-span-6">
-          <ExperimentsPanel experiments={experiments} />
+          <ExperimentsPanel experiments={panelExperiments} />
         </div>
       </div>
 
