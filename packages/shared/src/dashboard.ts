@@ -5,6 +5,8 @@
 // is explicit and safe to evolve.
 // =============================================================
 
+import { z } from "zod";
+
 export type MemberRoleName = "OWNER" | "ADMIN" | "VIEWER";
 
 export type ApiKeyEnvironment = "PRODUCTION" | "SANDBOX";
@@ -1446,3 +1448,60 @@ export interface UpdatePreferencesRequest {
   notifications?: Record<string, unknown>;
   appearance?: Record<string, unknown>;
 }
+
+// =============================================================
+// Subscriptions — header actions (grant / schedule / export)
+// =============================================================
+
+export const grantDurationSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("preset"),
+    preset: z.enum(["1mo", "3mo", "6mo", "1yr", "lifetime"]),
+  }),
+  z.object({ kind: z.literal("custom"), expiresAt: z.string().datetime() }),
+]);
+
+export const grantSubscriptionRequestSchema = z.object({
+  subscriberId: z.string().min(1),
+  productId: z.string().min(1),
+  duration: grantDurationSchema,
+  note: z.string().trim().max(200).optional(),
+});
+export type GrantSubscriptionRequest = z.infer<
+  typeof grantSubscriptionRequestSchema
+>;
+
+export const scheduleActionRequestSchema = z.object({
+  action: z.literal("CANCEL"),
+  dueAt: z.string().datetime(),
+  revokeImmediately: z.boolean().optional().default(false),
+});
+export type ScheduleActionRequest = z.infer<
+  typeof scheduleActionRequestSchema
+>;
+
+export type ScheduledActionStatus =
+  | "PENDING"
+  | "EXECUTED"
+  | "CANCELED"
+  | "FAILED";
+
+export type ScheduledActionRow = {
+  id: string;
+  purchaseId: string;
+  subscriberId: string;
+  action: "CANCEL";
+  status: ScheduledActionStatus;
+  dueAt: string;
+  payload: { revokeImmediately?: boolean };
+  createdAt: string;
+  executedAt: string | null;
+  error: string | null;
+  // joined for display
+  productName: string | null;
+  store: string;
+};
+
+export type ListScheduledActionsResponse = {
+  rows: ScheduledActionRow[];
+};
