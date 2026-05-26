@@ -5,13 +5,13 @@ import { z } from "zod";
 import {
   FeatureFlagEnv,
   FeatureFlagType,
-  MemberRole,
   drizzle,
 } from "@rovenue/db";
 import { validateAudienceRules } from "@rovenue/shared/experiments";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { assertProjectAccess } from "../../lib/project-access";
+import { assertProjectCapability } from "../../lib/capabilities";
 import { ok } from "../../lib/response";
 import { invalidateFlagCache } from "../../services/flag-engine";
 
@@ -89,7 +89,7 @@ export const featureFlagsRoute = new Hono()
   .post("/", zValidator("json", createFlagBodySchema), async (c) => {
     const body = c.req.valid("json");
     const user = c.get("user");
-    await assertProjectAccess(body.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(body.projectId, user.id, "flags:write");
 
     const flag = await drizzle.dashboardFeatureFlagRepo.createFeatureFlag(
       drizzle.db,
@@ -168,7 +168,7 @@ export const featureFlagsRoute = new Hono()
       throw new HTTPException(404, { message: "Feature flag not found" });
     }
     const user = c.get("user");
-    await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(existing.projectId, user.id, "flags:write");
 
     const body = c.req.valid("json");
 
@@ -227,7 +227,7 @@ export const featureFlagsRoute = new Hono()
       throw new HTTPException(404, { message: "Feature flag not found" });
     }
     const user = c.get("user");
-    await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(existing.projectId, user.id, "flags:write");
 
     const flag = await drizzle.dashboardFeatureFlagRepo.updateFeatureFlag(
       drizzle.db,
@@ -263,7 +263,7 @@ export const featureFlagsRoute = new Hono()
       throw new HTTPException(404, { message: "Feature flag not found" });
     }
     const user = c.get("user");
-    await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(existing.projectId, user.id, "flags:write");
 
     await drizzle.dashboardFeatureFlagRepo.deleteFeatureFlag(drizzle.db, id);
     await invalidateFlagCache(existing.projectId, existing.env);

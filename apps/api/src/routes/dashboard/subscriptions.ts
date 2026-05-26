@@ -11,6 +11,7 @@ import {
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
+import { assertProjectCapability } from "../../lib/capabilities";
 import { ok } from "../../lib/response";
 import { grantComp } from "../../services/subscriptions/grant";
 import {
@@ -343,7 +344,7 @@ export const subscriptionsRoute = new Hono()
         throw new HTTPException(400, { message: "Missing projectId" });
       }
       const user = c.get("user");
-      await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+      await assertProjectCapability(projectId, user.id, "subscribers:write");
       const purchase = await grantComp({
         projectId,
         actorUserId: user.id,
@@ -362,7 +363,7 @@ export const subscriptionsRoute = new Hono()
         throw new HTTPException(400, { message: "Missing projectId/purchaseId" });
       }
       const user = c.get("user");
-      await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+      await assertProjectCapability(projectId, user.id, "subscribers:write");
       const row = await scheduleAction({
         projectId,
         actorUserId: user.id,
@@ -385,7 +386,7 @@ export const subscriptionsRoute = new Hono()
     const id = c.req.param("id");
     if (!projectId || !id) throw new HTTPException(400, { message: "Missing param" });
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(projectId, user.id, "subscribers:write");
     const row = await cancelScheduledAction({
       projectId,
       actorUserId: user.id,

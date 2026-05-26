@@ -5,6 +5,7 @@ import { z } from "zod";
 import { MemberRole, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
+import { assertProjectCapability } from "../../lib/capabilities";
 import { ok } from "../../lib/response";
 import { computeRetention } from "../../services/cohorts";
 import type {
@@ -151,7 +152,7 @@ export const cohortsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(projectId, user.id, "audiences:write");
     const body = c.req.valid("json");
 
     const existing = await drizzle.cohortRepo.findCohortByName(
@@ -202,7 +203,7 @@ export const cohortsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(projectId, user.id, "audiences:write");
     const body = c.req.valid("json");
 
     if (body.name) {
@@ -236,7 +237,7 @@ export const cohortsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(projectId, user.id, "audiences:write");
 
     const removed = await drizzle.cohortRepo.deleteCohort(
       drizzle.db,

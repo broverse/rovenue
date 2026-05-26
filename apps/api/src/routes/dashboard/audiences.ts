@@ -2,10 +2,11 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { MemberRole, drizzle } from "@rovenue/db";
+import { drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { assertProjectAccess } from "../../lib/project-access";
+import { assertProjectCapability } from "../../lib/capabilities";
 import { ok } from "../../lib/response";
 import { invalidateFlagCache } from "../../services/flag-engine";
 import { invalidateExperimentCache } from "../../services/experiment-engine";
@@ -79,7 +80,7 @@ export const audiencesRoute = new Hono()
   .post("/", zValidator("json", createAudienceBodySchema), async (c) => {
     const body = c.req.valid("json");
     const user = c.get("user");
-    await assertProjectAccess(body.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(body.projectId, user.id, "audiences:write");
 
     try {
       validateAudienceRules(body.rules);
@@ -132,7 +133,7 @@ export const audiencesRoute = new Hono()
       throw new HTTPException(404, { message: "Audience not found" });
     }
     const user = c.get("user");
-    await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(existing.projectId, user.id, "audiences:write");
 
     const body = c.req.valid("json");
     if (body.rules !== undefined) {
@@ -175,7 +176,7 @@ export const audiencesRoute = new Hono()
       throw new HTTPException(404, { message: "Audience not found" });
     }
     const user = c.get("user");
-    await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(existing.projectId, user.id, "audiences:write");
 
     if (existing.isDefault) {
       throw new HTTPException(400, {
