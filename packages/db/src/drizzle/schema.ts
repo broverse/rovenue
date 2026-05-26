@@ -27,6 +27,8 @@ import {
   productType,
   purchaseStatus,
   revenueEventType,
+  scheduledActionStatus,
+  scheduledActionType,
   store,
   webhookEventStatus,
   webhookSource,
@@ -1113,6 +1115,48 @@ export type FxRate = typeof fxRates.$inferSelect;
 export type NewFxRate = typeof fxRates.$inferInsert;
 
 // =============================================================
+// scheduled_subscription_actions
+// =============================================================
+
+export const scheduledSubscriptionActions = pgTable(
+  "scheduled_subscription_actions",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    purchaseId: text("purchaseId")
+      .notNull()
+      .references(() => purchases.id, { onDelete: "cascade" }),
+    subscriberId: text("subscriberId")
+      .notNull()
+      .references(() => subscribers.id, { onDelete: "cascade" }),
+    action: scheduledActionType("action").notNull(),
+    dueAt: timestamp("dueAt", { withTimezone: true }).notNull(),
+    status: scheduledActionStatus("status").notNull().default("PENDING"),
+    payload: jsonb("payload")
+      .$type<{ revokeImmediately?: boolean }>()
+      .notNull()
+      .default({}),
+    createdBy: text("createdBy").notNull(),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    executedAt: timestamp("executedAt", { withTimezone: true }),
+    error: text("error"),
+  },
+  (t) => ({
+    projectIdStatusIdx: index(
+      "scheduled_actions_projectId_status_idx",
+    ).on(t.projectId, t.status),
+    statusDueAtIdx: index("scheduled_actions_status_dueAt_idx").on(
+      t.status,
+      t.dueAt,
+    ),
+  }),
+);
+
+// =============================================================
 // Inferred types
 // =============================================================
 //
@@ -1174,6 +1218,11 @@ export type NewExperimentAssignment =
 export type FeatureFlag = typeof featureFlags.$inferSelect;
 export type NewFeatureFlag = typeof featureFlags.$inferInsert;
 
+export type ScheduledSubscriptionAction =
+  typeof scheduledSubscriptionActions.$inferSelect;
+export type NewScheduledSubscriptionAction =
+  typeof scheduledSubscriptionActions.$inferInsert;
+
 // Re-export enum helpers so downstream code can `import { memberRole }
 // from "@rovenue/db/drizzle"` without reaching into the `drizzle`
 // namespace on the top-level `@rovenue/db` export.
@@ -1188,6 +1237,8 @@ export {
   productType,
   purchaseStatus,
   revenueEventType,
+  scheduledActionStatus,
+  scheduledActionType,
   store,
   webhookEventStatus,
   webhookSource,
