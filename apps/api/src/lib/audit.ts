@@ -81,7 +81,9 @@ export type AuditAction =
   | "invitation.created"
   | "invitation.revoked"
   | "invitation.resent"
-  | "invitation.accepted";
+  | "invitation.accepted"
+  // --- billing ---
+  | "billing.subscription.activated";
 
 export type AuditResource =
   | "audience"
@@ -95,7 +97,8 @@ export type AuditResource =
   | "subscriber"
   | "member"
   | "credential"
-  | "invitation";
+  | "invitation"
+  | "billing_subscription";
 
 export interface AuditEntry {
   projectId: string;
