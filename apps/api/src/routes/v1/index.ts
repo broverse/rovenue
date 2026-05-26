@@ -3,6 +3,7 @@ import { apiKeyAuth } from "../../middleware/api-key-auth";
 import { apiKeyRateLimit } from "../../middleware/rate-limit";
 import { configRoute } from "./config";
 import { experimentsRoute } from "./experiments";
+import { funnelClaimRoute } from "./funnel-claim";
 import { meRoute } from "./me";
 import { receiptsRoute } from "./receipts";
 import { subscribersRoute } from "./subscribers";
@@ -38,4 +39,8 @@ export const v1Route = new Hono()
   .route("/me", meRoute)
   .route("/receipts", receiptsRoute)
   .route("/subscribers", subscribersRoute)
-  .route("/product-groups", productGroupsRoute);
+  .route("/product-groups", productGroupsRoute)
+  // funnelClaimRoute owns `/subscribers/claim-funnel-token` and
+  // `/sdk/claim-*`; mounted at root so its handler paths apply
+  // verbatim under /v1.
+  .route("/", funnelClaimRoute);
