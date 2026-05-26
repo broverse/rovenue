@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import type { Db } from "../client";
 import { session } from "../schema";
 
@@ -64,4 +64,23 @@ export async function isSessionOwnedBy(
  */
 export async function deleteSessionById(db: Db, id: string): Promise<void> {
   await db.delete(session).where(eq(session.id, id));
+}
+
+/**
+ * Revokes every session belonging to `userId` except `keepId`.
+ * Returns the number of sessions removed so callers can surface
+ * a "n devices signed out" confirmation. `keepId` is required —
+ * we never expose a "log everyone out including me" path through
+ * this repo; that's what Better Auth's `signOut` is for.
+ */
+export async function deleteOtherSessionsByUser(
+  db: Db,
+  userId: string,
+  keepId: string,
+): Promise<number> {
+  const rows = await db
+    .delete(session)
+    .where(and(eq(session.userId, userId), ne(session.id, keepId)))
+    .returning({ id: session.id });
+  return rows.length;
 }

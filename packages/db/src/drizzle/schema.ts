@@ -70,6 +70,11 @@ export const user = pgTable("user", {
   // exclusively. BCP-47 locale tag + IANA tz database name.
   locale: text("locale").notNull().default("en-US"),
   timezone: text("timezone").notNull().default("UTC"),
+  // Maintained by Better Auth's twoFactor plugin; flipped to true
+  // after the user verifies the first TOTP code, back to false on
+  // disable. Mirroring the plugin's schema declaration here so the
+  // drizzle adapter can read/write it.
+  twoFactorEnabled: boolean("twoFactorEnabled").notNull().default(false),
   createdAt: timestamp("createdAt", { withTimezone: false }).notNull(),
   updatedAt: timestamp("updatedAt", { withTimezone: false }).notNull(),
 });
@@ -125,6 +130,33 @@ export const verification = pgTable("verification", {
   createdAt: timestamp("createdAt", { withTimezone: false }),
   updatedAt: timestamp("updatedAt", { withTimezone: false }),
 });
+
+// =============================================================
+// twoFactor (Better Auth — `twoFactor` plugin)
+// =============================================================
+//
+// One row per user with 2FA enrolled. `secret` and `backupCodes`
+// are AES-encrypted by the plugin (using BETTER_AUTH_SECRET) so
+// the dashboard never sees plaintext after the initial enable
+// response. `verified=false` after `/two-factor/enable`,
+// flipped to `true` by `/two-factor/verify-totp`.
+
+export const twoFactor = pgTable(
+  "twoFactor",
+  {
+    id: text("id").primaryKey(),
+    secret: text("secret").notNull(),
+    backupCodes: text("backupCodes").notNull(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    verified: boolean("verified").notNull().default(true),
+  },
+  (t) => ({
+    userIdIdx: index("twoFactor_userId_idx").on(t.userId),
+    secretIdx: index("twoFactor_secret_idx").on(t.secret),
+  }),
+);
 
 // =============================================================
 // personal_access_tokens — Phase 2 Account / Identity

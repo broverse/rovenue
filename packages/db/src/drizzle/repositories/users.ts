@@ -39,6 +39,7 @@ export interface UserProfile {
   image: string | null;
   locale: string;
   timezone: string;
+  twoFactorEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -51,6 +52,7 @@ const USER_PROFILE_COLUMNS = {
   image: user.image,
   locale: user.locale,
   timezone: user.timezone,
+  twoFactorEnabled: user.twoFactorEnabled,
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 } as const;

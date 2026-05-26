@@ -92,6 +92,7 @@ function toCurrentUser(row: {
   image: string | null;
   locale: string;
   timezone: string;
+  twoFactorEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }): CurrentUser {
@@ -103,6 +104,7 @@ function toCurrentUser(row: {
     image: row.image,
     locale: row.locale,
     timezone: row.timezone,
+    twoFactorEnabled: row.twoFactorEnabled,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -201,6 +203,18 @@ export const meRoute = new Hono()
     const payload: MySessionsResponse = { sessions };
     return c.json(ok(payload));
   })
+  // ----- DELETE /dashboard/me/sessions (revoke all others) -----
+  .delete("/sessions", async (c) => {
+    const sessionUser = c.get("user");
+    const currentSession = c.get("session");
+
+    const revoked = await drizzle.sessionRepo.deleteOtherSessionsByUser(
+      drizzle.db,
+      sessionUser.id,
+      currentSession.id,
+    );
+    return c.json(ok({ revoked }));
+  })
   // ----- DELETE /dashboard/me/sessions/:id -----
   .delete("/sessions/:id", async (c) => {
     const id = c.req.param("id");
@@ -259,14 +273,26 @@ export const meRoute = new Hono()
     const provider = c.req.param("provider");
     const sessionUser = c.get("user");
 
-    const total = await drizzle.accountRepo.countAccountsByUser(
+    const linked = await drizzle.accountRepo.listAccountsByUser(
       drizzle.db,
       sessionUser.id,
     );
-    if (total <= 1) {
+    if (linked.length <= 1) {
       throw new HTTPException(400, {
         message:
           "Cannot disconnect the only remaining login method. Link another provider first.",
+      });
+    }
+
+    // listAccountsByUser orders newest-first, so the oldest row
+    // (the original sign-up identity) sits at the tail. Refuse to
+    // unlink it — orphaning the primary identity makes audit-log
+    // ownership and future re-linking ambiguous.
+    const primaryProviderId = linked[linked.length - 1]?.providerId;
+    if (primaryProviderId === provider) {
+      throw new HTTPException(400, {
+        message:
+          "Cannot disconnect the primary sign-in method. Switch primary by linking and re-signing in with another provider first.",
       });
     }
 

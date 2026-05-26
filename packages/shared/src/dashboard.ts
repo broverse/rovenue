@@ -1636,6 +1636,9 @@ export interface CurrentUser {
   locale: string;
   /** IANA tz database name, e.g. "Europe/Istanbul". */
   timezone: string;
+  /** Better Auth twoFactor plugin — true after the user verified
+   *  their first TOTP code; false on disable. */
+  twoFactorEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 }

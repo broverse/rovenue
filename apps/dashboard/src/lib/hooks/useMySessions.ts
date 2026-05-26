@@ -23,3 +23,14 @@ export function useRevokeSession() {
     },
   });
 }
+
+export function useRevokeOtherSessions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      unwrap<{ revoked: number }>(rpc.dashboard.me.sessions.$delete()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["me", "sessions"] });
+    },
+  });
+}

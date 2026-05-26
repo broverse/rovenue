@@ -434,12 +434,15 @@
     },
     "twofa": {
       "title": "Two-factor authentication",
-      "subtitle": "Enter the 6-digit code from your authenticator app.",
-      "backupSubtitle": "Enter one of your single-use recovery codes.",
+      "subtitle": "Enter the 6-digit code from your authenticator app to finish signing in.",
+      "backupTitle": "Recovery code",
+      "backupSubtitle": "Enter one of your single-use recovery codes (XXXXX-XXXXX).",
       "trustDevice": "Trust this device for 30 days",
-      "verify": "Verify",
-      "useBackup": "Use a recovery code instead",
+      "trustDeviceTag": "Skip 2FA",
+      "verify": "Verify and continue",
+      "useBackup": "Lost access? Use a recovery code",
       "useTotp": "Use authenticator app instead",
+      "backToSignIn": "Back to sign in",
       "invalid": "Invalid code. Try again."
     }
   },
@@ -2704,51 +2707,24 @@
     },
     "connected": {
       "title": "Connected accounts",
-      "subtitle": "Sign-in providers and third-party apps with access to your Rovenue account.",
+      "subtitle": "Sign-in providers linked to your Rovenue account.",
       "providers": {
         "title": "Sign-in methods",
         "subtitle": "You can sign in to Rovenue with any of the following.",
         "primary": "primary",
+        "primaryLocked": "Primary sign-in method can't be disconnected",
+        "notConnected": "Not connected",
+        "linkedAt": "Linked {{date}}",
         "actions": {
           "connect": "Connect",
-          "configure": "Configure",
           "disconnect": "Disconnect"
         },
         "items": {
           "google": {
-            "name": "Google",
-            "connected": "aiden@lumen.co · connected Mar 12, 2026"
+            "name": "Google"
           },
           "github": {
-            "name": "GitHub",
-            "connected": "aidenkow · connected Apr 4, 2026"
-          },
-          "apple": {
-            "name": "Apple",
-            "disconnected": "Not connected"
-          },
-          "sso": {
-            "name": "SAML SSO (lumen.co)",
-            "disconnected": "Not connected"
-          }
-        }
-      },
-      "apps": {
-        "title": "OAuth apps with access",
-        "subtitle": "Third-party apps you've authorized. Revoke anytime.",
-        "revoke": "Revoke",
-        "items": {
-          "linear": {
-            "name": "Linear",
-            "meta": "read:experiments, write:annotations · Authorized Apr 18"
-          },
-          "zapier": {
-            "name": "Zapier",
-            "meta": "read:metrics · Authorized Feb 22"
-          },
-          "raycast": {
-            "name": "Raycast",
-            "meta": "read:dashboard · Authorized Jan 9"
+            "name": "GitHub"
           }
         }
       }
