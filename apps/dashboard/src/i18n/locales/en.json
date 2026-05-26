@@ -1925,7 +1925,6 @@
       "avgRetention": "AVG W4 RETENTION",
       "avgRetentionDelta": "▲ +{{value}}pp vs prior 12w",
       "bestCohort": "BEST COHORT · W4",
-      "bestCohortValue": "{{value}}% · {{users}} users",
       "bestCohortPending": "Awaiting aggregate endpoint",
       "blendedLtv": "BLENDED 90-DAY LTV",
       "blendedLtvDelta": "▲ +${{value}} vs prior period"
@@ -1938,12 +1937,6 @@
       "heading": "Saved cohorts",
       "newAria": "New cohort",
       "filterPlaceholder": "Filter cohorts…",
-      "groups": {
-        "Behavior": "Behavior",
-        "Lifecycle": "Lifecycle",
-        "Risk": "Risk",
-        "Acquisition": "Acquisition"
-      },
       "sizeLabel": "{{size}} · ",
       "tooltipChange": "{{value}} this week",
       "filterEmpty": "No cohorts match this filter."
@@ -1952,10 +1945,7 @@
       "groupCohort": "{{group}} cohort",
       "memberMore": "+ {{count}} more",
       "size": "Size",
-      "sizeDelta": "{{value}} this week",
       "w4Retention": "W4 retention",
-      "w4RetentionValue": "62.4%",
-      "w4RetentionDelta": "▲ +2.1pp",
       "ltv90": "90-day LTV",
       "ltv90Value": "$32.14",
       "ltv90Delta": "▲ +$3.40",
@@ -1968,19 +1958,11 @@
     },
     "builder": {
       "heading": "Cohort definition",
-      "include": "INCLUDE",
-      "exclude": "EXCLUDE",
-      "anchor": "ANCHOR",
       "and": "AND",
       "or": "OR",
       "edit": "Edit",
       "noFilters": "No filters — cohort matches every subscriber.",
       "matchesUnknown": "Match count unavailable",
-      "addCondition": "+ Add condition",
-      "cohortBy": "cohort by",
-      "bucket": "bucket",
-      "bucketValue": "weekly",
-      "anchorValue": "first_subscription.start_date",
       "matches": "Matches <0>{{count}}</0> users · refreshed {{ago}}",
       "refreshedAgo": "2m ago"
     },
