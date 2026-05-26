@@ -1,0 +1,10 @@
+{
+  "subject": "Rovenue faturanız tahsil edilemedi",
+  "preview": "{{amountFormatted}} · fatura {{invoiceId}}",
+  "headline": "Faturanız tahsil edilemedi",
+  "body": "{{invoiceId}} numaralı fatura için {{amountFormatted}} tahsil etmeye çalıştık ancak ödeme başarısız oldu.\n\nSebep: {{reason}}",
+  "body.fallback": "Hizmet kesintisini önlemek için ödeme yönteminizi güncelleyin.",
+  "cta": "Faturayı aç",
+  "push.title": "Fatura başarısız",
+  "push.body": "{{amountFormatted}} — {{reason}}"
+}
