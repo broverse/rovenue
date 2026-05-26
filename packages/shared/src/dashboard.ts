@@ -793,7 +793,6 @@ export const subscriptionStoreCodes = [
   "APP_STORE",
   "PLAY_STORE",
   "STRIPE",
-  "WEB",
   "MANUAL",
 ] as const;
 
