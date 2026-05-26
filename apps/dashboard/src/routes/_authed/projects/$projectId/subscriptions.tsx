@@ -33,12 +33,17 @@ import {
   type SubscriptionStore,
 } from "../../../../components/subscriptions";
 import {
+  buildExportSubscriptionsUrl,
   useProjectBillingIssues,
   useProjectRenewalCalendar,
   useProjectSubscriptions,
   useProjectSubscriptionsComposition,
   useProjectSubscriptionsKpis,
 } from "../../../../lib/hooks/useProjectSubscriptions";
+import {
+  GrantSubscriptionModal,
+  ScheduleCancelModal,
+} from "../../../../components/subscriptions";
 import type {
   BillingIssueRow,
   RenewalCalendarResponse,
@@ -223,6 +228,8 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [grantOpen, setGrantOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [filters, setFilters] = useState({
     store: true,
     product: false,
@@ -333,6 +340,14 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
   const totalForFilterBar =
     composition.data?.total ?? realRows?.length ?? TOTAL_FALLBACK;
 
+  const selectedSubs = useMemo(
+    () => filtered.filter((s) => selectedIds.has(s.id)),
+    [filtered, selectedIds],
+  );
+  const canSchedule = selectedSubs.length > 0;
+  const onExport = () =>
+    window.location.assign(buildExportSubscriptionsUrl(projectId, scope, search));
+
   return (
     <>
       <header className="flex items-start justify-between pb-5">
@@ -345,15 +360,21 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="flat" size="sm">
+          <Button
+            variant="flat"
+            size="sm"
+            disabled={!canSchedule}
+            title={!canSchedule ? t("subscriptions.actions.scheduleDisabledTooltip", { defaultValue: "Select at least one row" }) : undefined}
+            onClick={() => setScheduleOpen(true)}
+          >
             <CalendarDays size={13} />
             {t("subscriptions.actions.schedule")}
           </Button>
-          <Button variant="flat" size="sm">
+          <Button variant="flat" size="sm" onClick={onExport}>
             <Download size={13} />
             {t("subscriptions.actions.exportCsv")}
           </Button>
-          <Button variant="solid-primary" size="sm">
+          <Button variant="solid-primary" size="sm" onClick={() => setGrantOpen(true)}>
             <Plus size={13} />
             {t("subscriptions.actions.newSubscription")}
           </Button>
@@ -494,6 +515,18 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
         <BillingIssuesPanel issues={issueRows} />
         <CohortRetentionPanel />
       </div>
+
+      <GrantSubscriptionModal
+        projectId={projectId}
+        open={grantOpen}
+        onClose={() => setGrantOpen(false)}
+      />
+      <ScheduleCancelModal
+        projectId={projectId}
+        open={scheduleOpen}
+        selected={selectedSubs}
+        onClose={() => setScheduleOpen(false)}
+      />
     </>
   );
 }
