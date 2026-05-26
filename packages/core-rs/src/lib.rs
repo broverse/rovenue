@@ -1,6 +1,7 @@
 pub mod api;
 pub mod cache;
 pub mod config;
+pub mod entitlements;
 pub mod error;
 pub mod identity;
 pub mod observer;
@@ -10,6 +11,7 @@ pub mod version;
 
 pub use api::RovenueCore;
 pub use config::Config;
+pub use entitlements::Entitlement;
 pub use error::{RovenueError, RovenueResult};
 pub use observer::{ChangeEvent, Observer};
 pub use version::SDK_VERSION;
