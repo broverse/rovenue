@@ -15,6 +15,7 @@ import {
   useAudiences,
   useDeleteAudience,
 } from "../../../../lib/hooks/useProjectAdmin";
+import { siftToConditions } from "../../../../components/targeting/sift-codec";
 
 export const Route = createFileRoute(
   "/_authed/projects/$projectId/audiences",
@@ -111,7 +112,7 @@ export function AudiencesPage({ projectId }: { projectId: string }) {
           </div>
         ) : (
           audiences.map((a) => {
-            const ruleCount = Object.keys(a.rules ?? {}).length;
+            const ruleCount = siftToConditions(a.rules).length;
             return (
               <div
                 key={a.id}
