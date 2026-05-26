@@ -98,7 +98,12 @@ export async function findBySubscriptionId(
   const rows = await db
     .select()
     .from(billingSubscriptions)
-    .where(eq(billingSubscriptions.stripeSubscriptionId, stripeSubscriptionId))
+    .where(
+      and(
+        eq(billingSubscriptions.stripeSubscriptionId, stripeSubscriptionId),
+        ne(billingSubscriptions.state, "deleted"),
+      ),
+    )
     .limit(1);
   return rows[0] ?? null;
 }
@@ -166,5 +171,10 @@ export async function updateAfterStripeUpdated(
       currentPeriodEnd: input.currentPeriodEnd,
       updatedAt: sql`now()`,
     })
-    .where(eq(billingSubscriptions.stripeSubscriptionId, stripeSubscriptionId));
+    .where(
+      and(
+        eq(billingSubscriptions.stripeSubscriptionId, stripeSubscriptionId),
+        ne(billingSubscriptions.state, "deleted"),
+      ),
+    );
 }
