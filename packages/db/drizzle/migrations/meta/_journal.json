@@ -288,6 +288,13 @@
       "when": 1780000003000,
       "tag": "0040_project_invitations",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1779813463236,
+      "tag": "0041_empty_scarlet_spider",
+      "breakpoints": true
     }
   ]
 }
