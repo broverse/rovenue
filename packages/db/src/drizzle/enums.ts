@@ -152,3 +152,8 @@ export const notificationDeliveryStatus = pgEnum("NotificationDeliveryStatus", [
 ]);
 
 export const pushPlatform = pgEnum("PushPlatform", ["ios", "android"]);
+
+export const notificationSuppressionReason = pgEnum(
+  "NotificationSuppressionReason",
+  ["hard_bounce", "complaint", "manual"],
+);

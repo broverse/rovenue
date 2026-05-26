@@ -27,6 +27,7 @@ import {
   memberRole,
   notificationChannel,
   notificationDeliveryStatus,
+  notificationSuppressionReason,
   outgoingWebhookStatus,
   productType,
   purchaseStatus,
@@ -1440,6 +1441,31 @@ export type PushDevice = typeof pushDevices.$inferSelect;
 export type NewPushDevice = typeof pushDevices.$inferInsert;
 
 // =============================================================
+// notification_suppression_list — global "do not email" set
+// =============================================================
+//
+// Populated by the SES feedback consumer (hard bounces +
+// complaints) and by manual ops. Keyed by lowercased email so
+// the pre-send check is a single PK lookup.
+
+export const notificationSuppressionList = pgTable(
+  "notification_suppression_list",
+  {
+    email: text("email").primaryKey(),
+    reason: notificationSuppressionReason("reason").notNull(),
+    source: text("source"),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+);
+
+export type NotificationSuppression =
+  typeof notificationSuppressionList.$inferSelect;
+export type NewNotificationSuppression =
+  typeof notificationSuppressionList.$inferInsert;
+
+// =============================================================
 // user_project_notification_prefs + project_notification_defaults
 // =============================================================
 //
@@ -1588,6 +1614,7 @@ export {
   memberRole,
   notificationChannel,
   notificationDeliveryStatus,
+  notificationSuppressionReason,
   outgoingWebhookStatus,
   productType,
   purchaseStatus,
