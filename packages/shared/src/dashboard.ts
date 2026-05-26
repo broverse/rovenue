@@ -379,7 +379,17 @@ export interface DuplicateExperimentResponse {
 export type DashboardFlagType = "BOOLEAN" | "STRING" | "NUMBER" | "JSON";
 
 export interface DashboardFlagRule {
-  audienceId: string;
+  /**
+   * Reference to a pre-built audience. Optional now that rules
+   * can carry inline targeting conditions instead.
+   */
+  audienceId?: string;
+  /**
+   * MongoDB-style targeting document evaluated by `matchesAudience`.
+   * Combined with the audience (logical AND) when both are present.
+   * Empty / undefined = matches all subscribers.
+   */
+  conditions?: Record<string, unknown>;
   value: unknown;
   rolloutPercentage?: number | null;
 }
@@ -1517,7 +1527,7 @@ export interface UpdatePreferencesRequest {
 export const grantDurationSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("preset"),
-    preset: z.enum(["1mo", "3mo", "6mo", "1yr", "lifetime"]),
+    preset: z.enum(["1d", "1w", "1mo", "3mo", "6mo", "1yr", "lifetime"]),
   }),
   z.object({ kind: z.literal("custom"), expiresAt: z.string().datetime() }),
 ]);

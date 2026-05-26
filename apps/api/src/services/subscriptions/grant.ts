@@ -43,7 +43,11 @@ export async function grantComp(
       expiresDate = null;
     } else {
       const d = new Date(now);
-      if (preset === "1mo") {
+      if (preset === "1d") {
+        d.setDate(d.getDate() + 1);
+      } else if (preset === "1w") {
+        d.setDate(d.getDate() + 7);
+      } else if (preset === "1mo") {
         d.setMonth(d.getMonth() + 1);
       } else if (preset === "3mo") {
         d.setMonth(d.getMonth() + 3);

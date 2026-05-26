@@ -17,9 +17,19 @@ import { useSubscribers } from "../../lib/hooks/useSubscribers";
 // Types
 // ---------------------------------------------------------------------------
 
-type Preset = "1mo" | "3mo" | "6mo" | "1yr" | "lifetime" | "custom";
+type Preset =
+  | "1d"
+  | "1w"
+  | "1mo"
+  | "3mo"
+  | "6mo"
+  | "1yr"
+  | "lifetime"
+  | "custom";
 
 const PRESETS: ReadonlyArray<Preset> = [
+  "1d",
+  "1w",
   "1mo",
   "3mo",
   "6mo",
