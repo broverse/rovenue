@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import {
   AccountPageHeader,
@@ -7,127 +7,167 @@ import {
   AccountToggleRow,
   SectionCard,
 } from "../../../components/account";
+import { Select } from "../../../ui/select";
+import { DeviceList } from "../../../components/notifications/device-list";
+import { EventToggleList } from "../../../components/notifications/event-toggle-list";
+import { useProjects } from "../../../lib/hooks/useProjects";
 import {
-  useMyPreferences,
-  useUpdatePreferences,
-} from "../../../lib/hooks/useMyPreferences";
+  useNotificationPreferences,
+  useUpdateNotificationPreferences,
+} from "../../../lib/hooks/useNotificationPreferences";
+
+// =============================================================
+// /account/notifications — per-user notification preferences
+// =============================================================
+//
+// Three sections per spec §7.3:
+//   1. Channel masters (email + push) + locale + timezone.
+//   2. Registered push devices (read-only list with revoke).
+//   3. Per-project event overrides — project picker drives the
+//      EventToggleList state. Forced events render disabled with
+//      a lock icon (component handles the wiring); the server
+//      also rejects writes for them as defence in depth.
+//
+// We drop the old slack/marketing toggles entirely. Slack lives
+// behind the integrations workspace; marketing email is a
+// product-marketing concern that doesn't belong on this page.
 
 export const Route = createFileRoute("/_authed/account/notifications")({
   component: NotificationsPage,
 });
 
-const KEYS = [
-  "email",
-  "slack",
-  "push",
-  "daily_digest",
-  "weekly_summary",
-  "anomaly",
-  "milestone",
-  "churn_spike",
-  "invoice",
-  "refund_alert",
-  "low_balance",
-  "product_news",
-  "marketing",
-] as const;
-
-type NotifKey = (typeof KEYS)[number];
-
-const DEFAULTS: Record<NotifKey, boolean> = {
-  email: true,
-  slack: true,
-  push: true,
-  daily_digest: true,
-  weekly_summary: true,
-  anomaly: true,
-  milestone: false,
-  churn_spike: true,
-  invoice: true,
-  refund_alert: true,
-  low_balance: true,
-  product_news: false,
-  marketing: false,
-};
-
 function NotificationsPage() {
   const { t } = useTranslation();
-  const { data: preferences } = useMyPreferences();
-  const updatePrefs = useUpdatePreferences();
-  const [state, setState] = useState<Record<NotifKey, boolean>>(DEFAULTS);
+  const projects = useProjects();
+  const projectOptions = useMemo(
+    () =>
+      (projects.data ?? []).map((p) => ({
+        value: p.id,
+        label: p.name,
+      })),
+    [projects.data],
+  );
 
-  // Hydrate from the API when it lands. We keep the toggles as
-  // local state and persist each flip individually so the user
-  // sees immediate UI feedback even if the network round-trip is
-  // slow — the backend PATCH is a shallow merge so concurrent
-  // saves stay safe.
-  useEffect(() => {
-    if (!preferences) return;
-    setState((prev) => {
-      const merged = { ...prev };
-      for (const key of KEYS) {
-        const value = (preferences.notifications as Record<string, unknown>)[
-          key
-        ];
-        if (typeof value === "boolean") merged[key] = value;
-      }
-      return merged;
-    });
-  }, [preferences]);
+  const [projectId, setProjectId] = useState<string | undefined>(undefined);
+  const effectiveProjectId =
+    projectId ?? projectOptions[0]?.value ?? undefined;
 
-  const toggle = (k: NotifKey) => {
-    const next = !state[k];
-    setState((s) => ({ ...s, [k]: next }));
-    updatePrefs.mutate({ notifications: { [k]: next } });
+  const prefs = useNotificationPreferences(effectiveProjectId);
+  const update = useUpdateNotificationPreferences();
+
+  const channels = prefs.data?.channels ?? {
+    email: true,
+    push: true,
+    locale: "en",
+    timezone: "UTC",
   };
-
-  const groups = [
-    {
-      titleKey: "account.notifications.channels.title",
-      subtitleKey: "account.notifications.channels.subtitle",
-      keys: ["email", "slack", "push"] as NotifKey[],
-    },
-    {
-      titleKey: "account.notifications.revenue.title",
-      subtitleKey: "account.notifications.revenue.subtitle",
-      keys: ["daily_digest", "weekly_summary", "anomaly", "milestone", "churn_spike"] as NotifKey[],
-    },
-    {
-      titleKey: "account.notifications.billing.title",
-      subtitleKey: "account.notifications.billing.subtitle",
-      keys: ["invoice", "refund_alert", "low_balance"] as NotifKey[],
-    },
-    {
-      titleKey: "account.notifications.marketing.title",
-      subtitleKey: "account.notifications.marketing.subtitle",
-      keys: ["product_news", "marketing"] as NotifKey[],
-    },
-  ];
 
   return (
     <AccountShell active="notifications">
       <AccountPageHeader
-        title={t("account.notifications.title")}
-        description={t("account.notifications.subtitle")}
+        title={t("notifications.prefs.title", "Notifications")}
+        description={t(
+          "notifications.prefs.description",
+          "Control which alerts reach you, and on which channel.",
+        )}
       />
 
-      {groups.map((g) => (
+      <div className="flex flex-col gap-6">
+        {/* 1) Channel masters + locale/tz link */}
         <SectionCard
-          key={g.titleKey}
-          title={t(g.titleKey)}
-          description={t(g.subtitleKey)}
+          title={t("notifications.prefs.channels.title", "Channels")}
         >
-          {g.keys.map((k) => (
-            <AccountToggleRow
-              key={k}
-              title={t(`account.notifications.items.${k}.title`)}
-              description={t(`account.notifications.items.${k}.desc`, { defaultValue: "" }) || undefined}
-              checked={state[k]}
-              onChange={() => toggle(k)}
-            />
-          ))}
+          <AccountToggleRow
+            title={t("notifications.prefs.channels.email", "Email")}
+            description={t(
+              "notifications.prefs.channels.emailDesc",
+              "Required security notifications still send even when this is off.",
+            )}
+            checked={channels.email}
+            onChange={(v) =>
+              update.mutate({ scope: "global", channels: { email: v } })
+            }
+          />
+          <AccountToggleRow
+            title={t("notifications.prefs.channels.push", "Push")}
+            description={t(
+              "notifications.prefs.channels.pushDesc",
+              "Mobile alerts on devices listed below.",
+            )}
+            checked={channels.push}
+            onChange={(v) =>
+              update.mutate({ scope: "global", channels: { push: v } })
+            }
+          />
+          <p className="mt-3 text-[12px] text-rv-mute-500">
+            {t("notifications.prefs.channels.localeHint", "Locale + timezone")}
+            :{" "}
+            <Link to="/account/profile" className="underline">
+              {channels.locale} · {channels.timezone}
+            </Link>
+          </p>
         </SectionCard>
-      ))}
+
+        {/* 2) Push devices */}
+        <SectionCard
+          title={t(
+            "notifications.prefs.devices.title",
+            "Registered devices",
+          )}
+        >
+          <DeviceList />
+        </SectionCard>
+
+        {/* 3) Per-event toggles, scoped to the picked project */}
+        <SectionCard
+          title={t(
+            "notifications.prefs.events.title",
+            "Per-event preferences",
+          )}
+        >
+          {projectOptions.length === 0 ? (
+            <p className="text-[12px] text-rv-mute-500">
+              {t(
+                "notifications.prefs.events.noProjects",
+                "Create a project to manage per-event preferences.",
+              )}
+            </p>
+          ) : (
+            <>
+              <div className="mb-4">
+                <Select
+                  value={effectiveProjectId ?? ""}
+                  onChange={(e) => setProjectId(e.target.value)}
+                  aria-label={t(
+                    "notifications.prefs.events.projectPicker",
+                    "Project",
+                  )}
+                >
+                  {projectOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <EventToggleList
+                mode="user"
+                projectDefaults={prefs.data?.projectDefaults ?? {}}
+                userOverrides={prefs.data?.userOverrides ?? {}}
+                disabled={update.isPending}
+                onChange={(eventKey, next) => {
+                  if (!effectiveProjectId) return;
+                  update.mutate({
+                    scope: "project",
+                    projectId: effectiveProjectId,
+                    overrides: { [eventKey]: next },
+                  });
+                }}
+              />
+            </>
+          )}
+        </SectionCard>
+      </div>
     </AccountShell>
   );
 }
