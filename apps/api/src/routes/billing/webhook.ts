@@ -4,6 +4,7 @@ import { env } from "../../lib/env";
 import { getPlatformStripe } from "../../lib/stripe-billing";
 import { isBillingEnabled } from "../../lib/billing-flags";
 import { logger } from "../../lib/logger";
+import { dispatchStripeBillingEvent } from "../../services/billing/webhook-handlers";
 
 const log = logger.child("billing:webhook");
 
@@ -55,11 +56,11 @@ export const billingWebhookRoute = new Hono().post("/", async (c) => {
     throw new HTTPException(400, { message: "Invalid signature" });
   }
 
-  log.info("billing webhook received", {
+  const result = await dispatchStripeBillingEvent(event);
+  log.info("billing webhook dispatched", {
     eventId: event.id,
     eventType: event.type,
-    apiVersion: event.api_version,
+    result: result.status,
   });
-
-  return c.json({ received: true, eventType: event.type }, 200);
+  return c.json({ received: true, result: result.status }, 200);
 });
