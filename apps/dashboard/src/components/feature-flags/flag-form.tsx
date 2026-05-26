@@ -45,6 +45,15 @@ import {
   useUpdateFeatureFlag,
 } from "../../lib/hooks/useFeatureFlags";
 import type { FlagEnv } from "./types";
+import {
+  conditionsToSift,
+  makeCondition,
+  siftToConditions,
+  type CompareOp,
+  type ConditionKind,
+  type DraftCondition,
+  type ListOp,
+} from "../targeting/sift-codec";
 
 const UI_TO_DB_ENV: Record<FlagEnv, DashboardFlagEnv> = {
   prod: "PROD",
@@ -74,14 +83,6 @@ const TYPE_OPTIONS: ReadonlyArray<{
 
 const ENV_OPTIONS: ReadonlyArray<FlagEnv> = ["prod", "staging", "development"];
 
-type ConditionKind =
-  | "customAttribute"
-  | "country"
-  | "app"
-  | "appVersion"
-  | "platform"
-  | "sdkVersion";
-
 const CONDITION_TYPES: ReadonlyArray<{
   kind: ConditionKind;
   labelKey: string;
@@ -94,9 +95,6 @@ const CONDITION_TYPES: ReadonlyArray<{
   { kind: "platform", labelKey: "featureFlags.new.conditions.types.platform", icon: <Smartphone size={11} /> },
   { kind: "sdkVersion", labelKey: "featureFlags.new.conditions.types.sdkVersion", icon: <Layers size={11} /> },
 ];
-
-type ListOp = "$in" | "$nin";
-type CompareOp = "$eq" | "$ne" | "$gt" | "$gte" | "$lt" | "$lte";
 
 const LIST_OPS: ReadonlyArray<{ value: ListOp; labelKey: string }> = [
   { value: "$in", labelKey: "featureFlags.new.conditions.ops.in" },
@@ -117,28 +115,6 @@ const PLATFORM_VALUES: ReadonlyArray<{ value: string; label: string }> = [
   { value: "android", label: "Android" },
   { value: "web", label: "Web" },
 ];
-
-interface DraftCondition {
-  kind: ConditionKind;
-  // Single-value editors (attribute path + scalar)
-  attribute: string; // for customAttribute
-  scalarOp: CompareOp; // for customAttribute / appVersion / sdkVersion
-  scalarValue: string;
-  // List editors (multi-value chips)
-  listOp: ListOp; // for country / app / platform / customAttribute(list)
-  listValues: string[];
-}
-
-function makeCondition(kind: ConditionKind): DraftCondition {
-  return {
-    kind,
-    attribute: kind === "customAttribute" ? "" : kind,
-    scalarOp: "$gte",
-    scalarValue: "",
-    listOp: "$in",
-    listValues: [],
-  };
-}
 
 interface DraftRule {
   audienceId?: string; // preserved when editing legacy rules; never set on new
@@ -183,154 +159,6 @@ function validateJson(raw: string): JsonState {
       error: e instanceof Error ? e.message : "invalid JSON",
     };
   }
-}
-
-// =============================================================
-// Condition → sift document
-// =============================================================
-
-/**
- * Each draft condition maps to a sift fragment like
- * `{ <field>: { <op>: <value> } }`. We collect every fragment
- * and combine them with $and when there's more than one — this
- * sidesteps the "two conditions on the same field overwrite each
- * other" problem you'd hit by merging plain objects.
- */
-function conditionToFragment(c: DraftCondition): Record<string, unknown> | null {
-  const trimmedAttr = c.attribute.trim();
-  switch (c.kind) {
-    case "customAttribute": {
-      if (!trimmedAttr) return null;
-      const parsed = parseScalar(c.scalarValue);
-      return { [trimmedAttr]: { [c.scalarOp]: parsed } };
-    }
-    case "country":
-    case "app":
-    case "platform": {
-      const field = c.kind;
-      const values = c.listValues
-        .map((v) => v.trim())
-        .filter((v) => v.length > 0);
-      if (values.length === 0) return null;
-      return { [field]: { [c.listOp]: values } };
-    }
-    case "appVersion":
-    case "sdkVersion": {
-      const field = c.kind;
-      const v = c.scalarValue.trim();
-      if (v.length === 0) return null;
-      return { [field]: { [c.scalarOp]: v } };
-    }
-  }
-}
-
-function parseScalar(raw: string): unknown {
-  const trimmed = raw.trim();
-  if (trimmed === "true") return true;
-  if (trimmed === "false") return false;
-  if (trimmed.length > 0 && !Number.isNaN(Number(trimmed))) {
-    return Number(trimmed);
-  }
-  return raw;
-}
-
-function conditionsToSift(
-  conds: ReadonlyArray<DraftCondition>,
-): Record<string, unknown> | undefined {
-  const fragments: Record<string, unknown>[] = [];
-  for (const c of conds) {
-    const frag = conditionToFragment(c);
-    if (frag) fragments.push(frag);
-  }
-  if (fragments.length === 0) return undefined;
-  if (fragments.length === 1) return fragments[0]!;
-  return { $and: fragments };
-}
-
-/**
- * Best-effort reverse mapping: try to recognize the sift shapes
- * this form emits. Anything we can't recognize falls back to a
- * single "customAttribute" row carrying the raw JSON, so a user
- * can still see and edit it.
- */
-function siftToConditions(
-  sift: Record<string, unknown> | undefined,
-): DraftCondition[] {
-  if (!sift) return [];
-  const fragments: Record<string, unknown>[] = Array.isArray(sift.$and)
-    ? (sift.$and as Record<string, unknown>[])
-    : [sift];
-
-  const out: DraftCondition[] = [];
-  for (const frag of fragments) {
-    const entries = Object.entries(frag);
-    if (entries.length !== 1) {
-      // unknown shape — preserve as raw custom attribute
-      out.push({
-        ...makeCondition("customAttribute"),
-        attribute: "_raw",
-        scalarOp: "$eq",
-        scalarValue: JSON.stringify(frag),
-      });
-      continue;
-    }
-    const [field, ops] = entries[0]!;
-    if (typeof ops !== "object" || ops === null || Array.isArray(ops)) {
-      out.push({
-        ...makeCondition("customAttribute"),
-        attribute: field,
-        scalarOp: "$eq",
-        scalarValue: String(ops),
-      });
-      continue;
-    }
-    const opEntries = Object.entries(ops as Record<string, unknown>);
-    if (opEntries.length !== 1) {
-      out.push({
-        ...makeCondition("customAttribute"),
-        attribute: field,
-        scalarOp: "$eq",
-        scalarValue: JSON.stringify(ops),
-      });
-      continue;
-    }
-    const [op, raw] = opEntries[0]!;
-    if (field === "country" || field === "app" || field === "platform") {
-      out.push({
-        ...makeCondition(field),
-        listOp: op === "$nin" ? "$nin" : "$in",
-        listValues: Array.isArray(raw) ? raw.map((v) => String(v)) : [String(raw)],
-      });
-      continue;
-    }
-    if (field === "appVersion" || field === "sdkVersion") {
-      out.push({
-        ...makeCondition(field),
-        scalarOp: normaliseCompareOp(op),
-        scalarValue: String(raw),
-      });
-      continue;
-    }
-    out.push({
-      ...makeCondition("customAttribute"),
-      attribute: field,
-      scalarOp: normaliseCompareOp(op),
-      scalarValue: typeof raw === "object" ? JSON.stringify(raw) : String(raw),
-    });
-  }
-  return out;
-}
-
-function normaliseCompareOp(op: string): CompareOp {
-  const allowed: ReadonlyArray<CompareOp> = [
-    "$eq",
-    "$ne",
-    "$gt",
-    "$gte",
-    "$lt",
-    "$lte",
-  ];
-  return allowed.includes(op as CompareOp) ? (op as CompareOp) : "$eq";
 }
 
 // =============================================================
