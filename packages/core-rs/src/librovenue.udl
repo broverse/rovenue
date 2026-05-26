@@ -20,9 +20,45 @@ dictionary Config {
     boolean debug;
 };
 
+dictionary User {
+    string anon_id;
+    string? known_user_id;
+};
+
+dictionary Entitlement {
+    string id;
+    boolean is_active;
+    string? product_id;
+    u64? expires_at_ms;
+};
+
+callback interface Observer {
+    void on_change(ChangeEvent event);
+};
+
+enum ChangeEvent {
+    "EntitlementsChanged",
+    "IdentityChanged",
+};
+
 interface RovenueCore {
     [Throws=RovenueError]
     constructor(Config config);
 
     string get_version();
+
+    User current_user();
+
+    [Throws=RovenueError]
+    void identify(string known_user_id);
+
+    Entitlement? entitlement(string id);
+    sequence<Entitlement> entitlements_all();
+
+    [Throws=RovenueError]
+    void refresh_entitlements();
+
+    void register_observer(Observer obs);
+    void set_foreground(boolean foreground);
+    void shutdown();
 };
