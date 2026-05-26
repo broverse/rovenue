@@ -5,6 +5,7 @@ pub mod entitlements;
 pub mod error;
 pub mod identity;
 pub mod observer;
+pub mod polling;
 pub mod time;
 pub mod transport;
 pub mod version;
