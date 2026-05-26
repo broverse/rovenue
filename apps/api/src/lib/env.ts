@@ -68,6 +68,17 @@ const envSchema = z
       .enum(["true", "false"])
       .default("true")
       .transform((v) => v === "true"),
+    // ---- Billing (Stripe) --------------------------------------------------
+    // Set BILLING_ENABLED=true to activate the /billing routes and Stripe
+    // integration. When false (default) all billing endpoints return 404 and
+    // no Stripe client is initialised.
+    BILLING_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
+    STRIPE_BILLING_SECRET_KEY: z.string().min(1).optional(),
+    STRIPE_BILLING_WEBHOOK_SECRET: z.string().min(1).optional(),
+    STRIPE_BILLING_PUBLISHABLE_KEY: z.string().min(1).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== "production") return;
@@ -121,6 +132,19 @@ const envSchema = z
       "KAFKA_BROKERS",
       "analytics ingestion requires a Kafka/Redpanda cluster in production",
     );
+
+    if (data.BILLING_ENABLED) {
+      require(
+        data.STRIPE_BILLING_SECRET_KEY,
+        "STRIPE_BILLING_SECRET_KEY",
+        "BILLING_ENABLED=true requires a Stripe secret key in production",
+      );
+      require(
+        data.STRIPE_BILLING_WEBHOOK_SECRET,
+        "STRIPE_BILLING_WEBHOOK_SECRET",
+        "BILLING_ENABLED=true requires a Stripe webhook secret in production",
+      );
+    }
   });
 
 export const env = envSchema.parse(process.env);

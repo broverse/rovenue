@@ -52,3 +52,8 @@ export * as savedQueryRepo from "./repositories/saved-queries";
 export * as fxRateRepo from "./repositories/fx-rates";
 export * as scheduledActionsRepo from "./repositories/scheduled-actions";
 export * as invitationRepo from "./repositories/invitations";
+export * as billingSubscriptionRepo from "./repositories/billing-subscriptions";
+export * as billingPaymentMethodRepo from "./repositories/billing-payment-methods";
+export * as billingInvoiceRepo from "./repositories/billing-invoices";
+export * as billingDunningStateRepo from "./repositories/billing-dunning-state";
+export * as usageSnapshotRepo from "./repositories/usage-snapshots";

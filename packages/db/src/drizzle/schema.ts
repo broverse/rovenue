@@ -7,6 +7,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   primaryKey,
   smallint,
@@ -17,6 +18,13 @@ import {
 
 import {
   aggregateTypeEnum,
+  billingCycleEnum,
+  billingDunningPhaseEnum,
+  billingInvoiceStatusEnum,
+  billingMeterKeyEnum,
+  billingPendingActionEnum,
+  billingStateEnum,
+  billingTierEnum,
   creditLedgerType,
   environment,
   experimentStatus,
@@ -1379,6 +1387,13 @@ export type NewScheduledSubscriptionAction =
 // from "@rovenue/db/drizzle"` without reaching into the `drizzle`
 // namespace on the top-level `@rovenue/db` export.
 export {
+  billingCycleEnum,
+  billingDunningPhaseEnum,
+  billingInvoiceStatusEnum,
+  billingMeterKeyEnum,
+  billingPendingActionEnum,
+  billingStateEnum,
+  billingTierEnum,
   creditLedgerType,
   environment,
   experimentStatus,
@@ -1397,3 +1412,182 @@ export {
   webhookEventStatus,
   webhookSource,
 } from "./enums";
+
+// =============================================================
+// Billing tables (Phase 1)
+// =============================================================
+// One row per project (partial unique on projectId WHERE state != 'deleted')
+// captures the project's lifetime billing state. Stripe identifiers stay
+// NULL while the project is on Free — the Stripe customer is created
+// lazily on first upgrade.
+
+export const billingSubscriptions = pgTable(
+  "billing_subscriptions",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    state: billingStateEnum("state").notNull().default("free"),
+    tier: billingTierEnum("tier").notNull().default("free"),
+    cycle: billingCycleEnum("cycle").notNull().default("monthly"),
+    currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    trialEnd: timestamp("trial_end", { withTimezone: true }),
+    pausedAt: timestamp("paused_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    pendingAction: billingPendingActionEnum("pending_action"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    activeProjectUnique: uniqueIndex("billing_subscriptions_project_active_uq")
+      .on(t.projectId)
+      .where(sql`${t.state} != 'deleted'`),
+    stripeSubscriptionIdUnique: uniqueIndex(
+      "billing_subscriptions_stripe_subscription_id_uq",
+    ).on(t.stripeSubscriptionId),
+  }),
+);
+
+export const billingPaymentMethods = pgTable(
+  "billing_payment_methods",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    stripePaymentMethodId: text("stripe_payment_method_id").notNull().unique(),
+    brand: text("brand").notNull(),
+    last4: text("last4").notNull(),
+    expMonth: integer("exp_month").notNull(),
+    expYear: integer("exp_year").notNull(),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    oneDefaultPerProject: uniqueIndex("billing_payment_methods_default_uq")
+      .on(t.projectId)
+      .where(sql`${t.isDefault} = true`),
+    projectIdx: index("billing_payment_methods_project_idx").on(t.projectId),
+  }),
+);
+
+export const billingInvoices = pgTable(
+  "billing_invoices",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    stripeInvoiceId: text("stripe_invoice_id").notNull().unique(),
+    number: text("number").notNull(),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    amountDue: numeric("amount_due", { precision: 12, scale: 4 }).notNull(),
+    amountPaid: numeric("amount_paid", { precision: 12, scale: 4 })
+      .notNull()
+      .default("0"),
+    refundedAmount: numeric("refunded_amount", { precision: 12, scale: 4 })
+      .notNull()
+      .default("0"),
+    currency: text("currency").notNull().default("usd"),
+    status: billingInvoiceStatusEnum("status").notNull(),
+    hostedInvoiceUrl: text("hosted_invoice_url"),
+    pdfUrl: text("pdf_url"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextPaymentAttempt: timestamp("next_payment_attempt", {
+      withTimezone: true,
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectCreatedIdx: index("billing_invoices_project_created_idx").on(
+      t.projectId,
+      t.createdAt,
+    ),
+  }),
+);
+
+export const billingDunningState = pgTable("billing_dunning_state", {
+  projectId: text("project_id")
+    .primaryKey()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  firstFailureAt: timestamp("first_failure_at", { withTimezone: true }).notNull(),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  currentPhase: billingDunningPhaseEnum("current_phase"),
+  uiLockedAt: timestamp("ui_locked_at", { withTimezone: true }),
+  sdkLockedAt: timestamp("sdk_locked_at", { withTimezone: true }),
+  recoveredAt: timestamp("recovered_at", { withTimezone: true }),
+  lastEmailSentAt: timestamp("last_email_sent_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const billingTierLimits = pgTable(
+  "billing_tier_limits",
+  {
+    tier: billingTierEnum("tier").notNull(),
+    cycle: billingCycleEnum("cycle").notNull(),
+    priceUsdCents: integer("price_usd_cents").notNull(),
+    stripePriceId: text("stripe_price_id"),
+    mtrMin: numeric("mtr_min", { precision: 12, scale: 4 }).notNull(),
+    mtrMax: numeric("mtr_max", { precision: 12, scale: 4 }),
+    eventsLimit: integer("events_limit"),
+    sqlLimit: integer("sql_limit"),
+    retentionDays: integer("retention_days").notNull(),
+    auditLogDays: integer("audit_log_days").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.tier, t.cycle] }),
+  }),
+);
+
+export const usageSnapshots = pgTable(
+  "usage_snapshots",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    meterKey: billingMeterKeyEnum("meter_key").notNull(),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    currentValue: numeric("current_value", { precision: 18, scale: 4 })
+      .notNull()
+      .default("0"),
+    limitValue: numeric("limit_value", { precision: 18, scale: 4 }),
+    softCapWarnedAt: timestamp("soft_cap_warned_at", { withTimezone: true }),
+    hardCapWarnedAt: timestamp("hard_cap_warned_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({
+      columns: [t.projectId, t.meterKey, t.periodStart],
+    }),
+  }),
+);
+
+export type BillingSubscription = typeof billingSubscriptions.$inferSelect;
+export type NewBillingSubscription = typeof billingSubscriptions.$inferInsert;
+export type BillingPaymentMethod = typeof billingPaymentMethods.$inferSelect;
+export type NewBillingPaymentMethod = typeof billingPaymentMethods.$inferInsert;
+export type BillingInvoice = typeof billingInvoices.$inferSelect;
+export type NewBillingInvoice = typeof billingInvoices.$inferInsert;
+export type BillingDunningStateRow = typeof billingDunningState.$inferSelect;
+export type NewBillingDunningStateRow = typeof billingDunningState.$inferInsert;
+export type BillingTierLimits = typeof billingTierLimits.$inferSelect;
+export type UsageSnapshot = typeof usageSnapshots.$inferSelect;
+export type NewUsageSnapshot = typeof usageSnapshots.$inferInsert;

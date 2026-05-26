@@ -134,3 +134,98 @@ export const invitationDeliveryStatus = pgEnum("InvitationDeliveryStatus", [
   "COMPLAINED",
   "SUPPRESSED",
 ]);
+
+// =============================================================
+// Billing pgEnums (Phase 1)
+// =============================================================
+
+export const billingCycleEnum = pgEnum("billing_cycle", ["monthly", "annual"]);
+export const billingDunningPhaseEnum = pgEnum("billing_dunning_phase", [
+  "retrying",
+  "past_due",
+  "suspended",
+]);
+export const billingInvoiceStatusEnum = pgEnum("billing_invoice_status", [
+  "draft",
+  "open",
+  "paid",
+  "uncollectible",
+  "void",
+]);
+export const billingMeterKeyEnum = pgEnum("billing_meter_key", [
+  "mtr",
+  "events",
+  "sql_queries",
+]);
+export const billingPendingActionEnum = pgEnum("billing_pending_action", [
+  "downgrade_to_free",
+  "pause",
+  "delete",
+]);
+export const billingStateEnum = pgEnum("billing_state", [
+  "free",
+  "active",
+  "past_due",
+  "paused",
+  "deleted",
+]);
+export const billingTierEnum = pgEnum("billing_tier", [
+  "free",
+  "indie",
+  "pro",
+  "scale",
+  "growth",
+  "enterprise",
+]);
+
+// =============================================================
+// Billing enums (TS-only — not Postgres pgEnum; stored as text)
+// =============================================================
+
+export const billingState = [
+  "free",
+  "active",
+  "past_due",
+  "paused",
+  "deleted",
+] as const;
+export type BillingState = (typeof billingState)[number];
+
+export const billingTier = [
+  "free",
+  "indie",
+  "pro",
+  "scale",
+  "growth",
+  "enterprise",
+] as const;
+export type BillingTier = (typeof billingTier)[number];
+
+export const billingCycle = ["monthly", "annual"] as const;
+export type BillingCycle = (typeof billingCycle)[number];
+
+export const billingInvoiceStatus = [
+  "draft",
+  "open",
+  "paid",
+  "uncollectible",
+  "void",
+] as const;
+export type BillingInvoiceStatus = (typeof billingInvoiceStatus)[number];
+
+export const billingDunningPhase = [
+  "retrying",
+  "past_due",
+  "suspended",
+] as const;
+export type BillingDunningPhase = (typeof billingDunningPhase)[number];
+
+export const billingPendingAction = [
+  "downgrade_to_free",
+  "pause",
+  "delete",
+] as const;
+export type BillingPendingAction = (typeof billingPendingAction)[number];
+
+export const billingMeterKey = ["mtr", "events", "sql_queries"] as const;
+export type BillingMeterKey = (typeof billingMeterKey)[number];

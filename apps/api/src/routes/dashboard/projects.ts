@@ -18,6 +18,7 @@ import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { audit, extractRequestContext, redactCredentials } from "../../lib/audit";
 import { ok } from "../../lib/response";
+import { createFreeSubscription } from "../../services/billing/create-free-subscription";
 
 // =============================================================
 // Dashboard: Projects
@@ -273,6 +274,8 @@ export const projectsRoute = new Hono()
       userId: user.id,
       role: MemberRole.OWNER,
     });
+
+    await createFreeSubscription(tx, createdProject.id);
 
     await drizzle.audienceRepo.createAudience(tx, {
       projectId: createdProject.id,

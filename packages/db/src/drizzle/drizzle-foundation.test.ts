@@ -24,7 +24,16 @@ import {
   type NewAuditLogRow,
   type NewProject,
 } from "./schema";
-import { aggregateTypeEnum } from "./enums";
+import {
+  aggregateTypeEnum,
+  billingState,
+  billingTier,
+  billingCycle,
+  billingInvoiceStatus,
+  billingDunningPhase,
+  billingPendingAction,
+  billingMeterKey,
+} from "./enums";
 import {
   experimentVariantsSchema,
   featureFlagRulesSchema,
@@ -373,5 +382,182 @@ describe("outboxEvents", () => {
       "REVENUE_EVENT",
       "CREDIT_LEDGER",
     ]);
+  });
+});
+
+describe("billing enums", () => {
+  it("billingState lists every state the FSM uses", () => {
+    expect(billingState).toEqual([
+      "free",
+      "active",
+      "past_due",
+      "paused",
+      "deleted",
+    ]);
+  });
+  it("billingTier lists every tier in the ladder", () => {
+    expect(billingTier).toEqual([
+      "free",
+      "indie",
+      "pro",
+      "scale",
+      "growth",
+      "enterprise",
+    ]);
+  });
+  it("billingCycle covers monthly + annual only", () => {
+    expect(billingCycle).toEqual(["monthly", "annual"]);
+  });
+  it("billingInvoiceStatus matches Stripe's invoice statuses", () => {
+    expect(billingInvoiceStatus).toEqual([
+      "draft",
+      "open",
+      "paid",
+      "uncollectible",
+      "void",
+    ]);
+  });
+  it("billingDunningPhase covers the three dunning sub-states", () => {
+    expect(billingDunningPhase).toEqual([
+      "retrying",
+      "past_due",
+      "suspended",
+    ]);
+  });
+  it("billingPendingAction covers the three expected deletions", () => {
+    expect(billingPendingAction).toEqual([
+      "downgrade_to_free",
+      "pause",
+      "delete",
+    ]);
+  });
+  it("billingMeterKey lists the three metered dimensions", () => {
+    expect(billingMeterKey).toEqual([
+      "mtr",
+      "events",
+      "sql_queries",
+    ]);
+  });
+});
+
+import {
+  billingSubscriptions,
+  billingPaymentMethods,
+  billingInvoices,
+  billingDunningState,
+  billingTierLimits,
+  usageSnapshots,
+} from "./schema";
+
+describe("billing tables", () => {
+  it("billing_subscriptions has the columns the spec defines", () => {
+    const cols = Object.keys(billingSubscriptions);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "id",
+        "projectId",
+        "stripeCustomerId",
+        "stripeSubscriptionId",
+        "state",
+        "tier",
+        "cycle",
+        "currentPeriodStart",
+        "currentPeriodEnd",
+        "trialEnd",
+        "pausedAt",
+        "deletedAt",
+        "pendingAction",
+        "createdAt",
+        "updatedAt",
+      ]),
+    );
+  });
+  it("billing_payment_methods has Stripe-PM mirror columns", () => {
+    const cols = Object.keys(billingPaymentMethods);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "id",
+        "projectId",
+        "stripePaymentMethodId",
+        "brand",
+        "last4",
+        "expMonth",
+        "expYear",
+        "isDefault",
+        "createdAt",
+      ]),
+    );
+  });
+  it("billing_invoices has Stripe-invoice mirror columns + refunded", () => {
+    const cols = Object.keys(billingInvoices);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "id",
+        "projectId",
+        "stripeInvoiceId",
+        "number",
+        "periodStart",
+        "periodEnd",
+        "amountDue",
+        "amountPaid",
+        "refundedAmount",
+        "currency",
+        "status",
+        "hostedInvoiceUrl",
+        "pdfUrl",
+        "attemptCount",
+        "nextPaymentAttempt",
+        "createdAt",
+      ]),
+    );
+  });
+  it("billing_dunning_state has the FSM columns", () => {
+    const cols = Object.keys(billingDunningState);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "projectId",
+        "firstFailureAt",
+        "attemptCount",
+        "currentPhase",
+        "uiLockedAt",
+        "sdkLockedAt",
+        "recoveredAt",
+        "lastEmailSentAt",
+        "updatedAt",
+      ]),
+    );
+  });
+  it("billing_tier_limits has reference data columns", () => {
+    const cols = Object.keys(billingTierLimits);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "tier",
+        "cycle",
+        "priceUsdCents",
+        "stripePriceId",
+        "mtrMin",
+        "mtrMax",
+        "eventsLimit",
+        "sqlLimit",
+        "retentionDays",
+        "auditLogDays",
+      ]),
+    );
+  });
+  it("usage_snapshots has the PG rollup columns", () => {
+    const cols = Object.keys(usageSnapshots);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "projectId",
+        "meterKey",
+        "periodStart",
+        "periodEnd",
+        "currentValue",
+        "limitValue",
+        "softCapWarnedAt",
+        "hardCapWarnedAt",
+        "updatedAt",
+      ]),
+    );
   });
 });
