@@ -1,47 +1,35 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Search } from "lucide-react";
+import type { CohortRow } from "@rovenue/shared";
 import { cn } from "../../lib/cn";
-import { dotColor } from "./format";
-import type { CohortGroupKey, SavedCohort } from "./types";
+import { dotColorForId } from "./format";
 
 type Props = {
-  cohorts: ReadonlyArray<SavedCohort>;
-  selectedId: string;
+  cohorts: ReadonlyArray<CohortRow>;
+  selectedId: string | null;
   onSelect: (id: string) => void;
+  onNew: () => void;
 };
 
-const GROUP_ORDER: ReadonlyArray<CohortGroupKey> = [
-  "Behavior",
-  "Lifecycle",
-  "Risk",
-  "Acquisition",
-];
-
-export function SavedCohortsRail({ cohorts, selectedId, onSelect }: Props) {
+export function SavedCohortsRail({
+  cohorts,
+  selectedId,
+  onSelect,
+  onNew,
+}: Props) {
   const { t } = useTranslation();
   const [filter, setFilter] = useState("");
 
-  const filtered = useMemo<ReadonlyArray<SavedCohort>>(() => {
+  const filtered = useMemo<ReadonlyArray<CohortRow>>(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return cohorts;
     return cohorts.filter(
       (c) =>
         c.name.toLowerCase().includes(q) ||
-        c.description.toLowerCase().includes(q) ||
-        c.group.toLowerCase().includes(q),
+        (c.description ?? "").toLowerCase().includes(q),
     );
   }, [cohorts, filter]);
-
-  const groups = useMemo(() => {
-    const map = new Map<CohortGroupKey, SavedCohort[]>();
-    for (const item of filtered) {
-      const list = map.get(item.group) ?? [];
-      list.push(item);
-      map.set(item.group, list);
-    }
-    return GROUP_ORDER.filter((g) => map.has(g)).map((g) => [g, map.get(g)!] as const);
-  }, [filtered]);
 
   return (
     <aside className="overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">
@@ -52,6 +40,7 @@ export function SavedCohortsRail({ cohorts, selectedId, onSelect }: Props) {
         <button
           type="button"
           aria-label={t("cohorts.saved.newAria")}
+          onClick={onNew}
           className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-rv-mute-500 transition hover:bg-rv-c3 hover:text-foreground"
         >
           <Plus size={12} />
@@ -71,14 +60,19 @@ export function SavedCohortsRail({ cohorts, selectedId, onSelect }: Props) {
         </label>
       </div>
 
-      {groups.map(([group, items]) => (
-        <div key={group}>
+      {filtered.length === 0 ? (
+        <div className="px-3.5 py-6 text-center text-[12px] text-rv-mute-500">
+          {cohorts.length === 0
+            ? t("cohorts.list.empty")
+            : t("cohorts.saved.filterEmpty")}
+        </div>
+      ) : (
+        <div>
           <div className="bg-rv-c2 px-3.5 py-2 text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
-            {t(`cohorts.saved.groups.${group}`)}
+            {t("cohorts.list.allHeading")}
           </div>
-          {items.map((item) => {
+          {filtered.map((item) => {
             const active = item.id === selectedId;
-            const negative = item.growth.startsWith("−");
             return (
               <button
                 key={item.id}
@@ -94,21 +88,20 @@ export function SavedCohortsRail({ cohorts, selectedId, onSelect }: Props) {
                   <span
                     aria-hidden
                     className="h-1.5 w-1.5 shrink-0 rounded-full"
-                    style={{ background: dotColor(item.dot) }}
+                    style={{ background: dotColorForId(item.id) }}
                   />
                   <span className="truncate">{item.name}</span>
                 </div>
-                <div className="mt-0.5 font-rv-mono text-[11px] tabular-nums text-rv-mute-500">
-                  {item.size.toLocaleString()} ·{" "}
-                  <span className={negative ? "text-rv-danger" : "text-rv-success"}>
-                    {item.growth}
-                  </span>
-                </div>
+                {item.description && (
+                  <div className="mt-0.5 truncate font-rv-mono text-[11px] text-rv-mute-500">
+                    {item.description}
+                  </div>
+                )}
               </button>
             );
           })}
         </div>
-      ))}
+      )}
     </aside>
   );
 }

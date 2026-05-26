@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Download } from "lucide-react";
+import type { CohortRetentionPoint } from "@rovenue/shared";
 import { Button } from "../../ui/button";
 import {
   formatActiveCount,
@@ -10,7 +11,6 @@ import {
   retentionCellBackground,
   retentionCellText,
 } from "./format";
-import { COHORT_COLUMN_HEADERS, COHORT_ROWS } from "./mock-data";
 import { MetricTabs } from "./metric-tabs";
 import type { RetentionMetric } from "./types";
 
@@ -28,9 +28,23 @@ type Props = {
   cohortName: string;
   metric: RetentionMetric;
   onMetricChange: (next: RetentionMetric) => void;
+  points: ReadonlyArray<CohortRetentionPoint>;
+  size: number | null;
+  loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 };
 
-export function RetentionHeatmap({ cohortName, metric, onMetricChange }: Props) {
+export function RetentionHeatmap({
+  cohortName,
+  metric,
+  onMetricChange,
+  points,
+  size,
+  loading,
+  error,
+  onRetry,
+}: Props) {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState<HoveredCell | null>(null);
 
@@ -40,6 +54,22 @@ export function RetentionHeatmap({ cohortName, metric, onMetricChange }: Props) 
       : metric === "revenue"
         ? "cohorts.retention.headingRevenue"
         : "cohorts.retention.headingCount";
+
+  const columnHeaders = points.map((p) =>
+    p.period === 0 ? t("cohorts.retention.activation") : `W${p.period}`,
+  );
+
+  const row = {
+    cohort: cohortName,
+    size: size ?? 0,
+    cells: points.map((p) => ({ period: p.period, active: p.active, pct: p.pct })),
+  };
+
+  // Heatmap row shape compatible with metricValue helper
+  const heatmapRow = {
+    size: row.size,
+    data: row.cells.map((c) => c.pct),
+  };
 
   return (
     <section className="overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">
@@ -59,34 +89,51 @@ export function RetentionHeatmap({ cohortName, metric, onMetricChange }: Props) 
         </div>
       </header>
 
-      <div className="overflow-x-auto px-4 py-3.5">
-        <div
-          className="grid min-w-[900px] gap-0.5 font-rv-mono text-[11px]"
-          style={{ gridTemplateColumns: "120px repeat(12, minmax(0, 1fr))" }}
-        >
-          <div className="px-1 py-1 text-center text-[10px] font-medium uppercase tracking-wide text-rv-mute-500">
-            {t("cohorts.retention.cohortHeader")}
-          </div>
-          {COHORT_COLUMN_HEADERS.map((h) => (
-            <div
-              key={h}
-              className="px-1 py-1 text-center text-[10px] font-medium uppercase tracking-wide text-rv-mute-500"
-            >
-              {h}
-            </div>
-          ))}
+      {error && (
+        <div className="flex items-center justify-between border-b border-rv-divider bg-rv-c2 px-4 py-2.5 font-rv-mono text-[12px] text-rv-danger">
+          <span>{error}</span>
+          {onRetry && (
+            <Button variant="flat" size="sm" className="h-6" onClick={onRetry}>
+              {t("cohorts.retention.retry")}
+            </Button>
+          )}
+        </div>
+      )}
 
-          {COHORT_ROWS.map((row, rIdx) => (
-            <Fragment key={row.label}>
+      <div className="overflow-x-auto px-4 py-3.5">
+        {loading && points.length === 0 ? (
+          <div className="px-4 py-10 text-center text-[12px] text-rv-mute-500">
+            {t("cohorts.retention.loading")}
+          </div>
+        ) : (
+          <div
+            className="grid min-w-[900px] gap-0.5 font-rv-mono text-[11px]"
+            style={{
+              gridTemplateColumns: `120px repeat(${columnHeaders.length}, minmax(0, 1fr))`,
+            }}
+          >
+            <div className="px-1 py-1 text-center text-[10px] font-medium uppercase tracking-wide text-rv-mute-500">
+              {t("cohorts.retention.cohortHeader")}
+            </div>
+            {columnHeaders.map((h) => (
+              <div
+                key={h}
+                className="px-1 py-1 text-center text-[10px] font-medium uppercase tracking-wide text-rv-mute-500"
+              >
+                {h}
+              </div>
+            ))}
+
+            <Fragment>
               <div className="py-1.5 pr-2.5 text-left font-medium text-rv-mute-700">
-                {row.label}
+                {row.cohort}
                 <span className="ml-1.5 text-[10px] text-rv-mute-500">
                   {row.size.toLocaleString()}
                 </span>
               </div>
-              {row.data.map((_raw, cIdx) => {
-                const v = metricValue(row, cIdx, metric);
-                const base = row.data[cIdx];
+              {row.cells.map((_cell, cIdx) => {
+                const v = metricValue(heatmapRow, cIdx, metric);
+                const base = heatmapRow.data[cIdx];
                 const isData = v != null && base != null;
                 return (
                   <button
@@ -96,7 +143,7 @@ export function RetentionHeatmap({ cohortName, metric, onMetricChange }: Props) 
                     onMouseEnter={() => {
                       if (isData) {
                         setHovered({
-                          cohort: row.label,
+                          cohort: row.cohort,
                           week: cIdx,
                           baseValue: base,
                           displayed: v,
@@ -108,7 +155,7 @@ export function RetentionHeatmap({ cohortName, metric, onMetricChange }: Props) 
                     onFocus={() => {
                       if (isData) {
                         setHovered({
-                          cohort: row.label,
+                          cohort: row.cohort,
                           week: cIdx,
                           baseValue: base,
                           displayed: v,
@@ -129,20 +176,19 @@ export function RetentionHeatmap({ cohortName, metric, onMetricChange }: Props) 
                     }}
                     title={
                       isData
-                        ? `${row.label} · W${cIdx}: ${
+                        ? `${row.cohort} · W${cIdx}: ${
                             metric === "count" ? v.toLocaleString() : v + metricSuffix(metric)
                           }`
                         : ""
                     }
-                    data-row={rIdx}
                   >
                     {formatMetricCellValue(v, metric)}
                   </button>
                 );
               })}
             </Fragment>
-          ))}
-        </div>
+          </div>
+        )}
 
         <div className="mt-3.5 flex items-center gap-2.5 font-rv-mono text-[11px] text-rv-mute-500">
           <span>0{metricSuffix(metric)}</span>

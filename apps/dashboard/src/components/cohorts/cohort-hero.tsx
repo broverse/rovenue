@@ -1,44 +1,51 @@
 import { useTranslation } from "react-i18next";
-import { dotColor } from "./format";
-import type { CohortMember, SavedCohort } from "./types";
+import type { CohortRow } from "@rovenue/shared";
+import { dotColorForId } from "./format";
+import { MockBadge } from "./mock-badge";
+import { SAMPLE_MEMBERS } from "./mock-data";
 
 type Props = {
-  cohort: SavedCohort;
-  members: ReadonlyArray<CohortMember>;
+  cohort: CohortRow;
+  size: number | null;
+  w4Pct: number | null;
 };
 
-type StatProps = {
+function HeroStat({
+  label,
+  value,
+  delta,
+  mocked,
+}: {
   label: string;
   value: string;
-  delta: string;
-  deltaTone: "success" | "danger";
-};
-
-function HeroStat({ label, value, delta, deltaTone }: StatProps) {
+  delta?: string;
+  mocked?: boolean;
+}) {
   return (
     <div>
-      <div className="text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
+      <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
         {label}
+        {mocked && <MockBadge />}
       </div>
       <div className="mt-0.5 font-rv-mono text-[24px] font-medium tabular-nums text-foreground">
         {value}
       </div>
-      <div
-        className={
-          "font-rv-mono text-[11px] " +
-          (deltaTone === "danger" ? "text-rv-danger" : "text-rv-success")
-        }
-      >
-        {delta}
-      </div>
+      {delta && (
+        <div className="font-rv-mono text-[11px] text-rv-success">{delta}</div>
+      )}
     </div>
   );
 }
 
-export function CohortHero({ cohort, members }: Props) {
+export function CohortHero({ cohort, size, w4Pct }: Props) {
   const { t } = useTranslation();
-  const negative = cohort.growth.startsWith("−");
-  const remainder = cohort.size - members.length;
+  const members = SAMPLE_MEMBERS;
+  const sizeDisplay =
+    size == null ? "—" : size.toLocaleString();
+  const w4Display =
+    w4Pct == null ? "—" : `${w4Pct.toFixed(1)}%`;
+  const remainder =
+    size == null ? 0 : Math.max(0, size - members.length);
 
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
@@ -48,15 +55,22 @@ export function CohortHero({ cohort, members }: Props) {
             <span
               aria-hidden
               className="h-2 w-2 rounded-full"
-              style={{ background: dotColor(cohort.dot) }}
+              style={{ background: dotColorForId(cohort.id) }}
             />
-            {t("cohorts.hero.groupCohort", { group: cohort.group })}
+            {t("cohorts.hero.groupCohort", {
+              group: t("cohorts.hero.defaultGroup"),
+            })}
           </div>
           <h2 className="mt-1.5 mb-1 text-[22px] font-semibold leading-tight">
             {cohort.name}
           </h2>
-          <p className="m-0 text-[13px] text-rv-mute-600">{cohort.description}</p>
-          <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {cohort.description && (
+            <p className="m-0 text-[13px] text-rv-mute-600">
+              {cohort.description}
+            </p>
+          )}
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            <MockBadge />
             {members.map((m) => (
               <span
                 key={m.id}
@@ -70,7 +84,9 @@ export function CohortHero({ cohort, members }: Props) {
             ))}
             {remainder > 0 && (
               <span className="inline-flex items-center rounded-full border border-rv-divider bg-rv-c2 px-2.5 py-1 font-rv-mono text-[11px] text-rv-mute-500">
-                {t("cohorts.hero.memberMore", { count: remainder.toLocaleString() })}
+                {t("cohorts.hero.memberMore", {
+                  count: remainder.toLocaleString(),
+                })}
               </span>
             )}
           </div>
@@ -79,27 +95,23 @@ export function CohortHero({ cohort, members }: Props) {
         <div className="flex flex-wrap items-start gap-6">
           <HeroStat
             label={t("cohorts.hero.size")}
-            value={cohort.size.toLocaleString()}
-            delta={t("cohorts.hero.sizeDelta", { value: cohort.growth })}
-            deltaTone={negative ? "danger" : "success"}
+            value={sizeDisplay}
           />
           <HeroStat
             label={t("cohorts.hero.w4Retention")}
-            value={t("cohorts.hero.w4RetentionValue")}
-            delta={t("cohorts.hero.w4RetentionDelta")}
-            deltaTone="success"
+            value={w4Display}
           />
           <HeroStat
             label={t("cohorts.hero.ltv90")}
             value={t("cohorts.hero.ltv90Value")}
             delta={t("cohorts.hero.ltv90Delta")}
-            deltaTone="success"
+            mocked
           />
           <HeroStat
             label={t("cohorts.hero.monthlyChurn")}
             value={t("cohorts.hero.monthlyChurnValue")}
             delta={t("cohorts.hero.monthlyChurnDelta")}
-            deltaTone="success"
+            mocked
           />
         </div>
       </div>

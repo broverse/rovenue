@@ -1,17 +1,10 @@
-import type { CohortDot, CohortRow, RetentionMetric } from "./types";
+import type { RetentionMetric } from "./types";
 
-const DOT_COLOR: Record<CohortDot, string> = {
-  primary: "var(--color-rv-accent-500)",
-  success: "var(--color-rv-success)",
-  warning: "var(--color-rv-warning)",
-  danger: "var(--color-rv-danger)",
-  violet: "var(--color-rv-violet)",
-  muted: "var(--color-rv-mute-500)",
+/** Minimal heatmap row shape used only within this module. */
+type HeatmapRow = {
+  size: number;
+  data: ReadonlyArray<number | null>;
 };
-
-export function dotColor(tone: CohortDot): string {
-  return DOT_COLOR[tone];
-}
 
 /** Heatmap cell background — primary-tinted, opacity scales with retention. */
 export function retentionCellBackground(value: number | null): string {
@@ -36,7 +29,7 @@ export function retentionCellText(value: number | null): string {
  * user retention); `count` projects back to absolute user counts.
  */
 export function metricValue(
-  row: CohortRow,
+  row: HeatmapRow,
   weekIndex: number,
   metric: RetentionMetric,
 ): number | null {
@@ -65,4 +58,26 @@ export function formatMetricCellValue(value: number | null, metric: RetentionMet
   if (value == null) return "·";
   if (metric === "count") return formatActiveCount(value);
   return value + metricSuffix(metric);
+}
+
+// Deterministic dot colour from a cohort id.
+const DOT_PALETTE = [
+  "#22c55e", // green
+  "#a855f7", // violet
+  "#f59e0b", // amber
+  "#3b82f6", // blue
+  "#ef4444", // red
+  "#14b8a6", // teal
+] as const;
+
+export function dotColorForId(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return DOT_PALETTE[h % DOT_PALETTE.length];
+}
+
+export function w4Pct(
+  points: ReadonlyArray<{ period: number; pct: number }>,
+): number | null {
+  return points.find((p) => p.period === 4)?.pct ?? null;
 }

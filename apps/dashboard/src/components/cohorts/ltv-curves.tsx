@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { COHORT_COLUMN_HEADERS, LTV_CURVES } from "./mock-data";
+import { LTV_CURVES } from "./mock-data";
 import type { LtvCurve } from "./types";
 
 const W = 640;
@@ -20,7 +20,7 @@ const y = (v: number) => PAD.t + (1 - v / MAX_USD) * (H - PAD.t - PAD.b);
 export function LtvCurves() {
   const { t } = useTranslation();
   const yTicks = [0, 5, 10, 15, 20];
-  const xTicks = COHORT_COLUMN_HEADERS.filter((_, i) => i % 2 === 0);
+  const xTicks: ReadonlyArray<string> = ["W0", "W2", "W4", "W6", "W8", "W10"];
 
   return (
     <section className="overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">

@@ -1,5 +1,18 @@
 import { useTranslation } from "react-i18next";
-import { dotColor } from "./format";
+type CohortDot = "primary" | "success" | "warning" | "danger" | "violet" | "muted";
+
+const DOT_COLOR: Record<CohortDot, string> = {
+  primary: "var(--color-rv-accent-500)",
+  success: "var(--color-rv-success)",
+  warning: "var(--color-rv-warning)",
+  danger: "var(--color-rv-danger)",
+  violet: "var(--color-rv-violet)",
+  muted: "var(--color-rv-mute-500)",
+};
+
+function dotColor(tone: CohortDot): string {
+  return DOT_COLOR[tone];
+}
 import { SYNC_DESTINATIONS } from "./mock-data";
 import type { SyncDestination } from "./types";
 
