@@ -13,6 +13,7 @@ import { experimentsRoute } from "./experiments";
 import { featureFlagsRoute } from "./feature-flags";
 import { leaderboardsRoute } from "./leaderboards";
 import { meRoute } from "./me";
+import { invitationsRoute } from "./invitations";
 import { membersRoute } from "./members";
 import { metricsRoute } from "./metrics";
 import { overviewRoute } from "./overview";
@@ -55,6 +56,7 @@ export const dashboardRoute = new Hono()
   .route("/projects/:projectId/credits", creditsRoute)
   .route("/projects/:projectId/events", eventsStreamRoute)
   .route("/projects/:projectId/leaderboards", leaderboardsRoute)
+  .route("/projects/:projectId/invitations", invitationsRoute)
   .route("/projects/:projectId/members", membersRoute)
   .route("/projects/:projectId/metrics", metricsRoute)
   .route("/projects/:projectId/overview", overviewRoute)

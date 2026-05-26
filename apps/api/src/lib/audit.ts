@@ -76,7 +76,12 @@ export type AuditAction =
   | "member.role_changed"
   | "member.removed"
   | "member.left"
-  | "member.ownership_transferred";
+  | "member.ownership_transferred"
+  // --- invitations ---
+  | "invitation.created"
+  | "invitation.revoked"
+  | "invitation.resent"
+  | "invitation.accepted";
 
 export type AuditResource =
   | "audience"
@@ -89,7 +94,8 @@ export type AuditResource =
   | "purchase"
   | "subscriber"
   | "member"
-  | "credential";
+  | "credential"
+  | "invitation";
 
 export interface AuditEntry {
   projectId: string;
