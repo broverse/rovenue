@@ -74,7 +74,9 @@ export type AuditAction =
   // --- members ---
   | "member.invited"
   | "member.role_changed"
-  | "member.removed";
+  | "member.removed"
+  | "member.left"
+  | "member.ownership_transferred";
 
 export type AuditResource =
   | "audience"
