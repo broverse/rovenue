@@ -48,15 +48,17 @@ function snsNotification(sesEvent: unknown) {
   };
 }
 
-function sesBounceEvent(messageId: string, diagnosticCode = "550 unknown") {
+function sesBounceEvent(
+  messageId: string,
+  diagnosticCode = "550 unknown",
+  recipient = "bounce@example.com",
+) {
   return {
     notificationType: "Bounce",
     bounce: {
       bounceType: "Permanent",
       bounceSubType: "General",
-      bouncedRecipients: [
-        { emailAddress: "bounce@example.com", diagnosticCode },
-      ],
+      bouncedRecipients: [{ emailAddress: recipient, diagnosticCode }],
       timestamp: new Date().toISOString(),
       feedbackId: `fb-${RUN_ID}`,
     },
@@ -65,6 +67,67 @@ function sesBounceEvent(messageId: string, diagnosticCode = "550 unknown") {
       tags: { "ses:configuration-set": ["rovenue-events"] },
     },
   };
+}
+
+function sesComplaintEvent(messageId: string, recipient: string) {
+  return {
+    notificationType: "Complaint",
+    complaint: {
+      complainedRecipients: [{ emailAddress: recipient }],
+      timestamp: new Date().toISOString(),
+      feedbackId: `fb-c-${RUN_ID}`,
+    },
+    mail: {
+      messageId,
+      tags: { "ses:configuration-set": ["rovenue-events"] },
+    },
+  };
+}
+
+function sesDeliveryEvent(messageId: string, recipient: string) {
+  return {
+    notificationType: "Delivery",
+    delivery: {
+      recipients: [recipient],
+      timestamp: new Date().toISOString(),
+      processingTimeMillis: 100,
+      smtpResponse: "250 2.6.0",
+      reportingMTA: "a8-123.smtp-out.amazonses.com",
+    },
+    mail: {
+      messageId,
+      tags: { "ses:configuration-set": ["rovenue-events"] },
+    },
+  };
+}
+
+async function seedNotificationDelivery(opts: {
+  userId: string;
+  providerMessageId: string;
+}) {
+  const db = getDb();
+  const [notif] = await db
+    .insert(drizzle.schema.notifications)
+    .values({
+      userId: opts.userId,
+      eventKey: "team.member.invited",
+      eventId: `evt-${RUN_ID}-${Math.random()}`,
+      title: "t",
+      body: "b",
+    })
+    .returning();
+  if (!notif) throw new Error("no notification");
+  const [delivery] = await db
+    .insert(drizzle.schema.notificationDeliveries)
+    .values({
+      notificationId: notif.id,
+      channel: "email",
+      status: "sent",
+      providerMessageId: opts.providerMessageId,
+    })
+    .returning();
+  if (!delivery) throw new Error("no delivery");
+  return { notification: notif, delivery };
 }
 
 // ---------- Seed helpers ----------
@@ -209,5 +272,114 @@ describe("POST /webhooks/ses-events", () => {
     expect(res.status).toBe(200);
     const json = (await res.json()) as { ok: boolean };
     expect(json.ok).toBe(true);
+  });
+
+  // =============================================================
+  // 4. Bounce on a notification_delivery → suppression + 'bounced'
+  // =============================================================
+
+  it("4. Bounce on a notification delivery suppresses + marks 'bounced'", async () => {
+    const { userId } = await createUser("notif-bounce");
+    const sesMessageId = `ses-msg-notif-bounce-${RUN_ID}`;
+    const recipient = `bounce_notif_${RUN_ID}@rovenue.test`;
+    const { delivery } = await seedNotificationDelivery({
+      userId,
+      providerMessageId: sesMessageId,
+    });
+
+    const app = buildApp();
+    const body = snsNotification(
+      sesBounceEvent(sesMessageId, "550 unknown", recipient),
+    );
+    const res = await app.request("/webhooks/ses-events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(res.status).toBe(200);
+
+    const updated = await drizzle.db
+      .select()
+      .from(drizzle.schema.notificationDeliveries)
+      .where(eq(drizzle.schema.notificationDeliveries.id, delivery.id));
+    expect(updated[0]?.status).toBe("bounced");
+    expect(
+      await drizzle.notificationSuppressionRepo.isSuppressed(
+        drizzle.db,
+        recipient.toLowerCase(),
+      ),
+    ).toBe(true);
+  });
+
+  // =============================================================
+  // 5. Complaint → suppression + delivery 'bounced' + email disabled
+  // =============================================================
+
+  it("5. Complaint suppresses recipient + disables user email channel", async () => {
+    const { userId } = await createUser("notif-complaint");
+    const sesMessageId = `ses-msg-notif-complaint-${RUN_ID}`;
+    const recipient = `complaint_notif_${RUN_ID}@rovenue.test`;
+    const { delivery } = await seedNotificationDelivery({
+      userId,
+      providerMessageId: sesMessageId,
+    });
+
+    const app = buildApp();
+    const body = snsNotification(sesComplaintEvent(sesMessageId, recipient));
+    const res = await app.request("/webhooks/ses-events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(res.status).toBe(200);
+
+    const updated = await drizzle.db
+      .select()
+      .from(drizzle.schema.notificationDeliveries)
+      .where(eq(drizzle.schema.notificationDeliveries.id, delivery.id));
+    expect(updated[0]?.status).toBe("bounced");
+
+    const check = await drizzle.notificationSuppressionRepo.get(
+      drizzle.db,
+      recipient.toLowerCase(),
+    );
+    expect(check?.reason).toBe("complaint");
+
+    const channels =
+      await drizzle.notificationPreferencesRepo.getUserChannels(
+        drizzle.db,
+        userId,
+      );
+    expect(channels?.email).toBe(false);
+  });
+
+  // =============================================================
+  // 6. Delivery success → 'delivered' on the notification row
+  // =============================================================
+
+  it("6. Delivery notification flips delivery to 'delivered'", async () => {
+    const { userId } = await createUser("notif-deliv");
+    const sesMessageId = `ses-msg-notif-deliv-${RUN_ID}`;
+    const { delivery } = await seedNotificationDelivery({
+      userId,
+      providerMessageId: sesMessageId,
+    });
+
+    const app = buildApp();
+    const body = snsNotification(
+      sesDeliveryEvent(sesMessageId, `deliv_${RUN_ID}@rovenue.test`),
+    );
+    const res = await app.request("/webhooks/ses-events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(res.status).toBe(200);
+
+    const updated = await drizzle.db
+      .select()
+      .from(drizzle.schema.notificationDeliveries)
+      .where(eq(drizzle.schema.notificationDeliveries.id, delivery.id));
+    expect(updated[0]?.status).toBe("delivered");
   });
 });
