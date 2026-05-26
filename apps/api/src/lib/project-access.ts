@@ -15,10 +15,15 @@ export interface ProjectMembership {
   role: MemberRole;
 }
 
-// Numeric ordering: higher = more privileged. OWNER ≥ ADMIN ≥ VIEWER.
+// Numeric ordering: higher = more privileged. OWNER ≥ ADMIN ≥ {DEVELOPER,GROWTH,CUSTOMER_SUPPORT,VIEWER}.
+// Fine-grained capability gates are introduced in Task 2.x; for now the three
+// new roles are treated as equivalent to VIEWER for backwards compatibility.
 const ROLE_RANK: Record<MemberRole, number> = {
   [MemberRole.OWNER]: 3,
   [MemberRole.ADMIN]: 2,
+  [MemberRole.DEVELOPER]: 1,
+  [MemberRole.GROWTH]: 1,
+  [MemberRole.CUSTOMER_SUPPORT]: 1,
   [MemberRole.VIEWER]: 1,
 };
 

@@ -7,7 +7,7 @@
 
 import { z } from "zod";
 
-export type MemberRoleName = "OWNER" | "ADMIN" | "VIEWER";
+export type MemberRoleName = "OWNER" | "ADMIN" | "DEVELOPER" | "GROWTH" | "CUSTOMER_SUPPORT" | "VIEWER";
 
 export type ApiKeyEnvironment = "PRODUCTION" | "SANDBOX";
 

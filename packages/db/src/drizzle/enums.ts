@@ -11,7 +11,10 @@ import { pgEnum } from "drizzle-orm/pg-core";
 export const memberRole = pgEnum("MemberRole", [
   "OWNER",
   "ADMIN",
-  "VIEWER",
+  "DEVELOPER",
+  "GROWTH",
+  "CUSTOMER_SUPPORT",
+  "VIEWER", // deprecated; removed in 0040
 ]);
 
 export const environment = pgEnum("Environment", [

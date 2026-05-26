@@ -25,6 +25,9 @@ import { ok } from "../../lib/response";
 const memberRoleValues = [
   MemberRole.OWNER,
   MemberRole.ADMIN,
+  MemberRole.DEVELOPER,
+  MemberRole.GROWTH,
+  MemberRole.CUSTOMER_SUPPORT,
   MemberRole.VIEWER,
 ] as const;
 

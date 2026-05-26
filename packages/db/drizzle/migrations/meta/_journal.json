@@ -267,6 +267,13 @@
       "when": 1779800000000,
       "tag": "0037_user_preferences_profile",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1748217600000,
+      "tag": "0038_add_member_role_variants",
+      "breakpoints": true
     }
   ]
 }
