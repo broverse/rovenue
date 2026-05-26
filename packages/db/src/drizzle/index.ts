@@ -60,3 +60,4 @@ export * as usageSnapshotRepo from "./repositories/usage-snapshots";
 export * as billingTierLimitsRepo from "./repositories/billing-tier-limits";
 export * as funnelRepo from "./repositories/funnels";
 export * as funnelVersionRepo from "./repositories/funnel-versions";
+export * as funnelTemplateRepo from "./repositories/funnel-templates";
