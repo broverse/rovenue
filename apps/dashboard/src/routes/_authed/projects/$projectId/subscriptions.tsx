@@ -1,60 +1,140 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import {
-  CalendarDays,
-  ChevronsUpDown,
-  Download,
-  MoreHorizontal,
-  Plus,
-  Search,
-  X,
-} from "lucide-react";
+import { CalendarDays, Download, Plus } from "lucide-react";
+import type {
+  SubscriptionRow,
+  SubscriptionScopeName,
+  SubscriptionSortKey,
+  SubscriptionStoreCode,
+  SubscriptionUiStatus,
+  SubscriptionsCompositionResponse,
+} from "@rovenue/shared";
+import { subscriptionSortKeys, subscriptionStoreCodes } from "@rovenue/shared";
 import { Button } from "../../../../ui/button";
 import { StatCard } from "../../../../ui/stat-card";
 import { useProject } from "../../../../lib/hooks/useProject";
-import { FilterPill } from "../../../../components/subscribers/filter-pill";
 import {
-  BillingIssuesPanel,
-  CohortRetentionPanel,
   CompositionBar,
-  RenewalCalendar,
+  FilterToolbar,
   SCOPE_COUNTS,
   SUBSCRIPTIONS,
   ScopeTabs,
   SubscriptionsTable,
-  type BillingIssue,
-  type CalendarDay,
   type CompositionSegment,
-  type IssueSeverity,
+  type ProductOption,
   type Subscription,
   type SubscriptionScope,
   type SubscriptionStatus,
   type SubscriptionStore,
+  type SubscriptionsFilterValue,
 } from "../../../../components/subscriptions";
 import {
-  buildExportSubscriptionsUrl,
-  useProjectBillingIssues,
-  useProjectRenewalCalendar,
   useProjectSubscriptions,
   useProjectSubscriptionsComposition,
   useProjectSubscriptionsKpis,
 } from "../../../../lib/hooks/useProjectSubscriptions";
-import {
-  GrantSubscriptionModal,
-  ScheduleCancelModal,
-} from "../../../../components/subscriptions";
-import type {
-  BillingIssueRow,
-  RenewalCalendarResponse,
-  SubscriptionRow,
-  SubscriptionUiStatus,
-  SubscriptionsCompositionResponse,
-} from "@rovenue/shared";
+import { useProjectProducts } from "../../../../lib/hooks/useProjectProducts";
+
+// =============================================================
+// URL search-param schema
+// =============================================================
+
+const SCOPE_VALUES: ReadonlyArray<SubscriptionScopeName> = [
+  "all",
+  "active",
+  "trial",
+  "grace",
+  "canceling",
+  "issues",
+  "churned",
+];
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+interface SubsSearch {
+  scope: SubscriptionScopeName;
+  q?: string;
+  store?: SubscriptionStoreCode[];
+  productId?: string[];
+  autoRenew?: boolean;
+  isTrial?: boolean;
+  isIntro?: boolean;
+  hasIssue?: boolean;
+  purchasedFrom?: string;
+  purchasedTo?: string;
+  expiresFrom?: string;
+  expiresTo?: string;
+  sort: SubscriptionSortKey;
+}
+
+function parseScope(raw: unknown): SubscriptionScopeName {
+  return typeof raw === "string" &&
+    (SCOPE_VALUES as ReadonlyArray<string>).includes(raw)
+    ? (raw as SubscriptionScopeName)
+    : "all";
+}
+
+function parseSort(raw: unknown): SubscriptionSortKey {
+  return typeof raw === "string" &&
+    (subscriptionSortKeys as ReadonlyArray<string>).includes(raw)
+    ? (raw as SubscriptionSortKey)
+    : "started_desc";
+}
+
+function parseStores(raw: unknown): SubscriptionStoreCode[] | undefined {
+  const cands = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string" && raw.length > 0
+      ? raw.split(",")
+      : [];
+  const allowed = new Set(subscriptionStoreCodes as ReadonlyArray<string>);
+  const out = cands
+    .map((s) => String(s).trim().toUpperCase())
+    .filter((s): s is SubscriptionStoreCode => allowed.has(s));
+  return out.length > 0 ? Array.from(new Set(out)) : undefined;
+}
+
+function parseIds(raw: unknown): string[] | undefined {
+  const cands = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string" && raw.length > 0
+      ? raw.split(",")
+      : [];
+  const out = cands.map((s) => String(s).trim()).filter((s) => s.length > 0);
+  return out.length > 0 ? Array.from(new Set(out)) : undefined;
+}
+
+function parseBool(raw: unknown): boolean | undefined {
+  if (raw === true || raw === "true") return true;
+  if (raw === false || raw === "false") return false;
+  return undefined;
+}
+
+function parseDate(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || !ISO_DATE_RE.test(raw)) return undefined;
+  return Number.isNaN(new Date(raw).getTime()) ? undefined : raw;
+}
 
 export const Route = createFileRoute(
   "/_authed/projects/$projectId/subscriptions",
 )({
+  validateSearch: (raw: Record<string, unknown>): SubsSearch => ({
+    scope: parseScope(raw.scope),
+    q: typeof raw.q === "string" && raw.q.length > 0 ? raw.q : undefined,
+    store: parseStores(raw.store),
+    productId: parseIds(raw.productId),
+    autoRenew: parseBool(raw.autoRenew),
+    isTrial: parseBool(raw.isTrial),
+    isIntro: parseBool(raw.isIntro),
+    hasIssue:
+      raw.hasIssue === true || raw.hasIssue === "true" ? true : undefined,
+    purchasedFrom: parseDate(raw.purchasedFrom),
+    purchasedTo: parseDate(raw.purchasedTo),
+    expiresFrom: parseDate(raw.expiresFrom),
+    expiresTo: parseDate(raw.expiresTo),
+    sort: parseSort(raw.sort),
+  }),
   component: SubscriptionsRouteComponent,
 });
 
@@ -70,7 +150,7 @@ function SubscriptionsRouteComponent() {
 }
 
 // =============================================================
-// Wire → UI adapters
+// Wire → UI adapters (unchanged)
 // =============================================================
 
 const UI_STATUS_MAP: Record<SubscriptionUiStatus, SubscriptionStatus> = {
@@ -90,7 +170,7 @@ const STORE_MAP: Record<string, SubscriptionStore> = {
   PLAY: "play",
   STRIPE: "stripe",
   WEB: "web",
-  MANUAL: "manual",
+  MANUAL: "web",
 };
 
 function mapStore(raw: string): SubscriptionStore {
@@ -111,8 +191,12 @@ function daysUntil(iso: string | null, nowMs: number): number {
   return Math.round((t - nowMs) / DAY_MS);
 }
 
-function termDescriptor(row: SubscriptionRow, t: ReturnType<typeof useTranslation>["t"]): string {
-  if (row.isTrial) return t("subscriptions.term.trial", { defaultValue: "Trial" });
+function termDescriptor(
+  row: SubscriptionRow,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  if (row.isTrial)
+    return t("subscriptions.term.trial", { defaultValue: "Trial" });
   if (row.cancellationDate) {
     const ends = new Date(row.cancellationDate);
     return t("subscriptions.term.ends", {
@@ -123,9 +207,6 @@ function termDescriptor(row: SubscriptionRow, t: ReturnType<typeof useTranslatio
   return t("subscriptions.term.recurring", { defaultValue: "Recurring" });
 }
 
-// One bucket per status to seed deterministic colors that match
-// the dashboard's design tokens. The CompositionSegment shape
-// the page expects carries inline color tokens.
 const COMPOSITION_COLOR: Record<SubscriptionUiStatus, string> = {
   active: "var(--color-rv-accent-500)",
   trial: "var(--color-rv-success)",
@@ -134,7 +215,11 @@ const COMPOSITION_COLOR: Record<SubscriptionUiStatus, string> = {
   churned: "var(--color-rv-mute-600)",
 };
 
-function toUiSubscription(row: SubscriptionRow, nowMs: number, t: ReturnType<typeof useTranslation>["t"]): Subscription {
+function toUiSubscription(
+  row: SubscriptionRow,
+  nowMs: number,
+  t: ReturnType<typeof useTranslation>["t"],
+): Subscription {
   const price = row.priceAmount !== null ? Number(row.priceAmount) : 0;
   const renewsIn = daysUntil(row.expiresDate ?? row.gracePeriodExpires, nowMs);
   return {
@@ -181,109 +266,128 @@ function toCompositionSegments(
     });
 }
 
-function toCalendarDays(
-  response: RenewalCalendarResponse | undefined,
-): ReadonlyArray<CalendarDay> | undefined {
-  if (!response || response.days.length === 0) return undefined;
-  return response.days.map((d) => ({
-    day: d.offset,
-    today: d.today,
-    past: d.past,
-    renewals: d.renewals,
-    trials: d.trials,
-    grace: d.grace,
-    failed: d.failed,
-  }));
-}
-
-const SEVERITY_FALLBACK: IssueSeverity = "high";
-
-function toBillingIssues(
-  rows: ReadonlyArray<BillingIssueRow>,
-): ReadonlyArray<BillingIssue> {
-  return rows.map((r) => {
-    const mrr = r.priceAmount !== null ? Number(r.priceAmount) : 0;
-    return {
-      user: shortId(r.subscriberId),
-      id: r.purchaseId,
-      issue: r.issue,
-      product: r.productName ?? r.productId,
-      attempts: 1,
-      next: new Date(r.signalAt).toLocaleDateString(),
-      severity: (r.severity as IssueSeverity) ?? SEVERITY_FALLBACK,
-      mrr: Number.isFinite(mrr) ? mrr : 0,
-    };
-  });
-}
-
 // =============================================================
 // Page
 // =============================================================
 
 function SubscriptionsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
-  const [scope, setScope] = useState<SubscriptionScope>("all");
-  const [search, setSearch] = useState("");
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
+
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const [grantOpen, setGrantOpen] = useState(false);
-  const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [filters, setFilters] = useState({
-    store: true,
-    product: false,
-    autoRenew: false,
-  });
 
+  // Debounced search input → URL
+  const [searchInput, setSearchInput] = useState(search.q ?? "");
+  useEffect(() => setSearchInput(search.q ?? ""), [search.q]);
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      const trimmed = searchInput.trim();
+      void navigate({
+        search: (prev) => ({
+          ...prev,
+          q: trimmed.length > 0 ? trimmed : undefined,
+        }),
+        replace: true,
+      });
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [searchInput, navigate]);
+
+  // Hook params derived from URL search params (skip the local searchInput).
   const list = useProjectSubscriptions({
     projectId,
-    scope: scope as Parameters<typeof useProjectSubscriptions>[0]["scope"],
-    search: search.trim() || undefined,
+    scope: search.scope,
+    sort: search.sort,
+    search: search.q,
+    store: search.store as ReadonlyArray<SubscriptionStoreCode> | undefined,
+    productId: search.productId,
+    autoRenew: search.autoRenew,
+    isTrial: search.isTrial,
+    isIntro: search.isIntro,
+    hasIssue: search.hasIssue,
+    purchasedFrom: search.purchasedFrom,
+    purchasedTo: search.purchasedTo,
+    expiresFrom: search.expiresFrom,
+    expiresTo: search.expiresTo,
   });
   const kpis = useProjectSubscriptionsKpis(projectId);
   const composition = useProjectSubscriptionsComposition(projectId);
-  const calendar = useProjectRenewalCalendar({ projectId });
-  const issues = useProjectBillingIssues(projectId, 10);
+  // First page only — product picker doesn't need to walk the cursor.
+  const productList = useProjectProducts({
+    projectId,
+    includeInactive: false,
+    limit: 100,
+  });
 
-  const nowMs = useMemo(
-    () => Date.now(),
-    [list.dataUpdatedAt],
-  );
+  const nowMs = useMemo(() => Date.now(), [list.dataUpdatedAt]);
 
   const realRows = useMemo<ReadonlyArray<Subscription> | null>(() => {
     const pages = list.data?.pages;
     if (!pages || pages.length === 0) return null;
-    const flat = pages.flatMap((p) =>
+    return pages.flatMap((p) =>
       p.rows.map((row) => toUiSubscription(row, nowMs, t)),
     );
-    return flat;
   }, [list.data, nowMs, t]);
 
-  const filtered = useMemo<ReadonlyArray<Subscription>>(() => {
-    let arr: ReadonlyArray<Subscription> = realRows ?? SUBSCRIPTIONS;
-    // When falling back to mock, keep the prototype's behavior.
-    if (!realRows) {
-      if (scope === "active") arr = arr.filter((s) => s.status === "active");
-      if (scope === "trial") arr = arr.filter((s) => s.status === "trial");
-      if (scope === "grace") arr = arr.filter((s) => s.status === "grace");
-      if (scope === "canceling")
-        arr = arr.filter((s) => s.status === "canceling");
-      if (scope === "issues") arr = arr.filter((s) => Boolean(s.lastIssue));
-      if (scope === "churned") arr = arr.filter((s) => s.status === "churned");
+  const rows: ReadonlyArray<Subscription> = realRows ?? SUBSCRIPTIONS;
 
-      const q = search.trim().toLowerCase();
-      if (q) {
-        arr = arr.filter(
-          (s) =>
-            s.id.toLowerCase().includes(q) ||
-            s.user.toLowerCase().includes(q) ||
-            s.product.toLowerCase().includes(q),
-        );
-      }
-    }
-    return arr;
-  }, [realRows, scope, search]);
+  const productOptions: ReadonlyArray<ProductOption> = useMemo(() => {
+    const first = productList.data?.pages?.[0];
+    if (!first) return [];
+    return first.products.map((p) => ({ id: p.id, label: p.displayName }));
+  }, [productList.data]);
+
+  const filterValue: SubscriptionsFilterValue = useMemo(
+    () => ({
+      search: searchInput,
+      store: (search.store ?? []) as ReadonlyArray<SubscriptionStoreCode>,
+      productId: search.productId ?? [],
+      autoRenew: search.autoRenew,
+      isTrial: search.isTrial,
+      isIntro: search.isIntro,
+      hasIssue: search.hasIssue === true,
+      purchasedFrom: search.purchasedFrom,
+      purchasedTo: search.purchasedTo,
+      expiresFrom: search.expiresFrom,
+      expiresTo: search.expiresTo,
+    }),
+    [search, searchInput],
+  );
+
+  const onFilterChange = (next: SubscriptionsFilterValue) => {
+    setSearchInput(next.search);
+    void navigate({
+      search: (prev) => ({
+        ...prev,
+        // search is debounced via the useEffect above; don't write it here.
+        store: next.store.length > 0 ? [...next.store] : undefined,
+        productId:
+          next.productId.length > 0 ? [...next.productId] : undefined,
+        autoRenew: next.autoRenew,
+        isTrial: next.isTrial,
+        isIntro: next.isIntro,
+        hasIssue: next.hasIssue ? true : undefined,
+        purchasedFrom: next.purchasedFrom,
+        purchasedTo: next.purchasedTo,
+        expiresFrom: next.expiresFrom,
+        expiresTo: next.expiresTo,
+      }),
+      replace: true,
+    });
+  };
+
+  const onScopeChange = (scope: SubscriptionScope) =>
+    void navigate({
+      search: (prev) => ({ ...prev, scope: scope as SubscriptionScopeName }),
+      replace: false,
+    });
+
+  const onSortChange = (sort: SubscriptionSortKey) =>
+    void navigate({ search: (prev) => ({ ...prev, sort }), replace: false });
 
   const toggleOne = (id: string) =>
     setSelectedIds((prev) => {
@@ -294,29 +398,26 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
     });
 
   const toggleAll = () => {
-    if (filtered.length === 0) return;
-    if (filtered.every((s) => selectedIds.has(s.id))) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(filtered.map((s) => s.id)));
-    }
+    if (rows.length === 0) return;
+    if (rows.every((s) => selectedIds.has(s.id))) setSelectedIds(new Set());
+    else setSelectedIds(new Set(rows.map((s) => s.id)));
   };
 
   const toggleExpand = (id: string) =>
     setExpandedId((prev) => (prev === id ? null : id));
 
-  const toggleFilter = (key: keyof typeof filters) =>
-    setFilters((f) => ({ ...f, [key]: !f[key] }));
-
-  // Press `/` to focus the search input.
-  const searchAreaRef = useRef<HTMLDivElement>(null);
+  // Press `/` to focus the search input
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "/") return;
       const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-      const input =
-        searchAreaRef.current?.querySelector<HTMLInputElement>("input[type='text']");
+      if (
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA")
+      )
+        return;
+      const input = searchInputRef.current;
       if (input) {
         e.preventDefault();
         input.focus();
@@ -334,19 +435,8 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
 
   const compositionSegments = toCompositionSegments(composition.data);
   const compositionTotal = composition.data?.total;
-  const calendarDays = toCalendarDays(calendar.data);
-  const issueRows = issues.data ? toBillingIssues(issues.data.rows) : undefined;
-
   const totalForFilterBar =
     composition.data?.total ?? realRows?.length ?? TOTAL_FALLBACK;
-
-  const selectedSubs = useMemo(
-    () => filtered.filter((s) => selectedIds.has(s.id)),
-    [filtered, selectedIds],
-  );
-  const canSchedule = selectedSubs.length > 0;
-  const onExport = () =>
-    window.location.assign(buildExportSubscriptionsUrl(projectId, scope, search));
 
   return (
     <>
@@ -360,21 +450,15 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="flat"
-            size="sm"
-            disabled={!canSchedule}
-            title={!canSchedule ? t("subscriptions.actions.scheduleDisabledTooltip", { defaultValue: "Select at least one row" }) : undefined}
-            onClick={() => setScheduleOpen(true)}
-          >
+          <Button variant="flat" size="sm">
             <CalendarDays size={13} />
             {t("subscriptions.actions.schedule")}
           </Button>
-          <Button variant="flat" size="sm" onClick={onExport}>
+          <Button variant="flat" size="sm">
             <Download size={13} />
             {t("subscriptions.actions.exportCsv")}
           </Button>
-          <Button variant="solid-primary" size="sm" onClick={() => setGrantOpen(true)}>
+          <Button variant="solid-primary" size="sm">
             <Plus size={13} />
             {t("subscriptions.actions.newSubscription")}
           </Button>
@@ -396,13 +480,15 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
         <StatCard
           label={t("subscriptions.kpi.graceRetry")}
           value={
-            <span className="text-rv-warning">{kpiGrace.toLocaleString()}</span>
+            <span className="text-rv-warning">
+              {kpiGrace.toLocaleString()}
+            </span>
           }
           description={t("subscriptions.kpi.graceRetryDescription")}
         />
         <StatCard
           label={t("subscriptions.kpi.canceling")}
-          value={kpiCanceling.toLocaleString()}
+          value={<span>{kpiCanceling.toLocaleString()}</span>}
           description={t("subscriptions.kpi.cancelingDescription")}
           descriptionTone="danger"
         />
@@ -416,81 +502,29 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
         />
       </div>
 
-      <div className="mb-4">
-        <RenewalCalendar days={calendarDays} />
-      </div>
-
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <ScopeTabs value={scope} onChange={setScope} counts={SCOPE_COUNTS} />
-        <div className="ml-auto flex gap-1.5">
-          <Button variant="light" size="sm">
-            <ChevronsUpDown size={13} />
-            {t("subscriptions.toolbar.sortNextRenewal")}
-          </Button>
-          <Button
-            variant="light"
-            size="icon"
-            aria-label={t("subscriptions.toolbar.more")}
-          >
-            <MoreHorizontal size={14} />
-          </Button>
-        </div>
+        <ScopeTabs
+          value={search.scope as SubscriptionScope}
+          onChange={onScopeChange}
+          counts={SCOPE_COUNTS}
+        />
       </div>
 
-      <div
-        ref={searchAreaRef}
-        className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-rv-divider bg-rv-c1 px-3 py-2.5"
-      >
-        <label className="flex h-7 min-w-[260px] flex-1 items-center gap-1.5 rounded-md border border-rv-divider bg-rv-c2 px-2.5 transition focus-within:border-rv-accent-500 sm:flex-[0_1_360px]">
-          <Search size={12} className="text-rv-mute-500" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("subscriptions.filters.search")}
-            className="flex-1 bg-transparent text-[12px] text-foreground placeholder:text-rv-mute-500 outline-none"
-          />
-        </label>
-        <FilterPill active={filters.store} onClick={() => toggleFilter("store")}>
-          {t("subscriptions.filters.store")}
-          <span className="font-rv-mono text-[11px] font-medium text-rv-mute-800">
-            {t("subscriptions.filters.storeValue")}
-          </span>
-          <X size={10} className="opacity-50" />
-        </FilterPill>
-        <FilterPill
-          active={filters.product}
-          onClick={() => toggleFilter("product")}
-        >
-          {t("subscriptions.filters.product")}
-          <span className="font-rv-mono text-[11px] text-rv-mute-800">
-            {t("subscriptions.filters.any")}
-          </span>
-        </FilterPill>
-        <FilterPill
-          active={filters.autoRenew}
-          onClick={() => toggleFilter("autoRenew")}
-        >
-          {t("subscriptions.filters.autoRenew")}
-          <span className="font-rv-mono text-[11px] text-rv-mute-800">
-            {t("subscriptions.filters.autoRenewValue")}
-          </span>
-        </FilterPill>
-        <FilterPill solid>
-          <Plus size={10} />
-          {t("subscriptions.filters.addFilter")}
-        </FilterPill>
-        <span className="ml-auto font-rv-mono text-[12px] text-rv-mute-500">
-          {filtered.length.toLocaleString()}{" "}
-          {t("subscriptions.filters.of")}{" "}
-          {totalForFilterBar.toLocaleString()}
-        </span>
-      </div>
+      <FilterToolbar
+        value={filterValue}
+        onChange={onFilterChange}
+        products={productOptions}
+        visible={rows.length}
+        total={totalForFilterBar}
+        searchInputRef={searchInputRef}
+      />
 
       <SubscriptionsTable
-        subscriptions={filtered}
+        subscriptions={rows}
         selectedIds={selectedIds}
         expandedId={expandedId}
+        sort={search.sort}
+        onSortChange={onSortChange}
         onToggleSelect={toggleOne}
         onToggleSelectAll={toggleAll}
         onToggleExpand={toggleExpand}
@@ -510,23 +544,6 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
           </Button>
         </div>
       ) : null}
-
-      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <BillingIssuesPanel issues={issueRows} />
-        <CohortRetentionPanel />
-      </div>
-
-      <GrantSubscriptionModal
-        projectId={projectId}
-        open={grantOpen}
-        onClose={() => setGrantOpen(false)}
-      />
-      <ScheduleCancelModal
-        projectId={projectId}
-        open={scheduleOpen}
-        selected={selectedSubs}
-        onClose={() => setScheduleOpen(false)}
-      />
     </>
   );
 }
