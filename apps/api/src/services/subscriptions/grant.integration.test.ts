@@ -99,6 +99,12 @@ afterAll(async () => {
     .where(eq(projects.id, `prj_granttest_${RUN_ID}B`));
   await db
     .delete(projects)
+    .where(eq(projects.id, `prj_granttest_${RUN_ID}C`));
+  await db
+    .delete(projects)
+    .where(eq(projects.id, `prj_granttest_${RUN_ID}D`));
+  await db
+    .delete(projects)
     .where(eq(projects.id, `prj_granttest_${RUN_ID}custom`));
 });
 
@@ -126,7 +132,7 @@ describe("grantComp", () => {
 
     expect(result.store).toBe("MANUAL");
     expect(result.storeTransactionId).toMatch(/^comp_/);
-    expect(result.priceAmount).toBe("0");
+    expect(result.priceAmount).toBe("0.0000");
     expect(result.autoRenewStatus).toBe(false);
 
     const now = Date.now();
@@ -174,10 +180,10 @@ describe("grantComp", () => {
   });
 
   it("rejects a subscriber from another project", async () => {
-    const projectA = await seedProject("A");
-    const projectB = await seedProject("B");
-    const subB = await seedSubscriber({ projectId: projectB.id, suffix: "B" });
-    const prodA = await seedProduct({ projectId: projectA.id, suffix: "A" });
+    const projectA = await seedProject("C");
+    const projectB = await seedProject("D");
+    const subB = await seedSubscriber({ projectId: projectB.id, suffix: "D" });
+    const prodA = await seedProduct({ projectId: projectA.id, suffix: "C" });
 
     await expect(
       grantComp({
