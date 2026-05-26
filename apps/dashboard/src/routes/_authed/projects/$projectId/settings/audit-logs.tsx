@@ -1,17 +1,17 @@
 import { useMemo } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import { Button } from "../../../../ui/button";
-import { useProject } from "../../../../lib/hooks/useProject";
-import { useAuditLogs } from "../../../../lib/hooks/useProjectAdmin";
+import { Button } from "../../../../../ui/button";
+import { useProject } from "../../../../../lib/hooks/useProject";
+import { useAuditLogs } from "../../../../../lib/hooks/useProjectAdmin";
 
-export const Route = createFileRoute("/_authed/projects/$projectId/audit-logs")({
+export const Route = createFileRoute("/_authed/projects/$projectId/settings/audit-logs")({
   component: AuditLogsRoute,
 });
 
 function AuditLogsRoute() {
   const { projectId } = useParams({
-    from: "/_authed/projects/$projectId/audit-logs",
+    from: "/_authed/projects/$projectId/settings/audit-logs",
   });
   const { data: project } = useProject(projectId);
   if (!project) return null;

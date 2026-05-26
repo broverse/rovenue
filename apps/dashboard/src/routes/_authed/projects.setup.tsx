@@ -78,7 +78,7 @@ function ProjectSetupCreate() {
             console.warn("Apple credentials skipped:", err);
           }
           void navigate({
-            to: "/projects/$projectId/members",
+            to: "/projects/$projectId/settings/members",
             params: { projectId },
           });
         },

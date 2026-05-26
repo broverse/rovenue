@@ -1,16 +1,16 @@
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import { Chip } from "../../../../ui/chip";
-import { useProject } from "../../../../lib/hooks/useProject";
-import { useProjectMembers } from "../../../../lib/hooks/useProjectAdmin";
+import { Chip } from "../../../../../ui/chip";
+import { useProject } from "../../../../../lib/hooks/useProject";
+import { useProjectMembers } from "../../../../../lib/hooks/useProjectAdmin";
 
-export const Route = createFileRoute("/_authed/projects/$projectId/members")({
+export const Route = createFileRoute("/_authed/projects/$projectId/settings/members")({
   component: MembersRoute,
 });
 
 function MembersRoute() {
   const { projectId } = useParams({
-    from: "/_authed/projects/$projectId/members",
+    from: "/_authed/projects/$projectId/settings/members",
   });
   const { data: project } = useProject(projectId);
   if (!project) return null;

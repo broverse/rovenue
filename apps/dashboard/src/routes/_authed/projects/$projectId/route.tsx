@@ -27,15 +27,12 @@ function useBreadcrumbTitleKey(): string {
   if (id.includes("/feature-flags")) return "breadcrumb.featureFlags";
   if (id.includes("/experiments")) return "breadcrumb.experiments";
   if (id.includes("/apps")) return "breadcrumb.apps";
-  if (id.includes("/sdk")) return "breadcrumb.sdk";
   if (id.includes("/queries")) return "breadcrumb.queries";
   if (id.includes("/charts")) return "breadcrumb.charts";
   if (id.includes("/credits")) return "breadcrumb.credits";
   if (id.includes("/cohorts")) return "breadcrumb.cohorts";
-  if (id.includes("/audit-logs")) return "breadcrumb.auditLogs";
   if (id.includes("/audiences")) return "breadcrumb.audiences";
   if (id.includes("/leaderboards")) return "breadcrumb.leaderboards";
-  if (id.includes("/members")) return "breadcrumb.members";
   return "breadcrumb.overview";
 }
 

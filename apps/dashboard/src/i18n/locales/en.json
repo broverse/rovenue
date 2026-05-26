@@ -237,9 +237,7 @@
       "queries": "Queries",
       "leaderboards": "Leaderboards",
       "apps": "Apps & integrations",
-      "sdk": "SDK & API keys",
-      "members": "Members",
-      "auditLogs": "Audit log"
+      "settings": "Settings"
     },
     "footer": {
       "docs": "Docs",
@@ -294,11 +292,8 @@
     "charts": "Charts",
     "queries": "Queries",
     "cohorts": "Cohorts",
-    "sdk": "SDK & API",
     "audiences": "Audiences",
-    "leaderboards": "Leaderboards",
-    "members": "Members",
-    "auditLogs": "Audit log"
+    "leaderboards": "Leaderboards"
   },
   "overview": {
     "title": "Overview",
@@ -322,23 +317,45 @@
       "title": "Revenue",
       "subtitle": "Daily breakdown · {{metric}}",
       "subtitleMrr": "Daily breakdown · MRR movements",
-      "neg": "(neg)"
+      "neg": "(neg)",
+      "metrics": {
+        "mrr": "MRR",
+        "activeSubs": "Active subs",
+        "netChurn": "Net churn"
+      },
+      "series": {
+        "gross": "Gross USD",
+        "active": "Active subs",
+        "churn": "Net churn %"
+      },
+      "empty": {
+        "title": "No revenue yet",
+        "body": "Connect a store and start recording purchases to see the daily breakdown here."
+      }
     },
     "topProducts": {
       "title": "Top products",
       "subtitle": "Revenue contribution · last 28d",
-      "viewAll": "View all →"
+      "viewAll": "View all →",
+      "empty": {
+        "title": "No products yet",
+        "body": "Products you sell will show up here ranked by gross revenue."
+      }
     },
     "activity": {
       "title": "Recent activity",
-      "subtitle": "Last 10 events · real-time",
+      "subtitle": "Latest revenue events",
       "live": "live",
       "filter": "Filter",
-      "viewAllEvents": "View all events →"
+      "viewAllEvents": "View all events →",
+      "empty": {
+        "title": "No events yet",
+        "body": "When subscribers purchase, renew, or churn you'll see the stream here."
+      }
     },
     "experiments": {
       "title": "Active experiments",
-      "subtitle": "Statistical significance via Bayesian test",
+      "subtitle": "Running & recently completed",
       "viewAll": "View all experiments →",
       "filterAriaLabel": "Filter experiments",
       "filters": {
@@ -349,7 +366,15 @@
       "winner": "winner",
       "variants": "{{count}} variants",
       "completedDescription": "Completed · <0>{{winner}}</0> · <1>+{{uplift}}%</1> uplift",
-      "runningDescription": "Running · <0>{{days}}d</0> · {{confidence}}% confidence"
+      "completedDescriptionNoUplift": "Completed · <0>{{winner}}</0>",
+      "completedDescriptionNoWinner": "Completed",
+      "runningDescription": "Running · <0>{{days}}d</0> · {{confidence}}% confidence",
+      "runningDescriptionNoConfidence": "Running · <0>{{days}}d</0>",
+      "runningDescriptionNew": "Started moments ago",
+      "empty": {
+        "title": "No experiments yet",
+        "body": "Create an experiment to start testing paywall, pricing, or onboarding variants."
+      }
     },
     "systemHealth": {
       "title": "System health",
@@ -415,6 +440,15 @@
       "copyHeader": "Copy the new secret",
       "copyBody": "This is the only time we'll show the secret. Store it in your deployment secrets before closing this dialog.",
       "copied": "I've copied it"
+    }
+  },
+  "settings": {
+    "tabs": {
+      "aria": "Settings sections",
+      "general": "General",
+      "sdk": "SDK & API keys",
+      "members": "Members",
+      "auditLogs": "Audit log"
     }
   },
   "liveEvents": {
