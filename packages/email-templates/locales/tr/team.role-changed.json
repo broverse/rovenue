@@ -1,0 +1,7 @@
+{
+  "subject": "{{projectName}} üzerindeki rolünüz değişti",
+  "preview": "{{oldRole}} → {{newRole}} ({{changedByName}})",
+  "headline": "{{projectName}} üzerindeki rolünüz artık {{newRole}}",
+  "body": "{{changedByName}}, {{projectName}} üzerindeki rolünüzü {{oldRole}} → {{newRole}} olarak değiştirdi.",
+  "cta": "Projeyi aç"
+}

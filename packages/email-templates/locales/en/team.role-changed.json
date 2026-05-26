@@ -1,0 +1,7 @@
+{
+  "subject": "Your role on {{projectName}} changed",
+  "preview": "{{oldRole}} → {{newRole}} by {{changedByName}}",
+  "headline": "Your role on {{projectName}} is now {{newRole}}",
+  "body": "{{changedByName}} changed your role on {{projectName}} from {{oldRole}} to {{newRole}}.",
+  "cta": "Open project"
+}
