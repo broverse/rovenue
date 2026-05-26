@@ -7,6 +7,7 @@ import { requestIdMiddleware } from "./middleware/request-id";
 import { requestLoggerMiddleware } from "./middleware/request-logger";
 import {
   authRoute,
+  billingRoute,
   dashboardRoute,
   healthRoute,
   v1Route,
@@ -92,6 +93,7 @@ export function createApp() {
     .route("/health", healthRoute)
     .use("*", globalIpRateLimit())
     .route("/api/auth", authRoute)
+    .route("/billing", billingRoute)
     .route("/webhooks", webhooksRoute)
     .route("/v1", v1Route)
     .route("/", configStreamRoute)
