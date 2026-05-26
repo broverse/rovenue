@@ -4,11 +4,14 @@ use crate::error::RovenueResult;
 
 use super::CacheStore;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EntitlementRow {
     pub entitlement_id: String,
     pub is_active: bool,
     pub product_id: Option<String>,
+    pub product_identifier: String,
+    pub store: String,
+    pub expires_iso: Option<String>,
     pub expires_at_ms: Option<u64>,
     pub updated_at_ms: u64,
 }
@@ -28,13 +31,17 @@ impl<'a> EntitlementsRepo<'a> {
             {
                 let mut stmt = tx.prepare(
                     "INSERT INTO entitlements
-                       (user_scope, entitlement_id, is_active, product_id, expires_at_ms, updated_at_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                       (user_scope, entitlement_id, is_active, product_id,
+                        expires_at_ms, updated_at_ms, store, product_identifier, expires_iso)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                      ON CONFLICT(user_scope, entitlement_id) DO UPDATE SET
                        is_active = excluded.is_active,
                        product_id = excluded.product_id,
                        expires_at_ms = excluded.expires_at_ms,
-                       updated_at_ms = excluded.updated_at_ms",
+                       updated_at_ms = excluded.updated_at_ms,
+                       store = excluded.store,
+                       product_identifier = excluded.product_identifier,
+                       expires_iso = excluded.expires_iso",
                 )?;
                 for r in rows {
                     stmt.execute(params![
@@ -44,6 +51,9 @@ impl<'a> EntitlementsRepo<'a> {
                         r.product_id,
                         r.expires_at_ms.map(|v| v as i64),
                         r.updated_at_ms as i64,
+                        r.store,
+                        r.product_identifier,
+                        r.expires_iso,
                     ])?;
                 }
             }
@@ -52,14 +62,11 @@ impl<'a> EntitlementsRepo<'a> {
         })
     }
 
-    pub fn get(
-        &self,
-        user_scope: &str,
-        entitlement_id: &str,
-    ) -> RovenueResult<Option<EntitlementRow>> {
+    pub fn get(&self, user_scope: &str, entitlement_id: &str) -> RovenueResult<Option<EntitlementRow>> {
         self.store.with_conn(|c| {
             let mut stmt = c.prepare(
-                "SELECT entitlement_id, is_active, product_id, expires_at_ms, updated_at_ms
+                "SELECT entitlement_id, is_active, product_id, expires_at_ms, updated_at_ms,
+                        store, product_identifier, expires_iso
                  FROM entitlements WHERE user_scope = ?1 AND entitlement_id = ?2",
             )?;
             let mut rows = stmt.query(params![user_scope, entitlement_id])?;
@@ -70,6 +77,9 @@ impl<'a> EntitlementsRepo<'a> {
                     product_id: r.get(2)?,
                     expires_at_ms: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
                     updated_at_ms: r.get::<_, i64>(4)? as u64,
+                    store: r.get(5)?,
+                    product_identifier: r.get(6)?,
+                    expires_iso: r.get(7)?,
                 }))
             } else {
                 Ok(None)
@@ -80,7 +90,8 @@ impl<'a> EntitlementsRepo<'a> {
     pub fn list(&self, user_scope: &str) -> RovenueResult<Vec<EntitlementRow>> {
         self.store.with_conn(|c| {
             let mut stmt = c.prepare(
-                "SELECT entitlement_id, is_active, product_id, expires_at_ms, updated_at_ms
+                "SELECT entitlement_id, is_active, product_id, expires_at_ms, updated_at_ms,
+                        store, product_identifier, expires_iso
                  FROM entitlements WHERE user_scope = ?1",
             )?;
             let mut rows = stmt.query(params![user_scope])?;
@@ -92,6 +103,9 @@ impl<'a> EntitlementsRepo<'a> {
                     product_id: r.get(2)?,
                     expires_at_ms: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
                     updated_at_ms: r.get::<_, i64>(4)? as u64,
+                    store: r.get(5)?,
+                    product_identifier: r.get(6)?,
+                    expires_iso: r.get(7)?,
                 });
             }
             Ok(out)

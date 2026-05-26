@@ -29,5 +29,19 @@ CREATE TABLE etag_cache (
 INSERT INTO schema_meta (version) VALUES (1);
 "#;
 
-pub const MIGRATIONS: &[&str] = &[MIGRATION_V1];
-pub const LATEST: u32 = 1;
+pub const MIGRATION_V2: &str = r#"
+ALTER TABLE entitlements ADD COLUMN store TEXT NOT NULL DEFAULT '';
+ALTER TABLE entitlements ADD COLUMN product_identifier TEXT NOT NULL DEFAULT '';
+ALTER TABLE entitlements ADD COLUMN expires_iso TEXT;
+
+CREATE TABLE credit_balance (
+    user_scope TEXT PRIMARY KEY,
+    balance INTEGER NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+
+UPDATE schema_meta SET version = 2;
+"#;
+
+pub const MIGRATIONS: &[&str] = &[MIGRATION_V1, MIGRATION_V2];
+pub const LATEST: u32 = 2;
