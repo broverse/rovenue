@@ -9,7 +9,8 @@ CORE_DIR="$ROOT/packages/core-rs"
 UDL="$CORE_DIR/src/librovenue.udl"
 CONFIG="$CORE_DIR/uniffi.toml"
 SWIFT_OUT="$ROOT/packages/sdk-swift/Sources/Rovenue/Generated"
-KOTLIN_OUT="$ROOT/packages/sdk-kotlin/src/main/kotlin/dev/rovenue/sdk/generated"
+KOTLIN_OUT_ROOT="$ROOT/packages/sdk-kotlin/src/main/kotlin"
+KOTLIN_OUT="$KOTLIN_OUT_ROOT/dev/rovenue/sdk/generated"
 
 echo "→ cargo build (release, host triple)"
 cargo build --release --manifest-path "$CORE_DIR/Cargo.toml" -p librovenue
@@ -37,7 +38,7 @@ echo "→ generate Kotlin bindings → $KOTLIN_OUT"
 mkdir -p "$KOTLIN_OUT"
 "$BINDGEN" generate "$UDL" \
     --language kotlin \
-    --out-dir "$KOTLIN_OUT" \
+    --out-dir "$KOTLIN_OUT_ROOT" \
     --config "$CONFIG"
 
 echo "✓ bindings generated"
