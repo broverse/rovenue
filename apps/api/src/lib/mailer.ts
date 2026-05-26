@@ -9,10 +9,24 @@ export interface MailMessage {
   text: string;
   /** Tagged onto the outbound mail header (X-Rovenue-Id) for log correlation. */
   correlationId?: string;
+  /**
+   * Extra headers to attach (e.g. List-Unsubscribe, List-Unsubscribe-Post).
+   * Merged with the correlationId header at send time.
+   */
+  headers?: Record<string, string>;
 }
 
 export interface Mailer {
   send(msg: MailMessage): Promise<{ messageId: string }>;
+}
+
+function combineHeaders(
+  correlationId: string | undefined,
+  extra: Record<string, string> | undefined,
+): Record<string, string> {
+  const merged: Record<string, string> = { ...(extra ?? {}) };
+  if (correlationId) merged["X-Rovenue-Id"] = correlationId;
+  return merged;
 }
 
 class SesMailer implements Mailer {
@@ -23,6 +37,8 @@ class SesMailer implements Mailer {
   ) {}
 
   async send(msg: MailMessage) {
+    const headers = combineHeaders(msg.correlationId, msg.headers);
+    const headerEntries = Object.entries(headers);
     const cmd = new SendEmailCommand({
       FromEmailAddress: this.from,
       Destination: { ToAddresses: [msg.to] },
@@ -34,8 +50,8 @@ class SesMailer implements Mailer {
             Html: { Data: msg.html, Charset: "UTF-8" },
             Text: { Data: msg.text, Charset: "UTF-8" },
           },
-          Headers: msg.correlationId
-            ? [{ Name: "X-Rovenue-Id", Value: msg.correlationId }]
+          Headers: headerEntries.length
+            ? headerEntries.map(([Name, Value]) => ({ Name, Value }))
             : undefined,
         },
       },
