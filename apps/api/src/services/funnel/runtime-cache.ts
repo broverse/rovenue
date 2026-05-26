@@ -1,26 +1,33 @@
 // =============================================================
-// Funnel runtime cache — stub
+// Funnel runtime cache — Redis-backed published bundle cache
 // =============================================================
 //
-// Phase 5 ships only the route surface for publish/duplicate/etc.
-// The real Redis-backed bundle cache lands in Phase 6 Task 27 along
-// with the public runtime config endpoint. Leaving the helpers as
-// no-ops here keeps the publish flow callable end-to-end while the
-// runtime cache is still being designed; once Phase 6 lands every
-// call site here will be wired to a real client without changing
-// signatures.
+// Public runtime endpoints read the latest published funnel
+// config (pages with branching rules stripped, theme, settings)
+// from Redis on the hot path. Dashboard publish/duplicate/revert
+// invalidate the slug after the canonical write completes.
+//
+// Keys: funnel:runtime:<slug>
+// TTL : 5 minutes — bounded staleness even if an invalidation is
+//                   missed.
 
-export async function invalidatePublishedConfig(_slug: string): Promise<void> {
-  // Implementation lands in Phase 6 Task 27 with the Redis client wiring.
-}
+import { redis } from "../../lib/redis";
 
-export async function readPublishedConfig<T>(_slug: string): Promise<T | null> {
-  return null;
+const TTL_SECONDS = 300;
+const PREFIX = "funnel:runtime:";
+
+export async function readPublishedConfig<T>(slug: string): Promise<T | null> {
+  const raw = await redis.get(PREFIX + slug);
+  return raw ? (JSON.parse(raw) as T) : null;
 }
 
 export async function writePublishedConfig(
-  _slug: string,
-  _value: unknown,
+  slug: string,
+  value: unknown,
 ): Promise<void> {
-  // No-op until Phase 6 wires Redis.
+  await redis.set(PREFIX + slug, JSON.stringify(value), "EX", TTL_SECONDS);
+}
+
+export async function invalidatePublishedConfig(slug: string): Promise<void> {
+  await redis.del(PREFIX + slug);
 }
