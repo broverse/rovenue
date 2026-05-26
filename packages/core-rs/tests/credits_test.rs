@@ -10,7 +10,9 @@ use rovenue::transport::http_client::HttpClient;
 
 struct Capture(Mutex<Vec<ChangeEvent>>);
 impl Observer for Capture {
-    fn on_change(&self, e: ChangeEvent) { self.0.lock().unwrap().push(e); }
+    fn on_change(&self, e: ChangeEvent) {
+        self.0.lock().unwrap().push(e);
+    }
 }
 
 fn http(url: &str) -> Arc<HttpClient> {
@@ -21,7 +23,12 @@ fn http(url: &str) -> Arc<HttpClient> {
     )
 }
 
-fn fixture() -> (Arc<CacheStore>, Arc<ObserverBus>, Arc<Capture>, Arc<IdentityManager>) {
+fn fixture() -> (
+    Arc<CacheStore>,
+    Arc<ObserverBus>,
+    Arc<Capture>,
+    Arc<IdentityManager>,
+) {
     let store = Arc::new(CacheStore::open_in_memory().unwrap());
     let bus = Arc::new(ObserverBus::default());
     let cap = Arc::new(Capture(Mutex::new(vec![])));
@@ -76,13 +83,26 @@ fn refresh_no_change_when_balance_same() {
         .with_clock(Arc::new(SystemClock));
 
     reader.refresh().unwrap();
-    let count_after_first = cap.0.lock().unwrap().iter()
-        .filter(|e| **e == ChangeEvent::CreditBalanceChanged).count();
+    let count_after_first = cap
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|e| **e == ChangeEvent::CreditBalanceChanged)
+        .count();
 
     reader.refresh().unwrap();
-    let count_after_second = cap.0.lock().unwrap().iter()
-        .filter(|e| **e == ChangeEvent::CreditBalanceChanged).count();
-    assert_eq!(count_after_first, count_after_second, "unchanged balance must not re-emit");
+    let count_after_second = cap
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|e| **e == ChangeEvent::CreditBalanceChanged)
+        .count();
+    assert_eq!(
+        count_after_first, count_after_second,
+        "unchanged balance must not re-emit"
+    );
     first.assert();
 }
 

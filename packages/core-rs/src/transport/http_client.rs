@@ -9,8 +9,8 @@ use crate::error::{RovenueError, RovenueResult};
 use super::retry::{backoff, classify, RetryDecision};
 use super::types::HttpResponse;
 
-pub use super::types::HttpRequest;
 pub use super::types::HttpPostRequest;
+pub use super::types::HttpRequest;
 
 pub struct HttpClient {
     base_url: String,
@@ -206,7 +206,11 @@ impl HttpClient {
                             } else {
                                 Some(resp.json::<T>().map_err(|_| RovenueError::Internal)?)
                             };
-                            return Ok(HttpResponse { status, etag: None, body });
+                            return Ok(HttpResponse {
+                                status,
+                                etag: None,
+                                body,
+                            });
                         }
                         RetryDecision::Retryable => {
                             last_err = if (500..600).contains(&status) {

@@ -45,7 +45,9 @@ fn post_apple_403_is_fatal() {
         .create();
 
     let c = ReceiptClient::new(http(&server.url()));
-    let err = c.post_apple("<jws>", "anon_99", "pro", "idem_x").unwrap_err();
+    let err = c
+        .post_apple("<jws>", "anon_99", "pro", "idem_x")
+        .unwrap_err();
     assert!(matches!(err, rovenue::RovenueError::ServerError));
     m.assert();
 }

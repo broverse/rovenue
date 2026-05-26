@@ -36,8 +36,18 @@ fn upsert_and_read() {
 fn scopes_are_isolated() {
     let store = CacheStore::open_in_memory().unwrap();
     let repo = CreditBalanceRepo::new(&store);
-    repo.upsert(&CreditBalanceRow { user_scope: "a".into(), balance: 5, updated_at_ms: 1 }).unwrap();
-    repo.upsert(&CreditBalanceRow { user_scope: "b".into(), balance: 9, updated_at_ms: 1 }).unwrap();
+    repo.upsert(&CreditBalanceRow {
+        user_scope: "a".into(),
+        balance: 5,
+        updated_at_ms: 1,
+    })
+    .unwrap();
+    repo.upsert(&CreditBalanceRow {
+        user_scope: "b".into(),
+        balance: 9,
+        updated_at_ms: 1,
+    })
+    .unwrap();
     assert_eq!(repo.get("a").unwrap().unwrap().balance, 5);
     assert_eq!(repo.get("b").unwrap().unwrap().balance, 9);
 }

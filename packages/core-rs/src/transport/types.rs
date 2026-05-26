@@ -42,8 +42,18 @@ pub struct HttpPostRequest<'a> {
 
 impl<'a> HttpPostRequest<'a> {
     pub fn new(path: &'a str) -> Self {
-        Self { path, user_scope: None, idempotency_key: None }
+        Self {
+            path,
+            user_scope: None,
+            idempotency_key: None,
+        }
     }
-    pub fn user_scope(mut self, scope: &'a str) -> Self { self.user_scope = Some(scope); self }
-    pub fn idempotency_key(mut self, key: &'a str) -> Self { self.idempotency_key = Some(key); self }
+    pub fn user_scope(mut self, scope: &'a str) -> Self {
+        self.user_scope = Some(scope);
+        self
+    }
+    pub fn idempotency_key(mut self, key: &'a str) -> Self {
+        self.idempotency_key = Some(key);
+        self
+    }
 }

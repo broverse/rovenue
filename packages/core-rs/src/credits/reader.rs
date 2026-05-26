@@ -22,11 +22,26 @@ pub struct CreditReader {
 
 impl CreditReader {
     pub fn new(store: Arc<CacheStore>, identity: Arc<IdentityManager>) -> Self {
-        Self { store, identity, http: None, bus: None, clock: None }
+        Self {
+            store,
+            identity,
+            http: None,
+            bus: None,
+            clock: None,
+        }
     }
-    pub fn with_http(mut self, http: Arc<HttpClient>) -> Self { self.http = Some(http); self }
-    pub fn with_observer_bus(mut self, bus: Arc<ObserverBus>) -> Self { self.bus = Some(bus); self }
-    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self { self.clock = Some(clock); self }
+    pub fn with_http(mut self, http: Arc<HttpClient>) -> Self {
+        self.http = Some(http);
+        self
+    }
+    pub fn with_observer_bus(mut self, bus: Arc<ObserverBus>) -> Self {
+        self.bus = Some(bus);
+        self
+    }
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = Some(clock);
+        self
+    }
 
     pub fn balance(&self) -> RovenueResult<i64> {
         let scope = self.identity.current_user_scope();
@@ -60,7 +75,10 @@ impl CreditReader {
             HttpPostRequest::new("/v1/me/credits/spend")
                 .user_scope(&scope)
                 .idempotency_key(idempotency_key),
-            &SpendBody { amount, description },
+            &SpendBody {
+                amount,
+                description,
+            },
         )?;
         let body = resp.body.ok_or(RovenueError::Internal)?;
         let new_balance = body.data.balance;

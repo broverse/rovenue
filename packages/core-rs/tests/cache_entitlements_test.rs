@@ -1,6 +1,6 @@
-use rovenue::cache::CacheStore;
 use rovenue::cache::entitlements::{EntitlementRow, EntitlementsRepo};
 use rovenue::cache::etag::EtagRepo;
+use rovenue::cache::CacheStore;
 
 fn row(entitlement_id: &str) -> EntitlementRow {
     EntitlementRow {
@@ -31,7 +31,8 @@ fn upsert_and_get_one() {
 fn list_all_for_user_scope() {
     let store = CacheStore::open_in_memory().unwrap();
     let repo = EntitlementsRepo::new(&store);
-    repo.upsert_many("user_42", &[row("pro"), row("lifetime")]).unwrap();
+    repo.upsert_many("user_42", &[row("pro"), row("lifetime")])
+        .unwrap();
     repo.upsert_many("other", &[row("pro")]).unwrap();
     let mut got: Vec<String> = repo
         .list("user_42")

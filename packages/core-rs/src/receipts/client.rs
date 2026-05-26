@@ -23,7 +23,13 @@ impl ReceiptClient {
         product_id: &str,
         idempotency_key: &str,
     ) -> RovenueResult<ReceiptResult> {
-        self.post("/v1/receipts/apple", receipt, app_user_id, product_id, idempotency_key)
+        self.post(
+            "/v1/receipts/apple",
+            receipt,
+            app_user_id,
+            product_id,
+            idempotency_key,
+        )
     }
 
     pub fn post_google(
@@ -33,7 +39,13 @@ impl ReceiptClient {
         product_id: &str,
         idempotency_key: &str,
     ) -> RovenueResult<ReceiptResult> {
-        self.post("/v1/receipts/google", receipt, app_user_id, product_id, idempotency_key)
+        self.post(
+            "/v1/receipts/google",
+            receipt,
+            app_user_id,
+            product_id,
+            idempotency_key,
+        )
     }
 
     fn post(
@@ -44,13 +56,19 @@ impl ReceiptClient {
         product_id: &str,
         idempotency_key: &str,
     ) -> RovenueResult<ReceiptResult> {
-        let body = ReceiptBody { receipt, app_user_id, product_id };
-        let resp = self.http.post_json::<ReceiptBody, ApiEnvelope<ReceiptResponse>>(
-            HttpPostRequest::new(path)
-                .user_scope(app_user_id)
-                .idempotency_key(idempotency_key),
-            &body,
-        )?;
+        let body = ReceiptBody {
+            receipt,
+            app_user_id,
+            product_id,
+        };
+        let resp = self
+            .http
+            .post_json::<ReceiptBody, ApiEnvelope<ReceiptResponse>>(
+                HttpPostRequest::new(path)
+                    .user_scope(app_user_id)
+                    .idempotency_key(idempotency_key),
+                &body,
+            )?;
         let data = resp.body.ok_or(RovenueError::Internal)?.data;
         Ok(ReceiptResult {
             subscriber_id: data.subscriber.id,

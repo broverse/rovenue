@@ -27,7 +27,12 @@ fn post_google_success() {
 
     let c = ReceiptClient::new(http(&server.url()));
     let result = c
-        .post_google("play.purchase.token", "anon_99", "pro_monthly_v2", "idem_google_001")
+        .post_google(
+            "play.purchase.token",
+            "anon_99",
+            "pro_monthly_v2",
+            "idem_google_001",
+        )
         .unwrap();
     assert_eq!(result.subscriber_id, "sub_2");
     assert_eq!(result.credit_balance, 0);

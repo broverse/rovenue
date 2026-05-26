@@ -11,7 +11,13 @@ struct Payload {
 fn unwraps_data_envelope() {
     let json = r#"{"data": {"name": "pro", "count": 7}}"#;
     let env: ApiEnvelope<Payload> = serde_json::from_str(json).unwrap();
-    assert_eq!(env.data, Payload { name: "pro".into(), count: 7 });
+    assert_eq!(
+        env.data,
+        Payload {
+            name: "pro".into(),
+            count: 7
+        }
+    );
 }
 
 #[test]

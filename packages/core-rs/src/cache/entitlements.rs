@@ -62,7 +62,11 @@ impl<'a> EntitlementsRepo<'a> {
         })
     }
 
-    pub fn get(&self, user_scope: &str, entitlement_id: &str) -> RovenueResult<Option<EntitlementRow>> {
+    pub fn get(
+        &self,
+        user_scope: &str,
+        entitlement_id: &str,
+    ) -> RovenueResult<Option<EntitlementRow>> {
         self.store.with_conn(|c| {
             let mut stmt = c.prepare(
                 "SELECT entitlement_id, is_active, product_id, expires_at_ms, updated_at_ms,

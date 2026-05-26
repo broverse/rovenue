@@ -53,20 +53,32 @@ fn user_not_found_displays() {
 
 #[test]
 fn insufficient_credits_displays() {
-    assert_eq!(format!("{}", RovenueError::InsufficientCredits), "insufficient credits");
+    assert_eq!(
+        format!("{}", RovenueError::InsufficientCredits),
+        "insufficient credits"
+    );
 }
 
 #[test]
 fn entitlement_inactive_displays() {
-    assert_eq!(format!("{}", RovenueError::EntitlementInactive), "entitlement inactive");
+    assert_eq!(
+        format!("{}", RovenueError::EntitlementInactive),
+        "entitlement inactive"
+    );
 }
 
 #[test]
 fn duplicate_purchase_displays() {
-    assert_eq!(format!("{}", RovenueError::DuplicatePurchase), "duplicate purchase");
+    assert_eq!(
+        format!("{}", RovenueError::DuplicatePurchase),
+        "duplicate purchase"
+    );
 }
 
 #[test]
 fn receipt_invalid_displays() {
-    assert_eq!(format!("{}", RovenueError::ReceiptInvalid), "receipt invalid");
+    assert_eq!(
+        format!("{}", RovenueError::ReceiptInvalid),
+        "receipt invalid"
+    );
 }

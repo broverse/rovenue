@@ -4,7 +4,10 @@ use crate::cache::entitlements::EntitlementRow;
 
 use super::types::EntitlementWire;
 
-pub fn map_to_rows(map: HashMap<String, EntitlementWire>, updated_at_ms: u64) -> Vec<EntitlementRow> {
+pub fn map_to_rows(
+    map: HashMap<String, EntitlementWire>,
+    updated_at_ms: u64,
+) -> Vec<EntitlementRow> {
     map.into_iter()
         .map(|(key, w)| EntitlementRow {
             entitlement_id: key,
@@ -37,7 +40,12 @@ fn parse_iso_to_ms(iso: &str) -> Option<u64> {
     let h: u32 = t.next()?.parse().ok()?;
     let mn: u32 = t.next()?.parse().ok()?;
     let s: u32 = t.next()?.parse().ok()?;
-    let ms: u64 = ms_frac.chars().take(3).collect::<String>().parse().unwrap_or(0);
+    let ms: u64 = ms_frac
+        .chars()
+        .take(3)
+        .collect::<String>()
+        .parse()
+        .unwrap_or(0);
 
     // Days from civil (Howard Hinnant).
     let yy = if m <= 2 { y - 1 } else { y };

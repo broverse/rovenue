@@ -5,13 +5,19 @@ use rovenue::transport::types::HttpPostRequest;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
-struct Body { amount: u32 }
+struct Body {
+    amount: u32,
+}
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct Response { data: BodyOut }
+struct Response {
+    data: BodyOut,
+}
 
 #[derive(Debug, Deserialize, PartialEq)]
-struct BodyOut { balance: u32 }
+struct BodyOut {
+    balance: u32,
+}
 
 fn client(url: &str) -> HttpClient {
     HttpClient::new(url.to_string(), "pk_test_abc".into())
@@ -111,7 +117,9 @@ fn post_json_retries_reuse_same_idempotency_key() {
         .expect(1)
         .create();
 
-    let c = client(&server.url()).with_max_attempts(3).with_min_backoff(Duration::from_millis(1));
+    let c = client(&server.url())
+        .with_max_attempts(3)
+        .with_min_backoff(Duration::from_millis(1));
     let resp = c
         .post_json::<Body, Response>(
             HttpPostRequest::new("/v1/me/credits/spend")

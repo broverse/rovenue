@@ -156,7 +156,8 @@ impl RovenueCore {
             return Err(RovenueError::Internal);
         }
         let key = IdempotencyKey::new();
-        self.credits.consume(amount, description.as_deref(), key.as_str())
+        self.credits
+            .consume(amount, description.as_deref(), key.as_str())
     }
 
     pub fn post_apple_receipt(
@@ -166,7 +167,9 @@ impl RovenueCore {
     ) -> RovenueResult<ReceiptResult> {
         let scope = self.identity.current_user_scope();
         let key = IdempotencyKey::new();
-        let result = self.receipts.post_apple(&receipt, &scope, &product_id, key.as_str())?;
+        let result = self
+            .receipts
+            .post_apple(&receipt, &scope, &product_id, key.as_str())?;
         let _ = self.entitlements.refresh();
         let _ = self.credits.refresh();
         Ok(result)
@@ -179,7 +182,9 @@ impl RovenueCore {
     ) -> RovenueResult<ReceiptResult> {
         let scope = self.identity.current_user_scope();
         let key = IdempotencyKey::new();
-        let result = self.receipts.post_google(&receipt, &scope, &product_id, key.as_str())?;
+        let result = self
+            .receipts
+            .post_google(&receipt, &scope, &product_id, key.as_str())?;
         let _ = self.entitlements.refresh();
         let _ = self.credits.refresh();
         Ok(result)

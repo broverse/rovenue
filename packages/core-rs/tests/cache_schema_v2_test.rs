@@ -23,7 +23,10 @@ fn entitlements_v2_columns_present() {
             )
         })
         .unwrap();
-    assert_eq!(count, 3, "v2 columns store/product_identifier/expires_iso must exist");
+    assert_eq!(
+        count, 3,
+        "v2 columns store/product_identifier/expires_iso must exist"
+    );
 }
 
 #[test]
@@ -35,7 +38,8 @@ fn upgrades_v1_db_in_place() {
     {
         use rusqlite::Connection;
         let conn = Connection::open(&path).unwrap();
-        conn.execute_batch(rovenue::cache::schema::MIGRATION_V1).unwrap();
+        conn.execute_batch(rovenue::cache::schema::MIGRATION_V1)
+            .unwrap();
     }
 
     let store = CacheStore::open(&path).expect("reopen + upgrade v1→v2");

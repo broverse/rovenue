@@ -12,7 +12,9 @@ use serial_test::serial;
 
 struct Capture(Mutex<Vec<ChangeEvent>>);
 impl Observer for Capture {
-    fn on_change(&self, e: ChangeEvent) { self.0.lock().unwrap().push(e); }
+    fn on_change(&self, e: ChangeEvent) {
+        self.0.lock().unwrap().push(e);
+    }
 }
 
 #[test]
@@ -60,7 +62,7 @@ fn polling_refresh_fires_when_foreground() {
 
     let events = cap.0.lock().unwrap().clone();
     assert!(
-        events.iter().any(|e| *e == ChangeEvent::EntitlementsChanged),
+        events.contains(&ChangeEvent::EntitlementsChanged),
         "polling tick must have emitted at least one EntitlementsChanged"
     );
     m.assert();
