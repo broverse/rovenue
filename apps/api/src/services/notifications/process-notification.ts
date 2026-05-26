@@ -3,6 +3,7 @@ import { drizzle, type Db } from "@rovenue/db";
 import { renderTemplate } from "@rovenue/email-templates";
 import { getEvent } from "@rovenue/shared/notifications";
 import { logger } from "../../lib/logger";
+import { incDispatched } from "../../lib/metrics-notifications";
 import type { Env } from "../../lib/env";
 import type {
   SendEmailJob,
@@ -216,6 +217,14 @@ export async function processNotification(
     }
 
     outcome.recipientsNotified.push(userId);
+
+    // Per-channel dispatch counter — one increment per delivery
+    // row write so the rate of in-app inserts, queued-email, and
+    // queued-push at the notifier's exit can be graphed
+    // independently from the send-worker's outcome counters.
+    for (const cs of channelStatuses) {
+      incDispatched(payload.eventKey, cs.channel, cs.status as never);
+    }
 
     // Build the post-commit job-enqueue list. Email and push jobs
     // both reference deliveryId so the send-worker can transition

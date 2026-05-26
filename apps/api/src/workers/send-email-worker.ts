@@ -19,6 +19,10 @@ import type IORedis from "ioredis";
 import { drizzle, type Db } from "@rovenue/db";
 import type { Mailer } from "../lib/mailer";
 import type { Logger } from "../lib/logger";
+import {
+  incDispatched,
+  observeSendDuration,
+} from "../lib/metrics-notifications";
 import { isEmailSuppressed } from "../services/notifications/suppression";
 import { SEND_EMAIL_QUEUE_NAME, type SendEmailJob } from "../queues/notifier";
 
@@ -53,6 +57,7 @@ export function startSendEmailWorker(
           "suppressed",
           { providerResponse: { reason: "suppressed_list" } },
         );
+        incDispatched("unknown", "email", "suppressed");
         log.info("suppressed", { deliveryId: data.deliveryId });
         return;
       }
@@ -62,6 +67,7 @@ export function startSendEmailWorker(
         data.deliveryId,
       );
 
+      const startMs = performance.now();
       const result = await deps.mailer.send({
         to: data.to,
         subject: data.subject,
@@ -70,6 +76,7 @@ export function startSendEmailWorker(
         headers: data.headers,
         correlationId: data.deliveryId,
       });
+      observeSendDuration("email", "ses", "ok", performance.now() - startMs);
 
       await notificationDeliveryRepo.markDeliveryStatus(
         deps.db,
@@ -77,6 +84,7 @@ export function startSendEmailWorker(
         "sent",
         { providerMessageId: result.messageId },
       );
+      incDispatched("unknown", "email", "delivered");
       log.info("sent", {
         deliveryId: data.deliveryId,
         providerMessageId: result.messageId,
@@ -106,6 +114,7 @@ export function startSendEmailWorker(
           "failed",
           { providerResponse: { error: err?.message ?? "unknown" } },
         );
+        incDispatched("unknown", "email", "failed");
       } catch (markErr) {
         log.error("mark_failed_error", {
           deliveryId: job.data.deliveryId,

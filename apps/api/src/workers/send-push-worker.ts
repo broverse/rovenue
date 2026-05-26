@@ -27,6 +27,10 @@ import type {
 } from "../lib/push";
 import type { PushTransports } from "../lib/push";
 import type { Logger } from "../lib/logger";
+import {
+  incDispatched,
+  incPushDevicesRevoked,
+} from "../lib/metrics-notifications";
 import { SEND_PUSH_QUEUE_NAME, type SendPushJob } from "../queues/notifier";
 
 const { notificationDeliveryRepo, pushDeviceRepo } = drizzle;
@@ -128,6 +132,7 @@ export function startSendPushWorker(
             r.platform,
             r.token,
           );
+          incPushDevicesRevoked(r.platform, r.outcome.error);
         }
       }
 
@@ -146,6 +151,7 @@ export function startSendPushWorker(
             providerResponse: { devices: summariseOutcomes(outcomes) },
           },
         );
+        incDispatched("unknown", "push", "delivered");
         log.info("sent", {
           deliveryId: data.deliveryId,
           devices: outcomes.length,
@@ -172,6 +178,7 @@ export function startSendPushWorker(
         "failed",
         { providerResponse: { devices: summariseOutcomes(outcomes) } },
       );
+      incDispatched("unknown", "push", "failed");
       throw new UnrecoverableError("all push sends failed (permanent)");
     },
     {
