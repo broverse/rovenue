@@ -64,7 +64,7 @@ impl CacheStore {
     }
 
     /// Internal accessor used by sibling modules (identity, entitlements, etag).
-    pub(crate) fn with_conn<R>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<R>) -> RovenueResult<R> {
+    pub fn with_conn<R>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<R>) -> RovenueResult<R> {
         let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
         f(&guard).map_err(|_| RovenueError::Storage)
     }
