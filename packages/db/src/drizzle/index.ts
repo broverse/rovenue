@@ -62,3 +62,4 @@ export * as funnelRepo from "./repositories/funnels";
 export * as funnelVersionRepo from "./repositories/funnel-versions";
 export * as funnelTemplateRepo from "./repositories/funnel-templates";
 export * as funnelSessionRepo from "./repositories/funnel-sessions";
+export * as funnelAnswerRepo from "./repositories/funnel-answers";
