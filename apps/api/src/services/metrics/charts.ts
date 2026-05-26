@@ -1,6 +1,8 @@
 import type {
   ChartChannelsResponse,
   ChartChannelsRow,
+  ChartFilterOption,
+  ChartFilterOptionsResponse,
   ChartFunnelResponse,
   ChartFunnelStep,
   ChartHeatmapCell,
@@ -221,6 +223,87 @@ export async function readHeatmap(
   });
 
   return { windowDays: w.days, cells };
+}
+
+// =============================================================
+// Filter options — distinct values from the revenue stream
+// =============================================================
+//
+// Powers the right-rail Filters card on /charts. We surface the
+// distinct (platform, country, productGroupId) values that are
+// actually present in the project's CH data so users aren't
+// presented with options that can't match anything.
+//
+// `country` falls back to `subscriberCountry` when the event
+// payload didn't carry one — same convention used by the
+// overview cohort heatmap.
+
+interface ChDistinctRow {
+  value: string;
+  c: string;
+}
+
+async function distinctDimension(
+  projectId: string,
+  expr: string,
+  from: string,
+  to: string,
+  limit = 50,
+): Promise<ChartFilterOption[]> {
+  const rows = await queryAnalytics<ChDistinctRow>(
+    projectId,
+    `
+      SELECT
+        ${expr}              AS value,
+        toString(count())    AS c
+      FROM rovenue.raw_revenue_events FINAL
+      WHERE projectId = {projectId:String}
+        AND toDate(eventDate) >= {from:Date}
+        AND toDate(eventDate) <= {to:Date}
+        AND ${expr} != ''
+      GROUP BY value
+      ORDER BY count() DESC
+      LIMIT {limit:UInt32}
+    `,
+    { from, to, limit },
+  );
+  return rows.map((r) => ({
+    value: r.value,
+    label: r.value,
+    count: Number(r.c),
+  }));
+}
+
+export async function readFilterOptions(
+  projectId: string,
+  windowDays: number,
+): Promise<ChartFilterOptionsResponse> {
+  assertClickHouseReady();
+  const w = buildWindow(windowDays);
+  const from = toDateOnly(w.from);
+  const to = toDateOnly(w.to);
+
+  const [platform, country, productGroup] = await Promise.all([
+    // `store` is the platform discriminator in raw events.
+    distinctDimension(projectId, "store", from, to),
+    distinctDimension(
+      projectId,
+      "ifNull(nullIf(subscriberCountry, ''), country)",
+      from,
+      to,
+    ),
+    // Product group identifier travels on the event as
+    // `productGroupId`; some legacy rows are NULL — the filter on
+    // `expr != ''` strips them.
+    distinctDimension(projectId, "ifNull(productGroupId, '')", from, to),
+  ]);
+
+  return {
+    windowDays: w.days,
+    platform,
+    country,
+    productGroup,
+  };
 }
 
 export const __chartsConstants = {

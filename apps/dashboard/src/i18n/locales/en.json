@@ -2081,7 +2081,6 @@
     "subtitle": "Pre-built revenue, retention, and conversion charts. Pick from the library on the left, slice with filters on the right, save as a view, or pin to the dashboard. Every chart is a SQL query under the hood — open in Queries to edit.",
     "actions": {
       "openInQueries": "Open in Queries",
-      "exportCsv": "Export CSV",
       "newChart": "New chart"
     },
     "categories": {
@@ -2089,7 +2088,8 @@
       "growth": "Growth",
       "retention": "Retention",
       "conversion": "Conversion",
-      "credits": "Credits"
+      "credits": "Credits",
+      "custom": "Custom"
     },
     "items": {
       "mrr": "MRR",
@@ -2112,7 +2112,10 @@
     "catalog": {
       "searchPlaceholder": "Find chart…",
       "searchAria": "Search charts",
-      "empty": "No charts match your search."
+      "empty": "No charts match your search.",
+      "loading": "Loading charts…",
+      "delete": "Delete chart",
+      "deleteConfirm": "Delete \"{{name}}\"? This affects the whole project."
     },
     "toolbar": {
       "version": "v3.4 · auto-updated 2m ago",
@@ -2129,7 +2132,8 @@
       "legendCurrent": "Current",
       "legendPrev": "Prev period",
       "legendAnnotations": "Annotations",
-      "tooltipPrev": "prev: {{value}}"
+      "tooltipPrev": "prev: {{value}}",
+      "error": "Couldn't load MRR — using sample series."
     },
     "decomposition": {
       "newMrr": "New MRR",
@@ -2195,7 +2199,43 @@
     "filters": {
       "title": "Filters",
       "add": "Add filter",
-      "remove": "Remove filter"
+      "remove": "Remove filter",
+      "allValues": "all",
+      "loading": "Loading…",
+      "empty": "No values in this window",
+      "dimensions": {
+        "platform": "platform",
+        "country": "country",
+        "productGroup": "product_group"
+      }
+    },
+    "newChart": {
+      "title": "New chart",
+      "subtitle": "Adds a chart to the project's shared catalog. Pin filters and group-by after it's created.",
+      "submit": "Create chart",
+      "creating": "Creating…",
+      "name": {
+        "label": "Name",
+        "hint": "Shown in the catalog and on the chart card.",
+        "placeholder": "e.g. Trial conversion (iOS only)"
+      },
+      "category": {
+        "label": "Category"
+      },
+      "chartType": {
+        "label": "Default chart type"
+      },
+      "range": {
+        "label": "Default range"
+      },
+      "description": {
+        "label": "Description",
+        "hint": "Optional context for teammates browsing the library.",
+        "placeholder": "What does this chart track?"
+      },
+      "errors": {
+        "generic": "Could not create the chart. Please try again."
+      }
     },
     "groupBy": {
       "title": "Group by",

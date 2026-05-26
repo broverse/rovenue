@@ -980,6 +980,56 @@ export type ChartAnnotation = typeof chartAnnotations.$inferSelect;
 export type NewChartAnnotation = typeof chartAnnotations.$inferInsert;
 
 // =============================================================
+// custom_charts (Phase 3.5 — extended)
+// =============================================================
+//
+// Per-project, project-shared chart definitions authored by
+// dashboard users. Shipped alongside a hard-coded "system"
+// catalog (defined server-side, non-deletable). The opaque
+// `config` jsonb holds filters, group-by, and any other slice
+// state so the catalog wire schema can evolve without DB
+// migrations. Writes require ADMIN — viewers can read but not
+// mutate the shared library.
+
+export const customCharts = pgTable(
+  "custom_charts",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    /** Author. Null if the creator was later removed from the project. */
+    createdByUserId: text("createdByUserId").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    name: text("name").notNull(),
+    /** Free-form category string; system entries pick a fixed taxonomy
+     * but customs are free to define their own grouping. */
+    category: text("category").notNull(),
+    chartType: text("chartType").notNull(),
+    rangeOption: text("rangeOption").notNull(),
+    config: jsonb("config")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectIdUpdatedAtIdx: index(
+      "custom_charts_projectId_updatedAt_idx",
+    ).on(t.projectId, t.updatedAt),
+  }),
+);
+
+export type CustomChart = typeof customCharts.$inferSelect;
+export type NewCustomChart = typeof customCharts.$inferInsert;
+
+// =============================================================
 // cohorts (Phase 4.4)
 // =============================================================
 //

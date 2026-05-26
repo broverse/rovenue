@@ -2,32 +2,11 @@ import { seededSeries } from "./format";
 import type {
   Annotation,
   Channel,
-  ChartDescriptor,
-  FilterChip,
   FunnelStage,
   GroupBy,
   MrrSeries,
   SavedView,
 } from "./types";
-
-export const CHART_CATALOG: ReadonlyArray<ChartDescriptor> = [
-  { id: "mrr", category: "revenue", star: true },
-  { id: "arr", category: "revenue" },
-  { id: "arpu", category: "revenue" },
-  { id: "rev_per_install", category: "revenue", star: true },
-  { id: "gross_vs_net", category: "revenue" },
-  { id: "new_subs", category: "growth" },
-  { id: "trials_started", category: "growth" },
-  { id: "reactivations", category: "growth" },
-  { id: "churn", category: "retention", star: true },
-  { id: "retention_curve", category: "retention" },
-  { id: "ltv", category: "retention" },
-  { id: "trial_to_paid", category: "conversion" },
-  { id: "paywall_view_rate", category: "conversion" },
-  { id: "paywall_purchase", category: "conversion" },
-  { id: "credit_burn", category: "credits" },
-  { id: "liability", category: "credits" },
-];
 
 export const CHART_MONTH_LABELS = [
   "Jun",
@@ -156,12 +135,6 @@ export const HEATMAP_DAY_KEYS = [
   "charts.days.sat",
   "charts.days.sun",
 ] as const;
-
-export const FILTERS: ReadonlyArray<FilterChip> = [
-  { key: "platform", value: "iOS, Android" },
-  { key: "country", value: "all" },
-  { key: "product_group", value: "premium, pro" },
-];
 
 export const GROUP_BY_OPTIONS: ReadonlyArray<GroupBy> = [
   "none",

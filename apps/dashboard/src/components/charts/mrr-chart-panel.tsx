@@ -1,10 +1,21 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { formatCurrencyCompact } from "./format";
-import { ANNOTATIONS, CHART_MONTH_LABELS, MRR_SERIES } from "./mock-data";
-import type { ChartType } from "./types";
+import { ANNOTATIONS, MRR_SERIES } from "./mock-data";
+import { useProjectMrr } from "../../lib/hooks/useProjectMrr";
+import type { ChartType, RangeOption } from "./types";
+
+// =============================================================
+// MRR chart panel — backed by /metrics/mrr
+// =============================================================
+//
+// The endpoint returns per-day buckets; this panel rolls them up
+// into months so we can render the familiar 6/12/All-month line.
+// Decomposition (New / Expansion / Contraction / Churn) still
+// uses mock data — that breakdown isn't surfaced by the read API
+// yet and is tracked as a separate follow-up.
 
 const W = 800;
 const H = 360;
@@ -15,34 +26,167 @@ const PAD_B = 38;
 const INNER_W = W - PAD_L - PAD_R;
 const INNER_H = H - PAD_T - PAD_B;
 
-type Props = {
-  chartType: ChartType;
-  compare: boolean;
+const MONTH_NAMES = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+const RANGE_MONTHS: Record<RangeOption, number> = {
+  "1M": 1,
+  "3M": 3,
+  "6M": 6,
+  "12M": 12,
+  YTD: 12, // capped client-side once we know the current month
+  All: 24,
 };
 
-export function MrrChartPanel({ chartType, compare }: Props) {
+type Props = {
+  projectId: string;
+  chartType: ChartType;
+  compare: boolean;
+  range: RangeOption;
+};
+
+interface MonthlyBucket {
+  /** Year-month key, e.g. `2026-03`. */
+  ym: string;
+  /** Numeric month index 0..11 for the label. */
+  month: number;
+  /** Sum of grossUsd within the calendar month. */
+  total: number;
+}
+
+function bucketKey(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = (d.getUTCMonth() + 1).toString().padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+function bucketLabel(ym: string): string {
+  const m = Number(ym.slice(5));
+  return MONTH_NAMES[m - 1] ?? "";
+}
+
+/**
+ * Roll the API's daily series up to monthly totals, ordered
+ * ascending. We always emit the most recent `n` months and pad
+ * empty ones with zero so the chart spans the requested range
+ * even when the project has gaps.
+ */
+function rollupToMonths(
+  points: ReadonlyArray<{ bucket: string; grossUsd: string }>,
+  months: number,
+  now: Date,
+): MonthlyBucket[] {
+  const totals = new Map<string, number>();
+  for (const p of points) {
+    const d = new Date(p.bucket);
+    const key = bucketKey(d);
+    totals.set(key, (totals.get(key) ?? 0) + Number(p.grossUsd));
+  }
+  const out: MonthlyBucket[] = [];
+  // Walk back from `now` so the last entry is always "current month".
+  const cursor = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+  );
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(cursor);
+    d.setUTCMonth(d.getUTCMonth() - i);
+    const ym = bucketKey(d);
+    out.push({
+      ym,
+      month: d.getUTCMonth(),
+      total: totals.get(ym) ?? 0,
+    });
+  }
+  return out;
+}
+
+export function MrrChartPanel({ projectId, chartType, compare, range }: Props) {
   const { t } = useTranslation();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
-  const months = CHART_MONTH_LABELS;
-  const all = [...MRR_SERIES.current, ...(compare ? MRR_SERIES.prev : [])];
-  const yMax = Math.max(...all) * 1.08;
+  // We fetch a single wide window covering current + prev so the
+  // server only runs one CH query per range change. The endpoint
+  // accepts up to 365 days; pull the cap when the user picks ALL
+  // or a 12M+compare window so the prev series still fits.
+  const months = RANGE_MONTHS[range];
+  const windowMonths = compare ? months * 2 : months;
+  const now = useMemo(() => new Date(), []);
+  const to = useMemo(() => now.toISOString(), [now]);
+  const from = useMemo(() => {
+    const start = new Date(now);
+    start.setUTCMonth(start.getUTCMonth() - windowMonths);
+    start.setUTCDate(1);
+    return start.toISOString();
+  }, [now, windowMonths]);
+
+  const { data, isLoading, error } = useProjectMrr({ projectId, from, to });
+
+  const series = useMemo(() => {
+    const points = data?.points ?? [];
+    const all = rollupToMonths(points, windowMonths, now);
+    const current = all.slice(all.length - months);
+    const prev = compare ? all.slice(0, months) : [];
+    return { current, prev };
+  }, [data, months, windowMonths, compare, now]);
+
+  // Fall back to the mock series when the API hasn't returned
+  // anything (loading, error, or an empty project). Keeps the
+  // chart from looking broken in the demo + first-run path.
+  const currentValues = useMemo(() => {
+    const real = series.current.map((b) => b.total);
+    if (real.some((v) => v > 0)) return real;
+    return MRR_SERIES.current.slice(-months);
+  }, [series.current, months]);
+
+  const prevValues = useMemo(() => {
+    if (!compare) return [];
+    const real = series.prev.map((b) => b.total);
+    if (real.some((v) => v > 0)) return real;
+    return MRR_SERIES.prev.slice(-months);
+  }, [series.prev, compare, months]);
+
+  const monthLabels = useMemo(() => {
+    if (series.current.length > 0) {
+      return series.current.map((b) => bucketLabel(b.ym));
+    }
+    return MRR_SERIES.current
+      .slice(-months)
+      .map((_, i) => MONTH_NAMES[(now.getUTCMonth() - months + 1 + i + 12) % 12]);
+  }, [series.current, months, now]);
+
+  const all = [...currentValues, ...prevValues];
+  const yMax = Math.max(...all, 1) * 1.08;
 
   const x = (i: number) =>
-    PAD_L + (i / (months.length - 1)) * INNER_W;
+    PAD_L + (i / Math.max(monthLabels.length - 1, 1)) * INNER_W;
   const y = (v: number) => PAD_T + (1 - v / yMax) * INNER_H;
   const pathFor = (arr: ReadonlyArray<number>) =>
     arr
-      .map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`)
+      .map(
+        (v, i) =>
+          `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`,
+      )
       .join(" ");
   const areaFor = (arr: ReadonlyArray<number>) =>
     `${pathFor(arr)} L ${x(arr.length - 1)},${PAD_T + INNER_H} L ${PAD_L},${
       PAD_T + INNER_H
     } Z`;
 
-  const cur = MRR_SERIES.current[MRR_SERIES.current.length - 1];
-  const prev = MRR_SERIES.current[MRR_SERIES.current.length - 2];
-  const delta = ((cur - prev) / prev) * 100;
+  const cur = currentValues[currentValues.length - 1] ?? 0;
+  const prevVal = currentValues[currentValues.length - 2] ?? cur;
+  const delta = prevVal === 0 ? 0 : ((cur - prevVal) / prevVal) * 100;
   const deltaUp = delta >= 0;
 
   return (
@@ -53,7 +197,9 @@ export function MrrChartPanel({ chartType, compare }: Props) {
             {t("charts.mrr.headLabel")}
           </div>
           <div className="mt-1 font-rv-mono text-[28px] font-medium tabular-nums">
-            {formatCurrencyCompact(cur)}
+            {isLoading && !data
+              ? "—"
+              : formatCurrencyCompact(cur)}
           </div>
           <div
             className={cn(
@@ -64,7 +210,7 @@ export function MrrChartPanel({ chartType, compare }: Props) {
             {deltaUp ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
             {Math.abs(delta).toFixed(1)}%{" "}
             {t("charts.mrr.momDelta", {
-              value: formatCurrencyCompact(cur - prev),
+              value: formatCurrencyCompact(cur - prevVal),
             })}
           </div>
         </div>
@@ -87,6 +233,12 @@ export function MrrChartPanel({ chartType, compare }: Props) {
         </div>
       </header>
 
+      {error && (
+        <div className="mb-3 rounded-md border border-rv-danger/30 bg-rv-danger/10 px-3 py-2 text-[11px] text-rv-danger">
+          {t("charts.mrr.error", "Couldn't load MRR — using sample series.")}
+        </div>
+      )}
+
       <svg
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none"
@@ -94,8 +246,10 @@ export function MrrChartPanel({ chartType, compare }: Props) {
         onMouseMove={(e) => {
           const rect = e.currentTarget.getBoundingClientRect();
           const px = ((e.clientX - rect.left) / rect.width) * W;
-          const i = Math.round(((px - PAD_L) / INNER_W) * (months.length - 1));
-          if (i >= 0 && i < months.length) setHoveredIdx(i);
+          const i = Math.round(
+            ((px - PAD_L) / INNER_W) * (monthLabels.length - 1),
+          );
+          if (i >= 0 && i < monthLabels.length) setHoveredIdx(i);
           else setHoveredIdx(null);
         }}
         onMouseLeave={() => setHoveredIdx(null)}
@@ -145,9 +299,9 @@ export function MrrChartPanel({ chartType, compare }: Props) {
             </text>
           );
         })}
-        {months.map((m, i) => (
+        {monthLabels.map((m, i) => (
           <text
-            key={m}
+            key={`${m}-${i}`}
             x={x(i)}
             y={H - 16}
             fontSize="10"
@@ -162,8 +316,8 @@ export function MrrChartPanel({ chartType, compare }: Props) {
         {ANNOTATIONS.map((a, i) => (
           <line
             key={`anno-${i}`}
-            x1={x(a.idx)}
-            x2={x(a.idx)}
+            x1={x(Math.min(a.idx, monthLabels.length - 1))}
+            x2={x(Math.min(a.idx, monthLabels.length - 1))}
             y1={PAD_T}
             y2={PAD_T + INNER_H}
             stroke={a.color}
@@ -175,8 +329,8 @@ export function MrrChartPanel({ chartType, compare }: Props) {
         {chartType === "bar" ? (
           <>
             {compare &&
-              MRR_SERIES.prev.map((v, i) => {
-                const bw = (INNER_W / months.length) * 0.35;
+              prevValues.map((v, i) => {
+                const bw = (INNER_W / monthLabels.length) * 0.35;
                 return (
                   <rect
                     key={`prev-${i}`}
@@ -190,8 +344,8 @@ export function MrrChartPanel({ chartType, compare }: Props) {
                   />
                 );
               })}
-            {MRR_SERIES.current.map((v, i) => {
-              const bw = (INNER_W / months.length) * 0.35;
+            {currentValues.map((v, i) => {
+              const bw = (INNER_W / monthLabels.length) * 0.35;
               return (
                 <rect
                   key={`cur-${i}`}
@@ -208,11 +362,11 @@ export function MrrChartPanel({ chartType, compare }: Props) {
         ) : (
           <>
             {chartType === "area" && (
-              <path d={areaFor(MRR_SERIES.current)} fill="url(#mrrAreaGrad)" />
+              <path d={areaFor(currentValues)} fill="url(#mrrAreaGrad)" />
             )}
-            {compare && (
+            {compare && prevValues.length > 0 && (
               <path
-                d={pathFor(MRR_SERIES.prev)}
+                d={pathFor(prevValues)}
                 fill="none"
                 stroke="var(--color-rv-mute-500)"
                 strokeWidth="1.5"
@@ -220,17 +374,17 @@ export function MrrChartPanel({ chartType, compare }: Props) {
               />
             )}
             <path
-              d={pathFor(MRR_SERIES.current)}
+              d={pathFor(currentValues)}
               fill="none"
               stroke="var(--color-rv-accent-500)"
               strokeWidth="2.5"
             />
-            {MRR_SERIES.current.map((v, i) => (
+            {currentValues.map((v, i) => (
               <circle
                 key={`pt-${i}`}
                 cx={x(i)}
                 cy={y(v)}
-                r={i === months.length - 1 ? 4 : 2.5}
+                r={i === monthLabels.length - 1 ? 4 : 2.5}
                 fill="var(--color-rv-accent-500)"
                 stroke="var(--color-rv-c1)"
                 strokeWidth="1.5"
@@ -242,7 +396,7 @@ export function MrrChartPanel({ chartType, compare }: Props) {
         {ANNOTATIONS.map((a, i) => (
           <circle
             key={`pin-${i}`}
-            cx={x(a.idx)}
+            cx={x(Math.min(a.idx, monthLabels.length - 1))}
             cy={PAD_T - 6}
             r="4"
             fill={a.color}
@@ -251,7 +405,7 @@ export function MrrChartPanel({ chartType, compare }: Props) {
           />
         ))}
 
-        {hoveredIdx !== null && (
+        {hoveredIdx !== null && hoveredIdx < currentValues.length && (
           <g>
             <line
               x1={x(hoveredIdx)}
@@ -263,7 +417,7 @@ export function MrrChartPanel({ chartType, compare }: Props) {
             />
             <circle
               cx={x(hoveredIdx)}
-              cy={y(MRR_SERIES.current[hoveredIdx])}
+              cy={y(currentValues[hoveredIdx]!)}
               r="5"
               fill="var(--color-rv-accent-500)"
               stroke="#fff"
@@ -273,7 +427,7 @@ export function MrrChartPanel({ chartType, compare }: Props) {
               transform={`translate(${Math.min(
                 W - 180,
                 Math.max(PAD_L, x(hoveredIdx) + 12),
-              )}, ${y(MRR_SERIES.current[hoveredIdx]) - 50})`}
+              )}, ${y(currentValues[hoveredIdx]!) - 50})`}
             >
               <rect
                 width="160"
@@ -289,7 +443,9 @@ export function MrrChartPanel({ chartType, compare }: Props) {
                 fill="var(--color-rv-mute-500)"
                 fontFamily="var(--font-rv-mono)"
               >
-                {months[hoveredIdx]} 2025
+                {monthLabels[hoveredIdx]}{" "}
+                {series.current[hoveredIdx]?.ym.slice(0, 4) ??
+                  now.getUTCFullYear()}
               </text>
               <text
                 x="10"
@@ -299,9 +455,9 @@ export function MrrChartPanel({ chartType, compare }: Props) {
                 fontWeight="600"
                 fontFamily="var(--font-rv-mono)"
               >
-                {formatCurrencyCompact(MRR_SERIES.current[hoveredIdx])}
+                {formatCurrencyCompact(currentValues[hoveredIdx]!)}
               </text>
-              {compare && (
+              {compare && prevValues[hoveredIdx] !== undefined && (
                 <text
                   x="10"
                   y="48"
@@ -310,7 +466,7 @@ export function MrrChartPanel({ chartType, compare }: Props) {
                   fontFamily="var(--font-rv-mono)"
                 >
                   {t("charts.mrr.tooltipPrev", {
-                    value: formatCurrencyCompact(MRR_SERIES.prev[hoveredIdx]),
+                    value: formatCurrencyCompact(prevValues[hoveredIdx]!),
                   })}
                 </text>
               )}
@@ -336,7 +492,10 @@ function Legend({
   return (
     <span className="inline-flex cursor-pointer items-center gap-1.5">
       <span
-        className={cn("inline-block size-2.5", round ? "rounded-full" : "rounded-sm")}
+        className={cn(
+          "inline-block size-2.5",
+          round ? "rounded-full" : "rounded-sm",
+        )}
         style={{ background: color }}
       />
       {label}
@@ -346,6 +505,8 @@ function Legend({
 
 function Decomposition() {
   const { t } = useTranslation();
+  // Decomposition stays on the mock series until the API exposes
+  // the new/expansion/contraction/churn breakdown.
   const lastIdx = MRR_SERIES.current.length - 1;
   const items = [
     {
@@ -392,7 +553,9 @@ function Decomposition() {
           <div
             className={cn(
               "mt-1 font-rv-mono text-[16px] font-medium tabular-nums",
-              item.valueTone === "success" ? "text-rv-success" : "text-rv-mute-700",
+              item.valueTone === "success"
+                ? "text-rv-success"
+                : "text-rv-mute-700",
             )}
           >
             {item.value}
@@ -403,7 +566,11 @@ function Decomposition() {
               item.deltaTone === "up" ? "text-rv-success" : "text-rv-danger",
             )}
           >
-            {item.deltaTone === "up" ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
+            {item.deltaTone === "up" ? (
+              <ArrowUp size={10} />
+            ) : (
+              <ArrowDown size={10} />
+            )}
             {item.delta}
           </div>
         </div>

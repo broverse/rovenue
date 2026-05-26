@@ -3,13 +3,8 @@ export type ChartCategory =
   | "growth"
   | "retention"
   | "conversion"
-  | "credits";
-
-export type ChartDescriptor = {
-  id: string;
-  category: ChartCategory;
-  star?: boolean;
-};
+  | "credits"
+  | "custom";
 
 export type ChartType = "line" | "area" | "bar";
 
@@ -22,11 +17,6 @@ export type GroupBy =
   | "product"
   | "channel"
   | "cohort_month";
-
-export type FilterChip = {
-  key: string;
-  value: string;
-};
 
 export type SeriesPoint = number;
 

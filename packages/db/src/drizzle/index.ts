@@ -45,6 +45,7 @@ export * as revenueEventRepo from "./repositories/revenue-events";
 export * as lockRepo from "./repositories/locks";
 export * as savedChartViewRepo from "./repositories/saved-chart-views";
 export * as chartAnnotationRepo from "./repositories/chart-annotations";
+export * as customChartRepo from "./repositories/custom-charts";
 export * as productRepo from "./repositories/products";
 export * as cohortRepo from "./repositories/cohorts";
 export * as savedQueryRepo from "./repositories/saved-queries";

@@ -10,7 +10,9 @@ const CHART_TYPES: ReadonlyArray<ChartType> = ["line", "area", "bar"];
 const RANGES: ReadonlyArray<RangeOption> = ["1M", "3M", "6M", "12M", "YTD", "All"];
 
 type Props = {
-  titleKey: string;
+  /** Already-resolved chart title — system charts pass the i18n
+   * lookup; custom charts pass their literal user-typed name. */
+  title: string;
   versionLabel: string;
   starred: boolean;
   onToggleStar: () => void;
@@ -23,7 +25,7 @@ type Props = {
 };
 
 export function ChartToolbar({
-  titleKey,
+  title,
   versionLabel,
   starred,
   onToggleStar,
@@ -51,7 +53,7 @@ export function ChartToolbar({
         >
           <Star size={14} className={starred ? "fill-rv-warning" : ""} />
         </button>
-        <h2 className="text-[15px] font-semibold">{t(titleKey)}</h2>
+        <h2 className="text-[15px] font-semibold">{title}</h2>
         <Chip tone="default" className="ml-1">
           {versionLabel}
         </Chip>

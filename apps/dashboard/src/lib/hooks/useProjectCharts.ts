@@ -2,13 +2,108 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   ChartAnnotation,
   ChartAnnotationsResponse,
+  ChartCatalogEntry,
+  ChartCatalogResponse,
+  ChartCategory,
   ChartChannelsResponse,
+  ChartFilterOptionsResponse,
   ChartFunnelResponse,
   ChartHeatmapResponse,
+  ChartRangeOption,
+  ChartType,
   SavedChartView,
   SavedChartViewsResponse,
 } from "@rovenue/shared";
 import { api } from "../api";
+
+// =============================================================
+// Catalog (system defaults + project-shared custom rows)
+// =============================================================
+
+export function useChartCatalog(projectId: string) {
+  return useQuery({
+    queryKey: ["charts", "catalog", projectId],
+    enabled: Boolean(projectId),
+    queryFn: () =>
+      api<ChartCatalogResponse>(
+        `/dashboard/projects/${projectId}/charts/catalog`,
+      ),
+  });
+}
+
+export interface CreateCustomChartInput {
+  name: string;
+  category?: ChartCategory;
+  chartType?: ChartType;
+  range?: ChartRangeOption;
+  config?: Record<string, unknown>;
+}
+
+export function useCreateCustomChart(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateCustomChartInput) =>
+      api<{ entry: ChartCatalogEntry }>(
+        `/dashboard/projects/${projectId}/charts/catalog`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["charts", "catalog", projectId] }),
+  });
+}
+
+export interface UpdateCustomChartInput {
+  id: string;
+  name?: string;
+  category?: ChartCategory;
+  chartType?: ChartType;
+  range?: ChartRangeOption;
+  config?: Record<string, unknown>;
+}
+
+export function useUpdateCustomChart(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: UpdateCustomChartInput) =>
+      api<{ entry: ChartCatalogEntry }>(
+        `/dashboard/projects/${projectId}/charts/catalog/${id}`,
+        { method: "PATCH", body: JSON.stringify(patch) },
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["charts", "catalog", projectId] }),
+  });
+}
+
+export function useDeleteCustomChart(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<{ deleted: true }>(
+        `/dashboard/projects/${projectId}/charts/catalog/${id}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["charts", "catalog", projectId] }),
+  });
+}
+
+// =============================================================
+// Filter options
+// =============================================================
+
+export function useChartFilterOptions({
+  projectId,
+  windowDays,
+}: DataParams) {
+  return useQuery({
+    queryKey: ["charts", "filter-options", projectId, { windowDays }],
+    enabled: Boolean(projectId),
+    queryFn: () =>
+      api<ChartFilterOptionsResponse>(
+        `/dashboard/projects/${projectId}/charts/filter-options${buildWindowQs(windowDays)}`,
+      ),
+  });
+}
 
 // =============================================================
 // Read-only chart data

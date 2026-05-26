@@ -246,6 +246,13 @@
       "when": 1779786829997,
       "tag": "0034_blue_king_bedlam",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1779789833128,
+      "tag": "0035_custom_charts",
+      "breakpoints": true
     }
   ]
 }

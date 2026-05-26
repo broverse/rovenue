@@ -9,12 +9,20 @@ import { ok } from "../../lib/response";
 import {
   __chartsConstants,
   readChannels,
+  readFilterOptions,
   readFunnel,
   readHeatmap,
 } from "../../services/metrics/charts";
+import {
+  isSystemChartId,
+  listSystemChartEntries,
+} from "../../services/metrics/chart-catalog";
 import type {
   ChartAnnotation,
   ChartAnnotationsResponse,
+  ChartCatalogEntry,
+  ChartCatalogResponse,
+  ChartFilterOptionsResponse,
   SavedChartView,
   SavedChartViewsResponse,
 } from "@rovenue/shared";
@@ -82,6 +90,70 @@ const annotationsListSchema = z.object({
   limit: z.coerce.number().int().min(1).max(1000).default(500),
 });
 
+// =============================================================
+// Catalog CRUD validators
+// =============================================================
+
+const chartCategorySchema = z.enum([
+  "revenue",
+  "growth",
+  "retention",
+  "conversion",
+  "credits",
+  "custom",
+]);
+const chartTypeSchema = z.enum(["line", "area", "bar"]);
+const chartRangeSchema = z.enum(["1M", "3M", "6M", "12M", "YTD", "All"]);
+
+const customChartCreateSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  category: chartCategorySchema.default("custom"),
+  chartType: chartTypeSchema.default("line"),
+  range: chartRangeSchema.default("12M"),
+  config: z.record(z.unknown()).default({}),
+});
+
+const customChartUpdateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(120).optional(),
+    category: chartCategorySchema.optional(),
+    chartType: chartTypeSchema.optional(),
+    range: chartRangeSchema.optional(),
+    config: z.record(z.unknown()).optional(),
+  })
+  .refine(
+    (v) =>
+      v.name !== undefined ||
+      v.category !== undefined ||
+      v.chartType !== undefined ||
+      v.range !== undefined ||
+      v.config !== undefined,
+    { message: "At least one field is required" },
+  );
+
+function toWireCustomChart(row: {
+  id: string;
+  name: string;
+  category: string;
+  chartType: string;
+  rangeOption: string;
+  config: Record<string, unknown>;
+  createdAt: Date;
+  updatedAt: Date;
+}): ChartCatalogEntry {
+  return {
+    id: row.id,
+    kind: "custom",
+    category: row.category as ChartCatalogEntry["category"],
+    name: row.name,
+    chartType: row.chartType as ChartCatalogEntry["chartType"],
+    range: row.rangeOption as ChartCatalogEntry["range"],
+    config: row.config,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
 function toWireSavedView(row: {
   id: string;
   projectId: string;
@@ -134,6 +206,138 @@ function toWireAnnotation(row: {
 
 export const chartsRoute = new Hono()
   .use("*", requireDashboardAuth)
+  // ------------------------------------------------------------
+  // Catalog — system defaults + custom rows
+  // ------------------------------------------------------------
+  .get("/catalog", async (c) => {
+    const projectId = c.req.param("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "Missing projectId" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+
+    const customRows = await drizzle.customChartRepo.listCustomCharts(
+      drizzle.db,
+      projectId,
+    );
+    const entries: ChartCatalogEntry[] = [
+      ...listSystemChartEntries(),
+      ...customRows.map(toWireCustomChart),
+    ];
+    const payload: ChartCatalogResponse = { entries };
+    return c.json(ok(payload));
+  })
+  .post(
+    "/catalog",
+    zValidator("json", customChartCreateSchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      if (!projectId) {
+        throw new HTTPException(400, { message: "Missing projectId" });
+      }
+      const user = c.get("user");
+      // Creating a chart adds it to the project-shared library,
+      // so writes are gated to ADMIN — viewers can only consume.
+      await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+      const body = c.req.valid("json");
+
+      const row = await drizzle.customChartRepo.createCustomChart(drizzle.db, {
+        projectId,
+        createdByUserId: user.id,
+        name: body.name,
+        category: body.category,
+        chartType: body.chartType,
+        rangeOption: body.range,
+        config: body.config,
+      });
+      return c.json(ok({ entry: toWireCustomChart(row) }));
+    },
+  )
+  .patch(
+    "/catalog/:id",
+    zValidator("json", customChartUpdateSchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      const id = c.req.param("id");
+      if (!projectId || !id) {
+        throw new HTTPException(400, { message: "Missing identifier" });
+      }
+      // System entries live in code, not in `custom_charts` — reject
+      // mutation attempts early so the SQL update doesn't silently
+      // no-op against a missing row.
+      if (isSystemChartId(id)) {
+        throw new HTTPException(403, {
+          message: "System charts are read-only",
+        });
+      }
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+      const body = c.req.valid("json");
+
+      const row = await drizzle.customChartRepo.updateCustomChart(
+        drizzle.db,
+        id,
+        projectId,
+        {
+          name: body.name,
+          category: body.category,
+          chartType: body.chartType,
+          rangeOption: body.range,
+          config: body.config,
+        },
+      );
+      if (!row) {
+        throw new HTTPException(404, { message: "Chart not found" });
+      }
+      return c.json(ok({ entry: toWireCustomChart(row) }));
+    },
+  )
+  .delete("/catalog/:id", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing identifier" });
+    }
+    if (isSystemChartId(id)) {
+      throw new HTTPException(403, {
+        message: "System charts cannot be deleted",
+      });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+
+    const removed = await drizzle.customChartRepo.deleteCustomChart(
+      drizzle.db,
+      id,
+      projectId,
+    );
+    if (!removed) {
+      throw new HTTPException(404, { message: "Chart not found" });
+    }
+    return c.json(ok({ deleted: true }));
+  })
+  // ------------------------------------------------------------
+  // Filter options — distinct values from CH
+  // ------------------------------------------------------------
+  .get(
+    "/filter-options",
+    zValidator("query", windowQuerySchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      if (!projectId) {
+        throw new HTTPException(400, { message: "Missing projectId" });
+      }
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+      const { windowDays } = c.req.valid("query");
+      const payload: ChartFilterOptionsResponse = await readFilterOptions(
+        projectId,
+        windowDays,
+      );
+      return c.json(ok(payload));
+    },
+  )
   // ------------------------------------------------------------
   // Read-only chart data
   // ------------------------------------------------------------
