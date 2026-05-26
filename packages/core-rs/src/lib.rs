@@ -5,6 +5,7 @@ pub mod error;
 pub mod identity;
 pub mod observer;
 pub mod time;
+pub mod transport;
 pub mod version;
 
 pub use api::RovenueCore;
