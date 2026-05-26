@@ -17,6 +17,10 @@
     "./experiments": {
       "types": "./src/experiments/index.ts",
       "default": "./src/experiments/index.ts"
+    },
+    "./funnel": {
+      "types": "./src/funnel/index.ts",
+      "default": "./src/funnel/index.ts"
     }
   },
   "scripts": {
