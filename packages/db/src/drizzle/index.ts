@@ -55,3 +55,4 @@ export * as invitationRepo from "./repositories/invitations";
 export * as billingSubscriptionRepo from "./repositories/billing-subscriptions";
 export * as billingPaymentMethodRepo from "./repositories/billing-payment-methods";
 export * as billingInvoiceRepo from "./repositories/billing-invoices";
+export * as billingDunningStateRepo from "./repositories/billing-dunning-state";
