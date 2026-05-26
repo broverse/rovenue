@@ -84,6 +84,14 @@ const envSchema = z
       .enum(["true", "false"])
       .default("false")
       .transform((v) => v === "true"),
+    // ---- Unsubscribe-link signing -----------------------------
+    // 32-byte hex key used to HMAC-SHA256 the one-click
+    // unsubscribe payloads embedded in List-Unsubscribe headers.
+    // Required in production for the public unsubscribe flow.
+    UNSUB_SIGNING_KEY: z
+      .string()
+      .regex(/^[0-9a-fA-F]{64}$/, "32 bytes in hex (64 chars)")
+      .optional(),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== "production") return;
@@ -121,6 +129,11 @@ const envSchema = z
       data.BETTER_AUTH_SECRET,
       "BETTER_AUTH_SECRET",
       "session encryption key must be set",
+    );
+    require(
+      data.UNSUB_SIGNING_KEY,
+      "UNSUB_SIGNING_KEY",
+      "one-click unsubscribe links must be signed",
     );
     require(
       data.CLICKHOUSE_URL,
