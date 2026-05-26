@@ -112,8 +112,15 @@ impl HttpClient {
                                 std::thread::sleep(d);
                             }
                         }
-                        RetryDecision::RetryAfter(_) => {
-                            return Err(RovenueError::RateLimited);
+                        RetryDecision::RetryAfter(d) => {
+                            use super::retry::RETRY_AFTER_MAX;
+                            if d > RETRY_AFTER_MAX {
+                                return Err(RovenueError::RateLimited);
+                            }
+                            last_err = RovenueError::RateLimited;
+                            if attempt + 1 < self.max_attempts {
+                                std::thread::sleep(d.max(self.min_backoff));
+                            }
                         }
                         RetryDecision::Fatal => {
                             return Err(if status == 401 {

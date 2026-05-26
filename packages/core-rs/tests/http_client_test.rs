@@ -108,20 +108,61 @@ fn forbidden_is_fatal_no_retry() {
 }
 
 #[test]
-fn rate_limit_returns_rate_limited_error() {
+fn rate_limited_then_success_within_budget() {
+    let mut server = mockito::Server::new();
+    let m1 = server
+        .mock("GET", "/v1/me/entitlements")
+        .with_status(429)
+        .with_header("Retry-After", "0")
+        .expect(1)
+        .create();
+    let m2 = server
+        .mock("GET", "/v1/me/entitlements")
+        .with_status(200)
+        .with_body(r#"{"entitlements": []}"#)
+        .expect(1)
+        .create();
+
+    let c = client(&server.url()).with_max_attempts(3).with_min_backoff(Duration::from_millis(1));
+    let resp = c
+        .get_json::<DummyEntitlements>(HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"))
+        .unwrap();
+    assert_eq!(resp.status, 200);
+    m1.assert();
+    m2.assert();
+}
+
+#[test]
+fn rate_limited_exceeds_max_wait_surfaces_error() {
     let mut server = mockito::Server::new();
     let m = server
         .mock("GET", "/v1/me/entitlements")
         .with_status(429)
-        .with_header("Retry-After", "1")
+        .with_header("Retry-After", "120")
         .expect(1)
         .create();
 
-    let c = client(&server.url()).with_max_attempts(1);
+    let c = client(&server.url()).with_max_attempts(3);
     let err = c
-        .get_json::<DummyEntitlements>(
-            HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"),
-        )
+        .get_json::<DummyEntitlements>(HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"))
+        .unwrap_err();
+    assert!(matches!(err, rovenue::RovenueError::RateLimited));
+    m.assert();
+}
+
+#[test]
+fn rate_limited_budget_exhausted_surfaces_error() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/v1/me/entitlements")
+        .with_status(429)
+        .with_header("Retry-After", "0")
+        .expect(2)
+        .create();
+
+    let c = client(&server.url()).with_max_attempts(2).with_min_backoff(Duration::from_millis(1));
+    let err = c
+        .get_json::<DummyEntitlements>(HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"))
         .unwrap_err();
     assert!(matches!(err, rovenue::RovenueError::RateLimited));
     m.assert();
