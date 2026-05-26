@@ -1,0 +1,14 @@
+{
+  "subject": "Your Rovenue weekly summary — {{weekStart}}",
+  "preview": "{{count}} project(s) · {{weekStart}} → {{weekEnd}} ({{timezone}})",
+  "headline": "Weekly summary — {{weekStart}} → {{weekEnd}}",
+  "intro": "Here's what happened across your projects last week ({{timezone}}).",
+  "section.mrr": "MRR",
+  "section.mrrDelta": "Δ vs prior week",
+  "section.newSubs": "New subscribers",
+  "section.churnedSubs": "Churned",
+  "section.refunds": "Refunds",
+  "section.refundsValue": "{{count}} · {{total}}",
+  "cta": "Open dashboard",
+  "footer.empty": "Quiet week. No movement to report."
+}

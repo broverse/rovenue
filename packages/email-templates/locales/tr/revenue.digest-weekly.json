@@ -1,0 +1,14 @@
+{
+  "subject": "Rovenue haftalık özet — {{weekStart}}",
+  "preview": "{{count}} proje · {{weekStart}} → {{weekEnd}} ({{timezone}})",
+  "headline": "Haftalık özet — {{weekStart}} → {{weekEnd}}",
+  "intro": "Geçen hafta projelerinizde olanlar ({{timezone}}).",
+  "section.mrr": "MRR",
+  "section.mrrDelta": "Önceki haftaya göre Δ",
+  "section.newSubs": "Yeni aboneler",
+  "section.churnedSubs": "Kaybedilen",
+  "section.refunds": "İadeler",
+  "section.refundsValue": "{{count}} · {{total}}",
+  "cta": "Dashboard'u aç",
+  "footer.empty": "Sakin bir hafta — kayda değer hareket yok."
+}

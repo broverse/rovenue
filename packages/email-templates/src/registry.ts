@@ -4,6 +4,7 @@ import type { TFunction } from "i18next";
 import { getT } from "./i18n";
 import { template as anomalyDetected } from "./revenue/anomaly-detected";
 import { template as digestDaily } from "./revenue/digest-daily";
+import { template as digestWeekly } from "./revenue/digest-weekly";
 
 export interface TemplateModule<Ctx> {
   Component: (props: { ctx: Ctx; t: TFunction }) => ReactElement;
@@ -17,6 +18,7 @@ export interface TemplateModule<Ctx> {
 const TEMPLATES: Record<string, TemplateModule<any>> = {
   "revenue.anomaly.detected": anomalyDetected,
   "revenue.digest.daily": digestDaily,
+  "revenue.digest.weekly": digestWeekly,
   // More templates land in Phase 6.
 };
 
