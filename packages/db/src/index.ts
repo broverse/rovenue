@@ -206,4 +206,5 @@ export {
   creditLedger,
   revenueEvents,
   outboxEvents as outbox,
+  scheduledSubscriptionActions,
 } from "./drizzle/schema";
