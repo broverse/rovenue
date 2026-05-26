@@ -15,5 +15,6 @@ coverage/
 *.tsbuildinfo
 .next/
 .cache/
+.tanstack/
 .worktrees/
 apps/dashboard/src/routeTree.gen.ts
