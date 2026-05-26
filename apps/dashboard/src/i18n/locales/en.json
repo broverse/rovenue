@@ -2248,6 +2248,7 @@
       "subtitle": "last {{days}}d · gross USD",
       "total": "total",
       "loading": "Loading…",
+      "empty": "No revenue in this window",
       "organic": "Organic",
       "asa": "Apple Search Ads",
       "meta": "Meta",
@@ -2290,6 +2291,36 @@
     "annotations": {
       "title": "Annotations on this chart",
       "add": "Add annotation",
+      "loading": "Loading…",
+      "empty": "No annotations yet. Add one to flag launches, promos, or incidents.",
+      "delete": "Delete annotation",
+      "deleteConfirm": "Delete annotation \"{{label}}\"?",
+      "deleteFailed": "Couldn't remove that annotation.",
+      "newTitle": "Add annotation",
+      "newSubtitle": "Flag a launch, promo, or incident so spikes in the chart have context.",
+      "save": "Save annotation",
+      "saving": "Saving…",
+      "fields": {
+        "label": "Label",
+        "labelPlaceholder": "e.g. v3.1 launch",
+        "date": "Date",
+        "color": "Color",
+        "description": "Description",
+        "descriptionPlaceholder": "What changed?",
+        "url": "Link",
+        "urlHint": "Optional — e.g. PR, release notes, Linear ticket."
+      },
+      "colors": {
+        "blue": "Blue",
+        "green": "Green",
+        "amber": "Amber",
+        "red": "Red",
+        "violet": "Violet"
+      },
+      "errors": {
+        "date": "Pick a valid date.",
+        "generic": "Could not save the annotation. Please try again."
+      },
       "v31": {
         "label": "v3.1 launch",
         "sub": "Hero paywall + annual anchor"

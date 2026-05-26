@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { ChartFunnelStep } from "@rovenue/shared";
 import { useChartFunnel } from "../../lib/hooks/useProjectCharts";
-import { FUNNEL_STAGES } from "./mock-data";
 
 const DEFAULT_WINDOW_DAYS = 28;
 
@@ -14,6 +13,13 @@ const STEP_LABEL_KEY: Record<ChartFunnelStep["key"], string> = {
   trial_to_paid: "charts.funnel.paid",
   renewal: "charts.funnel.renewal",
 };
+
+const FALLBACK_STEP_KEYS: ReadonlyArray<ChartFunnelStep["key"]> = [
+  "purchase",
+  "trial",
+  "trial_to_paid",
+  "renewal",
+];
 
 interface FunnelRow {
   id: string;
@@ -35,16 +41,14 @@ export function FunnelCard({ projectId }: Props) {
 
   const rows: FunnelRow[] = useMemo(() => {
     const steps = data?.steps ?? [];
-    const hasReal = steps.some((s) => s.count > 0);
-    if (!hasReal) {
-      // Fall back to the legacy mock so empty projects still show
-      // the install → paid silhouette. Once events flow in, we
-      // swap automatically on the next refresh.
-      return FUNNEL_STAGES.map((s) => ({
-        id: s.id,
-        label: t(s.labelKey),
-        value: s.value,
-        pct: s.pct,
+    if (steps.length === 0) {
+      // Render the canonical four-step shell with zeros so the
+      // panel keeps its shape on empty projects.
+      return FALLBACK_STEP_KEYS.map((key) => ({
+        id: key,
+        label: t(STEP_LABEL_KEY[key], key),
+        value: 0,
+        pct: 0,
       }));
     }
     return steps.map((s) => ({

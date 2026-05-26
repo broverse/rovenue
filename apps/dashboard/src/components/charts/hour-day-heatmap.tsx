@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useChartHeatmap } from "../../lib/hooks/useProjectCharts";
 import { heatColor } from "./format";
-import { HEATMAP_DAY_KEYS, HEATMAP_MATRIX } from "./mock-data";
+import { HEATMAP_DAY_KEYS } from "./mock-data";
 
 const HOUR_TICKS = [0, 4, 8, 12, 16, 20] as const;
 const LEGEND_STOPS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
@@ -53,23 +53,13 @@ export function HourDayHeatmap({ projectId }: Props) {
     windowDays: DEFAULT_WINDOW_DAYS,
   });
 
-  const { matrix, counts, peak, hasRealData } = useMemo(() => {
-    const cells = data?.cells ?? [];
-    if (cells.length === 0) {
-      // Mock matrix has values 0..1 directly; counts are derived
-      // back so the tooltip's `count` math stays consistent.
-      return {
-        matrix: HEATMAP_MATRIX.map((row) => [...row]),
-        counts: HEATMAP_MATRIX.map((row) => row.map((v) => Math.round(v * 248))),
-        peak: null,
-        hasRealData: false,
-      };
-    }
-    return { ...pivot(cells), hasRealData: true };
-  }, [data]);
+  const { matrix, counts, peak } = useMemo(
+    () => pivot(data?.cells ?? []),
+    [data],
+  );
 
   const peakLabel = useMemo(() => {
-    if (!hasRealData || !peak) return t("charts.heatmap.peak");
+    if (!peak) return t("charts.heatmap.peak");
     const day = t(DAY_KEYS_MON_FIRST[(peak.dow === 0 ? 6 : peak.dow - 1)]!);
     const hh = peak.hour.toString().padStart(2, "0");
     return t("charts.heatmap.peakLive", {
@@ -78,7 +68,7 @@ export function HourDayHeatmap({ projectId }: Props) {
       count: peak.count,
       defaultValue: `Peak: {{day}} {{hour}} UTC · {{count}} events/h`,
     });
-  }, [hasRealData, peak, t]);
+  }, [peak, t]);
 
   return (
     <div className="col-span-full rounded-lg border border-rv-divider bg-rv-c1 px-4 py-3.5">

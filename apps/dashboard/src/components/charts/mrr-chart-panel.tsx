@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { formatCurrencyCompact } from "./format";
-import { ANNOTATIONS, MRR_SERIES } from "./mock-data";
 import { useProjectMrr } from "../../lib/hooks/useProjectMrr";
+import { useChartAnnotations } from "../../lib/hooks/useProjectCharts";
 import type { ChartType, RangeOption } from "./types";
 
 // =============================================================
@@ -174,37 +174,45 @@ export function MrrChartPanel({ projectId, chartType, compare, range }: Props) {
     return { current, prev };
   }, [currentQuery.data, prevQuery.data, months, compare, now]);
 
-  // Has the API returned at least one point with non-zero gross?
-  // If yes, render the real series even when other months are
-  // empty. If no, fall back to the mock so the chart doesn't look
-  // broken on a fresh project. Errors are surfaced separately and
-  // never trigger the fallback silently.
-  const hasRealData =
-    (currentQuery.data?.points.length ?? 0) > 0 &&
-    series.current.some((b) => b.total > 0);
+  // Empty projects render an all-zero series spanning the requested
+  // range so axes/labels still draw. Errors are surfaced separately
+  // and never silently swap to anything else.
+  const currentValues = useMemo(
+    () => series.current.map((b) => b.total),
+    [series.current],
+  );
 
-  const currentValues = useMemo(() => {
-    if (hasRealData) return series.current.map((b) => b.total);
-    return MRR_SERIES.current.slice(-months);
-  }, [series.current, hasRealData, months]);
+  const prevValues = useMemo(
+    () => (compare ? series.prev.map((b) => b.total) : []),
+    [series.prev, compare],
+  );
 
-  const prevValues = useMemo(() => {
-    if (!compare) return [];
-    if (hasRealData) return series.prev.map((b) => b.total);
-    return MRR_SERIES.prev.slice(-months);
-  }, [series.prev, compare, hasRealData, months]);
+  const monthLabels = useMemo(
+    () => series.current.map((b) => bucketLabel(b.ym)),
+    [series.current],
+  );
 
-  const monthLabels = useMemo(() => {
-    if (hasRealData && series.current.length > 0) {
-      return series.current.map((b) => bucketLabel(b.ym));
-    }
-    return MRR_SERIES.current
-      .slice(-months)
-      .map(
-        (_, i) =>
-          MONTH_NAMES[(now.getUTCMonth() - months + 1 + i + 12) % 12],
-      );
-  }, [series.current, hasRealData, months, now]);
+  const annotationsQuery = useChartAnnotations({ projectId, limit: 100 });
+  const annotationPins = useMemo(() => {
+    if (series.current.length === 0) return [];
+    const ymToIdx = new Map(series.current.map((b, i) => [b.ym, i]));
+    return (annotationsQuery.data?.annotations ?? [])
+      .map((a) => {
+        const d = new Date(a.occurredAt);
+        const ym = `${d.getUTCFullYear()}-${(d.getUTCMonth() + 1)
+          .toString()
+          .padStart(2, "0")}`;
+        const idx = ymToIdx.get(ym);
+        if (idx === undefined) return null;
+        return {
+          id: a.id,
+          idx,
+          label: a.label,
+          color: a.color ?? "var(--color-rv-accent-500)",
+        };
+      })
+      .filter((a): a is { id: string; idx: number; label: string; color: string } => a !== null);
+  }, [annotationsQuery.data, series.current]);
 
   const error = currentQuery.error ?? (compare ? prevQuery.error : null);
   const isLoading = currentQuery.isLoading || (compare && prevQuery.isLoading);
@@ -356,11 +364,11 @@ export function MrrChartPanel({ projectId, chartType, compare, range }: Props) {
           </text>
         ))}
 
-        {ANNOTATIONS.map((a, i) => (
+        {annotationPins.map((a) => (
           <line
-            key={`anno-${i}`}
-            x1={x(Math.min(a.idx, monthLabels.length - 1))}
-            x2={x(Math.min(a.idx, monthLabels.length - 1))}
+            key={`anno-${a.id}`}
+            x1={x(a.idx)}
+            x2={x(a.idx)}
             y1={PAD_T}
             y2={PAD_T + INNER_H}
             stroke={a.color}
@@ -436,16 +444,10 @@ export function MrrChartPanel({ projectId, chartType, compare, range }: Props) {
           </>
         )}
 
-        {ANNOTATIONS.map((a, i) => (
-          <circle
-            key={`pin-${i}`}
-            cx={x(Math.min(a.idx, monthLabels.length - 1))}
-            cy={PAD_T - 6}
-            r="4"
-            fill={a.color}
-            stroke="var(--color-rv-c1)"
-            strokeWidth="2"
-          />
+        {annotationPins.map((a) => (
+          <circle key={`pin-${a.id}`} cx={x(a.idx)} cy={PAD_T - 6} r="4" fill={a.color} stroke="var(--color-rv-c1)" strokeWidth="2">
+            <title>{a.label}</title>
+          </circle>
         ))}
 
         {hoveredIdx !== null && hoveredIdx < currentValues.length && (
@@ -548,43 +550,16 @@ function Legend({
 
 function Decomposition() {
   const { t } = useTranslation();
-  // Decomposition stays on the mock series until the API exposes
-  // the new/expansion/contraction/churn breakdown.
-  const lastIdx = MRR_SERIES.current.length - 1;
+  // The new/expansion/contraction/churn breakdown isn't exposed by
+  // the read API yet. Render the four cells with zeros so the
+  // panel keeps its shape; tracked as a follow-up.
   const items = [
-    {
-      key: "newMrr",
-      labelKey: "charts.decomposition.newMrr",
-      value: `+${formatCurrencyCompact(MRR_SERIES.newMrr[lastIdx])}`,
-      valueTone: "success" as const,
-      delta: "+12.4%",
-      deltaTone: "up" as const,
-    },
-    {
-      key: "expansion",
-      labelKey: "charts.decomposition.expansion",
-      value: `+${formatCurrencyCompact(MRR_SERIES.expansion[lastIdx])}`,
-      valueTone: "success" as const,
-      delta: "+8.1%",
-      deltaTone: "up" as const,
-    },
-    {
-      key: "contraction",
-      labelKey: "charts.decomposition.contraction",
-      value: formatCurrencyCompact(MRR_SERIES.contraction[lastIdx]),
-      valueTone: "muted" as const,
-      delta: "+3.2%",
-      deltaTone: "down" as const,
-    },
-    {
-      key: "churned",
-      labelKey: "charts.decomposition.churned",
-      value: formatCurrencyCompact(MRR_SERIES.churn[lastIdx]),
-      valueTone: "muted" as const,
-      delta: "-2.1%",
-      deltaTone: "up" as const,
-    },
+    { key: "newMrr", labelKey: "charts.decomposition.newMrr" },
+    { key: "expansion", labelKey: "charts.decomposition.expansion" },
+    { key: "contraction", labelKey: "charts.decomposition.contraction" },
+    { key: "churned", labelKey: "charts.decomposition.churned" },
   ];
+  const zero = formatCurrencyCompact(0);
 
   return (
     <div className="mt-3.5 grid grid-cols-2 gap-3 border-t border-rv-divider pt-3.5 md:grid-cols-4">
@@ -593,28 +568,11 @@ function Decomposition() {
           <div className="text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
             {t(item.labelKey)}
           </div>
-          <div
-            className={cn(
-              "mt-1 font-rv-mono text-[16px] font-medium tabular-nums",
-              item.valueTone === "success"
-                ? "text-rv-success"
-                : "text-rv-mute-700",
-            )}
-          >
-            {item.value}
+          <div className="mt-1 font-rv-mono text-[16px] font-medium tabular-nums text-rv-mute-700">
+            {zero}
           </div>
-          <div
-            className={cn(
-              "mt-0.5 flex items-center gap-1 font-rv-mono text-[11px]",
-              item.deltaTone === "up" ? "text-rv-success" : "text-rv-danger",
-            )}
-          >
-            {item.deltaTone === "up" ? (
-              <ArrowUp size={10} />
-            ) : (
-              <ArrowDown size={10} />
-            )}
-            {item.delta}
+          <div className="mt-0.5 font-rv-mono text-[11px] text-rv-mute-500">
+            —
           </div>
         </div>
       ))}

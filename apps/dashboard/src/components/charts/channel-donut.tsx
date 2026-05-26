@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import type { ChartChannelsRow } from "@rovenue/shared";
 import { useChartChannels } from "../../lib/hooks/useProjectCharts";
-import { CHANNELS } from "./mock-data";
 
 const RADIUS = 50;
 const CX = 65;
@@ -65,17 +64,6 @@ export function ChannelDonut({ projectId }: Props) {
 
   const entries: DonutEntry[] = useMemo(() => {
     const rows = data?.rows ?? [];
-    if (rows.length === 0) {
-      // Empty projects keep the mock channel mix so the panel
-      // doesn't render as a hollow circle on first run.
-      return CHANNELS.map((ch) => ({
-        id: ch.id,
-        label: t(ch.labelKey),
-        value: ch.value,
-        share: ch.share,
-        color: ch.color,
-      }));
-    }
     return rows.map((row: ChartChannelsRow, i) => {
       const style = STORE_STYLE[row.store];
       return {
@@ -87,6 +75,8 @@ export function ChannelDonut({ projectId }: Props) {
       };
     });
   }, [data, t]);
+
+  const isEmpty = entries.length === 0;
 
   const segments = useMemo(() => {
     let offset = 0;
@@ -120,20 +110,31 @@ export function ChannelDonut({ projectId }: Props) {
       </h4>
       <div className="flex items-center gap-4">
         <svg width="130" height="130" viewBox="0 0 130 130" className="shrink-0">
-          {segments.map((s) => (
+          {isEmpty ? (
             <circle
-              key={s.id}
               cx={CX}
               cy={CY}
               r={RADIUS}
               fill="none"
-              stroke={s.color}
+              stroke="var(--color-rv-divider-strong)"
               strokeWidth={STROKE_WIDTH}
-              strokeDasharray={s.dasharray}
-              strokeDashoffset={s.offset}
-              transform={`rotate(-90 ${CX} ${CY})`}
             />
-          ))}
+          ) : (
+            segments.map((s) => (
+              <circle
+                key={s.id}
+                cx={CX}
+                cy={CY}
+                r={RADIUS}
+                fill="none"
+                stroke={s.color}
+                strokeWidth={STROKE_WIDTH}
+                strokeDasharray={s.dasharray}
+                strokeDashoffset={s.offset}
+                transform={`rotate(-90 ${CX} ${CY})`}
+              />
+            ))
+          )}
           <text
             x={CX}
             y={CY - 4}
@@ -175,9 +176,11 @@ export function ChannelDonut({ projectId }: Props) {
               </span>
             </div>
           ))}
-          {isLoading && entries.length === 0 && (
+          {isEmpty && (
             <div className="py-2 text-center text-[11px] text-rv-mute-500">
-              {t("charts.channels.loading", "Loading…")}
+              {isLoading
+                ? t("charts.channels.loading", "Loading…")
+                : t("charts.channels.empty", "No revenue in this window")}
             </div>
           )}
         </div>
