@@ -73,7 +73,11 @@ describe("createPushTransports", () => {
         APNS_TEAM_ID: "y",
         APNS_KEY_P8: "z",
         APNS_BUNDLE_ID: "io.rovenue.app",
-        FCM_SERVICE_ACCOUNT_JSON: "{}",
+        FCM_SERVICE_ACCOUNT_JSON: JSON.stringify({
+          project_id: "rovenue",
+          client_email: "x@y",
+          private_key: "k",
+        }),
       }),
     );
     expect(out.ios).toBeDefined();
