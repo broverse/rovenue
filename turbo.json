@@ -12,6 +12,18 @@
     "lint": {},
     "test": {
       "dependsOn": ["^build"]
+    },
+    "//#cargo:test": {
+      "cache": false,
+      "outputs": []
+    },
+    "//#cargo:fmt": {
+      "cache": false,
+      "outputs": []
+    },
+    "//#cargo:clippy": {
+      "cache": false,
+      "outputs": []
     }
   }
 }

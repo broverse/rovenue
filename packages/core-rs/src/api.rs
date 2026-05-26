@@ -13,7 +13,9 @@ impl RovenueCore {
         if config.api_key.trim().is_empty() {
             return Err(crate::error::RovenueError::InvalidApiKey);
         }
-        Ok(Self { config: Arc::new(config) })
+        Ok(Self {
+            config: Arc::new(config),
+        })
     }
 
     pub fn get_version(&self) -> String {

@@ -10,5 +10,8 @@ fn core_new_returns_handle() {
 #[test]
 fn core_new_rejects_invalid_config() {
     let cfg = Config::new("".into(), "https://api.rovenue.dev".into());
-    assert!(cfg.is_err(), "empty api key must error before reaching core");
+    assert!(
+        cfg.is_err(),
+        "empty api key must error before reaching core"
+    );
 }

@@ -7,7 +7,10 @@ fn not_configured_displays() {
 
 #[test]
 fn invalid_api_key_displays() {
-    assert_eq!(format!("{}", RovenueError::InvalidApiKey), "invalid api key");
+    assert_eq!(
+        format!("{}", RovenueError::InvalidApiKey),
+        "invalid api key"
+    );
 }
 
 #[test]
