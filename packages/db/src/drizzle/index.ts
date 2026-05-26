@@ -63,3 +63,4 @@ export * as notificationPreferencesRepo from "./repositories/notification-prefer
 export * as notificationDeliveryRepo from "./repositories/notification-deliveries";
 export * as pushDeviceRepo from "./repositories/push-devices";
 export * as notificationSuppressionRepo from "./repositories/notification-suppression";
+export * as userKnownDeviceRepo from "./repositories/user-known-devices";

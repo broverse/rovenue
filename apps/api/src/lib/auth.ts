@@ -4,6 +4,10 @@ import { twoFactor } from "better-auth/plugins";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { drizzle } from "@rovenue/db";
 import { env } from "./env";
+import { logger } from "./logger";
+import { maybeEmitNewDevice } from "../services/notifications/new-device-emit";
+
+const log = logger.child("auth");
 
 interface OAuthCreds {
   clientId: string;
@@ -85,6 +89,55 @@ const oauthTwoFactorRedirect: BetterAuthPlugin = {
   },
 };
 
+/**
+ * security.signin.new_device producer. After any session-issuing
+ * request, fingerprints the UA+IP, upserts user_known_devices,
+ * and emits the notification if the device is new. Fire-and-forget
+ * — runs in the background so it can't slow the sign-in response.
+ */
+const newDeviceNotifier: BetterAuthPlugin = {
+  id: "new-device-notifier",
+  hooks: {
+    after: [
+      {
+        matcher: (ctx) => {
+          const p = ctx.path ?? "";
+          // Any path that issues a session: email/password sign-in,
+          // OAuth callback, magic link callback, 2FA verify.
+          return (
+            p.startsWith("/callback/") ||
+            p.startsWith("/sign-in/") ||
+            p.startsWith("/two-factor/verify")
+          );
+        },
+        handler: createAuthMiddleware(async (ctx) => {
+          const data = ctx.context.newSession;
+          if (!data?.user?.id) return;
+          const userAgent =
+            ctx.request?.headers.get("user-agent") ?? "unknown";
+          const ipAddress =
+            ctx.request?.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+            ctx.request?.headers.get("x-real-ip") ??
+            "0.0.0.0";
+
+          // Don't await — keep the auth response on the fast path.
+          // The emit helper has its own try/catch + sentry hook.
+          void maybeEmitNewDevice(drizzle.db, {
+            userId: data.user.id,
+            userAgent,
+            ipAddress,
+          }).catch((err) => {
+            log.warn("new_device_emit_failed", {
+              userId: data.user.id,
+              err: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }),
+      },
+    ],
+  },
+};
+
 export const auth = betterAuth({
   // `schema` is intentionally omitted: the adapter's default table
   // resolution reads tables directly from `drizzle.db`'s attached
@@ -114,5 +167,8 @@ export const auth = betterAuth({
     // — it converts the plugin's JSON response into a 302 for
     // browser-initiated OAuth callbacks.
     oauthTwoFactorRedirect,
+    // Same after-hook chain — runs after 2FA / OAuth-redirect so
+    // `newSession` is populated for the device-fingerprint check.
+    newDeviceNotifier,
   ],
 });

@@ -1474,6 +1474,42 @@ export type NewNotificationSuppression =
   typeof notificationSuppressionList.$inferInsert;
 
 // =============================================================
+// user_known_devices
+// =============================================================
+//
+// Per-user device fingerprint registry. The notifier producer
+// for `security.signin.new_device` upserts (userId, fingerprint)
+// on every sign-in and emits the notification when the row was
+// newly inserted (i.e. first time we've seen this UA+IP for the
+// user).
+
+export const userKnownDevices = pgTable(
+  "user_known_devices",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    fingerprint: text("fingerprint").notNull(),
+    lastSeenAt: timestamp("lastSeenAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    userIdFingerprintKey: uniqueIndex(
+      "user_known_devices_userId_fingerprint_key",
+    ).on(t.userId, t.fingerprint),
+    userIdIdx: index("user_known_devices_userId_idx").on(t.userId),
+  }),
+);
+
+export type UserKnownDevice = typeof userKnownDevices.$inferSelect;
+export type NewUserKnownDevice = typeof userKnownDevices.$inferInsert;
+
+// =============================================================
 // user_project_notification_prefs + project_notification_defaults
 // =============================================================
 //

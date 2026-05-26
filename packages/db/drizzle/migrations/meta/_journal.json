@@ -344,6 +344,13 @@
       "when": 1780000100000,
       "tag": "0048_dark_lightspeed",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1780000110000,
+      "tag": "0049_user_known_devices",
+      "breakpoints": true
     }
   ]
 }
