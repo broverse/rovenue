@@ -1,0 +1,10 @@
+{
+  "subject": "New sign-in from {{userAgent}}",
+  "preview": "{{userAgent}} · {{locationOrIp}} · {{whenIso}}",
+  "headline": "New sign-in to your Rovenue account",
+  "body": "We saw a new sign-in to your account.\n\nBrowser: {{userAgent}}\nIP: {{ipAddress}}\nLocation: {{locationOrIp}}\nTime: {{whenIso}}",
+  "body.tail": "If this wasn't you, change your password and review active devices immediately.",
+  "cta": "Review devices",
+  "push.title": "New sign-in to your account",
+  "push.body": "{{userAgent}} · {{locationOrIp}}"
+}
