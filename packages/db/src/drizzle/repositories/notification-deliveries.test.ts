@@ -118,22 +118,25 @@ describe("notification-deliveries repo", () => {
 
   it("findDeliveryByProviderMessageId: returns null when absent, the row when present", async () => {
     expect(
-      await findDeliveryByProviderMessageId(db, "not-a-real-id"),
+      await findDeliveryByProviderMessageId(db, `not-real-${createId()}`),
     ).toBeNull();
 
     const user = await seedUser();
     const note = await seedNotification(user.id);
+    // Unique-per-run providerMessageId so parallel test runs don't
+    // collide on the same string.
+    const providerMessageId = `ses-msg-${createId()}`;
     const [delivery] = await insertNotificationDeliveries(db, [
       {
         notificationId: note.id,
         channel: "email",
         status: "sent",
-        providerMessageId: "ses-msg-find-me",
+        providerMessageId,
       },
     ]);
     const found = await findDeliveryByProviderMessageId(
       db,
-      "ses-msg-find-me",
+      providerMessageId,
     );
     expect(found).not.toBeNull();
     expect(found!.id).toBe(delivery!.id);
