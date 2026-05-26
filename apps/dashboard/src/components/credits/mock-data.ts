@@ -1,7 +1,6 @@
 import type {
   CreditBurner,
   CreditPack,
-  FlowNode,
   LedgerEntry,
   VolumePoint,
 } from "./types";
@@ -26,42 +25,6 @@ export const WALLET_STATS = {
   breakageUnit: "k",
   breakageDescriptionKey: "credits.kpi.breakageDescription",
 } as const;
-
-export const FLOW_NODES: ReadonlyArray<FlowNode> = [
-  {
-    id: "in",
-    titleKey: "credits.flow.inflow",
-    total: "+2.41M",
-    breakdown: [
-      { labelKey: "credits.flow.purchases", value: "2.18M" },
-      { labelKey: "credits.flow.promo", value: "154k" },
-      { labelKey: "credits.flow.supportComps", value: "42k" },
-      { labelKey: "credits.flow.refundReturns", value: "38k" },
-    ],
-  },
-  {
-    id: "balance",
-    titleKey: "credits.flow.balance",
-    total: "14.82M",
-    breakdown: [
-      { labelKey: "credits.flow.paidLiability", value: "6.08M · 41%", tone: "accent" },
-      { labelKey: "credits.flow.bonusPromo", value: "5.34M · 36%" },
-      { labelKey: "credits.flow.goodwill", value: "1.82M · 12%" },
-      { labelKey: "credits.flow.expiringSoon", value: "1.58M · 11%", tone: "warning" },
-    ],
-  },
-  {
-    id: "out",
-    titleKey: "credits.flow.outflow",
-    total: "-1.92M",
-    breakdown: [
-      { labelKey: "credits.flow.consumed", value: "1.81M" },
-      { labelKey: "credits.flow.expired", value: "86k" },
-      { labelKey: "credits.flow.refundClawback", value: "28k" },
-      { labelKey: "credits.flow.adjustments", value: "−2k" },
-    ],
-  },
-];
 
 export const PACKS: ReadonlyArray<CreditPack> = [
   { id: "credits_100", name: "100 credits", price: 4.99, sold: 8421, share: 38, color: "var(--color-rv-accent-500)" },
@@ -113,12 +76,3 @@ export const VOLUME_SERIES: ReadonlyArray<VolumePoint> = (() => {
 })();
 
 export const VOLUME_DAY_COUNT = VOLUME_DAYS;
-
-export const LIABILITY = {
-  pct: 0.41,
-  paidValue: "$462,348",
-  promoValue: "$0 (non-cash)",
-  averageAge: "22.4d",
-  reserveDelta: "+6.4%",
-  reserveSuggestion: "$28k",
-} as const;

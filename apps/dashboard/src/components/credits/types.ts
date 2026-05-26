@@ -45,16 +45,3 @@ export type VolumePoint = {
   burned: number;
   net: number;
 };
-
-export type FlowBreakdown = {
-  labelKey: string;
-  value: string;
-  tone?: "default" | "accent" | "warning" | "muted";
-};
-
-export type FlowNode = {
-  id: "in" | "balance" | "out";
-  titleKey: string;
-  total: string;
-  breakdown: ReadonlyArray<FlowBreakdown>;
-};

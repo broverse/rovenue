@@ -959,6 +959,56 @@ export interface CreditsLedgerRow {
   createdAt: string;
 }
 
+/**
+ * Window-scoped sums by ledger type. Inflow values are positive
+ * deltas (`amount > 0`); outflow values are the absolute value of
+ * negative deltas, so every member is non-negative and safe to
+ * pass straight into UI formatters.
+ */
+export interface CreditsFlowByType {
+  purchase: number;
+  bonus: number;
+  refund: number;
+  transferIn: number;
+  spend: number;
+  expire: number;
+  transferOut: number;
+}
+
+/**
+ * Three-card "Inflow → Balance → Outflow" payload. `balanceByType`
+ * splits the outstanding total into paid / promo / transfer shares
+ * via lifetime inflow ratios — per-batch attribution isn't tracked,
+ * so it's an approximation, not a true LIFO/FIFO accounting.
+ */
+export interface CreditsFlow {
+  inflow: number;
+  outflow: number;
+  balance: number;
+  inflowByType: CreditsFlowByType;
+  outflowByType: CreditsFlowByType;
+  balanceByType: {
+    paid: number;
+    promo: number;
+    transfer: number;
+  };
+}
+
+export interface CreditsLiability {
+  /** Paid (revenue-backed) share of outstanding, 0–1. */
+  paidShare: number;
+  /** Bonus / promo share of outstanding, 0–1. */
+  promoShare: number;
+  /** Transfer-in share of outstanding, 0–1. */
+  transferShare: number;
+  /** Decimal-as-string USD reserve suggestion: paid × avg credit price. */
+  paidReserveUsd: string;
+  /** % change in paidReserveUsd vs the previous equal-length window. null when prev was 0. */
+  reserveDeltaPct: number | null;
+  /** Average age of positive credit_ledger rows in days. null when none. */
+  averageAgeDays: number | null;
+}
+
 export interface CreditsRollupResponse {
   window: {
     from: string;
@@ -966,10 +1016,31 @@ export interface CreditsRollupResponse {
     days: number;
   };
   kpis: CreditsKpis;
+  flow: CreditsFlow;
+  liability: CreditsLiability;
   volume: CreditsVolumePoint[];
   packages: CreditsPackageRow[];
   topBurners: CreditsTopBurnerRow[];
   ledger: CreditsLedgerRow[];
+}
+
+// =============================================================
+// Credits — dashboard grant (manual ledger entry)
+// =============================================================
+
+export const grantCreditsRequestSchema = z.object({
+  subscriberId: z.string().min(1),
+  amount: z.number().int().positive(),
+  type: z.enum(["BONUS", "PURCHASE", "REFUND"]).default("BONUS"),
+  referenceType: z.string().trim().max(60).optional(),
+  referenceId: z.string().trim().max(120).optional(),
+  description: z.string().trim().max(200).optional(),
+});
+export type GrantCreditsRequest = z.infer<typeof grantCreditsRequestSchema>;
+
+export interface GrantCreditsResponse {
+  entry: CreditsLedgerRow;
+  balance: number;
 }
 
 // =============================================================
@@ -1056,6 +1127,78 @@ export interface ChartAnnotation {
 
 export interface ChartAnnotationsResponse {
   annotations: ChartAnnotation[];
+}
+
+// =============================================================
+// Chart catalog (Phase 3.5 — extended)
+// =============================================================
+//
+// The chart catalog is the left-rail library on /charts. System
+// entries are hard-coded server-side (non-deletable) and ship with
+// every project; custom entries are per-project, user-authored
+// rows stored in `custom_charts` and editable by ADMIN+ members.
+
+export type ChartCategory =
+  | "revenue"
+  | "growth"
+  | "retention"
+  | "conversion"
+  | "credits"
+  | "custom";
+
+export type ChartType = "line" | "area" | "bar";
+
+export type ChartRangeOption = "1M" | "3M" | "6M" | "12M" | "YTD" | "All";
+
+export interface ChartCatalogEntry {
+  /** Stable id — system slug or DB cuid. */
+  id: string;
+  /** "system" entries cannot be deleted. */
+  kind: "system" | "custom";
+  category: ChartCategory;
+  /**
+   * For system entries this is a translation key under
+   * `charts.items.<id>`; for custom entries it's the literal
+   * user-provided label.
+   */
+  name: string;
+  chartType: ChartType;
+  range: ChartRangeOption;
+  /** Filters / group-by / extra config — opaque JSON. */
+  config: Record<string, unknown>;
+  /** Null for system entries. */
+  createdAt: string | null;
+  /** Null for system entries. */
+  updatedAt: string | null;
+}
+
+export interface ChartCatalogResponse {
+  entries: ChartCatalogEntry[];
+}
+
+// =============================================================
+// Chart filter options (Phase 3.5 — extended)
+// =============================================================
+//
+// Drives the right-rail Filters card. The dashboard previously
+// hard-coded chip values; this endpoint surfaces the distinct
+// values actually present in the project's revenue stream so
+// teams only see filters that can match data.
+
+export interface ChartFilterOption {
+  /** Machine value — e.g. `ios`, `US`, `premium`. */
+  value: string;
+  /** Display label. Mirrors `value` when no friendlier name exists. */
+  label: string;
+  /** Event count in the window — used for sort + diagnostics. */
+  count: number;
+}
+
+export interface ChartFilterOptionsResponse {
+  windowDays: number;
+  platform: ChartFilterOption[];
+  country: ChartFilterOption[];
+  productGroup: ChartFilterOption[];
 }
 
 // =============================================================

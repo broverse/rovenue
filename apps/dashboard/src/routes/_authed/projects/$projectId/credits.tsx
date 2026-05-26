@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import { ArrowUpDown, BookOpen, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "../../../../ui/button";
 import {
   CreditFlow,
@@ -9,7 +9,6 @@ import {
   LedgerTable,
   LiabilityGauge,
   PackageMix,
-  QuickActions,
   TopBurners,
   VolumeChart,
   WALLET_STATS,
@@ -21,6 +20,7 @@ import {
   type LedgerScope,
   type VolumePoint,
 } from "../../../../components/credits";
+import { GrantCreditsModal } from "../../../../components/credits/grant-credits-modal";
 import { useProject } from "../../../../lib/hooks/useProject";
 import { useProjectCreditsRollup } from "../../../../lib/hooks/useProjectCredits";
 import type {
@@ -157,17 +157,41 @@ function toUiVolume(points: ReadonlyArray<CreditsVolumePoint>): ReadonlyArray<Vo
 }
 
 // =============================================================
+// Number formatting
+// =============================================================
+//
+// Picks a magnitude suffix per value so the KPI tile doesn't lock
+// units while the underlying rollup grows or shrinks. Returns the
+// number formatted with one decimal place and the matching unit
+// label ("M", "k", or "").
+
+function formatMagnitude(n: number): { value: string; unit: string } {
+  if (n >= 1_000_000)
+    return { value: (n / 1_000_000).toFixed(2), unit: "M" };
+  if (n >= 1_000) return { value: (n / 1_000).toFixed(1), unit: "k" };
+  return { value: n.toLocaleString(), unit: "" };
+}
+
+function formatUsdMagnitude(usd: number): { value: string; unit: string } {
+  if (usd >= 1_000_000)
+    return { value: `$${(usd / 1_000_000).toFixed(2)}`, unit: "M" };
+  if (usd >= 1_000) return { value: `$${(usd / 1_000).toFixed(1)}`, unit: "k" };
+  return { value: `$${Math.round(usd).toLocaleString()}`, unit: "" };
+}
+
+// =============================================================
 // Page
 // =============================================================
 
 function CreditsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [scope, setScope] = useState<LedgerScope>("all");
+  const [grantOpen, setGrantOpen] = useState(false);
   const { data } = useProjectCreditsRollup({ projectId });
 
-  // Derive UI shapes from the wire response, falling back to
-  // the design-spec mocks so the page stays populated while
-  // the rollup query is in flight.
+  // Derive UI shapes from the wire response, falling back to the
+  // design-spec mocks so the page stays populated while the rollup
+  // query is in flight.
   const ui = useMemo(() => {
     if (!data) return null;
     return {
@@ -188,11 +212,30 @@ function CreditsPage({ projectId }: { projectId: string }) {
   const walletValues = useMemo(() => {
     if (!ui) return null;
     const { kpis } = ui.response;
+    const outstanding = formatMagnitude(kpis.outstanding);
+    const issued = formatMagnitude(kpis.issued28d);
+    const burned = formatMagnitude(kpis.burned28d);
+    const revenue = formatUsdMagnitude(Number(kpis.revenue28dUsd));
+    const burnRate =
+      kpis.issued28d > 0
+        ? `${((kpis.burned28d / kpis.issued28d) * 100).toFixed(1)}%`
+        : "—";
+    const avgPriceUsd =
+      kpis.issued28d > 0
+        ? Number(kpis.revenue28dUsd) / kpis.issued28d
+        : 0;
     return {
-      outstandingValue: kpis.outstanding.toLocaleString(),
-      issuedValue: kpis.issued28d.toLocaleString(),
-      burnedValue: kpis.burned28d.toLocaleString(),
-      revenueValue: `$${Math.round(Number(kpis.revenue28dUsd)).toLocaleString()}`,
+      outstandingValue: outstanding.value,
+      outstandingUnit: outstanding.unit ? `${outstanding.unit} cr` : "credits",
+      issuedValue: issued.value,
+      issuedUnit: issued.unit,
+      burnedValue: burned.value,
+      burnedUnit: burned.unit,
+      burnRate,
+      revenueValue: revenue.value,
+      revenueUnit: revenue.unit,
+      avgPrice:
+        avgPriceUsd > 0 ? `$${avgPriceUsd.toFixed(3)}` : "—",
       breakageValue:
         kpis.breakagePct !== null ? `${kpis.breakagePct.toFixed(1)}%` : "—",
     };
@@ -210,15 +253,11 @@ function CreditsPage({ projectId }: { projectId: string }) {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="flat" size="sm">
-            <BookOpen size={13} />
-            {t("credits.actions.schema")}
-          </Button>
-          <Button variant="flat" size="sm">
-            <ArrowUpDown size={13} />
-            {t("credits.actions.exportLedger")}
-          </Button>
-          <Button variant="solid-primary" size="sm">
+          <Button
+            variant="solid-primary"
+            size="sm"
+            onClick={() => setGrantOpen(true)}
+          >
             <Plus size={13} />
             {t("credits.actions.grantCredits")}
           </Button>
@@ -230,18 +269,17 @@ function CreditsPage({ projectId }: { projectId: string }) {
           accent
           label={t("credits.kpi.outstandingBalance")}
           value={walletValues?.outstandingValue ?? WALLET_STATS.outstandingValue}
-          unit={WALLET_STATS.outstandingUnit}
-          description={t(
-            WALLET_STATS.outstandingDescriptionKey,
-            WALLET_STATS.outstandingDescriptionVars,
-          )}
+          unit={walletValues?.outstandingUnit ?? WALLET_STATS.outstandingUnit}
+          description={t(WALLET_STATS.outstandingDescriptionKey, {
+            wallets: WALLET_STATS.outstandingDescriptionVars.wallets,
+          })}
           sparkSeed={1}
           sparkColor="var(--color-rv-accent-400)"
         />
         <WalletStat
           label={t("credits.kpi.issued28d")}
           value={walletValues?.issuedValue ?? WALLET_STATS.issuedValue}
-          unit={WALLET_STATS.issuedUnit}
+          unit={walletValues?.issuedUnit ?? WALLET_STATS.issuedUnit}
           description={t(WALLET_STATS.issuedDescriptionKey)}
           descriptionTone="success"
           sparkSeed={3}
@@ -250,47 +288,53 @@ function CreditsPage({ projectId }: { projectId: string }) {
         <WalletStat
           label={t("credits.kpi.burned28d")}
           value={walletValues?.burnedValue ?? WALLET_STATS.burnedValue}
-          unit={WALLET_STATS.burnedUnit}
-          description={t(
-            WALLET_STATS.burnedDescriptionKey,
-            WALLET_STATS.burnedDescriptionVars,
-          )}
+          unit={walletValues?.burnedUnit ?? WALLET_STATS.burnedUnit}
+          description={t(WALLET_STATS.burnedDescriptionKey, {
+            rate:
+              walletValues?.burnRate ??
+              WALLET_STATS.burnedDescriptionVars.rate,
+          })}
           sparkSeed={5}
           sparkColor="var(--color-rv-violet)"
         />
         <WalletStat
           label={t("credits.kpi.revenue28d")}
           value={walletValues?.revenueValue ?? WALLET_STATS.revenueValue}
-          unit={WALLET_STATS.revenueUnit}
-          description={t(
-            WALLET_STATS.revenueDescriptionKey,
-            WALLET_STATS.revenueDescriptionVars,
-          )}
+          unit={walletValues?.revenueUnit ?? WALLET_STATS.revenueUnit}
+          description={t(WALLET_STATS.revenueDescriptionKey, {
+            avg:
+              walletValues?.avgPrice ?? WALLET_STATS.revenueDescriptionVars.avg,
+          })}
           sparkSeed={7}
           sparkColor="var(--color-rv-warning)"
         />
         <WalletStat
           label={t("credits.kpi.breakage")}
           value={walletValues?.breakageValue ?? WALLET_STATS.breakageValue}
-          unit={WALLET_STATS.breakageUnit}
+          unit={walletValues?.breakageValue ? "" : WALLET_STATS.breakageUnit}
           description={t(WALLET_STATS.breakageDescriptionKey)}
           sparkSeed={9}
           sparkColor="var(--color-rv-mute-600)"
         />
       </div>
 
-      <CreditFlow />
+      <CreditFlow flow={ui?.response.flow} />
       <VolumeChart series={ui?.volume} />
 
       <div className="grid items-start gap-4 max-[1280px]:grid-cols-1 grid-cols-[minmax(0,1fr)_380px]">
         <LedgerTable entries={visible} scope={scope} onScopeChange={setScope} />
         <div className="flex flex-col gap-4">
-          <LiabilityGauge />
+          <LiabilityGauge liability={ui?.response.liability} />
           <PackageMix packs={ui?.packs} />
           <TopBurners burners={ui?.burners} />
-          <QuickActions />
         </div>
       </div>
+
+      <GrantCreditsModal
+        projectId={projectId}
+        open={grantOpen}
+        onClose={() => setGrantOpen(false)}
+      />
     </>
   );
 }

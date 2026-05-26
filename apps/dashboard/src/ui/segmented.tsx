@@ -24,6 +24,8 @@ export type SegmentedProps<T extends string> = VariantProps<typeof segmentedItem
   onChange: (next: T) => void;
   ariaLabel?: string;
   className?: string;
+  /** Map option value → label. Defaults to rendering the raw value. */
+  renderLabel?: (option: T) => React.ReactNode;
 };
 
 /**
@@ -37,6 +39,7 @@ export function Segmented<T extends string>({
   ariaLabel,
   tone,
   className,
+  renderLabel,
 }: SegmentedProps<T>) {
   return (
     <RadioGroup
@@ -50,7 +53,7 @@ export function Segmented<T extends string>({
     >
       {options.map((opt) => (
         <Radio.Root key={opt} value={opt} className={segmentedItemVariants({ tone })}>
-          {opt}
+          {renderLabel ? renderLabel(opt) : opt}
         </Radio.Root>
       ))}
     </RadioGroup>

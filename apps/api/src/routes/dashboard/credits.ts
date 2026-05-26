@@ -1,18 +1,29 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { MemberRole } from "@rovenue/db";
+import {
+  CreditLedgerType,
+  MemberRole,
+  drizzle,
+} from "@rovenue/db";
+import {
+  grantCreditsRequestSchema,
+  type GrantCreditsResponse,
+} from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
+import { audit, extractRequestContext } from "../../lib/audit";
 import { ok } from "../../lib/response";
+import { addCredits } from "../../services/credit-engine";
 import {
   __creditsConstants,
   getCreditsRollup,
 } from "../../services/metrics/credits";
 
 // =============================================================
-// Dashboard: Credits rollup (Phase 3.4)
+// Dashboard: Credits (Phase 3.4 + manual grant)
 // =============================================================
 
 const { ROLLUP_WINDOW_DEFAULT_DAYS, ROLLUP_WINDOW_MAX_DAYS } = __creditsConstants;
@@ -39,4 +50,85 @@ export const creditsRoute = new Hono()
     const { windowDays } = c.req.valid("query");
     const payload = await getCreditsRollup({ projectId, windowDays });
     return c.json(ok(payload));
-  });
+  })
+  // -------------------------------------------------------------
+  // POST / — manual ledger grant (dashboard "Grant Credits")
+  // -------------------------------------------------------------
+  //
+  // Resolves the subscriber by primary id (scoped to project), then
+  // hands off to the credit-engine for the append + advisory lock.
+  // The audit row runs *after* the ledger commits because addCredits
+  // owns its own transaction; we accept the small atomicity gap so
+  // the engine stays the single writer for credit_ledger.
+  .post(
+    "/",
+    zValidator("json", grantCreditsRequestSchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      if (!projectId) {
+        throw new HTTPException(400, { message: "Missing projectId" });
+      }
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+
+      const input = c.req.valid("json");
+
+      const [sub] = await drizzle.db
+        .select({
+          id: drizzle.schema.subscribers.id,
+          projectId: drizzle.schema.subscribers.projectId,
+        })
+        .from(drizzle.schema.subscribers)
+        .where(eq(drizzle.schema.subscribers.id, input.subscriberId))
+        .limit(1);
+
+      if (!sub || sub.projectId !== projectId) {
+        throw new HTTPException(404, { message: "subscriber not found" });
+      }
+
+      const entry = await addCredits({
+        subscriberId: sub.id,
+        amount: input.amount,
+        type: input.type as CreditLedgerType,
+        referenceType: input.referenceType,
+        referenceId: input.referenceId,
+        description: input.description,
+      });
+
+      const ctx = extractRequestContext(c);
+      await audit({
+        projectId,
+        userId: user.id,
+        action: "subscriber.credits_added",
+        resource: "subscriber",
+        resourceId: sub.id,
+        before: null,
+        after: {
+          ledgerId: entry.id,
+          type: entry.type,
+          amount: entry.amount,
+          balance: entry.balance,
+          referenceType: entry.referenceType,
+          referenceId: entry.referenceId,
+        },
+        ipAddress: ctx.ipAddress,
+        userAgent: ctx.userAgent,
+      });
+
+      const response: GrantCreditsResponse = {
+        entry: {
+          id: entry.id,
+          subscriberId: entry.subscriberId,
+          type: entry.type,
+          amount: entry.amount,
+          balance: entry.balance,
+          referenceType: entry.referenceType,
+          referenceId: entry.referenceId,
+          description: entry.description,
+          createdAt: entry.createdAt.toISOString(),
+        },
+        balance: entry.balance,
+      };
+      return c.json(ok(response));
+    },
+  );

@@ -2,8 +2,11 @@ import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
 import type {
   CreditLedgerType,
+  CreditsFlow,
+  CreditsFlowByType,
   CreditsKpis,
   CreditsLedgerRow,
+  CreditsLiability,
   CreditsPackageRow,
   CreditsRollupResponse,
   CreditsTopBurnerRow,
@@ -231,6 +234,228 @@ async function readKpis(
 }
 
 // =============================================================
+// PG: window-scoped sums by ledger type
+// =============================================================
+//
+// One query returns the absolute-value sum for every ledger type
+// in the window. Inflow types (PURCHASE/BONUS/REFUND/TRANSFER_IN)
+// carry positive deltas; outflow types (SPEND/EXPIRE/TRANSFER_OUT)
+// carry negative deltas, and we surface them positive so the UI
+// can render without a per-row sign flip.
+
+interface PgFlowRow {
+  type: string;
+  total: string;
+}
+
+const ZERO_FLOW: CreditsFlowByType = {
+  purchase: 0,
+  bonus: 0,
+  refund: 0,
+  transferIn: 0,
+  spend: 0,
+  expire: 0,
+  transferOut: 0,
+};
+
+async function readFlowByType(
+  projectId: string,
+  window: RollupWindow,
+): Promise<{ inflow: CreditsFlowByType; outflow: CreditsFlowByType }> {
+  const cl = drizzle.schema.creditLedger;
+  const rows = await drizzle.db
+    .select({
+      type: cl.type,
+      total: sql<string>`COALESCE(SUM(ABS("amount")), 0)::text`,
+    })
+    .from(cl)
+    .where(
+      and(
+        eq(cl.projectId, projectId),
+        gte(cl.createdAt, window.from),
+        lte(cl.createdAt, window.to),
+      ),
+    )
+    .groupBy(cl.type);
+
+  const inflow: CreditsFlowByType = { ...ZERO_FLOW };
+  const outflow: CreditsFlowByType = { ...ZERO_FLOW };
+  for (const r of rows as PgFlowRow[]) {
+    const n = Number(r.total);
+    switch (r.type) {
+      case "PURCHASE":
+        inflow.purchase = n;
+        break;
+      case "BONUS":
+        inflow.bonus = n;
+        break;
+      case "REFUND":
+        inflow.refund = n;
+        break;
+      case "TRANSFER_IN":
+        inflow.transferIn = n;
+        break;
+      case "SPEND":
+        outflow.spend = n;
+        break;
+      case "EXPIRE":
+        outflow.expire = n;
+        break;
+      case "TRANSFER_OUT":
+        outflow.transferOut = n;
+        break;
+    }
+  }
+  return { inflow, outflow };
+}
+
+// =============================================================
+// PG: liability composition
+// =============================================================
+//
+// Splits the outstanding balance into paid (PURCHASE+REFUND),
+// promo (BONUS), and transfer (TRANSFER_IN) shares using lifetime
+// inflow ratios. credit_ledger doesn't track per-batch attribution
+// so this is an approximation, not a true FIFO/LIFO accounting.
+// `averageAgeDays` is the amount-weighted age across all positive
+// ledger rows in the trailing 365 days, capped so a one-off ancient
+// row can't drag the average. Reserve = paid × avgCreditPrice in
+// USD; delta compares against the same-length prior window.
+
+const AGE_LOOKBACK_DAYS = 365;
+const AVG_AGE_LOOKBACK_MS = AGE_LOOKBACK_DAYS * DAY_MS;
+
+async function readLifetimeInflowSplit(
+  projectId: string,
+): Promise<{ paid: number; promo: number; transfer: number }> {
+  const cl = drizzle.schema.creditLedger;
+  const rows = await drizzle.db
+    .select({
+      type: cl.type,
+      total: sql<string>`COALESCE(SUM("amount"), 0)::text`,
+    })
+    .from(cl)
+    .where(and(eq(cl.projectId, projectId), gte(cl.amount, 1)))
+    .groupBy(cl.type);
+  let paid = 0;
+  let promo = 0;
+  let transfer = 0;
+  for (const r of rows as PgFlowRow[]) {
+    const n = Number(r.total);
+    if (r.type === "PURCHASE" || r.type === "REFUND") paid += n;
+    else if (r.type === "BONUS") promo += n;
+    else if (r.type === "TRANSFER_IN") transfer += n;
+  }
+  return { paid, promo, transfer };
+}
+
+async function readAverageAgeDays(
+  projectId: string,
+): Promise<number | null> {
+  const cutoff = new Date(Date.now() - AVG_AGE_LOOKBACK_MS);
+  const cl = drizzle.schema.creditLedger;
+  const rows = await drizzle.db.execute<{ avg_days: string | null }>(sql`
+    SELECT (SUM(EXTRACT(EPOCH FROM (NOW() - "createdAt")) * "amount")
+            / NULLIF(SUM("amount"), 0)) / 86400.0 AS avg_days
+    FROM ${cl}
+    WHERE "projectId" = ${projectId}
+      AND "amount" > 0
+      AND "createdAt" >= ${cutoff}
+  `);
+  const v = rows.rows[0]?.avg_days;
+  return v == null ? null : Number(v);
+}
+
+async function readWindowCreditPurchaseUsd(
+  projectId: string,
+  window: RollupWindow,
+): Promise<number> {
+  const rev = drizzle.schema.revenueEvents;
+  const rows = await drizzle.db
+    .select({
+      sumUsd: sql<string>`COALESCE(SUM("amountUsd"), 0)::text`,
+    })
+    .from(rev)
+    .where(
+      and(
+        eq(rev.projectId, projectId),
+        eq(rev.type, "CREDIT_PURCHASE"),
+        gte(rev.eventDate, window.from),
+        lte(rev.eventDate, window.to),
+      ),
+    );
+  return Number(rows[0]?.sumUsd ?? "0");
+}
+
+async function readWindowIssued(
+  projectId: string,
+  window: RollupWindow,
+): Promise<number> {
+  const cl = drizzle.schema.creditLedger;
+  const rows = await drizzle.db
+    .select({
+      total: sql<string>`COALESCE(SUM(CASE WHEN "amount" > 0 THEN "amount" ELSE 0 END), 0)::text`,
+    })
+    .from(cl)
+    .where(
+      and(
+        eq(cl.projectId, projectId),
+        gte(cl.createdAt, window.from),
+        lte(cl.createdAt, window.to),
+      ),
+    );
+  return Number(rows[0]?.total ?? "0");
+}
+
+interface LiabilityInputs {
+  outstanding: number;
+  windowRevenueUsd: number;
+  windowIssued: number;
+  prevWindowRevenueUsd: number;
+  prevWindowIssued: number;
+}
+
+async function readLiability(
+  projectId: string,
+  inputs: LiabilityInputs,
+): Promise<CreditsLiability> {
+  const [split, averageAgeDays] = await Promise.all([
+    readLifetimeInflowSplit(projectId),
+    readAverageAgeDays(projectId),
+  ]);
+
+  const totalInflow = split.paid + split.promo + split.transfer;
+  const paidShare = totalInflow > 0 ? split.paid / totalInflow : 0;
+  const promoShare = totalInflow > 0 ? split.promo / totalInflow : 0;
+  const transferShare = totalInflow > 0 ? split.transfer / totalInflow : 0;
+
+  const avgCreditPriceUsd =
+    inputs.windowIssued > 0 ? inputs.windowRevenueUsd / inputs.windowIssued : 0;
+  const paidReserveCents = Math.round(
+    paidShare * inputs.outstanding * avgCreditPriceUsd * 100,
+  );
+  const paidReserveUsd = (paidReserveCents / 100).toFixed(2);
+
+  const prevAvgPrice =
+    inputs.prevWindowIssued > 0
+      ? inputs.prevWindowRevenueUsd / inputs.prevWindowIssued
+      : 0;
+  const prevReserve = paidShare * inputs.outstanding * prevAvgPrice;
+  const currentReserve = paidReserveCents / 100;
+  const reserveDeltaPct =
+    prevReserve > 0 ? ((currentReserve - prevReserve) / prevReserve) * 100 : null;
+
+  return {
+    paidShare,
+    promoShare,
+    transferShare,
+    paidReserveUsd,
+    reserveDeltaPct,
+    averageAgeDays,
+  };
+}
+
+// =============================================================
 // PG: top burning reference buckets
 // =============================================================
 
@@ -369,13 +594,52 @@ export async function getCreditsRollup(
     Math.min(Math.max(input.windowDays, 1), ROLLUP_WINDOW_MAX_DAYS),
   );
 
-  const [kpis, volume, packagesRaw, topBurners, ledger] = await Promise.all([
+  const prevWindow: RollupWindow = {
+    from: new Date(window.from.getTime() - window.days * DAY_MS),
+    to: new Date(window.from.getTime() - 1),
+    days: window.days,
+  };
+
+  const [
+    kpis,
+    volume,
+    packagesRaw,
+    topBurners,
+    ledger,
+    flowByType,
+    prevRevenueUsd,
+    prevIssued,
+  ] = await Promise.all([
     readKpis(input.projectId, window),
     readVolume(input.projectId, window),
     readPackages(input.projectId, window),
     readTopBurners(input.projectId, window),
     readRecentLedger(input.projectId),
+    readFlowByType(input.projectId, window),
+    readWindowCreditPurchaseUsd(input.projectId, prevWindow),
+    readWindowIssued(input.projectId, prevWindow),
   ]);
+
+  const liability = await readLiability(input.projectId, {
+    outstanding: kpis.outstanding,
+    windowRevenueUsd: Number(kpis.revenue28dUsd),
+    windowIssued: kpis.issued28d,
+    prevWindowRevenueUsd: prevRevenueUsd,
+    prevWindowIssued: prevIssued,
+  });
+
+  const flow: CreditsFlow = {
+    inflow: kpis.issued28d,
+    outflow: kpis.burned28d,
+    balance: kpis.outstanding,
+    inflowByType: flowByType.inflow,
+    outflowByType: flowByType.outflow,
+    balanceByType: {
+      paid: Math.round(liability.paidShare * kpis.outstanding),
+      promo: Math.round(liability.promoShare * kpis.outstanding),
+      transfer: Math.round(liability.transferShare * kpis.outstanding),
+    },
+  };
 
   const productDisplay = await fetchProductDisplay(
     input.projectId,
@@ -411,6 +675,8 @@ export async function getCreditsRollup(
       days: window.days,
     },
     kpis,
+    flow,
+    liability,
     volume,
     packages,
     topBurners,
