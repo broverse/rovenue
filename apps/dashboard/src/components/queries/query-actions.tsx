@@ -1,4 +1,4 @@
-import { Calendar, Save, Wand2, Zap } from "lucide-react";
+import { Save, Wand2, Zap } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/cn";
 import { Button } from "../../ui/button";
@@ -10,14 +10,32 @@ type Props = {
   mode: QueryMode;
   onModeChange: (next: QueryMode) => void;
   savedAgoLabel: string;
+  onRun?: () => void;
+  onSave?: () => void;
+  onFormat?: () => void;
+  runDisabled?: boolean;
+  runLoading?: boolean;
+  saveDisabled?: boolean;
+  saveLoading?: boolean;
 };
 
 /**
  * Editor action bar — datasource pill on the left, SQL / Visual builder
- * toggle, "saved" timestamp, then Schedule / Format / Save secondary
- * buttons and the primary Run button with the ⌘⏎ hint.
+ * toggle, "saved" timestamp, then Format / Save secondary buttons and the
+ * primary Run button with the ⌘⏎ hint.
  */
-export function QueryActions({ mode, onModeChange, savedAgoLabel }: Props) {
+export function QueryActions({
+  mode,
+  onModeChange,
+  savedAgoLabel,
+  onRun,
+  onSave,
+  onFormat,
+  runDisabled,
+  runLoading,
+  saveDisabled,
+  saveLoading,
+}: Props) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b border-rv-divider bg-rv-c2 px-3 py-2">
@@ -47,24 +65,35 @@ export function QueryActions({ mode, onModeChange, savedAgoLabel }: Props) {
       </span>
 
       <div className="ml-auto flex flex-wrap items-center gap-1.5">
-        <Button variant="light" className="h-[26px]" aria-label={t("queries.actions.schedule")}>
-          <Calendar size={12} />
-          <span className="hidden sm:inline">{t("queries.actions.schedule")}</span>
-        </Button>
-        <Button variant="light" className="h-[26px]" aria-label={t("queries.actions.format")}>
+        <Button
+          variant="light"
+          className="h-[26px]"
+          aria-label={t("queries.actions.format")}
+          onClick={onFormat}
+        >
           <Wand2 size={12} />
           <span className="hidden sm:inline">{t("queries.actions.format")}</span>
         </Button>
-        <Button variant="flat" className="h-[26px]" aria-label={t("queries.actions.save")}>
+        <Button
+          variant="flat"
+          className="h-[26px]"
+          aria-label={t("queries.actions.save")}
+          onClick={onSave}
+          disabled={saveDisabled || saveLoading}
+        >
           <Save size={12} />
-          <span className="hidden sm:inline">{t("queries.actions.save")}</span>
+          <span className="hidden sm:inline">
+            {saveLoading ? t("common.saving") : t("queries.actions.save")}
+          </span>
         </Button>
         <button
           type="button"
-          className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md bg-rv-accent-500 px-3.5 text-[12px] font-medium text-white transition hover:bg-rv-accent-600"
+          onClick={onRun}
+          disabled={runDisabled || runLoading}
+          className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md bg-rv-accent-500 px-3.5 text-[12px] font-medium text-white transition hover:bg-rv-accent-600 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Zap size={12} />
-          {t("queries.actions.run")}
+          {runLoading ? t("queries.actions.running") : t("queries.actions.run")}
           <Kbd className="hidden bg-white/20 text-white sm:inline-flex">⌘ ⏎</Kbd>
         </button>
       </div>

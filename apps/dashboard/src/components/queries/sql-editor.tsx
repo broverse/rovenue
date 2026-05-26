@@ -1,77 +1,76 @@
-import { Fragment } from "react";
+import { useMemo, type ChangeEvent, type KeyboardEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/cn";
-import { SQL_TOKEN_COLOR } from "./format";
-import type { SqlLine, SqlTokenKind } from "./types";
 
 type Props = {
-  lines: ReadonlyArray<SqlLine>;
+  value: string;
+  onChange: (next: string) => void;
+  onSubmit?: () => void;
+  placeholder?: string;
+  ariaLabel?: string;
+  disabled?: boolean;
 };
 
 /**
- * Read-only mock SQL pane — line numbers on the left, hand-tokenized
- * pairs (kind, text) rendered as colored spans. Last line gets the
- * "current line" highlight + blinking caret.
+ * Editable SQL pane — line numbers gutter on the left, a synced
+ * monospace textarea on the right. ⌘/Ctrl + Enter calls `onSubmit`.
  */
-export function SqlEditor({ lines }: Props) {
-  return (
-    <div className="relative max-h-80 min-h-[280px] overflow-auto bg-rv-bg py-3.5 font-rv-mono text-[13px] leading-[1.7]">
-      {lines.map((line, i) => {
-        const isCurrent = i === lines.length - 1;
-        const isFullComment = line.length === 2 && line[0] === "cm";
-        return (
-          <div
-            key={i}
-            className={cn(
-              "grid grid-cols-[44px_1fr]",
-              isCurrent
-                ? "bg-rv-accent-500/8"
-                : "hover:bg-white/[0.02]",
-            )}
-          >
-            <span
-              className={cn(
-                "select-none pr-3.5 text-right",
-                isCurrent ? "text-rv-accent-400 opacity-100" : "text-rv-mute-500 opacity-50",
-              )}
-            >
-              {i + 1}
-            </span>
-            <span className="whitespace-pre pr-3.5">
-              {isFullComment ? (
-                <span className={SQL_TOKEN_COLOR.cm}>{line[1]}</span>
-              ) : (
-                <SegmentedLine line={line} />
-              )}
-              {isCurrent && (
-                <span
-                  className="ml-0 inline-block animate-pulse font-bold text-rv-accent-400"
-                  aria-hidden
-                >
-                  |
-                </span>
-              )}
-            </span>
-          </div>
-        );
-      })}
-    </div>
+export function SqlEditor({
+  value,
+  onChange,
+  onSubmit,
+  placeholder,
+  ariaLabel,
+  disabled,
+}: Props) {
+  const { t } = useTranslation();
+  const lineCount = useMemo(
+    () => Math.max(1, value.split("\n").length),
+    [value],
   );
-}
+  const lineNumbers = useMemo(
+    () => Array.from({ length: lineCount }, (_, i) => i + 1),
+    [lineCount],
+  );
 
-function SegmentedLine({ line }: { line: SqlLine }) {
-  const segments: Array<{ kind: SqlTokenKind; text: string }> = [];
-  for (let i = 0; i < line.length; i += 2) {
-    const kind = line[i] as SqlTokenKind;
-    const text = line[i + 1] ?? "";
-    segments.push({ kind, text });
-  }
+  const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
+    onChange(e.target.value);
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      onSubmit?.();
+    }
+  };
+
   return (
-    <>
-      {segments.map((seg, j) => (
-        <Fragment key={j}>
-          <span className={SQL_TOKEN_COLOR[seg.kind]}>{seg.text}</span>
-        </Fragment>
-      ))}
-    </>
+    <div className="relative grid max-h-80 min-h-[280px] grid-cols-[44px_1fr] overflow-auto bg-rv-bg font-rv-mono text-[13px] leading-[1.7]">
+      <div
+        aria-hidden
+        className="select-none pt-3.5 pr-3.5 text-right text-rv-mute-500 opacity-50"
+      >
+        {lineNumbers.map((n) => (
+          <div key={n}>{n}</div>
+        ))}
+      </div>
+      <textarea
+        value={value}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        spellCheck={false}
+        placeholder={placeholder ?? t("queries.editor.placeholder")}
+        aria-label={ariaLabel ?? t("queries.editor.aria")}
+        disabled={disabled}
+        className={cn(
+          "block min-h-full w-full resize-none border-0 bg-transparent py-3.5 pr-3.5 font-rv-mono text-[13px] leading-[1.7] text-foreground outline-none placeholder:text-rv-mute-500",
+          "whitespace-pre",
+        )}
+        style={{
+          // Keep the textarea sized to its content so the gutter scrolls in lock-step.
+          minHeight: `${lineCount * 1.7}em`,
+        }}
+      />
+    </div>
   );
 }

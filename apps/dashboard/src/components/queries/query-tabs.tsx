@@ -1,28 +1,40 @@
-import { LineChart, Plus, X } from "lucide-react";
+import { FileText, LineChart, Plus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/cn";
-import { SAVED_QUERY_BY_ID } from "./mock-data";
 
 type Props = {
   openIds: ReadonlyArray<string>;
-  selectedId: string;
+  selectedId: string | null;
   dirtyIds?: ReadonlyArray<string>;
+  draftIds?: ReadonlyArray<string>;
+  nameFor: (id: string) => string;
   onSelect: (next: string) => void;
   onClose: (id: string) => void;
+  onNew: () => void;
 };
 
 /**
  * Editor tab strip — open queries with a close-X, dirty dot, and an
  * always-visible "+" tab for opening a new query.
  */
-export function QueryTabs({ openIds, selectedId, dirtyIds = [], onSelect, onClose }: Props) {
+export function QueryTabs({
+  openIds,
+  selectedId,
+  dirtyIds = [],
+  draftIds = [],
+  nameFor,
+  onSelect,
+  onClose,
+  onNew,
+}: Props) {
   const { t } = useTranslation();
   return (
     <div className="flex items-stretch gap-0 overflow-x-auto border-b border-rv-divider bg-rv-c1 px-2.5">
       {openIds.map((id) => {
-        const q = SAVED_QUERY_BY_ID[id];
         const active = id === selectedId;
         const dirty = dirtyIds.includes(id);
+        const isDraft = draftIds.includes(id);
+        const Icon = isDraft ? FileText : LineChart;
         return (
           <button
             key={id}
@@ -35,8 +47,15 @@ export function QueryTabs({ openIds, selectedId, dirtyIds = [], onSelect, onClos
                 : "text-rv-mute-600 hover:text-foreground",
             )}
           >
-            <LineChart size={11} />
-            <span className="max-w-[140px] truncate sm:max-w-[180px]">{q?.name ?? id}</span>
+            <Icon size={11} />
+            <span
+              className={cn(
+                "max-w-[140px] truncate sm:max-w-[180px]",
+                isDraft && "italic",
+              )}
+            >
+              {nameFor(id)}
+            </span>
             {dirty && <span className="size-1.5 rounded-full bg-rv-warning" aria-hidden />}
             <span
               role="button"
@@ -55,7 +74,8 @@ export function QueryTabs({ openIds, selectedId, dirtyIds = [], onSelect, onClos
       <button
         type="button"
         aria-label={t("queries.tabs.new")}
-        className="shrink-0 self-center px-2.5 text-rv-mute-500 hover:text-foreground"
+        onClick={onNew}
+        className="shrink-0 cursor-pointer self-center px-2.5 text-rv-mute-500 hover:text-foreground"
       >
         <Plus size={12} />
       </button>

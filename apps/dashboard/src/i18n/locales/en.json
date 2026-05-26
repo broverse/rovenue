@@ -34,7 +34,8 @@
     "edit": "Edit",
     "close": "Close",
     "optional": "optional",
-    "retry": "Retry"
+    "retry": "Retry",
+    "saving": "Saving…"
   },
   "themes": {
     "light": "Light",
@@ -2841,7 +2842,7 @@
   },
   "queries": {
     "title": "Queries",
-    "subtitle": "SQL workbench against your Rovenue data warehouse — saved queries, scheduled refreshes, and downloadable CSV/Parquet exports.",
+    "subtitle": "SQL workbench against your Rovenue data warehouse — write, save, and run queries against ClickHouse.",
     "mobile": {
       "paneEditor": "Editor",
       "paneTablistAria": "Workbench panes",
@@ -2849,37 +2850,41 @@
     },
     "actions": {
       "sqlReference": "SQL reference",
-      "scheduledCount": "Scheduled ({{count}})",
       "newQuery": "New query",
       "datasource": "warehouse · production",
       "modeSql": "SQL",
       "modeVisual": "Visual builder",
-      "savedAgo": "Saved · {{minutes}} min ago by {{user}}",
-      "schedule": "Schedule",
+      "savedSaved": "Saved query",
+      "savedDraft": "Unsaved draft",
       "format": "Format",
       "save": "Save",
-      "run": "Run"
+      "run": "Run",
+      "running": "Running…"
+    },
+    "draft": {
+      "untitled": "Untitled query",
+      "defaultName": "New query"
+    },
+    "editor": {
+      "placeholder": "-- Write SQL against your warehouse, then ⌘⏎ to run.",
+      "aria": "SQL editor",
+      "startNew": "Start a new query →",
+      "namePrompt": "Name this query",
+      "errorEmpty": "Write some SQL before running.",
+      "errorRun": "Could not execute the query.",
+      "errorSave": "Could not save the query."
     },
     "library": {
       "title": "Library",
       "newAria": "New query",
       "searchPlaceholder": "Search queries…",
       "searchAria": "Search saved queries",
+      "loadFailed": "Could not load queries.",
+      "empty": "No saved queries yet.",
+      "noResults": "No queries match.",
       "sections": {
-        "pinned": "PINNED",
-        "revenue": "REVENUE",
-        "retentionPlatform": "RETENTION & PLATFORM",
-        "recentRuns": "RECENT RUNS"
-      }
-    },
-    "recent": {
-      "when": {
-        "minutesAgo_2": "2 min ago",
-        "minutesAgo_14": "14 min ago",
-        "hoursAgo_1": "1 hr ago",
-        "hoursAgo_2": "2 hr ago",
-        "hoursAgo_4": "4 hr ago",
-        "yesterday": "Yesterday"
+        "drafts": "DRAFTS",
+        "saved": "SAVED"
       }
     },
     "tabs": {
@@ -2887,37 +2892,27 @@
       "new": "New tab"
     },
     "footer": {
-      "compiled": "Compiled",
+      "ready": "Ready",
       "lineChars": "{{lines}} lines · {{chars}} chars",
-      "cost": "Estimated cost: {{bytes}} scan",
-      "cache": "Cache: HIT (2m ttl)",
-      "runtime": "Runtime: ClickHouse 24.3"
+      "runtime": "ClickHouse"
     },
     "results": {
       "tabs": {
         "results": "Results",
-        "visualization": "Visualization",
-        "plan": "Query plan",
-        "logs": "Logs"
+        "visualization": "Visualization"
       },
       "success": "● Success",
+      "running": "Running…",
+      "failed": "Failed",
+      "notRun": "Not run yet",
+      "runHint": "Run the query to see results.",
       "duration": "{{ms}}ms",
-      "rowsScanned": "{{rows}} rows · {{bytes}} scanned",
-      "exportCsv": "Export CSV",
-      "empty": "No rows to display.",
+      "rowsReturned": "{{rows}} rows",
+      "truncated": "(truncated)",
       "chart": {
-        "title": "{{name}}",
         "subtitle": "Bar · top {{count}}",
         "bar": "Bar",
-        "line": "Line",
-        "pie": "Pie"
-      },
-      "logs": {
-        "level": {
-          "info": "info",
-          "warn": "warn",
-          "error": "error"
-        }
+        "noNumericColumn": "No numeric column to chart."
       }
     },
     "schema": {
@@ -2932,12 +2927,6 @@
         "groupByProduct": "Group by product_id",
         "limitTopFive": "Limit to top 5"
       }
-    },
-    "schedule": {
-      "title": "Schedule",
-      "cadence": "Every hour",
-      "active": "active",
-      "next": "Next: 15:00 UTC · Slack #revenue + S3 export"
     }
   },
   "apps": {

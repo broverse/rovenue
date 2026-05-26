@@ -1,13 +1,16 @@
-import { ArrowDown, BarChart3 } from "lucide-react";
+import { BarChart3, Loader2 } from "lucide-react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import type { QueryExecuteResponse } from "@rovenue/shared";
 import { cn } from "../../lib/cn";
 import { Button } from "../../ui/button";
 import { formatNumberCell } from "./format";
-import { QUERY_LOGS, QUERY_PLAN } from "./mock-data";
-import type { QueryResultTab, SavedQuery } from "./types";
+import type { QueryResultTab } from "./types";
 
 type Props = {
-  query: SavedQuery;
+  result: QueryExecuteResponse | null;
+  loading: boolean;
+  error: string | null;
   resultTab: QueryResultTab;
   onResultTabChange: (next: QueryResultTab) => void;
 };
@@ -15,21 +18,49 @@ type Props = {
 const TABS: ReadonlyArray<{ k: QueryResultTab; labelKey: string; showCount?: boolean }> = [
   { k: "table", labelKey: "queries.results.tabs.results", showCount: true },
   { k: "chart", labelKey: "queries.results.tabs.visualization" },
-  { k: "plan", labelKey: "queries.results.tabs.plan" },
-  { k: "logs", labelKey: "queries.results.tabs.logs" },
 ];
 
 /**
  * Results panel under the editor — shared header (tabs + run stats) and
- * one of four bodies: a sortable-looking table, a horizontal-bar chart,
- * a flat query plan, or a log timeline.
+ * one of two bodies: a sortable-looking table or a horizontal-bar chart
+ * built from the most recent execution payload.
  */
-export function ResultsPanel({ query, resultTab, onResultTabChange }: Props) {
+export function ResultsPanel({
+  result,
+  loading,
+  error,
+  resultTab,
+  onResultTabChange,
+}: Props) {
   const { t } = useTranslation();
-  const maxBarValue =
-    query.rows && query.rows.length > 0
-      ? Math.max(...query.rows.map((r) => Number(r[2] ?? 0) || 0))
-      : 1;
+  const rowCount = result?.rowCount ?? 0;
+
+  const numericColumnIndex = useMemo(() => {
+    if (!result) return null;
+    return result.columns.findIndex((c, i) => {
+      if (i === 0) return false;
+      const t = c.type.toLowerCase();
+      return (
+        t.includes("int") ||
+        t.includes("float") ||
+        t.includes("decimal") ||
+        t.includes("uint") ||
+        t.includes("double")
+      );
+    });
+  }, [result]);
+
+  const maxBarValue = useMemo(() => {
+    if (!result || numericColumnIndex === null || numericColumnIndex < 0) {
+      return 1;
+    }
+    let max = 0;
+    for (const row of result.rows) {
+      const v = Number(row[numericColumnIndex] ?? 0) || 0;
+      if (v > max) max = v;
+    }
+    return max || 1;
+  }, [result, numericColumnIndex]);
 
   return (
     <section className="mt-3.5 overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">
@@ -59,7 +90,7 @@ export function ResultsPanel({ query, resultTab, onResultTabChange }: Props) {
                         : "bg-rv-c3 text-rv-mute-600",
                     )}
                   >
-                    {query.rowCount ?? 0}
+                    {rowCount}
                   </span>
                 )}
               </button>
@@ -67,53 +98,116 @@ export function ResultsPanel({ query, resultTab, onResultTabChange }: Props) {
           })}
         </div>
         <div className="flex w-full flex-wrap items-center gap-x-3.5 gap-y-1 pb-2 font-rv-mono text-[11px] text-rv-mute-500 sm:ml-auto sm:w-auto sm:flex-nowrap sm:pb-0">
-          <span className="flex items-center gap-1">
-            <span className="size-1.5 rounded-full bg-rv-success" aria-hidden />
-            <b className="font-medium text-rv-success">{t("queries.results.success")}</b>
-          </span>
-          <span className="hidden sm:inline">
-            ·{" "}
-            <b className="font-medium text-foreground">
-              {t("queries.results.duration", { ms: query.durationMs })}
-            </b>{" "}
-            ·{" "}
-            {t("queries.results.rowsScanned", {
-              rows: query.rowCount ?? 0,
-              bytes: query.bytesScanned ?? "—",
-            })}
-          </span>
-          <span className="sm:hidden">
-            <b className="font-medium text-foreground">
-              {t("queries.results.duration", { ms: query.durationMs })}
-            </b>
-          </span>
-          <Button variant="light" className="ml-auto h-6 text-[11px] sm:ml-0">
-            <ArrowDown size={11} />
-            {t("queries.results.exportCsv")}
-          </Button>
+          {loading ? (
+            <span className="inline-flex items-center gap-1 text-rv-mute-600">
+              <Loader2 size={11} className="animate-spin" />
+              <b className="font-medium">{t("queries.results.running")}</b>
+            </span>
+          ) : error ? (
+            <span className="inline-flex items-center gap-1 text-rv-danger">
+              <span className="size-1.5 rounded-full bg-rv-danger" aria-hidden />
+              <b className="font-medium">{t("queries.results.failed")}</b>
+            </span>
+          ) : result ? (
+            <>
+              <span className="flex items-center gap-1">
+                <span
+                  className="size-1.5 rounded-full bg-rv-success"
+                  aria-hidden
+                />
+                <b className="font-medium text-rv-success">
+                  {t("queries.results.success")}
+                </b>
+              </span>
+              <span className="hidden sm:inline">
+                ·{" "}
+                <b className="font-medium text-foreground">
+                  {t("queries.results.duration", { ms: result.durationMs })}
+                </b>{" "}
+                ·{" "}
+                {t("queries.results.rowsReturned", { rows: result.rowCount })}
+              </span>
+              {result.truncated && (
+                <span className="text-rv-warning">
+                  {t("queries.results.truncated")}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-rv-mute-600">
+              {t("queries.results.notRun")}
+            </span>
+          )}
         </div>
       </header>
 
       {resultTab === "table" && (
-        <ResultsTable query={query} maxBarValue={maxBarValue} />
+        <ResultsTable
+          result={result}
+          loading={loading}
+          error={error}
+          numericColumnIndex={numericColumnIndex}
+          maxBarValue={maxBarValue}
+        />
       )}
       {resultTab === "chart" && (
-        <ResultsChart query={query} maxBarValue={maxBarValue} />
+        <ResultsChart
+          result={result}
+          loading={loading}
+          error={error}
+          numericColumnIndex={numericColumnIndex}
+          maxBarValue={maxBarValue}
+        />
       )}
-      {resultTab === "plan" && <ResultsPlan />}
-      {resultTab === "logs" && <ResultsLogs />}
     </section>
   );
 }
 
-function ResultsTable({ query, maxBarValue }: { query: SavedQuery; maxBarValue: number }) {
+function ResultsEmpty({
+  loading,
+  error,
+}: {
+  loading: boolean;
+  error: string | null;
+}) {
   const { t } = useTranslation();
-  if (!query.rows || !query.columns) {
+  if (loading) {
     return (
-      <div className="px-4 py-12 text-center font-rv-mono text-[12px] text-rv-mute-500">
-        {t("queries.results.empty")}
+      <div className="flex items-center justify-center gap-2 px-4 py-12 font-rv-mono text-[12px] text-rv-mute-500">
+        <Loader2 size={12} className="animate-spin" />
+        {t("queries.results.running")}
       </div>
     );
+  }
+  if (error) {
+    return (
+      <div className="px-4 py-10 text-center font-rv-mono text-[12px]">
+        <p className="text-rv-danger">{error}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="px-4 py-12 text-center font-rv-mono text-[12px] text-rv-mute-500">
+      {t("queries.results.runHint")}
+    </div>
+  );
+}
+
+function ResultsTable({
+  result,
+  loading,
+  error,
+  numericColumnIndex,
+  maxBarValue,
+}: {
+  result: QueryExecuteResponse | null;
+  loading: boolean;
+  error: string | null;
+  numericColumnIndex: number | null;
+  maxBarValue: number;
+}) {
+  if (!result || result.rows.length === 0) {
+    return <ResultsEmpty loading={loading} error={error} />;
   }
   return (
     <div className="max-h-80 overflow-auto">
@@ -123,7 +217,7 @@ function ResultsTable({ query, maxBarValue }: { query: SavedQuery; maxBarValue: 
             <th className="sticky top-0 z-[1] w-8 whitespace-nowrap border-b border-rv-divider bg-rv-c2 px-3 py-1.5 text-left text-[11px] font-medium text-rv-mute-700">
               #
             </th>
-            {query.columns.map((c) => (
+            {result.columns.map((c) => (
               <th
                 key={c.name}
                 className="sticky top-0 z-[1] whitespace-nowrap border-b border-rv-divider bg-rv-c2 px-3 py-1.5 text-left text-[11px] font-medium text-rv-mute-700"
@@ -137,7 +231,7 @@ function ResultsTable({ query, maxBarValue }: { query: SavedQuery; maxBarValue: 
           </tr>
         </thead>
         <tbody>
-          {query.rows.map((row, i) => (
+          {result.rows.map((row, i) => (
             <tr
               key={i}
               className="border-b border-white/[0.04] transition hover:bg-rv-c2"
@@ -155,11 +249,13 @@ function ResultsTable({ query, maxBarValue }: { query: SavedQuery; maxBarValue: 
                       isNumber ? "text-foreground" : "text-rv-mute-700",
                     )}
                   >
-                    {formatNumberCell(v)}
-                    {j === 2 && isNumber && (
+                    {renderCell(v)}
+                    {j === numericColumnIndex && isNumber && (
                       <span
                         className="ml-2 inline-block h-1 rounded bg-rv-accent-500/35 align-middle"
-                        style={{ width: `${(Number(v) / maxBarValue) * 80}px` }}
+                        style={{
+                          width: `${(Number(v) / maxBarValue) * 80}px`,
+                        }}
                         aria-hidden
                       />
                     )}
@@ -174,43 +270,63 @@ function ResultsTable({ query, maxBarValue }: { query: SavedQuery; maxBarValue: 
   );
 }
 
-function ResultsChart({ query, maxBarValue }: { query: SavedQuery; maxBarValue: number }) {
+function renderCell(v: unknown) {
+  if (typeof v === "number") return formatNumberCell(v);
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+
+function ResultsChart({
+  result,
+  loading,
+  error,
+  numericColumnIndex,
+  maxBarValue,
+}: {
+  result: QueryExecuteResponse | null;
+  loading: boolean;
+  error: string | null;
+  numericColumnIndex: number | null;
+  maxBarValue: number;
+}) {
   const { t } = useTranslation();
-  if (!query.rows) {
+  if (!result || result.rows.length === 0) {
+    return <ResultsEmpty loading={loading} error={error} />;
+  }
+  if (numericColumnIndex === null || numericColumnIndex < 0) {
     return (
       <div className="px-4 py-12 text-center font-rv-mono text-[12px] text-rv-mute-500">
-        {t("queries.results.empty")}
+        {t("queries.results.chart.noNumericColumn")}
       </div>
     );
   }
+  const labelIndex = 0;
   return (
     <div className="p-4.5">
       <div className="mb-3 flex flex-wrap items-baseline gap-2.5">
         <h4 className="text-[13px] font-medium">
-          {t("queries.results.chart.title", { name: query.name })}
+          {result.columns[numericColumnIndex]?.name ?? "value"}
         </h4>
         <span className="text-[11px] text-rv-mute-500">
-          {t("queries.results.chart.subtitle", { count: query.rowCount ?? 0 })}
+          {t("queries.results.chart.subtitle", { count: result.rowCount })}
         </span>
         <div className="ml-auto flex flex-wrap gap-1.5">
           <Button variant="light" className="h-6 text-[11px]">
             <BarChart3 size={11} />
             {t("queries.results.chart.bar")}
           </Button>
-          <Button variant="light" className="h-6 text-[11px]">
-            {t("queries.results.chart.line")}
-          </Button>
-          <Button variant="light" className="h-6 text-[11px]">
-            {t("queries.results.chart.pie")}
-          </Button>
         </div>
       </div>
-      <div className="grid items-center gap-x-3 gap-y-1.5 font-rv-mono text-[11.5px] [grid-template-columns:60px_1fr_90px]">
-        {query.rows.map((row, i) => {
-          const value = Number(row[2] ?? 0);
+      <div className="grid items-center gap-x-3 gap-y-1.5 font-rv-mono text-[11.5px] [grid-template-columns:120px_1fr_90px]">
+        {result.rows.map((row, i) => {
+          const value = Number(row[numericColumnIndex] ?? 0);
+          const label = row[labelIndex];
           return (
             <div key={i} className="contents">
-              <span className="text-rv-mute-700">{row[0]}</span>
+              <span className="truncate text-rv-mute-700">
+                {typeof label === "number" ? formatNumberCell(label) : String(label ?? "—")}
+              </span>
               <div className="h-3 overflow-hidden rounded bg-rv-c2">
                 <div
                   className="h-full bg-gradient-to-r from-rv-accent-600 to-rv-accent-400"
@@ -218,54 +334,12 @@ function ResultsChart({ query, maxBarValue }: { query: SavedQuery; maxBarValue: 
                 />
               </div>
               <span className="text-right text-rv-mute-700">
-                ${(value / 1000).toFixed(1)}k
+                {formatNumberCell(value)}
               </span>
             </div>
           );
         })}
       </div>
-    </div>
-  );
-}
-
-function ResultsPlan() {
-  return (
-    <div className="overflow-x-auto p-4.5 font-rv-mono text-[11.5px] leading-[1.8] text-rv-mute-700">
-      {QUERY_PLAN.map((node, i) => (
-        <div
-          key={i}
-          className="flex gap-3 py-1"
-          style={{ paddingLeft: node.depth * 18 }}
-        >
-          <span className="min-w-[110px] font-medium text-rv-accent-400">{node.op}</span>
-          <span className="min-w-[80px] text-rv-mute-500">{node.cost}</span>
-          <span className="min-w-[100px] text-rv-warning">{node.rows} rows</span>
-          <span className="text-rv-mute-600">{node.detail}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ResultsLogs() {
-  const { t } = useTranslation();
-  return (
-    <div className="overflow-x-auto p-4.5 font-rv-mono text-[11.5px] leading-[1.8] text-rv-mute-700">
-      {QUERY_LOGS.map((log, i) => (
-        <div key={i}>
-          <span className="text-rv-mute-500">{log.ts}</span>{" "}
-          <span
-            className={cn(
-              log.level === "info" && "text-rv-success",
-              log.level === "warn" && "text-rv-warning",
-              log.level === "error" && "text-rv-danger",
-            )}
-          >
-            [{t(`queries.results.logs.level.${log.level}`)}]
-          </span>{" "}
-          {log.message}
-        </div>
-      ))}
     </div>
   );
 }

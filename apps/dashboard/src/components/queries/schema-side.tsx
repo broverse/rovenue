@@ -1,4 +1,4 @@
-import { Calendar, ChevronDown, Database } from "lucide-react";
+import { ChevronDown, Database } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/cn";
 import { AI_SUGGESTIONS, SCHEMA_TABLES } from "./mock-data";
@@ -22,7 +22,6 @@ export function SchemaSide() {
           <div className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[12px]">
             <Database size={12} className="text-rv-accent-400" />
             <span className="flex-1 font-rv-mono font-medium">{table.name}</span>
-            <span className="font-rv-mono text-[10px] text-rv-mute-500">{table.rows}</span>
             <ChevronDown size={11} className="text-rv-mute-500" />
           </div>
           <div className="flex flex-col gap-0.5 px-3 pb-1.5 pl-8 font-rv-mono text-[11px]">
@@ -64,21 +63,6 @@ export function SchemaSide() {
         ))}
       </div>
 
-      <div className="px-3 py-3">
-        <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-rv-mute-500">
-          {t("queries.schedule.title")}
-        </div>
-        <div className="flex items-center gap-1.5 text-[12px]">
-          <Calendar size={12} className="text-rv-mute-500" />
-          <span>{t("queries.schedule.cadence")}</span>
-          <span className="ml-auto font-rv-mono text-[11px] text-rv-success">
-            {t("queries.schedule.active")}
-          </span>
-        </div>
-        <div className="mt-1.5 text-[11px] text-rv-mute-500">
-          {t("queries.schedule.next")}
-        </div>
-      </div>
     </aside>
   );
 }

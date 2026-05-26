@@ -1,24 +1,30 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import { BookOpen, Calendar, Plus } from "lucide-react";
+import { BookOpen, Plus } from "lucide-react";
+import type {
+  DashboardSavedQuery,
+  QueryExecuteResponse,
+} from "@rovenue/shared";
 import { cn } from "../../../../lib/cn";
 import { Button } from "../../../../ui/button";
 import {
   EditorFooter,
   LibraryRail,
-  PINNED_QUERY_IDS,
   QueryActions,
   QueryTabs,
   ResultsPanel,
-  SAVED_QUERIES,
-  SAVED_QUERY_BY_ID,
   SchemaSide,
   SqlEditor,
   type QueryMode,
   type QueryResultTab,
-  type SavedQuery,
 } from "../../../../components/queries";
+import {
+  useCreateSavedQuery,
+  useExecuteQuery,
+  useSavedQueries,
+  useUpdateSavedQuery,
+} from "../../../../lib/hooks/useProjectQueries";
 import { useProject } from "../../../../lib/hooks/useProject";
 
 export const Route = createFileRoute("/_authed/projects/$projectId/queries")({
@@ -31,49 +37,301 @@ function QueriesRoute() {
   });
   const { data: project } = useProject(projectId);
   if (!project) return null;
-  return <QueriesPage />;
+  return <QueriesPage projectId={projectId} />;
 }
-
-const FALLBACK_QUERY: SavedQuery =
-  SAVED_QUERY_BY_ID["mrr_by_country"] ?? SAVED_QUERIES[0];
 
 type MobilePane = "library" | "editor" | "schema";
 
-function QueriesPage() {
+/** Local-only working state for an open editor tab. */
+interface EditorTab {
+  id: string;
+  savedId: string | null;
+  name: string;
+  /** The text that was last persisted (used for dirty detection). */
+  baselineSql: string;
+  /** The text currently in the editor. */
+  sql: string;
+  result: QueryExecuteResponse | null;
+  error: string | null;
+}
+
+const newDraftId = () =>
+  `draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+function makeDraft(): EditorTab {
+  return {
+    id: newDraftId(),
+    savedId: null,
+    name: "",
+    baselineSql: "",
+    sql: "",
+    result: null,
+    error: null,
+  };
+}
+
+function makeFromSaved(q: DashboardSavedQuery): EditorTab {
+  return {
+    id: q.id,
+    savedId: q.id,
+    name: q.name,
+    baselineSql: q.sql,
+    sql: q.sql,
+    result: null,
+    error: null,
+  };
+}
+
+function QueriesPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
-  const [selectedId, setSelectedId] = useState<string>(FALLBACK_QUERY.id);
-  const [openIds, setOpenIds] = useState<ReadonlyArray<string>>(PINNED_QUERY_IDS);
+  const list = useSavedQueries(projectId);
+  const execute = useExecuteQuery(projectId);
+  const createMut = useCreateSavedQuery(projectId);
+  const updateMut = useUpdateSavedQuery(projectId);
+
+  const queries = list.data?.queries ?? [];
+  const queriesById = useMemo(() => {
+    const map: Record<string, DashboardSavedQuery> = {};
+    for (const q of queries) map[q.id] = q;
+    return map;
+  }, [queries]);
+
+  const [tabs, setTabs] = useState<EditorTab[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mode, setMode] = useState<QueryMode>("sql");
   const [resultTab, setResultTab] = useState<QueryResultTab>("table");
   const [mobilePane, setMobilePane] = useState<MobilePane>("editor");
+  const seededRef = useRef(false);
 
-  const current = useMemo(
-    () => SAVED_QUERY_BY_ID[selectedId] ?? FALLBACK_QUERY,
-    [selectedId],
+  // Seed the editor with the first saved query (if any) on first load.
+  useEffect(() => {
+    if (seededRef.current) return;
+    if (list.isLoading) return;
+    seededRef.current = true;
+    if (queries.length > 0) {
+      const first = makeFromSaved(queries[0]);
+      setTabs([first]);
+      setSelectedId(first.id);
+    } else {
+      const draft = makeDraft();
+      setTabs([draft]);
+      setSelectedId(draft.id);
+    }
+  }, [list.isLoading, queries]);
+
+  // When a tab's underlying saved query changes (e.g. after a save), pull
+  // the new persisted SQL in so dirty detection stays accurate.
+  useEffect(() => {
+    setTabs((prev) =>
+      prev.map((tab) => {
+        if (!tab.savedId) return tab;
+        const persisted = queriesById[tab.savedId];
+        if (!persisted) return tab;
+        if (
+          persisted.name === tab.name &&
+          persisted.sql === tab.baselineSql
+        ) {
+          return tab;
+        }
+        // If the editor is unchanged from the previous baseline, accept
+        // the new persisted text. Otherwise leave the local edits alone.
+        const sqlInSync = tab.sql === tab.baselineSql;
+        return {
+          ...tab,
+          name: persisted.name,
+          baselineSql: persisted.sql,
+          sql: sqlInSync ? persisted.sql : tab.sql,
+        };
+      }),
+    );
+  }, [queriesById]);
+
+  const current = tabs.find((t) => t.id === selectedId) ?? null;
+  const dirtyIds = useMemo(
+    () => tabs.filter((t) => t.sql !== t.baselineSql).map((t) => t.id),
+    [tabs],
   );
-  const editorQuery = current.sql ? current : FALLBACK_QUERY;
+  const draftIds = useMemo(
+    () => tabs.filter((t) => !t.savedId).map((t) => t.id),
+    [tabs],
+  );
+  const draftNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const tab of tabs) {
+      if (!tab.savedId) {
+        map[tab.id] = tab.name || t("queries.draft.untitled");
+      }
+    }
+    return map;
+  }, [tabs, t]);
+
+  const nameFor = useCallback(
+    (id: string) => {
+      const tab = tabs.find((tt) => tt.id === id);
+      if (tab) {
+        if (!tab.savedId) return tab.name || t("queries.draft.untitled");
+        return tab.name;
+      }
+      return queriesById[id]?.name ?? id;
+    },
+    [tabs, queriesById, t],
+  );
+
+  const openSaved = useCallback(
+    (id: string) => {
+      const existing = tabs.find((tt) => tt.id === id);
+      if (existing) {
+        setSelectedId(id);
+        setMobilePane("editor");
+        return;
+      }
+      const q = queriesById[id];
+      if (!q) return;
+      const next = makeFromSaved(q);
+      setTabs((prev) => [...prev, next]);
+      setSelectedId(next.id);
+      setMobilePane("editor");
+    },
+    [tabs, queriesById],
+  );
 
   const handleSelect = (id: string) => {
-    setSelectedId(id);
-    setOpenIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+    // Drafts only live in `tabs`; saved queries live in the API list.
+    if (tabs.some((tt) => tt.id === id)) {
+      setSelectedId(id);
+      setMobilePane("editor");
+      return;
+    }
+    openSaved(id);
+  };
+
+  const handleNew = () => {
+    const draft = makeDraft();
+    setTabs((prev) => [...prev, draft]);
+    setSelectedId(draft.id);
     setMobilePane("editor");
   };
 
   const handleClose = (id: string) => {
-    setOpenIds((prev) => {
-      const next = prev.filter((openId) => openId !== id);
-      if (id === selectedId && next.length > 0) {
-        setSelectedId(next[next.length - 1]);
+    setTabs((prev) => {
+      const next = prev.filter((tt) => tt.id !== id);
+      if (id === selectedId) {
+        setSelectedId(next.length > 0 ? next[next.length - 1].id : null);
       }
       return next;
     });
   };
+
+  const updateCurrent = useCallback(
+    (patch: Partial<EditorTab>) => {
+      setTabs((prev) =>
+        prev.map((tt) => (tt.id === selectedId ? { ...tt, ...patch } : tt)),
+      );
+    },
+    [selectedId],
+  );
+
+  const handleRun = useCallback(async () => {
+    if (!current) return;
+    const sql = current.sql.trim();
+    if (!sql) {
+      updateCurrent({ error: t("queries.editor.errorEmpty") });
+      return;
+    }
+    updateCurrent({ error: null });
+    try {
+      const res = await execute.mutateAsync({ sql });
+      updateCurrent({ result: res, error: null });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : t("queries.editor.errorRun");
+      updateCurrent({ result: null, error: message });
+    }
+  }, [current, execute, t, updateCurrent]);
+
+  const handleSave = useCallback(async () => {
+    if (!current) return;
+    const sql = current.sql.trim();
+    if (!sql) {
+      updateCurrent({ error: t("queries.editor.errorEmpty") });
+      return;
+    }
+    if (current.savedId) {
+      try {
+        const res = await updateMut.mutateAsync({
+          id: current.savedId,
+          sql: current.sql,
+        });
+        updateCurrent({
+          baselineSql: res.query.sql,
+          sql: res.query.sql,
+          name: res.query.name,
+          error: null,
+        });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : t("queries.editor.errorSave");
+        updateCurrent({ error: message });
+      }
+      return;
+    }
+    // Draft → create. Ask for a name once.
+    const proposed = current.name || t("queries.draft.defaultName");
+    const name =
+      typeof window !== "undefined"
+        ? window.prompt(t("queries.editor.namePrompt"), proposed)
+        : proposed;
+    if (!name) return;
+    try {
+      const res = await createMut.mutateAsync({ name: name.trim(), sql });
+      const saved = res.query;
+      setTabs((prev) =>
+        prev.map((tt) =>
+          tt.id === current.id
+            ? {
+                ...tt,
+                id: saved.id,
+                savedId: saved.id,
+                name: saved.name,
+                baselineSql: saved.sql,
+                sql: saved.sql,
+                error: null,
+              }
+            : tt,
+        ),
+      );
+      setSelectedId(saved.id);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : t("queries.editor.errorSave");
+      updateCurrent({ error: message });
+    }
+  }, [current, createMut, updateMut, t, updateCurrent]);
+
+  // Keyboard ⌘/Ctrl + S → save the current tab.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void handleSave();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [handleSave]);
 
   const paneTabs: ReadonlyArray<{ k: MobilePane; labelKey: string }> = [
     { k: "library", labelKey: "queries.library.title" },
     { k: "editor", labelKey: "queries.mobile.paneEditor" },
     { k: "schema", labelKey: "queries.schema.title" },
   ];
+
+  const savedAgoLabel = current?.savedId
+    ? t("queries.actions.savedSaved")
+    : t("queries.actions.savedDraft");
+
+  const openIds = tabs.map((t) => t.id);
+  const isDirty = current ? current.sql !== current.baselineSql : false;
 
   return (
     <>
@@ -89,18 +347,15 @@ function QueriesPage() {
         <div className="flex flex-wrap gap-2">
           <Button variant="flat" size="sm">
             <BookOpen size={13} />
-            <span className="hidden sm:inline">{t("queries.actions.sqlReference")}</span>
-          </Button>
-          <Button variant="flat" size="sm">
-            <Calendar size={13} />
             <span className="hidden sm:inline">
-              {t("queries.actions.scheduledCount", { count: 8 })}
+              {t("queries.actions.sqlReference")}
             </span>
-            <span className="sm:hidden">8</span>
           </Button>
-          <Button variant="solid-primary" size="sm">
+          <Button variant="solid-primary" size="sm" onClick={handleNew}>
             <Plus size={13} />
-            <span className="hidden sm:inline">{t("queries.actions.newQuery")}</span>
+            <span className="hidden sm:inline">
+              {t("queries.actions.newQuery")}
+            </span>
             <span className="sm:hidden">{t("queries.mobile.newShort")}</span>
           </Button>
         </div>
@@ -140,7 +395,17 @@ function QueriesPage() {
             "min-[1024px]:block",
           )}
         >
-          <LibraryRail selectedId={selectedId} onSelect={handleSelect} />
+          <LibraryRail
+            queries={queries}
+            draftIds={draftIds}
+            draftNames={draftNames}
+            selectedId={selectedId}
+            onSelect={handleSelect}
+            onNew={handleNew}
+            loading={list.isLoading}
+            error={Boolean(list.error)}
+            onRetry={() => list.refetch()}
+          />
         </div>
 
         <main
@@ -154,24 +419,52 @@ function QueriesPage() {
             <QueryTabs
               openIds={openIds}
               selectedId={selectedId}
-              dirtyIds={["refund_anomalies"]}
+              dirtyIds={dirtyIds}
+              draftIds={draftIds}
+              nameFor={nameFor}
               onSelect={setSelectedId}
               onClose={handleClose}
+              onNew={handleNew}
             />
             <QueryActions
               mode={mode}
               onModeChange={setMode}
-              savedAgoLabel={t("queries.actions.savedAgo", {
-                minutes: 4,
-                user: "furkan@rovenue.dev",
-              })}
+              savedAgoLabel={savedAgoLabel}
+              onRun={handleRun}
+              onSave={handleSave}
+              runDisabled={!current || !current.sql.trim()}
+              runLoading={execute.isPending}
+              saveDisabled={
+                !current ||
+                !current.sql.trim() ||
+                (Boolean(current.savedId) && !isDirty)
+              }
+              saveLoading={createMut.isPending || updateMut.isPending}
             />
-            {editorQuery.sql && <SqlEditor lines={editorQuery.sql} />}
-            <EditorFooter query={editorQuery} />
+            {current ? (
+              <SqlEditor
+                value={current.sql}
+                onChange={(next) => updateCurrent({ sql: next })}
+                onSubmit={handleRun}
+              />
+            ) : (
+              <div className="flex min-h-[280px] items-center justify-center bg-rv-bg px-4 text-center font-rv-mono text-[12px] text-rv-mute-500">
+                <button
+                  type="button"
+                  onClick={handleNew}
+                  className="cursor-pointer underline-offset-2 hover:underline"
+                >
+                  {t("queries.editor.startNew")}
+                </button>
+              </div>
+            )}
+            <EditorFooter sql={current?.sql ?? ""} errorMessage={current?.error ?? null} />
           </div>
 
           <ResultsPanel
-            query={editorQuery}
+            result={current?.result ?? null}
+            loading={execute.isPending}
+            error={current?.error ?? null}
             resultTab={resultTab}
             onResultTabChange={setResultTab}
           />
