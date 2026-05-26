@@ -21,6 +21,7 @@ pub use entitlements::Entitlement;
 pub use error::{RovenueError, RovenueResult};
 pub use identity::User;
 pub use observer::{ChangeEvent, Observer};
+pub use receipts::ReceiptResult;
 pub use version::SDK_VERSION;
 
 pub fn sdk_version() -> String {

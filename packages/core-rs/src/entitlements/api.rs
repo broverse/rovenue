@@ -24,9 +24,7 @@ fn parse_iso_to_ms(iso: &str) -> Option<u64> {
     // On parse failure return None so the row still inserts (expires_iso is the
     // source of truth; expires_at_ms is a denorm convenience).
     let primitive = iso.strip_suffix('Z').unwrap_or(iso);
-    let mut parts = primitive.splitn(2, 'T');
-    let date = parts.next()?;
-    let time = parts.next()?;
+    let (date, time) = primitive.split_once('T')?;
     let mut d = date.split('-');
     let y: i64 = d.next()?.parse().ok()?;
     let m: u32 = d.next()?.parse().ok()?;
