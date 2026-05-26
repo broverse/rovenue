@@ -19,7 +19,10 @@ interface MinimalPage {
   config: Record<string, unknown>;
   next_rules?: Array<{
     id: string;
-    condition: { op: "all" | "any"; clauses: Array<{ question_id: string }> };
+    condition: {
+      op: "all" | "any";
+      clauses: Array<{ question_id: string; [key: string]: unknown }>;
+    };
     goto: string;
   }>;
   default_next?: string;

@@ -38,7 +38,7 @@ describe("evaluateNext", () => {
         },
       ],
     };
-    const answers: AnswerMap = new Map([
+    const answers: AnswerMap = new Map<string, string | number>([
       ["goal", "lose_weight"],
       ["age", 42],
     ]);
