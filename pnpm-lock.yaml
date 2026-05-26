@@ -92,6 +92,9 @@ importers:
       kafkajs:
         specifier: ^2.2.4
         version: 2.2.4
+      lru-cache:
+        specifier: ^11.0.0
+        version: 11.5.0
       nodemailer:
         specifier: ^8.0.9
         version: 8.0.9
