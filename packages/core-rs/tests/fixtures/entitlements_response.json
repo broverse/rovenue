@@ -1,0 +1,6 @@
+{
+  "entitlements": [
+    {"id": "pro", "is_active": true, "product_id": "monthly", "expires_at_ms": 1900000000000},
+    {"id": "lifetime", "is_active": false, "product_id": null, "expires_at_ms": null}
+  ]
+}

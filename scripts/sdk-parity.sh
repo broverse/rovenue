@@ -20,6 +20,16 @@ RUST_VER=$(
 )
 echo "→ Rust librovenue version: $RUST_VER"
 
+echo "→ Rust core tests (M1 surface)"
+cargo test -p librovenue --quiet \
+    --test integration_smoke \
+    --test entitlement_read_test \
+    --test identity_test \
+    --test polling_test \
+    >/tmp/rovenue-rust-parity.log 2>&1
+tail -3 /tmp/rovenue-rust-parity.log
+echo "  ✓ Rust M1 tests passed"
+
 # Swift façade test exercises sdkVersion() against the dylib.
 echo "→ Swift test"
 (
