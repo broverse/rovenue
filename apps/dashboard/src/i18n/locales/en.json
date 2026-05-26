@@ -3650,5 +3650,33 @@
       "expiresIn_one": "in {{count}} day",
       "expiresIn_other": "in {{count}} days"
     }
+  },
+  "invitationsLanding": {
+    "invite": {
+      "title": "You're invited to join {{project}}",
+      "body": "{{inviter}} invited {{email}} to join {{project}} as a {{role}}.",
+      "someone": "Someone"
+    },
+    "joining": "Joining…",
+    "accepted": {
+      "title": "Invitation accepted",
+      "body": "This invitation has already been accepted. You can return to the dashboard."
+    },
+    "revoked": {
+      "title": "Invitation revoked",
+      "body": "This invitation was revoked and cannot be used."
+    },
+    "expired": {
+      "title": "Invitation expired",
+      "body": "This invitation has expired. Ask the project owner to send a new one."
+    },
+    "mismatch": {
+      "title": "Wrong account",
+      "body": "You're signed in as {{me}}, but this invitation is for {{them}}. Sign out and try again with the right account."
+    },
+    "errors": {
+      "notFound": "We couldn't find that invitation.",
+      "acceptFailed": "Couldn't accept the invitation."
+    }
   }
 }
