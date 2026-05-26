@@ -1272,6 +1272,12 @@
         "refund": "Refund",
         "override": "Override",
         "more": "More actions"
+      },
+      "scheduled": {
+        "heading": "Scheduled",
+        "cancelAt": "Cancel on {{date}}",
+        "revokeImmediately": "revoke immediately",
+        "remove": "Remove"
       }
     },
     "billingIssues": {

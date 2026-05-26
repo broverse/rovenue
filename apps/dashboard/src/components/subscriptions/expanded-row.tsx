@@ -1,6 +1,8 @@
 import { Key, MoreHorizontal, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useParams } from "@tanstack/react-router";
 import { Button } from "../../ui/button";
+import { useScheduledActions, useDeleteScheduledAction } from "../../lib/hooks/useProjectSubscriptions";
 import type { Subscription } from "./types";
 
 type Props = { sub: Subscription };
@@ -11,6 +13,12 @@ type Props = { sub: Subscription };
  */
 export function ExpandedRow({ sub }: Props) {
   const { t } = useTranslation();
+  const { projectId } = useParams({ strict: false }) as { projectId: string };
+  const scheduled = useScheduledActions(projectId);
+  const del = useDeleteScheduledAction(projectId);
+  const mine = (scheduled.data?.rows ?? []).filter(
+    (r) => r.purchaseId === sub.id && r.status === "PENDING",
+  );
 
   const lifecycleNext =
     sub.status === "canceling"
@@ -132,6 +140,36 @@ export function ExpandedRow({ sub }: Props) {
             ))}
           </ul>
         )}
+        {mine.length > 0 ? (
+          <div className="mt-3 rounded-md border border-rv-divider p-2">
+            <div className="mb-1 font-rv-mono text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
+              {t("subscriptions.expanded.scheduled.heading", { defaultValue: "Scheduled" })}
+            </div>
+            <ul className="flex flex-col gap-1">
+              {mine.map((r) => (
+                <li key={r.id} className="flex items-center justify-between gap-2">
+                  <span className="font-rv-mono text-[11px] text-rv-mute-700">
+                    {t("subscriptions.expanded.scheduled.cancelAt", {
+                      defaultValue: "Cancel on {{date}}",
+                      date: new Date(r.dueAt).toLocaleString(),
+                    })}
+                    {r.payload.revokeImmediately
+                      ? ` (${t("subscriptions.expanded.scheduled.revokeImmediately", { defaultValue: "revoke immediately" })})`
+                      : ""}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => del.mutate(r.id)}
+                    disabled={del.isPending}
+                    className="shrink-0 font-rv-mono text-[10px] text-rv-danger opacity-80 hover:opacity-100 disabled:pointer-events-none disabled:opacity-40"
+                  >
+                    {t("subscriptions.expanded.scheduled.remove", { defaultValue: "Remove" })}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <div className="mt-3.5 flex items-center gap-1.5">
           <Button variant="flat" size="sm" className="flex-1 text-[11px]">
             <RotateCcw size={11} />
