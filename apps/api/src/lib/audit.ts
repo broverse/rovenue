@@ -65,6 +65,8 @@ export type AuditAction =
   | "subscriber.exported"
   // --- subscription manual ops ---
   | "subscription.granted"
+  | "subscription.cancel_scheduled"
+  | "subscription.schedule_canceled"
   // --- members ---
   | "member.invited"
   | "member.role_changed"
