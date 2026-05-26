@@ -1913,26 +1913,10 @@
     "subtitle": "Group subscribers by behavior, acquisition channel, or lifecycle stage. Compare retention, revenue, and LTV across segments — then sync cohorts to ad platforms or use them as targeting rules.",
     "actions": {
       "howCohortsWork": "How cohorts work",
-      "exportCsv": "Export CSV",
       "newCohort": "New cohort",
       "duplicate": "Duplicate",
       "save": "Save",
-      "csv": "CSV",
       "delete": "Delete"
-    },
-    "kpi": {
-      "saved": "SAVED COHORTS",
-      "savedBreakdown": "{{groups}} groups · {{synced}} sync'd to Meta",
-      "avgRetention": "AVG W4 RETENTION",
-      "avgRetentionDelta": "▲ +{{value}}pp vs prior 12w",
-      "bestCohort": "BEST COHORT · W4",
-      "bestCohortPending": "Awaiting aggregate endpoint",
-      "blendedLtv": "BLENDED 90-DAY LTV",
-      "blendedLtvDelta": "▲ +${{value}} vs prior period"
-    },
-    "mockBadge": {
-      "label": "Mock",
-      "tooltip": "Backend not wired yet — showing placeholder data"
     },
     "saved": {
       "heading": "Saved cohorts",
@@ -1944,15 +1928,8 @@
     },
     "hero": {
       "groupCohort": "{{group}} cohort",
-      "memberMore": "+ {{count}} more",
       "size": "Size",
       "w4Retention": "W4 retention",
-      "ltv90": "90-day LTV",
-      "ltv90Value": "$32.14",
-      "ltv90Delta": "▲ +$3.40",
-      "monthlyChurn": "Monthly churn",
-      "monthlyChurnValue": "2.8%",
-      "monthlyChurnDelta": "▼ -0.4pp",
       "emptyState": "Create your first cohort to see retention",
       "retentionFailed": "Couldn't load retention",
       "defaultGroup": "Cohort"

@@ -1,6 +1,5 @@
 import { Fragment, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { Download } from "lucide-react";
 import type { CohortRetentionPoint } from "@rovenue/shared";
 import { Button } from "../../ui/button";
 import {
@@ -82,10 +81,6 @@ export function RetentionHeatmap({
         </div>
         <div className="flex items-center gap-2.5">
           <MetricTabs value={metric} onChange={onMetricChange} />
-          <Button variant="flat" size="sm" className="h-7">
-            <Download size={12} />
-            {t("cohorts.actions.csv")}
-          </Button>
         </div>
       </header>
 

@@ -8,9 +8,8 @@ import {
   useSearch,
 } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import { BookOpen, Download, Plus } from "lucide-react";
+import { BookOpen, Plus } from "lucide-react";
 import { Button } from "../../../../ui/button";
-import { StatCard } from "../../../../ui/stat-card";
 import { useProject } from "../../../../lib/hooks/useProject";
 import {
   useCohortRetention,
@@ -19,8 +18,6 @@ import {
 import {
   CohortDefinitionCard,
   CohortHero,
-  KPI_VALUES,
-  MockBadge,
   RetentionHeatmap,
   SavedCohortsRail,
   w4Pct,
@@ -140,63 +137,12 @@ function CohortsPage({ projectId }: { projectId: string }) {
             <BookOpen size={13} />
             {t("cohorts.actions.howCohortsWork")}
           </Button>
-          <Button variant="flat" size="sm">
-            <Download size={13} />
-            {t("cohorts.actions.exportCsv")}
-          </Button>
           <Button variant="solid-primary" size="sm" onClick={goNew}>
             <Plus size={13} />
             {t("cohorts.actions.newCohort")}
           </Button>
         </div>
       </header>
-
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard
-          label={t("cohorts.kpi.saved")}
-          value={cohorts.length}
-          description={t("cohorts.kpi.savedBreakdown", {
-            groups: KPI_VALUES.groupCount,
-            synced: KPI_VALUES.syncedCount,
-          })}
-        />
-        <StatCard
-          label={
-            <span className="inline-flex items-center gap-1.5">
-              {t("cohorts.kpi.avgRetention")}
-              <MockBadge />
-            </span>
-          }
-          value="40.1%"
-          description={t("cohorts.kpi.avgRetentionDelta", {
-            value: KPI_VALUES.avgRetentionDelta,
-          })}
-          descriptionTone="success"
-        />
-        <StatCard
-          label={
-            <span className="inline-flex items-center gap-1.5">
-              {t("cohorts.kpi.bestCohort")}
-              <MockBadge />
-            </span>
-          }
-          value="—"
-          description={t("cohorts.kpi.bestCohortPending")}
-        />
-        <StatCard
-          label={
-            <span className="inline-flex items-center gap-1.5">
-              {t("cohorts.kpi.blendedLtv")}
-              <MockBadge />
-            </span>
-          }
-          value={KPI_VALUES.blendedLtv}
-          description={t("cohorts.kpi.blendedLtvDelta", {
-            value: KPI_VALUES.blendedLtvDelta,
-          })}
-          descriptionTone="success"
-        />
-      </div>
 
       <div className="grid items-start gap-4 max-[1280px]:grid-cols-1 grid-cols-[260px_minmax(0,1fr)]">
         <SavedCohortsRail
