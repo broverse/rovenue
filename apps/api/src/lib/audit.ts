@@ -334,11 +334,15 @@ export async function verifyAuditChain(
       });
     }
 
+    // Schema allows null projectId/userId, but every chained row (one
+    // with a rowHash, filtered above) is written by writeChained which
+    // requires both to be non-null. Coerce here so the canonical type
+    // stays narrow.
     const canonical = canonicalJSON(
       buildCanonicalPayload(
         {
-          projectId: row.projectId,
-          userId: row.userId,
+          projectId: row.projectId ?? "",
+          userId: row.userId ?? "",
           action: row.action as AuditAction,
           resource: row.resource as AuditResource,
           resourceId: row.resourceId,
