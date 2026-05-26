@@ -25,6 +25,8 @@ import {
   featureFlagType,
   invitationDeliveryStatus,
   memberRole,
+  notificationChannel,
+  notificationDeliveryStatus,
   outgoingWebhookStatus,
   productType,
   purchaseStatus,
@@ -1309,6 +1311,86 @@ export const scheduledSubscriptionActions = pgTable(
 );
 
 // =============================================================
+// notifications
+// =============================================================
+//
+// User-facing notification inbox. NOT partitioned at v1 scale —
+// `(userId, eventId)` idempotency forces the partition key into
+// the unique constraint under native partitioning, which would
+// break the spec §3.4 contract. Volume fits in a single table;
+// revisit partitioning if/when row counts demand it.
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    projectId: text("projectId").references(() => projects.id, {
+      onDelete: "cascade",
+    }),
+    eventKey: text("eventKey").notNull(),
+    eventId: text("eventId").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull(),
+    data: jsonb("data").notNull().default(sql`'{}'::jsonb`),
+    readAt: timestamp("readAt", { withTimezone: true }),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    userIdEventIdKey: uniqueIndex("notifications_userId_eventId_key").on(
+      t.userId,
+      t.eventId,
+    ),
+    userIdFeedIdx: index("notifications_userId_feed_idx").on(
+      t.userId,
+      t.readAt,
+      t.createdAt,
+    ),
+  }),
+);
+
+// =============================================================
+// notification_deliveries
+// =============================================================
+//
+// Per-channel delivery record for each notification. Plain
+// (non-partitioned) table for v1 — pg_partman is not installed on
+// this stack and the existing hot tables are also unmanaged plain
+// partitions. Add cron retention later if volume demands.
+
+export const notificationDeliveries = pgTable(
+  "notification_deliveries",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    notificationId: text("notificationId")
+      .notNull()
+      .references(() => notifications.id, { onDelete: "cascade" }),
+    channel: notificationChannel("channel").notNull(),
+    status: notificationDeliveryStatus("status").notNull(),
+    providerMessageId: text("providerMessageId"),
+    providerResponse: jsonb("providerResponse"),
+    attempts: integer("attempts").notNull().default(0),
+    lastAttemptAt: timestamp("lastAttemptAt", { withTimezone: true }),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    notificationIdIdx: index(
+      "notification_deliveries_notificationId_idx",
+    ).on(t.notificationId),
+    statusIdx: index("notification_deliveries_status_idx").on(
+      t.status,
+      t.createdAt,
+    ),
+  }),
+);
+
+// =============================================================
 // Inferred types
 // =============================================================
 //
@@ -1374,6 +1456,14 @@ export type ScheduledSubscriptionAction =
   typeof scheduledSubscriptionActions.$inferSelect;
 export type NewScheduledSubscriptionAction =
   typeof scheduledSubscriptionActions.$inferInsert;
+
+export type Notification = typeof notifications.$inferSelect;
+export type NewNotification = typeof notifications.$inferInsert;
+
+export type NotificationDelivery =
+  typeof notificationDeliveries.$inferSelect;
+export type NewNotificationDelivery =
+  typeof notificationDeliveries.$inferInsert;
 
 // Re-export enum helpers so downstream code can `import { memberRole }
 // from "@rovenue/db/drizzle"` without reaching into the `drizzle`
