@@ -35,6 +35,7 @@ import {
   safeEqualHash,
 } from "../../services/funnel/token";
 import { parseInstallReferrer } from "../../services/funnel/install-referrer";
+import { emitFunnelEvent } from "../../services/funnel/outbox";
 import {
   fingerprintsMatch,
   normalizeFingerprint,
@@ -161,23 +162,56 @@ export const funnelClaimRoute = new Hono()
         throw new HTTPException(409, { message: "Token already claimed" });
       }
 
-      const claimed = await drizzle.funnelClaimTokenRepo.tryClaim(
+      // Load the session up-front so we have funnel_id / version_id
+      // in scope for the outbox payload — `tryClaim` only touches the
+      // claim-token row.
+      const sessionForEvent = await drizzle.funnelSessionRepo.findById(
         drizzle.db,
-        tokenRow.id,
-        subscriber.id,
+        tokenRow.sessionId,
       );
+
+      const claimed = await drizzle.db.transaction(async (tx) => {
+        const winner = await drizzle.funnelClaimTokenRepo.tryClaim(
+          tx,
+          tokenRow.id,
+          subscriber.id,
+        );
+        if (!winner) return false;
+
+        // Flip session to completed so /state stops reporting it as
+        // still in flight.
+        await drizzle.funnelSessionRepo.setState(
+          tx,
+          tokenRow.sessionId,
+          "completed",
+        );
+
+        if (sessionForEvent) {
+          await emitFunnelEvent(tx, "funnel.session.completed", tokenRow.sessionId, {
+            funnel_id: sessionForEvent.funnelId,
+            version_id: sessionForEvent.funnelVersionId,
+            project_id: sessionForEvent.projectId,
+            subscriber_id: subscriber.id,
+          });
+          await emitFunnelEvent(
+            tx,
+            "funnel.claim_token.claimed",
+            tokenRow.sessionId,
+            {
+              funnel_id: sessionForEvent.funnelId,
+              version_id: sessionForEvent.funnelVersionId,
+              project_id: sessionForEvent.projectId,
+              subscriber_id: subscriber.id,
+            },
+          );
+        }
+        return true;
+      });
+
       if (!claimed) {
         // Lost the race — someone else just claimed it.
         throw new HTTPException(409, { message: "Token already claimed" });
       }
-
-      // Flip session to completed so /state stops reporting it as
-      // still in flight.
-      await drizzle.funnelSessionRepo.setState(
-        drizzle.db,
-        tokenRow.sessionId,
-        "completed",
-      );
 
       const body = await buildClaimResponse(tokenRow.sessionId, subscriber.id);
       return c.json({ data: body });

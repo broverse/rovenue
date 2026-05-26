@@ -36,6 +36,7 @@ import {
   type PageGraph,
 } from "../../services/funnel/branching-evaluator";
 import { generateClaimToken, hashToken } from "../../services/funnel/token";
+import { emitFunnelEvent } from "../../services/funnel/outbox";
 
 interface PublishedRuntimeConfig {
   id: string;
@@ -166,6 +167,12 @@ export const publicFunnelsRoute = new Hono()
         currentPageId: firstPageId,
       });
 
+      await emitFunnelEvent(drizzle.db, "funnel.session.started", session.id, {
+        funnel_id: config.id,
+        version_id: config.version_id,
+        project_id: funnel.projectId,
+      });
+
       setCookie(c, "rv_funnel_sid", session.id, {
         httpOnly: true,
         sameSite: "Lax",
@@ -262,11 +269,26 @@ export const publicFunnelsRoute = new Hono()
         pagesById,
       });
       if (result.next === "page") {
+        const prevPageId = session.currentPageId;
         await drizzle.funnelSessionRepo.setCurrentPage(
           drizzle.db,
           sid,
           result.pageId,
         );
+        if (prevPageId !== result.pageId) {
+          await emitFunnelEvent(
+            drizzle.db,
+            "funnel.session.advanced",
+            sid,
+            {
+              funnel_id: session.funnelId,
+              version_id: session.funnelVersionId,
+              project_id: session.projectId,
+              from_page_id: prevPageId,
+              to_page_id: result.pageId,
+            },
+          );
+        }
         return c.json({ data: { next: "page", page_id: result.pageId } });
       }
       return c.json({ data: { next: result.next } });
@@ -324,7 +346,7 @@ export const publicFunnelsRoute = new Hono()
         plaintext = generateClaimToken();
         const tokenPlaintext = plaintext;
         await drizzle.db.transaction(async (tx) => {
-          await drizzle.funnelPurchaseRepo.insert(tx, {
+          const purchase = await drizzle.funnelPurchaseRepo.insert(tx, {
             sessionId: sid,
             projectId: session.projectId,
             status: "paid",
@@ -332,11 +354,25 @@ export const publicFunnelsRoute = new Hono()
             rawPayload: { stub: true },
           });
           await drizzle.funnelSessionRepo.setState(tx, sid, "paid");
-          await drizzle.funnelClaimTokenRepo.insert(tx, {
+          const tokenRow = await drizzle.funnelClaimTokenRepo.insert(tx, {
             tokenHash: hashToken(tokenPlaintext),
             sessionId: sid,
             projectId: session.projectId,
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          });
+          await emitFunnelEvent(tx, "funnel.session.paid", sid, {
+            funnel_id: session.funnelId,
+            version_id: session.funnelVersionId,
+            project_id: session.projectId,
+            purchase_id: purchase.id,
+            token_id: tokenRow.id,
+          });
+          await emitFunnelEvent(tx, "funnel.claim_token.issued", sid, {
+            funnel_id: session.funnelId,
+            version_id: session.funnelVersionId,
+            project_id: session.projectId,
+            purchase_id: purchase.id,
+            token_id: tokenRow.id,
           });
         });
       } else {

@@ -126,6 +126,7 @@ export const aggregateTypeEnum = pgEnum("aggregate_type", [
   "REVENUE_EVENT",
   "CREDIT_LEDGER",
   "BILLING",
+  "FUNNEL",
 ]);
 
 export const invitationDeliveryStatus = pgEnum("InvitationDeliveryStatus", [
