@@ -7,25 +7,25 @@ import {
 } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
-import { Button } from "../../../../ui/button";
-import { Chip } from "../../../../ui/chip";
-import { ApiError } from "../../../../lib/api";
-import { useProject } from "../../../../lib/hooks/useProject";
+import { Button } from "../../../../../ui/button";
+import { Chip } from "../../../../../ui/chip";
+import { ApiError } from "../../../../../lib/api";
+import { useProject } from "../../../../../lib/hooks/useProject";
 import {
   useAudiences,
   useDeleteAudience,
-} from "../../../../lib/hooks/useProjectAdmin";
-import { siftToConditions } from "../../../../components/targeting/sift-codec";
+} from "../../../../../lib/hooks/useProjectAdmin";
+import { siftToConditions } from "../../../../../components/targeting/sift-codec";
 
 export const Route = createFileRoute(
-  "/_authed/projects/$projectId/audiences",
+  "/_authed/projects/$projectId/audiences/",
 )({
   component: AudiencesRoute,
 });
 
 function AudiencesRoute() {
   const { projectId } = useParams({
-    from: "/_authed/projects/$projectId/audiences",
+    from: "/_authed/projects/$projectId/audiences/",
   });
   const { data: project } = useProject(projectId);
   if (!project) return null;

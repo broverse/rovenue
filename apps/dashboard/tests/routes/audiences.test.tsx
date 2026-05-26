@@ -6,7 +6,7 @@ import { initReactI18next } from "react-i18next";
 import en from "../../src/i18n/locales/en.json";
 import { server } from "../msw/server";
 import { renderWithRouter } from "../render";
-import { AudiencesPage } from "../../src/routes/_authed/projects/$projectId/audiences";
+import { AudiencesPage } from "../../src/routes/_authed/projects/$projectId/audiences/index";
 
 const BASE = "http://localhost:3000";
 
