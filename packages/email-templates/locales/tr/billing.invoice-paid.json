@@ -1,0 +1,7 @@
+{
+  "subject": "Rovenue faturanız ödendi",
+  "preview": "{{amountFormatted}} · {{periodStart}} → {{periodEnd}}",
+  "headline": "{{invoiceId}} numaralı fatura ödendi",
+  "body": "{{periodStart}} → {{periodEnd}} dönemi için {{amountFormatted}} tahsil edildi. Teşekkürler.",
+  "cta": "Faturayı aç"
+}
