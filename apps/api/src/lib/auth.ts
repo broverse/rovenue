@@ -6,6 +6,7 @@ import { drizzle } from "@rovenue/db";
 import { env } from "./env";
 import { logger } from "./logger";
 import { maybeEmitNewDevice } from "../services/notifications/new-device-emit";
+import { maybeEmitOAuthLink } from "../services/notifications/oauth-link-emit";
 
 const log = logger.child("auth");
 
@@ -138,6 +139,36 @@ const newDeviceNotifier: BetterAuthPlugin = {
   },
 };
 
+/**
+ * security.oauth.account_linked producer. After any OAuth
+ * callback (which is where Better Auth inserts new account
+ * rows), check if the user just gained a NEW provider link.
+ * Fire-and-forget like the new-device emitter — same fast-path
+ * discipline.
+ */
+const oauthLinkNotifier: BetterAuthPlugin = {
+  id: "oauth-link-notifier",
+  hooks: {
+    after: [
+      {
+        matcher: (ctx) => ctx.path?.startsWith("/callback/") ?? false,
+        handler: createAuthMiddleware(async (ctx) => {
+          const data = ctx.context.newSession;
+          if (!data?.user?.id) return;
+          void maybeEmitOAuthLink(drizzle.db, {
+            userId: data.user.id,
+          }).catch((err) => {
+            log.warn("oauth_link_emit_failed", {
+              userId: data.user.id,
+              err: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }),
+      },
+    ],
+  },
+};
+
 export const auth = betterAuth({
   // `schema` is intentionally omitted: the adapter's default table
   // resolution reads tables directly from `drizzle.db`'s attached
@@ -170,5 +201,9 @@ export const auth = betterAuth({
     // Same after-hook chain — runs after 2FA / OAuth-redirect so
     // `newSession` is populated for the device-fingerprint check.
     newDeviceNotifier,
+    // Detects "an OAuth provider was just linked to an existing
+    // user" specifically (first-time signup is excluded — that's
+    // already covered by the new-device emitter above).
+    oauthLinkNotifier,
   ],
 });
