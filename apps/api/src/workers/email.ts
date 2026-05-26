@@ -1,11 +1,10 @@
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
 import { drizzle } from "@rovenue/db";
+import { renderTemplate } from "@rovenue/email-templates";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import { mailer } from "../lib/mailer";
-import { renderInvitationEmail } from "../lib/email-templates";
-import type { MemberRoleName } from "@rovenue/shared";
 
 const log = logger.child("email-worker");
 
@@ -67,12 +66,18 @@ export async function runInvitationEmailJob(args: {
   );
   if (!load) return { skipped: "not_pending" };
 
-  const { subject, html, text } = renderInvitationEmail({
-    inviterName: load.inviterName,
-    projectName: load.projectName,
-    role: load.invitation.role as MemberRoleName,
-    inviteUrl: args.inviteUrl,
-    expiresAt: load.invitation.expiresAt,
+  const { subject, html, text } = await renderTemplate({
+    eventKey: "team.member.invited",
+    locale: "en",
+    context: {
+      projectId: load.projectId,
+      projectName: load.projectName,
+      inviterName: load.inviterName,
+      role: load.invitation.role,
+      acceptUrl: args.inviteUrl,
+      expiresAt: load.invitation.expiresAt.toUTCString(),
+    },
+    managePreferencesUrl: `${env.DASHBOARD_URL}/account/notifications`,
   });
 
   const result = await mailer().send({

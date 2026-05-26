@@ -202,6 +202,10 @@ export const EVENT_CATALOG: Record<string, NotificationEventDescriptor> = {
       inviterName: z.string(),
       role: z.string(),
       acceptUrl: z.string().url(),
+      // Optional so producers without an expiry can still emit; the
+      // existing invite worker passes the ISO expiry to preserve the
+      // user-facing "this link expires on …" hint.
+      expiresAt: z.string().optional(),
     }),
   },
   "team.member.role_changed": {

@@ -41,6 +41,7 @@ describe("runInvitationEmailJob", () => {
         role: "DEVELOPER",
         expiresAt: new Date(Date.now() + 86_400_000),
       },
+      projectId: "proj_1",
       inviterName: "Furkan",
       projectName: "Rovenue",
     });

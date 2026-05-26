@@ -1,0 +1,9 @@
+{
+  "subject": "You've been invited to {{projectName}} on Rovenue",
+  "preview": "{{inviterName}} invited you to {{projectName}} as {{role}}",
+  "headline": "You're invited to join {{projectName}}",
+  "body": "{{inviterName}} invited you to join {{projectName}} as a {{role}}.",
+  "body.expires": "This invitation expires on {{expiresAt}}. If you didn't expect this email, you can ignore it.",
+  "body.tail": "If you didn't expect this email, you can ignore it.",
+  "cta": "Accept invitation"
+}

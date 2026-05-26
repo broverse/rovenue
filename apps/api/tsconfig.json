@@ -3,7 +3,12 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
-    "declaration": false
+    "declaration": false,
+    // @rovenue/email-templates exports .tsx source files directly (no
+    // dist), so tsc walks through them while resolving types. Enabling
+    // react-jsx is a no-op for api's own non-JSX source but lets tsc
+    // parse the transitive .tsx files.
+    "jsx": "react-jsx"
   },
   "include": ["src/**/*"]
 }

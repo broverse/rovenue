@@ -17,6 +17,7 @@ import { template as roleChanged } from "./team/role-changed";
 import { template as removed } from "./team/removed";
 import { template as signinNewDevice } from "./security/signin-new-device";
 import { template as oauthAccountLinked } from "./security/oauth-account-linked";
+import { template as invited } from "./team/invited";
 
 export interface TemplateModule<Ctx> {
   Component: (props: { ctx: Ctx; t: TFunction }) => ReactElement;
@@ -43,8 +44,7 @@ const TEMPLATES: Record<string, TemplateModule<any>> = {
   "team.member.removed": removed,
   "security.signin.new_device": signinNewDevice,
   "security.oauth.account_linked": oauthAccountLinked,
-  // team.member.invited is the last template to land in Phase 6 (it
-  // also retires apps/api/src/lib/email-templates).
+  "team.member.invited": invited,
 };
 
 export interface RenderInput {
