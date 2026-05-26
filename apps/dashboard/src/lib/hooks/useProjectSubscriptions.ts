@@ -1,7 +1,11 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   BillingIssuesResponse,
+  GrantSubscriptionRequest,
+  ListScheduledActionsResponse,
   RenewalCalendarResponse,
+  ScheduleActionRequest,
+  ScheduledActionRow,
   SubscriptionScopeName,
   SubscriptionsCompositionResponse,
   SubscriptionsKpis,
@@ -93,4 +97,70 @@ export function useProjectBillingIssues(projectId: string, limit?: number) {
       );
     },
   });
+}
+
+export function useGrantSubscription(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: GrantSubscriptionRequest) =>
+      api<{ purchaseId: string }>(
+        `/dashboard/projects/${projectId}/subscriptions`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["subscriptions", "list", projectId] });
+      void qc.invalidateQueries({ queryKey: ["subscriptions", "kpis", projectId] });
+      void qc.invalidateQueries({ queryKey: ["subscriptions", "composition", projectId] });
+    },
+  });
+}
+
+export function useScheduleAction(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { purchaseId: string; body: ScheduleActionRequest }) =>
+      api<ScheduledActionRow>(
+        `/dashboard/projects/${projectId}/subscriptions/${vars.purchaseId}/schedule`,
+        { method: "POST", body: JSON.stringify(vars.body) },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["subscriptions", "scheduled", projectId] });
+    },
+  });
+}
+
+export function useScheduledActions(projectId: string) {
+  return useQuery({
+    queryKey: ["subscriptions", "scheduled", projectId],
+    enabled: Boolean(projectId),
+    queryFn: () =>
+      api<ListScheduledActionsResponse>(
+        `/dashboard/projects/${projectId}/subscriptions/scheduled`,
+      ),
+  });
+}
+
+export function useDeleteScheduledAction(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<ScheduledActionRow>(
+        `/dashboard/projects/${projectId}/subscriptions/scheduled/${id}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["subscriptions", "scheduled", projectId] });
+    },
+  });
+}
+
+export function buildExportSubscriptionsUrl(
+  projectId: string,
+  scope: string,
+  search: string,
+): string {
+  const params = new URLSearchParams({ scope });
+  const trimmed = search.trim();
+  if (trimmed) params.set("search", trimmed);
+  return `/v1/dashboard/projects/${projectId}/subscriptions/export.csv?${params.toString()}`;
 }
