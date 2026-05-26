@@ -924,11 +924,16 @@
     "actions": {
       "syncStores": "Sync stores",
       "exportCsv": "Export CSV",
-      "lastRange": "Last 28d",
-      "sortNewest": "Sort: Newest",
-      "sortOldest": "Sort: Oldest",
-      "sortAmountDesc": "Sort: Amount (high → low)",
-      "sortAmountAsc": "Sort: Amount (low → high)"
+      "lastRange": "Last 28d"
+    },
+    "sort": {
+      "label": "Sort: {{mode}}",
+      "modes": {
+        "newest": "Newest",
+        "oldest": "Oldest",
+        "amount_desc": "Amount (high → low)",
+        "amount_asc": "Amount (low → high)"
+      }
     },
     "kpi": {
       "gross28d": "GROSS · 28D",

@@ -1,5 +1,6 @@
 export { RevenueFlow, type RevenueFlowTotals } from "./revenue-flow";
 export { ScopeTabs } from "./scope-tabs";
+export { TxSortPopover } from "./sort-popover";
 export { StoreAvatar, StoreInlineBadge, type StoreAvatarProps } from "./store-badge";
 export { StoreBreakdown, type StoreBreakdownRow } from "./store-breakdown";
 export { TransactionInspector } from "./transaction-inspector";

@@ -19,6 +19,7 @@ import {
   TransactionInspector,
   TransactionsTable,
   TxFilterBar,
+  TxSortPopover,
   type StoreBreakdownRow,
   type Transaction,
   type TxScope,
@@ -278,34 +279,6 @@ function toStoreBreakdownRows(
   });
 }
 
-function nextSort(sort: TransactionsListSort): TransactionsListSort {
-  switch (sort) {
-    case "newest":
-      return "oldest";
-    case "oldest":
-      return "amount_desc";
-    case "amount_desc":
-      return "amount_asc";
-    case "amount_asc":
-    default:
-      return "newest";
-  }
-}
-
-function sortLabelKey(sort: TransactionsListSort): string {
-  switch (sort) {
-    case "oldest":
-      return "transactions.actions.sortOldest";
-    case "amount_desc":
-      return "transactions.actions.sortAmountDesc";
-    case "amount_asc":
-      return "transactions.actions.sortAmountAsc";
-    case "newest":
-    default:
-      return "transactions.actions.sortNewest";
-  }
-}
-
 // =============================================================
 // Page
 // =============================================================
@@ -501,9 +474,9 @@ function TransactionsPage({ projectId }: { projectId: string }) {
       search: (prev) => ({ ...prev, amountMin: next }),
       replace: false,
     });
-  const toggleSort = () =>
+  const setSort = (next: TransactionsListSort) =>
     void navigate({
-      search: (prev) => ({ ...prev, sort: nextSort(sort) }),
+      search: (prev) => ({ ...prev, sort: next }),
       replace: false,
     });
   const clearAll = () =>
@@ -668,10 +641,7 @@ function TransactionsPage({ projectId }: { projectId: string }) {
             <Calendar size={13} />
             {t("transactions.actions.lastRange")}
           </Button>
-          <Button variant="light" size="sm" onClick={toggleSort}>
-            <ArrowUpDown size={13} />
-            {t(sortLabelKey(sort))}
-          </Button>
+          <TxSortPopover value={sort} onChange={setSort} />
         </div>
       </div>
 
