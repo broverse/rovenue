@@ -1,46 +1,22 @@
 import { useTranslation } from "react-i18next";
-import { Menu } from "@base-ui-components/react/menu";
-import {
-  Bell,
-  Box,
-  ChevronDown,
-  Flag,
-  FlaskConical,
-  Key,
-  Menu as MenuIcon,
-  Plus,
-  Settings,
-  Webhook,
-} from "lucide-react";
-import { Button, buttonVariants } from "../../ui/button";
-import { cn } from "../../lib/cn";
+import { Bell, BookOpen, Menu as MenuIcon, Search } from "lucide-react";
+import { Button } from "../../ui/button";
+import { TopbarUserMenu } from "./topbar-user-menu";
+
+const IS_SELF_HOSTED = import.meta.env.VITE_SELF_HOSTED === "true";
 
 type TopbarProps = {
   projectName: string;
   current: string;
-  liveOn: boolean;
-  onToggleLive: () => void;
   /** Mobile-only: opens the sidebar drawer. */
   onMenuClick?: () => void;
 };
 
-const POPUP_CLASS =
-  "min-w-[200px] rounded-lg border border-rv-divider-strong bg-rv-c3 p-1 shadow-[0_10px_30px_rgba(0,0,0,0.5)] focus:outline-none animate-rv-menu-in";
-
-const ITEM_CLASS =
-  "flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-rv-mute-700 outline-none data-[highlighted]:bg-rv-c4 data-[highlighted]:text-foreground";
-
 /**
- * Sticky page topbar — breadcrumb on the left, live chip / new dropdown /
- * settings / notifications on the right.
+ * Sticky page topbar — breadcrumb on the left, search + docs / github /
+ * notifications / user on the right.
  */
-export function Topbar({
-  projectName,
-  current,
-  liveOn,
-  onToggleLive,
-  onMenuClick,
-}: TopbarProps) {
+export function Topbar({ projectName, current, onMenuClick }: TopbarProps) {
   const { t } = useTranslation();
 
   return (
@@ -60,83 +36,54 @@ export function Topbar({
         <span className="truncate font-medium text-foreground">{current}</span>
       </div>
 
+      <button
+        type="button"
+        className="ml-3 hidden h-8 min-w-[180px] cursor-pointer items-center gap-2 rounded-md border border-rv-divider bg-rv-c2 px-2.5 text-xs text-rv-mute-500 transition hover:border-rv-c4 hover:text-rv-mute-700 md:inline-flex lg:min-w-[240px]"
+        aria-label={t("topbar.search")}
+      >
+        <Search size={14} />
+        <span>{t("topbar.search")}</span>
+        <span className="ml-auto inline-flex h-[18px] items-center rounded border border-rv-divider bg-rv-c4 px-1.5 font-rv-mono text-[10px] text-rv-mute-600">
+          ⌘K
+        </span>
+      </button>
+
       <div className="ml-auto flex items-center gap-1 sm:gap-1.5">
-        <button
-          type="button"
-          onClick={onToggleLive}
-          aria-pressed={liveOn}
-          aria-label={liveOn ? t("topbar.liveOnAria") : t("topbar.liveOffAria")}
-          className="hidden h-7 cursor-pointer items-center gap-1.5 rounded-full border border-rv-success/25 bg-rv-success/10 px-2.5 text-xs font-medium text-rv-success transition hover:bg-rv-success/15 sm:inline-flex"
+        <a
+          href="https://docs.rovenue.dev"
+          target="_blank"
+          rel="noreferrer"
+          aria-label={t("topbar.docs")}
+          title={t("topbar.docs")}
+          className="hidden size-8 items-center justify-center rounded-md text-rv-mute-600 transition hover:bg-rv-c2 hover:text-foreground sm:inline-flex"
         >
-          {liveOn && (
-            <span className="relative inline-block size-1.5 rounded-full bg-rv-success">
-              <span className="absolute -inset-0.5 rounded-full bg-rv-success/40 animate-rv-pulse" />
-            </span>
-          )}
-          <span>{liveOn ? t("common.live") : t("common.paused")}</span>
-        </button>
-
-        <Menu.Root>
-          <Menu.Trigger
-            className={cn(buttonVariants({ variant: "solid-primary", size: "sm" }), "px-2 sm:px-3")}
-            aria-label={t("topbar.newMenu.trigger")}
+          <BookOpen size={16} />
+        </a>
+        {IS_SELF_HOSTED && (
+          <a
+            href="https://github.com/broverse/rovenue"
+            target="_blank"
+            rel="noreferrer"
+            aria-label={t("topbar.github")}
+            title={t("topbar.github")}
+            className="hidden size-8 items-center justify-center rounded-md text-rv-mute-600 transition hover:bg-rv-c2 hover:text-foreground sm:inline-flex"
           >
-            <Plus size={14} />
-            <span className="hidden sm:inline">{t("topbar.newMenu.trigger")}</span>
-            <ChevronDown size={12} className="hidden sm:inline" />
-          </Menu.Trigger>
-          <Menu.Portal>
-            <Menu.Positioner sideOffset={4} align="end" className="z-50">
-              <Menu.Popup className={POPUP_CLASS}>
-                <NewMenuItem icon={<Box size={13} />} label={t("topbar.newMenu.product")} kbd="C P" />
-                <NewMenuItem
-                  icon={<FlaskConical size={13} />}
-                  label={t("topbar.newMenu.experiment")}
-                  kbd="C E"
-                />
-                <NewMenuItem
-                  icon={<Flag size={13} />}
-                  label={t("topbar.newMenu.featureFlag")}
-                  kbd="C F"
-                />
-                <div className="my-1 h-px bg-rv-divider" />
-                <NewMenuItem icon={<Webhook size={13} />} label={t("topbar.newMenu.webhook")} />
-                <NewMenuItem icon={<Key size={13} />} label={t("topbar.newMenu.apiKey")} />
-              </Menu.Popup>
-            </Menu.Positioner>
-          </Menu.Portal>
-        </Menu.Root>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+            </svg>
+          </a>
+        )}
 
-        <Button variant="light" size="icon" aria-label={t("topbar.settings")} className="hidden sm:inline-flex">
-          <Settings size={16} />
-        </Button>
+        <span className="mx-0.5 hidden h-5 w-px bg-rv-divider sm:inline-block" aria-hidden="true" />
+
         <Button variant="light" size="icon" aria-label={t("topbar.notifications")} className="relative">
           <Bell size={16} />
           <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-rv-danger" />
         </Button>
+
+        <span className="mx-0.5 hidden h-5 w-px bg-rv-divider sm:inline-block" aria-hidden="true" />
+        <TopbarUserMenu />
       </div>
     </div>
-  );
-}
-
-function NewMenuItem({
-  icon,
-  label,
-  kbd,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  kbd?: string;
-}) {
-  return (
-    <Menu.Item className={ITEM_CLASS}>
-      {icon}
-      <span className="flex-1">{label}</span>
-      {kbd && (
-        <span className="inline-flex h-[18px] items-center rounded border border-rv-divider bg-rv-c4 px-1.5 font-rv-mono text-[10px] text-rv-mute-600">
-          {kbd}
-        </span>
-      )}
-    </Menu.Item>
   );
 }

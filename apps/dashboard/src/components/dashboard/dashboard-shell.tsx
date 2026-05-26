@@ -8,15 +8,13 @@ type Props = {
   envLabel?: string;
   /** Page title shown in the topbar breadcrumb (e.g. "Overview"). */
   current: string;
-  /** Render-prop receives `{ liveOn }` for pages that want to react. */
-  children: ((ctx: { liveOn: boolean }) => ReactNode) | ReactNode;
+  children: ReactNode;
 };
 
 /**
  * App-shell wrapper for every project-scoped page. Holds the sidebar +
- * topbar state (live ticker) and renders children inside the scrolling
- * content column. Forces dark mode so HeroUI tokens align with the
- * Rovenue dashboard palette.
+ * topbar and renders children inside the scrolling content column. Forces
+ * dark mode so HeroUI tokens align with the Rovenue dashboard palette.
  */
 export function DashboardShell({
   projectId,
@@ -25,7 +23,6 @@ export function DashboardShell({
   current,
   children,
 }: Props) {
-  const [liveOn, setLiveOn] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
@@ -51,12 +48,10 @@ export function DashboardShell({
         <Topbar
           projectName={projectName}
           current={current}
-          liveOn={liveOn}
-          onToggleLive={() => setLiveOn((v) => !v)}
           onMenuClick={() => setMobileNavOpen(true)}
         />
         <div className="mx-auto w-full max-w-[1536px] px-4 pb-10 pt-5 sm:px-6">
-          {typeof children === "function" ? children({ liveOn }) : children}
+          {children}
         </div>
       </div>
     </div>

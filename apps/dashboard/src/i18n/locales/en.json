@@ -254,10 +254,7 @@
       "custom": "Custom…"
     },
     "dateRange": "Date range",
-    "settings": "Settings",
     "notifications": "Notifications",
-    "liveOnAria": "Live updates on (click to pause)",
-    "liveOffAria": "Live updates paused (click to resume)",
     "newMenu": {
       "trigger": "New",
       "product": "Product",
