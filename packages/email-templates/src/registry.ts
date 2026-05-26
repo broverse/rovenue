@@ -8,6 +8,7 @@ import { template as digestWeekly } from "./revenue/digest-weekly";
 import { template as churnSpike } from "./revenue/churn-spike";
 import { template as milestoneHit } from "./revenue/milestone-hit";
 import { template as refundDetected } from "./billing/refund-detected";
+import { template as creditLowBalance } from "./billing/credit-low-balance";
 
 export interface TemplateModule<Ctx> {
   Component: (props: { ctx: Ctx; t: TFunction }) => ReactElement;
@@ -25,6 +26,7 @@ const TEMPLATES: Record<string, TemplateModule<any>> = {
   "revenue.churn.spike": churnSpike,
   "revenue.milestone.hit": milestoneHit,
   "billing.refund.detected": refundDetected,
+  "billing.credit.low_balance": creditLowBalance,
   // More templates land in Phase 6.
 };
 

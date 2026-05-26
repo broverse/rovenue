@@ -1,0 +1,9 @@
+{
+  "subject": "Low credit balance on {{projectName}}",
+  "preview": "Balance {{balanceFormatted}} · threshold {{thresholdFormatted}}",
+  "headline": "Credit balance is low on {{projectName}}",
+  "body": "Your credit balance for {{projectName}} has dropped to {{balanceFormatted}}, below the {{thresholdFormatted}} threshold you configured.",
+  "cta": "Top up balance",
+  "push.title": "Low balance on {{projectName}}",
+  "push.body": "Balance: {{balanceFormatted}} (threshold {{thresholdFormatted}})"
+}

@@ -1,0 +1,9 @@
+{
+  "subject": "{{projectName}} — kredi bakiyesi düşük",
+  "preview": "Bakiye {{balanceFormatted}} · eşik {{thresholdFormatted}}",
+  "headline": "{{projectName}} kredi bakiyesi düştü",
+  "body": "{{projectName}} için kredi bakiyeniz {{balanceFormatted}} seviyesine indi — belirlediğiniz {{thresholdFormatted}} eşiğinin altında.",
+  "cta": "Bakiyeyi yükle",
+  "push.title": "{{projectName}} — düşük bakiye",
+  "push.body": "Bakiye: {{balanceFormatted}} (eşik {{thresholdFormatted}})"
+}
