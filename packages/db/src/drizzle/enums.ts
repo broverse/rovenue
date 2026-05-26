@@ -134,3 +134,55 @@ export const invitationDeliveryStatus = pgEnum("InvitationDeliveryStatus", [
   "COMPLAINED",
   "SUPPRESSED",
 ]);
+
+// =============================================================
+// Billing enums (TS-only — not Postgres pgEnum; stored as text)
+// =============================================================
+
+export const billingState = [
+  "free",
+  "active",
+  "past_due",
+  "paused",
+  "deleted",
+] as const;
+export type BillingState = (typeof billingState)[number];
+
+export const billingTier = [
+  "free",
+  "indie",
+  "pro",
+  "scale",
+  "growth",
+  "enterprise",
+] as const;
+export type BillingTier = (typeof billingTier)[number];
+
+export const billingCycle = ["monthly", "annual"] as const;
+export type BillingCycle = (typeof billingCycle)[number];
+
+export const billingInvoiceStatus = [
+  "draft",
+  "open",
+  "paid",
+  "uncollectible",
+  "void",
+] as const;
+export type BillingInvoiceStatus = (typeof billingInvoiceStatus)[number];
+
+export const billingDunningPhase = [
+  "retrying",
+  "past_due",
+  "suspended",
+] as const;
+export type BillingDunningPhase = (typeof billingDunningPhase)[number];
+
+export const billingPendingAction = [
+  "downgrade_to_free",
+  "pause",
+  "delete",
+] as const;
+export type BillingPendingAction = (typeof billingPendingAction)[number];
+
+export const billingMeterKey = ["mtr", "events", "sql_queries"] as const;
+export type BillingMeterKey = (typeof billingMeterKey)[number];

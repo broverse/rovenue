@@ -24,7 +24,16 @@ import {
   type NewAuditLogRow,
   type NewProject,
 } from "./schema";
-import { aggregateTypeEnum } from "./enums";
+import {
+  aggregateTypeEnum,
+  billingState,
+  billingTier,
+  billingCycle,
+  billingInvoiceStatus,
+  billingDunningPhase,
+  billingPendingAction,
+  billingMeterKey,
+} from "./enums";
 import {
   experimentVariantsSchema,
   featureFlagRulesSchema,
@@ -372,6 +381,61 @@ describe("outboxEvents", () => {
       "EXPOSURE",
       "REVENUE_EVENT",
       "CREDIT_LEDGER",
+    ]);
+  });
+});
+
+describe("billing enums", () => {
+  it("billingState lists every state the FSM uses", () => {
+    expect(billingState).toEqual([
+      "free",
+      "active",
+      "past_due",
+      "paused",
+      "deleted",
+    ]);
+  });
+  it("billingTier lists every tier in the ladder", () => {
+    expect(billingTier).toEqual([
+      "free",
+      "indie",
+      "pro",
+      "scale",
+      "growth",
+      "enterprise",
+    ]);
+  });
+  it("billingCycle covers monthly + annual only", () => {
+    expect(billingCycle).toEqual(["monthly", "annual"]);
+  });
+  it("billingInvoiceStatus matches Stripe's invoice statuses", () => {
+    expect(billingInvoiceStatus).toEqual([
+      "draft",
+      "open",
+      "paid",
+      "uncollectible",
+      "void",
+    ]);
+  });
+  it("billingDunningPhase covers the three dunning sub-states", () => {
+    expect(billingDunningPhase).toEqual([
+      "retrying",
+      "past_due",
+      "suspended",
+    ]);
+  });
+  it("billingPendingAction covers the three expected deletions", () => {
+    expect(billingPendingAction).toEqual([
+      "downgrade_to_free",
+      "pause",
+      "delete",
+    ]);
+  });
+  it("billingMeterKey lists the three metered dimensions", () => {
+    expect(billingMeterKey).toEqual([
+      "mtr",
+      "events",
+      "sql_queries",
     ]);
   });
 });
