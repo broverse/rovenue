@@ -57,7 +57,12 @@ export async function publishBillingPaymentMethodAdded(
     aggregateType: "BILLING",
     aggregateId: input.projectId,
     eventType: "billing.payment_method.added",
-    payload: input,
+    payload: {
+      projectId: input.projectId,
+      paymentMethodId: input.paymentMethodId,
+      brand: input.brand,
+      last4: input.last4,
+    },
   });
 }
 
@@ -76,6 +81,11 @@ export async function publishBillingInvoicePaid(
     aggregateType: "BILLING",
     aggregateId: input.projectId,
     eventType: "billing.invoice.paid",
-    payload: input,
+    payload: {
+      projectId: input.projectId,
+      invoiceId: input.invoiceId,
+      stripeInvoiceId: input.stripeInvoiceId,
+      amountPaid: input.amountPaid,
+    },
   });
 }
