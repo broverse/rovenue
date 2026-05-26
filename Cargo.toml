@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["packages/core-rs", "packages/core-rs/bindgen"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.78"
+license = "AGPL-3.0-only"
+repository = "https://github.com/rovenue/rovenue"
+
+[workspace.dependencies]
+uniffi = { version = "0.25.3" }
+thiserror = "1.0.61"

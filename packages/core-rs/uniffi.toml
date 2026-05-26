@@ -1,0 +1,8 @@
+[bindings.swift]
+module_name = "RovenueFFI"
+ffi_module_name = "RovenueFFI"
+generate_module_map = true
+omit_argument_labels = false
+
+[bindings.kotlin]
+package_name = "dev.rovenue.sdk.generated"

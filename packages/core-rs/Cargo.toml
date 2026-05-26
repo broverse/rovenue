@@ -1,0 +1,19 @@
+[package]
+name = "librovenue"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Rovenue SDK core — shared business logic for Swift, Kotlin, React Native"
+
+[lib]
+name = "rovenue"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+uniffi = { workspace = true }
+thiserror = { workspace = true }
+
+[build-dependencies]
+uniffi = { workspace = true, features = ["build"] }

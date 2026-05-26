@@ -1,0 +1,24 @@
+namespace librovenue {
+    string sdk_version();
+};
+
+[Error]
+enum RovenueError {
+    "NotConfigured",
+    "InvalidApiKey",
+    "ServerError",
+    "Internal",
+};
+
+dictionary Config {
+    string api_key;
+    string base_url;
+    boolean debug;
+};
+
+interface RovenueCore {
+    [Throws=RovenueError]
+    constructor(Config config);
+
+    string get_version();
+};
