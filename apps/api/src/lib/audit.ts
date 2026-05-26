@@ -83,7 +83,15 @@ export type AuditAction =
   | "invitation.resent"
   | "invitation.accepted"
   // --- billing ---
-  | "billing.subscription.activated";
+  | "billing.subscription.activated"
+  // --- funnels ---
+  | "funnel.created"
+  | "funnel.updated"
+  | "funnel.archived"
+  | "funnel.duplicated"
+  | "funnel.published"
+  | "funnel.reverted"
+  | "funnel.from_template";
 
 export type AuditResource =
   | "audience"
@@ -98,7 +106,8 @@ export type AuditResource =
   | "member"
   | "credential"
   | "invitation"
-  | "billing_subscription";
+  | "billing_subscription"
+  | "funnel";
 
 export interface AuditEntry {
   projectId: string;
