@@ -1,0 +1,9 @@
+{
+  "subject": "{{projectName}} kilometre taşını geçti",
+  "preview": "{{projectName}} az önce {{metricLabel}} {{milestoneFormatted}} eşiğini geçti",
+  "headline": "🎉 {{projectName}} → {{milestoneFormatted}}",
+  "body": "{{projectName}} az önce {{metricLabel}} alanında {{milestoneFormatted}} eşiğini geçti. Tebrikler.",
+  "cta": "Dashboard'u aç",
+  "metric.mrr": "MRR",
+  "metric.total_revenue": "toplam gelir"
+}
