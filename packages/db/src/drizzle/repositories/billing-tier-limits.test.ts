@@ -51,6 +51,24 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // Restore the (free, annual) row that `beforeAll` deleted so the dev DB
+  // matches the canonical `seed.ts` state once the suite is done. Guarded
+  // by `onConflictDoNothing()` for idempotency against re-runs.
+  await db
+    .insert(schema.billingTierLimits)
+    .values({
+      tier: "free",
+      cycle: "annual",
+      priceUsdCents: 0,
+      stripePriceId: null,
+      mtrMin: "0",
+      mtrMax: "3000",
+      eventsLimit: 5_000_000,
+      sqlLimit: 100,
+      retentionDays: 30,
+      auditLogDays: 7,
+    })
+    .onConflictDoNothing();
   await pool.end();
 });
 
