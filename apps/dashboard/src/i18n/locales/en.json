@@ -1172,15 +1172,30 @@
       "more": "More options"
     },
     "filters": {
-      "search": "Search by sub_id, user_id, or product…",
-      "addFilter": "Add filter",
-      "of": "of",
-      "store": "store",
-      "storeValue": "iOS + Play",
-      "product": "product",
-      "autoRenew": "auto-renew",
-      "autoRenewValue": "on",
-      "any": "any"
+      "searchPlaceholder": "Search subscription ID, user, transaction ID",
+      "clearSearch": "Clear search",
+      "store": "Store",
+      "storeLabels": {
+        "APP_STORE": "App Store",
+        "PLAY_STORE": "Play Store",
+        "STRIPE": "Stripe",
+        "MANUAL": "Manual"
+      },
+      "product": "Product",
+      "productSearch": "Search products",
+      "noResults": "No matches",
+      "autoRenew": "Auto-renew",
+      "any": "Any",
+      "on": "On",
+      "off": "Off",
+      "more": "More filters",
+      "isTrial": "Trial",
+      "isIntro": "Intro offer",
+      "hasIssue": "Has issue",
+      "purchasedRange": "Purchased",
+      "expiresRange": "Expires",
+      "clearAll": "Clear all",
+      "showing": "{{visible}} of {{total}}"
     },
     "status": {
       "active": "Active",

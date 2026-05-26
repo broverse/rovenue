@@ -7,34 +7,89 @@ import type {
   ScheduleActionRequest,
   ScheduledActionRow,
   SubscriptionScopeName,
+  SubscriptionSortKey,
+  SubscriptionStoreCode,
   SubscriptionsCompositionResponse,
   SubscriptionsKpis,
   SubscriptionsListResponse,
 } from "@rovenue/shared";
 import { api } from "../api";
 
-interface ListParams {
+export interface SubscriptionsListParams {
   projectId: string;
   scope: SubscriptionScopeName;
+  sort: SubscriptionSortKey;
   search?: string;
   limit?: number;
+  store?: ReadonlyArray<SubscriptionStoreCode>;
+  productId?: ReadonlyArray<string>;
+  autoRenew?: boolean;
+  isTrial?: boolean;
+  isIntro?: boolean;
+  hasIssue?: boolean;
+  purchasedFrom?: string;
+  purchasedTo?: string;
+  expiresFrom?: string;
+  expiresTo?: string;
 }
 
-export function useProjectSubscriptions({ projectId, scope, search, limit }: ListParams) {
+// Stable, normalized key shape for React Query — alphabetized arrays so
+// equivalent filter sets share a cache entry.
+function normalizedKey(p: SubscriptionsListParams) {
+  return {
+    scope: p.scope,
+    sort: p.sort,
+    search: p.search ?? "",
+    limit: p.limit ?? null,
+    store: p.store && p.store.length > 0 ? [...p.store].sort() : null,
+    productId:
+      p.productId && p.productId.length > 0 ? [...p.productId].sort() : null,
+    autoRenew: p.autoRenew ?? null,
+    isTrial: p.isTrial ?? null,
+    isIntro: p.isIntro ?? null,
+    hasIssue: p.hasIssue ?? null,
+    purchasedFrom: p.purchasedFrom ?? null,
+    purchasedTo: p.purchasedTo ?? null,
+    expiresFrom: p.expiresFrom ?? null,
+    expiresTo: p.expiresTo ?? null,
+  };
+}
+
+function buildListParams(
+  p: SubscriptionsListParams,
+  cursor?: string,
+): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set("scope", p.scope);
+  params.set("sort", p.sort);
+  if (p.limit) params.set("limit", String(p.limit));
+  if (p.search) params.set("search", p.search);
+  if (p.store && p.store.length > 0) params.set("store", p.store.join(","));
+  if (p.productId && p.productId.length > 0)
+    params.set("productId", p.productId.join(","));
+  if (p.autoRenew !== undefined) params.set("autoRenew", String(p.autoRenew));
+  if (p.isTrial !== undefined) params.set("isTrial", String(p.isTrial));
+  if (p.isIntro !== undefined) params.set("isIntro", String(p.isIntro));
+  if (p.hasIssue) params.set("hasIssue", "true");
+  if (p.purchasedFrom) params.set("purchasedFrom", p.purchasedFrom);
+  if (p.purchasedTo) params.set("purchasedTo", p.purchasedTo);
+  if (p.expiresFrom) params.set("expiresFrom", p.expiresFrom);
+  if (p.expiresTo) params.set("expiresTo", p.expiresTo);
+  if (cursor) params.set("cursor", cursor);
+  return params;
+}
+
+export function useProjectSubscriptions(p: SubscriptionsListParams) {
   return useInfiniteQuery({
-    queryKey: ["subscriptions", "list", projectId, scope, search ?? "", limit],
-    enabled: Boolean(projectId),
+    queryKey: ["subscriptions", "list", p.projectId, normalizedKey(p)],
+    enabled: Boolean(p.projectId),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage: SubscriptionsListResponse) =>
       lastPage.nextCursor ?? undefined,
     queryFn: ({ pageParam }) => {
-      const params = new URLSearchParams();
-      params.set("scope", scope);
-      if (limit) params.set("limit", String(limit));
-      if (search) params.set("search", search);
-      if (pageParam) params.set("cursor", pageParam);
+      const qs = buildListParams(p, pageParam).toString();
       return api<SubscriptionsListResponse>(
-        `/dashboard/projects/${projectId}/subscriptions?${params.toString()}`,
+        `/dashboard/projects/${p.projectId}/subscriptions?${qs}`,
       );
     },
   });

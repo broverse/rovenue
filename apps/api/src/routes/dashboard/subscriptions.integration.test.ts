@@ -186,6 +186,97 @@ async function seedManualPurchase({
 }
 
 // ---------------------------------------------------------------------------
+// Seed helper for the list/filter/sort tests below
+// ---------------------------------------------------------------------------
+
+const LIST_SUFFIXES = [
+  "lst_store",
+  "lst_prod",
+  "lst_auto",
+  "lst_trial",
+  "lst_issue",
+  "lst_price",
+  "lst_renews",
+  "lst_xsort",
+  "lst_bad",
+  "lst_badbool",
+] as const;
+
+async function seedListFixture(suffix: (typeof LIST_SUFFIXES)[number]) {
+  const db = getDb();
+  const { userId, cookie } = await createUserAndSession(suffix);
+  const project = await seedProject(suffix);
+  await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+
+  const sub = await seedSubscriber({ projectId: project.id, suffix });
+  const productA = await seedProduct({ projectId: project.id, suffix: `${suffix}_a` });
+  const productB = await seedProduct({ projectId: project.id, suffix: `${suffix}_b` });
+
+  // Six purchases spanning stores, expiry status, price tiers, and a
+  // NULL-expires row so the renews_asc NULLS-LAST contract has signal.
+  const now = Date.now();
+  const day = 86_400_000;
+  const purchasesSeed = [
+    { idx: 1, store: "APP_STORE", price: "9.99", purchaseDate: new Date(now - 5 * day), expiresDate: new Date(now + 10 * day), autoRenew: true, isTrial: false, status: "ACTIVE", productId: productA.id },
+    { idx: 2, store: "PLAY_STORE", price: "19.99", purchaseDate: new Date(now - 3 * day), expiresDate: new Date(now + 30 * day), autoRenew: false, isTrial: false, status: "ACTIVE", productId: productA.id },
+    { idx: 3, store: "STRIPE", price: "4.99", purchaseDate: new Date(now - 4 * day), expiresDate: new Date(now + 2 * day), autoRenew: true, isTrial: false, status: "ACTIVE", productId: productB.id },
+    { idx: 4, store: "STRIPE", price: "29.99", purchaseDate: new Date(now - 10 * day), expiresDate: new Date(now + 60 * day), autoRenew: true, isTrial: true, status: "TRIAL", productId: productA.id },
+    { idx: 5, store: "MANUAL", price: "0", purchaseDate: new Date(now - 1 * day), expiresDate: null, autoRenew: false, isTrial: false, status: "ACTIVE", productId: productB.id },
+    { idx: 6, store: "APP_STORE", price: "14.99", purchaseDate: new Date(now - 2 * day), expiresDate: new Date(now + 5 * day), autoRenew: true, isTrial: false, status: "GRACE_PERIOD", productId: productA.id },
+  ];
+
+  for (const row of purchasesSeed) {
+    const synth = `tx_${RUN_ID}_${suffix}_${row.idx}`;
+    await db.insert(purchases).values({
+      projectId: project.id,
+      subscriberId: sub.id,
+      productId: row.productId,
+      store: row.store as any,
+      storeTransactionId: synth,
+      originalTransactionId: synth,
+      status: row.status as any,
+      isTrial: row.isTrial,
+      isIntroOffer: false,
+      isSandbox: false,
+      purchaseDate: row.purchaseDate,
+      originalPurchaseDate: row.purchaseDate,
+      expiresDate: row.expiresDate,
+      priceAmount: row.price,
+      priceCurrency: "USD",
+      environment: "PRODUCTION",
+      autoRenewStatus: row.autoRenew,
+    });
+  }
+
+  return {
+    userId,
+    cookie,
+    projectId: project.id,
+    productId: productA.id,
+    productB: productB.id,
+  };
+}
+
+async function listRequest(cookie: string, projectId: string, qs: string) {
+  const app = buildApp();
+  const res = await app.request(
+    `/projects/${projectId}/subscriptions${qs ? `?${qs}` : ""}`,
+    { headers: { cookie } },
+  );
+  expect(res.status).toBe(200);
+  return (await res.json()).data as {
+    rows: Array<{
+      id: string;
+      store: string;
+      expiresDate: string | null;
+      priceAmount: string | null;
+      status: string;
+    }>;
+    nextCursor: string | null;
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Cleanup
 // ---------------------------------------------------------------------------
 
@@ -204,11 +295,112 @@ afterAll(async () => {
   await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}csvviewer`));
   await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}csvviewerdata`));
   await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}csvbadscope`));
+  for (const suffix of LIST_SUFFIXES) {
+    await db
+      .delete(projects)
+      .where(eq(projects.id, `prj_routetest_${RUN_ID}${suffix}`));
+  }
 });
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe("GET /projects/:projectId/subscriptions — filters + sort", () => {
+  it("filters by store (multi-select)", async () => {
+    const { cookie, projectId } = await seedListFixture("lst_store");
+    const body = await listRequest(cookie, projectId, "store=STRIPE,MANUAL");
+    expect(
+      body.rows.every((r) => r.store === "STRIPE" || r.store === "MANUAL"),
+    ).toBe(true);
+    expect(body.rows.length).toBe(3);
+  });
+
+  it("filters by productId (CSV)", async () => {
+    const { cookie, projectId, productB } = await seedListFixture("lst_prod");
+    const body = await listRequest(cookie, projectId, `productId=${productB}`);
+    expect(body.rows.length).toBe(2);
+  });
+
+  it("filters by autoRenew=false", async () => {
+    const { cookie, projectId } = await seedListFixture("lst_auto");
+    const body = await listRequest(cookie, projectId, "autoRenew=false");
+    expect(body.rows.length).toBe(2);
+  });
+
+  it("filters by isTrial=true", async () => {
+    const { cookie, projectId } = await seedListFixture("lst_trial");
+    const body = await listRequest(cookie, projectId, "isTrial=true");
+    expect(body.rows.length).toBe(1);
+  });
+
+  it("filters by hasIssue=true (grace + autorenew on)", async () => {
+    const { cookie, projectId } = await seedListFixture("lst_issue");
+    const body = await listRequest(cookie, projectId, "hasIssue=true");
+    expect(body.rows.length).toBe(1);
+    expect(body.rows[0]!.status).toBe("grace");
+  });
+
+  it("sort=price_desc with NULLS LAST and cursor walk", async () => {
+    const { cookie, projectId } = await seedListFixture("lst_price");
+    const first = await listRequest(cookie, projectId, "sort=price_desc&limit=4");
+    // `priceAmount` is numeric(12,4) so Postgres returns 4-decimal strings.
+    // We assert the numeric values, not the textual formatting.
+    expect(first.rows.map((r) => Number(r.priceAmount))).toEqual([
+      29.99, 19.99, 14.99, 9.99,
+    ]);
+    expect(first.nextCursor).not.toBeNull();
+    const second = await listRequest(
+      cookie,
+      projectId,
+      `sort=price_desc&limit=4&cursor=${encodeURIComponent(first.nextCursor!)}`,
+    );
+    expect(second.rows.map((r) => Number(r.priceAmount))).toEqual([4.99, 0]);
+  });
+
+  it("sort=renews_asc puts NULL expiresDate rows last", async () => {
+    const { cookie, projectId } = await seedListFixture("lst_renews");
+    const body = await listRequest(cookie, projectId, "sort=renews_asc&limit=10");
+    const ids = body.rows.map((r) => r.expiresDate);
+    // The single NULL row must be the last entry.
+    expect(ids[ids.length - 1]).toBeNull();
+    // Everything before it must be ASC and non-null.
+    const nonNull = ids.slice(0, -1).filter((v): v is string => v !== null);
+    expect([...nonNull].sort()).toEqual(nonNull);
+  });
+
+  it("rejects a cursor when sort changes", async () => {
+    const { cookie, projectId } = await seedListFixture("lst_xsort");
+    const first = await listRequest(cookie, projectId, "sort=price_desc&limit=2");
+    expect(first.nextCursor).not.toBeNull();
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${projectId}/subscriptions?sort=started_desc&cursor=${encodeURIComponent(first.nextCursor!)}`,
+      { headers: { cookie } },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects unknown store value via Zod", async () => {
+    const { cookie, projectId } = await seedListFixture("lst_bad");
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${projectId}/subscriptions?store=NOPE`,
+      { headers: { cookie } },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects autoRenew=on (not a boolish enum)", async () => {
+    const { cookie, projectId } = await seedListFixture("lst_badbool");
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${projectId}/subscriptions?autoRenew=on`,
+      { headers: { cookie } },
+    );
+    expect(res.status).toBe(400);
+  });
+});
 
 describe("POST /projects/:projectId/subscriptions (grant)", () => {
   it("returns 403 when the authenticated user has VIEWER role", async () => {

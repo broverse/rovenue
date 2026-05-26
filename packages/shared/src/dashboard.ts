@@ -770,6 +770,63 @@ export interface SubscriptionsListResponse {
   nextCursor: string | null;
 }
 
+// =============================================================
+// Subscriptions list — sort key + filter union
+// =============================================================
+//
+// `SubscriptionSortKey` is the canonical sort identifier the API
+// accepts via `?sort=…`. The dashboard maps `<Th>` column clicks to
+// these keys (see SubscriptionsTable.sortableColumns).
+//
+//   started_desc (default) — purchaseDate DESC, id DESC
+//   started_asc            — purchaseDate ASC,  id ASC
+//   renews_asc             — expiresDate ASC NULLS LAST, id ASC
+//   renews_desc            — expiresDate DESC NULLS LAST, id DESC
+//   price_desc             — priceAmount DESC NULLS LAST, id DESC
+//   price_asc              — priceAmount ASC NULLS LAST, id ASC
+//   status                 — status ASC, id ASC
+
+export const subscriptionSortKeys = [
+  "started_desc",
+  "started_asc",
+  "renews_asc",
+  "renews_desc",
+  "price_desc",
+  "price_asc",
+  "status",
+] as const;
+
+export type SubscriptionSortKey = (typeof subscriptionSortKeys)[number];
+
+export const subscriptionStoreCodes = [
+  "APP_STORE",
+  "PLAY_STORE",
+  "STRIPE",
+  "MANUAL",
+] as const;
+
+export type SubscriptionStoreCode = (typeof subscriptionStoreCodes)[number];
+
+// All optional client-side query fields the list endpoint accepts.
+// Mirrors the URL search-param shape used by the dashboard route.
+export interface SubscriptionsListQuery {
+  scope?: SubscriptionScopeName;
+  search?: string;
+  cursor?: string;
+  limit?: number;
+  store?: ReadonlyArray<SubscriptionStoreCode>;
+  productId?: ReadonlyArray<string>;
+  autoRenew?: boolean;
+  isTrial?: boolean;
+  isIntro?: boolean;
+  hasIssue?: boolean;
+  purchasedFrom?: string;
+  purchasedTo?: string;
+  expiresFrom?: string;
+  expiresTo?: string;
+  sort?: SubscriptionSortKey;
+}
+
 export interface SubscriptionsKpis {
   totalActive: number;
   renewing7: number;

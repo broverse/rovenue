@@ -3,7 +3,12 @@ import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { MemberRole } from "@rovenue/db";
-import { grantSubscriptionRequestSchema, scheduleActionRequestSchema } from "@rovenue/shared";
+import {
+  grantSubscriptionRequestSchema,
+  scheduleActionRequestSchema,
+  subscriptionSortKeys,
+  subscriptionStoreCodes,
+} from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
@@ -47,6 +52,71 @@ const subscriptionScopes = [
   "churned",
 ] as const;
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_PRODUCT_IDS = 50;
+
+const csvList = <T extends string>(allowed: ReadonlyArray<T>) =>
+  z
+    .string()
+    .min(1)
+    .optional()
+    .transform((raw, ctx) => {
+      if (raw === undefined) return undefined;
+      const seen = new Set<T>();
+      for (const part of raw.split(",")) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        if (!(allowed as ReadonlyArray<string>).includes(trimmed)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Unknown value: ${trimmed}`,
+          });
+          return z.NEVER;
+        }
+        seen.add(trimmed as T);
+      }
+      return seen.size > 0 ? (Array.from(seen) as ReadonlyArray<T>) : undefined;
+    });
+
+const csvIds = z
+  .string()
+  .min(1)
+  .optional()
+  .transform((raw, ctx) => {
+    if (raw === undefined) return undefined;
+    const ids = Array.from(
+      new Set(
+        raw
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0),
+      ),
+    );
+    if (ids.length === 0) return undefined;
+    if (ids.length > MAX_PRODUCT_IDS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Too many ids (max ${MAX_PRODUCT_IDS})`,
+      });
+      return z.NEVER;
+    }
+    return ids as ReadonlyArray<string>;
+  });
+
+const boolish = z
+  .enum(["true", "false"])
+  .optional()
+  .transform((v) => (v === undefined ? undefined : v === "true"));
+
+const isoDate = z
+  .string()
+  .regex(ISO_DATE_RE, "expected YYYY-MM-DD")
+  .optional();
+
+// `subscriptionStoreCodes` + `subscriptionSortKeys` are exported from
+// @rovenue/shared (added in Task 1). The Zod schema below pins to
+// those tuples so the wire format and the shared type stay aligned.
+
 const listQuerySchema = z.object({
   scope: z.enum(subscriptionScopes).default("all"),
   limit: z.coerce
@@ -57,6 +127,20 @@ const listQuerySchema = z.object({
     .default(PAGE_LIMIT_DEFAULT),
   cursor: z.string().min(1).optional(),
   search: z.string().trim().min(1).optional(),
+  store: csvList(subscriptionStoreCodes),
+  productId: csvIds,
+  autoRenew: boolish,
+  isTrial: boolish,
+  isIntro: boolish,
+  hasIssue: z
+    .enum(["true"])
+    .optional()
+    .transform((v) => v === "true"),
+  purchasedFrom: isoDate,
+  purchasedTo: isoDate,
+  expiresFrom: isoDate,
+  expiresTo: isoDate,
+  sort: z.enum(subscriptionSortKeys).default("started_desc"),
 });
 
 const calendarQuerySchema = z.object({
@@ -93,18 +177,29 @@ export const subscriptionsRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
 
-    const { scope, limit, cursor: rawCursor, search } = c.req.valid("query");
-    const cursor = rawCursor ? decodeSubsCursor(rawCursor) : null;
-    if (rawCursor && !cursor) {
+    const q = c.req.valid("query");
+    const cursor = q.cursor ? decodeSubsCursor(q.cursor, q.sort) : null;
+    if (q.cursor && !cursor) {
       throw new HTTPException(400, { message: "Invalid cursor" });
     }
 
     const payload = await listSubscriptions({
       projectId,
-      scope,
-      limit,
+      scope: q.scope,
+      limit: q.limit,
       cursor,
-      search: search ?? null,
+      sort: q.sort,
+      search: q.search ?? null,
+      store: q.store ?? null,
+      productId: q.productId ?? null,
+      autoRenew: q.autoRenew ?? null,
+      isTrial: q.isTrial ?? null,
+      isIntro: q.isIntro ?? null,
+      hasIssue: q.hasIssue,
+      purchasedFrom: q.purchasedFrom ?? null,
+      purchasedTo: q.purchasedTo ?? null,
+      expiresFrom: q.expiresFrom ?? null,
+      expiresTo: q.expiresTo ?? null,
     });
     return c.json(ok(payload));
   })

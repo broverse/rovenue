@@ -10,6 +10,11 @@ export { RenewalCalendar } from "./renewal-calendar";
 export { ScopeTabs } from "./scope-tabs";
 export { StoreChip, storeFullName } from "./store-chip";
 export { SubscriptionsTable } from "./subscriptions-table";
+export { FilterToolbar } from "./filter-toolbar";
+export type {
+  SubscriptionsFilterValue,
+  ProductOption,
+} from "./filter-toolbar";
 export { SubscriptionStatusChip } from "./subscription-status-chip";
 export { renewalProgressColor } from "./format";
 export {
