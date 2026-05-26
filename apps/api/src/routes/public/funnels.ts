@@ -1,13 +1,15 @@
 // =============================================================
 // Public funnel runtime routes (no auth — browser-facing)
 //
-// GET  /public/funnels/:slug                  — published config
-// POST /public/funnels/:slug/sessions         — start a session
+// GET  /public/funnels/:slug                              — published config
+// POST /public/funnels/:slug/sessions                     — start a session
+// POST /public/funnel-sessions/:sessionId/answers         — upsert an answer
+// POST /public/funnel-sessions/:sessionId/advance         — evaluate next page
 //
 // Branching rules (`next_rules` / `default_next`) are stripped
 // from the published bundle so the client never sees the routing
-// logic — `/advance` (added in Task 29) evaluates server-side
-// using the canonical version stored in Postgres.
+// logic — `/advance` evaluates server-side using the canonical
+// version stored in Postgres.
 // =============================================================
 
 import { Hono } from "hono";
@@ -24,6 +26,13 @@ import {
   readPublishedConfig,
   writePublishedConfig,
 } from "../../services/funnel/runtime-cache";
+import {
+  evaluateNext,
+  type AnswerMap,
+  type AnswerValue,
+  type EvalPage,
+  type PageGraph,
+} from "../../services/funnel/branching-evaluator";
 
 interface PublishedRuntimeConfig {
   id: string;
@@ -165,6 +174,99 @@ export const publicFunnelsRoute = new Hono()
         { data: { session_id: session.id, first_page_id: firstPageId } },
         201,
       );
+    },
+  )
+
+  // ---------------------------------------------------------------
+  // POST /funnel-sessions/:sessionId/answers — upsert an answer
+  // ---------------------------------------------------------------
+  .post(
+    "/funnel-sessions/:sessionId/answers",
+    zValidator(
+      "json",
+      z.object({
+        page_id: z.string(),
+        question_id: z.string(),
+        answer: z.unknown(),
+      }),
+    ),
+    async (c) => {
+      const sid = c.req.param("sessionId");
+      const body = c.req.valid("json");
+      const session = await drizzle.funnelSessionRepo.findById(drizzle.db, sid);
+      if (!session) {
+        throw new HTTPException(404, { message: "Session not found" });
+      }
+      if (session.state !== "in_progress") {
+        throw new HTTPException(409, { message: "Session is closed" });
+      }
+      await drizzle.funnelAnswerRepo.upsert(drizzle.db, {
+        sessionId: sid,
+        pageId: body.page_id,
+        questionId: body.question_id,
+        answerJson: { value: body.answer },
+      });
+      await drizzle.funnelSessionRepo.setCurrentPage(
+        drizzle.db,
+        sid,
+        body.page_id,
+      );
+      return c.json({ data: { ok: true } });
+    },
+  )
+
+  // ---------------------------------------------------------------
+  // POST /funnel-sessions/:sessionId/advance — evaluate next page
+  // ---------------------------------------------------------------
+  .post(
+    "/funnel-sessions/:sessionId/advance",
+    zValidator("json", z.object({ from_page_id: z.string() })),
+    async (c) => {
+      const sid = c.req.param("sessionId");
+      const body = c.req.valid("json");
+      const session = await drizzle.funnelSessionRepo.findById(drizzle.db, sid);
+      if (!session) {
+        throw new HTTPException(404, { message: "Session not found" });
+      }
+      const version = await drizzle.funnelVersionRepo.findById(
+        drizzle.db,
+        session.funnelVersionId,
+      );
+      if (!version) {
+        throw new HTTPException(500, { message: "Version missing" });
+      }
+      const pages = (version.pagesJson as EvalPage[]) ?? [];
+      const answers = await drizzle.funnelAnswerRepo.listBySession(
+        drizzle.db,
+        sid,
+      );
+      const answerMap: AnswerMap = new Map(
+        answers.map((a) => [
+          a.questionId,
+          (a.answerJson as { value: AnswerValue }).value,
+        ]),
+      );
+      const pagesById: PageGraph = new Map(pages.map((p) => [p.id, p]));
+      const pagesOrder = pages.map((p) => p.id);
+      const page = pagesById.get(body.from_page_id);
+      if (!page) {
+        throw new HTTPException(400, { message: "Unknown from_page_id" });
+      }
+      const result = evaluateNext({
+        page,
+        pagesOrder,
+        answers: answerMap,
+        pagesById,
+      });
+      if (result.next === "page") {
+        await drizzle.funnelSessionRepo.setCurrentPage(
+          drizzle.db,
+          sid,
+          result.pageId,
+        );
+        return c.json({ data: { next: "page", page_id: result.pageId } });
+      }
+      return c.json({ data: { next: result.next } });
     },
   );
 
