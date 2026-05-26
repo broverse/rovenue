@@ -15,6 +15,7 @@ import { leaderboardsRoute } from "./leaderboards";
 import { meRoute } from "./me";
 import { invitationsRoute } from "./invitations";
 import { notificationsRoute } from "./notifications";
+import { projectNotificationDefaultsRoute } from "./project-notification-defaults";
 import { pushDevicesRoute } from "./push-devices";
 import { membersRoute } from "./members";
 import { metricsRoute } from "./metrics";
@@ -62,6 +63,10 @@ export const dashboardRoute = new Hono()
   .route("/projects/:projectId/leaderboards", leaderboardsRoute)
   .route("/projects/:projectId/invitations", invitationsRoute)
   .route("/projects/:projectId/members", membersRoute)
+  .route(
+    "/projects/:projectId/notification-defaults",
+    projectNotificationDefaultsRoute,
+  )
   .route("/projects/:projectId/metrics", metricsRoute)
   .route("/projects/:projectId/overview", overviewRoute)
   .route("/projects/:projectId/product-groups", productGroupsDashboardRoute)
