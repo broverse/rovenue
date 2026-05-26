@@ -1,4 +1,7 @@
-use librovenue::version::SDK_VERSION;
+// NOTE: the Cargo package name is `librovenue` but `[lib] name = "rovenue"`
+// (per spec §8.2 — final dylib is `librovenue.{a,dylib,so}` and C symbols are `rovenue_*`).
+// The Rust import path therefore uses `rovenue`, not `librovenue`.
+use rovenue::version::SDK_VERSION;
 
 #[test]
 fn sdk_version_matches_cargo_pkg_version() {
