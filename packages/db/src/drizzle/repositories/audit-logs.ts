@@ -35,7 +35,7 @@ interface AuditUserLite {
 export interface AuditLogRowWithUser {
   id: string;
   projectId: string;
-  userId: string;
+  userId: string | null;
   action: string;
   resource: string;
   resourceId: string;
@@ -140,7 +140,7 @@ export async function findProjectChain(
 ): Promise<Array<{
   id: string;
   projectId: string;
-  userId: string;
+  userId: string | null;
   action: string;
   resource: string;
   resourceId: string;
