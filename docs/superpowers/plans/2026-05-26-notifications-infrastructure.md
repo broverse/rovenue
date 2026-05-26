@@ -2329,6 +2329,89 @@ Expected: green, 16 events total.
 
 ## Phase 7 — Email transport integration
 
+### Task 7.0: `notification_suppression_list` table
+
+**Correction to spec dependency declaration:** the spec assumes this table ships in the invite spec. It does not — the invite spec uses per-row `projectInvitations.deliveryStatus` and exposes `findCrossProjectSuppression(db, email)` to look across invitations. That model does not fit notifications (we need a global "do not email this address" list, not a per-row history). This task creates the dedicated table; the invite-spec helper continues to work alongside it (invites check both lists before sending).
+
+**Files:**
+- Modify: `packages/db/src/drizzle/schema.ts`
+- Create: `packages/db/drizzle/migrations/<next>_notification_suppression_list.sql`
+- Create: `packages/db/src/drizzle/repositories/notification-suppression.ts`
+- Test: `packages/db/src/drizzle/repositories/notification-suppression.integration.test.ts`
+
+- [ ] **Step 1: Schema**
+
+```ts
+export const notificationSuppressionReason = pgEnum(
+  "NotificationSuppressionReason",
+  ["hard_bounce", "complaint", "manual"],
+);
+
+export const notificationSuppressionList = pgTable(
+  "notification_suppression_list",
+  {
+    email: text("email").primaryKey(),
+    reason: notificationSuppressionReason("reason").notNull(),
+    source: text("source"),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+);
+
+export type NotificationSuppression =
+  typeof notificationSuppressionList.$inferSelect;
+```
+
+- [ ] **Step 2: Generate + apply migration**
+
+```
+pnpm db:migrate:generate
+pnpm db:migrate
+```
+
+- [ ] **Step 3: Repo**
+
+```ts
+import { eq } from "drizzle-orm";
+import type { DrizzleDb } from "../client";
+import { notificationSuppressionList } from "../schema";
+
+export const notificationSuppressionRepo = {
+  async isSuppressed(db: DrizzleDb, email: string): Promise<boolean> {
+    const rows = await db
+      .select({ email: notificationSuppressionList.email })
+      .from(notificationSuppressionList)
+      .where(eq(notificationSuppressionList.email, email.toLowerCase()))
+      .limit(1);
+    return rows.length > 0;
+  },
+
+  async add(
+    db: DrizzleDb,
+    input: { email: string; reason: "hard_bounce" | "complaint" | "manual"; source?: string },
+  ): Promise<void> {
+    await db
+      .insert(notificationSuppressionList)
+      .values({
+        email: input.email.toLowerCase(),
+        reason: input.reason,
+        source: input.source,
+      })
+      .onConflictDoNothing();
+  },
+};
+```
+
+- [ ] **Step 4: Integration test** — insert + isSuppressed round-trip, lowercasing applied, ON CONFLICT no-op idempotent.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/db/
+git commit -m "feat(db): notification_suppression_list table + repo"
+```
+
 ### Task 7.1: `SmtpMailer` adapter
 
 **Files:**
@@ -2607,20 +2690,14 @@ Test cases: forced event → empty headers; non-forced → both headers present;
 
 ```ts
 // suppression.ts
-import { suppressionList } from "@rovenue/db"; // from invite spec
-import { eq } from "drizzle-orm";
+import { notificationSuppressionRepo } from "@rovenue/db/repositories/notification-suppression";
 import type { DrizzleDb } from "@rovenue/db";
 
 export async function isSuppressed(
   db: DrizzleDb,
   emailLower: string,
 ): Promise<boolean> {
-  const rows = await db
-    .select()
-    .from(suppressionList)
-    .where(eq(suppressionList.email, emailLower))
-    .limit(1);
-  return rows.length > 0;
+  return notificationSuppressionRepo.isSuppressed(db, emailLower);
 }
 ```
 
