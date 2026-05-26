@@ -92,6 +92,22 @@ const envSchema = z
       .string()
       .regex(/^[0-9a-fA-F]{64}$/, "32 bytes in hex (64 chars)")
       .optional(),
+    // ---- Push notifications (optional; enables iOS push) -------
+    // Token-based APNs auth. APNS_KEY_P8 is the .p8 file contents
+    // verbatim (BEGIN/END lines included); APNS_ENVIRONMENT picks
+    // the production gateway vs the sandbox host TestFlight uses.
+    APNS_KEY_ID: z.string().optional(),
+    APNS_TEAM_ID: z.string().optional(),
+    APNS_KEY_P8: z.string().optional(),
+    APNS_BUNDLE_ID: z.string().optional(),
+    APNS_ENVIRONMENT: z
+      .enum(["production", "sandbox"])
+      .default("production"),
+    // ---- Push notifications (optional; enables Android push) ---
+    // FCM v1 HTTP API. Service-account JSON pasted verbatim into
+    // the env var so secrets stay in the same place as everything
+    // else. The factory parses it lazily on first use.
+    FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== "production") return;
