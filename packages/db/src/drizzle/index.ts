@@ -57,3 +57,4 @@ export * as billingPaymentMethodRepo from "./repositories/billing-payment-method
 export * as billingInvoiceRepo from "./repositories/billing-invoices";
 export * as billingDunningStateRepo from "./repositories/billing-dunning-state";
 export * as usageSnapshotRepo from "./repositories/usage-snapshots";
+export * as billingTierLimitsRepo from "./repositories/billing-tier-limits";
