@@ -225,6 +225,13 @@
       "when": 1779745095699,
       "tag": "0031_misty_mandarin",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1779780724586,
+      "tag": "0032_salty_firelord",
+      "breakpoints": true
     }
   ]
 }
