@@ -381,7 +381,12 @@ describe("outboxEvents", () => {
       "EXPOSURE",
       "REVENUE_EVENT",
       "CREDIT_LEDGER",
+      "BILLING",
     ]);
+  });
+
+  it("aggregate_type includes BILLING", () => {
+    expect(aggregateTypeEnum.enumValues).toContain("BILLING");
   });
 });
 

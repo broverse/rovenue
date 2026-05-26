@@ -302,6 +302,13 @@
       "when": 1780000040000,
       "tag": "0042_billing_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1780000050000,
+      "tag": "0043_aggregate_type_billing",
+      "breakpoints": true
     }
   ]
 }
