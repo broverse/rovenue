@@ -1,5 +1,5 @@
 import { createId } from "@paralleldrive/cuid2";
-import { InferInsertModel, InferSelectModel, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import {
   boolean,
   date,
@@ -8,7 +8,6 @@ import {
   integer,
   jsonb,
   numeric,
-  pgEnum,
   pgTable,
   primaryKey,
   smallint,
@@ -19,6 +18,13 @@ import {
 
 import {
   aggregateTypeEnum,
+  billingCycleEnum,
+  billingDunningPhaseEnum,
+  billingInvoiceStatusEnum,
+  billingMeterKeyEnum,
+  billingPendingActionEnum,
+  billingStateEnum,
+  billingTierEnum,
   creditLedgerType,
   environment,
   experimentStatus,
@@ -37,49 +43,6 @@ import {
   webhookEventStatus,
   webhookSource,
 } from "./enums";
-
-// =============================================================
-// Billing pgEnums (Phase 1)
-// =============================================================
-
-export const billingCycleEnum = pgEnum("billing_cycle", ["monthly", "annual"]);
-export const billingDunningPhaseEnum = pgEnum("billing_dunning_phase", [
-  "retrying",
-  "past_due",
-  "suspended",
-]);
-export const billingInvoiceStatusEnum = pgEnum("billing_invoice_status", [
-  "draft",
-  "open",
-  "paid",
-  "uncollectible",
-  "void",
-]);
-export const billingMeterKeyEnum = pgEnum("billing_meter_key", [
-  "mtr",
-  "events",
-  "sql_queries",
-]);
-export const billingPendingActionEnum = pgEnum("billing_pending_action", [
-  "downgrade_to_free",
-  "pause",
-  "delete",
-]);
-export const billingStateEnum = pgEnum("billing_state", [
-  "free",
-  "active",
-  "past_due",
-  "paused",
-  "deleted",
-]);
-export const billingTierEnum = pgEnum("billing_tier", [
-  "free",
-  "indie",
-  "pro",
-  "scale",
-  "growth",
-  "enterprise",
-]);
 
 // =============================================================
 // Drizzle schema — canonical source of truth
@@ -1424,6 +1387,13 @@ export type NewScheduledSubscriptionAction =
 // from "@rovenue/db/drizzle"` without reaching into the `drizzle`
 // namespace on the top-level `@rovenue/db` export.
 export {
+  billingCycleEnum,
+  billingDunningPhaseEnum,
+  billingInvoiceStatusEnum,
+  billingMeterKeyEnum,
+  billingPendingActionEnum,
+  billingStateEnum,
+  billingTierEnum,
   creditLedgerType,
   environment,
   experimentStatus,
@@ -1610,19 +1580,13 @@ export const usageSnapshots = pgTable(
   }),
 );
 
-export type BillingSubscription = InferSelectModel<typeof billingSubscriptions>;
-export type NewBillingSubscription = InferInsertModel<
-  typeof billingSubscriptions
->;
-export type BillingPaymentMethod = InferSelectModel<typeof billingPaymentMethods>;
-export type NewBillingPaymentMethod = InferInsertModel<
-  typeof billingPaymentMethods
->;
-export type BillingInvoice = InferSelectModel<typeof billingInvoices>;
-export type NewBillingInvoice = InferInsertModel<typeof billingInvoices>;
-export type BillingDunningStateRow = InferSelectModel<typeof billingDunningState>;
-export type NewBillingDunningStateRow = InferInsertModel<
-  typeof billingDunningState
->;
-export type BillingTierLimits = InferSelectModel<typeof billingTierLimits>;
-export type UsageSnapshot = InferSelectModel<typeof usageSnapshots>;
+export type BillingSubscription = typeof billingSubscriptions.$inferSelect;
+export type NewBillingSubscription = typeof billingSubscriptions.$inferInsert;
+export type BillingPaymentMethod = typeof billingPaymentMethods.$inferSelect;
+export type NewBillingPaymentMethod = typeof billingPaymentMethods.$inferInsert;
+export type BillingInvoice = typeof billingInvoices.$inferSelect;
+export type NewBillingInvoice = typeof billingInvoices.$inferInsert;
+export type BillingDunningStateRow = typeof billingDunningState.$inferSelect;
+export type NewBillingDunningStateRow = typeof billingDunningState.$inferInsert;
+export type BillingTierLimits = typeof billingTierLimits.$inferSelect;
+export type UsageSnapshot = typeof usageSnapshots.$inferSelect;

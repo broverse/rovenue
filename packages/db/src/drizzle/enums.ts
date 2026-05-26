@@ -136,6 +136,49 @@ export const invitationDeliveryStatus = pgEnum("InvitationDeliveryStatus", [
 ]);
 
 // =============================================================
+// Billing pgEnums (Phase 1)
+// =============================================================
+
+export const billingCycleEnum = pgEnum("billing_cycle", ["monthly", "annual"]);
+export const billingDunningPhaseEnum = pgEnum("billing_dunning_phase", [
+  "retrying",
+  "past_due",
+  "suspended",
+]);
+export const billingInvoiceStatusEnum = pgEnum("billing_invoice_status", [
+  "draft",
+  "open",
+  "paid",
+  "uncollectible",
+  "void",
+]);
+export const billingMeterKeyEnum = pgEnum("billing_meter_key", [
+  "mtr",
+  "events",
+  "sql_queries",
+]);
+export const billingPendingActionEnum = pgEnum("billing_pending_action", [
+  "downgrade_to_free",
+  "pause",
+  "delete",
+]);
+export const billingStateEnum = pgEnum("billing_state", [
+  "free",
+  "active",
+  "past_due",
+  "paused",
+  "deleted",
+]);
+export const billingTierEnum = pgEnum("billing_tier", [
+  "free",
+  "indie",
+  "pro",
+  "scale",
+  "growth",
+  "enterprise",
+]);
+
+// =============================================================
 // Billing enums (TS-only — not Postgres pgEnum; stored as text)
 // =============================================================
 
