@@ -88,26 +88,26 @@ const CONDITION_TYPES: ReadonlyArray<{
   labelKey: string;
   icon: ReactNode;
 }> = [
-  { kind: "customAttribute", labelKey: "featureFlags.new.conditions.types.customAttribute", icon: <KeyRound size={11} /> },
-  { kind: "country", labelKey: "featureFlags.new.conditions.types.country", icon: <Globe2 size={11} /> },
-  { kind: "app", labelKey: "featureFlags.new.conditions.types.app", icon: <Package size={11} /> },
-  { kind: "appVersion", labelKey: "featureFlags.new.conditions.types.appVersion", icon: <Tag size={11} /> },
-  { kind: "platform", labelKey: "featureFlags.new.conditions.types.platform", icon: <Smartphone size={11} /> },
-  { kind: "sdkVersion", labelKey: "featureFlags.new.conditions.types.sdkVersion", icon: <Layers size={11} /> },
+  { kind: "customAttribute", labelKey: "targeting.conditions.types.customAttribute", icon: <KeyRound size={11} /> },
+  { kind: "country", labelKey: "targeting.conditions.types.country", icon: <Globe2 size={11} /> },
+  { kind: "app", labelKey: "targeting.conditions.types.app", icon: <Package size={11} /> },
+  { kind: "appVersion", labelKey: "targeting.conditions.types.appVersion", icon: <Tag size={11} /> },
+  { kind: "platform", labelKey: "targeting.conditions.types.platform", icon: <Smartphone size={11} /> },
+  { kind: "sdkVersion", labelKey: "targeting.conditions.types.sdkVersion", icon: <Layers size={11} /> },
 ];
 
 const LIST_OPS: ReadonlyArray<{ value: ListOp; labelKey: string }> = [
-  { value: "$in", labelKey: "featureFlags.new.conditions.ops.in" },
-  { value: "$nin", labelKey: "featureFlags.new.conditions.ops.notIn" },
+  { value: "$in", labelKey: "targeting.conditions.ops.in" },
+  { value: "$nin", labelKey: "targeting.conditions.ops.notIn" },
 ];
 
 const COMPARE_OPS: ReadonlyArray<{ value: CompareOp; labelKey: string }> = [
-  { value: "$eq", labelKey: "featureFlags.new.conditions.ops.eq" },
-  { value: "$ne", labelKey: "featureFlags.new.conditions.ops.ne" },
-  { value: "$gte", labelKey: "featureFlags.new.conditions.ops.gte" },
-  { value: "$gt", labelKey: "featureFlags.new.conditions.ops.gt" },
-  { value: "$lte", labelKey: "featureFlags.new.conditions.ops.lte" },
-  { value: "$lt", labelKey: "featureFlags.new.conditions.ops.lt" },
+  { value: "$eq", labelKey: "targeting.conditions.ops.eq" },
+  { value: "$ne", labelKey: "targeting.conditions.ops.ne" },
+  { value: "$gte", labelKey: "targeting.conditions.ops.gte" },
+  { value: "$gt", labelKey: "targeting.conditions.ops.gt" },
+  { value: "$lte", labelKey: "targeting.conditions.ops.lte" },
+  { value: "$lt", labelKey: "targeting.conditions.ops.lt" },
 ];
 
 const PLATFORM_VALUES: ReadonlyArray<{ value: string; label: string }> = [
@@ -600,7 +600,7 @@ export function FlagForm({ projectId, initialFlag }: FlagFormProps) {
                     <div className="flex flex-col gap-2">
                       {r.conditions.length === 0 && (
                         <span className="text-[11px] italic text-rv-mute-500">
-                          {t("featureFlags.new.conditions.empty")}
+                          {t("targeting.conditions.empty")}
                         </span>
                       )}
                       {r.conditions.map((c, condIdx) => (
@@ -739,7 +739,7 @@ function ConditionMenu({
         className="inline-flex items-center gap-1 rounded-md border border-dashed border-rv-divider-strong bg-transparent px-3 py-1.5 text-[11px] font-medium text-rv-mute-600 transition hover:border-rv-accent-500 hover:bg-rv-accent-500/5 hover:text-rv-accent-500"
       >
         <Plus size={11} />
-        {t("featureFlags.new.conditions.add")}
+        {t("targeting.conditions.add")}
         <ChevronDown size={11} className="text-rv-mute-500" />
       </button>
       {open && (
@@ -886,7 +886,7 @@ function ConditionRow({
 
       <button
         type="button"
-        aria-label={t("featureFlags.new.conditions.removeCondition")}
+        aria-label={t("targeting.conditions.removeCondition")}
         onClick={onRemove}
         className="ml-auto inline-flex size-6 cursor-pointer items-center justify-center rounded text-rv-mute-500 hover:bg-rv-c3 hover:text-rv-danger"
       >

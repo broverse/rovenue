@@ -1472,29 +1472,6 @@
         "remove": "Remove rule",
         "legacyAudience": "linked to saved audience"
       },
-      "conditions": {
-        "empty": "No conditions — rule matches every subscriber.",
-        "add": "Add condition",
-        "removeCondition": "Remove condition",
-        "types": {
-          "customAttribute": "Custom attribute",
-          "country": "Country",
-          "app": "App",
-          "appVersion": "App version",
-          "platform": "Platform",
-          "sdkVersion": "SDK version"
-        },
-        "ops": {
-          "in": "is one of",
-          "notIn": "is not one of",
-          "eq": "=",
-          "ne": "≠",
-          "gt": ">",
-          "gte": "≥",
-          "lt": "<",
-          "lte": "≤"
-        }
-      },
       "errors": {
         "required": "Key is required.",
         "invalidKey": "Key must contain only letters, digits, dashes or underscores.",
@@ -1512,6 +1489,31 @@
       "notFound": "We couldn't find that feature flag.",
       "keyLocked": "Key is permanent — create a new flag to rename.",
       "typeLocked": "Type is permanent — create a new flag to switch."
+    }
+  },
+  "targeting": {
+    "conditions": {
+      "empty": "No conditions — matches every subscriber.",
+      "add": "Add condition",
+      "removeCondition": "Remove condition",
+      "types": {
+        "customAttribute": "Custom attribute",
+        "country": "Country",
+        "app": "App",
+        "appVersion": "App version",
+        "platform": "Platform",
+        "sdkVersion": "SDK version"
+      },
+      "ops": {
+        "in": "is one of",
+        "notIn": "is not one of",
+        "eq": "=",
+        "ne": "≠",
+        "gt": ">",
+        "gte": "≥",
+        "lt": "<",
+        "lte": "≤"
+      }
     }
   },
   "experiments": {
