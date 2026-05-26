@@ -1680,3 +1680,151 @@ export type FunnelVersion = typeof funnelVersions.$inferSelect;
 export type NewFunnelVersion = typeof funnelVersions.$inferInsert;
 export type FunnelTemplate = typeof funnelTemplates.$inferSelect;
 export type NewFunnelTemplate = typeof funnelTemplates.$inferInsert;
+
+export const funnelSessions = pgTable(
+  "funnel_sessions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    funnelId: text("funnel_id")
+      .notNull()
+      .references(() => funnels.id, { onDelete: "cascade" }),
+    funnelVersionId: text("funnel_version_id")
+      .notNull()
+      .references(() => funnelVersions.id, { onDelete: "restrict" }),
+    projectId: text("project_id").notNull(),
+    anonId: text("anon_id")
+      .notNull()
+      .$defaultFn(() => createId()),
+    state: funnelSessionState("state").notNull().default("in_progress"),
+    currentPageId: text("current_page_id"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    utmJson: jsonb("utm_json").notNull().default(sql`'{}'::jsonb`),
+    ipHash: text("ip_hash"),
+    userAgent: text("user_agent"),
+  },
+  (t) => ({
+    funnelStartedIdx: index("funnel_sessions_funnel_started_idx").on(t.funnelId, t.startedAt),
+    stateActivityIdx: index("funnel_sessions_state_activity_idx").on(t.state, t.lastActivityAt),
+    projectStartedIdx: index("funnel_sessions_project_started_idx").on(t.projectId, t.startedAt),
+  }),
+);
+
+export const funnelAnswers = pgTable(
+  "funnel_answers",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => funnelSessions.id, { onDelete: "cascade" }),
+    pageId: text("page_id").notNull(),
+    questionId: text("question_id").notNull(),
+    answerJson: jsonb("answer_json").notNull(),
+    answeredAt: timestamp("answered_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    sessionQuestionUnique: uniqueIndex("funnel_answers_session_question_unique").on(
+      t.sessionId,
+      t.questionId,
+    ),
+    sessionIdx: index("funnel_answers_session_idx").on(t.sessionId),
+  }),
+);
+
+export const funnelPurchases = pgTable(
+  "funnel_purchases",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => funnelSessions.id, { onDelete: "cascade" })
+      .unique(),
+    projectId: text("project_id").notNull(),
+    productId: text("product_id"),
+    stripeCheckoutSessionId: text("stripe_checkout_session_id"),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    amountCents: integer("amount_cents"),
+    currency: text("currency"),
+    status: funnelPurchaseStatus("status").notNull().default("pending"),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    rawPayload: jsonb("raw_payload").notNull().default(sql`'{}'::jsonb`),
+  },
+  (t) => ({
+    projectStatusIdx: index("funnel_purchases_project_status_idx").on(
+      t.projectId,
+      t.status,
+      t.paidAt,
+    ),
+    stripeSubIdx: index("funnel_purchases_stripe_sub_idx").on(t.stripeSubscriptionId),
+  }),
+);
+
+export const funnelClaimTokens = pgTable(
+  "funnel_claim_tokens",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    tokenHash: text("token_hash").notNull().unique(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => funnelSessions.id, { onDelete: "cascade" })
+      .unique(),
+    projectId: text("project_id").notNull(),
+    emailHash: text("email_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    claimedBySubscriberId: text("claimed_by_subscriber_id"),
+  },
+  (t) => ({
+    emailIdx: index("funnel_claim_tokens_email_idx").on(t.emailHash),
+    expiresIdx: index("funnel_claim_tokens_expires_idx").on(t.expiresAt),
+  }),
+);
+
+export const funnelDeferredClaims = pgTable(
+  "funnel_deferred_claims",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    tokenId: text("token_id")
+      .notNull()
+      .references(() => funnelClaimTokens.id, { onDelete: "cascade" }),
+    platform: funnelDeferredPlatform("platform").notNull(),
+    ipHash: text("ip_hash").notNull(),
+    userAgent: text("user_agent").notNull(),
+    locale: text("locale").notNull(),
+    timezone: text("timezone").notNull(),
+    screenDims: text("screen_dims").notNull(),
+    deviceModel: text("device_model"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    matchedAt: timestamp("matched_at", { withTimezone: true }),
+    matchedInstallId: text("matched_install_id"),
+  },
+  (t) => ({
+    ipExpiresIdx: index("funnel_deferred_claims_ip_expires_idx").on(t.ipHash, t.expiresAt),
+    tokenIdx: index("funnel_deferred_claims_token_idx").on(t.tokenId),
+  }),
+);
+
+export type FunnelSession = typeof funnelSessions.$inferSelect;
+export type NewFunnelSession = typeof funnelSessions.$inferInsert;
+export type FunnelAnswer = typeof funnelAnswers.$inferSelect;
+export type NewFunnelAnswer = typeof funnelAnswers.$inferInsert;
+export type FunnelPurchase = typeof funnelPurchases.$inferSelect;
+export type NewFunnelPurchase = typeof funnelPurchases.$inferInsert;
+export type FunnelClaimToken = typeof funnelClaimTokens.$inferSelect;
+export type NewFunnelClaimToken = typeof funnelClaimTokens.$inferInsert;
+export type FunnelDeferredClaim = typeof funnelDeferredClaims.$inferSelect;
+export type NewFunnelDeferredClaim = typeof funnelDeferredClaims.$inferInsert;
