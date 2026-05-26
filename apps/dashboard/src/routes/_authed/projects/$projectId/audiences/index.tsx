@@ -6,6 +6,7 @@ import {
   useParams,
 } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
+import { Menu } from "@base-ui-components/react/menu";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "../../../../../ui/button";
 import { Chip } from "../../../../../ui/chip";
@@ -175,53 +176,39 @@ function RowMenu({
   onDelete: () => void;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
 
   return (
-    <div className="relative inline-block text-right">
-      <button
-        type="button"
+    <Menu.Root>
+      <Menu.Trigger
         aria-label={t("audiences.actions.menu")}
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex size-7 cursor-pointer items-center justify-center rounded text-rv-mute-500 hover:bg-rv-c3 hover:text-foreground"
+        className="inline-flex size-7 cursor-pointer items-center justify-center rounded text-rv-mute-500 outline-none hover:bg-rv-c3 hover:text-foreground data-[popup-open]:bg-rv-c3 data-[popup-open]:text-foreground"
       >
         <MoreHorizontal size={14} />
-      </button>
-      {open && (
-        <>
-          <button
-            type="button"
-            aria-hidden="true"
-            tabIndex={-1}
-            className="fixed inset-0 z-10 cursor-default"
-            onClick={() => setOpen(false)}
-          />
-          <div className="absolute right-0 top-full z-20 mt-1 w-[140px] overflow-hidden rounded-md border border-rv-divider bg-rv-c1 shadow-lg">
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                onEdit();
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-foreground transition hover:bg-rv-c3"
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner
+          sideOffset={4}
+          align="end"
+          className="z-50 min-w-[140px]"
+        >
+          <Menu.Popup className="rounded-md border border-rv-divider-strong bg-rv-c3 p-1 shadow-[0_10px_30px_rgba(0,0,0,0.5)] focus:outline-none animate-rv-menu-in">
+            <Menu.Item
+              onClick={onEdit}
+              className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-rv-mute-700 outline-none data-[highlighted]:bg-rv-c4 data-[highlighted]:text-foreground"
             >
               <Pencil size={12} className="text-rv-mute-500" />
               {t("audiences.actions.edit")}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                onDelete();
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-rv-danger transition hover:bg-rv-danger/10"
+            </Menu.Item>
+            <Menu.Item
+              onClick={onDelete}
+              className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-rv-danger outline-none data-[highlighted]:bg-rv-danger/10"
             >
               <Trash2 size={12} />
               {t("audiences.actions.delete")}
-            </button>
-          </div>
-        </>
-      )}
-    </div>
+            </Menu.Item>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }

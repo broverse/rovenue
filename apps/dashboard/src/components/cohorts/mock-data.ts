@@ -1,33 +1,4 @@
-import type {
-  CohortMember,
-  Condition,
-  CountryBreakdown,
-  LtvCurve,
-  SyncDestination,
-} from "./types";
-
-export const LTV_CURVES: ReadonlyArray<LtvCurve> = [
-  { label: "Feb 02", color: "primary", points: [0, 3.2, 5.8, 7.9, 9.6, 11.1, 12.3, 13.4, 14.3, 15.1, 15.8, 16.4] },
-  { label: "Feb 23", color: "violet",  points: [0, 4.1, 7.4, 10.2, 12.4, 14.3, 15.9, 17.2, 18.3, 19.2, null, null] },
-  { label: "Mar 16", color: "success", points: [0, 4.8, 8.7, 12.1, 15.0, 17.4, 19.3, null, null, null, null, null] },
-  { label: "Apr 06", color: "warning", points: [0, 5.4, 9.6, 13.4, null, null, null, null, null, null, null, null] },
-];
-
-export const COUNTRY_BREAKDOWN: ReadonlyArray<CountryBreakdown> = [
-  { country: "United States",  users: 2104, w4: 64.8, ltv: 38.20, churn: 2.4, delta: "+12%" },
-  { country: "United Kingdom", users: 841,  w4: 63.1, ltv: 34.50, churn: 2.6, delta: "+8%"  },
-  { country: "Canada",         users: 612,  w4: 61.4, ltv: 31.80, churn: 2.8, delta: "+2%"  },
-  { country: "Australia",      users: 487,  w4: 59.2, ltv: 29.40, churn: 3.1, delta: "−4%"  },
-  { country: "Germany",        users: 312,  w4: 57.8, ltv: 26.10, churn: 3.4, delta: "−9%"  },
-  { country: "Other (18)",     users: 465,  w4: 54.2, ltv: 22.80, churn: 3.8, delta: "−18%" },
-];
-
-export const SYNC_DESTINATIONS: ReadonlyArray<SyncDestination> = [
-  { id: "metaAds",     status: "on",  dot: "primary", state: { kind: "syncedAgo",     ago: "6m ago" } },
-  { id: "tiktokAds",   status: "off", dot: "muted",   state: { kind: "notSynced" } },
-  { id: "experiments", status: "on",  dot: "violet",  state: { kind: "activeCount",   count: 2 } },
-  { id: "featureFlag", status: "on",  dot: "success", state: { kind: "ruleReferences", count: 1 } },
-];
+import type { CohortMember, Condition } from "./types";
 
 export const SAMPLE_MEMBERS: ReadonlyArray<CohortMember> = [
   { id: "u_9f2a", initials: "MC", name: "Mira Chen" },

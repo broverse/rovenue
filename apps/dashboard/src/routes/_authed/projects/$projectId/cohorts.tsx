@@ -19,13 +19,10 @@ import {
 import {
   CohortDefinitionCard,
   CohortHero,
-  CountryBreakdown,
   KPI_VALUES,
-  LtvCurves,
   MockBadge,
   RetentionHeatmap,
   SavedCohortsRail,
-  SyncDestinations,
   w4Pct,
   type RetentionMetric,
 } from "../../../../components/cohorts";
@@ -254,28 +251,6 @@ function CohortsPage({ projectId }: { projectId: string }) {
                 error={retentionError}
                 onRetry={() => retention.refetch()}
               />
-
-              <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-                <div className="relative">
-                  <div className="absolute right-3 top-3 z-10">
-                    <MockBadge />
-                  </div>
-                  <LtvCurves />
-                </div>
-                <div className="relative">
-                  <div className="absolute right-3 top-3 z-10">
-                    <MockBadge />
-                  </div>
-                  <CountryBreakdown />
-                </div>
-              </div>
-
-              <div className="relative">
-                <div className="absolute right-3 top-3 z-10">
-                  <MockBadge />
-                </div>
-                <SyncDestinations />
-              </div>
             </>
           )}
         </div>

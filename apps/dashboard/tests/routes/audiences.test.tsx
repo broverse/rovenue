@@ -77,7 +77,9 @@ describe("<AudiencesPage />", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /audience actions/i }),
     );
-    fireEvent.click(screen.getByRole("button", { name: /^Delete$/i }));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: /^Delete$/i }),
+    );
 
     await waitFor(() =>
       expect(
