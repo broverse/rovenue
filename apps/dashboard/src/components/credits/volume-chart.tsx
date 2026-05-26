@@ -1,6 +1,5 @@
 import { useTranslation } from "react-i18next";
 import { formatCompact } from "./format";
-import { VOLUME_DAY_COUNT, VOLUME_SERIES } from "./mock-data";
 import type { VolumePoint } from "./types";
 
 type VolumeChartProps = {
@@ -23,8 +22,25 @@ const INNER_H = VH - PAD_T - PAD_B;
  */
 export function VolumeChart({ series }: VolumeChartProps = {}) {
   const { t } = useTranslation();
-  const data = series && series.length > 0 ? series : VOLUME_SERIES;
-  const dayCount = series ? data.length : VOLUME_DAY_COUNT;
+
+  if (!series || series.length === 0) {
+    return (
+      <section className="mb-4 rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
+        <header className="mb-3.5 flex flex-wrap items-start justify-between gap-2.5">
+          <div>
+            <h3 className="text-[14px] font-semibold">{t("credits.volume.title")}</h3>
+            <p className="mt-1 text-[11px] text-rv-mute-500">{t("credits.volume.subtitle")}</p>
+          </div>
+        </header>
+        <div className="flex h-[220px] items-center justify-center font-rv-mono text-[12px] text-rv-mute-500">
+          {t("credits.volume.empty")}
+        </div>
+      </section>
+    );
+  }
+
+  const data = series;
+  const dayCount = data.length;
   const maxV =
     Math.max(1, ...data.flatMap((p) => [p.issued, p.burned]));
   const x = (i: number) => PAD_L + (i / Math.max(1, dayCount - 1)) * INNER_W;

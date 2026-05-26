@@ -5,13 +5,11 @@ import { Plus } from "lucide-react";
 import { Button } from "../../../../ui/button";
 import {
   CreditFlow,
-  LEDGER_ENTRIES,
   LedgerTable,
   LiabilityGauge,
   PackageMix,
   TopBurners,
   VolumeChart,
-  WALLET_STATS,
   WalletStat,
   type CreditBurner,
   type CreditPack,
@@ -165,6 +163,8 @@ function toUiVolume(points: ReadonlyArray<CreditsVolumePoint>): ReadonlyArray<Vo
 // number formatted with one decimal place and the matching unit
 // label ("M", "k", or "").
 
+const PLACEHOLDER = { value: "—", unit: "" } as const;
+
 function formatMagnitude(n: number): { value: string; unit: string } {
   if (n >= 1_000_000)
     return { value: (n / 1_000_000).toFixed(2), unit: "M" };
@@ -189,9 +189,9 @@ function CreditsPage({ projectId }: { projectId: string }) {
   const [grantOpen, setGrantOpen] = useState(false);
   const { data } = useProjectCreditsRollup({ projectId });
 
-  // Derive UI shapes from the wire response, falling back to the
-  // design-spec mocks so the page stays populated while the rollup
-  // query is in flight.
+  // Derive UI shapes from the wire response. `ui` stays null until
+  // the rollup query resolves; cards render their own empty state
+  // when their prop is undefined.
   const ui = useMemo(() => {
     if (!data) return null;
     return {
@@ -204,7 +204,7 @@ function CreditsPage({ projectId }: { projectId: string }) {
   }, [data]);
 
   const visible = useMemo<ReadonlyArray<LedgerEntry>>(() => {
-    const entries = ui?.ledger ?? LEDGER_ENTRIES;
+    const entries = ui?.ledger ?? [];
     if (scope === "all") return entries;
     return entries.filter((entry) => entry.source === scope);
   }, [ui, scope]);
@@ -221,21 +221,15 @@ function CreditsPage({ projectId }: { projectId: string }) {
         ? `${((kpis.burned28d / kpis.issued28d) * 100).toFixed(1)}%`
         : "—";
     const avgPriceUsd =
-      kpis.issued28d > 0
-        ? Number(kpis.revenue28dUsd) / kpis.issued28d
-        : 0;
+      kpis.issued28d > 0 ? Number(kpis.revenue28dUsd) / kpis.issued28d : 0;
     return {
-      outstandingValue: outstanding.value,
-      outstandingUnit: outstanding.unit ? `${outstanding.unit} cr` : "credits",
-      issuedValue: issued.value,
-      issuedUnit: issued.unit,
-      burnedValue: burned.value,
-      burnedUnit: burned.unit,
+      outstanding: { ...outstanding, unit: outstanding.unit ? `${outstanding.unit} cr` : "credits" },
+      walletCount: kpis.outstandingWalletCount.toLocaleString(),
+      issued,
+      burned,
+      revenue,
       burnRate,
-      revenueValue: revenue.value,
-      revenueUnit: revenue.unit,
-      avgPrice:
-        avgPriceUsd > 0 ? `$${avgPriceUsd.toFixed(3)}` : "—",
+      avgPrice: avgPriceUsd > 0 ? `$${avgPriceUsd.toFixed(3)}` : "—",
       breakageValue:
         kpis.breakagePct !== null ? `${kpis.breakagePct.toFixed(1)}%` : "—",
     };
@@ -268,51 +262,48 @@ function CreditsPage({ projectId }: { projectId: string }) {
         <WalletStat
           accent
           label={t("credits.kpi.outstandingBalance")}
-          value={walletValues?.outstandingValue ?? WALLET_STATS.outstandingValue}
-          unit={walletValues?.outstandingUnit ?? WALLET_STATS.outstandingUnit}
-          description={t(WALLET_STATS.outstandingDescriptionKey, {
-            wallets: WALLET_STATS.outstandingDescriptionVars.wallets,
+          value={walletValues?.outstanding.value ?? PLACEHOLDER.value}
+          unit={walletValues?.outstanding.unit ?? PLACEHOLDER.unit}
+          description={t("credits.kpi.outstandingDescription", {
+            wallets: walletValues?.walletCount ?? "—",
           })}
           sparkSeed={1}
           sparkColor="var(--color-rv-accent-400)"
         />
         <WalletStat
           label={t("credits.kpi.issued28d")}
-          value={walletValues?.issuedValue ?? WALLET_STATS.issuedValue}
-          unit={walletValues?.issuedUnit ?? WALLET_STATS.issuedUnit}
-          description={t(WALLET_STATS.issuedDescriptionKey)}
+          value={walletValues?.issued.value ?? PLACEHOLDER.value}
+          unit={walletValues?.issued.unit ?? PLACEHOLDER.unit}
+          description={t("credits.kpi.issuedDelta")}
           descriptionTone="success"
           sparkSeed={3}
           sparkColor="var(--color-rv-success)"
         />
         <WalletStat
           label={t("credits.kpi.burned28d")}
-          value={walletValues?.burnedValue ?? WALLET_STATS.burnedValue}
-          unit={walletValues?.burnedUnit ?? WALLET_STATS.burnedUnit}
-          description={t(WALLET_STATS.burnedDescriptionKey, {
-            rate:
-              walletValues?.burnRate ??
-              WALLET_STATS.burnedDescriptionVars.rate,
+          value={walletValues?.burned.value ?? PLACEHOLDER.value}
+          unit={walletValues?.burned.unit ?? PLACEHOLDER.unit}
+          description={t("credits.kpi.burnedRate", {
+            rate: walletValues?.burnRate ?? "—",
           })}
           sparkSeed={5}
           sparkColor="var(--color-rv-violet)"
         />
         <WalletStat
           label={t("credits.kpi.revenue28d")}
-          value={walletValues?.revenueValue ?? WALLET_STATS.revenueValue}
-          unit={walletValues?.revenueUnit ?? WALLET_STATS.revenueUnit}
-          description={t(WALLET_STATS.revenueDescriptionKey, {
-            avg:
-              walletValues?.avgPrice ?? WALLET_STATS.revenueDescriptionVars.avg,
+          value={walletValues?.revenue.value ?? PLACEHOLDER.value}
+          unit={walletValues?.revenue.unit ?? PLACEHOLDER.unit}
+          description={t("credits.kpi.revenueAvg", {
+            avg: walletValues?.avgPrice ?? "—",
           })}
           sparkSeed={7}
           sparkColor="var(--color-rv-warning)"
         />
         <WalletStat
           label={t("credits.kpi.breakage")}
-          value={walletValues?.breakageValue ?? WALLET_STATS.breakageValue}
-          unit={walletValues?.breakageValue ? "" : WALLET_STATS.breakageUnit}
-          description={t(WALLET_STATS.breakageDescriptionKey)}
+          value={walletValues?.breakageValue ?? PLACEHOLDER.value}
+          unit=""
+          description={t("credits.kpi.breakageDescription")}
           sparkSeed={9}
           sparkColor="var(--color-rv-mute-600)"
         />
@@ -322,7 +313,12 @@ function CreditsPage({ projectId }: { projectId: string }) {
       <VolumeChart series={ui?.volume} />
 
       <div className="grid items-start gap-4 max-[1280px]:grid-cols-1 grid-cols-[minmax(0,1fr)_380px]">
-        <LedgerTable entries={visible} scope={scope} onScopeChange={setScope} />
+        <LedgerTable
+          entries={visible}
+          total={ui?.ledger.length ?? 0}
+          scope={scope}
+          onScopeChange={setScope}
+        />
         <div className="flex flex-col gap-4">
           <LiabilityGauge liability={ui?.response.liability} />
           <PackageMix packs={ui?.packs} />

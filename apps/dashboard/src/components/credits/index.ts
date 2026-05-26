@@ -8,14 +8,6 @@ export { TopBurners } from "./top-burners";
 export { VolumeChart } from "./volume-chart";
 export { WalletStat } from "./wallet-stat";
 export {
-  BURNERS,
-  LEDGER_ENTRIES,
-  PACKS,
-  VOLUME_DAY_COUNT,
-  VOLUME_SERIES,
-  WALLET_STATS,
-} from "./mock-data";
-export {
   formatCompact,
   formatCount,
   formatDelta,

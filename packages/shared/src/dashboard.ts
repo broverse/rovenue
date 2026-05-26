@@ -909,6 +909,8 @@ export type CreditLedgerType =
 export interface CreditsKpis {
   /** Outstanding credit liability — sum of latest balances per subscriber. */
   outstanding: number;
+  /** Distinct subscribers with a positive latest balance. */
+  outstandingWalletCount: number;
   issued28d: number;
   burned28d: number;
   /** Decimal-as-string USD revenue from CREDIT_PURCHASE events in window. */

@@ -1,5 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { PACKS } from "./mock-data";
 import type { CreditPack } from "./types";
 
 type PackageMixProps = {
@@ -13,7 +12,7 @@ type PackageMixProps = {
  */
 export function PackageMix({ packs }: PackageMixProps = {}) {
   const { t } = useTranslation();
-  const data = packs && packs.length > 0 ? packs : PACKS;
+  const data = packs ?? [];
   const totalSold = data.reduce((sum, pack) => sum + pack.sold, 0);
 
   return (
@@ -24,6 +23,11 @@ export function PackageMix({ packs }: PackageMixProps = {}) {
           {t("credits.packs.sold", { count: totalSold.toLocaleString() })}
         </span>
       </header>
+      {data.length === 0 ? (
+        <div className="py-6 text-center font-rv-mono text-[12px] text-rv-mute-500">
+          {t("credits.packs.empty")}
+        </div>
+      ) : (
       <div className="flex flex-col">
         {data.map((pack) => (
           <div
@@ -53,6 +57,7 @@ export function PackageMix({ packs }: PackageMixProps = {}) {
           </div>
         ))}
       </div>
+      )}
     </section>
   );
 }

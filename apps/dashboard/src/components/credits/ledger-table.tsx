@@ -5,11 +5,12 @@ import { Button } from "../../ui/button";
 import { formatCount, formatDelta, initials } from "./format";
 import { ScopeTabs } from "./scope-tabs";
 import { SourceBadge } from "./source-badge";
-import { LEDGER_ENTRIES } from "./mock-data";
 import type { LedgerEntry, LedgerScope } from "./types";
 
 type Props = {
   entries: ReadonlyArray<LedgerEntry>;
+  /** Unfiltered total — drives the "{visible} of {total}" header counter. */
+  total: number;
   scope: LedgerScope;
   onScopeChange: (next: LedgerScope) => void;
   onSelect?: (entryId: string) => void;
@@ -21,7 +22,7 @@ type Props = {
  * are colored green for positive, neutral for negative; balance trails
  * in muted text.
  */
-export function LedgerTable({ entries, scope, onScopeChange, onSelect }: Props) {
+export function LedgerTable({ entries, total, scope, onScopeChange, onSelect }: Props) {
   const { t } = useTranslation();
   return (
     <section className="overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">
@@ -30,7 +31,7 @@ export function LedgerTable({ entries, scope, onScopeChange, onSelect }: Props) 
         <span className="font-rv-mono text-[11px] text-rv-mute-500">
           {t("credits.ledger.count", {
             visible: entries.length,
-            total: LEDGER_ENTRIES.length,
+            total,
           })}
         </span>
         <div className="ml-auto">

@@ -303,6 +303,7 @@ export const handlers = [
           },
           kpis: {
             outstanding: 14_820_000,
+            outstandingWalletCount: 89_142,
             issued28d: 2_410_000,
             burned28d: 1_920_000,
             revenue28dUsd: "182400.00",

@@ -160,9 +160,16 @@ async function readPackages(
 // so the latest balance per subscriber is the trustworthy value
 // for the outstanding-liability gauge.
 
-async function readOutstandingBalance(projectId: string): Promise<number> {
-  const rows = await drizzle.db.execute<{ outstanding: string | null }>(sql`
-    SELECT COALESCE(SUM(balance), 0)::text AS outstanding
+async function readOutstandingBalance(
+  projectId: string,
+): Promise<{ outstanding: number; walletCount: number }> {
+  const rows = await drizzle.db.execute<{
+    outstanding: string | null;
+    wallet_count: string | null;
+  }>(sql`
+    SELECT
+      COALESCE(SUM(balance), 0)::text                AS outstanding,
+      COUNT(*) FILTER (WHERE balance > 0)::text      AS wallet_count
     FROM (
       SELECT DISTINCT ON ("subscriberId") balance
       FROM ${drizzle.schema.creditLedger}
@@ -170,7 +177,11 @@ async function readOutstandingBalance(projectId: string): Promise<number> {
       ORDER BY "subscriberId", "createdAt" DESC
     ) latest
   `);
-  return Number(rows.rows[0]?.outstanding ?? "0");
+  const r = rows.rows[0];
+  return {
+    outstanding: Number(r?.outstanding ?? "0"),
+    walletCount: Number(r?.wallet_count ?? "0"),
+  };
 }
 
 // =============================================================
@@ -182,7 +193,7 @@ async function readKpis(
   window: RollupWindow,
 ): Promise<CreditsKpis> {
   const cl = drizzle.schema.creditLedger;
-  const [outstanding, [windowAgg]] = await Promise.all([
+  const [{ outstanding, walletCount }, [windowAgg]] = await Promise.all([
     readOutstandingBalance(projectId),
     drizzle.db
       .select({
@@ -226,6 +237,7 @@ async function readKpis(
 
   return {
     outstanding,
+    outstandingWalletCount: walletCount,
     issued28d: issued,
     burned28d: burned,
     revenue28dUsd: revRows[0]?.sumUsd ?? "0",
