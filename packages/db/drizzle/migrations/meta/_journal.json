@@ -274,6 +274,13 @@
       "when": 1748217600000,
       "tag": "0038_add_member_role_variants",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1779800350431,
+      "tag": "0039_backfill_viewer_to_customer_support",
+      "breakpoints": true
     }
   ]
 }
