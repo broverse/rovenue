@@ -7,10 +7,11 @@ use crate::error::{RovenueError, RovenueResult};
 use crate::identity::IdentityManager;
 use crate::observer::{ChangeEvent, ObserverBus};
 use crate::time::Clock;
+use crate::transport::api::ApiEnvelope;
 use crate::transport::http_client::HttpClient;
 use crate::transport::types::HttpRequest;
 
-use super::api::wire_to_row;
+use super::api::map_to_rows;
 use super::types::{Entitlement, EntitlementsResponse};
 
 const RESOURCE: &str = "entitlements";
@@ -25,27 +26,12 @@ pub struct EntitlementReader {
 
 impl EntitlementReader {
     pub fn new(store: Arc<CacheStore>, identity: Arc<IdentityManager>) -> Self {
-        Self {
-            store,
-            identity,
-            http: None,
-            bus: None,
-            clock: None,
-        }
+        Self { store, identity, http: None, bus: None, clock: None }
     }
 
-    pub fn with_http(mut self, http: Arc<HttpClient>) -> Self {
-        self.http = Some(http);
-        self
-    }
-    pub fn with_observer_bus(mut self, bus: Arc<ObserverBus>) -> Self {
-        self.bus = Some(bus);
-        self
-    }
-    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
-        self.clock = Some(clock);
-        self
-    }
+    pub fn with_http(mut self, http: Arc<HttpClient>) -> Self { self.http = Some(http); self }
+    pub fn with_observer_bus(mut self, bus: Arc<ObserverBus>) -> Self { self.bus = Some(bus); self }
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self { self.clock = Some(clock); self }
 
     pub fn get(&self, id: &str) -> RovenueResult<Option<Entitlement>> {
         let scope = self.identity.current_user_scope();
@@ -56,11 +42,7 @@ impl EntitlementReader {
     pub fn list_all(&self) -> RovenueResult<Vec<Entitlement>> {
         let scope = self.identity.current_user_scope();
         let repo = EntitlementsRepo::new(&self.store);
-        Ok(repo
-            .list(&scope)?
-            .into_iter()
-            .map(row_to_entitlement)
-            .collect())
+        Ok(repo.list(&scope)?.into_iter().map(row_to_entitlement).collect())
     }
 
     pub fn refresh(&self) -> RovenueResult<()> {
@@ -76,29 +58,22 @@ impl EntitlementReader {
             req = req.etag(e);
         }
 
-        let resp = http.get_json::<EntitlementsResponse>(req)?;
+        let resp = http.get_json::<ApiEnvelope<EntitlementsResponse>>(req)?;
 
         if resp.status == 304 {
-            return Ok(()); // not modified — no observer fire
+            return Ok(());
         }
 
         let body = resp.body.ok_or(RovenueError::Internal)?;
         let now = clock.now_unix_ms();
-        let rows: Vec<_> = body
-            .entitlements
-            .into_iter()
-            .map(|w| wire_to_row(w, now))
-            .collect();
-
+        let rows = map_to_rows(body.data.entitlements, now);
         EntitlementsRepo::new(&self.store).upsert_many(&scope, &rows)?;
         if let Some(etag) = resp.etag {
             etag_repo.put(RESOURCE, &etag, now)?;
         }
-
         if let Some(bus) = &self.bus {
             bus.emit(ChangeEvent::EntitlementsChanged);
         }
-
         Ok(())
     }
 }
@@ -107,7 +82,8 @@ fn row_to_entitlement(r: crate::cache::entitlements::EntitlementRow) -> Entitlem
     Entitlement {
         id: r.entitlement_id,
         is_active: r.is_active,
-        product_id: r.product_id,
-        expires_at_ms: r.expires_at_ms,
+        product_identifier: r.product_identifier,
+        store: r.store,
+        expires_iso: r.expires_iso,
     }
 }
