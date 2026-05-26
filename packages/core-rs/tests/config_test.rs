@@ -10,7 +10,7 @@ fn config_validates_non_empty_api_key() {
 #[test]
 fn config_validates_https_base_url() {
     let err = Config::new("pk_test_abc".into(), "ftp://api".into()).unwrap_err();
-    assert!(matches!(err, RovenueError::Internal(_)));
+    assert!(matches!(err, RovenueError::Internal));
 }
 
 #[test]

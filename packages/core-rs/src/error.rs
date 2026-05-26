@@ -8,11 +8,11 @@ pub enum RovenueError {
     #[error("invalid api key")]
     InvalidApiKey,
 
-    #[error("server error: {status} {message}")]
-    ServerError { status: u16, message: String },
+    #[error("server error")]
+    ServerError,
 
-    #[error("internal: {0}")]
-    Internal(String),
+    #[error("internal error")]
+    Internal,
 }
 
 pub type RovenueResult<T> = std::result::Result<T, RovenueError>;

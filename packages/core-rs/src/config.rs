@@ -13,9 +13,7 @@ impl Config {
             return Err(RovenueError::InvalidApiKey);
         }
         if !(base_url.starts_with("https://") || base_url.starts_with("http://")) {
-            return Err(RovenueError::Internal(format!(
-                "base_url must be http(s)://, got {base_url}"
-            )));
+            return Err(RovenueError::Internal);
         }
         Ok(Self { api_key, base_url, debug: false })
     }
