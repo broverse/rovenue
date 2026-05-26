@@ -134,3 +134,20 @@ export const invitationDeliveryStatus = pgEnum("InvitationDeliveryStatus", [
   "COMPLAINED",
   "SUPPRESSED",
 ]);
+
+export const notificationChannel = pgEnum("NotificationChannel", [
+  "email",
+  "push",
+  "inapp",
+]);
+
+export const notificationDeliveryStatus = pgEnum("NotificationDeliveryStatus", [
+  "queued",
+  "sent",
+  "delivered",
+  "bounced",
+  "failed",
+  "suppressed",
+]);
+
+export const pushPlatform = pgEnum("PushPlatform", ["ios", "android"]);
