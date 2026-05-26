@@ -1,5 +1,11 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type {
+  AudienceRow,
   AudiencesListResponse,
   AuditLogsListResponse,
   LeaderboardResponse,
@@ -111,5 +117,84 @@ export function useProjectMembers(projectId: string) {
     queryFn: () =>
       api<ListMembersResponse>(`/dashboard/projects/${projectId}/members`),
     select: (res) => res.members,
+  });
+}
+
+// =============================================================
+// Audiences (single + mutations)
+// =============================================================
+
+export function useAudience(id: string | undefined) {
+  return useQuery({
+    queryKey: ["audience", id],
+    enabled: Boolean(id),
+    queryFn: () =>
+      api<{ audience: AudienceRow }>(
+        `/dashboard/audiences/${encodeURIComponent(id!)}`,
+      ),
+    select: (res) => res.audience,
+  });
+}
+
+export interface CreateAudienceVars {
+  projectId: string;
+  name: string;
+  description?: string;
+  rules: Record<string, unknown>;
+}
+
+export function useCreateAudience() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: CreateAudienceVars) =>
+      api<{ audience: AudienceRow }>("/dashboard/audiences", {
+        method: "POST",
+        body: JSON.stringify(vars),
+      }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["audiences", vars.projectId] });
+    },
+  });
+}
+
+export interface UpdateAudienceVars {
+  id: string;
+  projectId: string;
+  name?: string;
+  description?: string | null;
+  rules?: Record<string, unknown>;
+}
+
+export function useUpdateAudience() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, projectId: _p, ...patch }: UpdateAudienceVars) =>
+      api<{ audience: AudienceRow }>(
+        `/dashboard/audiences/${encodeURIComponent(id)}`,
+        { method: "PATCH", body: JSON.stringify(patch) },
+      ),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["audiences", vars.projectId] });
+      qc.invalidateQueries({ queryKey: ["audience", vars.id] });
+    },
+  });
+}
+
+export interface DeleteAudienceVars {
+  id: string;
+  projectId: string;
+}
+
+export function useDeleteAudience() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: DeleteAudienceVars) =>
+      api<{ deleted: true }>(
+        `/dashboard/audiences/${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["audiences", vars.projectId] });
+    },
   });
 }
