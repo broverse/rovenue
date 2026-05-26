@@ -230,3 +230,32 @@ export type BillingPendingAction = (typeof billingPendingAction)[number];
 
 export const billingMeterKey = ["mtr", "events", "sql_queries"] as const;
 export type BillingMeterKey = (typeof billingMeterKey)[number];
+
+export const funnelStatus = pgEnum("FunnelStatus", [
+  "draft",
+  "published",
+  "archived",
+]);
+
+export const funnelSessionState = pgEnum("FunnelSessionState", [
+  "in_progress",
+  "paid",
+  "completed",
+  "abandoned",
+]);
+
+export const funnelPurchaseStatus = pgEnum("FunnelPurchaseStatus", [
+  "pending",
+  "paid",
+  "failed",
+  "refunded",
+]);
+
+export const funnelTemplateScope = pgEnum("FunnelTemplateScope", [
+  "system",
+  "user",
+]);
+
+export const funnelDeferredPlatform = pgEnum("FunnelDeferredPlatform", [
+  "ios",
+]);
