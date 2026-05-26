@@ -1,3 +1,4 @@
+import { Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ChangeLog } from "./change-log";
 import { CodeSnippet } from "./code-snippet";
@@ -14,9 +15,10 @@ type Props = {
   flag: FeatureFlag;
   seed: number;
   onToggle: () => void;
+  onEdit?: () => void;
 };
 
-export function FlagDetail({ flag, seed, onToggle }: Props) {
+export function FlagDetail({ flag, seed, onToggle, onEdit }: Props) {
   const { t } = useTranslation();
 
   return (
@@ -45,13 +47,25 @@ export function FlagDetail({ flag, seed, onToggle }: Props) {
             ))}
           </div>
         </div>
-        <FlagToggle
-          enabled={flag.enabled}
-          killed={flag.killed}
-          onToggle={onToggle}
-          size="md"
-          className="mt-1"
-        />
+        <div className="mt-1 flex items-center gap-1.5">
+          {onEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              aria-label={t("featureFlags.detail.edit")}
+              title={t("featureFlags.detail.edit")}
+              className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:border-rv-accent-500/40 hover:text-foreground"
+            >
+              <Pencil size={12} />
+            </button>
+          )}
+          <FlagToggle
+            enabled={flag.enabled}
+            killed={flag.killed}
+            onToggle={onToggle}
+            size="md"
+          />
+        </div>
       </header>
 
       {flag.killed && (

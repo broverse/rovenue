@@ -13,7 +13,12 @@ export { ScopeTabs } from "./scope-tabs";
 export { TagPill, type TagPillTone } from "./tag-pill";
 export { TypeBadge } from "./type-badge";
 export { VariantSplit } from "./variant-split";
-export { evalSparkSeries, formatEvalCount, mapApiFeatureFlag } from "./format";
+export {
+  evalSparkSeries,
+  formatEvalCount,
+  mapApiFeatureFlag,
+  toDbEnv,
+} from "./format";
 export type {
   Condition,
   FeatureFlag,

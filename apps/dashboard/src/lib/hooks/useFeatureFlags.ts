@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
+  DashboardFlagEnv,
   DashboardFlagRule,
   DashboardFlagType,
   FeatureFlagDetailResponse,
@@ -8,13 +9,15 @@ import type {
 } from "@rovenue/shared";
 import { rpc, unwrap } from "../api";
 
-export function useFeatureFlags(projectId: string) {
+export function useFeatureFlags(projectId: string, env?: DashboardFlagEnv) {
   return useQuery({
-    queryKey: ["feature-flags", projectId],
+    queryKey: ["feature-flags", projectId, env ?? "ALL"],
     enabled: Boolean(projectId),
     queryFn: () =>
       unwrap<FeatureFlagListResponse>(
-        rpc.dashboard["feature-flags"].$get({ query: { projectId } }),
+        rpc.dashboard["feature-flags"].$get({
+          query: { projectId, ...(env ? { env } : {}) },
+        }),
       ),
     select: (res) => res.flags,
   });
@@ -79,6 +82,7 @@ export interface CreateFlagVars {
   projectId: string;
   key: string;
   type: DashboardFlagType;
+  env?: DashboardFlagEnv;
   defaultValue: unknown;
   rules?: DashboardFlagRule[];
   isEnabled?: boolean;
@@ -101,6 +105,7 @@ export function useCreateFeatureFlag() {
 export interface UpdateFlagVars {
   id: string;
   body: {
+    env?: DashboardFlagEnv;
     defaultValue?: unknown;
     rules?: DashboardFlagRule[];
     isEnabled?: boolean;

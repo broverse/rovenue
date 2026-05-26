@@ -1323,7 +1323,7 @@
       "newFlag": "New flag"
     },
     "kpi": {
-      "totalProd": "TOTAL FLAGS · PROD",
+      "totalProd": "TOTAL FLAGS · {{env}}",
       "totalProdBreakdown": "{{on}} on · {{off}} off · {{killed}} killed",
       "evaluations": "EVALUATIONS · 24H",
       "evaluationsLatency": "p99 12ms · p50 3.1ms",
@@ -1377,7 +1377,8 @@
       "sdkUsage": "SDK usage",
       "copyHint": "copy",
       "changelog": "Change log",
-      "eventCount": "{{count}} events"
+      "eventCount": "{{count}} events",
+      "edit": "Edit flag"
     },
     "rules": {
       "matchLabel": "If · match rule",
@@ -1400,22 +1401,22 @@
       "cancel": "Cancel",
       "enabledOn": "Enabled — rules evaluate",
       "enabledOff": "Disabled — default served",
-      "audienceEmpty": "No audiences yet",
       "sections": {
         "basics": "Basics",
-        "basicsSub": "Identify the flag and choose whether it ships in the on or off state.",
+        "basicsSub": "Identify the flag, pick its environment, and choose whether it ships in the on or off state.",
         "type": "Value & default",
         "typeSub": "The default value is served when no targeting rule matches.",
         "rules": "Targeting rules",
-        "rulesSub": "Each rule pins an audience to a value with an optional rollout percentage."
+        "rulesSub": "Conditions on the same rule are AND-combined. Empty rules match every subscriber."
       },
       "fields": {
         "key": "Key",
         "description": "Description",
         "enabled": "Enabled",
+        "env": "Environment",
         "type": "Type",
         "defaultValue": "Default value",
-        "audience": "Audience",
+        "conditions": "Conditions",
         "rollout": "Rollout",
         "ruleValue": "Value to serve"
       },
@@ -1423,8 +1424,9 @@
         "key": "Lowercase letters, digits, dashes or underscores. The SDK looks this up verbatim.",
         "description": "Optional context shown in the dashboard and audit log.",
         "enabled": "When off the flag short-circuits to the default value for every caller.",
+        "env": "Pick the environment this flag belongs to. The SDK fetches flags by env, so prod stays isolated from staging and dev.",
         "defaultValue": "Returned when no rule matches the request.",
-        "audience": "Subscribers in this audience get the value below.",
+        "conditions": "Subscribers must satisfy every condition for this rule to apply.",
         "rollout": "Fraction of matched subscribers that receive the value. Hashed deterministically on user id.",
         "ruleValue": "Value returned when this rule matches and falls within the rollout."
       },
@@ -1453,17 +1455,48 @@
         "ordinal": "Rule {{index}}",
         "add": "Add targeting rule",
         "remove": "Remove rule",
-        "noAudiences": "Create an audience first to add targeting rules.",
-        "createAudience": "Create an audience"
+        "legacyAudience": "linked to saved audience"
+      },
+      "conditions": {
+        "empty": "No conditions — rule matches every subscriber.",
+        "add": "Add condition",
+        "removeCondition": "Remove condition",
+        "types": {
+          "customAttribute": "Custom attribute",
+          "country": "Country",
+          "app": "App",
+          "appVersion": "App version",
+          "platform": "Platform",
+          "sdkVersion": "SDK version"
+        },
+        "ops": {
+          "in": "is one of",
+          "notIn": "is not one of",
+          "eq": "=",
+          "ne": "≠",
+          "gt": ">",
+          "gte": "≥",
+          "lt": "<",
+          "lte": "≤"
+        }
       },
       "errors": {
         "required": "Key is required.",
         "invalidKey": "Key must contain only letters, digits, dashes or underscores.",
         "invalidJsonDefault": "Default value is not valid JSON: {{error}}",
         "invalidJsonRule": "Rule {{index}}: value is not valid JSON ({{error}})",
-        "ruleAudienceRequired": "Rule {{index}}: pick an audience.",
         "unknown": "Something went wrong. Please try again."
       }
+    },
+    "edit": {
+      "title": "Edit feature flag",
+      "subtitle": "Update the default value, targeting rules, or description. The key and type are locked once a flag exists.",
+      "submit": "Save changes",
+      "submitting": "Saving…",
+      "loading": "Loading flag…",
+      "notFound": "We couldn't find that feature flag.",
+      "keyLocked": "Key is permanent — create a new flag to rename.",
+      "typeLocked": "Type is permanent — create a new flag to switch."
     }
   },
   "experiments": {

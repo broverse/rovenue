@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createFileRoute, useParams } from "@tanstack/react-router";
+import {
+  Link,
+  createFileRoute,
+  useNavigate,
+  useParams,
+} from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import {
   BookOpen,
@@ -7,26 +12,28 @@ import {
   Search,
   Upload,
 } from "lucide-react";
-import { Button } from "../../../../ui/button";
-import { Segmented } from "../../../../ui/segmented";
-import { StatCard } from "../../../../ui/stat-card";
-import { useProject } from "../../../../lib/hooks/useProject";
+import { Button, buttonVariants } from "../../../../../ui/button";
+import { Segmented } from "../../../../../ui/segmented";
+import { StatCard } from "../../../../../ui/stat-card";
+import { cn } from "../../../../../lib/cn";
+import { useProject } from "../../../../../lib/hooks/useProject";
 import {
   FlagDetail,
   FlagsList,
   ScopeTabs,
   mapApiFeatureFlag,
+  toDbEnv,
   type FeatureFlag,
   type FlagEnv,
   type FlagScope,
-} from "../../../../components/feature-flags";
+} from "../../../../../components/feature-flags";
 import {
   useFeatureFlags,
   useToggleFeatureFlag,
-} from "../../../../lib/hooks/useFeatureFlags";
+} from "../../../../../lib/hooks/useFeatureFlags";
 
 export const Route = createFileRoute(
-  "/_authed/projects/$projectId/feature-flags",
+  "/_authed/projects/$projectId/feature-flags/",
 )({
   component: FeatureFlagsRouteComponent,
 });
@@ -35,7 +42,7 @@ const ENV_OPTIONS: ReadonlyArray<FlagEnv> = ["prod", "staging", "development"];
 
 function FeatureFlagsRouteComponent() {
   const { projectId } = useParams({
-    from: "/_authed/projects/$projectId/feature-flags",
+    from: "/_authed/projects/$projectId/feature-flags/",
   });
   const { data: project } = useProject(projectId);
   if (!project) return null;
@@ -49,7 +56,7 @@ export function FeatureFlagsPage({ projectId }: { projectId: string }) {
   const [search, setSearch] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
-  const { data: apiFlags = [] } = useFeatureFlags(projectId);
+  const { data: apiFlags = [] } = useFeatureFlags(projectId, toDbEnv(env));
   const toggleFlagMutation = useToggleFeatureFlag();
 
   // Backend addresses flags by id; the UI works in `key` space.
@@ -120,13 +127,26 @@ export function FeatureFlagsPage({ projectId }: { projectId: string }) {
     return idx >= 0 ? idx : 0;
   }, [flags, selected]);
 
+  const navigate = useNavigate();
+
   const toggleFlag = (key: string) => {
     const id = keyToId.get(key);
     if (!id) return;
     toggleFlagMutation.mutate(id);
   };
 
-  const totalProd = flags.filter((f) => f.env === "prod").length;
+  const editFlag = (key: string) => {
+    const id = keyToId.get(key);
+    if (!id) return;
+    void navigate({
+      to: "/projects/$projectId/feature-flags/$flagId/edit",
+      params: { projectId, flagId: id },
+    });
+  };
+
+  // Apparent "total" mirrors the active env tab since the query is
+  // already env-scoped — no client-side env filter needed.
+  const totalProd = flags.length;
 
   // Press `/` to focus the search input.
   const searchRef = useRef<HTMLInputElement>(null);
@@ -170,16 +190,20 @@ export function FeatureFlagsPage({ projectId }: { projectId: string }) {
             <Upload size={13} />
             {t("featureFlags.actions.import")}
           </Button>
-          <Button variant="solid-primary" size="sm">
+          <Link
+            to="/projects/$projectId/feature-flags/new"
+            params={{ projectId }}
+            className={cn(buttonVariants({ variant: "solid-primary", size: "sm" }))}
+          >
             <Plus size={13} />
             {t("featureFlags.actions.newFlag")}
-          </Button>
+          </Link>
         </div>
       </header>
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
-          label={t("featureFlags.kpi.totalProd")}
+          label={t("featureFlags.kpi.totalProd", { env: env.toUpperCase() })}
           value={totalProd}
           description={t("featureFlags.kpi.totalProdBreakdown", {
             on: counts.on,
@@ -239,6 +263,7 @@ export function FeatureFlagsPage({ projectId }: { projectId: string }) {
             flag={selected}
             seed={selectedSeed}
             onToggle={() => toggleFlag(selected.key)}
+            onEdit={() => editFlag(selected.key)}
           />
         ) : (
           <div className="flex h-[200px] items-center justify-center rounded-lg border border-rv-divider bg-rv-c1 text-[13px] text-rv-mute-500">
