@@ -1,13 +1,4 @@
-import {
-  AlertOctagon,
-  Bell,
-  FileText,
-  Gauge,
-  Link2,
-  Receipt,
-  Shield,
-  User,
-} from "lucide-react";
+import { AlertOctagon, Bell, Gauge, Link2, Shield, User } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export type AccountTabId =
@@ -15,8 +6,6 @@ export type AccountTabId =
   | "security"
   | "notifications"
   | "connected"
-  | "billing"
-  | "invoices"
   | "usage";
 
 export type AccountSectionKey = "account" | "workspace";
@@ -58,14 +47,6 @@ export const ACCOUNT_NAV: ReadonlyArray<AccountNavSection> = [
   {
     key: "workspace",
     items: [
-      { id: "billing", path: "billing", labelKey: "account.nav.items.billing", icon: Receipt },
-      {
-        id: "invoices",
-        path: "invoices",
-        labelKey: "account.nav.items.invoices",
-        icon: FileText,
-        badge: "24",
-      },
       { id: "usage", path: "usage", labelKey: "account.nav.items.usage", icon: Gauge },
     ],
   },

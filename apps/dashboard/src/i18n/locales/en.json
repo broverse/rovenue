@@ -481,6 +481,9 @@
       "aria": "Settings sections",
       "general": "General",
       "sdk": "SDK & API keys",
+      "billing": "Billing",
+      "paymentMethods": "Payment methods",
+      "invoices": "Invoices",
       "members": "Members",
       "auditLogs": "Audit log"
     }

@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Menu } from "@base-ui-components/react/menu";
-import { FileText, Gauge, LogOut, Receipt, UserCog } from "lucide-react";
+import { Gauge, LogOut, UserCog } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { signOut, useSession } from "../../lib/auth";
 
@@ -13,15 +13,13 @@ const initialsFromName = (name?: string | null, email?: string | null) => {
 };
 
 type NavItem = {
-  to: "/account/profile" | "/account/billing" | "/account/invoices" | "/account/usage";
+  to: "/account/profile" | "/account/usage";
   labelKey: string;
   icon: LucideIcon;
 };
 
 const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { to: "/account/profile", labelKey: "account.nav.items.profile", icon: UserCog },
-  { to: "/account/billing", labelKey: "account.nav.items.billing", icon: Receipt },
-  { to: "/account/invoices", labelKey: "account.nav.items.invoices", icon: FileText },
   { to: "/account/usage", labelKey: "account.nav.items.usage", icon: Gauge },
 ];
 
