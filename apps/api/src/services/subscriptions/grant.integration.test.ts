@@ -77,6 +77,7 @@ async function seedProduct({
     type: "SUBSCRIPTION",
     storeIds: {},
     displayName: `Test Product ${RUN_ID}${suffix}`,
+    entitlementKeys: [`pro_${RUN_ID}${suffix}`],
   });
   return { id };
 }
