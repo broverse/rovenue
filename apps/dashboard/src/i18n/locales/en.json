@@ -1100,6 +1100,28 @@
       "exportCsv": "Export CSV",
       "newSubscription": "New subscription"
     },
+    "grant": {
+      "title": "Grant subscription",
+      "subtitle": "Manually provision a subscription for a subscriber.",
+      "submit": "Grant subscription",
+      "submitting": "Granting…",
+      "fields": {
+        "subscriber": "Subscriber",
+        "subscriberSearch": "Search by user ID…",
+        "subscriberPlaceholder": "— select subscriber —",
+        "product": "Product",
+        "productPlaceholder": "— select product —",
+        "duration": "Duration",
+        "durationAria": "Duration preset",
+        "expiresAt": "Expires at",
+        "note": "Note",
+        "notePlaceholder": "Why was this subscription granted?"
+      },
+      "errors": {
+        "unknown": "Something went wrong.",
+        "datePast": "Date must be in the future."
+      }
+    },
     "kpi": {
       "totalActive": "TOTAL ACTIVE",
       "totalActiveDelta": "▲ +248 · last 28d",
@@ -1353,6 +1375,80 @@
       "title": "Kill switch active",
       "body": "All rules bypassed. Returning <0>false</0> to every caller until re-enabled.",
       "reenable": "Re-enable"
+    },
+    "new": {
+      "back": "Back to feature flags",
+      "title": "New feature flag",
+      "subtitle": "Pick a stable key the SDK checks against. Rules evaluate top-down; the default value is returned when no rule matches.",
+      "submit": "Create flag",
+      "submitting": "Creating…",
+      "cancel": "Cancel",
+      "enabledOn": "Enabled — rules evaluate",
+      "enabledOff": "Disabled — default served",
+      "audienceEmpty": "No audiences yet",
+      "sections": {
+        "basics": "Basics",
+        "basicsSub": "Identify the flag and choose whether it ships in the on or off state.",
+        "type": "Value & default",
+        "typeSub": "The default value is served when no targeting rule matches.",
+        "rules": "Targeting rules",
+        "rulesSub": "Each rule pins an audience to a value with an optional rollout percentage."
+      },
+      "fields": {
+        "key": "Key",
+        "description": "Description",
+        "enabled": "Enabled",
+        "type": "Type",
+        "defaultValue": "Default value",
+        "audience": "Audience",
+        "rollout": "Rollout",
+        "ruleValue": "Value to serve"
+      },
+      "descriptions": {
+        "key": "Lowercase letters, digits, dashes or underscores. The SDK looks this up verbatim.",
+        "description": "Optional context shown in the dashboard and audit log.",
+        "enabled": "When off the flag short-circuits to the default value for every caller.",
+        "defaultValue": "Returned when no rule matches the request.",
+        "audience": "Subscribers in this audience get the value below.",
+        "rollout": "Fraction of matched subscribers that receive the value. Hashed deterministically on user id.",
+        "ruleValue": "Value returned when this rule matches and falls within the rollout."
+      },
+      "placeholders": {
+        "description": "What does this flag control, who owns it, when can it be retired…"
+      },
+      "types": {
+        "boolean": "Boolean",
+        "string": "String",
+        "number": "Number",
+        "json": "JSON"
+      },
+      "typeDescriptions": {
+        "boolean": "true / false. Best for kill switches and gated features.",
+        "string": "Arbitrary string — variant ids, copy keys, layout names.",
+        "number": "Numeric value — limits, thresholds, sample rates.",
+        "json": "Structured value — config objects, nested settings."
+      },
+      "json": {
+        "valid": "valid json",
+        "invalid": "invalid json",
+        "format": "Format"
+      },
+      "rules": {
+        "count": "{{count}} rule(s)",
+        "ordinal": "Rule {{index}}",
+        "add": "Add targeting rule",
+        "remove": "Remove rule",
+        "noAudiences": "Create an audience first to add targeting rules.",
+        "createAudience": "Create an audience"
+      },
+      "errors": {
+        "required": "Key is required.",
+        "invalidKey": "Key must contain only letters, digits, dashes or underscores.",
+        "invalidJsonDefault": "Default value is not valid JSON: {{error}}",
+        "invalidJsonRule": "Rule {{index}}: value is not valid JSON ({{error}})",
+        "ruleAudienceRequired": "Rule {{index}}: pick an audience.",
+        "unknown": "Something went wrong. Please try again."
+      }
     }
   },
   "experiments": {
@@ -1504,11 +1600,16 @@
     },
     "edit": {
       "title": "Edit experiment",
-      "subtitle": "Tweak targeting, variants and traffic weights. Editable while the experiment is still a draft.",
+      "subtitle": "Tweak targeting, variants and traffic weights. Editable while the experiment is still a draft — once live, use the lifecycle controls.",
       "submit": "Save changes",
       "submitting": "Saving…",
       "backToList": "Back to experiments",
-      "notFound": "Experiment not found, or you don't have access to it."
+      "notFound": "Experiment not found, or you don't have access to it.",
+      "readOnlyBanner": {
+        "running": "This experiment is live. Configuration is locked — pause or complete it from the lifecycle bar before editing.",
+        "paused": "This experiment is paused. Resume it to keep collecting data, or complete it to lock the result. Configuration is read-only.",
+        "completed": "This experiment is completed. Configuration is locked — duplicate it to run another iteration."
+      }
     },
     "list": {
       "scopeAriaLabel": "Experiment scope",
@@ -1534,7 +1635,25 @@
       "running": "Running",
       "completed": "Completed",
       "stopped": "Stopped",
-      "draft": "Draft"
+      "draft": "Draft",
+      "paused": "Paused"
+    },
+    "lifecycle": {
+      "indicator": {
+        "draft": "Draft",
+        "running": "Live",
+        "paused": "Paused",
+        "completed": "Completed"
+      },
+      "activate": "Activate",
+      "pause": "Pause",
+      "resume": "Resume",
+      "complete": "Complete",
+      "stopConfirm": "Complete experiment \"{{name}}\"? Traffic will stop and the result will be locked in.",
+      "startFailed": "Could not start the experiment.",
+      "pauseFailed": "Could not pause the experiment.",
+      "resumeFailed": "Could not resume the experiment.",
+      "stopFailed": "Could not complete the experiment."
     },
     "groups": {
       "pricing": "Pricing",
