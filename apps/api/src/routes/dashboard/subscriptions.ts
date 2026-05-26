@@ -3,9 +3,11 @@ import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { MemberRole } from "@rovenue/db";
+import { grantSubscriptionRequestSchema } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
+import { grantComp } from "../../services/subscriptions/grant";
 import {
   __subscriptionsConstants,
   decodeSubsCursor,
@@ -150,5 +152,23 @@ export const subscriptionsRoute = new Hono()
       const { limit } = c.req.valid("query");
       const payload = await readBillingIssues(projectId, limit);
       return c.json(ok(payload));
+    },
+  )
+  .post(
+    "/",
+    zValidator("json", grantSubscriptionRequestSchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      if (!projectId) {
+        throw new HTTPException(400, { message: "Missing projectId" });
+      }
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+      const purchase = await grantComp({
+        projectId,
+        actorUserId: user.id,
+        input: c.req.valid("json"),
+      });
+      return c.json(ok(purchase));
     },
   );
