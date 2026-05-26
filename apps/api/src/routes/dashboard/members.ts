@@ -28,7 +28,6 @@ const memberRoleValues = [
   MemberRole.DEVELOPER,
   MemberRole.GROWTH,
   MemberRole.CUSTOMER_SUPPORT,
-  MemberRole.VIEWER,
 ] as const;
 
 export const addMemberBodySchema = z.object({

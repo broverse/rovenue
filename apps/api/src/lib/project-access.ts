@@ -15,22 +15,21 @@ export interface ProjectMembership {
   role: MemberRole;
 }
 
-// Numeric ordering: higher = more privileged. OWNER ≥ ADMIN ≥ {DEVELOPER,GROWTH,CUSTOMER_SUPPORT,VIEWER}.
+// Numeric ordering: higher = more privileged. OWNER ≥ ADMIN ≥ {DEVELOPER,GROWTH,CUSTOMER_SUPPORT}.
 // Fine-grained capability gates are introduced in Task 2.x; for now the three
-// new roles are treated as equivalent to VIEWER for backwards compatibility.
+// non-admin roles are treated as equivalent for backwards compatibility.
 const ROLE_RANK: Record<MemberRole, number> = {
   [MemberRole.OWNER]: 3,
   [MemberRole.ADMIN]: 2,
   [MemberRole.DEVELOPER]: 1,
   [MemberRole.GROWTH]: 1,
   [MemberRole.CUSTOMER_SUPPORT]: 1,
-  [MemberRole.VIEWER]: 1,
 };
 
 export async function assertProjectAccess(
   projectId: string,
   userId: string,
-  minimumRole: MemberRole = MemberRole.VIEWER,
+  minimumRole: MemberRole = MemberRole.CUSTOMER_SUPPORT,
 ): Promise<ProjectMembership> {
   const membership = await drizzle.projectRepo.findMembership(
     drizzle.db,

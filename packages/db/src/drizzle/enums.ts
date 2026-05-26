@@ -14,7 +14,6 @@ export const memberRole = pgEnum("MemberRole", [
   "DEVELOPER",
   "GROWTH",
   "CUSTOMER_SUPPORT",
-  "VIEWER", // deprecated; removed in 0040
 ]);
 
 export const environment = pgEnum("Environment", [
