@@ -12,6 +12,8 @@ import { creditsRoute } from "./credits";
 import { eventsStreamRoute } from "./events-stream";
 import { experimentsRoute } from "./experiments";
 import { featureFlagsRoute } from "./feature-flags";
+import { funnelTemplatesRoute } from "./funnel-templates";
+import { funnelsRoute } from "./funnels";
 import { leaderboardsRoute } from "./leaderboards";
 import { meRoute } from "./me";
 import { invitationsRoute } from "./invitations";
@@ -51,6 +53,7 @@ export const dashboardRoute = new Hono()
   .route("/audit-logs", auditLogsRoute)
   .route("/experiments", experimentsRoute)
   .route("/feature-flags", featureFlagsRoute)
+  .route("/funnel-templates", funnelTemplatesRoute)
   .route("/me", meRoute)
   .route("/notifications", notificationsRoute)
   .route("/push-devices", pushDevicesRoute)
@@ -62,6 +65,7 @@ export const dashboardRoute = new Hono()
   .route("/projects/:projectId/credentials", credentialsRoute)
   .route("/projects/:projectId/credits", creditsRoute)
   .route("/projects/:projectId/events", eventsStreamRoute)
+  .route("/projects/:projectId/funnels", funnelsRoute)
   .route("/projects/:projectId/leaderboards", leaderboardsRoute)
   .route("/projects/:projectId/invitations", invitationsRoute)
   .route("/projects/:projectId/members", membersRoute)

@@ -64,3 +64,11 @@ export * as notificationDeliveryRepo from "./repositories/notification-deliverie
 export * as pushDeviceRepo from "./repositories/push-devices";
 export * as notificationSuppressionRepo from "./repositories/notification-suppression";
 export * as userKnownDeviceRepo from "./repositories/user-known-devices";
+export * as funnelRepo from "./repositories/funnels";
+export * as funnelVersionRepo from "./repositories/funnel-versions";
+export * as funnelTemplateRepo from "./repositories/funnel-templates";
+export * as funnelSessionRepo from "./repositories/funnel-sessions";
+export * as funnelAnswerRepo from "./repositories/funnel-answers";
+export * as funnelPurchaseRepo from "./repositories/funnel-purchases";
+export * as funnelClaimTokenRepo from "./repositories/funnel-claim-tokens";
+export * as funnelDeferredClaimRepo from "./repositories/funnel-deferred-claims";

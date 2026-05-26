@@ -127,6 +127,7 @@ export const aggregateTypeEnum = pgEnum("aggregate_type", [
   "CREDIT_LEDGER",
   "BILLING",
   "NOTIFICATION",
+  "FUNNEL",
 ]);
 
 export const invitationDeliveryStatus = pgEnum("InvitationDeliveryStatus", [
@@ -257,3 +258,36 @@ export const notificationSuppressionReason = pgEnum(
   "NotificationSuppressionReason",
   ["hard_bounce", "complaint", "manual"],
 );
+
+// =============================================================
+// Funnels pgEnums
+// =============================================================
+
+export const funnelStatus = pgEnum("FunnelStatus", [
+  "draft",
+  "published",
+  "archived",
+]);
+
+export const funnelSessionState = pgEnum("FunnelSessionState", [
+  "in_progress",
+  "paid",
+  "completed",
+  "abandoned",
+]);
+
+export const funnelPurchaseStatus = pgEnum("FunnelPurchaseStatus", [
+  "pending",
+  "paid",
+  "failed",
+  "refunded",
+]);
+
+export const funnelTemplateScope = pgEnum("FunnelTemplateScope", [
+  "system",
+  "user",
+]);
+
+export const funnelDeferredPlatform = pgEnum("FunnelDeferredPlatform", [
+  "ios",
+]);

@@ -31,6 +31,11 @@ import {
   experimentType,
   featureFlagEnv,
   featureFlagType,
+  funnelDeferredPlatform,
+  funnelPurchaseStatus,
+  funnelSessionState,
+  funnelStatus,
+  funnelTemplateScope,
   invitationDeliveryStatus,
   memberRole,
   notificationChannel,
@@ -1661,6 +1666,11 @@ export {
   experimentType,
   featureFlagEnv,
   featureFlagType,
+  funnelDeferredPlatform,
+  funnelPurchaseStatus,
+  funnelSessionState,
+  funnelStatus,
+  funnelTemplateScope,
   invitationDeliveryStatus,
   memberRole,
   notificationChannel,
@@ -1856,3 +1866,245 @@ export type NewBillingDunningStateRow = typeof billingDunningState.$inferInsert;
 export type BillingTierLimits = typeof billingTierLimits.$inferSelect;
 export type UsageSnapshot = typeof usageSnapshots.$inferSelect;
 export type NewUsageSnapshot = typeof usageSnapshots.$inferInsert;
+
+// =============================================================
+// Funnels — onboarding builder (sub-project A)
+// =============================================================
+
+export const funnels = pgTable(
+  "funnels",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    status: funnelStatus("status").notNull().default("draft"),
+    currentVersionId: text("current_version_id"),
+    draftPagesJson: jsonb("draft_pages_json").notNull().default(sql`'[]'::jsonb`),
+    draftThemeJson: jsonb("draft_theme_json").notNull().default(sql`'{}'::jsonb`),
+    draftSettingsJson: jsonb("draft_settings_json").notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    projectStatusIdx: index("funnels_project_status_idx").on(t.projectId, t.status),
+    slugUnique: uniqueIndex("funnels_project_slug_unique").on(t.projectId, t.slug),
+  }),
+);
+
+export const funnelVersions = pgTable(
+  "funnel_versions",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    funnelId: text("funnel_id")
+      .notNull()
+      .references(() => funnels.id, { onDelete: "cascade" }),
+    versionNo: integer("version_no").notNull(),
+    pagesJson: jsonb("pages_json").notNull(),
+    themeJson: jsonb("theme_json").notNull(),
+    settingsJson: jsonb("settings_json").notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
+    publishedBy: text("published_by").references(() => user.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    funnelVersionUnique: uniqueIndex("funnel_versions_funnel_version_unique").on(
+      t.funnelId,
+      t.versionNo,
+    ),
+  }),
+);
+
+export const funnelTemplates = pgTable(
+  "funnel_templates",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    name: text("name").notNull(),
+    category: text("category").notNull(),
+    description: text("description"),
+    previewImageUrl: text("preview_image_url"),
+    pagesJson: jsonb("pages_json").notNull(),
+    themeJson: jsonb("theme_json").notNull(),
+    settingsJson: jsonb("settings_json").notNull(),
+    scope: funnelTemplateScope("scope").notNull().default("system"),
+    projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    scopeCategoryIdx: index("funnel_templates_scope_category_idx").on(t.scope, t.category),
+    projectIdx: index("funnel_templates_project_idx").on(t.projectId),
+  }),
+);
+
+export type Funnel = typeof funnels.$inferSelect;
+export type NewFunnel = typeof funnels.$inferInsert;
+export type FunnelVersion = typeof funnelVersions.$inferSelect;
+export type NewFunnelVersion = typeof funnelVersions.$inferInsert;
+export type FunnelTemplate = typeof funnelTemplates.$inferSelect;
+export type NewFunnelTemplate = typeof funnelTemplates.$inferInsert;
+
+export const funnelSessions = pgTable(
+  "funnel_sessions",
+  {
+    // `.primaryKey()` removed — declarative range partitioning on
+    // started_at requires the partition column in every UNIQUE /
+    // PRIMARY KEY. Table-level pk below is (id, startedAt). Other
+    // funnel_* tables therefore reference funnel_sessions only via
+    // session_id index, not a real FK (PG can't FK partitioned
+    // tables without including the partition key).
+    id: text("id")
+      .notNull()
+      .$defaultFn(() => createId()),
+    funnelId: text("funnel_id")
+      .notNull()
+      .references(() => funnels.id, { onDelete: "cascade" }),
+    funnelVersionId: text("funnel_version_id")
+      .notNull()
+      .references(() => funnelVersions.id, { onDelete: "restrict" }),
+    projectId: text("project_id").notNull(),
+    anonId: text("anon_id")
+      .notNull()
+      .$defaultFn(() => createId()),
+    state: funnelSessionState("state").notNull().default("in_progress"),
+    currentPageId: text("current_page_id"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    lastActivityAt: timestamp("last_activity_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    utmJson: jsonb("utm_json").notNull().default(sql`'{}'::jsonb`),
+    ipHash: text("ip_hash"),
+    userAgent: text("user_agent"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.id, t.startedAt] }),
+    funnelStartedIdx: index("funnel_sessions_funnel_started_idx").on(t.funnelId, t.startedAt),
+    stateActivityIdx: index("funnel_sessions_state_activity_idx").on(t.state, t.lastActivityAt),
+    projectStartedIdx: index("funnel_sessions_project_started_idx").on(t.projectId, t.startedAt),
+  }),
+);
+
+export const funnelAnswers = pgTable(
+  "funnel_answers",
+  {
+    // Partitioned by answered_at; composite PK (id, answeredAt).
+    // session_id is a plain text column (no FK) — funnel_sessions
+    // is partitioned and PG won't allow FKs into it.
+    id: text("id")
+      .notNull()
+      .$defaultFn(() => createId()),
+    sessionId: text("session_id").notNull(),
+    pageId: text("page_id").notNull(),
+    questionId: text("question_id").notNull(),
+    answerJson: jsonb("answer_json").notNull(),
+    answeredAt: timestamp("answered_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.id, t.answeredAt] }),
+    // (session_id, question_id) was UNIQUE in the original design
+    // but native partitioning forbids UNIQUEs that omit the partition
+    // key. Dedup is enforced at the repository layer.
+    sessionQuestionIdx: index("funnel_answers_session_question_idx").on(
+      t.sessionId,
+      t.questionId,
+    ),
+    sessionIdx: index("funnel_answers_session_idx").on(t.sessionId),
+  }),
+);
+
+export const funnelPurchases = pgTable(
+  "funnel_purchases",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    // session_id intentionally has no FK — funnel_sessions is
+    // partitioned. .unique() still enforces 1:1 at this table.
+    sessionId: text("session_id").notNull().unique(),
+    projectId: text("project_id").notNull(),
+    productId: text("product_id"),
+    stripeCheckoutSessionId: text("stripe_checkout_session_id"),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    amountCents: integer("amount_cents"),
+    currency: text("currency"),
+    status: funnelPurchaseStatus("status").notNull().default("pending"),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    rawPayload: jsonb("raw_payload").notNull().default(sql`'{}'::jsonb`),
+  },
+  (t) => ({
+    projectStatusIdx: index("funnel_purchases_project_status_idx").on(
+      t.projectId,
+      t.status,
+      t.paidAt,
+    ),
+    stripeSubIdx: index("funnel_purchases_stripe_sub_idx").on(t.stripeSubscriptionId),
+  }),
+);
+
+export const funnelClaimTokens = pgTable(
+  "funnel_claim_tokens",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    tokenHash: text("token_hash").notNull().unique(),
+    // session_id intentionally has no FK — funnel_sessions is
+    // partitioned. .unique() still enforces 1:1 at this table.
+    sessionId: text("session_id").notNull().unique(),
+    projectId: text("project_id").notNull(),
+    emailHash: text("email_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    claimedBySubscriberId: text("claimed_by_subscriber_id"),
+  },
+  (t) => ({
+    emailIdx: index("funnel_claim_tokens_email_idx").on(t.emailHash),
+    expiresIdx: index("funnel_claim_tokens_expires_idx").on(t.expiresAt),
+  }),
+);
+
+export const funnelDeferredClaims = pgTable(
+  "funnel_deferred_claims",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    tokenId: text("token_id")
+      .notNull()
+      .references(() => funnelClaimTokens.id, { onDelete: "cascade" }),
+    platform: funnelDeferredPlatform("platform").notNull(),
+    ipHash: text("ip_hash").notNull(),
+    userAgent: text("user_agent").notNull(),
+    locale: text("locale").notNull(),
+    timezone: text("timezone").notNull(),
+    screenDims: text("screen_dims").notNull(),
+    deviceModel: text("device_model"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    matchedAt: timestamp("matched_at", { withTimezone: true }),
+    matchedInstallId: text("matched_install_id"),
+  },
+  (t) => ({
+    ipExpiresIdx: index("funnel_deferred_claims_ip_expires_idx").on(t.ipHash, t.expiresAt),
+    tokenIdx: index("funnel_deferred_claims_token_idx").on(t.tokenId),
+  }),
+);
+
+export type FunnelSession = typeof funnelSessions.$inferSelect;
+export type NewFunnelSession = typeof funnelSessions.$inferInsert;
+export type FunnelAnswer = typeof funnelAnswers.$inferSelect;
+export type NewFunnelAnswer = typeof funnelAnswers.$inferInsert;
+export type FunnelPurchase = typeof funnelPurchases.$inferSelect;
+export type NewFunnelPurchase = typeof funnelPurchases.$inferInsert;
+export type FunnelClaimToken = typeof funnelClaimTokens.$inferSelect;
+export type NewFunnelClaimToken = typeof funnelClaimTokens.$inferInsert;
+export type FunnelDeferredClaim = typeof funnelDeferredClaims.$inferSelect;
+export type NewFunnelDeferredClaim = typeof funnelDeferredClaims.$inferInsert;

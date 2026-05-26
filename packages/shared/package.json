@@ -21,6 +21,10 @@
     "./notifications": {
       "types": "./src/notifications/index.ts",
       "default": "./src/notifications/index.ts"
+    },
+    "./funnel": {
+      "types": "./src/funnel/index.ts",
+      "default": "./src/funnel/index.ts"
     }
   },
   "scripts": {

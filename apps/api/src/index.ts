@@ -37,6 +37,18 @@ import {
   getScheduledActionsWorker,
 } from "./workers/scheduled-actions";
 import { createEmailWorker } from "./workers/email";
+import {
+  createFunnelAbandonerWorker,
+  scheduleFunnelAbandoner,
+} from "./workers/funnel-abandoner";
+import {
+  createFunnelTokenExpirerWorker,
+  scheduleFunnelTokenExpirer,
+} from "./workers/funnel-token-expirer";
+import {
+  createFunnelDeferredCleanupWorker,
+  scheduleFunnelDeferredCleanup,
+} from "./workers/funnel-deferred-cleanup";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -107,6 +119,33 @@ ensureScheduledActionsRepeatable().catch((err: unknown) => {
 
 // Outgoing transactional email (invitations today; reusable for more flows).
 createEmailWorker();
+
+// Funnel session abandoner — hourly sweep that flips in_progress
+// sessions with lastActivityAt older than 24h to 'abandoned'.
+createFunnelAbandonerWorker();
+scheduleFunnelAbandoner().catch((err: unknown) => {
+  logger.error("failed to schedule funnel abandoner", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Funnel claim-token expirer — daily 03:00 UTC sweep that removes
+// claim-token rows whose expires_at has passed.
+createFunnelTokenExpirerWorker();
+scheduleFunnelTokenExpirer().catch((err: unknown) => {
+  logger.error("failed to schedule funnel token expirer", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Funnel deferred-claim cleanup — every 5 minutes, prunes
+// fingerprint-deferred rows past their expires_at.
+createFunnelDeferredCleanupWorker();
+scheduleFunnelDeferredCleanup().catch((err: unknown) => {
+  logger.error("failed to schedule funnel deferred cleanup", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
 
 // Shutdown handler — signals the outbox dispatcher loop to exit
 // so the Kafka producer disconnects cleanly before the process
