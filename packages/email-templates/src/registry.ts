@@ -3,6 +3,7 @@ import { createElement, type ReactElement } from "react";
 import type { TFunction } from "i18next";
 import { getT } from "./i18n";
 import { template as anomalyDetected } from "./revenue/anomaly-detected";
+import { template as digestDaily } from "./revenue/digest-daily";
 
 export interface TemplateModule<Ctx> {
   Component: (props: { ctx: Ctx; t: TFunction }) => ReactElement;
@@ -15,6 +16,7 @@ export interface TemplateModule<Ctx> {
 // by the event catalog's contextSchema (see packages/shared/notifications).
 const TEMPLATES: Record<string, TemplateModule<any>> = {
   "revenue.anomaly.detected": anomalyDetected,
+  "revenue.digest.daily": digestDaily,
   // More templates land in Phase 6.
 };
 
