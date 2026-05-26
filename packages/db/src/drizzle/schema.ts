@@ -21,6 +21,7 @@ import {
   environment,
   experimentStatus,
   experimentType,
+  featureFlagEnv,
   featureFlagType,
   memberRole,
   outgoingWebhookStatus,
@@ -827,6 +828,7 @@ export const featureFlags = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     key: text("key").notNull(),
     type: featureFlagType("type").notNull(),
+    env: featureFlagEnv("env").notNull().default("PROD"),
     defaultValue: jsonb("defaultValue").notNull(),
     rules: jsonb("rules").notNull().default(sql`'[]'::jsonb`),
     isEnabled: boolean("isEnabled").notNull().default(true),
@@ -839,13 +841,17 @@ export const featureFlags = pgTable(
       .defaultNow(),
   },
   (t) => ({
-    projectIdKeyKey: uniqueIndex("feature_flags_projectId_key_key").on(
+    // (projectId, env, key) is unique so the same key can carry a
+    // different config per environment — the SDK looks up flags by
+    // (projectId, env, key), never just (projectId, key).
+    projectIdEnvKeyKey: uniqueIndex("feature_flags_projectId_env_key_key").on(
       t.projectId,
+      t.env,
       t.key,
     ),
-    projectIdIsEnabledIdx: index(
-      "feature_flags_projectId_isEnabled_idx",
-    ).on(t.projectId, t.isEnabled),
+    projectIdEnvIsEnabledIdx: index(
+      "feature_flags_projectId_env_isEnabled_idx",
+    ).on(t.projectId, t.env, t.isEnabled),
   }),
 );
 
@@ -1234,6 +1240,7 @@ export {
   environment,
   experimentStatus,
   experimentType,
+  featureFlagEnv,
   featureFlagType,
   memberRole,
   outgoingWebhookStatus,

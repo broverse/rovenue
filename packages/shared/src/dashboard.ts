@@ -378,6 +378,14 @@ export interface DuplicateExperimentResponse {
 
 export type DashboardFlagType = "BOOLEAN" | "STRING" | "NUMBER" | "JSON";
 
+export type DashboardFlagEnv = "PROD" | "STAGING" | "DEVELOPMENT";
+
+export const DASHBOARD_FLAG_ENVS: ReadonlyArray<DashboardFlagEnv> = [
+  "PROD",
+  "STAGING",
+  "DEVELOPMENT",
+];
+
 export interface DashboardFlagRule {
   /**
    * Reference to a pre-built audience. Optional now that rules
@@ -399,6 +407,7 @@ export interface FeatureFlagListItem {
   projectId: string;
   key: string;
   type: DashboardFlagType;
+  env: DashboardFlagEnv;
   defaultValue: unknown;
   rules: DashboardFlagRule[];
   isEnabled: boolean;

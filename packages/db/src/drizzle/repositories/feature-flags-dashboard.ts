@@ -1,10 +1,11 @@
-import { asc, count, eq } from "drizzle-orm";
+import { and, asc, count, eq } from "drizzle-orm";
 import type { Db } from "../client";
 import { featureFlags, type FeatureFlag } from "../schema";
-import { featureFlagType } from "../enums";
+import { featureFlagEnv, featureFlagType } from "../enums";
 
 type DbOrTx = Db;
 type FeatureFlagType = (typeof featureFlagType.enumValues)[number];
+type FeatureFlagEnv = (typeof featureFlagEnv.enumValues)[number];
 
 export async function countFeatureFlags(
   db: Db,
@@ -28,11 +29,16 @@ export async function countFeatureFlags(
 export async function listFeatureFlags(
   db: Db,
   projectId: string,
+  env?: FeatureFlagEnv,
 ): Promise<FeatureFlag[]> {
   return db
     .select()
     .from(featureFlags)
-    .where(eq(featureFlags.projectId, projectId))
+    .where(
+      env !== undefined
+        ? and(eq(featureFlags.projectId, projectId), eq(featureFlags.env, env))
+        : eq(featureFlags.projectId, projectId),
+    )
     .orderBy(asc(featureFlags.key));
 }
 
@@ -56,6 +62,7 @@ export interface CreateFeatureFlagInput {
   projectId: string;
   key: string;
   type: FeatureFlagType;
+  env?: FeatureFlagEnv;
   defaultValue: unknown;
   rules: unknown;
   isEnabled?: boolean;
@@ -72,6 +79,7 @@ export async function createFeatureFlag(
       projectId: input.projectId,
       key: input.key,
       type: input.type,
+      env: input.env ?? "PROD",
       defaultValue:
         input.defaultValue as typeof featureFlags.$inferInsert.defaultValue,
       rules: input.rules as typeof featureFlags.$inferInsert.rules,
@@ -86,6 +94,7 @@ export async function createFeatureFlag(
 
 export interface UpdateFeatureFlagInput {
   key?: string;
+  env?: FeatureFlagEnv;
   defaultValue?: unknown;
   rules?: unknown;
   isEnabled?: boolean;
@@ -99,6 +108,7 @@ export async function updateFeatureFlag(
 ): Promise<FeatureFlag | null> {
   const data: Partial<typeof featureFlags.$inferInsert> = {};
   if (patch.key !== undefined) data.key = patch.key;
+  if (patch.env !== undefined) data.env = patch.env;
   if (patch.defaultValue !== undefined) {
     data.defaultValue =
       patch.defaultValue as typeof featureFlags.$inferInsert.defaultValue;

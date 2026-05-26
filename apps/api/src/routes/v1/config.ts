@@ -2,7 +2,7 @@ import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { drizzle } from "@rovenue/db";
+import { FeatureFlagEnv, drizzle } from "@rovenue/db";
 import { evaluateAllFlags } from "../../services/flag-engine";
 import { evaluateExperiments } from "../../services/experiment-engine";
 import { ok } from "../../lib/response";
@@ -31,6 +31,32 @@ import { ok } from "../../lib/response";
 //     // body is typechecked against configBodySchema
 
 const SUBSCRIBER_HEADER = "x-rovenue-user-id";
+const ENV_HEADER = "x-rovenue-env";
+
+const ENV_LOOKUP: Record<string, FeatureFlagEnv> = {
+  prod: FeatureFlagEnv.PROD,
+  production: FeatureFlagEnv.PROD,
+  PROD: FeatureFlagEnv.PROD,
+  PRODUCTION: FeatureFlagEnv.PROD,
+  staging: FeatureFlagEnv.STAGING,
+  STAGING: FeatureFlagEnv.STAGING,
+  development: FeatureFlagEnv.DEVELOPMENT,
+  dev: FeatureFlagEnv.DEVELOPMENT,
+  DEVELOPMENT: FeatureFlagEnv.DEVELOPMENT,
+  DEV: FeatureFlagEnv.DEVELOPMENT,
+};
+
+function resolveEnv(c: Context): FeatureFlagEnv {
+  const raw = c.req.query("env") ?? c.req.header(ENV_HEADER) ?? "";
+  if (raw.length === 0) return FeatureFlagEnv.PROD;
+  const mapped = ENV_LOOKUP[raw];
+  if (!mapped) {
+    throw new HTTPException(400, {
+      message: "env must be one of prod, staging, development",
+    });
+  }
+  return mapped;
+}
 
 export const configBodySchema = z.object({
   attributes: z.record(z.unknown()).optional(),
@@ -84,8 +110,9 @@ async function handleConfig(
     },
   );
 
+  const env = resolveEnv(c);
   const [flags, experiments] = await Promise.all([
-    evaluateAllFlags(project.id, subscriber.id, mergedAttributes),
+    evaluateAllFlags(project.id, env, subscriber.id, mergedAttributes),
     evaluateExperiments(project.id, subscriber.id, mergedAttributes),
   ]);
 

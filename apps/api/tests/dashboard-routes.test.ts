@@ -198,6 +198,11 @@ vi.mock("@rovenue/db", () => ({
     NUMBER: "NUMBER",
     JSON: "JSON",
   },
+  FeatureFlagEnv: {
+    PROD: "PROD",
+    STAGING: "STAGING",
+    DEVELOPMENT: "DEVELOPMENT",
+  },
   ExperimentStatus: {
     DRAFT: "DRAFT",
     RUNNING: "RUNNING",
@@ -595,6 +600,7 @@ describe("dashboard feature flags", () => {
       projectId: "proj_a",
       key: "new_paywall",
       type: "BOOLEAN",
+      env: "PROD",
       defaultValue: false,
       rules: [],
       isEnabled: true,
@@ -611,18 +617,20 @@ describe("dashboard feature flags", () => {
       }),
     });
 
-    expect(flagMock.invalidateFlagCache).toHaveBeenCalledWith("proj_a");
+    expect(flagMock.invalidateFlagCache).toHaveBeenCalledWith("proj_a", "PROD");
   });
 
   it("toggle flips isEnabled and invalidates cache", async () => {
     dbMock.featureFlag.findUnique.mockResolvedValue({
       id: "flag_1",
       projectId: "proj_a",
+      env: "PROD",
       isEnabled: true,
     });
     dbMock.featureFlag.update.mockImplementation(async (args: any) => ({
       id: "flag_1",
       projectId: "proj_a",
+      env: "PROD",
       isEnabled: args.data.isEnabled,
     }));
 
@@ -634,6 +642,6 @@ describe("dashboard feature flags", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: { flag: { isEnabled: boolean } } };
     expect(body.data.flag.isEnabled).toBe(false);
-    expect(flagMock.invalidateFlagCache).toHaveBeenCalledWith("proj_a");
+    expect(flagMock.invalidateFlagCache).toHaveBeenCalledWith("proj_a", "PROD");
   });
 });

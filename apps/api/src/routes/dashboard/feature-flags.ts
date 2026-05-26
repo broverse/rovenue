@@ -3,10 +3,12 @@ import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import {
+  FeatureFlagEnv,
   FeatureFlagType,
   MemberRole,
   drizzle,
 } from "@rovenue/db";
+import { validateAudienceRules } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { assertProjectAccess } from "../../lib/project-access";
@@ -23,11 +25,36 @@ import { invalidateFlagCache } from "../../services/flag-engine";
 //   await client.dashboard["feature-flags"].$post({ json: {…} })
 //   await client.dashboard["feature-flags"][":id"].toggle.$post()
 
-export const ruleSchema = z.object({
-  audienceId: z.string().min(1),
-  value: z.unknown(),
-  rolloutPercentage: z.number().min(0).max(1).nullable().optional(),
-});
+// Inline targeting conditions are validated via the same
+// `validateAudienceRules` allow-list the Audience model uses, so
+// the rule engine never receives operators outside the supported
+// set (e.g. `$regex`, `$where`).
+export const ruleSchema = z
+  .object({
+    audienceId: z.string().min(1).optional(),
+    conditions: z
+      .record(z.string(), z.unknown())
+      .optional()
+      .superRefine((val, ctx) => {
+        if (val === undefined) return;
+        try {
+          validateAudienceRules(val);
+        } catch (err) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: err instanceof Error ? err.message : "Invalid conditions",
+          });
+        }
+      }),
+    value: z.unknown(),
+    rolloutPercentage: z.number().min(0).max(1).nullable().optional(),
+  });
+
+const envEnum = z.enum([
+  FeatureFlagEnv.PROD,
+  FeatureFlagEnv.STAGING,
+  FeatureFlagEnv.DEVELOPMENT,
+]);
 
 export const createFlagBodySchema = z.object({
   projectId: z.string().min(1),
@@ -41,6 +68,7 @@ export const createFlagBodySchema = z.object({
     FeatureFlagType.NUMBER,
     FeatureFlagType.JSON,
   ]),
+  env: envEnum.default(FeatureFlagEnv.PROD),
   defaultValue: z.unknown(),
   rules: z.array(ruleSchema).default([]),
   isEnabled: z.boolean().default(true),
@@ -48,6 +76,7 @@ export const createFlagBodySchema = z.object({
 });
 
 export const updateFlagBodySchema = z.object({
+  env: envEnum.optional(),
   defaultValue: z.unknown().optional(),
   rules: z.array(ruleSchema).optional(),
   isEnabled: z.boolean().optional(),
@@ -68,6 +97,7 @@ export const featureFlagsRoute = new Hono()
         projectId: body.projectId,
         key: body.key,
         type: body.type,
+        env: body.env,
         defaultValue: body.defaultValue,
         rules: body.rules,
         isEnabled: body.isEnabled,
@@ -75,24 +105,31 @@ export const featureFlagsRoute = new Hono()
       },
     );
 
-    await invalidateFlagCache(body.projectId);
+    await invalidateFlagCache(body.projectId, body.env);
     await audit({
       projectId: body.projectId,
       userId: user.id,
       action: "create",
       resource: "feature_flag",
       resourceId: flag.id,
-      after: { key: body.key, type: body.type },
+      after: { key: body.key, type: body.type, env: body.env },
       ...extractRequestContext(c),
     });
 
     return c.json(ok({ flag }));
   })
-  // ----- GET /dashboard/feature-flags?projectId=... -----
+  // ----- GET /dashboard/feature-flags?projectId=...&env=... -----
   .get("/", async (c) => {
     const projectId = c.req.query("projectId");
     if (!projectId) {
       throw new HTTPException(400, { message: "projectId query param required" });
+    }
+    const envParam = c.req.query("env");
+    const envParsed = envParam ? envEnum.safeParse(envParam) : null;
+    if (envParam && (!envParsed || !envParsed.success)) {
+      throw new HTTPException(400, {
+        message: "env must be one of PROD, STAGING, DEVELOPMENT",
+      });
     }
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id);
@@ -100,6 +137,7 @@ export const featureFlagsRoute = new Hono()
     const flags = await drizzle.dashboardFeatureFlagRepo.listFeatureFlags(
       drizzle.db,
       projectId,
+      envParsed?.success ? envParsed.data : undefined,
     );
 
     return c.json(ok({ flags }));
@@ -138,6 +176,7 @@ export const featureFlagsRoute = new Hono()
       drizzle.db,
       id,
       {
+        ...(body.env !== undefined && { env: body.env }),
         ...(body.defaultValue !== undefined && {
           defaultValue: body.defaultValue,
         }),
@@ -152,7 +191,13 @@ export const featureFlagsRoute = new Hono()
       throw new HTTPException(404, { message: "Feature flag not found" });
     }
 
-    await invalidateFlagCache(existing.projectId);
+    // Invalidate the original env's bundle and — if the env was
+    // changed — the new env's bundle too. Both directions must
+    // forget the row so the SDK never serves a stale evaluation.
+    await invalidateFlagCache(existing.projectId, existing.env);
+    if (body.env !== undefined && body.env !== existing.env) {
+      await invalidateFlagCache(existing.projectId, body.env);
+    }
     await audit({
       projectId: existing.projectId,
       userId: user.id,
@@ -160,6 +205,7 @@ export const featureFlagsRoute = new Hono()
       resource: "feature_flag",
       resourceId: id,
       before: {
+        env: existing.env,
         defaultValue: existing.defaultValue,
         rules: existing.rules,
         isEnabled: existing.isEnabled,
@@ -192,7 +238,7 @@ export const featureFlagsRoute = new Hono()
       throw new HTTPException(404, { message: "Feature flag not found" });
     }
 
-    await invalidateFlagCache(existing.projectId);
+    await invalidateFlagCache(existing.projectId, existing.env);
     await audit({
       projectId: existing.projectId,
       userId: user.id,
@@ -220,14 +266,14 @@ export const featureFlagsRoute = new Hono()
     await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
 
     await drizzle.dashboardFeatureFlagRepo.deleteFeatureFlag(drizzle.db, id);
-    await invalidateFlagCache(existing.projectId);
+    await invalidateFlagCache(existing.projectId, existing.env);
     await audit({
       projectId: existing.projectId,
       userId: user.id,
       action: "delete",
       resource: "feature_flag",
       resourceId: id,
-      before: { key: existing.key, type: existing.type },
+      before: { key: existing.key, type: existing.type, env: existing.env },
       ...extractRequestContext(c),
     });
 

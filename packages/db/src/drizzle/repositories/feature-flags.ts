@@ -1,6 +1,9 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Db } from "../client";
 import { audiences, featureFlags, type Audience, type FeatureFlag } from "../schema";
+import { featureFlagEnv } from "../enums";
+
+type FeatureFlagEnv = (typeof featureFlagEnv.enumValues)[number];
 
 // =============================================================
 // Feature flag + audience reads — Drizzle repository
@@ -15,11 +18,16 @@ import { audiences, featureFlags, type Audience, type FeatureFlag } from "../sch
 export async function findFeatureFlagsByProject(
   db: Db,
   projectId: string,
+  env?: FeatureFlagEnv,
 ): Promise<FeatureFlag[]> {
   return db
     .select()
     .from(featureFlags)
-    .where(eq(featureFlags.projectId, projectId));
+    .where(
+      env !== undefined
+        ? and(eq(featureFlags.projectId, projectId), eq(featureFlags.env, env))
+        : eq(featureFlags.projectId, projectId),
+    );
 }
 
 export async function findAudiencesByProject(

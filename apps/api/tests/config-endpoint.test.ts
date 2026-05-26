@@ -177,6 +177,11 @@ vi.mock("@rovenue/db", () => ({
     PRODUCTION: "PRODUCTION",
     SANDBOX: "SANDBOX",
   },
+  FeatureFlagEnv: {
+    PROD: "PROD",
+    STAGING: "STAGING",
+    DEVELOPMENT: "DEVELOPMENT",
+  },
   PurchaseStatus: {
     TRIAL: "TRIAL",
     ACTIVE: "ACTIVE",
@@ -364,6 +369,7 @@ describe("GET /v1/config", () => {
 
     expect(flagMock.evaluateAllFlags).toHaveBeenCalledWith(
       "proj_test",
+      "PROD",
       "sub_internal_1",
       expect.any(Object),
     );
@@ -412,6 +418,7 @@ describe("POST /v1/config", () => {
 
     expect(flagMock.evaluateAllFlags).toHaveBeenCalledWith(
       "proj_test",
+      "PROD",
       "sub_internal_1",
       expect.objectContaining({
         country: "TR",

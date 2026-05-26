@@ -1,4 +1,4 @@
-import { drizzle } from "@rovenue/db";
+import { FeatureFlagEnv, drizzle } from "@rovenue/db";
 import { logger } from "../lib/logger";
 import { redis } from "../lib/redis";
 import { isInRollout, matchesAudience } from "@rovenue/shared";
@@ -29,7 +29,8 @@ const CACHE_TTL_SECONDS = 60;
 // =============================================================
 
 interface FlagRule {
-  audienceId: string;
+  audienceId?: string;
+  conditions?: Record<string, unknown>;
   value: unknown;
   rolloutPercentage?: number | null;
 }
@@ -55,17 +56,27 @@ interface FlagBundle {
 // Bundle loading + caching
 // =============================================================
 
-function cacheKey(projectId: string): string {
-  return `${CACHE_KEY_PREFIX}:${projectId}`;
+// Bundle keys are per (projectId, env) so a staging change can
+// never bust the prod cache (and vice-versa). Audiences are still
+// global to the project — they're shared across envs by design.
+function cacheKey(projectId: string, env: FeatureFlagEnv): string {
+  return `${CACHE_KEY_PREFIX}:${projectId}:${env}`;
 }
 
-async function loadBundleFromDb(projectId: string): Promise<FlagBundle> {
+async function loadBundleFromDb(
+  projectId: string,
+  env: FeatureFlagEnv,
+): Promise<FlagBundle> {
   // Phase 6 cutover: Drizzle is the canonical reader after the
   // Phase 3 shadow cycle ran clean. Both fetches run in parallel;
   // the bundle is then Redis-cached for 60s so steady-state
   // evaluation doesn't hit Postgres at all.
   const [flags, audiences] = await Promise.all([
-    drizzle.featureFlagRepo.findFeatureFlagsByProject(drizzle.db, projectId),
+    drizzle.featureFlagRepo.findFeatureFlagsByProject(
+      drizzle.db,
+      projectId,
+      env,
+    ),
     drizzle.featureFlagRepo.findAudiencesByProject(drizzle.db, projectId),
   ]);
 
@@ -84,8 +95,11 @@ async function loadBundleFromDb(projectId: string): Promise<FlagBundle> {
   };
 }
 
-async function loadBundle(projectId: string): Promise<FlagBundle> {
-  const key = cacheKey(projectId);
+async function loadBundle(
+  projectId: string,
+  env: FeatureFlagEnv,
+): Promise<FlagBundle> {
+  const key = cacheKey(projectId, env);
 
   try {
     const cached = await redis.get(key);
@@ -96,6 +110,7 @@ async function loadBundle(projectId: string): Promise<FlagBundle> {
       }
       log.info("flag cache schema mismatch, re-hydrating", {
         projectId,
+        env,
         cached: parsed.schemaVersion,
         current: BUNDLE_SCHEMA_VERSION,
       });
@@ -103,17 +118,19 @@ async function loadBundle(projectId: string): Promise<FlagBundle> {
   } catch (err) {
     log.warn("flag cache read failed, falling through to DB", {
       projectId,
+      env,
       err: err instanceof Error ? err.message : String(err),
     });
   }
 
-  const bundle = await loadBundleFromDb(projectId);
+  const bundle = await loadBundleFromDb(projectId, env);
 
   try {
     await redis.set(key, JSON.stringify(bundle), "EX", CACHE_TTL_SECONDS);
   } catch (err) {
     log.warn("flag cache write failed", {
       projectId,
+      env,
       err: err instanceof Error ? err.message : String(err),
     });
   }
@@ -121,12 +138,24 @@ async function loadBundle(projectId: string): Promise<FlagBundle> {
   return bundle;
 }
 
-export async function invalidateFlagCache(projectId: string): Promise<void> {
+/**
+ * Invalidate one env's bundle. When `env` is omitted (legacy
+ * call sites) every env is invalidated so we never serve stale
+ * data after a global change like an audience update.
+ */
+export async function invalidateFlagCache(
+  projectId: string,
+  env?: FeatureFlagEnv,
+): Promise<void> {
+  const envs: FeatureFlagEnv[] = env
+    ? [env]
+    : [FeatureFlagEnv.PROD, FeatureFlagEnv.STAGING, FeatureFlagEnv.DEVELOPMENT];
   try {
-    await redis.del(cacheKey(projectId));
+    await Promise.all(envs.map((e) => redis.del(cacheKey(projectId, e))));
   } catch (err) {
     log.warn("flag cache invalidate failed", {
       projectId,
+      env,
       err: err instanceof Error ? err.message : String(err),
     });
   }
@@ -147,15 +176,20 @@ function evaluate(
 
   // 2. First matching rule (with a satisfied rollout) wins.
   for (const rule of flag.rules) {
-    const audienceRules = audiences[rule.audienceId];
-    if (audienceRules === undefined) {
-      // Audience was deleted after the flag was saved — skip
-      // rather than crash so the flag falls through to the next
-      // rule or the default value.
-      continue;
+    // Audience match: only evaluated when the rule explicitly
+    // references an audience. A missing/deleted audience skips
+    // the rule rather than crashing.
+    if (rule.audienceId !== undefined) {
+      const audienceRules = audiences[rule.audienceId];
+      if (audienceRules === undefined) continue;
+      if (!matchesAudience(attributes, audienceRules)) continue;
     }
 
-    if (!matchesAudience(attributes, audienceRules)) continue;
+    // Inline conditions: AND-combined with the audience match.
+    // Absent or empty conditions are treated as "matches all".
+    if (rule.conditions !== undefined) {
+      if (!matchesAudience(attributes, rule.conditions)) continue;
+    }
 
     if (rule.rolloutPercentage == null) {
       return rule.value;
@@ -165,7 +199,7 @@ function evaluate(
       return rule.value;
     }
 
-    // Audience matched but subscriber didn't win the rollout —
+    // Targeting matched but subscriber didn't win the rollout —
     // fall through so a lower-priority rule can still apply.
   }
 
@@ -179,14 +213,15 @@ function evaluate(
 
 export async function evaluateFlag(
   projectId: string,
+  env: FeatureFlagEnv,
   flagKey: string,
   subscriberId: string,
   attributes: Record<string, unknown>,
 ): Promise<unknown> {
-  const bundle = await loadBundle(projectId);
+  const bundle = await loadBundle(projectId, env);
   const flag = bundle.flags.find((f) => f.key === flagKey);
   if (!flag) {
-    log.warn("unknown flag requested", { projectId, flagKey });
+    log.warn("unknown flag requested", { projectId, env, flagKey });
     return null;
   }
   return evaluate(flag, subscriberId, attributes, bundle.audiences);
@@ -194,10 +229,11 @@ export async function evaluateFlag(
 
 export async function evaluateAllFlags(
   projectId: string,
+  env: FeatureFlagEnv,
   subscriberId: string,
   attributes: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const bundle = await loadBundle(projectId);
+  const bundle = await loadBundle(projectId, env);
   const result: Record<string, unknown> = {};
   for (const flag of bundle.flags) {
     if (!flag.isEnabled) continue;

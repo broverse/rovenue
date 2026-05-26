@@ -139,6 +139,14 @@ export const FeatureFlagType = {
 export type FeatureFlagType =
   (typeof FeatureFlagType)[keyof typeof FeatureFlagType];
 
+export const FeatureFlagEnv = {
+  PROD: "PROD",
+  STAGING: "STAGING",
+  DEVELOPMENT: "DEVELOPMENT",
+} as const;
+export type FeatureFlagEnv =
+  (typeof FeatureFlagEnv)[keyof typeof FeatureFlagEnv];
+
 // =============================================================
 // Row types
 // =============================================================

@@ -74,6 +74,11 @@ const { dbMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(
 vi.mock("@rovenue/db", () => ({
   default: dbMock,
   drizzle: drizzleMock,
+  FeatureFlagEnv: {
+    PROD: "PROD",
+    STAGING: "STAGING",
+    DEVELOPMENT: "DEVELOPMENT",
+  },
 }));
 
 vi.mock("../src/lib/redis", () => ({ redis: redisMock }));
@@ -165,7 +170,7 @@ describe("evaluateFlag — kill switch", () => {
     ]);
     dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
 
-    const result = await evaluateFlag("proj_a", "kill-me", "sub_1", {
+    const result = await evaluateFlag("proj_a", "PROD", "kill-me", "sub_1", {
       country: "TR",
     });
 
@@ -178,7 +183,7 @@ describe("evaluateFlag — unknown flag", () => {
     dbMock.featureFlag.findMany.mockResolvedValue([]);
     dbMock.audience.findMany.mockResolvedValue([]);
 
-    const result = await evaluateFlag("proj_a", "missing", "sub_1", {});
+    const result = await evaluateFlag("proj_a", "PROD", "missing", "sub_1", {});
 
     expect(result).toBeNull();
   });
@@ -196,7 +201,7 @@ describe("evaluateFlag — rule matching", () => {
       audience("aud_tr", { country: "TR" }),
     ]);
 
-    const result = await evaluateFlag("proj_a", "new_paywall", "sub_1", {
+    const result = await evaluateFlag("proj_a", "PROD", "new_paywall", "sub_1", {
       country: "TR",
     });
 
@@ -218,7 +223,7 @@ describe("evaluateFlag — rule matching", () => {
       audience("aud_all", {}, { isDefault: true }),
     ]);
 
-    const result = await evaluateFlag("proj_a", "new_paywall", "sub_1", {
+    const result = await evaluateFlag("proj_a", "PROD", "new_paywall", "sub_1", {
       country: "DE",
     });
 
@@ -237,7 +242,7 @@ describe("evaluateFlag — rule matching", () => {
       audience("aud_tr", { country: "TR" }),
     ]);
 
-    const result = await evaluateFlag("proj_a", "new_paywall", "sub_1", {
+    const result = await evaluateFlag("proj_a", "PROD", "new_paywall", "sub_1", {
       country: "US",
     });
 
@@ -259,7 +264,7 @@ describe("evaluateFlag — rule matching", () => {
       audience("aud_all", {}, { isDefault: true }),
     ]);
 
-    const result = await evaluateFlag("proj_a", "new_paywall", "sub_1", {});
+    const result = await evaluateFlag("proj_a", "PROD", "new_paywall", "sub_1", {});
 
     expect(result).toBe("all_users");
   });
@@ -286,6 +291,7 @@ describe("evaluateFlag — rollout", () => {
     for (let i = 0; i < 20; i += 1) {
       const result = await evaluateFlag(
         "proj_a",
+        "PROD",
         "new_paywall",
         `sub_${i}`,
         {},
@@ -308,7 +314,7 @@ describe("evaluateFlag — rollout", () => {
       audience("aud_all", {}, { isDefault: true }),
     ]);
 
-    const result = await evaluateFlag("proj_a", "new_paywall", "sub_1", {});
+    const result = await evaluateFlag("proj_a", "PROD", "new_paywall", "sub_1", {});
 
     expect(result).toBe("off");
   });
@@ -334,7 +340,7 @@ describe("evaluateFlag — rollout", () => {
     let hits = 0;
     const N = 5_000;
     for (let i = 0; i < N; i += 1) {
-      const v = await evaluateFlag("proj_a", "canary", `sub_${i}`, {});
+      const v = await evaluateFlag("proj_a", "PROD", "canary", `sub_${i}`, {});
       if (v === true) hits += 1;
     }
     const drift = Math.abs(hits / N - 0.1);
@@ -357,7 +363,7 @@ describe("evaluateFlag — rollout", () => {
       audience("aud_all", {}, { isDefault: true }),
     ]);
 
-    const result = await evaluateFlag("proj_a", "tiered", "sub_1", {
+    const result = await evaluateFlag("proj_a", "PROD", "tiered", "sub_1", {
       country: "TR",
     });
 
@@ -376,8 +382,8 @@ describe("flag-engine cache", () => {
     ]);
     dbMock.audience.findMany.mockResolvedValue([]);
 
-    await evaluateFlag("proj_a", "cached", "sub_1", {});
-    await evaluateFlag("proj_a", "cached", "sub_2", {});
+    await evaluateFlag("proj_a", "PROD", "cached", "sub_1", {});
+    await evaluateFlag("proj_a", "PROD", "cached", "sub_2", {});
 
     expect(dbMock.featureFlag.findMany).toHaveBeenCalledTimes(1);
     expect(dbMock.audience.findMany).toHaveBeenCalledTimes(1);
@@ -388,8 +394,8 @@ describe("flag-engine cache", () => {
     dbMock.featureFlag.findMany.mockResolvedValue([flag({ key: "f" })]);
     dbMock.audience.findMany.mockResolvedValue([]);
 
-    await evaluateFlag("proj_a", "f", "sub_1", {});
-    await evaluateFlag("proj_b", "f", "sub_1", {});
+    await evaluateFlag("proj_a", "PROD", "f", "sub_1", {});
+    await evaluateFlag("proj_b", "PROD", "f", "sub_1", {});
 
     expect(dbMock.featureFlag.findMany).toHaveBeenCalledTimes(2);
   });
@@ -398,7 +404,7 @@ describe("flag-engine cache", () => {
     dbMock.featureFlag.findMany.mockResolvedValue([flag()]);
     dbMock.audience.findMany.mockResolvedValue([]);
 
-    await evaluateFlag("proj_a", "test-flag", "sub_1", {});
+    await evaluateFlag("proj_a", "PROD", "test-flag", "sub_1", {});
 
     const [, , mode, ttl] = redisMock.set.mock.calls[0]!;
     expect(mode).toBe("EX");
@@ -409,12 +415,12 @@ describe("flag-engine cache", () => {
     dbMock.featureFlag.findMany.mockResolvedValue([flag()]);
     dbMock.audience.findMany.mockResolvedValue([]);
 
-    await evaluateFlag("proj_a", "test-flag", "sub_1", {});
-    await invalidateFlagCache("proj_a");
-    await evaluateFlag("proj_a", "test-flag", "sub_1", {});
+    await evaluateFlag("proj_a", "PROD", "test-flag", "sub_1", {});
+    await invalidateFlagCache("proj_a", "PROD");
+    await evaluateFlag("proj_a", "PROD", "test-flag", "sub_1", {});
 
     expect(dbMock.featureFlag.findMany).toHaveBeenCalledTimes(2);
-    expect(redisMock.del).toHaveBeenCalledWith("flags:proj_a");
+    expect(redisMock.del).toHaveBeenCalledWith("flags:proj_a:PROD");
   });
 
   test("Redis GET failure falls through to DB (fail open)", async () => {
@@ -424,7 +430,7 @@ describe("flag-engine cache", () => {
     dbMock.audience.findMany.mockResolvedValue([]);
 
     setRedisMode("get-fail");
-    const result = await evaluateFlag("proj_a", "live", "sub_1", {});
+    const result = await evaluateFlag("proj_a", "PROD", "live", "sub_1", {});
 
     expect(result).toBe("ok");
   });
@@ -436,7 +442,7 @@ describe("flag-engine cache", () => {
     dbMock.audience.findMany.mockResolvedValue([]);
 
     setRedisMode("set-fail");
-    const result = await evaluateFlag("proj_a", "live", "sub_1", {});
+    const result = await evaluateFlag("proj_a", "PROD", "live", "sub_1", {});
 
     expect(result).toBe("ok");
   });
@@ -461,7 +467,7 @@ describe("evaluateAllFlags", () => {
       audience("aud_all", {}, { isDefault: true }),
     ]);
 
-    const result = await evaluateAllFlags("proj_a", "sub_1", {});
+    const result = await evaluateAllFlags("proj_a", "PROD", "sub_1", {});
 
     expect(result).toEqual({
       a: "a_default",
@@ -474,7 +480,7 @@ describe("evaluateAllFlags", () => {
     dbMock.featureFlag.findMany.mockResolvedValue([]);
     dbMock.audience.findMany.mockResolvedValue([]);
 
-    const result = await evaluateAllFlags("proj_a", "sub_1", {});
+    const result = await evaluateAllFlags("proj_a", "PROD", "sub_1", {});
 
     expect(result).toEqual({});
   });
