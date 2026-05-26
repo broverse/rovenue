@@ -54,6 +54,7 @@ export type AuditAction =
   | "pause"
   | "resume"
   | "stop"
+  | "duplicate"
   | "experiment.started"
   | "experiment.stopped"
   // --- feature flag ---
@@ -69,6 +70,7 @@ export type AuditAction =
   | "subscription.schedule_canceled"
   | "subscription.cancel_executed"
   | "subscription.cancel_failed"
+  | "subscriptions.exported"
   // --- members ---
   | "member.invited"
   | "member.role_changed"

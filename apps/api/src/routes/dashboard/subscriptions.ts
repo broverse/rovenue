@@ -13,6 +13,8 @@ import {
   listScheduledForProject,
   cancelScheduledAction,
 } from "../../services/subscriptions/schedule";
+import { streamSubscriptionsCsv } from "../../services/subscriptions/export-csv";
+import { audit } from "../../lib/audit";
 import {
   __subscriptionsConstants,
   decodeSubsCursor,
@@ -74,6 +76,11 @@ const calendarQuerySchema = z.object({
 
 const issuesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+const exportQuerySchema = z.object({
+  scope: z.enum(subscriptionScopes).default("all"),
+  search: z.string().trim().min(1).optional(),
 });
 
 export const subscriptionsRoute = new Hono()
@@ -157,6 +164,79 @@ export const subscriptionsRoute = new Hono()
       const { limit } = c.req.valid("query");
       const payload = await readBillingIssues(projectId, limit);
       return c.json(ok(payload));
+    },
+  )
+  .get(
+    "/export.csv",
+    zValidator("query", exportQuerySchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      if (!projectId) throw new HTTPException(400, { message: "Missing projectId" });
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+
+      const { scope, search } = c.req.valid("query");
+      const generator = streamSubscriptionsCsv({
+        projectId,
+        scope,
+        search: search ?? null,
+      });
+
+      const datePart = new Date()
+        .toISOString()
+        .slice(0, 10)
+        .replace(/-/g, "");
+      const filename = `subscriptions-${projectId}-${datePart}.csv`;
+
+      c.header("Content-Type", "text/csv; charset=utf-8");
+      c.header("Content-Disposition", `attachment; filename="${filename}"`);
+
+      return c.body(
+        new ReadableStream<Uint8Array>({
+          async start(controller) {
+            const enc = new TextEncoder();
+            let summary: { rowCount: number; truncated: boolean } = {
+              rowCount: 0,
+              truncated: false,
+            };
+            try {
+              while (true) {
+                const next = await generator.next();
+                if (next.done) {
+                  summary = next.value ?? summary;
+                  break;
+                }
+                controller.enqueue(enc.encode(next.value));
+              }
+            } catch (err) {
+              controller.enqueue(
+                enc.encode(`# error: ${(err as Error).message}\n`),
+              );
+              throw err;
+            } finally {
+              controller.close();
+              try {
+                await audit({
+                  projectId,
+                  userId: user.id,
+                  action: "subscriptions.exported",
+                  resource: "project",
+                  resourceId: projectId,
+                  before: null,
+                  after: {
+                    scope,
+                    search: search ?? null,
+                    rowCount: summary.rowCount,
+                    truncated: summary.truncated,
+                  },
+                });
+              } catch {
+                // Audit failure must not poison the response.
+              }
+            }
+          },
+        }),
+      );
     },
   )
   .post(

@@ -201,6 +201,9 @@ afterAll(async () => {
   await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}delviewer`));
   await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}deladmin`));
   await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}delmissing`));
+  await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}csvviewer`));
+  await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}csvviewerdata`));
+  await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}csvbadscope`));
 });
 
 // ---------------------------------------------------------------------------
@@ -484,5 +487,75 @@ describe("DELETE /projects/:projectId/subscriptions/scheduled/:id", () => {
     );
 
     expect(res.status).toBe(409);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /projects/:projectId/subscriptions/export.csv
+// ---------------------------------------------------------------------------
+
+describe("GET /projects/:projectId/subscriptions/export.csv", () => {
+  it("returns 200 with text/csv and header line when VIEWER has no subscriptions", async () => {
+    const app = buildApp();
+    const { userId, cookie } = await createUserAndSession("csvviewer");
+    const project = await seedProject("csvviewer");
+    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+
+    const res = await app.request(
+      `/projects/${project.id}/subscriptions/export.csv?scope=all`,
+      {
+        method: "GET",
+        headers: { cookie },
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/^text\/csv/);
+    expect(res.headers.get("content-disposition")).toMatch(/attachment/);
+
+    const body = await res.text();
+    // Must start with the canonical header row
+    expect(body).toMatch(/^id,subscriber_id,product,/);
+  });
+
+  it("includes seeded purchase row in CSV body", async () => {
+    const app = buildApp();
+    // Reuse the same user from the previous test by creating a fresh one
+    const { userId, cookie } = await createUserAndSession("csvviewerdata");
+    const project = await seedProject("csvviewerdata");
+    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+    await seedManualPurchase({ projectId: project.id, suffix: "csvrow" });
+
+    const res = await app.request(
+      `/projects/${project.id}/subscriptions/export.csv?scope=all`,
+      {
+        method: "GET",
+        headers: { cookie },
+      },
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toMatch(/^id,subscriber_id,product,/);
+    // Body should have at least two lines (header + one data row)
+    const lines = body.trim().split("\n");
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("returns 400 when scope is invalid", async () => {
+    const app = buildApp();
+    const { userId, cookie } = await createUserAndSession("csvbadscope");
+    const project = await seedProject("csvbadscope");
+    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+
+    const res = await app.request(
+      `/projects/${project.id}/subscriptions/export.csv?scope=notascope`,
+      {
+        method: "GET",
+        headers: { cookie },
+      },
+    );
+
+    expect(res.status).toBe(400);
   });
 });
