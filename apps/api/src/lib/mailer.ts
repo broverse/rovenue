@@ -1,6 +1,7 @@
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { env } from "./env";
 import { logger } from "./logger";
+import { SmtpMailer } from "./mailer-smtp";
 
 export interface MailMessage {
   to: string;
@@ -70,18 +71,43 @@ class NoopMailer implements Mailer {
 
 let _mailer: Mailer | null = null;
 
+/**
+ * Build a Mailer from the runtime env. Exposed so tests can construct
+ * one with a custom env shape; the singleton `mailer()` builds via
+ * the loaded process env.
+ *
+ * Selection rules:
+ *   - EMAIL_PROVIDER=smtp → SmtpMailer (requires SMTP_HOST/PORT/USER/PASS + a from address)
+ *   - EMAIL_PROVIDER=ses + AWS_SES_FROM_EMAIL or EMAIL_FROM set → SesMailer
+ *   - otherwise → NoopMailer (dev convenience; logs and returns id="noop")
+ */
+export function createMailerFromEnv(e: typeof env): Mailer {
+  const from = e.EMAIL_FROM ?? e.AWS_SES_FROM_EMAIL;
+
+  if (e.EMAIL_PROVIDER === "smtp") {
+    if (!e.SMTP_HOST || !e.SMTP_PORT || !e.SMTP_USER || !e.SMTP_PASS || !from) {
+      throw new Error(
+        "EMAIL_PROVIDER=smtp requires SMTP_HOST/PORT/USER/PASS and EMAIL_FROM (or AWS_SES_FROM_EMAIL)",
+      );
+    }
+    return new SmtpMailer({
+      host: e.SMTP_HOST,
+      port: e.SMTP_PORT,
+      user: e.SMTP_USER,
+      pass: e.SMTP_PASS,
+      secure: e.SMTP_SECURE,
+      from,
+    });
+  }
+
+  if (!from) return new NoopMailer();
+  const client = new SESv2Client({ region: e.AWS_SES_REGION });
+  return new SesMailer(client, from, e.AWS_SES_CONFIGURATION_SET ?? undefined);
+}
+
 export function mailer(): Mailer {
   if (_mailer) return _mailer;
-  if (!env.AWS_SES_FROM_EMAIL) {
-    _mailer = new NoopMailer();
-    return _mailer;
-  }
-  const client = new SESv2Client({ region: env.AWS_SES_REGION });
-  _mailer = new SesMailer(
-    client,
-    env.AWS_SES_FROM_EMAIL,
-    env.AWS_SES_CONFIGURATION_SET ?? undefined,
-  );
+  _mailer = createMailerFromEnv(env);
   return _mailer;
 }
 

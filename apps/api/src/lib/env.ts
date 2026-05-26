@@ -68,6 +68,22 @@ const envSchema = z
       .enum(["true", "false"])
       .default("true")
       .transform((v) => v === "true"),
+    // ---- Email transport selection -----------------------------
+    // EMAIL_PROVIDER picks the Mailer impl. "ses" is the default
+    // (uses AWS_SES_* above). "smtp" enables the nodemailer path
+    // for self-hosted instances without AWS credentials.
+    EMAIL_PROVIDER: z.enum(["ses", "smtp"]).default("ses"),
+    // Overrides AWS_SES_FROM_EMAIL when set (also required by the
+    // SMTP path which has no SES equivalent).
+    EMAIL_FROM: z.string().email().optional(),
+    SMTP_HOST: z.string().optional(),
+    SMTP_PORT: z.coerce.number().int().min(1).max(65535).optional(),
+    SMTP_USER: z.string().optional(),
+    SMTP_PASS: z.string().optional(),
+    SMTP_SECURE: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== "production") return;
