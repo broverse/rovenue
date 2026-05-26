@@ -6,10 +6,9 @@ import {
   AccountShell,
   Field,
   FieldRow,
-  PaymentMethodRow,
-  PlanCard,
   SectionCard,
 } from "../../../components/account";
+import { PaymentMethodRow, PlanCard } from "../../../components/billing";
 import { Button } from "../../../ui/button";
 import { Input } from "../../../ui/input";
 import { Select } from "../../../ui/select";

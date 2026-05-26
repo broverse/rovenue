@@ -4,10 +4,12 @@ import { ArrowDownToLine, FileDown } from "lucide-react";
 import {
   AccountPageHeader,
   AccountShell,
-  InvoiceStatusChip,
   SectionCard,
-  type InvoiceStatus,
 } from "../../../components/account";
+import {
+  InvoiceStatusChip,
+  type InvoiceStatus,
+} from "../../../components/billing";
 import { Button } from "../../../ui/button";
 
 export const Route = createFileRoute("/_authed/account/invoices")({
