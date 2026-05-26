@@ -32,7 +32,6 @@ import { db } from "./src/drizzle/client";
 
 const DEMO_USER_ID = "usr_demo";
 const DEMO_USER_EMAIL = "demo@rovenue.dev";
-const DEV_USER_EMAIL = "dev@rovenue.local";
 const DEMO_PROJECT_ID = "proj_demo_seed";
 const DEMO_PROJECT_SLUG = "demo";
 const DEMO_PUBLIC_KEY = "rov_pub_demo_production";
@@ -164,24 +163,6 @@ async function main() {
       },
     })
     .onConflictDoNothing();
-
-  // Dev user lookup — optional ADMIN attachment.
-  const devUserRows = await db
-    .select({ id: userTable.id })
-    .from(userTable)
-    .where(eq(userTable.email, DEV_USER_EMAIL))
-    .limit(1);
-  const devUserId = devUserRows[0]?.id ?? null;
-  if (devUserId) {
-    await db
-      .insert(projectMembers)
-      .values({
-        projectId: DEMO_PROJECT_ID,
-        userId: devUserId,
-        role: "ADMIN",
-      })
-      .onConflictDoNothing();
-  }
 
   await db
     .insert(audiences)
@@ -510,15 +491,6 @@ async function main() {
   console.log(`  subscribers: ${SUBSCRIBER_COUNT}`);
   console.log(`  experiments: 1 (paywall_price_test, RUNNING)`);
   console.log(`  flags:       1 (new_onboarding)`);
-  if (devUserId) {
-    console.log(
-      `  dev user:    ${DEV_USER_EMAIL} → ADMIN on ${DEMO_PROJECT_SLUG}`,
-    );
-  } else {
-    console.log(
-      `  (tip: click "Continue as Dev User" on /login, then re-run seed)`,
-    );
-  }
 }
 
 main()

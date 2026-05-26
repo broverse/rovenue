@@ -28,14 +28,14 @@
     "you": "You",
     "owner": "Owner",
     "member": "Member",
-    "devOnly": "dev only",
     "theme": "Theme",
     "themeAria": "Theme: {{label}} (click to change)",
     "edit": "Edit",
     "close": "Close",
     "optional": "optional",
     "retry": "Retry",
-    "saving": "Saving…"
+    "saving": "Saving…",
+    "back": "Back"
   },
   "themes": {
     "light": "Light",
@@ -386,8 +386,62 @@
     "subtitle": "Continue with GitHub or Google to manage your projects.",
     "continueWithGithub": "Continue with GitHub",
     "continueWithGoogle": "Continue with Google",
-    "continueAsDev": "Continue as Dev User",
-    "devSignUpFailed": "Dev sign-up failed"
+    "signIn": {
+      "eyebrow": "Sign in to your workspace",
+      "welcomePrefix": "Welcome back to ",
+      "welcomeBrand": "Rovenue.",
+      "tagline": "Subscription revenue, paywall experiments, and a self-hosted data warehouse — all in one open-source dashboard.",
+      "orWithEmail": "or with email",
+      "emailLabel": "Work email",
+      "emailHint": "we'll send a magic link",
+      "emailPlaceholder": "you@company.com",
+      "magicSend": "Send magic link",
+      "magicSending": "Sending magic link…",
+      "terms": "By continuing you agree to the <1>Terms of Service</1> and <3>Privacy Policy</3>. Magic links expire in 15 minutes.",
+      "checkInbox": "Check your inbox",
+      "sentTitle": "Magic link sent",
+      "sentBody": "We sent a sign-in link to <1>{{email}}</1>. Open it on this device within the next <3>15 minutes</3> to continue to your workspace.",
+      "useDifferentEmail": "← Use a different email",
+      "resend": "Resend in 30s",
+      "sentHelp": "Didn't get it? Check spam or <1>try signing in with Google or GitHub</1>.",
+      "aside": {
+        "eyebrow": "Self-hosted · open source · AGPL-3.0",
+        "headlinePrefix": "Own your ",
+        "headlineBrand": "subscription data",
+        "headlineSuffix": ", end to end.",
+        "features": {
+          "mrrTitle": "Real-time MRR & retention",
+          "mrrDesc": "Ingest App Store, Play Store and Stripe — see revenue movement within seconds, not days.",
+          "sdkTitle": "Drop-in SDKs for every platform",
+          "sdkDesc": "iOS, Android, React Native, Flutter, Unity, Web, Node, Python, Go and more — all open source.",
+          "complianceTitle": "GDPR + KVKK ready",
+          "complianceDesc": "Run on your infrastructure or on Rovenue Cloud — same code, same guarantees."
+        },
+        "quote": "Rovenue replaced three vendors and our home-grown revenue ETL in a single afternoon. The fact that it's open source sealed it.",
+        "quoteAuthor": "Aiden Kowalski",
+        "quoteTitle": "Head of Growth · Lumen",
+        "statusPill": "api.rovenue.io · operational",
+        "version": "v0.9.3-rc · 28.4k installs"
+      },
+      "footer": {
+        "copyright": "© 2026 Rovenue · AGPL-3.0 licensed",
+        "docs": "Docs",
+        "github": "GitHub",
+        "status": "Status",
+        "privacy": "Privacy",
+        "terms": "Terms"
+      }
+    },
+    "twofa": {
+      "title": "Two-factor authentication",
+      "subtitle": "Enter the 6-digit code from your authenticator app.",
+      "backupSubtitle": "Enter one of your single-use recovery codes.",
+      "trustDevice": "Trust this device for 30 days",
+      "verify": "Verify",
+      "useBackup": "Use a recovery code instead",
+      "useTotp": "Use authenticator app instead",
+      "invalid": "Invalid code. Try again."
+    }
   },
   "topNav": {
     "appName": "Rovenue"
@@ -2488,37 +2542,62 @@
     },
     "security": {
       "title": "Security",
-      "subtitle": "Authentication, devices, and recovery options for your account.",
-      "password": {
-        "title": "Password",
-        "subtitle": "Choose a strong password unique to Rovenue. Minimum 12 characters.",
-        "current": "Current password",
-        "new": "New password",
-        "confirm": "Confirm new password",
-        "lastChanged": "Last changed {{count}} days ago",
-        "update": "Update password"
-      },
+      "subtitle": "Two-factor authentication and device sessions for your account.",
       "twofa": {
         "title": "Two-factor authentication",
-        "subtitle": "Add a second step at sign-in. Required for owners on production projects.",
-        "authenticator": {
+        "subtitle": "Add a second step at sign-in using an authenticator app.",
+        "empty": {
+          "title": "Two-factor authentication is off",
+          "body": "Require a 6-digit code from your authenticator app every time you sign in.",
+          "apps": "Works with 1Password, Authy, Google Authenticator, Microsoft Authenticator.",
+          "cta": "Set up authenticator"
+        },
+        "enabled": {
           "title": "Authenticator app",
-          "desc": "Use 1Password, Authy, or Google Authenticator to generate codes. Configured Apr 2."
+          "body": "A 6-digit code from your authenticator app is required at every sign-in."
         },
-        "reconfigure": "Reconfigure",
-        "hardware": {
-          "title": "Hardware security key",
-          "desc": "YubiKey, Titan, or any FIDO2 key. Recommended for highest assurance.",
-          "add": "Add key"
+        "authenticator": {
+          "qrAlt": "Authenticator setup QR code",
+          "secret": "Secret key",
+          "disable": "Disable"
         },
-        "sms": {
-          "title": "SMS backup",
-          "desc": "Code via text to {{phone}}. Avoid if your phone supports an authenticator."
+        "setup": {
+          "title": "Set up authenticator",
+          "subtitle": "Scan the QR with your authenticator app, then enter the code it generates.",
+          "subtitleCodes": "Save your recovery codes before finishing.",
+          "steps": {
+            "connect": "Connect",
+            "verify": "Verify",
+            "save": "Recovery codes"
+          },
+          "scanHelp": "Open your authenticator app and scan the QR code to add Rovenue.",
+          "manualToggle": "Can't scan? Enter the secret manually",
+          "continue": "Next",
+          "verifyTitle": "Enter the 6-digit code",
+          "verifyDesc": "Open your authenticator app and enter the current code for Rovenue.",
+          "verify": "Verify and enable",
+          "finish": "Finish setup"
+        },
+        "disable": {
+          "title": "Disable two-factor authentication?",
+          "body": "Your account will no longer require a verification code at sign-in. We strongly recommend keeping 2FA on.",
+          "confirm": "Disable 2FA"
         },
         "recovery": {
           "title": "Recovery codes",
-          "desc": "10 single-use codes for when you can't access 2FA. {{remaining}} of 10 remaining.",
-          "view": "View codes"
+          "desc": "Single-use codes for when you can't access your authenticator app.",
+          "saveTitle": "Save your recovery codes",
+          "saveSubtitle": "Each code can be used once.",
+          "regenerateSubtitle": "Generate a fresh set — your previous codes will stop working.",
+          "invalidatesTitle": "This invalidates your current codes",
+          "invalidatesBody": "Any recovery code you've already saved will stop working. Make sure you save the new set somewhere safe.",
+          "generate": "Generate new codes",
+          "regenerate": "Regenerate codes",
+          "oneTimeNotice": "These codes won't be shown again. Store them in a password manager or print them out.",
+          "ack": "I've saved my recovery codes somewhere safe.",
+          "copyAll": "Copy all",
+          "copied": "Copied",
+          "download": "Download .txt"
         }
       },
       "sessions": {
