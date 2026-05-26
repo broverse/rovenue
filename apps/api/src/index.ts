@@ -41,6 +41,14 @@ import {
   createFunnelAbandonerWorker,
   scheduleFunnelAbandoner,
 } from "./workers/funnel-abandoner";
+import {
+  createFunnelTokenExpirerWorker,
+  scheduleFunnelTokenExpirer,
+} from "./workers/funnel-token-expirer";
+import {
+  createFunnelDeferredCleanupWorker,
+  scheduleFunnelDeferredCleanup,
+} from "./workers/funnel-deferred-cleanup";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -117,6 +125,24 @@ createEmailWorker();
 createFunnelAbandonerWorker();
 scheduleFunnelAbandoner().catch((err: unknown) => {
   logger.error("failed to schedule funnel abandoner", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Funnel claim-token expirer — daily 03:00 UTC sweep that removes
+// claim-token rows whose expires_at has passed.
+createFunnelTokenExpirerWorker();
+scheduleFunnelTokenExpirer().catch((err: unknown) => {
+  logger.error("failed to schedule funnel token expirer", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Funnel deferred-claim cleanup — every 5 minutes, prunes
+// fingerprint-deferred rows past their expires_at.
+createFunnelDeferredCleanupWorker();
+scheduleFunnelDeferredCleanup().catch((err: unknown) => {
+  logger.error("failed to schedule funnel deferred cleanup", {
     err: err instanceof Error ? err.message : String(err),
   });
 });
