@@ -29,6 +29,16 @@ export const store = pgEnum("Store", [
   "APP_STORE",
   "PLAY_STORE",
   "STRIPE",
+  "MANUAL",
+]);
+
+export const scheduledActionType = pgEnum("ScheduledActionType", ["CANCEL"]);
+
+export const scheduledActionStatus = pgEnum("ScheduledActionStatus", [
+  "PENDING",
+  "EXECUTED",
+  "CANCELED",
+  "FAILED",
 ]);
 
 export const purchaseStatus = pgEnum("PurchaseStatus", [
