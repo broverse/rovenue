@@ -5,6 +5,7 @@ import { z } from "zod";
 import { MemberRole, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
+import { assertProjectCapability } from "../../lib/capabilities";
 import { ok } from "../../lib/response";
 import type {
   DashboardProductGroupRow,
@@ -117,7 +118,7 @@ export const productGroupsDashboardRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const rows = await drizzle.productGroupRepo.listProductGroups(
       drizzle.db,
@@ -134,7 +135,7 @@ export const productGroupsDashboardRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(projectId, user.id, "products:write");
     const body = c.req.valid("json");
 
     const existing = await drizzle.productGroupRepo.findProductGroupByIdentifier(
@@ -170,7 +171,7 @@ export const productGroupsDashboardRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const row = await drizzle.productGroupRepo.findProductGroupById(
       drizzle.db,
@@ -189,7 +190,7 @@ export const productGroupsDashboardRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(projectId, user.id, "products:write");
     const body = c.req.valid("json");
 
     if (body.identifier) {
@@ -229,7 +230,7 @@ export const productGroupsDashboardRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(projectId, user.id, "products:write");
 
     const removed = await drizzle.productGroupRepo.deleteProductGroup(
       drizzle.db,

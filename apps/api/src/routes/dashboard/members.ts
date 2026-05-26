@@ -4,37 +4,27 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { MemberRole, drizzle } from "@rovenue/db";
 import type {
-  AddMemberResponse,
   ListMembersResponse,
   ProjectMemberRow,
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
-import { assertProjectAccess } from "../../lib/project-access";
+import { assertProjectCapability } from "../../lib/capabilities";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { ok } from "../../lib/response";
 
-// =============================================================
-// Dashboard: Project members
-// =============================================================
-//
-// Every project has at least one OWNER at all times — attempts to
-// demote or remove the last OWNER return 400. "Add member" looks
-// up an existing User by email; a real invite flow (token + email
-// delivery) is a separate feature and not in scope here.
-
-const memberRoleValues = [
-  MemberRole.OWNER,
+const ASSIGNABLE_ROLE_VALUES = [
   MemberRole.ADMIN,
-  MemberRole.VIEWER,
+  MemberRole.DEVELOPER,
+  MemberRole.GROWTH,
+  MemberRole.CUSTOMER_SUPPORT,
 ] as const;
 
-export const addMemberBodySchema = z.object({
-  email: z.string().email(),
-  role: z.enum(memberRoleValues),
+export const updateMemberBodySchema = z.object({
+  role: z.enum(ASSIGNABLE_ROLE_VALUES),
 });
 
-export const updateMemberBodySchema = z.object({
-  role: z.enum(memberRoleValues),
+export const transferOwnershipBodySchema = z.object({
+  toUserId: z.string().min(1),
 });
 
 function toMemberRow(m: {
@@ -61,174 +51,110 @@ async function countOwners(projectId: string): Promise<number> {
 
 export const membersRoute = new Hono()
   .use("*", requireDashboardAuth)
-  // =============================================================
+
   // GET /dashboard/projects/:projectId/members
-  // =============================================================
   .get("/", async (c) => {
     const projectId = c.req.param("projectId");
-    if (!projectId) throw new HTTPException(400, { message: "Missing projectId" });
+    if (!projectId)
+      throw new HTTPException(400, { message: "Missing projectId" });
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectCapability(projectId, user.id, "project:read");
 
     const rows = await drizzle.projectRepo.listProjectMembers(
       drizzle.db,
       projectId,
     );
-
     const payload: ListMembersResponse = { members: rows.map(toMemberRow) };
     return c.json(ok(payload));
   })
-  // =============================================================
-  // POST /dashboard/projects/:projectId/members — OWNER only
-  // =============================================================
-  .post("/", zValidator("json", addMemberBodySchema), async (c) => {
-    const projectId = c.req.param("projectId");
-    if (!projectId) throw new HTTPException(400, { message: "Missing projectId" });
-    const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.OWNER);
 
-    const body = c.req.valid("json");
+  // PATCH /dashboard/projects/:projectId/members/:userId
+  .patch(
+    "/:userId",
+    zValidator("json", updateMemberBodySchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      const targetUserId = c.req.param("userId");
+      if (!projectId || !targetUserId)
+        throw new HTTPException(400, { message: "Missing projectId or userId" });
+      const user = c.get("user");
+      await assertProjectCapability(projectId, user.id, "members:manage");
+      const body = c.req.valid("json");
 
-    const targetUser = await drizzle.userRepo.findUserByEmail(
-      drizzle.db,
-      body.email,
-    );
-    if (!targetUser) {
-      throw new HTTPException(404, {
-        message: "No user with that email. Ask them to sign in first.",
-      });
-    }
-
-    const existing = await drizzle.projectRepo.findMembership(
-      drizzle.db,
-      projectId,
-      targetUser.id,
-    );
-    if (existing) {
-      throw new HTTPException(409, {
-        message: "That user is already a project member",
-      });
-    }
-
-    const created = await drizzle.db.transaction(async (tx) => {
-      const member = await drizzle.projectRepo.createProjectMember(tx, {
-        projectId,
-        userId: targetUser.id,
-        role: body.role,
-      });
-      await audit(
-        {
-          projectId,
-          userId: user.id,
-          action: "member.invited",
-          resource: "member",
-          resourceId: member.id,
-          after: { userId: targetUser.id, email: targetUser.email, role: body.role },
-          ...extractRequestContext(c),
-        },
-        tx,
-      );
-      return member;
-    });
-
-    const row: ProjectMemberRow = {
-      id: created.id,
-      userId: targetUser.id,
-      email: targetUser.email,
-      name: targetUser.name,
-      image: targetUser.image,
-      role: created.role,
-      createdAt: created.createdAt.toISOString(),
-    };
-    const payload: AddMemberResponse = { member: row };
-    return c.json(ok(payload));
-  })
-  // =============================================================
-  // PATCH /dashboard/projects/:projectId/members/:userId — OWNER only
-  // =============================================================
-  .patch("/:userId", zValidator("json", updateMemberBodySchema), async (c) => {
-    const projectId = c.req.param("projectId");
-    const targetUserId = c.req.param("userId");
-    if (!projectId || !targetUserId) {
-      throw new HTTPException(400, { message: "Missing projectId or userId" });
-    }
-    const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.OWNER);
-
-    const body = c.req.valid("json");
-
-    const target = await drizzle.projectRepo.findMembership(
-      drizzle.db,
-      projectId,
-      targetUserId,
-    );
-    if (!target) throw new HTTPException(404, { message: "Member not found" });
-
-    // Demote-last-OWNER guard: if we're moving the only OWNER off the
-    // OWNER role, the project is left un-administrable — reject.
-    if (target.role === MemberRole.OWNER && body.role !== MemberRole.OWNER) {
-      const owners = await countOwners(projectId);
-      if (owners <= 1) {
+      if (targetUserId === user.id) {
         throw new HTTPException(400, {
-          message: "Cannot demote the last OWNER",
+          message: "Cannot change your own role",
         });
       }
-    }
 
-    const updated = await drizzle.db.transaction(async (tx) => {
-      const row = await drizzle.projectRepo.updateProjectMemberRole(
-        tx,
+      const target = await drizzle.projectRepo.findMembership(
+        drizzle.db,
         projectId,
         targetUserId,
-        body.role,
       );
-      if (!row) {
+      if (!target)
         throw new HTTPException(404, { message: "Member not found" });
+      if (target.role === MemberRole.OWNER) {
+        throw new HTTPException(400, {
+          message: "Cannot modify an OWNER. Transfer ownership first.",
+        });
       }
-      await audit(
-        {
-          projectId,
-          userId: user.id,
-          action: "member.role_changed",
-          resource: "member",
-          resourceId: row.id,
-          before: { role: target.role },
-          after: { role: body.role },
-          ...extractRequestContext(c),
-        },
-        tx,
-      );
-      return row;
-    });
 
-    return c.json(ok({ member: toMemberRow(updated) }));
-  })
-  // =============================================================
-  // DELETE /dashboard/projects/:projectId/members/:userId — OWNER only
-  // =============================================================
+      const updated = await drizzle.db.transaction(async (tx) => {
+        const row = await drizzle.projectRepo.updateProjectMemberRole(
+          tx,
+          projectId,
+          targetUserId,
+          body.role,
+        );
+        if (!row)
+          throw new HTTPException(404, { message: "Member not found" });
+        await audit(
+          {
+            projectId,
+            userId: user.id,
+            action: "member.role_changed",
+            resource: "member",
+            resourceId: row.id,
+            before: { role: target.role },
+            after: { role: body.role },
+            ...extractRequestContext(c),
+          },
+          tx,
+        );
+        return row;
+      });
+
+      return c.json(ok({ member: toMemberRow(updated) }));
+    },
+  )
+
+  // DELETE /dashboard/projects/:projectId/members/:userId
   .delete("/:userId", async (c) => {
     const projectId = c.req.param("projectId");
     const targetUserId = c.req.param("userId");
-    if (!projectId || !targetUserId) {
+    if (!projectId || !targetUserId)
       throw new HTTPException(400, { message: "Missing projectId or userId" });
-    }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.OWNER);
+    await assertProjectCapability(projectId, user.id, "members:manage");
+
+    if (targetUserId === user.id) {
+      throw new HTTPException(400, {
+        message: "Use POST /members/leave to remove yourself",
+      });
+    }
 
     const target = await drizzle.projectRepo.findMembership(
       drizzle.db,
       projectId,
       targetUserId,
     );
-    if (!target) throw new HTTPException(404, { message: "Member not found" });
-
+    if (!target)
+      throw new HTTPException(404, { message: "Member not found" });
     if (target.role === MemberRole.OWNER) {
-      const owners = await countOwners(projectId);
-      if (owners <= 1) {
-        throw new HTTPException(400, {
-          message: "Cannot remove the last OWNER",
-        });
-      }
+      throw new HTTPException(400, {
+        message: "Cannot remove an OWNER. Transfer ownership first.",
+      });
     }
 
     await drizzle.db.transaction(async (tx) => {
@@ -249,20 +175,17 @@ export const membersRoute = new Hono()
 
     return c.json(ok({ id: target.id }));
   })
-  // =============================================================
+
   // POST /dashboard/projects/:projectId/members/leave
-  // =============================================================
-  //
-  // Any role can leave — unless they're the last OWNER, in which
-  // case they must first promote or add another OWNER.
   .post("/leave", async (c) => {
     const projectId = c.req.param("projectId");
-    if (!projectId) throw new HTTPException(400, { message: "Missing projectId" });
+    if (!projectId)
+      throw new HTTPException(400, { message: "Missing projectId" });
     const user = c.get("user");
-    const membership = await assertProjectAccess(
+    const membership = await assertProjectCapability(
       projectId,
       user.id,
-      MemberRole.VIEWER,
+      "project:read",
     );
 
     if (membership.role === MemberRole.OWNER) {
@@ -279,11 +202,10 @@ export const membersRoute = new Hono()
         {
           projectId,
           userId: user.id,
-          action: "member.removed",
+          action: "member.left",
           resource: "member",
           resourceId: membership.id,
           before: { userId: user.id, role: membership.role },
-          after: { self: true },
           ...extractRequestContext(c),
         },
         tx,
@@ -291,5 +213,71 @@ export const membersRoute = new Hono()
       await drizzle.projectRepo.deleteProjectMember(tx, projectId, user.id);
     });
 
-    return c.json(ok({ id: membership.id }));
-  });
+    return c.json(ok({ left: true }));
+  })
+
+  // POST /dashboard/projects/:projectId/members/transfer
+  .post(
+    "/transfer",
+    zValidator("json", transferOwnershipBodySchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      if (!projectId)
+        throw new HTTPException(400, { message: "Missing projectId" });
+      const user = c.get("user");
+      await assertProjectCapability(projectId, user.id, "project:transfer");
+      const { toUserId } = c.req.valid("json");
+
+      if (toUserId === user.id) {
+        throw new HTTPException(400, {
+          message: "Cannot transfer ownership to yourself",
+        });
+      }
+
+      const target = await drizzle.projectRepo.findMembership(
+        drizzle.db,
+        projectId,
+        toUserId,
+      );
+      if (!target) {
+        throw new HTTPException(404, {
+          message: "Target user is not a member of this project",
+        });
+      }
+      if (target.role === MemberRole.OWNER) {
+        throw new HTTPException(409, {
+          message: "Target is already an OWNER",
+        });
+      }
+
+      await drizzle.db.transaction(async (tx) => {
+        await drizzle.projectRepo.updateProjectMemberRole(
+          tx,
+          projectId,
+          toUserId,
+          MemberRole.OWNER,
+        );
+        await drizzle.projectRepo.updateProjectMemberRole(
+          tx,
+          projectId,
+          user.id,
+          MemberRole.ADMIN,
+        );
+        await audit(
+          {
+            projectId,
+            userId: user.id,
+            action: "member.ownership_transferred",
+            resource: "project",
+            resourceId: projectId,
+            before: { ownerUserId: user.id },
+            after: { ownerUserId: toUserId },
+            ...extractRequestContext(c),
+          },
+          tx,
+        );
+      });
+
+      return c.json(ok({ transferred: true }));
+    },
+  );

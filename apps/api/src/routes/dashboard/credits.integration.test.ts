@@ -64,7 +64,7 @@ async function seedMember({
 }: {
   projectId: string;
   userId: string;
-  role: "OWNER" | "ADMIN" | "VIEWER";
+  role: "OWNER" | "ADMIN" | "CUSTOMER_SUPPORT";
 }) {
   await getDb().insert(drizzle.schema.projectMembers).values({
     projectId,
@@ -148,7 +148,7 @@ describe("POST /projects/:projectId/credits — manual grant", () => {
     const { userId, cookie } = await createUserAndSession("viewer");
     const project = await seedProject("viewer");
     trackProject(project.id);
-    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
     const sub = await seedSubscriber({ projectId: project.id, suffix: "v" });
 
     const app = buildApp();

@@ -45,7 +45,7 @@ export const overviewRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const { windowDays } = c.req.valid("query");
     const payload = await getProjectOverview({ projectId, windowDays });

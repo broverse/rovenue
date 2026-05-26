@@ -11,7 +11,9 @@ import { pgEnum } from "drizzle-orm/pg-core";
 export const memberRole = pgEnum("MemberRole", [
   "OWNER",
   "ADMIN",
-  "VIEWER",
+  "DEVELOPER",
+  "GROWTH",
+  "CUSTOMER_SUPPORT",
 ]);
 
 export const environment = pgEnum("Environment", [
@@ -123,4 +125,12 @@ export const aggregateTypeEnum = pgEnum("aggregate_type", [
   "EXPOSURE",
   "REVENUE_EVENT",
   "CREDIT_LEDGER",
+]);
+
+export const invitationDeliveryStatus = pgEnum("InvitationDeliveryStatus", [
+  "PENDING",
+  "DELIVERED",
+  "BOUNCED",
+  "COMPLAINED",
+  "SUPPRESSED",
 ]);

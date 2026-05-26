@@ -14,6 +14,7 @@ import {
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
+import { assertProjectCapability } from "../../lib/capabilities";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { ok } from "../../lib/response";
 import { addCredits } from "../../services/credit-engine";
@@ -45,7 +46,7 @@ export const creditsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const { windowDays } = c.req.valid("query");
     const payload = await getCreditsRollup({ projectId, windowDays });
@@ -69,7 +70,7 @@ export const creditsRoute = new Hono()
         throw new HTTPException(400, { message: "Missing projectId" });
       }
       const user = c.get("user");
-      await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+      await assertProjectCapability(projectId, user.id, "credits:write");
 
       const input = c.req.valid("json");
 

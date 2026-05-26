@@ -77,7 +77,7 @@ export const leaderboardsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     let query: z.infer<typeof leaderboardQuerySchema>;
     try {
@@ -135,7 +135,7 @@ export const leaderboardsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     let query: z.infer<typeof leaderboardQuerySchema>;
     try {

@@ -26,7 +26,9 @@ import * as drizzleNamespace from "./drizzle";
 export const MemberRole = {
   OWNER: "OWNER",
   ADMIN: "ADMIN",
-  VIEWER: "VIEWER",
+  DEVELOPER: "DEVELOPER",
+  GROWTH: "GROWTH",
+  CUSTOMER_SUPPORT: "CUSTOMER_SUPPORT",
 } as const;
 export type MemberRole = (typeof MemberRole)[keyof typeof MemberRole];
 

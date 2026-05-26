@@ -23,6 +23,7 @@ import {
   experimentType,
   featureFlagEnv,
   featureFlagType,
+  invitationDeliveryStatus,
   memberRole,
   outgoingWebhookStatus,
   productType,
@@ -274,6 +275,61 @@ export const projectMembers = pgTable(
     userIdIdx: index("project_members_userId_idx").on(t.userId),
   }),
 );
+
+// =============================================================
+// project_invitations
+// =============================================================
+
+export const projectInvitations = pgTable(
+  "project_invitations",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    email: text("email").notNull(), // always lowercased before insert
+    role: memberRole("role").notNull(),
+    tokenHash: text("tokenHash").notNull(),
+    invitedByUserId: text("invitedByUserId")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    expiresAt: timestamp("expiresAt", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("acceptedAt", { withTimezone: true }),
+    revokedAt: timestamp("revokedAt", { withTimezone: true }),
+    deliveryStatus: invitationDeliveryStatus("deliveryStatus")
+      .notNull()
+      .default("PENDING"),
+    deliveryError: text("deliveryError"),
+    lastSentAt: timestamp("lastSentAt", { withTimezone: true }),
+    sesMessageId: text("sesMessageId"),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    // Partial unique: only one pending invite per (project, email).
+    pendingUniq: uniqueIndex("project_invitations_pending_uniq")
+      .on(t.projectId, t.email)
+      .where(sql`accepted_at IS NULL AND revoked_at IS NULL`),
+    tokenHashUniq: uniqueIndex("project_invitations_token_hash_key").on(
+      t.tokenHash,
+    ),
+    expiresAtIdx: index("project_invitations_expiresAt_idx").on(t.expiresAt),
+    sesMessageIdIdx: index("project_invitations_sesMessageId_idx").on(
+      t.sesMessageId,
+    ),
+    projectIdEmailIdx: index("project_invitations_projectId_email_idx").on(
+      t.projectId,
+      t.email,
+    ),
+  }),
+);
+
+export type ProjectInvitation = typeof projectInvitations.$inferSelect;
+export type NewProjectInvitation = typeof projectInvitations.$inferInsert;
 
 // =============================================================
 // subscribers
@@ -1329,6 +1385,7 @@ export {
   experimentType,
   featureFlagEnv,
   featureFlagType,
+  invitationDeliveryStatus,
   memberRole,
   outgoingWebhookStatus,
   productType,

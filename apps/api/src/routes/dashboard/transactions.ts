@@ -136,7 +136,7 @@ export const transactionsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const q = c.req.valid("query");
     const useOffset = q.sort === "amount_desc" || q.sort === "amount_asc";
@@ -180,7 +180,7 @@ export const transactionsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const { windowDays } = c.req.valid("query");
     const payload = await listTransactionsVolume({ projectId, windowDays });
@@ -195,7 +195,7 @@ export const transactionsRoute = new Hono()
         throw new HTTPException(400, { message: "Missing projectId" });
       }
       const user = c.get("user");
-      await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
       const { windowDays } = c.req.valid("query");
       const payload = await listStoreBreakdown({ projectId, windowDays });
@@ -208,7 +208,7 @@ export const transactionsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const payload = await syncTransactions({ projectId });
     return c.json(ok(payload));
@@ -222,7 +222,7 @@ export const transactionsRoute = new Hono()
         throw new HTTPException(400, { message: "Missing projectId" });
       }
       const user = c.get("user");
-      await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
       const q = c.req.valid("query");
       const csv = await exportTransactionsCsv({

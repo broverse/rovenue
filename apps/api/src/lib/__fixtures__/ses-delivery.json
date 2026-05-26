@@ -1,0 +1,8 @@
+{
+  "notificationType": "Delivery",
+  "delivery": { "recipients": ["a@b.com"] },
+  "mail": {
+    "messageId": "ses-msg-3",
+    "tags": { "ses:configuration-set": ["rovenue-events"] }
+  }
+}

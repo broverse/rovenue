@@ -1,12 +1,12 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import {
-  MemberRole,
   OutgoingWebhookStatus,
   drizzle,
 } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
+import { assertProjectCapability } from "../../lib/capabilities";
 import { ok } from "../../lib/response";
 
 // =============================================================
@@ -75,7 +75,7 @@ export const webhooksDashboardRoute = new Hono()
     throw new HTTPException(404, { message: "Webhook not found" });
   }
   const user = c.get("user");
-  await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+  await assertProjectCapability(existing.projectId, user.id, "webhooks:write");
 
   if (existing.status !== OutgoingWebhookStatus.DEAD) {
     throw new HTTPException(400, {
@@ -114,7 +114,7 @@ export const webhooksDashboardRoute = new Hono()
     throw new HTTPException(404, { message: "Webhook not found" });
   }
   const user = c.get("user");
-  await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+  await assertProjectCapability(existing.projectId, user.id, "webhooks:write");
 
   if (existing.status !== OutgoingWebhookStatus.DEAD) {
     throw new HTTPException(400, {

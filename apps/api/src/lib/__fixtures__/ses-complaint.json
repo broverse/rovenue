@@ -1,0 +1,8 @@
+{
+  "notificationType": "Complaint",
+  "complaint": { "complainedRecipients": [{ "emailAddress": "a@b.com" }] },
+  "mail": {
+    "messageId": "ses-msg-2",
+    "tags": { "ses:configuration-set": ["rovenue-events"] }
+  }
+}

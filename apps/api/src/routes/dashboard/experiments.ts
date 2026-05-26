@@ -5,7 +5,6 @@ import { z } from "zod";
 import {
   ExperimentStatus,
   FeatureFlagType,
-  MemberRole,
   drizzle,
   type ExperimentType,
 } from "@rovenue/db";
@@ -17,6 +16,7 @@ import {
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { assertProjectAccess } from "../../lib/project-access";
+import { assertProjectCapability } from "../../lib/capabilities";
 import { ok } from "../../lib/response";
 import {
   getExperimentResults,
@@ -123,7 +123,7 @@ export const experimentsRoute = new Hono()
     });
 
     const user = c.get("user");
-    await assertProjectAccess(body.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(body.projectId, user.id, "experiments:write");
 
     const audience = await drizzle.audienceRepo.findAudienceInProject(
       drizzle.db,
@@ -240,7 +240,7 @@ export const experimentsRoute = new Hono()
       throw new HTTPException(404, { message: "Experiment not found" });
     }
     const user = c.get("user");
-    await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(existing.projectId, user.id, "experiments:write");
 
     const raw = await c.req.json();
 
@@ -399,7 +399,7 @@ export const experimentsRoute = new Hono()
       throw new HTTPException(404, { message: "Experiment not found" });
     }
     const user = c.get("user");
-    await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(existing.projectId, user.id, "experiments:write");
 
     if (existing.status !== ExperimentStatus.DRAFT) {
       throw new HTTPException(400, {
@@ -444,7 +444,7 @@ export const experimentsRoute = new Hono()
       throw new HTTPException(404, { message: "Experiment not found" });
     }
     const user = c.get("user");
-    await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(existing.projectId, user.id, "experiments:write");
 
     if (existing.status !== ExperimentStatus.RUNNING) {
       throw new HTTPException(400, {
@@ -486,7 +486,7 @@ export const experimentsRoute = new Hono()
       throw new HTTPException(404, { message: "Experiment not found" });
     }
     const user = c.get("user");
-    await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(existing.projectId, user.id, "experiments:write");
 
     if (existing.status !== ExperimentStatus.PAUSED) {
       throw new HTTPException(400, {
@@ -528,7 +528,7 @@ export const experimentsRoute = new Hono()
       throw new HTTPException(404, { message: "Experiment not found" });
     }
     const user = c.get("user");
-    await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(existing.projectId, user.id, "experiments:write");
 
     if (
       existing.status !== ExperimentStatus.RUNNING &&
@@ -622,7 +622,7 @@ export const experimentsRoute = new Hono()
       throw new HTTPException(404, { message: "Experiment not found" });
     }
     const user = c.get("user");
-    await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(existing.projectId, user.id, "experiments:write");
 
     if (existing.status !== ExperimentStatus.DRAFT) {
       throw new HTTPException(400, {
@@ -668,7 +668,7 @@ export const experimentsRoute = new Hono()
       throw new HTTPException(404, { message: "Experiment not found" });
     }
     const user = c.get("user");
-    await assertProjectAccess(source.projectId, user.id, MemberRole.ADMIN);
+    await assertProjectCapability(source.projectId, user.id, "experiments:write");
 
     const siblings = await drizzle.experimentRepo.findExperimentsByProject(
       drizzle.db,

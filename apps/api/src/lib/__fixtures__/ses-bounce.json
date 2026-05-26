@@ -1,0 +1,16 @@
+{
+  "notificationType": "Bounce",
+  "bounce": {
+    "bounceType": "Permanent",
+    "bounceSubType": "General",
+    "bouncedRecipients": [
+      { "emailAddress": "a@b.com", "diagnosticCode": "550 user unknown" }
+    ],
+    "timestamp": "2026-05-26T00:00:00Z",
+    "feedbackId": "f1"
+  },
+  "mail": {
+    "messageId": "ses-msg-1",
+    "tags": { "ses:configuration-set": ["rovenue-events"] }
+  }
+}

@@ -7,7 +7,21 @@
 
 import { z } from "zod";
 
-export type MemberRoleName = "OWNER" | "ADMIN" | "VIEWER";
+export type MemberRoleName =
+  | "OWNER"
+  | "ADMIN"
+  | "DEVELOPER"
+  | "GROWTH"
+  | "CUSTOMER_SUPPORT";
+
+/** Roles a user can be invited or reassigned to via the UI. */
+export const ASSIGNABLE_ROLES = [
+  "ADMIN",
+  "DEVELOPER",
+  "GROWTH",
+  "CUSTOMER_SUPPORT",
+] as const satisfies ReadonlyArray<MemberRoleName>;
+export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
 
 export type ApiKeyEnvironment = "PRODUCTION" | "SANDBOX";
 
@@ -157,17 +171,66 @@ export interface ListMembersResponse {
   members: ProjectMemberRow[];
 }
 
-export interface AddMemberRequest {
-  /** User must have signed in at least once so the User row exists. */
+export interface UpdateMemberRoleRequest {
+  role: AssignableRole;
+}
+
+export interface TransferOwnershipRequest {
+  toUserId: string;
+}
+
+// =============================================================
+// Project invitations
+// =============================================================
+
+export type InvitationStatus = "pending" | "accepted" | "revoked" | "expired";
+export type InvitationDeliveryStatusName =
+  | "PENDING"
+  | "DELIVERED"
+  | "BOUNCED"
+  | "COMPLAINED"
+  | "SUPPRESSED";
+
+export interface InvitationRow {
+  id: string;
   email: string;
   role: MemberRoleName;
+  status: InvitationStatus;
+  deliveryStatus: InvitationDeliveryStatusName;
+  deliveryError: string | null;
+  invitedByName: string | null;
+  expiresAt: string;
+  lastSentAt: string | null;
+  createdAt: string;
 }
 
-export interface AddMemberResponse {
-  member: ProjectMemberRow;
+export interface ListInvitationsResponse {
+  invitations: InvitationRow[];
 }
 
-export interface UpdateMemberRoleRequest {
+export interface CreateInvitationRequest {
+  email: string;
+  role: AssignableRole;
+}
+
+export interface CreateInvitationResponse {
+  invitation: InvitationRow;
+  /** Returned exactly once on create. Subsequent GETs do not include this. */
+  inviteUrl: string;
+}
+
+export interface InvitationPreviewResponse {
+  projectId: string;
+  projectName: string;
+  inviterName: string | null;
+  role: MemberRoleName;
+  email: string;
+  status: InvitationStatus;
+  expiresAt: string;
+}
+
+export interface AcceptInvitationResponse {
+  projectId: string;
   role: MemberRoleName;
 }
 

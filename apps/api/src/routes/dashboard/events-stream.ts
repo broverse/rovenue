@@ -46,7 +46,7 @@ export const eventsStreamRoute = new Hono()
 
     return streamSSE(c, async (stream) => {
       try {
-        await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+        await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
       } catch (err) {
         log.warn("denied", { projectId, userId: user.id });
         await stream.writeSSE({
