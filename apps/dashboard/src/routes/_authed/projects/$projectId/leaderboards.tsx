@@ -22,8 +22,10 @@ function LeaderboardsRoute() {
 }
 
 type Board = "spenders" | "consumers";
+type RangeDays = 7 | 30 | 90;
 
 const BOARDS: ReadonlyArray<Board> = ["spenders", "consumers"];
+const RANGES: ReadonlyArray<RangeDays> = [7, 30, 90];
 
 function isoDay(date: Date): string {
   return date.toISOString().slice(0, 10);
@@ -32,13 +34,23 @@ function isoDay(date: Date): string {
 function LeaderboardsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [board, setBoard] = useState<Board>("spenders");
+  const [rangeDays, setRangeDays] = useState<RangeDays>(30);
 
-  // Trailing 30 days, snapped to day boundaries to match CH grain.
-  const { from, to } = useMemo(() => {
+  // Trailing window, snapped to day boundaries to match CH grain.
+  // API schema requires full ISO datetime — we send T00:00:00Z and
+  // the server slices the date portion for the CH parameter.
+  const { from, to, fromDay, toDay } = useMemo(() => {
     const end = new Date();
-    const start = new Date(end.getTime() - 30 * 86_400_000);
-    return { from: isoDay(start), to: isoDay(end) };
-  }, []);
+    const start = new Date(end.getTime() - rangeDays * 86_400_000);
+    const fromDay = isoDay(start);
+    const toDay = isoDay(end);
+    return {
+      from: `${fromDay}T00:00:00.000Z`,
+      to: `${toDay}T00:00:00.000Z`,
+      fromDay,
+      toDay,
+    };
+  }, [rangeDays]);
 
   const spenders = useTopSpenders({
     projectId,
@@ -64,36 +76,62 @@ function LeaderboardsPage({ projectId }: { projectId: string }) {
             {t("leaderboards.title", "Leaderboards")}
           </h1>
           <p className="mt-1 text-[13px] text-rv-mute-500">
-            {t("leaderboards.subtitle", "Trailing 30 days · {{from}} → {{to}}", {
-              from,
-              to,
+            {t("leaderboards.subtitle", "Trailing {{days}} days · {{from}} → {{to}}", {
+              days: rangeDays,
+              from: fromDay,
+              to: toDay,
             })}
           </p>
         </div>
-        <div
-          role="tablist"
-          aria-label={t("leaderboards.ariaLabel", "Leaderboard type")}
-          className="inline-flex gap-0.5 rounded-md border border-rv-divider bg-rv-c2 p-0.5"
-        >
-          {BOARDS.map((b) => (
-            <button
-              key={b}
-              type="button"
-              role="tab"
-              aria-selected={board === b}
-              onClick={() => setBoard(b)}
-              className={cn(
-                "h-6 cursor-pointer rounded px-2.5 text-xs font-medium transition",
-                board === b
-                  ? "bg-rv-c4 text-foreground"
-                  : "text-rv-mute-600 hover:text-foreground",
-              )}
-            >
-              {b === "spenders"
-                ? t("leaderboards.tabs.spenders", "Top spenders")
-                : t("leaderboards.tabs.consumers", "Top consumers")}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            role="tablist"
+            aria-label={t("leaderboards.rangeAriaLabel", "Date range")}
+            className="inline-flex gap-0.5 rounded-md border border-rv-divider bg-rv-c2 p-0.5"
+          >
+            {RANGES.map((d) => (
+              <button
+                key={d}
+                type="button"
+                role="tab"
+                aria-selected={rangeDays === d}
+                onClick={() => setRangeDays(d)}
+                className={cn(
+                  "h-6 cursor-pointer rounded px-2.5 text-xs font-medium transition",
+                  rangeDays === d
+                    ? "bg-rv-c4 text-foreground"
+                    : "text-rv-mute-600 hover:text-foreground",
+                )}
+              >
+                {t("leaderboards.range.lastNd", "{{days}}d", { days: d })}
+              </button>
+            ))}
+          </div>
+          <div
+            role="tablist"
+            aria-label={t("leaderboards.ariaLabel", "Leaderboard type")}
+            className="inline-flex gap-0.5 rounded-md border border-rv-divider bg-rv-c2 p-0.5"
+          >
+            {BOARDS.map((b) => (
+              <button
+                key={b}
+                type="button"
+                role="tab"
+                aria-selected={board === b}
+                onClick={() => setBoard(b)}
+                className={cn(
+                  "h-6 cursor-pointer rounded px-2.5 text-xs font-medium transition",
+                  board === b
+                    ? "bg-rv-c4 text-foreground"
+                    : "text-rv-mute-600 hover:text-foreground",
+                )}
+              >
+                {b === "spenders"
+                  ? t("leaderboards.tabs.spenders", "Top spenders")
+                  : t("leaderboards.tabs.consumers", "Top consumers")}
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 

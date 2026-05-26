@@ -1908,6 +1908,27 @@
       }
     }
   },
+  "leaderboards": {
+    "title": "Leaderboards",
+    "subtitle": "Trailing {{days}} days · {{from}} → {{to}}",
+    "ariaLabel": "Leaderboard type",
+    "rangeAriaLabel": "Date range",
+    "empty": "Not enough data for this window yet.",
+    "range": {
+      "lastNd": "{{days}}d"
+    },
+    "tabs": {
+      "spenders": "Top spenders",
+      "consumers": "Top consumers"
+    },
+    "cols": {
+      "rank": "#",
+      "subscriber": "Subscriber",
+      "totalUsd": "USD",
+      "totalCredits": "Credits",
+      "events": "Events"
+    }
+  },
   "cohorts": {
     "title": "Cohorts",
     "subtitle": "Group subscribers by behavior, acquisition channel, or lifecycle stage. Compare retention, revenue, and LTV across segments — then sync cohorts to ad platforms or use them as targeting rules.",
