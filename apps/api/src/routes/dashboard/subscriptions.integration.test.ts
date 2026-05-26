@@ -24,6 +24,7 @@ import {
 } from "@rovenue/db";
 import { auth } from "../../lib/auth";
 import { subscriptionsRoute } from "./subscriptions";
+import type { ScheduledActionRow } from "../../services/subscriptions/schedule";
 
 // ---------------------------------------------------------------------------
 // Unique run key so parallel re-runs never collide
@@ -146,6 +147,44 @@ async function seedProduct({
   return { id };
 }
 
+async function seedManualPurchase({
+  projectId,
+  suffix = "",
+  status = "ACTIVE" as "ACTIVE" | "EXPIRED" | "REVOKED" | "REFUNDED",
+}: {
+  projectId: string;
+  suffix?: string;
+  status?: "ACTIVE" | "EXPIRED" | "REVOKED" | "REFUNDED";
+}) {
+  const sub = await seedSubscriber({ projectId, suffix: `mp_${suffix}` });
+  const prod = await seedProduct({ projectId, suffix: `mp_${suffix}` });
+  const synth = `comp_${RUN_ID}_${suffix}_${Math.random().toString(36).slice(2, 8)}`;
+  const [purchase] = await getDb()
+    .insert(purchases)
+    .values({
+      projectId,
+      subscriberId: sub.id,
+      productId: prod.id,
+      store: "MANUAL",
+      storeTransactionId: synth,
+      originalTransactionId: synth,
+      status,
+      isTrial: false,
+      isIntroOffer: false,
+      isSandbox: false,
+      environment: "PRODUCTION",
+      purchaseDate: new Date(),
+      originalPurchaseDate: new Date(),
+      expiresDate: new Date(Date.now() + 30 * 86400_000),
+      priceAmount: "0",
+      priceCurrency: "USD",
+      autoRenewStatus: false,
+    })
+    .returning();
+  if (!purchase) throw new Error("seedManualPurchase: no row returned");
+  return purchase;
+}
+
 // ---------------------------------------------------------------------------
 // Cleanup
 // ---------------------------------------------------------------------------
@@ -154,6 +193,14 @@ afterAll(async () => {
   const db = getDb();
   await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}viewer`));
   await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}admin`));
+  await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}schedviewer`));
+  await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}schedadmin`));
+  await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}scheddup`));
+  await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}schedbad`));
+  await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}listviewer`));
+  await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}delviewer`));
+  await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}deladmin`));
+  await db.delete(projects).where(eq(projects.id, `prj_routetest_${RUN_ID}delmissing`));
 });
 
 // ---------------------------------------------------------------------------
@@ -224,5 +271,218 @@ describe("POST /projects/:projectId/subscriptions (grant)", () => {
       .from(purchases)
       .where(eq(purchases.id, body.data.id));
     expect(row?.store).toBe("MANUAL");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /projects/:projectId/subscriptions/:purchaseId/schedule
+// ---------------------------------------------------------------------------
+
+describe("POST /projects/:projectId/subscriptions/:purchaseId/schedule", () => {
+  it("returns 403 when the authenticated user has VIEWER role", async () => {
+    const app = buildApp();
+    const { userId, cookie } = await createUserAndSession("schedviewer");
+    const project = await seedProject("schedviewer");
+    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+    const purchase = await seedManualPurchase({ projectId: project.id, suffix: "sv" });
+
+    const res = await app.request(
+      `/projects/${project.id}/subscriptions/${purchase.id}/schedule`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({
+          action: "CANCEL",
+          dueAt: new Date(Date.now() + 3600_000).toISOString(),
+          revokeImmediately: false,
+        }),
+      },
+    );
+
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 200 with status PENDING when ADMIN schedules a future action", async () => {
+    const app = buildApp();
+    const { userId, cookie } = await createUserAndSession("schedadmin");
+    const project = await seedProject("schedadmin");
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const purchase = await seedManualPurchase({ projectId: project.id, suffix: "sa" });
+
+    const res = await app.request(
+      `/projects/${project.id}/subscriptions/${purchase.id}/schedule`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({
+          action: "CANCEL",
+          dueAt: new Date(Date.now() + 3600_000).toISOString(),
+          revokeImmediately: false,
+        }),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: ScheduledActionRow };
+    expect(body.data.status).toBe("PENDING");
+  });
+
+  it("returns 400 when dueAt is less than 60s in the future", async () => {
+    const app = buildApp();
+    const { userId, cookie } = await createUserAndSession("schedbad");
+    const project = await seedProject("schedbad");
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const purchase = await seedManualPurchase({ projectId: project.id, suffix: "sbad" });
+
+    const res = await app.request(
+      `/projects/${project.id}/subscriptions/${purchase.id}/schedule`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({
+          action: "CANCEL",
+          dueAt: new Date(Date.now() + 30_000).toISOString(),
+          revokeImmediately: false,
+        }),
+      },
+    );
+
+    expect(res.status).toBe(400);
+    const text = await res.text();
+    expect(text).toMatch(/future/i);
+  });
+
+  it("returns 409 on duplicate PENDING scheduled action for same purchase", async () => {
+    const app = buildApp();
+    const { userId, cookie } = await createUserAndSession("scheddup");
+    const project = await seedProject("scheddup");
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const purchase = await seedManualPurchase({ projectId: project.id, suffix: "sdup" });
+    const dueAt = new Date(Date.now() + 3600_000).toISOString();
+    const payload = JSON.stringify({ action: "CANCEL", dueAt, revokeImmediately: false });
+
+    // First call — should succeed
+    const first = await app.request(
+      `/projects/${project.id}/subscriptions/${purchase.id}/schedule`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: payload,
+      },
+    );
+    expect(first.status).toBe(200);
+
+    // Second call — should conflict
+    const second = await app.request(
+      `/projects/${project.id}/subscriptions/${purchase.id}/schedule`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: payload,
+      },
+    );
+    expect(second.status).toBe(409);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /projects/:projectId/subscriptions/scheduled
+// ---------------------------------------------------------------------------
+
+describe("GET /projects/:projectId/subscriptions/scheduled", () => {
+  it("returns 200 with rows array for VIEWER role", async () => {
+    const app = buildApp();
+    const { userId, cookie } = await createUserAndSession("listviewer");
+    const project = await seedProject("listviewer");
+    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+
+    const res = await app.request(
+      `/projects/${project.id}/subscriptions/scheduled`,
+      {
+        method: "GET",
+        headers: { cookie },
+      },
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: { rows: unknown[] } };
+    expect(Array.isArray(body.data.rows)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /projects/:projectId/subscriptions/scheduled/:id
+// ---------------------------------------------------------------------------
+
+describe("DELETE /projects/:projectId/subscriptions/scheduled/:id", () => {
+  it("returns 403 when the authenticated user has VIEWER role", async () => {
+    const app = buildApp();
+    const { userId, cookie } = await createUserAndSession("delviewer");
+    const project = await seedProject("delviewer");
+    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+
+    const res = await app.request(
+      `/projects/${project.id}/subscriptions/scheduled/nonexistent-id`,
+      {
+        method: "DELETE",
+        headers: { cookie },
+      },
+    );
+
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 200 with status CANCELED after canceling a PENDING action", async () => {
+    const app = buildApp();
+    const { userId, cookie } = await createUserAndSession("deladmin");
+    const project = await seedProject("deladmin");
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const purchase = await seedManualPurchase({ projectId: project.id, suffix: "da" });
+
+    // Schedule an action first
+    const schedRes = await app.request(
+      `/projects/${project.id}/subscriptions/${purchase.id}/schedule`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({
+          action: "CANCEL",
+          dueAt: new Date(Date.now() + 3600_000).toISOString(),
+          revokeImmediately: false,
+        }),
+      },
+    );
+    expect(schedRes.status).toBe(200);
+    const schedBody = await schedRes.json() as { data: ScheduledActionRow };
+    const actionId = schedBody.data.id;
+
+    // Cancel it
+    const delRes = await app.request(
+      `/projects/${project.id}/subscriptions/scheduled/${actionId}`,
+      {
+        method: "DELETE",
+        headers: { cookie },
+      },
+    );
+    expect(delRes.status).toBe(200);
+    const delBody = await delRes.json() as { data: ScheduledActionRow };
+    expect(delBody.data.status).toBe("CANCELED");
+  });
+
+  it("returns 409 when canceling a non-existent or already-canceled action", async () => {
+    const app = buildApp();
+    const { userId, cookie } = await createUserAndSession("delmissing");
+    const project = await seedProject("delmissing");
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+
+    const res = await app.request(
+      `/projects/${project.id}/subscriptions/scheduled/does-not-exist`,
+      {
+        method: "DELETE",
+        headers: { cookie },
+      },
+    );
+
+    expect(res.status).toBe(409);
   });
 });

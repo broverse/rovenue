@@ -3,11 +3,16 @@ import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { MemberRole } from "@rovenue/db";
-import { grantSubscriptionRequestSchema } from "@rovenue/shared";
+import { grantSubscriptionRequestSchema, scheduleActionRequestSchema } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
 import { grantComp } from "../../services/subscriptions/grant";
+import {
+  scheduleAction,
+  listScheduledForProject,
+  cancelScheduledAction,
+} from "../../services/subscriptions/schedule";
 import {
   __subscriptionsConstants,
   decodeSubsCursor,
@@ -171,4 +176,45 @@ export const subscriptionsRoute = new Hono()
       });
       return c.json(ok(purchase));
     },
-  );
+  )
+  .post(
+    "/:purchaseId/schedule",
+    zValidator("json", scheduleActionRequestSchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      const purchaseId = c.req.param("purchaseId");
+      if (!projectId || !purchaseId) {
+        throw new HTTPException(400, { message: "Missing projectId/purchaseId" });
+      }
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+      const row = await scheduleAction({
+        projectId,
+        actorUserId: user.id,
+        purchaseId,
+        input: c.req.valid("json"),
+      });
+      return c.json(ok(row));
+    },
+  )
+  .get("/scheduled", async (c) => {
+    const projectId = c.req.param("projectId");
+    if (!projectId) throw new HTTPException(400, { message: "Missing projectId" });
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    const rows = await listScheduledForProject(projectId, 100);
+    return c.json(ok({ rows }));
+  })
+  .delete("/scheduled/:id", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) throw new HTTPException(400, { message: "Missing param" });
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.ADMIN);
+    const row = await cancelScheduledAction({
+      projectId,
+      actorUserId: user.id,
+      id,
+    });
+    return c.json(ok(row));
+  });
