@@ -1,0 +1,6 @@
+{
+  "subject": "{{projectName}} projesinden çıkarıldınız",
+  "preview": "{{removedByName}} tarafından çıkarıldınız",
+  "headline": "{{projectName}} projesine erişiminiz kaldırıldı",
+  "body": "{{removedByName}}, sizi {{projectName}} projesinden çıkardı. Bunun bir hata olduğunu düşünüyorsanız doğrudan kendisiyle iletişime geçin."
+}

@@ -14,6 +14,7 @@ import { template as invoicePaid } from "./billing/invoice-paid";
 import { template as storeCredentialExpired } from "./integration/store-credential-expired";
 import { template as webhookFailing } from "./integration/webhook-failing";
 import { template as roleChanged } from "./team/role-changed";
+import { template as removed } from "./team/removed";
 
 export interface TemplateModule<Ctx> {
   Component: (props: { ctx: Ctx; t: TFunction }) => ReactElement;
@@ -37,6 +38,7 @@ const TEMPLATES: Record<string, TemplateModule<any>> = {
   "integration.store_credential.expired": storeCredentialExpired,
   "integration.webhook.failing": webhookFailing,
   "team.member.role_changed": roleChanged,
+  "team.member.removed": removed,
   // More templates land in Phase 6.
 };
 
