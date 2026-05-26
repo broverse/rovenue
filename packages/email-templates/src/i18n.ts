@@ -1,21 +1,28 @@
-import i18next, { type i18n, type TFunction } from "i18next";
+import i18next, {
+  type i18n,
+  type Resource,
+  type TFunction,
+} from "i18next";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+type Namespace = Record<string, string>;
+type LocaleResources = Record<string, Namespace>;
+
 const here = fileURLToPath(new URL(".", import.meta.url));
 const localesDir = join(here, "..", "locales");
 
-function loadResources(): Record<string, Record<string, unknown>> {
-  const resources: Record<string, Record<string, unknown>> = {};
+function loadResources(): Record<string, LocaleResources> {
+  const resources: Record<string, LocaleResources> = {};
   for (const locale of readdirSync(localesDir)) {
-    const ns: Record<string, unknown> = {};
+    const ns: LocaleResources = {};
     for (const file of readdirSync(join(localesDir, locale))) {
       if (!file.endsWith(".json")) continue;
       const name = file.replace(/\.json$/, "");
       ns[name] = JSON.parse(
         readFileSync(join(localesDir, locale, file), "utf8"),
-      );
+      ) as Namespace;
     }
     resources[locale] = ns;
   }
@@ -29,7 +36,7 @@ const instance: i18n = i18next.createInstance();
 await instance.init({
   resources: Object.fromEntries(
     supported.map((l) => [l, resources[l] ?? {}]),
-  ),
+  ) as Resource,
   fallbackLng: "en",
   defaultNS: "common",
   ns: Array.from(
