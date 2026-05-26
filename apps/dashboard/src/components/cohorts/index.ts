@@ -1,4 +1,4 @@
-export { CohortBuilder } from "./cohort-builder";
+export { CohortDefinitionCard } from "./cohort-builder";
 export { CohortHero } from "./cohort-hero";
 export { CountryBreakdown } from "./country-breakdown";
 export { LtvCurves } from "./ltv-curves";
