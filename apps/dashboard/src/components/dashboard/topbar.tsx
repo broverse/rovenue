@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { Bell, BookOpen, Menu as MenuIcon, Search } from "lucide-react";
-import { Button } from "../../ui/button";
+import { BookOpen, Menu as MenuIcon, Search } from "lucide-react";
+import { BellDropdown } from "../notifications/bell-dropdown";
 import { TopbarUserMenu } from "./topbar-user-menu";
 
 const IS_SELF_HOSTED = import.meta.env.VITE_SELF_HOSTED === "true";
@@ -76,10 +76,7 @@ export function Topbar({ projectName, current, onMenuClick }: TopbarProps) {
 
         <span className="mx-0.5 hidden h-5 w-px bg-rv-divider sm:inline-block" aria-hidden="true" />
 
-        <Button variant="light" size="icon" aria-label={t("topbar.notifications")} className="relative">
-          <Bell size={16} />
-          <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-rv-danger" />
-        </Button>
+        <BellDropdown />
 
         <span className="mx-0.5 hidden h-5 w-px bg-rv-divider sm:inline-block" aria-hidden="true" />
         <TopbarUserMenu />
