@@ -1,12 +1,13 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import type { Db } from "../client";
+import type { BillingCycle, BillingTier } from "../enums";
 import {
   billingSubscriptions,
   type BillingSubscription,
 } from "../schema";
 
 // =============================================================
-// billing_subscriptions repository (Phase 1)
+// billing_subscriptions repository (Phase 1 + 2)
 // =============================================================
 // One row per project. The partial unique index
 // `billing_subscriptions_project_active_uq` permits multiple rows only
@@ -44,4 +45,126 @@ export async function findBillingSubscriptionByProject(
     )
     .limit(1);
   return rows[0] ?? null;
+}
+
+// =============================================================
+// Phase 2: Stripe-side lookups + post-webhook mutators
+// =============================================================
+
+/**
+ * Mutate `stripe_customer_id` on the project's active row
+ * (state != 'deleted') and bump `updated_at`.
+ */
+export async function setStripeCustomerId(
+  db: Db,
+  projectId: string,
+  stripeCustomerId: string,
+): Promise<void> {
+  await db
+    .update(billingSubscriptions)
+    .set({
+      stripeCustomerId,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(billingSubscriptions.projectId, projectId),
+        ne(billingSubscriptions.state, "deleted"),
+      ),
+    );
+}
+
+export async function findByStripeCustomerId(
+  db: Db,
+  stripeCustomerId: string,
+): Promise<BillingSubscription | null> {
+  const rows = await db
+    .select()
+    .from(billingSubscriptions)
+    .where(
+      and(
+        eq(billingSubscriptions.stripeCustomerId, stripeCustomerId),
+        ne(billingSubscriptions.state, "deleted"),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function findBySubscriptionId(
+  db: Db,
+  stripeSubscriptionId: string,
+): Promise<BillingSubscription | null> {
+  const rows = await db
+    .select()
+    .from(billingSubscriptions)
+    .where(eq(billingSubscriptions.stripeSubscriptionId, stripeSubscriptionId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export interface UpdateAfterStripeCreatedInput {
+  stripeSubscriptionId: string;
+  tier: Exclude<BillingTier, "free">;
+  cycle: BillingCycle;
+  currentPeriodStart: Date;
+  currentPeriodEnd: Date;
+}
+
+/**
+ * Flip a project's active billing row to `state='active'` and write
+ * the Stripe subscription id + period boundaries. Called from the
+ * `customer.subscription.created` webhook handler.
+ */
+export async function updateAfterStripeCreated(
+  db: Db,
+  projectId: string,
+  input: UpdateAfterStripeCreatedInput,
+): Promise<void> {
+  await db
+    .update(billingSubscriptions)
+    .set({
+      state: "active",
+      stripeSubscriptionId: input.stripeSubscriptionId,
+      tier: input.tier,
+      cycle: input.cycle,
+      currentPeriodStart: input.currentPeriodStart,
+      currentPeriodEnd: input.currentPeriodEnd,
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(billingSubscriptions.projectId, projectId),
+        ne(billingSubscriptions.state, "deleted"),
+      ),
+    );
+}
+
+export interface UpdateAfterStripeUpdatedInput {
+  tier: Exclude<BillingTier, "free">;
+  cycle: BillingCycle;
+  currentPeriodStart: Date;
+  currentPeriodEnd: Date;
+}
+
+/**
+ * Patch period+tier+cycle on the row identified by Stripe subscription
+ * id. Does NOT touch `state` — that's the dunning/lifecycle handlers'
+ * job. Called from `customer.subscription.updated`.
+ */
+export async function updateAfterStripeUpdated(
+  db: Db,
+  stripeSubscriptionId: string,
+  input: UpdateAfterStripeUpdatedInput,
+): Promise<void> {
+  await db
+    .update(billingSubscriptions)
+    .set({
+      tier: input.tier,
+      cycle: input.cycle,
+      currentPeriodStart: input.currentPeriodStart,
+      currentPeriodEnd: input.currentPeriodEnd,
+      updatedAt: sql`now()`,
+    })
+    .where(eq(billingSubscriptions.stripeSubscriptionId, stripeSubscriptionId));
 }
