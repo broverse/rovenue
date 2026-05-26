@@ -4,6 +4,7 @@ import { dashboardUserRateLimit } from "../../middleware/rate-limit";
 import { appsRoute } from "./apps";
 import { audiencesRoute } from "./audiences";
 import { auditLogsRoute } from "./audit-logs";
+import { billingSubRouter } from "./billing";
 import { chartsRoute } from "./charts";
 import { cohortsRoute } from "./cohorts";
 import { credentialsRoute } from "./credentials";
@@ -50,6 +51,7 @@ export const dashboardRoute = new Hono()
   .route("/me", meRoute)
   .route("/projects", projectsRoute)
   .route("/projects/:projectId/apps", appsRoute)
+  .route("/projects/:projectId/billing", billingSubRouter)
   .route("/projects/:projectId/charts", chartsRoute)
   .route("/projects/:projectId/cohorts", cohortsRoute)
   .route("/projects/:projectId/credentials", credentialsRoute)

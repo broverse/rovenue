@@ -1,0 +1,1 @@
+ALTER TYPE "public"."aggregate_type" ADD VALUE 'BILLING';

@@ -74,3 +74,36 @@ export async function deletePaymentMethod(
     .delete(billingPaymentMethods)
     .where(eq(billingPaymentMethods.id, paymentMethodId));
 }
+
+export async function findByStripePaymentMethodId(
+  db: Db,
+  stripePaymentMethodId: string,
+): Promise<BillingPaymentMethod | null> {
+  const rows = await db
+    .select()
+    .from(billingPaymentMethods)
+    .where(eq(billingPaymentMethods.stripePaymentMethodId, stripePaymentMethodId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export async function deleteByStripePaymentMethodId(
+  db: Db,
+  stripePaymentMethodId: string,
+): Promise<void> {
+  await db
+    .delete(billingPaymentMethods)
+    .where(eq(billingPaymentMethods.stripePaymentMethodId, stripePaymentMethodId));
+}
+
+export async function findPaymentMethodById(
+  db: Db,
+  paymentMethodId: string,
+): Promise<BillingPaymentMethod | null> {
+  const rows = await db
+    .select()
+    .from(billingPaymentMethods)
+    .where(eq(billingPaymentMethods.id, paymentMethodId))
+    .limit(1);
+  return rows[0] ?? null;
+}

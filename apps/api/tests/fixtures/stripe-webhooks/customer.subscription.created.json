@@ -1,0 +1,29 @@
+{
+  "id": "evt_sub_created_phase2_test_1",
+  "type": "customer.subscription.created",
+  "api_version": "2024-04-10",
+  "created": 1748736000,
+  "livemode": false,
+  "object": "event",
+  "pending_webhooks": 0,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "sub_test_phase2",
+      "object": "subscription",
+      "customer": "cus_test_phase2",
+      "status": "active",
+      "current_period_start": 1748736000,
+      "current_period_end": 1751414400,
+      "items": {
+        "object": "list",
+        "data": [
+          {
+            "id": "si_test_1",
+            "price": { "id": "price_test_indie_monthly" }
+          }
+        ]
+      }
+    }
+  }
+}

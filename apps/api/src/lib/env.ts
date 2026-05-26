@@ -79,6 +79,7 @@ const envSchema = z
     STRIPE_BILLING_SECRET_KEY: z.string().min(1).optional(),
     STRIPE_BILLING_WEBHOOK_SECRET: z.string().min(1).optional(),
     STRIPE_BILLING_PUBLISHABLE_KEY: z.string().min(1).optional(),
+    STRIPE_BILLING_INDIE_MONTHLY_PRICE_ID: z.string().min(1).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== "production") return;
@@ -143,6 +144,11 @@ const envSchema = z
         data.STRIPE_BILLING_WEBHOOK_SECRET,
         "STRIPE_BILLING_WEBHOOK_SECRET",
         "BILLING_ENABLED=true requires a Stripe webhook secret in production",
+      );
+      require(
+        data.STRIPE_BILLING_INDIE_MONTHLY_PRICE_ID,
+        "STRIPE_BILLING_INDIE_MONTHLY_PRICE_ID",
+        "BILLING_ENABLED=true requires the Indie monthly Stripe price id",
       );
     }
   });

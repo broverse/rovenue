@@ -1,0 +1,25 @@
+{
+  "id": "evt_si_phase2_test_1",
+  "type": "setup_intent.succeeded",
+  "api_version": "2024-04-10",
+  "created": 1748736000,
+  "livemode": false,
+  "object": "event",
+  "pending_webhooks": 0,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "seti_test_phase2",
+      "object": "setup_intent",
+      "status": "succeeded",
+      "customer": "cus_test_phase2",
+      "payment_method": "pm_test_phase2",
+      "metadata": {
+        "rovenue_project_id": "<placeholder>",
+        "rovenue_flow": "upgrade",
+        "rovenue_target_tier": "indie",
+        "rovenue_target_cycle": "monthly"
+      }
+    }
+  }
+}

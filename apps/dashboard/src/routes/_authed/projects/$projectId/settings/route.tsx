@@ -6,7 +6,15 @@ import {
   useParams,
 } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import { History, KeyRound, Settings as SettingsIcon, UserCog } from "lucide-react";
+import {
+  CreditCard,
+  FileText,
+  History,
+  KeyRound,
+  Receipt,
+  Settings as SettingsIcon,
+  UserCog,
+} from "lucide-react";
 import { cn } from "../../../../../lib/cn";
 
 export const Route = createFileRoute("/_authed/projects/$projectId/settings")({
@@ -27,6 +35,27 @@ const TABS = [
     icon: KeyRound,
     to: "/projects/$projectId/settings/sdk" as const,
     match: (id: string) => id.endsWith("/settings/sdk"),
+  },
+  {
+    id: "billing",
+    labelKey: "settings.tabs.billing",
+    icon: Receipt,
+    to: "/projects/$projectId/settings/billing" as const,
+    match: (id: string) => id.endsWith("/settings/billing"),
+  },
+  {
+    id: "paymentMethods",
+    labelKey: "settings.tabs.paymentMethods",
+    icon: CreditCard,
+    to: "/projects/$projectId/settings/payment-methods" as const,
+    match: (id: string) => id.endsWith("/settings/payment-methods"),
+  },
+  {
+    id: "invoices",
+    labelKey: "settings.tabs.invoices",
+    icon: FileText,
+    to: "/projects/$projectId/settings/invoices" as const,
+    match: (id: string) => id.endsWith("/settings/invoices"),
   },
   {
     id: "members",
