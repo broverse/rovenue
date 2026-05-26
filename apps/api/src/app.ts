@@ -13,6 +13,7 @@ import {
   webhooksRoute,
 } from "./routes";
 import { configStreamRoute } from "./routes/v1/config-stream";
+import { publicInvitationsRoute } from "./routes/public/invitations";
 
 // =============================================================
 // Hono app + RPC-ready AppType export
@@ -94,6 +95,7 @@ export function createApp() {
     .route("/webhooks", webhooksRoute)
     .route("/v1", v1Route)
     .route("/", configStreamRoute)
+    .route("/invitations", publicInvitationsRoute)
     .route("/dashboard", dashboardRoute);
 
   app.onError(errorHandler);
