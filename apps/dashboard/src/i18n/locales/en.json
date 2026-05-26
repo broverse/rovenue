@@ -2487,8 +2487,7 @@
       "aria": "Account settings",
       "sections": {
         "account": "ACCOUNT",
-        "workspace": "WORKSPACE",
-        "preferences": "PREFERENCES"
+        "workspace": "WORKSPACE"
       },
       "items": {
         "profile": "Profile",
@@ -2497,11 +2496,7 @@
         "connected": "Connected accounts",
         "billing": "Billing & plan",
         "invoices": "Invoices",
-        "usage": "Usage",
-        "api": "API & webhooks",
-        "team": "Team",
-        "appearance": "Appearance",
-        "export": "Export & danger zone"
+        "usage": "Usage"
       }
     },
     "profile": {
@@ -2832,95 +2827,6 @@
           "name": "SQL credits",
           "desc": "Ad-hoc warehouse queries"
         }
-      }
-    },
-    "api": {
-      "title": "API & webhooks",
-      "subtitle": "Personal API keys for scripts and integrations. For project-level keys see Project → API.",
-      "revoke": "Revoke",
-      "tokens": {
-        "title": "Personal access tokens",
-        "subtitle": "Tokens inherit your account permissions. Rotate every 90 days.",
-        "new": "New token",
-        "items": {
-          "scripts": {
-            "name": "Ad-hoc scripts",
-            "meta": "Created Apr 4 · last used 12m ago"
-          },
-          "linear": {
-            "name": "Linear bot",
-            "meta": "Created Feb 22 · last used 2h ago"
-          },
-          "local": {
-            "name": "Local dev",
-            "meta": "Created Jan 9 · last used 6 days ago"
-          }
-        }
-      }
-    },
-    "team": {
-      "title": "Team",
-      "subtitle": "Manage workspace members.",
-      "placeholder": {
-        "title": "Workspace team",
-        "body": "See <b>Workspace → Team</b> for invitations and roles."
-      }
-    },
-    "appearance": {
-      "title": "Appearance",
-      "subtitle": "Local preferences for how Rovenue looks on this device.",
-      "theme": {
-        "title": "Theme",
-        "options": {
-          "dark": {
-            "name": "Dark",
-            "desc": "Default. Lower eye strain at night."
-          },
-          "light": {
-            "name": "Light",
-            "desc": "High contrast for bright rooms."
-          },
-          "system": {
-            "name": "Match system",
-            "desc": "Follows OS appearance setting."
-          }
-        }
-      },
-      "density": {
-        "title": "Density",
-        "subtitle": "Tables and lists."
-      },
-      "numbers": {
-        "title": "Number format",
-        "compact": {
-          "title": "Compact large numbers",
-          "desc": "Show $1.2M instead of $1,234,567 in dashboards."
-        },
-        "currency": {
-          "title": "Show currency symbol always",
-          "desc": "Affects table cells and tooltips."
-        }
-      }
-    },
-    "export": {
-      "title": "Export & danger zone",
-      "subtitle": "Download your account data, or close your account.",
-      "data": {
-        "title": "Export account data",
-        "subtitle": "Includes profile, preferences, comments, saved charts, and audit log entries.",
-        "action": "Request data export (.zip)",
-        "hint": "You'll receive a download link by email within 24 hours. Project-level data is exported separately from each project."
-      },
-      "transfer": {
-        "title": "Transfer account ownership",
-        "subtitle": "Move ownership of all your projects to another team member.",
-        "action": "Transfer ownership"
-      },
-      "close": {
-        "title": "Close account",
-        "subtitle": "Permanently delete your Rovenue account, all personal data, and revoke all sessions. Project data is retained if you have co-owners.",
-        "warning": "<b>This is irreversible.</b> Once closed, your account cannot be recovered. Active subscriptions will be canceled and prorated. You'll have 30 days to download exports before they're purged.",
-        "action": "Close my account"
       }
     }
   },

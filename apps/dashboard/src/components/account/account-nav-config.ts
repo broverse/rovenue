@@ -1,16 +1,12 @@
 import {
   AlertOctagon,
   Bell,
-  Database,
   FileText,
   Gauge,
   Link2,
-  Palette,
   Receipt,
   Shield,
-  Terminal,
   User,
-  Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -21,13 +17,9 @@ export type AccountTabId =
   | "connected"
   | "billing"
   | "invoices"
-  | "usage"
-  | "api"
-  | "team"
-  | "appearance"
-  | "export";
+  | "usage";
 
-export type AccountSectionKey = "account" | "workspace" | "preferences";
+export type AccountSectionKey = "account" | "workspace";
 
 export type AccountTab = {
   id: AccountTabId;
@@ -75,25 +67,6 @@ export const ACCOUNT_NAV: ReadonlyArray<AccountNavSection> = [
         badge: "24",
       },
       { id: "usage", path: "usage", labelKey: "account.nav.items.usage", icon: Gauge },
-      { id: "api", path: "api", labelKey: "account.nav.items.api", icon: Terminal },
-      { id: "team", path: "team", labelKey: "account.nav.items.team", icon: Users },
-    ],
-  },
-  {
-    key: "preferences",
-    items: [
-      {
-        id: "appearance",
-        path: "appearance",
-        labelKey: "account.nav.items.appearance",
-        icon: Palette,
-      },
-      {
-        id: "export",
-        path: "export",
-        labelKey: "account.nav.items.export",
-        icon: Database,
-      },
     ],
   },
 ];
