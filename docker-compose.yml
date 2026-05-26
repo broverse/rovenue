@@ -37,6 +37,85 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # --- Notification pipeline workers ---
+  # Four separate processes, all built from the same image as `api`
+  # but with different entrypoints. Splitting them up means a stuck
+  # APNs session can't starve email throughput, and the digest
+  # scheduler can be scaled to exactly one replica without dragging
+  # the Kafka consumer along with it.
+  notifier-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["pnpm", "--filter", "@rovenue/api", "exec", "tsx", "src/workers/notifier-process.ts"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: redpanda:9092
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: rovenue_reader
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+      redpanda: { condition: service_healthy }
+    restart: unless-stopped
+
+  digest-scheduler:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["pnpm", "--filter", "@rovenue/api", "exec", "tsx", "src/workers/digest-scheduler-process.ts"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
+      REDIS_URL: redis://redis:6379
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: rovenue_reader
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+      clickhouse: { condition: service_healthy }
+    # Only ever one — the BullMQ repeat-jobId guarantees idempotency
+    # across replicas, but running multiple wastes per-tick work.
+    deploy:
+      replicas: 1
+    restart: unless-stopped
+
+  send-email-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["pnpm", "--filter", "@rovenue/api", "exec", "tsx", "src/workers/send-email-process.ts"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+    restart: unless-stopped
+
+  send-push-worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["pnpm", "--filter", "@rovenue/api", "exec", "tsx", "src/workers/send-push-process.ts"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+    restart: unless-stopped
+
   db:
     # Plan 3 §G.1 — vanilla Postgres 16 + pg_partman, replacing the
     # timescale/timescaledb:2.17.2-pg16 image. Hypertables, continuous
