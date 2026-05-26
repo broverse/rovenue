@@ -2231,7 +2231,7 @@
         "id": {
           "name": "id",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true
         },
         "session_id": {
@@ -2267,8 +2267,8 @@
         }
       },
       "indexes": {
-        "funnel_answers_session_question_unique": {
-          "name": "funnel_answers_session_question_unique",
+        "funnel_answers_session_question_idx": {
+          "name": "funnel_answers_session_question_idx",
           "columns": [
             {
               "expression": "session_id",
@@ -2283,7 +2283,7 @@
               "nulls": "last"
             }
           ],
-          "isUnique": true,
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2304,22 +2304,16 @@
           "with": {}
         }
       },
-      "foreignKeys": {
-        "funnel_answers_session_id_funnel_sessions_id_fk": {
-          "name": "funnel_answers_session_id_funnel_sessions_id_fk",
-          "tableFrom": "funnel_answers",
-          "tableTo": "funnel_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "funnel_answers_id_answered_at_pk": {
+          "name": "funnel_answers_id_answered_at_pk",
+          "columns": [
+            "id",
+            "answered_at"
+          ]
         }
       },
-      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
@@ -2417,21 +2411,7 @@
           "with": {}
         }
       },
-      "foreignKeys": {
-        "funnel_claim_tokens_session_id_funnel_sessions_id_fk": {
-          "name": "funnel_claim_tokens_session_id_funnel_sessions_id_fk",
-          "tableFrom": "funnel_claim_tokens",
-          "tableTo": "funnel_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "funnel_claim_tokens_token_hash_unique": {
@@ -2721,21 +2701,7 @@
           "with": {}
         }
       },
-      "foreignKeys": {
-        "funnel_purchases_session_id_funnel_sessions_id_fk": {
-          "name": "funnel_purchases_session_id_funnel_sessions_id_fk",
-          "tableFrom": "funnel_purchases",
-          "tableTo": "funnel_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "funnel_purchases_session_id_unique": {
@@ -2757,7 +2723,7 @@
         "id": {
           "name": "id",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true
         },
         "funnel_id": {
@@ -2931,7 +2897,15 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "funnel_sessions_id_started_at_pk": {
+          "name": "funnel_sessions_id_started_at_pk",
+          "columns": [
+            "id",
+            "started_at"
+          ]
+        }
+      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},

@@ -1689,8 +1689,14 @@ export type NewFunnelTemplate = typeof funnelTemplates.$inferInsert;
 export const funnelSessions = pgTable(
   "funnel_sessions",
   {
+    // `.primaryKey()` removed — declarative range partitioning on
+    // started_at requires the partition column in every UNIQUE /
+    // PRIMARY KEY. Table-level pk below is (id, startedAt). Other
+    // funnel_* tables therefore reference funnel_sessions only via
+    // session_id index, not a real FK (PG can't FK partitioned
+    // tables without including the partition key).
     id: text("id")
-      .primaryKey()
+      .notNull()
       .$defaultFn(() => createId()),
     funnelId: text("funnel_id")
       .notNull()
@@ -1712,6 +1718,7 @@ export const funnelSessions = pgTable(
     userAgent: text("user_agent"),
   },
   (t) => ({
+    pk: primaryKey({ columns: [t.id, t.startedAt] }),
     funnelStartedIdx: index("funnel_sessions_funnel_started_idx").on(t.funnelId, t.startedAt),
     stateActivityIdx: index("funnel_sessions_state_activity_idx").on(t.state, t.lastActivityAt),
     projectStartedIdx: index("funnel_sessions_project_started_idx").on(t.projectId, t.startedAt),
@@ -1721,19 +1728,24 @@ export const funnelSessions = pgTable(
 export const funnelAnswers = pgTable(
   "funnel_answers",
   {
+    // Partitioned by answered_at; composite PK (id, answeredAt).
+    // session_id is a plain text column (no FK) — funnel_sessions
+    // is partitioned and PG won't allow FKs into it.
     id: text("id")
-      .primaryKey()
-      .$defaultFn(() => createId()),
-    sessionId: text("session_id")
       .notNull()
-      .references(() => funnelSessions.id, { onDelete: "cascade" }),
+      .$defaultFn(() => createId()),
+    sessionId: text("session_id").notNull(),
     pageId: text("page_id").notNull(),
     questionId: text("question_id").notNull(),
     answerJson: jsonb("answer_json").notNull(),
     answeredAt: timestamp("answered_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    sessionQuestionUnique: uniqueIndex("funnel_answers_session_question_unique").on(
+    pk: primaryKey({ columns: [t.id, t.answeredAt] }),
+    // (session_id, question_id) was UNIQUE in the original design
+    // but native partitioning forbids UNIQUEs that omit the partition
+    // key. Dedup is enforced at the repository layer.
+    sessionQuestionIdx: index("funnel_answers_session_question_idx").on(
       t.sessionId,
       t.questionId,
     ),
@@ -1747,10 +1759,9 @@ export const funnelPurchases = pgTable(
     id: text("id")
       .primaryKey()
       .$defaultFn(() => createId()),
-    sessionId: text("session_id")
-      .notNull()
-      .references(() => funnelSessions.id, { onDelete: "cascade" })
-      .unique(),
+    // session_id intentionally has no FK — funnel_sessions is
+    // partitioned. .unique() still enforces 1:1 at this table.
+    sessionId: text("session_id").notNull().unique(),
     projectId: text("project_id").notNull(),
     productId: text("product_id"),
     stripeCheckoutSessionId: text("stripe_checkout_session_id"),
@@ -1779,10 +1790,9 @@ export const funnelClaimTokens = pgTable(
       .primaryKey()
       .$defaultFn(() => createId()),
     tokenHash: text("token_hash").notNull().unique(),
-    sessionId: text("session_id")
-      .notNull()
-      .references(() => funnelSessions.id, { onDelete: "cascade" })
-      .unique(),
+    // session_id intentionally has no FK — funnel_sessions is
+    // partitioned. .unique() still enforces 1:1 at this table.
+    sessionId: text("session_id").notNull().unique(),
     projectId: text("project_id").notNull(),
     emailHash: text("email_hash"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
