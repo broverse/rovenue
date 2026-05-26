@@ -72,8 +72,13 @@ describe("POST /billing/stripe/webhook", () => {
       headers: { "stripe-signature": sig, "content-type": "application/json" },
     });
     expect(res.status).toBe(200);
-    const json = (await res.json()) as { received: boolean; eventType: string };
+    const json = (await res.json()) as { received: boolean; result: string };
     expect(json.received).toBe(true);
-    expect(json.eventType).toBe("invoice.paid");
+    // Phase 2 dispatcher returns a status code rather than echoing the
+    // event type. `invoice.paid` is not a handled type → "ignored";
+    // the test fixture also lacks a Stripe `customer` field so the
+    // project-resolution branch would otherwise route to
+    // "project_not_found", but the ignored check happens first.
+    expect(json.result).toBe("ignored");
   });
 });
