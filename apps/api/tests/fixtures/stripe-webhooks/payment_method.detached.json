@@ -1,0 +1,18 @@
+{
+  "id": "evt_pm_detached_phase2_test_1",
+  "type": "payment_method.detached",
+  "api_version": "2024-04-10",
+  "created": 1748736000,
+  "livemode": false,
+  "object": "event",
+  "pending_webhooks": 0,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "pm_test_phase2",
+      "object": "payment_method",
+      "customer": "cus_test_phase2",
+      "type": "card"
+    }
+  }
+}

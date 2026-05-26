@@ -1,0 +1,28 @@
+{
+  "id": "evt_inv_created_phase2_test_1",
+  "type": "invoice.created",
+  "api_version": "2024-04-10",
+  "created": 1748736000,
+  "livemode": false,
+  "object": "event",
+  "pending_webhooks": 0,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "in_test_phase2_1",
+      "object": "invoice",
+      "customer": "cus_test_phase2",
+      "number": "RV-TEST-001",
+      "status": "draft",
+      "amount_due": 2900,
+      "amount_paid": 0,
+      "currency": "usd",
+      "period_start": 1748736000,
+      "period_end": 1751414400,
+      "hosted_invoice_url": "https://stripe.test/in/test1",
+      "invoice_pdf": null,
+      "attempt_count": 0,
+      "next_payment_attempt": null
+    }
+  }
+}

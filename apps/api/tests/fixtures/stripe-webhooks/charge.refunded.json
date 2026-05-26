@@ -1,0 +1,19 @@
+{
+  "id": "evt_charge_refunded_phase2_test_1",
+  "type": "charge.refunded",
+  "api_version": "2024-04-10",
+  "created": 1748736000,
+  "livemode": false,
+  "object": "event",
+  "pending_webhooks": 0,
+  "request": { "id": null, "idempotency_key": null },
+  "data": {
+    "object": {
+      "id": "ch_test_phase2",
+      "object": "charge",
+      "customer": "cus_test_phase2",
+      "invoice": "in_test_phase2_1",
+      "amount_refunded": 500
+    }
+  }
+}
