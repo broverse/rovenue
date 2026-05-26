@@ -117,6 +117,7 @@ export function ConditionList({
           condition={c}
           onChange={(patch) => updateAt(idx, patch)}
           onRemove={() => removeAt(idx)}
+          disabled={disabled}
         />
       ))}
       {!disabled && <ConditionMenu onPick={append} />}
@@ -173,10 +174,12 @@ function ConditionRow({
   condition,
   onChange,
   onRemove,
+  disabled,
 }: {
   condition: DraftCondition;
   onChange: (patch: Partial<DraftCondition>) => void;
   onRemove: () => void;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   const meta = CONDITION_TYPES.find((c) => c.kind === condition.kind)!;
@@ -192,12 +195,14 @@ function ConditionRow({
         <>
           <Input
             mono
+            disabled={disabled}
             value={condition.attribute}
             onChange={(e) => onChange({ attribute: e.target.value })}
             placeholder="user_level"
             className="h-7 flex-1 min-w-[120px] max-w-[180px] text-[12px]"
           />
           <Select
+            disabled={disabled}
             value={condition.scalarOp}
             onChange={(e) =>
               onChange({ scalarOp: e.target.value as CompareOp })
@@ -212,6 +217,7 @@ function ConditionRow({
           </Select>
           <Input
             mono
+            disabled={disabled}
             value={condition.scalarValue}
             onChange={(e) => onChange({ scalarValue: e.target.value })}
             placeholder="42"
@@ -225,6 +231,7 @@ function ConditionRow({
         condition.kind === "platform") && (
         <>
           <Select
+            disabled={disabled}
             value={condition.listOp}
             onChange={(e) => onChange({ listOp: e.target.value as ListOp })}
             className="h-7 w-[80px] text-[12px]"
@@ -237,11 +244,13 @@ function ConditionRow({
           </Select>
           {condition.kind === "platform" ? (
             <PlatformChips
+              disabled={disabled}
               values={condition.listValues}
               onChange={(next) => onChange({ listValues: next })}
             />
           ) : (
             <ChipInput
+              disabled={disabled}
               values={condition.listValues}
               onChange={(next) => onChange({ listValues: next })}
               placeholder={
@@ -258,6 +267,7 @@ function ConditionRow({
         condition.kind === "sdkVersion") && (
         <>
           <Select
+            disabled={disabled}
             value={condition.scalarOp}
             onChange={(e) =>
               onChange({ scalarOp: e.target.value as CompareOp })
@@ -272,6 +282,7 @@ function ConditionRow({
           </Select>
           <Input
             mono
+            disabled={disabled}
             value={condition.scalarValue}
             onChange={(e) => onChange({ scalarValue: e.target.value })}
             placeholder="1.2.3"
@@ -284,7 +295,9 @@ function ConditionRow({
         type="button"
         aria-label={t("targeting.conditions.removeCondition")}
         onClick={onRemove}
-        className="ml-auto inline-flex size-6 cursor-pointer items-center justify-center rounded text-rv-mute-500 hover:bg-rv-c3 hover:text-rv-danger"
+        disabled={disabled}
+        aria-disabled={disabled}
+        className="ml-auto inline-flex size-6 cursor-pointer items-center justify-center rounded text-rv-mute-500 hover:bg-rv-c3 hover:text-rv-danger disabled:cursor-not-allowed disabled:opacity-50"
       >
         <Trash2 size={12} />
       </button>
@@ -296,10 +309,12 @@ function ChipInput({
   values,
   onChange,
   placeholder,
+  disabled,
 }: {
   values: ReadonlyArray<string>;
   onChange: (next: string[]) => void;
   placeholder: string;
+  disabled?: boolean;
 }) {
   const [draft, setDraft] = useState("");
 
@@ -329,8 +344,9 @@ function ChipInput({
           <button
             type="button"
             aria-label={`Remove ${v}`}
+            disabled={disabled}
             onClick={() => onChange(values.filter((x) => x !== v))}
-            className="text-rv-mute-500 hover:text-rv-danger"
+            className="text-rv-mute-500 hover:text-rv-danger disabled:cursor-not-allowed disabled:opacity-50"
           >
             ×
           </button>
@@ -338,6 +354,7 @@ function ChipInput({
       ))}
       <input
         type="text"
+        disabled={disabled}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
@@ -354,7 +371,7 @@ function ChipInput({
         }}
         onBlur={commit}
         placeholder={values.length === 0 ? placeholder : ""}
-        className="flex-1 min-w-[80px] bg-transparent font-rv-mono text-[11px] text-foreground placeholder:text-rv-mute-500 outline-none"
+        className="flex-1 min-w-[80px] bg-transparent font-rv-mono text-[11px] text-foreground placeholder:text-rv-mute-500 outline-none disabled:cursor-not-allowed"
       />
     </div>
   );
@@ -363,9 +380,11 @@ function ChipInput({
 function PlatformChips({
   values,
   onChange,
+  disabled,
 }: {
   values: ReadonlyArray<string>;
   onChange: (next: string[]) => void;
+  disabled?: boolean;
 }) {
   const selected = new Set(values);
   return (
@@ -376,7 +395,9 @@ function PlatformChips({
           <button
             key={p.value}
             type="button"
+            disabled={disabled}
             onClick={() => {
+              if (disabled) return;
               if (isOn) onChange(values.filter((v) => v !== p.value));
               else onChange([...values, p.value]);
             }}
@@ -385,6 +406,7 @@ function PlatformChips({
               isOn
                 ? "border-rv-accent-500 bg-rv-accent-500/10 text-rv-accent-500"
                 : "border-rv-divider bg-rv-c2 text-rv-mute-700 hover:border-rv-accent-500/40",
+              disabled && "cursor-not-allowed opacity-50",
             )}
           >
             {isOn && <Check size={9} />}
