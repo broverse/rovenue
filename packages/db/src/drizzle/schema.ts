@@ -335,9 +335,12 @@ export const auditLogs = pgTable(
     projectId: text("projectId").references(() => projects.id, {
       onDelete: "set null",
     }),
-    userId: text("userId")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    // Plain text column — no FK to "user". Programmatic operations
+    // (e.g. grantComp) may pass an opaque actorUserId that isn't a
+    // Better Auth row, and the audit trail must still record it.
+    // Dashboard routes pass the session user.id (always present in
+    // the user table). Nullable so future batch operations can omit it.
+    userId: text("userId"),
     action: text("action").notNull(),
     resource: text("resource").notNull(),
     resourceId: text("resourceId").notNull(),

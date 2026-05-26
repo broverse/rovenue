@@ -34,7 +34,7 @@ export interface SubscriberDetailPurchase {
   id: string;
   productId: string;
   productIdentifier: string;
-  store: "APP_STORE" | "PLAY_STORE" | "STRIPE";
+  store: "APP_STORE" | "PLAY_STORE" | "STRIPE" | "MANUAL";
   status:
     | "TRIAL"
     | "ACTIVE"

@@ -232,6 +232,13 @@
       "when": 1779780724586,
       "tag": "0032_salty_firelord",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1779782216530,
+      "tag": "0033_flowery_wasp",
+      "breakpoints": true
     }
   ]
 }

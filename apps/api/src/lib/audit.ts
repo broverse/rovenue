@@ -63,6 +63,8 @@ export type AuditAction =
   | "subscriber.credits_added"
   | "subscriber.anonymized"
   | "subscriber.exported"
+  // --- subscription manual ops ---
+  | "subscription.granted"
   // --- members ---
   | "member.invited"
   | "member.role_changed"
@@ -76,6 +78,7 @@ export type AuditResource =
   | "api_key"
   | "product"
   | "product_group"
+  | "purchase"
   | "subscriber"
   | "member"
   | "credential";

@@ -47,6 +47,7 @@ export const Store = {
   APP_STORE: "APP_STORE",
   PLAY_STORE: "PLAY_STORE",
   STRIPE: "STRIPE",
+  MANUAL: "MANUAL",
 } as const;
 export type Store = (typeof Store)[keyof typeof Store];
 
@@ -179,3 +180,30 @@ export * from "./helpers/encrypted-field";
 export const drizzle = drizzleNamespace;
 export type { Db } from "./drizzle";
 export { getDb, createDb, db } from "./drizzle";
+
+// =============================================================
+// Schema table objects — convenience re-exports so integration
+// tests and service code can import tables directly without going
+// through the `drizzle.schema.*` namespace.
+// =============================================================
+
+export {
+  projects,
+  subscribers,
+  products,
+  productGroups,
+  purchases,
+  subscriberAccess,
+  auditLogs,
+  outboxEvents,
+  apiKeys,
+  webhookEvents,
+  outgoingWebhooks,
+  audiences,
+  experiments,
+  experimentAssignments,
+  featureFlags,
+  creditLedger,
+  revenueEvents,
+  outboxEvents as outbox,
+} from "./drizzle/schema";
