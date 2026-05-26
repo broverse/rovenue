@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["packages/core-rs"]
+members = ["packages/core-rs", "packages/core-rs/bindgen"]
 
 [workspace.package]
 version = "0.0.1"
