@@ -1,0 +1,12 @@
+{
+  "subject": "Refund detected on {{projectName}}",
+  "preview": "{{amountFormatted}} refunded · reason: {{reasonLabel}}",
+  "headline": "Refund detected on {{projectName}}",
+  "body": "A refund of {{amountFormatted}} was flagged on {{projectName}} (reason: {{reasonLabel}}).",
+  "body.product": "Related product: {{productId}}",
+  "cta": "Review refund",
+  "push.title": "Refund {{amountFormatted}} on {{projectName}}",
+  "push.body": "Reason: {{reasonLabel}}",
+  "reason.high_value": "high-value",
+  "reason.burst": "burst of refunds"
+}

@@ -1,0 +1,12 @@
+{
+  "subject": "{{projectName}} projesinde iade tespit edildi",
+  "preview": "{{amountFormatted}} iade · sebep: {{reasonLabel}}",
+  "headline": "{{projectName}} — iade tespit edildi",
+  "body": "{{projectName}} üzerinde {{amountFormatted}} tutarında iade işaretlendi (sebep: {{reasonLabel}}).",
+  "body.product": "İlgili ürün: {{productId}}",
+  "cta": "İadeyi incele",
+  "push.title": "{{projectName}} — {{amountFormatted}} iade",
+  "push.body": "Sebep: {{reasonLabel}}",
+  "reason.high_value": "yüksek tutar",
+  "reason.burst": "iade patlaması"
+}
