@@ -186,4 +186,104 @@ export const handlers = [
       },
     }),
   ),
+
+  http.get(`${BASE}/dashboard/audiences`, () =>
+    HttpResponse.json({
+      data: {
+        audiences: [
+          {
+            id: "aud_default",
+            projectId: "proj_1",
+            name: "All Users",
+            description: "Matches every subscriber",
+            rules: {},
+            isDefault: true,
+            createdAt: "2026-04-01T00:00:00Z",
+            updatedAt: "2026-04-01T00:00:00Z",
+          },
+          {
+            id: "aud_eu",
+            projectId: "proj_1",
+            name: "EU customers",
+            description: null,
+            rules: { country: { $in: ["DE", "FR"] } },
+            isDefault: false,
+            createdAt: "2026-04-10T00:00:00Z",
+            updatedAt: "2026-04-10T00:00:00Z",
+          },
+        ],
+      },
+    }),
+  ),
+
+  http.get(`${BASE}/dashboard/audiences/:id`, ({ params }) =>
+    HttpResponse.json({
+      data: {
+        audience: {
+          id: params.id,
+          projectId: "proj_1",
+          name: params.id === "aud_default" ? "All Users" : "EU customers",
+          description:
+            params.id === "aud_default" ? "Matches every subscriber" : null,
+          rules:
+            params.id === "aud_default"
+              ? {}
+              : { country: { $in: ["DE", "FR"] } },
+          isDefault: params.id === "aud_default",
+          createdAt: "2026-04-01T00:00:00Z",
+          updatedAt: "2026-04-10T00:00:00Z",
+        },
+      },
+    }),
+  ),
+
+  http.post(`${BASE}/dashboard/audiences`, async ({ request }) => {
+    const body = (await request.json()) as {
+      projectId: string;
+      name: string;
+      description?: string;
+      rules?: Record<string, unknown>;
+    };
+    return HttpResponse.json({
+      data: {
+        audience: {
+          id: "aud_new",
+          projectId: body.projectId,
+          name: body.name,
+          description: body.description ?? null,
+          rules: body.rules ?? {},
+          isDefault: false,
+          createdAt: "2026-05-26T00:00:00Z",
+          updatedAt: "2026-05-26T00:00:00Z",
+        },
+      },
+    });
+  }),
+
+  http.patch(
+    `${BASE}/dashboard/audiences/:id`,
+    async ({ params, request }) => {
+      const body = (await request.json()) as Record<string, unknown>;
+      return HttpResponse.json({
+        data: {
+          audience: {
+            id: params.id,
+            projectId: "proj_1",
+            name: (body.name as string) ?? "EU customers",
+            description: (body.description as string | null) ?? null,
+            rules:
+              (body.rules as Record<string, unknown>) ??
+              { country: { $in: ["DE", "FR"] } },
+            isDefault: false,
+            createdAt: "2026-04-10T00:00:00Z",
+            updatedAt: "2026-05-26T00:00:00Z",
+          },
+        },
+      });
+    },
+  ),
+
+  http.delete(`${BASE}/dashboard/audiences/:id`, () =>
+    HttpResponse.json({ data: { deleted: true } }),
+  ),
 ];
