@@ -1821,7 +1821,7 @@ git commit -m "feat(api): BullMQ email queue + worker + invitation repo stub"
 **Files:**
 - Modify: `packages/db/src/drizzle/enums.ts`
 - Modify: `packages/db/src/drizzle/schema.ts`
-- Create: `packages/db/drizzle/migrations/0041_project_invitations.sql`
+- Create: `packages/db/drizzle/migrations/0039_project_invitations.sql`
 
 - [ ] **Step 1: Add the delivery-status enum**
 
@@ -1905,7 +1905,7 @@ Also re-export `invitationDeliveryStatus` and `projectInvitations` from the exis
 cd packages/db && pnpm db:migrate:generate
 ```
 
-Open the generated file (likely `0041_*.sql`) and confirm it creates `project_invitations` + the indexes. Drizzle may produce the partial unique index without the `WHERE` clause — if so, replace that statement with the explicit version:
+Open the generated file (likely `0039_*.sql`) and confirm it creates `project_invitations` + the indexes. Drizzle may produce the partial unique index without the `WHERE` clause — if so, replace that statement with the explicit version:
 
 ```sql
 CREATE UNIQUE INDEX "project_invitations_pending_uniq"
@@ -1913,7 +1913,7 @@ CREATE UNIQUE INDEX "project_invitations_pending_uniq"
   WHERE accepted_at IS NULL AND revoked_at IS NULL;
 ```
 
-Rename the file to `0041_project_invitations.sql` for clarity if drizzle gave it a different suffix.
+Rename the file to `0039_project_invitations.sql` for clarity if drizzle gave it a different suffix.
 
 - [ ] **Step 4: Run migration + verify**
 
