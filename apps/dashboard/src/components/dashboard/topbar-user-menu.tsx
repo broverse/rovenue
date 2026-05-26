@@ -1,9 +1,9 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Menu } from "@base-ui-components/react/menu";
-import { UserCog } from "lucide-react";
+import { FileText, Gauge, LogOut, Receipt, UserCog } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { signOut, useSession } from "../../lib/auth";
-import { ThemeToggle } from "../layout/ThemeToggle";
 
 const initialsFromName = (name?: string | null, email?: string | null) => {
   const source = (name && name.trim()) || (email && email.split("@")[0]) || "U";
@@ -11,6 +11,19 @@ const initialsFromName = (name?: string | null, email?: string | null) => {
   if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
   return source.slice(0, 2).toUpperCase();
 };
+
+type NavItem = {
+  to: "/account/profile" | "/account/billing" | "/account/invoices" | "/account/usage";
+  labelKey: string;
+  icon: LucideIcon;
+};
+
+const NAV_ITEMS: ReadonlyArray<NavItem> = [
+  { to: "/account/profile", labelKey: "account.nav.items.profile", icon: UserCog },
+  { to: "/account/billing", labelKey: "account.nav.items.billing", icon: Receipt },
+  { to: "/account/invoices", labelKey: "account.nav.items.invoices", icon: FileText },
+  { to: "/account/usage", labelKey: "account.nav.items.usage", icon: Gauge },
+];
 
 export function TopbarUserMenu() {
   const { t } = useTranslation();
@@ -42,18 +55,20 @@ export function TopbarUserMenu() {
               </div>
             </div>
             <div className="my-1 h-px bg-rv-divider" />
-            <div className="flex items-center justify-between rounded px-2 py-1 text-[13px] text-rv-mute-700">
-              <span>{t("common.theme")}</span>
-              <ThemeToggle />
-            </div>
+            {NAV_ITEMS.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Menu.Item
+                  key={item.to}
+                  onClick={() => navigate({ to: item.to })}
+                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-rv-mute-700 outline-none data-[highlighted]:bg-rv-c4 data-[highlighted]:text-foreground"
+                >
+                  <Icon size={13} />
+                  {t(item.labelKey)}
+                </Menu.Item>
+              );
+            })}
             <div className="my-1 h-px bg-rv-divider" />
-            <Menu.Item
-              onClick={() => navigate({ to: "/account/profile" })}
-              className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-rv-mute-700 outline-none data-[highlighted]:bg-rv-c4 data-[highlighted]:text-foreground"
-            >
-              <UserCog size={13} />
-              {t("account.nav.items.profile")}
-            </Menu.Item>
             <Menu.Item
               onClick={async () => {
                 await signOut();
@@ -61,6 +76,7 @@ export function TopbarUserMenu() {
               }}
               className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-rv-mute-700 outline-none data-[highlighted]:bg-rv-c4 data-[highlighted]:text-foreground"
             >
+              <LogOut size={13} />
               {t("common.signOut")}
             </Menu.Item>
           </Menu.Popup>
