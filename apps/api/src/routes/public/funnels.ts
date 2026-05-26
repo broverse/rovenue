@@ -5,6 +5,8 @@
 // POST /public/funnels/:slug/sessions                     — start a session
 // POST /public/funnel-sessions/:sessionId/answers         — upsert an answer
 // POST /public/funnel-sessions/:sessionId/advance         — evaluate next page
+// GET  /public/funnel-sessions/:sessionId/state           — poll status
+// POST /public/funnel-sessions/:sessionId/claim-token     — issue claim token
 //
 // Branching rules (`next_rules` / `default_next`) are stripped
 // from the published bundle so the client never sees the routing
@@ -33,6 +35,7 @@ import {
   type EvalPage,
   type PageGraph,
 } from "../../services/funnel/branching-evaluator";
+import { generateClaimToken, hashToken } from "../../services/funnel/token";
 
 interface PublishedRuntimeConfig {
   id: string;
@@ -268,6 +271,117 @@ export const publicFunnelsRoute = new Hono()
       }
       return c.json({ data: { next: result.next } });
     },
-  );
+  )
+
+  // ---------------------------------------------------------------
+  // GET /funnel-sessions/:sessionId/state — poll progress + token status
+  // ---------------------------------------------------------------
+  .get("/funnel-sessions/:sessionId/state", async (c) => {
+    const sid = c.req.param("sessionId");
+    const session = await drizzle.funnelSessionRepo.findById(drizzle.db, sid);
+    if (!session) {
+      throw new HTTPException(404, { message: "Session not found" });
+    }
+    const tokenRow = await drizzle.funnelClaimTokenRepo.findBySession(
+      drizzle.db,
+      sid,
+    );
+    return c.json({
+      data: {
+        current_page_id: session.currentPageId,
+        state: session.state,
+        has_claim_token: tokenRow !== null,
+      },
+    });
+  })
+
+  // ---------------------------------------------------------------
+  // POST /funnel-sessions/:sessionId/claim-token — issue token
+  //
+  // In production the Stripe webhook (sub-project B) inserts the
+  // funnel_purchases + funnel_claim_tokens rows out-of-band and the
+  // client polls /state. This endpoint only mints a token
+  // synchronously when the funnel version has `dev_mode: true` AND
+  // NODE_ENV !== "production" — a developer convenience for
+  // end-to-end testing without Stripe.
+  // ---------------------------------------------------------------
+  .post("/funnel-sessions/:sessionId/claim-token", async (c) => {
+    const sid = c.req.param("sessionId");
+    const session = await drizzle.funnelSessionRepo.findById(drizzle.db, sid);
+    if (!session) {
+      throw new HTTPException(404, { message: "Session not found" });
+    }
+
+    let plaintext: string | null = null;
+
+    if (session.state === "in_progress") {
+      const version = await drizzle.funnelVersionRepo.findById(
+        drizzle.db,
+        session.funnelVersionId,
+      );
+      const settings = (version?.settingsJson ?? {}) as { dev_mode?: boolean };
+      if (settings.dev_mode && process.env.NODE_ENV !== "production") {
+        plaintext = generateClaimToken();
+        const tokenPlaintext = plaintext;
+        await drizzle.db.transaction(async (tx) => {
+          await drizzle.funnelPurchaseRepo.insert(tx, {
+            sessionId: sid,
+            projectId: session.projectId,
+            status: "paid",
+            paidAt: new Date(),
+            rawPayload: { stub: true },
+          });
+          await drizzle.funnelSessionRepo.setState(tx, sid, "paid");
+          await drizzle.funnelClaimTokenRepo.insert(tx, {
+            tokenHash: hashToken(tokenPlaintext),
+            sessionId: sid,
+            projectId: session.projectId,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          });
+        });
+      } else {
+        throw new HTTPException(409, { message: "Session is not paid" });
+      }
+    } else if (session.state !== "paid" && session.state !== "completed") {
+      throw new HTTPException(409, { message: "Session is not paid" });
+    }
+
+    if (plaintext === null) {
+      // Non-stub path: token was issued by the Stripe webhook. We
+      // intentionally don't recover plaintext — clients should pull
+      // it from the URL the webhook handler emitted (sub-project B).
+      const existing = await drizzle.funnelClaimTokenRepo.findBySession(
+        drizzle.db,
+        sid,
+      );
+      if (!existing) {
+        throw new HTTPException(404, { message: "No claim token" });
+      }
+      throw new HTTPException(410, { message: "Token already issued" });
+    }
+
+    const version = await drizzle.funnelVersionRepo.findById(
+      drizzle.db,
+      session.funnelVersionId,
+    );
+    const settings = (version?.settingsJson ?? {}) as {
+      deep_link_scheme?: string;
+      universal_link_domain?: string;
+    };
+    const deepLink = settings.deep_link_scheme
+      ? `${settings.deep_link_scheme}://onboarding-complete?token=${plaintext}&project=${session.projectId}`
+      : null;
+    const universalLink = settings.universal_link_domain
+      ? `https://${settings.universal_link_domain}/universal/funnels/open/${plaintext}`
+      : null;
+
+    return c.json({
+      data: {
+        token: plaintext,
+        deep_link_url: deepLink,
+        universal_link_url: universalLink,
+      },
+    });
+  });
 
 export { invalidatePublishedConfig };
