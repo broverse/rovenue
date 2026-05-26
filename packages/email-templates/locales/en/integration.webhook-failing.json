@@ -1,0 +1,8 @@
+{
+  "subject": "Webhook delivery failing on {{projectName}}",
+  "preview": "{{consecutiveFailures}} consecutive failures to {{endpointUrl}}",
+  "headline": "Webhook is failing on {{projectName}}",
+  "body": "Your webhook to {{endpointUrl}} has failed {{consecutiveFailures}} times in a row. We'll keep retrying with backoff but you may be missing events.",
+  "body.meta": "Webhook ID: {{webhookId}}",
+  "cta": "Open webhook"
+}

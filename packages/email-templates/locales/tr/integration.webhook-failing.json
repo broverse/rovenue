@@ -1,0 +1,8 @@
+{
+  "subject": "{{projectName}} — webhook teslimi başarısız",
+  "preview": "{{endpointUrl}} adresine {{consecutiveFailures}} ardışık başarısızlık",
+  "headline": "{{projectName}} — webhook başarısız oluyor",
+  "body": "{{endpointUrl}} adresine giden webhook üst üste {{consecutiveFailures}} kez başarısız oldu. Backoff ile yeniden deneyeceğiz ancak olay kaçırıyor olabilirsiniz.",
+  "body.meta": "Webhook ID: {{webhookId}}",
+  "cta": "Webhook'u aç"
+}
