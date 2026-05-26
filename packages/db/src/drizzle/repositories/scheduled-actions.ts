@@ -120,8 +120,8 @@ export async function claimDueBatch(
 }
 
 export async function markExecuted(
-  id: string,
   db: DbOrTx,
+  id: string,
 ): Promise<void> {
   await db
     .update(scheduledSubscriptionActions)
@@ -130,9 +130,9 @@ export async function markExecuted(
 }
 
 export async function markFailed(
+  db: DbOrTx,
   id: string,
   error: string,
-  db: DbOrTx,
 ): Promise<void> {
   await db
     .update(scheduledSubscriptionActions)
