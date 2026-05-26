@@ -1,11 +1,12 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { cn } from "../../lib/cn";
 
 type ConnectionRowProps = {
   name: ReactNode;
   meta: ReactNode;
-  glyph: string;
-  glyphStyle?: { background?: string };
+  glyph: ReactNode;
+  glyphStyle?: CSSProperties;
+  glyphClassName?: string;
   primary?: boolean;
   primaryLabel?: string;
   action: ReactNode;
@@ -16,6 +17,7 @@ export function ConnectionRow({
   meta,
   glyph,
   glyphStyle,
+  glyphClassName,
   primary,
   primaryLabel,
   action,
@@ -25,6 +27,7 @@ export function ConnectionRow({
       <div
         className={cn(
           "flex size-8 shrink-0 items-center justify-center rounded-md font-rv-mono text-[12px] font-semibold text-white",
+          glyphClassName,
         )}
         style={glyphStyle}
       >

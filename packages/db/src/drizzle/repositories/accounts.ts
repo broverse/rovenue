@@ -40,22 +40,6 @@ export async function listAccountsByUser(
 }
 
 /**
- * Counts how many OAuth accounts are linked to the user.
- * Callers use this to refuse the final disconnect (which would
- * lock the user out of an OAuth-only deployment).
- */
-export async function countAccountsByUser(
-  db: Db,
-  userId: string,
-): Promise<number> {
-  const rows = await db
-    .select({ id: account.id })
-    .from(account)
-    .where(eq(account.userId, userId));
-  return rows.length;
-}
-
-/**
  * Deletes the user's row for a single provider (e.g. "github" /
  * "google"). Returns true if a row was removed.
  */
