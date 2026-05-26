@@ -21,7 +21,11 @@ import { listDailyMrr } from "../../services/metrics/mrr";
 // with `from` / `to` as ISO-8601 strings; the schema rejects
 // windows wider than MRR_WINDOW_MAX_DAYS or where from > to.
 
-const MRR_WINDOW_MAX_DAYS = 365;
+// Cap chosen to cover up to "All" (24 months) on the Charts page
+// without forcing a second round-trip. Compare-mode adds a *second*
+// request for the prior period, so this cap doesn't need to grow
+// just because the UI offers a "previous-period overlay".
+const MRR_WINDOW_MAX_DAYS = 800;
 const DEFAULT_WINDOW_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 

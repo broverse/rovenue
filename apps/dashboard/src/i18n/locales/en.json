@@ -2284,27 +2284,36 @@
     },
     "channels": {
       "title": "Acquisition channel split",
-      "subtitle": "28d new MRR",
+      "subtitle": "last {{days}}d · gross USD",
       "total": "total",
+      "loading": "Loading…",
       "organic": "Organic",
       "asa": "Apple Search Ads",
       "meta": "Meta",
       "tiktok": "TikTok",
-      "referral": "Referral"
+      "referral": "Referral",
+      "stores": {
+        "apple": "App Store",
+        "google": "Play Store",
+        "stripe": "Stripe",
+        "manual": "Manual"
+      }
     },
     "funnel": {
       "title": "Install → paid funnel",
-      "subtitle": "28d",
-      "install": "Install",
+      "subtitle": "last {{days}}d",
+      "install": "Initial purchase",
       "onboarding": "Onboarding done",
       "paywall": "Paywall view",
-      "trial": "Trial started",
-      "paid": "Trial → paid"
+      "trial": "Trial",
+      "paid": "Trial → paid",
+      "renewal": "Renewal"
     },
     "heatmap": {
       "title": "Purchase volume by hour × day",
-      "subtitle": "last 4 weeks · UTC",
-      "peak": "Peak: Sat 19:00 UTC · 218 purchases/h",
+      "subtitle": "last {{days}}d · UTC",
+      "peak": "Peak: pick a window with at least one event",
+      "peakLive": "Peak: {{day}} {{hour}} UTC · {{count}} events/h",
       "low": "low",
       "high": "high"
     },

@@ -116,55 +116,98 @@ export function MrrChartPanel({ projectId, chartType, compare, range }: Props) {
   const { t } = useTranslation();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
-  // We fetch a single wide window covering current + prev so the
-  // server only runs one CH query per range change. The endpoint
-  // accepts up to 365 days; pull the cap when the user picks ALL
-  // or a 12M+compare window so the prev series still fits.
+  // We split current + prev into two requests so each stays under
+  // the API's per-call window cap. Going through the cap in a
+  // single span was the prior bug behind "Couldn't load MRR" on
+  // 12M+compare / All ranges.
   const months = RANGE_MONTHS[range];
-  const windowMonths = compare ? months * 2 : months;
   const now = useMemo(() => new Date(), []);
-  const to = useMemo(() => now.toISOString(), [now]);
-  const from = useMemo(() => {
-    const start = new Date(now);
-    start.setUTCMonth(start.getUTCMonth() - windowMonths);
-    start.setUTCDate(1);
-    return start.toISOString();
-  }, [now, windowMonths]);
 
-  const { data, isLoading, error } = useProjectMrr({ projectId, from, to });
+  // Floor to the first day of the month so the API doesn't return
+  // a partial leading bucket that the monthly rollup would
+  // double-count against `to`.
+  const currentFrom = useMemo(() => {
+    const d = new Date(now);
+    d.setUTCMonth(d.getUTCMonth() - (months - 1));
+    d.setUTCDate(1);
+    d.setUTCHours(0, 0, 0, 0);
+    return d.toISOString();
+  }, [now, months]);
+  const currentTo = useMemo(() => now.toISOString(), [now]);
+
+  const prevTo = useMemo(() => {
+    const d = new Date(now);
+    d.setUTCMonth(d.getUTCMonth() - months);
+    return d.toISOString();
+  }, [now, months]);
+  const prevFrom = useMemo(() => {
+    const d = new Date(prevTo);
+    d.setUTCMonth(d.getUTCMonth() - (months - 1));
+    d.setUTCDate(1);
+    d.setUTCHours(0, 0, 0, 0);
+    return d.toISOString();
+  }, [prevTo, months]);
+
+  const currentQuery = useProjectMrr({
+    projectId,
+    from: currentFrom,
+    to: currentTo,
+  });
+  const prevQuery = useProjectMrr({
+    projectId,
+    from: prevFrom,
+    to: prevTo,
+    enabled: compare,
+  });
 
   const series = useMemo(() => {
-    const points = data?.points ?? [];
-    const all = rollupToMonths(points, windowMonths, now);
-    const current = all.slice(all.length - months);
-    const prev = compare ? all.slice(0, months) : [];
+    const current = rollupToMonths(
+      currentQuery.data?.points ?? [],
+      months,
+      now,
+    );
+    const prevAnchor = new Date(now);
+    prevAnchor.setUTCMonth(prevAnchor.getUTCMonth() - months);
+    const prev = compare
+      ? rollupToMonths(prevQuery.data?.points ?? [], months, prevAnchor)
+      : [];
     return { current, prev };
-  }, [data, months, windowMonths, compare, now]);
+  }, [currentQuery.data, prevQuery.data, months, compare, now]);
 
-  // Fall back to the mock series when the API hasn't returned
-  // anything (loading, error, or an empty project). Keeps the
-  // chart from looking broken in the demo + first-run path.
+  // Has the API returned at least one point with non-zero gross?
+  // If yes, render the real series even when other months are
+  // empty. If no, fall back to the mock so the chart doesn't look
+  // broken on a fresh project. Errors are surfaced separately and
+  // never trigger the fallback silently.
+  const hasRealData =
+    (currentQuery.data?.points.length ?? 0) > 0 &&
+    series.current.some((b) => b.total > 0);
+
   const currentValues = useMemo(() => {
-    const real = series.current.map((b) => b.total);
-    if (real.some((v) => v > 0)) return real;
+    if (hasRealData) return series.current.map((b) => b.total);
     return MRR_SERIES.current.slice(-months);
-  }, [series.current, months]);
+  }, [series.current, hasRealData, months]);
 
   const prevValues = useMemo(() => {
     if (!compare) return [];
-    const real = series.prev.map((b) => b.total);
-    if (real.some((v) => v > 0)) return real;
+    if (hasRealData) return series.prev.map((b) => b.total);
     return MRR_SERIES.prev.slice(-months);
-  }, [series.prev, compare, months]);
+  }, [series.prev, compare, hasRealData, months]);
 
   const monthLabels = useMemo(() => {
-    if (series.current.length > 0) {
+    if (hasRealData && series.current.length > 0) {
       return series.current.map((b) => bucketLabel(b.ym));
     }
     return MRR_SERIES.current
       .slice(-months)
-      .map((_, i) => MONTH_NAMES[(now.getUTCMonth() - months + 1 + i + 12) % 12]);
-  }, [series.current, months, now]);
+      .map(
+        (_, i) =>
+          MONTH_NAMES[(now.getUTCMonth() - months + 1 + i + 12) % 12],
+      );
+  }, [series.current, hasRealData, months, now]);
+
+  const error = currentQuery.error ?? (compare ? prevQuery.error : null);
+  const isLoading = currentQuery.isLoading || (compare && prevQuery.isLoading);
 
   const all = [...currentValues, ...prevValues];
   const yMax = Math.max(...all, 1) * 1.08;
@@ -197,7 +240,7 @@ export function MrrChartPanel({ projectId, chartType, compare, range }: Props) {
             {t("charts.mrr.headLabel")}
           </div>
           <div className="mt-1 font-rv-mono text-[28px] font-medium tabular-nums">
-            {isLoading && !data
+            {isLoading && !currentQuery.data
               ? "—"
               : formatCurrencyCompact(cur)}
           </div>

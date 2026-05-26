@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Plus, Search } from "lucide-react";
@@ -67,6 +67,65 @@ function entryLabel(
   return entry.kind === "system" ? t(`charts.items.${entry.id}`) : entry.name;
 }
 
+const EMPTY_FILTERS: FilterSelection = {
+  platform: [],
+  country: [],
+  productGroup: [],
+};
+
+const filtersStorageKey = (projectId: string): string =>
+  `rovenue.charts.filters.${projectId}`;
+
+/**
+ * Per-chart filter selection persisted to localStorage. Keyed by
+ * project so two projects in adjacent tabs don't bleed selections
+ * into each other. We persist on every change — the surface is
+ * tiny and the writes only happen when the user actually moves a
+ * chip, so the work is negligible.
+ */
+function useChartFiltersByChart(
+  projectId: string,
+  chartId: string,
+): [FilterSelection, (next: FilterSelection) => void] {
+  const [byChart, setByChart] = useState<Record<string, FilterSelection>>(
+    () => {
+      if (typeof window === "undefined") return {};
+      try {
+        const raw = window.localStorage.getItem(filtersStorageKey(projectId));
+        if (!raw) return {};
+        const parsed = JSON.parse(raw) as unknown;
+        if (!parsed || typeof parsed !== "object") return {};
+        return parsed as Record<string, FilterSelection>;
+      } catch {
+        return {};
+      }
+    },
+  );
+
+  const current = byChart[chartId] ?? EMPTY_FILTERS;
+
+  const setCurrent = useCallback(
+    (next: FilterSelection) => {
+      setByChart((prev) => {
+        const updated = { ...prev, [chartId]: next };
+        try {
+          window.localStorage.setItem(
+            filtersStorageKey(projectId),
+            JSON.stringify(updated),
+          );
+        } catch {
+          // Storage may be full or disabled; the in-memory state
+          // still updates so the session keeps working.
+        }
+        return updated;
+      });
+    },
+    [chartId, projectId],
+  );
+
+  return [current, setCurrent];
+}
+
 function ChartsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const catalogQuery = useChartCatalog(projectId);
@@ -84,11 +143,7 @@ function ChartsPage({ projectId }: { projectId: string }) {
     DEFAULT_STARRED_IDS,
   );
   const [newChartOpen, setNewChartOpen] = useState(false);
-  const [filters, setFilters] = useState<FilterSelection>({
-    platform: [],
-    country: [],
-    productGroup: [],
-  });
+  const [filters, setFilters] = useChartFiltersByChart(projectId, chartId);
 
   // The catalog can grow / shrink — if the selected id disappears
   // (e.g. the user just deleted their custom chart), snap back to
@@ -204,12 +259,12 @@ function ChartsPage({ projectId }: { projectId: string }) {
           />
 
           <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
-            <ChannelDonut />
-            <FunnelCard />
-            <HourDayHeatmap />
+            <ChannelDonut projectId={projectId} />
+            <FunnelCard projectId={projectId} />
+            <HourDayHeatmap projectId={projectId} />
           </div>
 
-          <AnnotationsPanel />
+          <AnnotationsPanel projectId={projectId} />
         </main>
 
         <aside className="sticky top-[76px] hidden max-h-[calc(100vh-96px)] flex-col gap-3 overflow-y-auto min-[1481px]:flex">

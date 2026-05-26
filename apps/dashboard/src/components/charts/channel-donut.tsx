@@ -1,33 +1,111 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import type { ChartChannelsRow } from "@rovenue/shared";
+import { useChartChannels } from "../../lib/hooks/useProjectCharts";
 import { CHANNELS } from "./mock-data";
 
 const RADIUS = 50;
 const CX = 65;
 const CY = 65;
 const STROKE_WIDTH = 18;
+const DEFAULT_WINDOW_DAYS = 28;
 
-export function ChannelDonut() {
+// Per-store palette + display label. `store` on the wire comes
+// from the raw_revenue_events.store column — APP_STORE / PLAY_STORE
+// / STRIPE etc. Unknown stores get a neutral muted color so the
+// donut stays readable when a new store appears.
+const STORE_STYLE: Record<string, { color: string; labelKey: string }> = {
+  APP_STORE: {
+    color: "var(--color-rv-accent-500)",
+    labelKey: "charts.channels.stores.apple",
+  },
+  PLAY_STORE: {
+    color: "var(--color-rv-success)",
+    labelKey: "charts.channels.stores.google",
+  },
+  STRIPE: {
+    color: "var(--color-rv-violet)",
+    labelKey: "charts.channels.stores.stripe",
+  },
+  MANUAL: {
+    color: "var(--color-rv-warning)",
+    labelKey: "charts.channels.stores.manual",
+  },
+};
+
+const FALLBACK_COLORS = [
+  "var(--color-rv-accent-500)",
+  "var(--color-rv-violet)",
+  "var(--color-rv-success)",
+  "var(--color-rv-warning)",
+  "var(--color-rv-cyan)",
+  "var(--color-rv-mute-500)",
+];
+
+interface DonutEntry {
+  id: string;
+  label: string;
+  value: number;
+  share: number;
+  color: string;
+}
+
+type Props = {
+  projectId: string;
+};
+
+export function ChannelDonut({ projectId }: Props) {
   const { t } = useTranslation();
+  const { data, isLoading } = useChartChannels({
+    projectId,
+    windowDays: DEFAULT_WINDOW_DAYS,
+  });
+
   const circumference = 2 * Math.PI * RADIUS;
+
+  const entries: DonutEntry[] = useMemo(() => {
+    const rows = data?.rows ?? [];
+    if (rows.length === 0) {
+      // Empty projects keep the mock channel mix so the panel
+      // doesn't render as a hollow circle on first run.
+      return CHANNELS.map((ch) => ({
+        id: ch.id,
+        label: t(ch.labelKey),
+        value: ch.value,
+        share: ch.share,
+        color: ch.color,
+      }));
+    }
+    return rows.map((row: ChartChannelsRow, i) => {
+      const style = STORE_STYLE[row.store];
+      return {
+        id: row.store,
+        label: style ? t(style.labelKey, row.store) : row.store,
+        value: Number(row.grossUsd),
+        share: row.pct,
+        color: style?.color ?? FALLBACK_COLORS[i % FALLBACK_COLORS.length]!,
+      };
+    });
+  }, [data, t]);
 
   const segments = useMemo(() => {
     let offset = 0;
-    return CHANNELS.map((ch) => {
-      const len = (ch.share / 100) * circumference;
+    return entries.map((e) => {
+      const len = (e.share / 100) * circumference;
       const seg = {
-        ...ch,
-        dasharray: `${len} ${circumference - len}`,
+        ...e,
+        dasharray: `${len} ${Math.max(circumference - len, 0)}`,
         offset: -offset,
       };
       offset += len + 1;
       return seg;
     });
-  }, [circumference]);
+  }, [entries, circumference]);
 
   const total = useMemo(
-    () => CHANNELS.reduce((sum, ch) => sum + ch.value, 0),
-    [],
+    () =>
+      data ? Number(data.totalUsd) : entries.reduce((s, e) => s + e.value, 0),
+    [data, entries],
   );
 
   return (
@@ -35,7 +113,9 @@ export function ChannelDonut() {
       <h4 className="mb-3 flex items-baseline justify-between gap-2.5 truncate text-[13px] font-semibold">
         <span className="truncate">{t("charts.channels.title")}</span>
         <span className="shrink-0 font-rv-mono text-[11px] font-normal text-rv-mute-500">
-          {t("charts.channels.subtitle")}
+          {t("charts.channels.subtitle", {
+            days: data?.windowDays ?? DEFAULT_WINDOW_DAYS,
+          })}
         </span>
       </h4>
       <div className="flex items-center gap-4">
@@ -77,24 +157,29 @@ export function ChannelDonut() {
           </text>
         </svg>
         <div className="flex-1 min-w-0">
-          {CHANNELS.map((ch) => (
+          {entries.map((e) => (
             <div
-              key={ch.id}
+              key={e.id}
               className="flex items-center gap-2 py-1 font-rv-mono text-[11px]"
             >
               <span
                 className="size-2 shrink-0 rounded-sm"
-                style={{ background: ch.color }}
+                style={{ background: e.color }}
               />
               <span className="flex-1 truncate text-rv-mute-700">
-                {t(ch.labelKey)}
+                {e.label}
               </span>
-              <span className="text-rv-mute-500">{ch.share}%</span>
+              <span className="text-rv-mute-500">{e.share}%</span>
               <span className="w-12 text-right tabular-nums">
-                ${(ch.value / 1000).toFixed(1)}k
+                ${(e.value / 1000).toFixed(1)}k
               </span>
             </div>
           ))}
+          {isLoading && entries.length === 0 && (
+            <div className="py-2 text-center text-[11px] text-rv-mute-500">
+              {t("charts.channels.loading", "Loading…")}
+            </div>
+          )}
         </div>
       </div>
     </div>

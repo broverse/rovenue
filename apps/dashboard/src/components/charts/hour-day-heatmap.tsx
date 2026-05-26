@@ -1,35 +1,109 @@
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useChartHeatmap } from "../../lib/hooks/useProjectCharts";
 import { heatColor } from "./format";
 import { HEATMAP_DAY_KEYS, HEATMAP_MATRIX } from "./mock-data";
 
 const HOUR_TICKS = [0, 4, 8, 12, 16, 20] as const;
 const LEGEND_STOPS = [0.1, 0.3, 0.5, 0.7, 0.9] as const;
+const DAY_KEYS_MON_FIRST = HEATMAP_DAY_KEYS;
+const DEFAULT_WINDOW_DAYS = 28;
 
-export function HourDayHeatmap() {
+// The API delivers cells keyed by `(dow, hour)` with Sunday=0..Saturday=6.
+// The grid renders Mon→Sun. The helper builds a 7×24 grid of
+// normalised intensities (0..1) plus the underlying raw counts so
+// the tooltip can show "Sat 19:00 — 218 events".
+
+interface PivotResult {
+  matrix: number[][];
+  counts: number[][];
+  peak: { dow: number; hour: number; count: number } | null;
+}
+
+function pivot(cells: ReadonlyArray<{ dow: number; hour: number; count: number }>): PivotResult {
+  const counts: number[][] = Array.from({ length: 7 }, () =>
+    Array.from({ length: 24 }, () => 0),
+  );
+  let max = 0;
+  let peak: PivotResult["peak"] = null;
+  for (const c of cells) {
+    // Wire convention: Sun=0..Sat=6. Grid convention: Mon=0..Sun=6.
+    const row = c.dow === 0 ? 6 : c.dow - 1;
+    if (row < 0 || row > 6 || c.hour < 0 || c.hour > 23) continue;
+    counts[row]![c.hour] = c.count;
+    if (c.count > max) {
+      max = c.count;
+      peak = c;
+    }
+  }
+  const matrix = counts.map((row) =>
+    row.map((c) => (max > 0 ? c / max : 0)),
+  );
+  return { matrix, counts, peak };
+}
+
+type Props = {
+  projectId: string;
+};
+
+export function HourDayHeatmap({ projectId }: Props) {
   const { t } = useTranslation();
+  const { data } = useChartHeatmap({
+    projectId,
+    windowDays: DEFAULT_WINDOW_DAYS,
+  });
+
+  const { matrix, counts, peak, hasRealData } = useMemo(() => {
+    const cells = data?.cells ?? [];
+    if (cells.length === 0) {
+      // Mock matrix has values 0..1 directly; counts are derived
+      // back so the tooltip's `count` math stays consistent.
+      return {
+        matrix: HEATMAP_MATRIX.map((row) => [...row]),
+        counts: HEATMAP_MATRIX.map((row) => row.map((v) => Math.round(v * 248))),
+        peak: null,
+        hasRealData: false,
+      };
+    }
+    return { ...pivot(cells), hasRealData: true };
+  }, [data]);
+
+  const peakLabel = useMemo(() => {
+    if (!hasRealData || !peak) return t("charts.heatmap.peak");
+    const day = t(DAY_KEYS_MON_FIRST[(peak.dow === 0 ? 6 : peak.dow - 1)]!);
+    const hh = peak.hour.toString().padStart(2, "0");
+    return t("charts.heatmap.peakLive", {
+      day,
+      hour: `${hh}:00`,
+      count: peak.count,
+      defaultValue: `Peak: {{day}} {{hour}} UTC · {{count}} events/h`,
+    });
+  }, [hasRealData, peak, t]);
 
   return (
     <div className="col-span-full rounded-lg border border-rv-divider bg-rv-c1 px-4 py-3.5">
       <h4 className="mb-3 flex items-baseline justify-between gap-2.5 truncate text-[13px] font-semibold">
         <span className="truncate">{t("charts.heatmap.title")}</span>
         <span className="shrink-0 font-rv-mono text-[11px] font-normal text-rv-mute-500">
-          {t("charts.heatmap.subtitle")}
+          {t("charts.heatmap.subtitle", {
+            days: data?.windowDays ?? DEFAULT_WINDOW_DAYS,
+          })}
         </span>
       </h4>
 
       <div>
-        {HEATMAP_DAY_KEYS.map((dayKey, i) => (
+        {DAY_KEYS_MON_FIRST.map((dayKey, i) => (
           <div key={dayKey} className="flex items-center">
             <div className="w-10 shrink-0 pr-1.5 text-right font-rv-mono text-[9px] leading-[18px] text-rv-mute-500">
               {t(dayKey)}
             </div>
             <div className="mb-0.5 flex flex-1 gap-0.5">
-              {HEATMAP_MATRIX[i].map((v, j) => (
+              {matrix[i]!.map((v, j) => (
                 <div
                   key={j}
                   className="h-[18px] flex-1 rounded-[2px]"
                   style={{ background: heatColor(v) }}
-                  title={`${t(dayKey)} ${j}:00 — ${(v * 248).toFixed(0)}`}
+                  title={`${t(dayKey)} ${j}:00 — ${counts[i]![j]}`}
                 />
               ))}
             </div>
@@ -46,7 +120,7 @@ export function HourDayHeatmap() {
       </div>
 
       <div className="mt-2.5 flex items-center justify-between font-rv-mono text-[10px] text-rv-mute-500">
-        <span>{t("charts.heatmap.peak")}</span>
+        <span>{peakLabel}</span>
         <div className="flex items-center gap-1">
           <span>{t("charts.heatmap.low")}</span>
           {LEGEND_STOPS.map((v) => (
