@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { OutgoingWebhookStatus, drizzle } from "@rovenue/db";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
+import { captureNotifierError } from "../lib/sentry-notifications";
 import { emitNotification } from "../services/notifications/emit";
 
 // =============================================================
@@ -256,6 +257,11 @@ async function safeEmitWebhookFailing(
     log.warn("integration.webhook.failing emit skipped", {
       webhookId: wh.id,
       err: err instanceof Error ? err.message : String(err),
+    });
+    captureNotifierError(err, {
+      component: "webhook-failing-emit",
+      projectId: wh.projectId,
+      reason: "emit_failed",
     });
   }
 }

@@ -31,6 +31,7 @@ import {
   incDispatched,
   incPushDevicesRevoked,
 } from "../lib/metrics-notifications";
+import { captureNotifierError } from "../lib/sentry-notifications";
 import { SEND_PUSH_QUEUE_NAME, type SendPushJob } from "../queues/notifier";
 
 const { notificationDeliveryRepo, pushDeviceRepo } = drizzle;
@@ -179,6 +180,16 @@ export function startSendPushWorker(
         { providerResponse: { devices: summariseOutcomes(outcomes) } },
       );
       incDispatched("unknown", "push", "failed");
+      captureNotifierError(
+        new Error("all push sends failed (permanent)"),
+        {
+          component: "send-push",
+          channel: "push",
+          userId: data.userId,
+          deliveryId: data.deliveryId,
+          reason: "all_devices_permanent",
+        },
+      );
       throw new UnrecoverableError("all push sends failed (permanent)");
     },
     {
@@ -209,6 +220,13 @@ export function startSendPushWorker(
           "failed",
           { providerResponse: { error: err?.message ?? "unknown" } },
         );
+        captureNotifierError(err ?? new Error("unknown push failure"), {
+          component: "send-push",
+          channel: "push",
+          userId: job.data.userId,
+          deliveryId: job.data.deliveryId,
+          reason: "attempts_exhausted",
+        });
       } catch (markErr) {
         log.error("mark_failed_error", {
           deliveryId: job.data.deliveryId,

@@ -2,6 +2,7 @@ import type { Consumer, Kafka, Producer } from "kafkajs";
 import { z } from "zod";
 import type { Logger } from "../lib/logger";
 import { incDlq } from "../lib/metrics-notifications";
+import { captureNotifierError } from "../lib/sentry-notifications";
 
 // =============================================================
 // notifier worker
@@ -99,6 +100,10 @@ export async function startNotifier(deps: NotifierDeps): Promise<RunningNotifier
             ],
           });
           incDlq(NOTIFICATIONS_DLQ_TOPIC);
+          captureNotifierError(err, {
+            component: "notifier",
+            reason: "routed_to_dlq",
+          });
         } catch (dlqErr) {
           // DLQ send itself failed — log loudly. Re-throwing here
           // would crash the consumer; instead we drop the message

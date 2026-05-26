@@ -23,6 +23,7 @@ import {
   incDispatched,
   observeSendDuration,
 } from "../lib/metrics-notifications";
+import { captureNotifierError } from "../lib/sentry-notifications";
 import { isEmailSuppressed } from "../services/notifications/suppression";
 import { SEND_EMAIL_QUEUE_NAME, type SendEmailJob } from "../queues/notifier";
 
@@ -115,6 +116,12 @@ export function startSendEmailWorker(
           { providerResponse: { error: err?.message ?? "unknown" } },
         );
         incDispatched("unknown", "email", "failed");
+        captureNotifierError(err ?? new Error("unknown send failure"), {
+          component: "send-email",
+          channel: "email",
+          deliveryId: job.data.deliveryId,
+          reason: "attempts_exhausted",
+        });
       } catch (markErr) {
         log.error("mark_failed_error", {
           deliveryId: job.data.deliveryId,
