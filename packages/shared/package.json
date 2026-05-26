@@ -17,6 +17,10 @@
     "./experiments": {
       "types": "./src/experiments/index.ts",
       "default": "./src/experiments/index.ts"
+    },
+    "./notifications": {
+      "types": "./src/notifications/index.ts",
+      "default": "./src/notifications/index.ts"
     }
   },
   "scripts": {
