@@ -1,5 +1,6 @@
 import {
   Environment,
+  RevenueEventType,
   WebhookEventStatus,
   WebhookSource,
   Store,
@@ -8,6 +9,7 @@ import {
 } from "@rovenue/db";
 import { logger } from "../../lib/logger";
 import { convertToUsd } from "../fx";
+import { maybeEmitRefundDetected } from "../notifications/refund-emit";
 import {
   GOOGLE_ACKNOWLEDGEMENT_STATE,
   type GooglePubSubPushBody,
@@ -290,6 +292,7 @@ async function processSubscriptionNotification(
   if (revenueEventType) {
     const amount = pricing?.amount ?? 0;
     const currency = pricing?.currency ?? "USD";
+    const amountUsd = await convertToUsd(amount, currency);
     await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
       projectId: ctx.projectId,
       subscriberId: subscriber.id,
@@ -298,10 +301,20 @@ async function processSubscriptionNotification(
       type: revenueEventType,
       amount: amount.toString(),
       currency,
-      amountUsd: (await convertToUsd(amount, currency)).toString(),
+      amountUsd: amountUsd.toString(),
       store: Store.PLAY_STORE,
       eventDate: new Date(),
     });
+
+    if (revenueEventType === RevenueEventType.REFUND) {
+      await maybeEmitRefundDetected(drizzle.db, {
+        projectId: ctx.projectId,
+        purchaseId: persisted.id,
+        productId: product.id,
+        amountUsdCents: Math.round(Math.abs(amountUsd) * 100),
+        currency,
+      });
+    }
   }
 
   return { subscriberId: subscriber.id, purchaseId: persisted.id };

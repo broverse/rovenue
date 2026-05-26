@@ -11,6 +11,7 @@ import {
 } from "@rovenue/db";
 import { logger } from "../../lib/logger";
 import { convertToUsd } from "../fx";
+import { maybeEmitRefundDetected } from "../notifications/refund-emit";
 import {
   STRIPE_EVENT_TYPE,
   STRIPE_INVOICE_BILLING_REASON,
@@ -407,6 +408,14 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
     amountUsd: amountUsd.toString(),
     store: Store.STRIPE,
     eventDate: new Date(),
+  });
+
+  await maybeEmitRefundDetected(drizzle.db, {
+    projectId: ctx.projectId,
+    purchaseId: purchase.id,
+    productId: purchase.productId,
+    amountUsdCents: Math.round(Math.abs(amountUsd) * 100),
+    currency,
   });
 }
 

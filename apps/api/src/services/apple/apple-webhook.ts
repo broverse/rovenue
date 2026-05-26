@@ -11,6 +11,7 @@ import { env } from "../../lib/env";
 import { logger } from "../../lib/logger";
 import { loadAppleCredentials } from "../../lib/project-credentials";
 import { convertToUsd } from "../fx";
+import { maybeEmitRefundDetected } from "../notifications/refund-emit";
 import {
   APPLE_ENVIRONMENT,
   APPLE_NOTIFICATION_SUBTYPE,
@@ -575,6 +576,16 @@ async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
     store: Store.APP_STORE,
     eventDate: new Date(tx.purchaseDate),
   });
+
+  if (type === RevenueEventType.REFUND) {
+    await maybeEmitRefundDetected(drizzle.db, {
+      projectId: ctx.projectId,
+      purchaseId,
+      productId,
+      amountUsdCents: Math.round(Math.abs(amountUsd) * 100),
+      currency: tx.currency,
+    });
+  }
 }
 
 async function emitCancellationEvent(ctx: DispatchContext): Promise<void> {
