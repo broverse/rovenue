@@ -10,6 +10,23 @@ import type {
 } from "@rovenue/shared";
 import { rpc, unwrap } from "../api";
 
+export interface CreateExperimentVars {
+  projectId: string;
+  name: string;
+  description?: string;
+  type: DashboardExperimentType;
+  key: string;
+  audienceId: string;
+  variants: ReadonlyArray<{
+    id: string;
+    name: string;
+    value: unknown;
+    weight: number;
+  }>;
+  metrics?: ReadonlyArray<string>;
+  mutualExclusionGroup?: string;
+}
+
 interface ListParams {
   projectId: string;
   status?: DashboardExperimentStatus;
@@ -71,6 +88,27 @@ function useLifecycleMutation(
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["experiments"] });
       qc.invalidateQueries({ queryKey: ["experiment", data.experiment.id] });
+    },
+  });
+}
+
+export function useCreateExperiment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: CreateExperimentVars) => {
+      const { metrics, variants, ...rest } = vars;
+      return unwrap<{ experiment: ExperimentListItem }>(
+        rpc.dashboard.experiments.$post({
+          json: {
+            ...rest,
+            variants: variants.map((v) => ({ ...v })),
+            ...(metrics ? { metrics: [...metrics] } : {}),
+          },
+        }),
+      );
+    },
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["experiments", vars.projectId] });
     },
   });
 }

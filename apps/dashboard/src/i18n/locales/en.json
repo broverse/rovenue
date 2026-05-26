@@ -1316,7 +1316,6 @@
     "subtitleSuffix": " — no flicker between sessions.",
     "actions": {
       "runbook": "Runbook",
-      "importFromSdk": "Import from SDK",
       "newExperiment": "New experiment",
       "duplicate": "Duplicate",
       "stop": "Stop",
@@ -1326,13 +1325,132 @@
     },
     "kpi": {
       "running": "RUNNING",
-      "runningDescription": "{{withPower}} with enough power · {{gathering}} gathering",
-      "usersAssigned": "USERS IN EXPERIMENTS · 28D",
-      "usersAssignedDescription": "{{share}}% of new installs",
-      "shippedWins": "SHIPPED WINS · QTD",
-      "shippedWinsDescription": "est. +{{impact}} MRR impact",
-      "timeToDecision": "AVG TIME TO DECISION",
-      "timeToDecisionDescription": "target ≤ {{target}}d · on track"
+      "draft": "DRAFT",
+      "shippedWins": "SHIPPED",
+      "total": "TOTAL"
+    },
+    "detail": {
+      "comingSoon": "Detailed analytics (variants, funnel, timeline) ship in Phase 3 — once results are aggregated for this experiment they'll appear here."
+    },
+    "new": {
+      "back": "Back to experiments",
+      "title": "New experiment",
+      "subtitle": "Allocation is deterministic on hash(user_id). Variant weights must sum to 1.",
+      "sections": {
+        "basics": "Basics",
+        "basicsSub": "Give the experiment a recognizable name and a stable identifier.",
+        "targeting": "Targeting",
+        "targetingSub": "Pick what the experiment changes and who sees it.",
+        "variants": "Variants",
+        "variantsSub": "At least two arms. Weights are deterministic on hash(user_id) and must sum to 1."
+      },
+      "fields": {
+        "name": "Name",
+        "key": "Key",
+        "description": "Description",
+        "type": "Type",
+        "audience": "Audience",
+        "variantId": "Variant id",
+        "variantName": "Variant name",
+        "variantWeight": "Traffic weight",
+        "variantValue": "Value (JSON)",
+        "flagValue": "Variant value",
+        "productGroup": "Product group"
+      },
+      "descriptions": {
+        "name": "Shown in the experiments list and reports. Keep it short.",
+        "key": "Lowercase letters, digits, dashes or underscores. The SDK uses this to look up the experiment — change it later and existing assignments are lost.",
+        "description": "Why you're running it and what success looks like.",
+        "audience": "Defaults to the project's default audience. Pick a narrower segment to restrict who is enrolled.",
+        "variantId": "Stable id used in code and analytics — don't change after launch.",
+        "variantName": "Human label shown in dashboards.",
+        "variantWeight": "Share of eligible users that get this arm. Moving one slider redistributes the rest so the total always stays at 100%.",
+        "variantValue": "JSON value the SDK returns when this arm is picked. Use the wand to pretty-print.",
+        "productGroup": "Identifier the SDK loads when this arm is picked. Each arm should point at a different group."
+      },
+      "typeDescriptions": {
+        "flag": "Return a typed flag value (boolean, string, number) — best for on/off and copy tests.",
+        "product_group": "Swap the product group identifier the SDK loads — use for price and product mix tests.",
+        "paywall": "Ship a structured paywall config (title, CTA, layout) as remote config.",
+        "element": "Return an arbitrary JSON blob — flexible escape hatch for one-off UI tests."
+      },
+      "trafficLabel": "traffic",
+      "placeholders": {
+        "name": "Higher entry price on the post-onboarding paywall",
+        "description": "Quick rationale + success criteria",
+        "variantId": "control",
+        "variantName": "Control",
+        "variantValue": "JSON value the SDK should return"
+      },
+      "types": {
+        "flag": "Feature flag",
+        "productGroup": "Product group",
+        "paywall": "Paywall config",
+        "element": "Element"
+      },
+      "controlBadge": "Control",
+      "variantBadge": "Variant {{index}}",
+      "addVariant": "Add variant",
+      "removeVariant": "Remove variant",
+      "weightSum": "Σ weights = {{sum}}  (must equal 1)",
+      "audienceEmpty": "No audiences in this project yet",
+      "submit": "Create experiment",
+      "submitting": "Creating…",
+      "cancel": "Cancel",
+      "errors": {
+        "required": "Name and key are required.",
+        "invalidKey": "Key must contain only letters, digits, - or _.",
+        "noAudience": "Pick an audience to target.",
+        "weightSum": "Variant weights must sum to 1 (got {{sum}}).",
+        "invalidJson": "Variant value must be valid JSON: {{message}}",
+        "productGroupMissing": "Pick a product group for every variant.",
+        "unknown": "Could not create experiment."
+      },
+      "flag": {
+        "subtypeLabel": "Flag value type",
+        "subtypes": {
+          "boolean": "Boolean",
+          "string": "String",
+          "number": "Number"
+        },
+        "subtypeDescriptions": {
+          "boolean": "Each arm returns true or false — the simplest on/off test.",
+          "string": "Each arm returns a string — good for copy or enum-style choices.",
+          "number": "Each arm returns a number — useful for limits, prices, or thresholds."
+        },
+        "valueDescriptions": {
+          "boolean": "Boolean value this arm returns from useFlag().",
+          "string": "String value this arm returns from useFlag().",
+          "number": "Number value this arm returns from useFlag()."
+        }
+      },
+      "productGroup": {
+        "noneTitle": "You don't have any product groups yet. Create at least two before you can run a product-group experiment.",
+        "createCta": "Go to product groups",
+        "empty": "No product groups available",
+        "pick": "Pick a product group…"
+      },
+      "paywall": {
+        "heading": "Paywall config",
+        "title": "Title",
+        "subtitle": "Subtitle",
+        "ctaText": "CTA text",
+        "ctaColor": "CTA color",
+        "layout": "Layout",
+        "layoutOptions": {
+          "vertical": "Vertical",
+          "horizontal": "Horizontal"
+        },
+        "backgroundImage": "Background image URL",
+        "showBadge": "Show badge",
+        "badgePlaceholder": "Best value",
+        "showTestimonial": "Show testimonial"
+      },
+      "json": {
+        "valid": "valid JSON",
+        "invalid": "invalid JSON",
+        "format": "Format"
+      }
     },
     "list": {
       "scopeAriaLabel": "Experiment scope",
