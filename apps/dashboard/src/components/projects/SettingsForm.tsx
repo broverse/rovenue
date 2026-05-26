@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   Button,
-  Description,
   Input,
   Label,
   TextField,
@@ -17,16 +16,12 @@ interface Props {
 export function SettingsForm({ project }: Props) {
   const { t } = useTranslation();
   const [name, setName] = useState(project.name);
-  const [webhookUrl, setWebhookUrl] = useState(project.webhookUrl ?? "");
   const { mutate, isPending, error } = useUpdateProject(project.id);
 
   const trimmedName = name.trim();
-  const trimmedUrl = webhookUrl.trim();
-  const originalUrl = project.webhookUrl ?? "";
 
   const patch: UpdateProjectRequest = {};
   if (trimmedName && trimmedName !== project.name) patch.name = trimmedName;
-  if (trimmedUrl !== originalUrl) patch.webhookUrl = trimmedUrl ? trimmedUrl : null;
 
   const hasChanges = Object.keys(patch).length > 0;
   const canSubmit = hasChanges && trimmedName.length >= 2;
@@ -43,11 +38,6 @@ export function SettingsForm({ project }: Props) {
       <TextField value={name} onChange={setName} isRequired>
         <Label>{t("projects.form.name")}</Label>
         <Input placeholder={t("projects.form.namePlaceholder")} />
-      </TextField>
-      <TextField value={webhookUrl} onChange={setWebhookUrl}>
-        <Label>{t("projects.settingsForm.webhookUrl")}</Label>
-        <Input placeholder={t("projects.settingsForm.webhookUrlPlaceholder")} />
-        <Description>{t("projects.settingsForm.webhookUrlDescription")}</Description>
       </TextField>
       {error && (
         <div role="alert" className="text-sm text-danger-500">

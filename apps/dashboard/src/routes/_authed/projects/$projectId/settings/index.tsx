@@ -3,7 +3,6 @@ import { Card } from "@heroui/react";
 import { useTranslation } from "react-i18next";
 import { useProject } from "../../../../../lib/hooks/useProject";
 import { SettingsForm } from "../../../../../components/projects/SettingsForm";
-import { RotateSecretDialog } from "../../../../../components/projects/RotateSecretDialog";
 import { DeleteProjectDialog } from "../../../../../components/projects/DeleteProjectDialog";
 
 export const Route = createFileRoute("/_authed/projects/$projectId/settings/")({
@@ -22,16 +21,6 @@ function ProjectGeneralSettingsPage() {
       <Card className="p-6">
         <h2 className="mb-4 text-lg font-semibold">{t("projects.settings.general")}</h2>
         <SettingsForm project={project} />
-      </Card>
-
-      <Card className="p-6">
-        <h2 className="mb-2 text-lg font-semibold">{t("projects.settings.webhookSecretHeader")}</h2>
-        <p className="mb-4 text-sm text-default-500">
-          {project.hasWebhookSecret
-            ? t("projects.settings.webhookSecretConfigured")
-            : t("projects.settings.webhookSecretMissing")}
-        </p>
-        <RotateSecretDialog projectId={project.id} />
       </Card>
 
       <Card className="border border-danger-200 p-6">

@@ -407,10 +407,6 @@
     },
     "settings": {
       "general": "General",
-      "basicsHeader": "Project basics",
-      "basicsDescription": "Name shown in dashboards, exports, and webhook payloads.",
-      "reportingHeader": "Currency & timezone",
-      "reportingDescription": "How revenue is normalized and how time-bucketed metrics roll up. Historical reports will be re-aggregated when these change.",
       "dangerZone": "Danger zone",
       "dangerZoneDescription": "Deleting a project is permanent and cannot be undone."
     },
