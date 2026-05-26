@@ -372,6 +372,7 @@ describe("outboxEvents", () => {
       "EXPOSURE",
       "REVENUE_EVENT",
       "CREDIT_LEDGER",
+      "NOTIFICATION",
     ]);
   });
 });
