@@ -24,6 +24,7 @@ import { requireDashboardAuth } from "../../../middleware/dashboard-auth";
 import { decodeCursor, encodeCursor } from "../../../lib/pagination";
 import { ok } from "../../../lib/response";
 import { notificationPreferencesRoute } from "./preferences";
+import { notificationTestSendRoute } from "./test-send";
 
 const { notificationRepo } = drizzle;
 const { notifications } = drizzle.schema;
@@ -45,6 +46,7 @@ const readAllBodySchema = z
 export const notificationsRoute = new Hono()
   .use("*", requireDashboardAuth)
   .route("/preferences", notificationPreferencesRoute)
+  .route("/test-send", notificationTestSendRoute)
 
   // GET /
   .get("/", zValidator("query", listQuerySchema), async (c) => {
