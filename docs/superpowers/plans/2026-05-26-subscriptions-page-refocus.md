@@ -94,7 +94,6 @@ export const subscriptionStoreCodes = [
   "APP_STORE",
   "PLAY_STORE",
   "STRIPE",
-  "WEB",
   "MANUAL",
 ] as const;
 
@@ -1513,7 +1512,6 @@ const STORE_OPTIONS: ReadonlyArray<SubscriptionStoreCode> = [
   "APP_STORE",
   "PLAY_STORE",
   "STRIPE",
-  "WEB",
   "MANUAL",
 ];
 
@@ -2426,7 +2424,6 @@ grep -n '"filters"' apps/dashboard/src/i18n/locales/tr.json
     "APP_STORE": "App Store",
     "PLAY_STORE": "Play Store",
     "STRIPE": "Stripe",
-    "WEB": "Web",
     "MANUAL": "Manual"
   },
   "product": "Product",
@@ -2458,7 +2455,6 @@ grep -n '"filters"' apps/dashboard/src/i18n/locales/tr.json
     "APP_STORE": "App Store",
     "PLAY_STORE": "Play Store",
     "STRIPE": "Stripe",
-    "WEB": "Web",
     "MANUAL": "Manuel"
   },
   "product": "Ürün",
@@ -2661,7 +2657,6 @@ beforeAll(async () => {
                   APP_STORE: "App Store",
                   PLAY_STORE: "Play Store",
                   STRIPE: "Stripe",
-                  WEB: "Web",
                   MANUAL: "Manual",
                 },
                 product: "Product",
