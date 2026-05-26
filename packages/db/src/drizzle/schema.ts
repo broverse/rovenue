@@ -1590,3 +1590,4 @@ export type BillingDunningStateRow = typeof billingDunningState.$inferSelect;
 export type NewBillingDunningStateRow = typeof billingDunningState.$inferInsert;
 export type BillingTierLimits = typeof billingTierLimits.$inferSelect;
 export type UsageSnapshot = typeof usageSnapshots.$inferSelect;
+export type NewUsageSnapshot = typeof usageSnapshots.$inferInsert;
