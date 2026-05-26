@@ -2,6 +2,7 @@ pub mod api;
 pub mod cache;
 pub mod config;
 pub mod error;
+pub mod identity;
 pub mod observer;
 pub mod time;
 pub mod version;
