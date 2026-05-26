@@ -37,7 +37,7 @@ The plan ships in eight phases. Each phase ends green (tests pass, app boots) so
 
 **Files:**
 - Modify: `packages/db/src/drizzle/enums.ts`
-- Create: `packages/db/drizzle/migrations/0037_add_member_role_variants.sql`
+- Create: `packages/db/drizzle/migrations/0038_add_member_role_variants.sql`
 
 - [ ] **Step 1: Update Drizzle enum definition**
 
@@ -62,7 +62,7 @@ export const memberRole = pgEnum("MemberRole", [
 cd packages/db && pnpm db:migrate:generate
 ```
 
-Drizzle will produce a stub. Replace its contents with the hand-rolled SQL below at `packages/db/drizzle/migrations/0037_add_member_role_variants.sql`:
+Drizzle will produce a stub. Replace its contents with the hand-rolled SQL below at `packages/db/drizzle/migrations/0038_add_member_role_variants.sql`:
 
 ```sql
 -- ADD VALUE must run outside an explicit transaction block, but Postgres
@@ -85,7 +85,7 @@ Also update `packages/db/drizzle/migrations/meta/_journal.json` (drizzle-kit wil
 pnpm db:migrate
 ```
 
-Expected output: `0037_add_member_role_variants` applied with no errors.
+Expected output: `0038_add_member_role_variants` applied with no errors.
 
 - [ ] **Step 4: Verify variants present**
 
@@ -101,18 +101,18 @@ Expected:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/db/src/drizzle/enums.ts packages/db/drizzle/migrations/0037_add_member_role_variants.sql packages/db/drizzle/migrations/meta/
+git add packages/db/src/drizzle/enums.ts packages/db/drizzle/migrations/0038_add_member_role_variants.sql packages/db/drizzle/migrations/meta/
 git commit -m "feat(db): add DEVELOPER, GROWTH, CUSTOMER_SUPPORT to MemberRole"
 ```
 
 ### Task 1.2: Backfill VIEWER → CUSTOMER_SUPPORT
 
 **Files:**
-- Create: `packages/db/drizzle/migrations/0038_backfill_viewer_to_customer_support.sql`
+- Create: `packages/db/drizzle/migrations/0039_backfill_viewer_to_customer_support.sql`
 
 - [ ] **Step 1: Write the data migration**
 
-Create `packages/db/drizzle/migrations/0038_backfill_viewer_to_customer_support.sql`:
+Create `packages/db/drizzle/migrations/0039_backfill_viewer_to_customer_support.sql`:
 
 ```sql
 UPDATE project_members
@@ -139,7 +139,7 @@ Expected: no row with `role = 'VIEWER'`.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add packages/db/drizzle/migrations/0038_backfill_viewer_to_customer_support.sql packages/db/drizzle/migrations/meta/
+git add packages/db/drizzle/migrations/0039_backfill_viewer_to_customer_support.sql packages/db/drizzle/migrations/meta/
 git commit -m "feat(db): migrate VIEWER members to CUSTOMER_SUPPORT"
 ```
 
@@ -147,7 +147,7 @@ git commit -m "feat(db): migrate VIEWER members to CUSTOMER_SUPPORT"
 
 **Files:**
 - Modify: `packages/db/src/drizzle/enums.ts`
-- Create: `packages/db/drizzle/migrations/0039_drop_viewer_member_role.sql`
+- Create: `packages/db/drizzle/migrations/0040_drop_viewer_member_role.sql`
 - Modify: every file currently referencing `MemberRole.VIEWER` (Task 1.4 maps these explicitly)
 
 - [ ] **Step 1: Audit call sites**
@@ -166,7 +166,7 @@ DO NOT change these in this task — Task 1.4 rewrites them as one batch. Just c
 
 - [ ] **Step 2: Write enum-swap migration**
 
-Create `packages/db/drizzle/migrations/0039_drop_viewer_member_role.sql`:
+Create `packages/db/drizzle/migrations/0040_drop_viewer_member_role.sql`:
 
 ```sql
 -- Postgres cannot DROP VALUE from an enum, so we rebuild the type.
@@ -206,12 +206,12 @@ export const memberRole = pgEnum("MemberRole", [
 pnpm db:migrate
 ```
 
-Expected: `0039_drop_viewer_member_role` applied. `psql ... -c "SELECT enum_range(NULL::\"MemberRole\");"` should output `{OWNER,ADMIN,DEVELOPER,GROWTH,CUSTOMER_SUPPORT}`.
+Expected: `0040_drop_viewer_member_role` applied. `psql ... -c "SELECT enum_range(NULL::\"MemberRole\");"` should output `{OWNER,ADMIN,DEVELOPER,GROWTH,CUSTOMER_SUPPORT}`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/db/src/drizzle/enums.ts packages/db/drizzle/migrations/0039_drop_viewer_member_role.sql packages/db/drizzle/migrations/meta/
+git add packages/db/src/drizzle/enums.ts packages/db/drizzle/migrations/0040_drop_viewer_member_role.sql packages/db/drizzle/migrations/meta/
 git commit -m "feat(db): drop VIEWER from MemberRole enum"
 ```
 
@@ -1821,7 +1821,7 @@ git commit -m "feat(api): BullMQ email queue + worker + invitation repo stub"
 **Files:**
 - Modify: `packages/db/src/drizzle/enums.ts`
 - Modify: `packages/db/src/drizzle/schema.ts`
-- Create: `packages/db/drizzle/migrations/0040_project_invitations.sql`
+- Create: `packages/db/drizzle/migrations/0041_project_invitations.sql`
 
 - [ ] **Step 1: Add the delivery-status enum**
 
@@ -1905,7 +1905,7 @@ Also re-export `invitationDeliveryStatus` and `projectInvitations` from the exis
 cd packages/db && pnpm db:migrate:generate
 ```
 
-Open the generated file (likely `0040_*.sql`) and confirm it creates `project_invitations` + the indexes. Drizzle may produce the partial unique index without the `WHERE` clause — if so, replace that statement with the explicit version:
+Open the generated file (likely `0041_*.sql`) and confirm it creates `project_invitations` + the indexes. Drizzle may produce the partial unique index without the `WHERE` clause — if so, replace that statement with the explicit version:
 
 ```sql
 CREATE UNIQUE INDEX "project_invitations_pending_uniq"
@@ -1913,7 +1913,7 @@ CREATE UNIQUE INDEX "project_invitations_pending_uniq"
   WHERE accepted_at IS NULL AND revoked_at IS NULL;
 ```
 
-Rename the file to `0040_project_invitations.sql` for clarity if drizzle gave it a different suffix.
+Rename the file to `0041_project_invitations.sql` for clarity if drizzle gave it a different suffix.
 
 - [ ] **Step 4: Run migration + verify**
 
