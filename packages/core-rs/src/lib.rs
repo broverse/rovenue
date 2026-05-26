@@ -4,6 +4,7 @@
 pub mod api;
 pub mod cache;
 pub mod config;
+pub mod credits;
 pub mod entitlements;
 pub mod error;
 pub mod identity;

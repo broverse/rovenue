@@ -33,8 +33,9 @@ dictionary User {
 dictionary Entitlement {
     string id;
     boolean is_active;
-    string? product_id;
-    u64? expires_at_ms;
+    string product_identifier;
+    string store;
+    string? expires_iso;
 };
 
 callback interface Observer {
@@ -44,6 +45,7 @@ callback interface Observer {
 enum ChangeEvent {
     "EntitlementsChanged",
     "IdentityChanged",
+    "CreditBalanceChanged",
 };
 
 interface RovenueCore {

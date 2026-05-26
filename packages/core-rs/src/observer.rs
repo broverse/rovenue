@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, Weak};
 pub enum ChangeEvent {
     EntitlementsChanged,
     IdentityChanged,
+    CreditBalanceChanged,
 }
 
 /// Implemented by façades to receive cache-state notifications from the core.
