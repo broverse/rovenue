@@ -115,24 +115,26 @@ export function ExperimentsPage({ projectId }: { projectId: string }) {
   );
 
   // Default-select the first visible row when nothing is selected,
-  // or when the selected id was filtered out by the current scope.
+  // or when the selected key was filtered out by the current scope.
+  // We URL-encode the experiment `key` (slug) — not the cuid2 db id —
+  // so the URL stays human-readable.
   useEffect(() => {
     if (scoped.length === 0) return;
-    if (!selectedId || !scoped.some((e) => e.id === selectedId)) {
-      updateSearch({ selected: scoped[0]!.id });
+    if (!selectedId || !scoped.some((e) => e.key === selectedId)) {
+      updateSearch({ selected: scoped[0]!.key });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scoped, selectedId]);
 
   const selected = useMemo<ExperimentSummary | null>(() => {
     if (!selectedId) return null;
-    return summaries.find((e) => e.id === selectedId) ?? null;
+    return summaries.find((e) => e.key === selectedId) ?? null;
   }, [selectedId, summaries]);
 
   // Only show the full mock-driven detail rollup when the selected
   // experiment matches a seeded demo key. Real experiments render
   // the hero (real data) plus an analytics-placeholder.
-  const detail = selected ? EXPERIMENT_DETAILS[selected.id] : undefined;
+  const detail = selected ? EXPERIMENT_DETAILS[selected.key] : undefined;
 
   return (
     <>
@@ -200,7 +202,7 @@ export function ExperimentsPage({ projectId }: { projectId: string }) {
         <div className="flex min-w-0 flex-col gap-4">
           {selected ? (
             <>
-              <ExperimentHero experiment={selected} />
+              <ExperimentHero experiment={selected} projectId={projectId} />
               {detail ? (
                 <>
                   <VariantsTable

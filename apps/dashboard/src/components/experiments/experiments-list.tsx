@@ -78,12 +78,12 @@ export function ExperimentsList({
           </div>
         )}
         {experiments.map((e) => {
-          const selected = selectedId === e.id;
+          const selected = selectedId === e.key;
           return (
             <button
               key={e.id}
               type="button"
-              onClick={() => onSelect(e.id)}
+              onClick={() => onSelect(e.key)}
               className={cn(
                 "block w-full cursor-pointer border-b border-rv-divider px-3.5 py-3 text-left transition last:border-b-0",
                 selected
@@ -94,7 +94,7 @@ export function ExperimentsList({
               <div className="mb-1.5 flex items-center gap-2">
                 <ExperimentStatusDot status={e.status} />
                 <div className="min-w-0 flex-1 truncate font-rv-mono text-[12px] font-medium text-foreground">
-                  {e.id}
+                  {e.key}
                 </div>
                 <div className="font-rv-mono text-[10px] text-rv-mute-500">
                   {t("experiments.list.variants", { count: e.variantCount })}

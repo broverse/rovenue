@@ -20,6 +20,7 @@ export function ExperimentStatusDot({ status, className }: Props) {
           status === "completed" && "bg-rv-success",
           status === "stopped" && "bg-rv-danger",
           status === "draft" && "bg-rv-mute-400",
+          status === "paused" && "bg-rv-warning",
         )}
       />
       {status === "running" && (

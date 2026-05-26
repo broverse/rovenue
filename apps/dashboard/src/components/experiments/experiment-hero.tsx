@@ -1,35 +1,108 @@
+import { useNavigate } from "@tanstack/react-router";
 import { Trans, useTranslation } from "react-i18next";
 import {
   AlertTriangle,
   Check,
   Copy,
   MoreHorizontal,
+  Pencil,
   RotateCcw,
+  Trash2,
 } from "lucide-react";
 import { Button } from "../../ui/button";
+import {
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  MenuTriggerButton,
+} from "../../ui/menu";
 import { cn } from "../../lib/cn";
+import {
+  useDeleteExperiment,
+  useDuplicateExperiment,
+} from "../../lib/hooks/useExperiments";
 import { ExperimentStatusChip } from "./experiment-status-chip";
 import { ExperimentStatusDot } from "./experiment-status-dot";
 import type { ExperimentSummary } from "./types";
 
 type Props = {
   experiment: ExperimentSummary;
+  projectId: string;
 };
 
 /**
  * Hero panel above the variant comparison — title-line metadata,
  * action buttons, 5-up KPI strip, and an optional "ship winner" banner
  * when confidence ≥ 80% and no winner has been shipped yet.
+ *
+ * Action layout (by status):
+ *   draft     → Edit primary · ⋯ menu (Duplicate, Delete)
+ *   running   → Stop · Ship Winner · ⋯ menu (Duplicate)
+ *   completed → Re-run · ⋯ menu (Duplicate)
+ *   stopped   → ⋯ menu (Duplicate, Delete unavailable — server gates it)
  */
-export function ExperimentHero({ experiment }: Props) {
+export function ExperimentHero({ experiment, projectId }: Props) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const duplicate = useDuplicateExperiment();
+  const remove = useDeleteExperiment();
+
   const ageLabel = experiment.ageLabelValues
     ? t(experiment.ageLabelKey, experiment.ageLabelValues)
     : t(experiment.ageLabelKey);
   const isRunning = experiment.status === "running";
   const isCompleted = experiment.status === "completed";
+  const isDraft = experiment.status === "draft";
   const showWinner =
     experiment.confidence >= 0.8 && !experiment.winner && experiment.status === "running";
+
+  const handleEdit = () => {
+    void navigate({
+      to: "/projects/$projectId/experiments/$experimentId/edit",
+      params: { projectId, experimentId: experiment.id },
+    });
+  };
+
+  const handleDuplicate = async () => {
+    try {
+      const res = await duplicate.mutateAsync(experiment.id);
+      void navigate({
+        to: "/projects/$projectId/experiments",
+        params: { projectId },
+        search: { selected: res.experiment.key, scope: "draft" },
+      });
+    } catch (err) {
+      // Surface via window.alert — matches the project's existing
+      // approach for destructive/lifecycle errors (no toast system).
+      window.alert(
+        err instanceof Error
+          ? err.message
+          : t("experiments.actions.duplicateFailed"),
+      );
+    }
+  };
+
+  const handleDelete = async () => {
+    const confirmed = window.confirm(
+      t("experiments.actions.deleteConfirm", { name: experiment.key }),
+    );
+    if (!confirmed) return;
+    try {
+      await remove.mutateAsync(experiment.id);
+      void navigate({
+        to: "/projects/$projectId/experiments",
+        params: { projectId },
+        search: {},
+        replace: true,
+      });
+    } catch (err) {
+      window.alert(
+        err instanceof Error
+          ? err.message
+          : t("experiments.actions.deleteFailed"),
+      );
+    }
+  };
 
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-5">
@@ -47,17 +120,19 @@ export function ExperimentHero({ experiment }: Props) {
             </span>
           </div>
           <h1 className="m-0 mb-1.5 font-rv-mono text-[22px] font-semibold leading-tight tracking-tight">
-            {experiment.id}
+            {experiment.key}
           </h1>
           <p className="max-w-[640px] text-[13px] text-rv-mute-600">
             {experiment.description}
           </p>
         </div>
         <div className="flex flex-shrink-0 gap-1.5">
-          <Button variant="flat">
-            <Copy size={13} />
-            {t("experiments.actions.duplicate")}
-          </Button>
+          {isDraft && (
+            <Button variant="solid-primary" onClick={handleEdit}>
+              <Pencil size={13} />
+              {t("experiments.actions.edit")}
+            </Button>
+          )}
           {isRunning && (
             <>
               <Button variant="flat">
@@ -76,13 +151,45 @@ export function ExperimentHero({ experiment }: Props) {
               {t("experiments.actions.rerun")}
             </Button>
           )}
-          <Button
-            variant="light"
-            size="icon"
-            aria-label={t("experiments.actions.more")}
+          <Menu
+            align="end"
+            trigger={() => (
+              <MenuTriggerButton ariaLabel={t("experiments.actions.more")}>
+                <MoreHorizontal size={14} />
+              </MenuTriggerButton>
+            )}
           >
-            <MoreHorizontal size={14} />
-          </Button>
+            {(close) => (
+              <>
+                <MenuItem
+                  icon={<Copy size={12} />}
+                  disabled={duplicate.isPending}
+                  onClick={() => {
+                    close();
+                    void handleDuplicate();
+                  }}
+                >
+                  {t("experiments.actions.duplicate")}
+                </MenuItem>
+                {isDraft && (
+                  <>
+                    <MenuSeparator />
+                    <MenuItem
+                      icon={<Trash2 size={12} />}
+                      tone="danger"
+                      disabled={remove.isPending}
+                      onClick={() => {
+                        close();
+                        void handleDelete();
+                      }}
+                    >
+                      {t("experiments.actions.delete")}
+                    </MenuItem>
+                  </>
+                )}
+              </>
+            )}
+          </Menu>
         </div>
       </div>
 

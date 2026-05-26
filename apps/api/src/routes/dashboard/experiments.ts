@@ -606,6 +606,111 @@ export const experimentsRoute = new Hono()
 
     return c.json(ok({ experiment, promotedFlag }));
   })
+  // ----- DELETE /dashboard/experiments/:id -----
+  //
+  // Hard-delete restricted to DRAFT. Anything that has been started
+  // (RUNNING / PAUSED / COMPLETED) keeps its assignment + analytics
+  // history; the user must complete or archive it via the lifecycle
+  // endpoints instead.
+  .delete("/:id", async (c) => {
+    const id = c.req.param("id");
+    const existing = await drizzle.experimentRepo.findExperimentById(
+      drizzle.db,
+      id,
+    );
+    if (!existing) {
+      throw new HTTPException(404, { message: "Experiment not found" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(existing.projectId, user.id, MemberRole.ADMIN);
+
+    if (existing.status !== ExperimentStatus.DRAFT) {
+      throw new HTTPException(400, {
+        message: `Cannot delete experiment in status ${existing.status} — only DRAFT can be deleted`,
+      });
+    }
+
+    const deleted = await drizzle.experimentRepo.deleteExperiment(
+      drizzle.db,
+      id,
+    );
+    if (!deleted) {
+      throw new HTTPException(404, { message: "Experiment not found" });
+    }
+
+    await invalidateExperimentCache(existing.projectId);
+    await audit({
+      projectId: existing.projectId,
+      userId: user.id,
+      action: "delete",
+      resource: "experiment",
+      resourceId: id,
+      before: { status: existing.status, name: existing.name, key: existing.key },
+      ...extractRequestContext(c),
+    });
+
+    return c.json(ok({ id }));
+  })
+  // ----- POST /dashboard/experiments/:id/duplicate -----
+  //
+  // Clones an experiment as a new DRAFT, regardless of source status.
+  // Generates a unique key by appending `-copy` (and a numeric suffix
+  // if needed) so the new draft does not collide on the
+  // (projectId, key) constraint. Name is suffixed with "(copy)" for
+  // visual disambiguation in the list.
+  .post("/:id/duplicate", async (c) => {
+    const id = c.req.param("id");
+    const source = await drizzle.experimentRepo.findExperimentById(
+      drizzle.db,
+      id,
+    );
+    if (!source) {
+      throw new HTTPException(404, { message: "Experiment not found" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(source.projectId, user.id, MemberRole.ADMIN);
+
+    const siblings = await drizzle.experimentRepo.findExperimentsByProject(
+      drizzle.db,
+      { projectId: source.projectId },
+    );
+    const takenKeys = new Set(siblings.map((e) => e.key));
+    const base = `${source.key}-copy`.replace(/[^a-z0-9-_]/gi, "-");
+    let nextKey = base;
+    let suffix = 2;
+    while (takenKeys.has(nextKey)) {
+      nextKey = `${base}-${suffix++}`;
+    }
+
+    const duplicated = await drizzle.experimentRepo.createExperiment(
+      drizzle.db,
+      {
+        projectId: source.projectId,
+        name: `${source.name} (copy)`,
+        description: source.description,
+        type: source.type,
+        key: nextKey,
+        audienceId: source.audienceId,
+        status: ExperimentStatus.DRAFT,
+        variants: source.variants,
+        metrics: source.metrics,
+        mutualExclusionGroup: source.mutualExclusionGroup,
+      },
+    );
+
+    await invalidateExperimentCache(source.projectId);
+    await audit({
+      projectId: source.projectId,
+      userId: user.id,
+      action: "duplicate",
+      resource: "experiment",
+      resourceId: duplicated.id,
+      after: { sourceId: id, key: nextKey },
+      ...extractRequestContext(c),
+    });
+
+    return c.json(ok({ experiment: duplicated }));
+  })
   // ----- GET /dashboard/experiments/:id/results -----
   .get("/:id/results", async (c) => {
     const id = c.req.param("id");

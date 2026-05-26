@@ -2,11 +2,15 @@ import { useTranslation } from "react-i18next";
 import { Chip } from "../../ui/chip";
 import type { ExperimentStatus } from "./types";
 
-const TONE: Record<ExperimentStatus, "primary" | "success" | "danger" | "default"> = {
+const TONE: Record<
+  ExperimentStatus,
+  "primary" | "success" | "danger" | "default" | "warning"
+> = {
   running: "primary",
   completed: "success",
   stopped: "danger",
   draft: "default",
+  paused: "warning",
 };
 
 type Props = { status: ExperimentStatus };

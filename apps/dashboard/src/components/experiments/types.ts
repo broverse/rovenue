@@ -1,4 +1,9 @@
-export type ExperimentStatus = "running" | "completed" | "stopped" | "draft";
+export type ExperimentStatus =
+  | "running"
+  | "completed"
+  | "stopped"
+  | "draft"
+  | "paused";
 
 export type ExperimentScope = "running" | "completed" | "draft" | "all";
 
@@ -11,7 +16,10 @@ export type ExperimentGroup =
   | "monetization";
 
 export type ExperimentSummary = {
+  /** Database id (cuid2) — used for all backend-bound calls + routing. */
   id: string;
+  /** Slug shown to humans (e.g. `paywall_test`). Stable in the SDK lookup. */
+  key: string;
   status: ExperimentStatus;
   description: string;
   metric: string;

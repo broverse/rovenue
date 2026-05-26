@@ -15,13 +15,12 @@ import type {
 // =============================================================
 //
 // Backend stores its own enum (DRAFT/RUNNING/PAUSED/COMPLETED).
-// The dashboard's `ExperimentSummary` was designed pre-API and
-// only carries lowercase states — PAUSED has no UI today, so we
-// collapse it onto RUNNING for now and add a dedicated state
-// once the page grows lifecycle controls.
+// We mirror it as lowercase so the list/hero/dot can branch on a
+// single string without re-importing the API enum.
 function uiStatus(s: DashboardExperimentStatus): ExperimentStatus {
   if (s === "DRAFT") return "draft";
   if (s === "COMPLETED") return "completed";
+  if (s === "PAUSED") return "paused";
   return "running";
 }
 
@@ -91,7 +90,8 @@ export function mapApiExperiment(item: ExperimentListItem): ExperimentSummary {
   const age = ageLabel(status, item.startedAt, item.completedAt);
 
   return {
-    id: item.key,
+    id: item.id,
+    key: item.key,
     status,
     description,
     metric,

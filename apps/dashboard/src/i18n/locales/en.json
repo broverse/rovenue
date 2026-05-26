@@ -1297,6 +1297,15 @@
     },
     "live": {
       "updated": "updated {{value}} ago"
+    },
+    "schedule": {
+      "title": "Schedule cancel ({{count}})",
+      "dueAt": "When",
+      "revokeImmediately": "Revoke access immediately on cancel",
+      "storeNote": "App Store and Play Store cancellations are requested via webhook; the final state will sync from the store.",
+      "submit": "Schedule cancel",
+      "submitting": "Scheduling…",
+      "partialFailure": "{{failed}} of {{total}} failed"
     }
   },
   "featureFlags": {

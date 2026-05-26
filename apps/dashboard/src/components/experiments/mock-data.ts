@@ -8,6 +8,7 @@ import type {
 export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
   {
     id: "paywall_v2_pricing",
+    key: "paywall_v2_pricing",
     status: "running",
     description: "Test higher entry price on the post-onboarding paywall.",
     metric: "trial_start_rate",
@@ -25,6 +26,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
   },
   {
     id: "trial_length_7_vs_14",
+    key: "trial_length_7_vs_14",
     status: "running",
     description: "Compare 7-day trial vs 14-day trial on trial → paid conversion.",
     metric: "trial_to_paid",
@@ -42,6 +44,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
   },
   {
     id: "offering_promo_card_copy",
+    key: "offering_promo_card_copy",
     status: "running",
     description: "Promo card headline: \"Save 40%\" vs \"2 months free\" on annual.",
     metric: "annual_purchase_rate",
@@ -59,6 +62,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
   },
   {
     id: "onboarding_copy_v3",
+    key: "onboarding_copy_v3",
     status: "completed",
     description: "Simplified onboarding copy and reduced steps from 5 to 3.",
     metric: "onboarding_completion",
@@ -76,6 +80,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
   },
   {
     id: "hard_paywall_day_2",
+    key: "hard_paywall_day_2",
     status: "completed",
     description: "Force hard paywall on day 2 vs soft paywall throughout.",
     metric: "mrr_per_install",
@@ -93,6 +98,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
   },
   {
     id: "push_notif_permission_prime",
+    key: "push_notif_permission_prime",
     status: "running",
     description: "Show priming screen before iOS push permission prompt.",
     metric: "push_opt_in_rate",
@@ -110,6 +116,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
   },
   {
     id: "credits_upsell_modal",
+    key: "credits_upsell_modal",
     status: "stopped",
     description: "Show credit upsell after 3rd free generation.",
     metric: "credit_pack_revenue",
@@ -127,6 +134,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
   },
   {
     id: "weekly_subscription_unlock",
+    key: "weekly_subscription_unlock",
     status: "draft",
     description: "Offer a $2.99/week product in the paywall carousel.",
     metric: "arpu",

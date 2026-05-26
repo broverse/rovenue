@@ -180,3 +180,19 @@ export async function updateExperiment(
     .returning();
   return rows[0] ?? null;
 }
+
+/**
+ * Hard-delete an experiment. Cascades to experiment_assignments via
+ * the FK. Callers are expected to gate this on status === "DRAFT" so
+ * we don't shred running/completed analytics.
+ */
+export async function deleteExperiment(
+  db: DbOrTx,
+  id: string,
+): Promise<boolean> {
+  const rows = await db
+    .delete(experiments)
+    .where(eq(experiments.id, id))
+    .returning({ id: experiments.id });
+  return rows.length > 0;
+}

@@ -1,5 +1,6 @@
 export { BillingIssuesPanel } from "./billing-issues-panel";
 export { GrantSubscriptionModal } from "./grant-modal";
+export { ScheduleCancelModal } from "./schedule-modal";
 export { CohortRetentionPanel } from "./cohort-retention-panel";
 export { CompositionBar } from "./composition-bar";
 export { CountdownCell } from "./countdown-cell";

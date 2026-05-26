@@ -6,6 +6,14 @@ export { CodeBlock } from "./code-block";
 export { CopyButton, type CopyButtonProps } from "./copy-button";
 export { Input, inputVariants, type InputProps } from "./input";
 export { Kbd, kbdVariants, type KbdProps } from "./kbd";
+export {
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  MenuTriggerButton,
+  type MenuProps,
+  type MenuItemProps,
+} from "./menu";
 export { SearchInput, searchInputVariants, type SearchInputProps } from "./search-input";
 export { Segmented, segmentedItemVariants, type SegmentedProps } from "./segmented";
 export { Select, type SelectProps } from "./select";

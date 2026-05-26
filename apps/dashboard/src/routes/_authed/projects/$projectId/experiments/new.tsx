@@ -10,6 +10,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Check,
+  CircleStop,
   FileText,
   FlaskConical,
   Hash,
@@ -17,6 +18,8 @@ import {
   Layers,
   Package,
   Palette,
+  Pause,
+  Play,
   Plus,
   Scale,
   Sparkles,
@@ -29,6 +32,7 @@ import {
 } from "lucide-react";
 import type {
   DashboardExperimentType,
+  ExperimentListItem,
   PaywallConfig,
 } from "@rovenue/shared";
 import { Button } from "../../../../../ui/button";
@@ -43,6 +47,11 @@ import { useAudiences } from "../../../../../lib/hooks/useProjectAdmin";
 import { useProjectProductGroups } from "../../../../../lib/hooks/useProjectProductGroups";
 import {
   useCreateExperiment,
+  usePauseExperiment,
+  useResumeExperiment,
+  useStartExperiment,
+  useStopExperiment,
+  useUpdateExperiment,
   type CreateExperimentVars,
 } from "../../../../../lib/hooks/useExperiments";
 
@@ -222,24 +231,104 @@ function validateJson(raw: string): JsonState {
 // Page
 // =============================================================
 
-function NewExperimentPage({ projectId }: { projectId: string }) {
+// =============================================================
+// Edit-mode seeding helpers
+// =============================================================
+//
+// When the form mounts in edit mode we need to project the stored
+// variant shape (`{ id, name, value, weight }`) back into the form's
+// per-type DraftVariant state so the user sees their saved values.
+
+function inferFlagSubtype(value: unknown): FlagSubtype {
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "number") return "number";
+  return "string";
+}
+
+function seedDraftVariant(
+  idx: number,
+  stored: { id: string; name: string; value: unknown; weight: number },
+  type: DashboardExperimentType,
+  flagSubtype: FlagSubtype,
+): DraftVariant {
+  const base = makeVariant(idx);
+  const draft: DraftVariant = {
+    ...base,
+    id: stored.id,
+    name: stored.name,
+    weight: stored.weight,
+  };
+  if (type === "FLAG") {
+    if (flagSubtype === "boolean")
+      draft.flag.boolValue = Boolean(stored.value);
+    else if (flagSubtype === "number")
+      draft.flag.numValue = Number(stored.value) || 0;
+    else draft.flag.strValue = String(stored.value ?? "");
+  } else if (type === "PRODUCT_GROUP") {
+    draft.productGroupId = String(stored.value ?? "");
+  } else if (type === "PAYWALL") {
+    draft.paywall = {
+      ...DEFAULT_PAYWALL,
+      ...((stored.value as Partial<PaywallConfig>) ?? {}),
+    };
+  } else if (type === "ELEMENT") {
+    draft.element = JSON.stringify(stored.value, null, 2);
+  }
+  return draft;
+}
+
+interface ExperimentFormPageProps {
+  projectId: string;
+  initialExperiment?: ExperimentListItem;
+}
+
+export function NewExperimentPage({
+  projectId,
+  initialExperiment,
+}: ExperimentFormPageProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const isEdit = Boolean(initialExperiment);
   const { data: audiences = [], isLoading: audiencesLoading } =
     useAudiences(projectId);
   const productGroupsQuery = useProjectProductGroups(projectId);
   const productGroups = productGroupsQuery.data?.groups ?? [];
   const create = useCreateExperiment();
+  const update = useUpdateExperiment();
+  const start = useStartExperiment();
+  const pause = usePauseExperiment();
+  const resume = useResumeExperiment();
+  const stop = useStopExperiment();
 
-  const [name, setName] = useState("");
-  const [key, setKey] = useState("");
-  const [description, setDescription] = useState("");
-  const [type, setType] = useState<DashboardExperimentType>("FLAG");
-  const [flagSubtype, setFlagSubtype] = useState<FlagSubtype>("boolean");
-  const [audienceId, setAudienceId] = useState<string>("");
-  const [variants, setVariants] = useState<DraftVariant[]>(() =>
-    rebalanceEqually([makeVariant(0), makeVariant(1)]),
+  const status = initialExperiment?.status ?? "DRAFT";
+  const isReadOnly = isEdit && status !== "DRAFT";
+  const lifecycleBusy =
+    start.isPending || pause.isPending || resume.isPending || stop.isPending;
+
+  const seededType = initialExperiment?.type ?? "FLAG";
+  const seededFlagSubtype: FlagSubtype =
+    initialExperiment && seededType === "FLAG"
+      ? inferFlagSubtype(initialExperiment.variants[0]?.value)
+      : "boolean";
+
+  const [name, setName] = useState(initialExperiment?.name ?? "");
+  const [key, setKey] = useState(initialExperiment?.key ?? "");
+  const [description, setDescription] = useState(
+    initialExperiment?.description ?? "",
   );
+  const [type, setType] = useState<DashboardExperimentType>(seededType);
+  const [flagSubtype, setFlagSubtype] = useState<FlagSubtype>(seededFlagSubtype);
+  const [audienceId, setAudienceId] = useState<string>(
+    initialExperiment?.audienceId ?? "",
+  );
+  const [variants, setVariants] = useState<DraftVariant[]>(() => {
+    if (initialExperiment) {
+      return initialExperiment.variants.map((v, idx) =>
+        seedDraftVariant(idx, v, seededType, seededFlagSubtype),
+      );
+    }
+    return rebalanceEqually([makeVariant(0), makeVariant(1)]);
+  });
   const [formError, setFormError] = useState<string | null>(null);
 
   const resolvedAudienceId = audienceId || audiences[0]?.id || "";
@@ -400,15 +489,27 @@ function NewExperimentPage({ projectId }: { projectId: string }) {
     }
 
     try {
-      await create.mutateAsync({
-        projectId,
-        name: name.trim(),
-        ...(description.trim() ? { description: description.trim() } : {}),
-        type,
-        key: key.trim(),
-        audienceId: resolvedAudienceId,
-        variants: parsedVariants,
-      });
+      if (initialExperiment) {
+        await update.mutateAsync({
+          id: initialExperiment.id,
+          name: name.trim(),
+          description: description.trim() ? description.trim() : null,
+          type,
+          key: key.trim(),
+          audienceId: resolvedAudienceId,
+          variants: parsedVariants,
+        });
+      } else {
+        await create.mutateAsync({
+          projectId,
+          name: name.trim(),
+          ...(description.trim() ? { description: description.trim() } : {}),
+          type,
+          key: key.trim(),
+          audienceId: resolvedAudienceId,
+          variants: parsedVariants,
+        });
+      }
       void navigate({
         to: "/projects/$projectId/experiments",
         params: { projectId },
@@ -426,11 +527,11 @@ function NewExperimentPage({ projectId }: { projectId: string }) {
   };
 
   const submitDisabled =
-    create.isPending || !weightOk || !elementValid;
+    create.isPending || update.isPending || !weightOk || !elementValid;
 
   return (
     <>
-      <header className="flex items-start justify-between gap-4 pb-5">
+      <header className="flex flex-col gap-4 pb-5 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <Link
             to="/projects/$projectId/experiments"
@@ -441,18 +542,88 @@ function NewExperimentPage({ projectId }: { projectId: string }) {
             {t("experiments.new.back")}
           </Link>
           <h1 className="mt-2 text-[24px] font-semibold leading-8 tracking-tight">
-            {t("experiments.new.title")}
+            {isEdit ? t("experiments.edit.title") : t("experiments.new.title")}
           </h1>
           <p className="mt-1 max-w-2xl text-[13px] text-rv-mute-500">
-            {t("experiments.new.subtitle")}
+            {isEdit
+              ? t("experiments.edit.subtitle")
+              : t("experiments.new.subtitle")}
           </p>
         </div>
+        {isEdit && initialExperiment ? (
+          <LifecycleBar
+            status={status}
+            busy={lifecycleBusy}
+            onStart={async () => {
+              try {
+                await start.mutateAsync(initialExperiment.id);
+              } catch (err) {
+                window.alert(
+                  err instanceof Error
+                    ? err.message
+                    : t("experiments.lifecycle.startFailed"),
+                );
+              }
+            }}
+            onPause={async () => {
+              try {
+                await pause.mutateAsync(initialExperiment.id);
+              } catch (err) {
+                window.alert(
+                  err instanceof Error
+                    ? err.message
+                    : t("experiments.lifecycle.pauseFailed"),
+                );
+              }
+            }}
+            onResume={async () => {
+              try {
+                await resume.mutateAsync(initialExperiment.id);
+              } catch (err) {
+                window.alert(
+                  err instanceof Error
+                    ? err.message
+                    : t("experiments.lifecycle.resumeFailed"),
+                );
+              }
+            }}
+            onStop={async () => {
+              const confirmed = window.confirm(
+                t("experiments.lifecycle.stopConfirm", {
+                  name: initialExperiment.key,
+                }),
+              );
+              if (!confirmed) return;
+              try {
+                await stop.mutateAsync({ id: initialExperiment.id });
+              } catch (err) {
+                window.alert(
+                  err instanceof Error
+                    ? err.message
+                    : t("experiments.lifecycle.stopFailed"),
+                );
+              }
+            }}
+          />
+        ) : null}
       </header>
 
       <form
         onSubmit={handleSubmit}
         className="grid max-w-3xl grid-cols-1 gap-5"
       >
+        {isReadOnly ? (
+          <div className="flex items-start gap-2 rounded-md border border-rv-divider bg-rv-c2/60 px-3 py-2 text-[12px] text-rv-mute-700">
+            <AlertCircle size={13} className="mt-0.5 flex-shrink-0" />
+            <span>
+              {t(`experiments.edit.readOnlyBanner.${status.toLowerCase()}`)}
+            </span>
+          </div>
+        ) : null}
+        <fieldset
+          disabled={isReadOnly}
+          className="contents disabled:cursor-not-allowed disabled:opacity-60"
+        >
         <Section
           icon={<FileText size={13} />}
           title={t("experiments.new.sections.basics")}
@@ -734,6 +905,7 @@ function NewExperimentPage({ projectId }: { projectId: string }) {
             {t("experiments.new.addVariant")}
           </button>
         </Section>
+        </fieldset>
 
         {formError && (
           <div className="rounded-md border border-rv-danger/30 bg-rv-danger/10 px-3 py-2 text-[12px] text-rv-danger">
@@ -741,26 +913,134 @@ function NewExperimentPage({ projectId }: { projectId: string }) {
           </div>
         )}
 
-        <div className="flex items-center gap-2 pt-2">
-          <Button
-            type="submit"
-            variant="solid-primary"
-            disabled={submitDisabled}
-          >
-            {create.isPending
-              ? t("experiments.new.submitting")
-              : t("experiments.new.submit")}
-          </Button>
-          <Link
-            to="/projects/$projectId/experiments"
-            params={{ projectId }}
-            className="text-[12px] text-rv-mute-500 hover:text-foreground"
-          >
-            {t("experiments.new.cancel")}
-          </Link>
-        </div>
+        {!isReadOnly ? (
+          <div className="flex items-center gap-2 pt-2">
+            <Button
+              type="submit"
+              variant="solid-primary"
+              disabled={submitDisabled}
+            >
+              {isEdit
+                ? update.isPending
+                  ? t("experiments.edit.submitting")
+                  : t("experiments.edit.submit")
+                : create.isPending
+                  ? t("experiments.new.submitting")
+                  : t("experiments.new.submit")}
+            </Button>
+            <Link
+              to="/projects/$projectId/experiments"
+              params={{ projectId }}
+              className="text-[12px] text-rv-mute-500 hover:text-foreground"
+            >
+              {t("experiments.new.cancel")}
+            </Link>
+          </div>
+        ) : null}
       </form>
     </>
+  );
+}
+
+// =============================================================
+// Lifecycle bar — status indicator + state-machine actions
+// =============================================================
+//
+// Sits in the edit-page header. The pulsing dot reads "live" for
+// RUNNING (green), solid for PAUSED (yellow). Buttons are gated by
+// the current state: DRAFT → Activate, RUNNING → Pause + Complete,
+// PAUSED → Resume + Complete, COMPLETED → no actions.
+
+type ApiStatus = "DRAFT" | "RUNNING" | "PAUSED" | "COMPLETED";
+
+function LifecycleBar({
+  status,
+  busy,
+  onStart,
+  onPause,
+  onResume,
+  onStop,
+}: {
+  status: ApiStatus;
+  busy: boolean;
+  onStart: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  onStop: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-shrink-0 items-center gap-2 rounded-lg border border-rv-divider bg-rv-c1 px-3 py-2">
+      <LiveIndicator status={status} />
+      {status === "DRAFT" && (
+        <Button
+          variant="solid-primary"
+          onClick={onStart}
+          disabled={busy}
+        >
+          <Play size={13} />
+          {t("experiments.lifecycle.activate")}
+        </Button>
+      )}
+      {status === "RUNNING" && (
+        <>
+          <Button variant="flat" onClick={onPause} disabled={busy}>
+            <Pause size={13} />
+            {t("experiments.lifecycle.pause")}
+          </Button>
+          <Button variant="flat" onClick={onStop} disabled={busy}>
+            <CircleStop size={13} />
+            {t("experiments.lifecycle.complete")}
+          </Button>
+        </>
+      )}
+      {status === "PAUSED" && (
+        <>
+          <Button variant="solid-primary" onClick={onResume} disabled={busy}>
+            <Play size={13} />
+            {t("experiments.lifecycle.resume")}
+          </Button>
+          <Button variant="flat" onClick={onStop} disabled={busy}>
+            <CircleStop size={13} />
+            {t("experiments.lifecycle.complete")}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function LiveIndicator({ status }: { status: ApiStatus }) {
+  const { t } = useTranslation();
+  const isLive = status === "RUNNING";
+  const isPaused = status === "PAUSED";
+  const isCompleted = status === "COMPLETED";
+  const isDraft = status === "DRAFT";
+
+  return (
+    <div className="inline-flex items-center gap-2 rounded-md bg-rv-c2 px-2.5 py-1.5">
+      <span className="relative inline-flex size-2.5 flex-shrink-0">
+        <span
+          className={cn(
+            "size-2.5 rounded-full",
+            isLive && "bg-rv-success",
+            isPaused && "bg-rv-warning",
+            isCompleted && "bg-rv-mute-500",
+            isDraft && "bg-rv-mute-500",
+          )}
+        />
+        {isLive && (
+          <span
+            aria-hidden
+            className="absolute inset-0 -m-1 rounded-full bg-rv-success/30"
+            style={{ animation: "var(--animate-rv-pulse)" }}
+          />
+        )}
+      </span>
+      <span className="font-rv-mono text-[10px] font-semibold uppercase tracking-wider text-rv-mute-700">
+        {t(`experiments.lifecycle.indicator.${status.toLowerCase()}`)}
+      </span>
+    </div>
   );
 }
 
