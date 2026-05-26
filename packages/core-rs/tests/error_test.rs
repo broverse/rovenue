@@ -45,3 +45,40 @@ fn rate_limited_displays() {
 fn storage_displays() {
     assert_eq!(format!("{}", RovenueError::Storage), "storage error");
 }
+
+#[test]
+fn user_not_found_displays() {
+    assert_eq!(format!("{}", RovenueError::UserNotFound), "user not found");
+}
+
+#[test]
+fn insufficient_credits_displays() {
+    assert_eq!(
+        format!("{}", RovenueError::InsufficientCredits),
+        "insufficient credits"
+    );
+}
+
+#[test]
+fn entitlement_inactive_displays() {
+    assert_eq!(
+        format!("{}", RovenueError::EntitlementInactive),
+        "entitlement inactive"
+    );
+}
+
+#[test]
+fn duplicate_purchase_displays() {
+    assert_eq!(
+        format!("{}", RovenueError::DuplicatePurchase),
+        "duplicate purchase"
+    );
+}
+
+#[test]
+fn receipt_invalid_displays() {
+    assert_eq!(
+        format!("{}", RovenueError::ReceiptInvalid),
+        "receipt invalid"
+    );
+}

@@ -1,5 +1,9 @@
 use std::time::Duration;
 
+/// We never wait more than this on a server-driven Retry-After.
+/// Beyond this the client should fail open with RateLimited.
+pub const RETRY_AFTER_MAX: Duration = Duration::from_secs(30);
+
 /// What to do with an HTTP attempt's outcome.
 #[derive(Debug, PartialEq, Eq)]
 pub enum RetryDecision {

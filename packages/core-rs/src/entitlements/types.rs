@@ -5,21 +5,24 @@ use serde::Deserialize;
 pub struct Entitlement {
     pub id: String,
     pub is_active: bool,
-    pub product_id: Option<String>,
-    pub expires_at_ms: Option<u64>,
+    pub product_identifier: String,
+    pub store: String,
+    pub expires_iso: Option<String>,
 }
 
-/// Wire model the server returns.
+/// Wire model: server returns `{ data: { entitlements: { "<key>": EntitlementWire } } }`.
 #[derive(Debug, Deserialize)]
 pub struct EntitlementWire {
-    pub id: String,
+    #[serde(rename = "isActive")]
     pub is_active: bool,
-    pub product_id: Option<String>,
-    #[serde(rename = "expires_at_ms")]
-    pub expires_at_ms: Option<u64>,
+    #[serde(rename = "expiresDate")]
+    pub expires_date: Option<String>,
+    pub store: String,
+    #[serde(rename = "productIdentifier")]
+    pub product_identifier: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct EntitlementsResponse {
-    pub entitlements: Vec<EntitlementWire>,
+    pub entitlements: std::collections::HashMap<String, EntitlementWire>,
 }

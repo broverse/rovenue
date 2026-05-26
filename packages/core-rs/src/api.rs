@@ -4,13 +4,16 @@ use std::time::Duration;
 
 use crate::cache::CacheStore;
 use crate::config::Config;
+use crate::credits::CreditReader;
 use crate::entitlements::{Entitlement, EntitlementReader};
 use crate::error::{RovenueError, RovenueResult};
 use crate::identity::{IdentityManager, User};
 use crate::observer::{Observer, ObserverBus};
 use crate::polling::PollingScheduler;
+use crate::receipts::{ReceiptClient, ReceiptResult};
 use crate::time::{Clock, SystemClock};
 use crate::transport::http_client::HttpClient;
+use crate::transport::idempotency::IdempotencyKey;
 use crate::version::SDK_VERSION;
 
 const ENTITLEMENTS_INTERVAL_MS: u64 = 30_000;
@@ -20,6 +23,8 @@ pub struct RovenueCore {
     bus: Arc<ObserverBus>,
     identity: Arc<IdentityManager>,
     entitlements: Arc<EntitlementReader>,
+    credits: Arc<CreditReader>,
+    receipts: Arc<ReceiptClient>,
     scheduler: PollingScheduler,
 }
 
@@ -50,6 +55,13 @@ impl RovenueCore {
                 .with_observer_bus(Arc::clone(&bus))
                 .with_clock(Arc::clone(&clock)),
         );
+        let credits = Arc::new(
+            CreditReader::new(Arc::clone(&store), Arc::clone(&identity))
+                .with_http(Arc::clone(&http))
+                .with_observer_bus(Arc::clone(&bus))
+                .with_clock(Arc::clone(&clock)),
+        );
+        let receipts = Arc::new(ReceiptClient::new(Arc::clone(&http)));
         let scheduler = PollingScheduler::new();
         {
             let reader = Arc::clone(&reader);
@@ -61,11 +73,19 @@ impl RovenueCore {
                 },
             );
         }
+        {
+            let reader = Arc::clone(&credits);
+            scheduler.register("credits", Duration::from_secs(60), move || {
+                let _ = reader.refresh();
+            });
+        }
         Ok(Self {
             _config: Arc::new(config),
             bus,
             identity,
             entitlements: reader,
+            credits,
+            receipts,
             scheduler,
         })
     }
@@ -121,6 +141,53 @@ impl RovenueCore {
 
     pub fn shutdown(&self) {
         self.scheduler.shutdown();
+    }
+
+    pub fn credit_balance(&self) -> i64 {
+        self.credits.balance().unwrap_or(0)
+    }
+
+    pub fn refresh_credits(&self) -> RovenueResult<()> {
+        self.credits.refresh()
+    }
+
+    pub fn consume_credits(&self, amount: i64, description: Option<String>) -> RovenueResult<i64> {
+        if amount <= 0 {
+            return Err(RovenueError::Internal);
+        }
+        let key = IdempotencyKey::new();
+        self.credits
+            .consume(amount, description.as_deref(), key.as_str())
+    }
+
+    pub fn post_apple_receipt(
+        &self,
+        receipt: String,
+        product_id: String,
+    ) -> RovenueResult<ReceiptResult> {
+        let scope = self.identity.current_user_scope();
+        let key = IdempotencyKey::new();
+        let result = self
+            .receipts
+            .post_apple(&receipt, &scope, &product_id, key.as_str())?;
+        let _ = self.entitlements.refresh();
+        let _ = self.credits.refresh();
+        Ok(result)
+    }
+
+    pub fn post_google_receipt(
+        &self,
+        receipt: String,
+        product_id: String,
+    ) -> RovenueResult<ReceiptResult> {
+        let scope = self.identity.current_user_scope();
+        let key = IdempotencyKey::new();
+        let result = self
+            .receipts
+            .post_google(&receipt, &scope, &product_id, key.as_str())?;
+        let _ = self.entitlements.refresh();
+        let _ = self.credits.refresh();
+        Ok(result)
     }
 }
 

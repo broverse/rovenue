@@ -59,7 +59,9 @@ fn refresh_populates_cache_and_emits_observer() {
 
     let pro = reader.get("pro").unwrap().unwrap();
     assert!(pro.is_active);
-    assert_eq!(pro.product_id.as_deref(), Some("monthly"));
+    assert_eq!(pro.product_identifier, "monthly");
+    assert_eq!(pro.store, "APP_STORE");
+    assert_eq!(pro.expires_iso.as_deref(), Some("2030-01-01T00:00:00.000Z"));
 
     let all = reader.list_all().unwrap();
     assert_eq!(all.len(), 2);

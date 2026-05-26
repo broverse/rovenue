@@ -23,6 +23,21 @@ pub enum RovenueError {
     #[error("storage error")]
     Storage,
 
+    #[error("user not found")]
+    UserNotFound,
+
+    #[error("insufficient credits")]
+    InsufficientCredits,
+
+    #[error("entitlement inactive")]
+    EntitlementInactive,
+
+    #[error("duplicate purchase")]
+    DuplicatePurchase,
+
+    #[error("receipt invalid")]
+    ReceiptInvalid,
+
     #[error("internal error")]
     Internal,
 }

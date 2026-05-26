@@ -11,6 +11,11 @@ enum RovenueError {
     "Timeout",
     "RateLimited",
     "Storage",
+    "UserNotFound",
+    "InsufficientCredits",
+    "EntitlementInactive",
+    "DuplicatePurchase",
+    "ReceiptInvalid",
     "Internal",
 };
 
@@ -28,8 +33,9 @@ dictionary User {
 dictionary Entitlement {
     string id;
     boolean is_active;
-    string? product_id;
-    u64? expires_at_ms;
+    string product_identifier;
+    string store;
+    string? expires_iso;
 };
 
 callback interface Observer {
@@ -39,6 +45,13 @@ callback interface Observer {
 enum ChangeEvent {
     "EntitlementsChanged",
     "IdentityChanged",
+    "CreditBalanceChanged",
+};
+
+dictionary ReceiptResult {
+    string subscriber_id;
+    string app_user_id;
+    i64 credit_balance;
 };
 
 interface RovenueCore {
@@ -57,6 +70,20 @@ interface RovenueCore {
 
     [Throws=RovenueError]
     void refresh_entitlements();
+
+    i64 credit_balance();
+
+    [Throws=RovenueError]
+    void refresh_credits();
+
+    [Throws=RovenueError]
+    i64 consume_credits(i64 amount, string? description);
+
+    [Throws=RovenueError]
+    ReceiptResult post_apple_receipt(string receipt, string product_id);
+
+    [Throws=RovenueError]
+    ReceiptResult post_google_receipt(string receipt, string product_id);
 
     void register_observer(Observer obs);
     void set_foreground(boolean foreground);

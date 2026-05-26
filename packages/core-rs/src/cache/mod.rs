@@ -1,3 +1,4 @@
+pub mod credits;
 pub mod entitlements;
 pub mod etag;
 pub mod identity;
