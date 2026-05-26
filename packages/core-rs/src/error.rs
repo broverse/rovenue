@@ -11,6 +11,18 @@ pub enum RovenueError {
     #[error("server error")]
     ServerError,
 
+    #[error("network unavailable")]
+    NetworkUnavailable,
+
+    #[error("timeout")]
+    Timeout,
+
+    #[error("rate limited")]
+    RateLimited,
+
+    #[error("storage error")]
+    Storage,
+
     #[error("internal error")]
     Internal,
 }

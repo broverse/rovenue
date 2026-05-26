@@ -7,6 +7,10 @@ enum RovenueError {
     "NotConfigured",
     "InvalidApiKey",
     "ServerError",
+    "NetworkUnavailable",
+    "Timeout",
+    "RateLimited",
+    "Storage",
     "Internal",
 };
 
