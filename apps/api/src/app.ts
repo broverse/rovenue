@@ -14,6 +14,7 @@ import {
 } from "./routes";
 import { configStreamRoute } from "./routes/v1/config-stream";
 import { publicInvitationsRoute } from "./routes/public/invitations";
+import { publicUnsubscribeRoute } from "./routes/public/unsubscribe";
 
 // =============================================================
 // Hono app + RPC-ready AppType export
@@ -96,6 +97,7 @@ export function createApp() {
     .route("/v1", v1Route)
     .route("/", configStreamRoute)
     .route("/invitations", publicInvitationsRoute)
+    .route("/unsubscribe", publicUnsubscribeRoute)
     .route("/dashboard", dashboardRoute);
 
   app.onError(errorHandler);

@@ -77,3 +77,7 @@ process.env.ENCRYPTION_KEY ??=
 // (and any future SNS-driven tests) don't need to stub fetch().
 // The signature logic itself is covered by middleware/sns-signature.test.ts.
 process.env.AWS_SES_EVENTS_VERIFY_SIGNATURE ??= "false";
+// 32-byte hex key for the one-click unsubscribe HMAC. The all-zero
+// key is fine for tests; production refuses to start without a real
+// value via the lib/env zod check at module load.
+process.env.UNSUB_SIGNING_KEY ??= "0".repeat(64);
