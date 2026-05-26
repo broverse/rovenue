@@ -14,6 +14,7 @@ import { featureFlagsRoute } from "./feature-flags";
 import { leaderboardsRoute } from "./leaderboards";
 import { meRoute } from "./me";
 import { invitationsRoute } from "./invitations";
+import { notificationsRoute } from "./notifications";
 import { membersRoute } from "./members";
 import { metricsRoute } from "./metrics";
 import { overviewRoute } from "./overview";
@@ -48,6 +49,7 @@ export const dashboardRoute = new Hono()
   .route("/experiments", experimentsRoute)
   .route("/feature-flags", featureFlagsRoute)
   .route("/me", meRoute)
+  .route("/notifications", notificationsRoute)
   .route("/projects", projectsRoute)
   .route("/projects/:projectId/apps", appsRoute)
   .route("/projects/:projectId/charts", chartsRoute)
