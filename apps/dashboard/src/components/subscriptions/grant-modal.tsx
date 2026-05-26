@@ -281,7 +281,7 @@ export function GrantSubscriptionModal({ projectId, open, onClose }: Props) {
                     "subscriptions.grant.fields.durationAria",
                     "Duration preset",
                   )}
-                  className="w-full justify-between"
+                  className="w-full"
                 />
                 {preset === "custom" && (
                   <div className="mt-2">

@@ -4,7 +4,7 @@ import { Radio } from "@base-ui-components/react/radio";
 import { cn } from "../lib/cn";
 
 export const segmentedItemVariants = cva(
-  "h-6 cursor-pointer rounded px-2.5 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rv-accent-500 focus-visible:ring-offset-1 focus-visible:ring-offset-rv-c2 data-[checked]:bg-rv-c4 data-[checked]:text-foreground text-rv-mute-600 hover:text-foreground",
+  "h-6 flex-1 cursor-pointer rounded px-2.5 text-center text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rv-accent-500 focus-visible:ring-offset-1 focus-visible:ring-offset-rv-c2 data-[checked]:bg-rv-c4 data-[checked]:text-foreground text-rv-mute-600 hover:text-foreground",
   {
     variants: {
       // Reserved for future tonal variants of the segmented control.
