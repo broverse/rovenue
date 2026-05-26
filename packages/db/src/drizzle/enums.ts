@@ -126,6 +126,7 @@ export const aggregateTypeEnum = pgEnum("aggregate_type", [
   "REVENUE_EVENT",
   "CREDIT_LEDGER",
   "BILLING",
+  "NOTIFICATION",
 ]);
 
 export const invitationDeliveryStatus = pgEnum("InvitationDeliveryStatus", [
@@ -230,3 +231,29 @@ export type BillingPendingAction = (typeof billingPendingAction)[number];
 
 export const billingMeterKey = ["mtr", "events", "sql_queries"] as const;
 export type BillingMeterKey = (typeof billingMeterKey)[number];
+
+// =============================================================
+// Notifications pgEnums
+// =============================================================
+
+export const notificationChannel = pgEnum("NotificationChannel", [
+  "email",
+  "push",
+  "inapp",
+]);
+
+export const notificationDeliveryStatus = pgEnum("NotificationDeliveryStatus", [
+  "queued",
+  "sent",
+  "delivered",
+  "bounced",
+  "failed",
+  "suppressed",
+]);
+
+export const pushPlatform = pgEnum("PushPlatform", ["ios", "android"]);
+
+export const notificationSuppressionReason = pgEnum(
+  "NotificationSuppressionReason",
+  ["hard_bounce", "complaint", "manual"],
+);

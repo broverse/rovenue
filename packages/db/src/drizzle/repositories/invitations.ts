@@ -235,6 +235,7 @@ export interface InvitationEmailLoad {
     role: ProjectInvitation["role"];
     expiresAt: Date;
   };
+  projectId: string;
   inviterName: string;
   projectName: string;
 }
@@ -246,6 +247,7 @@ export async function findInvitationForEmailSend(
   const rows = await db
     .select({
       id: projectInvitations.id,
+      projectId: projectInvitations.projectId,
       email: projectInvitations.email,
       role: projectInvitations.role,
       expiresAt: projectInvitations.expiresAt,
@@ -267,6 +269,7 @@ export async function findInvitationForEmailSend(
   if (r.expiresAt <= new Date()) return null;
   return {
     invitation: { id: r.id, email: r.email, role: r.role, expiresAt: r.expiresAt },
+    projectId: r.projectId,
     inviterName: r.inviterName,
     projectName: r.projectName,
   };

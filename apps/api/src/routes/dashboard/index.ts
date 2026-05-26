@@ -15,6 +15,9 @@ import { featureFlagsRoute } from "./feature-flags";
 import { leaderboardsRoute } from "./leaderboards";
 import { meRoute } from "./me";
 import { invitationsRoute } from "./invitations";
+import { notificationsRoute } from "./notifications";
+import { projectNotificationDefaultsRoute } from "./project-notification-defaults";
+import { pushDevicesRoute } from "./push-devices";
 import { membersRoute } from "./members";
 import { metricsRoute } from "./metrics";
 import { overviewRoute } from "./overview";
@@ -49,6 +52,8 @@ export const dashboardRoute = new Hono()
   .route("/experiments", experimentsRoute)
   .route("/feature-flags", featureFlagsRoute)
   .route("/me", meRoute)
+  .route("/notifications", notificationsRoute)
+  .route("/push-devices", pushDevicesRoute)
   .route("/projects", projectsRoute)
   .route("/projects/:projectId/apps", appsRoute)
   .route("/projects/:projectId/billing", billingSubRouter)
@@ -60,6 +65,10 @@ export const dashboardRoute = new Hono()
   .route("/projects/:projectId/leaderboards", leaderboardsRoute)
   .route("/projects/:projectId/invitations", invitationsRoute)
   .route("/projects/:projectId/members", membersRoute)
+  .route(
+    "/projects/:projectId/notification-defaults",
+    projectNotificationDefaultsRoute,
+  )
   .route("/projects/:projectId/metrics", metricsRoute)
   .route("/projects/:projectId/overview", overviewRoute)
   .route("/projects/:projectId/product-groups", productGroupsDashboardRoute)

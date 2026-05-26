@@ -80,6 +80,51 @@ const envSchema = z
     STRIPE_BILLING_WEBHOOK_SECRET: z.string().min(1).optional(),
     STRIPE_BILLING_PUBLISHABLE_KEY: z.string().min(1).optional(),
     STRIPE_BILLING_INDIE_MONTHLY_PRICE_ID: z.string().min(1).optional(),
+    // ---- Email transport selection -----------------------------
+    // EMAIL_PROVIDER picks the Mailer impl. "ses" is the default
+    // (uses AWS_SES_* above). "smtp" enables the nodemailer path
+    // for self-hosted instances without AWS credentials.
+    EMAIL_PROVIDER: z.enum(["ses", "smtp"]).default("ses"),
+    // Overrides AWS_SES_FROM_EMAIL when set (also required by the
+    // SMTP path which has no SES equivalent).
+    EMAIL_FROM: z.string().email().optional(),
+    SMTP_HOST: z.string().optional(),
+    SMTP_PORT: z.coerce.number().int().min(1).max(65535).optional(),
+    SMTP_USER: z.string().optional(),
+    SMTP_PASS: z.string().optional(),
+    SMTP_SECURE: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
+    // ---- Unsubscribe-link signing -----------------------------
+    // 32-byte hex key used to HMAC-SHA256 the one-click
+    // unsubscribe payloads embedded in List-Unsubscribe headers.
+    // Required in production for the public unsubscribe flow.
+    UNSUB_SIGNING_KEY: z
+      .string()
+      .regex(/^[0-9a-fA-F]{64}$/, "32 bytes in hex (64 chars)")
+      .optional(),
+    // Static mailbox advertised in the `mailto:` half of the
+    // List-Unsubscribe header. Inbox providers fall back to this
+    // when the one-click URL is unreachable; the address is read
+    // by an ops mailbox that forwards to the suppression worker.
+    UNSUB_MAILTO: z.string().email().default("unsubscribe@rovenue.io"),
+    // ---- Push notifications (optional; enables iOS push) -------
+    // Token-based APNs auth. APNS_KEY_P8 is the .p8 file contents
+    // verbatim (BEGIN/END lines included); APNS_ENVIRONMENT picks
+    // the production gateway vs the sandbox host TestFlight uses.
+    APNS_KEY_ID: z.string().optional(),
+    APNS_TEAM_ID: z.string().optional(),
+    APNS_KEY_P8: z.string().optional(),
+    APNS_BUNDLE_ID: z.string().optional(),
+    APNS_ENVIRONMENT: z
+      .enum(["production", "sandbox"])
+      .default("production"),
+    // ---- Push notifications (optional; enables Android push) ---
+    // FCM v1 HTTP API. Service-account JSON pasted verbatim into
+    // the env var so secrets stay in the same place as everything
+    // else. The factory parses it lazily on first use.
+    FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== "production") return;
@@ -117,6 +162,11 @@ const envSchema = z
       data.BETTER_AUTH_SECRET,
       "BETTER_AUTH_SECRET",
       "session encryption key must be set",
+    );
+    require(
+      data.UNSUB_SIGNING_KEY,
+      "UNSUB_SIGNING_KEY",
+      "one-click unsubscribe links must be signed",
     );
     require(
       data.CLICKHOUSE_URL,

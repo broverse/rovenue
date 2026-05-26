@@ -1,0 +1,14 @@
+{
+  "subject": "Your Rovenue daily digest — {{date}}",
+  "preview": "{{count}} project(s) · {{date}} ({{timezone}})",
+  "headline": "Daily digest — {{date}}",
+  "intro": "Here's what happened across your projects in the last day ({{timezone}}).",
+  "section.mrr": "MRR",
+  "section.mrrDelta": "Δ vs yesterday",
+  "section.newSubs": "New subscribers",
+  "section.churnedSubs": "Churned",
+  "section.refunds": "Refunds",
+  "section.refundsValue": "{{count}} · {{total}}",
+  "cta": "Open dashboard",
+  "footer.empty": "Quiet day. No movement to report."
+}

@@ -160,6 +160,87 @@ describe("PATCH /projects/:projectId/members/:userId", () => {
 // DELETE /:userId — remove member
 // =============================================================
 
+describe("Producer emits (15.1)", () => {
+  it("PATCH role emits team.member.role_changed outbox row", async () => {
+    const owner = await createUserAndSession("emit_role_owner");
+    const admin = await createUserAndSession("emit_role_admin");
+    const dev = await createUserAndSession("emit_role_dev");
+    const project = await seedProject("_emit_role");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId: owner.userId, role: "OWNER" });
+    await seedMember({ projectId: project.id, userId: admin.userId, role: "ADMIN" });
+    await seedMember({ projectId: project.id, userId: dev.userId, role: "DEVELOPER" });
+
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${project.id}/members/${dev.userId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie: admin.cookie },
+        body: JSON.stringify({ role: "GROWTH" }),
+      },
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await getDb()
+      .select()
+      .from(drizzle.schema.outboxEvents)
+      .where(eq(drizzle.schema.outboxEvents.eventType, "team.member.role_changed"));
+    const match = rows.find((r) => {
+      const p = r.payload as {
+        recipients?: string[];
+        projectId?: string;
+      };
+      return (
+        p.projectId === project.id && p.recipients?.includes(dev.userId)
+      );
+    });
+    expect(match).toBeDefined();
+    const payload = match!.payload as {
+      context: { oldRole: string; newRole: string; changedByName: string };
+    };
+    expect(payload.context.oldRole).toBe("DEVELOPER");
+    expect(payload.context.newRole).toBe("GROWTH");
+    expect(payload.context.changedByName).toBeDefined();
+  });
+
+  it("DELETE member emits team.member.removed outbox row", async () => {
+    const owner = await createUserAndSession("emit_rm_owner");
+    const dev = await createUserAndSession("emit_rm_dev");
+    const project = await seedProject("_emit_rm");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId: owner.userId, role: "OWNER" });
+    await seedMember({ projectId: project.id, userId: dev.userId, role: "DEVELOPER" });
+
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${project.id}/members/${dev.userId}`,
+      { method: "DELETE", headers: { cookie: owner.cookie } },
+    );
+    expect(res.status).toBe(200);
+
+    const rows = await getDb()
+      .select()
+      .from(drizzle.schema.outboxEvents)
+      .where(eq(drizzle.schema.outboxEvents.eventType, "team.member.removed"));
+    const match = rows.find((r) => {
+      const p = r.payload as {
+        recipients?: string[];
+        projectId?: string;
+      };
+      return (
+        p.projectId === project.id && p.recipients?.includes(dev.userId)
+      );
+    });
+    expect(match).toBeDefined();
+    const payload = match!.payload as {
+      context: { projectName: string; removedByName: string };
+    };
+    expect(payload.context.projectName).toBeDefined();
+    expect(payload.context.removedByName).toBeDefined();
+  });
+});
+
 describe("DELETE /projects/:projectId/members/:userId", () => {
   it("4. DELETE cannot remove an OWNER", async () => {
     const owner = await createUserAndSession("del_owner");

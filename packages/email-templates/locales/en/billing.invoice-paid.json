@@ -1,0 +1,7 @@
+{
+  "subject": "Your Rovenue invoice was paid",
+  "preview": "{{amountFormatted}} · {{periodStart}} → {{periodEnd}}",
+  "headline": "Invoice {{invoiceId}} paid",
+  "body": "We charged {{amountFormatted}} for the period {{periodStart}} → {{periodEnd}}. Thank you.",
+  "cta": "View invoice"
+}

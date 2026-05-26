@@ -1,0 +1,10 @@
+{
+  "subject": "Your {{providerLabel}} account is now linked",
+  "preview": "{{providerLabel}} linked at {{whenIso}}",
+  "headline": "{{providerLabel}} account linked",
+  "body": "A {{providerLabel}} account was linked to your Rovenue login at {{whenIso}}.",
+  "body.tail": "If this wasn't you, unlink it immediately and rotate your password.",
+  "cta": "Manage connected accounts",
+  "provider.github": "GitHub",
+  "provider.google": "Google"
+}

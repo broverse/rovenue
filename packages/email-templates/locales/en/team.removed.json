@@ -1,0 +1,6 @@
+{
+  "subject": "You've been removed from {{projectName}}",
+  "preview": "Removed by {{removedByName}}",
+  "headline": "You no longer have access to {{projectName}}",
+  "body": "{{removedByName}} removed you from {{projectName}}. If you think this was a mistake, reach out to them directly."
+}

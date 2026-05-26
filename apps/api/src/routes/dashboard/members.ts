@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { MemberRole, drizzle } from "@rovenue/db";
+import { eq } from "drizzle-orm";
+import { MemberRole, drizzle, type Db } from "@rovenue/db";
 import type {
   ListMembersResponse,
   ProjectMemberRow,
@@ -11,6 +12,35 @@ import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { ok } from "../../lib/response";
+import { emitNotification } from "../../services/notifications/emit";
+
+/**
+ * Project name + actor display name, both inside the same tx
+ * that's making the role/membership change. Errors here are
+ * intentionally swallowed — emitNotification is best-effort
+ * (the outbox row matters; a missing context.changedByName
+ * shouldn't roll back the role change).
+ */
+async function loadEmitContext(
+  tx: Db,
+  projectId: string,
+  actorUserId: string,
+): Promise<{ projectName: string; actorName: string }> {
+  const [proj] = await tx
+    .select({ name: drizzle.schema.projects.name })
+    .from(drizzle.schema.projects)
+    .where(eq(drizzle.schema.projects.id, projectId))
+    .limit(1);
+  const [actor] = await tx
+    .select({ name: drizzle.schema.user.name, email: drizzle.schema.user.email })
+    .from(drizzle.schema.user)
+    .where(eq(drizzle.schema.user.id, actorUserId))
+    .limit(1);
+  return {
+    projectName: proj?.name ?? projectId,
+    actorName: actor?.name ?? actor?.email ?? "Someone",
+  };
+}
 
 const ASSIGNABLE_ROLE_VALUES = [
   MemberRole.ADMIN,
@@ -122,6 +152,21 @@ export const membersRoute = new Hono()
           },
           tx,
         );
+
+        const ctx = await loadEmitContext(tx, projectId, user.id);
+        await emitNotification(tx, {
+          eventKey: "team.member.role_changed",
+          eventId: `member.role_changed:${row.id}:${target.role}->${body.role}`,
+          projectId,
+          recipients: [targetUserId],
+          context: {
+            projectId,
+            projectName: ctx.projectName,
+            oldRole: target.role,
+            newRole: body.role,
+            changedByName: ctx.actorName,
+          },
+        });
         return row;
       });
 
@@ -170,6 +215,20 @@ export const membersRoute = new Hono()
         },
         tx,
       );
+
+      const ctx = await loadEmitContext(tx, projectId, user.id);
+      await emitNotification(tx, {
+        eventKey: "team.member.removed",
+        eventId: `member.removed:${target.id}`,
+        projectId,
+        recipients: [targetUserId],
+        context: {
+          projectId,
+          projectName: ctx.projectName,
+          removedByName: ctx.actorName,
+        },
+      });
+
       await drizzle.projectRepo.deleteProjectMember(tx, projectId, targetUserId);
     });
 

@@ -1,0 +1,14 @@
+{
+  "subject": "Rovenue günlük özet — {{date}}",
+  "preview": "{{count}} proje · {{date}} ({{timezone}})",
+  "headline": "Günlük özet — {{date}}",
+  "intro": "Son 24 saatte projelerinizde olanlar ({{timezone}}).",
+  "section.mrr": "MRR",
+  "section.mrrDelta": "Düne göre Δ",
+  "section.newSubs": "Yeni aboneler",
+  "section.churnedSubs": "Kaybedilen",
+  "section.refunds": "İadeler",
+  "section.refundsValue": "{{count}} · {{total}}",
+  "cta": "Dashboard'u aç",
+  "footer.empty": "Sakin bir gün — kayda değer hareket yok."
+}

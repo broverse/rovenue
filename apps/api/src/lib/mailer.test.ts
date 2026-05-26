@@ -1,12 +1,32 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
+import type { env as RealEnv } from "./env";
 import {
   __setMailerForTests,
   _SesMailerForTests,
+  createMailerFromEnv,
   mailer,
   type Mailer,
 } from "./mailer";
+import { SmtpMailer } from "./mailer-smtp";
+
+type EnvShape = typeof RealEnv;
+function baseEnv(overrides: Partial<EnvShape> = {}): EnvShape {
+  return {
+    EMAIL_PROVIDER: "ses",
+    EMAIL_FROM: undefined,
+    AWS_SES_FROM_EMAIL: undefined,
+    AWS_SES_REGION: "us-east-1",
+    AWS_SES_CONFIGURATION_SET: undefined,
+    SMTP_HOST: undefined,
+    SMTP_PORT: undefined,
+    SMTP_USER: undefined,
+    SMTP_PASS: undefined,
+    SMTP_SECURE: false,
+    ...overrides,
+  } as unknown as EnvShape;
+}
 
 describe("mailer", () => {
   afterEach(() => __setMailerForTests(null));
@@ -68,5 +88,77 @@ describe("mailer", () => {
     );
     const out = await m.send({ to: "a@b.com", subject: "s", html: "h", text: "t" });
     expect(out.messageId).toBe("");
+  });
+
+  it("SesMailer threads msg.headers + correlationId together", async () => {
+    const sesMock = mockClient(SESv2Client);
+    sesMock.on(SendEmailCommand).resolves({ MessageId: "id" });
+    const m = new _SesMailerForTests(
+      new SESv2Client({ region: "us-east-1" }),
+      "noreply@example.com",
+    );
+    await m.send({
+      to: "a@b.com",
+      subject: "s",
+      html: "h",
+      text: "t",
+      correlationId: "inv_42",
+      headers: { "List-Unsubscribe": "<https://x>" },
+    });
+    const input = sesMock.commandCalls(SendEmailCommand)[0].args[0].input;
+    expect(input.Content?.Simple?.Headers).toEqual(
+      expect.arrayContaining([
+        { Name: "X-Rovenue-Id", Value: "inv_42" },
+        { Name: "List-Unsubscribe", Value: "<https://x>" },
+      ]),
+    );
+  });
+});
+
+describe("createMailerFromEnv", () => {
+  it("returns NoopMailer when SES selected but no from address is set", async () => {
+    const m = createMailerFromEnv(baseEnv());
+    const r = await m.send({ to: "x@y.com", subject: "s", html: "h", text: "t" });
+    expect(r.messageId).toBe("noop");
+  });
+
+  it("uses AWS_SES_FROM_EMAIL when EMAIL_FROM is absent", () => {
+    const m = createMailerFromEnv(
+      baseEnv({ AWS_SES_FROM_EMAIL: "rovenue@example.com" }),
+    );
+    expect(m.constructor.name).toBe("SesMailer");
+  });
+
+  it("builds an SmtpMailer when EMAIL_PROVIDER=smtp and required vars are set", () => {
+    const m = createMailerFromEnv(
+      baseEnv({
+        EMAIL_PROVIDER: "smtp",
+        SMTP_HOST: "smtp.example.com",
+        SMTP_PORT: 587,
+        SMTP_USER: "u",
+        SMTP_PASS: "p",
+        EMAIL_FROM: "rovenue@example.com",
+      }),
+    );
+    expect(m).toBeInstanceOf(SmtpMailer);
+  });
+
+  it("throws when EMAIL_PROVIDER=smtp but SMTP_* or from is missing", () => {
+    expect(() =>
+      createMailerFromEnv(
+        baseEnv({ EMAIL_PROVIDER: "smtp", EMAIL_FROM: "rovenue@example.com" }),
+      ),
+    ).toThrow(/EMAIL_PROVIDER=smtp requires/);
+    expect(() =>
+      createMailerFromEnv(
+        baseEnv({
+          EMAIL_PROVIDER: "smtp",
+          SMTP_HOST: "h",
+          SMTP_PORT: 25,
+          SMTP_USER: "u",
+          SMTP_PASS: "p",
+        }),
+      ),
+    ).toThrow(/EMAIL_PROVIDER=smtp requires/);
   });
 });

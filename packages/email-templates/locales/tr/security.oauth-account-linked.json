@@ -1,0 +1,10 @@
+{
+  "subject": "{{providerLabel}} hesabınız artık bağlı",
+  "preview": "{{providerLabel}} bağlandı: {{whenIso}}",
+  "headline": "{{providerLabel}} hesabı bağlandı",
+  "body": "{{whenIso}} tarihinde Rovenue girişinize bir {{providerLabel}} hesabı bağlandı.",
+  "body.tail": "Bu siz değilseniz, bağlantıyı hemen kaldırın ve parolanızı değiştirin.",
+  "cta": "Bağlı hesapları yönet",
+  "provider.github": "GitHub",
+  "provider.google": "Google"
+}

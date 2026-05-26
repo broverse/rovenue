@@ -1,0 +1,10 @@
+{
+  "subject": "Your Rovenue invoice failed to charge",
+  "preview": "{{amountFormatted}} · invoice {{invoiceId}}",
+  "headline": "Your Rovenue invoice couldn't be charged",
+  "body": "We tried to charge {{amountFormatted}} for invoice {{invoiceId}} but the payment failed.\n\nReason: {{reason}}",
+  "body.fallback": "Please update your payment method to avoid service interruption.",
+  "cta": "View invoice",
+  "push.title": "Invoice failed",
+  "push.body": "{{amountFormatted}} — {{reason}}"
+}

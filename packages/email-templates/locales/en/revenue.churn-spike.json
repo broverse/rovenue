@@ -1,0 +1,9 @@
+{
+  "subject": "Churn spike on {{projectName}}",
+  "preview": "{{churnRatePct}}% vs {{baselinePct}}% baseline ({{windowDays}}d window)",
+  "headline": "Churn spike on {{projectName}}",
+  "body": "Churn ran at {{churnRatePct}}% over the last {{windowDays}} days, well above the {{baselinePct}}% baseline.",
+  "cta": "Open churn dashboard",
+  "push.title": "Churn spike on {{projectName}}",
+  "push.body": "{{churnRatePct}}% vs {{baselinePct}}% baseline"
+}

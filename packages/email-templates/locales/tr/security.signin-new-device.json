@@ -1,0 +1,10 @@
+{
+  "subject": "{{userAgent}} üzerinden yeni oturum",
+  "preview": "{{userAgent}} · {{locationOrIp}} · {{whenIso}}",
+  "headline": "Rovenue hesabınıza yeni oturum",
+  "body": "Hesabınızda yeni bir oturum açılışı tespit ettik.\n\nTarayıcı: {{userAgent}}\nIP: {{ipAddress}}\nKonum: {{locationOrIp}}\nZaman: {{whenIso}}",
+  "body.tail": "Bu siz değilseniz, parolanızı değiştirin ve aktif cihazları hemen gözden geçirin.",
+  "cta": "Cihazları gözden geçir",
+  "push.title": "Hesabınıza yeni oturum",
+  "push.body": "{{userAgent}} · {{locationOrIp}}"
+}

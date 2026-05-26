@@ -1,0 +1,9 @@
+{
+  "subject": "Anomaly detected on {{projectName}}",
+  "preview": "{{metric}} moved {{direction}} {{magnitudePct}}% in the last {{windowMinutes}} minutes",
+  "headline": "Anomaly detected on {{projectName}}",
+  "body": "{{metric}} moved {{direction}} {{magnitudePct}}% in the last {{windowMinutes}} minutes, beyond your project's baseline.",
+  "cta": "Open dashboard",
+  "push.title": "Anomaly on {{projectName}}",
+  "push.body": "{{metric}} {{direction}} {{magnitudePct}}% / {{windowMinutes}} min"
+}

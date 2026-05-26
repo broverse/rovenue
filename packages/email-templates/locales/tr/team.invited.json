@@ -1,0 +1,9 @@
+{
+  "subject": "Rovenue üzerinde {{projectName}} projesine davet edildiniz",
+  "preview": "{{inviterName}}, sizi {{projectName}} projesine {{role}} olarak davet etti",
+  "headline": "{{projectName}} projesine katılmaya davetlisiniz",
+  "body": "{{inviterName}}, sizi {{projectName}} projesine {{role}} rolüyle davet etti.",
+  "body.expires": "Bu davet {{expiresAt}} tarihinde sona erer. Bu e-postayı beklemiyorsanız yok sayabilirsiniz.",
+  "body.tail": "Bu e-postayı beklemiyorsanız yok sayabilirsiniz.",
+  "cta": "Daveti kabul et"
+}

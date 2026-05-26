@@ -488,6 +488,110 @@
       "auditLogs": "Audit log"
     }
   },
+  "notifications": {
+    "bell": {
+      "title": "Notifications",
+      "markAll": "Mark all as read",
+      "viewAll": "View all",
+      "empty": "You're all caught up.",
+      "loading": "Loading…"
+    },
+    "inbox": {
+      "title": "Inbox",
+      "description": "Every alert routed to you across projects.",
+      "section": "Feed",
+      "unreadOnly": "Unread only",
+      "itemsLoaded": "loaded",
+      "empty": "No notifications yet.",
+      "loadMore": "Load more"
+    },
+    "prefs": {
+      "title": "Notifications",
+      "description": "Control which alerts reach you, and on which channel.",
+      "channels": {
+        "title": "Channels",
+        "email": "Email",
+        "emailDesc": "Required security notifications still send even when this is off.",
+        "push": "Push",
+        "pushDesc": "Mobile alerts on devices listed below.",
+        "localeHint": "Locale + timezone"
+      },
+      "devices": {
+        "title": "Registered devices"
+      },
+      "events": {
+        "title": "Per-event preferences",
+        "noProjects": "Create a project to manage per-event preferences.",
+        "projectPicker": "Project"
+      }
+    },
+    "projectDefaults": {
+      "title": "Notification defaults",
+      "description": "Set the baseline for every member of {{name}}. Members can still override individual events on their own preferences page."
+    },
+    "categories": {
+      "revenue": "Revenue",
+      "billing": "Billing",
+      "integration": "Integrations",
+      "team": "Team",
+      "security": "Security"
+    },
+    "source": {
+      "custom": "Custom",
+      "default": "Default"
+    },
+    "devices": {
+      "loading": "Loading devices…",
+      "empty": "No push devices registered. Sign in on iOS or Android to add one.",
+      "lastSeen": "Last seen",
+      "revoke": "Revoke device"
+    },
+    "events": {
+      "forcedTooltip": "Required notification — cannot be turned off.",
+      "revenue.digest.daily": { "title": "Daily revenue digest" },
+      "revenue.digest.weekly": { "title": "Weekly revenue digest" },
+      "revenue.anomaly.detected": { "title": "Revenue anomaly detected" },
+      "revenue.milestone.hit": { "title": "Revenue milestone hit" },
+      "revenue.churn.spike": { "title": "Churn spike" },
+      "billing.refund.detected": { "title": "Refund processed" },
+      "billing.credit.low_balance": { "title": "Low credit balance" },
+      "billing.invoice.failed": { "title": "Invoice failed" },
+      "billing.invoice.paid": { "title": "Invoice paid" },
+      "integration.store_credential.expired": { "title": "Store credential expired" },
+      "integration.webhook.failing": { "title": "Outgoing webhook failing" },
+      "team.member.invited": { "title": "Team member invited" },
+      "team.member.role_changed": { "title": "Member role changed" },
+      "team.member.removed": { "title": "Team member removed" },
+      "security.signin.new_device": { "title": "Sign-in from new device" },
+      "security.oauth.account_linked": { "title": "OAuth account linked" }
+    }
+  },
+  "unsubscribe": {
+    "missingToken": {
+      "title": "Missing unsubscribe token",
+      "body": "The link you followed doesn't contain a valid token. Open the latest notification email and click the unsubscribe link again."
+    },
+    "confirm": {
+      "title": "Confirm unsubscribe",
+      "body": "We'll stop sending you the email type this link covers. Required security notifications still send.",
+      "cta": "Unsubscribe me",
+      "pending": "Unsubscribing…"
+    },
+    "success": {
+      "title": "You're unsubscribed",
+      "body": "We won't send you this kind of email again. You can re-enable it any time from your account settings.",
+      "cta": "Manage notification preferences"
+    },
+    "expired": {
+      "title": "This link has expired",
+      "body": "Unsubscribe links expire after 30 days. Sign in to update your preferences manually."
+    },
+    "error": {
+      "title": "We couldn't unsubscribe you",
+      "signIn": "Sign in",
+      "prefs": "Notification settings"
+    }
+  },
   "liveEvents": {
     "title": "Live events",
     "subtitle": "Real-time event stream",

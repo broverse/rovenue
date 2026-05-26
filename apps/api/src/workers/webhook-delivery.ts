@@ -1,9 +1,12 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
+import { eq } from "drizzle-orm";
 import { OutgoingWebhookStatus, drizzle } from "@rovenue/db";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
+import { captureNotifierError } from "../lib/sentry-notifications";
+import { emitNotification } from "../services/notifications/emit";
 
 // =============================================================
 // Outgoing webhook delivery worker
@@ -202,7 +205,65 @@ async function attemptDelivery(
       nextRetryAt,
     },
   );
+
+  // Fire `integration.webhook.failing` on the third consecutive
+  // failure. We dedup at the notifier layer via a per-endpoint
+  // per-day eventId, so a burst of failing rows for the same URL
+  // surfaces a single notification a day instead of one per row.
+  if (newAttempts === 3) {
+    await safeEmitWebhookFailing(wh, newAttempts, now);
+  }
   return "FAILED";
+}
+
+/**
+ * Best-effort notification emit. Wraps the call in a tx + try/catch
+ * so a project-name lookup miss or notifier-side schema mismatch
+ * can't break the webhook delivery loop. The webhook write that
+ * happened just before this call is already committed.
+ */
+async function safeEmitWebhookFailing(
+  wh: WebhookRow,
+  consecutiveFailures: number,
+  now: Date,
+): Promise<void> {
+  try {
+    const [proj] = await drizzle.db
+      .select({ name: drizzle.schema.projects.name })
+      .from(drizzle.schema.projects)
+      .where(eq(drizzle.schema.projects.id, wh.projectId))
+      .limit(1);
+    const projectName = proj?.name ?? wh.projectId;
+    const urlDigest = createHash("sha256")
+      .update(wh.url)
+      .digest("hex")
+      .slice(0, 12);
+    const dayBucket = now.toISOString().slice(0, 10);
+    await drizzle.db.transaction(async (tx) => {
+      await emitNotification(tx, {
+        eventKey: "integration.webhook.failing",
+        eventId: `webhook.failing:${wh.projectId}:${urlDigest}:${dayBucket}`,
+        projectId: wh.projectId,
+        context: {
+          projectId: wh.projectId,
+          projectName,
+          webhookId: wh.id,
+          endpointUrl: wh.url,
+          consecutiveFailures,
+        },
+      });
+    });
+  } catch (err) {
+    log.warn("integration.webhook.failing emit skipped", {
+      webhookId: wh.id,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    captureNotifierError(err, {
+      component: "webhook-failing-emit",
+      projectId: wh.projectId,
+      reason: "emit_failed",
+    });
+  }
 }
 
 // =============================================================

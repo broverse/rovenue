@@ -1,0 +1,9 @@
+{
+  "subject": "Milestone hit on {{projectName}}",
+  "preview": "{{projectName}} just crossed {{milestoneFormatted}} {{metricLabel}}",
+  "headline": "🎉 {{projectName}} hit {{milestoneFormatted}}",
+  "body": "{{projectName}} just crossed the {{milestoneFormatted}} mark in {{metricLabel}}. Nice work.",
+  "cta": "Open dashboard",
+  "metric.mrr": "MRR",
+  "metric.total_revenue": "total revenue"
+}

@@ -309,6 +309,41 @@
       "when": 1780000050000,
       "tag": "0043_aggregate_type_billing",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1780000060000,
+      "tag": "0044_motionless_maddog",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1780000070000,
+      "tag": "0045_glamorous_iceman",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1780000080000,
+      "tag": "0046_outstanding_lockheed",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1780000090000,
+      "tag": "0047_outbox_notification_aggregate",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1780000100000,
+      "tag": "0048_dark_lightspeed",
+      "breakpoints": true
     }
   ]
 }
