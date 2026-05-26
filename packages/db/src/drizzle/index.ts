@@ -58,3 +58,4 @@ export * as billingInvoiceRepo from "./repositories/billing-invoices";
 export * as billingDunningStateRepo from "./repositories/billing-dunning-state";
 export * as usageSnapshotRepo from "./repositories/usage-snapshots";
 export * as billingTierLimitsRepo from "./repositories/billing-tier-limits";
+export * as funnelRepo from "./repositories/funnels";
