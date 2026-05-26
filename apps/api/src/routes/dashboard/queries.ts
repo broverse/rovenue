@@ -88,7 +88,7 @@ export const queriesRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const rows = await drizzle.savedQueryRepo.listSavedQueries(
       drizzle.db,
@@ -106,7 +106,7 @@ export const queriesRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
     const body = c.req.valid("json");
 
     const row = await drizzle.savedQueryRepo.createSavedQuery(drizzle.db, {
@@ -127,7 +127,7 @@ export const queriesRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const row = await drizzle.savedQueryRepo.findSavedQueryById(
       drizzle.db,
@@ -147,7 +147,7 @@ export const queriesRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
     const body = c.req.valid("json");
 
     const row = await drizzle.savedQueryRepo.updateSavedQuery(
@@ -169,7 +169,7 @@ export const queriesRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const removed = await drizzle.savedQueryRepo.deleteSavedQuery(
       drizzle.db,
@@ -189,7 +189,7 @@ export const queriesRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     try {
       const payload = await executePlaygroundQuery({
@@ -220,7 +220,7 @@ export const queriesRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     return c.json(ok(await readPlaygroundSchema(projectId)));
   });

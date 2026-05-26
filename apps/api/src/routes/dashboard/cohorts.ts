@@ -139,7 +139,7 @@ export const cohortsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const rows = await drizzle.cohortRepo.listCohorts(drizzle.db, projectId);
     const payload: CohortsListResponse = { cohorts: rows.map(toWire) };
@@ -183,7 +183,7 @@ export const cohortsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const row = await drizzle.cohortRepo.findCohortById(
       drizzle.db,
@@ -258,7 +258,7 @@ export const cohortsRoute = new Hono()
         throw new HTTPException(400, { message: "Missing identifier" });
       }
       const user = c.get("user");
-      await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
       const cohort = await drizzle.cohortRepo.findCohortById(
         drizzle.db,

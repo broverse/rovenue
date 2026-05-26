@@ -175,7 +175,7 @@ export const subscriptionsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const q = c.req.valid("query");
     const cursor = q.cursor ? decodeSubsCursor(q.cursor, q.sort) : null;
@@ -209,7 +209,7 @@ export const subscriptionsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const payload = await readSubscriptionsKpis(projectId);
     return c.json(ok(payload));
@@ -220,7 +220,7 @@ export const subscriptionsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const payload = await readSubscriptionsComposition(projectId);
     return c.json(ok(payload));
@@ -234,7 +234,7 @@ export const subscriptionsRoute = new Hono()
         throw new HTTPException(400, { message: "Missing projectId" });
       }
       const user = c.get("user");
-      await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
       const { pastDays, futureDays } = c.req.valid("query");
       const payload = await readRenewalCalendar({
@@ -254,7 +254,7 @@ export const subscriptionsRoute = new Hono()
         throw new HTTPException(400, { message: "Missing projectId" });
       }
       const user = c.get("user");
-      await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
       const { limit } = c.req.valid("query");
       const payload = await readBillingIssues(projectId, limit);
@@ -268,7 +268,7 @@ export const subscriptionsRoute = new Hono()
       const projectId = c.req.param("projectId");
       if (!projectId) throw new HTTPException(400, { message: "Missing projectId" });
       const user = c.get("user");
-      await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
       const { scope, search } = c.req.valid("query");
       const generator = streamSubscriptionsCsv({
@@ -376,7 +376,7 @@ export const subscriptionsRoute = new Hono()
     const projectId = c.req.param("projectId");
     if (!projectId) throw new HTTPException(400, { message: "Missing projectId" });
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
     const rows = await listScheduledForProject(projectId, 100);
     return c.json(ok({ rows }));
   })

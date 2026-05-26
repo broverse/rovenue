@@ -214,7 +214,7 @@ export const subscribersRoute = new Hono()
     throw new HTTPException(400, { message: "Missing projectId" });
   }
   const user = c.get("user");
-  await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+  await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
   const query = c.req.valid("query");
   const cursor = decodeListCursor(query.cursor);
@@ -295,7 +295,7 @@ export const subscribersRoute = new Hono()
     throw new HTTPException(400, { message: "Missing projectId or id" });
   }
   const user = c.get("user");
-  await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+  await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
   const subscriber = await drizzle.subscriberRepo.findSubscriberById(
     drizzle.db,
@@ -395,7 +395,7 @@ export const subscribersRoute = new Hono()
       throw new HTTPException(400, { message: "Missing path parameters" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const query = c.req.valid("query");
 

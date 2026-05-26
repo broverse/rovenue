@@ -125,7 +125,7 @@ export const credentialsRoute = new Hono()
     throw new HTTPException(400, { message: "Missing projectId" });
   }
   const user = c.get("user");
-  await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+  await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
   const [appleRow, googleRow, stripeRow] = await Promise.all([
     drizzle.projectRepo.findProjectCredentials(drizzle.db, projectId, "apple"),

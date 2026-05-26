@@ -215,7 +215,7 @@ export const chartsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const customRows = await drizzle.customChartRepo.listCustomCharts(
       drizzle.db,
@@ -329,7 +329,7 @@ export const chartsRoute = new Hono()
         throw new HTTPException(400, { message: "Missing projectId" });
       }
       const user = c.get("user");
-      await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
       const { windowDays } = c.req.valid("query");
       const payload: ChartFilterOptionsResponse = await readFilterOptions(
         projectId,
@@ -347,7 +347,7 @@ export const chartsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
     const { windowDays } = c.req.valid("query");
     return c.json(ok(await readChannels(projectId, windowDays)));
   })
@@ -357,7 +357,7 @@ export const chartsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
     const { windowDays } = c.req.valid("query");
     return c.json(ok(await readFunnel(projectId, windowDays)));
   })
@@ -367,7 +367,7 @@ export const chartsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
     const { windowDays } = c.req.valid("query");
     return c.json(ok(await readHeatmap(projectId, windowDays)));
   })
@@ -380,7 +380,7 @@ export const chartsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const rows = await drizzle.savedChartViewRepo.listSavedViews(
       drizzle.db,
@@ -398,7 +398,7 @@ export const chartsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
     const body = c.req.valid("json");
 
     const row = await drizzle.savedChartViewRepo.createSavedView(drizzle.db, {
@@ -420,7 +420,7 @@ export const chartsRoute = new Hono()
         throw new HTTPException(400, { message: "Missing identifier" });
       }
       const user = c.get("user");
-      await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
       const body = c.req.valid("json");
 
       const row = await drizzle.savedChartViewRepo.updateSavedView(
@@ -443,7 +443,7 @@ export const chartsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing identifier" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const removed = await drizzle.savedChartViewRepo.deleteSavedView(
       drizzle.db,
@@ -468,7 +468,7 @@ export const chartsRoute = new Hono()
         throw new HTTPException(400, { message: "Missing projectId" });
       }
       const user = c.get("user");
-      await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
       const { from, to, limit } = c.req.valid("query");
 
       const rows = await drizzle.chartAnnotationRepo.listAnnotations(

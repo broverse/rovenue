@@ -45,7 +45,7 @@ export const creditsRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const { windowDays } = c.req.valid("query");
     const payload = await getCreditsRollup({ projectId, windowDays });

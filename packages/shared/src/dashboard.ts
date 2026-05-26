@@ -7,7 +7,21 @@
 
 import { z } from "zod";
 
-export type MemberRoleName = "OWNER" | "ADMIN" | "DEVELOPER" | "GROWTH" | "CUSTOMER_SUPPORT" | "VIEWER";
+export type MemberRoleName =
+  | "OWNER"
+  | "ADMIN"
+  | "DEVELOPER"
+  | "GROWTH"
+  | "CUSTOMER_SUPPORT";
+
+/** Roles a user can be invited or reassigned to via the UI. */
+export const ASSIGNABLE_ROLES = [
+  "ADMIN",
+  "DEVELOPER",
+  "GROWTH",
+  "CUSTOMER_SUPPORT",
+] as const satisfies ReadonlyArray<MemberRoleName>;
+export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
 
 export type ApiKeyEnvironment = "PRODUCTION" | "SANDBOX";
 

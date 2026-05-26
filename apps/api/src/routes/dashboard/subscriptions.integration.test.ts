@@ -99,7 +99,7 @@ async function seedMember({
 }: {
   projectId: string;
   userId: string;
-  role: "OWNER" | "ADMIN" | "VIEWER";
+  role: "OWNER" | "ADMIN" | "CUSTOMER_SUPPORT";
 }) {
   const db = getDb();
   await db.insert(drizzle.schema.projectMembers).values({
@@ -206,7 +206,7 @@ async function seedListFixture(suffix: (typeof LIST_SUFFIXES)[number]) {
   const db = getDb();
   const { userId, cookie } = await createUserAndSession(suffix);
   const project = await seedProject(suffix);
-  await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+  await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
 
   const sub = await seedSubscriber({ projectId: project.id, suffix });
   const productA = await seedProduct({ projectId: project.id, suffix: `${suffix}_a` });
@@ -407,7 +407,7 @@ describe("POST /projects/:projectId/subscriptions (grant)", () => {
     const app = buildApp();
     const { userId, cookie } = await createUserAndSession("viewer");
     const project = await seedProject("viewer");
-    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
     const sub = await seedSubscriber({ projectId: project.id, suffix: "viewer" });
     const prod = await seedProduct({ projectId: project.id, suffix: "viewer" });
 
@@ -478,7 +478,7 @@ describe("POST /projects/:projectId/subscriptions/:purchaseId/schedule", () => {
     const app = buildApp();
     const { userId, cookie } = await createUserAndSession("schedviewer");
     const project = await seedProject("schedviewer");
-    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
     const purchase = await seedManualPurchase({ projectId: project.id, suffix: "sv" });
 
     const res = await app.request(
@@ -589,7 +589,7 @@ describe("GET /projects/:projectId/subscriptions/scheduled", () => {
     const app = buildApp();
     const { userId, cookie } = await createUserAndSession("listviewer");
     const project = await seedProject("listviewer");
-    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
 
     const res = await app.request(
       `/projects/${project.id}/subscriptions/scheduled`,
@@ -614,7 +614,7 @@ describe("DELETE /projects/:projectId/subscriptions/scheduled/:id", () => {
     const app = buildApp();
     const { userId, cookie } = await createUserAndSession("delviewer");
     const project = await seedProject("delviewer");
-    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
 
     const res = await app.request(
       `/projects/${project.id}/subscriptions/scheduled/nonexistent-id`,
@@ -691,7 +691,7 @@ describe("GET /projects/:projectId/subscriptions/export.csv", () => {
     const app = buildApp();
     const { userId, cookie } = await createUserAndSession("csvviewer");
     const project = await seedProject("csvviewer");
-    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
 
     const res = await app.request(
       `/projects/${project.id}/subscriptions/export.csv?scope=all`,
@@ -715,7 +715,7 @@ describe("GET /projects/:projectId/subscriptions/export.csv", () => {
     // Reuse the same user from the previous test by creating a fresh one
     const { userId, cookie } = await createUserAndSession("csvviewerdata");
     const project = await seedProject("csvviewerdata");
-    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
     await seedManualPurchase({ projectId: project.id, suffix: "csvrow" });
 
     const res = await app.request(
@@ -738,7 +738,7 @@ describe("GET /projects/:projectId/subscriptions/export.csv", () => {
     const app = buildApp();
     const { userId, cookie } = await createUserAndSession("csvbadscope");
     const project = await seedProject("csvbadscope");
-    await seedMember({ projectId: project.id, userId, role: "VIEWER" });
+    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
 
     const res = await app.request(
       `/projects/${project.id}/subscriptions/export.csv?scope=notascope`,

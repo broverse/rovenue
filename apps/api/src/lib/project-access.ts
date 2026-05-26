@@ -15,15 +15,16 @@ export interface ProjectMembership {
   role: MemberRole;
 }
 
-// Numeric ordering: higher = more privileged. OWNER ≥ ADMIN ≥ {DEVELOPER,GROWTH,CUSTOMER_SUPPORT}.
-// Fine-grained capability gates are introduced in Task 2.x; for now the three
-// non-admin roles are treated as equivalent for backwards compatibility.
+// Numeric ordering: higher = more privileged. OWNER > ADMIN >
+// DEVELOPER ≈ GROWTH ≈ CUSTOMER_SUPPORT (read-only callers get the
+// same baseline rank — capability gates handle the per-feature splits;
+// see Phase 2).
 const ROLE_RANK: Record<MemberRole, number> = {
-  [MemberRole.OWNER]: 3,
-  [MemberRole.ADMIN]: 2,
-  [MemberRole.DEVELOPER]: 1,
-  [MemberRole.GROWTH]: 1,
-  [MemberRole.CUSTOMER_SUPPORT]: 1,
+  [MemberRole.OWNER]: 4,
+  [MemberRole.ADMIN]: 3,
+  [MemberRole.DEVELOPER]: 2,
+  [MemberRole.GROWTH]: 2,
+  [MemberRole.CUSTOMER_SUPPORT]: 2,
 };
 
 export async function assertProjectAccess(

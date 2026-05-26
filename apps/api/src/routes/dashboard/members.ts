@@ -70,7 +70,7 @@ export const membersRoute = new Hono()
     const projectId = c.req.param("projectId");
     if (!projectId) throw new HTTPException(400, { message: "Missing projectId" });
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.VIEWER);
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const rows = await drizzle.projectRepo.listProjectMembers(
       drizzle.db,
@@ -264,7 +264,7 @@ export const membersRoute = new Hono()
     const membership = await assertProjectAccess(
       projectId,
       user.id,
-      MemberRole.VIEWER,
+      MemberRole.CUSTOMER_SUPPORT,
     );
 
     if (membership.role === MemberRole.OWNER) {

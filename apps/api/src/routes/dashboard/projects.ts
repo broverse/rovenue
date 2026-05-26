@@ -229,7 +229,7 @@ export const projectsRoute = new Hono()
   .get("/:id", async (c) => {
   const id = c.req.param("id");
   const user = c.get("user");
-  await assertProjectAccess(id, user.id, MemberRole.VIEWER);
+  await assertProjectAccess(id, user.id, MemberRole.CUSTOMER_SUPPORT);
 
   const [project, apiKeys, subscribers, experiments, featureFlags] = await Promise.all([
     drizzle.projectRepo.findProjectById(drizzle.db, id),
