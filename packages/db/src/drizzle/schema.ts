@@ -193,6 +193,7 @@ export type NewUserPreferences = typeof userPreferences.$inferInsert;
 export const projects = pgTable("projects", {
   id: text("id").primaryKey().$defaultFn(() => createId()),
   name: text("name").notNull(),
+  description: text("description"),
   appleCredentials: jsonb("appleCredentials"),
   googleCredentials: jsonb("googleCredentials"),
   stripeCredentials: jsonb("stripeCredentials"),

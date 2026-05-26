@@ -253,6 +253,13 @@
       "when": 1779789833128,
       "tag": "0035_custom_charts",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1779795846711,
+      "tag": "0036_huge_network",
+      "breakpoints": true
     }
   ]
 }

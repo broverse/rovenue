@@ -52,6 +52,7 @@ function ProjectSetupCreate() {
     createProject.mutate(
       {
         name: form.name,
+        description: form.desc.trim() ? form.desc.trim() : null,
         reporting: {
           reportingCurrency: form.currency,
           fxSource: "ecb",

@@ -400,15 +400,10 @@
     "card": {
       "createdOn": "Created {{date}}"
     },
-    "form": {
-      "name": "Project name",
-      "namePlaceholder": "Acme",
-      "createProject": "Create project"
-    },
     "settings": {
       "general": "General",
       "basicsHeader": "Project basics",
-      "basicsDescription": "Name shown in dashboards, exports, and webhook payloads.",
+      "basicsDescription": "Name and description. Visible to all members and used in dashboards, exports, and webhook payloads.",
       "reportingHeader": "Currency & timezone",
       "reportingDescription": "How revenue is normalized and how time-bucketed metrics roll up. Historical reports will be re-aggregated when these change.",
       "dangerZone": "Danger zone",

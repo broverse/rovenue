@@ -76,6 +76,7 @@ function newApiKeyId(): string {
 type ProjectRow = {
   id: string;
   name: string;
+  description: string | null;
   webhookUrl: string | null;
   webhookSecret: string | null;
   settings: unknown;
@@ -143,6 +144,7 @@ function toProjectDetail(
   return {
     id: project.id,
     name: project.name,
+    description: project.description,
     webhookUrl: project.webhookUrl,
     hasWebhookSecret: Boolean(project.webhookSecret),
     settings: sanitizeSettings(project.settings),
@@ -178,14 +180,29 @@ const reportingSettingsSchema = z
   })
   .strict();
 
+// Description trims to "" but the column stores NULL. The dashboard
+// description field is optional, multi-line, and capped at 400 chars
+// (matches the wizard's basics step counter at projects.basics.descriptionHint).
+const descriptionSchema = z
+  .string()
+  .max(400)
+  .nullable()
+  .transform((v) => {
+    if (v === null) return null;
+    const trimmed = v.trim();
+    return trimmed.length === 0 ? null : trimmed;
+  });
+
 export const createProjectBodySchema = z.object({
   name: z.string().trim().min(2).max(80),
+  description: descriptionSchema.optional(),
   reporting: reportingSettingsSchema.optional(),
 });
 
 export const updateProjectBodySchema = z
   .object({
     name: z.string().trim().min(2).max(80).optional(),
+    description: descriptionSchema.optional(),
     webhookUrl: z.string().url().nullable().optional(),
     settings: z.record(z.unknown()).optional(),
   })
@@ -247,6 +264,7 @@ export const projectsRoute = new Hono()
     const settings = body.reporting ? { reporting: body.reporting } : {};
     const createdProject = await drizzle.projectRepo.createProject(tx, {
       name: body.name,
+      description: body.description ?? null,
       settings,
     });
 
@@ -325,6 +343,7 @@ export const projectsRoute = new Hono()
   const project = await drizzle.db.transaction(async (tx) => {
     const updated = await drizzle.projectRepo.updateProject(tx, id, {
       ...(body.name !== undefined && { name: body.name }),
+      ...(body.description !== undefined && { description: body.description }),
       ...(body.webhookUrl !== undefined && { webhookUrl: body.webhookUrl }),
       ...(body.settings !== undefined && { settings: body.settings }),
     });

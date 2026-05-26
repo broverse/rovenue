@@ -29,6 +29,7 @@ export interface ProjectApiKey {
 export interface ProjectDetail {
   id: string;
   name: string;
+  description: string | null;
   webhookUrl: string | null;
   hasWebhookSecret: boolean;
   settings: Record<string, unknown>;
@@ -70,6 +71,7 @@ export interface ProjectReportingSettings {
 
 export interface CreateProjectRequest {
   name: string;
+  description?: string | null;
   reporting?: Partial<ProjectReportingSettings>;
 }
 
@@ -83,6 +85,7 @@ export interface CreateProjectResponse {
 
 export interface UpdateProjectRequest {
   name?: string;
+  description?: string | null;
   webhookUrl?: string | null;
   settings?: Record<string, unknown>;
 }

@@ -188,6 +188,7 @@ export async function countProjectOwners(
 
 export interface CreateProjectInput {
   name: string;
+  description?: string | null;
   settings: unknown;
 }
 
@@ -204,6 +205,7 @@ export async function createProject(
     .insert(projects)
     .values({
       name: input.name,
+      description: input.description ?? null,
       settings: input.settings as typeof projects.$inferInsert.settings,
     })
     .returning();
@@ -214,14 +216,15 @@ export async function createProject(
 
 export interface UpdateProjectInput {
   name?: string;
+  description?: string | null;
   webhookUrl?: string | null;
   settings?: unknown;
 }
 
 /**
  * Apply a partial update to a project. The dashboard PATCH route
- * composes this from whitelisted body fields (name / webhookUrl /
- * settings) — anything else is stripped by Zod upstream.
+ * composes this from whitelisted body fields (name / description /
+ * webhookUrl / settings) — anything else is stripped by Zod upstream.
  */
 export async function updateProject(
   db: DbOrTx,
@@ -230,6 +233,7 @@ export async function updateProject(
 ): Promise<Project | null> {
   const patch: Partial<typeof projects.$inferInsert> = {};
   if (input.name !== undefined) patch.name = input.name;
+  if (input.description !== undefined) patch.description = input.description;
   if (input.webhookUrl !== undefined) {
     patch.webhookUrl = input.webhookUrl;
   }
