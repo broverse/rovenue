@@ -1516,6 +1516,76 @@
       }
     }
   },
+  "audiences": {
+    "title": "Audiences",
+    "subtitle": "Targeting groups shared between feature flags and experiments. Editing rules invalidates both engines' caches.",
+    "empty": "No audiences yet — defaults are created automatically when needed.",
+    "allUsers": "all users",
+    "ruleCount": "{{count}} rule(s)",
+    "cols": {
+      "name": "Name",
+      "kind": "Kind",
+      "rulesCount": "Rules",
+      "created": "Created"
+    },
+    "kind": {
+      "default": "Default",
+      "custom": "Custom"
+    },
+    "actions": {
+      "new": "New audience",
+      "menu": "Audience actions",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "delete": {
+      "confirm": "Delete audience \"{{name}}\"? This cannot be undone.",
+      "inUse": "This audience is in use by at least one experiment. Detach it before deleting.",
+      "failed": "Could not delete the audience. Please try again."
+    },
+    "form": {
+      "back": "Back to audiences",
+      "titleNew": "New audience",
+      "titleEdit": "Edit audience",
+      "titleDefault": "All Users",
+      "subtitleNew": "Define the targeting rules that subscribers must match to be included in this audience.",
+      "subtitleEdit": "Update the targeting rules. Feature-flag and experiment caches will be invalidated immediately.",
+      "defaultBanner": "The default audience matches every subscriber and cannot be edited.",
+      "loading": "Loading audience…",
+      "notFound": "We couldn't find that audience.",
+      "preview": "Sift document",
+      "previewSub": "The serialised form that the SDK evaluates against subscriber attributes.",
+      "allUsers": "all users",
+      "conditionCount": "{{count}} condition(s)",
+      "cancel": "Cancel",
+      "submitNew": "Create audience",
+      "submitEdit": "Save changes",
+      "submittingNew": "Creating…",
+      "submittingEdit": "Saving…",
+      "sections": {
+        "basics": "Basics",
+        "basicsSub": "A descriptive name shown in feature-flag and experiment pickers.",
+        "rules": "Targeting rules",
+        "rulesSub": "Combine conditions with AND. Leave empty to match every subscriber."
+      },
+      "fields": {
+        "name": "Name",
+        "description": "Description"
+      },
+      "descriptions": {
+        "name": "Shown wherever this audience is selected.",
+        "description": "Optional context for teammates."
+      },
+      "placeholders": {
+        "name": "EU customers",
+        "description": "Subscribers in Germany and France on iOS 1.4+"
+      },
+      "errors": {
+        "nameRequired": "Name is required.",
+        "unknown": "Something went wrong. Please try again."
+      }
+    }
+  },
   "experiments": {
     "title": "Experiments",
     "subtitle": "Run A/B and multi-arm tests on pricing, paywalls, and onboarding. Traffic allocation is deterministic on ",
@@ -1951,6 +2021,58 @@
     },
     "topbar": {
       "range": "Weekly · last 12 weeks"
+    },
+    "form": {
+      "basics": {
+        "heading": "Basics",
+        "name": "Name",
+        "namePlaceholder": "e.g. High-value users",
+        "description": "Description",
+        "descriptionPlaceholder": "Optional summary of who's in this cohort"
+      },
+      "rules": {
+        "heading": "Rules",
+        "matchPrefix": "Match",
+        "matchSuffix": "of the following",
+        "match": { "all": "all", "any": "any" },
+        "emptyHint": "No filters — cohort matches every subscriber.",
+        "addFilter": "Add filter",
+        "removeFilter": "Remove filter",
+        "field": {
+          "country": "Country",
+          "store": "Store",
+          "productId": "Product ID",
+          "purchaseType": "Purchase type",
+          "firstSeenAfter": "First seen after",
+          "firstSeenBefore": "First seen before"
+        },
+        "op": {
+          "eq": "equals",
+          "in": "in",
+          "gte": "on or after",
+          "lte": "on or before"
+        },
+        "placeholder": {
+          "country": "Country (US, CA, …)",
+          "store": "apple / google / stripe",
+          "productId": "product_id",
+          "purchaseType": "subscription / consumable / …",
+          "firstSeenAfter": "",
+          "firstSeenBefore": ""
+        },
+        "preview": "JSON preview"
+      },
+      "submit": {
+        "create": "Create cohort",
+        "save": "Save changes",
+        "cancel": "Cancel",
+        "creating": "Creating…",
+        "saving": "Saving…"
+      },
+      "errors": {
+        "nameRequired": "Name is required.",
+        "nameInUse": "A cohort with this name already exists."
+      }
     }
   },
   "credits": {
@@ -1991,7 +2113,8 @@
       "subtitle": "Daily issuance vs burn — net positive means liability is growing",
       "issued": "issued",
       "burned": "burned",
-      "net": "net"
+      "net": "net",
+      "empty": "No credit activity in this window yet."
     },
     "scope": {
       "all": "All",
@@ -2041,11 +2164,13 @@
       "title": "Package mix · 28d",
       "sold": "{{count}} sold",
       "unitsSold": "{{count}} sold",
-      "free": "free"
+      "free": "free",
+      "empty": "No credit-pack purchases in this window."
     },
     "burners": {
       "title": "Top consumers · 28d",
-      "sub": "by credits burned"
+      "sub": "by credits burned",
+      "empty": "No credits burned in this window."
     },
     "grant": {
       "title": "Grant credits",
