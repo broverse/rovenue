@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   createFileRoute,
+  Outlet,
+  useChildMatches,
   useNavigate,
   useParams,
   useSearch,
@@ -46,7 +48,14 @@ function CohortsRouteComponent() {
     from: "/_authed/projects/$projectId/cohorts",
   });
   const { data: project } = useProject(projectId);
+  // `cohorts/new` and `cohorts/$cohortId` are children of this
+  // route. When a child is active, defer to its <Outlet />
+  // instead of stacking the listing on top of the form.
+  const childMatches = useChildMatches();
   if (!project) return null;
+  if (childMatches.length > 0) {
+    return <Outlet />;
+  }
   return <CohortsPage projectId={projectId} />;
 }
 
