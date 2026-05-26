@@ -11,6 +11,11 @@ enum RovenueError {
     "Timeout",
     "RateLimited",
     "Storage",
+    "UserNotFound",
+    "InsufficientCredits",
+    "EntitlementInactive",
+    "DuplicatePurchase",
+    "ReceiptInvalid",
     "Internal",
 };
 
