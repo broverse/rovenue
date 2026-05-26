@@ -1,0 +1,9 @@
+{
+  "subject": "{{projectName}} projesinde churn sıçraması",
+  "preview": "%{{churnRatePct}} vs %{{baselinePct}} baseline ({{windowDays}}g)",
+  "headline": "{{projectName}} projesinde churn sıçraması",
+  "body": "Son {{windowDays}} günde churn %{{churnRatePct}} olarak gerçekleşti — baseline %{{baselinePct}}.",
+  "cta": "Churn dashboard'unu aç",
+  "push.title": "{{projectName}} — churn sıçraması",
+  "push.body": "%{{churnRatePct}} vs %{{baselinePct}} baseline"
+}
