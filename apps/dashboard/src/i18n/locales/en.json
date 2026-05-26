@@ -1915,7 +1915,8 @@
       "newCohort": "New cohort",
       "duplicate": "Duplicate",
       "save": "Save",
-      "csv": "CSV"
+      "csv": "CSV",
+      "delete": "Delete"
     },
     "kpi": {
       "saved": "SAVED COHORTS",
@@ -2077,6 +2078,13 @@
     "new": {
       "title": "New cohort",
       "subtitle": "Group subscribers by behaviour or acquisition channel."
+    },
+    "edit": {
+      "title": "Edit cohort",
+      "subtitle": "Editing {{name}}"
+    },
+    "delete": {
+      "confirm": "Delete cohort '{{name}}'?"
     }
   },
   "credits": {
