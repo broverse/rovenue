@@ -286,4 +286,233 @@ export const handlers = [
   http.delete(`${BASE}/dashboard/audiences/:id`, () =>
     HttpResponse.json({ data: { deleted: true } }),
   ),
+
+  // -------------------------------------------------------------
+  // Credits — rollup + grant
+  // -------------------------------------------------------------
+
+  http.get(
+    `${BASE}/dashboard/projects/:projectId/credits/rollup`,
+    () =>
+      HttpResponse.json({
+        data: {
+          window: {
+            from: "2026-04-28T00:00:00.000Z",
+            to: "2026-05-25T23:59:59.999Z",
+            days: 28,
+          },
+          kpis: {
+            outstanding: 14_820_000,
+            issued28d: 2_410_000,
+            burned28d: 1_920_000,
+            revenue28dUsd: "182400.00",
+            breakagePct: 3.4,
+          },
+          flow: {
+            inflow: 2_410_000,
+            outflow: 1_920_000,
+            balance: 14_820_000,
+            inflowByType: {
+              purchase: 2_180_000,
+              bonus: 154_000,
+              refund: 38_000,
+              transferIn: 38_000,
+              spend: 0,
+              expire: 0,
+              transferOut: 0,
+            },
+            outflowByType: {
+              purchase: 0,
+              bonus: 0,
+              refund: 0,
+              transferIn: 0,
+              spend: 1_810_000,
+              expire: 86_000,
+              transferOut: 24_000,
+            },
+            balanceByType: {
+              paid: 6_080_000,
+              promo: 5_340_000,
+              transfer: 3_400_000,
+            },
+          },
+          liability: {
+            paidShare: 0.41,
+            promoShare: 0.36,
+            transferShare: 0.23,
+            paidReserveUsd: "462348.00",
+            reserveDeltaPct: 6.4,
+            averageAgeDays: 22.4,
+          },
+          volume: [],
+          packages: [],
+          topBurners: [],
+          ledger: [],
+        },
+      }),
+  ),
+
+  http.post(
+    `${BASE}/dashboard/projects/:projectId/credits`,
+    async ({ request }) => {
+      const body = (await request.json()) as {
+        subscriberId: string;
+        amount: number;
+        type?: "BONUS" | "PURCHASE" | "REFUND";
+      };
+      return HttpResponse.json({
+        data: {
+          entry: {
+            id: "cl_msw_1",
+            subscriberId: body.subscriberId,
+            type: body.type ?? "BONUS",
+            amount: body.amount,
+            balance: body.amount,
+            referenceType: null,
+            referenceId: null,
+            description: null,
+            createdAt: new Date().toISOString(),
+          },
+          balance: body.amount,
+        },
+      });
+    },
+  ),
+
+  // -------------------------------------------------------------
+  // Cohorts — CRUD + retention
+  // -------------------------------------------------------------
+
+  http.get(`${BASE}/dashboard/projects/:projectId/cohorts`, () =>
+    HttpResponse.json({
+      data: {
+        cohorts: [
+          {
+            id: "coh_1",
+            projectId: "proj_1",
+            userId: "u1",
+            name: "High-value users",
+            description: "Spent >$50 lifetime",
+            rules: {
+              match: "all",
+              filters: [{ field: "country", op: "in", value: ["US", "CA"] }],
+            },
+            syncDestinations: [],
+            metadata: {},
+            createdAt: "2026-05-01T00:00:00Z",
+            updatedAt: "2026-05-10T00:00:00Z",
+          },
+        ],
+      },
+    }),
+  ),
+
+  http.post(
+    `${BASE}/dashboard/projects/:projectId/cohorts`,
+    async ({ request }) => {
+      const body = (await request.json()) as {
+        name: string;
+        description?: string | null;
+        rules: unknown;
+      };
+      return HttpResponse.json({
+        data: {
+          cohort: {
+            id: "coh_new",
+            projectId: "proj_1",
+            userId: "u1",
+            name: body.name,
+            description: body.description ?? null,
+            rules: body.rules,
+            syncDestinations: [],
+            metadata: {},
+            createdAt: "2026-05-26T00:00:00Z",
+            updatedAt: "2026-05-26T00:00:00Z",
+          },
+        },
+      });
+    },
+  ),
+
+  http.get(
+    `${BASE}/dashboard/projects/:projectId/cohorts/:id`,
+    ({ params }) =>
+      HttpResponse.json({
+        data: {
+          cohort: {
+            id: params.id,
+            projectId: "proj_1",
+            userId: "u1",
+            name: "High-value users",
+            description: "Spent >$50 lifetime",
+            rules: {
+              match: "all",
+              filters: [{ field: "country", op: "in", value: ["US", "CA"] }],
+            },
+            syncDestinations: [],
+            metadata: {},
+            createdAt: "2026-05-01T00:00:00Z",
+            updatedAt: "2026-05-10T00:00:00Z",
+          },
+        },
+      }),
+  ),
+
+  http.patch(
+    `${BASE}/dashboard/projects/:projectId/cohorts/:id`,
+    async ({ params, request }) => {
+      const body = (await request.json()) as Record<string, unknown>;
+      return HttpResponse.json({
+        data: {
+          cohort: {
+            id: params.id,
+            projectId: "proj_1",
+            userId: "u1",
+            name: (body.name as string) ?? "High-value users",
+            description: (body.description as string | null) ?? null,
+            rules: body.rules ?? {
+              match: "all",
+              filters: [],
+            },
+            syncDestinations: [],
+            metadata: {},
+            createdAt: "2026-05-01T00:00:00Z",
+            updatedAt: "2026-05-26T00:00:00Z",
+          },
+        },
+      });
+    },
+  ),
+
+  http.delete(
+    `${BASE}/dashboard/projects/:projectId/cohorts/:id`,
+    () => HttpResponse.json({ data: { deleted: true } }),
+  ),
+
+  http.get(
+    `${BASE}/dashboard/projects/:projectId/cohorts/:id/retention`,
+    () =>
+      HttpResponse.json({
+        data: {
+          size: 4821,
+          granularity: "week",
+          periods: 13,
+          points: [
+            { period: 0, active: 4821, pct: 100 },
+            { period: 1, active: 3961, pct: 82.1 },
+            { period: 2, active: 3520, pct: 73 },
+            { period: 3, active: 3208, pct: 66.5 },
+            { period: 4, active: 3007, pct: 62.4 },
+            { period: 5, active: 2853, pct: 59.2 },
+            { period: 6, active: 2740, pct: 56.8 },
+            { period: 7, active: 2643, pct: 54.8 },
+            { period: 8, active: 2559, pct: 53.1 },
+            { period: 9, active: 2488, pct: 51.6 },
+            { period: 10, active: 2425, pct: 50.3 },
+            { period: 11, active: 2371, pct: 49.2 },
+            { period: 12, active: 2326, pct: 48.2 },
+          ],
+        },
+      }),
+  ),
 ];
