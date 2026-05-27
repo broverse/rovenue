@@ -5,6 +5,8 @@ import {
   ArrowRight,
   Eye,
   Image as ImageIcon,
+  Maximize,
+  Minus,
   Monitor,
   Play,
   Plus,
@@ -52,14 +54,27 @@ const DEVICE_FRAMES: Record<
   },
 };
 
+const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
 export const CanvasEditor = component(() => {
   const vm = useService(FunnelDraftViewModel);
   const [addOpen, setAddOpen] = useState(false);
   const [device, setDevice] = useState<Device>("phone");
+  const [zoom, setZoom] = useState(1);
   const page = vm.selectedPage;
   if (!page) return null;
   const idx = vm.selectedIdx;
   const frame = DEVICE_FRAMES[device];
+
+  const stepZoom = (dir: 1 | -1) => {
+    const i = ZOOM_STEPS.indexOf(zoom);
+    if (i < 0) {
+      setZoom(1);
+      return;
+    }
+    const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, i + dir))];
+    setZoom(next);
+  };
 
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-rv-bg">
@@ -111,6 +126,38 @@ export const CanvasEditor = component(() => {
           })}
         </div>
 
+        <div className="inline-flex items-center gap-0.5 rounded-md border border-rv-divider bg-rv-c2 px-0.5">
+          <button
+            type="button"
+            onClick={() => stepZoom(-1)}
+            title="Zoom out"
+            disabled={zoom === ZOOM_STEPS[0]}
+            className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Minus size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setZoom(1)}
+            title="Reset zoom (1×)"
+            className="min-w-[44px] cursor-pointer rounded px-1 font-rv-mono text-[11px] tabular-nums text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            type="button"
+            onClick={() => stepZoom(1)}
+            title="Zoom in"
+            disabled={zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1]}
+            className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Plus size={12} />
+          </button>
+        </div>
+        <ToolBtn title="Fit to canvas (1×)" onClick={() => setZoom(1)}>
+          <Maximize size={13} />
+        </ToolBtn>
+
         <ToolBtn title="Play through" onClick={() => vm.openPreview()}>
           <Play size={14} />
         </ToolBtn>
@@ -138,13 +185,27 @@ export const CanvasEditor = component(() => {
         </div>
       </div>
 
-      <div className="flex flex-1 items-center justify-center overflow-auto bg-gradient-to-b from-rv-c1 to-rv-bg p-8">
-        <div className={cn("relative", frame.outer)}>
-          <div className={cn("relative h-full w-full overflow-hidden bg-white", frame.screen)}>
-            {frame.notch && (
-              <div className="absolute left-1/2 top-2 z-10 h-1.5 w-20 -translate-x-1/2 rounded-full bg-black/40" />
-            )}
-            <PagePreview page={page} theme={vm.theme} />
+      <div
+        className="flex flex-1 items-center justify-center overflow-auto bg-gradient-to-b from-rv-c1 to-rv-bg p-8"
+        onWheel={(e) => {
+          // Ctrl/Cmd + scroll zooms — matches Figma / browser zoom muscle memory.
+          // Without the modifier, let the canvas scroll normally.
+          if (!(e.ctrlKey || e.metaKey)) return;
+          e.preventDefault();
+          stepZoom(e.deltaY > 0 ? -1 : 1);
+        }}
+      >
+        <div
+          style={{ transform: `scale(${zoom})`, transformOrigin: "center center" }}
+          className="transition-transform duration-150"
+        >
+          <div className={cn("relative", frame.outer)}>
+            <div className={cn("relative h-full w-full overflow-hidden bg-white", frame.screen)}>
+              {frame.notch && (
+                <div className="absolute left-1/2 top-2 z-10 h-1.5 w-20 -translate-x-1/2 rounded-full bg-black/40" />
+              )}
+              <PagePreview page={page} theme={vm.theme} />
+            </div>
           </div>
         </div>
       </div>
