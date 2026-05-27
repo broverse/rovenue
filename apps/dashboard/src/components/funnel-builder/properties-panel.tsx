@@ -47,7 +47,18 @@ export const PropertiesPanel = component(() => {
   const { data: products = [] } = useProjectProducts(vm.projectId);
 
   const page = vm.selectedPage;
-  if (!page) return null;
+  if (!page) {
+    return (
+      <aside className="flex w-[340px] flex-shrink-0 flex-col items-center justify-center border-l border-rv-divider bg-rv-c1 px-6 text-center">
+        <div className="rounded-lg border border-dashed border-rv-divider bg-rv-c2 px-4 py-6">
+          <div className="text-[13px] font-medium text-foreground">No page selected</div>
+          <div className="mt-1 text-[11px] text-rv-mute-500">
+            Add or pick a page from the rail on the left to edit its content here.
+          </div>
+        </div>
+      </aside>
+    );
+  }
   const meta = PAGE_TYPES[page.type];
   const Ico = meta.icon;
   const rules = vm.rules[page.id] ?? [];
