@@ -13,40 +13,26 @@
 // M6. Nitrogen is also wired up in M6 and will normally generate a
 // `HybridRovenueNitroSpecSpec` base class from the .nitro.ts spec —
 // we hand-write the conformance against the expected shape here.
-//
-// M4 SURFACE STATUS
-// -----------------
-// At the time of writing, `packages/sdk-kotlin/src/main/kotlin/dev/
-// rovenue/sdk/Rovenue.kt` only exposes `Rovenue.version` (a static
-// `val`). The richer surface used below — `Rovenue.configure(...)`,
-// `Rovenue.shared.identify(...)`, etc. — is the *expected* M4 façade
-// shape that mirrors the M3 Swift `Rovenue` API. M4 is expected to
-// grow to match (companion object for static `configure`, `shared`
-// instance for the rest) when the Kotlin façade is fleshed out.
-// Until then this file will NOT compile against M4; revisiting in M6
-// is required (same as the iOS Swift spec).
+// The only unresolved import at the M5 stage is
+// `com.margelo.nitro.HybridObject`, which Nitrogen + gradle wiring
+// will provide in M6.
 //
 // DTO mapping notes (UniFFI-generated Kotlin types -> RN-bridge DTOs
 // as declared in `src/specs/RovenueNitroSpec.nitro.ts`):
-//   * Entitlement: UDL fields `is_active`, `product_identifier`,
-//                  `expires_iso`, `store` → Kotlin camelCase
-//                  `isActive`, `productIdentifier`, `expiresIso`,
-//                  `store`. RN ships `{ id, active, expiresAt,
-//                  productId }` — `store` is intentionally dropped.
-//   * ReceiptResult: UDL exposes `{subscriberId, appUserId,
-//                    creditBalance}`. The suspend functions only
-//                    return on success and (per spec) guarantee
-//                    entitlements + credits caches were refreshed.
-//                    We therefore synthesise `{ok: true,
-//                    entitlementsRefreshed: true,
-//                    creditsRefreshed: true}` when the call returns;
-//                    failures propagate as thrown exceptions.
-//   * `Rovenue.shared.changes` is the `SharedFlow<ChangeEvent>` from M4.
-//   * `ChangeEvent.name` returns the SCREAMING_SNAKE enum constant name,
-//     matching the iOS switch's output verbatim
-//     (ENTITLEMENTS_CHANGED, IDENTITY_CHANGED, CREDIT_BALANCE_CHANGED).
-//   * Kotlin `suspend` functions can throw — adjust if M4 marks any
-//     of these non-throwing.
+//   * Entitlement (UniFFI): `{id, isActive, productIdentifier, store,
+//                  expiresIso}`. RN ships `{id, active, expiresAt,
+//                  productId}` — `store` is intentionally dropped.
+//   * ReceiptResult (UniFFI): `{subscriberId, appUserId, creditBalance}`.
+//                    The suspend functions only return on success and
+//                    (per spec) guarantee entitlements + credits caches
+//                    were refreshed. We therefore synthesise `{ok: true,
+//                    entitlementsRefreshed: true, creditsRefreshed: true}`
+//                    when the call returns; failures propagate as thrown
+//                    exceptions.
+//   * `Rovenue.shared.changes`: `SharedFlow<ChangeEvent>` (M4 façade).
+//   * `ChangeEvent.name` returns the SCREAMING_SNAKE enum constant name
+//     (ENTITLEMENTS_CHANGED, IDENTITY_CHANGED, CREDIT_BALANCE_CHANGED) —
+//     matches the iOS switch output verbatim.
 
 package dev.rovenue.sdkrn
 
