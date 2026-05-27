@@ -6,6 +6,7 @@ import type { NextRule } from "@rovenue/shared/funnel";
 import { validateFunnelGraph, type ValidatorIssue } from "@rovenue/shared/funnel";
 import { FunnelApi, type FunnelDetailDto } from "../../../lib/services/funnel-api";
 import type { Page, Theme, Settings, TabId } from "../types";
+import { toEvalPage } from "../types";
 
 export interface DraftProps {
   projectId: string;
@@ -216,13 +217,9 @@ export class FunnelDraftViewModel {
     byPage: Map<string, ValidatorIssue[]>;
     unreachable: Set<string>;
   } {
-    const minimal = this.pages.map((p) => ({
-      id: p.id,
-      type: p.type,
-      config: pageToConfig(p),
-      next_rules: this.rules[p.id] ?? [],
-      default_next: this.defaultNext[p.id] ?? undefined,
-    }));
+    const minimal = this.pages.map((p) =>
+      toEvalPage(p, this.rules[p.id] ?? [], this.defaultNext[p.id] ?? undefined),
+    );
     const result = validateFunnelGraph(minimal as never);
     const errors = result.ok ? [] : result.issues;
     const warnings = result.warnings;
@@ -300,20 +297,3 @@ export class FunnelDraftViewModel {
   }
 }
 
-// The dashboard's Page type is flat; the validator expects MinimalPage with
-// the question_id and friends nested under `config`. Surface the relevant
-// dashboard fields under `config` so the shared validator works unchanged.
-function pageToConfig(p: Page): Record<string, unknown> {
-  return {
-    question_id: p.question_id,
-    title: p.title,
-    headline: p.headline,
-    body: p.body,
-    options: p.options,
-    min: p.min,
-    max: p.max,
-    step: p.step,
-    suffix: p.suffix,
-    duration_ms: p.duration,
-  };
-}

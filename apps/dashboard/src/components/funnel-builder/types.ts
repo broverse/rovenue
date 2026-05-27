@@ -224,3 +224,41 @@ export const TABS: ReadonlyArray<{ id: TabId; label: string; hint: string; pip?:
   { id: "sessions", label: "Sessions", hint: "Live runs" },
   { id: "share", label: "Share", hint: "URL, QR, snippets" },
 ];
+
+/** Convert dashboard's flat Page into the shared validator/evaluator shape. */
+export function toEvalPage(
+  p: Page,
+  rules?: unknown[],
+  defaultNext?: string,
+): {
+  id: string;
+  type: string;
+  config: Record<string, unknown>;
+  next_rules?: unknown[];
+  default_next?: string;
+} {
+  return {
+    id: p.id,
+    type: p.type,
+    config: {
+      question_id: p.question_id,
+      title: p.title,
+      subtitle: p.subtitle,
+      headline: p.headline,
+      body_markdown: p.body,
+      body: p.body,
+      options: p.options,
+      min: p.min,
+      max: p.max,
+      step: p.step,
+      suffix: p.suffix,
+      duration_ms: p.duration,
+      steps: p.steps,
+      product_id: p.productId,
+      bullets: p.benefits,
+      open_app_label: p.cta,
+    },
+    next_rules: rules,
+    default_next: defaultNext,
+  };
+}
