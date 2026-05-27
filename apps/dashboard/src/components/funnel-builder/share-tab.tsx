@@ -1,40 +1,56 @@
 import { useMemo, useState } from "react";
+import { component, useService } from "impair";
 import { ArrowRight, Check, Copy, Link } from "lucide-react";
-import type { Funnel } from "./types";
+import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 
-type Props = {
-  funnel: Funnel;
-};
-
-/**
- * Share tab — public URL, QR code, and copy-paste snippets for the
- * various surfaces marketers tend to drop a funnel into.
- */
-export function ShareTab({ funnel }: Props) {
-  const baseUrl = `https://${funnel.settings.universalLinkDomain}/${funnel.slug}`;
+export const ShareTab = component(() => {
+  const vm = useService(FunnelDraftViewModel);
+  const domain = vm.settings.universalLinkDomain;
+  const baseUrl = domain ? `https://${domain}/${vm.slug}` : null;
   const [utm, setUtm] = useState({
     source: "tiktok",
     medium: "cpc",
-    campaign: "launch_apr_2026",
+    campaign: "launch",
   });
-  const utmUrl = `${baseUrl}?utm_source=${utm.source}&utm_medium=${utm.medium}&utm_campaign=${utm.campaign}`;
+  const utmUrl = baseUrl
+    ? `${baseUrl}?utm_source=${utm.source}&utm_medium=${utm.medium}&utm_campaign=${utm.campaign}`
+    : null;
 
   return (
     <div className="flex-1 overflow-y-auto bg-rv-bg px-6 py-8">
       <div className="mx-auto flex max-w-[820px] flex-col gap-4">
-        {funnel.status !== "published" ? (
+        {vm.status !== "published" ? (
           <Card>
             <h3 className="m-0 mb-1 text-[14px] font-semibold">Publish to share</h3>
             <p className="m-0 mb-4 text-[12px] leading-relaxed text-rv-mute-500">
-              This funnel is in <span className="text-rv-warning">Draft</span>. Publish a version
-              before sending traffic to it. The public URL is reserved by your slug.
+              This funnel is in <span className="text-rv-warning">{vm.status}</span>. Publish a
+              version before sending traffic to it. The public URL is reserved by your slug.
             </p>
             <button
               type="button"
+              onClick={() => {
+                if (vm.errorCount > 0) vm.openValidation();
+                else void vm.publish();
+              }}
               className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md bg-rv-accent-500 px-3 text-[13px] font-medium text-white transition hover:bg-rv-accent-600"
             >
               <Check size={13} />
-              Open Publish panel
+              {vm.errorCount > 0 ? "Fix issues first" : "Publish now"}
+            </button>
+          </Card>
+        ) : !baseUrl ? (
+          <Card>
+            <h3 className="m-0 mb-1 text-[14px] font-semibold">Set a universal link domain</h3>
+            <p className="m-0 mb-4 text-[12px] leading-relaxed text-rv-mute-500">
+              You're published, but no universal-link domain is set. Open Settings → Hand-off and
+              point a domain at <span className="font-rv-mono">claim.rovenue.dev</span>.
+            </p>
+            <button
+              type="button"
+              onClick={() => vm.setActiveTab("settings")}
+              className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md bg-rv-accent-500 px-3 text-[13px] font-medium text-white transition hover:bg-rv-accent-600"
+            >
+              Open Settings
             </button>
           </Card>
         ) : (
@@ -49,22 +65,20 @@ export function ShareTab({ funnel }: Props) {
                   </p>
                 </div>
                 <span className="inline-flex h-5 items-center gap-1 rounded-full bg-rv-success/15 px-2 font-rv-mono text-[10px] font-medium text-rv-success">
-                  ● Live · v{funnel.version}
+                  ● Live · v{vm.funnel?.currentVersionNo ?? "?"}
                 </span>
               </div>
               <div className="mt-3.5 flex items-center gap-2 rounded-md border border-rv-divider bg-rv-c2 px-3 py-2">
                 <Link size={14} className="text-rv-mute-500" />
                 <div className="flex-1 truncate font-rv-mono text-[13px]">
-                  <span className="text-rv-mute-500">
-                    https://{funnel.settings.universalLinkDomain}/
-                  </span>
-                  <span className="text-foreground">{funnel.slug}</span>
+                  <span className="text-rv-mute-500">https://{domain}/</span>
+                  <span className="text-foreground">{vm.slug}</span>
                 </div>
-                <ActionBtn>
+                <ActionBtn onClick={() => navigator.clipboard?.writeText(baseUrl)}>
                   <Copy size={12} />
                   Copy
                 </ActionBtn>
-                <ActionBtn>
+                <ActionBtn onClick={() => window.open(baseUrl, "_blank")}>
                   <ArrowRight size={12} />
                   Open
                 </ActionBtn>
@@ -80,15 +94,8 @@ export function ShareTab({ funnel }: Props) {
                 <div className="min-w-0 flex-1">
                   <p className="m-0 mb-3 text-[13px] leading-relaxed text-rv-mute-700">
                     Drop this on printed material, in your slide deck, or scan to test the live
-                    funnel on a real device. Resolves to the same universal-link URL above.
+                    funnel on a real device.
                   </p>
-                  <div className="flex flex-wrap gap-2">
-                    <ActionBtn size="md">
-                      <Copy size={13} />
-                      Copy PNG
-                    </ActionBtn>
-                    <ActionBtn size="md">Download SVG</ActionBtn>
-                  </div>
                 </div>
               </div>
             </Card>
@@ -136,16 +143,12 @@ export function ShareTab({ funnel }: Props) {
                 desc="For dropping into your marketing site — deep-links to the app with store fallback."
               >
                 <pre className="m-0 overflow-x-auto bg-rv-c2 px-3.5 py-3 font-rv-mono text-[11px] leading-relaxed text-foreground">
-                  <span className="text-rv-mute-500">
-                    {`<!-- Opens in-app if installed, otherwise to the App/Play Store -->`}
-                  </span>
-                  {"\n"}
                   <span className="text-rv-accent-400">{`<a `}</span>href=
                   <span className="text-rv-success">{`"${baseUrl}"`}</span>
                   {"\n   "}data-fallback-ios=
-                  <span className="text-rv-success">{`"${funnel.settings.iosUrl}"`}</span>
+                  <span className="text-rv-success">{`"${vm.settings.iosUrl}"`}</span>
                   {"\n   "}data-fallback-android=
-                  <span className="text-rv-success">{`"${funnel.settings.androidUrl}"`}</span>
+                  <span className="text-rv-success">{`"${vm.settings.androidUrl}"`}</span>
                   <span className="text-rv-accent-400">{`>`}</span>
                   {"\n  Start onboarding\n"}
                   <span className="text-rv-accent-400">{`</a>`}</span>
@@ -157,7 +160,7 @@ export function ShareTab({ funnel }: Props) {
       </div>
     </div>
   );
-}
+});
 
 function Card({ children }: { children: React.ReactNode }) {
   return (
@@ -168,13 +171,16 @@ function Card({ children }: { children: React.ReactNode }) {
 function ActionBtn({
   children,
   size = "sm",
+  onClick,
 }: {
   children: React.ReactNode;
   size?: "sm" | "md";
+  onClick?: () => void;
 }) {
   return (
     <button
       type="button"
+      onClick={onClick}
       className={`inline-flex cursor-pointer items-center gap-1 rounded border border-rv-divider bg-rv-c1 px-2.5 text-[11px] font-medium text-rv-mute-700 transition hover:bg-rv-c3 hover:text-foreground ${
         size === "md" ? "h-8 text-[12px]" : "h-7"
       }`}
@@ -200,21 +206,12 @@ function SnippetCard({
           <h4 className="m-0 text-[12px] font-semibold">{title}</h4>
           <div className="mt-0.5 text-[10px] text-rv-mute-500">{desc}</div>
         </div>
-        <ActionBtn>
-          <Copy size={11} />
-          Copy
-        </ActionBtn>
       </div>
       {children}
     </div>
   );
 }
 
-/**
- * Deterministic SVG placeholder that *looks* like a QR code. Real QR
- * generation is out of scope for the mock — when the API ships, swap
- * this for the result of `qrcode.toString({ type: 'svg' })`.
- */
 function QRPlaceholder() {
   const cells = useMemo(() => {
     const seed = 0xc0ffee;
@@ -226,8 +223,7 @@ function QRPlaceholder() {
     const acc: Array<[number, number]> = [];
     for (let y = 0; y < 21; y++) {
       for (let x = 0; x < 21; x++) {
-        const inFinder =
-          (x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13);
+        const inFinder = (x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13);
         if (inFinder) {
           const cx = x < 7 ? 3 : 17;
           const cy = y < 7 ? 3 : 17;

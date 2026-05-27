@@ -13,16 +13,8 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
-import {
-  TABS,
-  type Funnel as FunnelView,
-  type Rule as RuleView,
-  type RuleClause,
-  type Operator,
-  type TabId,
-  type ValidationIssue,
-} from "./types";
-import type { NextRule, ValidatorIssue } from "@rovenue/shared/funnel";
+import { TABS, type TabId, type ValidationIssue } from "./types";
+import type { ValidatorIssue } from "@rovenue/shared/funnel";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { ThumbRail } from "./thumb-rail";
 import { CanvasEditor } from "./canvas-editor";
@@ -39,46 +31,9 @@ type Props = {
   projectId: string;
 };
 
-// Until Tasks 19–35 convert each child to consume the VM directly,
-// BuilderShell synthesises the legacy prop shapes that the existing
-// children expect. The converters below are intentionally lossy —
-// they're throw-away glue that vanishes commit-by-commit as each
-// child migrates to `useService(FunnelDraftViewModel)`.
-function legacyOperator(op: string): Operator {
-  switch (op) {
-    case "eq": return "equals";
-    case "neq": return "not_equals";
-    case "gt": return ">";
-    case "gte": return ">=";
-    case "lt": return "<";
-    case "lte": return "<=";
-    case "between": return "between";
-    case "in": return "is_one_of";
-    case "not_in": return "not_one_of";
-    case "contains": return "contains";
-    case "is_answered": return "is_answered";
-    case "is_not_answered": return "not_answered";
-    default: return "equals";
-  }
-}
-
-function toLegacyRules(rules: Record<string, NextRule[]>): Record<string, RuleView[]> {
-  const out: Record<string, RuleView[]> = {};
-  for (const [pageId, list] of Object.entries(rules)) {
-    out[pageId] = list.map((r) => ({
-      id: r.id,
-      combinator: r.condition.op,
-      clauses: r.condition.clauses.map<RuleClause>((c) => ({
-        qid: c.question_id,
-        op: legacyOperator(c.op),
-        value: (c as { value?: unknown }).value as RuleClause["value"],
-      })),
-      goto: r.goto,
-    }));
-  }
-  return out;
-}
-
+// Shim that adapts the shared ValidatorIssue shape to the legacy
+// ValidationIssue prop that ValidationDrawer + PreviewOverlay still
+// expect. Removed by Tasks 33 / 35 when those consume the VM directly.
 function toLegacyIssues(errors: ValidatorIssue[], warnings: ValidatorIssue[]): ValidationIssue[] {
   const map = (iss: ValidatorIssue, kind: "error" | "warning"): ValidationIssue => {
     const where = "pageId" in iss ? (iss as { pageId: string }).pageId : "funnel";
@@ -104,20 +59,6 @@ export const BuilderShell = component(({ projectId }: Props) => {
     );
   }
 
-  // Synthesised legacy view used by children that haven't migrated yet.
-  const legacyFunnel: FunnelView = {
-    id: vm.funnel.id,
-    name: vm.name,
-    slug: vm.slug,
-    status: vm.status,
-    version: vm.funnel.currentVersionNo ?? 0,
-    draftDiffersFromPublished: vm.funnel.draftDiffersFromPublished,
-    theme: vm.theme,
-    settings: vm.settings,
-    pages: vm.pages,
-    rules: toLegacyRules(vm.rules),
-    default_next: vm.defaultNext,
-  };
   const issues = toLegacyIssues(vm.validation.errors, vm.validation.warnings);
 
   return (
@@ -136,7 +77,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
         {vm.activeTab === "theme" && <ThemeTab />}
         {vm.activeTab === "settings" && <SettingsTab />}
         {vm.activeTab === "sessions" && <SessionsTab />}
-        {vm.activeTab === "share" && <ShareTab funnel={legacyFunnel} />}
+        {vm.activeTab === "share" && <ShareTab />}
       </main>
 
       {vm.activeTab === "content" && <AiChatFab />}
