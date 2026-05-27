@@ -13,6 +13,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
+import logoSquareUrl from "../../assets/logos/logo-square.png";
 import { TABS, type TabId } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { FunnelVersionsViewModel } from "./vm/funnel-versions.vm";
@@ -92,10 +93,10 @@ const TopBar = component(({ projectId }: { projectId: string }) => {
         <Link
           to="/projects/$projectId/funnels"
           params={{ projectId }}
-          className="flex h-8 w-8 items-center justify-center rounded-md bg-gradient-to-br from-rv-accent-500 to-rv-accent-700 text-[14px] font-bold text-white"
+          className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-md"
           title="Back to all funnels"
         >
-          R
+          <img src={logoSquareUrl} alt="Rovenue" className="h-full w-full object-cover" />
         </Link>
         <Link
           to="/projects/$projectId/funnels"

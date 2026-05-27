@@ -199,8 +199,31 @@ export const CanvasEditor = component(() => {
 
       <div
         ref={setCanvasEl}
-        className="flex flex-1 items-center justify-center overflow-auto bg-gradient-to-b from-rv-c1 to-rv-bg p-8"
+        className="relative flex flex-1 items-center justify-center overflow-auto bg-gradient-to-b from-rv-c1 to-rv-bg p-8"
       >
+        {/* Floating page navigator — top-right of the canvas. Independent
+            of the bottom strip so the user can flip pages without leaving
+            the preview area. */}
+        <div className="pointer-events-none absolute right-4 top-4 z-20 flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => vm.goPrev()}
+            disabled={idx === 0}
+            title="Previous page"
+            className="pointer-events-auto flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-rv-divider bg-rv-c1/90 text-rv-mute-600 shadow-sm backdrop-blur-sm transition hover:bg-rv-c2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ArrowLeft size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => vm.goNext()}
+            disabled={idx === vm.pages.length - 1}
+            title="Next page"
+            className="pointer-events-auto flex h-8 w-8 cursor-pointer items-center justify-center rounded-full border border-rv-divider bg-rv-c1/90 text-rv-mute-600 shadow-sm backdrop-blur-sm transition hover:bg-rv-c2 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ArrowRight size={14} />
+          </button>
+        </div>
         <div
           style={{ transform: `scale(${zoom})`, transformOrigin: "center center" }}
           className="transition-transform duration-150"

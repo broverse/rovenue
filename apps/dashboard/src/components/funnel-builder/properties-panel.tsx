@@ -16,6 +16,7 @@ import { rpc, unwrap } from "../../lib/api";
 import { PAGE_GROUPS, PAGE_TYPE_DESC, PAGE_TYPES, type Page, type PageType } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { RuleEditor } from "./rule-editor";
+import { ColorSwatchInput } from "./color-swatch-input";
 
 interface ProductDto {
   id: string;
@@ -709,14 +710,22 @@ export const PropertiesPanel = component(() => {
                 label={page.background.kind === "color" ? "Color (hex)" : "URL"}
                 className="mb-3"
               >
-                <input
-                  value={page.background.value}
-                  onChange={(e) =>
-                    vm.updateBackground(page.id, { value: e.currentTarget.value })
-                  }
-                  placeholder={page.background.kind === "color" ? "#0F172A" : "https://…"}
-                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
-                />
+                {page.background.kind === "color" ? (
+                  <ColorSwatchInput
+                    value={page.background.value}
+                    onChange={(v) => vm.updateBackground(page.id, { value: v })}
+                    placeholder="#0F172A"
+                  />
+                ) : (
+                  <input
+                    value={page.background.value}
+                    onChange={(e) =>
+                      vm.updateBackground(page.id, { value: e.currentTarget.value })
+                    }
+                    placeholder="https://…"
+                    className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+                  />
+                )}
               </Field>
               <Field
                 label={`Opacity · ${Math.round((page.background.opacity ?? 1) * 100)}%`}
@@ -743,7 +752,7 @@ export const PropertiesPanel = component(() => {
           <Toggle
             on={!!page.footer?.enabled}
             label="Enable footer"
-            help="Edge-to-edge band under the primary button"
+            help="Style the band that contains the primary button"
             onChange={(v) =>
               vm.updateFooter(page.id, {
                 enabled: v,
@@ -763,37 +772,28 @@ export const PropertiesPanel = component(() => {
                   className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                 />
               </Field>
-              <div className="grid grid-cols-2 gap-2 mb-3">
+              <div className="grid grid-cols-1 gap-2 mb-3">
                 <Field label="Text color">
-                  <input
+                  <ColorSwatchInput
                     value={page.footer.textColor ?? ""}
-                    onChange={(e) =>
-                      vm.updateFooter(page.id, { textColor: e.currentTarget.value })
-                    }
-                    placeholder="#666"
-                    className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+                    onChange={(v) => vm.updateFooter(page.id, { textColor: v })}
+                    placeholder="#666666"
                   />
                 </Field>
                 <Field label="Bg color">
-                  <input
+                  <ColorSwatchInput
                     value={page.footer.bgColor ?? ""}
-                    onChange={(e) =>
-                      vm.updateFooter(page.id, { bgColor: e.currentTarget.value })
-                    }
-                    placeholder="#f4f4f5"
-                    className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+                    onChange={(v) => vm.updateFooter(page.id, { bgColor: v })}
+                    placeholder="#F4F4F5"
                   />
                 </Field>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-2">
                 <Field label="Border color">
-                  <input
+                  <ColorSwatchInput
                     value={page.footer.borderColor ?? ""}
-                    onChange={(e) =>
-                      vm.updateFooter(page.id, { borderColor: e.currentTarget.value })
-                    }
-                    placeholder="#e4e4e7"
-                    className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+                    onChange={(v) => vm.updateFooter(page.id, { borderColor: v })}
+                    placeholder="#E4E4E7"
                   />
                 </Field>
                 <Field label={`Border · ${page.footer.borderWidth ?? 0}px`}>

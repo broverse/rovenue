@@ -7,6 +7,7 @@ import { validateFunnelGraph, type ValidatorIssue } from "@rovenue/shared/funnel
 import { FunnelApi, type FunnelDetailDto } from "../../../lib/services/funnel-api";
 import type { Page, Theme, Settings, TabId } from "../types";
 import { toEvalPage } from "../types";
+import { loadFontFamily } from "../fonts";
 
 export interface DraftProps {
   projectId: string;
@@ -18,7 +19,7 @@ const DEFAULT_THEME: Theme = {
   accent: "#3B82F6",
   bg: "#FFFFFF",
   text: "#0F172A",
-  font: "Inter",
+  font: "'Inter', system-ui, sans-serif",
   logoUrl: "",
   logoLetter: "F",
 };
@@ -343,6 +344,14 @@ export class FunnelDraftViewModel {
 
   @derived get isDirty() {
     return this.autosaveStatus === "saving" || this.autosaveStatus === "error";
+  }
+
+  // Lazy-inject the Google Fonts stylesheet for the active theme font. The
+  // trigger re-runs on every theme.font change (and once on mount), and
+  // loadFontFamily is a no-op for system faces / already-loaded families.
+  @trigger
+  loadActiveFont() {
+    loadFontFamily(this.theme.font);
   }
 
   // ----- Autosave + publish/duplicate/discard -----

@@ -36,10 +36,56 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
   const containerStyle: CSSProperties = {
     background: baseColor,
     color: theme.text,
+    fontFamily: theme.font || undefined,
   };
   const stepProgress = 4 / 9;
   const hasMediaBg =
     (bg?.kind === "image" || bg?.kind === "video") && isFilledColor(bg?.value);
+  // Primary CTA label by page type — `null` means this page type doesn't
+  // render a CTA (paywall/welcome use page.cta-with-defaults; success and
+  // most question pages fall back to "Continue" / "Open app").
+  const ctaLabel: string | null = (() => {
+    switch (page.type) {
+      case "welcome":
+        return page.cta || "Get started";
+      case "paywall":
+        return "Start free trial";
+      case "success":
+        return page.cta || "Open app";
+      case "single_choice":
+      case "multi_choice":
+      case "picture_choice":
+      case "yes_no":
+      case "legal":
+      case "checkbox":
+      case "opinion_scale":
+      case "rating":
+      case "short_text":
+      case "long_text":
+      case "email":
+      case "phone":
+      case "contact_info":
+      case "date_input":
+      case "number_input":
+      case "slider":
+      case "text_input":
+      case "statement":
+      case "feature":
+        return page.cta || "Continue";
+      default:
+        return null;
+    }
+  })();
+  const footer = page.footer;
+  const footerStyle = footer?.enabled
+    ? {
+        background: footer.bgColor || "transparent",
+        borderTop:
+          (footer.borderWidth ?? 0) > 0
+            ? `${footer.borderWidth}px solid ${footer.borderColor ?? "rgba(0,0,0,0.1)"}`
+            : undefined,
+      }
+    : undefined;
   return (
     <div
       className="relative flex h-full w-full flex-col overflow-hidden rounded-[28px]"
@@ -71,8 +117,12 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
           style={{ background: theme.bg, opacity: 1 - overlayOpacity }}
         />
       )}
-      {/* Content layer */}
-      <div className="relative z-10 flex h-full w-full flex-col px-4 pb-4 pt-2">
+      {/* Content layer — split into scrollable top + footer band that
+          contains the primary CTA. The footer's bg/border style the
+          wrapper around the button (and any helper text) rather than
+          rendering as a separate strip below the button. */}
+      <div className="relative z-10 flex h-full w-full flex-col">
+      <div className={`flex min-h-0 flex-1 flex-col px-4 pt-2${ctaLabel ? "" : " pb-4"}`}>
       <div className="flex items-center justify-between px-1 py-1 text-[10px] font-medium opacity-70">
         <span>9:41</span>
         <span>● ● ●</span>
@@ -200,77 +250,30 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
           </div>
         )}
       </div>
-      {(page.type === "single_choice" ||
-        page.type === "multi_choice" ||
-        page.type === "picture_choice" ||
-        page.type === "yes_no" ||
-        page.type === "legal" ||
-        page.type === "checkbox" ||
-        page.type === "opinion_scale" ||
-        page.type === "rating" ||
-        page.type === "short_text" ||
-        page.type === "long_text" ||
-        page.type === "email" ||
-        page.type === "phone" ||
-        page.type === "contact_info" ||
-        page.type === "date_input" ||
-        page.type === "number_input" ||
-        page.type === "slider" ||
-        page.type === "text_input" ||
-        page.type === "statement" ||
-        page.type === "feature") && (
-        <button
-          type="button"
-          className="mt-3 h-10 w-full rounded-lg text-[13px] font-semibold text-white"
-          style={{ background: theme.primary }}
-        >
-          {page.cta || "Continue"}
-        </button>
-      )}
-      {page.type === "welcome" && (
-        <button
-          type="button"
-          className="mt-3 h-10 w-full rounded-lg text-[13px] font-semibold text-white"
-          style={{ background: theme.primary }}
-        >
-          {page.cta || "Get started"}
-        </button>
-      )}
-      {page.type === "paywall" && (
-        <button
-          type="button"
-          className="mt-3 h-10 w-full rounded-lg text-[13px] font-semibold text-white"
-          style={{ background: theme.primary }}
-        >
-          Start free trial
-        </button>
-      )}
-      {page.type === "success" && (
-        <button
-          type="button"
-          className="mt-3 h-10 w-full rounded-lg text-[13px] font-semibold text-white"
-          style={{ background: theme.primary }}
-        >
-          {page.cta || "Open app"}
-        </button>
-      )}
       </div>
-      {/* Footer band — sits below the CTA, edge-to-edge. */}
-      {page.footer?.enabled && (
-        <div
-          className="relative z-10 px-4 py-2 text-center text-[10px]"
-          style={{
-            background: page.footer.bgColor || "transparent",
-            color: page.footer.textColor || theme.text,
-            borderTop:
-              (page.footer.borderWidth ?? 0) > 0
-                ? `${page.footer.borderWidth}px solid ${page.footer.borderColor ?? "rgba(0,0,0,0.1)"}`
-                : undefined,
-          }}
-        >
-          {page.footer.text || "Footer text"}
+      {/* Footer band — edge-to-edge container that holds the CTA. When
+          `footer.enabled` is on, its bg/border style this whole band and
+          an optional helper line sits under the button. */}
+      {ctaLabel && (
+        <div className="px-4 pb-4 pt-3" style={footerStyle}>
+          <button
+            type="button"
+            className="h-10 w-full rounded-lg text-[13px] font-semibold text-white"
+            style={{ background: theme.primary }}
+          >
+            {ctaLabel}
+          </button>
+          {footer?.enabled && footer.text && (
+            <div
+              className="mt-2 text-center text-[10px]"
+              style={{ color: footer.textColor || theme.text }}
+            >
+              {footer.text}
+            </div>
+          )}
         </div>
       )}
+      </div>
     </div>
   );
 });

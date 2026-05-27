@@ -3,6 +3,8 @@ import { Check, Image as ImageIcon, TriangleAlert } from "lucide-react";
 import type { Theme } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { PagePreview } from "./page-preview";
+import { ColorSwatchInput } from "./color-swatch-input";
+import { CATEGORY_ORDER, DEFAULT_FONT_FAMILY, FONT_OPTIONS } from "./fonts";
 
 const COLOR_ROWS: ReadonlyArray<{ key: keyof Theme; label: string; hint: string }> = [
   { key: "primary", label: "Primary color", hint: "Buttons, progress, accents on every page" },
@@ -57,20 +59,16 @@ export const ThemeTab = component(() => {
                 key={c.key}
                 className="flex items-center gap-3 border-b border-rv-divider py-3 last:border-b-0"
               >
-                <div
-                  className="h-9 w-9 flex-shrink-0 rounded-md border border-rv-divider"
-                  style={{ background: theme[c.key] as string }}
-                />
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium text-foreground">{c.label}</div>
                   <div className="text-[11px] text-rv-mute-500">{c.hint}</div>
                 </div>
-                <input
+                <ColorSwatchInput
+                  className="w-[150px]"
                   value={theme[c.key] as string}
-                  onChange={(e) =>
-                    vm.updateTheme({ [c.key]: e.currentTarget.value } as Partial<Theme>)
-                  }
-                  className="h-7 w-24 rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] uppercase text-foreground outline-none focus:border-rv-accent-500"
+                  onChange={(v) => vm.updateTheme({ [c.key]: v } as Partial<Theme>)}
+                  placeholder="#000000"
+                  size="sm"
                 />
               </div>
             ))}
@@ -116,20 +114,33 @@ export const ThemeTab = component(() => {
             <SectionHead title="Typography" />
             <Field label="Font family">
               <select
-                value={theme.font}
+                value={
+                  FONT_OPTIONS.some((o) => o.family === theme.font)
+                    ? theme.font
+                    : DEFAULT_FONT_FAMILY
+                }
                 onChange={(e) => vm.updateTheme({ font: e.currentTarget.value })}
                 className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
               >
-                <option>Inter</option>
-                <option>Geist</option>
-                <option>SF Pro</option>
-                <option>Roboto</option>
-                <option>System default</option>
+                {CATEGORY_ORDER.map((category) => {
+                  const options = FONT_OPTIONS.filter((o) => o.category === category);
+                  if (options.length === 0) return null;
+                  return (
+                    <optgroup key={category} label={category}>
+                      {options.map((o) => (
+                        <option key={o.family} value={o.family}>
+                          {o.label}
+                          {o.google ? " · Google" : " · Free"}
+                        </option>
+                      ))}
+                    </optgroup>
+                  );
+                })}
               </select>
             </Field>
             <div
               className="mt-2 rounded-md bg-rv-c2 px-4 py-4"
-              style={{ fontFamily: theme.font || "Inter" }}
+              style={{ fontFamily: theme.font || DEFAULT_FONT_FAMILY }}
             >
               <div className="mb-1 text-[20px] font-bold tracking-tight">Heading sample</div>
               <div className="text-[13px] text-rv-mute-700">
