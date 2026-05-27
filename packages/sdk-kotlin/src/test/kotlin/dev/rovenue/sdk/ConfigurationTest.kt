@@ -1,0 +1,48 @@
+package dev.rovenue.sdk
+
+import dev.rovenue.sdk.generated.RovenueException
+import dev.rovenue.sdk.generated.sdkVersion
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
+import kotlin.test.assertNotSame
+
+class ConfigurationTest {
+
+    @BeforeEach
+    fun setUp() {
+        Rovenue.resetForTesting()
+    }
+
+    @Test
+    fun `configure rejects blank api key`() {
+        assertFailsWith<RovenueException.InvalidApiKey> {
+            Rovenue.configure(apiKey = "", baseUrl = "https://api.rovenue.dev")
+        }
+    }
+
+    @Test
+    fun `configure rejects whitespace api key`() {
+        assertFailsWith<RovenueException.InvalidApiKey> {
+            Rovenue.configure(apiKey = "   ", baseUrl = "https://api.rovenue.dev")
+        }
+    }
+
+    @Test
+    fun `configure succeeds with valid config`() {
+        Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.dev")
+        assertNotNull(Rovenue.shared)
+        assertEquals(sdkVersion(), Rovenue.shared.version)
+    }
+
+    @Test
+    fun `configure twice replaces shared instance`() {
+        Rovenue.configure(apiKey = "pk_first", baseUrl = "https://api.rovenue.dev")
+        val first = Rovenue.shared
+        Rovenue.configure(apiKey = "pk_second", baseUrl = "https://api.rovenue.dev")
+        val second = Rovenue.shared
+        assertNotSame(first, second)
+    }
+}
