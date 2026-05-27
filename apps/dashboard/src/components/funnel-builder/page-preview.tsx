@@ -215,6 +215,11 @@ const ChoiceListEditable = component(({ page, theme }: { page: Page; theme: Them
     vm.setActiveTab("workflow");
   };
 
+  // The "outer container" hover affordance — drag handle on the left,
+  // delete + branch on the right, both rendered OUTSIDE the option card
+  // so they don't crowd the runtime preview. The last surviving option
+  // can't be deleted (a choice page with zero options is meaningless).
+  const canDelete = options.length > 1;
   return (
     <div className="mt-2 flex flex-col gap-2">
       {options.map((o, i) => (
@@ -222,57 +227,63 @@ const ChoiceListEditable = component(({ page, theme }: { page: Page; theme: Them
           key={i}
           onDragOver={onDragOver}
           onDrop={(e) => onDrop(e, i)}
-          className="group relative flex items-center gap-2 rounded-lg px-3 py-2.5 text-[12px]"
-          style={{
-            background: "white",
-            border: `1px solid ${i === 0 ? theme.primary : "rgba(0,0,0,0.08)"}`,
-            boxShadow: i === 0 ? `0 0 0 2px ${theme.primary}25` : undefined,
-          }}
+          className="group relative"
         >
-          {/* Drag handle (left, hover-only) */}
+          {/* Drag handle — sits outside the card on the left */}
           <button
             type="button"
             draggable
             onDragStart={(e) => onDragStart(e, i)}
             title="Drag to reorder"
-            className="absolute -left-7 top-1/2 hidden -translate-y-1/2 cursor-grab items-center justify-center text-rv-mute-500 group-hover:flex hover:text-foreground active:cursor-grabbing"
-            style={{ color: "rgba(0,0,0,0.5)" }}
+            className="absolute -left-10 top-1/2 hidden h-7 w-7 -translate-y-1/2 cursor-grab items-center justify-center rounded-full border bg-white text-rv-mute-700 transition group-hover:flex hover:scale-110 active:cursor-grabbing"
+            style={{ borderColor: "rgba(0,0,0,0.12)" }}
           >
             <GripVertical size={14} />
           </button>
 
-          <span
-            className="block flex-shrink-0"
+          {/* Option card */}
+          <div
+            className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-[12px]"
             style={{
-              width: 14,
-              height: 14,
-              border: `1.5px solid ${theme.primary}`,
-              borderRadius: page.type === "multi_choice" ? 3 : "50%",
-              background: i === 0 ? theme.primary : "transparent",
+              background: "white",
+              border: `1px solid ${i === 0 ? theme.primary : "rgba(0,0,0,0.08)"}`,
+              boxShadow: i === 0 ? `0 0 0 2px ${theme.primary}25` : undefined,
             }}
-          />
-          <span className="min-w-0 flex-1 truncate">{o.label}</span>
+          >
+            <span
+              className="block flex-shrink-0"
+              style={{
+                width: 14,
+                height: 14,
+                border: `1.5px solid ${theme.primary}`,
+                borderRadius: page.type === "multi_choice" ? 3 : "50%",
+                background: i === 0 ? theme.primary : "transparent",
+              }}
+            />
+            <span className="min-w-0 flex-1 truncate">{o.label}</span>
+          </div>
 
-          {/* Hover actions (right, outside the card) */}
-          <div className="absolute -right-16 top-1/2 hidden -translate-y-1/2 items-center gap-1 group-hover:flex">
+          {/* Hover actions — sit outside the card on the right */}
+          <div className="absolute -right-20 top-1/2 hidden -translate-y-1/2 items-center gap-1 group-hover:flex">
             <button
               type="button"
-              onClick={() => vm.removeOption(page.id, i)}
-              title="Delete option"
-              className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border bg-white text-rv-danger transition hover:scale-110"
+              onClick={() => canDelete && vm.removeOption(page.id, i)}
+              disabled={!canDelete}
+              title={canDelete ? "Delete option" : "At least one option required"}
+              className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border bg-white text-rv-danger transition hover:scale-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
               style={{ borderColor: "rgba(0,0,0,0.12)" }}
             >
-              <X size={12} />
+              <X size={13} />
             </button>
             {page.question_id && (
               <button
                 type="button"
                 onClick={() => onBranch(o.value)}
                 title="Branch from this option"
-                className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border bg-white text-rv-mute-700 transition hover:scale-110"
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border bg-white text-rv-mute-700 transition hover:scale-110"
                 style={{ borderColor: "rgba(0,0,0,0.12)" }}
               >
-                <GitBranch size={12} />
+                <GitBranch size={13} />
               </button>
             )}
           </div>
