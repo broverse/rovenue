@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { component, useService } from "impair";
 import {
   ArrowLeft,
@@ -61,6 +61,10 @@ export const CanvasEditor = component(() => {
   const [addOpen, setAddOpen] = useState(false);
   const [device, setDevice] = useState<Device>("phone");
   const [zoom, setZoom] = useState(1);
+  // Trackpads emit many small wheel events per gesture; accumulate deltaY
+  // and only step zoom when |acc| crosses the threshold. Mouse wheels
+  // typically emit deltaY ~100 per click so a single click still steps.
+  const wheelAccRef = useRef(0);
   const page = vm.selectedPage;
   if (!page) return null;
   const idx = vm.selectedIdx;
@@ -192,7 +196,12 @@ export const CanvasEditor = component(() => {
           // Without the modifier, let the canvas scroll normally.
           if (!(e.ctrlKey || e.metaKey)) return;
           e.preventDefault();
-          stepZoom(e.deltaY > 0 ? -1 : 1);
+          const ZOOM_WHEEL_THRESHOLD = 120;
+          wheelAccRef.current += e.deltaY;
+          while (Math.abs(wheelAccRef.current) >= ZOOM_WHEEL_THRESHOLD) {
+            stepZoom(wheelAccRef.current > 0 ? -1 : 1);
+            wheelAccRef.current -= Math.sign(wheelAccRef.current) * ZOOM_WHEEL_THRESHOLD;
+          }
         }}
       >
         <div
