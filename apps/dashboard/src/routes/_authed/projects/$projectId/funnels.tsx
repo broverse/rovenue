@@ -27,10 +27,12 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "../../../../ui/button";
 import { Chip } from "../../../../ui/chip";
 import { cn } from "../../../../lib/cn";
 import { useProject } from "../../../../lib/hooks/useProject";
+import { rpc, unwrap } from "../../../../lib/api";
 
 export const Route = createFileRoute("/_authed/projects/$projectId/funnels")({
   component: FunnelsRoute,
@@ -75,119 +77,6 @@ type Funnel = {
   isNew?: boolean;
 };
 
-const FUNNELS: ReadonlyArray<Funnel> = [
-  {
-    id: "fn_main_quiz",
-    slug: "fitness-goal-quiz",
-    name: "Fitness goal quiz",
-    status: "published",
-    version: 14,
-    thumb: "F",
-    tone: "amber",
-    editedAt: "12m ago",
-    editedBy: "furkan",
-    publishedAt: "2d ago",
-    pages: 9,
-    started: 18420,
-    completed: 12188,
-    paid: 1842,
-    conv: 10.0,
-    spark: [3, 4, 5, 4, 6, 8, 7],
-    pinned: true,
-  },
-  {
-    id: "fn_glow_lang",
-    slug: "mandarin-starter",
-    name: "Mandarin starter",
-    status: "published",
-    version: 6,
-    thumb: "M",
-    tone: "emerald",
-    editedAt: "3h ago",
-    editedBy: "tess",
-    publishedAt: "5d ago",
-    pages: 7,
-    started: 9214,
-    completed: 6042,
-    paid: 712,
-    conv: 7.7,
-    spark: [2, 3, 3, 4, 5, 5, 6],
-  },
-  {
-    id: "fn_mind_int",
-    slug: "mindful-intro",
-    name: "Mindfulness intro",
-    status: "draft",
-    version: 3,
-    thumb: "M",
-    tone: "violet",
-    editedAt: "1h ago",
-    editedBy: "furkan",
-    publishedAt: "14d ago",
-    pages: 11,
-    started: 0,
-    completed: 0,
-    paid: 0,
-    conv: 0,
-    spark: null,
-    draftDiffers: true,
-  },
-  {
-    id: "fn_holiday_promo",
-    slug: "holiday-2026",
-    name: "Holiday promo · 2026",
-    status: "published",
-    version: 2,
-    thumb: "H",
-    tone: "pink",
-    editedAt: "4d ago",
-    editedBy: "aris",
-    publishedAt: "9d ago",
-    pages: 6,
-    started: 5208,
-    completed: 3104,
-    paid: 488,
-    conv: 9.4,
-    spark: [1, 2, 4, 6, 5, 8, 9],
-  },
-  {
-    id: "fn_sleep_quiz",
-    slug: "sleep-better",
-    name: "Sleep better quiz",
-    status: "draft",
-    version: 0,
-    thumb: "S",
-    tone: "rose",
-    editedAt: "38m ago",
-    editedBy: "tess",
-    publishedAt: null,
-    pages: 8,
-    started: 0,
-    completed: 0,
-    paid: 0,
-    conv: 0,
-    spark: null,
-    isNew: true,
-  },
-  {
-    id: "fn_old_paywall",
-    slug: "paywall-only",
-    name: "Paywall only (legacy)",
-    status: "archived",
-    version: 11,
-    thumb: "P",
-    tone: "",
-    editedAt: "2mo ago",
-    editedBy: "aris",
-    publishedAt: "2mo ago",
-    pages: 3,
-    started: 412,
-    completed: 296,
-    paid: 41,
-    conv: 9.9,
-    spark: [0, 0, 0, 1, 0, 0, 0],
-  },
-];
 
 type SystemTemplate = {
   id: string;
@@ -336,6 +225,54 @@ function Sparkline({ data, color = "var(--color-rv-accent-500)" }: { data: numbe
 
 type Scope = "all" | "published" | "draft" | "archived";
 
+interface ApiFunnelRow {
+  id: string;
+  slug: string;
+  name: string;
+  status: FunnelStatus;
+  currentVersionId: string | null;
+  draftPagesJson: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Map an API funnel row onto the legacy list-page Funnel shape. Stats
+// default to zero — the dashboard's project-aggregate analytics endpoint
+// doesn't exist yet, so the table renders the placeholder until that lands.
+function rowToFunnel(row: ApiFunnelRow): Funnel {
+  const pageCount = Array.isArray(row.draftPagesJson) ? row.draftPagesJson.length : 0;
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    status: row.status,
+    version: 0,
+    thumb: row.name.charAt(0).toUpperCase() || "F",
+    tone: "",
+    editedAt: row.updatedAt,
+    editedBy: "",
+    publishedAt: row.currentVersionId ? row.updatedAt : null,
+    pages: pageCount,
+    started: 0,
+    completed: 0,
+    paid: 0,
+    conv: 0,
+    spark: null,
+  };
+}
+
+function useFunnelsList(projectId: string) {
+  return useQuery({
+    queryKey: ["dashboard-funnels", projectId],
+    enabled: Boolean(projectId),
+    queryFn: () =>
+      unwrap<{ funnels: ApiFunnelRow[] }>(
+        rpc.dashboard.projects[":projectId"].funnels.$get({ param: { projectId } }),
+      ),
+    select: (r) => r.funnels.map(rowToFunnel),
+  });
+}
+
 function FunnelsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [scope, setScope] = useState<Scope>("all");
@@ -344,9 +281,11 @@ function FunnelsPage({ projectId }: { projectId: string }) {
   const [showTemplates, setShowTemplates] = useState(false);
   const [hintDismissed, setHintDismissed] = useState(false);
 
+  const { data: funnels = [] } = useFunnelsList(projectId);
+
   const filtered = useMemo(
     () =>
-      FUNNELS.filter((f) => {
+      funnels.filter((f) => {
         if (scope !== "all" && f.status !== scope) return false;
         if (
           query &&
@@ -355,21 +294,21 @@ function FunnelsPage({ projectId }: { projectId: string }) {
           return false;
         return true;
       }),
-    [scope, query],
+    [funnels, scope, query],
   );
 
   const counts = useMemo(
     () => ({
-      all: FUNNELS.length,
-      published: FUNNELS.filter((f) => f.status === "published").length,
-      draft: FUNNELS.filter((f) => f.status === "draft").length,
-      archived: FUNNELS.filter((f) => f.status === "archived").length,
+      all: funnels.length,
+      published: funnels.filter((f) => f.status === "published").length,
+      draft: funnels.filter((f) => f.status === "draft").length,
+      archived: funnels.filter((f) => f.status === "archived").length,
     }),
-    [],
+    [funnels],
   );
 
-  const totalSessions = FUNNELS.reduce((a, f) => a + f.started, 0);
-  const totalPaid = FUNNELS.reduce((a, f) => a + f.paid, 0);
+  const totalSessions = funnels.reduce((a, f) => a + f.started, 0);
+  const totalPaid = funnels.reduce((a, f) => a + f.paid, 0);
   const avgConv = totalSessions ? (totalPaid / totalSessions) * 100 : 0;
 
   return (
@@ -580,7 +519,7 @@ function FunnelsPage({ projectId }: { projectId: string }) {
 
       <div className="mt-8 flex items-center justify-between border-t border-rv-divider pt-4 text-[12px] text-rv-mute-500">
         <div className="font-rv-mono">
-          {filtered.length} of {FUNNELS.length} funnels
+          {filtered.length} of {funnels.length} funnels
         </div>
         <div className="font-rv-mono">⌘N to create · F to focus search</div>
       </div>

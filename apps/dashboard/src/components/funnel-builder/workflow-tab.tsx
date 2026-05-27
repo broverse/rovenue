@@ -1,18 +1,11 @@
-import { ArrowLeftRight, Plus } from "lucide-react";
-import type { Funnel } from "./types";
+import { component, useService } from "impair";
+import { ArrowLeftRight } from "lucide-react";
+import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { RuleEditor } from "./rule-editor";
 
-type Props = {
-  funnel: Funnel;
-};
-
-/**
- * Workflow tab. Lists every branching rule in the funnel grouped by
- * its source page, in evaluation order. Empty state nudges users
- * toward adding a rule.
- */
-export function WorkflowTab({ funnel }: Props) {
-  const ruleEntries = Object.entries(funnel.rules);
+export const WorkflowTab = component(() => {
+  const vm = useService(FunnelDraftViewModel);
+  const ruleEntries = Object.entries(vm.rules);
 
   return (
     <div className="flex-1 overflow-y-auto bg-rv-bg px-6 py-8">
@@ -25,13 +18,6 @@ export function WorkflowTab({ funnel }: Props) {
               page.
             </p>
           </div>
-          <button
-            type="button"
-            className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md bg-rv-accent-500 px-3 text-[13px] font-medium text-white transition hover:bg-rv-accent-600"
-          >
-            <Plus size={13} />
-            Add rule
-          </button>
         </div>
 
         {ruleEntries.length === 0 ? (
@@ -41,12 +27,13 @@ export function WorkflowTab({ funnel }: Props) {
             </div>
             <h3 className="m-0 mb-1.5 text-[15px] font-semibold">No branching yet</h3>
             <p className="mx-auto m-0 max-w-[320px] text-[12px] text-rv-mute-500">
-              Add a rule to send specific visitors down different paths based on their answers.
+              Add a rule on any question page from the Content tab. Rules show up here grouped by
+              their source page.
             </p>
           </div>
         ) : (
           ruleEntries.map(([pageId, rules]) => {
-            const page = funnel.pages.find((p) => p.id === pageId);
+            const page = vm.pages.find((p) => p.id === pageId);
             return (
               <section
                 key={pageId}
@@ -61,15 +48,7 @@ export function WorkflowTab({ funnel }: Props) {
                     {rules.length} rule{rules.length === 1 ? "" : "s"}
                   </span>
                 </div>
-                {rules.map((r, i) => (
-                  <RuleEditor
-                    key={r.id}
-                    rule={r}
-                    idx={i}
-                    pageId={pageId}
-                    allPages={funnel.pages}
-                  />
-                ))}
+                <RuleEditor pageId={pageId} />
               </section>
             );
           })
@@ -77,4 +56,4 @@ export function WorkflowTab({ funnel }: Props) {
       </div>
     </div>
   );
-}
+});

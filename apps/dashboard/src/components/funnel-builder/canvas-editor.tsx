@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { component, useService } from "impair";
 import {
   ArrowLeft,
   ArrowRight,
@@ -9,53 +10,82 @@ import {
   Image as ImageIcon,
   Play,
   Plus,
-  Search,
   Settings,
   Smartphone,
   Type as TypeIcon,
   X,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
-import {
-  PAGE_GROUPS,
-  PAGE_TYPE_DESC,
-  PAGE_TYPES,
-  type Page,
-  type PageType,
-} from "./types";
+import { PAGE_TYPES, type Page } from "./types";
+import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
+import { AddContentPopover } from "./add-content-popover";
+import { blankPage } from "./blank-page";
 
-type Props = {
-  page: Page;
-  allPages: Page[];
-  idx: number;
-  onPrev: () => void;
-  onNext: () => void;
-  onPreview: () => void;
-};
-
-/**
- * Center stage of the Content tab. Renders an editable card for the
- * selected page — input fields swap based on the page type, and the
- * toolbar exposes shared affordances (add content popover, preview,
- * accessibility check, etc.).
- */
-export function CanvasEditor({ page, allPages, idx, onPrev, onNext, onPreview }: Props) {
+export const CanvasEditor = component(() => {
+  const vm = useService(FunnelDraftViewModel);
+  const [addOpen, setAddOpen] = useState(false);
+  const page = vm.selectedPage;
+  if (!page) return null;
   const meta = PAGE_TYPES[page.type];
   const Ico = meta.icon;
-  const [addOpen, setAddOpen] = useState(false);
+  const idx = vm.selectedIdx;
 
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-rv-bg">
-      <CanvasToolbar
-        idx={idx}
-        total={allPages.length}
-        pageId={page.id}
-        questionId={page.question_id}
-        addOpen={addOpen}
-        onToggleAdd={() => setAddOpen((o) => !o)}
-        onCloseAdd={() => setAddOpen(false)}
-        onPreview={onPreview}
-      />
+      <div className="flex items-center gap-2 border-b border-rv-divider bg-rv-c1 px-4 py-2">
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setAddOpen((o) => !o)}
+            className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] font-medium text-foreground transition hover:bg-rv-c3"
+          >
+            <span className="flex h-4 w-4 items-center justify-center rounded bg-rv-accent-500 text-white">
+              <Plus size={10} />
+            </span>
+            Add content
+          </button>
+          {addOpen && (
+            <AddContentPopover
+              onPick={(t) => {
+                setAddOpen(false);
+                vm.addPage(blankPage(t), page.id);
+              }}
+              onClose={() => setAddOpen(false)}
+            />
+          )}
+        </div>
+
+        <div className="mx-1 h-5 w-px bg-rv-divider" />
+
+        <ToolBtn title="Theme & design" onClick={() => vm.setActiveTab("theme")}>
+          <ImageIcon size={14} />
+        </ToolBtn>
+        <ToolBtn title="Device preview" onClick={() => vm.openPreview()}>
+          <Smartphone size={14} />
+        </ToolBtn>
+        <ToolBtn title="Play through" onClick={() => vm.openPreview()}>
+          <Play size={14} />
+        </ToolBtn>
+        <ToolBtn title="Accessibility check"><Eye size={14} /></ToolBtn>
+        <ToolBtn title="Translations"><TypeIcon size={14} /></ToolBtn>
+        <ToolBtn title="Page settings" onClick={() => vm.setActiveTab("settings")}>
+          <Settings size={14} />
+        </ToolBtn>
+
+        <div className="ml-auto flex items-center gap-2 text-[11px]">
+          <span className="font-rv-mono text-rv-mute-500">
+            Page {idx + 1} of {vm.pages.length}
+          </span>
+          <span className="rounded border border-rv-divider bg-rv-c2 px-1.5 py-0.5 font-rv-mono text-[10px] text-rv-mute-600">
+            {page.id}
+          </span>
+          {page.question_id && (
+            <span className="rounded border border-rv-accent-500/40 bg-rv-accent-500/10 px-1.5 py-0.5 font-rv-mono text-[10px] text-rv-accent-500">
+              @{page.question_id}
+            </span>
+          )}
+        </div>
+      </div>
 
       <div className="flex flex-1 items-start justify-center overflow-y-auto px-8 py-10">
         <div className="w-full max-w-[640px] rounded-2xl border border-rv-divider bg-rv-c1 px-8 py-9 shadow-[0_8px_28px_rgba(0,0,0,0.25)]">
@@ -79,23 +109,22 @@ export function CanvasEditor({ page, allPages, idx, onPrev, onNext, onPreview }:
         </div>
       </div>
 
-      {/* Footer stepper */}
       <div className="flex items-center justify-center gap-3 border-t border-rv-divider bg-rv-c1 py-2.5">
         <button
           type="button"
-          onClick={onPrev}
+          onClick={() => vm.goPrev()}
           disabled={idx === 0}
           className="flex h-8 w-8 cursor-pointer items-center justify-center rounded border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
         >
           <ArrowLeft size={14} />
         </button>
         <div className="font-rv-mono text-[12px] tabular-nums text-rv-mute-600">
-          {String(idx + 1).padStart(2, "0")} / {String(allPages.length).padStart(2, "0")}
+          {String(idx + 1).padStart(2, "0")} / {String(vm.pages.length).padStart(2, "0")}
         </div>
         <button
           type="button"
-          onClick={onNext}
-          disabled={idx === allPages.length - 1}
+          onClick={() => vm.goNext()}
+          disabled={idx === vm.pages.length - 1}
           className="flex h-8 w-8 cursor-pointer items-center justify-center rounded border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
         >
           <ArrowRight size={14} />
@@ -103,68 +132,7 @@ export function CanvasEditor({ page, allPages, idx, onPrev, onNext, onPreview }:
       </div>
     </div>
   );
-}
-
-function CanvasToolbar({
-  idx,
-  total,
-  pageId,
-  questionId,
-  addOpen,
-  onToggleAdd,
-  onCloseAdd,
-  onPreview,
-}: {
-  idx: number;
-  total: number;
-  pageId: string;
-  questionId?: string;
-  addOpen: boolean;
-  onToggleAdd: () => void;
-  onCloseAdd: () => void;
-  onPreview: () => void;
-}) {
-  return (
-    <div className="flex items-center gap-2 border-b border-rv-divider bg-rv-c1 px-4 py-2">
-      <div className="relative">
-        <button
-          type="button"
-          onClick={onToggleAdd}
-          className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] font-medium text-foreground transition hover:bg-rv-c3"
-        >
-          <span className="flex h-4 w-4 items-center justify-center rounded bg-rv-accent-500 text-white">
-            <Plus size={10} />
-          </span>
-          Add content
-        </button>
-        {addOpen && <AddContentPopover onPick={onCloseAdd} onClose={onCloseAdd} />}
-      </div>
-
-      <div className="mx-1 h-5 w-px bg-rv-divider" />
-
-      <ToolBtn title="Theme & design"><ImageIcon size={14} /></ToolBtn>
-      <ToolBtn title="Device preview" onClick={onPreview}><Smartphone size={14} /></ToolBtn>
-      <ToolBtn title="Play through"><Play size={14} /></ToolBtn>
-      <ToolBtn title="Accessibility check"><Eye size={14} /></ToolBtn>
-      <ToolBtn title="Translations"><TypeIcon size={14} /></ToolBtn>
-      <ToolBtn title="Page settings"><Settings size={14} /></ToolBtn>
-
-      <div className="ml-auto flex items-center gap-2 text-[11px]">
-        <span className="font-rv-mono text-rv-mute-500">
-          Page {idx + 1} of {total}
-        </span>
-        <span className="rounded border border-rv-divider bg-rv-c2 px-1.5 py-0.5 font-rv-mono text-[10px] text-rv-mute-600">
-          {pageId}
-        </span>
-        {questionId && (
-          <span className="rounded border border-rv-accent-500/40 bg-rv-accent-500/10 px-1.5 py-0.5 font-rv-mono text-[10px] text-rv-accent-500">
-            @{questionId}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
+});
 
 function ToolBtn({
   title,
@@ -187,79 +155,32 @@ function ToolBtn({
   );
 }
 
-function AddContentPopover({
-  onPick,
-  onClose,
-}: {
-  onPick: (type: PageType) => void;
-  onClose: () => void;
-}) {
-  return (
-    <>
-      <div className="fixed inset-0 z-[49]" onClick={onClose} />
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="absolute left-0 top-9 z-50 w-[360px] rounded-lg border border-rv-divider-strong bg-rv-c1 p-3 shadow-[0_18px_44px_rgba(0,0,0,0.5)]"
-      >
-        <div className="mb-2 flex items-center gap-1.5 rounded-md border border-rv-divider bg-rv-c2 px-2">
-          <Search size={13} className="text-rv-mute-500" />
-          <input
-            autoFocus
-            placeholder="Search content type… (e.g. paywall, slider)"
-            className="h-7 flex-1 bg-transparent text-[12px] text-foreground outline-none placeholder:text-rv-mute-500"
-          />
-        </div>
-        {PAGE_GROUPS.map((g) => (
-          <div key={g.label} className="mt-2">
-            <div className="mb-1.5 px-1 font-rv-mono text-[9px] uppercase tracking-wider text-rv-mute-500">
-              {g.label}
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {g.types.map((t) => {
-                const m = PAGE_TYPES[t];
-                const I = m.icon;
-                return (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => onPick(t)}
-                    className="flex cursor-pointer items-start gap-2 rounded border border-rv-divider bg-rv-c2 p-2 text-left transition hover:border-rv-accent-500 hover:bg-rv-c3"
-                  >
-                    <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-rv-c3 text-rv-mute-600">
-                      <I size={14} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[12px] font-medium text-foreground">
-                        {m.label}
-                      </div>
-                      <div className="text-[10px] text-rv-mute-500">
-                        {PAGE_TYPE_DESC[t]}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
-      </div>
-    </>
-  );
-}
-
-function PageBody({ page }: { page: Page }) {
+const PageBody = component(({ page }: { page: Page }) => {
+  const vm = useService(FunnelDraftViewModel);
   const hasFreeTitle =
     page.type !== "paywall" &&
     page.type !== "success" &&
     page.type !== "loading" &&
     page.type !== "result";
 
+  const set = (patch: Partial<Page>) => vm.updatePage(page.id, patch);
+
   return (
     <>
       {hasFreeTitle && (
         <>
-          <TitleInput defaultValue={page.title} placeholder="Your question here. Recall information with @" />
-          <SubInput defaultValue={page.subtitle} placeholder="Description (optional)" />
+          <input
+            value={page.title ?? ""}
+            onChange={(e) => set({ title: e.currentTarget.value })}
+            placeholder="Your question here. Recall information with @"
+            className="w-full border-none bg-transparent text-[26px] font-semibold leading-snug tracking-tight text-foreground outline-none placeholder:text-rv-mute-500"
+          />
+          <input
+            value={page.subtitle ?? ""}
+            onChange={(e) => set({ subtitle: e.currentTarget.value })}
+            placeholder="Description (optional)"
+            className="mt-2 w-full border-none bg-transparent text-[14px] leading-relaxed text-rv-mute-600 outline-none placeholder:text-rv-mute-500"
+          />
         </>
       )}
 
@@ -267,7 +188,7 @@ function PageBody({ page }: { page: Page }) {
         <div className="mt-6 flex flex-col gap-2">
           {(page.options ?? []).map((o, i) => (
             <div
-              key={`${o.value}-${i}`}
+              key={i}
               className="flex items-center gap-2 rounded-md border border-rv-divider bg-rv-c2 px-2 py-1.5"
             >
               <GripVertical size={12} className="cursor-grab text-rv-mute-500" />
@@ -275,12 +196,14 @@ function PageBody({ page }: { page: Page }) {
                 {String.fromCharCode(65 + i)}
               </div>
               <input
-                defaultValue={o.label}
+                value={o.label}
+                onChange={(e) => vm.updateOption(page.id, i, { label: e.currentTarget.value })}
                 placeholder="Option label"
                 className="flex-1 bg-transparent text-[13px] text-foreground outline-none"
               />
               <input
-                defaultValue={o.value}
+                value={o.value}
+                onChange={(e) => vm.updateOption(page.id, i, { value: e.currentTarget.value })}
                 className="w-32 rounded border border-rv-divider bg-rv-c1 px-2 py-1 font-rv-mono text-[11px] text-rv-mute-600 outline-none focus:border-rv-accent-500"
               />
               <div className="flex gap-1">
@@ -294,6 +217,7 @@ function PageBody({ page }: { page: Page }) {
                 <button
                   type="button"
                   title="Remove"
+                  onClick={() => vm.removeOption(page.id, i)}
                   className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-rv-mute-500 hover:bg-rv-c3 hover:text-rv-danger"
                 >
                   <X size={11} />
@@ -303,6 +227,7 @@ function PageBody({ page }: { page: Page }) {
           ))}
           <button
             type="button"
+            onClick={() => vm.addOption(page.id)}
             className="mt-1 inline-flex h-8 w-fit cursor-pointer items-center gap-1.5 rounded border border-dashed border-rv-divider bg-rv-c2 px-3 text-[12px] text-rv-mute-600 transition hover:border-rv-accent-500 hover:text-rv-accent-500"
           >
             <Plus size={12} />
@@ -314,7 +239,7 @@ function PageBody({ page }: { page: Page }) {
       {page.type === "number_input" && (
         <div className="mt-7 rounded-lg border border-rv-divider bg-rv-c2 px-6 py-6 text-center">
           <div className="font-rv-mono text-[44px] font-bold leading-none">
-            32
+            {Math.round(((page.min ?? 0) + (page.max ?? 100)) / 2)}
             <span className="ml-1 text-[18px] font-normal text-rv-mute-500">
               {page.suffix}
             </span>
@@ -328,22 +253,27 @@ function PageBody({ page }: { page: Page }) {
       {page.type === "slider" && (
         <div className="mt-7 rounded-lg border border-rv-divider bg-rv-c2 px-6 py-6">
           <div className="mb-3.5 text-center font-rv-mono text-[36px] font-bold leading-none">
-            72 kg
+            {Math.round(((page.min ?? 0) + (page.max ?? 100)) / 2)} {page.suffix ?? ""}
           </div>
           <div className="relative h-1.5 rounded-full bg-rv-c4">
             <div className="absolute inset-y-0 left-0 w-[32%] rounded-full bg-rv-accent-500" />
             <div className="absolute -top-1.5 left-[32%] h-4 w-4 -translate-x-1/2 rounded-full border-[3px] border-rv-accent-500 bg-white" />
           </div>
           <div className="mt-2 flex justify-between font-rv-mono text-[11px] text-rv-mute-500">
-            <span>{page.min} kg</span>
-            <span>{page.max} kg</span>
+            <span>{page.min} {page.suffix}</span>
+            <span>{page.max} {page.suffix}</span>
           </div>
         </div>
       )}
 
       {page.type === "loading" && (
         <>
-          <TitleInput defaultValue={page.title} placeholder="What should we show while loading?" />
+          <input
+            value={page.title ?? ""}
+            onChange={(e) => set({ title: e.currentTarget.value })}
+            placeholder="What should we show while loading?"
+            className="w-full border-none bg-transparent text-[26px] font-semibold leading-snug tracking-tight text-foreground outline-none placeholder:text-rv-mute-500"
+          />
           <div className="mt-7 rounded-lg border border-rv-divider bg-rv-c2 px-10 py-10 text-center">
             <div className="mx-auto mb-4 h-14 w-14 animate-spin rounded-full border-4 border-rv-c4 border-t-rv-accent-500" />
             <div className="text-[14px] font-medium text-rv-mute-700">
@@ -358,16 +288,19 @@ function PageBody({ page }: { page: Page }) {
 
       {page.type === "result" && (
         <>
-          <TitleInput
-            defaultValue={page.title}
+          <input
+            value={page.title ?? ""}
+            onChange={(e) => set({ title: e.currentTarget.value })}
             placeholder="Your result title — supports {{question_id}}"
+            className="w-full border-none bg-transparent text-[26px] font-semibold leading-snug tracking-tight text-foreground outline-none placeholder:text-rv-mute-500"
           />
           <div className="mt-4 rounded-lg border border-rv-divider bg-rv-c2 p-4">
             <div className="mb-1.5 font-rv-mono text-[10px] font-semibold uppercase tracking-wider text-rv-violet">
               Result body
             </div>
             <textarea
-              defaultValue={page.body}
+              value={page.body ?? ""}
+              onChange={(e) => set({ body: e.currentTarget.value })}
               rows={3}
               className="w-full resize-none bg-transparent text-[14px] leading-relaxed text-rv-mute-700 outline-none"
             />
@@ -377,46 +310,54 @@ function PageBody({ page }: { page: Page }) {
 
       {page.type === "paywall" && (
         <>
-          <TitleInput defaultValue={page.headline} placeholder="Headline — Unlock your plan" />
+          <input
+            value={page.headline ?? ""}
+            onChange={(e) => set({ headline: e.currentTarget.value })}
+            placeholder="Headline — Unlock your plan"
+            className="w-full border-none bg-transparent text-[26px] font-semibold leading-snug tracking-tight text-foreground outline-none placeholder:text-rv-mute-500"
+          />
           <div className="mt-4 flex items-center gap-3 rounded-lg border border-rv-divider bg-rv-c2 px-3 py-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-md bg-gradient-to-br from-rv-warning to-[#fb923c] text-[13px] font-bold text-white">
               P
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-[13px] font-medium text-foreground">
-                Posely Pro · Annual
+                {page.productId ? page.productId : "No product selected"}
               </div>
               <div className="font-rv-mono text-[11px] text-rv-mute-500">
-                {page.productId} · $79.99/yr · 7-day trial
+                Pick a product in the side panel
               </div>
             </div>
-            <button
-              type="button"
-              className="inline-flex h-7 cursor-pointer items-center gap-1 rounded border border-rv-divider bg-rv-c1 px-2 text-[11px] font-medium text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
-            >
-              <ArrowRight size={11} />
-              Change
-            </button>
           </div>
           <div className="mt-5 mb-1.5 font-rv-mono text-[10px] font-semibold uppercase tracking-wider text-rv-mute-500">
             Benefits
           </div>
           <div className="flex flex-col gap-1.5">
-            {(page.benefits ?? []).map((b) => (
+            {(page.benefits ?? []).map((b, i) => (
               <div
-                key={b}
+                key={i}
                 className="group flex items-center gap-2 rounded-md border border-rv-divider bg-rv-c2 px-2 py-1.5"
               >
                 <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-rv-success/15 text-rv-success">
                   <Check size={12} />
                 </div>
                 <input
-                  defaultValue={b}
+                  value={b}
+                  onChange={(e) => {
+                    const next = [...(page.benefits ?? [])];
+                    next[i] = e.currentTarget.value;
+                    set({ benefits: next });
+                  }}
                   className="flex-1 bg-transparent text-[13px] text-foreground outline-none"
                 />
                 <button
                   type="button"
                   title="Remove"
+                  onClick={() => {
+                    const next = [...(page.benefits ?? [])];
+                    next.splice(i, 1);
+                    set({ benefits: next });
+                  }}
                   className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-rv-mute-500 opacity-50 transition hover:bg-rv-c3 hover:text-rv-danger hover:opacity-100"
                 >
                   <X size={10} />
@@ -425,6 +366,7 @@ function PageBody({ page }: { page: Page }) {
             ))}
             <button
               type="button"
+              onClick={() => set({ benefits: [...(page.benefits ?? []), "New benefit"] })}
               className="mt-1 inline-flex h-8 w-fit cursor-pointer items-center gap-1.5 rounded border border-dashed border-rv-divider bg-rv-c2 px-3 text-[12px] text-rv-mute-600 transition hover:border-rv-accent-500 hover:text-rv-accent-500"
             >
               <Plus size={12} />
@@ -441,14 +383,25 @@ function PageBody({ page }: { page: Page }) {
               <Check size={28} />
             </div>
           </div>
-          <TitleInput defaultValue={page.title} placeholder="Success headline" centered />
-          <SubInput defaultValue={page.body} placeholder="Body — what happens next" centered />
+          <input
+            value={page.title ?? ""}
+            onChange={(e) => set({ title: e.currentTarget.value })}
+            placeholder="Success headline"
+            className="w-full border-none bg-transparent text-center text-[26px] font-semibold leading-snug tracking-tight text-foreground outline-none placeholder:text-rv-mute-500"
+          />
+          <input
+            value={page.body ?? ""}
+            onChange={(e) => set({ body: e.currentTarget.value })}
+            placeholder="Body — what happens next"
+            className="mt-2 w-full border-none bg-transparent text-center text-[14px] leading-relaxed text-rv-mute-600 outline-none placeholder:text-rv-mute-500"
+          />
           <div className="mt-7 rounded-lg border border-rv-accent-500/30 bg-rv-accent-500/[0.08] p-4 text-center">
             <div className="mb-1.5 font-rv-mono text-[10px] font-semibold uppercase tracking-wider text-rv-accent-500">
               Hand-off button
             </div>
             <input
-              defaultValue={page.cta}
+              value={page.cta ?? ""}
+              onChange={(e) => set({ cta: e.currentTarget.value })}
               className="mx-auto block w-full max-w-[240px] rounded border border-rv-divider bg-rv-c1 px-3 py-1.5 text-center text-[13px] text-foreground outline-none focus:border-rv-accent-500"
             />
             <div className="mt-2 font-rv-mono text-[11px] text-rv-mute-500">
@@ -460,8 +413,18 @@ function PageBody({ page }: { page: Page }) {
 
       {page.type === "info" && (
         <>
-          <TitleInput defaultValue={page.title} placeholder="Info screen title" />
-          <SubInput defaultValue={page.subtitle} placeholder="Body — markdown supported" />
+          <input
+            value={page.title ?? ""}
+            onChange={(e) => set({ title: e.currentTarget.value })}
+            placeholder="Info screen title"
+            className="w-full border-none bg-transparent text-[26px] font-semibold leading-snug tracking-tight text-foreground outline-none placeholder:text-rv-mute-500"
+          />
+          <input
+            value={page.subtitle ?? ""}
+            onChange={(e) => set({ subtitle: e.currentTarget.value })}
+            placeholder="Body — markdown supported"
+            className="mt-2 w-full border-none bg-transparent text-[14px] leading-relaxed text-rv-mute-600 outline-none placeholder:text-rv-mute-500"
+          />
           <div className="mt-6 rounded-lg border border-dashed border-rv-divider-strong bg-rv-c2 px-5 py-6 text-center text-[12px] text-rv-mute-500">
             <ImageIcon size={20} className="mx-auto mb-1.5 opacity-60" />
             <div>Optional hero image — drag here or set in properties</div>
@@ -470,46 +433,4 @@ function PageBody({ page }: { page: Page }) {
       )}
     </>
   );
-}
-
-function TitleInput({
-  defaultValue,
-  placeholder,
-  centered,
-}: {
-  defaultValue?: string;
-  placeholder?: string;
-  centered?: boolean;
-}) {
-  return (
-    <input
-      defaultValue={defaultValue ?? ""}
-      placeholder={placeholder}
-      className={cn(
-        "w-full border-none bg-transparent text-[26px] font-semibold leading-snug tracking-tight text-foreground outline-none placeholder:text-rv-mute-500",
-        centered && "text-center",
-      )}
-    />
-  );
-}
-
-function SubInput({
-  defaultValue,
-  placeholder,
-  centered,
-}: {
-  defaultValue?: string;
-  placeholder?: string;
-  centered?: boolean;
-}) {
-  return (
-    <input
-      defaultValue={defaultValue ?? ""}
-      placeholder={placeholder}
-      className={cn(
-        "mt-2 w-full border-none bg-transparent text-[14px] leading-relaxed text-rv-mute-600 outline-none placeholder:text-rv-mute-500",
-        centered && "text-center",
-      )}
-    />
-  );
-}
+});
