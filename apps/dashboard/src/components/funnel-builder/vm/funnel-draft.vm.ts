@@ -1,5 +1,9 @@
-import { injectable, inject, state, onMount, type Cleanup, Props } from "impair";
+import {
+  injectable, inject, state, onMount, derived, trigger,
+  type Cleanup, Props,
+} from "impair";
 import type { NextRule } from "@rovenue/shared/funnel";
+import { validateFunnelGraph, type ValidatorIssue } from "@rovenue/shared/funnel";
 import { FunnelApi, type FunnelDetailDto } from "../../../lib/services/funnel-api";
 import type { Page, Theme, Settings, TabId } from "../types";
 
@@ -191,4 +195,125 @@ export class FunnelDraftViewModel {
   // ----- Theme / settings -----
   updateTheme(patch: Partial<Theme>) { Object.assign(this.theme, patch); }
   updateSettings(patch: Partial<Settings>) { Object.assign(this.settings, patch); }
+
+  // ----- Derived -----
+  @derived
+  get selectedIdx(): number {
+    return this.pages.findIndex((p) => p.id === this.selectedPageId);
+  }
+
+  @derived
+  get selectedPage(): Page | null {
+    return this.selectedPageId
+      ? this.pages.find((p) => p.id === this.selectedPageId) ?? null
+      : this.pages[0] ?? null;
+  }
+
+  @derived
+  get validation(): {
+    errors: ValidatorIssue[];
+    warnings: ValidatorIssue[];
+    byPage: Map<string, ValidatorIssue[]>;
+    unreachable: Set<string>;
+  } {
+    const minimal = this.pages.map((p) => ({
+      id: p.id,
+      type: p.type,
+      config: pageToConfig(p),
+      next_rules: this.rules[p.id] ?? [],
+      default_next: this.defaultNext[p.id] ?? undefined,
+    }));
+    const result = validateFunnelGraph(minimal as never);
+    const errors = result.ok ? [] : result.issues;
+    const warnings = result.warnings;
+    const byPage = new Map<string, ValidatorIssue[]>();
+    const unreachable = new Set<string>();
+    for (const i of [...errors, ...warnings]) {
+      const pageId = "pageId" in i ? i.pageId : undefined;
+      if (pageId) {
+        const arr = byPage.get(pageId) ?? [];
+        arr.push(i);
+        byPage.set(pageId, arr);
+      }
+      if (i.code === "UNREACHABLE" && pageId) unreachable.add(pageId);
+    }
+    return { errors, warnings, byPage, unreachable };
+  }
+
+  @derived get errorCount() { return this.validation.errors.length; }
+  @derived get warnCount() { return this.validation.warnings.length; }
+
+  @derived get isDirty() {
+    return this.autosaveStatus === "saving" || this.autosaveStatus === "error";
+  }
+
+  // ----- Autosave + publish/duplicate/discard -----
+  @trigger.debounce(800)
+  async autosave(cleanup: Cleanup) {
+    if (!this.funnel || this.isLoading) return;
+    // Touch every reactive field we want to send so the trigger re-runs when
+    // any of them changes. impair's @trigger tracks reads inside the body.
+    const payload = {
+      name: this.name,
+      slug: this.slug,
+      draftPages: this.pages as never,
+      draftTheme: this.theme as never,
+      draftSettings: this.settings as never,
+      draftRules: this.rules,
+      draftDefaultNext: this.defaultNext,
+    };
+    const controller = new AbortController();
+    cleanup(() => controller.abort());
+    try {
+      this.autosaveStatus = "saving";
+      const next = await this.api.patchDraft(
+        this.props.projectId,
+        this.props.funnelId,
+        payload,
+        controller.signal,
+      );
+      this.funnel = next;
+      this.lastSavedAt = Date.now();
+      this.autosaveStatus = "saved";
+    } catch (err) {
+      if ((err as { name?: string })?.name === "AbortError") return;
+      this.autosaveStatus = "error";
+    }
+  }
+
+  async publish() {
+    if (this.errorCount > 0) {
+      this.showValidation = true;
+      return;
+    }
+    const result = await this.api.publish(this.props.projectId, this.props.funnelId);
+    this.applyServer(result.funnel);
+  }
+
+  async duplicate() {
+    return this.api.duplicate(this.props.projectId, this.props.funnelId);
+  }
+
+  async discardDraft() {
+    const funnel = await this.api.get(this.props.projectId, this.props.funnelId);
+    this.applyServer(funnel);
+  }
+}
+
+// The dashboard's Page type is flat; the validator expects MinimalPage with
+// the question_id and friends nested under `config`. Surface the relevant
+// dashboard fields under `config` so the shared validator works unchanged.
+function pageToConfig(p: Page): Record<string, unknown> {
+  return {
+    question_id: p.question_id,
+    title: p.title,
+    headline: p.headline,
+    body: p.body,
+    options: p.options,
+    min: p.min,
+    max: p.max,
+    step: p.step,
+    suffix: p.suffix,
+    duration_ms: p.duration,
+  };
 }
