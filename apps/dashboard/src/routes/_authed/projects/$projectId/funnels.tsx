@@ -4,6 +4,7 @@ import {
   Link,
   Outlet,
   useChildMatches,
+  useNavigate,
   useParams,
 } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
@@ -27,7 +28,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "../../../../ui/button";
 import { Chip } from "../../../../ui/chip";
 import { cn } from "../../../../lib/cn";
@@ -270,6 +271,20 @@ function useFunnelsList(projectId: string) {
         rpc.dashboard.projects[":projectId"].funnels.$get({ param: { projectId } }),
       ),
     select: (r) => r.funnels.map(rowToFunnel),
+  });
+}
+
+function useCreateFunnel(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; slug: string }) =>
+      unwrap<ApiFunnelRow>(
+        rpc.dashboard.projects[":projectId"].funnels.$post({
+          param: { projectId },
+          json: body,
+        }),
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["dashboard-funnels", projectId] }),
   });
 }
 
@@ -525,7 +540,10 @@ function FunnelsPage({ projectId }: { projectId: string }) {
       </div>
 
       {showTemplates && (
-        <TemplatesModal onClose={() => setShowTemplates(false)} />
+        <TemplatesModal
+          projectId={projectId}
+          onClose={() => setShowTemplates(false)}
+        />
       )}
     </>
   );
@@ -723,10 +741,18 @@ function RowAction({
   );
 }
 
-function TemplatesModal({ onClose }: { onClose: () => void }) {
+function TemplatesModal({
+  projectId,
+  onClose,
+}: {
+  projectId: string;
+  onClose: () => void;
+}) {
   const [picked, setPicked] = useState<SystemTemplate | null>(null);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
+  const navigate = useNavigate();
+  const createFunnel = useCreateFunnel(projectId);
 
   const toSlug = (s: string) =>
     s
@@ -851,10 +877,22 @@ function TemplatesModal({ onClose }: { onClose: () => void }) {
                   <Button
                     variant="solid-primary"
                     size="sm"
-                    disabled={!name || !slug}
-                    onClick={onClose}
+                    disabled={!name || !slug || createFunnel.isPending}
+                    onClick={async () => {
+                      // Template-based create isn't wired yet — only the
+                      // blank "Start from scratch" path lands here. The
+                      // server seeds an empty draft pages_json; the
+                      // builder then takes over.
+                      const created = await createFunnel.mutateAsync({ name, slug });
+                      onClose();
+                      navigate({
+                        to: "/projects/$projectId/funnels/$funnelId",
+                        params: { projectId, funnelId: created.id },
+                      });
+                    }}
                   >
-                    Create funnel <ArrowRight size={13} />
+                    {createFunnel.isPending ? "Creating…" : "Create funnel"}
+                    <ArrowRight size={13} />
                   </Button>
                 </div>
               </div>
