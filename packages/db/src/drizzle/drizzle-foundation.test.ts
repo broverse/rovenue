@@ -1,6 +1,10 @@
 import { eq, sql } from "drizzle-orm";
-import { describe, expect, it, test } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, test } from "vitest";
+import { Pool } from "pg";
+import { drizzle as drizzleClient } from "drizzle-orm/node-postgres";
+import * as schema from "./schema";
 import {
+  access,
   apiKeys,
   audiences,
   auditLogs,
@@ -569,5 +573,103 @@ describe("billing tables", () => {
         "updatedAt",
       ]),
     );
+  });
+});
+
+// =============================================================
+// access — catalog table (shape + integration)
+// =============================================================
+//
+// The shape assertion is type-only. The two integration tests
+// require a live Postgres (host port 5433 in the dev compose
+// stack), matching the convention in
+// `repositories/credit-ledger.test.ts`.
+
+process.env.DATABASE_URL ??=
+  "postgresql://rovenue:rovenue@localhost:5433/rovenue";
+
+let accessPool: Pool;
+let accessDb: ReturnType<typeof drizzleClient<typeof schema>>;
+
+beforeAll(() => {
+  accessPool = new Pool({ connectionString: process.env.DATABASE_URL });
+  accessDb = drizzleClient(accessPool, { schema });
+});
+
+afterAll(async () => {
+  await accessPool.end();
+});
+
+async function createTestProject() {
+  const [project] = await accessDb
+    .insert(schema.projects)
+    .values({ name: `Access Test ${Date.now()}-${Math.random()}` })
+    .returning();
+  if (!project) throw new Error("createTestProject: no row returned");
+  return project;
+}
+
+describe("access table", () => {
+  it("has the catalog columns", () => {
+    const cols = Object.keys(access);
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        "id",
+        "projectId",
+        "identifier",
+        "displayName",
+        "description",
+        "metadata",
+        "createdAt",
+        "updatedAt",
+      ]),
+    );
+  });
+
+  it("creates and retrieves a row scoped to project", async () => {
+    const project = await createTestProject();
+    const [row] = await accessDb
+      .insert(access)
+      .values({
+        projectId: project.id,
+        identifier: "pro",
+        displayName: "Pro Access",
+        description: "Unlocks paid features",
+      })
+      .returning();
+    expect(row.identifier).toBe("pro");
+    expect(row.metadata).toEqual({});
+  });
+
+  it("enforces (projectId, identifier) uniqueness", async () => {
+    const project = await createTestProject();
+    await accessDb.insert(access).values({
+      projectId: project.id,
+      identifier: "dup",
+      displayName: "Dup",
+    });
+    // Drizzle wraps PG errors in DrizzleQueryError; the canonical
+    // "duplicate key value violates unique constraint" string lives
+    // on the `.cause` chain, so flatten the message chain before
+    // matching.
+    let captured: unknown;
+    try {
+      await accessDb.insert(access).values({
+        projectId: project.id,
+        identifier: "dup",
+        displayName: "Dup 2",
+      });
+    } catch (err) {
+      captured = err;
+    }
+    expect(captured).toBeDefined();
+    const messages: string[] = [];
+    let cursor: unknown = captured;
+    while (cursor && typeof cursor === "object") {
+      const m = (cursor as { message?: unknown }).message;
+      if (typeof m === "string") messages.push(m);
+      cursor = (cursor as { cause?: unknown }).cause;
+    }
+    expect(messages.join(" | ")).toMatch(/duplicate key/i);
   });
 });

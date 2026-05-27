@@ -514,6 +514,37 @@ export const apiKeys = pgTable(
 );
 
 // =============================================================
+// access (catalog of access rights — replaces free-form
+// entitlement key strings). One row per (projectId, identifier).
+// Referenced from products.accessIds[] and subscriber_access.accessId.
+// =============================================================
+
+export const access = pgTable(
+  "access",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    identifier: text("identifier").notNull(),
+    displayName: text("displayName").notNull(),
+    description: text("description"),
+    metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectIdIdentifierKey: uniqueIndex(
+      "access_projectId_identifier_key",
+    ).on(t.projectId, t.identifier),
+  }),
+);
+
+// =============================================================
 // products
 // =============================================================
 
@@ -1601,6 +1632,9 @@ export type NewAuditLogRow = typeof auditLogs.$inferInsert;
 
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type NewApiKey = typeof apiKeys.$inferInsert;
+
+export type AccessRow = typeof access.$inferSelect;
+export type NewAccessRow = typeof access.$inferInsert;
 
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
