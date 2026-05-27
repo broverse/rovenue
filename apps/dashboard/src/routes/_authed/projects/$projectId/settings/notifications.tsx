@@ -20,7 +20,7 @@ import {
 // on PATCH); the UI surfaces the error string from the API.
 
 export const Route = createFileRoute(
-  "/_authed/projects/$projectId/settings/notifications" as never,
+  "/_authed/projects/$projectId/settings/notifications",
 )({
   component: ProjectNotificationsSettingsRoute,
 });
@@ -28,8 +28,8 @@ export const Route = createFileRoute(
 function ProjectNotificationsSettingsRoute() {
   const { t } = useTranslation();
   const { projectId } = useParams({
-    from: "/_authed/projects/$projectId/settings/notifications" as never,
-  }) as { projectId: string };
+    from: "/_authed/projects/$projectId/settings/notifications",
+  });
 
   const project = useProject(projectId);
   const defaults = useProjectNotificationDefaults(projectId);

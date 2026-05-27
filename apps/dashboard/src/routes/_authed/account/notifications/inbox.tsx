@@ -17,7 +17,7 @@ import {
 
 // File-route path: /account/notifications/inbox
 export const Route = createFileRoute(
-  "/_authed/account/notifications/inbox" as never,
+  "/_authed/account/notifications/inbox",
 )({
   component: InboxPage,
 });
