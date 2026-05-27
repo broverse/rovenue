@@ -59,25 +59,22 @@ const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 export const CanvasEditor = component(() => {
   const vm = useService(FunnelDraftViewModel);
   const [addOpen, setAddOpen] = useState(false);
-  const [device, setDevice] = useState<Device>("phone");
-  const [zoom, setZoom] = useState(1);
   // Trackpads emit many small wheel events per gesture; accumulate deltaY
   // and only step zoom when |acc| crosses the threshold. Mouse wheels
   // typically emit deltaY ~100 per click so a single click still steps.
   const wheelAccRef = useRef(0);
   const page = vm.selectedPage;
   if (!page) return null;
+  const device = vm.canvasDevice;
+  const zoom = vm.canvasZoom;
   const idx = vm.selectedIdx;
   const frame = DEVICE_FRAMES[device];
 
   const stepZoom = (dir: 1 | -1) => {
-    const i = ZOOM_STEPS.indexOf(zoom);
-    if (i < 0) {
-      setZoom(1);
-      return;
-    }
+    let i = ZOOM_STEPS.findIndex((s) => s >= zoom);
+    if (i < 0) i = ZOOM_STEPS.length - 1;
     const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, i + dir))];
-    setZoom(next);
+    vm.setCanvasZoom(next);
   };
 
   return (
@@ -117,7 +114,7 @@ export const CanvasEditor = component(() => {
               <button
                 key={d}
                 type="button"
-                onClick={() => setDevice(d)}
+                onClick={() => vm.setCanvasDevice(d)}
                 title={D.label}
                 className={cn(
                   "flex h-6 w-7 cursor-pointer items-center justify-center rounded transition",
@@ -142,7 +139,7 @@ export const CanvasEditor = component(() => {
           </button>
           <button
             type="button"
-            onClick={() => setZoom(1)}
+            onClick={() => vm.setCanvasZoom(1)}
             title="Reset zoom (1×)"
             className="min-w-[44px] cursor-pointer rounded px-1 font-rv-mono text-[11px] tabular-nums text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
           >
@@ -158,7 +155,7 @@ export const CanvasEditor = component(() => {
             <Plus size={12} />
           </button>
         </div>
-        <ToolBtn title="Fit to canvas (1×)" onClick={() => setZoom(1)}>
+        <ToolBtn title="Fit to canvas (1×)" onClick={() => vm.setCanvasZoom(1)}>
           <Maximize size={13} />
         </ToolBtn>
 

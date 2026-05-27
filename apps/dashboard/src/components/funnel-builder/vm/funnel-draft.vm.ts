@@ -54,6 +54,21 @@ export class FunnelDraftViewModel {
   @state autosaveStatus: "saved" | "saving" | "error" = "saved";
   @state lastSavedAt: number | null = null;
 
+  // Canvas preview UI state (device frame + zoom). Lives on the VM so
+  // `component()`-wrapped subscribers (CanvasEditor toolbar, the scaled
+  // wrapper) re-render reliably when they change — useState inside an
+  // impair component proved flaky for zoom because React's setState
+  // didn't always reach Vue's effect scheduler before paint.
+  @state canvasDevice: "phone" | "tablet" | "desktop" = "phone";
+  @state canvasZoom = 1;
+
+  setCanvasDevice(d: "phone" | "tablet" | "desktop") {
+    this.canvasDevice = d;
+  }
+  setCanvasZoom(z: number) {
+    this.canvasZoom = Math.max(0.25, Math.min(3, z));
+  }
+
   // Mirrors of Props.projectId / Props.funnelId so React-side consumers
   // (e.g. the paywall product picker that runs a TanStack Query) can read
   // them without violating the private `props` field on this VM.
