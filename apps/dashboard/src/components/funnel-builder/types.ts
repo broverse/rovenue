@@ -227,6 +227,10 @@ export type Page = {
   productId?: string;
   trial?: number;
   benefits?: string[];
+  // Optional media displayed above the question on the preview.
+  // Driven by the Text / Image / Video segmented control in the sidebar.
+  mediaKind?: "none" | "image" | "video";
+  mediaUrl?: string;
   // Inputs
   placeholder?: string;
   // contact_info — which sub-fields are required

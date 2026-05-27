@@ -58,6 +58,21 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
         </div>
       )}
       <div className="mt-4 flex flex-1 flex-col gap-2 overflow-hidden">
+        {page.mediaKind === "image" && page.mediaUrl && (
+          <img
+            src={page.mediaUrl}
+            alt=""
+            className="mb-2 max-h-[180px] w-full rounded-lg object-cover"
+          />
+        )}
+        {page.mediaKind === "video" && page.mediaUrl && (
+          <video
+            src={page.mediaUrl}
+            controls
+            playsInline
+            className="mb-2 max-h-[180px] w-full rounded-lg bg-black object-cover"
+          />
+        )}
         <h1 className="m-0 text-[18px] font-semibold leading-tight tracking-tight">
           {page.title || meta.label}
         </h1>

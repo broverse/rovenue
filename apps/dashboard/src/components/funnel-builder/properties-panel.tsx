@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { rpc, unwrap } from "../../lib/api";
-import { PAGE_TYPES, type Page } from "./types";
+import { PAGE_GROUPS, PAGE_TYPE_DESC, PAGE_TYPES, type Page, type PageType } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { RuleEditor } from "./rule-editor";
 
@@ -43,7 +43,6 @@ export const PropertiesPanel = component(() => {
   // `return null`. React throws "Should have a queue" otherwise when the
   // selected page flips from undefined to set between renders.
   const vm = useService(FunnelDraftViewModel);
-  const [qTab, setQTab] = useState<"text" | "video">("text");
   const { data: products = [] } = useProjectProducts(vm.projectId);
 
   const page = vm.selectedPage;
@@ -60,7 +59,6 @@ export const PropertiesPanel = component(() => {
     );
   }
   const meta = PAGE_TYPES[page.type];
-  const Ico = meta.icon;
   const rules = vm.rules[page.id] ?? [];
   const sourceIndex = vm.pages.findIndex((p) => p.id === page.id);
   const earlierQs = vm.pages
@@ -87,27 +85,42 @@ export const PropertiesPanel = component(() => {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {isQuestionPage && (
-          <Section>
-            <Segmented
-              value={qTab}
-              onChange={setQTab}
-              options={[
-                { value: "text", label: "Text", icon: <TypeIcon size={12} /> },
-                { value: "video", label: "Video", icon: <Play size={12} /> },
-              ]}
-            />
-          </Section>
-        )}
+        {/* Media tabs — switching to Image/Video reveals a URL input
+            and the chosen media renders above the title in the preview. */}
+        <Section>
+          <Segmented
+            value={page.mediaKind ?? "none"}
+            onChange={(v) => {
+              set({ mediaKind: v === "none" ? "none" : v });
+              if (v === "none") set({ mediaUrl: "" });
+            }}
+            options={[
+              { value: "none", label: "Text", icon: <TypeIcon size={12} /> },
+              { value: "image", label: "Image", icon: <ImageIcon size={12} /> },
+              { value: "video", label: "Video", icon: <Play size={12} /> },
+            ]}
+          />
+          {(page.mediaKind === "image" || page.mediaKind === "video") && (
+            <Field label="Media URL" className="mt-3">
+              <input
+                value={page.mediaUrl ?? ""}
+                onChange={(e) => set({ mediaUrl: e.currentTarget.value })}
+                placeholder={
+                  page.mediaKind === "image"
+                    ? "https://cdn.example.com/photo.jpg"
+                    : "https://cdn.example.com/clip.mp4"
+                }
+                className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+              />
+            </Field>
+          )}
+        </Section>
 
         <Section title={isQuestionPage ? "Answer type" : "Page type"}>
-          <div className="flex items-center gap-2 rounded-md border border-rv-divider bg-rv-c2 px-2.5 py-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded bg-rv-c3 text-rv-mute-600">
-              <Ico size={13} />
-            </div>
-            <div className="flex-1 text-[13px] text-foreground">{meta.label}</div>
-            <ChevronDown size={14} className="text-rv-mute-500" />
-          </div>
+          <AnswerTypeDropdown
+            value={page.type}
+            onChange={(t) => set({ type: t })}
+          />
         </Section>
 
         {/* Content editing — replaces the inline canvas inputs. Every page
@@ -858,7 +871,10 @@ function Segmented<T extends string>({
   options: ReadonlyArray<{ value: T; label: string; icon: React.ReactNode }>;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-1 rounded-md border border-rv-divider bg-rv-c2 p-0.5">
+    <div
+      className="grid gap-1 rounded-md border border-rv-divider bg-rv-c2 p-0.5"
+      style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+    >
       {options.map((o) => (
         <button
           key={o.value}
@@ -873,6 +889,89 @@ function Segmented<T extends string>({
           {o.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+function AnswerTypeDropdown({
+  value,
+  onChange,
+}: {
+  value: PageType;
+  onChange: (t: PageType) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = PAGE_TYPES[value];
+  const CurIco = current.icon;
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-rv-divider bg-rv-c2 px-2.5 py-2 transition hover:bg-rv-c3"
+      >
+        <div className="flex h-6 w-6 items-center justify-center rounded bg-rv-c3 text-rv-mute-600">
+          <CurIco size={13} />
+        </div>
+        <div className="flex-1 text-left text-[13px] text-foreground">{current.label}</div>
+        <ChevronDown
+          size={14}
+          className={cn(
+            "text-rv-mute-500 transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-[49]" onClick={() => setOpen(false)} />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="absolute right-0 z-50 mt-1 max-h-[480px] w-[320px] overflow-y-auto rounded-lg border border-rv-divider-strong bg-rv-c1 p-2 shadow-[0_18px_44px_rgba(0,0,0,0.5)]"
+          >
+            {PAGE_GROUPS.map((g) => (
+              <div key={g.label} className="mt-2 first:mt-0">
+                <div className="mb-1 px-2 font-rv-mono text-[9px] uppercase tracking-wider text-rv-mute-500">
+                  {g.label}
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  {g.types.map((t) => {
+                    const m = PAGE_TYPES[t];
+                    const I = m.icon;
+                    const active = t === value;
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => {
+                          onChange(t);
+                          setOpen(false);
+                        }}
+                        className={cn(
+                          "flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left transition",
+                          active
+                            ? "bg-rv-accent-500/15 text-rv-accent-500"
+                            : "text-foreground hover:bg-rv-c2",
+                        )}
+                      >
+                        <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-rv-c3 text-rv-mute-600">
+                          <I size={13} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[12px] font-medium">{m.label}</div>
+                          <div className="text-[10px] text-rv-mute-500">
+                            {PAGE_TYPE_DESC[t]}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
