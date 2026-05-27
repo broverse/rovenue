@@ -13,6 +13,7 @@ import {
   checkHostname,
   verifyCustomDomain,
 } from "../../services/custom-domains/verify";
+import { invalidateHost } from "../../services/custom-domains/host-resolver";
 
 // =============================================================
 // Dashboard: Custom Domains
@@ -194,6 +195,11 @@ export const customDomainsRoute = new Hono()
       return next;
     });
 
+    // Bust the resolver cache so the next request sees the new
+    // verification state (a negative entry from before the verify
+    // landed would otherwise live for up to 60 s).
+    await invalidateHost(updated.hostname);
+
     return c.json(ok({ ...serialize(updated), result }));
   })
 
@@ -227,6 +233,6 @@ export const customDomainsRoute = new Hono()
       );
     });
 
-    // TODO (step 5): invalidate the Redis hostname→funnel cache here.
+    await invalidateHost(row.hostname);
     return c.json(ok({ deleted: true }));
   });

@@ -37,6 +37,7 @@ import {
 } from "../../services/funnel/branching-evaluator";
 import { generateClaimToken, hashToken } from "../../services/funnel/token";
 import { emitFunnelEvent } from "../../services/funnel/outbox";
+import { resolveHost } from "../../services/custom-domains/host-resolver";
 
 interface PublishedRuntimeConfig {
   id: string;
@@ -95,6 +96,24 @@ export const publicFunnelsRoute = new Hono()
     "*",
     cors({ origin: "*", allowMethods: ["GET", "POST"], maxAge: 86400 }),
   )
+
+  // ---------------------------------------------------------------
+  // GET /host/lookup — resolve the current Host header to a slug
+  //
+  // Lets the SDK discover its funnel slug when it's loaded from a
+  // custom domain (no slug in the URL). Returns 404 if the Host is
+  // unknown, unverified, or its cert isn't issued yet — anything
+  // else would mean the edge is serving traffic that can't be
+  // attributed to a funnel.
+  // ---------------------------------------------------------------
+  .get("/host/lookup", async (c) => {
+    const host = c.req.header("host") ?? "";
+    const resolved = await resolveHost(host);
+    if (!resolved) {
+      throw new HTTPException(404, { message: "Unknown host" });
+    }
+    return c.json({ data: resolved });
+  })
 
   // ---------------------------------------------------------------
   // GET /funnels/:slug — published runtime bundle
