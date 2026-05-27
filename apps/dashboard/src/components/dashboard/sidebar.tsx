@@ -6,6 +6,7 @@ import { AppSwitcher } from "./app-switcher";
 import { SidebarNavLink } from "./sidebar-nav-link";
 import { SidebarNewButton } from "./sidebar-new-button";
 import { NAV_SECTIONS } from "./navigation";
+import logoUrl from "../../assets/logos/logo.svg";
 
 type SidebarProps = {
   projectId: string;
@@ -41,6 +42,9 @@ export function Sidebar({ projectId, projectName, envLabel, open = false, onClos
         open ? "translate-x-0" : "-translate-x-full",
       )}
     >
+      <div className="flex h-12 items-center border-b border-rv-divider px-3">
+        <img src={logoUrl} alt="Rovenue" className="h-5 w-auto select-none" draggable={false} />
+      </div>
       <div className="flex items-center border-b border-rv-divider lg:border-b-0">
         <div className="min-w-0 flex-1">
           <AppSwitcher projectId={projectId} projectName={projectName} envLabel={envLabel} />

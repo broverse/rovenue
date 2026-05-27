@@ -2,6 +2,7 @@ import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Trans, useTranslation } from "react-i18next";
 import { signIn } from "../lib/auth";
+import logoUrl from "../assets/logos/logo.svg";
 
 export const Route = createFileRoute("/login")({
   component: LoginRouteComponent,
@@ -57,8 +58,7 @@ export function LoginPage({ error }: { error?: string }) {
 
         <header className="si-bar">
           <div className="si-logo">
-            <span className="mark">R</span>
-            <span>Rovenue</span>
+            <img src={logoUrl} alt="Rovenue" className="si-logo-img" />
           </div>
         </header>
 
@@ -498,13 +498,12 @@ const LOGIN_STYLES = `
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 28px; z-index: 5;
 }
-.si-logo { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; }
-.si-logo .mark {
-  width: 26px; height: 26px; border-radius: 7px;
-  background: linear-gradient(135deg, var(--si-primary-400), var(--si-primary-700));
-  display: inline-flex; align-items: center; justify-content: center;
-  font-family: "Geist Mono", ui-monospace, monospace; font-size: 13px; color: #fff;
-  box-shadow: 0 4px 20px color-mix(in srgb, var(--si-primary-500) 35%, transparent);
+.si-logo { display: flex; align-items: center; }
+.si-logo-img {
+  height: 28px;
+  width: auto;
+  display: block;
+  user-select: none;
 }
 .si-bar-cta { font-size: 12.5px; color: var(--si-mute-600); }
 .si-bar-cta a {
