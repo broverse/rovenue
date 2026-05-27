@@ -79,4 +79,26 @@ public final class Rovenue: @unchecked Sendable {
     public var version: String {
         sdkVersion()
     }
+
+    // MARK: - Identity
+
+    /// Returns the SDK's current user (anonymous ID + optional known ID).
+    public func currentUser() async -> User {
+        await dispatcher.runNonThrowing { [core] in
+            core.currentUser()
+        }
+    }
+
+    /// Associate the SDK's user with the customer's app-side user id.
+    /// Client-local only — server-side merging happens via the customer's
+    /// backend calling `/v1/subscribers/transfer` with the secret key.
+    public func identify(_ knownUserId: String) async throws {
+        try await dispatcher.run { [core] in
+            do {
+                try core.identify(knownUserId: knownUserId)
+            } catch let err as RovenueError {
+                throw mapError(err)
+            }
+        }
+    }
 }
