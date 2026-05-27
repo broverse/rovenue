@@ -695,7 +695,9 @@ export const subscriberAccess = pgTable(
     purchaseId: text("purchaseId")
       .notNull()
       .references(() => purchases.id, { onDelete: "cascade" }),
-    entitlementKey: text("entitlementKey").notNull(),
+    accessId: text("accessId")
+      .notNull()
+      .references(() => access.id, { onDelete: "restrict" }),
     isActive: boolean("isActive").notNull().default(true),
     expiresDate: timestamp("expiresDate", { withTimezone: true }),
     store: store("store").notNull(),
@@ -710,9 +712,9 @@ export const subscriberAccess = pgTable(
     subscriberIdIsActiveIdx: index(
       "subscriber_access_subscriberId_isActive_idx",
     ).on(t.subscriberId, t.isActive),
-    subscriberIdEntitlementKeyIdx: index(
-      "subscriber_access_subscriberId_entitlementKey_idx",
-    ).on(t.subscriberId, t.entitlementKey),
+    subscriberIdAccessIdIdx: index(
+      "subscriber_access_subscriberId_accessId_idx",
+    ).on(t.subscriberId, t.accessId),
   }),
 );
 
