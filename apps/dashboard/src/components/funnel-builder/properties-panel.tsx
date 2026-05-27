@@ -9,6 +9,7 @@ import {
   Play,
   Plus,
   Type as TypeIcon,
+  X,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { rpc, unwrap } from "../../lib/api";
@@ -96,6 +97,199 @@ export const PropertiesPanel = component(() => {
             <div className="flex-1 text-[13px] text-foreground">{meta.label}</div>
             <ChevronDown size={14} className="text-rv-mute-500" />
           </div>
+        </Section>
+
+        {/* Content editing — replaces the inline canvas inputs. Every page
+            type surfaces the fields the preview renders, so the canvas
+            stays read-only and the sidebar is the single edit surface. */}
+        <Section title="Content">
+          {page.type !== "paywall" && page.type !== "success" && (
+            <>
+              <Field label="Title" className="mb-3">
+                <input
+                  value={page.title ?? ""}
+                  onChange={(e) => set({ title: e.currentTarget.value })}
+                  placeholder="Your question or screen title"
+                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+              </Field>
+              {page.type !== "loading" && page.type !== "result" && (
+                <Field label="Subtitle" className="mb-3">
+                  <input
+                    value={page.subtitle ?? ""}
+                    onChange={(e) => set({ subtitle: e.currentTarget.value })}
+                    placeholder="Optional helper text"
+                    className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                  />
+                </Field>
+              )}
+            </>
+          )}
+
+          {(page.type === "single_choice" || page.type === "multi_choice") && (
+            <Field label={`Options · ${(page.options ?? []).length}`}>
+              <div className="flex flex-col gap-1.5">
+                {(page.options ?? []).map((o, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-1.5 rounded border border-rv-divider bg-rv-c2 px-1.5 py-1"
+                  >
+                    <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded bg-rv-c3 font-rv-mono text-[10px] font-bold text-rv-mute-600">
+                      {String.fromCharCode(65 + i)}
+                    </span>
+                    <input
+                      value={o.label}
+                      onChange={(e) => vm.updateOption(page.id, i, { label: e.currentTarget.value })}
+                      placeholder="Label"
+                      className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none"
+                    />
+                    <input
+                      value={o.value}
+                      onChange={(e) => vm.updateOption(page.id, i, { value: e.currentTarget.value })}
+                      placeholder="value"
+                      className="w-20 rounded border border-rv-divider bg-rv-c1 px-1.5 py-0.5 font-rv-mono text-[10px] text-rv-mute-700 outline-none focus:border-rv-accent-500"
+                    />
+                    <button
+                      type="button"
+                      title="Remove"
+                      onClick={() => vm.removeOption(page.id, i)}
+                      className="flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded text-rv-mute-500 hover:bg-rv-c3 hover:text-rv-danger"
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => vm.addOption(page.id)}
+                  className="mt-1 inline-flex h-7 w-full cursor-pointer items-center justify-center gap-1.5 rounded border border-dashed border-rv-divider bg-rv-c2 px-2 text-[11px] text-rv-mute-600 transition hover:border-rv-accent-500 hover:text-rv-accent-500"
+                >
+                  <Plus size={11} />
+                  Add option
+                </button>
+              </div>
+            </Field>
+          )}
+
+          {page.type === "info" && (
+            <Field label="Body · markdown">
+              <textarea
+                value={page.body ?? ""}
+                onChange={(e) => set({ body: e.currentTarget.value })}
+                rows={4}
+                placeholder="Hello, world."
+                className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 text-[12px] leading-relaxed text-foreground outline-none focus:border-rv-accent-500"
+              />
+            </Field>
+          )}
+
+          {page.type === "result" && (
+            <Field label="Body">
+              <textarea
+                value={page.body ?? ""}
+                onChange={(e) => set({ body: e.currentTarget.value })}
+                rows={3}
+                placeholder="Supports {{question_id}} tokens"
+                className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 text-[12px] leading-relaxed text-foreground outline-none focus:border-rv-accent-500"
+              />
+            </Field>
+          )}
+
+          {page.type === "paywall" && (
+            <>
+              <Field label="Headline" className="mb-3">
+                <input
+                  value={page.headline ?? ""}
+                  onChange={(e) => set({ headline: e.currentTarget.value })}
+                  placeholder="Unlock your plan"
+                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+              </Field>
+              <Field label={`Benefits · ${(page.benefits ?? []).length}`}>
+                <div className="flex flex-col gap-1.5">
+                  {(page.benefits ?? []).map((b, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-1.5 rounded border border-rv-divider bg-rv-c2 px-1.5 py-1"
+                    >
+                      <input
+                        value={b}
+                        onChange={(e) => {
+                          const next = [...(page.benefits ?? [])];
+                          next[i] = e.currentTarget.value;
+                          set({ benefits: next });
+                        }}
+                        placeholder="Benefit line"
+                        className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none"
+                      />
+                      <button
+                        type="button"
+                        title="Remove"
+                        onClick={() => {
+                          const next = [...(page.benefits ?? [])];
+                          next.splice(i, 1);
+                          set({ benefits: next });
+                        }}
+                        className="flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded text-rv-mute-500 hover:bg-rv-c3 hover:text-rv-danger"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => set({ benefits: [...(page.benefits ?? []), "New benefit"] })}
+                    className="mt-1 inline-flex h-7 w-full cursor-pointer items-center justify-center gap-1.5 rounded border border-dashed border-rv-divider bg-rv-c2 px-2 text-[11px] text-rv-mute-600 transition hover:border-rv-accent-500 hover:text-rv-accent-500"
+                  >
+                    <Plus size={11} />
+                    Add benefit
+                  </button>
+                </div>
+              </Field>
+            </>
+          )}
+
+          {page.type === "success" && (
+            <>
+              <Field label="Headline" className="mb-3">
+                <input
+                  value={page.title ?? ""}
+                  onChange={(e) => set({ title: e.currentTarget.value })}
+                  placeholder="You're in"
+                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+              </Field>
+              <Field label="Body" className="mb-3">
+                <input
+                  value={page.body ?? ""}
+                  onChange={(e) => set({ body: e.currentTarget.value })}
+                  placeholder="What happens next"
+                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+              </Field>
+              <Field label="CTA label">
+                <input
+                  value={page.cta ?? ""}
+                  onChange={(e) => set({ cta: e.currentTarget.value })}
+                  placeholder="Open app"
+                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+              </Field>
+            </>
+          )}
+
+          {page.type === "loading" && (
+            <Field label="Steps · one per line">
+              <textarea
+                value={(page.steps ?? []).join("\n")}
+                onChange={(e) =>
+                  set({ steps: e.currentTarget.value.split("\n").filter(Boolean) })
+                }
+                rows={4}
+                className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+              />
+            </Field>
+          )}
         </Section>
 
         {(page.type === "single_choice" || page.type === "multi_choice") && (
