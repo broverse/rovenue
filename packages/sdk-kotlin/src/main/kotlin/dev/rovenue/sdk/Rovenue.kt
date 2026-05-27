@@ -137,4 +137,30 @@ class Rovenue private constructor(
     @Throws(RovenueException::class)
     suspend fun consumeCredits(amount: Long, description: String? = null): Long =
         dispatcher.run { core.consumeCredits(amount, description) }
+
+    // ---------------------------------------------------------------
+    // Receipts
+    // ---------------------------------------------------------------
+
+    /** Post an Apple StoreKit 2 JWS to the server for validation.
+     *  Caller obtains JWS via `Product.purchase()` on iOS (this SDK does
+     *  NOT call StoreKit). On success, refreshes entitlements + credits
+     *  and returns a ReceiptResult. */
+    @Throws(RovenueException::class)
+    suspend fun postAppleReceipt(
+        jws: String,
+        productId: String,
+    ): dev.rovenue.sdk.generated.ReceiptResult =
+        dispatcher.run { core.postAppleReceipt(jws, productId) }
+
+    /** Post a Google Play Billing purchase token to the server for
+     *  validation. Caller obtains the token via `Purchase.purchaseToken`
+     *  on Android. On success, refreshes entitlements + credits and
+     *  returns a ReceiptResult. */
+    @Throws(RovenueException::class)
+    suspend fun postGoogleReceipt(
+        receipt: String,
+        productId: String,
+    ): dev.rovenue.sdk.generated.ReceiptResult =
+        dispatcher.run { core.postGoogleReceipt(receipt, productId) }
 }
