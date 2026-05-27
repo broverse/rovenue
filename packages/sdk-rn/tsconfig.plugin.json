@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": false,
+    "outDir": "./plugin/build",
+    "rootDir": "./plugin",
+    "types": ["node"]
+  },
+  "include": ["plugin/**/*.ts"],
+  "exclude": ["plugin/build", "node_modules"]
+}
