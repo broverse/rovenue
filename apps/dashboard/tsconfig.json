@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "useDefineForClassFields": true,
+    "useDefineForClassFields": false,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
@@ -15,7 +15,9 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["vitest/globals", "@testing-library/jest-dom"]
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "types": ["vitest/globals", "@testing-library/jest-dom", "reflect-metadata"]
   },
   "include": ["src", "tests"]
 }
