@@ -1,0 +1,16 @@
+{
+  "cxxNamespace": ["rovenue"],
+  "ios": {
+    "iosModuleName": "RovenueSdkRn"
+  },
+  "android": {
+    "androidNamespace": ["rovenue"],
+    "androidCxxLibName": "RovenueSdkRn"
+  },
+  "autolinking": {
+    "RovenueNitroSpec": {
+      "swift": "HybridRovenueNitroSpec",
+      "kotlin": "dev.rovenue.sdkrn.HybridRovenueNitroSpec"
+    }
+  }
+}
