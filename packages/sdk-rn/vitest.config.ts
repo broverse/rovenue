@@ -14,4 +14,11 @@ export default defineConfig({
       ),
     },
   },
+  test: {
+    // .tsx tests render React components, which need a DOM. Plain
+    // .ts tests stay in the default node env (cheaper to spin up).
+    environmentMatchGlobs: [
+      ["**/*.test.tsx", "happy-dom"],
+    ],
+  },
 });
