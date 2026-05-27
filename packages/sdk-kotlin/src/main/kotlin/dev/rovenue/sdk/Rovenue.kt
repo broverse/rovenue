@@ -113,4 +113,28 @@ class Rovenue private constructor(
     suspend fun refreshEntitlements() {
         dispatcher.run { core.refreshEntitlements() }
     }
+
+    // ---------------------------------------------------------------
+    // Credits
+    // ---------------------------------------------------------------
+
+    /** Read the cached credit balance. Returns 0 if the cache is empty. */
+    suspend fun creditBalance(): Long =
+        dispatcher.run { core.creditBalance() }
+
+    /** Force a refresh of the credit balance against the server.
+     *  On success (when the balance changed), emits
+     *  ChangeEvent.CREDIT_BALANCE_CHANGED. */
+    @Throws(RovenueException::class)
+    suspend fun refreshCredits() {
+        dispatcher.run { core.refreshCredits() }
+    }
+
+    /** Spend credits server-side. The SDK generates an Idempotency-Key
+     *  internally — retries of the same call are server-deduped. Returns
+     *  the new balance. Throws RovenueException.InsufficientCredits if
+     *  the user lacks the balance. */
+    @Throws(RovenueException::class)
+    suspend fun consumeCredits(amount: Long, description: String? = null): Long =
+        dispatcher.run { core.consumeCredits(amount, description) }
 }
