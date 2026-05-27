@@ -122,7 +122,6 @@ export const BuilderShell = component(({ projectId }: Props) => {
   const issues = toLegacyIssues(vm.validation.errors, vm.validation.warnings);
   const sessions: Session[] = [];
 
-  const selectedIdx = vm.selectedIdx;
   const selectedPage = vm.selectedPage ?? vm.pages[0];
 
   return (
@@ -133,14 +132,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
         {vm.activeTab === "content" && (
           <>
             <ThumbRail />
-            <CanvasEditor
-              page={selectedPage}
-              allPages={vm.pages}
-              idx={selectedIdx}
-              onPrev={() => vm.goPrev()}
-              onNext={() => vm.goNext()}
-              onPreview={() => vm.openPreview()}
-            />
+            <CanvasEditor />
             <PropertiesPanel
               page={selectedPage}
               allPages={vm.pages}
