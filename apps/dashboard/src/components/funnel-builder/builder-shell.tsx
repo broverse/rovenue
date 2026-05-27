@@ -16,6 +16,7 @@ import { cn } from "../../lib/cn";
 import { TABS, type TabId, type ValidationIssue } from "./types";
 import type { ValidatorIssue } from "@rovenue/shared/funnel";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
+import { FunnelVersionsViewModel } from "./vm/funnel-versions.vm";
 import { ThumbRail } from "./thumb-rail";
 import { CanvasEditor } from "./canvas-editor";
 import { PropertiesPanel } from "./properties-panel";
@@ -261,6 +262,7 @@ const PublishDropdown = component(() => {
 
 const VersionMenu = component(() => {
   const vm = useService(FunnelDraftViewModel);
+  const versions = useService(FunnelVersionsViewModel);
   return (
     <>
       <div className="fixed inset-0 z-40" onClick={() => vm.closeVersionMenu()} />
@@ -268,7 +270,33 @@ const VersionMenu = component(() => {
         <div className="px-2 py-1 font-rv-mono text-[10px] uppercase tracking-wider text-rv-mute-500">
           Recent versions
         </div>
-        <div className="px-2 py-1 text-[11px] text-rv-mute-500">Version dropdown wired in Task 32</div>
+        {versions.isLoading && (
+          <div className="px-2 py-1 text-[11px] text-rv-mute-500">Loading…</div>
+        )}
+        {!versions.isLoading && versions.versions.length === 0 && (
+          <div className="px-2 py-1 text-[11px] text-rv-mute-500">Nothing published yet.</div>
+        )}
+        {versions.versions.slice(0, 4).map((v) => (
+          <div
+            key={v.id}
+            className="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 hover:bg-rv-c2"
+          >
+            <span className="min-w-[32px] font-rv-mono text-[11px] text-rv-mute-500">
+              v{v.versionNo}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[12px] text-foreground">{v.notes ?? "—"}</div>
+              <div className="mt-0.5 font-rv-mono text-[10px] text-rv-mute-500">
+                @{v.publishedByName ?? "unknown"}
+              </div>
+            </div>
+            {v.isCurrent && (
+              <span className="inline-flex h-4 items-center rounded-full bg-rv-success/15 px-1.5 font-rv-mono text-[9px] font-medium text-rv-success">
+                LIVE
+              </span>
+            )}
+          </div>
+        ))}
         <div className="my-1 border-t border-rv-divider" />
         <button
           type="button"
