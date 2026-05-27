@@ -75,4 +75,21 @@ class Rovenue private constructor(
     private fun shutdownInternal() {
         core.shutdown()
     }
+
+    // ---------------------------------------------------------------
+    // Identity
+    // ---------------------------------------------------------------
+
+    /** Returns the SDK's current user (anonymous ID + optional known ID).
+     *  Cache read — never hits the network. */
+    suspend fun currentUser(): dev.rovenue.sdk.generated.User =
+        dispatcher.run { core.currentUser() }
+
+    /** Associate the SDK's user with the customer's app-side user id.
+     *  Client-local only — server-side merging happens via the customer's
+     *  backend calling /v1/subscribers/transfer with the secret key. */
+    @Throws(RovenueException::class)
+    suspend fun identify(knownUserId: String) {
+        dispatcher.run { core.identify(knownUserId) }
+    }
 }
