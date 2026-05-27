@@ -1,5 +1,11 @@
 import { useMemo, useState } from "react";
-import { createFileRoute, useParams } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  Outlet,
+  useChildMatches,
+  useParams,
+} from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
@@ -35,8 +41,13 @@ function FunnelsRoute() {
     from: "/_authed/projects/$projectId/funnels",
   });
   const { data: project } = useProject(projectId);
+  // When `funnels/$funnelId` is active, defer fully to the child so
+  // the Builder's full-bleed UI replaces the list rather than
+  // stacking under it.
+  const childMatches = useChildMatches();
   if (!project) return null;
-  return <FunnelsPage />;
+  if (childMatches.length > 0) return <Outlet />;
+  return <FunnelsPage projectId={projectId} />;
 }
 
 type FunnelStatus = "draft" | "published" | "archived";
@@ -325,7 +336,7 @@ function Sparkline({ data, color = "var(--color-rv-accent-500)" }: { data: numbe
 
 type Scope = "all" | "published" | "draft" | "archived";
 
-function FunnelsPage() {
+function FunnelsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [scope, setScope] = useState<Scope>("all");
   const [sortBy, setSortBy] = useState("Recently edited");
@@ -559,7 +570,7 @@ function FunnelsPage() {
               </thead>
               <tbody>
                 {filtered.map((f) => (
-                  <FunnelRow key={f.id} funnel={f} />
+                  <FunnelRow key={f.id} funnel={f} projectId={projectId} />
                 ))}
               </tbody>
             </table>
@@ -634,11 +645,21 @@ function Th({
   );
 }
 
-function FunnelRow({ funnel: f }: { funnel: Funnel }) {
+function FunnelRow({
+  funnel: f,
+  projectId,
+}: {
+  funnel: Funnel;
+  projectId: string;
+}) {
   return (
     <tr className="group border-b border-white/[0.04] last:border-b-0 hover:bg-white/[0.02]">
       <td className="px-3.5 py-3.5 align-middle">
-        <div className="flex cursor-pointer items-center gap-3">
+        <Link
+          to="/projects/$projectId/funnels/$funnelId"
+          params={{ projectId, funnelId: f.id }}
+          className="flex cursor-pointer items-center gap-3 text-inherit no-underline"
+        >
           <div
             className={cn(
               "relative flex size-9 shrink-0 items-center justify-center rounded-md text-[13px] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]",
@@ -666,7 +687,7 @@ function FunnelRow({ funnel: f }: { funnel: Funnel }) {
               /{f.slug}
             </div>
           </div>
-        </div>
+        </Link>
       </td>
       <td className="px-3.5 py-3.5 align-middle">
         <div className="inline-flex items-center gap-1.5 text-[11px]">
