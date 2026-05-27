@@ -1,6 +1,12 @@
 import { Search } from "lucide-react";
 import { PAGE_GROUPS, PAGE_TYPE_DESC, PAGE_TYPES, type PageType } from "./types";
 
+// `align` controls where the 360px popover anchors relative to its trigger:
+//   - "left"          → flush with trigger's left edge (default; for wide containers)
+//   - "right"         → flush with trigger's right edge
+//   - "rightOfTrigger"→ starts where the trigger ends, opens into the next column.
+//                       Use this inside narrow surfaces (the ThumbRail) where
+//                       neither left- nor right-anchored 360px would fit.
 export function AddContentPopover({
   onPick,
   onClose,
@@ -8,16 +14,20 @@ export function AddContentPopover({
 }: {
   onPick: (type: PageType) => void;
   onClose: () => void;
-  align?: "left" | "right";
+  align?: "left" | "right" | "rightOfTrigger";
 }) {
+  const alignClass =
+    align === "right"
+      ? "right-0"
+      : align === "rightOfTrigger"
+        ? "left-full ml-2"
+        : "left-0";
   return (
     <>
       <div className="fixed inset-0 z-[49]" onClick={onClose} />
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`absolute top-9 z-50 w-[360px] rounded-lg border border-rv-divider-strong bg-rv-c1 p-3 shadow-[0_18px_44px_rgba(0,0,0,0.5)] ${
-          align === "right" ? "right-0" : "left-0"
-        }`}
+        className={`absolute top-0 z-50 w-[360px] rounded-lg border border-rv-divider-strong bg-rv-c1 p-3 shadow-[0_18px_44px_rgba(0,0,0,0.5)] ${alignClass}`}
       >
         <div className="mb-2 flex items-center gap-1.5 rounded-md border border-rv-divider bg-rv-c2 px-2">
           <Search size={13} className="text-rv-mute-500" />
