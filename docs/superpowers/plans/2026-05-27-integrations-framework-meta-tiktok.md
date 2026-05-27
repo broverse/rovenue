@@ -4961,4 +4961,3069 @@ git commit -m "test(integrations): assert audit row written on dead-letter"
 
 ---
 
-<!-- PART 1 END (M0-M3). Continue in PART 2 (M4-M6) and PART 3 (M7-M8). -->
+## Milestone M4 — Backfill on activation (7-day window)
+
+When `integration_connections.is_enabled` flips false→true, enqueue every outbox event from the last 7 days as a regular deliver job tagged `isBackfill: true`. Idempotency relies on the same `jobId = ${connectionId}:${outboxEventId}` dedup applied to realtime traffic (M2) plus the DB UNIQUE on `(connection_id, outbox_event_id, created_at)` (M1).
+
+### Task M4.1: Extend AuditAction union with backfill + test_event actions
+
+**Files:**
+- Modify: `apps/api/src/lib/audit.ts`
+- Modify: `apps/api/src/lib/audit.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `apps/api/src/lib/audit.test.ts`:
+
+```ts
+it("admits integration.backfill.started, integration.backfill.completed, integration.test_event.sent", () => {
+  const a: AuditAction = "integration.backfill.started";
+  const b: AuditAction = "integration.backfill.completed";
+  const c: AuditAction = "integration.test_event.sent";
+  expect([a, b, c]).toHaveLength(3);
+});
+```
+
+Run: `pnpm --filter @rovenue/api test -- audit.test.ts`
+Expected: FAIL — literal not assignable.
+
+- [ ] **Step 2: Write minimal implementation**
+
+In `apps/api/src/lib/audit.ts`, extend the existing `AuditAction` union (literals from Part 1 M0 already include `integration.connection.created/updated/deleted/credentials.rotated/delivery.dead_letter`). Append:
+
+```ts
+| "integration.test_event.sent"
+| "integration.backfill.started"
+| "integration.backfill.completed";
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- audit.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/api/src/lib/audit.ts apps/api/src/lib/audit.test.ts
+git commit -m "feat(audit): extend AuditAction union with integration.backfill.* + test_event.sent"
+```
+
+### Task M4.2: enqueueBackfillForConnection — unit test (windowDays math)
+
+**Files:**
+- Create: `apps/api/src/services/integrations/backfill.ts`
+- Create: `apps/api/src/services/integrations/backfill.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { enqueueBackfillForConnection } from "./backfill";
+
+describe("enqueueBackfillForConnection", () => {
+  it("queries with INTERVAL '7 days' by default", async () => {
+    const queryCalls: { sql: string }[] = [];
+    const fakeDb = {
+      execute: vi.fn(async (q: { sql: string }) => {
+        queryCalls.push(q);
+        return { rows: [] };
+      }),
+    };
+    const fakeQueue = { add: vi.fn(async () => undefined) };
+    const fakeAudit = vi.fn(async () => undefined);
+    await enqueueBackfillForConnection(
+      { connectionId: "conn-1", projectId: "proj-1", providerId: "META_CAPI" },
+      { db: fakeDb as never, queue: fakeQueue as never, audit: fakeAudit, now: () => new Date() },
+    );
+    expect(queryCalls[0]!.sql).toMatch(/INTERVAL '7 days'/);
+    expect(queryCalls[0]!.sql).toMatch(/aggregate_type IN \('revenue', 'billing'\)/);
+    expect(fakeAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "integration.backfill.started",
+        metadata: { windowDays: 7, eventCount: 0 },
+      }),
+    );
+  });
+
+  it("respects a custom windowDays argument", async () => {
+    const queryCalls: { sql: string }[] = [];
+    const fakeDb = { execute: vi.fn(async (q: { sql: string }) => { queryCalls.push(q); return { rows: [] }; }) };
+    await enqueueBackfillForConnection(
+      { connectionId: "c", projectId: "p", providerId: "TIKTOK_EVENTS", windowDays: 3 },
+      { db: fakeDb as never, queue: { add: vi.fn() } as never, audit: vi.fn(), now: () => new Date() },
+    );
+    expect(queryCalls[0]!.sql).toMatch(/INTERVAL '3 days'/);
+  });
+});
+```
+
+Run: `pnpm --filter @rovenue/api test -- backfill.test.ts`
+Expected: FAIL — module not found.
+
+- [ ] **Step 2: Write minimal implementation**
+
+Create `apps/api/src/services/integrations/backfill.ts`:
+
+```ts
+import { sql } from "drizzle-orm";
+import type { Queue } from "bullmq";
+import type { ProviderId } from "./types";
+import type { IntegrationsDeliverJob } from "../../workers/integrations-deliver";
+import { buildIntegrationsDeliverJobId } from "../../workers/integrations-deliver";
+
+export interface EnqueueBackfillArgs {
+  connectionId: string;
+  projectId: string;
+  providerId: ProviderId;
+  windowDays?: number;
+}
+
+export interface EnqueueBackfillDeps {
+  db: { execute: (q: ReturnType<typeof sql>) => Promise<{ rows: Array<{ id: string; aggregate_type: string; event_type: string; payload: unknown; created_at: Date }> }> };
+  queue: Pick<Queue<IntegrationsDeliverJob>, "add">;
+  audit: (input: {
+    projectId: string;
+    actorId: string;
+    actorType: "system" | "user";
+    action: "integration.backfill.started" | "integration.backfill.completed";
+    resource: "integration_connection";
+    resourceId: string;
+    metadata: Record<string, unknown>;
+  }) => Promise<void>;
+  now: () => Date;
+}
+
+/**
+ * Re-enqueues outbox events from the last `windowDays` for a freshly-activated
+ * connection. Each job uses the same `${connectionId}:${outboxEventId}` jobId
+ * as realtime traffic, so BullMQ + the DB UNIQUE constraint co-deduplicate.
+ *
+ * CAVEAT: Meta CAPI dedup is 7d, TikTok is 14d. A reactivation inside those
+ * windows is safe (platform-side dedup kicks in even if our queue/DB doesn't).
+ * Do NOT extend windowDays beyond 14 without re-evaluating TikTok dedup.
+ */
+export async function enqueueBackfillForConnection(
+  args: EnqueueBackfillArgs,
+  deps: EnqueueBackfillDeps,
+): Promise<{ eventCount: number }> {
+  const windowDays = args.windowDays ?? 7;
+  const intervalLit = sql.raw(`INTERVAL '${windowDays} days'`);
+
+  const result = await deps.db.execute(sql`
+    SELECT id, aggregate_type, event_type, payload, created_at
+    FROM outbox_events
+    WHERE project_id = ${args.projectId}
+      AND created_at > NOW() - ${intervalLit}
+      AND aggregate_type IN ('revenue', 'billing')
+    ORDER BY created_at ASC
+    LIMIT 10000
+  `);
+
+  for (const row of result.rows) {
+    await deps.queue.add(
+      "deliver",
+      {
+        connectionId: args.connectionId,
+        projectId: args.projectId,
+        providerId: args.providerId,
+        envelope: row.payload as never,
+        isBackfill: true,
+      },
+      { jobId: buildIntegrationsDeliverJobId(args.connectionId, row.id), priority: 10 },
+    );
+  }
+
+  await deps.audit({
+    projectId: args.projectId,
+    actorId: "system",
+    actorType: "system",
+    action: "integration.backfill.started",
+    resource: "integration_connection",
+    resourceId: args.connectionId,
+    metadata: { windowDays, eventCount: result.rows.length },
+  });
+
+  return { eventCount: result.rows.length };
+}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- backfill.test.ts`
+Expected: PASS (2 cases).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/api/src/services/integrations/backfill.ts apps/api/src/services/integrations/backfill.test.ts
+git commit -m "feat(integrations): enqueueBackfillForConnection with 7d window default"
+```
+
+### Task M4.3: Hardening — chunked iteration when >10000 rows
+
+**Files:**
+- Modify: `apps/api/src/services/integrations/backfill.ts`
+- Modify: `apps/api/src/services/integrations/backfill.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Append:
+
+```ts
+it("chunks queries when more than 10000 rows would match", async () => {
+  let calls = 0;
+  const fakeDb = {
+    execute: vi.fn(async () => {
+      calls++;
+      if (calls === 1) {
+        return {
+          rows: Array.from({ length: 10000 }, (_, i) => ({
+            id: `o-${i}`, aggregate_type: "revenue", event_type: "revenue.event.recorded",
+            payload: { outboxEventId: `o-${i}` }, created_at: new Date(2026, 0, 1, 0, i),
+          })),
+        };
+      }
+      if (calls === 2) {
+        return { rows: [{ id: "o-extra", aggregate_type: "revenue", event_type: "revenue.event.recorded", payload: { outboxEventId: "o-extra" }, created_at: new Date(2026, 0, 1, 1, 0) }] };
+      }
+      return { rows: [] };
+    }),
+  };
+  const result = await enqueueBackfillForConnection(
+    { connectionId: "c", projectId: "p", providerId: "META_CAPI" },
+    { db: fakeDb as never, queue: { add: vi.fn() } as never, audit: vi.fn(), now: () => new Date() },
+  );
+  expect(result.eventCount).toBe(10001);
+  expect(calls).toBeGreaterThanOrEqual(2);
+});
+```
+
+Run: `pnpm --filter @rovenue/api test -- backfill.test.ts -t "chunks"`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+Replace the query loop in `backfill.ts` with a cursor pagination loop:
+
+```ts
+let cursor: Date | null = null;
+let total = 0;
+const PAGE_SIZE = 10000;
+while (true) {
+  const cursorClause = cursor
+    ? sql`AND created_at > ${cursor.toISOString()}::timestamptz`
+    : sql``;
+  const result = await deps.db.execute(sql`
+    SELECT id, aggregate_type, event_type, payload, created_at
+    FROM outbox_events
+    WHERE project_id = ${args.projectId}
+      AND created_at > NOW() - ${intervalLit}
+      AND aggregate_type IN ('revenue', 'billing')
+      ${cursorClause}
+    ORDER BY created_at ASC
+    LIMIT ${PAGE_SIZE}
+  `);
+  if (result.rows.length === 0) break;
+  for (const row of result.rows) {
+    await deps.queue.add(
+      "deliver",
+      { connectionId: args.connectionId, projectId: args.projectId, providerId: args.providerId, envelope: row.payload as never, isBackfill: true },
+      { jobId: buildIntegrationsDeliverJobId(args.connectionId, row.id), priority: 10 },
+    );
+    cursor = row.created_at;
+    total++;
+  }
+  if (result.rows.length < PAGE_SIZE) break;
+}
+
+await deps.audit({
+  projectId: args.projectId,
+  actorId: "system",
+  actorType: "system",
+  action: "integration.backfill.started",
+  resource: "integration_connection",
+  resourceId: args.connectionId,
+  metadata: { windowDays, eventCount: total },
+});
+
+return { eventCount: total };
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- backfill.test.ts`
+Expected: PASS (3 cases).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/api/src/services/integrations/backfill.ts apps/api/src/services/integrations/backfill.test.ts
+git commit -m "feat(integrations): chunk backfill queries (bound memory at 10000/page)"
+```
+
+### Task M4.4: handleConnectionEnableTransition helper
+
+**Files:**
+- Create: `apps/api/src/services/integrations/connection-events.ts`
+- Create: `apps/api/src/services/integrations/connection-events.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+import { describe, it, expect, vi } from "vitest";
+import { handleConnectionEnableTransition } from "./connection-events";
+
+describe("handleConnectionEnableTransition", () => {
+  it("calls enqueueBackfill when transitioning false → true", async () => {
+    const enqueue = vi.fn(async () => ({ eventCount: 0 }));
+    await handleConnectionEnableTransition(
+      { wasEnabled: false, willBeEnabled: true, connectionId: "c", projectId: "p", providerId: "META_CAPI" },
+      { enqueueBackfill: enqueue },
+    );
+    expect(enqueue).toHaveBeenCalledOnce();
+  });
+
+  it("no-ops when wasEnabled = willBeEnabled", async () => {
+    const enqueue = vi.fn();
+    await handleConnectionEnableTransition(
+      { wasEnabled: true, willBeEnabled: true, connectionId: "c", projectId: "p", providerId: "META_CAPI" },
+      { enqueueBackfill: enqueue },
+    );
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("no-ops on true → false", async () => {
+    const enqueue = vi.fn();
+    await handleConnectionEnableTransition(
+      { wasEnabled: true, willBeEnabled: false, connectionId: "c", projectId: "p", providerId: "META_CAPI" },
+      { enqueueBackfill: enqueue },
+    );
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+});
+```
+
+Run: `pnpm --filter @rovenue/api test -- connection-events.test.ts`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```ts
+import type { ProviderId } from "./types";
+
+export interface EnableTransitionArgs {
+  wasEnabled: boolean;
+  willBeEnabled: boolean;
+  connectionId: string;
+  projectId: string;
+  providerId: ProviderId;
+}
+
+export interface EnableTransitionDeps {
+  enqueueBackfill: (args: { connectionId: string; projectId: string; providerId: ProviderId }) => Promise<{ eventCount: number }>;
+}
+
+export async function handleConnectionEnableTransition(
+  args: EnableTransitionArgs,
+  deps: EnableTransitionDeps,
+): Promise<void> {
+  if (args.wasEnabled === args.willBeEnabled) return;
+  if (!args.willBeEnabled) return;
+  await deps.enqueueBackfill({
+    connectionId: args.connectionId,
+    projectId: args.projectId,
+    providerId: args.providerId,
+  });
+}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- connection-events.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/api/src/services/integrations/connection-events.ts apps/api/src/services/integrations/connection-events.test.ts
+git commit -m "feat(integrations): handleConnectionEnableTransition gates backfill on false→true"
+```
+
+### Task M4.5: Integration test — N outbox events backfilled with isBackfill=true
+
+**Files:**
+- Create: `apps/api/src/services/integrations/backfill.integration.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+import { describe, it, beforeAll, afterAll, expect } from "vitest";
+import { createId } from "@paralleldrive/cuid2";
+import { Queue } from "bullmq";
+import { Redis } from "ioredis";
+import { sql } from "drizzle-orm";
+import { startTestcontainers, stopTestcontainers, db } from "../../../test/testcontainers";
+import { enqueueBackfillForConnection } from "./backfill";
+import * as schema from "@rovenue/db/schema";
+import { INTEGRATIONS_DELIVER_QUEUE_NAME } from "../../workers/integrations-deliver";
+import { encrypt } from "@rovenue/shared/crypto";
+
+let redis: Redis;
+let queue: Queue;
+
+beforeAll(async () => {
+  await startTestcontainers();
+  redis = new Redis(process.env.REDIS_URL!, { maxRetriesPerRequest: null });
+  queue = new Queue(INTEGRATIONS_DELIVER_QUEUE_NAME, { connection: redis });
+}, 120_000);
+
+afterAll(async () => { await queue.close(); await redis.quit(); await stopTestcontainers(); });
+
+it("backfill enqueues every in-window outbox row with isBackfill=true and skips older rows", async () => {
+  const projectId = createId();
+  await db.insert(schema.projects).values({ id: projectId, name: "p", slug: projectId });
+  const connectionId = createId();
+  await db.insert(schema.integrationConnections).values({
+    id: connectionId, projectId, providerId: "META_CAPI", displayName: "test",
+    credentialsCipher: encrypt(JSON.stringify({ pixel_id: "1", access_token: "t" })),
+    credentialsHint: "Pixel 1…1", isEnabled: true,
+  });
+  const inWindow: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    const id = createId(); inWindow.push(id);
+    await db.insert(schema.outboxEvents).values({
+      id, projectId, aggregateType: "revenue", eventType: "revenue.event.recorded",
+      payload: { outboxEventId: id, projectId, eventType: "revenue.event.recorded", occurredAt: new Date().toISOString(), revenueEventKind: "RENEWAL", amount: "9.99", currency: "USD" },
+      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * (i + 1)),
+    });
+  }
+  // Out-of-window
+  await db.insert(schema.outboxEvents).values({
+    id: createId(), projectId, aggregateType: "revenue", eventType: "revenue.event.recorded",
+    payload: {}, createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 8),
+  });
+
+  const result = await enqueueBackfillForConnection(
+    { connectionId, projectId, providerId: "META_CAPI" },
+    { db: db as never, queue, audit: async () => undefined, now: () => new Date() },
+  );
+  expect(result.eventCount).toBe(3);
+  const jobs = await queue.getJobs(["waiting", "delayed", "active", "completed"]);
+  const ourJobs = jobs.filter((j) => inWindow.includes(j.data.envelope.outboxEventId as string));
+  expect(ourJobs).toHaveLength(3);
+  for (const j of ourJobs) {
+    expect(j.data.isBackfill).toBe(true);
+    expect(j.opts.jobId).toBe(`${connectionId}:${j.data.envelope.outboxEventId}`);
+  }
+}, 60_000);
+
+it("realtime event during backfill window is deduped via jobId", async () => {
+  const projectId = createId();
+  await db.insert(schema.projects).values({ id: projectId, name: "p", slug: projectId });
+  const connectionId = createId();
+  await db.insert(schema.integrationConnections).values({
+    id: connectionId, projectId, providerId: "META_CAPI", displayName: "test",
+    credentialsCipher: encrypt(JSON.stringify({ pixel_id: "1", access_token: "t" })),
+    credentialsHint: "Pixel 1…1", isEnabled: true,
+  });
+  const outboxId = createId();
+  await db.insert(schema.outboxEvents).values({
+    id: outboxId, projectId, aggregateType: "revenue", eventType: "revenue.event.recorded",
+    payload: { outboxEventId: outboxId, projectId, eventType: "revenue.event.recorded", occurredAt: new Date().toISOString() },
+    createdAt: new Date(Date.now() - 1000 * 60 * 60),
+  });
+  await queue.add("deliver",
+    { connectionId, projectId, providerId: "META_CAPI", envelope: { outboxEventId: outboxId, projectId, eventType: "revenue.event.recorded", occurredAt: new Date().toISOString() } },
+    { jobId: `${connectionId}:${outboxId}` },
+  );
+  await enqueueBackfillForConnection(
+    { connectionId, projectId, providerId: "META_CAPI" },
+    { db: db as never, queue, audit: async () => undefined, now: () => new Date() },
+  );
+  const jobs = await queue.getJobs(["waiting", "delayed", "active", "completed", "failed"]);
+  const matching = jobs.filter((j) => j.opts.jobId === `${connectionId}:${outboxId}`);
+  expect(matching).toHaveLength(1);
+}, 60_000);
+```
+
+Run: `pnpm --filter @rovenue/api test -- backfill.integration.test.ts`
+Expected: PASS.
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add apps/api/src/services/integrations/backfill.integration.test.ts
+git commit -m "test(integrations): backfill enqueues in-window rows + jobId dedup vs realtime"
+```
+
+### Task M4.6: End-to-end backfill — worker processes N=5 jobs with isBackfill flag
+
+**Files:**
+- Modify: `apps/api/src/services/integrations/backfill.integration.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Append:
+
+```ts
+import { Worker } from "bullmq";
+import { runDeliverStep } from "../../workers/integrations-deliver";
+import { MockAgent, setGlobalDispatcher } from "undici";
+
+it("worker processes every backfilled job; isBackfill=true reaches the step", async () => {
+  const projectId = createId();
+  await db.insert(schema.projects).values({ id: projectId, name: "p", slug: projectId });
+  const connectionId = createId();
+  await db.insert(schema.integrationConnections).values({
+    id: connectionId, projectId, providerId: "META_CAPI", displayName: "test",
+    credentialsCipher: encrypt(JSON.stringify({ pixel_id: "12345678", access_token: "EAAtok" })),
+    credentialsHint: "Pixel 1234…7890", enabledEvents: ["revenue.RENEWAL"], isEnabled: true,
+  });
+  const N = 5;
+  for (let i = 0; i < N; i++) {
+    const id = createId();
+    await db.insert(schema.outboxEvents).values({
+      id, projectId, aggregateType: "revenue", eventType: "revenue.event.recorded",
+      payload: { outboxEventId: id, projectId, eventType: "revenue.event.recorded", occurredAt: new Date().toISOString(), revenueEventKind: "RENEWAL", amount: "9.99", currency: "USD", identityContext: { email: "u@x.com" } },
+      createdAt: new Date(Date.now() - 1000 * 60 * 60 * (i + 1)),
+    });
+  }
+  const agent = new MockAgent(); agent.disableNetConnect(); setGlobalDispatcher(agent);
+  agent.get("https://graph.facebook.com").intercept({ path: /v18/, method: "POST" }).reply(200, { events_received: 1 }).persist();
+
+  await enqueueBackfillForConnection(
+    { connectionId, projectId, providerId: "META_CAPI" },
+    { db: db as never, queue, audit: async () => undefined, now: () => new Date() },
+  );
+
+  const seen: Array<{ isBackfill?: boolean }> = [];
+  const worker = new Worker(INTEGRATIONS_DELIVER_QUEUE_NAME,
+    async (job) => { seen.push({ isBackfill: job.data.isBackfill }); await runDeliverStep(job, {}); },
+    { connection: redis, concurrency: 4 },
+  );
+  await new Promise((r) => setTimeout(r, 3000));
+  await worker.close();
+
+  expect(seen.length).toBeGreaterThanOrEqual(N);
+  expect(seen.every((s) => s.isBackfill === true)).toBe(true);
+  const deliveries = await db.execute(sql`SELECT count(*)::int as c FROM integration_deliveries WHERE connection_id = ${connectionId}`);
+  expect(Number(deliveries.rows[0]!.c)).toBe(N);
+}, 60_000);
+```
+
+Run: `pnpm --filter @rovenue/api test -- backfill.integration.test.ts -t "worker processes"`
+Expected: PASS.
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add apps/api/src/services/integrations/backfill.integration.test.ts
+git commit -m "test(integrations): end-to-end backfill via worker (N=5 RENEWAL events)"
+```
+
+---
+
+## Milestone M5 — Dashboard API (7 endpoints + AppConnectionRow overlay)
+
+All 7 routes live in `apps/api/src/routes/dashboard/integrations.ts`. Each is gated by `requireDashboardAuth` + `assertProjectAccess(projectId, MemberRole.CUSTOMER_SUPPORT)`. Audit rows flow through the helpers in `apps/api/src/lib/audit-helpers.ts` (introduced in Part 1 M0.5).
+
+### Task M5.1: Scaffold integrations router + mount
+
+**Files:**
+- Create: `apps/api/src/routes/dashboard/integrations.ts`
+- Create: `apps/api/src/routes/dashboard/integrations.test.ts`
+- Modify: `apps/api/src/routes/dashboard/index.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+import { describe, it, expect } from "vitest";
+import { integrationsRoute } from "./integrations";
+
+describe("integrationsRoute", () => {
+  it("is a Hono app", () => {
+    expect(integrationsRoute).toBeDefined();
+    expect(typeof integrationsRoute.fetch).toBe("function");
+  });
+});
+```
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+Create `apps/api/src/routes/dashboard/integrations.ts`:
+
+```ts
+import { Hono } from "hono";
+import type { DashboardEnv } from "../../types/dashboard-env";
+
+export const integrationsRoute = new Hono<DashboardEnv>();
+```
+
+Modify `apps/api/src/routes/dashboard/index.ts` to mount it after the existing `appsRoute` line:
+
+```ts
+import { integrationsRoute } from "./integrations";
+// ...
+dashboard.route("/", integrationsRoute);
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/api/src/routes/dashboard/integrations.ts apps/api/src/routes/dashboard/integrations.test.ts apps/api/src/routes/dashboard/index.ts
+git commit -m "feat(api): scaffold dashboard integrations router"
+```
+
+### Task M5.2: GET /projects/:projectId/integrations — list
+
+**Files:**
+- Modify: `apps/api/src/routes/dashboard/integrations.ts`
+- Modify: `apps/api/src/routes/dashboard/integrations.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Append:
+
+```ts
+import { db } from "../../db/client";
+import * as schema from "@rovenue/db/schema";
+import { eq } from "drizzle-orm";
+import { createId } from "@paralleldrive/cuid2";
+import { encrypt } from "@rovenue/shared/crypto";
+import { signTestDashboardJwt, seedUserProjectMember } from "../../test/auth-helpers";
+
+it("GET lists connections with redacted credentials", async () => {
+  const userId = createId();
+  const projectId = createId();
+  await seedUserProjectMember(userId, projectId, "CUSTOMER_SUPPORT");
+  const connectionId = createId();
+  await db.insert(schema.integrationConnections).values({
+    id: connectionId, projectId, providerId: "META_CAPI", displayName: "My Pixel",
+    credentialsCipher: encrypt(JSON.stringify({ pixel_id: "12345678", access_token: "EAAtoken123456" })),
+    credentialsHint: "Pixel 1234…5678", enabledEvents: ["revenue.INITIAL"], isEnabled: true,
+  });
+
+  const res = await integrationsRoute.request(
+    `/projects/${projectId}/integrations`,
+    { headers: { Authorization: `Bearer ${signTestDashboardJwt(userId)}` } },
+  );
+  expect(res.status).toBe(200);
+  const body = await res.json() as { data: Array<Record<string, unknown>> };
+  expect(body.data).toHaveLength(1);
+  expect(body.data[0]).toMatchObject({
+    id: connectionId, providerId: "META_CAPI", credentialsHint: "Pixel 1234…5678",
+    isEnabled: true, enabledEvents: ["revenue.INITIAL"],
+  });
+  expect(body.data[0]).not.toHaveProperty("credentialsCipher");
+  expect(JSON.stringify(body.data[0])).not.toMatch(/EAAtoken/);
+});
+```
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+Append to `integrations.ts`:
+
+```ts
+import { and, eq, isNull } from "drizzle-orm";
+import { requireDashboardAuth } from "../../middleware/require-dashboard-auth";
+import { assertProjectAccess } from "../../lib/assert-project-access";
+import { MemberRole } from "@rovenue/db/schema";
+import { db } from "../../db/client";
+import * as schema from "@rovenue/db/schema";
+
+integrationsRoute.get(
+  "/projects/:projectId/integrations",
+  requireDashboardAuth(),
+  async (c) => {
+    const projectId = c.req.param("projectId");
+    await assertProjectAccess(c, projectId, MemberRole.CUSTOMER_SUPPORT);
+    const rows = await db
+      .select({
+        id: schema.integrationConnections.id,
+        providerId: schema.integrationConnections.providerId,
+        displayName: schema.integrationConnections.displayName,
+        credentialsHint: schema.integrationConnections.credentialsHint,
+        enabledEvents: schema.integrationConnections.enabledEvents,
+        eventMapping: schema.integrationConnections.eventMapping,
+        actionSource: schema.integrationConnections.actionSource,
+        testEventCode: schema.integrationConnections.testEventCode,
+        isEnabled: schema.integrationConnections.isEnabled,
+        lastValidatedAt: schema.integrationConnections.lastValidatedAt,
+        lastError: schema.integrationConnections.lastError,
+        lastBackfillAt: schema.integrationConnections.lastBackfillAt,
+        createdAt: schema.integrationConnections.createdAt,
+        updatedAt: schema.integrationConnections.updatedAt,
+      })
+      .from(schema.integrationConnections)
+      .where(and(eq(schema.integrationConnections.projectId, projectId), isNull(schema.integrationConnections.deletedAt)));
+    return c.json({ data: rows });
+  },
+);
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/api/src/routes/dashboard/integrations.ts apps/api/src/routes/dashboard/integrations.test.ts
+git commit -m "feat(api): GET /projects/:projectId/integrations returns redacted connection list"
+```
+
+### Task M5.3: POST — create connection (validate first; no DB write on failure)
+
+**Files:**
+- Modify: `apps/api/src/routes/dashboard/integrations.ts`
+- Modify: `apps/api/src/routes/dashboard/integrations.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Append:
+
+```ts
+import { MockAgent, setGlobalDispatcher } from "undici";
+
+it("POST creates a connection after validateCredentials passes", async () => {
+  const userId = createId();
+  const projectId = createId();
+  await seedUserProjectMember(userId, projectId, "CUSTOMER_SUPPORT");
+  const agent = new MockAgent(); agent.disableNetConnect(); setGlobalDispatcher(agent);
+  agent.get("https://graph.facebook.com").intercept({ path: /v18/, method: "GET" }).reply(200, { id: "12345678" });
+
+  const res = await integrationsRoute.request(`/projects/${projectId}/integrations`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${signTestDashboardJwt(userId)}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      providerId: "META_CAPI",
+      displayName: "Main Pixel",
+      credentials: { pixelId: "12345678", accessToken: "EAAabcdef1234" },
+      enabledEvents: ["revenue.INITIAL", "revenue.RENEWAL"],
+      actionSource: "app",
+    }),
+  });
+  expect(res.status).toBe(201);
+  const body = await res.json() as { data: { id: string; isEnabled: boolean } };
+  expect(body.data.isEnabled).toBe(false);
+
+  const audits = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.resourceId, body.data.id));
+  expect(audits[0]!.action).toBe("integration.connection.created");
+  expect(JSON.stringify(audits[0]!.metadata)).toMatch(/REDACTED/);
+  expect(JSON.stringify(audits[0]!.metadata)).not.toMatch(/EAAabcdef/);
+});
+
+it("POST rejects when validateCredentials fails (no DB write)", async () => {
+  const userId = createId();
+  const projectId = createId();
+  await seedUserProjectMember(userId, projectId, "CUSTOMER_SUPPORT");
+  const agent = new MockAgent(); agent.disableNetConnect(); setGlobalDispatcher(agent);
+  agent.get("https://graph.facebook.com").intercept({ path: /v18/, method: "GET" }).reply(401, { error: { message: "Invalid token" } });
+
+  const res = await integrationsRoute.request(`/projects/${projectId}/integrations`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${signTestDashboardJwt(userId)}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      providerId: "META_CAPI", displayName: "Bad",
+      credentials: { pixelId: "12345678", accessToken: "EAAbadtoken" },
+      enabledEvents: ["revenue.INITIAL"],
+    }),
+  });
+  expect(res.status).toBe(400);
+  const rows = await db.select().from(schema.integrationConnections).where(eq(schema.integrationConnections.projectId, projectId));
+  expect(rows).toHaveLength(0);
+});
+```
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```ts
+import { z } from "zod";
+import { zValidator } from "@hono/zod-validator";
+import { createId } from "@paralleldrive/cuid2";
+import { encrypt } from "@rovenue/shared/crypto";
+import { getProvider } from "../../services/integrations/registry";
+import { auditConnectionCreated } from "../../lib/audit-helpers";
+import { httpClient } from "../../lib/http-client";
+
+const credentialsSchema = z.object({
+  pixelId: z.string().optional(),
+  pixelCode: z.string().optional(),
+  accessToken: z.string().min(1),
+});
+
+const createBodySchema = z.object({
+  providerId: z.enum(["META_CAPI", "TIKTOK_EVENTS"]),
+  displayName: z.string().min(1).max(120),
+  credentials: credentialsSchema,
+  enabledEvents: z.array(z.string()).default([]),
+  eventMapping: z.record(z.unknown()).default({}),
+  actionSource: z.enum(["app", "website", "system_generated"]).default("app"),
+  testEventCode: z.string().optional(),
+});
+
+function buildCredentialsHint(providerId: string, creds: { pixelId?: string; pixelCode?: string }): string {
+  const id = creds.pixelId ?? creds.pixelCode ?? "";
+  return `Pixel ${id.slice(0, 4)}…${id.slice(-4)}`;
+}
+
+integrationsRoute.post(
+  "/projects/:projectId/integrations",
+  requireDashboardAuth(),
+  zValidator("json", createBodySchema),
+  async (c) => {
+    const projectId = c.req.param("projectId");
+    await assertProjectAccess(c, projectId, MemberRole.CUSTOMER_SUPPORT);
+    const body = c.req.valid("json");
+    const provider = getProvider(body.providerId);
+
+    const providerCreds = body.providerId === "META_CAPI"
+      ? { pixel_id: body.credentials.pixelId, access_token: body.credentials.accessToken }
+      : { pixel_code: body.credentials.pixelCode, access_token: body.credentials.accessToken };
+
+    const validation = await provider.validateCredentials(providerCreds, httpClient);
+    if (!validation.ok) {
+      return c.json({ error: { code: "invalid_credentials", message: validation.reason } }, 400);
+    }
+
+    const id = createId();
+    const userId = c.get("userId");
+    await db.transaction(async (tx) => {
+      await tx.insert(schema.integrationConnections).values({
+        id, projectId, providerId: body.providerId, displayName: body.displayName,
+        credentialsCipher: encrypt(JSON.stringify(providerCreds)),
+        credentialsHint: buildCredentialsHint(body.providerId, body.credentials),
+        enabledEvents: body.enabledEvents, eventMapping: body.eventMapping,
+        actionSource: body.actionSource, testEventCode: body.testEventCode,
+        isEnabled: false, lastValidatedAt: new Date(),
+      });
+      await auditConnectionCreated(tx, {
+        projectId, actorId: userId, connectionId: id, providerId: body.providerId, displayName: body.displayName,
+      });
+    });
+
+    return c.json({ data: { id, isEnabled: false } }, 201);
+  },
+);
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/api/src/routes/dashboard/integrations.ts apps/api/src/routes/dashboard/integrations.test.ts
+git commit -m "feat(api): POST integrations validates creds before insert + audits creation"
+```
+
+### Task M5.4: PATCH — update scope/mapping/enabled + backfill + credential rotation
+
+**Files:**
+- Modify: `apps/api/src/routes/dashboard/integrations.ts`
+- Modify: `apps/api/src/routes/dashboard/integrations.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+it("PATCH isEnabled false→true triggers backfill audit row", async () => {
+  const userId = createId();
+  const projectId = createId();
+  await seedUserProjectMember(userId, projectId, "CUSTOMER_SUPPORT");
+  const connectionId = createId();
+  await db.insert(schema.integrationConnections).values({
+    id: connectionId, projectId, providerId: "META_CAPI", displayName: "Pixel",
+    credentialsCipher: encrypt(JSON.stringify({ pixel_id: "1", access_token: "t" })),
+    credentialsHint: "Pixel 1…1", isEnabled: false,
+  });
+
+  const res = await integrationsRoute.request(
+    `/projects/${projectId}/integrations/${connectionId}`,
+    { method: "PATCH", headers: { Authorization: `Bearer ${signTestDashboardJwt(userId)}`, "Content-Type": "application/json" }, body: JSON.stringify({ isEnabled: true }) },
+  );
+  expect(res.status).toBe(200);
+  const audits = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.resourceId, connectionId));
+  expect(audits.find((a) => a.action === "integration.backfill.started")).toBeDefined();
+});
+
+it("PATCH credential rotation writes a separate redacted audit row", async () => {
+  const userId = createId();
+  const projectId = createId();
+  await seedUserProjectMember(userId, projectId, "CUSTOMER_SUPPORT");
+  const connectionId = createId();
+  await db.insert(schema.integrationConnections).values({
+    id: connectionId, projectId, providerId: "META_CAPI", displayName: "Pixel",
+    credentialsCipher: encrypt(JSON.stringify({ pixel_id: "12345678", access_token: "old" })),
+    credentialsHint: "Pixel 1234…5678", isEnabled: false,
+  });
+  const agent = new MockAgent(); agent.disableNetConnect(); setGlobalDispatcher(agent);
+  agent.get("https://graph.facebook.com").intercept({ path: /v18/ }).reply(200, { id: "12345678" });
+
+  const res = await integrationsRoute.request(
+    `/projects/${projectId}/integrations/${connectionId}`,
+    { method: "PATCH", headers: { Authorization: `Bearer ${signTestDashboardJwt(userId)}`, "Content-Type": "application/json" }, body: JSON.stringify({ credentials: { accessToken: "EAAnewtoken" } }) },
+  );
+  expect(res.status).toBe(200);
+  const audits = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.resourceId, connectionId));
+  const rotated = audits.find((a) => a.action === "integration.credentials.rotated");
+  expect(rotated).toBeDefined();
+  expect(JSON.stringify(rotated!.metadata)).toMatch(/REDACTED/);
+  expect(JSON.stringify(rotated!.metadata)).not.toMatch(/EAAnewtoken/);
+});
+```
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```ts
+import { decrypt } from "@rovenue/shared/crypto";
+import { enqueueBackfillForConnection } from "../../services/integrations/backfill";
+import { handleConnectionEnableTransition } from "../../services/integrations/connection-events";
+import { connectionCache } from "../../services/integrations/connection-cache"; // Part 1 EventEmitter
+import { integrationsDeliverQueue } from "../../workers/integrations-deliver";
+import { audit } from "../../lib/audit";
+import { auditConnectionUpdated, auditCredentialsRotated } from "../../lib/audit-helpers";
+
+const patchBodySchema = z.object({
+  enabledEvents: z.array(z.string()).optional(),
+  eventMapping: z.record(z.unknown()).optional(),
+  actionSource: z.enum(["app", "website", "system_generated"]).optional(),
+  testEventCode: z.string().nullable().optional(),
+  isEnabled: z.boolean().optional(),
+  credentials: z.object({ accessToken: z.string().min(1) }).optional(),
+});
+
+integrationsRoute.patch(
+  "/projects/:projectId/integrations/:id",
+  requireDashboardAuth(),
+  zValidator("json", patchBodySchema),
+  async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    await assertProjectAccess(c, projectId, MemberRole.CUSTOMER_SUPPORT);
+    const body = c.req.valid("json");
+    const userId = c.get("userId");
+
+    const existing = await db.select().from(schema.integrationConnections)
+      .where(and(
+        eq(schema.integrationConnections.id, id),
+        eq(schema.integrationConnections.projectId, projectId),
+        isNull(schema.integrationConnections.deletedAt),
+      )).limit(1);
+    if (existing.length === 0) {
+      return c.json({ error: { code: "not_found", message: "connection not found" } }, 404);
+    }
+    const before = existing[0]!;
+
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (body.enabledEvents !== undefined) updates.enabledEvents = body.enabledEvents;
+    if (body.eventMapping !== undefined) updates.eventMapping = body.eventMapping;
+    if (body.actionSource !== undefined) updates.actionSource = body.actionSource;
+    if (body.testEventCode !== undefined) updates.testEventCode = body.testEventCode;
+    if (body.isEnabled !== undefined) updates.isEnabled = body.isEnabled;
+    if (body.credentials) {
+      const currentCreds = JSON.parse(decrypt(before.credentialsCipher));
+      const newCreds = { ...currentCreds, access_token: body.credentials.accessToken };
+      const provider = getProvider(before.providerId as "META_CAPI" | "TIKTOK_EVENTS");
+      const validation = await provider.validateCredentials(newCreds, httpClient);
+      if (!validation.ok) {
+        return c.json({ error: { code: "invalid_credentials", message: validation.reason } }, 400);
+      }
+      updates.credentialsCipher = encrypt(JSON.stringify(newCreds));
+      updates.lastValidatedAt = new Date();
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.update(schema.integrationConnections).set(updates).where(eq(schema.integrationConnections.id, id));
+      if (body.credentials) {
+        await auditCredentialsRotated(tx, { projectId, actorId: userId, connectionId: id });
+      } else {
+        await auditConnectionUpdated(tx, { projectId, actorId: userId, connectionId: id, changes: { ...updates, credentialsCipher: undefined } });
+      }
+    });
+
+    await handleConnectionEnableTransition(
+      {
+        wasEnabled: before.isEnabled,
+        willBeEnabled: body.isEnabled ?? before.isEnabled,
+        connectionId: id, projectId,
+        providerId: before.providerId as "META_CAPI" | "TIKTOK_EVENTS",
+      },
+      {
+        enqueueBackfill: ({ connectionId, projectId, providerId }) =>
+          enqueueBackfillForConnection(
+            { connectionId, projectId, providerId },
+            {
+              db: db as never, queue: integrationsDeliverQueue,
+              audit: (a) => audit({ ...a, actorId: userId, actorType: "user" }),
+              now: () => new Date(),
+            },
+          ),
+      },
+    );
+
+    connectionCache.emit("integrationConnectionChanged", id);
+    return c.json({ data: { id, ...updates, credentialsCipher: undefined } });
+  },
+);
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/api/src/routes/dashboard/integrations.ts apps/api/src/routes/dashboard/integrations.test.ts
+git commit -m "feat(api): PATCH integration (scope/mapping/enabled/rotation) + backfill + audit + cache"
+```
+
+### Task M5.5: DELETE — soft delete + audit + cache invalidation
+
+**Files:**
+- Modify: `apps/api/src/routes/dashboard/integrations.ts`
+- Modify: `apps/api/src/routes/dashboard/integrations.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+it("DELETE soft-deletes (sets deleted_at), invalidates cache, audits", async () => {
+  const userId = createId();
+  const projectId = createId();
+  await seedUserProjectMember(userId, projectId, "CUSTOMER_SUPPORT");
+  const connectionId = createId();
+  await db.insert(schema.integrationConnections).values({
+    id: connectionId, projectId, providerId: "META_CAPI", displayName: "Pixel",
+    credentialsCipher: encrypt(JSON.stringify({ pixel_id: "1", access_token: "t" })),
+    credentialsHint: "Pixel 1…1",
+  });
+  const res = await integrationsRoute.request(
+    `/projects/${projectId}/integrations/${connectionId}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${signTestDashboardJwt(userId)}` } },
+  );
+  expect(res.status).toBe(204);
+  const rows = await db.select().from(schema.integrationConnections).where(eq(schema.integrationConnections.id, connectionId));
+  expect(rows[0]!.deletedAt).toBeInstanceOf(Date);
+  const audits = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.resourceId, connectionId));
+  expect(audits.find((a) => a.action === "integration.connection.deleted")).toBeDefined();
+});
+```
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts -t "DELETE"`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```ts
+import { auditConnectionDeleted } from "../../lib/audit-helpers";
+
+integrationsRoute.delete(
+  "/projects/:projectId/integrations/:id",
+  requireDashboardAuth(),
+  async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    await assertProjectAccess(c, projectId, MemberRole.CUSTOMER_SUPPORT);
+    const userId = c.get("userId");
+    const existing = await db.select().from(schema.integrationConnections)
+      .where(and(
+        eq(schema.integrationConnections.id, id),
+        eq(schema.integrationConnections.projectId, projectId),
+        isNull(schema.integrationConnections.deletedAt),
+      )).limit(1);
+    if (existing.length === 0) {
+      return c.json({ error: { code: "not_found", message: "connection not found" } }, 404);
+    }
+    await db.transaction(async (tx) => {
+      await tx.update(schema.integrationConnections)
+        .set({ deletedAt: new Date(), isEnabled: false, updatedAt: new Date() })
+        .where(eq(schema.integrationConnections.id, id));
+      await auditConnectionDeleted(tx, { projectId, actorId: userId, connectionId: id });
+    });
+    connectionCache.emit("integrationConnectionChanged", id);
+    return c.body(null, 204);
+  },
+);
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/api/src/routes/dashboard/integrations.ts apps/api/src/routes/dashboard/integrations.test.ts
+git commit -m "feat(api): DELETE integration (soft delete + audit + cache invalidation)"
+```
+
+### Task M5.6: POST /validate — pre-save dry-run
+
+**Files:**
+- Modify: `apps/api/src/routes/dashboard/integrations.ts`
+- Modify: `apps/api/src/routes/dashboard/integrations.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+it("POST /validate returns { ok: true } without writing DB", async () => {
+  const userId = createId();
+  const projectId = createId();
+  await seedUserProjectMember(userId, projectId, "CUSTOMER_SUPPORT");
+  const agent = new MockAgent(); agent.disableNetConnect(); setGlobalDispatcher(agent);
+  agent.get("https://graph.facebook.com").intercept({ path: /v18/ }).reply(200, { id: "1" });
+
+  const res = await integrationsRoute.request(`/projects/${projectId}/integrations/validate`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${signTestDashboardJwt(userId)}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ providerId: "META_CAPI", credentials: { pixelId: "1", accessToken: "t" } }),
+  });
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ data: { ok: true } });
+  const rows = await db.select().from(schema.integrationConnections).where(eq(schema.integrationConnections.projectId, projectId));
+  expect(rows).toHaveLength(0);
+});
+
+it("POST /validate returns { ok: false, reason } on provider failure", async () => {
+  const userId = createId();
+  const projectId = createId();
+  await seedUserProjectMember(userId, projectId, "CUSTOMER_SUPPORT");
+  const agent = new MockAgent(); agent.disableNetConnect(); setGlobalDispatcher(agent);
+  agent.get("https://graph.facebook.com").intercept({ path: /v18/ }).reply(401, { error: { message: "bad" } });
+
+  const res = await integrationsRoute.request(`/projects/${projectId}/integrations/validate`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${signTestDashboardJwt(userId)}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ providerId: "META_CAPI", credentials: { pixelId: "1", accessToken: "bad" } }),
+  });
+  expect(res.status).toBe(200);
+  const body = await res.json() as { data: { ok: false; reason: string } };
+  expect(body.data.ok).toBe(false);
+});
+```
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts -t "validate"`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```ts
+import { rateLimitMiddleware } from "../../middleware/rate-limit";
+// If the export name differs, inspect ls apps/api/src/middleware/ and adjust accordingly.
+
+const validateBodySchema = z.object({
+  providerId: z.enum(["META_CAPI", "TIKTOK_EVENTS"]),
+  credentials: credentialsSchema,
+});
+
+integrationsRoute.post(
+  "/projects/:projectId/integrations/validate",
+  requireDashboardAuth(),
+  rateLimitMiddleware({ windowMs: 60_000, max: 30, keyPrefix: "integrations.validate" }),
+  zValidator("json", validateBodySchema),
+  async (c) => {
+    const projectId = c.req.param("projectId");
+    await assertProjectAccess(c, projectId, MemberRole.CUSTOMER_SUPPORT);
+    const body = c.req.valid("json");
+    const provider = getProvider(body.providerId);
+    const providerCreds = body.providerId === "META_CAPI"
+      ? { pixel_id: body.credentials.pixelId, access_token: body.credentials.accessToken }
+      : { pixel_code: body.credentials.pixelCode, access_token: body.credentials.accessToken };
+    const result = await provider.validateCredentials(providerCreds, httpClient);
+    return c.json({ data: result });
+  },
+);
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/api/src/routes/dashboard/integrations.ts apps/api/src/routes/dashboard/integrations.test.ts
+git commit -m "feat(api): POST /integrations/validate dry-runs credentials with no DB write"
+```
+
+### Task M5.7: POST /:id/test-event — synthetic Subscribe via test_event_code
+
+**Files:**
+- Modify: `apps/api/src/routes/dashboard/integrations.ts`
+- Modify: `apps/api/src/routes/dashboard/integrations.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+it("POST /test-event 400s when test_event_code is unset", async () => {
+  const userId = createId();
+  const projectId = createId();
+  await seedUserProjectMember(userId, projectId, "CUSTOMER_SUPPORT");
+  const connectionId = createId();
+  await db.insert(schema.integrationConnections).values({
+    id: connectionId, projectId, providerId: "META_CAPI", displayName: "Pixel",
+    credentialsCipher: encrypt(JSON.stringify({ pixel_id: "1", access_token: "t" })),
+    credentialsHint: "Pixel 1…1", enabledEvents: ["revenue.INITIAL"],
+  });
+  const res = await integrationsRoute.request(
+    `/projects/${projectId}/integrations/${connectionId}/test-event`,
+    { method: "POST", headers: { Authorization: `Bearer ${signTestDashboardJwt(userId)}` } },
+  );
+  expect(res.status).toBe(400);
+});
+
+it("POST /test-event sends synthetic Subscribe with $0.01 USD + test_event_code + audits", async () => {
+  const userId = createId();
+  const projectId = createId();
+  await seedUserProjectMember(userId, projectId, "CUSTOMER_SUPPORT");
+  const connectionId = createId();
+  await db.insert(schema.integrationConnections).values({
+    id: connectionId, projectId, providerId: "META_CAPI", displayName: "Pixel",
+    credentialsCipher: encrypt(JSON.stringify({ pixel_id: "12345678", access_token: "EAAtok" })),
+    credentialsHint: "Pixel 1234…5678", enabledEvents: ["revenue.INITIAL"], testEventCode: "TEST123",
+  });
+  const agent = new MockAgent(); agent.disableNetConnect(); setGlobalDispatcher(agent);
+  let captured: { body: unknown } | null = null;
+  agent.get("https://graph.facebook.com").intercept({ path: /v18.*events/, method: "POST" }).reply((opts) => {
+    captured = { body: JSON.parse(opts.body as string) };
+    return { statusCode: 200, data: { events_received: 1 } };
+  });
+
+  const res = await integrationsRoute.request(
+    `/projects/${projectId}/integrations/${connectionId}/test-event`,
+    { method: "POST", headers: { Authorization: `Bearer ${signTestDashboardJwt(userId)}` } },
+  );
+  expect(res.status).toBe(200);
+  expect(JSON.stringify(captured!.body)).toMatch(/TEST123/);
+  expect(JSON.stringify(captured!.body)).toMatch(/0\.01/);
+  expect(JSON.stringify(captured!.body)).toMatch(/USD/);
+
+  const audits = await db.select().from(schema.auditLogs).where(eq(schema.auditLogs.resourceId, connectionId));
+  expect(audits.find((a) => a.action === "integration.test_event.sent")).toBeDefined();
+});
+```
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts -t "test-event"`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```ts
+import { auditTestEventSent } from "../../lib/audit-helpers";
+
+integrationsRoute.post(
+  "/projects/:projectId/integrations/:id/test-event",
+  requireDashboardAuth(),
+  async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    await assertProjectAccess(c, projectId, MemberRole.CUSTOMER_SUPPORT);
+    const userId = c.get("userId");
+
+    const rows = await db.select().from(schema.integrationConnections)
+      .where(and(
+        eq(schema.integrationConnections.id, id),
+        eq(schema.integrationConnections.projectId, projectId),
+        isNull(schema.integrationConnections.deletedAt),
+      )).limit(1);
+    if (rows.length === 0) {
+      return c.json({ error: { code: "not_found", message: "connection not found" } }, 404);
+    }
+    const conn = rows[0]!;
+    if (!conn.testEventCode) {
+      return c.json({ error: { code: "missing_test_event_code", message: "test_event_code must be set on the connection" } }, 400);
+    }
+    const provider = getProvider(conn.providerId as "META_CAPI" | "TIKTOK_EVENTS");
+    const creds = JSON.parse(decrypt(conn.credentialsCipher));
+
+    const envelope = {
+      outboxEventId: createId(),
+      projectId,
+      eventType: "revenue.event.recorded" as const,
+      occurredAt: new Date().toISOString(),
+      revenueEventKind: "INITIAL" as const,
+      amount: "0.01", currency: "USD",
+      subscriberId: "test-subscriber",
+      identityContext: { email: "test@example.com", externalId: "test-external-id" },
+    };
+    const config = {
+      connectionId: conn.id, projectId,
+      enabledEvents: conn.enabledEvents.includes("revenue.INITIAL") ? conn.enabledEvents : ["revenue.INITIAL", ...conn.enabledEvents],
+      eventMapping: conn.eventMapping as Record<string, never>,
+      actionSource: conn.actionSource as "app" | "website" | "system_generated",
+      testEventCode: conn.testEventCode,
+    };
+
+    const mapped = provider.mapEvent(envelope, config);
+    if ("skip" in mapped) {
+      return c.json({ error: { code: "mapping_skipped", message: mapped.reason } }, 400);
+    }
+    const delivery = await provider.deliver(mapped, creds, httpClient);
+
+    await auditTestEventSent(db, { projectId, actorId: userId, connectionId: id, providerEvent: mapped.providerEvent });
+
+    return c.json({
+      data: {
+        ok: delivery.ok,
+        httpStatus: delivery.httpStatus,
+        responseBody: delivery.responseBody.slice(0, 4096),
+        errorMessage: delivery.errorMessage,
+      },
+    });
+  },
+);
+```
+
+Also extend `apps/api/src/lib/audit-helpers.ts` with `auditTestEventSent`:
+
+```ts
+export async function auditTestEventSent(
+  tx: DbOrTx,
+  args: { projectId: string; actorId: string; connectionId: string; providerEvent: string },
+): Promise<void> {
+  await audit({
+    db: tx, projectId: args.projectId, actorId: args.actorId, actorType: "user",
+    action: "integration.test_event.sent",
+    resource: "integration_connection", resourceId: args.connectionId,
+    metadata: { providerEvent: args.providerEvent },
+  });
+}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/api/src/routes/dashboard/integrations.ts apps/api/src/routes/dashboard/integrations.test.ts apps/api/src/lib/audit-helpers.ts
+git commit -m "feat(api): POST /test-event sends synthetic \$0.01 Subscribe with test_event_code"
+```
+
+### Task M5.8: GET /:id/deliveries — cursor-paginated with status filter
+
+**Files:**
+- Modify: `apps/api/src/routes/dashboard/integrations.ts`
+- Modify: `apps/api/src/routes/dashboard/integrations.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+it("GET /:id/deliveries returns cursor-paginated rows filtered by status", async () => {
+  const userId = createId();
+  const projectId = createId();
+  await seedUserProjectMember(userId, projectId, "CUSTOMER_SUPPORT");
+  const connectionId = createId();
+  await db.insert(schema.integrationConnections).values({
+    id: connectionId, projectId, providerId: "META_CAPI", displayName: "Pixel",
+    credentialsCipher: encrypt(JSON.stringify({ pixel_id: "1", access_token: "t" })),
+    credentialsHint: "Pixel 1…1",
+  });
+  for (let i = 0; i < 5; i++) {
+    await db.insert(schema.integrationDeliveries).values({
+      id: createId(), connectionId, projectId, providerId: "META_CAPI",
+      outboxEventId: createId(), eventKey: "revenue.RENEWAL", providerEvent: "Subscribe",
+      status: i % 2 === 0 ? "succeeded" : "failed",
+      attempt: 1, createdAt: new Date(Date.now() - i * 60_000),
+    });
+  }
+  const res = await integrationsRoute.request(
+    `/projects/${projectId}/integrations/${connectionId}/deliveries?status=failed&limit=10`,
+    { headers: { Authorization: `Bearer ${signTestDashboardJwt(userId)}` } },
+  );
+  expect(res.status).toBe(200);
+  const body = await res.json() as { data: { deliveries: unknown[]; nextCursor: string | null } };
+  expect(body.data.deliveries).toHaveLength(2);
+  expect(body.data.nextCursor).toBeNull();
+});
+```
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts -t "deliveries"`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```ts
+import { lt, desc } from "drizzle-orm";
+
+const deliveriesQuerySchema = z.object({
+  cursor: z.string().optional(),
+  status: z.enum(["pending", "succeeded", "failed", "skipped", "dead_letter"]).optional(),
+  limit: z.coerce.number().min(1).max(200).default(50),
+});
+
+integrationsRoute.get(
+  "/projects/:projectId/integrations/:id/deliveries",
+  requireDashboardAuth(),
+  zValidator("query", deliveriesQuerySchema),
+  async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    await assertProjectAccess(c, projectId, MemberRole.CUSTOMER_SUPPORT);
+    const q = c.req.valid("query");
+    const whereParts = [
+      eq(schema.integrationDeliveries.connectionId, id),
+      eq(schema.integrationDeliveries.projectId, projectId),
+    ];
+    if (q.status) whereParts.push(eq(schema.integrationDeliveries.status, q.status));
+    if (q.cursor) whereParts.push(lt(schema.integrationDeliveries.createdAt, new Date(q.cursor)));
+    const rows = await db.select().from(schema.integrationDeliveries)
+      .where(and(...whereParts))
+      .orderBy(desc(schema.integrationDeliveries.createdAt))
+      .limit(q.limit + 1);
+    const hasMore = rows.length > q.limit;
+    const deliveries = hasMore ? rows.slice(0, q.limit) : rows;
+    const nextCursor = hasMore ? deliveries[deliveries.length - 1]!.createdAt.toISOString() : null;
+    return c.json({ data: { deliveries, nextCursor } });
+  },
+);
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- dashboard/integrations.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/api/src/routes/dashboard/integrations.ts apps/api/src/routes/dashboard/integrations.test.ts
+git commit -m "feat(api): GET /:id/deliveries cursor-paginated with status filter"
+```
+
+### Task M5.9: Extend AppConnectionRow with errorReason + credentialsHint
+
+**Files:**
+- Modify: `packages/shared/src/dashboard.ts`
+- Modify: `packages/shared/src/dashboard.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Append:
+
+```ts
+it("AppConnectionRow accepts errorReason and credentialsHint", () => {
+  const row: AppConnectionRow = {
+    id: "meta-capi", name: "Meta CAPI", description: "x",
+    status: "error", account: "Pixel 1234…5678", lastSyncLabel: "5m ago",
+    errorReason: "invalid_credentials", credentialsHint: "Pixel 1234…5678",
+  };
+  expect(row.errorReason).toBe("invalid_credentials");
+  expect(row.credentialsHint).toBe("Pixel 1234…5678");
+});
+```
+
+Run: `pnpm --filter @rovenue/shared test -- dashboard.test.ts`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+In `packages/shared/src/dashboard.ts` near lines 1408-1422, add optional fields to `AppConnectionRow`:
+
+```ts
+export interface AppConnectionRow {
+  id: string;
+  name: string;
+  description: string;
+  status: AppConnectionStatus;
+  account?: string;
+  lastSyncLabel?: string;
+  errorReason?: string;
+  credentialsHint?: string;
+}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/shared test -- dashboard.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add packages/shared/src/dashboard.ts packages/shared/src/dashboard.test.ts
+git commit -m "feat(shared): extend AppConnectionRow with errorReason + credentialsHint"
+```
+
+### Task M5.10: apps-connections overlay for meta-capi + tiktok-events
+
+**Files:**
+- Modify: `apps/api/src/services/apps-connections.ts`
+- Modify (or create): `apps/api/src/services/apps-connections.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+import { createId } from "@paralleldrive/cuid2";
+import { db } from "../db/client";
+import * as schema from "@rovenue/db/schema";
+import { encrypt } from "@rovenue/shared/crypto";
+import { readAppConnections } from "./apps-connections";
+
+it("derives meta-capi as 'connected' when enabled + recent validation + no recent dead_letter", async () => {
+  const projectId = createId();
+  await db.insert(schema.projects).values({ id: projectId, name: "p", slug: projectId });
+  const cid = createId();
+  await db.insert(schema.integrationConnections).values({
+    id: cid, projectId, providerId: "META_CAPI", displayName: "Pixel",
+    credentialsCipher: encrypt(JSON.stringify({ pixel_id: "1", access_token: "t" })),
+    credentialsHint: "Pixel 1234…5678", isEnabled: true,
+    lastValidatedAt: new Date(Date.now() - 60_000),
+  });
+  await db.insert(schema.integrationDeliveries).values({
+    id: createId(), connectionId: cid, projectId, providerId: "META_CAPI",
+    outboxEventId: createId(), eventKey: "revenue.RENEWAL",
+    providerEvent: "Subscribe", status: "succeeded", attempt: 1,
+    createdAt: new Date(Date.now() - 5 * 60_000),
+  });
+  const rows = await readAppConnections(projectId);
+  const meta = rows.find((r) => r.id === "meta-capi");
+  expect(meta?.status).toBe("connected");
+  expect(meta?.account).toBe("Pixel 1234…5678");
+  expect(meta?.lastSyncLabel).toBeDefined();
+});
+
+it("derives meta-capi as 'error' when there is a dead_letter in the last hour", async () => {
+  const projectId = createId();
+  await db.insert(schema.projects).values({ id: projectId, name: "p", slug: projectId });
+  const cid = createId();
+  await db.insert(schema.integrationConnections).values({
+    id: cid, projectId, providerId: "META_CAPI", displayName: "Pixel",
+    credentialsCipher: encrypt(JSON.stringify({ pixel_id: "1", access_token: "t" })),
+    credentialsHint: "Pixel 1…1", isEnabled: true,
+    lastValidatedAt: new Date(), lastError: "401 invalid token",
+  });
+  await db.insert(schema.integrationDeliveries).values({
+    id: createId(), connectionId: cid, projectId, providerId: "META_CAPI",
+    outboxEventId: createId(), eventKey: "revenue.RENEWAL",
+    status: "dead_letter", attempt: 5, httpStatus: 401,
+    errorMessage: "invalid token", createdAt: new Date(Date.now() - 5 * 60_000),
+  });
+  const rows = await readAppConnections(projectId);
+  const meta = rows.find((r) => r.id === "meta-capi");
+  expect(meta?.status).toBe("error");
+  expect(meta?.errorReason).toBeDefined();
+});
+
+it("derives meta-capi + tiktok-events as 'available' when no connection exists", async () => {
+  const projectId = createId();
+  await db.insert(schema.projects).values({ id: projectId, name: "p", slug: projectId });
+  const rows = await readAppConnections(projectId);
+  expect(rows.find((r) => r.id === "meta-capi")?.status).toBe("available");
+  expect(rows.find((r) => r.id === "tiktok-events")?.status).toBe("available");
+});
+```
+
+Run: `pnpm --filter @rovenue/api test -- apps-connections.test.ts`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+In `apps-connections.ts`, add:
+
+```ts
+import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import * as schema from "@rovenue/db/schema";
+import { db } from "../db/client";
+import type { AppConnectionRow } from "@rovenue/shared/dashboard";
+import { describeAge } from "./describe-age"; // adjust path to wherever the existing helper lives
+
+async function buildIntegrationOverlay(
+  projectId: string,
+  providerId: "META_CAPI" | "TIKTOK_EVENTS",
+  catalogId: "meta-capi" | "tiktok-events",
+  catalogName: string,
+  catalogDescription: string,
+): Promise<AppConnectionRow> {
+  const rows = await db.select().from(schema.integrationConnections)
+    .where(and(
+      eq(schema.integrationConnections.projectId, projectId),
+      eq(schema.integrationConnections.providerId, providerId),
+      isNull(schema.integrationConnections.deletedAt),
+    )).limit(1);
+  if (rows.length === 0 || !rows[0]!.isEnabled) {
+    return { id: catalogId, name: catalogName, description: catalogDescription, status: "available" };
+  }
+  const conn = rows[0]!;
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const deadLetter = await db.select().from(schema.integrationDeliveries)
+    .where(and(
+      eq(schema.integrationDeliveries.connectionId, conn.id),
+      eq(schema.integrationDeliveries.status, "dead_letter"),
+      gt(schema.integrationDeliveries.createdAt, oneHourAgo),
+    )).limit(1);
+  if (deadLetter.length > 0) {
+    return {
+      id: catalogId, name: catalogName, description: catalogDescription, status: "error",
+      account: conn.credentialsHint, credentialsHint: conn.credentialsHint,
+      errorReason: deadLetter[0]!.errorMessage ?? conn.lastError ?? "delivery_failure",
+    };
+  }
+  const recentSuccess = await db.select().from(schema.integrationDeliveries)
+    .where(and(eq(schema.integrationDeliveries.connectionId, conn.id), eq(schema.integrationDeliveries.status, "succeeded")))
+    .orderBy(desc(schema.integrationDeliveries.createdAt)).limit(1);
+  return {
+    id: catalogId, name: catalogName, description: catalogDescription, status: "connected",
+    account: conn.credentialsHint, credentialsHint: conn.credentialsHint,
+    lastSyncLabel: recentSuccess.length > 0 ? describeAge(recentSuccess[0]!.createdAt) : undefined,
+  };
+}
+```
+
+In the body of `readAppConnections(projectId)`, replace any static catalog entries for `meta-capi` and `tiktok-events` with overlays:
+
+```ts
+const meta = await buildIntegrationOverlay(projectId, "META_CAPI", "meta-capi", "Meta CAPI", "Send server-side conversions to your Meta Pixel.");
+const tiktok = await buildIntegrationOverlay(projectId, "TIKTOK_EVENTS", "tiktok-events", "TikTok Events API", "Send server-side conversions to your TikTok Pixel.");
+// replace existing meta-capi / tiktok-events rows in the result list with these
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- apps-connections.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/api/src/services/apps-connections.ts apps/api/src/services/apps-connections.test.ts
+git commit -m "feat(api): surface meta-capi/tiktok-events overlay status in apps-connections"
+```
+
+---
+
+## Milestone M6 — Dashboard UI (React + base-ui drawer + react-query)
+
+### Task M6.1: useProjectIntegrations hook (list)
+
+**Files:**
+- Create: `apps/dashboard/src/lib/hooks/useProjectIntegrations.ts`
+- Create: `apps/dashboard/src/lib/hooks/useProjectIntegrations.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { setupServer } from "msw/node";
+import { http, HttpResponse } from "msw";
+import React from "react";
+import { useProjectIntegrations } from "./useProjectIntegrations";
+
+const server = setupServer(
+  http.get("/api/dashboard/projects/p1/integrations", () =>
+    HttpResponse.json({
+      data: [{ id: "c1", providerId: "META_CAPI", displayName: "Pixel", isEnabled: true, credentialsHint: "Pixel 1…1", enabledEvents: ["revenue.INITIAL"], eventMapping: {}, actionSource: "app", testEventCode: null, lastValidatedAt: null, lastError: null, lastBackfillAt: null, createdAt: "", updatedAt: "" }],
+    }),
+  ),
+);
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+const wrapper = ({ children }: { children: React.ReactNode }) => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+};
+
+describe("useProjectIntegrations", () => {
+  it("returns the list of connections", async () => {
+    const { result } = renderHook(() => useProjectIntegrations("p1"), { wrapper });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(result.current.data).toHaveLength(1);
+    expect(result.current.data?.[0]?.providerId).toBe("META_CAPI");
+  });
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- useProjectIntegrations.test.ts`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```ts
+// apps/dashboard/src/lib/hooks/useProjectIntegrations.ts
+import { useQuery } from "@tanstack/react-query";
+import { apiFetch } from "../api-client";
+
+export interface IntegrationConnectionRow {
+  id: string;
+  providerId: "META_CAPI" | "TIKTOK_EVENTS";
+  displayName: string;
+  credentialsHint: string;
+  enabledEvents: string[];
+  eventMapping: Record<string, { eventName?: string; skip?: true }>;
+  actionSource: "app" | "website" | "system_generated";
+  testEventCode: string | null;
+  isEnabled: boolean;
+  lastValidatedAt: string | null;
+  lastError: string | null;
+  lastBackfillAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function useProjectIntegrations(projectId: string) {
+  return useQuery({
+    queryKey: ["project-integrations", projectId],
+    queryFn: async (): Promise<IntegrationConnectionRow[]> => {
+      const res = await apiFetch(`/api/dashboard/projects/${projectId}/integrations`);
+      const body = await res.json() as { data: IntegrationConnectionRow[] };
+      return body.data;
+    },
+    enabled: Boolean(projectId),
+  });
+}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/dashboard test -- useProjectIntegrations.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/dashboard/src/lib/hooks/useProjectIntegrations.ts apps/dashboard/src/lib/hooks/useProjectIntegrations.test.ts
+git commit -m "feat(dashboard): useProjectIntegrations react-query hook"
+```
+
+### Task M6.2: useCreateIntegration + useUpdateIntegration + useDeleteIntegration mutations
+
+**Files:**
+- Modify: `apps/dashboard/src/lib/hooks/useProjectIntegrations.ts`
+- Modify: `apps/dashboard/src/lib/hooks/useProjectIntegrations.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+import { useCreateIntegration, useUpdateIntegration, useDeleteIntegration } from "./useProjectIntegrations";
+
+it("useCreateIntegration POSTs to create endpoint", async () => {
+  server.use(http.post("/api/dashboard/projects/p1/integrations", () =>
+    HttpResponse.json({ data: { id: "new1", isEnabled: false } }, { status: 201 })));
+  const { result } = renderHook(() => useCreateIntegration("p1"), { wrapper });
+  const out = await result.current.mutateAsync({
+    providerId: "META_CAPI", displayName: "X",
+    credentials: { pixelId: "1", accessToken: "t" }, enabledEvents: ["revenue.INITIAL"],
+  });
+  expect(out.id).toBe("new1");
+});
+
+it("useUpdateIntegration PATCHes", async () => {
+  server.use(http.patch("/api/dashboard/projects/p1/integrations/c1", () =>
+    HttpResponse.json({ data: { id: "c1", isEnabled: true } })));
+  const { result } = renderHook(() => useUpdateIntegration("p1"), { wrapper });
+  const out = await result.current.mutateAsync({ id: "c1", body: { isEnabled: true } });
+  expect(out.id).toBe("c1");
+});
+
+it("useDeleteIntegration DELETEs", async () => {
+  server.use(http.delete("/api/dashboard/projects/p1/integrations/c1", () =>
+    HttpResponse.json(null, { status: 204 })));
+  const { result } = renderHook(() => useDeleteIntegration("p1"), { wrapper });
+  await result.current.mutateAsync("c1");
+  expect(result.current.isSuccess).toBe(true);
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- useProjectIntegrations.test.ts`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```ts
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+
+export interface CreateIntegrationBody {
+  providerId: "META_CAPI" | "TIKTOK_EVENTS";
+  displayName: string;
+  credentials: { pixelId?: string; pixelCode?: string; accessToken: string };
+  enabledEvents: string[];
+  eventMapping?: Record<string, unknown>;
+  actionSource?: "app" | "website" | "system_generated";
+  testEventCode?: string;
+}
+
+export function useCreateIntegration(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: CreateIntegrationBody): Promise<{ id: string; isEnabled: boolean }> => {
+      const res = await apiFetch(`/api/dashboard/projects/${projectId}/integrations`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error((await res.json() as { error: { message: string } }).error.message);
+      return ((await res.json()) as { data: { id: string; isEnabled: boolean } }).data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["project-integrations", projectId] }),
+  });
+}
+
+export interface UpdateIntegrationBody {
+  enabledEvents?: string[];
+  eventMapping?: Record<string, unknown>;
+  actionSource?: "app" | "website" | "system_generated";
+  testEventCode?: string | null;
+  isEnabled?: boolean;
+  credentials?: { accessToken: string };
+}
+
+export function useUpdateIntegration(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id: string; body: UpdateIntegrationBody }) => {
+      const res = await apiFetch(`/api/dashboard/projects/${projectId}/integrations/${input.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input.body),
+      });
+      if (!res.ok) throw new Error((await res.json() as { error: { message: string } }).error.message);
+      return ((await res.json()) as { data: { id: string; isEnabled: boolean } }).data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["project-integrations", projectId] });
+      qc.invalidateQueries({ queryKey: ["project-app-connections", projectId] });
+    },
+  });
+}
+
+export function useDeleteIntegration(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiFetch(`/api/dashboard/projects/${projectId}/integrations/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("delete failed");
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["project-integrations", projectId] });
+      qc.invalidateQueries({ queryKey: ["project-app-connections", projectId] });
+    },
+  });
+}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/dashboard test -- useProjectIntegrations.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/dashboard/src/lib/hooks/useProjectIntegrations.ts apps/dashboard/src/lib/hooks/useProjectIntegrations.test.ts
+git commit -m "feat(dashboard): create/update/delete integration mutations"
+```
+
+### Task M6.3: useValidateIntegrationCredentials + useTestIntegrationEvent
+
+**Files:**
+- Modify: `apps/dashboard/src/lib/hooks/useProjectIntegrations.ts`
+- Modify: `apps/dashboard/src/lib/hooks/useProjectIntegrations.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+import { useValidateIntegrationCredentials, useTestIntegrationEvent } from "./useProjectIntegrations";
+
+it("useValidateIntegrationCredentials returns { ok: true }", async () => {
+  server.use(http.post("/api/dashboard/projects/p1/integrations/validate", () =>
+    HttpResponse.json({ data: { ok: true } })));
+  const { result } = renderHook(() => useValidateIntegrationCredentials("p1"), { wrapper });
+  const out = await result.current.mutateAsync({
+    providerId: "META_CAPI", credentials: { pixelId: "1", accessToken: "t" },
+  });
+  expect(out.ok).toBe(true);
+});
+
+it("useTestIntegrationEvent POSTs to /test-event", async () => {
+  server.use(http.post("/api/dashboard/projects/p1/integrations/c1/test-event", () =>
+    HttpResponse.json({ data: { ok: true, httpStatus: 200, responseBody: "{}" } })));
+  const { result } = renderHook(() => useTestIntegrationEvent("p1", "c1"), { wrapper });
+  const out = await result.current.mutateAsync();
+  expect(out.httpStatus).toBe(200);
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- useProjectIntegrations.test.ts`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```ts
+export function useValidateIntegrationCredentials(projectId: string) {
+  return useMutation({
+    mutationFn: async (body: {
+      providerId: "META_CAPI" | "TIKTOK_EVENTS";
+      credentials: { pixelId?: string; pixelCode?: string; accessToken: string };
+    }): Promise<{ ok: true } | { ok: false; reason: string }> => {
+      const res = await apiFetch(`/api/dashboard/projects/${projectId}/integrations/validate`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      return ((await res.json()) as { data: { ok: true } | { ok: false; reason: string } }).data;
+    },
+  });
+}
+
+export function useTestIntegrationEvent(projectId: string, connectionId: string) {
+  return useMutation({
+    mutationFn: async (): Promise<{ ok: boolean; httpStatus: number; responseBody: string; errorMessage?: string }> => {
+      const res = await apiFetch(`/api/dashboard/projects/${projectId}/integrations/${connectionId}/test-event`, { method: "POST" });
+      if (!res.ok) throw new Error((await res.json() as { error: { message: string } }).error.message);
+      return ((await res.json()) as { data: { ok: boolean; httpStatus: number; responseBody: string; errorMessage?: string } }).data;
+    },
+  });
+}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/dashboard test -- useProjectIntegrations.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/dashboard/src/lib/hooks/useProjectIntegrations.ts apps/dashboard/src/lib/hooks/useProjectIntegrations.test.ts
+git commit -m "feat(dashboard): validate + test-event mutation hooks"
+```
+
+### Task M6.4: useIntegrationDeliveries (infinite query)
+
+**Files:**
+- Modify: `apps/dashboard/src/lib/hooks/useProjectIntegrations.ts`
+- Modify: `apps/dashboard/src/lib/hooks/useProjectIntegrations.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+import { useIntegrationDeliveries } from "./useProjectIntegrations";
+
+it("useIntegrationDeliveries fetches paginated deliveries", async () => {
+  server.use(http.get("/api/dashboard/projects/p1/integrations/c1/deliveries", () =>
+    HttpResponse.json({ data: { deliveries: [{ id: "d1", status: "succeeded" }], nextCursor: null } })));
+  const { result } = renderHook(
+    () => useIntegrationDeliveries("p1", "c1", { status: undefined }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.data).toBeDefined());
+  expect(result.current.data?.pages[0]?.deliveries).toHaveLength(1);
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- useProjectIntegrations.test.ts`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```ts
+import { useInfiniteQuery } from "@tanstack/react-query";
+
+export interface IntegrationDeliveryRow {
+  id: string;
+  connectionId: string;
+  outboxEventId: string;
+  eventKey: string;
+  providerEvent: string | null;
+  status: "pending" | "succeeded" | "failed" | "skipped" | "dead_letter";
+  attempt: number;
+  httpStatus: number | null;
+  responseBody: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export function useIntegrationDeliveries(
+  projectId: string,
+  connectionId: string,
+  params: { status?: IntegrationDeliveryRow["status"]; limit?: number },
+) {
+  return useInfiniteQuery({
+    queryKey: ["integration-deliveries", projectId, connectionId, params],
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }) => {
+      const qp = new URLSearchParams();
+      if (params.status) qp.set("status", params.status);
+      qp.set("limit", String(params.limit ?? 50));
+      if (pageParam) qp.set("cursor", pageParam);
+      const res = await apiFetch(
+        `/api/dashboard/projects/${projectId}/integrations/${connectionId}/deliveries?${qp.toString()}`,
+      );
+      return ((await res.json()) as { data: { deliveries: IntegrationDeliveryRow[]; nextCursor: string | null } }).data;
+    },
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    enabled: Boolean(connectionId),
+  });
+}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/dashboard test -- useProjectIntegrations.test.ts`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/dashboard/src/lib/hooks/useProjectIntegrations.ts apps/dashboard/src/lib/hooks/useProjectIntegrations.test.ts
+git commit -m "feat(dashboard): useIntegrationDeliveries infinite query"
+```
+
+### Task M6.5: IntegrationDrawer shell (base-ui Dialog 520px + 5-step machine)
+
+**Files:**
+- Create: `apps/dashboard/src/components/apps/integration-drawer/integration-drawer.tsx`
+- Create: `apps/dashboard/src/components/apps/integration-drawer/integration-drawer.test.tsx`
+- Create stubs: `step-credentials.tsx`, `step-events.tsx`, `step-mapping.tsx`, `step-test.tsx`, `step-activate.tsx` (filled in subsequent tasks)
+
+- [ ] **Step 1: Write the failing test**
+
+```tsx
+import { describe, it, expect } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import React from "react";
+import { IntegrationDrawer } from "./integration-drawer";
+
+const wrapper = ({ children }: { children: React.ReactNode }) => (
+  <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
+);
+
+describe("IntegrationDrawer", () => {
+  it("renders Step 1 (Credentials) when no existingConnection", () => {
+    render(
+      <IntegrationDrawer open={true} onOpenChange={() => {}} providerId="META_CAPI" projectId="p1" />,
+      { wrapper },
+    );
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText(/credentials/i)).toBeInTheDocument();
+  });
+
+  it("renders nothing when open=false", () => {
+    const { container } = render(
+      <IntegrationDrawer open={false} onOpenChange={() => {}} providerId="META_CAPI" projectId="p1" />,
+      { wrapper },
+    );
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- integration-drawer.test.tsx`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+Mirror the pattern from `apps/dashboard/src/components/products/product-drawer.tsx`. Create `integration-drawer.tsx`:
+
+```tsx
+import { useState } from "react";
+import { Dialog } from "@base-ui-components/react/dialog";
+import type { IntegrationConnectionRow } from "../../../lib/hooks/useProjectIntegrations";
+import { StepCredentials } from "./step-credentials";
+import { StepEvents } from "./step-events";
+import { StepMapping } from "./step-mapping";
+import { StepTest } from "./step-test";
+import { StepActivate } from "./step-activate";
+
+type Step = "credentials" | "events" | "mapping" | "test" | "activate";
+
+export interface IntegrationDrawerProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  providerId: "META_CAPI" | "TIKTOK_EVENTS";
+  projectId: string;
+  existingConnection?: IntegrationConnectionRow;
+}
+
+export interface DrawerState {
+  credentials: { pixelId?: string; pixelCode?: string; accessToken?: string };
+  validated: boolean;
+  enabledEvents: string[];
+  eventMapping: Record<string, { eventName?: string; skip?: true }>;
+  actionSource: "app" | "website" | "system_generated";
+  testEventCode: string;
+}
+
+const DEFAULT_ENABLED: string[] = ["revenue.INITIAL", "revenue.RENEWAL", "subscription.trial.started"];
+
+export function IntegrationDrawer({ open, onOpenChange, providerId, projectId, existingConnection }: IntegrationDrawerProps) {
+  const [step, setStep] = useState<Step>(existingConnection ? "events" : "credentials");
+  const [state, setState] = useState<DrawerState>({
+    credentials: {}, validated: Boolean(existingConnection),
+    enabledEvents: existingConnection?.enabledEvents ?? DEFAULT_ENABLED,
+    eventMapping: existingConnection?.eventMapping ?? {},
+    actionSource: existingConnection?.actionSource ?? "app",
+    testEventCode: existingConnection?.testEventCode ?? "",
+  });
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 bg-black/40" />
+        <Dialog.Popup className="fixed right-0 top-0 h-full w-[520px] bg-white shadow-xl overflow-y-auto" role="dialog">
+          <header className="px-6 py-4 border-b">
+            <Dialog.Title className="text-lg font-semibold">
+              {providerId === "META_CAPI" ? "Meta CAPI" : "TikTok Events API"}
+            </Dialog.Title>
+          </header>
+          <div className="p-6">
+            {step === "credentials" && <StepCredentials providerId={providerId} projectId={projectId} state={state} onChange={setState} onNext={() => setStep("events")} />}
+            {step === "events" && <StepEvents state={state} onChange={setState} onBack={() => setStep("credentials")} onNext={() => setStep("mapping")} />}
+            {step === "mapping" && <StepMapping state={state} onChange={setState} onBack={() => setStep("events")} onNext={() => setStep("test")} />}
+            {step === "test" && <StepTest providerId={providerId} projectId={projectId} state={state} onChange={setState} onBack={() => setStep("mapping")} onNext={() => setStep("activate")} existingConnection={existingConnection} />}
+            {step === "activate" && <StepActivate providerId={providerId} projectId={projectId} state={state} existingConnection={existingConnection} onClose={() => onOpenChange(false)} onBack={() => setStep("test")} />}
+          </div>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+```
+
+Create stub files:
+
+```tsx
+// step-credentials.tsx, step-events.tsx, step-mapping.tsx, step-test.tsx, step-activate.tsx
+export function StepCredentials(_: unknown) { return <h2>Credentials</h2>; }
+export function StepEvents(_: unknown) { return <h2>Events</h2>; }
+export function StepMapping(_: unknown) { return <h2>Mapping</h2>; }
+export function StepTest(_: unknown) { return <h2>Test</h2>; }
+export function StepActivate(_: unknown) { return <h2>Activate</h2>; }
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/dashboard test -- integration-drawer.test.tsx`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/dashboard/src/components/apps/integration-drawer
+git commit -m "feat(dashboard): IntegrationDrawer shell with 5-step state machine"
+```
+
+### Task M6.6: Step 1 — Credentials (validate + token preview)
+
+**Files:**
+- Modify: `apps/dashboard/src/components/apps/integration-drawer/step-credentials.tsx`
+- Create: `apps/dashboard/src/components/apps/integration-drawer/step-credentials.test.tsx`
+
+- [ ] **Step 1: Write the failing test**
+
+```tsx
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { setupServer } from "msw/node";
+import { http, HttpResponse } from "msw";
+import { vi, beforeAll, afterEach, afterAll, it, expect } from "vitest";
+import React from "react";
+import { StepCredentials } from "./step-credentials";
+
+const server = setupServer(
+  http.post("/api/dashboard/projects/p1/integrations/validate", () => HttpResponse.json({ data: { ok: true } })),
+);
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+const wrapper = ({ children }: { children: React.ReactNode }) => (
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{children}</QueryClientProvider>
+);
+
+it("validates credentials and unlocks Next on success", async () => {
+  const onNext = vi.fn();
+  let state = { credentials: {}, validated: false, enabledEvents: [], eventMapping: {}, actionSource: "app" as const, testEventCode: "" };
+  const onChange = vi.fn((s) => { state = s; });
+  const { rerender } = render(
+    <StepCredentials providerId="META_CAPI" projectId="p1" state={state} onChange={onChange} onNext={onNext} />,
+    { wrapper },
+  );
+  fireEvent.change(screen.getByLabelText("Pixel ID"), { target: { value: "12345678" } });
+  fireEvent.change(screen.getByLabelText("Access Token"), { target: { value: "EAAtoken1234" } });
+  fireEvent.click(screen.getByRole("button", { name: /validate/i }));
+  await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ validated: true })));
+  rerender(<StepCredentials providerId="META_CAPI" projectId="p1" state={{ ...state, validated: true, credentials: { pixelId: "12345678", accessToken: "EAAtoken1234" } }} onChange={onChange} onNext={onNext} />);
+  expect(screen.getByText(/1234/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /next/i })).not.toBeDisabled();
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- step-credentials.test.tsx`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```tsx
+import { useState } from "react";
+import { useValidateIntegrationCredentials } from "../../../lib/hooks/useProjectIntegrations";
+import type { DrawerState } from "./integration-drawer";
+
+export interface StepCredentialsProps {
+  providerId: "META_CAPI" | "TIKTOK_EVENTS";
+  projectId: string;
+  state: DrawerState;
+  onChange: (s: DrawerState) => void;
+  onNext: () => void;
+}
+
+export function StepCredentials({ providerId, projectId, state, onChange, onNext }: StepCredentialsProps) {
+  const validate = useValidateIntegrationCredentials(projectId);
+  const [error, setError] = useState<string | null>(null);
+  const isMeta = providerId === "META_CAPI";
+  const idValue = isMeta ? state.credentials.pixelId ?? "" : state.credentials.pixelCode ?? "";
+  const tokenValue = state.credentials.accessToken ?? "";
+
+  const handleValidate = async () => {
+    setError(null);
+    const result = await validate.mutateAsync({
+      providerId,
+      credentials: isMeta
+        ? { pixelId: idValue, accessToken: tokenValue }
+        : { pixelCode: idValue, accessToken: tokenValue },
+    });
+    if (result.ok) onChange({ ...state, validated: true });
+    else setError(result.reason);
+  };
+
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); handleValidate(); }} className="space-y-4">
+      <h2 className="text-base font-semibold">Credentials</h2>
+      <label className="block">
+        <span className="text-sm">{isMeta ? "Pixel ID" : "Pixel Code"}</span>
+        <input
+          aria-label={isMeta ? "Pixel ID" : "Pixel Code"}
+          value={idValue}
+          onChange={(e) => onChange({ ...state, credentials: isMeta
+            ? { ...state.credentials, pixelId: e.target.value }
+            : { ...state.credentials, pixelCode: e.target.value },
+          })}
+          className="w-full border rounded px-3 py-2"
+        />
+      </label>
+      <label className="block">
+        <span className="text-sm">Access Token</span>
+        <input
+          aria-label="Access Token" type="password" value={tokenValue}
+          onChange={(e) => onChange({ ...state, credentials: { ...state.credentials, accessToken: e.target.value } })}
+          className="w-full border rounded px-3 py-2"
+        />
+      </label>
+      <button type="submit" disabled={validate.isPending} className="px-3 py-2 bg-slate-800 text-white rounded">
+        {validate.isPending ? "Validating…" : "Validate"}
+      </button>
+      {state.validated && (
+        <p className="text-green-700 text-sm">Token ending …{tokenValue.slice(-4)} validated</p>
+      )}
+      {error && <p className="text-red-700 text-sm">{error}</p>}
+      <div className="flex justify-end gap-2">
+        <button type="button" disabled={!state.validated} onClick={onNext}
+          className="px-3 py-2 bg-blue-600 text-white rounded disabled:opacity-40">Next</button>
+      </div>
+    </form>
+  );
+}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/dashboard test -- step-credentials.test.tsx`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/dashboard/src/components/apps/integration-drawer/step-credentials.tsx apps/dashboard/src/components/apps/integration-drawer/step-credentials.test.tsx
+git commit -m "feat(dashboard): IntegrationDrawer Step 1 — Credentials with live validation"
+```
+
+### Task M6.7: Step 2 — Event scope checkbox list
+
+**Files:**
+- Modify: `apps/dashboard/src/components/apps/integration-drawer/step-events.tsx`
+- Create: `apps/dashboard/src/components/apps/integration-drawer/step-events.test.tsx`
+
+- [ ] **Step 1: Write the failing test**
+
+```tsx
+import { render, screen, fireEvent } from "@testing-library/react";
+import { vi, it, expect } from "vitest";
+import { StepEvents } from "./step-events";
+
+it("toggles enabledEvents when checkbox clicked", () => {
+  const onChange = vi.fn();
+  render(<StepEvents
+    state={{ credentials: {}, validated: true, enabledEvents: ["revenue.INITIAL"], eventMapping: {}, actionSource: "app", testEventCode: "" }}
+    onChange={onChange} onBack={() => {}} onNext={() => {}} />);
+  fireEvent.click(screen.getByLabelText("revenue.RENEWAL"));
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+    enabledEvents: ["revenue.INITIAL", "revenue.RENEWAL"],
+  }));
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- step-events.test.tsx`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```tsx
+import type { DrawerState } from "./integration-drawer";
+
+const ALL_EVENT_KEYS = [
+  "revenue.INITIAL", "revenue.TRIAL_CONVERSION", "revenue.RENEWAL",
+  "revenue.CREDIT_PURCHASE", "revenue.REFUND", "revenue.CANCELLATION",
+  "subscription.trial.started", "subscriber.identified",
+] as const;
+
+export interface StepEventsProps {
+  state: DrawerState;
+  onChange: (s: DrawerState) => void;
+  onBack: () => void;
+  onNext: () => void;
+}
+
+export function StepEvents({ state, onChange, onBack, onNext }: StepEventsProps) {
+  const toggle = (key: string) => {
+    const next = state.enabledEvents.includes(key)
+      ? state.enabledEvents.filter((k) => k !== key)
+      : [...state.enabledEvents, key];
+    onChange({ ...state, enabledEvents: next });
+  };
+  return (
+    <div className="space-y-3">
+      <h2 className="text-base font-semibold">Event scope</h2>
+      {ALL_EVENT_KEYS.map((k) => (
+        <label key={k} className="flex items-center gap-2">
+          <input type="checkbox" checked={state.enabledEvents.includes(k)} onChange={() => toggle(k)} aria-label={k} />
+          <span className="font-mono text-sm">{k}</span>
+        </label>
+      ))}
+      <div className="flex justify-between pt-4">
+        <button type="button" onClick={onBack} className="px-3 py-2 border rounded">Back</button>
+        <button type="button" onClick={onNext} className="px-3 py-2 bg-blue-600 text-white rounded">Next</button>
+      </div>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/dashboard test -- step-events.test.tsx`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/dashboard/src/components/apps/integration-drawer/step-events.tsx apps/dashboard/src/components/apps/integration-drawer/step-events.test.tsx
+git commit -m "feat(dashboard): IntegrationDrawer Step 2 — Event scope checkboxes"
+```
+
+### Task M6.8: Step 3 — Mapping overrides (collapsed accordion)
+
+**Files:**
+- Modify: `apps/dashboard/src/components/apps/integration-drawer/step-mapping.tsx`
+- Create: `apps/dashboard/src/components/apps/integration-drawer/step-mapping.test.tsx`
+
+- [ ] **Step 1: Write the failing test**
+
+```tsx
+import { render, screen, fireEvent } from "@testing-library/react";
+import { vi, it, expect } from "vitest";
+import { StepMapping } from "./step-mapping";
+
+it("expands accordion + accepts eventName override", () => {
+  const onChange = vi.fn();
+  render(<StepMapping
+    state={{ credentials: {}, validated: true, enabledEvents: ["revenue.RENEWAL"], eventMapping: {}, actionSource: "app", testEventCode: "" }}
+    onChange={onChange} onBack={() => {}} onNext={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: /advanced/i }));
+  fireEvent.change(screen.getByLabelText("revenue.RENEWAL"), { target: { value: "CustomPurchase" } });
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+    eventMapping: { "revenue.RENEWAL": { eventName: "CustomPurchase" } },
+  }));
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- step-mapping.test.tsx`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```tsx
+import { useState } from "react";
+import type { DrawerState } from "./integration-drawer";
+
+export interface StepMappingProps {
+  state: DrawerState;
+  onChange: (s: DrawerState) => void;
+  onBack: () => void;
+  onNext: () => void;
+}
+
+export function StepMapping({ state, onChange, onBack, onNext }: StepMappingProps) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="space-y-3">
+      <h2 className="text-base font-semibold">Mapping overrides</h2>
+      <button type="button" onClick={() => setOpen((v) => !v)} className="text-sm text-blue-600">
+        {open ? "Hide" : "Advanced: customize event names"}
+      </button>
+      {open && (
+        <div className="space-y-2 mt-2">
+          {state.enabledEvents.map((k) => (
+            <label key={k} className="block">
+              <span className="text-sm font-mono">{k}</span>
+              <input
+                aria-label={k} placeholder="(default)"
+                value={state.eventMapping[k]?.eventName ?? ""}
+                onChange={(e) => onChange({
+                  ...state,
+                  eventMapping: {
+                    ...state.eventMapping,
+                    [k]: e.target.value ? { eventName: e.target.value } : { eventName: undefined },
+                  },
+                })}
+                className="w-full border rounded px-3 py-2"
+              />
+            </label>
+          ))}
+        </div>
+      )}
+      <div className="flex justify-between pt-4">
+        <button type="button" onClick={onBack} className="px-3 py-2 border rounded">Back</button>
+        <button type="button" onClick={onNext} className="px-3 py-2 bg-blue-600 text-white rounded">Next</button>
+      </div>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/dashboard test -- step-mapping.test.tsx`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/dashboard/src/components/apps/integration-drawer/step-mapping.tsx apps/dashboard/src/components/apps/integration-drawer/step-mapping.test.tsx
+git commit -m "feat(dashboard): IntegrationDrawer Step 3 — mapping override accordion"
+```
+
+### Task M6.9: Step 4 — Test event (send + provider Events Manager link)
+
+**Files:**
+- Modify: `apps/dashboard/src/components/apps/integration-drawer/step-test.tsx`
+- Create: `apps/dashboard/src/components/apps/integration-drawer/step-test.test.tsx`
+
+- [ ] **Step 1: Write the failing test**
+
+```tsx
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { setupServer } from "msw/node";
+import { http, HttpResponse } from "msw";
+import { beforeAll, afterAll, afterEach, it, expect, vi } from "vitest";
+import React from "react";
+import { StepTest } from "./step-test";
+
+const server = setupServer(
+  http.post("/api/dashboard/projects/p1/integrations/c1/test-event", () =>
+    HttpResponse.json({ data: { ok: true, httpStatus: 200, responseBody: '{"events_received":1}' } })),
+);
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+const wrapper = ({ children }: { children: React.ReactNode }) => (
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{children}</QueryClientProvider>
+);
+
+it("posts /test-event and shows response status", async () => {
+  render(<StepTest
+    providerId="META_CAPI" projectId="p1"
+    state={{ credentials: {}, validated: true, enabledEvents: ["revenue.INITIAL"], eventMapping: {}, actionSource: "app", testEventCode: "TEST123" }}
+    onChange={vi.fn()} onBack={vi.fn()} onNext={vi.fn()}
+    existingConnection={{ id: "c1" } as never}
+  />, { wrapper });
+  fireEvent.click(screen.getByRole("button", { name: /send test event/i }));
+  await waitFor(() => expect(screen.getByText(/200/)).toBeInTheDocument());
+  expect(screen.getByText(/events_received/)).toBeInTheDocument();
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- step-test.test.tsx`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```tsx
+import { useState } from "react";
+import { useTestIntegrationEvent } from "../../../lib/hooks/useProjectIntegrations";
+import type { DrawerState } from "./integration-drawer";
+import type { IntegrationConnectionRow } from "../../../lib/hooks/useProjectIntegrations";
+
+export interface StepTestProps {
+  providerId: "META_CAPI" | "TIKTOK_EVENTS";
+  projectId: string;
+  state: DrawerState;
+  onChange: (s: DrawerState) => void;
+  onBack: () => void;
+  onNext: () => void;
+  existingConnection?: IntegrationConnectionRow;
+}
+
+export function StepTest({ providerId, projectId, state, onChange, onBack, onNext, existingConnection }: StepTestProps) {
+  const test = useTestIntegrationEvent(projectId, existingConnection?.id ?? "");
+  const [result, setResult] = useState<{ httpStatus: number; responseBody: string } | null>(null);
+  const externalLink = providerId === "META_CAPI"
+    ? "https://business.facebook.com/events_manager"
+    : "https://ads.tiktok.com/i18n/events_manager";
+  const canSend = Boolean(existingConnection?.id && state.testEventCode);
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-base font-semibold">Test event</h2>
+      <label className="block">
+        <span className="text-sm">Test event code</span>
+        <input aria-label="test_event_code" value={state.testEventCode}
+          onChange={(e) => onChange({ ...state, testEventCode: e.target.value })}
+          className="w-full border rounded px-3 py-2" />
+      </label>
+      <button type="button" disabled={!canSend || test.isPending}
+        onClick={async () => {
+          const out = await test.mutateAsync();
+          setResult({ httpStatus: out.httpStatus, responseBody: out.responseBody });
+        }}
+        className="px-3 py-2 bg-slate-800 text-white rounded disabled:opacity-40">
+        {test.isPending ? "Sending…" : "Send test event"}
+      </button>
+      {result && (
+        <details open className="border rounded p-3">
+          <summary>HTTP {result.httpStatus}</summary>
+          <pre className="text-xs overflow-x-auto">{result.responseBody}</pre>
+        </details>
+      )}
+      <a href={externalLink} target="_blank" rel="noreferrer" className="text-blue-600 text-sm">
+        Open in {providerId === "META_CAPI" ? "Meta" : "TikTok"} Events Manager →
+      </a>
+      <div className="flex justify-between pt-4">
+        <button type="button" onClick={onBack} className="px-3 py-2 border rounded">Back</button>
+        <button type="button" onClick={onNext} className="px-3 py-2 bg-blue-600 text-white rounded">Next</button>
+      </div>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/dashboard test -- step-test.test.tsx`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/dashboard/src/components/apps/integration-drawer/step-test.tsx apps/dashboard/src/components/apps/integration-drawer/step-test.test.tsx
+git commit -m "feat(dashboard): IntegrationDrawer Step 4 — send test event + manager link"
+```
+
+### Task M6.10: Step 5 — Activate (create or PATCH isEnabled=true)
+
+**Files:**
+- Modify: `apps/dashboard/src/components/apps/integration-drawer/step-activate.tsx`
+- Create: `apps/dashboard/src/components/apps/integration-drawer/step-activate.test.tsx`
+
+- [ ] **Step 1: Write the failing test**
+
+```tsx
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { setupServer } from "msw/node";
+import { http, HttpResponse } from "msw";
+import { vi, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import React from "react";
+import { StepActivate } from "./step-activate";
+
+const server = setupServer(
+  http.post("/api/dashboard/projects/p1/integrations", () => HttpResponse.json({ data: { id: "new1", isEnabled: false } }, { status: 201 })),
+  http.patch("/api/dashboard/projects/p1/integrations/new1", () => HttpResponse.json({ data: { id: "new1", isEnabled: true } })),
+);
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+const wrapper = ({ children }: { children: React.ReactNode }) => (
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{children}</QueryClientProvider>
+);
+
+it("creates a new connection when no existingConnection", async () => {
+  const onClose = vi.fn();
+  render(<StepActivate
+    providerId="META_CAPI" projectId="p1"
+    state={{ credentials: { pixelId: "1", accessToken: "t" }, validated: true, enabledEvents: ["revenue.INITIAL"], eventMapping: {}, actionSource: "app", testEventCode: "" }}
+    existingConnection={undefined} onClose={onClose} onBack={() => {}}
+  />, { wrapper });
+  fireEvent.click(screen.getByRole("button", { name: /activate/i }));
+  await waitFor(() => expect(onClose).toHaveBeenCalled());
+});
+
+it("PATCHes isEnabled=true when existingConnection present", async () => {
+  server.use(http.patch("/api/dashboard/projects/p1/integrations/c1", async ({ request }) => {
+    const body = await request.json() as { isEnabled: boolean };
+    expect(body.isEnabled).toBe(true);
+    return HttpResponse.json({ data: { id: "c1", isEnabled: true } });
+  }));
+  const onClose = vi.fn();
+  render(<StepActivate
+    providerId="META_CAPI" projectId="p1"
+    state={{ credentials: {}, validated: true, enabledEvents: ["revenue.INITIAL"], eventMapping: {}, actionSource: "app", testEventCode: "" }}
+    existingConnection={{ id: "c1", isEnabled: false } as never}
+    onClose={onClose} onBack={() => {}}
+  />, { wrapper });
+  fireEvent.click(screen.getByRole("button", { name: /activate/i }));
+  await waitFor(() => expect(onClose).toHaveBeenCalled());
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- step-activate.test.tsx`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```tsx
+import { useCreateIntegration, useUpdateIntegration } from "../../../lib/hooks/useProjectIntegrations";
+import type { DrawerState } from "./integration-drawer";
+import type { IntegrationConnectionRow } from "../../../lib/hooks/useProjectIntegrations";
+// Adjust the toast import to match the project's existing notification pattern;
+// look in apps/dashboard/src/lib/ or apps/dashboard/src/components/ui/ first.
+
+export interface StepActivateProps {
+  providerId: "META_CAPI" | "TIKTOK_EVENTS";
+  projectId: string;
+  state: DrawerState;
+  existingConnection?: IntegrationConnectionRow;
+  onClose: () => void;
+  onBack: () => void;
+}
+
+export function StepActivate({ providerId, projectId, state, existingConnection, onClose, onBack }: StepActivateProps) {
+  const create = useCreateIntegration(projectId);
+  const update = useUpdateIntegration(projectId);
+
+  const handleActivate = async () => {
+    if (existingConnection) {
+      await update.mutateAsync({
+        id: existingConnection.id,
+        body: {
+          isEnabled: true,
+          enabledEvents: state.enabledEvents,
+          eventMapping: state.eventMapping,
+          actionSource: state.actionSource,
+          testEventCode: state.testEventCode || null,
+        },
+      });
+    } else {
+      const created = await create.mutateAsync({
+        providerId,
+        displayName: providerId === "META_CAPI" ? "Meta CAPI" : "TikTok Events API",
+        credentials: state.credentials as { pixelId?: string; pixelCode?: string; accessToken: string },
+        enabledEvents: state.enabledEvents,
+        eventMapping: state.eventMapping,
+        actionSource: state.actionSource,
+        testEventCode: state.testEventCode || undefined,
+      });
+      await update.mutateAsync({ id: created.id, body: { isEnabled: true } });
+    }
+    onClose();
+  };
+
+  return (
+    <div className="space-y-3">
+      <h2 className="text-base font-semibold">Activate</h2>
+      <dl className="text-sm">
+        <dt className="font-semibold">Events</dt>
+        <dd className="mb-2">{state.enabledEvents.join(", ") || "(none)"}</dd>
+        <dt className="font-semibold">Action source</dt>
+        <dd className="mb-2">{state.actionSource}</dd>
+        <dt className="font-semibold">Test event code</dt>
+        <dd>{state.testEventCode || "(none)"}</dd>
+      </dl>
+      <div className="flex justify-between pt-4">
+        <button type="button" onClick={onBack} className="px-3 py-2 border rounded">Back</button>
+        <button type="button" onClick={handleActivate}
+          disabled={create.isPending || update.isPending}
+          className="px-3 py-2 bg-green-600 text-white rounded disabled:opacity-40">
+          {create.isPending || update.isPending ? "Activating…" : "Activate"}
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/dashboard test -- step-activate.test.tsx`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/dashboard/src/components/apps/integration-drawer/step-activate.tsx apps/dashboard/src/components/apps/integration-drawer/step-activate.test.tsx
+git commit -m "feat(dashboard): IntegrationDrawer Step 5 — Activate (create or enable)"
+```
+
+### Task M6.11: Wire AppCard click → open drawer
+
+**Files:**
+- Modify: `apps/dashboard/src/components/apps/app-card.tsx`
+- Create or modify: `apps/dashboard/src/components/apps/app-card.test.tsx`
+
+- [ ] **Step 1: Write the failing test**
+
+```tsx
+import { render, screen, fireEvent } from "@testing-library/react";
+import { vi, it, expect } from "vitest";
+import { AppCard } from "./app-card";
+
+it("clicking the meta-capi card calls onOpenIntegration", () => {
+  const onOpen = vi.fn();
+  render(<AppCard
+    app={{ id: "meta-capi", name: "Meta CAPI", description: "", status: "available" }}
+    onOpenIntegration={onOpen} />);
+  fireEvent.click(screen.getByRole("button", { name: /meta capi/i }));
+  expect(onOpen).toHaveBeenCalledWith("meta-capi");
+});
+
+it("clicking an 'unavailable' card does nothing", () => {
+  const onOpen = vi.fn();
+  render(<AppCard
+    app={{ id: "snapchat-ads", name: "Snapchat", description: "", status: "unavailable" }}
+    onOpenIntegration={onOpen} />);
+  fireEvent.click(screen.getByRole("button", { name: /snapchat/i }));
+  expect(onOpen).not.toHaveBeenCalled();
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- app-card.test.tsx`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+Modify `app-card.tsx` to accept `onOpenIntegration?: (providerId: string) => void`. On click, dispatch only when `app.status !== "unavailable"` AND `app.id === "meta-capi" || app.id === "tiktok-events"`. Other clicks behave as before.
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/dashboard test -- app-card.test.tsx`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/dashboard/src/components/apps/app-card.tsx apps/dashboard/src/components/apps/app-card.test.tsx
+git commit -m "feat(dashboard): AppCard opens IntegrationDrawer for meta-capi + tiktok-events"
+```
+
+### Task M6.12: AppsGrid (container) renders drawer
+
+**Files:**
+- Modify: `apps/dashboard/src/components/apps/apps-grid.tsx` (or whichever container hosts cards; ls the directory first if uncertain)
+- Create/modify: `apps/dashboard/src/components/apps/apps-grid.test.tsx`
+
+- [ ] **Step 1: Write the failing test**
+
+```tsx
+it("renders drawer when a meta-capi card opens it", async () => {
+  server.use(http.get("/api/dashboard/projects/p1/app-connections", () =>
+    HttpResponse.json({ data: [{ id: "meta-capi", name: "Meta CAPI", description: "", status: "available" }] })));
+  render(<AppsGrid projectId="p1" />, { wrapper });
+  await screen.findByRole("button", { name: /meta capi/i });
+  fireEvent.click(screen.getByRole("button", { name: /meta capi/i }));
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- apps-grid.test.tsx`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+In the container, add state `[drawerProviderId, setDrawerProviderId] = useState<"META_CAPI" | "TIKTOK_EVENTS" | null>(null)`. Pass `onOpenIntegration={(id) => setDrawerProviderId(id === "meta-capi" ? "META_CAPI" : "TIKTOK_EVENTS")}` to cards. Render:
+
+```tsx
+{drawerProviderId && (
+  <IntegrationDrawer
+    open={true}
+    onOpenChange={(o) => !o && setDrawerProviderId(null)}
+    providerId={drawerProviderId}
+    projectId={projectId}
+    existingConnection={integrations?.find((c) => c.providerId === drawerProviderId)}
+  />
+)}
+```
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/dashboard test -- apps-grid.test.tsx`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/dashboard/src/components/apps/apps-grid.tsx apps/dashboard/src/components/apps/apps-grid.test.tsx
+git commit -m "feat(dashboard): AppsGrid renders IntegrationDrawer on card open"
+```
+
+### Task M6.13: Catalog entries for meta-capi + tiktok-events
+
+**Files:**
+- Modify: `apps/dashboard/src/components/apps/mock-data.ts`
+
+- [ ] **Step 1: Verify state**
+
+Run: `grep -n "meta-capi\|tiktok-events" apps/dashboard/src/components/apps/mock-data.ts`
+
+If both IDs already exist with `category: "ads"` and a default `status: "available"`, skip; if missing, add:
+
+```ts
+{ id: "meta-capi", name: "Meta CAPI", description: "Send server-side conversions to your Meta Pixel.", category: "ads", status: "available", icon: "/icons/apps/meta.svg" },
+{ id: "tiktok-events", name: "TikTok Events API", description: "Send server-side conversions to your TikTok Pixel.", category: "ads", status: "available", icon: "/icons/apps/tiktok.svg" },
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add apps/dashboard/src/components/apps/mock-data.ts
+git commit -m "feat(dashboard): catalog entries for meta-capi + tiktok-events"
+```
+
+### Task M6.14: i18n keys (en + tr if tr.json exists)
+
+**Files:**
+- Modify: `apps/dashboard/src/i18n/locales/en.json`
+- Modify: `apps/dashboard/src/i18n/locales/tr.json` (only if present)
+
+- [ ] **Step 1: Verify locale layout**
+
+Run: `ls apps/dashboard/src/i18n/locales/`
+
+Add (under existing `apps` namespace, mirroring the existing nesting depth):
+
+```json
+{
+  "apps": {
+    "items": {
+      "meta-capi": { "name": "Meta CAPI", "description": "Send server-side conversions to your Meta Pixel." },
+      "tiktok-events": { "name": "TikTok Events API", "description": "Send server-side conversions to your TikTok Pixel." }
+    },
+    "drawer": {
+      "step.credentials.title": "Credentials",
+      "step.events.title": "Event scope",
+      "step.mapping.title": "Mapping overrides",
+      "step.test.title": "Test event",
+      "step.activate.title": "Activate",
+      "button.validate": "Validate",
+      "button.next": "Next",
+      "button.back": "Back",
+      "button.activate": "Activate",
+      "button.sendTestEvent": "Send test event",
+      "success.activated": "Integration activated. Backfilling last 7 days…",
+      "error.invalidCredentials": "Invalid credentials. Check the pixel ID and access token.",
+      "advanced.toggle": "Advanced: customize event names"
+    }
+  }
+}
+```
+
+Mirror to `tr.json` if present.
+
+- [ ] **Step 2: Run** `pnpm --filter @rovenue/dashboard test` to ensure JSON parses.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add apps/dashboard/src/i18n/locales/
+git commit -m "feat(dashboard): i18n keys for integration drawer"
+```
+
+### Task M6.15: Deliveries tab (when existingConnection set)
+
+**Files:**
+- Create: `apps/dashboard/src/components/apps/integration-drawer/step-deliveries.tsx`
+- Create: `apps/dashboard/src/components/apps/integration-drawer/step-deliveries.test.tsx`
+- Modify: `apps/dashboard/src/components/apps/integration-drawer/integration-drawer.tsx`
+
+- [ ] **Step 1: Write the failing test**
+
+```tsx
+import { setupServer } from "msw/node";
+import { http, HttpResponse } from "msw";
+import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { beforeAll, afterAll, afterEach, it, expect } from "vitest";
+import React from "react";
+import { StepDeliveries } from "./step-deliveries";
+
+const server = setupServer(
+  http.get("/api/dashboard/projects/p1/integrations/c1/deliveries", () =>
+    HttpResponse.json({
+      data: {
+        deliveries: [
+          { id: "d1", status: "succeeded", httpStatus: 200, eventKey: "revenue.RENEWAL", createdAt: "2026-05-26T00:00:00Z" },
+          { id: "d2", status: "dead_letter", httpStatus: 401, eventKey: "revenue.RENEWAL", createdAt: "2026-05-26T00:01:00Z" },
+        ],
+        nextCursor: null,
+      },
+    })),
+);
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+const wrapper = ({ children }: { children: React.ReactNode }) => (
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{children}</QueryClientProvider>
+);
+
+it("renders paginated deliveries table", async () => {
+  render(<StepDeliveries projectId="p1" connectionId="c1" />, { wrapper });
+  await screen.findByText("revenue.RENEWAL");
+  expect(screen.getByText("succeeded")).toBeInTheDocument();
+  expect(screen.getByText("dead_letter")).toBeInTheDocument();
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- step-deliveries.test.tsx`
+Expected: FAIL.
+
+- [ ] **Step 2: Write minimal implementation**
+
+```tsx
+import { useIntegrationDeliveries } from "../../../lib/hooks/useProjectIntegrations";
+
+export function StepDeliveries({ projectId, connectionId }: { projectId: string; connectionId: string }) {
+  const q = useIntegrationDeliveries(projectId, connectionId, {});
+  const rows = q.data?.pages.flatMap((p) => p.deliveries) ?? [];
+  return (
+    <div className="space-y-2">
+      <h2 className="text-base font-semibold">Recent deliveries</h2>
+      <table className="w-full text-sm">
+        <thead><tr><th>Event</th><th>Status</th><th>HTTP</th><th>When</th></tr></thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id}>
+              <td className="font-mono">{r.eventKey}</td>
+              <td>{r.status}</td>
+              <td>{r.httpStatus ?? "—"}</td>
+              <td>{new Date(r.createdAt).toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {q.hasNextPage && (
+        <button type="button" onClick={() => q.fetchNextPage()} className="px-3 py-2 border rounded">Load more</button>
+      )}
+    </div>
+  );
+}
+```
+
+Modify `integration-drawer.tsx` to expose a top-row "Wizard / Deliveries" tab toggle when `existingConnection` is set. Add a `view: "wizard" | "deliveries"` state.
+
+- [ ] **Step 3: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/dashboard test -- step-deliveries.test.tsx`
+Expected: PASS.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/dashboard/src/components/apps/integration-drawer/step-deliveries.tsx apps/dashboard/src/components/apps/integration-drawer/step-deliveries.test.tsx apps/dashboard/src/components/apps/integration-drawer/integration-drawer.tsx
+git commit -m "feat(dashboard): IntegrationDrawer deliveries tab (existing connection only)"
+```
+
+### Task M6.16: End-to-end drawer flow happy path
+
+**Files:**
+- Create: `apps/dashboard/src/components/apps/integration-drawer/integration-drawer.flow.test.tsx`
+
+- [ ] **Step 1: Write the test**
+
+```tsx
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { setupServer } from "msw/node";
+import { http, HttpResponse } from "msw";
+import { vi, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import React from "react";
+import { IntegrationDrawer } from "./integration-drawer";
+
+const server = setupServer(
+  http.post("/api/dashboard/projects/p1/integrations/validate", () => HttpResponse.json({ data: { ok: true } })),
+  http.post("/api/dashboard/projects/p1/integrations", () => HttpResponse.json({ data: { id: "new1", isEnabled: false } }, { status: 201 })),
+  http.patch("/api/dashboard/projects/p1/integrations/new1", () => HttpResponse.json({ data: { id: "new1", isEnabled: true } })),
+);
+beforeAll(() => server.listen());
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+
+const wrapper = ({ children }: { children: React.ReactNode }) => (
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{children}</QueryClientProvider>
+);
+
+it("complete flow: validate → events → mapping → test → activate", async () => {
+  const onOpenChange = vi.fn();
+  render(<IntegrationDrawer open={true} onOpenChange={onOpenChange} providerId="META_CAPI" projectId="p1" />, { wrapper });
+  fireEvent.change(screen.getByLabelText("Pixel ID"), { target: { value: "1" } });
+  fireEvent.change(screen.getByLabelText("Access Token"), { target: { value: "EAAtok" } });
+  fireEvent.click(screen.getByRole("button", { name: /validate/i }));
+  await waitFor(() => expect(screen.getByRole("button", { name: /next/i })).not.toBeDisabled());
+  fireEvent.click(screen.getByRole("button", { name: /next/i }));
+  fireEvent.click(screen.getByRole("button", { name: /next/i }));
+  fireEvent.click(screen.getByRole("button", { name: /next/i }));
+  fireEvent.click(screen.getByRole("button", { name: /next/i }));
+  fireEvent.click(screen.getByRole("button", { name: /activate/i }));
+  await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+});
+```
+
+Run: `pnpm --filter @rovenue/dashboard test -- integration-drawer.flow.test.tsx`
+Expected: PASS.
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add apps/dashboard/src/components/apps/integration-drawer/integration-drawer.flow.test.tsx
+git commit -m "test(dashboard): IntegrationDrawer end-to-end happy-path flow"
+```
+
+---
+
+<!-- PART 2 END (M4-M6). Continue in PART 3 (M7-M8). -->
