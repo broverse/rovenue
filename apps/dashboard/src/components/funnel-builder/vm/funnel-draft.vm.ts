@@ -81,11 +81,18 @@ export class FunnelDraftViewModel {
       const funnel = await this.api.get(this.props.projectId, this.props.funnelId, controller.signal);
       this.applyServer(funnel);
     } catch (err) {
-      if ((err as { name?: string })?.name !== "AbortError") {
-        this.error = err as Error;
+      const name = (err as { name?: string })?.name;
+      if (controller.signal.aborted || name === "AbortError") {
+        // Strict-Mode double-mount races abort the first attempt — ignore.
+        return;
       }
+      // eslint-disable-next-line no-console
+      console.error("[FunnelDraftViewModel] load failed", err);
+      this.error = err as Error;
     } finally {
-      this.isLoading = false;
+      if (!controller.signal.aborted) {
+        this.isLoading = false;
+      }
     }
   }
 
