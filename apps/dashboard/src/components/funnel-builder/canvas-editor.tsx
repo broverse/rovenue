@@ -62,24 +62,24 @@ export const CanvasEditor = component(() => {
   const canvasRef = useRef<HTMLDivElement>(null);
   const page = vm.selectedPage;
 
-  // Native non-passive wheel listener:
-  //  - pinch (trackpad pinch sends wheel events with ctrlKey=true) and
-  //    Cmd/Ctrl+wheel zoom the canvas; preventDefault stops the browser's
-  //    own page-zoom from firing
-  //  - bare scroll bubbles normally so trackpad two-finger / mouse wheel
-  //    pans the canvas via its overflow-auto scroll
-  //  - deltaY accumulates per gesture so trackpad's high event rate
-  //    doesn't fly past zoom steps
+  // Native non-passive wheel listener — every wheel/pinch over the canvas
+  // zooms (no modifier required). preventDefault blocks the page from
+  // scrolling or browser-zooming. Mouse users scroll to zoom; trackpad
+  // users pinch or two-finger scroll, both end up here as wheel events.
+  // deltaY accumulates so the trackpad's high event rate doesn't fly past
+  // discrete zoom steps in one gesture.
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
     let acc = 0;
     const THRESHOLD = 120;
     const onWheel = (e: WheelEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
       e.stopPropagation();
-      acc += e.deltaY;
+      // Browser pinch on trackpad reports ctrlKey=true with very small
+      // deltaY (~1-5); amplify so a pinch gesture lands a step quickly.
+      const delta = e.ctrlKey ? e.deltaY * 8 : e.deltaY;
+      acc += delta;
       while (Math.abs(acc) >= THRESHOLD) {
         const dir = acc > 0 ? -1 : 1;
         const current = vm.canvasZoom;
