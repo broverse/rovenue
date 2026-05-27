@@ -14,6 +14,9 @@ export interface DraftProps {
   funnelId: string;
 }
 
+/** Which slice of the draft a `saveNow(scope)` call should ship. */
+export type SaveScope = "settings" | "theme" | "pages" | "name";
+
 const DEFAULT_THEME: Theme = {
   primary: "#3B82F6",
   accent: "#3B82F6",
@@ -30,6 +33,7 @@ const DEFAULT_THEME: Theme = {
 };
 
 const DEFAULT_SETTINGS: Settings = {
+  customDomain: "",
   iosUrl: "",
   androidUrl: "",
   universalLinkDomain: "",
@@ -59,6 +63,10 @@ export class FunnelDraftViewModel {
   @state versionMenuOpen = false;
   @state autosaveStatus: "saved" | "saving" | "error" = "saved";
   @state lastSavedAt: number | null = null;
+  // JSON snapshot of the most recently saved state. Compared against the
+  // current snapshot to drive `isDirty` — so we don't ship no-op PATCHes
+  // and the beforeunload guard only fires when there's something to lose.
+  @state lastSavedSnapshot: string = "";
 
   // Canvas preview UI state lives on the VM so a) impair tracks change
   // for the `component()`-wrapped CanvasEditor and b) the wheel handler
@@ -128,6 +136,27 @@ export class FunnelDraftViewModel {
   // catch hooks fire differently than expected.
   private disposed = false;
 
+  // Shared abort handle for autosave + saveNow. A new save aborts any
+  // in-flight save so two PATCHes never race; the trailing call wins and
+  // writes the latest state. Cleared once the latest call resolves.
+  private saveController: AbortController | null = null;
+
+  // Warn the user before they navigate away with unsaved work. Modern
+  // browsers ignore the returned string and show their own generic copy,
+  // but `event.preventDefault()` + a non-empty returnValue is what triggers
+  // the prompt at all. Cleanup runs when the VM disposes (route change,
+  // funnel switch).
+  @onMount
+  guardUnload(cleanup: Cleanup) {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (!this.isDirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    cleanup(() => window.removeEventListener("beforeunload", handler));
+  }
+
   @onMount
   async load(cleanup: Cleanup) {
     cleanup(() => {
@@ -166,6 +195,20 @@ export class FunnelDraftViewModel {
     }
     this.lastSavedAt = Date.now();
     this.autosaveStatus = "saved";
+    this.lastSavedSnapshot = this.snapshot();
+  }
+
+  /** Stringified picture of everything that gets shipped on autosave. */
+  private snapshot(): string {
+    return JSON.stringify({
+      name: this.name,
+      slug: this.slug,
+      pages: this.pages,
+      theme: this.theme,
+      settings: this.settings,
+      rules: this.rules,
+      defaultNext: this.defaultNext,
+    });
   }
 
   // ----- UI state mutations -----
@@ -279,6 +322,67 @@ export class FunnelDraftViewModel {
   updateTheme(patch: Partial<Theme>) { Object.assign(this.theme, patch); }
   updateSettings(patch: Partial<Settings>) { Object.assign(this.settings, patch); }
 
+  // Force-flush the current draft to the backend, bypassing the autosave
+  // throttle. Used by explicit "Save" buttons so the user gets an immediate
+  // "Saved" confirmation instead of waiting for the next throttle tick.
+  //
+  // `scope` lets callers narrow the PATCH to a single concern so a Save
+  // button in the Settings tab doesn't ship half-typed page edits, and
+  // vice-versa. Omitting it sends the full draft (the global save path).
+  async saveNow(scope?: SaveScope) {
+    if (!this.funnel || this.isLoading) return;
+    // Nothing to ship — skip the round-trip and just confirm "Saved".
+    if (!this.isDirty) {
+      this.autosaveStatus = "saved";
+      return;
+    }
+    this.saveController?.abort();
+    const controller = new AbortController();
+    this.saveController = controller;
+    this.autosaveStatus = "saving";
+    const snap = this.snapshot();
+    try {
+      const payload: Parameters<typeof this.api.patchDraft>[2] = {};
+      if (scope === undefined) {
+        payload.name = this.name;
+        payload.slug = this.slug;
+        payload.draftPages = this.pages as never;
+        payload.draftTheme = this.theme as never;
+        payload.draftSettings = this.settings as never;
+        payload.draftRules = this.rules;
+        payload.draftDefaultNext = this.defaultNext;
+      } else if (scope === "settings") {
+        payload.draftSettings = this.settings as never;
+      } else if (scope === "theme") {
+        payload.draftTheme = this.theme as never;
+      } else if (scope === "pages") {
+        payload.draftPages = this.pages as never;
+        payload.draftRules = this.rules;
+        payload.draftDefaultNext = this.defaultNext;
+      } else if (scope === "name") {
+        payload.name = this.name;
+        payload.slug = this.slug;
+      }
+      const next = await this.api.patchDraft(
+        this.props.projectId,
+        this.props.funnelId,
+        payload,
+        controller.signal,
+      );
+      if (this.saveController !== controller) return;
+      this.funnel = next;
+      this.lastSavedAt = Date.now();
+      this.lastSavedSnapshot = snap;
+      this.autosaveStatus = "saved";
+    } catch (err) {
+      if ((err as { name?: string })?.name === "AbortError") return;
+      if (this.saveController !== controller) return;
+      this.autosaveStatus = "error";
+    } finally {
+      if (this.saveController === controller) this.saveController = null;
+    }
+  }
+
   // ----- Per-page background / footer ----------------------------------
   // These accept partial patches and merge against whatever the page
   // currently has, so panel inputs never need to spread `page.footer!`
@@ -346,7 +450,7 @@ export class FunnelDraftViewModel {
   @derived get warnCount() { return this.validation.warnings.length; }
 
   @derived get isDirty() {
-    return this.autosaveStatus === "saving" || this.autosaveStatus === "error";
+    return this.snapshot() !== this.lastSavedSnapshot;
   }
 
   // Lazy-inject the Google Fonts stylesheet for the active theme font. The
@@ -363,6 +467,25 @@ export class FunnelDraftViewModel {
   // immediately and coalesces subsequent edits into a trailing call when
   // the window expires — so a single keystroke saves right away but
   // sustained editing doesn't hammer the server.
+  // Reset a sticky "error" status the moment the user edits anything again.
+  // Without this, the badge stays red for up to 30s while we wait for the
+  // throttled autosave to fire its trailing call — confusing because the
+  // user is clearly making progress. The throttle still controls when the
+  // actual PATCH happens; this trigger just flips the visible state.
+  @trigger
+  clearAutosaveError() {
+    // Touch the same reactive reads autosave depends on so impair re-runs
+    // this on any tracked mutation.
+    void this.name;
+    void this.slug;
+    void this.pages;
+    void this.theme;
+    void this.settings;
+    void this.rules;
+    void this.defaultNext;
+    if (this.autosaveStatus === "error") this.autosaveStatus = "saving";
+  }
+
   @trigger.throttle(30000)
   async autosave(cleanup: Cleanup) {
     if (!this.funnel || this.isLoading) return;
@@ -377,7 +500,16 @@ export class FunnelDraftViewModel {
       draftRules: this.rules,
       draftDefaultNext: this.defaultNext,
     };
+    // Skip no-op PATCHes — the throttle fires on any read change, but
+    // many of those (e.g. UI-only toggles wrapped in @state) leave the
+    // shipped payload identical.
+    const snap = this.snapshot();
+    if (snap === this.lastSavedSnapshot) return;
+    // Share the abort handle with saveNow so an explicit save and an
+    // in-flight autosave never race — the newer call wins.
+    this.saveController?.abort();
     const controller = new AbortController();
+    this.saveController = controller;
     cleanup(() => controller.abort());
     try {
       this.autosaveStatus = "saving";
@@ -387,12 +519,17 @@ export class FunnelDraftViewModel {
         payload,
         controller.signal,
       );
+      if (this.saveController !== controller) return;
       this.funnel = next;
       this.lastSavedAt = Date.now();
+      this.lastSavedSnapshot = snap;
       this.autosaveStatus = "saved";
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
+      if (this.saveController !== controller) return;
       this.autosaveStatus = "error";
+    } finally {
+      if (this.saveController === controller) this.saveController = null;
     }
   }
 

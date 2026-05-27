@@ -303,6 +303,8 @@ export type Theme = {
 };
 
 export type Settings = {
+  /** Optional custom hostname this funnel is served from (e.g. quiz.acme.com). */
+  customDomain: string;
   iosUrl: string;
   androidUrl: string;
   universalLinkDomain: string;
@@ -360,7 +362,7 @@ export const TABS: ReadonlyArray<{ id: TabId; label: string; hint: string; pip?:
   { id: "workflow", label: "Workflow", hint: "Branching & rules", pip: true },
   { id: "theme", label: "Theme", hint: "Brand & colors" },
   { id: "settings", label: "Settings", hint: "Store URLs, hand-off" },
-  { id: "sessions", label: "Sessions", hint: "Live runs" },
+  { id: "sessions", label: "Analytics", hint: "Live runs & metrics" },
   { id: "share", label: "Share", hint: "URL, QR, snippets" },
 ];
 

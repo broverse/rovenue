@@ -372,6 +372,13 @@
       "when": 1780000160000,
       "tag": "0052_aggregate_type_funnel",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1779921368923,
+      "tag": "0053_bored_multiple_man",
+      "breakpoints": true
     }
   ]
 }

@@ -4,12 +4,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
 import { MemberRole, drizzle } from "@rovenue/db";
-import {
-  pagesArraySchema,
-  settingsSchema,
-  themeSchema,
-  type Page,
-} from "@rovenue/shared/funnel";
+import { pagesArraySchema, type Page } from "@rovenue/shared/funnel";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { audit, extractRequestContext } from "../../lib/audit";
@@ -71,13 +66,23 @@ const createFunnelBodySchema = z.object({
   slug: slugSchema.optional(),
 });
 
+// Draft JSON columns are owned by the dashboard's working-copy schema
+// (which uses different field names than the SDK-runtime schemas in
+// `@rovenue/shared/funnel`). We persist them as opaque JSON here and
+// re-validate against the strict SDK schemas at publish time, when the
+// draft actually crosses the boundary into a runtime version. Validating
+// with the strict schema on every PATCH would silently strip every field
+// the dashboard sends and write `{}` to the column.
+const draftPagesJsonSchema = z.array(z.record(z.unknown()));
+const draftJsonObjectSchema = z.record(z.unknown());
+
 const updateFunnelBodySchema = z
   .object({
     name: z.string().min(1).max(120).optional(),
     slug: slugSchema.optional(),
-    draft_pages_json: pagesArraySchema.optional(),
-    draft_theme_json: themeSchema.partial().optional(),
-    draft_settings_json: settingsSchema.partial().optional(),
+    draft_pages_json: draftPagesJsonSchema.optional(),
+    draft_theme_json: draftJsonObjectSchema.optional(),
+    draft_settings_json: draftJsonObjectSchema.optional(),
   })
   .refine(
     (v) =>

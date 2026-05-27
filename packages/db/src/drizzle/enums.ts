@@ -291,3 +291,10 @@ export const funnelTemplateScope = pgEnum("FunnelTemplateScope", [
 export const funnelDeferredPlatform = pgEnum("FunnelDeferredPlatform", [
   "ios",
 ]);
+
+export const customDomainCertStatus = pgEnum("CustomDomainCertStatus", [
+  "pending",   // row created, no cert yet
+  "issuing",   // Caddy is mid-ACME (transient)
+  "issued",    // cert live, edge will serve
+  "failed",    // ACME failed (rate-limit, CAA, etc.) — surfaced to dashboard
+]);

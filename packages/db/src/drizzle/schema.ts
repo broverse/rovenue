@@ -26,6 +26,7 @@ import {
   billingStateEnum,
   billingTierEnum,
   creditLedgerType,
+  customDomainCertStatus,
   environment,
   experimentStatus,
   experimentType,
@@ -1661,6 +1662,7 @@ export {
   billingStateEnum,
   billingTierEnum,
   creditLedgerType,
+  customDomainCertStatus,
   environment,
   experimentStatus,
   experimentType,
@@ -2098,6 +2100,58 @@ export const funnelDeferredClaims = pgTable(
   }),
 );
 
+// =============================================================
+// Custom domains — host-based serving for funnels
+// =============================================================
+//
+// Maps an arbitrary hostname (e.g. `quiz.acme.com`) to a single
+// funnel. Verification is two-factor: a CNAME pointing at the
+// canonical edge plus a TXT challenge at `_rovenue.{hostname}`
+// containing `verificationToken`. Only rows with non-null
+// `verifiedAt` AND `certStatus = 'issued'` are eligible for
+// serving — the edge resolver enforces both.
+
+export const customDomains = pgTable(
+  "custom_domains",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    funnelId: text("funnel_id")
+      .notNull()
+      .references(() => funnels.id, { onDelete: "cascade" }),
+    // Canonical (lowercased) hostname — no scheme, no port, no path.
+    hostname: text("hostname").notNull(),
+    // 32-byte hex; surfaced as the TXT value `rv-verify=<token>`.
+    verificationToken: text("verification_token").notNull(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    verificationFailureReason: text("verification_failure_reason"),
+    certStatus: customDomainCertStatus("cert_status").notNull().default("pending"),
+    certIssuedAt: timestamp("cert_issued_at", { withTimezone: true }),
+    certFailureReason: text("cert_failure_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    // Hostnames are global — DNS does not care about project boundaries.
+    hostnameUnique: uniqueIndex("custom_domains_hostname_unique").on(t.hostname),
+    // One custom domain per funnel; enforce at the DB layer so we never
+    // accidentally route a hostname to two funnels.
+    funnelUnique: uniqueIndex("custom_domains_funnel_unique").on(t.funnelId),
+    projectIdx: index("custom_domains_project_idx").on(t.projectId),
+    // Partial index — keep tiny since verified rows dominate. Used by
+    // the retry job to scan unverified rows.
+    pendingIdx: index("custom_domains_pending_idx")
+      .on(t.verifiedAt)
+      .where(sql`verified_at IS NULL`),
+  }),
+);
+
 export type FunnelSession = typeof funnelSessions.$inferSelect;
 export type NewFunnelSession = typeof funnelSessions.$inferInsert;
 export type FunnelAnswer = typeof funnelAnswers.$inferSelect;
@@ -2108,3 +2162,5 @@ export type FunnelClaimToken = typeof funnelClaimTokens.$inferSelect;
 export type NewFunnelClaimToken = typeof funnelClaimTokens.$inferInsert;
 export type FunnelDeferredClaim = typeof funnelDeferredClaims.$inferSelect;
 export type NewFunnelDeferredClaim = typeof funnelDeferredClaims.$inferInsert;
+export type CustomDomain = typeof customDomains.$inferSelect;
+export type NewCustomDomain = typeof customDomains.$inferInsert;

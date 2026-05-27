@@ -91,7 +91,12 @@ export type AuditAction =
   | "funnel.duplicated"
   | "funnel.published"
   | "funnel.reverted"
-  | "funnel.from_template";
+  | "funnel.from_template"
+  // --- custom domains ---
+  | "custom_domain.created"
+  | "custom_domain.verified"
+  | "custom_domain.verify_failed"
+  | "custom_domain.deleted";
 
 export type AuditResource =
   | "audience"
@@ -107,7 +112,8 @@ export type AuditResource =
   | "credential"
   | "invitation"
   | "billing_subscription"
-  | "funnel";
+  | "funnel"
+  | "custom_domain";
 
 export interface AuditEntry {
   projectId: string;
