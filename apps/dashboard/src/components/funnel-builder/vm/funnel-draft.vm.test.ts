@@ -36,7 +36,9 @@ function makeVm(api: Partial<FunnelApi>) {
 }
 
 describe("FunnelDraftViewModel", () => {
-  beforeEach(() => vi.useFakeTimers());
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
 
   it("loads on mount and surfaces pages", async () => {
     const get = vi.fn().mockResolvedValue(fakeFunnel());
