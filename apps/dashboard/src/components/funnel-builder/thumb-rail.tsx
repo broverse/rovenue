@@ -1,25 +1,44 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { component, useService } from "impair";
 import { Plus, Sparkles } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { PAGE_TYPES } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
+import { AddContentPopover } from "./add-content-popover";
+import { blankPage } from "./blank-page";
 
 export const ThumbRail = component(() => {
   const vm = useService(FunnelDraftViewModel);
+  // Popover state is purely UI — keep it local. `insertAfter=null` means
+  // append to the end of the list (rail head button); a page id means
+  // insert directly after that page (between-thumb buttons).
+  const [popover, setPopover] = useState<{ insertAfter: string | null } | null>(null);
   return (
-    <aside className="flex w-[88px] flex-shrink-0 flex-col border-r border-rv-divider bg-rv-c1">
+    <aside className="relative flex w-[88px] flex-shrink-0 flex-col border-r border-rv-divider bg-rv-c1">
       <div className="flex items-center justify-between border-b border-rv-divider px-3 py-2.5">
         <span className="text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
           Pages
         </span>
-        <button
-          type="button"
-          title="Add page"
-          className="flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
-        >
-          <Plus size={11} />
-        </button>
+        <div className="relative">
+          <button
+            type="button"
+            title="Add page"
+            onClick={() => setPopover({ insertAfter: null })}
+            className="flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
+          >
+            <Plus size={11} />
+          </button>
+          {popover && (
+            <AddContentPopover
+              align="right"
+              onPick={(t) => {
+                vm.addPage(blankPage(t), popover.insertAfter);
+                setPopover(null);
+              }}
+              onClose={() => setPopover(null)}
+            />
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-3">
@@ -48,6 +67,7 @@ export const ThumbRail = component(() => {
                 <div className="my-1.5 flex justify-center opacity-0 transition-opacity hover:opacity-100">
                   <button
                     type="button"
+                    onClick={() => setPopover({ insertAfter: vm.pages[i - 1].id })}
                     className="flex h-3.5 w-3.5 cursor-pointer items-center justify-center rounded-full border border-rv-divider bg-rv-c2 text-rv-mute-500 hover:bg-rv-c3 hover:text-foreground"
                   >
                     <Plus size={8} />
