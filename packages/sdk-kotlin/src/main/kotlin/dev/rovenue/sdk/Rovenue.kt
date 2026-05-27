@@ -92,4 +92,25 @@ class Rovenue private constructor(
     suspend fun identify(knownUserId: String) {
         dispatcher.run { core.identify(knownUserId) }
     }
+
+    // ---------------------------------------------------------------
+    // Entitlements (cache-first reads; refresh hits HTTP)
+    // ---------------------------------------------------------------
+
+    /** Fetch a specific entitlement from the local cache. Returns null if
+     *  it doesn't exist locally — does not hit the network. */
+    suspend fun entitlement(id: String): dev.rovenue.sdk.generated.Entitlement? =
+        dispatcher.run { core.entitlement(id) }
+
+    /** List all cached entitlements. Does not hit the network. */
+    suspend fun entitlementsAll(): List<dev.rovenue.sdk.generated.Entitlement> =
+        dispatcher.run { core.entitlementsAll() }
+
+    /** Force a refresh of the entitlements cache against the server.
+     *  On success, emits ChangeEvent.ENTITLEMENTS_CHANGED to subscribers
+     *  of `changes`. */
+    @Throws(RovenueException::class)
+    suspend fun refreshEntitlements() {
+        dispatcher.run { core.refreshEntitlements() }
+    }
 }
