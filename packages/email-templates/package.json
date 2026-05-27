@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "react-email dev --dir ./src",
+    "dev": "email dev --dir ./src",
     "test": "vitest run"
   },
   "dependencies": {
