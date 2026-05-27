@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { component, useService } from "impair";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowRight,
@@ -13,8 +13,18 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
-import { FUNNEL, SESSIONS, VALIDATION_ISSUES, VERSIONS } from "./data";
-import { TABS, type TabId, type ValidationIssue } from "./types";
+import {
+  TABS,
+  type Funnel as FunnelView,
+  type Rule as RuleView,
+  type RuleClause,
+  type Operator,
+  type Session,
+  type TabId,
+  type ValidationIssue,
+} from "./types";
+import type { NextRule, ValidatorIssue } from "@rovenue/shared/funnel";
+import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { ThumbRail } from "./thumb-rail";
 import { CanvasEditor } from "./canvas-editor";
 import { PropertiesPanel } from "./properties-panel";
@@ -30,140 +40,158 @@ type Props = {
   projectId: string;
 };
 
-/**
- * Full-bleed funnel editor. Lives as a `fixed inset-0` overlay so it
- * paints over the dashboard shell — gives the editor its own topbar
- * + tab nav without restructuring parent routes.
- */
-export function BuilderShell({ projectId }: Props) {
-  const [activeTab, setActiveTab] = useState<TabId>("content");
-  const [selectedPageId, setSelectedPageId] = useState<string>(FUNNEL.pages[0].id);
-  const [showVal, setShowVal] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
-  const [versionMenuOpen, setVersionMenuOpen] = useState(false);
-  const [autosave, setAutosave] = useState<"saved" | "saving">("saved");
+// Until Tasks 19–35 convert each child to consume the VM directly,
+// BuilderShell synthesises the legacy prop shapes that the existing
+// children expect. The converters below are intentionally lossy —
+// they're throw-away glue that vanishes commit-by-commit as each
+// child migrates to `useService(FunnelDraftViewModel)`.
+function legacyOperator(op: string): Operator {
+  switch (op) {
+    case "eq": return "equals";
+    case "neq": return "not_equals";
+    case "gt": return ">";
+    case "gte": return ">=";
+    case "lt": return "<";
+    case "lte": return "<=";
+    case "between": return "between";
+    case "in": return "is_one_of";
+    case "not_in": return "not_one_of";
+    case "contains": return "contains";
+    case "is_answered": return "is_answered";
+    case "is_not_answered": return "not_answered";
+    default: return "equals";
+  }
+}
 
-  const errorCount = VALIDATION_ISSUES.filter((i) => i.kind === "error").length;
-  const warnCount = VALIDATION_ISSUES.filter((i) => i.kind === "warning").length;
-  const selectedIdx = FUNNEL.pages.findIndex((p) => p.id === selectedPageId);
-  const selectedPage = FUNNEL.pages[selectedIdx] ?? FUNNEL.pages[0];
+function toLegacyRules(rules: Record<string, NextRule[]>): Record<string, RuleView[]> {
+  const out: Record<string, RuleView[]> = {};
+  for (const [pageId, list] of Object.entries(rules)) {
+    out[pageId] = list.map((r) => ({
+      id: r.id,
+      combinator: r.condition.op,
+      clauses: r.condition.clauses.map<RuleClause>((c) => ({
+        qid: c.question_id,
+        op: legacyOperator(c.op),
+        value: (c as { value?: unknown }).value as RuleClause["value"],
+      })),
+      goto: r.goto,
+    }));
+  }
+  return out;
+}
 
-  // Fake autosave indicator — every page/tab switch flickers "saving".
-  // The real backend hook would replace this with a mutation status.
-  useEffect(() => {
-    setAutosave("saving");
-    const t = setTimeout(() => setAutosave("saved"), 600);
-    return () => clearTimeout(t);
-  }, [selectedPageId, activeTab]);
-
-  const goPrev = () =>
-    selectedIdx > 0 && setSelectedPageId(FUNNEL.pages[selectedIdx - 1].id);
-  const goNext = () =>
-    selectedIdx < FUNNEL.pages.length - 1 &&
-    setSelectedPageId(FUNNEL.pages[selectedIdx + 1].id);
-
-  const jumpToIssue = (iss: ValidationIssue) => {
-    setShowVal(false);
-    if (iss.where.startsWith("pg_")) {
-      setActiveTab("content");
-      const pageId = iss.where.split(" ")[0];
-      setSelectedPageId(pageId);
-    } else if (iss.where === "theme") {
-      setActiveTab("theme");
-    }
+function toLegacyIssues(errors: ValidatorIssue[], warnings: ValidatorIssue[]): ValidationIssue[] {
+  const map = (iss: ValidatorIssue, kind: "error" | "warning"): ValidationIssue => {
+    const where = "pageId" in iss ? (iss as { pageId: string }).pageId : "funnel";
+    return { kind, where, title: iss.code, desc: iss.message, fix: "Open page" };
   };
+  return [
+    ...errors.map((e) => map(e, "error")),
+    ...warnings.map((w) => map(w, "warning")),
+  ];
+}
+
+export const BuilderShell = component(({ projectId }: Props) => {
+  const vm = useService(FunnelDraftViewModel);
+
+  if (vm.isLoading) {
+    return <div className="fixed inset-0 z-50 bg-rv-bg" />;
+  }
+  if (vm.error || !vm.funnel) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-rv-bg text-rv-mute-700">
+        Failed to load funnel.
+      </div>
+    );
+  }
+
+  // Synthesised legacy view used by children that haven't migrated yet.
+  const legacyFunnel: FunnelView = {
+    id: vm.funnel.id,
+    name: vm.name,
+    slug: vm.slug,
+    status: vm.status,
+    version: vm.funnel.currentVersionNo ?? 0,
+    draftDiffersFromPublished: vm.funnel.draftDiffersFromPublished,
+    theme: vm.theme,
+    settings: vm.settings,
+    pages: vm.pages,
+    rules: toLegacyRules(vm.rules),
+    default_next: vm.defaultNext,
+  };
+  const issues = toLegacyIssues(vm.validation.errors, vm.validation.warnings);
+  const sessions: Session[] = [];
+
+  const selectedIdx = vm.selectedIdx;
+  const selectedPage = vm.selectedPage ?? vm.pages[0];
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-rv-bg text-foreground">
-      <TopBar
-        projectId={projectId}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        autosave={autosave}
-        errorCount={errorCount}
-        warnCount={warnCount}
-        onShowValidation={() => setShowVal(true)}
-        versionMenuOpen={versionMenuOpen}
-        onToggleVersionMenu={() => setVersionMenuOpen((o) => !o)}
-        onCloseVersionMenu={() => setVersionMenuOpen(false)}
-      />
+      <TopBar projectId={projectId} />
 
       <main className="flex flex-1 overflow-hidden">
-        {activeTab === "content" && (
+        {vm.activeTab === "content" && (
           <>
             <ThumbRail
-              pages={FUNNEL.pages}
-              selectedId={selectedPageId}
-              onSelect={setSelectedPageId}
+              pages={vm.pages}
+              selectedId={vm.selectedPageId ?? vm.pages[0]?.id ?? ""}
+              onSelect={(id) => vm.selectPage(id)}
             />
             <CanvasEditor
               page={selectedPage}
-              allPages={FUNNEL.pages}
+              allPages={vm.pages}
               idx={selectedIdx}
-              onPrev={goPrev}
-              onNext={goNext}
-              onPreview={() => setShowPreview(true)}
+              onPrev={() => vm.goPrev()}
+              onNext={() => vm.goNext()}
+              onPreview={() => vm.openPreview()}
             />
             <PropertiesPanel
               page={selectedPage}
-              allPages={FUNNEL.pages}
-              allRules={FUNNEL.rules}
+              allPages={vm.pages}
+              allRules={legacyFunnel.rules}
             />
           </>
         )}
-        {activeTab === "workflow" && <WorkflowTab funnel={FUNNEL} />}
-        {activeTab === "theme" && <ThemeTab theme={FUNNEL.theme} currentPage={selectedPage} />}
-        {activeTab === "settings" && <SettingsTab settings={FUNNEL.settings} />}
-        {activeTab === "sessions" && <SessionsTab sessions={SESSIONS} />}
-        {activeTab === "share" && <ShareTab funnel={FUNNEL} />}
+        {vm.activeTab === "workflow" && <WorkflowTab funnel={legacyFunnel} />}
+        {vm.activeTab === "theme" && <ThemeTab theme={vm.theme} currentPage={selectedPage} />}
+        {vm.activeTab === "settings" && <SettingsTab settings={vm.settings} />}
+        {vm.activeTab === "sessions" && <SessionsTab sessions={sessions} />}
+        {vm.activeTab === "share" && <ShareTab funnel={legacyFunnel} />}
       </main>
 
-      {activeTab === "content" && <AiChatFab />}
+      {vm.activeTab === "content" && <AiChatFab />}
 
-      {showPreview && (
+      {vm.showPreview && (
         <PreviewOverlay
-          pages={FUNNEL.pages}
-          currentId={selectedPageId}
-          theme={FUNNEL.theme}
-          onClose={() => setShowPreview(false)}
-          onSelect={setSelectedPageId}
+          pages={vm.pages}
+          currentId={vm.selectedPageId ?? vm.pages[0]?.id ?? ""}
+          theme={vm.theme}
+          onClose={() => vm.closePreview()}
+          onSelect={(id) => vm.selectPage(id)}
         />
       )}
 
-      {showVal && (
+      {vm.showValidation && (
         <ValidationDrawer
-          issues={VALIDATION_ISSUES}
-          onClose={() => setShowVal(false)}
-          onJump={jumpToIssue}
+          issues={issues}
+          onClose={() => vm.closeValidation()}
+          onJump={(iss) => {
+            vm.closeValidation();
+            if (iss.where.startsWith("pg_")) {
+              vm.setActiveTab("content");
+              vm.selectPage(iss.where);
+            } else if (iss.where === "theme") {
+              vm.setActiveTab("theme");
+            }
+          }}
         />
       )}
     </div>
   );
-}
+});
 
-function TopBar({
-  projectId,
-  activeTab,
-  onTabChange,
-  autosave,
-  errorCount,
-  warnCount,
-  onShowValidation,
-  versionMenuOpen,
-  onToggleVersionMenu,
-  onCloseVersionMenu,
-}: {
-  projectId: string;
-  activeTab: TabId;
-  onTabChange: (t: TabId) => void;
-  autosave: "saved" | "saving";
-  errorCount: number;
-  warnCount: number;
-  onShowValidation: () => void;
-  versionMenuOpen: boolean;
-  onToggleVersionMenu: () => void;
-  onCloseVersionMenu: () => void;
-}) {
+const TopBar = component(({ projectId }: { projectId: string }) => {
+  const vm = useService(FunnelDraftViewModel);
   return (
     <header className="flex h-14 items-center justify-between border-b border-rv-divider bg-rv-c1 px-4">
       <div className="flex items-center gap-2 text-[13px]">
@@ -183,7 +211,7 @@ function TopBar({
           Funnels
         </Link>
         <ChevronRight size={12} className="text-rv-mute-500" />
-        <span className="font-medium text-foreground">{FUNNEL.name}</span>
+        <span className="font-medium text-foreground">{vm.name}</span>
         <ChevronDown size={12} className="text-rv-mute-500" />
       </div>
 
@@ -193,17 +221,17 @@ function TopBar({
             <button
               key={t.id}
               type="button"
-              onClick={() => onTabChange(t.id)}
+              onClick={() => vm.setActiveTab(t.id as TabId)}
               title={t.hint}
               className={cn(
                 "relative inline-flex h-7 cursor-pointer items-center gap-1.5 rounded px-3 text-[12px] font-medium transition",
-                activeTab === t.id
+                vm.activeTab === t.id
                   ? "bg-rv-c4 text-foreground"
                   : "text-rv-mute-600 hover:text-foreground",
               )}
             >
               {t.label}
-              {t.pip && (
+              {t.pip && Object.keys(vm.rules).length > 0 && (
                 <span className="h-1.5 w-1.5 rounded-full bg-rv-accent-500" title="Active rules" />
               )}
             </button>
@@ -212,121 +240,37 @@ function TopBar({
       </div>
 
       <div className="flex items-center gap-2">
-        <span
-          title="Autosaved on every change"
-          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-rv-mute-600"
-        >
-          <span
-            className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              autosave === "saving" ? "animate-pulse bg-rv-warning" : "bg-rv-success",
-            )}
-          />
-          {autosave === "saving" ? "saving" : "saved · 12s"}
-        </span>
-
-        {errorCount > 0 ? (
+        <AutosaveBadge />
+        {vm.errorCount > 0 ? (
           <button
             type="button"
-            onClick={onShowValidation}
+            onClick={() => vm.openValidation()}
             className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-rv-danger/40 bg-rv-danger/15 px-2 text-[11px] font-medium text-rv-danger transition hover:bg-rv-danger/20"
           >
             <TriangleAlert size={12} />
-            {errorCount} issue{errorCount === 1 ? "" : "s"}
+            {vm.errorCount} issue{vm.errorCount === 1 ? "" : "s"}
           </button>
-        ) : (
-          warnCount > 0 && (
-            <button
-              type="button"
-              onClick={onShowValidation}
-              className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-rv-warning/40 bg-rv-warning/15 px-2 text-[11px] font-medium text-rv-warning transition hover:bg-rv-warning/20"
-            >
-              <TriangleAlert size={12} />
-              {warnCount} warning{warnCount === 1 ? "" : "s"}
-            </button>
-          )
-        )}
+        ) : vm.warnCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => vm.openValidation()}
+            className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-rv-warning/40 bg-rv-warning/15 px-2 text-[11px] font-medium text-rv-warning transition hover:bg-rv-warning/20"
+          >
+            <TriangleAlert size={12} />
+            {vm.warnCount} warning{vm.warnCount === 1 ? "" : "s"}
+          </button>
+        ) : null}
 
         <button
           type="button"
-          onClick={() => onTabChange("share")}
+          onClick={() => vm.setActiveTab("share")}
           className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-rv-divider bg-rv-c2 px-3 text-[12px] font-medium text-rv-mute-800 transition hover:bg-rv-c3"
         >
           <Share2 size={13} />
           Share
         </button>
 
-        <div className="relative flex">
-          <button
-            type="button"
-            disabled={errorCount > 0}
-            className={cn(
-              "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-l-md bg-rv-accent-500 px-3 text-[12px] font-medium text-white transition hover:bg-rv-accent-600",
-              errorCount > 0 && "cursor-not-allowed opacity-50",
-            )}
-          >
-            <Check size={13} />
-            Publish v{FUNNEL.version + 1}
-          </button>
-          <button
-            type="button"
-            onClick={onToggleVersionMenu}
-            title="Version history"
-            className="flex h-8 w-7 cursor-pointer items-center justify-center rounded-r-md bg-rv-accent-600 text-white transition hover:bg-rv-accent-700"
-          >
-            <ChevronDown size={11} />
-          </button>
-          {versionMenuOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={onCloseVersionMenu} />
-              <div className="absolute right-0 top-10 z-50 w-[300px] rounded-lg border border-rv-divider-strong bg-rv-c1 p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.5)]">
-                <div className="px-2 py-1 font-rv-mono text-[10px] uppercase tracking-wider text-rv-mute-500">
-                  Recent versions
-                </div>
-                {VERSIONS.slice(0, 4).map((v) => (
-                  <div
-                    key={v.num}
-                    className="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 hover:bg-rv-c2"
-                  >
-                    <span className="min-w-[32px] font-rv-mono text-[11px] text-rv-mute-500">
-                      v{v.num}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[12px] text-foreground">
-                        {v.notes.split(".")[0]}
-                      </div>
-                      <div className="mt-0.5 font-rv-mono text-[10px] text-rv-mute-500">
-                        {v.when} · @{v.who}
-                      </div>
-                    </div>
-                    {v.isCurrent && (
-                      <span className="inline-flex h-4 items-center rounded-full bg-rv-success/15 px-1.5 font-rv-mono text-[9px] font-medium text-rv-success">
-                        LIVE
-                      </span>
-                    )}
-                  </div>
-                ))}
-                <div className="my-1 border-t border-rv-divider" />
-                <button
-                  type="button"
-                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-rv-mute-700 hover:bg-rv-c2"
-                >
-                  <History size={12} />
-                  All versions…
-                </button>
-                {FUNNEL.draftDiffersFromPublished && (
-                  <button
-                    type="button"
-                    className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-rv-mute-700 hover:bg-rv-c2"
-                  >
-                    <RotateCcw size={12} />
-                    Discard unpublished changes
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-        </div>
+        <PublishDropdown />
 
         <button
           type="button"
@@ -344,7 +288,88 @@ function TopBar({
       </div>
     </header>
   );
-}
+});
+
+const AutosaveBadge = component(() => {
+  const vm = useService(FunnelDraftViewModel);
+  const saving = vm.autosaveStatus === "saving";
+  const err = vm.autosaveStatus === "error";
+  return (
+    <span
+      title={err ? "Save failed — retrying" : "Autosaved on every change"}
+      className="inline-flex h-7 items-center gap-1.5 rounded-md border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-rv-mute-600"
+    >
+      <span className={cn(
+        "h-1.5 w-1.5 rounded-full",
+        saving ? "animate-pulse bg-rv-warning" : err ? "bg-rv-danger" : "bg-rv-success",
+      )} />
+      {saving ? "saving" : err ? "retrying" : "saved"}
+    </span>
+  );
+});
+
+const PublishDropdown = component(() => {
+  const vm = useService(FunnelDraftViewModel);
+  const nextVersionNo = (vm.funnel?.currentVersionNo ?? 0) + 1;
+  return (
+    <div className="relative flex">
+      <button
+        type="button"
+        disabled={vm.errorCount > 0}
+        onClick={() => vm.publish()}
+        className={cn(
+          "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-l-md bg-rv-accent-500 px-3 text-[12px] font-medium text-white transition hover:bg-rv-accent-600",
+          vm.errorCount > 0 && "cursor-not-allowed opacity-50",
+        )}
+      >
+        <Check size={13} />
+        Publish v{nextVersionNo}
+      </button>
+      <button
+        type="button"
+        onClick={() => vm.toggleVersionMenu()}
+        title="Version history"
+        className="flex h-8 w-7 cursor-pointer items-center justify-center rounded-r-md bg-rv-accent-600 text-white transition hover:bg-rv-accent-700"
+      >
+        <ChevronDown size={11} />
+      </button>
+      {vm.versionMenuOpen && <VersionMenu />}
+    </div>
+  );
+});
+
+const VersionMenu = component(() => {
+  const vm = useService(FunnelDraftViewModel);
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={() => vm.closeVersionMenu()} />
+      <div className="absolute right-0 top-10 z-50 w-[300px] rounded-lg border border-rv-divider-strong bg-rv-c1 p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.5)]">
+        <div className="px-2 py-1 font-rv-mono text-[10px] uppercase tracking-wider text-rv-mute-500">
+          Recent versions
+        </div>
+        <div className="px-2 py-1 text-[11px] text-rv-mute-500">Version dropdown wired in Task 32</div>
+        <div className="my-1 border-t border-rv-divider" />
+        <button
+          type="button"
+          className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-rv-mute-700 hover:bg-rv-c2"
+        >
+          <History size={12} />
+          All versions…
+        </button>
+        {vm.funnel?.draftDiffersFromPublished && (
+          <button
+            type="button"
+            onClick={() => vm.discardDraft()}
+            className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-rv-mute-700 hover:bg-rv-c2"
+          >
+            <RotateCcw size={12} />
+            Discard unpublished changes
+          </button>
+        )}
+      </div>
+    </>
+  );
+});
 
 function AiChatFab() {
   return (
