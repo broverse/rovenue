@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 
 /// What changed in the SDK's internal state.
 ///
@@ -15,34 +15,39 @@ pub trait Observer: Send + Sync {
     fn on_change(&self, event: ChangeEvent);
 }
 
-/// Holds `Weak` references so dropping an observer on the façade side
-/// naturally GCs it without a separate unregister call.
+/// Holds strong `Arc` references so FFI-registered observers stay alive for the
+/// bus's lifetime. The FFI boundary passes a `Box<dyn Observer>` once and never
+/// holds another strong reference on the caller side, so the bus must own it.
+///
+/// Rust-side callers that want lifecycle control can drop the entire bus or
+/// call `clear()` to release all observers at once.
 #[derive(Default)]
 pub struct ObserverBus {
-    subs: Mutex<Vec<Weak<dyn Observer>>>,
+    subs: Mutex<Vec<Arc<dyn Observer>>>,
 }
 
 impl ObserverBus {
     pub fn register(&self, obs: Arc<dyn Observer>) {
         let mut guard = self.subs.lock().expect("observer bus poisoned");
-        guard.push(Arc::downgrade(&obs));
+        guard.push(obs);
     }
 
     pub fn emit(&self, event: ChangeEvent) {
+        let guard = self.subs.lock().expect("observer bus poisoned");
+        for s in guard.iter() {
+            s.on_change(event);
+        }
+    }
+
+    /// Releases all registered observers. Primarily intended for tests and
+    /// shutdown paths.
+    pub fn clear(&self) {
         let mut guard = self.subs.lock().expect("observer bus poisoned");
-        guard.retain(|w| {
-            if let Some(s) = w.upgrade() {
-                s.on_change(event);
-                true
-            } else {
-                false
-            }
-        });
+        guard.clear();
     }
 
     pub fn live_count(&self) -> usize {
-        let mut guard = self.subs.lock().expect("observer bus poisoned");
-        guard.retain(|w| w.strong_count() > 0);
+        let guard = self.subs.lock().expect("observer bus poisoned");
         guard.len()
     }
 }
