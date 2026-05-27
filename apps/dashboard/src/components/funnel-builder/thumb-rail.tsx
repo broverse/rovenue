@@ -14,7 +14,7 @@ export const ThumbRail = component(() => {
   // insert directly after that page (between-thumb buttons).
   const [popover, setPopover] = useState<{ insertAfter: string | null } | null>(null);
   return (
-    <aside className="relative flex w-[220px] flex-shrink-0 flex-col border-r border-rv-divider bg-rv-c1">
+    <aside className="relative flex w-[280px] flex-shrink-0 flex-col border-r border-rv-divider bg-rv-c1">
       <div className="flex items-center justify-between border-b border-rv-divider px-3 py-2.5">
         <span className="text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
           Pages
@@ -30,7 +30,7 @@ export const ThumbRail = component(() => {
           </button>
           {popover && (
             <AddContentPopover
-              align="right"
+              align="rightOfTrigger"
               onPick={(t) => {
                 vm.addPage(blankPage(t), popover.insertAfter);
                 setPopover(null);
