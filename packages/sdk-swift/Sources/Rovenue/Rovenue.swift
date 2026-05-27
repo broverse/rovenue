@@ -130,4 +130,39 @@ public final class Rovenue: @unchecked Sendable {
             }
         }
     }
+
+    // MARK: - Credits
+
+    /// Read the cached credit balance. Returns 0 if the cache is empty.
+    public func creditBalance() async -> Int64 {
+        await dispatcher.runNonThrowing { [core] in
+            core.creditBalance()
+        }
+    }
+
+    /// Force a refresh of the credit balance against the server.
+    /// On success (when the balance changed), emits `.creditBalanceChanged`.
+    public func refreshCredits() async throws {
+        try await dispatcher.run { [core] in
+            do {
+                try core.refreshCredits()
+            } catch let err as RovenueError {
+                throw mapError(err)
+            }
+        }
+    }
+
+    /// Spend credits server-side. The SDK generates an Idempotency-Key
+    /// internally — retries of the same call are server-deduped.
+    /// Returns the new balance.
+    /// Throws `.insufficientCredits` if the user lacks the balance.
+    public func consumeCredits(_ amount: Int64, description: String? = nil) async throws -> Int64 {
+        try await dispatcher.run { [core] in
+            do {
+                return try core.consumeCredits(amount: amount, description: description)
+            } catch let err as RovenueError {
+                throw mapError(err)
+            }
+        }
+    }
 }
