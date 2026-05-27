@@ -213,7 +213,7 @@ export const CanvasEditor = component(() => {
               {frame.notch && (
                 <div className="absolute left-1/2 top-2 z-10 h-1.5 w-20 -translate-x-1/2 rounded-full bg-black/40" />
               )}
-              <PagePreview page={page} theme={vm.theme} />
+              <PagePreview page={page} theme={vm.theme} editable />
             </div>
           </div>
         </div>

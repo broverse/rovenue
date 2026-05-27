@@ -195,6 +195,14 @@ export class FunnelDraftViewModel {
     if (!page?.options) return;
     page.options.splice(idx, 1);
   }
+  reorderOption(pageId: string, from: number, to: number) {
+    const page = this.pages.find((p) => p.id === pageId);
+    if (!page?.options) return;
+    if (from < 0 || from >= page.options.length) return;
+    if (to < 0 || to >= page.options.length) return;
+    const [moved] = page.options.splice(from, 1);
+    page.options.splice(to, 0, moved);
+  }
 
   // ----- Rules -----
   addRule(pageId: string, rule: NextRule) {
