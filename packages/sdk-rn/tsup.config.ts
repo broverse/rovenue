@@ -7,10 +7,7 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   entry: ["src/index.ts", "src/version.ts"],
   format: ["esm", "cjs"],
-  // .d.ts emission is handled by a separate `tsc --emitDeclarationOnly`
-  // pass (see build:dts in package.json) so it tolerates the pre-existing
-  // TS errors in src/index.ts that other tasks own.
-  dts: false,
+  dts: true,
   outDir: "dist",
   clean: true,
   sourcemap: true,

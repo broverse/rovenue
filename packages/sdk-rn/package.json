@@ -26,9 +26,8 @@
     "expo-module.config.json"
   ],
   "scripts": {
-    "build": "pnpm build:js && pnpm build:dts && pnpm build:plugin",
+    "build": "pnpm build:js && pnpm build:plugin",
     "build:js": "tsup",
-    "build:dts": "tsc -p tsconfig.dts.json || true",
     "build:plugin": "tsc -p tsconfig.plugin.json",
     "test": "vitest run"
   },
