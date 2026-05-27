@@ -196,4 +196,27 @@ public final class Rovenue: @unchecked Sendable {
             }
         }
     }
+
+    // MARK: - Lifecycle hooks
+
+    /// Tell the SDK whether the app is in the foreground. While foreground,
+    /// the SDK's internal polling scheduler ticks; while background, polling
+    /// pauses. Call from your AppDelegate / SceneDelegate.
+    public func setForeground(_ foreground: Bool) {
+        core.setForeground(foreground: foreground)
+    }
+
+    /// Stop background work cleanly. Called automatically on `resetForTesting`.
+    public func shutdown() {
+        core.shutdown()
+    }
+
+    // MARK: - Observer stream
+
+    /// AsyncStream of cache-change notifications. Each access returns a new
+    /// stream — subscribing twice (one per view, say) is supported. Stream
+    /// termination on cancel deregisters the subscriber automatically.
+    public var changes: AsyncStream<ChangeEvent> {
+        bridge.subscribe()
+    }
 }
