@@ -39,8 +39,13 @@ export const BuilderShell = component(({ projectId }: Props) => {
   }
   if (vm.error || !vm.funnel) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-rv-bg text-rv-mute-700">
-        Failed to load funnel.
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-2 bg-rv-bg p-6 text-rv-mute-700">
+        <div className="text-[14px] font-medium">Failed to load funnel.</div>
+        {vm.error && (
+          <pre className="max-w-[640px] overflow-auto rounded border border-rv-divider bg-rv-c2 px-3 py-2 font-rv-mono text-[11px] text-rv-danger">
+            {vm.error.name}: {vm.error.message}
+          </pre>
+        )}
       </div>
     );
   }
