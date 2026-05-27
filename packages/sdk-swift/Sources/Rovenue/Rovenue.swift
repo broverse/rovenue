@@ -165,4 +165,35 @@ public final class Rovenue: @unchecked Sendable {
             }
         }
     }
+
+    // MARK: - Receipts
+
+    /// Post an Apple StoreKit 2 JWS to the server for validation.
+    /// The caller is responsible for obtaining the JWS via `Product.purchase()`
+    /// (or `Transaction.currentEntitlements`) — this SDK does NOT call StoreKit.
+    /// On success, refreshes entitlements + credits and returns a `ReceiptResult`.
+    public func postAppleReceipt(_ jws: String, productId: String) async throws -> ReceiptResult {
+        try await dispatcher.run { [core] in
+            do {
+                return try core.postAppleReceipt(receipt: jws, productId: productId)
+            } catch let err as RovenueError {
+                throw mapError(err)
+            }
+        }
+    }
+
+    /// Post a Google Play Billing purchase token to the server for validation.
+    /// The caller obtains the token via `Purchase.purchaseToken` after a
+    /// successful Play Billing flow on Android. (Provided here for completeness
+    /// — Swift code on iOS won't use this method.)
+    /// On success, refreshes entitlements + credits and returns a `ReceiptResult`.
+    public func postGoogleReceipt(_ receipt: String, productId: String) async throws -> ReceiptResult {
+        try await dispatcher.run { [core] in
+            do {
+                return try core.postGoogleReceipt(receipt: receipt, productId: productId)
+            } catch let err as RovenueError {
+                throw mapError(err)
+            }
+        }
+    }
 }
