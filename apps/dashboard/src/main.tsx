@@ -1,3 +1,5 @@
+import "reflect-metadata";
+import "./lib/impair-config";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { I18nProvider } from "@heroui/react";
