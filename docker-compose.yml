@@ -20,11 +20,17 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
       REDIS_URL: redis://redis:6379
       PORT: 3000
+      # Internal port serves the Caddy on-demand-TLS ask endpoint. NOT
+      # published in `ports:` — only reachable inside the docker network.
+      INTERNAL_PORT: 3001
+      CANONICAL_HOSTS: ${CANONICAL_HOSTS:-rovenue.app,edge.rovenue.app}
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: rovenue_reader
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
       KAFKA_BROKERS: redpanda:9092
     ports:
+      # Only the public port is mapped to the host. 3001 stays
+      # docker-network-only so Caddy is the only thing that can hit it.
       - "3000:3000"
     depends_on:
       db:
@@ -35,6 +41,33 @@ services:
         condition: service_healthy
       redpanda:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Caddy edge — terminates TLS, gates on-demand cert issuance through
+  # the api's internal ask-endpoint. See deploy/caddy/Caddyfile for the
+  # routing rules and threat model.
+  #
+  # First-time deploy:
+  #   - Operator must point DNS for canonical hostnames at this service.
+  #   - Operator must point CNAMEs for custom-domain hosts at the same.
+  #   - $TLS_EMAIL is mandatory in production (Let's Encrypt account).
+  #
+  # The `caddy-data` volume MUST persist across deploys — losing it
+  # forces full cert re-issuance and risks Let's Encrypt rate-limits.
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      TLS_EMAIL: ${TLS_EMAIL:-ops@rovenue.app}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_started
     restart: unless-stopped
 
   # --- Notification pipeline workers ---
@@ -253,3 +286,5 @@ volumes:
   rovenue-data:
   rovenue-clickhouse-data:
   rovenue-redpanda-data:
+  caddy-data:
+  caddy-config:

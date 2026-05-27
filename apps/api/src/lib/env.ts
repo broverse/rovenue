@@ -3,6 +3,17 @@ import { z } from "zod";
 const envSchema = z
   .object({
     PORT: z.coerce.number().int().positive().default(3000),
+    // Internal-only port for the Caddy on-demand-TLS ask endpoint.
+    // Bind to a separate listener so it's never reachable from the
+    // public network — Caddy hits it over the docker network only.
+    INTERNAL_PORT: z.coerce.number().int().positive().default(3001),
+    // Comma-separated list of hostnames that the canonical edge
+    // also serves. Used by the on-demand-TLS guard to refuse cert
+    // issuance for anything outside (custom domains | canonical).
+    CANONICAL_HOSTS: z
+      .string()
+      .default("rovenue.app,edge.rovenue.app")
+      .transform((v) => v.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)),
     NODE_ENV: z
       .enum(["development", "production", "test"])
       .default("development"),

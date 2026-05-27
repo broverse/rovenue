@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { app } from "./app";
+import { internalApp } from "./internal-app";
 import { env } from "./lib/env";
 import { logger } from "./lib/logger";
 import { createWebhookWorker } from "./services/webhook-processor";
@@ -175,6 +176,13 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   logger.info("listening", { url: `http://localhost:${info.port}` });
+});
+
+// Internal-only port — Caddy on-demand-TLS ask endpoint + health probe.
+// Never mapped in docker-compose `ports:` so it stays unreachable from
+// the public network. See apps/api/src/internal-app.ts for the rationale.
+serve({ fetch: internalApp.fetch, port: env.INTERNAL_PORT }, (info) => {
+  logger.info("internal listener", { url: `http://localhost:${info.port}` });
 });
 
 // Outbox → Redpanda dispatcher loop. Fire-and-forget; the loop

@@ -1,0 +1,77 @@
+# =============================================================
+# Rovenue edge — Caddy 2.x
+# =============================================================
+#
+# Two terminate-and-proxy scopes:
+#
+#   1. Canonical surface — *.rovenue.app, rovenue.app, edge.rovenue.app
+#      → automatic HTTPS via standard ACME (no on-demand). The
+#      hostnames are known up front so Caddy can solicit certs at
+#      startup and renew on the normal schedule.
+#
+#   2. Custom domains — any other hostname that arrives. Caddy uses
+#      on-demand TLS, but ONLY after asking the api at
+#      `internal:3001/internal/domains/check?domain={host}`. That
+#      endpoint returns 200 only for verified custom_domains rows
+#      and the canonical hostnames above, so an attacker spraying
+#      random hostnames can't trip Let's Encrypt rate limits.
+#
+# Operator notes:
+#   - Set the operator email via $TLS_EMAIL (used for ACME account).
+#   - The ACME state volume (/data) MUST persist across deploys, or
+#     every redeploy re-issues every cert (rate-limit risk).
+#   - `internal:3001` is the docker-network DNS name for the api
+#     service's internal listener. The compose file does NOT publish
+#     port 3001 — only Caddy can reach it.
+
+{
+    email {$TLS_EMAIL:ops@rovenue.app}
+
+    # Gate on-demand cert issuance through the api's ask-endpoint.
+    on_demand_tls {
+        ask http://api:3001/internal/domains/check
+        # Throttle issuance even when the ask passes — defence in
+        # depth in case the ask-endpoint is misconfigured.
+        interval 2m
+        burst 5
+    }
+}
+
+# -------------------------------------------------------------
+# Canonical surface — explicit cert via standard ACME.
+# -------------------------------------------------------------
+rovenue.app, *.rovenue.app, edge.rovenue.app {
+    encode zstd gzip
+    reverse_proxy api:3000 {
+        header_up X-Forwarded-Host {host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Real-IP {remote_host}
+    }
+}
+
+# -------------------------------------------------------------
+# Custom domains — on-demand TLS, gated by the ask-endpoint.
+#
+# This block matches every host NOT covered above. Caddy will only
+# attempt cert issuance when the ask-endpoint says yes; otherwise
+# it returns a generic TLS error to the client (no cert, no serve).
+# -------------------------------------------------------------
+:443 {
+    tls {
+        on_demand
+    }
+    encode zstd gzip
+    reverse_proxy api:3000 {
+        header_up X-Forwarded-Host {host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Real-IP {remote_host}
+    }
+}
+
+# -------------------------------------------------------------
+# Port 80 — redirect everything to HTTPS. Caddy's auto-redirect
+# handles canonical names; this block covers the on-demand case.
+# -------------------------------------------------------------
+:80 {
+    redir https://{host}{uri} permanent
+}
