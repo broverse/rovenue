@@ -1,5 +1,5 @@
 import { Check, GitBranch, GripVertical, X } from "lucide-react";
-import { useService } from "impair";
+import { component, useService } from "impair";
 import type { CSSProperties } from "react";
 import { PAGE_TYPES, type Page, type Theme } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
@@ -18,8 +18,13 @@ type Props = {
  * Renders the mobile-screen preview for a single funnel page.
  * Pure presentation when `editable` is false — colors come from `theme`.
  * When `editable`, in-place edit affordances appear on hover.
+ *
+ * Wrapped with `component(...)` so impair's reactive tracker subscribes
+ * to every prop read (page.title, page.options[i].label, theme.primary…)
+ * — without this, mutations to those fields via the VM don't trigger a
+ * re-render and the preview stays stale.
  */
-export function PagePreview({ page, theme, editable = false }: Props) {
+export const PagePreview = component(({ page, theme, editable = false }: Props) => {
   const meta = PAGE_TYPES[page.type];
   const style: CSSProperties = {
     background: theme.bg,
@@ -132,11 +137,11 @@ export function PagePreview({ page, theme, editable = false }: Props) {
       )}
     </div>
   );
-}
+});
 
 // ---------- Choice list ----------
 
-function ChoiceListReadOnly({ page, theme }: { page: Page; theme: Theme }) {
+const ChoiceListReadOnly = component(({ page, theme }: { page: Page; theme: Theme }) => {
   return (
     <div className="mt-2 flex flex-col gap-2">
       {(page.options || []).slice(0, 6).map((o, i) => (
@@ -164,9 +169,9 @@ function ChoiceListReadOnly({ page, theme }: { page: Page; theme: Theme }) {
       ))}
     </div>
   );
-}
+});
 
-function ChoiceListEditable({ page, theme }: { page: Page; theme: Theme }) {
+const ChoiceListEditable = component(({ page, theme }: { page: Page; theme: Theme }) => {
   const vm = useService(FunnelDraftViewModel);
   const options = page.options ?? [];
 
@@ -283,4 +288,4 @@ function ChoiceListEditable({ page, theme }: { page: Page; theme: Theme }) {
       </button>
     </div>
   );
-}
+});
