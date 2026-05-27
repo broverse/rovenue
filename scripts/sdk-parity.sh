@@ -59,7 +59,7 @@ fi
 
 # RN: vitest covers the Cargo.toml-version sync test, which is the parity assertion.
 echo "→ RN test"
-pnpm --filter @rovenue/sdk-rn test 2>&1 | tee /tmp/rovenue-rn-parity.log >/dev/null
+pnpm --filter @rovenue/react-native-sdk test 2>&1 | tee /tmp/rovenue-rn-parity.log >/dev/null
 grep -E "Test Files +1 passed|[0-9]+ passed" /tmp/rovenue-rn-parity.log >/dev/null
 echo "  ✓ RN stub tests passed"
 
