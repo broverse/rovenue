@@ -686,14 +686,158 @@ export const PropertiesPanel = component(() => {
           </Section>
         )}
 
-        {page.type !== "paywall" && page.type !== "success" && (
-          <Accordion title="Image or video">
-            <div className="flex flex-col items-center gap-1 rounded border border-dashed border-rv-divider-strong bg-rv-c2 px-3 py-5 text-[11px] text-rv-mute-500">
-              <ImageIcon size={14} />
-              <span>Drop image or paste URL</span>
-            </div>
-          </Accordion>
-        )}
+        <Section title="Background">
+          <Field label="Kind" className="mb-3">
+            <Segmented
+              value={page.background?.kind ?? "none"}
+              onChange={(k) =>
+                set({
+                  background: {
+                    kind: k as "none" | "color" | "image" | "video",
+                    value: page.background?.value ?? "",
+                    opacity: page.background?.opacity ?? 1,
+                  },
+                })
+              }
+              options={[
+                { value: "none", label: "Theme", icon: null },
+                { value: "color", label: "Color", icon: null },
+                { value: "image", label: "Image", icon: null },
+                { value: "video", label: "Video", icon: null },
+              ]}
+            />
+          </Field>
+          {page.background?.kind && page.background.kind !== "none" && (
+            <>
+              <Field label={page.background.kind === "color" ? "Color (hex)" : "URL"} className="mb-3">
+                <input
+                  value={page.background.value}
+                  onChange={(e) =>
+                    set({
+                      background: {
+                        ...page.background!,
+                        value: e.currentTarget.value,
+                      },
+                    })
+                  }
+                  placeholder={
+                    page.background.kind === "color" ? "#0F172A" : "https://…"
+                  }
+                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+              </Field>
+              <Field label={`Opacity · ${Math.round((page.background.opacity ?? 1) * 100)}%`}>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={page.background.opacity ?? 1}
+                  onChange={(e) =>
+                    set({
+                      background: {
+                        ...page.background!,
+                        opacity: Number(e.currentTarget.value),
+                      },
+                    })
+                  }
+                  className="w-full accent-rv-accent-500"
+                />
+              </Field>
+            </>
+          )}
+        </Section>
+
+        <Section title="Footer">
+          <Toggle
+            on={!!page.footer?.enabled}
+            label="Enable footer"
+            help="Edge-to-edge band under the primary button"
+            onChange={(v) =>
+              set({
+                footer: {
+                  ...(page.footer ?? {
+                    enabled: false,
+                    text: "© Your brand",
+                    textColor: "",
+                    bgColor: "",
+                    borderColor: "",
+                    borderWidth: 0,
+                  }),
+                  enabled: v,
+                },
+              })
+            }
+          />
+          {page.footer?.enabled && (
+            <>
+              <Field label="Text" className="mt-3 mb-3">
+                <input
+                  value={page.footer.text ?? ""}
+                  onChange={(e) =>
+                    set({ footer: { ...page.footer!, text: e.currentTarget.value } })
+                  }
+                  placeholder="© Your brand"
+                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+              </Field>
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <Field label="Text color">
+                  <input
+                    value={page.footer.textColor ?? ""}
+                    onChange={(e) =>
+                      set({ footer: { ...page.footer!, textColor: e.currentTarget.value } })
+                    }
+                    placeholder="#666"
+                    className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+                  />
+                </Field>
+                <Field label="Bg color">
+                  <input
+                    value={page.footer.bgColor ?? ""}
+                    onChange={(e) =>
+                      set({ footer: { ...page.footer!, bgColor: e.currentTarget.value } })
+                    }
+                    placeholder="#f4f4f5"
+                    className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+                  />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Border color">
+                  <input
+                    value={page.footer.borderColor ?? ""}
+                    onChange={(e) =>
+                      set({
+                        footer: { ...page.footer!, borderColor: e.currentTarget.value },
+                      })
+                    }
+                    placeholder="#e4e4e7"
+                    className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+                  />
+                </Field>
+                <Field label={`Border · ${page.footer.borderWidth ?? 0}px`}>
+                  <input
+                    type="range"
+                    min={0}
+                    max={4}
+                    step={1}
+                    value={page.footer.borderWidth ?? 0}
+                    onChange={(e) =>
+                      set({
+                        footer: {
+                          ...page.footer!,
+                          borderWidth: Number(e.currentTarget.value),
+                        },
+                      })
+                    }
+                    className="w-full accent-rv-accent-500"
+                  />
+                </Field>
+              </div>
+            </>
+          )}
+        </Section>
 
         <Accordion
           title="Branching"
@@ -868,7 +1012,7 @@ function Segmented<T extends string>({
 }: {
   value: T;
   onChange: (v: T) => void;
-  options: ReadonlyArray<{ value: T; label: string; icon: React.ReactNode }>;
+  options: ReadonlyArray<{ value: T; label: string; icon?: React.ReactNode }>;
 }) {
   return (
     <div

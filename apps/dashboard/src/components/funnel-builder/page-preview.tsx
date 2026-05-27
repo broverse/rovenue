@@ -1,8 +1,12 @@
-import { Check, GitBranch, GripVertical, X } from "lucide-react";
+import { Calendar, Check, GitBranch, GripVertical, Mail, Phone, Star, X } from "lucide-react";
 import { component, useService } from "impair";
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { PAGE_TYPES, type Page, type Theme } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
+
+function isFilledColor(c?: string): c is string {
+  return typeof c === "string" && c.trim().length > 0;
+}
 
 type Props = {
   page: Page;
@@ -26,16 +30,49 @@ type Props = {
  */
 export const PagePreview = component(({ page, theme, editable = false }: Props) => {
   const meta = PAGE_TYPES[page.type];
-  const style: CSSProperties = {
-    background: theme.bg,
+  const bg = page.background;
+  const baseColor = isFilledColor(bg?.value) && bg?.kind === "color" ? bg.value : theme.bg;
+  const overlayOpacity = bg?.opacity ?? 1;
+  const containerStyle: CSSProperties = {
+    background: baseColor,
     color: theme.text,
   };
   const stepProgress = 4 / 9;
+  const hasMediaBg =
+    (bg?.kind === "image" || bg?.kind === "video") && isFilledColor(bg?.value);
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden rounded-[28px] px-4 pb-4 pt-2"
-      style={style}
+      className="relative flex h-full w-full flex-col overflow-hidden rounded-[28px]"
+      style={containerStyle}
     >
+      {/* Full-bleed background layer */}
+      {hasMediaBg && bg?.kind === "image" && (
+        <img
+          src={bg.value}
+          alt=""
+          className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+          style={{ opacity: overlayOpacity }}
+        />
+      )}
+      {hasMediaBg && bg?.kind === "video" && (
+        <video
+          src={bg.value}
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+          style={{ opacity: overlayOpacity }}
+        />
+      )}
+      {bg?.kind === "color" && bg.opacity < 1 && (
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ background: theme.bg, opacity: 1 - overlayOpacity }}
+        />
+      )}
+      {/* Content layer */}
+      <div className="relative z-10 flex h-full w-full flex-col px-4 pb-4 pt-2">
       <div className="flex items-center justify-between px-1 py-1 text-[10px] font-medium opacity-70">
         <span>9:41</span>
         <span>● ● ●</span>
@@ -79,14 +116,13 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
         {page.subtitle && (
           <p className="m-0 text-[12px] leading-relaxed opacity-70">{page.subtitle}</p>
         )}
-        {(page.type === "single_choice" ||
-          page.type === "multi_choice" ||
-          page.type === "yes_no") &&
+        {(page.type === "single_choice" || page.type === "multi_choice") &&
           (editable ? (
             <ChoiceListEditable page={page} theme={theme} />
           ) : (
             <ChoiceListReadOnly page={page} theme={theme} />
           ))}
+        {page.type === "yes_no" && <YesNoButtons page={page} theme={theme} />}
         {page.type === "picture_choice" && <PictureChoiceList page={page} theme={theme} />}
         {(page.type === "legal" || page.type === "checkbox") && (
           <LegalCheckbox page={page} theme={theme} />
@@ -100,11 +136,27 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
           <TextArea placeholder={page.placeholder} theme={theme} />
         )}
         {page.type === "email" && (
-          <TextField placeholder={page.placeholder ?? "you@example.com"} theme={theme} type="email" />
+          <TextField
+            placeholder={page.placeholder ?? "you@example.com"}
+            theme={theme}
+            type="email"
+            icon={<Mail size={14} />}
+          />
         )}
         {page.type === "phone" && (
-          <TextField placeholder={page.placeholder ?? "+1 555 0000"} theme={theme} type="tel" />
+          <TextField
+            placeholder={page.placeholder ?? "+1 555 0000"}
+            theme={theme}
+            type="tel"
+            icon={<Phone size={14} />}
+          />
         )}
+        {page.type === "text_input" && (
+          <TextField placeholder={page.placeholder} theme={theme} />
+        )}
+        {page.type === "number_input" && <NumberCounter page={page} theme={theme} />}
+        {page.type === "date_input" && <DatePicker theme={theme} />}
+        {page.type === "slider" && <SliderInput page={page} theme={theme} />}
         {page.type === "contact_info" && <ContactInfoFields page={page} theme={theme} />}
         {page.type === "welcome" && <WelcomeBody page={page} theme={theme} />}
         {page.type === "statement" && <StatementBody page={page} theme={theme} />}
@@ -201,6 +253,23 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
         >
           {page.cta || "Open app"}
         </button>
+      )}
+      </div>
+      {/* Footer band — sits below the CTA, edge-to-edge. */}
+      {page.footer?.enabled && (
+        <div
+          className="relative z-10 px-4 py-2 text-center text-[10px]"
+          style={{
+            background: page.footer.bgColor || "transparent",
+            color: page.footer.textColor || theme.text,
+            borderTop:
+              (page.footer.borderWidth ?? 0) > 0
+                ? `${page.footer.borderWidth}px solid ${page.footer.borderColor ?? "rgba(0,0,0,0.1)"}`
+                : undefined,
+          }}
+        >
+          {page.footer.text || "Footer text"}
+        </div>
       )}
     </div>
   );
@@ -368,6 +437,131 @@ const ChoiceListEditable = component(({ page, theme }: { page: Page; theme: Them
   );
 });
 
+// ---------- Yes / No ----------
+
+const YesNoButtons = component(({ page, theme }: { page: Page; theme: Theme }) => {
+  const opts = page.options?.length === 2 ? page.options : [
+    { label: "Yes", value: "yes" },
+    { label: "No", value: "no" },
+  ];
+  const [picked, setPicked] = useState<string | null>(null);
+  return (
+    <div className="mt-3 grid grid-cols-2 gap-2">
+      {opts.map((o) => {
+        const active = picked === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => setPicked(o.value)}
+            className="h-14 rounded-lg text-[14px] font-semibold transition"
+            style={{
+              background: active ? theme.primary : "white",
+              color: active ? "white" : theme.text,
+              border: `1px solid ${theme.primary}${active ? "" : "40"}`,
+              boxShadow: active ? `0 0 0 2px ${theme.primary}25` : undefined,
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+});
+
+// ---------- Number counter ----------
+
+const NumberCounter = component(({ page, theme }: { page: Page; theme: Theme }) => {
+  const min = page.min ?? 0;
+  const max = page.max ?? 100;
+  const step = page.step ?? 1;
+  const [n, setN] = useState(min);
+  const dec = () => setN((v) => Math.max(min, v - step));
+  const inc = () => setN((v) => Math.min(max, v + step));
+  return (
+    <div className="mt-3 flex items-center justify-center gap-3 rounded-lg px-4 py-3"
+      style={{ background: "white", border: `1px solid ${theme.primary}40` }}>
+      <button
+        type="button"
+        onClick={dec}
+        className="flex h-10 w-10 items-center justify-center rounded-full text-[18px] font-bold transition"
+        style={{ background: `${theme.primary}15`, color: theme.primary }}
+      >
+        −
+      </button>
+      <div className="min-w-[60px] text-center font-rv-mono text-[28px] font-bold tabular-nums">
+        {n}
+        {page.suffix && (
+          <span className="ml-1 text-[14px] font-normal opacity-60">{page.suffix}</span>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={inc}
+        className="flex h-10 w-10 items-center justify-center rounded-full text-[18px] font-bold transition"
+        style={{ background: `${theme.primary}15`, color: theme.primary }}
+      >
+        +
+      </button>
+    </div>
+  );
+});
+
+// ---------- Date picker ----------
+
+function DatePicker({ theme }: { theme: Theme }) {
+  return (
+    <div
+      className="mt-3 flex h-10 w-full items-center gap-2 rounded-lg px-3"
+      style={{ background: "white", border: `1px solid ${theme.primary}40` }}
+    >
+      <Calendar size={14} style={{ color: theme.primary }} />
+      <input
+        readOnly
+        type="date"
+        className="h-full flex-1 bg-transparent text-[13px] outline-none"
+      />
+    </div>
+  );
+}
+
+// ---------- Slider ----------
+
+const SliderInput = component(({ page, theme }: { page: Page; theme: Theme }) => {
+  const min = page.min ?? 0;
+  const max = page.max ?? 100;
+  const step = page.step ?? 1;
+  const [v, setV] = useState(min + Math.round((max - min) / 2));
+  return (
+    <div
+      className="mt-3 rounded-lg px-4 py-4"
+      style={{ background: "white", border: `1px solid ${theme.primary}40` }}
+    >
+      <div className="mb-2 text-center font-rv-mono text-[24px] font-bold tabular-nums">
+        {v}
+        {page.suffix && (
+          <span className="ml-1 text-[12px] font-normal opacity-60">{page.suffix}</span>
+        )}
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={v}
+        onChange={(e) => setV(Number(e.currentTarget.value))}
+        className="w-full"
+        style={{ accentColor: theme.primary }}
+      />
+      <div className="mt-1 flex justify-between font-rv-mono text-[10px] opacity-50">
+        <span>{min}</span>
+        <span>{max}</span>
+      </div>
+    </div>
+  );
+});
+
 // ---------- Picture choice ----------
 
 const PictureChoiceList = component(({ page, theme }: { page: Page; theme: Theme }) => (
@@ -448,17 +642,40 @@ const OpinionScale = component(({ page, theme }: { page: Page; theme: Theme }) =
 
 const RatingStars = component(({ page, theme }: { page: Page; theme: Theme }) => {
   const max = page.max ?? 5;
+  // Local interactive preview state — click fills up to that star.
+  // Hover lights up the in-flight rating so it feels live in the canvas.
+  const [picked, setPicked] = useState(0);
+  const [hover, setHover] = useState(0);
+  const filledThrough = hover || picked;
   return (
-    <div className="mt-3 flex gap-1.5">
-      {Array.from({ length: max }, (_, i) => (
-        <Check
-          key={i}
-          size={28}
-          // Using Check as a star stand-in keeps the icon set lean — actual
-          // star glyph requires another import.
-          style={{ color: i === 0 ? theme.primary : "rgba(0,0,0,0.2)" }}
-        />
-      ))}
+    <div className="mt-3 flex items-center gap-1.5" onMouseLeave={() => setHover(0)}>
+      {Array.from({ length: max }, (_, i) => {
+        const n = i + 1;
+        const on = n <= filledThrough;
+        return (
+          <button
+            key={i}
+            type="button"
+            onClick={() => setPicked(n)}
+            onMouseEnter={() => setHover(n)}
+            className="cursor-pointer p-0.5 transition hover:scale-110"
+          >
+            <Star
+              size={30}
+              strokeWidth={1.5}
+              style={{
+                color: theme.primary,
+                fill: on ? theme.primary : "transparent",
+              }}
+            />
+          </button>
+        );
+      })}
+      {picked > 0 && (
+        <span className="ml-2 font-rv-mono text-[11px] opacity-60">
+          {picked} / {max}
+        </span>
+      )}
     </div>
   );
 });
@@ -469,19 +686,26 @@ function TextField({
   placeholder,
   theme,
   type = "text",
+  icon,
 }: {
   placeholder?: string;
   theme: Theme;
   type?: "text" | "email" | "tel";
+  icon?: React.ReactNode;
 }) {
   return (
-    <input
-      readOnly
-      type={type}
-      placeholder={placeholder ?? "Type your answer…"}
-      className="mt-3 h-10 w-full rounded-lg px-3 text-[13px] outline-none"
+    <div
+      className="mt-3 flex h-10 w-full items-center gap-2 rounded-lg px-3"
       style={{ background: "white", border: `1px solid ${theme.primary}40` }}
-    />
+    >
+      {icon && <span style={{ color: theme.primary }}>{icon}</span>}
+      <input
+        readOnly
+        type={type}
+        placeholder={placeholder ?? "Type your answer…"}
+        className="h-full flex-1 bg-transparent text-[13px] outline-none placeholder:opacity-50"
+      />
+    </div>
   );
 }
 

@@ -243,6 +243,29 @@ export type Page = {
   // feature — a list of feature lines (headline already on .headline)
   features?: string[];
   // statement — the body text already lives on .body
+
+  // ----- Per-page design overrides -----
+  /** Full-bleed background behind the page content. Overrides theme.bg. */
+  background?: PageBackground;
+  /** Optional sticky footer that lives below the primary CTA button. */
+  footer?: PageFooter;
+};
+
+export type PageBackground = {
+  kind: "none" | "color" | "image" | "video";
+  /** color hex, or absolute URL for image/video */
+  value: string;
+  /** 0..1 — overlay applied on top of the background, multiplied with the bg colour */
+  opacity: number;
+};
+
+export type PageFooter = {
+  enabled: boolean;
+  text?: string;
+  textColor?: string;
+  bgColor?: string;
+  borderColor?: string;
+  borderWidth?: number;
 };
 
 export type Theme = {
