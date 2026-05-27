@@ -1,6 +1,12 @@
 import { component, useService } from "impair";
-import { Check, Image as ImageIcon, TriangleAlert } from "lucide-react";
-import type { Theme } from "./types";
+import {
+  ArrowLeft,
+  Check,
+  ChevronLeft,
+  Image as ImageIcon,
+  TriangleAlert,
+} from "lucide-react";
+import type { BackIcon, ProgressStyle, Theme } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { PagePreview } from "./page-preview";
 import { ColorSwatchInput } from "./color-swatch-input";
@@ -16,6 +22,18 @@ const COLOR_ROWS: ReadonlyArray<{ key: keyof Theme; label: string; hint: string 
 const SWATCH_ROWS = [
   ["#3B82F6", "#8B5CF6", "#10B981", "#F59E0B", "#EC4899", "#06B6D4"],
   ["#FAFAFA", "#FFFFFF", "#F4F4F5", "#0F0F12", "#18181B", "#27272A"],
+];
+
+const PROGRESS_STYLES: ReadonlyArray<{ value: ProgressStyle; label: string }> = [
+  { value: "solid", label: "Solid" },
+  { value: "rounded", label: "Rounded" },
+  { value: "segmented", label: "Segmented" },
+  { value: "dashed", label: "Dashed" },
+];
+
+const BACK_ICONS: ReadonlyArray<{ value: BackIcon; label: string; icon: typeof ChevronLeft }> = [
+  { value: "chevron", label: "Chevron", icon: ChevronLeft },
+  { value: "arrow", label: "Arrow", icon: ArrowLeft },
 ];
 
 export const ThemeTab = component(() => {
@@ -148,6 +166,87 @@ export const ThemeTab = component(() => {
               </div>
             </div>
           </Section>
+
+          <Section>
+            <SectionHead title="Header" />
+            <Field label="Progress style">
+              <div className="grid grid-cols-4 gap-1.5">
+                {PROGRESS_STYLES.map((s) => (
+                  <button
+                    key={s.value}
+                    type="button"
+                    onClick={() => vm.updateTheme({ progressStyle: s.value })}
+                    className={`flex cursor-pointer flex-col items-stretch gap-1.5 rounded border p-2 text-left transition ${
+                      theme.progressStyle === s.value
+                        ? "border-rv-accent-500 bg-rv-c2"
+                        : "border-rv-divider bg-rv-c2 hover:border-rv-accent-500"
+                    }`}
+                    title={s.label}
+                  >
+                    <ProgressPreview
+                      style={s.value}
+                      active={theme.progressActive || theme.primary}
+                      inactive={theme.progressInactive || "rgba(0,0,0,0.1)"}
+                    />
+                    <span className="text-[10px] font-medium text-foreground">{s.label}</span>
+                  </button>
+                ))}
+              </div>
+            </Field>
+            <div className="flex items-center gap-3 border-b border-rv-divider py-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-foreground">Active color</div>
+                <div className="text-[11px] text-rv-mute-500">
+                  Filled portion of the progress bar (blank uses Primary)
+                </div>
+              </div>
+              <ColorSwatchInput
+                className="w-[150px]"
+                value={theme.progressActive}
+                onChange={(v) => vm.updateTheme({ progressActive: v })}
+                placeholder={theme.primary}
+                size="sm"
+              />
+            </div>
+            <div className="flex items-center gap-3 border-b border-rv-divider py-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-foreground">Inactive color</div>
+                <div className="text-[11px] text-rv-mute-500">Unfilled track behind the bar</div>
+              </div>
+              <ColorSwatchInput
+                className="w-[150px]"
+                value={theme.progressInactive}
+                onChange={(v) => vm.updateTheme({ progressInactive: v })}
+                placeholder="rgba(0,0,0,0.1)"
+                size="sm"
+              />
+            </div>
+            <Field label="Back button icon">
+              <div className="grid grid-cols-2 gap-1.5">
+                {BACK_ICONS.map((b) => {
+                  const I = b.icon;
+                  return (
+                    <button
+                      key={b.value}
+                      type="button"
+                      onClick={() => vm.updateTheme({ backIcon: b.value })}
+                      className={`flex cursor-pointer items-center justify-center gap-2 rounded border px-2 py-2 text-[12px] transition ${
+                        theme.backIcon === b.value
+                          ? "border-rv-accent-500 bg-rv-c2 text-foreground"
+                          : "border-rv-divider bg-rv-c2 text-rv-mute-700 hover:border-rv-accent-500"
+                      }`}
+                    >
+                      <I size={16} strokeWidth={2.2} />
+                      <span>{b.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </Field>
+            <div className="text-[11px] text-rv-mute-500">
+              Visibility is per-page — toggle from the page sidebar's Header section.
+            </div>
+          </Section>
         </div>
 
         <div className="sticky top-4 self-start">
@@ -201,6 +300,50 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
         {label}
       </label>
       {children}
+    </div>
+  );
+}
+
+/** Tiny inline progress-bar preview used inside the style picker tiles. */
+function ProgressPreview({
+  style,
+  active,
+  inactive,
+}: {
+  style: ProgressStyle;
+  active: string;
+  inactive: string;
+}) {
+  if (style === "segmented") {
+    return (
+      <div className="flex items-center gap-[2px]">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <span
+            key={i}
+            className="block h-[3px] flex-1 rounded-full"
+            style={{ background: i < 3 ? active : inactive }}
+          />
+        ))}
+      </div>
+    );
+  }
+  if (style === "dashed") {
+    return (
+      <div className="relative h-[5px]">
+        <div
+          className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full"
+          style={{
+            backgroundImage: `repeating-linear-gradient(to right, ${inactive} 0 5px, transparent 5px 9px)`,
+          }}
+        />
+        <div className="relative h-[3px] w-[60%] overflow-hidden rounded-full" style={{ background: active }} />
+      </div>
+    );
+  }
+  const height = style === "rounded" ? "h-[5px]" : "h-[3px]";
+  return (
+    <div className={`${height} overflow-hidden rounded-full`} style={{ background: inactive }}>
+      <span className="block h-full w-[60%] rounded-full" style={{ background: active }} />
     </div>
   );
 }

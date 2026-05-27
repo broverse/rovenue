@@ -1,7 +1,6 @@
 import { component, useService } from "impair";
 import { Link } from "@tanstack/react-router";
 import {
-  ArrowRight,
   Book,
   Check,
   ChevronDown,
@@ -9,7 +8,6 @@ import {
   History,
   RotateCcw,
   Share2,
-  Sparkles,
   TriangleAlert,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
@@ -75,8 +73,6 @@ export const BuilderShell = component(({ projectId }: Props) => {
         {vm.activeTab === "sessions" && <SessionsTab />}
         {vm.activeTab === "share" && <ShareTab />}
       </main>
-
-      {vm.activeTab === "content" && <AiChatFab />}
 
       {vm.showPreview && <PreviewOverlay />}
 
@@ -293,23 +289,3 @@ const VersionMenu = component(() => {
   );
 });
 
-function AiChatFab() {
-  return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4">
-      <div className="pointer-events-auto flex w-full max-w-[680px] items-center gap-2 rounded-full border border-rv-divider-strong bg-rv-c1/95 px-4 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur">
-        <Sparkles size={14} className="text-rv-accent-500" />
-        <input
-          placeholder='Describe a change — e.g. "add a 3-step loading screen before the result"'
-          className="flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-rv-mute-500"
-        />
-        <button
-          type="button"
-          title="Send"
-          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full bg-rv-accent-500 text-white transition hover:bg-rv-accent-600"
-        >
-          <ArrowRight size={13} />
-        </button>
-      </div>
-    </div>
-  );
-}

@@ -138,6 +138,10 @@ export const PAGE_TYPE_DESC: Record<PageType, string> = {
 
 export const PAGE_GROUPS: ReadonlyArray<{ label: string; types: PageType[] }> = [
   {
+    label: "Page elements",
+    types: ["welcome", "statement", "feature", "info", "loading", "result", "paywall", "end_screen", "success"],
+  },
+  {
     label: "Contact info",
     types: ["contact_info", "email", "phone"],
   },
@@ -155,7 +159,7 @@ export const PAGE_GROUPS: ReadonlyArray<{ label: string; types: PageType[] }> = 
   },
   {
     label: "Other",
-    types: ["date_input", "number_input", "slider", "paywall", "welcome", "statement", "feature", "info", "loading", "result", "end_screen", "success"],
+    types: ["date_input", "number_input", "slider"],
   },
 ];
 
@@ -249,6 +253,10 @@ export type Page = {
   background?: PageBackground;
   /** Optional sticky footer that lives below the primary CTA button. */
   footer?: PageFooter;
+  /** Show the progress indicator on this page. Defaults to false. */
+  showProgress?: boolean;
+  /** Show the back button on this page. Defaults to false. */
+  showBack?: boolean;
 };
 
 export type PageBackground = {
@@ -261,12 +269,13 @@ export type PageBackground = {
 
 export type PageFooter = {
   enabled: boolean;
-  text?: string;
-  textColor?: string;
   bgColor?: string;
   borderColor?: string;
   borderWidth?: number;
 };
+
+export type ProgressStyle = "solid" | "segmented" | "dashed" | "rounded";
+export type BackIcon = "chevron" | "arrow";
 
 export type Theme = {
   primary: string;
@@ -276,6 +285,14 @@ export type Theme = {
   font: string;
   logoUrl: string;
   logoLetter: string;
+  /** Visual variant for the per-page progress indicator. */
+  progressStyle: ProgressStyle;
+  /** Active (filled) color for progress. Falls back to `primary` when empty. */
+  progressActive: string;
+  /** Inactive (track) color for progress. */
+  progressInactive: string;
+  /** Which glyph to use for the per-page back button. */
+  backIcon: BackIcon;
 };
 
 export type Settings = {

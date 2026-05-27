@@ -1,11 +1,95 @@
-import { Calendar, Check, GitBranch, GripVertical, Mail, Phone, Star, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Calendar,
+  Check,
+  ChevronLeft,
+  GitBranch,
+  GripVertical,
+  Mail,
+  Phone,
+  Star,
+  X,
+} from "lucide-react";
 import { component, useService } from "impair";
 import { useState, type CSSProperties } from "react";
-import { PAGE_TYPES, type Page, type Theme } from "./types";
+import { PAGE_TYPES, type Page, type ProgressStyle, type Theme } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 
 function isFilledColor(c?: string): c is string {
   return typeof c === "string" && c.trim().length > 0;
+}
+
+/**
+ * Progress indicator used in the page chrome. Pure presentation — picks a
+ * variant based on `style`:
+ *   - solid: single bar with rounded ends
+ *   - rounded: pill-shaped bar with extra height
+ *   - segmented: one cell per step (filled up to `currentStep`)
+ *   - dashed: dashed track over a thin filled bar
+ */
+function ProgressIndicator({
+  style,
+  active,
+  inactive,
+  progress,
+  totalSteps,
+  currentStep,
+}: {
+  style: ProgressStyle;
+  active: string;
+  inactive: string;
+  progress: number;
+  totalSteps: number;
+  currentStep: number;
+}) {
+  const pct = `${Math.max(0, Math.min(1, progress)) * 100}%`;
+  if (style === "segmented") {
+    const cells = Math.max(1, totalSteps);
+    return (
+      <div className="flex flex-1 items-center gap-[3px]">
+        {Array.from({ length: cells }).map((_, i) => (
+          <span
+            key={i}
+            className="block h-[3px] flex-1 rounded-full"
+            style={{ background: i < currentStep ? active : inactive }}
+          />
+        ))}
+      </div>
+    );
+  }
+  if (style === "dashed") {
+    return (
+      <div className="relative flex-1">
+        <div
+          className="absolute inset-0 rounded-full"
+          style={{
+            backgroundImage: `repeating-linear-gradient(to right, ${inactive} 0 6px, transparent 6px 10px)`,
+            height: 3,
+            top: "50%",
+            transform: "translateY(-50%)",
+          }}
+        />
+        <div className="relative h-[3px] overflow-hidden rounded-full">
+          <span
+            className="block h-full rounded-full"
+            style={{ width: pct, background: active }}
+          />
+        </div>
+      </div>
+    );
+  }
+  const height = style === "rounded" ? "h-[6px]" : "h-1";
+  return (
+    <div
+      className={`${height} flex-1 overflow-hidden rounded-full`}
+      style={{ background: inactive }}
+    >
+      <span
+        className="block h-full rounded-full transition-[width] duration-300 ease-out"
+        style={{ width: pct, background: active }}
+      />
+    </div>
+  );
 }
 
 type Props = {
@@ -29,6 +113,7 @@ type Props = {
  * re-render and the preview stays stale.
  */
 export const PagePreview = component(({ page, theme, editable = false }: Props) => {
+  const vm = useService(FunnelDraftViewModel);
   const meta = PAGE_TYPES[page.type];
   const bg = page.background;
   const baseColor = isFilledColor(bg?.value) && bg?.kind === "color" ? bg.value : theme.bg;
@@ -38,9 +123,18 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
     color: theme.text,
     fontFamily: theme.font || undefined,
   };
-  const stepProgress = 4 / 9;
   const hasMediaBg =
     (bg?.kind === "image" || bg?.kind === "video") && isFilledColor(bg?.value);
+  // Progress reflects this page's position in the funnel.
+  const pageIndex = vm.pages.findIndex((p) => p.id === page.id);
+  const totalPages = vm.pages.length;
+  const stepNumber = pageIndex >= 0 ? pageIndex + 1 : 1;
+  const stepProgress = totalPages > 1 ? Math.min(1, stepNumber / totalPages) : 1;
+  const progressActive = isFilledColor(theme.progressActive) ? theme.progressActive : theme.primary;
+  const progressInactive = isFilledColor(theme.progressInactive)
+    ? theme.progressInactive
+    : "rgba(0,0,0,0.1)";
+  const BackGlyph = theme.backIcon === "arrow" ? ArrowLeft : ChevronLeft;
   // Primary CTA label by page type — `null` means this page type doesn't
   // render a CTA (paywall/welcome use page.cta-with-defaults; success and
   // most question pages fall back to "Continue" / "Open app").
@@ -77,12 +171,14 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
     }
   })();
   const footer = page.footer;
-  const footerStyle = footer?.enabled
+  // Footer is opt-out: undefined and missing-enabled both render as enabled.
+  const footerEnabled = footer?.enabled !== false;
+  const footerStyle = footerEnabled
     ? {
-        background: footer.bgColor || "transparent",
+        background: footer?.bgColor || "transparent",
         borderTop:
-          (footer.borderWidth ?? 0) > 0
-            ? `${footer.borderWidth}px solid ${footer.borderColor ?? "rgba(0,0,0,0.1)"}`
+          (footer?.borderWidth ?? 0) > 0
+            ? `${footer?.borderWidth}px solid ${footer?.borderColor ?? "rgba(0,0,0,0.1)"}`
             : undefined,
       }
     : undefined;
@@ -127,21 +223,33 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
         <span>9:41</span>
         <span>● ● ●</span>
       </div>
-      <div
-        className="mx-auto mt-2 flex h-7 w-7 items-center justify-center rounded-md text-[13px] font-bold text-white"
-        style={{ background: theme.primary }}
-      >
-        {theme.logoLetter || "F"}
-      </div>
-      {page.type !== "paywall" && page.type !== "success" && (
-        <div className="mt-3 px-1">
-          <div className="h-1 overflow-hidden rounded-full bg-black/10">
-            <span
-              className="block h-full rounded-full"
-              style={{ width: `${stepProgress * 100}%`, background: theme.primary }}
+      {(page.showBack || page.showProgress) && (
+        <div className="mt-2 flex items-center gap-2">
+          {page.showBack ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label="Back"
+              className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full opacity-70 transition hover:opacity-100"
+              style={{ color: theme.text }}
+            >
+              <BackGlyph size={16} strokeWidth={2.2} />
+            </button>
+          ) : (
+            <span className="h-6 w-6 flex-shrink-0" aria-hidden />
+          )}
+          {page.showProgress ? (
+            <ProgressIndicator
+              style={theme.progressStyle}
+              active={progressActive}
+              inactive={progressInactive}
+              progress={stepProgress}
+              totalSteps={totalPages}
+              currentStep={stepNumber}
             />
-          </div>
-          <div className="mt-1.5 text-center text-[10px] opacity-60">Step 4 of 9</div>
+          ) : (
+            <span className="flex-1" />
+          )}
         </div>
       )}
       <div className="mt-4 flex flex-1 flex-col gap-2 overflow-hidden">
@@ -251,10 +359,10 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
         )}
       </div>
       </div>
-      {/* Footer band — edge-to-edge container that holds the CTA. When
-          `footer.enabled` is on, its bg/border style this whole band and
-          an optional helper line sits under the button. */}
-      {ctaLabel && (
+      {/* Footer band — edge-to-edge container that holds the CTA.
+          Defaults to enabled (`footer.enabled !== false`); the bg / border
+          fields style this whole band when the user customises them. */}
+      {ctaLabel && footerEnabled && (
         <div className="px-4 pb-4 pt-3" style={footerStyle}>
           <button
             type="button"
@@ -263,14 +371,6 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
           >
             {ctaLabel}
           </button>
-          {footer?.enabled && footer.text && (
-            <div
-              className="mt-2 text-center text-[10px]"
-              style={{ color: footer.textColor || theme.text }}
-            >
-              {footer.text}
-            </div>
-          )}
         </div>
       )}
       </div>

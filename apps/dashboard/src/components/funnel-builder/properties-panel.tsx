@@ -49,7 +49,7 @@ export const PropertiesPanel = component(() => {
   const page = vm.selectedPage;
   if (!page) {
     return (
-      <aside className="flex w-[340px] flex-shrink-0 flex-col items-center justify-center border-l border-rv-divider bg-rv-c1 px-6 text-center">
+      <aside className="flex flex-1 flex-col items-center justify-center border-l border-rv-divider bg-rv-bg px-6 text-center">
         <div className="rounded-lg border border-dashed border-rv-divider bg-rv-c2 px-4 py-6">
           <div className="text-[13px] font-medium text-foreground">No page selected</div>
           <div className="mt-1 text-[11px] text-rv-mute-500">
@@ -284,19 +284,11 @@ export const PropertiesPanel = component(() => {
                   className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                 />
               </Field>
-              <Field label="Body" className="mb-3">
+              <Field label="Body">
                 <input
                   value={page.body ?? ""}
                   onChange={(e) => set({ body: e.currentTarget.value })}
                   placeholder="What happens next"
-                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
-                />
-              </Field>
-              <Field label="CTA label">
-                <input
-                  value={page.cta ?? ""}
-                  onChange={(e) => set({ cta: e.currentTarget.value })}
-                  placeholder="Open app"
                   className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                 />
               </Field>
@@ -399,39 +391,19 @@ export const PropertiesPanel = component(() => {
                   className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                 />
               </Field>
-              {page.type === "welcome" && (
-                <Field label="Start button label">
-                  <input
-                    value={page.cta ?? ""}
-                    onChange={(e) => set({ cta: e.currentTarget.value })}
-                    placeholder="Get started"
-                    className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
-                  />
-                </Field>
-              )}
             </>
           )}
 
-          {/* Statement — body + CTA */}
+          {/* Statement — body only; the CTA label lives in the Footer section. */}
           {page.type === "statement" && (
-            <>
-              <Field label="Body" className="mb-3">
-                <textarea
-                  value={page.body ?? ""}
-                  onChange={(e) => set({ body: e.currentTarget.value })}
-                  rows={3}
-                  className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
-                />
-              </Field>
-              <Field label="Button label">
-                <input
-                  value={page.cta ?? ""}
-                  onChange={(e) => set({ cta: e.currentTarget.value })}
-                  placeholder="Continue"
-                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
-                />
-              </Field>
-            </>
+            <Field label="Body">
+              <textarea
+                value={page.body ?? ""}
+                onChange={(e) => set({ body: e.currentTarget.value })}
+                rows={3}
+                className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+              />
+            </Field>
           )}
 
           {/* Feature screen — headline + bulleted feature lines + CTA */}
@@ -485,14 +457,6 @@ export const PropertiesPanel = component(() => {
                     Add feature
                   </button>
                 </div>
-              </Field>
-              <Field label="Button label">
-                <input
-                  value={page.cta ?? ""}
-                  onChange={(e) => set({ cta: e.currentTarget.value })}
-                  placeholder="Continue"
-                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
-                />
               </Field>
             </>
           )}
@@ -686,6 +650,23 @@ export const PropertiesPanel = component(() => {
             </div>
           </Section>
         )}
+
+        <Section title="Header">
+          <Toggle
+            on={!!page.showBack}
+            label="Show back button"
+            help="Adds a back chevron / arrow in the page header"
+            onChange={(v) => set({ showBack: v })}
+          />
+          <div className="mt-3">
+            <Toggle
+              on={!!page.showProgress}
+              label="Show progress"
+              help="Renders the funnel progress bar above the content"
+              onChange={(v) => set({ showProgress: v })}
+            />
+          </div>
+        </Section>
 
         <Section title="Background">
           <Field label="Kind" className="mb-3">

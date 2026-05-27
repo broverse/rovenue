@@ -22,6 +22,10 @@ const DEFAULT_THEME: Theme = {
   font: "'Inter', system-ui, sans-serif",
   logoUrl: "",
   logoLetter: "F",
+  progressStyle: "solid",
+  progressActive: "",
+  progressInactive: "rgba(0,0,0,0.1)",
+  backIcon: "chevron",
 };
 
 const DEFAULT_SETTINGS: Settings = {
