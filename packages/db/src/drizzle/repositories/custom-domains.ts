@@ -55,17 +55,17 @@ export async function listPending(db: Db, olderThan: Date): Promise<CustomDomain
 }
 
 /**
- * Rows verified within the last `since` window whose certificate is still
- * pending / issuing — drives the cert-status poller.
+ * Verified rows whose certificate is still pending / issuing — drives
+ * the cert-status poller. The poller is responsible for time-window
+ * decisions (when to give up); the repo just returns the working set.
  */
-export async function listAwaitingCert(db: Db, verifiedAfter: Date): Promise<CustomDomain[]> {
+export async function listAwaitingCert(db: Db): Promise<CustomDomain[]> {
   return db
     .select()
     .from(customDomains)
     .where(
       and(
         sql`${customDomains.verifiedAt} IS NOT NULL`,
-        sql`${customDomains.verifiedAt} > ${verifiedAfter}`,
         sql`${customDomains.certStatus} IN ('pending', 'issuing')`,
       ),
     );

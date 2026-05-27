@@ -54,6 +54,10 @@ import {
   createCustomDomainVerifierWorker,
   scheduleCustomDomainVerifier,
 } from "./workers/custom-domain-verifier";
+import {
+  createCustomDomainCertPollerWorker,
+  scheduleCustomDomainCertPoller,
+} from "./workers/custom-domain-cert-poller";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -158,6 +162,17 @@ scheduleFunnelDeferredCleanup().catch((err: unknown) => {
 createCustomDomainVerifierWorker();
 scheduleCustomDomainVerifier().catch((err: unknown) => {
   logger.error("failed to schedule custom-domain verifier", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Custom-domain cert poller — every minute, TLS-handshakes verified
+// rows to learn whether Caddy has finished ACME. Flips cert_status
+// pending → issuing → issued / failed. After 30 minutes without issue
+// the row is marked failed.
+createCustomDomainCertPollerWorker();
+scheduleCustomDomainCertPoller().catch((err: unknown) => {
+  logger.error("failed to schedule custom-domain cert poller", {
     err: err instanceof Error ? err.message : String(err),
   });
 });
