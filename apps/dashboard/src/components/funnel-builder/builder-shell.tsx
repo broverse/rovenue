@@ -66,15 +66,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
 
       {vm.activeTab === "content" && <AiChatFab />}
 
-      {vm.showPreview && (
-        <PreviewOverlay
-          pages={vm.pages}
-          currentId={vm.selectedPageId ?? vm.pages[0]?.id ?? ""}
-          theme={vm.theme}
-          onClose={() => vm.closePreview()}
-          onSelect={(id) => vm.selectPage(id)}
-        />
-      )}
+      {vm.showPreview && <PreviewOverlay />}
 
       {vm.showValidation && <ValidationDrawer />}
     </div>
