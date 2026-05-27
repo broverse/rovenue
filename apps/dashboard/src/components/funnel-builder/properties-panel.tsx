@@ -301,6 +301,187 @@ export const PropertiesPanel = component(() => {
               />
             </Field>
           )}
+
+          {/* Inputs that take a placeholder */}
+          {(page.type === "short_text" ||
+            page.type === "long_text" ||
+            page.type === "email" ||
+            page.type === "phone" ||
+            page.type === "text_input") && (
+            <Field label="Placeholder">
+              <input
+                value={page.placeholder ?? ""}
+                onChange={(e) => set({ placeholder: e.currentTarget.value })}
+                placeholder="Type your answer…"
+                className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+              />
+            </Field>
+          )}
+
+          {/* Contact info — which sub-fields the form collects */}
+          {page.type === "contact_info" && (
+            <Field label="Collect">
+              <div className="flex flex-col gap-1">
+                {[
+                  ["Name", "collectName"],
+                  ["Email", "collectEmail"],
+                  ["Phone", "collectPhone"],
+                ].map(([label, key]) => {
+                  const k = key as "collectName" | "collectEmail" | "collectPhone";
+                  return (
+                    <Toggle
+                      key={k}
+                      on={!!page[k]}
+                      label={label as string}
+                      onChange={(v) => set({ [k]: v } as Partial<Page>)}
+                    />
+                  );
+                })}
+              </div>
+            </Field>
+          )}
+
+          {/* Legal / checkbox — agreement copy + optional link */}
+          {(page.type === "legal" || page.type === "checkbox") && (
+            <>
+              <Field label="Agreement label" className="mb-3">
+                <input
+                  value={page.agreementLabel ?? ""}
+                  onChange={(e) => set({ agreementLabel: e.currentTarget.value })}
+                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+              </Field>
+              {page.type === "legal" && (
+                <Field label="Terms URL">
+                  <input
+                    value={page.termsUrl ?? ""}
+                    onChange={(e) => set({ termsUrl: e.currentTarget.value })}
+                    placeholder="https://…/terms"
+                    className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+                  />
+                </Field>
+              )}
+            </>
+          )}
+
+          {/* Opinion scale — min/max */}
+          {page.type === "opinion_scale" && (
+            <Field label="Range">
+              <div className="grid grid-cols-2 gap-2">
+                <MonoInput value={page.min} onChange={(v) => set({ min: v })} />
+                <MonoInput value={page.max} onChange={(v) => set({ max: v })} />
+              </div>
+            </Field>
+          )}
+
+          {/* Welcome / End screen — body + CTA */}
+          {(page.type === "welcome" || page.type === "end_screen") && (
+            <>
+              <Field label="Body" className="mb-3">
+                <textarea
+                  value={page.body ?? ""}
+                  onChange={(e) => set({ body: e.currentTarget.value })}
+                  rows={3}
+                  className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+              </Field>
+              {page.type === "welcome" && (
+                <Field label="Start button label">
+                  <input
+                    value={page.cta ?? ""}
+                    onChange={(e) => set({ cta: e.currentTarget.value })}
+                    placeholder="Get started"
+                    className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                  />
+                </Field>
+              )}
+            </>
+          )}
+
+          {/* Statement — body + CTA */}
+          {page.type === "statement" && (
+            <>
+              <Field label="Body" className="mb-3">
+                <textarea
+                  value={page.body ?? ""}
+                  onChange={(e) => set({ body: e.currentTarget.value })}
+                  rows={3}
+                  className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+              </Field>
+              <Field label="Button label">
+                <input
+                  value={page.cta ?? ""}
+                  onChange={(e) => set({ cta: e.currentTarget.value })}
+                  placeholder="Continue"
+                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+              </Field>
+            </>
+          )}
+
+          {/* Feature screen — headline + bulleted feature lines + CTA */}
+          {page.type === "feature" && (
+            <>
+              <Field label="Headline" className="mb-3">
+                <input
+                  value={page.headline ?? ""}
+                  onChange={(e) => set({ headline: e.currentTarget.value })}
+                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+              </Field>
+              <Field label={`Features · ${(page.features ?? []).length}`} className="mb-3">
+                <div className="flex flex-col gap-1.5">
+                  {(page.features ?? []).map((f, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-1.5 rounded border border-rv-divider bg-rv-c2 px-1.5 py-1"
+                    >
+                      <input
+                        value={f}
+                        onChange={(e) => {
+                          const next = [...(page.features ?? [])];
+                          next[i] = e.currentTarget.value;
+                          set({ features: next });
+                        }}
+                        className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none"
+                      />
+                      <button
+                        type="button"
+                        title="Remove"
+                        onClick={() => {
+                          const next = [...(page.features ?? [])];
+                          next.splice(i, 1);
+                          set({ features: next });
+                        }}
+                        className="flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded text-rv-mute-500 hover:bg-rv-c3 hover:text-rv-danger"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      set({ features: [...(page.features ?? []), "New feature"] })
+                    }
+                    className="mt-1 inline-flex h-7 w-full cursor-pointer items-center justify-center gap-1.5 rounded border border-dashed border-rv-divider bg-rv-c2 px-2 text-[11px] text-rv-mute-600 transition hover:border-rv-accent-500 hover:text-rv-accent-500"
+                  >
+                    <Plus size={11} />
+                    Add feature
+                  </button>
+                </div>
+              </Field>
+              <Field label="Button label">
+                <input
+                  value={page.cta ?? ""}
+                  onChange={(e) => set({ cta: e.currentTarget.value })}
+                  placeholder="Continue"
+                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                />
+              </Field>
+            </>
+          )}
         </Section>
 
         {(page.type === "single_choice" || page.type === "multi_choice") && (

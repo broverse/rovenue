@@ -64,12 +64,37 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
         {page.subtitle && (
           <p className="m-0 text-[12px] leading-relaxed opacity-70">{page.subtitle}</p>
         )}
-        {(page.type === "single_choice" || page.type === "multi_choice") &&
+        {(page.type === "single_choice" ||
+          page.type === "multi_choice" ||
+          page.type === "yes_no") &&
           (editable ? (
             <ChoiceListEditable page={page} theme={theme} />
           ) : (
             <ChoiceListReadOnly page={page} theme={theme} />
           ))}
+        {page.type === "picture_choice" && <PictureChoiceList page={page} theme={theme} />}
+        {(page.type === "legal" || page.type === "checkbox") && (
+          <LegalCheckbox page={page} theme={theme} />
+        )}
+        {page.type === "opinion_scale" && <OpinionScale page={page} theme={theme} />}
+        {page.type === "rating" && <RatingStars page={page} theme={theme} />}
+        {page.type === "short_text" && (
+          <TextField placeholder={page.placeholder} theme={theme} />
+        )}
+        {page.type === "long_text" && (
+          <TextArea placeholder={page.placeholder} theme={theme} />
+        )}
+        {page.type === "email" && (
+          <TextField placeholder={page.placeholder ?? "you@example.com"} theme={theme} type="email" />
+        )}
+        {page.type === "phone" && (
+          <TextField placeholder={page.placeholder ?? "+1 555 0000"} theme={theme} type="tel" />
+        )}
+        {page.type === "contact_info" && <ContactInfoFields page={page} theme={theme} />}
+        {page.type === "welcome" && <WelcomeBody page={page} theme={theme} />}
+        {page.type === "statement" && <StatementBody page={page} theme={theme} />}
+        {page.type === "feature" && <FeatureBody page={page} theme={theme} />}
+        {(page.type === "end_screen") && <EndScreenBody page={page} theme={theme} />}
         {page.type === "paywall" && (
           <>
             <h2 className="mt-1 text-[18px] font-semibold leading-tight tracking-tight">
@@ -108,13 +133,40 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
           </div>
         )}
       </div>
-      {(page.type === "single_choice" || page.type === "multi_choice") && (
+      {(page.type === "single_choice" ||
+        page.type === "multi_choice" ||
+        page.type === "picture_choice" ||
+        page.type === "yes_no" ||
+        page.type === "legal" ||
+        page.type === "checkbox" ||
+        page.type === "opinion_scale" ||
+        page.type === "rating" ||
+        page.type === "short_text" ||
+        page.type === "long_text" ||
+        page.type === "email" ||
+        page.type === "phone" ||
+        page.type === "contact_info" ||
+        page.type === "date_input" ||
+        page.type === "number_input" ||
+        page.type === "slider" ||
+        page.type === "text_input" ||
+        page.type === "statement" ||
+        page.type === "feature") && (
         <button
           type="button"
           className="mt-3 h-10 w-full rounded-lg text-[13px] font-semibold text-white"
           style={{ background: theme.primary }}
         >
-          Continue
+          {page.cta || "Continue"}
+        </button>
+      )}
+      {page.type === "welcome" && (
+        <button
+          type="button"
+          className="mt-3 h-10 w-full rounded-lg text-[13px] font-semibold text-white"
+          style={{ background: theme.primary }}
+        >
+          {page.cta || "Get started"}
         </button>
       )}
       {page.type === "paywall" && (
@@ -300,3 +352,210 @@ const ChoiceListEditable = component(({ page, theme }: { page: Page; theme: Them
     </div>
   );
 });
+
+// ---------- Picture choice ----------
+
+const PictureChoiceList = component(({ page, theme }: { page: Page; theme: Theme }) => (
+  <div className="mt-2 grid grid-cols-2 gap-2">
+    {(page.options ?? []).slice(0, 6).map((o, i) => (
+      <div
+        key={i}
+        className="flex flex-col gap-1 overflow-hidden rounded-lg"
+        style={{
+          background: "white",
+          border: `1px solid ${i === 0 ? theme.primary : "rgba(0,0,0,0.08)"}`,
+          boxShadow: i === 0 ? `0 0 0 2px ${theme.primary}25` : undefined,
+        }}
+      >
+        <div
+          className="flex aspect-square w-full items-center justify-center text-[10px] opacity-50"
+          style={{ background: "rgba(0,0,0,0.04)" }}
+        >
+          {o.imageUrl ? (
+            <img src={o.imageUrl} alt={o.label} className="h-full w-full object-cover" />
+          ) : (
+            "no image"
+          )}
+        </div>
+        <div className="px-2 py-1.5 text-[11px]">{o.label}</div>
+      </div>
+    ))}
+  </div>
+));
+
+// ---------- Legal / checkbox ----------
+
+const LegalCheckbox = component(({ page, theme }: { page: Page; theme: Theme }) => (
+  <label className="mt-3 flex cursor-pointer items-start gap-2 text-[12px]">
+    <span
+      className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded"
+      style={{ border: `1.5px solid ${theme.primary}`, background: "transparent" }}
+    />
+    <span className="leading-snug">
+      {page.agreementLabel || "I agree"}
+      {page.termsUrl && (
+        <a className="ml-1 underline" style={{ color: theme.primary }} href={page.termsUrl}>
+          Read terms
+        </a>
+      )}
+    </span>
+  </label>
+));
+
+// ---------- Opinion scale 1-5 ----------
+
+const OpinionScale = component(({ page, theme }: { page: Page; theme: Theme }) => {
+  const min = page.min ?? 1;
+  const max = page.max ?? 5;
+  const items = [] as number[];
+  for (let i = min; i <= max; i++) items.push(i);
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      {items.map((n) => (
+        <button
+          key={n}
+          type="button"
+          className="flex h-9 min-w-9 items-center justify-center rounded-md text-[13px] font-medium"
+          style={{
+            border: `1px solid ${theme.primary}`,
+            color: theme.primary,
+            background: "white",
+          }}
+        >
+          {n}
+        </button>
+      ))}
+    </div>
+  );
+});
+
+// ---------- Rating stars ----------
+
+const RatingStars = component(({ page, theme }: { page: Page; theme: Theme }) => {
+  const max = page.max ?? 5;
+  return (
+    <div className="mt-3 flex gap-1.5">
+      {Array.from({ length: max }, (_, i) => (
+        <Check
+          key={i}
+          size={28}
+          // Using Check as a star stand-in keeps the icon set lean — actual
+          // star glyph requires another import.
+          style={{ color: i === 0 ? theme.primary : "rgba(0,0,0,0.2)" }}
+        />
+      ))}
+    </div>
+  );
+});
+
+// ---------- Text inputs ----------
+
+function TextField({
+  placeholder,
+  theme,
+  type = "text",
+}: {
+  placeholder?: string;
+  theme: Theme;
+  type?: "text" | "email" | "tel";
+}) {
+  return (
+    <input
+      readOnly
+      type={type}
+      placeholder={placeholder ?? "Type your answer…"}
+      className="mt-3 h-10 w-full rounded-lg px-3 text-[13px] outline-none"
+      style={{ background: "white", border: `1px solid ${theme.primary}40` }}
+    />
+  );
+}
+
+function TextArea({ placeholder, theme }: { placeholder?: string; theme: Theme }) {
+  return (
+    <textarea
+      readOnly
+      rows={3}
+      placeholder={placeholder ?? "Type your answer…"}
+      className="mt-3 w-full resize-none rounded-lg px-3 py-2 text-[13px] outline-none"
+      style={{ background: "white", border: `1px solid ${theme.primary}40` }}
+    />
+  );
+}
+
+// ---------- Contact info ----------
+
+const ContactInfoFields = component(({ page, theme }: { page: Page; theme: Theme }) => (
+  <div className="mt-3 flex flex-col gap-2">
+    {page.collectName !== false && (
+      <TextField placeholder="Full name" theme={theme} />
+    )}
+    {page.collectEmail !== false && (
+      <TextField placeholder="you@example.com" theme={theme} type="email" />
+    )}
+    {page.collectPhone && <TextField placeholder="+1 555 0000" theme={theme} type="tel" />}
+  </div>
+));
+
+// ---------- Welcome / Statement / Feature / End ----------
+
+const WelcomeBody = component(({ page, theme }: { page: Page; theme: Theme }) => (
+  <div className="flex flex-1 flex-col items-center justify-center px-2 text-center">
+    <div
+      className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl text-[24px] font-bold text-white"
+      style={{ background: theme.primary }}
+    >
+      {theme.logoLetter || "F"}
+    </div>
+    <h2 className="m-0 text-[20px] font-semibold leading-tight">{page.title || "Welcome"}</h2>
+    {page.body && (
+      <p className="mt-2 text-[13px] leading-relaxed opacity-70">{page.body}</p>
+    )}
+  </div>
+));
+
+const StatementBody = component(({ page }: { page: Page; theme: Theme }) => (
+  <div className="flex flex-1 items-center justify-center px-2 text-center">
+    <p className="m-0 text-[14px] leading-relaxed opacity-80">
+      {page.body || "Statement…"}
+    </p>
+  </div>
+));
+
+const FeatureBody = component(({ page, theme }: { page: Page; theme: Theme }) => (
+  <div className="mt-1 flex flex-col gap-3">
+    {page.headline && (
+      <h2 className="m-0 text-[18px] font-semibold leading-tight">{page.headline}</h2>
+    )}
+    <div className="flex flex-col gap-2">
+      {(page.features ?? []).map((f, i) => (
+        <div key={i} className="flex items-start gap-2 text-[12px]">
+          <span
+            className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-white"
+            style={{ background: theme.primary }}
+          >
+            <Check size={10} />
+          </span>
+          {f}
+        </div>
+      ))}
+    </div>
+  </div>
+));
+
+const EndScreenBody = component(({ page, theme }: { page: Page; theme: Theme }) => (
+  <div className="flex flex-1 flex-col items-center justify-center px-2 text-center">
+    <div
+      className="mb-3 flex h-14 w-14 items-center justify-center rounded-full"
+      style={{
+        background: `color-mix(in srgb, ${theme.primary} 18%, transparent)`,
+        color: theme.primary,
+      }}
+    >
+      <Check size={28} />
+    </div>
+    <h2 className="m-0 text-[20px] font-semibold leading-tight">{page.title || "Thanks!"}</h2>
+    {page.body && (
+      <p className="mt-2 text-[13px] leading-relaxed opacity-70">{page.body}</p>
+    )}
+  </div>
+));

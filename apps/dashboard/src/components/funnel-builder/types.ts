@@ -1,12 +1,24 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  AlignLeft,
   Calendar,
+  CheckSquare,
   Circle,
+  CircleDot,
+  Contact,
+  CreditCard,
+  Flag,
+  Gauge,
+  Hand,
   Hash,
   Hourglass,
+  Image as ImageIcon,
   Info,
-  Lock,
+  Mail,
+  MessageSquare,
   PartyPopper,
+  Phone,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   SquareCheck,
@@ -15,6 +27,7 @@ import {
 } from "lucide-react";
 
 export type PageType =
+  // Original primitives
   | "single_choice"
   | "multi_choice"
   | "text_input"
@@ -26,7 +39,26 @@ export type PageType =
   | "loading"
   | "result"
   | "paywall"
-  | "success";
+  | "success"
+  // Contact info
+  | "contact_info"
+  | "email"
+  | "phone"
+  // Choice extras
+  | "picture_choice"
+  | "yes_no"
+  | "legal"
+  | "checkbox"
+  // Rating & ranking
+  | "opinion_scale"
+  // Text & video
+  | "long_text"
+  | "short_text"
+  // Conversion / framing
+  | "welcome"
+  | "statement"
+  | "feature"
+  | "end_screen";
 
 export type PageTone = "" | "result" | "paywall" | "success";
 
@@ -38,7 +70,7 @@ export type PageTypeMeta = {
 
 export const PAGE_TYPES: Record<PageType, PageTypeMeta> = {
   single_choice: { label: "Single choice", icon: Circle, tone: "" },
-  multi_choice: { label: "Multi choice", icon: SquareCheck, tone: "" },
+  multi_choice: { label: "Multiple choice", icon: SquareCheck, tone: "" },
   text_input: { label: "Text input", icon: TypeIcon, tone: "" },
   number_input: { label: "Number input", icon: Hash, tone: "" },
   date_input: { label: "Date", icon: Calendar, tone: "" },
@@ -47,8 +79,27 @@ export const PAGE_TYPES: Record<PageType, PageTypeMeta> = {
   info: { label: "Info screen", icon: Info, tone: "" },
   loading: { label: "Loading", icon: Hourglass, tone: "" },
   result: { label: "Personalized result", icon: Sparkles, tone: "result" },
-  paywall: { label: "Paywall", icon: Lock, tone: "paywall" },
+  paywall: { label: "Payment screen", icon: CreditCard, tone: "paywall" },
   success: { label: "Success", icon: PartyPopper, tone: "success" },
+
+  contact_info: { label: "Contact info", icon: Contact, tone: "" },
+  email: { label: "Email", icon: Mail, tone: "" },
+  phone: { label: "Phone number", icon: Phone, tone: "" },
+
+  picture_choice: { label: "Picture choice", icon: ImageIcon, tone: "" },
+  yes_no: { label: "Yes/No", icon: CircleDot, tone: "" },
+  legal: { label: "Legal", icon: ShieldCheck, tone: "" },
+  checkbox: { label: "Checkbox", icon: CheckSquare, tone: "" },
+
+  opinion_scale: { label: "Opinion scale", icon: Gauge, tone: "" },
+
+  long_text: { label: "Long text", icon: AlignLeft, tone: "" },
+  short_text: { label: "Short text", icon: TypeIcon, tone: "" },
+
+  welcome: { label: "Welcome screen", icon: Hand, tone: "" },
+  statement: { label: "Statement screen", icon: MessageSquare, tone: "" },
+  feature: { label: "Feature screen", icon: Sparkles, tone: "" },
+  end_screen: { label: "End screen", icon: Flag, tone: "success" },
 };
 
 export const PAGE_TYPE_DESC: Record<PageType, string> = {
@@ -64,23 +115,48 @@ export const PAGE_TYPE_DESC: Record<PageType, string> = {
   result: "Personalized",
   paywall: "Stripe checkout",
   success: "Final hand-off",
+
+  contact_info: "Name · email · phone",
+  email: "Email address",
+  phone: "Phone number",
+
+  picture_choice: "Choice with images",
+  yes_no: "Binary answer",
+  legal: "Accept terms",
+  checkbox: "Single checkbox",
+
+  opinion_scale: "1–5 scale",
+
+  long_text: "Multi-line",
+  short_text: "Single-line",
+
+  welcome: "Splash + start",
+  statement: "Message + continue",
+  feature: "Feature showcase",
+  end_screen: "Goodbye screen",
 };
 
 export const PAGE_GROUPS: ReadonlyArray<{ label: string; types: PageType[] }> = [
   {
-    label: "Question",
-    types: [
-      "single_choice",
-      "multi_choice",
-      "text_input",
-      "number_input",
-      "date_input",
-      "slider",
-      "rating",
-    ],
+    label: "Contact info",
+    types: ["contact_info", "email", "phone"],
   },
-  { label: "Content", types: ["info", "loading", "result"] },
-  { label: "Conversion", types: ["paywall", "success"] },
+  {
+    label: "Choice",
+    types: ["multi_choice", "single_choice", "picture_choice", "yes_no", "legal", "checkbox"],
+  },
+  {
+    label: "Rating & ranking",
+    types: ["opinion_scale", "rating"],
+  },
+  {
+    label: "Text & Video",
+    types: ["long_text", "short_text"],
+  },
+  {
+    label: "Other",
+    types: ["date_input", "number_input", "slider", "paywall", "welcome", "statement", "feature", "info", "loading", "result", "end_screen", "success"],
+  },
 ];
 
 export type Operator =
@@ -125,7 +201,7 @@ export type Rule = {
   goto: string;
 };
 
-export type Option = { label: string; value: string };
+export type Option = { label: string; value: string; imageUrl?: string };
 
 export type Page = {
   id: string;
@@ -151,6 +227,18 @@ export type Page = {
   productId?: string;
   trial?: number;
   benefits?: string[];
+  // Inputs
+  placeholder?: string;
+  // contact_info — which sub-fields are required
+  collectName?: boolean;
+  collectEmail?: boolean;
+  collectPhone?: boolean;
+  // legal — agreement label + link
+  agreementLabel?: string;
+  termsUrl?: string;
+  // feature — a list of feature lines (headline already on .headline)
+  features?: string[];
+  // statement — the body text already lives on .body
 };
 
 export type Theme = {
