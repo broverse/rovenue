@@ -273,6 +273,31 @@ export class FunnelDraftViewModel {
   updateTheme(patch: Partial<Theme>) { Object.assign(this.theme, patch); }
   updateSettings(patch: Partial<Settings>) { Object.assign(this.settings, patch); }
 
+  // ----- Per-page background / footer ----------------------------------
+  // These accept partial patches and merge against whatever the page
+  // currently has, so panel inputs never need to spread `page.footer!`
+  // (which captures a stale snapshot through closures). The VM owns the
+  // merge so impair's reactive tracker sees a single assignment per call.
+  updateBackground(pageId: string, patch: Partial<NonNullable<Page["background"]>>) {
+    const page = this.pages.find((p) => p.id === pageId);
+    if (!page) return;
+    const current = page.background ?? { kind: "none" as const, value: "", opacity: 1 };
+    page.background = { ...current, ...patch };
+  }
+  updateFooter(pageId: string, patch: Partial<NonNullable<Page["footer"]>>) {
+    const page = this.pages.find((p) => p.id === pageId);
+    if (!page) return;
+    const current = page.footer ?? {
+      enabled: false,
+      text: "",
+      textColor: "",
+      bgColor: "",
+      borderColor: "",
+      borderWidth: 0,
+    };
+    page.footer = { ...current, ...patch };
+  }
+
   // ----- Derived -----
   @derived
   get selectedIdx(): number {

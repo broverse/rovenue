@@ -691,42 +691,36 @@ export const PropertiesPanel = component(() => {
             <Segmented
               value={page.background?.kind ?? "none"}
               onChange={(k) =>
-                set({
-                  background: {
-                    kind: k as "none" | "color" | "image" | "video",
-                    value: page.background?.value ?? "",
-                    opacity: page.background?.opacity ?? 1,
-                  },
+                vm.updateBackground(page.id, {
+                  kind: k as "none" | "color" | "image" | "video",
                 })
               }
               options={[
-                { value: "none", label: "Theme", icon: null },
-                { value: "color", label: "Color", icon: null },
-                { value: "image", label: "Image", icon: null },
-                { value: "video", label: "Video", icon: null },
+                { value: "none", label: "Theme" },
+                { value: "color", label: "Color" },
+                { value: "image", label: "Image" },
+                { value: "video", label: "Video" },
               ]}
             />
           </Field>
           {page.background?.kind && page.background.kind !== "none" && (
             <>
-              <Field label={page.background.kind === "color" ? "Color (hex)" : "URL"} className="mb-3">
+              <Field
+                label={page.background.kind === "color" ? "Color (hex)" : "URL"}
+                className="mb-3"
+              >
                 <input
                   value={page.background.value}
                   onChange={(e) =>
-                    set({
-                      background: {
-                        ...page.background!,
-                        value: e.currentTarget.value,
-                      },
-                    })
+                    vm.updateBackground(page.id, { value: e.currentTarget.value })
                   }
-                  placeholder={
-                    page.background.kind === "color" ? "#0F172A" : "https://…"
-                  }
+                  placeholder={page.background.kind === "color" ? "#0F172A" : "https://…"}
                   className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
                 />
               </Field>
-              <Field label={`Opacity · ${Math.round((page.background.opacity ?? 1) * 100)}%`}>
+              <Field
+                label={`Opacity · ${Math.round((page.background.opacity ?? 1) * 100)}%`}
+              >
                 <input
                   type="range"
                   min={0}
@@ -734,11 +728,8 @@ export const PropertiesPanel = component(() => {
                   step={0.05}
                   value={page.background.opacity ?? 1}
                   onChange={(e) =>
-                    set({
-                      background: {
-                        ...page.background!,
-                        opacity: Number(e.currentTarget.value),
-                      },
+                    vm.updateBackground(page.id, {
+                      opacity: Number(e.currentTarget.value),
                     })
                   }
                   className="w-full accent-rv-accent-500"
@@ -754,18 +745,9 @@ export const PropertiesPanel = component(() => {
             label="Enable footer"
             help="Edge-to-edge band under the primary button"
             onChange={(v) =>
-              set({
-                footer: {
-                  ...(page.footer ?? {
-                    enabled: false,
-                    text: "© Your brand",
-                    textColor: "",
-                    bgColor: "",
-                    borderColor: "",
-                    borderWidth: 0,
-                  }),
-                  enabled: v,
-                },
+              vm.updateFooter(page.id, {
+                enabled: v,
+                text: page.footer?.text ?? "© Your brand",
               })
             }
           />
@@ -775,7 +757,7 @@ export const PropertiesPanel = component(() => {
                 <input
                   value={page.footer.text ?? ""}
                   onChange={(e) =>
-                    set({ footer: { ...page.footer!, text: e.currentTarget.value } })
+                    vm.updateFooter(page.id, { text: e.currentTarget.value })
                   }
                   placeholder="© Your brand"
                   className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
@@ -786,7 +768,7 @@ export const PropertiesPanel = component(() => {
                   <input
                     value={page.footer.textColor ?? ""}
                     onChange={(e) =>
-                      set({ footer: { ...page.footer!, textColor: e.currentTarget.value } })
+                      vm.updateFooter(page.id, { textColor: e.currentTarget.value })
                     }
                     placeholder="#666"
                     className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
@@ -796,7 +778,7 @@ export const PropertiesPanel = component(() => {
                   <input
                     value={page.footer.bgColor ?? ""}
                     onChange={(e) =>
-                      set({ footer: { ...page.footer!, bgColor: e.currentTarget.value } })
+                      vm.updateFooter(page.id, { bgColor: e.currentTarget.value })
                     }
                     placeholder="#f4f4f5"
                     className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
@@ -808,9 +790,7 @@ export const PropertiesPanel = component(() => {
                   <input
                     value={page.footer.borderColor ?? ""}
                     onChange={(e) =>
-                      set({
-                        footer: { ...page.footer!, borderColor: e.currentTarget.value },
-                      })
+                      vm.updateFooter(page.id, { borderColor: e.currentTarget.value })
                     }
                     placeholder="#e4e4e7"
                     className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
@@ -824,11 +804,8 @@ export const PropertiesPanel = component(() => {
                     step={1}
                     value={page.footer.borderWidth ?? 0}
                     onChange={(e) =>
-                      set({
-                        footer: {
-                          ...page.footer!,
-                          borderWidth: Number(e.currentTarget.value),
-                        },
+                      vm.updateFooter(page.id, {
+                        borderWidth: Number(e.currentTarget.value),
                       })
                     }
                     className="w-full accent-rv-accent-500"
