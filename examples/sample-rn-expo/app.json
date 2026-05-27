@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "sample-rn-expo",
+    "slug": "sample-rn-expo",
+    "version": "0.0.1",
+    "ios": {
+      "bundleIdentifier": "dev.rovenue.sample"
+    },
+    "android": {
+      "package": "dev.rovenue.sample"
+    },
+    "plugins": ["@rovenue/react-native-sdk"]
+  }
+}
