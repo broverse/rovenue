@@ -28,15 +28,29 @@ fn registered_observer_receives_events() {
 }
 
 #[test]
-fn dropped_observer_is_garbage_collected() {
+fn bus_keeps_observer_alive_after_caller_drops_arc() {
+    // The bus holds a strong Arc so that FFI registrations (which never keep
+    // their own strong reference on the caller side) stay live and continue
+    // to receive callbacks. Verify by dropping the caller's Arc and confirming
+    // the bus still delivers events.
     let bus = ObserverBus::default();
-    {
-        let cap = Arc::new(Capture(Mutex::new(vec![])));
-        bus.register(Arc::clone(&cap) as Arc<dyn Observer>);
-        // cap is dropped here
-    }
-    // After the Arc is dropped, the bus should hold a dead Weak<>.
+    let cap = Arc::new(Capture(Mutex::new(vec![])));
+    let weak = Arc::downgrade(&cap);
+    bus.register(Arc::clone(&cap) as Arc<dyn Observer>);
+    drop(cap); // caller releases its Arc
+    assert!(
+        weak.upgrade().is_some(),
+        "bus must keep observer alive after caller drop"
+    );
     bus.emit(ChangeEvent::EntitlementsChanged);
+    let alive = weak.upgrade().expect("observer still alive");
+    assert_eq!(alive.0.lock().unwrap().len(), 1);
+    assert_eq!(bus.live_count(), 1);
+
+    // Explicit clear releases the strong references.
+    bus.clear();
+    drop(alive);
+    assert!(weak.upgrade().is_none());
     assert_eq!(bus.live_count(), 0);
 }
 

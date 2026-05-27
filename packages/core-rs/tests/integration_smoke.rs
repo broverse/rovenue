@@ -58,6 +58,52 @@ fn register_observer_receives_identify() {
     assert!(events.contains(&ChangeEvent::IdentityChanged));
 }
 
+/// FFI path: `register_observer(Box<dyn Observer>)` is what UniFFI generates for
+/// callback-interface registration. The caller (Swift/Kotlin/JS façade) has no
+/// way to keep a Rust Arc alive, so the core must own a strong reference.
+/// Regression test: prior to the fix the bus stored `Weak<dyn Observer>`, the
+/// Arc created inside `register_observer` was immediately dropped, and FFI
+/// callbacks silently never fired.
+#[test]
+fn ffi_register_observer_keeps_observer_alive_and_emits() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Counter(AtomicUsize);
+    impl Observer for Counter {
+        fn on_change(&self, _e: ChangeEvent) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let core = test_core();
+    // Use a separate Arc so we can inspect the count after registration —
+    // but pass the FFI Box<dyn Observer> path, not the Arc-flavored add_observer.
+    let counter = Arc::new(Counter(AtomicUsize::new(0)));
+    let counter_for_box: Arc<Counter> = Arc::clone(&counter);
+    // Box the trait object exactly as UniFFI does. We deliberately move the
+    // strong reference into the Box and rely on the bus to own it after this
+    // call returns.
+    let boxed: Box<dyn Observer> = Box::new(BoxedRelay(counter_for_box));
+    core.register_observer(boxed);
+
+    // Trigger an emit through the public surface.
+    core.identify("user_ffi".into()).unwrap();
+
+    assert!(
+        counter.0.load(Ordering::SeqCst) >= 1,
+        "FFI-registered observer must receive at least one event"
+    );
+}
+
+/// Relays Observer calls into an inner Arc so the test can both pass a Box to
+/// the FFI surface AND retain a reference to inspect the result afterwards.
+struct BoxedRelay(Arc<dyn Observer>);
+impl Observer for BoxedRelay {
+    fn on_change(&self, e: ChangeEvent) {
+        self.0.on_change(e);
+    }
+}
+
 #[test]
 fn entitlement_returns_none_when_empty() {
     let core = test_core();
