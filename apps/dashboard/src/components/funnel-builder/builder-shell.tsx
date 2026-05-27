@@ -35,17 +35,23 @@ export const BuilderShell = component(({ projectId }: Props) => {
   const vm = useService(FunnelDraftViewModel);
 
   if (vm.isLoading) {
-    return <div className="fixed inset-0 z-50 bg-rv-bg" />;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-rv-bg font-rv-mono text-[11px] text-rv-mute-500">
+        loading funnel…
+      </div>
+    );
   }
   if (vm.error || !vm.funnel) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-2 bg-rv-bg p-6 text-rv-mute-700">
         <div className="text-[14px] font-medium">Failed to load funnel.</div>
-        {vm.error && (
-          <pre className="max-w-[640px] overflow-auto rounded border border-rv-divider bg-rv-c2 px-3 py-2 font-rv-mono text-[11px] text-rv-danger">
-            {vm.error.name}: {vm.error.message}
-          </pre>
-        )}
+        <pre className="max-w-[640px] overflow-auto rounded border border-rv-divider bg-rv-c2 px-3 py-2 font-rv-mono text-[11px] text-rv-mute-600">
+          isLoading={String(vm.isLoading)}{"\n"}
+          funnel={vm.funnel ? "set" : "null"}{"\n"}
+          error={vm.error ? `${vm.error.name}: ${vm.error.message}` : "null"}{"\n"}
+          projectId={vm.projectId}{"\n"}
+          funnelId={vm.funnelId}
+        </pre>
       </div>
     );
   }
