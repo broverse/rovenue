@@ -14,7 +14,7 @@ export const ThumbRail = component(() => {
   // insert directly after that page (between-thumb buttons).
   const [popover, setPopover] = useState<{ insertAfter: string | null } | null>(null);
   return (
-    <aside className="relative flex w-[88px] flex-shrink-0 flex-col border-r border-rv-divider bg-rv-c1">
+    <aside className="relative flex w-[220px] flex-shrink-0 flex-col border-r border-rv-divider bg-rv-c1">
       <div className="flex items-center justify-between border-b border-rv-divider px-3 py-2.5">
         <span className="text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
           Pages
@@ -42,6 +42,21 @@ export const ThumbRail = component(() => {
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-3">
+        {vm.pages.length === 0 && (
+          <div className="rounded-md border border-dashed border-rv-divider bg-rv-c2 px-3 py-6 text-center">
+            <div className="font-rv-mono text-[10px] uppercase tracking-wider text-rv-mute-500">
+              No pages
+            </div>
+            <button
+              type="button"
+              onClick={() => setPopover({ insertAfter: null })}
+              className="mt-2 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded border border-rv-divider bg-rv-c1 px-2.5 text-[11px] font-medium text-rv-accent-500 transition hover:bg-rv-c3"
+            >
+              <Plus size={11} />
+              Add first page
+            </button>
+          </div>
+        )}
         {vm.pages.map((p, i) => {
           const meta = PAGE_TYPES[p.type];
           const Ico = meta.icon;
@@ -54,6 +69,7 @@ export const ThumbRail = component(() => {
           const hasError = issues.some((iss) => iss.code !== "UNREACHABLE");
           const branchCount = (vm.rules[p.id] ?? []).length;
           const selected = vm.selectedPageId === p.id;
+          const label = (p.title ?? "").trim() || (p.headline ?? "").trim() || meta.label;
           return (
             <Fragment key={p.id}>
               {showEndingDivider && (
@@ -77,9 +93,9 @@ export const ThumbRail = component(() => {
               <button
                 type="button"
                 onClick={() => vm.selectPage(p.id)}
-                title={p.title}
+                title={label}
                 className={cn(
-                  "group relative flex w-full cursor-pointer flex-col items-center gap-1 rounded-md border bg-rv-c2 px-2 py-2.5 text-left transition",
+                  "group relative flex w-full cursor-pointer items-center gap-2.5 rounded-md border bg-rv-c2 px-2.5 py-2 text-left transition",
                   selected
                     ? "border-rv-accent-500/60 bg-rv-accent-500/10 shadow-[0_0_0_2px_color-mix(in_srgb,var(--color-rv-accent-500)_18%,transparent)]"
                     : "border-rv-divider hover:border-rv-divider-strong hover:bg-rv-c3",
@@ -87,26 +103,35 @@ export const ThumbRail = component(() => {
                   meta.tone === "success" && "border-rv-success/30",
                 )}
               >
-                <span className="absolute left-1 top-1 font-rv-mono text-[9px] text-rv-mute-500">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
                 <div
                   className={cn(
-                    "flex h-10 w-10 items-center justify-center rounded text-rv-mute-600",
+                    "flex h-9 w-9 flex-shrink-0 items-center justify-center rounded text-rv-mute-600",
                     selected && "text-rv-accent-500",
                   )}
                 >
                   <Ico size={16} />
                 </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 font-rv-mono text-[10px] text-rv-mute-500">
+                    <span>{String(i + 1).padStart(2, "0")}</span>
+                    <span className="truncate">{meta.label}</span>
+                  </div>
+                  <div className="truncate text-[12px] font-medium text-foreground">
+                    {label}
+                  </div>
+                </div>
                 {hasError && (
-                  <div className="absolute right-1 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-rv-danger text-[9px] font-bold text-white">
+                  <div
+                    title="Has validation issues"
+                    className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-rv-danger text-[9px] font-bold text-white"
+                  >
                     !
                   </div>
                 )}
                 {!hasError && branchCount > 0 && (
                   <div
                     title={`${branchCount} branch rule${branchCount === 1 ? "" : "s"}`}
-                    className="absolute right-1 top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-rv-violet/80 px-1 font-rv-mono text-[9px] font-bold text-white"
+                    className="flex h-4 min-w-4 flex-shrink-0 items-center justify-center rounded-full bg-rv-violet/80 px-1 font-rv-mono text-[9px] font-bold text-white"
                   >
                     {branchCount}
                   </div>
@@ -122,10 +147,10 @@ export const ThumbRail = component(() => {
         title="Personalize based on earlier answers"
         className="m-3 flex cursor-pointer items-center gap-2 rounded-md border border-rv-accent-500/30 bg-rv-accent-500/10 px-2.5 py-2 text-left text-[11px] font-medium text-rv-accent-500 transition hover:bg-rv-accent-500/15"
       >
-        <span className="flex h-5 w-5 items-center justify-center rounded bg-rv-accent-500/20">
+        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded bg-rv-accent-500/20">
           <Sparkles size={12} />
         </span>
-        Personalize with branching
+        <span className="truncate">Personalize with branching</span>
       </button>
     </aside>
   );
