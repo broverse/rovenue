@@ -122,8 +122,6 @@ export const BuilderShell = component(({ projectId }: Props) => {
   const issues = toLegacyIssues(vm.validation.errors, vm.validation.warnings);
   const sessions: Session[] = [];
 
-  const selectedPage = vm.selectedPage ?? vm.pages[0];
-
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-rv-bg text-foreground">
       <TopBar projectId={projectId} />
@@ -137,8 +135,8 @@ export const BuilderShell = component(({ projectId }: Props) => {
           </>
         )}
         {vm.activeTab === "workflow" && <WorkflowTab />}
-        {vm.activeTab === "theme" && <ThemeTab theme={vm.theme} currentPage={selectedPage} />}
-        {vm.activeTab === "settings" && <SettingsTab settings={vm.settings} />}
+        {vm.activeTab === "theme" && <ThemeTab />}
+        {vm.activeTab === "settings" && <SettingsTab />}
         {vm.activeTab === "sessions" && <SessionsTab sessions={sessions} />}
         {vm.activeTab === "share" && <ShareTab funnel={legacyFunnel} />}
       </main>
