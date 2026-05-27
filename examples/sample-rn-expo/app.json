@@ -9,6 +9,8 @@
     "android": {
       "package": "dev.rovenue.sample"
     },
-    "plugins": ["@rovenue/react-native-sdk"]
+    "plugins": [
+      ["@rovenue/react-native-sdk", { "rovenueSwiftPath": "../../../packages/sdk-swift" }]
+    ]
   }
 }

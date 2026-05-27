@@ -12,5 +12,5 @@
     "types": ["node"]
   },
   "include": ["plugin/**/*.ts"],
-  "exclude": ["plugin/build", "node_modules"]
+  "exclude": ["plugin/build", "plugin/__tests__", "node_modules"]
 }
