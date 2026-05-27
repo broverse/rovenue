@@ -3,17 +3,13 @@ import { component, useService } from "impair";
 import {
   ArrowLeft,
   ArrowRight,
-  Eye,
-  Image as ImageIcon,
   Maximize,
   Minus,
   Monitor,
   Play,
   Plus,
-  Settings,
   Smartphone,
   Tablet,
-  Type as TypeIcon,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
@@ -100,7 +96,7 @@ export const CanvasEditor = component(() => {
             <span className="flex h-4 w-4 items-center justify-center rounded bg-rv-accent-500 text-white">
               <Plus size={10} />
             </span>
-            Add content
+            Add page
           </button>
           {addOpen && (
             <AddContentPopover
@@ -172,14 +168,6 @@ export const CanvasEditor = component(() => {
 
         <ToolBtn title="Play through" onClick={() => vm.openPreview()}>
           <Play size={14} />
-        </ToolBtn>
-        <ToolBtn title="Theme & design" onClick={() => vm.setActiveTab("theme")}>
-          <ImageIcon size={14} />
-        </ToolBtn>
-        <ToolBtn title="Accessibility check"><Eye size={14} /></ToolBtn>
-        <ToolBtn title="Translations"><TypeIcon size={14} /></ToolBtn>
-        <ToolBtn title="Page settings" onClick={() => vm.setActiveTab("settings")}>
-          <Settings size={14} />
         </ToolBtn>
 
         <div className="ml-auto flex items-center gap-2 text-[11px]">

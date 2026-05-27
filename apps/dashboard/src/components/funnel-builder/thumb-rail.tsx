@@ -10,9 +10,13 @@ import { blankPage } from "./blank-page";
 export const ThumbRail = component(() => {
   const vm = useService(FunnelDraftViewModel);
   // Popover state is purely UI — keep it local. `insertAfter=null` means
-  // append to the end of the list (rail head button); a page id means
-  // insert directly after that page (between-thumb buttons).
-  const [popover, setPopover] = useState<{ insertAfter: string | null } | null>(null);
+  // append to the end of the list (rail head/footer buttons); a page id means
+  // insert directly after that page (between-thumb buttons). `source` decides
+  // which trigger renders the popover so its anchor matches the click point.
+  const [popover, setPopover] = useState<{
+    insertAfter: string | null;
+    source: "header" | "footer" | "between";
+  } | null>(null);
   return (
     <aside className="relative flex w-[280px] flex-shrink-0 flex-col border-r border-rv-divider bg-rv-c1">
       <div className="flex items-center justify-between border-b border-rv-divider px-3 py-2.5">
@@ -23,12 +27,12 @@ export const ThumbRail = component(() => {
           <button
             type="button"
             title="Add page"
-            onClick={() => setPopover({ insertAfter: null })}
+            onClick={() => setPopover({ insertAfter: null, source: "header" })}
             className="flex h-5 w-5 cursor-pointer items-center justify-center rounded border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
           >
             <Plus size={11} />
           </button>
-          {popover && (
+          {popover && popover.source !== "footer" && (
             <AddContentPopover
               align="rightOfTrigger"
               onPick={(t) => {
@@ -49,7 +53,7 @@ export const ThumbRail = component(() => {
             </div>
             <button
               type="button"
-              onClick={() => setPopover({ insertAfter: null })}
+              onClick={() => setPopover({ insertAfter: null, source: "header" })}
               className="mt-2 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded border border-rv-divider bg-rv-c1 px-2.5 text-[11px] font-medium text-rv-accent-500 transition hover:bg-rv-c3"
             >
               <Plus size={11} />
@@ -83,7 +87,9 @@ export const ThumbRail = component(() => {
                 <div className="my-1.5 flex justify-center opacity-0 transition-opacity hover:opacity-100">
                   <button
                     type="button"
-                    onClick={() => setPopover({ insertAfter: vm.pages[i - 1].id })}
+                    onClick={() =>
+                      setPopover({ insertAfter: vm.pages[i - 1].id, source: "between" })
+                    }
                     className="flex h-3.5 w-3.5 cursor-pointer items-center justify-center rounded-full border border-rv-divider bg-rv-c2 text-rv-mute-500 hover:bg-rv-c3 hover:text-foreground"
                   >
                     <Plus size={8} />
@@ -141,6 +147,30 @@ export const ThumbRail = component(() => {
           );
         })}
       </div>
+
+      {vm.pages.length > 0 && (
+        <div className="relative border-t border-rv-divider px-3 py-2.5">
+          <button
+            type="button"
+            onClick={() => setPopover({ insertAfter: null, source: "footer" })}
+            className="flex h-8 w-full cursor-pointer items-center justify-center gap-1.5 rounded border border-dashed border-rv-divider bg-rv-c2 text-[11px] font-medium text-rv-accent-500 transition hover:border-rv-accent-500/50 hover:bg-rv-c3"
+          >
+            <Plus size={12} />
+            Add page
+          </button>
+          {popover && popover.source === "footer" && (
+            <AddContentPopover
+              align="rightOfTrigger"
+              verticalAlign="bottom"
+              onPick={(t) => {
+                vm.addPage(blankPage(t), popover.insertAfter);
+                setPopover(null);
+              }}
+              onClose={() => setPopover(null)}
+            />
+          )}
+        </div>
+      )}
 
       <button
         type="button"

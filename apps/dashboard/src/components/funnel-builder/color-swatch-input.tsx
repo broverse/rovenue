@@ -41,6 +41,11 @@ export interface ColorSwatchInputProps {
   className?: string;
   presets?: ReadonlyArray<ReadonlyArray<string>>;
   size?: "sm" | "md";
+  // Color rendered downstream when `value` is blank (e.g. a theme default the
+  // page falls back to). Shown in the swatch + popover preview so the picker
+  // matches what the user actually sees. The text input still shows the
+  // placeholder, so it's visually obvious the value isn't an explicit override.
+  inheritedColor?: string;
 }
 
 export function ColorSwatchInput({
@@ -50,6 +55,7 @@ export function ColorSwatchInput({
   className,
   presets = PRESETS,
   size = "md",
+  inheritedColor,
 }: ColorSwatchInputProps) {
   const [text, setText] = useState(value);
   const [open, setOpen] = useState(false);
@@ -60,7 +66,12 @@ export function ColorSwatchInput({
     setText(value);
   }, [value]);
 
-  const display = value && isValidHex(normalizeHex(value)) ? normalizeHex(value) : "";
+  const explicit = value && isValidHex(normalizeHex(value)) ? normalizeHex(value) : "";
+  const inherited =
+    !explicit && inheritedColor && isValidHex(normalizeHex(inheritedColor))
+      ? normalizeHex(inheritedColor)
+      : "";
+  const display = explicit || inherited;
   const swatchSize = size === "sm" ? "h-7 w-7" : "h-8 w-8";
   const inputHeight = size === "sm" ? "h-7" : "h-8";
 

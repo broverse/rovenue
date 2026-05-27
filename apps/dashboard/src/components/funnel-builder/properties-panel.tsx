@@ -2,8 +2,10 @@ import { useState } from "react";
 import { component, useService } from "impair";
 import { useQuery } from "@tanstack/react-query";
 import {
+  ArrowLeft,
   ArrowRight,
   ChevronDown,
+  ChevronLeft,
   Code,
   Image as ImageIcon,
   Play,
@@ -13,10 +15,30 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { rpc, unwrap } from "../../lib/api";
-import { PAGE_GROUPS, PAGE_TYPE_DESC, PAGE_TYPES, type Page, type PageType } from "./types";
+import {
+  PAGE_GROUPS,
+  PAGE_TYPE_DESC,
+  PAGE_TYPES,
+  type BackIcon,
+  type Page,
+  type PageType,
+  type ProgressStyle,
+} from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { RuleEditor } from "./rule-editor";
 import { ColorSwatchInput } from "./color-swatch-input";
+
+const PROGRESS_STYLES: ReadonlyArray<{ value: ProgressStyle; label: string }> = [
+  { value: "solid", label: "Solid" },
+  { value: "rounded", label: "Rounded" },
+  { value: "segmented", label: "Segmented" },
+  { value: "dashed", label: "Dashed" },
+];
+
+const BACK_ICONS: ReadonlyArray<{ value: BackIcon; label: string; icon: typeof ChevronLeft }> = [
+  { value: "chevron", label: "Chevron", icon: ChevronLeft },
+  { value: "arrow", label: "Arrow", icon: ArrowLeft },
+];
 
 interface ProductDto {
   id: string;
@@ -71,6 +93,16 @@ export const PropertiesPanel = component(() => {
   const headerLabel = isQuestionPage ? "Question" : meta.label;
 
   const set = (patch: Partial<Page>) => vm.updatePage(page.id, patch);
+
+  // Page types that render a footer button in the preview. Mirror the
+  // ctaLabel switch in page-preview.tsx — keep these in sync.
+  const NO_CTA_TYPES: ReadonlyArray<Page["type"]> = ["info", "loading", "result", "end_screen"];
+  const hasCta = !NO_CTA_TYPES.includes(page.type);
+  // Paywall's CTA label is locked ("Start free trial"); everything else
+  // reads `page.cta` with a per-type fallback.
+  const ctaEditable = hasCta && page.type !== "paywall";
+  const ctaPlaceholder =
+    page.type === "welcome" ? "Get started" : page.type === "success" ? "Open app" : "Continue";
 
   return (
     <aside className="flex w-[340px] flex-shrink-0 flex-col border-l border-rv-divider bg-rv-c1">
@@ -651,6 +683,34 @@ export const PropertiesPanel = component(() => {
           </Section>
         )}
 
+        <Section title="Style">
+          <Field
+            label={`Corner radius · ${page.radius ?? vm.theme.radius}px${
+              page.radius === undefined ? " (theme)" : ""
+            }`}
+            className="mb-1"
+          >
+            <input
+              type="range"
+              min={0}
+              max={28}
+              step={1}
+              value={page.radius ?? vm.theme.radius}
+              onChange={(e) => set({ radius: Number(e.currentTarget.value) })}
+              className="w-full accent-rv-accent-500"
+            />
+          </Field>
+          {page.radius !== undefined && (
+            <button
+              type="button"
+              onClick={() => set({ radius: undefined })}
+              className="cursor-pointer text-[10px] font-medium text-rv-mute-500 underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Reset to theme default
+            </button>
+          )}
+        </Section>
+
         <Section title="Header">
           <Toggle
             on={!!page.showBack}
@@ -666,6 +726,73 @@ export const PropertiesPanel = component(() => {
               onChange={(v) => set({ showProgress: v })}
             />
           </div>
+
+          <Field label="Progress style" className="mt-4">
+            <div className="grid grid-cols-2 gap-1.5">
+              {PROGRESS_STYLES.map((s) => (
+                <button
+                  key={s.value}
+                  type="button"
+                  onClick={() => vm.updateTheme({ progressStyle: s.value })}
+                  className={cn(
+                    "flex cursor-pointer flex-col items-stretch gap-1.5 rounded border p-2 text-left transition",
+                    vm.theme.progressStyle === s.value
+                      ? "border-rv-accent-500 bg-rv-c2"
+                      : "border-rv-divider bg-rv-c2 hover:border-rv-accent-500",
+                  )}
+                  title={s.label}
+                >
+                  <ProgressPreview
+                    style={s.value}
+                    active={vm.theme.progressActive || vm.theme.primary}
+                    inactive={vm.theme.progressInactive || "rgba(0,0,0,0.1)"}
+                  />
+                  <span className="text-[10px] font-medium text-foreground">{s.label}</span>
+                </button>
+              ))}
+            </div>
+          </Field>
+
+          <Field label="Active color" className="mt-3">
+            <ColorSwatchInput
+              value={vm.theme.progressActive}
+              onChange={(v) => vm.updateTheme({ progressActive: v })}
+              placeholder={vm.theme.primary}
+              size="sm"
+            />
+          </Field>
+          <Field label="Inactive color" className="mt-3">
+            <ColorSwatchInput
+              value={vm.theme.progressInactive}
+              onChange={(v) => vm.updateTheme({ progressInactive: v })}
+              placeholder="rgba(0,0,0,0.1)"
+              size="sm"
+            />
+          </Field>
+
+          <Field label="Back button icon" className="mt-3">
+            <div className="grid grid-cols-2 gap-1.5">
+              {BACK_ICONS.map((b) => {
+                const I = b.icon;
+                return (
+                  <button
+                    key={b.value}
+                    type="button"
+                    onClick={() => vm.updateTheme({ backIcon: b.value })}
+                    className={cn(
+                      "flex cursor-pointer items-center justify-center gap-2 rounded border px-2 py-2 text-[12px] transition",
+                      vm.theme.backIcon === b.value
+                        ? "border-rv-accent-500 bg-rv-c2 text-foreground"
+                        : "border-rv-divider bg-rv-c2 text-rv-mute-700 hover:border-rv-accent-500",
+                    )}
+                  >
+                    <I size={14} strokeWidth={2.2} />
+                    <span>{b.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
         </Section>
 
         <Section title="Background">
@@ -729,73 +856,69 @@ export const PropertiesPanel = component(() => {
           )}
         </Section>
 
-        <Section title="Footer">
-          <Toggle
-            on={!!page.footer?.enabled}
-            label="Enable footer"
-            help="Style the band that contains the primary button"
-            onChange={(v) =>
-              vm.updateFooter(page.id, {
-                enabled: v,
-                text: page.footer?.text ?? "© Your brand",
-              })
-            }
-          />
-          {page.footer?.enabled && (
-            <>
-              <Field label="Text" className="mt-3 mb-3">
-                <input
-                  value={page.footer.text ?? ""}
-                  onChange={(e) =>
-                    vm.updateFooter(page.id, { text: e.currentTarget.value })
-                  }
-                  placeholder="© Your brand"
-                  className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
-                />
-              </Field>
-              <div className="grid grid-cols-1 gap-2 mb-3">
-                <Field label="Text color">
+        {hasCta && (
+          <Section title="Footer">
+            <Toggle
+              on={page.footer?.enabled !== false}
+              label="Enable footer"
+              help="Renders the band that contains the primary button"
+              onChange={(v) => vm.updateFooter(page.id, { enabled: v })}
+            />
+            {page.footer?.enabled !== false && (
+              <>
+                {ctaEditable && (
+                  <Field label="Button label" className="mt-3 mb-3">
+                    <input
+                      value={page.cta ?? ""}
+                      onChange={(e) => set({ cta: e.currentTarget.value })}
+                      placeholder={ctaPlaceholder}
+                      className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+                    />
+                  </Field>
+                )}
+                <Field label="Footer bg color" className="mb-3">
                   <ColorSwatchInput
-                    value={page.footer.textColor ?? ""}
-                    onChange={(v) => vm.updateFooter(page.id, { textColor: v })}
-                    placeholder="#666666"
-                  />
-                </Field>
-                <Field label="Bg color">
-                  <ColorSwatchInput
-                    value={page.footer.bgColor ?? ""}
+                    value={page.footer?.bgColor ?? ""}
                     onChange={(v) => vm.updateFooter(page.id, { bgColor: v })}
                     placeholder="#F4F4F5"
                   />
                 </Field>
-              </div>
-              <div className="grid grid-cols-1 gap-2">
-                <Field label="Border color">
+                <Field label="Button color" className="mb-3">
                   <ColorSwatchInput
-                    value={page.footer.borderColor ?? ""}
-                    onChange={(v) => vm.updateFooter(page.id, { borderColor: v })}
-                    placeholder="#E4E4E7"
+                    value={page.footer?.buttonColor ?? ""}
+                    onChange={(v) => vm.updateFooter(page.id, { buttonColor: v })}
+                    placeholder={vm.theme.primary}
+                    inheritedColor={vm.theme.primary}
                   />
                 </Field>
-                <Field label={`Border · ${page.footer.borderWidth ?? 0}px`}>
-                  <input
-                    type="range"
-                    min={0}
-                    max={4}
-                    step={1}
-                    value={page.footer.borderWidth ?? 0}
-                    onChange={(e) =>
-                      vm.updateFooter(page.id, {
-                        borderWidth: Number(e.currentTarget.value),
-                      })
-                    }
-                    className="w-full accent-rv-accent-500"
-                  />
-                </Field>
-              </div>
-            </>
-          )}
-        </Section>
+                <div className="grid grid-cols-1 gap-2">
+                  <Field label="Border color">
+                    <ColorSwatchInput
+                      value={page.footer?.borderColor ?? ""}
+                      onChange={(v) => vm.updateFooter(page.id, { borderColor: v })}
+                      placeholder="#E4E4E7"
+                    />
+                  </Field>
+                  <Field label={`Border · ${page.footer?.borderWidth ?? 0}px`}>
+                    <input
+                      type="range"
+                      min={0}
+                      max={4}
+                      step={1}
+                      value={page.footer?.borderWidth ?? 0}
+                      onChange={(e) =>
+                        vm.updateFooter(page.id, {
+                          borderWidth: Number(e.currentTarget.value),
+                        })
+                      }
+                      className="w-full accent-rv-accent-500"
+                    />
+                  </Field>
+                </div>
+              </>
+            )}
+          </Section>
+        )}
 
         <Accordion
           title="Branching"
@@ -853,35 +976,95 @@ export const PropertiesPanel = component(() => {
   );
 });
 
-function Section({ title, children }: { title?: string; children: React.ReactNode }) {
+/**
+ * Collapsible sidebar section. Titled sections render an accordion header
+ * with a chevron and remember their open state locally (resets when the
+ * panel re-mounts for a new page selection, which keeps long sidebars from
+ * staying scrolled to a stale spot).
+ *
+ * When `title` is omitted, the section becomes a plain always-open
+ * container — used for the page-type badge header at the top of the panel.
+ */
+function Section({
+  title,
+  right,
+  defaultOpen = false,
+  children,
+}: {
+  title?: string;
+  right?: React.ReactNode;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  if (!title) {
+    return <section className="border-b border-rv-divider px-4 py-3.5">{children}</section>;
+  }
   return (
-    <section className="border-b border-rv-divider px-4 py-3.5">
-      {title && (
-        <h4 className="mb-2.5 m-0 font-rv-mono text-[10px] font-semibold uppercase tracking-wider text-rv-mute-500">
+    <section className="border-b border-rv-divider">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-left transition hover:bg-rv-c2"
+      >
+        <h4 className="m-0 font-rv-mono text-[10px] font-semibold uppercase tracking-wider text-rv-mute-500">
           {title}
         </h4>
-      )}
-      {children}
+        <div className="flex items-center gap-2">
+          {right}
+          <ChevronDown
+            size={12}
+            className={cn(
+              "text-rv-mute-500 transition-transform duration-150",
+              open ? "rotate-0" : "-rotate-90",
+            )}
+          />
+        </div>
+      </button>
+      {open && <div className="px-4 pb-3.5">{children}</div>}
     </section>
   );
 }
 
+/**
+ * Thin alias kept for sections that already need a bolder header style with
+ * a custom right-slot (e.g. Branching count chip). Renders the same
+ * collapsible behaviour as `Section`.
+ */
 function Accordion({
   title,
   right,
+  defaultOpen = false,
   children,
 }: {
   title: string;
   right?: React.ReactNode;
+  defaultOpen?: boolean;
   children: React.ReactNode;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <section className="border-b border-rv-divider">
-      <header className="flex items-center justify-between px-4 py-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-left transition hover:bg-rv-c2"
+      >
         <h4 className="m-0 text-[12px] font-semibold text-foreground">{title}</h4>
-        <div className="flex items-center gap-2">{right}</div>
-      </header>
-      <div className="px-4 pb-3.5">{children}</div>
+        <div className="flex items-center gap-2">
+          {right}
+          <ChevronDown
+            size={12}
+            className={cn(
+              "text-rv-mute-500 transition-transform duration-150",
+              open ? "rotate-0" : "-rotate-90",
+            )}
+          />
+        </div>
+      </button>
+      {open && <div className="px-4 pb-3.5">{children}</div>}
     </section>
   );
 }
@@ -1074,6 +1257,49 @@ function AnswerTypeDropdown({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function ProgressPreview({
+  style,
+  active,
+  inactive,
+}: {
+  style: ProgressStyle;
+  active: string;
+  inactive: string;
+}) {
+  if (style === "segmented") {
+    return (
+      <div className="flex items-center gap-[2px]">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <span
+            key={i}
+            className="block h-[3px] flex-1 rounded-full"
+            style={{ background: i < 3 ? active : inactive }}
+          />
+        ))}
+      </div>
+    );
+  }
+  if (style === "dashed") {
+    return (
+      <div className="relative h-[5px]">
+        <div
+          className="absolute inset-x-0 top-1/2 h-[3px] -translate-y-1/2 rounded-full"
+          style={{
+            backgroundImage: `repeating-linear-gradient(to right, ${inactive} 0 5px, transparent 5px 9px)`,
+          }}
+        />
+        <div className="relative h-[3px] w-[60%] overflow-hidden rounded-full" style={{ background: active }} />
+      </div>
+    );
+  }
+  const height = style === "rounded" ? "h-[5px]" : "h-[3px]";
+  return (
+    <div className={`${height} overflow-hidden rounded-full`} style={{ background: inactive }}>
+      <span className="block h-full w-[60%] rounded-full" style={{ background: active }} />
     </div>
   );
 }

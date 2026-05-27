@@ -26,6 +26,7 @@ const DEFAULT_THEME: Theme = {
   progressActive: "",
   progressInactive: "rgba(0,0,0,0.1)",
   backIcon: "chevron",
+  radius: 10,
 };
 
 const DEFAULT_SETTINGS: Settings = {
@@ -293,9 +294,7 @@ export class FunnelDraftViewModel {
     const page = this.pages.find((p) => p.id === pageId);
     if (!page) return;
     const current = page.footer ?? {
-      enabled: false,
-      text: "",
-      textColor: "",
+      enabled: true,
       bgColor: "",
       borderColor: "",
       borderWidth: 0,

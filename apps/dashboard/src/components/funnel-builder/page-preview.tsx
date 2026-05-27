@@ -112,8 +112,13 @@ type Props = {
  * — without this, mutations to those fields via the VM don't trigger a
  * re-render and the preview stays stale.
  */
-export const PagePreview = component(({ page, theme, editable = false }: Props) => {
+export const PagePreview = component(({ page, theme: rawTheme, editable = false }: Props) => {
   const vm = useService(FunnelDraftViewModel);
+  // Per-page overrides flow through `theme` — sub-components only see the
+  // effective value and never need to know whether it came from the page or
+  // the global theme.
+  const theme: Theme =
+    page.radius !== undefined ? { ...rawTheme, radius: page.radius } : rawTheme;
   const meta = PAGE_TYPES[page.type];
   const bg = page.background;
   const baseColor = isFilledColor(bg?.value) && bg?.kind === "color" ? bg.value : theme.bg;
@@ -123,6 +128,8 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
     color: theme.text,
     fontFamily: theme.font || undefined,
   };
+  const radius = theme.radius;
+  const r = (extra?: CSSProperties): CSSProperties => ({ borderRadius: radius, ...extra });
   const hasMediaBg =
     (bg?.kind === "image" || bg?.kind === "video") && isFilledColor(bg?.value);
   // Progress reflects this page's position in the funnel.
@@ -257,7 +264,8 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
           <img
             src={page.mediaUrl}
             alt=""
-            className="mb-2 max-h-[180px] w-full rounded-lg object-cover"
+            className="mb-2 max-h-[180px] w-full object-cover"
+            style={r()}
           />
         )}
         {page.mediaKind === "video" && page.mediaUrl && (
@@ -265,7 +273,8 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
             src={page.mediaUrl}
             controls
             playsInline
-            className="mb-2 max-h-[180px] w-full rounded-lg bg-black object-cover"
+            className="mb-2 max-h-[180px] w-full bg-black object-cover"
+            style={r()}
           />
         )}
         <h1 className="m-0 text-[18px] font-semibold leading-tight tracking-tight">
@@ -366,8 +375,8 @@ export const PagePreview = component(({ page, theme, editable = false }: Props) 
         <div className="px-4 pb-4 pt-3" style={footerStyle}>
           <button
             type="button"
-            className="h-10 w-full rounded-lg text-[13px] font-semibold text-white"
-            style={{ background: theme.primary }}
+            className="h-10 w-full text-[13px] font-semibold text-white"
+            style={r({ background: footer?.buttonColor || theme.primary })}
           >
             {ctaLabel}
           </button>
@@ -386,8 +395,9 @@ const ChoiceListReadOnly = component(({ page, theme }: { page: Page; theme: Them
       {(page.options || []).slice(0, 6).map((o, i) => (
         <div
           key={i}
-          className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-[12px]"
+          className="flex items-center gap-2 px-3 py-2.5 text-[12px]"
           style={{
+            borderRadius: theme.radius,
             background: "white",
             border: `1px solid ${i === 0 ? theme.primary : "rgba(0,0,0,0.08)"}`,
             boxShadow: i === 0 ? `0 0 0 2px ${theme.primary}25` : undefined,
@@ -482,8 +492,9 @@ const ChoiceListEditable = component(({ page, theme }: { page: Page; theme: Them
 
           {/* Option card */}
           <div
-            className="flex items-center gap-2 rounded-lg px-3 py-2.5 text-[12px]"
+            className="flex items-center gap-2 px-3 py-2.5 text-[12px]"
             style={{
+              borderRadius: theme.radius,
               background: "white",
               border: `1px solid ${i === 0 ? theme.primary : "rgba(0,0,0,0.08)"}`,
               boxShadow: i === 0 ? `0 0 0 2px ${theme.primary}25` : undefined,
@@ -557,8 +568,9 @@ const YesNoButtons = component(({ page, theme }: { page: Page; theme: Theme }) =
             key={o.value}
             type="button"
             onClick={() => setPicked(o.value)}
-            className="h-14 rounded-lg text-[14px] font-semibold transition"
+            className="h-14 text-[14px] font-semibold transition"
             style={{
+              borderRadius: theme.radius,
               background: active ? theme.primary : "white",
               color: active ? "white" : theme.text,
               border: `1px solid ${theme.primary}${active ? "" : "40"}`,
@@ -583,8 +595,8 @@ const NumberCounter = component(({ page, theme }: { page: Page; theme: Theme }) 
   const dec = () => setN((v) => Math.max(min, v - step));
   const inc = () => setN((v) => Math.min(max, v + step));
   return (
-    <div className="mt-3 flex items-center justify-center gap-3 rounded-lg px-4 py-3"
-      style={{ background: "white", border: `1px solid ${theme.primary}40` }}>
+    <div className="mt-3 flex items-center justify-center gap-3 px-4 py-3"
+      style={{ borderRadius: theme.radius, background: "white", border: `1px solid ${theme.primary}40` }}>
       <button
         type="button"
         onClick={dec}
@@ -616,8 +628,8 @@ const NumberCounter = component(({ page, theme }: { page: Page; theme: Theme }) 
 function DatePicker({ theme }: { theme: Theme }) {
   return (
     <div
-      className="mt-3 flex h-10 w-full items-center gap-2 rounded-lg px-3"
-      style={{ background: "white", border: `1px solid ${theme.primary}40` }}
+      className="mt-3 flex h-10 w-full items-center gap-2 px-3"
+      style={{ borderRadius: theme.radius, background: "white", border: `1px solid ${theme.primary}40` }}
     >
       <Calendar size={14} style={{ color: theme.primary }} />
       <input
@@ -638,8 +650,8 @@ const SliderInput = component(({ page, theme }: { page: Page; theme: Theme }) =>
   const [v, setV] = useState(min + Math.round((max - min) / 2));
   return (
     <div
-      className="mt-3 rounded-lg px-4 py-4"
-      style={{ background: "white", border: `1px solid ${theme.primary}40` }}
+      className="mt-3 px-4 py-4"
+      style={{ borderRadius: theme.radius, background: "white", border: `1px solid ${theme.primary}40` }}
     >
       <div className="mb-2 text-center font-rv-mono text-[24px] font-bold tabular-nums">
         {v}
@@ -672,8 +684,9 @@ const PictureChoiceList = component(({ page, theme }: { page: Page; theme: Theme
     {(page.options ?? []).slice(0, 6).map((o, i) => (
       <div
         key={i}
-        className="flex flex-col gap-1 overflow-hidden rounded-lg"
+        className="flex flex-col gap-1 overflow-hidden"
         style={{
+          borderRadius: theme.radius,
           background: "white",
           border: `1px solid ${i === 0 ? theme.primary : "rgba(0,0,0,0.08)"}`,
           boxShadow: i === 0 ? `0 0 0 2px ${theme.primary}25` : undefined,
@@ -798,8 +811,8 @@ function TextField({
 }) {
   return (
     <div
-      className="mt-3 flex h-10 w-full items-center gap-2 rounded-lg px-3"
-      style={{ background: "white", border: `1px solid ${theme.primary}40` }}
+      className="mt-3 flex h-10 w-full items-center gap-2 px-3"
+      style={{ borderRadius: theme.radius, background: "white", border: `1px solid ${theme.primary}40` }}
     >
       {icon && <span style={{ color: theme.primary }}>{icon}</span>}
       <input
@@ -818,8 +831,8 @@ function TextArea({ placeholder, theme }: { placeholder?: string; theme: Theme }
       readOnly
       rows={3}
       placeholder={placeholder ?? "Type your answer…"}
-      className="mt-3 w-full resize-none rounded-lg px-3 py-2 text-[13px] outline-none"
-      style={{ background: "white", border: `1px solid ${theme.primary}40` }}
+      className="mt-3 w-full resize-none px-3 py-2 text-[13px] outline-none"
+      style={{ borderRadius: theme.radius, background: "white", border: `1px solid ${theme.primary}40` }}
     />
   );
 }

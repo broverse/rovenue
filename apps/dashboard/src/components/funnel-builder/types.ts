@@ -257,6 +257,8 @@ export type Page = {
   showProgress?: boolean;
   /** Show the back button on this page. Defaults to false. */
   showBack?: boolean;
+  /** Override the theme default border-radius for this page. */
+  radius?: number;
 };
 
 export type PageBackground = {
@@ -272,6 +274,9 @@ export type PageFooter = {
   bgColor?: string;
   borderColor?: string;
   borderWidth?: number;
+  // Background color of the primary CTA button inside the footer band.
+  // Falls back to `theme.primary` when blank.
+  buttonColor?: string;
 };
 
 export type ProgressStyle = "solid" | "segmented" | "dashed" | "rounded";
@@ -293,6 +298,8 @@ export type Theme = {
   progressInactive: string;
   /** Which glyph to use for the per-page back button. */
   backIcon: BackIcon;
+  /** Default border-radius (in px) for CTA, choice tiles, inputs, media. */
+  radius: number;
 };
 
 export type Settings = {
