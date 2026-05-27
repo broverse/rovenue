@@ -71,26 +71,31 @@ export class FunnelDraftViewModel {
     this.funnelId = this.props.funnelId;
   }
 
+  // Track whether this VM instance has been disposed so a late-arriving
+  // fetch response doesn't mutate it. We can't rely on AbortController +
+  // @onMount in React StrictMode — the double-mount cycle disposes the
+  // first instance while its fetch is still in flight, and impair's
+  // catch hooks fire differently than expected.
+  private disposed = false;
+
   @onMount
   async load(cleanup: Cleanup) {
-    const controller = new AbortController();
-    cleanup(() => controller.abort());
+    cleanup(() => {
+      this.disposed = true;
+    });
     try {
       this.isLoading = true;
       this.error = null;
-      const funnel = await this.api.get(this.props.projectId, this.props.funnelId, controller.signal);
+      const funnel = await this.api.get(this.props.projectId, this.props.funnelId);
+      if (this.disposed) return;
       this.applyServer(funnel);
     } catch (err) {
-      const name = (err as { name?: string })?.name;
-      if (controller.signal.aborted || name === "AbortError") {
-        // Strict-Mode double-mount races abort the first attempt — ignore.
-        return;
-      }
+      if (this.disposed) return;
       // eslint-disable-next-line no-console
       console.error("[FunnelDraftViewModel] load failed", err);
       this.error = err as Error;
     } finally {
-      if (!controller.signal.aborted) {
+      if (!this.disposed) {
         this.isLoading = false;
       }
     }
