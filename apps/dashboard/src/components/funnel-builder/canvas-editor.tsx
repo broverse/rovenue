@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { component, useService } from "impair";
 import {
   ArrowLeft,
@@ -59,69 +59,34 @@ const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 export const CanvasEditor = component(() => {
   const vm = useService(FunnelDraftViewModel);
   const [addOpen, setAddOpen] = useState(false);
-  const canvasRef = useRef<HTMLDivElement>(null);
+  // Callback ref binds the native wheel listener directly during React's
+  // commit phase — bypasses useEffect entirely, which impair's component()
+  // wrapper doesn't reliably invoke for inner-rendered hooks. Cleanup
+  // ref keeps the prior listener so we can detach on element swap/unmount.
+  const wheelCleanupRef = useRef<(() => void) | null>(null);
+  const setCanvasEl = useCallback(
+    (el: HTMLDivElement | null) => {
+      // Tear down the previous binding regardless of new element.
+      wheelCleanupRef.current?.();
+      wheelCleanupRef.current = null;
+      if (!el) return;
+      const onWheel = (e: WheelEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        vm.handleCanvasWheel(e.deltaY, e.ctrlKey);
+      };
+      el.addEventListener("wheel", onWheel, { passive: false });
+      wheelCleanupRef.current = () => el.removeEventListener("wheel", onWheel);
+    },
+    [vm],
+  );
+
   const page = vm.selectedPage;
-
-  // Native non-passive wheel listener — every wheel/pinch over the canvas
-  // zooms (no modifier required). preventDefault blocks the page from
-  // scrolling or browser-zooming. Mouse users scroll to zoom; trackpad
-  // users pinch or two-finger scroll, both end up here as wheel events.
-  // deltaY accumulates so the trackpad's high event rate doesn't fly past
-  // discrete zoom steps in one gesture.
-  useEffect(() => {
-    const el = canvasRef.current;
-    // eslint-disable-next-line no-console
-    console.log("[canvas] useEffect ran, ref=", el);
-    if (!el) return;
-    let acc = 0;
-    const THRESHOLD = 120;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const delta = e.ctrlKey ? e.deltaY * 8 : e.deltaY;
-      acc += delta;
-      // eslint-disable-next-line no-console
-      console.log("[canvas] wheel", { deltaY: e.deltaY, ctrl: e.ctrlKey, acc, threshold: THRESHOLD });
-      while (Math.abs(acc) >= THRESHOLD) {
-        const dir = acc > 0 ? -1 : 1;
-        const current = vm.canvasZoom;
-        let i = ZOOM_STEPS.findIndex((s) => s >= current);
-        if (i < 0) i = ZOOM_STEPS.length - 1;
-        const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, i + dir))];
-        // eslint-disable-next-line no-console
-        console.log("[canvas] step zoom", current, "→", next);
-        vm.setCanvasZoom(next);
-        // eslint-disable-next-line no-console
-        console.log("[canvas] vm.canvasZoom now=", vm.canvasZoom);
-        acc -= Math.sign(acc) * THRESHOLD;
-      }
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    // eslint-disable-next-line no-console
-    console.log("[canvas] wheel listener attached");
-    return () => {
-      // eslint-disable-next-line no-console
-      console.log("[canvas] wheel listener removed");
-      el.removeEventListener("wheel", onWheel);
-    };
-  }, [vm]);
-
   if (!page) return null;
   const device = vm.canvasDevice;
   const zoom = vm.canvasZoom;
   const idx = vm.selectedIdx;
   const frame = DEVICE_FRAMES[device];
-
-  const stepZoom = (dir: 1 | -1) => {
-    let i = ZOOM_STEPS.findIndex((s) => s >= zoom);
-    if (i < 0) i = ZOOM_STEPS.length - 1;
-    const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, i + dir))];
-    // eslint-disable-next-line no-console
-    console.log("[canvas] toolbar stepZoom", { dir, zoom, next });
-    vm.setCanvasZoom(next);
-    // eslint-disable-next-line no-console
-    console.log("[canvas] toolbar after setCanvasZoom, vm.canvasZoom=", vm.canvasZoom);
-  };
 
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-rv-bg">
@@ -176,7 +141,7 @@ export const CanvasEditor = component(() => {
         <div className="inline-flex items-center gap-0.5 rounded-md border border-rv-divider bg-rv-c2 px-0.5">
           <button
             type="button"
-            onClick={() => stepZoom(-1)}
+            onClick={() => vm.zoomStep(-1)}
             title="Zoom out"
             disabled={zoom === ZOOM_STEPS[0]}
             className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
@@ -193,7 +158,7 @@ export const CanvasEditor = component(() => {
           </button>
           <button
             type="button"
-            onClick={() => stepZoom(1)}
+            onClick={() => vm.zoomStep(1)}
             title="Zoom in"
             disabled={zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1]}
             className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
@@ -233,7 +198,7 @@ export const CanvasEditor = component(() => {
       </div>
 
       <div
-        ref={canvasRef}
+        ref={setCanvasEl}
         className="flex flex-1 items-center justify-center overflow-auto bg-gradient-to-b from-rv-c1 to-rv-bg p-8"
       >
         <div

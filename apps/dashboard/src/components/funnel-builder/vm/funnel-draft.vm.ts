@@ -54,19 +54,48 @@ export class FunnelDraftViewModel {
   @state autosaveStatus: "saved" | "saving" | "error" = "saved";
   @state lastSavedAt: number | null = null;
 
-  // Canvas preview UI state (device frame + zoom). Lives on the VM so
-  // `component()`-wrapped subscribers (CanvasEditor toolbar, the scaled
-  // wrapper) re-render reliably when they change — useState inside an
-  // impair component proved flaky for zoom because React's setState
-  // didn't always reach Vue's effect scheduler before paint.
+  // Canvas preview UI state lives on the VM so a) impair tracks change
+  // for the `component()`-wrapped CanvasEditor and b) the wheel handler
+  // (attached via callback ref) has a stable target to mutate without
+  // depending on React's useEffect, which impair's component wrapper
+  // doesn't reliably invoke for inner-rendered hooks.
   @state canvasDevice: "phone" | "tablet" | "desktop" = "phone";
   @state canvasZoom = 1;
+  // Non-reactive accumulator for trackpad wheel events.
+  private canvasWheelAcc = 0;
+  private static readonly ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  private static readonly WHEEL_THRESHOLD = 120;
 
   setCanvasDevice(d: "phone" | "tablet" | "desktop") {
     this.canvasDevice = d;
   }
   setCanvasZoom(z: number) {
     this.canvasZoom = Math.max(0.25, Math.min(3, z));
+  }
+  zoomStep(dir: 1 | -1) {
+    const steps = FunnelDraftViewModel.ZOOM_STEPS;
+    let i = steps.findIndex((s) => s >= this.canvasZoom);
+    if (i < 0) i = steps.length - 1;
+    const next = steps[Math.max(0, Math.min(steps.length - 1, i + dir))];
+    this.setCanvasZoom(next);
+  }
+  resetCanvasZoom() {
+    this.setCanvasZoom(1);
+  }
+  /**
+   * Process a native wheel event on the canvas surface. Returns whether
+   * the gesture should be treated as a zoom (caller should preventDefault).
+   * Pinch gestures arrive as wheel events with ctrlKey=true and tiny
+   * deltaY (~1-5) — amplify so one pinch lands a step.
+   */
+  handleCanvasWheel(deltaY: number, isPinch: boolean) {
+    const delta = isPinch ? deltaY * 8 : deltaY;
+    this.canvasWheelAcc += delta;
+    const T = FunnelDraftViewModel.WHEEL_THRESHOLD;
+    while (Math.abs(this.canvasWheelAcc) >= T) {
+      this.zoomStep(this.canvasWheelAcc > 0 ? -1 : 1);
+      this.canvasWheelAcc -= Math.sign(this.canvasWheelAcc) * T;
+    }
   }
 
   // Mirrors of Props.projectId / Props.funnelId so React-side consumers
