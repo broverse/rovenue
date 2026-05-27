@@ -38,7 +38,13 @@ function useProjectProducts(projectId: string | undefined) {
 }
 
 export const PropertiesPanel = component(() => {
+  // Hooks must run unconditionally on every render — keep them above any
+  // `return null`. React throws "Should have a queue" otherwise when the
+  // selected page flips from undefined to set between renders.
   const vm = useService(FunnelDraftViewModel);
+  const [qTab, setQTab] = useState<"text" | "video">("text");
+  const { data: products = [] } = useProjectProducts(vm.projectId);
+
   const page = vm.selectedPage;
   if (!page) return null;
   const meta = PAGE_TYPES[page.type];
@@ -50,13 +56,10 @@ export const PropertiesPanel = component(() => {
     .map((p) => p.question_id)
     .filter((q): q is string => Boolean(q));
 
-  const [qTab, setQTab] = useState<"text" | "video">("text");
   const isQuestionPage = !!page.question_id;
   const headerLabel = isQuestionPage ? "Question" : meta.label;
 
   const set = (patch: Partial<Page>) => vm.updatePage(page.id, patch);
-
-  const { data: products = [] } = useProjectProducts(vm.projectId);
 
   return (
     <aside className="flex w-[340px] flex-shrink-0 flex-col border-l border-rv-divider bg-rv-c1">

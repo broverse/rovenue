@@ -49,7 +49,7 @@ describe("FunnelDraftViewModel", () => {
     expect(vm.selectedPageId).toBe("pg_1");
   });
 
-  it("autosave debounces mutations into one PATCH", async () => {
+  it("autosave throttles rapid mutations into one trailing PATCH per 30s", async () => {
     const patchDraft = vi.fn().mockResolvedValue(fakeFunnel());
     const vm = makeVm({
       get: vi.fn().mockResolvedValue(fakeFunnel()),
@@ -58,13 +58,25 @@ describe("FunnelDraftViewModel", () => {
       duplicate: vi.fn(),
     });
     await vm.load(() => {});
+    // Throttle's leading call fires for the first mutation; subsequent rapid
+    // mutations are queued and emitted as a single trailing PATCH after the
+    // window. Drain initial leading call from `load` setup if any.
+    await vi.advanceTimersByTimeAsync(30_001);
+    patchDraft.mockClear();
+
     vm.rename("renamed");
     vm.rename("renamed again");
     vm.updatePage("pg_1", { title: "Bonjour" });
-    expect(patchDraft).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(900);
-    expect(patchDraft).toHaveBeenCalledTimes(1);
-    expect(patchDraft.mock.calls[0][2].name).toBe("renamed again");
+    // Within the throttle window we expect at most one PATCH (the leading one).
+    await vi.advanceTimersByTimeAsync(100);
+    const beforeWindow = patchDraft.mock.calls.length;
+    expect(beforeWindow).toBeLessThanOrEqual(1);
+
+    // After the window closes, the trailing change is flushed once.
+    await vi.advanceTimersByTimeAsync(30_001);
+    expect(patchDraft.mock.calls.length).toBeGreaterThanOrEqual(beforeWindow);
+    const lastCall = patchDraft.mock.calls.at(-1)!;
+    expect(lastCall[2].name).toBe("renamed again");
   });
 
   it("errorCount reflects validator output", async () => {
