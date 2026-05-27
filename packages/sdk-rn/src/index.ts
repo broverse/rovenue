@@ -1,34 +1,67 @@
+// @rovenue/sdk-rn — public surface.
+//
+// Imperative API:    Rovenue.configure(...), Rovenue.identify(...), ...
+// React hooks:       useCurrentUser, useEntitlement, useEntitlements, useCreditBalance
+// Error classes:     RovenueError + 13 subclasses
+
+export { SDK_VERSION } from "./version";
+
+export type {
+  User,
+  Entitlement,
+  ReceiptResult,
+  ChangeEvent,
+} from "./types";
+
+export {
+  RovenueError,
+  InvalidApiKeyError,
+  NotConfiguredError,
+  NetworkUnavailableError,
+  TimeoutError,
+  RateLimitedError,
+  ServerError,
+  StorageError,
+  UserNotFoundError,
+  InsufficientCreditsError,
+  EntitlementInactiveError,
+  DuplicatePurchaseError,
+  ReceiptInvalidError,
+  InternalError,
+} from "./errors";
+
+export { useCurrentUser } from "./hooks/useCurrentUser";
+export { useEntitlement } from "./hooks/useEntitlement";
+export { useEntitlements } from "./hooks/useEntitlements";
+export { useCreditBalance } from "./hooks/useCreditBalance";
+
+import { configure } from "./api/configure";
+import { currentUser, identify } from "./api/identity";
+import { entitlement, entitlementsAll, refreshEntitlements } from "./api/entitlements";
+import { creditBalance, refreshCredits, consumeCredits } from "./api/credits";
+import { postAppleReceipt, postGoogleReceipt } from "./api/receipts";
+import { setForeground, shutdown } from "./api/lifecycle";
 import { SDK_VERSION } from "./version";
+import { getNative } from "./core/native";
 
-export { SDK_VERSION };
+export const Rovenue = {
+  configure,
+  getVersion: () => SDK_VERSION,
+  currentUser,
+  identify,
+  entitlement,
+  entitlementsAll,
+  refreshEntitlements,
+  creditBalance,
+  refreshCredits,
+  consumeCredits,
+  postAppleReceipt,
+  postGoogleReceipt,
+  setForeground,
+  shutdown,
+  addChangeListener: (cb: (event: import("./types").ChangeEvent) => void): (() => void) => {
+    return getNative().addChangeListener((e) => cb(e as import("./types").ChangeEvent));
+  },
+} as const;
 
-export type RovenueConfig = {
-  apiKey: string;
-  baseUrl: string;
-  debug?: boolean;
-};
-
-export type RovenueHandle = {
-  getVersion(): string;
-};
-
-class RovenueStub implements RovenueHandle {
-  constructor(public readonly config: Readonly<RovenueConfig>) {}
-  getVersion(): string {
-    return SDK_VERSION;
-  }
-}
-
-export function configure(config: RovenueConfig): RovenueHandle {
-  if (!config.apiKey || config.apiKey.trim() === "") {
-    throw new Error("Rovenue: invalid api key");
-  }
-  if (!/^https?:\/\//.test(config.baseUrl)) {
-    throw new Error("Rovenue: base_url must be http(s)");
-  }
-  return new RovenueStub({ debug: false, ...config });
-}
-
-export function getVersion(): string {
-  return SDK_VERSION;
-}
+export type { RovenueConfig } from "./api/configure";
