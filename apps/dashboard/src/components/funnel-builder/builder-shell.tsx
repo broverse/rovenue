@@ -19,7 +19,6 @@ import {
   type Rule as RuleView,
   type RuleClause,
   type Operator,
-  type Session,
   type TabId,
   type ValidationIssue,
 } from "./types";
@@ -120,7 +119,6 @@ export const BuilderShell = component(({ projectId }: Props) => {
     default_next: vm.defaultNext,
   };
   const issues = toLegacyIssues(vm.validation.errors, vm.validation.warnings);
-  const sessions: Session[] = [];
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-rv-bg text-foreground">
@@ -137,7 +135,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
         {vm.activeTab === "workflow" && <WorkflowTab />}
         {vm.activeTab === "theme" && <ThemeTab />}
         {vm.activeTab === "settings" && <SettingsTab />}
-        {vm.activeTab === "sessions" && <SessionsTab sessions={sessions} />}
+        {vm.activeTab === "sessions" && <SessionsTab />}
         {vm.activeTab === "share" && <ShareTab funnel={legacyFunnel} />}
       </main>
 
