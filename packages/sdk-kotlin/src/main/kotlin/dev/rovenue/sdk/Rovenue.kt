@@ -163,4 +163,36 @@ class Rovenue private constructor(
         productId: String,
     ): dev.rovenue.sdk.generated.ReceiptResult =
         dispatcher.run { core.postGoogleReceipt(receipt, productId) }
+
+    // ---------------------------------------------------------------
+    // Lifecycle hooks (sync)
+    // ---------------------------------------------------------------
+
+    /** Tell the SDK whether the app is in the foreground. While foreground,
+     *  the SDK's internal polling scheduler ticks; while background,
+     *  polling pauses. Call from your Activity / Application lifecycle. */
+    fun setForeground(foreground: Boolean) {
+        core.setForeground(foreground)
+    }
+
+    /** Stop background work cleanly. Called automatically on
+     *  resetForTesting() and on configure-twice. */
+    fun shutdown() {
+        core.shutdown()
+    }
+
+    // ---------------------------------------------------------------
+    // Observer flow
+    // ---------------------------------------------------------------
+
+    /** SharedFlow of cache-change notifications. Every collector receives
+     *  every event (multicast). Buffer is 64 with DROP_OLDEST policy —
+     *  consumers that don't keep up lose old events silently; the cache
+     *  reads remain authoritative.
+     *
+     *  CAUTION: collect this flow from a coroutine OUTSIDE the SDK's
+     *  internal scope; calling Rovenue.shutdown() from inside a coroutine
+     *  that is itself collecting `changes` would cancel that collector. */
+    val changes: kotlinx.coroutines.flow.SharedFlow<dev.rovenue.sdk.generated.ChangeEvent>
+        get() = bridge.flow
 }
