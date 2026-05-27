@@ -3,6 +3,7 @@ import {
   CirclePlus,
   Flag,
   FlaskConical,
+  Funnel,
   Layers,
   LayoutGrid,
   LineChart,
@@ -82,6 +83,13 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
   {
     sectionKey: "growth",
     items: [
+      {
+        id: "funnels",
+        labelKey: "sidebar.items.funnels",
+        icon: Funnel,
+        to: "/projects/$projectId/funnels",
+        badge: "web",
+      },
       {
         id: "experiments",
         labelKey: "sidebar.items.experiments",

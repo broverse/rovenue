@@ -33,6 +33,7 @@ function useBreadcrumbTitleKey(): string {
   if (id.includes("/cohorts")) return "breadcrumb.cohorts";
   if (id.includes("/audiences")) return "breadcrumb.audiences";
   if (id.includes("/leaderboards")) return "breadcrumb.leaderboards";
+  if (id.includes("/funnels")) return "breadcrumb.funnels";
   return "breadcrumb.overview";
 }
 

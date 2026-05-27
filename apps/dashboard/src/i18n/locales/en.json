@@ -228,6 +228,7 @@
       "subscribers": "Subscribers",
       "subscriptions": "Subscriptions",
       "transactions": "Transactions",
+      "funnels": "Funnels",
       "experiments": "Experiments",
       "flags": "Feature flags",
       "audiences": "Audiences",
@@ -288,7 +289,8 @@
     "queries": "Queries",
     "cohorts": "Cohorts",
     "audiences": "Audiences",
-    "leaderboards": "Leaderboards"
+    "leaderboards": "Leaderboards",
+    "funnels": "Funnels"
   },
   "overview": {
     "title": "Overview",
