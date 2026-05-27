@@ -97,5 +97,19 @@ else
   echo "  ~ gradle/Android SDK unavailable — Android sample build skipped"
 fi
 
+# ---- Rovenue podspec lint (best-effort) ----
+echo "→ Rovenue podspec lint"
+if command -v pod >/dev/null 2>&1; then
+  if pod spec lint packages/sdk-swift/Rovenue.podspec \
+       --allow-warnings --skip-tests --platforms=ios \
+       >/tmp/rovenue-podspec-lint.log 2>&1; then
+    echo "  ✓ Rovenue.podspec lints"
+  else
+    echo "  ~ Rovenue.podspec lint failed (expected pre-first-release — see /tmp/rovenue-podspec-lint.log)"
+  fi
+else
+  echo "  ~ cocoapods unavailable — podspec lint skipped"
+fi
+
 echo
 echo "✓ Parity: all available codepaths agree on version $RUST_VER"
