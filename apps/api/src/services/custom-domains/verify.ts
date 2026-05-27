@@ -38,6 +38,16 @@ export type HostnameRejection =
   | { ok: false; reason: "hostname_invalid" | "hostname_reserved" };
 
 /**
+ * Probe a hostname against one resolver — returns the CNAME targets and
+ * any TXT records at `_rovenue.{host}`. Exported so tests can inject a
+ * mock that doesn't hit the network.
+ */
+export type DnsProbe = (
+  resolverIp: string,
+  hostname: string,
+) => Promise<{ cnames: string[]; txt: string[]; error?: string }>;
+
+/**
  * Validate a hostname against our shape + reserved list. Caller is expected
  * to lowercase the input before persisting — this checker does NOT mutate.
  */
@@ -50,6 +60,28 @@ export function checkHostname(raw: string): HostnameRejection {
   return { ok: true };
 }
 
+/** Real-network DNS probe — uses `node:dns/promises` against the given IP. */
+export const liveDnsProbe: DnsProbe = async (resolverIp, hostname) => {
+  const resolver = new Resolver();
+  resolver.setServers([resolverIp]);
+  const txtName = `_rovenue.${hostname}`;
+  try {
+    const [cnameResult, txtResult] = await Promise.allSettled([
+      resolver.resolveCname(hostname),
+      resolver.resolveTxt(txtName),
+    ]);
+    const cnames =
+      cnameResult.status === "fulfilled" ? cnameResult.value.map((c) => c.toLowerCase()) : [];
+    // TXT comes back as string[][]; flatten and join each chunk-set into
+    // one record value (DNS chunks long records into <256-byte pieces).
+    const txt =
+      txtResult.status === "fulfilled" ? txtResult.value.map((chunks) => chunks.join("")) : [];
+    return { cnames, txt };
+  } catch (err) {
+    return { cnames: [], txt: [], error: (err as Error).message };
+  }
+};
+
 /**
  * Verify a hostname's CNAME + TXT challenge against two independent
  * recursive resolvers. Both must agree to defend against transient
@@ -58,7 +90,10 @@ export function checkHostname(raw: string): HostnameRejection {
 export async function verifyCustomDomain(
   hostname: string,
   verificationToken: string,
-  opts: { resolvers?: ReadonlyArray<readonly [string, string]> } = {},
+  opts: {
+    resolvers?: ReadonlyArray<readonly [string, string]>;
+    probe?: DnsProbe;
+  } = {},
 ): Promise<VerifyResult> {
   // Defaults intentionally hard-coded to Cloudflare (1.1.1.1) and Google
   // (8.8.8.8) — two unrelated networks, low latency, no logging.
@@ -68,8 +103,8 @@ export async function verifyCustomDomain(
       ["cloudflare", "1.1.1.1"],
       ["google", "8.8.8.8"],
     ] as const);
+  const probe = opts.probe ?? liveDnsProbe;
 
-  const txtName = `_rovenue.${hostname}`;
   const expectedTxt = `rv-verify=${verificationToken}`;
 
   type Probe = {
@@ -81,23 +116,8 @@ export async function verifyCustomDomain(
 
   const probes: Probe[] = await Promise.all(
     resolverPairs.map(async ([name, ip]): Promise<Probe> => {
-      const resolver = new Resolver();
-      resolver.setServers([ip]);
-      try {
-        const [cnameResult, txtResult] = await Promise.allSettled([
-          resolver.resolveCname(hostname),
-          resolver.resolveTxt(txtName),
-        ]);
-        const cnames =
-          cnameResult.status === "fulfilled" ? cnameResult.value.map((c) => c.toLowerCase()) : [];
-        // TXT comes back as string[][]; flatten and join each chunk-set into
-        // one record value (DNS chunks long records into <256-byte pieces).
-        const txt =
-          txtResult.status === "fulfilled" ? txtResult.value.map((chunks) => chunks.join("")) : [];
-        return { name, cnames, txt };
-      } catch (err) {
-        return { name, cnames: [], txt: [], error: (err as Error).message };
-      }
+      const result = await probe(ip, hostname);
+      return { name, ...result };
     }),
   );
 

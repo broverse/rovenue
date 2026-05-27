@@ -49,6 +49,10 @@ import {
   createFunnelDeferredCleanupWorker,
   scheduleFunnelDeferredCleanup,
 } from "./workers/funnel-deferred-cleanup";
+import {
+  createCustomDomainVerifierWorker,
+  scheduleCustomDomainVerifier,
+} from "./workers/custom-domain-verifier";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -143,6 +147,16 @@ scheduleFunnelTokenExpirer().catch((err: unknown) => {
 createFunnelDeferredCleanupWorker();
 scheduleFunnelDeferredCleanup().catch((err: unknown) => {
   logger.error("failed to schedule funnel deferred cleanup", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Custom-domain verifier — every 5 minutes, re-runs CNAME+TXT checks
+// on unverified rows that were last checked > 30 min ago. After 7 days
+// without success the row is tagged `verification_window_expired`.
+createCustomDomainVerifierWorker();
+scheduleCustomDomainVerifier().catch((err: unknown) => {
+  logger.error("failed to schedule custom-domain verifier", {
     err: err instanceof Error ? err.message : String(err),
   });
 });

@@ -217,4 +217,6 @@ export {
   revenueEvents,
   outboxEvents as outbox,
   scheduledSubscriptionActions,
+  funnels,
+  customDomains,
 } from "./drizzle/schema";
