@@ -132,11 +132,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
       <main className="flex flex-1 overflow-hidden">
         {vm.activeTab === "content" && (
           <>
-            <ThumbRail
-              pages={vm.pages}
-              selectedId={vm.selectedPageId ?? vm.pages[0]?.id ?? ""}
-              onSelect={(id) => vm.selectPage(id)}
-            />
+            <ThumbRail />
             <CanvasEditor
               page={selectedPage}
               allPages={vm.pages}
