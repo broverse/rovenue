@@ -1,9 +1,13 @@
-// withRovenueIos — Expo config plugin mod that injects the M3 Swift
-// pod into the consumer's Podfile so RovenueModule (sdk-rn's bridge)
-// can link against it.
+// withRovenueIos — Expo config plugin mod that injects the Rovenue pod
+// into the consumer's Podfile.
 //
-// M6 hard-codes the monorepo-relative path. M7 will support an
-// option-driven external path and/or a Trunk-published pod.
+// Default (no opts):     pod 'Rovenue', '~> 0.1'    — pulls from CocoaPods Trunk
+// rovenueSwiftPath set:  pod 'Rovenue', :path => '...'   — monorepo `:path =>` link
+//
+// Monorepo consumers (e.g. examples/sample-rn-expo) MUST pass
+// `rovenueSwiftPath` because the Rovenue pod has not been pushed to
+// Trunk yet (M7.1 only prepares the infra). External consumers pass
+// nothing and pick up the default once the first Trunk push lands.
 
 import { ConfigPlugin, withDangerousMod } from "@expo/config-plugins";
 import * as fs from "node:fs";
@@ -19,10 +23,10 @@ export const withRovenueIos: ConfigPlugin<Options> = (config, opts) => {
     const contents = fs.readFileSync(podfile, "utf8");
     if (contents.includes("pod 'Rovenue'")) return cfg;
 
-    const rovenuePath = opts?.rovenueSwiftPath ?? "../../../packages/sdk-swift";
-    const podLine = `  pod 'Rovenue', :path => '${rovenuePath}'`;
+    const podLine = opts?.rovenueSwiftPath
+      ? `  pod 'Rovenue', :path => '${opts.rovenueSwiftPath}'`
+      : `  pod 'Rovenue', '~> 0.1'`;
 
-    // Inject after the first `target 'XYZ' do` line.
     const patched = contents.replace(
       /(target\s+['"][^'"]+['"]\s+do)/,
       `$1\n${podLine}`,
