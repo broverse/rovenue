@@ -1,5 +1,5 @@
 import {
-  injectable, inject, state, onMount, derived, trigger,
+  injectable, inject, state, onMount, onInit, derived, trigger,
   type Cleanup, Props,
 } from "impair";
 import type { NextRule } from "@rovenue/shared/funnel";
@@ -54,10 +54,22 @@ export class FunnelDraftViewModel {
   @state autosaveStatus: "saved" | "saving" | "error" = "saved";
   @state lastSavedAt: number | null = null;
 
+  // Mirrors of Props.projectId / Props.funnelId so React-side consumers
+  // (e.g. the paywall product picker that runs a TanStack Query) can read
+  // them without violating the private `props` field on this VM.
+  @state projectId = "";
+  @state funnelId = "";
+
   constructor(
     @inject(Props) private props: DraftProps,
     @inject(FunnelApi) private api: FunnelApi,
   ) {}
+
+  @onInit
+  init() {
+    this.projectId = this.props.projectId;
+    this.funnelId = this.props.funnelId;
+  }
 
   @onMount
   async load(cleanup: Cleanup) {

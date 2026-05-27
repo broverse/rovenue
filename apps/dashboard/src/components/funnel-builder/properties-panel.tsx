@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { component, useService } from "impair";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   ChevronDown,
@@ -9,34 +11,52 @@ import {
   Type as TypeIcon,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
-import { PAGE_TYPES, type Page, type Rule } from "./types";
+import { rpc, unwrap } from "../../lib/api";
+import { PAGE_TYPES, type Page } from "./types";
+import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { RuleEditor } from "./rule-editor";
 
-type Props = {
-  page: Page;
-  allPages: Page[];
-  allRules: Record<string, Rule[]>;
-};
+interface ProductDto {
+  id: string;
+  identifier: string;
+  displayName: string;
+}
 
-/**
- * Right rail in the Content tab. Switches its contents based on the
- * selected page's type — single/multi choice, slider, paywall, etc.
- * Branching is always available (subject to the page having earlier
- * questions to reference).
- */
-export function PropertiesPanel({ page, allPages, allRules }: Props) {
+function useProjectProducts(projectId: string | undefined) {
+  return useQuery({
+    queryKey: ["funnel-builder-products", projectId],
+    enabled: Boolean(projectId),
+    queryFn: () =>
+      unwrap<{ products: ProductDto[]; nextCursor: string | null }>(
+        rpc.dashboard.projects[":projectId"].products.$get({
+          param: { projectId: projectId! },
+          query: {},
+        }),
+      ),
+    select: (r) => r.products,
+  });
+}
+
+export const PropertiesPanel = component(() => {
+  const vm = useService(FunnelDraftViewModel);
+  const page = vm.selectedPage;
+  if (!page) return null;
   const meta = PAGE_TYPES[page.type];
   const Ico = meta.icon;
-  const rules = allRules[page.id] ?? [];
-  const sourceIndex = allPages.findIndex((p) => p.id === page.id);
-  const earlierQs = allPages
+  const rules = vm.rules[page.id] ?? [];
+  const sourceIndex = vm.pages.findIndex((p) => p.id === page.id);
+  const earlierQs = vm.pages
     .slice(0, sourceIndex)
-    .filter((p) => p.question_id)
-    .map((p) => p.question_id as string);
-  const [qTab, setQTab] = useState<"text" | "video">("text");
+    .map((p) => p.question_id)
+    .filter((q): q is string => Boolean(q));
 
+  const [qTab, setQTab] = useState<"text" | "video">("text");
   const isQuestionPage = !!page.question_id;
   const headerLabel = isQuestionPage ? "Question" : meta.label;
+
+  const set = (patch: Partial<Page>) => vm.updatePage(page.id, patch);
+
+  const { data: products = [] } = useProjectProducts(vm.projectId);
 
   return (
     <aside className="flex w-[340px] flex-shrink-0 flex-col border-l border-rv-divider bg-rv-c1">
@@ -77,21 +97,20 @@ export function PropertiesPanel({ page, allPages, allRules }: Props) {
 
         {(page.type === "single_choice" || page.type === "multi_choice") && (
           <Section title="Behavior">
-            <Toggle on={!!page.required} label="Required" help="Visitor must answer to continue" />
             <Toggle
-              on={page.type === "multi_choice"}
-              label="Multiple selection"
-              help="Visitor can pick more than one option"
+              on={!!page.required}
+              label="Required"
+              help="Visitor must answer to continue"
+              onChange={(v) => set({ required: v })}
             />
-            <Toggle on={false} label="Randomize order" help="Shuffle options each session" />
-            <Toggle on={false} label='Add "Other" option' help="Adds a free-text fallback choice" />
-            <Toggle on={true} label="Vertical alignment" />
-            <Toggle on={false} label="Map to contacts" help="Sync answer to your CRM field" />
             {page.type === "multi_choice" && (
               <Field label="Max selections" className="mt-3">
                 <input
                   type="number"
-                  defaultValue={page.max_selections}
+                  value={page.max_selections ?? ""}
+                  onChange={(e) =>
+                    set({ max_selections: Number(e.currentTarget.value) || undefined })
+                  }
                   className="h-8 max-w-[100px] rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                 />
               </Field>
@@ -102,19 +121,26 @@ export function PropertiesPanel({ page, allPages, allRules }: Props) {
         {page.type === "number_input" && (
           <Section title="Range">
             <div className="grid grid-cols-3 gap-2">
-              <Field label="Min"><MonoInput defaultValue={page.min} /></Field>
-              <Field label="Max"><MonoInput defaultValue={page.max} /></Field>
-              <Field label="Step"><MonoInput defaultValue={page.step} /></Field>
+              <Field label="Min">
+                <MonoInput value={page.min} onChange={(v) => set({ min: v })} />
+              </Field>
+              <Field label="Max">
+                <MonoInput value={page.max} onChange={(v) => set({ max: v })} />
+              </Field>
+              <Field label="Step">
+                <MonoInput value={page.step} onChange={(v) => set({ step: v })} />
+              </Field>
             </div>
             <Field label="Suffix unit" className="mt-3">
               <input
-                defaultValue={page.suffix}
+                value={page.suffix ?? ""}
+                onChange={(e) => set({ suffix: e.currentTarget.value })}
                 placeholder="kg, lbs, years…"
                 className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
               />
             </Field>
             <div className="mt-3 border-t border-rv-divider pt-3">
-              <Toggle on={!!page.required} label="Required" />
+              <Toggle on={!!page.required} label="Required" onChange={(v) => set({ required: v })} />
             </div>
           </Section>
         )}
@@ -122,12 +148,22 @@ export function PropertiesPanel({ page, allPages, allRules }: Props) {
         {page.type === "slider" && (
           <Section title="Slider">
             <div className="grid grid-cols-3 gap-2">
-              <Field label="Min"><MonoInput defaultValue={page.min} /></Field>
-              <Field label="Max"><MonoInput defaultValue={page.max} /></Field>
-              <Field label="Step"><MonoInput defaultValue={page.step} /></Field>
+              <Field label="Min">
+                <MonoInput value={page.min} onChange={(v) => set({ min: v })} />
+              </Field>
+              <Field label="Max">
+                <MonoInput value={page.max} onChange={(v) => set({ max: v })} />
+              </Field>
+              <Field label="Step">
+                <MonoInput value={page.step} onChange={(v) => set({ step: v })} />
+              </Field>
             </div>
             <Field label="Label format · use {{value}}" className="mt-3">
-              <MonoInput defaultValue={page.format} />
+              <input
+                value={page.format ?? ""}
+                onChange={(e) => set({ format: e.currentTarget.value })}
+                className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+              />
             </Field>
           </Section>
         )}
@@ -135,11 +171,14 @@ export function PropertiesPanel({ page, allPages, allRules }: Props) {
         {page.type === "loading" && (
           <Section title="Loading">
             <Field label="Duration (ms) · 500–15000">
-              <MonoInput defaultValue={page.duration} />
+              <MonoInput value={page.duration} onChange={(v) => set({ duration: v })} />
             </Field>
             <Field label="Steps · one per line" className="mt-3">
               <textarea
-                defaultValue={(page.steps ?? []).join("\n")}
+                value={(page.steps ?? []).join("\n")}
+                onChange={(e) =>
+                  set({ steps: e.currentTarget.value.split("\n").filter(Boolean) })
+                }
                 rows={4}
                 className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
               />
@@ -171,43 +210,46 @@ export function PropertiesPanel({ page, allPages, allRules }: Props) {
         {page.type === "paywall" && (
           <>
             <Section title="Product">
-              <div className="flex items-center gap-2 rounded-md border border-rv-divider bg-rv-c2 px-2.5 py-2">
-                <div className="flex h-6 w-6 items-center justify-center rounded bg-gradient-to-br from-rv-warning to-[#fb923c] text-[12px] font-bold text-white">
-                  P
-                </div>
-                <div className="flex-1 text-[13px] text-foreground">Pro · Annual</div>
-                <ChevronDown size={14} className="text-rv-mute-500" />
-              </div>
-              <div className="mt-1.5 font-rv-mono text-[11px] text-rv-mute-500">
-                {page.productId} · $79.99/yr
-              </div>
+              <select
+                value={page.productId ?? ""}
+                onChange={(e) =>
+                  set({ productId: e.currentTarget.value || undefined })
+                }
+                className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+              >
+                <option value="">Choose a product…</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.identifier}>
+                    {p.displayName} · {p.identifier}
+                  </option>
+                ))}
+              </select>
             </Section>
             <Section title="Trial">
               <div className="grid grid-cols-3 gap-1 rounded-md border border-rv-divider bg-rv-c2 p-0.5">
                 {[
-                  ["None", false],
-                  ["3 days", false],
-                  ["7 days", true],
-                ].map(([label, active]) => (
-                  <button
-                    key={String(label)}
-                    type="button"
-                    className={cn(
-                      "h-7 cursor-pointer rounded text-[11px] font-medium transition",
-                      active
-                        ? "bg-rv-c4 text-foreground"
-                        : "text-rv-mute-600 hover:text-foreground",
-                    )}
-                  >
-                    {label as string}
-                  </button>
-                ))}
+                  { label: "None", value: undefined },
+                  { label: "3 days", value: 3 },
+                  { label: "7 days", value: 7 },
+                ].map((t) => {
+                  const active = (page.trial ?? undefined) === t.value;
+                  return (
+                    <button
+                      key={t.label}
+                      type="button"
+                      onClick={() => set({ trial: t.value })}
+                      className={cn(
+                        "h-7 cursor-pointer rounded text-[11px] font-medium transition",
+                        active
+                          ? "bg-rv-c4 text-foreground"
+                          : "text-rv-mute-600 hover:text-foreground",
+                      )}
+                    >
+                      {t.label}
+                    </button>
+                  );
+                })}
               </div>
-            </Section>
-            <Section title="Display">
-              <Toggle on={true} label="Show trial badge" />
-              <Toggle on={true} label="Show price footnote" />
-              <Toggle on={false} label="Hide skip option" help="Force the visitor to act on the paywall" />
             </Section>
           </>
         )}
@@ -216,17 +258,27 @@ export function PropertiesPanel({ page, allPages, allRules }: Props) {
           <Section title="Hand-off">
             <div className="text-[12px] leading-relaxed text-rv-mute-600">
               Configured globally in{" "}
-              <a href="#" className="text-rv-accent-500 underline-offset-2 hover:underline">
+              <a
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  vm.setActiveTab("settings");
+                }}
+                className="text-rv-accent-500 underline-offset-2 hover:underline"
+              >
                 Settings → Hand-off
               </a>
-              :
+              .
             </div>
             <div className="mt-2.5 rounded border border-rv-divider bg-rv-c2 px-3 py-2.5 font-rv-mono text-[11px] text-rv-mute-700">
               <div>
-                universal-link: <span className="text-rv-success">funnels.posely.app ✓</span>
+                universal-link:{" "}
+                <span className="text-rv-success">
+                  {vm.settings.universalLinkDomain || "not set"}
+                </span>
               </div>
               <div className="mt-1">
-                scheme: <span className="text-foreground">posely://</span>
+                scheme: <span className="text-foreground">{vm.settings.deepLinkScheme || "not set"}</span>
               </div>
             </div>
           </Section>
@@ -266,25 +318,19 @@ export function PropertiesPanel({ page, allPages, allRules }: Props) {
                   visitors fall through to the default below.
                 </div>
               )}
-              {rules.map((r, i) => (
-                <RuleEditor key={r.id} rule={r} idx={i} pageId={page.id} allPages={allPages} />
-              ))}
-              <button
-                type="button"
-                className="mt-2.5 inline-flex h-7 w-full cursor-pointer items-center justify-center gap-1.5 rounded border border-dashed border-rv-divider bg-rv-c2 px-2 text-[11px] text-rv-mute-600 transition hover:border-rv-accent-500 hover:text-rv-accent-500"
-              >
-                <Plus size={11} />
-                Add rule
-              </button>
+              <RuleEditor pageId={page.id} />
               <div className="mt-3 flex items-center gap-2 rounded bg-rv-c2 px-2.5 py-2 text-[11px] text-rv-mute-600">
                 <span>Otherwise</span>
                 <ArrowRight size={11} className="text-rv-mute-500" />
                 <select
-                  defaultValue=""
+                  value={vm.defaultNext[page.id] ?? ""}
+                  onChange={(e) =>
+                    vm.setDefaultNext(page.id, e.currentTarget.value || null)
+                  }
                   className="h-6 rounded border border-rv-divider bg-rv-c1 px-1.5 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
                 >
                   <option value="">next page ↓</option>
-                  {allPages
+                  {vm.pages
                     .filter((p) => p.id !== page.id)
                     .map((p) => (
                       <option key={p.id} value={p.id}>
@@ -292,29 +338,18 @@ export function PropertiesPanel({ page, allPages, allRules }: Props) {
                       </option>
                     ))}
                   <option value="paywall">⟶ paywall</option>
+                  <option value="end">⟶ end</option>
                 </select>
               </div>
             </>
           )}
         </Accordion>
-
-        <Section title="Comments">
-          <div className="text-[11px] text-rv-mute-500">
-            No comments yet. Tag a teammate to discuss this page.
-          </div>
-        </Section>
       </div>
     </aside>
   );
-}
+});
 
-function Section({
-  title,
-  children,
-}: {
-  title?: string;
-  children: React.ReactNode;
-}) {
+function Section({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
     <section className="border-b border-rv-divider px-4 py-3.5">
       {title && (
@@ -351,18 +386,21 @@ function Toggle({
   on,
   label,
   help,
+  onChange,
 }: {
   on: boolean;
   label: string;
   help?: string;
+  onChange?: (v: boolean) => void;
 }) {
   return (
-    <div className="flex items-center justify-between py-1.5">
+    <div
+      className="flex items-center justify-between py-1.5"
+      onClick={() => onChange?.(!on)}
+    >
       <div className="text-[12px] text-rv-mute-700" title={help}>
         {label}
-        {help && (
-          <span className="ml-1 cursor-help text-[10px] text-rv-mute-500">?</span>
-        )}
+        {help && <span className="ml-1 cursor-help text-[10px] text-rv-mute-500">?</span>}
       </div>
       <div
         role="switch"
@@ -402,10 +440,20 @@ function Field({
   );
 }
 
-function MonoInput({ defaultValue }: { defaultValue?: string | number }) {
+function MonoInput({
+  value,
+  onChange,
+}: {
+  value?: string | number;
+  onChange?: (v: number | undefined) => void;
+}) {
   return (
     <input
-      defaultValue={defaultValue}
+      value={value ?? ""}
+      onChange={(e) => {
+        const v = e.currentTarget.value;
+        onChange?.(v === "" ? undefined : Number(v));
+      }}
       className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[12px] text-foreground outline-none focus:border-rv-accent-500"
     />
   );
@@ -429,9 +477,7 @@ function Segmented<T extends string>({
           onClick={() => onChange(o.value)}
           className={cn(
             "inline-flex h-7 cursor-pointer items-center justify-center gap-1.5 rounded text-[11px] font-medium transition",
-            value === o.value
-              ? "bg-rv-c4 text-foreground"
-              : "text-rv-mute-600 hover:text-foreground",
+            value === o.value ? "bg-rv-c4 text-foreground" : "text-rv-mute-600 hover:text-foreground",
           )}
         >
           {o.icon}

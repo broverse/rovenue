@@ -133,14 +133,10 @@ export const BuilderShell = component(({ projectId }: Props) => {
           <>
             <ThumbRail />
             <CanvasEditor />
-            <PropertiesPanel
-              page={selectedPage}
-              allPages={vm.pages}
-              allRules={legacyFunnel.rules}
-            />
+            <PropertiesPanel />
           </>
         )}
-        {vm.activeTab === "workflow" && <WorkflowTab funnel={legacyFunnel} />}
+        {vm.activeTab === "workflow" && <WorkflowTab />}
         {vm.activeTab === "theme" && <ThemeTab theme={vm.theme} currentPage={selectedPage} />}
         {vm.activeTab === "settings" && <SettingsTab settings={vm.settings} />}
         {vm.activeTab === "sessions" && <SessionsTab sessions={sessions} />}
