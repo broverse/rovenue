@@ -1,23 +1,33 @@
-// Shared mock for RovenueNitroSpec — every test that touches the
-// native layer should use this so we have one place to maintain
-// the mock's behaviour.
+// Shared mock for RovenueModuleSpec — every test that touches the
+// native layer uses this. Provides:
+//   - All 15 façade methods as vi.fn() with reasonable default behaviour
+//   - addListener / removeListeners (Expo EventEmitter wire methods,
+//     no-ops since the stub's EventEmitter delegates to __addChangeListener)
+//   - __addChangeListener(cb) / __emit(event)         — change-event channel
+//   - __addLogListener(cb) / __emitLog(entry)         — log-event channel
+//   - __state — mutable test fixture state
 
 import { vi } from "vitest";
 import type {
   EntitlementDTO,
+  LogEntryDTO,
   ReceiptResultDTO,
-  RovenueNitroSpec,
+  RovenueModuleSpec,
   UserDTO,
-} from "../specs/RovenueNitroSpec.nitro";
+} from "../specs/RovenueModule.types";
 
-export type MockNative = RovenueNitroSpec & {
+export type MockNative = RovenueModuleSpec & {
   __state: {
     user: UserDTO;
     entitlements: Map<string, EntitlementDTO>;
     creditBalance: number;
-    listeners: Array<(event: string) => void>;
+    changeListeners: Array<(payload: { event: string }) => void>;
+    logListeners: Array<(entry: LogEntryDTO) => void>;
   };
   __emit(event: string): void;
+  __emitLog(entry: LogEntryDTO): void;
+  __addChangeListener(cb: (payload: { event: string }) => void): () => void;
+  __addLogListener(cb: (entry: LogEntryDTO) => void): () => void;
 };
 
 export function makeMockNative(): MockNative {
@@ -25,18 +35,36 @@ export function makeMockNative(): MockNative {
     user: { anonId: "anon_test", knownUserId: null } as UserDTO,
     entitlements: new Map<string, EntitlementDTO>(),
     creditBalance: 0,
-    listeners: [] as Array<(event: string) => void>,
+    changeListeners: [] as Array<(payload: { event: string }) => void>,
+    logListeners: [] as Array<(entry: LogEntryDTO) => void>,
   };
 
   const mock: MockNative = {
     __state: state,
     __emit(event: string) {
-      state.listeners.forEach((cb) => cb(event));
+      state.changeListeners.forEach((cb) => cb({ event }));
+    },
+    __emitLog(entry: LogEntryDTO) {
+      state.logListeners.forEach((cb) => cb(entry));
+    },
+    __addChangeListener(cb) {
+      state.changeListeners.push(cb);
+      return () => {
+        const i = state.changeListeners.indexOf(cb);
+        if (i >= 0) state.changeListeners.splice(i, 1);
+      };
+    },
+    __addLogListener(cb) {
+      state.logListeners.push(cb);
+      return () => {
+        const i = state.logListeners.indexOf(cb);
+        if (i >= 0) state.logListeners.splice(i, 1);
+      };
     },
     configure: vi.fn(),
     shutdown: vi.fn(),
     setForeground: vi.fn(),
-    getVersion: vi.fn(() => "0.0.2"),
+    getVersion: vi.fn(() => "0.1.0"),
     currentUser: vi.fn(async () => state.user),
     identify: vi.fn(async (knownUserId: string) => {
       state.user = { ...state.user, knownUserId };
@@ -72,13 +100,10 @@ export function makeMockNative(): MockNative {
       entitlementsRefreshed: true,
       creditsRefreshed: false,
     })),
-    addChangeListener: vi.fn((cb: (event: string) => void) => {
-      state.listeners.push(cb);
-      return () => {
-        const i = state.listeners.indexOf(cb);
-        if (i >= 0) state.listeners.splice(i, 1);
-      };
-    }),
+    // Expo EventEmitter wire methods — no-op (stub's EventEmitter
+    // delegates to __addChangeListener/__addLogListener instead).
+    addListener: vi.fn(),
+    removeListeners: vi.fn(),
   } as unknown as MockNative;
 
   return mock;

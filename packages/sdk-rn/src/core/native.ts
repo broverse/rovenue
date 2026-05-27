@@ -1,18 +1,30 @@
-// Lazily creates the Nitro hybrid object the first time we touch it.
+// Lazily acquires the native Expo module the first time we touch it.
 // Tests override `_setNativeForTesting` to inject a mock instead.
+//
+// `getEmitter()` constructs an EventEmitter against the current native
+// instance — lazy so test injection is observed.
 
-import { NitroModules } from "react-native-nitro-modules";
-import type { RovenueNitroSpec } from "../specs/RovenueNitroSpec.nitro";
+import { EventEmitter, requireNativeModule } from "expo-modules-core";
+import type { RovenueModuleSpec } from "../specs/RovenueModule.types";
 
-let instance: RovenueNitroSpec | null = null;
+let instance: RovenueModuleSpec | null = null;
+let emitter: EventEmitter | null = null;
 
-export function getNative(): RovenueNitroSpec {
+export function getNative(): RovenueModuleSpec {
   if (instance) return instance;
-  instance = NitroModules.createHybridObject<RovenueNitroSpec>("RovenueNitroSpec");
+  instance = requireNativeModule<RovenueModuleSpec>("Rovenue");
   return instance;
 }
 
-// Test seam: replaces the cached instance. Production code MUST NOT call this.
-export function _setNativeForTesting(mock: RovenueNitroSpec | null): void {
+export function getEmitter(): EventEmitter {
+  if (emitter) return emitter;
+  emitter = new EventEmitter(getNative() as any);
+  return emitter;
+}
+
+// Test seam: replaces the cached instance + forces a fresh emitter.
+// Production code MUST NOT call this.
+export function _setNativeForTesting(mock: RovenueModuleSpec | null): void {
   instance = mock;
+  emitter = null;
 }

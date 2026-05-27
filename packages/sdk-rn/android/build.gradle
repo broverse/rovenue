@@ -1,0 +1,48 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+group = 'dev.rovenue.sdkrn'
+version = '0.1.0'
+
+def expoModulesCorePlugin = new File(
+    project(':expo-modules-core').projectDir,
+    'ExpoModulesCorePlugin.gradle'
+)
+if (expoModulesCorePlugin.exists()) {
+    apply from: expoModulesCorePlugin
+    applyKotlinExpoModulesCorePlugin()
+}
+
+android {
+    namespace 'dev.rovenue.sdkrn'
+    compileSdkVersion safeExtGet('compileSdkVersion', 34)
+
+    defaultConfig {
+        minSdkVersion safeExtGet('minSdkVersion', 24)
+        targetSdkVersion safeExtGet('targetSdkVersion', 34)
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation project(':expo-modules-core')
+    // M4 Kotlin façade — provided by the consumer's settings.gradle
+    // via composite build (includeBuild) + dep coordinate injected by
+    // our config plugin (plugin/withRovenueAndroid.ts).
+    implementation 'dev.rovenue:sdk:0.1.0'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0'
+}
+
+// Helper for Expo's project-property safe lookups (provided when this
+// build.gradle is applied inside an Expo project; defaults work for
+// standalone evaluation).
+def safeExtGet(prop, fallback) {
+    rootProject.ext.has(prop) ? rootProject.ext.get(prop) : fallback
+}

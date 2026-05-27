@@ -1,9 +1,10 @@
 plugins {
     kotlin("jvm") version "1.9.23"
+    `maven-publish`
 }
 
 group = "dev.rovenue"
-version = "0.0.1"
+version = "0.1.0"
 
 repositories {
     mavenCentral()
@@ -28,4 +29,15 @@ tasks.test {
         "jna.library.path",
         rootProject.projectDir.resolve("../../target/release").canonicalPath
     )
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            from(components["java"])
+            groupId = "dev.rovenue"
+            artifactId = "sdk"
+            version = "0.1.0"
+        }
+    }
 }

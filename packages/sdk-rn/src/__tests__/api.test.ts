@@ -45,7 +45,8 @@ describe("Rovenue imperative API", () => {
   it("configure forwards to native + starts event bridge", () => {
     configure({ apiKey: "pk_test", baseUrl: "https://api.example.com", debug: true });
     expect(native.configure).toHaveBeenCalledWith("pk_test", "https://api.example.com", true);
-    expect(native.addChangeListener).toHaveBeenCalledTimes(1);
+    // Event bridge attached one change listener via the emitter.
+    expect(native.__state.changeListeners.length).toBe(1);
   });
 
   it("configure debug defaults to false when omitted", () => {

@@ -1,22 +1,19 @@
 import { defineConfig } from "vitest/config";
 import { resolve } from "node:path";
 
-// react-native-nitro-modules transitively imports react-native, whose
-// `index.js` contains Flow syntax that vite-node cannot parse. Tests
-// never need the real native bindings — they inject mocks via
-// _setNativeForTesting — so we alias the module to a tiny stub.
+// expo-modules-core transitively imports react-native (Flow syntax)
+// which vite-node cannot parse. Tests inject mocks via
+// _setNativeForTesting; the stub only needs to satisfy imports.
 export default defineConfig({
   resolve: {
     alias: {
-      "react-native-nitro-modules": resolve(
+      "expo-modules-core": resolve(
         __dirname,
-        "src/__tests__/_stubNitroModules.ts",
+        "src/__tests__/_stubExpoModules.ts",
       ),
     },
   },
   test: {
-    // .tsx tests render React components, which need a DOM. Plain
-    // .ts tests stay in the default node env (cheaper to spin up).
     environmentMatchGlobs: [
       ["**/*.test.tsx", "happy-dom"],
     ],

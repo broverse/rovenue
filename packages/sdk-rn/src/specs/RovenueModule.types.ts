@@ -1,19 +1,7 @@
-// RovenueNitroSpec — HybridObject interface for Nitrogen. Method
-// signatures mirror the M3 Swift `Rovenue` and M4 Kotlin `Rovenue`
-// public surfaces verbatim.
-//
-// IMPORTANT: this file is the Nitrogen input. Nitrogen is NOT wired
-// into the build in M5 (M6 packaging plan handles that). For M5 we
-// hand-import this type for vitest typechecking only; the actual
-// native module is created via `NitroModules.createHybridObject` at
-// runtime, and `createHybridObject` returns `any` so we don't need
-// Nitrogen-generated code paths.
-
-import type { HybridObject } from "react-native-nitro-modules";
-
-// DTOs — the wire shapes. Identical to the public types in ../types.ts;
-// kept separate so Nitrogen can generate native structs from this file
-// without leaking RN-only types into the public API.
+// RovenueModule — TypeScript shape of the native Expo module. Mirrors
+// the M3 Swift / M4 Kotlin public surfaces exactly. Used only for
+// typechecking; the runtime instance is fetched via
+// `requireNativeModule('Rovenue')`.
 
 export type UserDTO = {
   anonId: string;
@@ -33,8 +21,13 @@ export type ReceiptResultDTO = {
   creditsRefreshed: boolean;
 };
 
-export interface RovenueNitroSpec
-  extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
+export type LogEntryDTO = {
+  level: "debug" | "info" | "warn" | "error";
+  message: string;
+  data?: Record<string, unknown>;
+};
+
+export interface RovenueModuleSpec {
   // Lifecycle
   configure(apiKey: string, baseUrl: string, debug: boolean): void;
   shutdown(): void;
@@ -59,6 +52,9 @@ export interface RovenueNitroSpec
   postAppleReceipt(jws: string, productId: string): Promise<ReceiptResultDTO>;
   postGoogleReceipt(receipt: string, productId: string): Promise<ReceiptResultDTO>;
 
-  // Observer — returns an unsubscribe function
-  addChangeListener(cb: (event: string) => void): () => void;
+  // Required by `new EventEmitter(nativeModule)` — Expo's runtime checks
+  // these exist; our mock implements them as no-ops because emit routing
+  // happens through __addChangeListener / __emit on the mock state.
+  addListener(eventName: string): void;
+  removeListeners(count: number): void;
 }

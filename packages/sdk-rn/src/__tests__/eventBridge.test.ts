@@ -54,14 +54,16 @@ describe("eventBridge", () => {
   it("startEventBridge is idempotent (second call is no-op)", () => {
     startEventBridge();
     startEventBridge();
-    expect(native.addChangeListener).toHaveBeenCalledTimes(1);
+    expect(native.__state.changeListeners.length).toBe(1);
   });
 
   it("stopEventBridge unregisters and allows restart", () => {
     startEventBridge();
+    expect(native.__state.changeListeners.length).toBe(1);
     stopEventBridge();
+    expect(native.__state.changeListeners.length).toBe(0);
     startEventBridge();
-    expect(native.addChangeListener).toHaveBeenCalledTimes(2);
+    expect(native.__state.changeListeners.length).toBe(1);
   });
 
   it("unknown events are ignored without throwing", async () => {

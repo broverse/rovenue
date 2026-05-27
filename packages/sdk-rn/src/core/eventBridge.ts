@@ -1,25 +1,21 @@
-// eventBridge — converts native ChangeEvent callbacks into store mutations.
-// Started by configure(); stopped by shutdown(). Idempotent: a second
-// startEventBridge() call is a no-op.
+// eventBridge — converts native `onChange` events into ReactiveStore
+// mutations. Started by configure(); stopped by shutdown().
 //
-// Why we re-fetch from native instead of trusting the event payload:
-// the event is a "something changed" hint with no value attached
-// (matches the M3/M4 ChangeEvent enum's intentional design). The
-// authoritative value lives in the Rust core's SQLite cache; the
-// native getter reads it. This costs one extra bridge call per event
-// but keeps cache invalidation simple.
+// In M6 we subscribe via Expo's EventEmitter ("onChange" event) instead
+// of M5's native.addChangeListener callback. The handler is otherwise
+// identical: re-fetch from native on each hint, store the result.
 
-import { getNative } from "./native";
+import { getEmitter, getNative } from "./native";
 import { store } from "../store/reactiveStore";
 
-let unsubscribe: (() => void) | null = null;
+let subscription: { remove(): void } | null = null;
 
 export function startEventBridge(): void {
-  if (unsubscribe) return;
+  if (subscription) return;
   const native = getNative();
-  unsubscribe = native.addChangeListener(async (event) => {
+  subscription = getEmitter().addListener("onChange", async (payload: { event: string }) => {
     try {
-      switch (event) {
+      switch (payload.event) {
         case "IDENTITY_CHANGED": {
           const u = await native.currentUser();
           store.set("user", u);
@@ -39,8 +35,6 @@ export function startEventBridge(): void {
           break;
         }
         default:
-          // Unknown event — ignore silently. The native ChangeEvent
-          // enum may grow over time; older JS clients should not crash.
           break;
       }
     } catch {
@@ -50,6 +44,6 @@ export function startEventBridge(): void {
 }
 
 export function stopEventBridge(): void {
-  unsubscribe?.();
-  unsubscribe = null;
+  subscription?.remove();
+  subscription = null;
 }

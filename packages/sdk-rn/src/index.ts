@@ -42,7 +42,8 @@ import { creditBalance, refreshCredits, consumeCredits } from "./api/credits";
 import { postAppleReceipt, postGoogleReceipt } from "./api/receipts";
 import { setForeground, shutdown } from "./api/lifecycle";
 import { SDK_VERSION } from "./version";
-import { getNative } from "./core/native";
+import { getEmitter } from "./core/native";
+import { setLogHandler } from "./api/log";
 
 export const Rovenue = {
   configure,
@@ -59,9 +60,14 @@ export const Rovenue = {
   postGoogleReceipt,
   setForeground,
   shutdown,
+  setLogHandler,
   addChangeListener: (cb: (event: import("./types").ChangeEvent) => void): (() => void) => {
-    return getNative().addChangeListener((e) => cb(e as import("./types").ChangeEvent));
+    const sub = getEmitter().addListener("onChange", (payload: { event: string }) => {
+      cb(payload.event as import("./types").ChangeEvent);
+    });
+    return () => sub.remove();
   },
 } as const;
 
 export type { RovenueConfig } from "./api/configure";
+export type { LogEntry } from "./api/log";

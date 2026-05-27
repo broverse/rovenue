@@ -59,9 +59,43 @@ fi
 
 # RN: vitest covers the Cargo.toml-version sync test, which is the parity assertion.
 echo "→ RN test"
-pnpm --filter @rovenue/sdk-rn test 2>&1 | tee /tmp/rovenue-rn-parity.log >/dev/null
+pnpm --filter @rovenue/react-native-sdk test 2>&1 | tee /tmp/rovenue-rn-parity.log >/dev/null
 grep -E "Test Files +1 passed|[0-9]+ passed" /tmp/rovenue-rn-parity.log >/dev/null
-echo "  ✓ RN stub tests passed"
+echo "  ✓ RN unit tests passed"
+
+# ---- RN sample app native compile (best-effort) ----
+echo "→ RN sample app native compile"
+
+# iOS
+if command -v xcodebuild >/dev/null 2>&1 && [ -d "/Applications/Xcode.app" ]; then
+  (
+    set -e
+    cd examples/sample-rn-expo
+    pnpm install --frozen-lockfile >/dev/null 2>&1 || true
+    pnpm expo prebuild --platform ios --no-install >/tmp/rovenue-sample-ios.log 2>&1
+    (cd ios && pod install >>/tmp/rovenue-sample-ios.log 2>&1)
+    SCHEME=$(ls ios/*.xcworkspace | head -n 1 | xargs -I {} basename {} .xcworkspace)
+    xcodebuild -workspace "ios/${SCHEME}.xcworkspace" -scheme "${SCHEME}" \
+      -sdk iphonesimulator -configuration Debug build \
+      >>/tmp/rovenue-sample-ios.log 2>&1
+  )
+  echo "  ✓ iOS sample build succeeded"
+else
+  echo "  ~ xcodebuild unavailable — iOS sample build skipped"
+fi
+
+# Android
+if command -v java >/dev/null 2>&1 && [ -n "${ANDROID_HOME:-}" ]; then
+  (
+    set -e
+    cd examples/sample-rn-expo
+    pnpm expo prebuild --platform android --no-install >/tmp/rovenue-sample-android.log 2>&1
+    (cd android && ./gradlew assembleDebug >>/tmp/rovenue-sample-android.log 2>&1)
+  )
+  echo "  ✓ Android sample build succeeded"
+else
+  echo "  ~ gradle/Android SDK unavailable — Android sample build skipped"
+fi
 
 echo
 echo "✓ Parity: all available codepaths agree on version $RUST_VER"
