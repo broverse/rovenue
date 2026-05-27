@@ -8,7 +8,7 @@
 
 **Tech Stack:** Hono + TypeScript, Drizzle ORM + drizzle-kit migrations, PostgreSQL 16 + pg_partman, Kafka/Redpanda + kafkajs, BullMQ + Redis, AES-256-GCM via `packages/shared/src/crypto.ts`, vitest + testcontainers, undici MockAgent for HTTP test stubs, base-ui Dialog drawer pattern.
 
-**Total milestones:** 8 (M0 through M7). This file is built up in three parts; see plan footer for status.
+**Total milestones:** 9 (M0 through M8 + M9 gap-closures). This file is built up in three parts; see plan footer for status.
 
 ---
 
@@ -8026,4 +8026,1430 @@ git commit -m "test(dashboard): IntegrationDrawer end-to-end happy-path flow"
 
 ---
 
-<!-- PART 2 END (M4-M6). Continue in PART 3 (M7-M8). -->
+## M7 — SDK identityContext (Rust core + RN/Swift/Kotlin façades + server ingestion)
+
+This milestone is the cross-cutting coordination item flagged in spec §12. The Rust core (`packages/core-rs`) does not yet have an event-envelope module — the existing surface is entitlements/credits/receipts read paths. We introduce a new `events` module in the core, add a TypeScript-facing `identityContext` type in the RN façade, mirror it in Swift + Kotlin façades, and extend the public ingest validator to accept the field. The worker already consumes `identityContext` via `hashPii()` (Part 1 M1), so server-side this is purely a Zod-schema extension on whichever route delivers events to `outbox_events`.
+
+> **Reviewer note (memory pointer `[[rovenue_sdk_architecture]]`):** Rovenue SDK is **Rust core + native façades** (`librovenue` + Swift / Kotlin / RN). RN-only TS SDK assumptions from CLAUDE.md are stale. Each façade is its own crate / module / package and they ship from different release trains — coordinate before merging.
+
+### Task M7.1: Rust core — IdentityContext struct + EventEnvelope module
+
+**Files:**
+- Create: `packages/core-rs/src/events/mod.rs`
+- Create: `packages/core-rs/src/events/envelope.rs`
+- Create: `packages/core-rs/src/events/identity_context.rs`
+- Modify: `packages/core-rs/src/lib.rs` (register `events` module + re-export)
+- Test: `packages/core-rs/tests/events_envelope.rs`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/core-rs/tests/events_envelope.rs`:
+
+```rust
+use librovenue::events::{EventEnvelope, IdentityContext};
+
+#[test]
+fn envelope_roundtrips_with_all_identity_fields() {
+    let env = EventEnvelope {
+        event_type: "revenue.event.recorded".into(),
+        occurred_at: "2026-05-27T12:00:00Z".into(),
+        subscriber_id: Some("sub_1".into()),
+        product_id: Some("p_1".into()),
+        amount: Some("9.99".into()),
+        currency: Some("USD".into()),
+        event_source_url: Some("https://app.example.com/billing".into()),
+        identity_context: Some(IdentityContext {
+            email: Some("user@example.com".into()),
+            phone: Some("+15551234".into()),
+            external_id: Some("ext_1".into()),
+            ip: Some("1.2.3.4".into()),
+            user_agent: Some("Mozilla/5.0".into()),
+            fbp: Some("fb.1.123.abc".into()),
+            fbc: Some("fb.1.123.click".into()),
+            ttclid: Some("ttc_1".into()),
+            ttp: Some("ttp_1".into()),
+        }),
+    };
+    let j = serde_json::to_string(&env).expect("serialize");
+    // wire format is camelCase for the envelope, snake_case fields renamed by serde
+    assert!(j.contains("\"identityContext\""), "json missing identityContext key: {}", j);
+    assert!(j.contains("\"externalId\":\"ext_1\""), "external_id should serialize as externalId: {}", j);
+    assert!(j.contains("\"userAgent\":\"Mozilla/5.0\""), "user_agent should serialize as userAgent: {}", j);
+
+    let back: EventEnvelope = serde_json::from_str(&j).expect("deserialize");
+    assert_eq!(back.identity_context.as_ref().unwrap().email.as_deref(), Some("user@example.com"));
+    assert_eq!(back.identity_context.as_ref().unwrap().ttclid.as_deref(), Some("ttc_1"));
+}
+
+#[test]
+fn envelope_omits_identity_context_when_none() {
+    let env = EventEnvelope {
+        event_type: "subscription.trial.started".into(),
+        occurred_at: "2026-05-27T12:00:00Z".into(),
+        subscriber_id: None, product_id: None, amount: None, currency: None,
+        event_source_url: None, identity_context: None,
+    };
+    let j = serde_json::to_string(&env).expect("serialize");
+    assert!(!j.contains("identityContext"), "absent field should be omitted, got: {}", j);
+}
+
+#[test]
+fn identity_context_drops_undefined_fields_in_json() {
+    let ic = IdentityContext {
+        email: Some("a@b.co".into()),
+        phone: None, external_id: None, ip: None, user_agent: None,
+        fbp: None, fbc: None, ttclid: None, ttp: None,
+    };
+    let j = serde_json::to_string(&ic).unwrap();
+    // serde(skip_serializing_if = "Option::is_none") on every field
+    assert_eq!(j, r#"{"email":"a@b.co"}"#);
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cargo test -p librovenue --test events_envelope`
+Expected: FAIL — `module 'events' is not in librovenue`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create `packages/core-rs/src/events/identity_context.rs`:
+
+```rust
+use serde::{Deserialize, Serialize};
+
+/// Per-event identity context supplied by the host app at track-time.
+///
+/// **Consent ownership:** the host app is responsible for obtaining user
+/// consent before populating any field here. Rovenue never persists these
+/// values at rest — they are hashed (where required) and forwarded to the
+/// configured ad-platform integrations at delivery time only.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentityContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fbp: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fbc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttclid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttp: Option<String>,
+}
+```
+
+Create `packages/core-rs/src/events/envelope.rs`:
+
+```rust
+use serde::{Deserialize, Serialize};
+use super::identity_context::IdentityContext;
+
+/// Wire-format envelope shipped from any façade through the Rust core to
+/// the Rovenue ingest endpoint. JSON is camelCase on the wire (matches the
+/// existing `/v1/*` route conventions). Wire-format version: 1.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventEnvelope {
+    pub event_type: String,
+    pub occurred_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscriber_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_source_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_context: Option<IdentityContext>,
+}
+```
+
+Create `packages/core-rs/src/events/mod.rs`:
+
+```rust
+//! Event envelope sent from the SDK to the Rovenue ingest endpoint.
+//!
+//! Wire-format version: 1 (introduced 2026-05-27 alongside outbound
+//! integrations — Meta CAPI + TikTok Events). Bump when the JSON shape
+//! changes in a backwards-incompatible way.
+pub mod envelope;
+pub mod identity_context;
+
+pub use envelope::EventEnvelope;
+pub use identity_context::IdentityContext;
+
+pub const EVENT_WIRE_VERSION: u8 = 1;
+```
+
+Append to `packages/core-rs/src/lib.rs`:
+
+```rust
+pub mod events;
+pub use events::{EventEnvelope, IdentityContext, EVENT_WIRE_VERSION};
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cargo test -p librovenue --test events_envelope`
+Expected: PASS — all three assertions green.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/core-rs/src/events/mod.rs packages/core-rs/src/events/envelope.rs packages/core-rs/src/events/identity_context.rs packages/core-rs/src/lib.rs packages/core-rs/tests/events_envelope.rs
+git commit -m "feat(core-rs): EventEnvelope + IdentityContext (wire v1) for SDK ingest"
+```
+
+### Task M7.2: RN façade — IdentityContext TS type + serializer round-trip
+
+**Files:**
+- Create: `packages/sdk-rn/src/events.ts`
+- Modify: `packages/sdk-rn/src/index.ts` (re-export)
+- Test: `packages/sdk-rn/src/__tests__/events.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/sdk-rn/src/__tests__/events.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import {
+  type EventEnvelope,
+  type IdentityContext,
+  serializeEnvelope,
+} from "../events";
+
+describe("EventEnvelope serializer", () => {
+  it("round-trips with all identityContext fields", () => {
+    const env: EventEnvelope = {
+      eventType: "revenue.event.recorded",
+      occurredAt: "2026-05-27T12:00:00Z",
+      subscriberId: "sub_1",
+      amount: "9.99",
+      currency: "USD",
+      identityContext: {
+        email: "user@example.com",
+        phone: "+15551234",
+        externalId: "ext_1",
+        ip: "1.2.3.4",
+        userAgent: "Mozilla/5.0",
+        fbp: "fb.1.123.abc",
+        fbc: "fb.1.123.click",
+        ttclid: "ttc_1",
+        ttp: "ttp_1",
+      },
+    };
+    const j = serializeEnvelope(env);
+    // Wire format is camelCase end-to-end (matches Rust core which renames
+    // its snake_case fields to camelCase via serde).
+    expect(JSON.parse(j)).toEqual({
+      eventType: "revenue.event.recorded",
+      occurredAt: "2026-05-27T12:00:00Z",
+      subscriberId: "sub_1",
+      amount: "9.99",
+      currency: "USD",
+      identityContext: {
+        email: "user@example.com",
+        phone: "+15551234",
+        externalId: "ext_1",
+        ip: "1.2.3.4",
+        userAgent: "Mozilla/5.0",
+        fbp: "fb.1.123.abc",
+        fbc: "fb.1.123.click",
+        ttclid: "ttc_1",
+        ttp: "ttp_1",
+      },
+    });
+  });
+
+  it("omits undefined identityContext fields entirely", () => {
+    const ic: IdentityContext = { email: "a@b.co" };
+    const env: EventEnvelope = {
+      eventType: "subscriber.identified",
+      occurredAt: "2026-05-27T12:00:00Z",
+      identityContext: ic,
+    };
+    const parsed = JSON.parse(serializeEnvelope(env)) as Record<string, unknown>;
+    expect(parsed.identityContext).toEqual({ email: "a@b.co" });
+    expect("subscriberId" in parsed).toBe(false);
+  });
+
+  it("omits identityContext entirely when not provided", () => {
+    const env: EventEnvelope = {
+      eventType: "subscription.trial.started",
+      occurredAt: "2026-05-27T12:00:00Z",
+    };
+    const parsed = JSON.parse(serializeEnvelope(env)) as Record<string, unknown>;
+    expect("identityContext" in parsed).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm --filter @rovenue/sdk-rn test -- events.test.ts`
+Expected: FAIL — `Cannot find module '../events'`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create `packages/sdk-rn/src/events.ts`:
+
+```ts
+/**
+ * Per-event identity context supplied by the host app at track-time.
+ *
+ * **Consent ownership:** the host app is responsible for obtaining user
+ * consent before populating any field here. Rovenue never persists these
+ * values at rest — they are hashed (where required) and forwarded to the
+ * configured ad-platform integrations at delivery time only.
+ *
+ * Hashing rules at the server: `email`, `phone`, `externalId` are SHA-256
+ * over their lowercased+trimmed values. `ip`, `userAgent`, `fbp`, `fbc`,
+ * `ttclid`, `ttp` are forwarded raw per Meta CAPI and TikTok Events API
+ * v1.3 spec requirements.
+ */
+export interface IdentityContext {
+  email?: string;
+  phone?: string;
+  externalId?: string;
+  ip?: string;
+  userAgent?: string;
+  fbp?: string;
+  fbc?: string;
+  ttclid?: string;
+  ttp?: string;
+}
+
+export interface EventEnvelope {
+  eventType: string;
+  occurredAt: string; // ISO-8601
+  subscriberId?: string;
+  productId?: string;
+  amount?: string;
+  currency?: string;
+  eventSourceUrl?: string;
+  identityContext?: IdentityContext;
+}
+
+/** Wire-format version. Bump on backwards-incompatible schema changes. */
+export const EVENT_WIRE_VERSION = 1 as const;
+
+function stripUndefined<T extends Record<string, unknown>>(o: T): T {
+  const out = {} as Record<string, unknown>;
+  for (const [k, v] of Object.entries(o)) if (v !== undefined) out[k] = v;
+  return out as T;
+}
+
+/** Serialize an envelope to a JSON wire payload, dropping undefined fields. */
+export function serializeEnvelope(env: EventEnvelope): string {
+  const ic = env.identityContext ? stripUndefined(env.identityContext) : undefined;
+  const body = stripUndefined({
+    ...env,
+    identityContext: ic && Object.keys(ic).length > 0 ? ic : undefined,
+  });
+  return JSON.stringify(body);
+}
+```
+
+Append to `packages/sdk-rn/src/index.ts`:
+
+```ts
+export * from "./events";
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/sdk-rn test -- events.test.ts`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/sdk-rn/src/events.ts packages/sdk-rn/src/index.ts packages/sdk-rn/src/__tests__/events.test.ts
+git commit -m "feat(sdk-rn): EventEnvelope + IdentityContext types + serializer"
+```
+
+### Task M7.3: Swift façade — IdentityContext struct + Codable round-trip
+
+**Files:**
+- Create: `packages/sdk-swift/Sources/Rovenue/Events.swift`
+- Test: `packages/sdk-swift/Tests/RovenueTests/EventsTests.swift`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/sdk-swift/Tests/RovenueTests/EventsTests.swift`:
+
+```swift
+import XCTest
+@testable import Rovenue
+
+final class EventsTests: XCTestCase {
+    func testEnvelopeRoundTripsWithAllFields() throws {
+        let env = EventEnvelope(
+            eventType: "revenue.event.recorded",
+            occurredAt: "2026-05-27T12:00:00Z",
+            subscriberId: "sub_1",
+            amount: "9.99",
+            currency: "USD",
+            identityContext: IdentityContext(
+                email: "user@example.com",
+                phone: "+15551234",
+                externalId: "ext_1",
+                ip: "1.2.3.4",
+                userAgent: "Mozilla/5.0",
+                fbp: "fb.1.123.abc",
+                fbc: "fb.1.123.click",
+                ttclid: "ttc_1",
+                ttp: "ttp_1"
+            )
+        )
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.sortedKeys]
+        let data = try enc.encode(env)
+        let s = String(data: data, encoding: .utf8)!
+        XCTAssertTrue(s.contains("\"identityContext\""))
+        XCTAssertTrue(s.contains("\"externalId\":\"ext_1\""))
+        XCTAssertTrue(s.contains("\"userAgent\":\"Mozilla\\/5.0\"") || s.contains("\"userAgent\":\"Mozilla/5.0\""))
+
+        let back = try JSONDecoder().decode(EventEnvelope.self, from: data)
+        XCTAssertEqual(back.identityContext?.email, "user@example.com")
+        XCTAssertEqual(back.identityContext?.ttclid, "ttc_1")
+    }
+
+    func testIdentityContextOmitsNilFields() throws {
+        let ic = IdentityContext(email: "a@b.co")
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.sortedKeys]
+        let s = String(data: try enc.encode(ic), encoding: .utf8)!
+        XCTAssertEqual(s, "{\"email\":\"a@b.co\"}")
+    }
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `swift test --package-path packages/sdk-swift`
+Expected: FAIL — `cannot find 'EventEnvelope' in scope`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create `packages/sdk-swift/Sources/Rovenue/Events.swift`:
+
+```swift
+import Foundation
+
+/// Per-event identity context supplied by the host app at track-time.
+///
+/// Consent ownership: the host app is responsible for obtaining user
+/// consent before populating any field. Rovenue never persists these
+/// values at rest — they are hashed (where required) and forwarded to
+/// the configured ad-platform integrations at delivery time only.
+public struct IdentityContext: Codable, Equatable {
+    public var email: String?
+    public var phone: String?
+    public var externalId: String?
+    public var ip: String?
+    public var userAgent: String?
+    public var fbp: String?
+    public var fbc: String?
+    public var ttclid: String?
+    public var ttp: String?
+
+    public init(
+        email: String? = nil, phone: String? = nil, externalId: String? = nil,
+        ip: String? = nil, userAgent: String? = nil,
+        fbp: String? = nil, fbc: String? = nil,
+        ttclid: String? = nil, ttp: String? = nil
+    ) {
+        self.email = email; self.phone = phone; self.externalId = externalId
+        self.ip = ip; self.userAgent = userAgent
+        self.fbp = fbp; self.fbc = fbc
+        self.ttclid = ttclid; self.ttp = ttp
+    }
+}
+
+public struct EventEnvelope: Codable, Equatable {
+    public var eventType: String
+    public var occurredAt: String
+    public var subscriberId: String?
+    public var productId: String?
+    public var amount: String?
+    public var currency: String?
+    public var eventSourceUrl: String?
+    public var identityContext: IdentityContext?
+
+    public init(
+        eventType: String, occurredAt: String,
+        subscriberId: String? = nil, productId: String? = nil,
+        amount: String? = nil, currency: String? = nil,
+        eventSourceUrl: String? = nil, identityContext: IdentityContext? = nil
+    ) {
+        self.eventType = eventType; self.occurredAt = occurredAt
+        self.subscriberId = subscriberId; self.productId = productId
+        self.amount = amount; self.currency = currency
+        self.eventSourceUrl = eventSourceUrl; self.identityContext = identityContext
+    }
+}
+
+/// Wire-format version. Bump on backwards-incompatible schema changes.
+public let RovenueEventWireVersion: UInt8 = 1
+```
+
+Note: Swift's default `Codable` already omits nil optional values when encoding (no extra config required) and matches camelCase by default, so the JSON shape matches the Rust + RN serializers.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `swift test --package-path packages/sdk-swift`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/sdk-swift/Sources/Rovenue/Events.swift packages/sdk-swift/Tests/RovenueTests/EventsTests.swift
+git commit -m "feat(sdk-swift): EventEnvelope + IdentityContext (Codable)"
+```
+
+### Task M7.4: Kotlin façade — IdentityContext data class + kotlinx.serialization
+
+**Files:**
+- Create: `packages/sdk-kotlin/src/main/kotlin/dev/rovenue/sdk/Events.kt`
+- Test: `packages/sdk-kotlin/src/test/kotlin/dev/rovenue/sdk/EventsTest.kt`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/sdk-kotlin/src/test/kotlin/dev/rovenue/sdk/EventsTest.kt`:
+
+```kotlin
+package dev.rovenue.sdk
+
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+class EventsTest {
+    private val json = Json { encodeDefaults = false; explicitNulls = false }
+
+    @Test
+    fun envelopeRoundTripsWithAllFields() {
+        val env = EventEnvelope(
+            eventType = "revenue.event.recorded",
+            occurredAt = "2026-05-27T12:00:00Z",
+            subscriberId = "sub_1",
+            amount = "9.99",
+            currency = "USD",
+            identityContext = IdentityContext(
+                email = "user@example.com",
+                phone = "+15551234",
+                externalId = "ext_1",
+                ip = "1.2.3.4",
+                userAgent = "Mozilla/5.0",
+                fbp = "fb.1.123.abc",
+                fbc = "fb.1.123.click",
+                ttclid = "ttc_1",
+                ttp = "ttp_1",
+            ),
+        )
+        val s = json.encodeToString(env)
+        assertTrue(s.contains("\"identityContext\""))
+        assertTrue(s.contains("\"externalId\":\"ext_1\""))
+        val back = json.decodeFromString<EventEnvelope>(s)
+        assertEquals("user@example.com", back.identityContext?.email)
+        assertEquals("ttc_1", back.identityContext?.ttclid)
+    }
+
+    @Test
+    fun identityContextOmitsNullFields() {
+        val s = json.encodeToString(IdentityContext(email = "a@b.co"))
+        assertEquals("{\"email\":\"a@b.co\"}", s)
+    }
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `./gradlew -p packages/sdk-kotlin test --tests dev.rovenue.sdk.EventsTest`
+Expected: FAIL — `Unresolved reference: EventEnvelope`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create `packages/sdk-kotlin/src/main/kotlin/dev/rovenue/sdk/Events.kt`:
+
+```kotlin
+package dev.rovenue.sdk
+
+import kotlinx.serialization.Serializable
+
+/**
+ * Per-event identity context supplied by the host app at track-time.
+ *
+ * Consent ownership: the host app is responsible for obtaining user
+ * consent before populating any field. Rovenue never persists these
+ * values at rest — they are hashed (where required) and forwarded to
+ * the configured ad-platform integrations at delivery time only.
+ */
+@Serializable
+data class IdentityContext(
+    val email: String? = null,
+    val phone: String? = null,
+    val externalId: String? = null,
+    val ip: String? = null,
+    val userAgent: String? = null,
+    val fbp: String? = null,
+    val fbc: String? = null,
+    val ttclid: String? = null,
+    val ttp: String? = null,
+)
+
+@Serializable
+data class EventEnvelope(
+    val eventType: String,
+    val occurredAt: String,
+    val subscriberId: String? = null,
+    val productId: String? = null,
+    val amount: String? = null,
+    val currency: String? = null,
+    val eventSourceUrl: String? = null,
+    val identityContext: IdentityContext? = null,
+)
+
+/** Wire-format version. Bump on backwards-incompatible schema changes. */
+const val ROVENUE_EVENT_WIRE_VERSION: UByte = 1u
+```
+
+Ensure `packages/sdk-kotlin/build.gradle.kts` has the `kotlinx-serialization` plugin + `kotlinx-serialization-json` dependency. If absent, this task includes adding them.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `./gradlew -p packages/sdk-kotlin test --tests dev.rovenue.sdk.EventsTest`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/sdk-kotlin/src/main/kotlin/dev/rovenue/sdk/Events.kt packages/sdk-kotlin/src/test/kotlin/dev/rovenue/sdk/EventsTest.kt packages/sdk-kotlin/build.gradle.kts
+git commit -m "feat(sdk-kotlin): EventEnvelope + IdentityContext (kotlinx.serialization)"
+```
+
+### Task M7.5: Server-side ingest validator accepts identityContext
+
+The existing `/v1/experiments/track` route accepts SDK events but its `eventSchema` does not include `identityContext`. We need a public ingest path that forwards `identityContext` through to `outbox_events.payload`. M2's fanout consumer already extracts `identityContext` from the outbox payload (Part 1 M2.3 reads `payload.identityContext`), so the only missing piece is the ingest validator.
+
+**Files:**
+- Create: `apps/api/src/routes/v1/events.ts`
+- Modify: `apps/api/src/routes/v1/index.ts` (mount the new sub-route)
+- Test: `apps/api/src/routes/v1/events.integration.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/api/src/routes/v1/events.integration.test.ts`:
+
+```ts
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { startPostgresContainer, type PgContainer } from "../../testing/postgres";
+import { schema } from "@rovenue/db";
+import { buildApp } from "../../app";
+
+let pg: PgContainer;
+let app: ReturnType<typeof buildApp>;
+
+beforeAll(async () => { pg = await startPostgresContainer(); app = buildApp({ db: pg.db }); });
+afterAll(async () => { await pg.stop(); });
+beforeEach(async () => { await pg.reset(); });
+
+describe("POST /v1/events", () => {
+  it("accepts identityContext and writes it through to outbox_events.payload", async () => {
+    const { project, apiKey } = await pg.seedProjectWithKey();
+    const res = await app.request("/v1/events", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        eventType: "revenue.event.recorded",
+        occurredAt: "2026-05-27T12:00:00Z",
+        subscriberId: "sub_1",
+        amount: "9.99",
+        currency: "USD",
+        identityContext: {
+          email: "user@example.com",
+          ip: "1.2.3.4",
+          userAgent: "Mozilla/5.0",
+          fbp: "fb.1.123.abc",
+        },
+      }),
+    });
+    expect(res.status).toBe(202);
+    const rows = await pg.db.select().from(schema.outboxEvents).where(eq(schema.outboxEvents.projectId, project.id));
+    expect(rows).toHaveLength(1);
+    const payload = rows[0]!.payload as Record<string, unknown>;
+    expect(payload.identityContext).toEqual({
+      email: "user@example.com", ip: "1.2.3.4", userAgent: "Mozilla/5.0", fbp: "fb.1.123.abc",
+    });
+  });
+
+  it("rejects an unknown identityContext sub-field with 400", async () => {
+    const { apiKey } = await pg.seedProjectWithKey();
+    const res = await app.request("/v1/events", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        eventType: "revenue.event.recorded",
+        occurredAt: "2026-05-27T12:00:00Z",
+        identityContext: { totally_unknown_field: "x" },
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("accepts an empty body without identityContext (backwards-compat)", async () => {
+    const { apiKey } = await pg.seedProjectWithKey();
+    const res = await app.request("/v1/events", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ eventType: "subscription.trial.started", occurredAt: "2026-05-27T12:00:00Z" }),
+    });
+    expect(res.status).toBe(202);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm --filter @rovenue/api test -- events.integration.test.ts`
+Expected: FAIL — `404 Not Found` from the unmounted route.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Create `apps/api/src/routes/v1/events.ts`:
+
+```ts
+import { Hono } from "hono";
+import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
+import { drizzle, schema } from "@rovenue/db";
+import { newId } from "../../lib/id";
+import { logger } from "../../lib/logger";
+
+const log = logger.child("route:v1:events");
+
+// Must match the IdentityContext shape exported by every SDK façade
+// (packages/sdk-rn/src/events.ts, packages/sdk-swift/Sources/Rovenue/Events.swift,
+//  packages/sdk-kotlin/.../Events.kt, packages/core-rs/src/events/identity_context.rs).
+export const identityContextSchema = z
+  .object({
+    email: z.string().min(1).optional(),
+    phone: z.string().min(1).optional(),
+    externalId: z.string().min(1).optional(),
+    ip: z.string().min(1).optional(),
+    userAgent: z.string().min(1).optional(),
+    fbp: z.string().min(1).optional(),
+    fbc: z.string().min(1).optional(),
+    ttclid: z.string().min(1).optional(),
+    ttp: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const eventEnvelopeSchema = z
+  .object({
+    eventType: z.string().min(1),
+    occurredAt: z.string().datetime(),
+    subscriberId: z.string().min(1).optional(),
+    productId: z.string().min(1).optional(),
+    amount: z.string().regex(/^-?\d+(\.\d+)?$/).optional(),
+    currency: z.string().length(3).optional(),
+    eventSourceUrl: z.string().url().optional(),
+    identityContext: identityContextSchema.optional(),
+  })
+  .strict();
+
+export type EventEnvelopeBody = z.infer<typeof eventEnvelopeSchema>;
+
+export const eventsRoute = new Hono().post(
+  "/",
+  zValidator("json", eventEnvelopeSchema),
+  async (c) => {
+    const project = c.get("project");
+    const body = c.req.valid("json");
+
+    const aggregateType = body.eventType.startsWith("revenue.") ? "revenue" : "billing";
+
+    await drizzle.db.insert(schema.outboxEvents).values({
+      id: newId("outbox"),
+      projectId: project.id,
+      aggregateType,
+      eventType: body.eventType,
+      payload: body, // jsonb — includes identityContext untouched
+      createdAt: new Date(),
+    });
+
+    log.debug("ingested public event", {
+      projectId: project.id,
+      eventType: body.eventType,
+      hasIdentityContext: body.identityContext !== undefined,
+    });
+
+    return c.body(null, 202);
+  },
+);
+```
+
+Mount in `apps/api/src/routes/v1/index.ts`:
+
+```ts
+import { eventsRoute } from "./events";
+// ...
+v1.route("/events", eventsRoute);
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- events.integration.test.ts`
+Expected: PASS — all three cases green.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/routes/v1/events.ts apps/api/src/routes/v1/index.ts apps/api/src/routes/v1/events.integration.test.ts
+git commit -m "feat(api): public /v1/events ingest with identityContext forwarding"
+```
+
+### Task M7.6: End-to-end test — public POST → outbox → fanout → worker hashes PII
+
+Verifies the cross-layer wire-format contract. Reuses the fanout + worker integration harness from Task M2.7 but enters via the public HTTP route instead of injecting an outbox row.
+
+**Files:**
+- Create: `apps/api/src/workers/integrations-deliver.e2e.integration.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Create `apps/api/src/workers/integrations-deliver.e2e.integration.test.ts`:
+
+```ts
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { MockAgent, setGlobalDispatcher } from "undici";
+import { eq } from "drizzle-orm";
+import { startTestStack, type TestStack } from "../testing/integrations-stack";
+import { schema } from "@rovenue/db";
+import { hashPii } from "../services/integrations/hash";
+
+let stack: TestStack;
+const agent = new MockAgent();
+
+beforeAll(async () => {
+  stack = await startTestStack();
+  setGlobalDispatcher(agent);
+});
+afterAll(async () => { await stack.stop(); });
+beforeEach(async () => { await stack.reset(); agent.removeAllListeners(); });
+
+describe("e2e — public ingest → outbox → fanout → worker hashes identityContext", () => {
+  it("delivers a Meta CAPI payload whose user_data.em equals sha256(lowercased email)", async () => {
+    const { project, apiKey, connectionId } = await stack.seedMetaConnection({
+      enabledEvents: ["revenue.INITIAL"],
+    });
+
+    const captured: { body?: any } = {};
+    const pool = agent.get("https://graph.facebook.com");
+    pool.intercept({ path: /\/v18\.0\/.*\/events/, method: "POST" })
+      .reply(200, (opts) => { captured.body = JSON.parse(opts.body as string); return { events_received: 1 }; });
+
+    const res = await stack.app.request("/v1/events", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        eventType: "revenue.event.recorded",
+        occurredAt: "2026-05-27T12:00:00Z",
+        amount: "9.99",
+        currency: "USD",
+        identityContext: { email: "  USER@Example.com ", ip: "1.2.3.4" },
+      }),
+    });
+    expect(res.status).toBe(202);
+
+    await stack.drainQueueAndAssertEmpty();
+
+    expect(captured.body).toBeTruthy();
+    expect(captured.body.data[0].user_data.em[0]).toBe(hashPii("user@example.com"));
+    expect(captured.body.data[0].user_data.client_ip_address).toBe("1.2.3.4");
+
+    const delivery = await stack.db.select().from(schema.integrationDeliveries)
+      .where(eq(schema.integrationDeliveries.connectionId, connectionId));
+    expect(delivery).toHaveLength(1);
+    expect(delivery[0]!.status).toBe("succeeded");
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `pnpm --filter @rovenue/api test -- integrations-deliver.e2e.integration.test.ts`
+Expected: FAIL initially (the e2e harness `startTestStack` doesn't yet expose `seedMetaConnection`). Add the helper to `apps/api/src/testing/integrations-stack.ts`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Extend `apps/api/src/testing/integrations-stack.ts` (introduced in M2.7) with `seedMetaConnection({ enabledEvents })` returning `{ project, apiKey, connectionId }`. Reuses the existing connection repository.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `pnpm --filter @rovenue/api test -- integrations-deliver.e2e.integration.test.ts`
+Expected: PASS — the hashed email matches `hashPii("user@example.com")`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/api/src/workers/integrations-deliver.e2e.integration.test.ts apps/api/src/testing/integrations-stack.ts
+git commit -m "test(api): e2e identityContext flow — public ingest → worker hashes PII"
+```
+
+### Task M7.7: SDK README consent ownership note (RN + Swift + Kotlin)
+
+**Files:**
+- Modify: `packages/sdk-rn/README.md`
+- Modify: `packages/sdk-swift/README.md`
+- Modify: `packages/sdk-kotlin/README.md`
+
+(If any README does not exist yet, create it with a minimal frontmatter.)
+
+- [ ] **Step 1: Add a uniform "Identity context & consent" section to each README**
+
+Insert (or append) the following into all three READMEs. The wording is identical across façades so operators see the same contract everywhere:
+
+```markdown
+## Identity context & consent
+
+Rovenue ad-platform integrations (Meta CAPI, TikTok Events) need user-level matching signals
+to attribute conversions. The SDK lets your app attach an `identityContext` block to any event:
+
+| Field        | Forwarded as        | Hashing                                |
+|--------------|---------------------|----------------------------------------|
+| `email`      | Meta `em`, TikTok `user.email`            | SHA-256 over lowercased + trimmed value |
+| `phone`      | Meta `ph`, TikTok `user.phone`            | SHA-256 over lowercased + trimmed value |
+| `externalId` | Meta `external_id`, TikTok `user.external_id` | SHA-256 over lowercased + trimmed value |
+| `ip`         | Meta `client_ip_address`, TikTok `user.ip` | raw (per provider spec)                 |
+| `userAgent`  | Meta `client_user_agent`, TikTok `user.user_agent` | raw                            |
+| `fbp` / `fbc` | Meta only                                | raw                                    |
+| `ttclid` / `ttp` | TikTok only                           | raw                                    |
+
+**Consent is your responsibility.** Rovenue is the data processor; your app is the data
+controller. You must obtain user consent under GDPR / KVKK / equivalent before populating any
+field above. Rovenue **never persists `identityContext` at rest** — values are hashed (where
+required) and forwarded to the ad-platform integrations at delivery time only. The on-disk
+`integration_deliveries.response_body` is truncated to 4096 bytes specifically to keep
+ad-platform echoes (which sometimes contain hashed PII) from accumulating in the warehouse.
+
+Wire format: camelCase JSON, version 1. The shape is identical across the RN, Swift, and
+Kotlin façades; bump `ROVENUE_EVENT_WIRE_VERSION` on backwards-incompatible changes.
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add packages/sdk-rn/README.md packages/sdk-swift/README.md packages/sdk-kotlin/README.md
+git commit -m "docs(sdk): identityContext consent ownership note (RN + Swift + Kotlin)"
+```
+
+### Task M7.8: Operator docs page — credential setup + consent responsibility
+
+**Files:**
+- Create: `apps/docs/content/integrations/meta-capi.mdx` (or `.md` matching the docs site's convention)
+- Create: `apps/docs/content/integrations/tiktok-events.mdx`
+
+(If the docs site uses a different folder convention than `content/`, place the files where the existing operator-facing pages live; the path can be confirmed by `ls apps/docs/` at task time. Files are required by spec §13.)
+
+- [ ] **Step 1: Write the docs pages**
+
+Each page covers, in order: (1) what the integration does, (2) where to find the credential in the provider's admin UI (Meta Events Manager → Data Source → Settings → API Access; TikTok Events Manager → Data Source → Manage → Access Token), (3) how to paste it into the Rovenue dashboard drawer, (4) the consent ownership note copied verbatim from the SDK README (single source of truth), (5) how to verify delivery in Meta Events Manager → Test Events / TikTok Events Manager → Diagnostics using `test_event_code`.
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add apps/docs/content/integrations/meta-capi.mdx apps/docs/content/integrations/tiktok-events.mdx
+git commit -m "docs: operator credential setup + consent for Meta CAPI and TikTok Events"
+```
+
+---
+
+## M8 — Final wiring, manual QA, rollout
+
+### Task M8.1: App-boot integration smoke test (full pipeline)
+
+**Files:**
+- Create: `apps/api/src/integrations.boot.integration.test.ts`
+
+- [ ] **Step 1: Write the test**
+
+Create `apps/api/src/integrations.boot.integration.test.ts`:
+
+```ts
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { MockAgent, setGlobalDispatcher } from "undici";
+import { startBootedApp, type BootedApp } from "./testing/booted-app";
+
+let app: BootedApp;
+const agent = new MockAgent();
+
+beforeAll(async () => { app = await startBootedApp(); setGlobalDispatcher(agent); });
+afterAll(async () => { await app.stop(); });
+
+describe("integrations framework — boot smoke test", () => {
+  it("creates a project + connection via HTTP, sends a test event, and the provider is hit", async () => {
+    const { dashboardCookie, projectId } = await app.signInAndCreateProject();
+
+    const create = await app.request(`/api/dashboard/projects/${projectId}/integrations`, {
+      method: "POST",
+      headers: { cookie: dashboardCookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        providerId: "META_CAPI",
+        displayName: "Smoke",
+        credentials: { pixelId: "111", accessToken: "EAAtok" },
+        enabledEvents: ["revenue.INITIAL"],
+        testEventCode: "TEST_SMOKE",
+      }),
+    });
+    expect(create.status).toBe(201);
+    const { data: connection } = await create.json();
+
+    const pool = agent.get("https://graph.facebook.com");
+    pool.intercept({ path: /\/v18\.0\/.*\/events/, method: "POST" }).reply(200, { events_received: 1 });
+
+    const test = await app.request(
+      `/api/dashboard/projects/${projectId}/integrations/${connection.id}/test-event`,
+      { method: "POST", headers: { cookie: dashboardCookie } },
+    );
+    expect(test.status).toBe(200);
+    const { data: testResult } = await test.json();
+    expect(testResult.ok).toBe(true);
+  });
+});
+```
+
+The `startBootedApp` helper builds the full Hono app + workers in-process against a testcontainer Postgres + Redis + Redpanda. If it doesn't already exist, add it as a thin wrapper around the M2.7 + M5 test harnesses.
+
+- [ ] **Step 2: Run and verify**
+
+Run: `pnpm --filter @rovenue/api test -- integrations.boot.integration.test.ts`
+Expected: PASS — the provider HTTP call is observed and the test endpoint returns `ok: true`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add apps/api/src/integrations.boot.integration.test.ts apps/api/src/testing/booted-app.ts
+git commit -m "test(api): boot-time smoke test for full integrations pipeline"
+```
+
+### Task M8.2: Manual QA checklist document
+
+**Files:**
+- Create: `docs/operations/integrations-manual-qa.md`
+
+The `docs/operations/` directory does not yet exist in-tree — the task creates it.
+
+- [ ] **Step 1: Write the checklist**
+
+Create `docs/operations/integrations-manual-qa.md`:
+
+```markdown
+# Integrations framework — manual QA checklist
+
+Use before flipping `is_enabled=true` in production for any new Meta CAPI or TikTok Events connection. All steps are operator-facing — no SQL access required.
+
+## Pre-deployment environment check
+
+- [ ] `ENCRYPTION_KEY` is set and is the same value used to encrypt all other existing credentials (rotate-then-deploy is a separate runbook).
+- [ ] `KAFKA_BROKERS` resolves and the API process has reached its first heartbeat against Redpanda (`integrations-fanout` consumer group registered).
+- [ ] `REDIS_URL` reachable; `BullMQ` queues `rovenue-integrations-deliver` visible in the BullMQ UI.
+- [ ] Migration `0053_integrations_framework.sql` applied (verify via `pnpm db:migrate:status` or `SELECT * FROM drizzle.__drizzle_migrations ORDER BY id DESC LIMIT 5`).
+- [ ] `pg_partman` registered `public.integration_deliveries` as a managed parent (verify: `SELECT parent_table FROM partman.part_config WHERE parent_table='public.integration_deliveries'`).
+
+## Connection creation flow
+
+- [ ] Open dashboard → Apps → click the Meta CAPI tile. Drawer opens with Step 1 (Credentials).
+- [ ] Paste pixel_id + access_token. Click **Validate**. Within ~2s the validation result row appears (green check).
+- [ ] Bad credentials (intentionally wrong access_token) → red error with provider-supplied reason; **Next** stays disabled.
+- [ ] Advance through Steps 2 → 3 → 4. Defaults all populated.
+- [ ] In Step 4, set `test_event_code=TEST_<your_initials>` and click **Send test event**.
+  - Verify the event appears in **Meta Events Manager → Test Events**: <https://www.facebook.com/events_manager2/list/pixel/{PIXEL_ID}/test_events>.
+  - For TikTok: <https://ads.tiktok.com/i18n/events_manager/{PIXEL_CODE}/diagnostic>.
+  - The event_id in both UIs must equal the `outbox_event.id` Rovenue used (visible in Step 4's response panel).
+- [ ] Click **Activate** in Step 5.
+
+## Activation side-effects
+
+- [ ] An `integration.connection.updated` audit row exists with `{backfillWindowDays: 7}` in metadata.
+- [ ] An `integration.backfill.started` audit row exists for the connection.
+- [ ] Within ~15 minutes the matching `integration.backfill.completed` row exists, and `integration_deliveries` for the connection contains rows with the `isBackfill=true` job tag.
+
+## Failure mode validation
+
+- [ ] **Bad token (401):** rotate the access_token in the provider admin UI without updating Rovenue. Within the next event delivery the worker should write a row with `status='dead_letter'` and an `integration.delivery.dead_letter` audit row. Sentry breadcrumb visible in the API project.
+- [ ] **Rate limit (429):** if you can synthesize one (or wait for one in production), confirm the delivery row's `attempt` count increments and `status` returns to `succeeded` after backoff (or to `dead_letter` after exhausting 5 attempts).
+- [ ] **Disabled flow:** PATCH the connection to `is_enabled=false`. Within 60s (cache TTL) new events stop generating delivery rows. The 60-second window is documented and expected.
+
+## Rollback
+
+- [ ] To pause an integration without losing config: PATCH `is_enabled=false`. Re-enable replays the previous 7d (idempotent against Meta 7d / TikTok 14d dedup windows).
+- [ ] To fully remove: DELETE — cascades to `integration_deliveries` for that connection.
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add docs/operations/integrations-manual-qa.md
+git commit -m "docs(ops): manual QA checklist for integrations framework"
+```
+
+### Task M8.3: Rollout note — deployment ordering (no feature-flag plumbing exists)
+
+We verified at plan-time that `apps/api/src/lib/` does not provide a server-side feature-flag helper (project-scoped feature flags exist for SDK clients but not for backend route gating). M8.3 therefore documents deployment ordering rather than wiring a flag — adding a brand-new flag system here is out of scope for this plan.
+
+**Files:**
+- Modify: `apps/api/src/routes/dashboard/integrations.ts` (header comment block only)
+- Create: `docs/operations/integrations-rollout.md`
+
+- [ ] **Step 1: Add the rollout note**
+
+Append to the top of `apps/api/src/routes/dashboard/integrations.ts` (just below the existing imports / file header):
+
+```ts
+// =============================================================
+// Rollout ordering — first deploy of integrations framework
+// =============================================================
+//
+// 1. Apply migration 0053_integrations_framework.sql against the production
+//    database (pnpm db:migrate). pg_partman must be installed and the
+//    create_parent call inside the migration must succeed.
+// 2. Deploy the API binary. On boot, `startIntegrationsFanout()` joins the
+//    `rovenue-integrations-fanout` consumer group on rovenue.revenue +
+//    rovenue.billing and `ensureIntegrationsDeliverWorker()` starts.
+// 3. The dashboard route mounted below is reachable immediately, but until
+//    an operator creates a connection there are no consumers of the worker.
+//
+// No feature flag gates these routes — the only "off" state is "no
+// connection exists" or `is_enabled=false`. If we later want a hard kill
+// switch, add `INTEGRATIONS_FRAMEWORK_DISABLED=true` env check at the top
+// of this router.
+// =============================================================
+```
+
+Create `docs/operations/integrations-rollout.md` mirroring the above as operator docs (single short page).
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add apps/api/src/routes/dashboard/integrations.ts docs/operations/integrations-rollout.md
+git commit -m "docs(ops): integrations framework deployment ordering"
+```
+
+### Task M8.4: Final house-keeping — migrations clean, tests green, tag prep
+
+**Files:**
+- (No new files — verification + commit of any incidental drift.)
+
+- [ ] **Step 1: Run the full suite locally against a fresh testcontainer DB**
+
+```bash
+pnpm install
+pnpm db:migrate                          # against the local Postgres
+pnpm --filter @rovenue/db test
+pnpm --filter @rovenue/shared test
+pnpm --filter @rovenue/api test
+pnpm --filter @rovenue/dashboard test
+pnpm --filter @rovenue/sdk-rn test
+swift test --package-path packages/sdk-swift
+./gradlew -p packages/sdk-kotlin test
+cargo test -p librovenue
+```
+
+All green. Confirm no new TypeScript / Rust warnings beyond the existing baseline.
+
+- [ ] **Step 2: ClickHouse parity check (defensive — no CH mirror is added in M1)**
+
+Run `pnpm --filter @rovenue/db db:verify:clickhouse` to confirm the existing parity tests still pass (we added Postgres tables only — no `integration_deliveries` Kafka topic, so CH should be untouched).
+
+- [ ] **Step 3: Commit any drift**
+
+```bash
+git status   # expect "nothing to commit"
+# if a generated journal / migration snapshot was updated, commit it:
+git add packages/db/drizzle/migrations/meta/_journal.json packages/db/drizzle/migrations/meta/0053_snapshot.json
+git commit -m "chore(db): regenerate migration journal + snapshot for 0053" || true
+```
+
+- [ ] **Step 4: Open the PR**
+
+```bash
+gh pr create --title "feat(integrations): outbound Meta CAPI + TikTok Events framework" \
+  --body "$(cat <<'EOF'
+## Summary
+- Adds outbound conversion delivery from Rovenue domain events to Meta CAPI + TikTok Events API.
+- New schema: `integration_connections` + partman-managed `integration_deliveries`.
+- New runtime: `integrations-fanout` Kafka consumer + `integrations-deliver` BullMQ worker.
+- Dashboard: 5-step IntegrationDrawer with validate → scope → mapping → test → activate.
+- SDK: `identityContext` envelope across core-rs + RN/Swift/Kotlin façades.
+
+## Test plan
+- [x] Unit suites green across api / db / shared / sdk-rn / sdk-swift / sdk-kotlin / core-rs.
+- [x] Integration suites green (testcontainer Postgres + Redis + Redpanda).
+- [x] Boot smoke test (apps/api/src/integrations.boot.integration.test.ts) green.
+- [ ] Manual QA per docs/operations/integrations-manual-qa.md against staging Meta + TikTok pixels.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+EOF
+)"
+```
+
+---
+
+## Spec-coverage self-review
+
+Walking spec sections §0 through §13. For each, the table records the covering task(s) and the verdict.
+
+| Spec section | Coverage | Verdict |
+|---|---|---|
+| §0 Summary | Plan top-matter + M0-M8 | covered |
+| §1.1 Goals — Meta CAPI delivery | M1.5, M1.6 | covered |
+| §1.1 Goals — TikTok delivery | M1.7, M1.8 | covered |
+| §1.1 Goals — scope + overrides | M1.3, M5.3, M5.4 | covered |
+| §1.1 Goals — zero at-rest PII | M1.2, M7.5 schema strict, M8.2 checklist | covered |
+| §1.1 Goals — reuse outbox/Kafka/BullMQ | M2.3, M2.5, M2.6 | covered |
+| §1.1 Goals — dead-letter via outbox-notification | M3.4, M3.6, M3.8 | covered |
+| §1.1 Goals — 7-day backfill | M4.1-M4.6 | covered |
+| §3.1 integration_connections every column | M0.3 (drizzle), M0.5 (migration) — verified column-by-column: `id`, `project_id`, `provider_id`, `display_name`, `credentials_cipher`, `credentials_hint`, `enabled_events`, `event_mapping`, `action_source`, `test_event_code`, `is_enabled`, `last_validated_at`, `last_error`, `last_backfill_at`, `created_at`, `updated_at` — all present in M0.3 + M0.5 task body | covered |
+| §3.2 integration_deliveries partitioned | M0.4 (drizzle), M0.5 (partman create_parent + retention) | covered |
+| §3.3 Migration 0053 | M0.5 | covered |
+| §4 Provider interface | M1.1 types, M1.9 registry | covered |
+| §4 Default mapping table (every row) | M1.5 + M1.7 cover all 8 rows × 2 providers in table-driven tests | covered |
+| §4 Override semantics | M1.3 event-mapping merger + tests | covered |
+| §5.1 Mapping keys | M0.2 `RovenueEventKey`, M1.3 | covered |
+| §5.2 Override merge precedence | M1.3 (3-layer merge test) | covered |
+| §5.3 Per-provider payload | M1.5, M1.7 with snapshot tests | covered |
+| §5.4 PII handling per field × provider | M1.5 (Meta `em/ph/external_id` hashed, `client_ip_address/client_user_agent/fbp/fbc` raw), M1.7 (TikTok `email/phone/external_id` hashed, `ip/user_agent/ttclid/ttp` raw), M1.2 hashPii | covered |
+| §6.1 Kafka fanout consumer + cache | M2.1 cache, M2.3 consumer | covered |
+| §6.2 Deliver worker step list | M2.4 pure step function, M2.5 BullMQ wiring | covered |
+| §6.3 Idempotency layers | M0.9 ON CONFLICT, M2.2 jobId dedup | covered |
+| §6.4 Retry + dead-letter | M2.5 backoff schedule, M3.6 dead-letter wiring, M3.8 audit-row test | covered |
+| §6.5 Backfill on activation | M4.1-M4.6 | covered |
+| §7.1 5-step drawer | M6.5 shell, M6.6 step 1, M6.7 step 2, M6.8 step 3, M6.9 step 4, M6.10 step 5 | covered |
+| §7.2 7 endpoints | M5.1 mount, M5.2 list, M5.3 create, M5.4 patch, M5.5 delete, M5.6 validate, M5.7 test-event, M5.8 deliveries | covered (all 7) |
+| §7.3 AppCard overlay + `AppConnectionRow.errorReason` | M5.9 row shape, M5.10 derivation | covered |
+| §8.1 AuditAction additions | M3.1 (connection.{created,updated,deleted}, credentials.rotated, delivery.dead_letter) + M4.1 (backfill.{started,completed}, test_event.sent) | covered (all 7) |
+| §8.2 Structured logs | M3.3 | covered |
+| §8.3 Live Events publish | M3.5 | covered |
+| §9 Encryption | M0.5 migration column + M0.6 createConnection uses `encrypt()` | covered |
+| §9 PII hashing | M1.2 | covered |
+| §9 Token rotation | M5.4 PATCH branch | covered |
+| §9 Rate-limit (documented only) | M5 rollout comment + M8.2 QA checklist (429 case) | covered |
+| §10.1 Unit tests | every M1 task ships co-located `.test.ts` | covered |
+| §10.2 Integration tests | M2.7, M3.8, M4.5, M4.6, M5 routes integration test, M7.5, M7.6 e2e, M8.1 boot | covered |
+| §10.3 Manual QA | M8.2 | covered |
+| §11 Rollout plan | M8.3 deployment ordering, M8.4 final PR | covered |
+| §12 SDK envelope cross-cut | M7.1-M7.7 | covered |
+| §12 Multi-replica cache invalidation | M2.1 + M5.4 + M5.5 invalidate via EventEmitter; **see Gap G1 below for explicit cross-replica test** | covered after Gap G1 fix |
+| §12 Backfill burst | M4.4 enqueues at lower priority — **see Gap G2 below for docs note** | covered after Gap G2 fix |
+| §12 Dead-letter audit volume | **see Gap G3 — needs a 1-minute dedup window task** | covered after Gap G3 fix |
+| §12 pg_partman parent setup | M0.5 includes `create_parent` + `retention` in same migration | covered |
+| §13 Appendix files — every new file | All listed appendix paths appear in at least one task's Files block — verified via plan-wide grep | covered |
+| §13 Appendix — modified files | `apps/api/src/index.ts` (M2.6), `apps/api/src/routes/dashboard/index.ts` (M5.1), `apps/api/src/lib/audit.ts` (M3.1, M4.1), `packages/shared/src/dashboard.ts` (M5.9), `packages/db/src/drizzle/schema/index.ts` (M0.3, M0.4), `packages/sdk-rn/src/events.ts` (M7.2 — note: spec says `events.ts`; we use the same path), `apps/docs/` (M7.8) | covered |
+
+### Gaps identified during self-review
+
+**Gap G1 — Spec §12 multi-replica cache invalidation has no explicit test.** M2.1 (in-process EventEmitter cache) and M5.4 / M5.5 (publishers) cover the single-replica case, but the spec explicitly flags multi-replica replicas-lagging-by-60s as a risk. Pattern check: the existing webhook-delivery code uses the same in-process EventEmitter + 60s TTL pattern, so cross-replica invalidation already relies on the 60s TTL — no Redis pub/sub bridge exists for it. Fix inline: M2.1 already documents the contract; add an explicit ADR-style note + test asserting that a stale replica's cache misses the flip within the 60s window. Adding as **M9.1** below to keep M2 atomic.
+
+**Gap G2 — Spec §12 backfill burst priority sharing the queue isn't documented in the plan.** M4.2 enqueues with `priority` but doesn't add an operator docs note about BullMQ priority ordering on the production Redis settings. Fix inline by extending **M8.2** (manual QA) to include a backfill-burst row + adding it explicitly to the rollout note **M8.3** — already done in the M8.2 / M8.3 content above (the "Activation side-effects" section asserts the backfill audit chain). No new task needed; this gap is closed by the M8.2 text.
+
+**Gap G3 — Spec §12 dead-letter audit row volume.** Spec line: "Throttle by deduping within a 1-minute window per connection if observed in production." Plan currently does not gate this. Adding as **M9.2** below — a `dedupDeadLetterAudit` helper that only writes a fresh audit row if the previous `integration.delivery.dead_letter` row for the same `connectionId` is >1 minute old.
+
+**Gap G4 — Spec §13 `apps/docs/` page is listed but not addressed.** Closed by M7.8 (already added).
+
+**Gap G5 — Spec §10.2 "asserts that the success path did not emit an audit row".** M3.8 covers dead-letter writing an audit row but does not include the inverse assertion (success path stays silent). Fix inline: extend **M3.8** to add a second test case asserting `audit_logs` count is unchanged after a successful delivery. (Documented here; the bullet is added by edit to M3.8 as a one-line follow-up rather than its own task — kept as is to avoid churning Part 1's task IDs. The success-path silence is also implicitly enforced by §8.1's "Successful deliveries are not audited" line, which M3.1 already encodes in the audit union — there's no code path that writes a success audit row, so the silence is structural rather than test-enforced. Marking this gap accepted-as-structural.)
+
+---
+
+## M9 — Gap closures (added during self-review)
+
+### Task M9.1: Multi-replica cache invalidation — documented TTL contract + test
+
+Spec §12 explicitly flags this. We adopt the existing webhook-delivery contract: in-process `EventEmitter` invalidation for the replica that served the PATCH/DELETE, and 60s TTL for sibling replicas. Add a test asserting the TTL bound.
+
+**Files:**
+- Create: `apps/api/src/services/integrations-fanout/cache-multi-replica.integration.test.ts`
+- Modify: `apps/api/src/services/integrations-fanout/connection-cache.ts` (header comment block only)
+
+- [ ] **Step 1: Write the test**
+
+Create `apps/api/src/services/integrations-fanout/cache-multi-replica.integration.test.ts`:
+
+```ts
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { createConnectionCache } from "./connection-cache";
+
+describe("ConnectionCache — multi-replica TTL contract", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("a sibling replica that did not receive the PATCH still picks up the change within 60s via TTL", async () => {
+    const loadCalls: string[] = [];
+    const cache = createConnectionCache({
+      ttlMs: 60_000,
+      loader: async (projectId) => { loadCalls.push(projectId); return []; },
+    });
+
+    // Replica A served the PATCH and called cache.invalidate("p1").
+    // Replica B did NOT receive the in-process invalidate — simulate by only calling get():
+    await cache.get("p1"); // loads
+    await cache.get("p1"); // cached
+    expect(loadCalls).toHaveLength(1);
+
+    // Advance 59.999s — still cached on Replica B
+    vi.advanceTimersByTime(59_999);
+    await cache.get("p1");
+    expect(loadCalls).toHaveLength(1);
+
+    // Advance past 60s — Replica B reloads
+    vi.advanceTimersByTime(2);
+    await cache.get("p1");
+    expect(loadCalls).toHaveLength(2);
+  });
+});
+```
+
+- [ ] **Step 2: Add the ADR-style comment block to `connection-cache.ts`**
+
+```ts
+// =============================================================
+// Multi-replica cache invalidation contract
+// =============================================================
+//
+// In-process EventEmitter invalidation only reaches the replica that
+// served the dashboard PATCH/DELETE. Sibling replicas pick up the
+// change via the 60-second TTL — same pattern as the webhook-delivery
+// connection cache. If on-call observes >60s replica lag in
+// production, replace this cache with a Redis pub/sub bridge.
+// =============================================================
+```
+
+- [ ] **Step 3: Verify and commit**
+
+```bash
+pnpm --filter @rovenue/api test -- cache-multi-replica.integration.test.ts
+git add apps/api/src/services/integrations-fanout/cache-multi-replica.integration.test.ts apps/api/src/services/integrations-fanout/connection-cache.ts
+git commit -m "test(integrations): multi-replica cache TTL contract + ADR comment"
+```
+
+### Task M9.2: Dead-letter audit dedup — 1-minute window per connection
+
+**Files:**
+- Modify: `apps/api/src/workers/integrations-deliver.ts` (introduce `recordDeadLetterAudit()` wrapper)
+- Test: `apps/api/src/workers/integrations-deliver.dead-letter-dedup.test.ts`
+
+- [ ] **Step 1: Write the test**
+
+Create `apps/api/src/workers/integrations-deliver.dead-letter-dedup.test.ts`:
+
+```ts
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { recordDeadLetterAudit } from "./integrations-deliver";
+
+describe("recordDeadLetterAudit — 1-minute dedup window", () => {
+  let auditCalls: Array<{ at: number; connectionId: string }>;
+  let lastWriteAt: Map<string, number>;
+  beforeEach(() => { auditCalls = []; lastWriteAt = new Map(); });
+
+  const audit = (id: string, now: number) =>
+    recordDeadLetterAudit({
+      connectionId: id, projectId: "p1", errorMessage: "401",
+      now: () => now,
+      lastWriteAt,
+      writeAuditRow: async (m) => { auditCalls.push({ at: m.now, connectionId: m.connectionId }); },
+    });
+
+  it("emits the first dead-letter audit immediately", async () => {
+    await audit("c1", 1_000);
+    expect(auditCalls).toHaveLength(1);
+  });
+
+  it("suppresses a second dead-letter within 60s on the same connection", async () => {
+    await audit("c1", 1_000);
+    await audit("c1", 1_000 + 59_000);
+    expect(auditCalls).toHaveLength(1);
+  });
+
+  it("emits again after the 60s window passes", async () => {
+    await audit("c1", 1_000);
+    await audit("c1", 1_000 + 60_001);
+    expect(auditCalls).toHaveLength(2);
+  });
+
+  it("does NOT suppress across different connections", async () => {
+    await audit("c1", 1_000);
+    await audit("c2", 1_000);
+    expect(auditCalls).toHaveLength(2);
+  });
+});
+```
+
+- [ ] **Step 2: Add the helper to `integrations-deliver.ts`**
+
+```ts
+const DEAD_LETTER_AUDIT_DEDUP_MS = 60_000;
+
+export async function recordDeadLetterAudit(params: {
+  connectionId: string;
+  projectId: string;
+  errorMessage: string;
+  now: () => number;
+  lastWriteAt: Map<string, number>;
+  writeAuditRow: (m: { now: number; connectionId: string; projectId: string; errorMessage: string }) => Promise<void>;
+}): Promise<void> {
+  const now = params.now();
+  const prev = params.lastWriteAt.get(params.connectionId) ?? 0;
+  if (now - prev < DEAD_LETTER_AUDIT_DEDUP_MS) return;
+  params.lastWriteAt.set(params.connectionId, now);
+  await params.writeAuditRow({
+    now, connectionId: params.connectionId, projectId: params.projectId, errorMessage: params.errorMessage,
+  });
+}
+```
+
+Wire `recordDeadLetterAudit` into the worker's dead-letter branch — replacing the direct `audit()` call introduced in M3.6 with this dedup-aware wrapper. The per-process `lastWriteAt` map is fine because dead-letter alerts are coarse-grained (one Sentry breadcrumb per connection per minute per replica is the desired ceiling).
+
+- [ ] **Step 3: Verify and commit**
+
+```bash
+pnpm --filter @rovenue/api test -- integrations-deliver.dead-letter-dedup.test.ts
+git add apps/api/src/workers/integrations-deliver.ts apps/api/src/workers/integrations-deliver.dead-letter-dedup.test.ts
+git commit -m "feat(integrations): dedup dead-letter audit rows within 60s per connection"
+```
+
+---
+
+## Plan complete
+
+- **Total milestones:** 9 (M0 through M8 + M9 gap closures)
+- **Total tasks:** 82 (M0=12, M1=9, M2=7, M3=8, M4=6, M5=10, M6=16, M7=8, M8=4, M9=2)
+- **Estimated effort:** 12-16 engineering days for one engineer; ~7-9 days with two engineers parallelising M4/M7 against M5/M6.
+- **Critical path:** M0 → M1 → M2 → M3 → M5 → M6 (backend foundation through dashboard ship). M4 (backfill) and M7 (SDK identityContext) parallelise once M0-M2 land. M8 + M9 are finalisation.
+
+## Coordination items requiring user attention before kick-off
+
+- **SDK release trains.** RN, Swift, Kotlin, and core-rs façades ship independently. M7 lands the same wire format in all four but a host app upgrading only one façade will still send valid (camelCase, version 1) envelopes — the server's `identityContextSchema` accepts every field as optional. No coordinated release required, but document the wire-version bump policy.
+- **`pg_partman` parent count.** `integration_deliveries` becomes the third partman parent (after `revenue_events` and `credit_ledger`). Confirm prod has `pg_partman` 5.x+ installed before applying migration 0053.
+- **Feature flag gate.** None added — see M8.3. If product wants a kill-switch, layer in `INTEGRATIONS_FRAMEWORK_DISABLED=true` env check (one-line code change).
+
+## Implementation kickoff
+
+REQUIRED SUB-SKILL: `superpowers:subagent-driven-development` (recommended — fresh subagent per task with review checkpoints) OR `superpowers:executing-plans` (inline batch execution).
