@@ -1,26 +1,49 @@
+import { component, useService } from "impair";
 import { ArrowRight, Info, TriangleAlert, X } from "lucide-react";
 import { cn } from "../../lib/cn";
-import type { ValidationIssue } from "./types";
+import type { ValidatorIssue } from "@rovenue/shared/funnel";
+import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 
-type Props = {
-  issues: ReadonlyArray<ValidationIssue>;
-  onClose: () => void;
-  onJump: (issue: ValidationIssue) => void;
-};
+function titleFor(iss: ValidatorIssue): string {
+  switch (iss.code) {
+    case "MISSING_PAYWALL":
+      return "Funnel needs a paywall page";
+    case "MISSING_SUCCESS":
+      return "Funnel needs a success page";
+    case "CYCLE":
+      return "Pages form a cycle";
+    case "DUPLICATE_QUESTION_ID":
+      return `Duplicate question_id: ${iss.questionId}`;
+    case "UNKNOWN_QUESTION_REF":
+      return `Rule references unknown question: ${iss.questionId}`;
+    case "UNKNOWN_GOTO":
+      return `Goes to a missing page: ${iss.goto}`;
+    case "UNREACHABLE":
+      return "Page is unreachable from the start";
+  }
+}
 
-/**
- * Slide-in panel from the right edge that surfaces publish-blocking
- * errors and informational warnings. Clicking "Fix" deep-links into
- * the relevant tab + page.
- */
-export function ValidationDrawer({ issues, onClose, onJump }: Props) {
-  const errors = issues.filter((i) => i.kind === "error");
-  const warns = issues.filter((i) => i.kind === "warning");
+function whereOf(iss: ValidatorIssue): string {
+  return "pageId" in iss ? iss.pageId : "funnel";
+}
+
+export const ValidationDrawer = component(() => {
+  const vm = useService(FunnelDraftViewModel);
+  const errors = vm.validation.errors;
+  const warns = vm.validation.warnings;
+
+  const jump = (iss: ValidatorIssue) => {
+    vm.closeValidation();
+    if ("pageId" in iss) {
+      vm.setActiveTab("content");
+      vm.selectPage(iss.pageId);
+    }
+  };
 
   return (
     <>
       <div
-        onClick={onClose}
+        onClick={() => vm.closeValidation()}
         className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-[2px]"
       />
       <div className="fixed right-0 top-0 z-[61] flex h-screen w-full max-w-[440px] flex-col border-l border-rv-divider-strong bg-rv-c1 shadow-[0_0_60px_rgba(0,0,0,0.5)]">
@@ -34,7 +57,7 @@ export function ValidationDrawer({ issues, onClose, onJump }: Props) {
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => vm.closeValidation()}
             aria-label="Close"
             className="flex h-7 w-7 cursor-pointer items-center justify-center rounded text-rv-mute-600 transition hover:bg-rv-c2 hover:text-foreground"
           >
@@ -47,7 +70,7 @@ export function ValidationDrawer({ issues, onClose, onJump }: Props) {
             <>
               <SectionLabel>Errors</SectionLabel>
               {errors.map((iss, i) => (
-                <IssueRow key={`err-${i}`} issue={iss} onJump={onJump} />
+                <IssueRow key={`err-${i}`} issue={iss} kind="error" onJump={jump} />
               ))}
             </>
           )}
@@ -55,9 +78,12 @@ export function ValidationDrawer({ issues, onClose, onJump }: Props) {
             <>
               <SectionLabel className="mt-5">Warnings</SectionLabel>
               {warns.map((iss, i) => (
-                <IssueRow key={`warn-${i}`} issue={iss} onJump={onJump} />
+                <IssueRow key={`warn-${i}`} issue={iss} kind="warning" onJump={jump} />
               ))}
             </>
+          )}
+          {errors.length === 0 && warns.length === 0 && (
+            <div className="text-[12px] text-rv-mute-500">No issues — ready to publish.</div>
           )}
           <div className="mt-4 flex items-start gap-2 rounded-md border border-rv-accent-500/25 bg-rv-accent-500/[0.08] px-3 py-2.5">
             <Info size={14} className="mt-0.5 flex-shrink-0 text-rv-accent-500" />
@@ -74,7 +100,7 @@ export function ValidationDrawer({ issues, onClose, onJump }: Props) {
       </div>
     </>
   );
-}
+});
 
 function SectionLabel({
   children,
@@ -97,12 +123,14 @@ function SectionLabel({
 
 function IssueRow({
   issue,
+  kind,
   onJump,
 }: {
-  issue: ValidationIssue;
-  onJump: (issue: ValidationIssue) => void;
+  issue: ValidatorIssue;
+  kind: "error" | "warning";
+  onJump: (issue: ValidatorIssue) => void;
 }) {
-  const isError = issue.kind === "error";
+  const isError = kind === "error";
   return (
     <div
       className={cn(
@@ -114,24 +142,22 @@ function IssueRow({
         <div
           className={cn(
             "flex h-5 w-5 flex-shrink-0 items-center justify-center rounded",
-            isError
-              ? "bg-rv-danger/15 text-rv-danger"
-              : "bg-rv-warning/15 text-rv-warning",
+            isError ? "bg-rv-danger/15 text-rv-danger" : "bg-rv-warning/15 text-rv-warning",
           )}
         >
           <TriangleAlert size={12} />
         </div>
-        <div className="text-[13px] font-semibold text-foreground">{issue.title}</div>
-        <div className="ml-auto font-rv-mono text-[10px] text-rv-mute-500">{issue.where}</div>
+        <div className="text-[13px] font-semibold text-foreground">{titleFor(issue)}</div>
+        <div className="ml-auto font-rv-mono text-[10px] text-rv-mute-500">{whereOf(issue)}</div>
       </div>
-      <div className="mt-1.5 text-[12px] leading-relaxed text-rv-mute-700">{issue.desc}</div>
+      <div className="mt-1.5 text-[12px] leading-relaxed text-rv-mute-700">{issue.message}</div>
       <div className="mt-2.5">
         <button
           type="button"
           onClick={() => onJump(issue)}
           className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded border border-rv-divider bg-rv-c1 px-2.5 text-[11px] font-medium text-rv-mute-800 transition hover:bg-rv-c3 hover:text-foreground"
         >
-          {issue.fix} <ArrowRight size={11} />
+          Open page <ArrowRight size={11} />
         </button>
       </div>
     </div>

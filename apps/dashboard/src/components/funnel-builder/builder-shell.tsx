@@ -13,8 +13,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
-import { TABS, type TabId, type ValidationIssue } from "./types";
-import type { ValidatorIssue } from "@rovenue/shared/funnel";
+import { TABS, type TabId } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { FunnelVersionsViewModel } from "./vm/funnel-versions.vm";
 import { ThumbRail } from "./thumb-rail";
@@ -32,20 +31,6 @@ type Props = {
   projectId: string;
 };
 
-// Shim that adapts the shared ValidatorIssue shape to the legacy
-// ValidationIssue prop that ValidationDrawer + PreviewOverlay still
-// expect. Removed by Tasks 33 / 35 when those consume the VM directly.
-function toLegacyIssues(errors: ValidatorIssue[], warnings: ValidatorIssue[]): ValidationIssue[] {
-  const map = (iss: ValidatorIssue, kind: "error" | "warning"): ValidationIssue => {
-    const where = "pageId" in iss ? (iss as { pageId: string }).pageId : "funnel";
-    return { kind, where, title: iss.code, desc: iss.message, fix: "Open page" };
-  };
-  return [
-    ...errors.map((e) => map(e, "error")),
-    ...warnings.map((w) => map(w, "warning")),
-  ];
-}
-
 export const BuilderShell = component(({ projectId }: Props) => {
   const vm = useService(FunnelDraftViewModel);
 
@@ -59,8 +44,6 @@ export const BuilderShell = component(({ projectId }: Props) => {
       </div>
     );
   }
-
-  const issues = toLegacyIssues(vm.validation.errors, vm.validation.warnings);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-rv-bg text-foreground">
@@ -93,21 +76,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
         />
       )}
 
-      {vm.showValidation && (
-        <ValidationDrawer
-          issues={issues}
-          onClose={() => vm.closeValidation()}
-          onJump={(iss) => {
-            vm.closeValidation();
-            if (iss.where.startsWith("pg_")) {
-              vm.setActiveTab("content");
-              vm.selectPage(iss.where);
-            } else if (iss.where === "theme") {
-              vm.setActiveTab("theme");
-            }
-          }}
-        />
-      )}
+      {vm.showValidation && <ValidationDrawer />}
     </div>
   );
 });
