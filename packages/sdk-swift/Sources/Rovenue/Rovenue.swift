@@ -101,4 +101,33 @@ public final class Rovenue: @unchecked Sendable {
             }
         }
     }
+
+    // MARK: - Entitlements
+
+    /// Fetch a specific entitlement from the local cache. Returns nil if it
+    /// doesn't exist locally — does not hit the network.
+    public func entitlement(_ id: String) async -> Entitlement? {
+        await dispatcher.runNonThrowing { [core] in
+            core.entitlement(id: id)
+        }
+    }
+
+    /// List all cached entitlements. Does not hit the network.
+    public func entitlementsAll() async -> [Entitlement] {
+        await dispatcher.runNonThrowing { [core] in
+            core.entitlementsAll()
+        }
+    }
+
+    /// Force a refresh of the entitlements cache against the server.
+    /// On success, emits `.entitlementsChanged` to subscribers of `changes`.
+    public func refreshEntitlements() async throws {
+        try await dispatcher.run { [core] in
+            do {
+                try core.refreshEntitlements()
+            } catch let err as RovenueError {
+                throw mapError(err)
+            }
+        }
+    }
 }
