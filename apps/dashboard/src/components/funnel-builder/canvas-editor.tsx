@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { component, useService } from "impair";
 import {
   ArrowLeft,
@@ -59,11 +59,41 @@ const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 export const CanvasEditor = component(() => {
   const vm = useService(FunnelDraftViewModel);
   const [addOpen, setAddOpen] = useState(false);
-  // Trackpads emit many small wheel events per gesture; accumulate deltaY
-  // and only step zoom when |acc| crosses the threshold. Mouse wheels
-  // typically emit deltaY ~100 per click so a single click still steps.
-  const wheelAccRef = useRef(0);
+  const canvasRef = useRef<HTMLDivElement>(null);
   const page = vm.selectedPage;
+
+  // Native non-passive wheel listener:
+  //  - pinch (trackpad pinch sends wheel events with ctrlKey=true) and
+  //    Cmd/Ctrl+wheel zoom the canvas; preventDefault stops the browser's
+  //    own page-zoom from firing
+  //  - bare scroll bubbles normally so trackpad two-finger / mouse wheel
+  //    pans the canvas via its overflow-auto scroll
+  //  - deltaY accumulates per gesture so trackpad's high event rate
+  //    doesn't fly past zoom steps
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    let acc = 0;
+    const THRESHOLD = 120;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      acc += e.deltaY;
+      while (Math.abs(acc) >= THRESHOLD) {
+        const dir = acc > 0 ? -1 : 1;
+        const current = vm.canvasZoom;
+        let i = ZOOM_STEPS.findIndex((s) => s >= current);
+        if (i < 0) i = ZOOM_STEPS.length - 1;
+        const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, i + dir))];
+        vm.setCanvasZoom(next);
+        acc -= Math.sign(acc) * THRESHOLD;
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [vm]);
+
   if (!page) return null;
   const device = vm.canvasDevice;
   const zoom = vm.canvasZoom;
@@ -187,19 +217,8 @@ export const CanvasEditor = component(() => {
       </div>
 
       <div
+        ref={canvasRef}
         className="flex flex-1 items-center justify-center overflow-auto bg-gradient-to-b from-rv-c1 to-rv-bg p-8"
-        onWheel={(e) => {
-          // Ctrl/Cmd + scroll zooms — matches Figma / browser zoom muscle memory.
-          // Without the modifier, let the canvas scroll normally.
-          if (!(e.ctrlKey || e.metaKey)) return;
-          e.preventDefault();
-          const ZOOM_WHEEL_THRESHOLD = 120;
-          wheelAccRef.current += e.deltaY;
-          while (Math.abs(wheelAccRef.current) >= ZOOM_WHEEL_THRESHOLD) {
-            stepZoom(wheelAccRef.current > 0 ? -1 : 1);
-            wheelAccRef.current -= Math.sign(wheelAccRef.current) * ZOOM_WHEEL_THRESHOLD;
-          }
-        }}
       >
         <div
           style={{ transform: `scale(${zoom})`, transformOrigin: "center center" }}
