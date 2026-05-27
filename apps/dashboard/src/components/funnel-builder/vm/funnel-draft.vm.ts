@@ -269,7 +269,12 @@ export class FunnelDraftViewModel {
   }
 
   // ----- Autosave + publish/duplicate/discard -----
-  @trigger.debounce(800)
+  // Throttled so the backend gets at most one PATCH per 30s no matter how
+  // fast the user types. impair's throttle fires the leading change
+  // immediately and coalesces subsequent edits into a trailing call when
+  // the window expires — so a single keystroke saves right away but
+  // sustained editing doesn't hammer the server.
+  @trigger.throttle(30000)
   async autosave(cleanup: Cleanup) {
     if (!this.funnel || this.isLoading) return;
     // Touch every reactive field we want to send so the trigger re-runs when
