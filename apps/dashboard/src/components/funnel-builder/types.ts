@@ -303,8 +303,6 @@ export type Theme = {
 };
 
 export type Settings = {
-  /** Optional custom hostname this funnel is served from (e.g. quiz.acme.com). */
-  customDomain: string;
   iosUrl: string;
   androidUrl: string;
   universalLinkDomain: string;

@@ -33,7 +33,6 @@ const DEFAULT_THEME: Theme = {
 };
 
 const DEFAULT_SETTINGS: Settings = {
-  customDomain: "",
   iosUrl: "",
   androidUrl: "",
   universalLinkDomain: "",
@@ -538,6 +537,11 @@ export class FunnelDraftViewModel {
       this.showValidation = true;
       return;
     }
+    // Force-flush the throttled autosave first — otherwise pages added in
+    // the last 30s window aren't on the server yet and the publish would
+    // validate a stale snapshot (paywall/success the user just added would
+    // come back as MISSING_*).
+    await this.saveNow();
     const result = await this.api.publish(this.props.projectId, this.props.funnelId);
     this.applyServer(result.funnel);
   }
