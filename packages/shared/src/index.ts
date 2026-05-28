@@ -124,3 +124,9 @@ export * from "./copilot";
 // =============================================================
 
 export * from "./integrations";
+
+// =============================================================
+// i18n primitives — reusable by funnel + paywall builders
+// =============================================================
+export type { Localized, LocaleCode, LocaleSet } from "./i18n";
+export { pick, expand, isLocalized, liftToLocalized, mapLocalizedFields } from "./i18n";

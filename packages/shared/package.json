@@ -25,6 +25,10 @@
     "./funnel": {
       "types": "./src/funnel/index.ts",
       "default": "./src/funnel/index.ts"
+    },
+    "./i18n": {
+      "types": "./src/i18n/index.ts",
+      "default": "./src/i18n/index.ts"
     }
   },
   "scripts": {
