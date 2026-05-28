@@ -8,6 +8,7 @@ function makeVm(
   pages: PreviewProps["pages"],
   rules: PreviewProps["rules"] = {},
   defaultNext: PreviewProps["defaultNext"] = {},
+  editLocale: PreviewProps["editLocale"] = "en",
 ) {
   const container = new Container(tsyringeContainer);
   return container.resolve(FunnelPreviewViewModel, {
@@ -15,6 +16,7 @@ function makeVm(
     rules,
     defaultNext,
     startId: pages[0]?.id ?? null,
+    editLocale,
   });
 }
 

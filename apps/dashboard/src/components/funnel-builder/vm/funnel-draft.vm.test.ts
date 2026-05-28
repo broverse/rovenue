@@ -4,6 +4,7 @@ import { Container } from "impair";
 import { container as tsyringeContainer } from "tsyringe";
 import { FunnelDraftViewModel } from "./funnel-draft.vm";
 import { FunnelApi, type FunnelDetailDto } from "../../../lib/services/funnel-api";
+import type { Localized } from "@rovenue/shared/i18n";
 
 function fakeFunnel(): FunnelDetailDto {
   return {
@@ -90,5 +91,52 @@ describe("FunnelDraftViewModel", () => {
     expect(vm.errorCount).toBe(0);
     vm.removePage("pg_pay");
     expect(vm.errorCount).toBeGreaterThan(0);
+  });
+});
+
+describe("FunnelDraftViewModel — locale actions", () => {
+  it("addLocale appends to locales and switches editLocale", async () => {
+    const vm = makeVm({
+      get: vi.fn().mockResolvedValue(fakeFunnel()),
+      patchDraft: vi.fn().mockResolvedValue(fakeFunnel()),
+      publish: vi.fn(),
+      duplicate: vi.fn(),
+    });
+    await vm.load(() => {});
+    vm.addLocale("tr");
+    expect([...vm.locales].filter((x) => typeof x === "string")).toEqual(["en", "tr"]);
+    expect(vm.editLocale).toBe("tr");
+  });
+
+  it("removeLocale strips the key from every Localized field", async () => {
+    const vm = makeVm({
+      get: vi.fn().mockResolvedValue(fakeFunnel()),
+      patchDraft: vi.fn().mockResolvedValue(fakeFunnel()),
+      publish: vi.fn(),
+      duplicate: vi.fn(),
+    });
+    await vm.load(() => {});
+    vm.addLocale("tr");
+    // Directly set the VM's pages state with a bilingual title
+    (vm as unknown as { pages: unknown[] }).pages = [
+      { id: "p1", type: "welcome", title: { en: "Hi", tr: "Selam" } as Localized<string>, options: [] },
+    ];
+    vm.removeLocale("tr");
+    const page = (vm as unknown as { pages: { title: Localized<string> }[] }).pages[0];
+    expect({ ...page.title }).toEqual({ en: "Hi" });
+    expect([...vm.locales].filter((x) => typeof x === "string")).toEqual(["en"]);
+    expect(vm.editLocale).toBe("en");
+  });
+
+  it("removeLocale is a no-op on the default locale", async () => {
+    const vm = makeVm({
+      get: vi.fn().mockResolvedValue(fakeFunnel()),
+      patchDraft: vi.fn().mockResolvedValue(fakeFunnel()),
+      publish: vi.fn(),
+      duplicate: vi.fn(),
+    });
+    await vm.load(() => {});
+    vm.removeLocale("en");
+    expect([...vm.locales].filter((x) => typeof x === "string")).toContain("en");
   });
 });

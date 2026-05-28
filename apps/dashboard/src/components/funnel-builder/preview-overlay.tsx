@@ -11,6 +11,7 @@ export const PreviewOverlay = component(() => {
     rules: draft.rules,
     defaultNext: draft.defaultNext,
     startId: draft.selectedPageId,
+    editLocale: draft.editLocale,
   });
 
   const idx = preview.currentPage

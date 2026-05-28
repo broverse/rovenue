@@ -7,12 +7,14 @@ import {
 } from "@rovenue/shared/funnel";
 import type { Page } from "../types";
 import { toEvalPage } from "../types";
+import type { LocaleCode } from "@rovenue/shared/i18n";
 
 export interface PreviewProps {
   pages: Page[];
   rules: Record<string, NextRule[]>;
   defaultNext: Record<string, string | null>;
   startId: string | null;
+  editLocale: LocaleCode;
 }
 
 @injectable()
@@ -54,12 +56,13 @@ export class FunnelPreviewViewModel {
     const pagesById = new Map<string, EvalPage>(
       this.props.pages.map((p) => [
         p.id,
-        toEvalPage(p, this.props.rules[p.id], this.props.defaultNext[p.id] ?? undefined) as EvalPage,
+        toEvalPage(p, this.props.editLocale, this.props.rules[p.id], this.props.defaultNext[p.id] ?? undefined) as EvalPage,
       ]),
     );
     const result = evaluateNext({
       page: toEvalPage(
         cur,
+        this.props.editLocale,
         this.props.rules[cur.id],
         this.props.defaultNext[cur.id] ?? undefined,
       ) as EvalPage,
