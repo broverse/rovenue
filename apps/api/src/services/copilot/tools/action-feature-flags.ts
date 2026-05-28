@@ -4,9 +4,9 @@ import type { ToolContext } from "./query-subscribers";
 
 export function actionFeatureFlagsTools(ctx: ToolContext) {
   return {
-    "action.featureFlags.toggle": createIntentTool({
+    "action_featureFlags_toggle": createIntentTool({
       ctx,
-      toolName: "action.featureFlags.toggle",
+      toolName: "action_featureFlags_toggle",
       description:
         "Enable or disable a feature flag globally. Returns a pending intent; the user must approve before it executes.",
       inputSchema: z.object({
@@ -25,9 +25,9 @@ export function actionFeatureFlagsTools(ctx: ToolContext) {
       }),
     }),
 
-    "action.featureFlags.updateRules": createIntentTool({
+    "action_featureFlags_updateRules": createIntentTool({
       ctx,
-      toolName: "action.featureFlags.updateRules",
+      toolName: "action_featureFlags_updateRules",
       description:
         "Update targeting rules for a feature flag. Returns a pending intent; the user must approve before it executes.",
       inputSchema: z.object({

@@ -4,9 +4,9 @@ import type { ToolContext } from "./query-subscribers";
 
 export function actionSubscriptionsTools(ctx: ToolContext) {
   return {
-    "action.subscriptions.cancel": createIntentTool({
+    "action_subscriptions_cancel": createIntentTool({
       ctx,
-      toolName: "action.subscriptions.cancel",
+      toolName: "action_subscriptions_cancel",
       description:
         "Cancel a subscription. Returns a pending intent; the user must approve before it executes.",
       inputSchema: z.object({
@@ -25,9 +25,9 @@ export function actionSubscriptionsTools(ctx: ToolContext) {
       }),
     }),
 
-    "action.subscriptions.refund": createIntentTool({
+    "action_subscriptions_refund": createIntentTool({
       ctx,
-      toolName: "action.subscriptions.refund",
+      toolName: "action_subscriptions_refund",
       description:
         "Full refund of a single purchase. The user must approve.",
       inputSchema: z.object({

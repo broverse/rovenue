@@ -15,7 +15,7 @@ const ListArgs = z.object({
 
 export function querySubscriptionsTools(ctx: ToolContext) {
   return {
-    "query.subscriptions.list": tool({
+    "query_subscriptions_list": tool({
       description:
         "List subscriptions in the current project. Returns purchase/subscription records with store, product, status, expiry, and subscriber id.",
       inputSchema: ListArgs,

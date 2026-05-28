@@ -4,7 +4,7 @@ import type { ToolContext } from "./query-subscribers";
 
 export function uiTools(_ctx: ToolContext) {
   return {
-    "ui.navigate": tool({
+    "ui_navigate": tool({
       description: "Navigate the dashboard to a specific page.",
       inputSchema: z.object({
         to: z.enum([
@@ -21,7 +21,7 @@ export function uiTools(_ctx: ToolContext) {
       }),
       execute: async (input) => ({ uiAction: "navigate", ...input }),
     }),
-    "ui.filter": tool({
+    "ui_filter": tool({
       description: "Apply a filter to the currently visible table.",
       inputSchema: z.object({
         entity: z.string(),
@@ -29,7 +29,7 @@ export function uiTools(_ctx: ToolContext) {
       }),
       execute: async (input) => ({ uiAction: "filter", ...input }),
     }),
-    "ui.openSubscriber": tool({
+    "ui_openSubscriber": tool({
       description: "Open a subscriber's detail page.",
       inputSchema: z.object({ id: z.string().min(1) }),
       execute: async (input) => ({ uiAction: "openSubscriber", ...input }),

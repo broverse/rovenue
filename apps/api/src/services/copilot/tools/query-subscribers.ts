@@ -26,7 +26,7 @@ const GetArgs = z.object({ id: z.string().min(1) });
 
 export function querySubscribersTools(ctx: ToolContext) {
   return {
-    "query.subscribers.search": tool({
+    "query_subscribers_search": tool({
       description:
         "Search subscribers in the current project. Returns id, appUserId, status, country, firstSeenAt, lastSeenAt only.",
       inputSchema: SearchArgs,
@@ -46,7 +46,7 @@ export function querySubscribersTools(ctx: ToolContext) {
         return sterilizeToolResult({ subscribers: rows });
       },
     }),
-    "query.subscribers.get": tool({
+    "query_subscribers_get": tool({
       description: "Get subscriber details by id within the current project.",
       inputSchema: GetArgs,
       execute: async ({ id }) => {

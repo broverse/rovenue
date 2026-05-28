@@ -32,14 +32,14 @@ export function RoviToolUI({ part }: { part: ToolPart }): ReactNode {
   const { projectId } = useParams({ strict: false }) as { projectId?: string };
   const name = part.toolName ?? "";
   if (
-    name.startsWith("action.") &&
+    name.startsWith("action_") &&
     part.output &&
     typeof part.output === "object"
   ) {
     return <ApprovalCard intent={part.output as never} />;
   }
   if (
-    name === "query.subscribers.get" &&
+    name === "query_subscribers_get" &&
     part.output &&
     typeof part.output === "object"
   ) {
@@ -50,7 +50,7 @@ export function RoviToolUI({ part }: { part: ToolPart }): ReactNode {
     );
   }
   if (
-    name === "query.subscribers.search" &&
+    name === "query_subscribers_search" &&
     part.output &&
     typeof part.output === "object"
   ) {
@@ -59,11 +59,11 @@ export function RoviToolUI({ part }: { part: ToolPart }): ReactNode {
     };
     return <SubscriberList subscribers={o.subscribers ?? []} />;
   }
-  if (name.startsWith("query.metrics.")) {
+  if (name.startsWith("query_metrics_")) {
     return <MetricsChart name={name} output={part.output} />;
   }
   if (
-    (name === "ui.navigate" || name === "ui.openSubscriber") &&
+    (name === "ui_navigate" || name === "ui_openSubscriber") &&
     projectId &&
     part.output
   ) {

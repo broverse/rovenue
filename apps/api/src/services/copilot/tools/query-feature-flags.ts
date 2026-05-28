@@ -11,7 +11,7 @@ const ListArgs = z.object({
 
 export function queryFeatureFlagsTools(ctx: ToolContext) {
   return {
-    "query.featureFlags.list": tool({
+    "query_featureFlags_list": tool({
       description:
         "List feature flags in the current project. Returns id, key, env, defaultValue, audienceOverrides.",
       inputSchema: ListArgs,

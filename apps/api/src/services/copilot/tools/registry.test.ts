@@ -4,7 +4,7 @@ import { loadTools, listToolNames } from "./index";
 describe("loadTools", () => {
   it("includes whitelisted domains and excludes billing/webhook-config/custom-domain", () => {
     const names = listToolNames();
-    expect(names).toContain("query.subscribers.search");
+    expect(names).toContain("query_subscribers_search");
     expect(names.some((n) => n.includes("billing"))).toBe(false);
     expect(names.some((n) => n.includes("webhook"))).toBe(false);
     expect(names.some((n) => n.includes("custom-domain"))).toBe(false);
@@ -18,24 +18,24 @@ describe("loadTools", () => {
       threadId: "th_1",
       messageId: "msg_1",
     });
-    expect(tools["query.subscribers.search"]).toBeDefined();
-    expect(tools["query.subscribers.search"]).toHaveProperty("execute");
+    expect(tools["query_subscribers_search"]).toBeDefined();
+    expect(tools["query_subscribers_search"]).toHaveProperty("execute");
   });
 
   it("includes all v1 query tools", () => {
     const names = listToolNames();
     for (const n of [
-      "query.subscribers.search",
-      "query.subscribers.get",
-      "query.subscriptions.list",
-      "query.products.list",
-      "query.productGroups.list",
-      "query.metrics.mrr",
-      "query.metrics.churn",
-      "query.metrics.conversion",
-      "query.audiences.list",
-      "query.experiments.list",
-      "query.featureFlags.list",
+      "query_subscribers_search",
+      "query_subscribers_get",
+      "query_subscriptions_list",
+      "query_products_list",
+      "query_productGroups_list",
+      "query_metrics_mrr",
+      "query_metrics_churn",
+      "query_metrics_conversion",
+      "query_audiences_list",
+      "query_experiments_list",
+      "query_featureFlags_list",
     ]) {
       expect(names).toContain(n);
     }
@@ -44,17 +44,17 @@ describe("loadTools", () => {
   it("includes all v1 action tools", () => {
     const names = listToolNames();
     for (const n of [
-      "action.subscriptions.cancel",
-      "action.subscriptions.refund",
-      "action.subscribers.grantAccess",
-      "action.subscribers.transfer",
-      "action.products.updatePrice",
-      "action.audiences.create",
-      "action.audiences.update",
-      "action.featureFlags.toggle",
-      "action.featureFlags.updateRules",
-      "action.experiments.start",
-      "action.experiments.stop",
+      "action_subscriptions_cancel",
+      "action_subscriptions_refund",
+      "action_subscribers_grantAccess",
+      "action_subscribers_transfer",
+      "action_products_updatePrice",
+      "action_audiences_create",
+      "action_audiences_update",
+      "action_featureFlags_toggle",
+      "action_featureFlags_updateRules",
+      "action_experiments_start",
+      "action_experiments_stop",
     ]) {
       expect(names).toContain(n);
     }

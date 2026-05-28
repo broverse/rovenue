@@ -4,9 +4,9 @@ import type { ToolContext } from "./query-subscribers";
 
 export function actionSubscribersTools(ctx: ToolContext) {
   return {
-    "action.subscribers.grantAccess": createIntentTool({
+    "action_subscribers_grantAccess": createIntentTool({
       ctx,
-      toolName: "action.subscribers.grantAccess",
+      toolName: "action_subscribers_grantAccess",
       description:
         "Grant a subscriber access to a product group (entitlement). Returns a pending intent; the user must approve before it executes.",
       inputSchema: z.object({
@@ -27,9 +27,9 @@ export function actionSubscribersTools(ctx: ToolContext) {
       }),
     }),
 
-    "action.subscribers.transfer": createIntentTool({
+    "action_subscribers_transfer": createIntentTool({
       ctx,
-      toolName: "action.subscribers.transfer",
+      toolName: "action_subscribers_transfer",
       description:
         "Transfer a subscriber's purchases to another app user ID. The user must approve.",
       inputSchema: z.object({
