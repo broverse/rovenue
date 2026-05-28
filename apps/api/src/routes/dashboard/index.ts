@@ -30,6 +30,7 @@ import { offeringsDashboardRoute } from "./offerings";
 import { productsDashboardRoute } from "./products";
 import { projectsRoute } from "./projects";
 import { queriesRoute } from "./queries";
+import { refundShieldRoute } from "./refund-shield";
 import { subscribersRoute } from "./subscribers";
 import { subscriptionsRoute } from "./subscriptions";
 import { transactionsRoute } from "./transactions";
@@ -85,6 +86,7 @@ export const dashboardRoute = new Hono()
   .route("/projects/:projectId/offerings", offeringsDashboardRoute)
   .route("/projects/:projectId/products", productsDashboardRoute)
   .route("/projects/:projectId/queries", queriesRoute)
+  .route("/projects/:projectId/refund-shield", refundShieldRoute)
   .route("/projects/:projectId/subscribers", subscribersRoute)
   .route("/projects/:projectId/subscriptions", subscriptionsRoute)
   .route("/projects/:projectId/transactions", transactionsRoute)
