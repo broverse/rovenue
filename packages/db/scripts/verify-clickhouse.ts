@@ -80,15 +80,11 @@ const EXPECTED_TABLES: ReadonlyArray<{ name: string; engine: string }> = [
   { name: "credit_queue", engine: "Kafka" },
   { name: "raw_credit_ledger", engine: "ReplacingMergeTree" },
   { name: "mv_credit_to_raw", engine: "MaterializedView" },
-  // Plan 2 — MRR rollup
-  { name: "mv_mrr_daily_target", engine: "SummingMergeTree" },
-  { name: "mv_mrr_daily", engine: "MaterializedView" },
-  // Plan 2 — credit balance rollup
-  { name: "mv_credit_balance_target", engine: "AggregatingMergeTree" },
-  { name: "mv_credit_balance", engine: "MaterializedView" },
-  // Plan 2 — credit consumption rollup
-  { name: "mv_credit_consumption_daily_target", engine: "SummingMergeTree" },
-  { name: "mv_credit_consumption_daily", engine: "MaterializedView" },
+  // 0012 — idempotent query-time revenue/credit aggregates (replace rollups)
+  { name: "v_mrr_daily", engine: "View" },
+  { name: "v_credit_consumption_daily", engine: "View" },
+  { name: "v_credit_balance", engine: "View" },
+  { name: "v_revenue_lifetime_subscriber", engine: "View" },
   // Plan 3 — Refund Shield SDK session pipeline
   { name: "sdk_session_events_queue", engine: "Kafka" },
   { name: "raw_sdk_session_events", engine: "ReplacingMergeTree" },
@@ -96,9 +92,6 @@ const EXPECTED_TABLES: ReadonlyArray<{ name: string; engine: string }> = [
   // Plan 3 — Refund Shield per-subscriber daily session rollup
   { name: "sdk_sessions_daily_tbl", engine: "SummingMergeTree" },
   { name: "sdk_sessions_daily", engine: "MaterializedView" },
-  // Plan 3 — Refund Shield per-subscriber lifetime revenue rollup
-  { name: "revenue_lifetime_subscriber_tbl", engine: "SummingMergeTree" },
-  { name: "revenue_lifetime_subscriber_mv", engine: "MaterializedView" },
 ];
 
 interface TableRow {
