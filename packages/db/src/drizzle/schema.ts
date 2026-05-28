@@ -874,6 +874,7 @@ export const refundShieldResponses = pgTable(
       .on(t.status, t.scheduledFor)
       .where(sql`${t.status} = 'PENDING'`),
     outcomeLookupIdx: index("idx_rss_outcome_lookup").on(
+      t.projectId,
       t.appleOriginalTransactionId,
     ),
     dashboardIdx: index("idx_rss_dashboard").on(t.projectId, t.detectedAt),

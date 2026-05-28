@@ -463,6 +463,13 @@
       "when": 1780001500000,
       "tag": "0065_refund_shield_responses",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1780001600000,
+      "tag": "0066_oval_brother_voodoo",
+      "breakpoints": true
     }
   ]
 }
