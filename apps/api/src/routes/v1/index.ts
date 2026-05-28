@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { apiKeyAuth } from "../../middleware/api-key-auth";
 import { apiKeyRateLimit } from "../../middleware/rate-limit";
 import { configRoute } from "./config";
+import { eventsRoute } from "./events";
 import { experimentsRoute } from "./experiments";
 import { funnelClaimRoute } from "./funnel-claim";
 import { meRoute } from "./me";
@@ -35,6 +36,7 @@ export const v1Route = new Hono()
   // the IP.
   .use("*", apiKeyRateLimit())
   .route("/config", configRoute)
+  .route("/events", eventsRoute)
   .route("/experiments", experimentsRoute)
   .route("/me", meRoute)
   .route("/receipts", receiptsRoute)
