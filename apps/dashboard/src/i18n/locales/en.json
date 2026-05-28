@@ -239,7 +239,8 @@
       "queries": "Queries",
       "leaderboards": "Leaderboards",
       "apps": "Apps & integrations",
-      "settings": "Settings"
+      "settings": "Settings",
+      "refundShield": "Refund Shield"
     }
   },
   "topbar": {
@@ -293,7 +294,8 @@
     "cohorts": "Cohorts",
     "audiences": "Audiences",
     "leaderboards": "Leaderboards",
-    "funnels": "Funnels"
+    "funnels": "Funnels",
+    "refundShield": "Refund Shield"
   },
   "overview": {
     "title": "Overview",
@@ -1815,6 +1817,159 @@
         "nameRequired": "Name is required.",
         "unknown": "Something went wrong. Please try again."
       }
+    }
+  },
+  "refundShield": {
+    "title": "Refund Shield",
+    "subtitle": "Respond to Apple CONSUMPTION_REQUEST notifications with consumption data so the refund-decision algorithm is more likely to decline unjustified refunds.",
+    "disabled": {
+      "headline": "Refund Shield is off",
+      "body": "Enable it to start responding to Apple refund requests. Apple gives you 12 hours per request — Rovenue handles the timing.",
+      "cta": "Set up Refund Shield"
+    },
+    "kpi": {
+      "sent": "Responses sent",
+      "winRate": "Win rate",
+      "winRateHint": "Refunds declined / total outcomes",
+      "revenueSaved": "Revenue saved",
+      "revenueSavedHint": "Sum of declined-refund purchase prices",
+      "outcomesPending": "Awaiting outcome",
+      "outcomesPendingHint": "Responses sent, Apple decision still open"
+    },
+    "trend": {
+      "title": "Last 30 days",
+      "empty": "No responses yet in this window."
+    },
+    "donut": {
+      "title": "Outcome breakdown",
+      "declined": "Declined",
+      "approved": "Approved",
+      "reversed": "Reversed",
+      "pending": "Pending"
+    },
+    "responses": {
+      "title": "Responses",
+      "filters": {
+        "status": "Status",
+        "outcome": "Outcome",
+        "any": "Any"
+      },
+      "empty": "No responses match these filters yet.",
+      "columns": {
+        "detectedAt": "Detected",
+        "status": "Status",
+        "outcome": "Outcome",
+        "subscriber": "Subscriber",
+        "originalTransactionId": "Original transaction",
+        "scheduledFor": "Send at",
+        "sentAt": "Sent",
+        "retries": "Retries"
+      },
+      "loadMore": "Load more"
+    },
+    "detail": {
+      "back": "Back to responses",
+      "timeline": {
+        "title": "Timeline",
+        "detected": "Detected by webhook",
+        "scheduled": "Scheduled to send",
+        "sent": "Posted to Apple",
+        "outcomeApproved": "Refund granted",
+        "outcomeDeclined": "Refund declined",
+        "outcomeReversed": "Refund reversed",
+        "failed": "Failed"
+      },
+      "payload": {
+        "title": "Apple payload",
+        "subtitle": "The consumption document submitted to PUT /inApps/v1/transactions/consumption/{{txn}}",
+        "empty": "No payload — this row was skipped before assembly."
+      },
+      "appleResponse": {
+        "title": "Apple response",
+        "status": "HTTP {{status}}",
+        "empty": "No response captured."
+      },
+      "subscriber": {
+        "title": "Linked subscriber",
+        "missing": "No subscriber linked (Apple notification couldn't be matched)."
+      },
+      "linkSubscriber": "View subscriber"
+    },
+    "settings": {
+      "title": "Refund Shield settings",
+      "subtitle": "Operator-only controls. Enabling this feature submits consumption data to Apple's refund-decision API on your behalf.",
+      "enable": {
+        "label": "Enable Refund Shield",
+        "description": "When on, the polling worker responds to incoming CONSUMPTION_REQUEST notifications within the configured delay."
+      },
+      "delay": {
+        "label": "Response delay",
+        "description": "Wait this many minutes after Apple's notification before replying. A short delay lets last-minute usage signal accumulate; a longer delay is safer if your session telemetry is sparse.",
+        "unit": "{{value}} minutes",
+        "min": "30 min",
+        "max": "360 min"
+      },
+      "consent": {
+        "label": "I confirm our Terms of Service and privacy policy disclose that consumption data may be shared with Apple to evaluate refund requests.",
+        "stamped": "Consent acknowledged on {{date}} by {{user}}.",
+        "requiredBeforeEnable": "Tick the consent box before enabling."
+      },
+      "submit": "Save changes",
+      "submitting": "Saving…",
+      "saved": "Settings saved.",
+      "error": "Could not save settings. {{message}}"
+    },
+    "wizard": {
+      "title": "Set up Refund Shield",
+      "step": "Step {{n}} of 4",
+      "steps": {
+        "sdkCheck": {
+          "title": "SDK requirements",
+          "body": "Refund Shield works best when your SDK is passing an `appAccountToken` on every Apple purchase. Once you ship the updated SDK build, returning customers' new purchases will start populating the token automatically.",
+          "okay": "I've upgraded the SDK",
+          "skip": "Continue anyway"
+        },
+        "tos": {
+          "title": "Update your Terms of Service",
+          "body": "Apple's refund flow requires you to disclose that consumption data may be shared. Copy this clause into your ToS / privacy policy:",
+          "template": "Apple may consult anonymized signals about your usage of the app (session duration, account age, lifetime spend, refund history) when evaluating a refund request you submit. By using this app you consent to us sharing those signals with Apple solely for that purpose.",
+          "copied": "Copied!",
+          "acknowledged": "I've updated our ToS"
+        },
+        "delay": {
+          "title": "Response delay",
+          "body": "How long to wait before replying. The default 60 minutes is a safe middle ground.",
+          "next": "Next"
+        },
+        "enable": {
+          "title": "Enable",
+          "body": "You can disable Refund Shield at any time from Settings.",
+          "submit": "Enable Refund Shield",
+          "submitting": "Enabling…"
+        }
+      },
+      "back": "Back",
+      "exit": "Cancel"
+    },
+    "subscriberTab": {
+      "title": "Refund Shield",
+      "empty": "No refund requests for this subscriber.",
+      "disabled": "Refund Shield is off — enable it to start collecting refund-request history.",
+      "count_one": "{{count}} refund request",
+      "count_other": "{{count}} refund requests"
+    },
+    "status": {
+      "PENDING": "Pending",
+      "SENT": "Sent",
+      "FAILED": "Failed",
+      "SKIPPED_DISABLED": "Skipped (disabled)",
+      "SKIPPED_NOT_FOUND": "Skipped (no match)"
+    },
+    "outcome": {
+      "REFUND_APPROVED": "Refund granted",
+      "REFUND_DECLINED": "Refund declined",
+      "REFUND_REVERSED": "Reversed",
+      "none": "—"
     }
   },
   "experiments": {

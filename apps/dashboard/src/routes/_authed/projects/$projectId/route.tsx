@@ -21,6 +21,7 @@ function useBreadcrumbTitleKey(): string {
   const id = last?.routeId ?? "";
   if (id.includes("/subscribers/$id")) return "breadcrumb.subscriber";
   if (id.includes("/subscribers/")) return "breadcrumb.subscribers";
+  if (id.includes("/refund-shield")) return "breadcrumb.refundShield";
   if (id.includes("/settings")) return "breadcrumb.settings";
   if (id.includes("/live-events")) return "breadcrumb.liveEvents";
   if (id.includes("/products")) return "breadcrumb.products";

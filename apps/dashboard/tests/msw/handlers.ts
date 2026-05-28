@@ -516,4 +516,213 @@ export const handlers = [
         },
       }),
   ),
+
+  // -------------------------------------------------------------
+  // Refund Shield — settings / responses / metrics
+  // -------------------------------------------------------------
+
+  http.get(
+    `${BASE}/dashboard/projects/:projectId/refund-shield/settings`,
+    () =>
+      HttpResponse.json({
+        data: {
+          settings: {
+            enabled: false,
+            responseDelayMinutes: 60,
+            consentAcknowledgedAt: null,
+            consentAcknowledgedBy: null,
+          },
+        },
+      }),
+  ),
+
+  http.put(
+    `${BASE}/dashboard/projects/:projectId/refund-shield/settings`,
+    async ({ request }) => {
+      const body = (await request.json()) as {
+        enabled: boolean;
+        responseDelayMinutes?: number;
+        consentAcknowledged?: boolean;
+      };
+      return HttpResponse.json({
+        data: {
+          settings: {
+            enabled: body.enabled,
+            responseDelayMinutes: body.responseDelayMinutes ?? 60,
+            consentAcknowledgedAt: body.consentAcknowledged
+              ? "2026-05-28T00:00:00.000Z"
+              : null,
+            consentAcknowledgedBy: body.consentAcknowledged ? "u1" : null,
+          },
+        },
+      });
+    },
+  ),
+
+  http.get(
+    `${BASE}/dashboard/projects/:projectId/refund-shield/responses`,
+    ({ request }) => {
+      const url = new URL(request.url);
+      const status = url.searchParams.get("status");
+      const outcome = url.searchParams.get("outcome");
+
+      const all = [
+        {
+          id: "rss_sent_declined",
+          projectId: "proj_1",
+          subscriberId: "sub_1",
+          appleNotificationUuid: "notif-1111",
+          appleOriginalTransactionId: "2000000111111111",
+          appleTransactionId: "2000000111111112",
+          detectedAt: "2026-05-26T08:00:00.000Z",
+          scheduledFor: "2026-05-26T09:00:00.000Z",
+          sentAt: "2026-05-26T09:00:14.000Z",
+          status: "SENT",
+          outcome: "REFUND_DECLINED",
+          outcomeReceivedAt: "2026-05-26T15:21:00.000Z",
+          appleHttpStatus: 202,
+          error: null,
+          retryCount: 0,
+          createdAt: "2026-05-26T08:00:00.000Z",
+          updatedAt: "2026-05-26T15:21:00.000Z",
+        },
+        {
+          id: "rss_pending",
+          projectId: "proj_1",
+          subscriberId: "sub_2",
+          appleNotificationUuid: "notif-2222",
+          appleOriginalTransactionId: "2000000222222221",
+          appleTransactionId: "2000000222222222",
+          detectedAt: "2026-05-28T07:30:00.000Z",
+          scheduledFor: "2026-05-28T08:30:00.000Z",
+          sentAt: null,
+          status: "PENDING",
+          outcome: null,
+          outcomeReceivedAt: null,
+          appleHttpStatus: null,
+          error: null,
+          retryCount: 0,
+          createdAt: "2026-05-28T07:30:00.000Z",
+          updatedAt: "2026-05-28T07:30:00.000Z",
+        },
+        {
+          id: "rss_skipped_disabled",
+          projectId: "proj_1",
+          subscriberId: null,
+          appleNotificationUuid: "notif-3333",
+          appleOriginalTransactionId: "2000000333333331",
+          appleTransactionId: "2000000333333332",
+          detectedAt: "2026-05-20T11:00:00.000Z",
+          scheduledFor: "2026-05-20T11:00:00.000Z",
+          sentAt: null,
+          status: "SKIPPED_DISABLED",
+          outcome: null,
+          outcomeReceivedAt: null,
+          appleHttpStatus: null,
+          error: null,
+          retryCount: 0,
+          createdAt: "2026-05-20T11:00:00.000Z",
+          updatedAt: "2026-05-20T11:00:00.000Z",
+        },
+        {
+          id: "rss_failed",
+          projectId: "proj_1",
+          subscriberId: "sub_3",
+          appleNotificationUuid: "notif-4444",
+          appleOriginalTransactionId: "2000000444444441",
+          appleTransactionId: "2000000444444442",
+          detectedAt: "2026-05-15T03:00:00.000Z",
+          scheduledFor: "2026-05-15T04:00:00.000Z",
+          sentAt: null,
+          status: "FAILED",
+          outcome: null,
+          outcomeReceivedAt: null,
+          appleHttpStatus: 500,
+          error: "SLA_EXCEEDED",
+          retryCount: 5,
+          createdAt: "2026-05-15T03:00:00.000Z",
+          updatedAt: "2026-05-15T15:00:00.000Z",
+        },
+      ];
+
+      let filtered = all;
+      if (status) filtered = filtered.filter((r) => r.status === status);
+      if (outcome) filtered = filtered.filter((r) => r.outcome === outcome);
+
+      return HttpResponse.json({
+        data: { responses: filtered, nextCursor: null },
+      });
+    },
+  ),
+
+  http.get(
+    `${BASE}/dashboard/projects/:projectId/refund-shield/responses/:rid`,
+    ({ params }) => {
+      const rid = String(params.rid);
+      const requestPayload =
+        rid === "rss_sent_declined"
+          ? {
+              customerConsented: true,
+              consumptionStatus: 1,
+              platform: 1,
+              sampleContentProvided: false,
+              deliveryStatus: 0,
+              accountTenure: 5,
+              playTime: 4,
+              lifetimeDollarsPurchased: 3,
+              lifetimeDollarsRefunded: 0,
+              userStatus: 1,
+              refundPreference: 2,
+              appAccountToken: "00000000-0000-4000-8000-000000000001",
+            }
+          : null;
+      return HttpResponse.json({
+        data: {
+          response: {
+            id: rid,
+            projectId: "proj_1",
+            subscriberId: rid === "rss_skipped_disabled" ? null : "sub_1",
+            appleNotificationUuid: `notif-${rid}`,
+            appleOriginalTransactionId: "2000000111111111",
+            appleTransactionId: "2000000111111112",
+            detectedAt: "2026-05-26T08:00:00.000Z",
+            scheduledFor: "2026-05-26T09:00:00.000Z",
+            sentAt:
+              rid === "rss_sent_declined" ? "2026-05-26T09:00:14.000Z" : null,
+            status: rid === "rss_pending" ? "PENDING" : "SENT",
+            outcome: rid === "rss_sent_declined" ? "REFUND_DECLINED" : null,
+            outcomeReceivedAt:
+              rid === "rss_sent_declined" ? "2026-05-26T15:21:00.000Z" : null,
+            appleHttpStatus: rid === "rss_sent_declined" ? 202 : null,
+            appleResponseBody: rid === "rss_sent_declined" ? "" : null,
+            error: null,
+            retryCount: 0,
+            createdAt: "2026-05-26T08:00:00.000Z",
+            updatedAt: "2026-05-26T15:21:00.000Z",
+            requestPayload,
+          },
+        },
+      });
+    },
+  ),
+
+  http.get(
+    `${BASE}/dashboard/projects/:projectId/refund-shield/metrics`,
+    () =>
+      HttpResponse.json({
+        data: {
+          sentCount: 184,
+          outcomeCount: 162,
+          declinedCount: 121,
+          approvedCount: 36,
+          reversedCount: 5,
+          winRate: 0.7469,
+          estimatedRevenueSavedCents: 482400,
+          range: {
+            since: "2026-04-28T00:00:00.000Z",
+            until: "2026-05-28T00:00:00.000Z",
+          },
+        },
+      }),
+  ),
 ];
