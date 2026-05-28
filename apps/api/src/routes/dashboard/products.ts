@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { MemberRole, drizzle } from "@rovenue/db";
+import { MemberRole, accessIdSchema, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
@@ -102,7 +102,7 @@ const createBodySchema = z.object({
   type: productType,
   displayName: z.string().trim().min(1).max(200),
   storeIds: storeIdsSchema.optional(),
-  entitlementKeys: z.array(z.string().trim().min(1).max(120)).optional(),
+  accessIds: z.array(accessIdSchema).optional(),
   creditAmount: z.number().int().nullable().optional(),
   isActive: z.boolean().optional(),
   metadata: z.record(z.unknown()).optional(),
@@ -113,7 +113,7 @@ const importItemSchema = z.object({
   identifier: z.string().trim().min(1).max(160).optional(),
   displayName: z.string().trim().min(1).max(200).optional(),
   type: productType,
-  entitlementKeys: z.array(z.string().trim().min(1).max(120)).optional(),
+  accessIds: z.array(accessIdSchema).optional(),
   creditAmount: z.number().int().nullable().optional(),
   metadata: z.record(z.unknown()).optional(),
 });
@@ -129,7 +129,7 @@ const updateBodySchema = z
     type: productType.optional(),
     displayName: z.string().trim().min(1).max(200).optional(),
     storeIds: storeIdsSchema.optional(),
-    entitlementKeys: z.array(z.string().trim().min(1).max(120)).optional(),
+    accessIds: z.array(accessIdSchema).optional(),
     creditAmount: z.number().int().nullable().optional(),
     isActive: z.boolean().optional(),
     metadata: z.record(z.unknown()).optional(),
@@ -139,13 +139,36 @@ const updateBodySchema = z
     { message: "At least one field is required" },
   );
 
+/**
+ * Validates that every `accessId` referenced from a product row
+ * exists in the project's access catalog. Postgres `text[]` cannot
+ * enforce per-element FKs, so we do it here. Returns silently when
+ * the array is empty.
+ */
+async function assertAccessIdsExist(
+  projectId: string,
+  ids: ReadonlyArray<string>,
+): Promise<void> {
+  if (ids.length === 0) return;
+  const rows = await drizzle.accessCatalogRepo.findByIds(drizzle.db, [...ids]);
+  const valid = new Set(
+    rows.filter((r) => r.projectId === projectId).map((r) => r.id),
+  );
+  const missing = ids.filter((id) => !valid.has(id));
+  if (missing.length > 0) {
+    throw new HTTPException(400, {
+      message: `Unknown access ids: ${missing.join(", ")}`,
+    });
+  }
+}
+
 function toWire(row: {
   id: string;
   identifier: string;
   type: string;
   displayName: string;
   storeIds: unknown;
-  entitlementKeys: string[];
+  accessIds: string[];
   creditAmount: number | null;
   isActive: boolean;
   metadata: unknown;
@@ -158,7 +181,7 @@ function toWire(row: {
     type: row.type as ProductTypeName,
     displayName: row.displayName,
     storeIds: (row.storeIds as Record<string, string> | null) ?? {},
-    entitlementKeys: row.entitlementKeys,
+    accessIds: row.accessIds,
     creditAmount: row.creditAmount,
     isActive: row.isActive,
     metadata: (row.metadata as Record<string, unknown> | null) ?? {},
@@ -233,13 +256,15 @@ export const productsDashboardRoute = new Hono()
       });
     }
 
+    await assertAccessIdsExist(projectId, body.accessIds ?? []);
+
     const row = await drizzle.productRepo.createProduct(drizzle.db, {
       projectId,
       identifier: body.identifier,
       type: body.type,
       displayName: body.displayName,
       storeIds: body.storeIds ?? {},
-      entitlementKeys: body.entitlementKeys ?? [],
+      accessIds: body.accessIds ?? [],
       creditAmount: body.creditAmount ?? null,
       isActive: body.isActive ?? true,
       metadata: body.metadata ?? {},
@@ -263,7 +288,7 @@ export const productsDashboardRoute = new Hono()
         displayName,
         type: item.type,
         storeId: item.storeId,
-        entitlementKeys: item.entitlementKeys ?? [],
+        accessIds: item.accessIds ?? [],
         creditAmount: item.creditAmount ?? null,
         metadata: item.metadata ?? {},
       };
@@ -336,6 +361,10 @@ export const productsDashboardRoute = new Hono()
           message: `Product identifier already in use: ${body.identifier}`,
         });
       }
+    }
+
+    if (body.accessIds) {
+      await assertAccessIdsExist(projectId, body.accessIds);
     }
 
     const row = await drizzle.productRepo.updateProduct(

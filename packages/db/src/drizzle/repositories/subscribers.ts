@@ -221,8 +221,8 @@ export interface ListSubscribersArgs {
   q?: string;
   /** Derived lifecycle status — matches the dashboard scope tabs. */
   status?: SubscriberStatusFilter;
-  /** Subscriber must have an *active* entitlement with this key. */
-  entitlementKey?: string;
+  /** Subscriber must have an *active* access with this id. */
+  accessId?: string;
   /** Subscriber must have at least one purchase from this platform. */
   platforms?: ReadonlyArray<SubscriberPlatformFilter>;
   /** Match on `attributes->>'country'` (exact, case-insensitive). */
@@ -243,7 +243,7 @@ export interface ListedSubscriber {
   lastSeenAt: Date;
   createdAt: Date;
   purchaseCount: number;
-  activeEntitlementKeys: string[];
+  activeAccessIds: string[];
   /** Lifetime gross from `purchases.priceAmount`, decimal-as-string. */
   ltvUsd: string;
   /** Distinct platforms across all purchases (ios/android/web). */
@@ -262,10 +262,10 @@ const STORE_TO_PLATFORM: Record<string, SubscriberPlatformFilter> = {
 
 /**
  * Dashboard list query: keyset pagination on (createdAt, id),
- * optional text search + structured filters (status / entitlement /
+ * optional text search + structured filters (status / access /
  * platform / country / ltvMin), plus per-row purchase count, LTV,
- * platforms, and active entitlement keys. Aggregate fields are
- * fetched via correlated subqueries — Postgres handles the per-row
+ * platforms, and active access ids. Aggregate fields are fetched
+ * via correlated subqueries — Postgres handles the per-row
  * correlation cleanly and Drizzle's query API doesn't need a raw
  * SQL escape hatch for it.
  */
@@ -322,12 +322,12 @@ export async function listSubscribers(
     )`);
   }
 
-  // --- entitlement key (must be currently active) -------------
-  if (args.entitlementKey) {
+  // --- access id (must be currently active) --------------------
+  if (args.accessId) {
     whereClauses.push(sql`EXISTS (
       SELECT 1 FROM ${subscriberAccess}
       WHERE ${subscriberAccess.subscriberId} = ${subscribers.id}
-        AND ${subscriberAccess.entitlementKey} = ${args.entitlementKey}
+        AND ${subscriberAccess.accessId} = ${args.accessId}
         AND ${subscriberAccess.isActive} = TRUE
         AND (${subscriberAccess.expiresDate} IS NULL
              OR ${subscriberAccess.expiresDate} > NOW())
@@ -426,9 +426,9 @@ export async function listSubscribers(
     )`);
   }
 
-  const entitlementsSql = sql<string[]>`(
+  const accessIdsSql = sql<string[]>`(
     SELECT COALESCE(
-      ARRAY_AGG(DISTINCT ${subscriberAccess.entitlementKey}),
+      ARRAY_AGG(DISTINCT ${subscriberAccess.accessId}),
       ARRAY[]::text[]
     )
     FROM ${subscriberAccess}
@@ -463,7 +463,7 @@ export async function listSubscribers(
       lastSeenAt: subscribers.lastSeenAt,
       createdAt: subscribers.createdAt,
       purchaseCount: purchaseCountExpr,
-      activeEntitlementKeys: entitlementsSql,
+      activeAccessIds: accessIdsSql,
       ltvUsd: ltvSql,
       platforms: platformsSql,
       sortValue: sortValueSql,
@@ -476,7 +476,7 @@ export async function listSubscribers(
   return rows.map((r) => ({
     ...r,
     purchaseCount: Number(r.purchaseCount) || 0,
-    activeEntitlementKeys: r.activeEntitlementKeys ?? [],
+    activeAccessIds: r.activeAccessIds ?? [],
     ltvUsd: typeof r.ltvUsd === "string" ? r.ltvUsd : "0",
     platforms: (r.platforms ?? [])
       .map((s) => STORE_TO_PLATFORM[s])

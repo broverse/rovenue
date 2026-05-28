@@ -257,7 +257,7 @@ export interface SubscriberListItem {
   firstSeenAt: string;
   lastSeenAt: string;
   purchaseCount: number;
-  activeEntitlementKeys: string[];
+  activeAccessIds: string[];
   /** Lifetime gross from `purchases.priceAmount`, decimal-as-string. */
   ltvUsd: string;
   /** Distinct platforms across all purchases. */

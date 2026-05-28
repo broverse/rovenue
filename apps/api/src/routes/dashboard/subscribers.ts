@@ -162,7 +162,7 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   q: z.string().trim().min(1).max(200).optional(),
   status: z.enum(["active", "trial", "grace", "churned"]).optional(),
-  entitlement: z.string().trim().min(1).max(200).optional(),
+  access: z.string().trim().min(1).max(200).optional(),
   platform: platformSchema.optional(),
   // 2-letter country code; we upper-case both sides on the SQL side
   // so the input casing is forgiving.
@@ -247,7 +247,7 @@ export const subscribersRoute = new Hono()
     limit: fetchLimit,
     q: query.q,
     status: query.status,
-    entitlementKey: query.entitlement,
+    accessId: query.access,
     platforms: query.platform,
     country: query.country,
     ltvMin: query.ltvMin,
@@ -270,7 +270,7 @@ export const subscribersRoute = new Hono()
     firstSeenAt: s.firstSeenAt.toISOString(),
     lastSeenAt: s.lastSeenAt.toISOString(),
     purchaseCount: s.purchaseCount,
-    activeEntitlementKeys: s.activeEntitlementKeys,
+    activeAccessIds: s.activeAccessIds,
     ltvUsd: s.ltvUsd,
     platforms: s.platforms,
   }));
@@ -332,7 +332,7 @@ export const subscribersRoute = new Hono()
     deletedAt: subscriber.deletedAt?.toISOString() ?? null,
     mergedInto: subscriber.mergedInto,
     access: access.map((a) => ({
-      entitlementKey: a.entitlementKey,
+      accessId: a.accessId,
       isActive: a.isActive,
       expiresDate: a.expiresDate?.toISOString() ?? null,
       store: a.store,
