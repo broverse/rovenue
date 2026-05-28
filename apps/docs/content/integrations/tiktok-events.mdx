@@ -1,0 +1,69 @@
+# TikTok Events API
+
+The TikTok Events integration forwards Rovenue subscription and revenue events to the TikTok Events API (server-side), enabling reliable attribution for TikTok campaigns without depending solely on the client-side pixel.
+
+---
+
+## 1. Get your credentials from TikTok
+
+1. Open [TikTok Events Manager](https://ads.tiktok.com/i18n/events_manager).
+2. Select your **Data Source** (Web/App Pixel or SDK).
+3. Go to **Manage → Access Token** (or **Settings → Access Token** depending on your interface version).
+4. Copy:
+   - **Access Token** — the long-lived token for server-side API calls.
+   - **Pixel Code** — the alphanumeric identifier shown at the top of the Data Source page (e.g. `C8ABCDEF1234567890`).
+
+> Keep these values secure. The access token grants write access to your Events data source.
+
+---
+
+## 2. Add the integration in Rovenue
+
+1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
+2. Find **TikTok Events** in the integrations grid and click it.
+3. The side drawer opens. Fill in the **Credentials** step:
+   - **Pixel Code** — paste the Pixel Code from step 1.
+   - **Access Token** — paste the access token from step 1.
+4. Click **Validate** — Rovenue calls the TikTok Events API test endpoint to verify the credentials are accepted.
+5. Proceed through the remaining drawer steps (event mapping, test event code, enable).
+6. Click **Save** to activate the integration.
+
+---
+
+## 3. Identity context & consent
+
+When your SDK passes an `identityContext` with an event, the following fields are forwarded to TikTok Events API:
+
+| Field | Forwarded as | Hashing |
+|---|---|---|
+| `email` | `user_data.em` | SHA-256 (lowercased + trimmed before hashing) |
+| `phone` | `user_data.ph` | SHA-256 (digits only before hashing) |
+| `externalId` | `user_data.external_id` | SHA-256 (trimmed before hashing) |
+| `ip` | `context.ip` | Forwarded verbatim — not hashed |
+| `userAgent` | `context.user_agent` | Forwarded verbatim — not hashed |
+| `ttclid` / `ttp` | `context.ttclid` / `properties.ttp` | Forwarded verbatim — not hashed |
+| `fbp` / `fbc` | Not sent to TikTok Events | N/A (Meta-specific fields) |
+
+**Consent is your responsibility.**
+
+Rovenue acts as a **data processor**. Your application is the **data controller**. You must obtain the end-user's informed consent before passing any PII in `identityContext`. GDPR, CCPA, KVKK, and similar regulations place the consent obligation on the controller (you), not the processor (Rovenue).
+
+Additional guarantees:
+- Rovenue **never persists** `identityContext` fields at rest. PII is hashed in-process; raw values are not written to any database.
+- `response_body` from TikTok Events API is stored but **truncated to 4096 bytes**.
+- The wire format uses camelCase JSON with `ROVENUE_EVENT_WIRE_VERSION: "v1"`.
+
+---
+
+## 4. Verify events are arriving
+
+1. Go back to **TikTok Events Manager**.
+2. Select your Data Source and open the **Diagnostics** tab (sometimes labelled **Test Events**).
+3. In the Rovenue drawer's **Test** step, you set a `test_event_code`. Trigger a real event from your app or use the Rovenue **Send Test Event** button.
+4. The Diagnostics tab should show the event within a few seconds, confirming the full pipeline is working.
+
+If events are not appearing:
+- Verify the Pixel Code and Access Token are correct (use **Validate** in the drawer).
+- Check **Apps → TikTok Events → Delivery Log** in Rovenue for HTTP status codes and error messages.
+- Ensure `enabledEvents` in the connection includes the event type you are sending.
+- TikTok Events API returns a `code` field in its JSON response — code `0` means success; any other value is an error. The delivery log shows the raw response body.
