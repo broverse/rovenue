@@ -15,6 +15,7 @@ import dev.rovenue.sdk.LogEntry
 import dev.rovenue.sdk.Rovenue
 import dev.rovenue.sdk.generated.ChangeEvent
 import dev.rovenue.sdk.generated.Entitlement
+import dev.rovenue.sdk.generated.SessionEventKind
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import kotlinx.coroutines.CoroutineScope
@@ -66,13 +67,30 @@ class RovenueModule : Module() {
         AsyncFunction("consumeCredits") Coroutine { amount: Double, description: String? ->
             Rovenue.shared.consumeCredits(amount.toLong(), description).toDouble()
         }
-        AsyncFunction("postAppleReceipt") Coroutine { jws: String, productId: String ->
-            Rovenue.shared.postAppleReceipt(jws, productId)
+        AsyncFunction("postAppleReceipt") Coroutine { jws: String, productId: String, appAccountToken: String? ->
+            Rovenue.shared.postAppleReceipt(jws, productId, appAccountToken)
             mapOf("ok" to true, "entitlementsRefreshed" to true, "creditsRefreshed" to true)
         }
-        AsyncFunction("postGoogleReceipt") Coroutine { receipt: String, productId: String ->
-            Rovenue.shared.postGoogleReceipt(receipt, productId)
+        AsyncFunction("postGoogleReceipt") Coroutine { receipt: String, productId: String, obfAccount: String?, obfProfile: String? ->
+            Rovenue.shared.postGoogleReceipt(receipt, productId, obfAccount, obfProfile)
             mapOf("ok" to true, "entitlementsRefreshed" to true, "creditsRefreshed" to true)
+        }
+
+        // ---------------- Refund Shield ----------------
+        AsyncFunction("getAppAccountToken") Coroutine { ->
+            Rovenue.shared.getAppAccountToken()
+        }
+        AsyncFunction("recordSessionEvent") Coroutine { kind: String, occurredAt: String, durationMs: Double? ->
+            val kindEnum = when (kind) {
+                "open" -> SessionEventKind.OPEN
+                "background" -> SessionEventKind.BACKGROUND
+                "close" -> SessionEventKind.CLOSE
+                else -> SessionEventKind.OPEN
+            }
+            Rovenue.shared.recordSessionEvent(kindEnum, occurredAt, durationMs?.toInt()?.toUInt())
+        }
+        AsyncFunction("flushSessionEvents") Coroutine { ->
+            Rovenue.shared.flushSessionEvents().toDouble()
         }
 
         // ---------------- Events ----------------
