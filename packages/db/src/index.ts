@@ -207,6 +207,7 @@ export { getDb, createDb, db } from "./drizzle";
 // =============================================================
 
 export {
+  access,
   projects,
   subscribers,
   products,

@@ -52,7 +52,7 @@ beforeEach(() => {
     )
     .mockImplementationOnce(() =>
       selectChain([
-        { id: "acc_1", subscriberId: "sub_1", entitlementKey: "pro" },
+        { id: "acc_1", subscriberId: "sub_1", accessId: "pro" },
       ]),
     )
     .mockImplementationOnce(() =>

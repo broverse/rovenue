@@ -142,7 +142,7 @@ async function seedProduct({
     type: "SUBSCRIPTION",
     storeIds: {},
     displayName: `Route Test Product ${RUN_ID}${suffix}`,
-    entitlementKeys: [`pro_route_${RUN_ID}${suffix}`],
+    accessIds: [],
   });
   return { id };
 }

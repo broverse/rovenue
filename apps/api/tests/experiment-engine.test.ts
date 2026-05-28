@@ -125,16 +125,16 @@ const { dbMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(
           }),
       ),
     },
-    productGroupRepo: {
+    offeringRepo: {
       listProductGroups: vi.fn(async () => []),
       findDefaultProductGroup: vi.fn(async (_db: unknown, projectId: string) =>
-        dbMock.productGroup.findFirst({
+        dbMock.offering.findFirst({
           where: { projectId, isDefault: true },
         }),
       ),
       findProductGroupByIdentifier: vi.fn(
         async (_db: unknown, projectId: string, identifier: string) =>
-          dbMock.productGroup.findFirst({
+          dbMock.offering.findFirst({
             where: { projectId, identifier },
           }),
       ),
@@ -202,7 +202,7 @@ import {
 interface ExperimentOverrides {
   id?: string;
   key?: string;
-  type?: "FLAG" | "PRODUCT_GROUP" | "PAYWALL" | "ELEMENT";
+  type?: "FLAG" | "OFFERING" | "PAYWALL" | "ELEMENT";
   audienceId?: string;
   mutualExclusionGroup?: string | null;
   variants?: Array<{ id: string; name: string; value: unknown; weight: number }>;
@@ -302,7 +302,7 @@ describe("evaluateExperiments — empty state", () => {
 describe("evaluateExperiments — new assignment", () => {
   test("assigns subscriber to a variant and persists via createMany", async () => {
     dbMock.experiment.findMany.mockResolvedValue([
-      experiment({ key: "pricing-test", type: "PRODUCT_GROUP" }),
+      experiment({ key: "pricing-test", type: "OFFERING" }),
     ]);
     dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
 
@@ -310,7 +310,7 @@ describe("evaluateExperiments — new assignment", () => {
 
     const entry = result["pricing-test"];
     expect(entry).toBeDefined();
-    expect(entry!.type).toBe("PRODUCT_GROUP");
+    expect(entry!.type).toBe("OFFERING");
     expect(["control", "variant_a"]).toContain(entry!.variantId);
 
     expect(
@@ -495,10 +495,10 @@ describe("experiment-engine cache", () => {
 // =============================================================
 
 describe("resolveProductGroup", () => {
-  test("returns requested group when no PRODUCT_GROUP experiment is active", async () => {
+  test("returns requested group when no OFFERING experiment is active", async () => {
     dbMock.experiment.findMany.mockResolvedValue([]);
     dbMock.audience.findMany.mockResolvedValue([]);
-    dbMock.productGroup.findFirst.mockResolvedValue({
+    dbMock.offering.findFirst.mockResolvedValue({
       id: "pg_weekly",
       identifier: "weekly_first",
     } as never);
@@ -506,7 +506,7 @@ describe("resolveProductGroup", () => {
     const group = await resolveProductGroup("sub_1", "proj_a", "weekly_first");
 
     expect(group?.identifier).toBe("weekly_first");
-    expect(dbMock.productGroup.findFirst).toHaveBeenCalledWith(
+    expect(dbMock.offering.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           projectId: "proj_a",
@@ -519,14 +519,14 @@ describe("resolveProductGroup", () => {
   test("falls back to the default group when no requestedGroup is supplied", async () => {
     dbMock.experiment.findMany.mockResolvedValue([]);
     dbMock.audience.findMany.mockResolvedValue([]);
-    dbMock.productGroup.findFirst.mockResolvedValue({
+    dbMock.offering.findFirst.mockResolvedValue({
       id: "pg_default",
       identifier: "default",
     } as never);
 
     await resolveProductGroup("sub_1", "proj_a");
 
-    expect(dbMock.productGroup.findFirst).toHaveBeenCalledWith(
+    expect(dbMock.offering.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           projectId: "proj_a",
@@ -536,12 +536,12 @@ describe("resolveProductGroup", () => {
     );
   });
 
-  test("active PRODUCT_GROUP experiment overrides the requested group", async () => {
+  test("active OFFERING experiment overrides the requested group", async () => {
     dbMock.experiment.findMany.mockResolvedValue([
       experiment({
         id: "exp_1",
         key: "pricing-test",
-        type: "PRODUCT_GROUP",
+        type: "OFFERING",
         variants: [
           {
             id: "control",
@@ -559,7 +559,7 @@ describe("resolveProductGroup", () => {
       }),
     ]);
     dbMock.audience.findMany.mockResolvedValue([audience("aud_all", {})]);
-    dbMock.productGroup.findFirst.mockResolvedValue({
+    dbMock.offering.findFirst.mockResolvedValue({
       id: "pg_weekly",
       identifier: "weekly_first",
     } as never);
@@ -567,7 +567,7 @@ describe("resolveProductGroup", () => {
     const group = await resolveProductGroup("sub_1", "proj_a", "default");
 
     expect(group?.identifier).toBe("weekly_first");
-    expect(dbMock.productGroup.findFirst).toHaveBeenCalledWith(
+    expect(dbMock.offering.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           projectId: "proj_a",

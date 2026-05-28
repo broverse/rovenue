@@ -305,7 +305,7 @@ function SubscribersPage({
         country: "US",
         entitlements: detailData.access
           .filter((a) => a.isActive)
-          .map((a) => a.entitlementKey),
+          .map((a) => a.accessId),
         product: detailData.purchases[0]?.productIdentifier ?? "—",
         status,
         ltv: 0,
@@ -315,7 +315,7 @@ function SubscribersPage({
         platforms: [],
         risk: 0,
         plan:
-          detailData.access.filter((a) => a.isActive).map((a) => a.entitlementKey)[0] ??
+          detailData.access.filter((a) => a.isActive).map((a) => a.accessId)[0] ??
           "—",
       };
     }

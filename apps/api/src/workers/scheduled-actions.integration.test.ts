@@ -17,6 +17,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import {
+  access,
   getDb,
   projects,
   subscribers,
@@ -69,6 +70,13 @@ async function seedProduct({
 }) {
   const db = getDb();
   const id = `prod_swp_${RUN_ID}${suffix}`;
+  const accessId = `acsswp${String(RUN_ID).padStart(10, "0").slice(-10)}${suffix.padEnd(2, "x").slice(0, 2)}`.padEnd(24, "0").slice(0, 24);
+  await db.insert(access).values({
+    id: accessId,
+    projectId,
+    identifier: `pro_swp_${RUN_ID}${suffix}`,
+    displayName: `Pro Sweep ${RUN_ID}${suffix}`,
+  });
   await db.insert(products).values({
     id,
     projectId,
@@ -76,9 +84,9 @@ async function seedProduct({
     type: "SUBSCRIPTION",
     storeIds: {},
     displayName: `Sweep Test Product ${RUN_ID}${suffix}`,
-    entitlementKeys: [`pro_swp_${RUN_ID}${suffix}`],
+    accessIds: [accessId],
   });
-  return { id, entitlementKey: `pro_swp_${RUN_ID}${suffix}` };
+  return { id, accessId };
 }
 
 async function seedManualPurchase({
@@ -128,7 +136,7 @@ async function seedManualPurchase({
     await db.insert(subscriberAccess).values({
       subscriberId: subscriber.id,
       purchaseId: purchase.id,
-      entitlementKey: product.entitlementKey,
+      accessId: product.accessId,
       isActive: true,
       expiresDate: futureDate,
       store: "MANUAL",
