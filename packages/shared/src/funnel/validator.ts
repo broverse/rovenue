@@ -13,10 +13,14 @@ export type ValidationResult =
   | { ok: true; warnings: ValidatorIssue[] }
   | { ok: false; issues: ValidatorIssue[]; warnings: ValidatorIssue[] };
 
+// Minimal page contract this validator depends on. Mirrors the flat
+// dashboard shape exposed by `pages-schema.ts` — `question_id` is
+// top-level (no `config` wrapper) and `next_rules` follows the dashboard
+// `NextRule` shape (which the rule-editor + VM both already use).
 interface MinimalPage {
   id: string;
   type: string;
-  config: Record<string, unknown>;
+  question_id?: string;
   next_rules?: Array<{
     id: string;
     condition: {
@@ -26,6 +30,10 @@ interface MinimalPage {
     goto: string;
   }>;
   default_next?: string;
+  // Vestigial — older fixtures still pass this. The validator now reads
+  // question_id off the top level, but accepting `config` keeps existing
+  // tests + the dashboard's `toEvalPage` helper compiling.
+  config?: Record<string, unknown>;
 }
 
 export function validateFunnelGraph(pages: Page[] | MinimalPage[]): ValidationResult {
@@ -43,7 +51,7 @@ export function validateFunnelGraph(pages: Page[] | MinimalPage[]): ValidationRe
   const byId = new Map<string, MinimalPage>(list.map((p) => [p.id, p]));
   const questionIds = new Map<string, string>();
   for (const p of list) {
-    const qid = (p.config as { question_id?: string }).question_id;
+    const qid = p.question_id;
     if (qid !== undefined) {
       if (questionIds.has(qid)) {
         errors.push({

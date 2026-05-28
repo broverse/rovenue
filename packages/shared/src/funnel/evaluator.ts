@@ -3,12 +3,20 @@ import type { Clause, NextRule } from "./branching-schema";
 export type AnswerValue = string | number | boolean | string[] | null;
 export type AnswerMap = Map<string, AnswerValue>;
 
+// Minimal page shape the runtime evaluator needs. Matches the flat
+// dashboard page (see pages-schema.ts) — only the routing fields are
+// load-bearing here; everything else is opaque from the evaluator's
+// perspective.
 export interface EvalPage {
   id: string;
   type: string;
-  config: Record<string, unknown>;
   next_rules?: NextRule[];
   default_next?: string | "paywall" | "end";
+  // Vestigial — older callers / tests still pass a `config` bag from when
+  // the schema was SDK-wrapped. The evaluator no longer reads it, but
+  // accepting it keeps existing fixtures + dashboard's `toEvalPage`
+  // helper working unchanged.
+  config?: Record<string, unknown>;
 }
 
 export type PageGraph = Map<string, EvalPage>;

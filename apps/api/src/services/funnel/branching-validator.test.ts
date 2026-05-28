@@ -73,21 +73,13 @@ describe("validateFunnelGraph", () => {
     const result = validateFunnelGraph([
       {
         id: "pg_1",
-        type: "question_single",
-        config: {
-          question_id: "goal",
-          title: "T",
-          options: [{ id: "o", label: "L", value: "v" }],
-        },
+        type: "single_choice",
+        question_id: "goal",
       },
       {
         id: "pg_2",
-        type: "question_single",
-        config: {
-          question_id: "goal",
-          title: "T",
-          options: [{ id: "o", label: "L", value: "v" }],
-        },
+        type: "single_choice",
+        question_id: "goal",
       },
     ]);
     expect(result.ok).toBe(false);

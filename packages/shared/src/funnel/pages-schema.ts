@@ -1,118 +1,140 @@
 import { z } from "zod";
 import { nextRuleSchema } from "./branching-schema";
 
-const baseFields = {
-  id: z.string().min(1),
-  next_rules: z.array(nextRuleSchema).optional(),
-  default_next: z.union([z.string(), z.literal("paywall"), z.literal("end")]).optional(),
-};
+// =============================================================
+// Funnel page schema — flat dashboard shape.
+//
+// This package no longer feeds native mobile SDKs (Rust core /
+// Swift / Kotlin / RN are out of scope for funnels). The only
+// consumer is the API: publish-time validation + the server-side
+// branching evaluator/validator. So the schema mirrors what the
+// dashboard actually saves under `funnels.draft_pages_json`:
+// a single flat object per page, fields top-level, no `config`
+// wrapper. See apps/dashboard/src/components/funnel-builder/types.ts
+// (Page interface, ~line 210) for the canonical shape.
+//
+// Validation here is intentionally permissive — every field is
+// optional except `id` and `type`. The dashboard UI enforces
+// per-type field requirements (required body for statement,
+// options for choice pages, etc.) before save. The server uses
+// `validateFunnelGraph` for the cross-page invariants that
+// actually matter (at-least-one paywall + success, no cycles,
+// no dangling refs, reachability).
+// =============================================================
 
-const questionSingleConfig = z.object({
-  question_id: z.string().min(1),
-  title: z.string().min(1),
-  subtitle: z.string().optional(),
-  options: z
-    .array(
-      z.object({
-        id: z.string().min(1),
-        label: z.string().min(1),
-        value: z.string().min(1),
-        icon: z.string().optional(),
-      }),
-    )
-    .min(1),
-  required: z.boolean().optional(),
+export const PAGE_TYPES = [
+  "single_choice",
+  "multi_choice",
+  "text_input",
+  "number_input",
+  "date_input",
+  "slider",
+  "rating",
+  "info",
+  "loading",
+  "result",
+  "paywall",
+  "success",
+  "contact_info",
+  "email",
+  "phone",
+  "picture_choice",
+  "yes_no",
+  "legal",
+  "checkbox",
+  "opinion_scale",
+  "long_text",
+  "short_text",
+  "welcome",
+  "statement",
+  "feature",
+  "end_screen",
+] as const;
+
+export type PageType = (typeof PAGE_TYPES)[number];
+
+const optionSchema = z.object({
+  label: z.string(),
+  value: z.string(),
+  imageUrl: z.string().optional(),
 });
 
-const questionMultiConfig = questionSingleConfig.extend({
-  max_selections: z.number().int().positive().optional(),
+const pageBackgroundSchema = z.object({
+  kind: z.enum(["none", "color", "image", "video"]),
+  value: z.string(),
+  opacity: z.number(),
 });
 
-const textInputConfig = z.object({
-  question_id: z.string().min(1),
-  title: z.string().min(1),
-  placeholder: z.string().optional(),
-  validation: z.enum(["text", "email", "url"]).default("text"),
-  required: z.boolean().optional(),
+const pageFooterSchema = z.object({
+  enabled: z.boolean(),
+  bgColor: z.string().optional(),
+  borderColor: z.string().optional(),
+  borderWidth: z.number().optional(),
+  buttonColor: z.string().optional(),
 });
 
-const numberInputConfig = z.object({
-  question_id: z.string().min(1),
-  title: z.string().min(1),
-  min: z.number().optional(),
-  max: z.number().optional(),
-  step: z.number().positive().optional(),
-  suffix: z.string().optional(),
-});
-
-const dateConfig = z.object({
-  question_id: z.string().min(1),
-  title: z.string().min(1),
-  min_date: z.string().optional(),
-  max_date: z.string().optional(),
-});
-
-const sliderConfig = z.object({
-  question_id: z.string().min(1),
-  title: z.string().min(1),
-  min: z.number(),
-  max: z.number(),
-  step: z.number().positive(),
-  label_format: z.string().optional(),
-});
-
-const ratingConfig = z.object({
-  question_id: z.string().min(1),
-  title: z.string().min(1),
-  scale: z.union([z.literal(5), z.literal(10)]),
-  icon: z.enum(["star", "heart"]).default("star"),
-});
-
-const infoConfig = z.object({
-  title: z.string().min(1),
-  body_markdown: z.string(),
-  image_url: z.string().url().optional(),
-  cta_label: z.string().optional(),
-});
-
-const loadingConfig = z.object({
-  title: z.string().min(1),
-  duration_ms: z.number().int().min(500).max(15000),
-  steps: z.array(z.string()).optional(),
-});
-
-const resultConfig = z.object({
-  title_template: z.string(),
-  body_template: z.string(),
-});
-
-const paywallConfig = z.object({
-  product_id: z.string().min(1),
-  trial: z.object({ days: z.union([z.literal(3), z.literal(7)]) }).optional(),
-  headline: z.string().min(1),
-  bullets: z.array(z.string()).min(1),
-});
-
-const successConfig = z.object({
-  headline: z.string().min(1),
-  body: z.string(),
-  open_app_label: z.string().min(1),
-});
-
-export const pageSchema = z.discriminatedUnion("type", [
-  z.object({ ...baseFields, type: z.literal("question_single"), config: questionSingleConfig }),
-  z.object({ ...baseFields, type: z.literal("question_multi"), config: questionMultiConfig }),
-  z.object({ ...baseFields, type: z.literal("text_input"), config: textInputConfig }),
-  z.object({ ...baseFields, type: z.literal("number_input"), config: numberInputConfig }),
-  z.object({ ...baseFields, type: z.literal("date"), config: dateConfig }),
-  z.object({ ...baseFields, type: z.literal("slider"), config: sliderConfig }),
-  z.object({ ...baseFields, type: z.literal("rating"), config: ratingConfig }),
-  z.object({ ...baseFields, type: z.literal("info"), config: infoConfig }),
-  z.object({ ...baseFields, type: z.literal("loading"), config: loadingConfig }),
-  z.object({ ...baseFields, type: z.literal("result"), config: resultConfig }),
-  z.object({ ...baseFields, type: z.literal("paywall"), config: paywallConfig }),
-  z.object({ ...baseFields, type: z.literal("success"), config: successConfig }),
-]);
+// Single permissive flat object — discriminating on `type` only matters
+// when the variants have meaningfully different shapes. The dashboard's
+// page interface is a wide union of optional fields, so per-type Zod
+// variants would just be 26 copies of the same object; not worth the
+// code surface vs. UI-level validation.
+export const pageSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.enum(PAGE_TYPES),
+    // Branching, inlined onto the page by the dashboard's `recomposePages`
+    // (apps/dashboard/src/lib/services/funnel-api.ts) before save.
+    next_rules: z.array(nextRuleSchema).optional(),
+    default_next: z
+      .union([z.string(), z.literal("paywall"), z.literal("end")])
+      .optional(),
+    // Shared fields
+    question_id: z.string().optional(),
+    title: z.string().optional(),
+    subtitle: z.string().optional(),
+    body: z.string().optional(),
+    cta: z.string().optional(),
+    required: z.boolean().optional(),
+    // Choice + picture_choice
+    options: z.array(optionSchema).optional(),
+    max_selections: z.number().optional(),
+    // Numeric inputs / slider / rating / opinion_scale
+    min: z.number().optional(),
+    max: z.number().optional(),
+    step: z.number().optional(),
+    suffix: z.string().optional(),
+    format: z.string().optional(),
+    // Loading
+    duration: z.number().optional(),
+    steps: z.array(z.string()).optional(),
+    // Paywall / feature / success
+    headline: z.string().optional(),
+    productId: z.string().optional(),
+    trial: z.number().optional(),
+    benefits: z.array(z.string()).optional(),
+    features: z.array(z.string()).optional(),
+    // Media above content
+    mediaKind: z.enum(["none", "image", "video"]).optional(),
+    mediaUrl: z.string().optional(),
+    // Text inputs
+    placeholder: z.string().optional(),
+    // contact_info sub-fields
+    collectName: z.boolean().optional(),
+    collectEmail: z.boolean().optional(),
+    collectPhone: z.boolean().optional(),
+    // legal / checkbox
+    agreementLabel: z.string().optional(),
+    termsUrl: z.string().optional(),
+    // Per-page design overrides
+    background: pageBackgroundSchema.optional(),
+    footer: pageFooterSchema.optional(),
+    showProgress: z.boolean().optional(),
+    showBack: z.boolean().optional(),
+    radius: z.number().optional(),
+  })
+  // Tolerant of dashboard fields we haven't enumerated yet — UI-level
+  // validation owns the per-type contract.
+  .passthrough();
 
 export type Page = z.infer<typeof pageSchema>;
 

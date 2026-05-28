@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { component, useService } from "impair";
-import { useState, type CSSProperties } from "react";
+import { useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { PAGE_TYPES, type Page, type ProgressStyle, type Theme } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 
@@ -95,11 +95,23 @@ function ProgressIndicator({
 type Props = {
   page: Page;
   theme: Theme;
+  // Full pages list — drives the progress indicator. Passed in so this
+  // component doesn't depend on the draft VM and can be reused by the
+  // public runner (which has no draft).
+  pages: Page[];
   // When `editable`, choice rows surface hover affordances (drag handle on
   // the left, delete + branch icons on the right) and an "Add choice"
   // button appears below the list. The CanvasEditor turns this on; the
   // play-through PreviewOverlay and ThemeTab live preview leave it off.
   editable?: boolean;
+  // When provided, the footer CTA becomes a real button that calls this
+  // on click. Without it the CTA is inert (builder preview / theme tab).
+  onAdvance?: (e: MouseEvent<HTMLButtonElement>) => void;
+  // "phone" (default): mobile mockup chrome — rounded corners + fake iOS
+  // status bar (9:41). Used by the builder previews.
+  // "full": no rounded corners, no status bar. Used by the public runner
+  // where the page is the real document, not a mock-up inside a frame.
+  chrome?: "phone" | "full";
 };
 
 /**
@@ -112,8 +124,22 @@ type Props = {
  * — without this, mutations to those fields via the VM don't trigger a
  * re-render and the preview stays stale.
  */
-export const PagePreview = component(({ page, theme: rawTheme, editable = false }: Props) => {
-  const vm = useService(FunnelDraftViewModel);
+// Centers + caps the width of an interactive surface (choices, inputs,
+// rating, etc.) so it doesn't stretch edge-to-edge on desktop. Text
+// content (title / subtitle / body) is intentionally left full-bleed.
+function Cap({ children }: { children: ReactNode }) {
+  return <div className="mx-auto w-full max-w-md">{children}</div>;
+}
+
+export const PagePreview = component(
+  ({
+    page,
+    theme: rawTheme,
+    pages,
+    editable = false,
+    onAdvance,
+    chrome = "phone",
+  }: Props) => {
   // Per-page overrides flow through `theme` — sub-components only see the
   // effective value and never need to know whether it came from the page or
   // the global theme.
@@ -133,8 +159,8 @@ export const PagePreview = component(({ page, theme: rawTheme, editable = false 
   const hasMediaBg =
     (bg?.kind === "image" || bg?.kind === "video") && isFilledColor(bg?.value);
   // Progress reflects this page's position in the funnel.
-  const pageIndex = vm.pages.findIndex((p) => p.id === page.id);
-  const totalPages = vm.pages.length;
+  const pageIndex = pages.findIndex((p) => p.id === page.id);
+  const totalPages = pages.length;
   const stepNumber = pageIndex >= 0 ? pageIndex + 1 : 1;
   const stepProgress = totalPages > 1 ? Math.min(1, stepNumber / totalPages) : 1;
   const progressActive = isFilledColor(theme.progressActive) ? theme.progressActive : theme.primary;
@@ -191,7 +217,9 @@ export const PagePreview = component(({ page, theme: rawTheme, editable = false 
     : undefined;
   return (
     <div
-      className="relative flex h-full w-full flex-col overflow-hidden rounded-[28px]"
+      className={`relative flex h-full w-full flex-col overflow-hidden${
+        chrome === "phone" ? " rounded-[28px]" : ""
+      }`}
       style={containerStyle}
     >
       {/* Full-bleed background layer */}
@@ -226,10 +254,12 @@ export const PagePreview = component(({ page, theme: rawTheme, editable = false 
           rendering as a separate strip below the button. */}
       <div className="relative z-10 flex h-full w-full flex-col">
       <div className={`flex min-h-0 flex-1 flex-col px-4 pt-2${ctaLabel ? "" : " pb-4"}`}>
-      <div className="flex items-center justify-between px-1 py-1 text-[10px] font-medium opacity-70">
-        <span>9:41</span>
-        <span>● ● ●</span>
-      </div>
+      {chrome === "phone" && (
+        <div className="flex items-center justify-between px-1 py-1 text-[10px] font-medium opacity-70">
+          <span>9:41</span>
+          <span>● ● ●</span>
+        </div>
+      )}
       {(page.showBack || page.showProgress) && (
         <div className="mt-2 flex items-center gap-2">
           {page.showBack ? (
@@ -283,48 +313,95 @@ export const PagePreview = component(({ page, theme: rawTheme, editable = false 
         {page.subtitle && (
           <p className="m-0 text-[12px] leading-relaxed opacity-70">{page.subtitle}</p>
         )}
-        {(page.type === "single_choice" || page.type === "multi_choice") &&
-          (editable ? (
-            <ChoiceListEditable page={page} theme={theme} />
-          ) : (
-            <ChoiceListReadOnly page={page} theme={theme} />
-          ))}
-        {page.type === "yes_no" && <YesNoButtons page={page} theme={theme} />}
-        {page.type === "picture_choice" && <PictureChoiceList page={page} theme={theme} />}
-        {(page.type === "legal" || page.type === "checkbox") && (
-          <LegalCheckbox page={page} theme={theme} />
+        {(page.type === "single_choice" || page.type === "multi_choice") && (
+          <Cap>
+            {editable ? (
+              <ChoiceListEditable page={page} theme={theme} />
+            ) : (
+              <ChoiceListReadOnly page={page} theme={theme} />
+            )}
+          </Cap>
         )}
-        {page.type === "opinion_scale" && <OpinionScale page={page} theme={theme} />}
-        {page.type === "rating" && <RatingStars page={page} theme={theme} />}
+        {page.type === "yes_no" && (
+          <Cap>
+            <YesNoButtons page={page} theme={theme} />
+          </Cap>
+        )}
+        {page.type === "picture_choice" && (
+          <Cap>
+            <PictureChoiceList page={page} theme={theme} />
+          </Cap>
+        )}
+        {(page.type === "legal" || page.type === "checkbox") && (
+          <Cap>
+            <LegalCheckbox page={page} theme={theme} />
+          </Cap>
+        )}
+        {page.type === "opinion_scale" && (
+          <Cap>
+            <OpinionScale page={page} theme={theme} />
+          </Cap>
+        )}
+        {page.type === "rating" && (
+          <Cap>
+            <RatingStars page={page} theme={theme} />
+          </Cap>
+        )}
         {page.type === "short_text" && (
-          <TextField placeholder={page.placeholder} theme={theme} />
+          <Cap>
+            <TextField placeholder={page.placeholder} theme={theme} />
+          </Cap>
         )}
         {page.type === "long_text" && (
-          <TextArea placeholder={page.placeholder} theme={theme} />
+          <Cap>
+            <TextArea placeholder={page.placeholder} theme={theme} />
+          </Cap>
         )}
         {page.type === "email" && (
-          <TextField
-            placeholder={page.placeholder ?? "you@example.com"}
-            theme={theme}
-            type="email"
-            icon={<Mail size={14} />}
-          />
+          <Cap>
+            <TextField
+              placeholder={page.placeholder ?? "you@example.com"}
+              theme={theme}
+              type="email"
+              icon={<Mail size={14} />}
+            />
+          </Cap>
         )}
         {page.type === "phone" && (
-          <TextField
-            placeholder={page.placeholder ?? "+1 555 0000"}
-            theme={theme}
-            type="tel"
-            icon={<Phone size={14} />}
-          />
+          <Cap>
+            <TextField
+              placeholder={page.placeholder ?? "+1 555 0000"}
+              theme={theme}
+              type="tel"
+              icon={<Phone size={14} />}
+            />
+          </Cap>
         )}
         {page.type === "text_input" && (
-          <TextField placeholder={page.placeholder} theme={theme} />
+          <Cap>
+            <TextField placeholder={page.placeholder} theme={theme} />
+          </Cap>
         )}
-        {page.type === "number_input" && <NumberCounter page={page} theme={theme} />}
-        {page.type === "date_input" && <DatePicker theme={theme} />}
-        {page.type === "slider" && <SliderInput page={page} theme={theme} />}
-        {page.type === "contact_info" && <ContactInfoFields page={page} theme={theme} />}
+        {page.type === "number_input" && (
+          <Cap>
+            <NumberCounter page={page} theme={theme} />
+          </Cap>
+        )}
+        {page.type === "date_input" && (
+          <Cap>
+            <DatePicker theme={theme} />
+          </Cap>
+        )}
+        {page.type === "slider" && (
+          <Cap>
+            <SliderInput page={page} theme={theme} />
+          </Cap>
+        )}
+        {page.type === "contact_info" && (
+          <Cap>
+            <ContactInfoFields page={page} theme={theme} />
+          </Cap>
+        )}
         {page.type === "welcome" && <WelcomeBody page={page} theme={theme} />}
         {page.type === "statement" && <StatementBody page={page} theme={theme} />}
         {page.type === "feature" && <FeatureBody page={page} theme={theme} />}
@@ -375,7 +452,10 @@ export const PagePreview = component(({ page, theme: rawTheme, editable = false 
         <div className="px-4 pb-4 pt-3" style={footerStyle}>
           <button
             type="button"
-            className="h-10 w-full text-[13px] font-semibold text-white"
+            onClick={onAdvance}
+            className={`mx-auto block h-10 w-full max-w-md text-[13px] font-semibold text-white${
+              onAdvance ? " cursor-pointer transition active:scale-[0.98]" : ""
+            }`}
             style={r({ background: footer?.buttonColor || theme.primary })}
           >
             {ctaLabel}

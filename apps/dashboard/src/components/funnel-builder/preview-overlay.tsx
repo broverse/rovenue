@@ -37,7 +37,11 @@ export const PreviewOverlay = component(() => {
         <div className="relative h-full w-full overflow-hidden rounded-[36px]">
           <div className="absolute left-1/2 top-2 z-10 h-2 w-20 -translate-x-1/2 rounded-full bg-black/50" />
           {preview.currentPage ? (
-            <PagePreview page={preview.currentPage} theme={draft.theme} />
+            <PagePreview
+              page={preview.currentPage}
+              theme={draft.theme}
+              pages={draft.pages}
+            />
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-white text-[14px] text-rv-mute-700">
               {preview.finished ? "Done — end of funnel" : "No page"}
