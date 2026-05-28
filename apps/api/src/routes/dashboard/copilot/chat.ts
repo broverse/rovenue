@@ -297,6 +297,9 @@ export const copilotChatRoute = new Hono()
       },
     });
 
-    // v6 exposes toTextStreamResponse on the StreamTextResult object.
-    return result.toTextStreamResponse();
+    // v6 useChat (@ai-sdk/react) expects the UI message stream format —
+    // `toTextStreamResponse()` emits plain text which the default
+    // transport silently ignores. `toUIMessageStreamResponse()` produces
+    // the data-stream SSE format the React hook actually parses.
+    return result.toUIMessageStreamResponse();
   });
