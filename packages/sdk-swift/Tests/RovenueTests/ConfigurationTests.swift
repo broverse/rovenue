@@ -23,7 +23,7 @@ final class ConfigurationTests: XCTestCase {
 
     func test_configure_succeedsWithValidConfig() throws {
         try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.dev")
-        XCTAssertEqual(Rovenue.shared.version, "0.0.1")
+        XCTAssertEqual(Rovenue.shared.version, "0.6.0")
     }
 
     func test_configureTwice_lastWriteWins() throws {

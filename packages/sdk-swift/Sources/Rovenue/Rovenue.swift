@@ -241,18 +241,86 @@ public final class Rovenue: @unchecked Sendable {
         }
     }
 
+    // MARK: - Refund Shield — stable per-subscriber token
+
+    /// Returns a stable UUID for the current user. The host app passes this
+    /// to `Product.purchase(options: [.appAccountToken(uuid)])` so Apple's
+    /// `CONSUMPTION_REQUEST` webhook can attribute the refund request back
+    /// to a known subscriber.
+    ///
+    /// The token is generated once per (project, current_user_scope) pair
+    /// and persisted locally. It is stable across app launches and reused
+    /// for every subsequent purchase. Calling `identify()` first changes
+    /// the scope, so the next `getAppAccountToken()` returns a different
+    /// UUID for the now-known user.
+    @discardableResult
+    public func getAppAccountToken() async throws -> String {
+        try await dispatcher.run { [core] in
+            do { return try core.getOrCreateAppAccountToken() }
+            catch let err as RovenueError { throw mapError(err) }
+        }
+    }
+
+    // MARK: - Refund Shield — session telemetry
+
+    /// Record a single SDK session-lifecycle event (open / background / close).
+    /// Buffered locally and flushed in batches of up to 200 every ~30s by the
+    /// Rust core's `SessionDispatcher`. Best-effort: dropped on network error.
+    public func recordSessionEvent(
+        kind: SessionEventKind,
+        occurredAt: String,
+        durationMs: UInt32? = nil
+    ) async throws {
+        try await dispatcher.run { [core] in
+            do {
+                try core.recordSessionEvent(
+                    kind: kind,
+                    occurredAt: occurredAt,
+                    durationMs: durationMs
+                )
+            } catch let err as RovenueError {
+                throw mapError(err)
+            }
+        }
+    }
+
+    /// Force an immediate flush of buffered session events. Returns the
+    /// number of events drained. Normally callers don't invoke this — the
+    /// Rust core's 30s poll covers it.
+    @discardableResult
+    public func flushSessionEvents() async throws -> UInt32 {
+        try await dispatcher.run { [core] in
+            do { return try core.flushSessionEvents() }
+            catch let err as RovenueError { throw mapError(err) }
+        }
+    }
+
     // MARK: - Receipts
 
     /// Post an Apple StoreKit 2 JWS to the server for validation.
     /// The caller is responsible for obtaining the JWS via `Product.purchase()`
     /// (or `Transaction.currentEntitlements`) — this SDK does NOT call StoreKit.
     /// On success, refreshes entitlements + credits and returns a `ReceiptResult`.
-    public func postAppleReceipt(_ jws: String, productId: String) async throws -> ReceiptResult {
+    ///
+    /// `appAccountToken` is the UUID the host app supplied to
+    /// `Product.purchase(options: [.appAccountToken(uuid)])`. The backend
+    /// uses it as a sanity-check cross-reference vs the JWS-decoded
+    /// `appAccountToken` claim. Optional — purchases made without an
+    /// `appAccountToken` option still validate.
+    public func postAppleReceipt(
+        _ jws: String,
+        productId: String,
+        appAccountToken: String? = nil
+    ) async throws -> ReceiptResult {
         Self.emit(LogEntry(level: "info", message: "postAppleReceipt"))
         do {
             let result = try await dispatcher.run { [core] in
                 do {
-                    return try core.postAppleReceipt(receipt: jws, productId: productId)
+                    return try core.postAppleReceipt(
+                        receipt: jws,
+                        productId: productId,
+                        appAccountToken: appAccountToken
+                    )
                 } catch let err as RovenueError {
                     throw mapError(err)
                 }
@@ -270,12 +338,27 @@ public final class Rovenue: @unchecked Sendable {
     /// successful Play Billing flow on Android. (Provided here for completeness
     /// — Swift code on iOS won't use this method.)
     /// On success, refreshes entitlements + credits and returns a `ReceiptResult`.
-    public func postGoogleReceipt(_ receipt: String, productId: String) async throws -> ReceiptResult {
+    ///
+    /// `obfuscatedAccountId` / `obfuscatedProfileId` are the values the host
+    /// app passed to `BillingFlowParams.Builder.setObfuscatedAccountId(...)` /
+    /// `setObfuscatedProfileId(...)`. They survive into Play's RTDN messages
+    /// and let the backend attribute refunds back to a known subscriber.
+    public func postGoogleReceipt(
+        _ receipt: String,
+        productId: String,
+        obfuscatedAccountId: String? = nil,
+        obfuscatedProfileId: String? = nil
+    ) async throws -> ReceiptResult {
         Self.emit(LogEntry(level: "info", message: "postGoogleReceipt"))
         do {
             let result = try await dispatcher.run { [core] in
                 do {
-                    return try core.postGoogleReceipt(receipt: receipt, productId: productId)
+                    return try core.postGoogleReceipt(
+                        receipt: receipt,
+                        productId: productId,
+                        obfuscatedAccountId: obfuscatedAccountId,
+                        obfuscatedProfileId: obfuscatedProfileId
+                    )
                 } catch let err as RovenueError {
                     throw mapError(err)
                 }
