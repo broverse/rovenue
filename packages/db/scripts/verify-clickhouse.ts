@@ -96,6 +96,9 @@ const EXPECTED_TABLES: ReadonlyArray<{ name: string; engine: string }> = [
   // Plan 3 — Refund Shield per-subscriber daily session rollup
   { name: "sdk_sessions_daily_tbl", engine: "SummingMergeTree" },
   { name: "sdk_sessions_daily", engine: "MaterializedView" },
+  // Plan 3 — Refund Shield per-subscriber lifetime revenue rollup
+  { name: "revenue_lifetime_subscriber_tbl", engine: "SummingMergeTree" },
+  { name: "revenue_lifetime_subscriber_mv", engine: "MaterializedView" },
 ];
 
 interface TableRow {
