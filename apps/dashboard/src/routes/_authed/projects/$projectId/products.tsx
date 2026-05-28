@@ -10,8 +10,10 @@ import {
   useProjectProducts,
   type ProductStoreFilter,
 } from "../../../../lib/hooks/useProjectProducts";
+import { useProjectAccess } from "../../../../lib/hooks/useProjectAccess";
 import { rowToUiProduct } from "../../../../lib/dashboard-mappers";
 import {
+  type AccessChipEntry,
   BulkBar,
   type FilterValue,
   GroupSidebar,
@@ -159,10 +161,28 @@ function ProductsPage({ projectId }: { projectId: string }) {
     limit: 100,
   });
 
+  // Resolve product.accessIds (cuid2 strings) to display chips. Missing
+  // entries are filtered out by the mapper, so a stale link just disappears
+  // until the catalog refetches.
+  const accessQuery = useProjectAccess(projectId);
+  const accessById = useMemo(() => {
+    const m = new Map<string, AccessChipEntry>();
+    for (const r of accessQuery.data?.rows ?? []) {
+      m.set(r.id, {
+        id: r.id,
+        identifier: r.identifier,
+        displayName: r.displayName,
+      });
+    }
+    return m;
+  }, [accessQuery.data]);
+
   const products = useMemo<ReadonlyArray<Product>>(() => {
     const pages = productsQuery.data?.pages ?? [];
-    return pages.flatMap((page) => page.products.map(rowToUiProduct));
-  }, [productsQuery.data]);
+    return pages.flatMap((page) =>
+      page.products.map((row) => rowToUiProduct(row, { accessById })),
+    );
+  }, [productsQuery.data, accessById]);
 
   const groupList = useMemo<ReadonlyArray<string>>(() => {
     const set = new Set<string>();
@@ -253,7 +273,7 @@ function ProductsPage({ projectId }: { projectId: string }) {
   const archivedCount = products.length - activeCount - draftCount;
   const entitlementCount = useMemo(() => {
     const s = new Set<string>();
-    for (const p of products) for (const k of p.entitlements) s.add(k);
+    for (const p of products) for (const a of p.access) s.add(a.id);
     return s.size;
   }, [products]);
 

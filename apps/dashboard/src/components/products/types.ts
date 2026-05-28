@@ -1,3 +1,5 @@
+import type { AccessChipEntry } from "./access-chip";
+
 export type ProductStatus = "active" | "draft" | "archived";
 
 export type StoreId = "ios" | "android" | "web";
@@ -11,7 +13,9 @@ export type Product = {
   sku: string;
   name: string;
   group: string;
-  entitlements: ReadonlyArray<string>;
+  /** Resolved access chips for the access ids on the backend row.
+   *  Empty when the product grants nothing. */
+  access: ReadonlyArray<AccessChipEntry>;
   duration: DurationCode;
   price: number;
   currency: Currency;
