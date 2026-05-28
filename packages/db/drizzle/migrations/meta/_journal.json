@@ -414,6 +414,13 @@
       "when": 1780000220000,
       "tag": "0058_experiment_type_offering",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1748390400000,
+      "tag": "0053_integrations_framework",
+      "breakpoints": true
     }
   ]
 }
