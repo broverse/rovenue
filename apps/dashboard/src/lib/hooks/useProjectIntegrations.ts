@@ -51,10 +51,12 @@ export function useProjectIntegrations(projectId: string) {
   return useQuery({
     queryKey: ["project-integrations", projectId],
     enabled: Boolean(projectId),
-    queryFn: () =>
-      api<IntegrationConnectionRow[]>(
+    queryFn: async () => {
+      const result = await api<{ connections: IntegrationConnectionRow[] }>(
         `/dashboard/projects/${projectId}/integrations`,
-      ),
+      );
+      return result.connections;
+    },
   });
 }
 
@@ -65,11 +67,13 @@ export function useProjectIntegrations(projectId: string) {
 export function useCreateIntegration(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateIntegrationBody) =>
-      api<{ id: string }>(
+    mutationFn: async (body: CreateIntegrationBody) => {
+      const result = await api<{ connection: IntegrationConnectionRow }>(
         `/dashboard/projects/${projectId}/integrations`,
         { method: "POST", body: JSON.stringify(body) },
-      ),
+      );
+      return result.connection;
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["project-integrations", projectId] });
     },
@@ -79,17 +83,19 @@ export function useCreateIntegration(projectId: string) {
 export function useUpdateIntegration(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       connectionId,
       body,
     }: {
       connectionId: string;
       body: UpdateIntegrationBody;
-    }) =>
-      api<IntegrationConnectionRow>(
+    }) => {
+      const result = await api<{ connection: IntegrationConnectionRow }>(
         `/dashboard/projects/${projectId}/integrations/${connectionId}`,
         { method: "PATCH", body: JSON.stringify(body) },
-      ),
+      );
+      return result.connection;
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["project-integrations", projectId] });
       void qc.invalidateQueries({ queryKey: ["project-app-connections", projectId] });
@@ -100,11 +106,17 @@ export function useUpdateIntegration(projectId: string) {
 export function useDeleteIntegration(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (connectionId: string) =>
-      api<{ deleted: boolean }>(
-        `/dashboard/projects/${projectId}/integrations/${connectionId}`,
-        { method: "DELETE" },
-      ),
+    mutationFn: async (connectionId: string) => {
+      // DELETE returns 204 with no envelope — bypass api() unwrap.
+      const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+      const res = await fetch(
+        `${BASE_URL}/dashboard/projects/${projectId}/integrations/${connectionId}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      if (!res.ok) {
+        throw new Error(`Delete failed: HTTP ${res.status}`);
+      }
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["project-integrations", projectId] });
       void qc.invalidateQueries({ queryKey: ["project-app-connections", projectId] });
