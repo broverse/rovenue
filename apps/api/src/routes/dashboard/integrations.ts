@@ -140,24 +140,29 @@ const deliveriesQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 
-// Re-usable projection for list/read (excludes credentialsCipher)
-const CONNECTION_SELECT = {
-  id: drizzle.schema.integrationConnections.id,
-  projectId: drizzle.schema.integrationConnections.projectId,
-  providerId: drizzle.schema.integrationConnections.providerId,
-  displayName: drizzle.schema.integrationConnections.displayName,
-  credentialsHint: drizzle.schema.integrationConnections.credentialsHint,
-  enabledEvents: drizzle.schema.integrationConnections.enabledEvents,
-  eventMapping: drizzle.schema.integrationConnections.eventMapping,
-  actionSource: drizzle.schema.integrationConnections.actionSource,
-  testEventCode: drizzle.schema.integrationConnections.testEventCode,
-  isEnabled: drizzle.schema.integrationConnections.isEnabled,
-  lastValidatedAt: drizzle.schema.integrationConnections.lastValidatedAt,
-  lastError: drizzle.schema.integrationConnections.lastError,
-  lastBackfillAt: drizzle.schema.integrationConnections.lastBackfillAt,
-  createdAt: drizzle.schema.integrationConnections.createdAt,
-  updatedAt: drizzle.schema.integrationConnections.updatedAt,
-};
+// Re-usable projection for list/read (excludes credentialsCipher).
+// Evaluated lazily at call time so tests that mock @rovenue/db without
+// a full schema object can still import this module without crashing.
+function connectionSelect() {
+  const t = drizzle.schema.integrationConnections;
+  return {
+    id: t.id,
+    projectId: t.projectId,
+    providerId: t.providerId,
+    displayName: t.displayName,
+    credentialsHint: t.credentialsHint,
+    enabledEvents: t.enabledEvents,
+    eventMapping: t.eventMapping,
+    actionSource: t.actionSource,
+    testEventCode: t.testEventCode,
+    isEnabled: t.isEnabled,
+    lastValidatedAt: t.lastValidatedAt,
+    lastError: t.lastError,
+    lastBackfillAt: t.lastBackfillAt,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt,
+  };
+}
 
 // =============================================================
 // Route
@@ -179,7 +184,7 @@ export const integrationsRoute = new Hono()
     await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const rows = await drizzle.db
-      .select(CONNECTION_SELECT)
+      .select(connectionSelect())
       .from(drizzle.schema.integrationConnections)
       .where(
         and(
@@ -276,7 +281,7 @@ export const integrationsRoute = new Hono()
     });
 
     const [row] = await drizzle.db
-      .select(CONNECTION_SELECT)
+      .select(connectionSelect())
       .from(drizzle.schema.integrationConnections)
       .where(eq(drizzle.schema.integrationConnections.id, id));
 
@@ -517,7 +522,7 @@ export const integrationsRoute = new Hono()
     }
 
     const [updated] = await drizzle.db
-      .select(CONNECTION_SELECT)
+      .select(connectionSelect())
       .from(drizzle.schema.integrationConnections)
       .where(eq(drizzle.schema.integrationConnections.id, id));
 

@@ -314,7 +314,9 @@ describe("enum membership", () => {
     expect(projectMembers.role.enumValues).toEqual([
       "OWNER",
       "ADMIN",
-      "VIEWER",
+      "DEVELOPER",
+      "GROWTH",
+      "CUSTOMER_SUPPORT",
     ]);
   });
 });
@@ -387,6 +389,7 @@ describe("outboxEvents", () => {
       "CREDIT_LEDGER",
       "BILLING",
       "NOTIFICATION",
+      "FUNNEL",
     ]);
   });
 

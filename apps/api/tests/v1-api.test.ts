@@ -334,6 +334,7 @@ vi.mock("@rovenue/db", () => ({
     PAUSED: "PAUSED",
     COMPLETED: "COMPLETED",
   },
+  FeatureFlagEnv: { PROD: "PROD", STAGING: "STAGING", DEVELOPMENT: "DEVELOPMENT" },
 }));
 
 // Stub bcrypt so secret key compare is deterministic in tests

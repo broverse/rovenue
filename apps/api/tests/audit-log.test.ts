@@ -197,6 +197,7 @@ vi.mock("@rovenue/db", () => ({
     CANCELLATION: "CANCELLATION", REFUND: "REFUND", REACTIVATION: "REACTIVATION",
     CREDIT_PURCHASE: "CREDIT_PURCHASE",
   },
+  FeatureFlagEnv: { PROD: "PROD", STAGING: "STAGING", DEVELOPMENT: "DEVELOPMENT" },
 }));
 
 vi.mock("../src/lib/auth", () => authMock);
