@@ -144,6 +144,14 @@ export interface UpsertSubscriberInput {
   createAttributes?: unknown;
   /** Applied ONLY on update. Omit for lastSeenAt-only touches. */
   updateAttributes?: unknown;
+  /**
+   * Apple StoreKit `appAccountToken` (UUID) attached to the purchase.
+   * On insert this is written verbatim. On update it is COALESCEd so
+   * an existing token is never clobbered by a later notification that
+   * happens to lack the field — Refund Shield depends on this column
+   * to look up the owning subscriber from CONSUMPTION_REQUEST.
+   */
+  appleAppAccountToken?: string | null;
 }
 
 /**
@@ -163,6 +171,13 @@ export async function upsertSubscriber(
     update.attributes =
       input.updateAttributes as typeof subscribers.$inferInsert.attributes;
   }
+  // Only overwrite the existing column when the caller actually has a
+  // token. Apple notifications without `appAccountToken` (e.g. legacy
+  // purchases or non-token-binding flows) must not erase a previously
+  // captured token — COALESCE keeps the old value in that case.
+  if (input.appleAppAccountToken != null) {
+    update.appleAppAccountToken = input.appleAppAccountToken;
+  }
   const rows = await db
     .insert(subscribers)
     .values({
@@ -170,6 +185,7 @@ export async function upsertSubscriber(
       appUserId: input.appUserId,
       attributes: (input.createAttributes ??
         {}) as typeof subscribers.$inferInsert.attributes,
+      appleAppAccountToken: input.appleAppAccountToken ?? null,
     })
     .onConflictDoUpdate({
       target: [subscribers.projectId, subscribers.appUserId],

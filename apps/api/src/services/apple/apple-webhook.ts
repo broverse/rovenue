@@ -402,11 +402,19 @@ function mapEnvironment(tx: AppleJwsTransactionPayload): Environment {
 
 async function resolveSubscriber(ctx: DispatchContext) {
   const { projectId, transaction } = ctx;
+  // JWS `appAccountToken` is an opaque UUID the client attaches at
+  // purchase time via `Product.PurchaseOption.appAccountToken(_:)`.
+  // We persist it on the subscriber row so Refund Shield's
+  // CONSUMPTION_REQUEST handler can look the subscriber back up from
+  // an inbound webhook payload without needing the original
+  // transaction id.
+  const appleAppAccountToken = transaction.appAccountToken ?? null;
 
   if (transaction.appAccountToken) {
     return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
       projectId,
       appUserId: transaction.appAccountToken,
+      appleAppAccountToken,
     });
   }
 
