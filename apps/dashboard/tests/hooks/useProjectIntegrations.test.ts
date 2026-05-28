@@ -6,6 +6,9 @@ import { http, HttpResponse } from "msw";
 import { server } from "../msw/server";
 import {
   useProjectIntegrations,
+  useCreateIntegration,
+  useUpdateIntegration,
+  useDeleteIntegration,
   type IntegrationConnectionRow,
 } from "../../src/lib/hooks/useProjectIntegrations";
 
@@ -55,5 +58,88 @@ describe("useProjectIntegrations", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.[0]?.providerId).toBe("META_CAPI");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M6.2 — Create / Update / Delete mutations
+// ---------------------------------------------------------------------------
+
+describe("useCreateIntegration", () => {
+  test("POST create returns id", async () => {
+    server.use(
+      http.post(`${BASE}/dashboard/projects/:projectId/integrations`, () =>
+        HttpResponse.json({ data: { id: "conn_new" } }),
+      ),
+      http.get(`${BASE}/dashboard/projects/:projectId/integrations`, () =>
+        HttpResponse.json({ data: [] }),
+      ),
+    );
+
+    const { result } = renderHook(
+      () => useCreateIntegration("proj_1"),
+      { wrapper: makeWrapper() },
+    );
+
+    result.current.mutate({
+      providerId: "META_CAPI",
+      displayName: "New Connection",
+      credentials: { accessToken: "tok_test" },
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.id).toBe("conn_new");
+  });
+});
+
+describe("useUpdateIntegration", () => {
+  test("PATCH update toggles isEnabled", async () => {
+    server.use(
+      http.patch(
+        `${BASE}/dashboard/projects/:projectId/integrations/:id`,
+        async ({ request }) => {
+          const body = (await request.json()) as { isEnabled?: boolean };
+          return HttpResponse.json({
+            data: { ...mockConnection, isEnabled: body.isEnabled ?? false },
+          });
+        },
+      ),
+      http.get(`${BASE}/dashboard/projects/:projectId/integrations`, () =>
+        HttpResponse.json({ data: [] }),
+      ),
+    );
+
+    const { result } = renderHook(
+      () => useUpdateIntegration("proj_1"),
+      { wrapper: makeWrapper() },
+    );
+
+    result.current.mutate({ connectionId: "conn_1", body: { isEnabled: false } });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect((result.current.data as IntegrationConnectionRow).isEnabled).toBe(false);
+  });
+});
+
+describe("useDeleteIntegration", () => {
+  test("DELETE marks isSuccess", async () => {
+    server.use(
+      http.delete(
+        `${BASE}/dashboard/projects/:projectId/integrations/:id`,
+        () => HttpResponse.json({ data: { deleted: true } }),
+      ),
+      http.get(`${BASE}/dashboard/projects/:projectId/integrations`, () =>
+        HttpResponse.json({ data: [] }),
+      ),
+    );
+
+    const { result } = renderHook(
+      () => useDeleteIntegration("proj_1"),
+      { wrapper: makeWrapper() },
+    );
+
+    result.current.mutate("conn_1");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });
 });
