@@ -125,6 +125,22 @@ const envSchema = z
     // the env var so secrets stay in the same place as everything
     // else. The factory parses it lazily on first use.
     FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
+    // ---- Rovi (AI copilot) ------------------------------------------------
+    // Self-host: set ROVI_UNLIMITED=true to disable tier quotas.
+    // Cloud: leave false and set ROVI_TIER per deployment if not stored in
+    // projects.metadata. Defaults to true (self-hosted behavior).
+    ROVI_UNLIMITED: z.coerce.boolean().default(true),
+    ROVI_TIER: z.enum(["free", "team", "business", "enterprise"]).optional(),
+    ROVI_RATE_LIMIT_PER_USER: z.coerce.number().int().positive().default(30),
+    ROVI_MESSAGE_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
+    // Optional operator-funded fallback when a project has no BYOK
+    // credentials.
+    ROVI_DEFAULT_PROVIDER: z
+      .enum(["openai", "anthropic", "mistral", "ollama"])
+      .optional(),
+    ROVI_DEFAULT_MODEL: z.string().optional(),
+    ROVI_DEFAULT_API_KEY: z.string().optional(),
+    ROVI_DEFAULT_BASE_URL: z.string().url().optional(),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV !== "production") return;
