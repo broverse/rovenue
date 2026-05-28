@@ -208,6 +208,34 @@ describe("runDeliverStep", () => {
       expect.objectContaining({ status: "dead_letter" }),
     );
   });
+
+  it("returns succeeded without re-delivering when insertPendingDelivery hits dedupe (returns undefined)", async () => {
+    const insertPendingDelivery = vi.fn().mockResolvedValue(undefined); // simulate UNIQUE conflict
+    const updateDeliveryStatus = vi.fn();
+    const provider = {
+      id: "META_CAPI" as const,
+      defaultEventMapping: {},
+      validateCredentials: vi.fn(),
+      mapEvent: vi.fn().mockReturnValue({
+        eventKey: "revenue.RENEWAL",
+        providerEvent: "Purchase",
+        body: {},
+      }),
+      deliver: vi.fn(),
+    };
+    const r = await runDeliverStep(makeJob(), {
+      loadConnection: vi.fn().mockResolvedValue(makeConn()),
+      decrypt: () => ({ pixel_id: "p", access_token: "t" }),
+      insertPendingDelivery,
+      updateDeliveryStatus,
+      provider: provider as never,
+      http: { request: vi.fn() } as never,
+      attempt: 1,
+    });
+    expect(r.outcome).toBe("succeeded");
+    expect(provider.deliver).not.toHaveBeenCalled();
+    expect(updateDeliveryStatus).not.toHaveBeenCalled();
+  });
 });
 
 // =============================================================

@@ -8,7 +8,7 @@ import {
 import type { RovenueEventEnvelope } from "../integrations/types";
 import type { ConnectionCache } from "./connection-cache";
 
-export const FANOUT_CONSUMER_GROUP = "integrations-fanout";
+export const FANOUT_CONSUMER_GROUP = "rovenue-integrations-fanout";
 export const FANOUT_TOPICS = ["rovenue.revenue", "rovenue.billing"] as const;
 
 const log = logger.child("integrations-fanout");
@@ -40,6 +40,7 @@ export async function processFanoutMessage(
 
   await Promise.all(
     connections.map(async (conn) => {
+      if (!conn.isEnabled) return;
       const job: IntegrationsDeliverJob = {
         connectionId: conn.id,
         projectId: conn.projectId,

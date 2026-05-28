@@ -186,8 +186,18 @@ export async function runDeliverStep(
     attempt: deps.attempt,
   });
 
-  const rowId = pendingRow?.id ?? deliveryId;
-  const rowCreatedAt = pendingRow?.createdAt ?? new Date();
+  if (!pendingRow) {
+    // dedupe — another worker already succeeded (UNIQUE constraint on
+    // (connection_id, outbox_event_id, created_at) fired).
+    log.info("dedupe_skip", {
+      connectionId: conn.id,
+      outboxEventId: job.envelope.outboxEventId,
+    });
+    return { outcome: "succeeded" };
+  }
+
+  const rowId = pendingRow.id;
+  const rowCreatedAt = pendingRow.createdAt;
 
   // 7. Deliver
   const result = await deps.provider.deliver(payload, creds, deps.http);
