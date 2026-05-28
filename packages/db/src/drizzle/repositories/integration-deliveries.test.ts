@@ -13,7 +13,10 @@ import { Pool } from "pg";
 import { drizzle as drizzleClient } from "drizzle-orm/node-postgres";
 import * as schema from "../schema";
 import { createConnection } from "./integration-connections";
-import { insertPendingDelivery } from "./integration-deliveries";
+import {
+  insertPendingDelivery,
+  updateDeliveryStatus,
+} from "./integration-deliveries";
 
 // ---------------------------------------------------------------------------
 // Env bootstrap
@@ -132,5 +135,39 @@ describe("insertPendingDelivery", () => {
       createdAt: fixedCreatedAt,
     });
     expect(second).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updateDeliveryStatus
+// ---------------------------------------------------------------------------
+
+describe("updateDeliveryStatus", () => {
+  it("transitions pending → succeeded with httpStatus", async () => {
+    const projectId = await seedProject();
+    const connectionId = await seedConnection(projectId);
+    const id = createId();
+    const inserted = await insertPendingDelivery(db, {
+      id,
+      connectionId,
+      projectId,
+      providerId: "META_CAPI",
+      outboxEventId: createId(),
+      eventKey: "revenue.RENEWAL",
+      status: "pending",
+      attempt: 0,
+    });
+    if (!inserted) throw new Error("seed failed");
+    const updated = await updateDeliveryStatus(db, {
+      id: inserted.id,
+      createdAt: inserted.createdAt,
+      status: "succeeded",
+      httpStatus: 200,
+      responseBody: '{"events_received":1}',
+      attempt: 1,
+    });
+    expect(updated.status).toBe("succeeded");
+    expect(updated.httpStatus).toBe(200);
+    expect(updated.attempt).toBe(1);
   });
 });
