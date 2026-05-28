@@ -550,6 +550,19 @@ describe("handleAppleNotification — outcome linkage", () => {
   });
 
   test("sets outcome=REFUND_REVERSED for REFUND_REVERSED notification", async () => {
+    // Compensation path needs a resolvable purchase + subscriber so the
+    // REACTIVATION revenue_events emission can run.
+    drizzleMock.purchaseExtRepo.findPurchaseByStoreTransaction.mockResolvedValue(
+      {
+        id: "pur_rev",
+        subscriberId: "sub_rev",
+        productId: "prod_rev",
+      } as never,
+    );
+    drizzleMock.subscriberRepo.findSubscriberById.mockResolvedValue({
+      id: "sub_rev",
+    } as never);
+
     const verifier = makeStubVerifier(
       makeFakeJwsTransactionPayload({
         appAccountToken: APP_ACCOUNT_TOKEN,
@@ -587,6 +600,61 @@ describe("handleAppleNotification — outcome linkage", () => {
       originalTransactionId: "1000000012",
       outcome: "REFUND_REVERSED",
     });
+
+    // Compensation: a positive REACTIVATION revenue_events row must be
+    // emitted to undo the prior REFUND's effect in MRR / lifetime
+    // analytics. Amount mirrors the JWS price (positive, since the
+    // customer is keeping the charge).
+    expect(
+      drizzleMock.revenueEventRepo.createRevenueEvent,
+    ).toHaveBeenCalledOnce();
+    const [, revenueArgs] = drizzleMock.revenueEventRepo.createRevenueEvent
+      .mock.calls[0] as unknown as [unknown, Record<string, unknown>];
+    expect(revenueArgs).toMatchObject({
+      projectId: PROJECT_ID,
+      subscriberId: "sub_rev",
+      purchaseId: "pur_rev",
+      productId: "prod_rev",
+      type: "REACTIVATION",
+      currency: "USD",
+    });
+    // price is 9_990_000 micro-units → 9.99 in major units, positive.
+    expect(Number(revenueArgs.amount)).toBeCloseTo(9.99, 5);
+  });
+
+  test("REFUND_REVERSED with no matching purchase skips compensation cleanly", async () => {
+    // No purchase row resolves — should still update outcome but skip
+    // the revenue_events emission without throwing.
+    drizzleMock.purchaseExtRepo.findPurchaseByStoreTransaction.mockResolvedValue(
+      null,
+    );
+
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000014",
+        transactionId: "1000000099",
+      }),
+      makeOutcomeNotification(
+        APPLE_NOTIFICATION_TYPE.REFUND_REVERSED,
+        "uuid-r5",
+      ),
+    );
+
+    const result = await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    expect(result.status).toBe("processed");
+    expect(
+      drizzleMock.refundShieldResponseRepo
+        .updateOutcomeByOriginalTransactionIdOverwrite,
+    ).toHaveBeenCalledOnce();
+    expect(
+      drizzleMock.revenueEventRepo.createRevenueEvent,
+    ).not.toHaveBeenCalled();
   });
 
   test("ignores outcome update silently when no matching response row exists", async () => {

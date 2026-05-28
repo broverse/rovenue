@@ -432,11 +432,6 @@ async function applyRefundDeclined(ctx: DispatchContext): Promise<void> {
 // only outcome that legitimately OVERWRITES an earlier value —
 // typically REFUND_APPROVED → REFUND_REVERSED — so it routes through
 // the unconditional overwrite method.
-//
-// TODO (out of scope T11): emit a compensating revenue_events row to
-// reverse the earlier negative refund event. T11 wires only the
-// outcome; revenue accounting reversal is a separate concern tracked
-// by the plan's revenue-event compensation note.
 async function applyRefundReversed(ctx: DispatchContext): Promise<void> {
   await drizzle.refundShieldResponseRepo.updateOutcomeByOriginalTransactionIdOverwrite(
     drizzle.db,
@@ -447,6 +442,55 @@ async function applyRefundReversed(ctx: DispatchContext): Promise<void> {
     },
   );
   incRefundShieldOutcomeReversed(ctx.projectId);
+
+  // Emit a compensating REACTIVATION revenue_events row to undo the
+  // prior REFUND's effect in MRR / lifetime revenue analytics. Apple's
+  // REFUND_REVERSED means the customer keeps the charge after all, so
+  // the negative REFUND row needs a positive counterpart. We reuse the
+  // REACTIVATION type (the canonical "back to paying state" event in
+  // RevenueEventType) rather than introducing a new enum value — no
+  // schema migration, and downstream ClickHouse MVs already sum
+  // REACTIVATION into lifetime revenue.
+  //
+  // Idempotency: duplicate REFUND_REVERSED notifications short-circuit
+  // at the outer webhook_events dispatch (PROCESSED → "duplicate"),
+  // so this branch only runs once per Apple notification UUID.
+  const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
+    drizzle.db,
+    Store.APP_STORE,
+    ctx.transaction.transactionId,
+  );
+  if (!purchase) {
+    log.warn("REFUND_REVERSED with no matching purchase — skipping compensation", {
+      projectId: ctx.projectId,
+      originalTransactionId: ctx.transaction.originalTransactionId,
+      transactionId: ctx.transaction.transactionId,
+    });
+    return;
+  }
+
+  const subscriber = await drizzle.subscriberRepo.findSubscriberById(
+    drizzle.db,
+    purchase.subscriberId,
+  );
+  if (!subscriber) {
+    log.warn("REFUND_REVERSED with no matching subscriber — skipping compensation", {
+      projectId: ctx.projectId,
+      purchaseId: purchase.id,
+    });
+    return;
+  }
+
+  ctx.outcome.subscriberId = subscriber.id;
+  ctx.outcome.purchaseId = purchase.id;
+
+  await emitRevenueEvent({
+    ctx,
+    subscriberId: subscriber.id,
+    purchaseId: purchase.id,
+    productId: purchase.productId,
+    type: RevenueEventType.REACTIVATION,
+  });
 }
 
 // =============================================================
