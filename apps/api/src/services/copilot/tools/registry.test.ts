@@ -20,4 +20,23 @@ describe("loadTools", () => {
     expect(tools["query.subscribers.search"]).toBeDefined();
     expect(tools["query.subscribers.search"]).toHaveProperty("execute");
   });
+
+  it("includes all v1 query tools", () => {
+    const names = listToolNames();
+    for (const n of [
+      "query.subscribers.search",
+      "query.subscribers.get",
+      "query.subscriptions.list",
+      "query.products.list",
+      "query.productGroups.list",
+      "query.metrics.mrr",
+      "query.metrics.churn",
+      "query.metrics.conversion",
+      "query.audiences.list",
+      "query.experiments.list",
+      "query.featureFlags.list",
+    ]) {
+      expect(names).toContain(n);
+    }
+  });
 });
