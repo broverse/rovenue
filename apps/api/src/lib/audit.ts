@@ -96,7 +96,16 @@ export type AuditAction =
   | "custom_domain.created"
   | "custom_domain.verified"
   | "custom_domain.verify_failed"
-  | "custom_domain.deleted";
+  | "custom_domain.deleted"
+  // --- integrations ---
+  | "integration.connection.created"
+  | "integration.connection.updated"
+  | "integration.connection.deleted"
+  | "integration.credentials.rotated"
+  | "integration.delivery.dead_letter"
+  | "integration.test_event.sent"
+  | "integration.backfill.started"
+  | "integration.backfill.completed";
 
 export type AuditResource =
   | "audience"
@@ -113,7 +122,8 @@ export type AuditResource =
   | "invitation"
   | "billing_subscription"
   | "funnel"
-  | "custom_domain";
+  | "custom_domain"
+  | "integration_connection";
 
 export interface AuditEntry {
   projectId: string;

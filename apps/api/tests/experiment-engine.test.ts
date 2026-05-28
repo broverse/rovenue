@@ -41,6 +41,9 @@ const { dbMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(
     productGroup: {
       findFirst: vi.fn(async () => null),
     },
+    offering: {
+      findFirst: vi.fn(async () => null),
+    },
   };
 
   const drizzleMock = {
@@ -132,7 +135,18 @@ const { dbMock, drizzleMock, redisMock, redisStore, setRedisMode } = vi.hoisted(
           where: { projectId, isDefault: true },
         }),
       ),
+      findDefaultOffering: vi.fn(async (_db: unknown, projectId: string) =>
+        dbMock.offering.findFirst({
+          where: { projectId, isDefault: true },
+        }),
+      ),
       findProductGroupByIdentifier: vi.fn(
+        async (_db: unknown, projectId: string, identifier: string) =>
+          dbMock.offering.findFirst({
+            where: { projectId, identifier },
+          }),
+      ),
+      findOfferingByIdentifier: vi.fn(
         async (_db: unknown, projectId: string, identifier: string) =>
           dbMock.offering.findFirst({
             where: { projectId, identifier },

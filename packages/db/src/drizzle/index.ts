@@ -80,3 +80,5 @@ export * as copilotIntentRepo from "./repositories/copilot-intents";
 export * as copilotCredentialRepo from "./repositories/copilot-credentials";
 export * as copilotUsageRepo from "./repositories/copilot-usage";
 export { currentYearMonth } from "./repositories/copilot-usage";
+export * as integrationConnectionRepo from "./repositories/integration-connections";
+export * as integrationDeliveryRepo from "./repositories/integration-deliveries";

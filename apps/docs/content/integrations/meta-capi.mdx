@@ -1,0 +1,68 @@
+# Meta Conversions API (CAPI)
+
+The Meta CAPI integration forwards Rovenue subscription and revenue events directly to Meta's server-side Conversions API, enabling reliable attribution for mobile campaigns without relying solely on client-side pixels.
+
+---
+
+## 1. Get your credentials from Meta
+
+1. Open [Meta Events Manager](https://business.facebook.com/events_manager).
+2. Select your **Data Source** (Pixel).
+3. Go to **Settings → API Access**.
+4. Copy:
+   - **Access Token** — a long-lived system user token (recommended) or a page access token.
+   - **Pixel ID** — the numeric identifier shown at the top of the Data Source settings page (e.g. `123456789012345`).
+
+> Store these values securely. The access token grants write access to your Pixel.
+
+---
+
+## 2. Add the integration in Rovenue
+
+1. In the Rovenue dashboard, navigate to **Apps** (left sidebar).
+2. Find **Meta CAPI** in the integrations grid and click it.
+3. The side drawer opens. Fill in the **Credentials** step:
+   - **Pixel ID** — paste the Pixel ID from step 1.
+   - **Access Token** — paste the access token from step 1.
+4. Click **Validate** — Rovenue calls the Meta CAPI test endpoint to verify the credentials are accepted.
+5. Proceed through the remaining drawer steps (event mapping, test event code, enable).
+6. Click **Save** to activate the integration.
+
+---
+
+## 3. Identity context & consent
+
+When your SDK passes an `identityContext` with an event, the following fields are forwarded to Meta CAPI:
+
+| Field | Forwarded as | Hashing |
+|---|---|---|
+| `email` | `user_data.em` | SHA-256 (lowercased + trimmed before hashing) |
+| `phone` | `user_data.ph` | SHA-256 (digits only before hashing) |
+| `externalId` | `user_data.external_id` | SHA-256 (trimmed before hashing) |
+| `ip` | `user_data.client_ip_address` | Forwarded verbatim — not hashed |
+| `userAgent` | `user_data.client_user_agent` | Forwarded verbatim — not hashed |
+| `fbp` / `fbc` | `user_data.fbp` / `user_data.fbc` | Forwarded verbatim — not hashed |
+| `ttclid` / `ttp` | Not sent to Meta CAPI | N/A (TikTok-specific fields) |
+
+**Consent is your responsibility.**
+
+Rovenue acts as a **data processor**. Your application is the **data controller**. You must obtain the end-user's informed consent before passing any PII in `identityContext`. GDPR, CCPA, KVKK, and similar regulations place the consent obligation on the controller (you), not the processor (Rovenue).
+
+Additional guarantees:
+- Rovenue **never persists** `identityContext` fields at rest. PII is hashed in-process; raw values are not written to any database.
+- `response_body` from Meta CAPI is stored but **truncated to 4096 bytes**.
+- The wire format uses camelCase JSON with `ROVENUE_EVENT_WIRE_VERSION: "v1"`.
+
+---
+
+## 4. Verify events are arriving
+
+1. Go back to **Meta Events Manager**.
+2. Select your Data Source and open the **Test Events** tab.
+3. In the Rovenue drawer's **Test** step, you set a `test_event_code` (e.g. `TEST12345`). Trigger a real event from your app or use the Rovenue **Send Test Event** button.
+4. Within a few seconds, the Test Events tab should show the event with your test event code, confirming the full pipeline is working.
+
+If events are not appearing:
+- Verify the Pixel ID and Access Token are correct (use **Validate** in the drawer).
+- Check **Apps → Meta CAPI → Delivery Log** in Rovenue for HTTP status codes and error messages.
+- Ensure `enabledEvents` in the connection includes the event type you are sending.

@@ -298,3 +298,20 @@ export const customDomainCertStatus = pgEnum("CustomDomainCertStatus", [
   "issued",    // cert live, edge will serve
   "failed",    // ACME failed (rate-limit, CAA, etc.) — surfaced to dashboard
 ]);
+
+// =============================================================
+// Integrations pgEnums
+// =============================================================
+
+export const integrationProvider = pgEnum("IntegrationProvider", [
+  "META_CAPI",
+  "TIKTOK_EVENTS",
+]);
+
+export const integrationDeliveryStatus = pgEnum("IntegrationDeliveryStatus", [
+  "pending",
+  "succeeded",
+  "failed",
+  "skipped",
+  "dead_letter",
+]);

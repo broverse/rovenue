@@ -5,22 +5,38 @@ import { Button } from "../../ui/button";
 import { AppLogo } from "./app-logo";
 import type { AppDescriptor } from "./types";
 
+const DRAWER_IDS = new Set(["meta-capi", "tiktok-events"]);
+
 type Props = {
   app: AppDescriptor;
   onSelect?: (id: string) => void;
+  onOpenIntegration?: (providerId: string) => void;
 };
 
-export function AppCard({ app, onSelect }: Props) {
+export function AppCard({ app, onSelect, onOpenIntegration }: Props) {
   const { t } = useTranslation();
   const connected = app.status === "connected";
 
+  const handleCardClick = () => {
+    if (app.status !== "unavailable" && DRAWER_IDS.has(app.id)) {
+      onOpenIntegration?.(app.id);
+    }
+  };
+
+  const isDrawerApp = app.status !== "unavailable" && DRAWER_IDS.has(app.id);
+
   return (
     <article
+      role={isDrawerApp ? "button" : undefined}
+      tabIndex={isDrawerApp ? 0 : undefined}
+      onClick={isDrawerApp ? handleCardClick : undefined}
+      onKeyDown={isDrawerApp ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleCardClick(); } } : undefined}
       className={cn(
         "relative flex min-h-[168px] flex-col gap-3 rounded-lg border bg-rv-c1 p-4 transition",
         connected
           ? "border-[color-mix(in_srgb,var(--color-rv-success)_28%,var(--color-rv-divider))]"
           : "border-rv-divider hover:border-rv-divider-strong",
+        isDrawerApp && "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rv-accent-500",
       )}
     >
       <header className="flex items-start gap-3">

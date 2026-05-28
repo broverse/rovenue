@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   classifyNotification,
-  isEntitlementGranting,
+  isAccessGranting,
   mapRevenueEventType,
   mapStatus,
   parsePushBody,
@@ -249,24 +249,24 @@ describe("mapRevenueEventType", () => {
   }
 });
 
-describe("isEntitlementGranting", () => {
+describe("isAccessGranting", () => {
   it("grants entitlement for ACTIVE / TRIAL / GRACE_PERIOD", () => {
     // @ts-expect-error — testing runtime values that match the pgEnum
-    expect(isEntitlementGranting("ACTIVE")).toBe(true);
+    expect(isAccessGranting("ACTIVE")).toBe(true);
     // @ts-expect-error
-    expect(isEntitlementGranting("TRIAL")).toBe(true);
+    expect(isAccessGranting("TRIAL")).toBe(true);
     // @ts-expect-error
-    expect(isEntitlementGranting("GRACE_PERIOD")).toBe(true);
+    expect(isAccessGranting("GRACE_PERIOD")).toBe(true);
   });
 
   it("denies entitlement for non-active statuses", () => {
     // @ts-expect-error
-    expect(isEntitlementGranting("EXPIRED")).toBe(false);
+    expect(isAccessGranting("EXPIRED")).toBe(false);
     // @ts-expect-error
-    expect(isEntitlementGranting("REFUNDED")).toBe(false);
+    expect(isAccessGranting("REFUNDED")).toBe(false);
     // @ts-expect-error
-    expect(isEntitlementGranting("REVOKED")).toBe(false);
+    expect(isAccessGranting("REVOKED")).toBe(false);
     // @ts-expect-error
-    expect(isEntitlementGranting("PAUSED")).toBe(false);
+    expect(isAccessGranting("PAUSED")).toBe(false);
   });
 });

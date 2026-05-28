@@ -3491,7 +3491,29 @@
       "roku": {
         "name": "Roku Pay",
         "description": "Subscriptions on Roku channels."
+      },
+      "meta-capi": {
+        "name": "Meta CAPI",
+        "description": "Send server-side conversions to your Meta Pixel."
+      },
+      "tiktok-events": {
+        "name": "TikTok Events API",
+        "description": "Send server-side conversions to your TikTok Pixel."
       }
+    },
+    "drawer": {
+      "stepCredentials": "Credentials",
+      "stepEvents": "Events",
+      "stepMapping": "Mapping",
+      "stepTest": "Test",
+      "stepActivate": "Activate",
+      "tabWizard": "Wizard",
+      "tabDeliveries": "Deliveries",
+      "deliveriesColEvent": "Event",
+      "deliveriesColStatus": "Status",
+      "deliveriesColHttp": "HTTP",
+      "deliveriesColWhen": "When",
+      "loadMore": "Load more"
     }
   },
   "sdkApi": {

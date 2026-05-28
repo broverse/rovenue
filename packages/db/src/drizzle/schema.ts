@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   date,
   decimal,
   index,
@@ -38,6 +39,8 @@ import {
   funnelSessionState,
   funnelStatus,
   funnelTemplateScope,
+  integrationDeliveryStatus,
+  integrationProvider,
   invitationDeliveryStatus,
   memberRole,
   notificationChannel,
@@ -2346,3 +2349,91 @@ export const copilotUsageMonthly = pgTable(
     pk: primaryKey({ columns: [t.projectId, t.yearMonth] }),
   }),
 );
+
+// === Integrations tables ===
+
+export const integrationConnections = pgTable(
+  "integration_connections",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    providerId: integrationProvider("provider_id").notNull(),
+    displayName: text("display_name").notNull(),
+    credentialsCipher: text("credentials_cipher").notNull(),
+    credentialsHint: text("credentials_hint").notNull(),
+    enabledEvents: text("enabled_events")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    eventMapping: jsonb("event_mapping")
+      .$type<Record<string, { eventName?: string; skip?: true }>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    actionSource: text("action_source").notNull().default("app"),
+    testEventCode: text("test_event_code"),
+    isEnabled: boolean("is_enabled").notNull().default(false),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    lastBackfillAt: timestamp("last_backfill_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => ({
+    projectProviderUidx: uniqueIndex(
+      "integration_connections_project_provider_uidx",
+    ).on(t.projectId, t.providerId),
+    enabledIdx: index("integration_connections_enabled_idx")
+      .on(t.projectId)
+      .where(sql`is_enabled = true`),
+    actionSourceChk: check(
+      "integration_connections_action_source_chk",
+      sql`action_source IN ('app', 'website', 'system_generated')`,
+    ),
+  }),
+);
+
+export type IntegrationConnection = typeof integrationConnections.$inferSelect;
+export type NewIntegrationConnection = typeof integrationConnections.$inferInsert;
+
+export const integrationDeliveries = pgTable(
+  "integration_deliveries",
+  {
+    id: text("id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    projectId: text("project_id").notNull(),
+    providerId: integrationProvider("provider_id").notNull(),
+    outboxEventId: text("outbox_event_id").notNull(),
+    eventKey: text("event_key").notNull(),
+    providerEvent: text("provider_event"),
+    status: integrationDeliveryStatus("status").notNull(),
+    attempt: smallint("attempt").notNull().default(0),
+    skipReason: text("skip_reason"),
+    httpStatus: smallint("http_status"),
+    responseBody: text("response_body"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.id, t.createdAt] }),
+    dedupeUidx: uniqueIndex("integration_deliveries_dedupe_uidx").on(
+      t.connectionId, t.outboxEventId, t.createdAt,
+    ),
+    connStatusIdx: index("integration_deliveries_connection_status_idx").on(
+      t.connectionId, t.status, t.createdAt,
+    ),
+    deadLetterIdx: index("integration_deliveries_project_dead_letter_idx")
+      .on(t.projectId, t.createdAt)
+      .where(sql`status = 'dead_letter'`),
+  }),
+);
+
+export type IntegrationDelivery = typeof integrationDeliveries.$inferSelect;
+export type NewIntegrationDelivery = typeof integrationDeliveries.$inferInsert;

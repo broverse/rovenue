@@ -1446,6 +1446,10 @@ export interface AppConnectionRow {
   lastSyncLabel: string | null;
   /** Short status / account label (e.g. "12 endpoints", "Live"). */
   account: string | null;
+  /** Human-readable reason for the error state (integrations overlay). */
+  errorReason?: string;
+  /** Redacted credential hint surfaced alongside the error (integrations overlay). */
+  credentialsHint?: string;
 }
 
 export interface AppConnectionsResponse {

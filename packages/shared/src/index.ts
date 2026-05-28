@@ -118,3 +118,9 @@ export * from "./funnel";
 // =============================================================
 
 export * from "./copilot";
+
+// =============================================================
+// Integrations — canonical event keys and provider types
+// =============================================================
+
+export * from "./integrations";

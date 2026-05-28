@@ -66,6 +66,7 @@ import {
   createRoviRetentionWorker,
   scheduleRoviRetention,
 } from "./workers/rovi-retention";
+import { bootIntegrations } from "./integrations-boot";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -203,6 +204,10 @@ scheduleRoviRetention().catch((err: unknown) => {
   });
 });
 
+// Integrations fanout + delivery pipeline (Kafka → BullMQ → worker).
+// bootIntegrations() no-ops gracefully when KAFKA_BROKERS is unset.
+const integrationsHandle = bootIntegrations();
+
 // Shutdown handler — signals the outbox dispatcher loop to exit
 // so the Kafka producer disconnects cleanly before the process
 // terminates. Other BullMQ workers close via their own lifecycle.
@@ -212,6 +217,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
     stopOutboxDispatcher();
     void getScheduledActionsWorker().close();
     void getScheduledActionsQueue().close();
+    void integrationsHandle.then((h) => h.stop());
   });
 }
 

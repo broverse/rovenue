@@ -23,9 +23,16 @@ import {
   type AppView,
   type RailEntryId,
 } from "../../../../components/apps";
+import { IntegrationDrawer } from "../../../../components/apps/integration-drawer/integration-drawer";
 import { useProject } from "../../../../lib/hooks/useProject";
 import { useProjectAppConnections } from "../../../../lib/hooks/useProjectAppConnections";
+import { useProjectIntegrations } from "../../../../lib/hooks/useProjectIntegrations";
 import type { AppConnectionRow } from "@rovenue/shared";
+
+const CARD_ID_TO_PROVIDER: Record<string, "META_CAPI" | "TIKTOK_EVENTS"> = {
+  "meta-capi": "META_CAPI",
+  "tiktok-events": "TIKTOK_EVENTS",
+};
 
 export const Route = createFileRoute("/_authed/projects/$projectId/apps")({
   component: AppsRoute,
@@ -68,7 +75,18 @@ function AppsPage({ projectId }: { projectId: string }) {
   const [query, setQuery] = useState("");
   const [view, setView] = useState<AppView>("grid");
   const [tier, setTier] = useState<AppTier>("all");
+  const [drawerProviderId, setDrawerProviderId] = useState<"META_CAPI" | "TIKTOK_EVENTS" | null>(null);
   const connections = useProjectAppConnections(projectId);
+  const integrations = useProjectIntegrations(projectId);
+
+  const handleOpenIntegration = (cardId: string) => {
+    const providerId = CARD_ID_TO_PROVIDER[cardId];
+    if (providerId) setDrawerProviderId(providerId);
+  };
+
+  const existingConnection = drawerProviderId
+    ? (integrations.data?.find((c) => c.providerId === drawerProviderId) ?? null)
+    : null;
 
   const apps = useMemo<ReadonlyArray<AppDescriptor>>(
     () => applyConnectionOverlay(APPS, connections.data?.connections ?? []),
@@ -158,6 +176,7 @@ function AppsPage({ projectId }: { projectId: string }) {
                   apps={apps.filter((app) => app.category === category).slice(0, 4)}
                   totalCount={counts[category] ?? 0}
                   onViewAll={(next) => setActive(next)}
+                  onOpenIntegration={handleOpenIntegration}
                 />
               ))}
             </>
@@ -176,7 +195,7 @@ function AppsPage({ projectId }: { projectId: string }) {
               {filtered.length > 0 ? (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
                   {filtered.map((app) => (
-                    <AppCard key={app.id} app={app} />
+                    <AppCard key={app.id} app={app} onOpenIntegration={handleOpenIntegration} />
                   ))}
                 </div>
               ) : (
@@ -188,6 +207,16 @@ function AppsPage({ projectId }: { projectId: string }) {
           <BuildYourOwnCard />
         </main>
       </div>
+
+      {drawerProviderId && (
+        <IntegrationDrawer
+          open={true}
+          onClose={() => setDrawerProviderId(null)}
+          projectId={projectId}
+          providerId={drawerProviderId}
+          existingConnection={existingConnection}
+        />
+      )}
     </>
   );
 }

@@ -421,6 +421,20 @@
       "when": 1779979092849,
       "tag": "0059_brainy_prodigy",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1780001000000,
+      "tag": "0060_integrations_framework",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1780001100000,
+      "tag": "0061_integration_connections_soft_delete",
+      "breakpoints": true
     }
   ]
 }
