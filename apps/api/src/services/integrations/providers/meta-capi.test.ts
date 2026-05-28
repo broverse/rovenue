@@ -60,7 +60,7 @@ function makeConfig(
 
 describe("metaCapiProvider.mapEvent", () => {
   it("maps RENEWAL → Purchase with hashed email", () => {
-    const result = metaCapiProvider.mapEvent(makeEnvelope(), makeConfig());
+    const result = metaCapiProvider.mapEvent(makeEnvelope(), makeConfig(), {});
     expect(result).not.toHaveProperty("skip");
     const payload = result as ProviderPayload;
     const body = payload.body as {
@@ -79,19 +79,19 @@ describe("metaCapiProvider.mapEvent", () => {
 
   it("skips when not in enabled_events", () => {
     const config = makeConfig({ enabledEvents: ["revenue.INITIAL"] });
-    const result = metaCapiProvider.mapEvent(makeEnvelope(), config);
+    const result = metaCapiProvider.mapEvent(makeEnvelope(), config, {});
     expect(result).toEqual({ skip: true, reason: "filtered_by_event_scope" });
   });
 
   it("skips when identityContext is empty", () => {
     const envelope = makeEnvelope({ identityContext: {} });
-    const result = metaCapiProvider.mapEvent(envelope, makeConfig());
+    const result = metaCapiProvider.mapEvent(envelope, makeConfig(), {});
     expect(result).toEqual({ skip: true, reason: "no_user_data" });
   });
 
   it("test_event_code is forwarded into body", () => {
     const config = makeConfig({ testEventCode: "TEST123" });
-    const result = metaCapiProvider.mapEvent(makeEnvelope(), config);
+    const result = metaCapiProvider.mapEvent(makeEnvelope(), config, {});
     expect(result).not.toHaveProperty("skip");
     const payload = result as ProviderPayload;
     const body = payload.body as Record<string, unknown>;
