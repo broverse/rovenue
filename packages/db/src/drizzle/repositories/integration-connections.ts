@@ -43,3 +43,32 @@ export async function listActiveConnectionsForProject(
       ),
     );
 }
+
+export async function updateConnection(
+  db: Db,
+  id: string,
+  patch: Partial<NewIntegrationConnection>,
+): Promise<IntegrationConnection> {
+  const [row] = await db
+    .update(integrationConnections)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(eq(integrationConnections.id, id))
+    .returning();
+  if (!row) throw new Error(`updateConnection: id=${id} not found`);
+  return row;
+}
+
+export async function softDeleteConnection(
+  db: Db,
+  id: string,
+): Promise<void> {
+  await db
+    .update(integrationConnections)
+    .set({
+      isEnabled: false,
+      credentialsCipher: "",
+      credentialsHint: "deleted",
+      updatedAt: new Date(),
+    })
+    .where(eq(integrationConnections.id, id));
+}

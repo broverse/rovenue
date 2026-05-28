@@ -14,6 +14,8 @@ import {
   createConnection,
   getConnection,
   listActiveConnectionsForProject,
+  updateConnection,
+  softDeleteConnection,
 } from "./integration-connections";
 
 // ---------------------------------------------------------------------------
@@ -116,5 +118,61 @@ describe("listActiveConnectionsForProject", () => {
     });
     const active = await listActiveConnectionsForProject(db, projectId);
     expect(active.map((r) => r.id)).toEqual([enabledId]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updateConnection
+// ---------------------------------------------------------------------------
+
+describe("updateConnection", () => {
+  it("flips is_enabled and sets updatedAt", async () => {
+    const projectId = await seedProject();
+    const id = createId();
+    await createConnection(db, {
+      id,
+      projectId,
+      providerId: "META_CAPI",
+      displayName: "n",
+      credentialsCipher: "v1:1",
+      credentialsHint: "h",
+      enabledEvents: [],
+      eventMapping: {},
+      actionSource: "app",
+    });
+    const before = await getConnection(db, id);
+    await new Promise((r) => setTimeout(r, 10));
+    const updated = await updateConnection(db, id, { isEnabled: true });
+    expect(updated.isEnabled).toBe(true);
+    expect(updated.updatedAt.getTime()).toBeGreaterThan(
+      before!.updatedAt.getTime(),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// softDeleteConnection
+// ---------------------------------------------------------------------------
+
+describe("softDeleteConnection", () => {
+  it("disables and clears credentials", async () => {
+    const projectId = await seedProject();
+    const id = createId();
+    await createConnection(db, {
+      id,
+      projectId,
+      providerId: "META_CAPI",
+      displayName: "n",
+      credentialsCipher: "v1:secret",
+      credentialsHint: "h",
+      enabledEvents: ["revenue.RENEWAL"],
+      eventMapping: {},
+      actionSource: "app",
+      isEnabled: true,
+    });
+    await softDeleteConnection(db, id);
+    const row = await getConnection(db, id);
+    expect(row?.isEnabled).toBe(false);
+    expect(row?.credentialsCipher).toBe("");
   });
 });
