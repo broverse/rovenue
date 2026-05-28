@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _setNativeForTesting } from "../core/native";
 import { stopEventBridge } from "../core/eventBridge";
 import { store } from "../store/reactiveStore";
@@ -9,6 +9,7 @@ import { entitlement, entitlementsAll, refreshEntitlements } from "../api/entitl
 import { creditBalance, refreshCredits, consumeCredits } from "../api/credits";
 import { postAppleReceipt, postGoogleReceipt } from "../api/receipts";
 import { setForeground, shutdown } from "../api/lifecycle";
+import { Rovenue } from "../index";
 import { InvalidApiKeyError, InsufficientCreditsError } from "../errors";
 
 describe("Rovenue imperative API", () => {
@@ -44,14 +45,26 @@ describe("Rovenue imperative API", () => {
 
   it("configure forwards to native + starts event bridge", () => {
     configure({ apiKey: "pk_test", baseUrl: "https://api.example.com", debug: true });
-    expect(native.configure).toHaveBeenCalledWith("pk_test", "https://api.example.com", true);
+    // 4th arg (appVersion) is undefined here — the native side will
+    // auto-read Bundle.main / PackageManager when nothing is supplied.
+    expect(native.configure).toHaveBeenCalledWith(
+      "pk_test",
+      "https://api.example.com",
+      true,
+      undefined,
+    );
     // Event bridge attached one change listener via the emitter.
     expect(native.__state.changeListeners.length).toBe(1);
   });
 
   it("configure debug defaults to false when omitted", () => {
     configure({ apiKey: "pk_test", baseUrl: "https://api.example.com" });
-    expect(native.configure).toHaveBeenCalledWith("pk_test", "https://api.example.com", false);
+    expect(native.configure).toHaveBeenCalledWith(
+      "pk_test",
+      "https://api.example.com",
+      false,
+      undefined,
+    );
   });
 
   // -------- identity --------
@@ -126,12 +139,52 @@ describe("Rovenue imperative API", () => {
   it("postAppleReceipt forwards args + returns ReceiptResult", async () => {
     const r = await postAppleReceipt("jws.token.here", "com.foo.pro");
     expect(r.ok).toBe(true);
-    expect(native.postAppleReceipt).toHaveBeenCalledWith("jws.token.here", "com.foo.pro");
+    expect(native.postAppleReceipt).toHaveBeenCalledWith(
+      "jws.token.here",
+      "com.foo.pro",
+      undefined,
+    );
+  });
+
+  it("postAppleReceipt forwards optional appAccountToken", async () => {
+    await postAppleReceipt(
+      "jws.token.here",
+      "com.foo.pro",
+      "550e8400-e29b-41d4-a716-446655440000",
+    );
+    expect(native.postAppleReceipt).toHaveBeenCalledWith(
+      "jws.token.here",
+      "com.foo.pro",
+      "550e8400-e29b-41d4-a716-446655440000",
+    );
   });
 
   it("postGoogleReceipt forwards args + returns ReceiptResult", async () => {
     const r = await postGoogleReceipt("play.token", "com.foo.pro");
     expect(r.ok).toBe(true);
+  });
+
+  it("postGoogleReceipt forwards optional obfuscated ids", async () => {
+    await postGoogleReceipt(
+      "play.token",
+      "com.foo.pro",
+      "550e8400-e29b-41d4-a716-446655440000",
+      "project-abc",
+    );
+    expect(native.postGoogleReceipt).toHaveBeenCalledWith(
+      "play.token",
+      "com.foo.pro",
+      "550e8400-e29b-41d4-a716-446655440000",
+      "project-abc",
+    );
+  });
+
+  // -------- account token --------
+  it("exposes getAppAccountToken on Rovenue namespace", async () => {
+    const local = makeMockNative();
+    local.getAppAccountToken = vi.fn(async () => "abc");
+    _setNativeForTesting(local);
+    expect(await Rovenue.getAppAccountToken()).toBe("abc");
   });
 
   // -------- lifecycle --------

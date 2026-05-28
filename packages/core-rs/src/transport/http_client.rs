@@ -153,6 +153,24 @@ impl HttpClient {
         Err(last_err)
     }
 
+    /// POST a batch of session telemetry events to `/v1/sdk/sessions`.
+    /// Best-effort: returns Ok(()) for any 2xx, and discards the response body.
+    pub fn post_sessions(
+        &self,
+        subscriber_id: &str,
+        events: &[serde_json::Value],
+    ) -> RovenueResult<()> {
+        let body = serde_json::json!({
+            "subscriberId": subscriber_id,
+            "events": events,
+        });
+        let _resp = self.post_json::<serde_json::Value, serde_json::Value>(
+            super::types::HttpPostRequest::new("/v1/sdk/sessions").user_scope(subscriber_id),
+            &body,
+        )?;
+        Ok(())
+    }
+
     pub fn post_json<B: Serialize, T: DeserializeOwned>(
         &self,
         req: super::types::HttpPostRequest<'_>,

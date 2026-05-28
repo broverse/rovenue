@@ -5,7 +5,7 @@ plugins {
 }
 
 group = "dev.rovenue"
-version = "0.1.0"
+version = "0.6.0"
 
 repositories {
     mavenCentral()
@@ -39,7 +39,7 @@ publishing {
             from(components["java"])
             groupId = "dev.rovenue"
             artifactId = "sdk"
-            version = "0.1.0"
+            version = "0.6.0"
         }
     }
 }

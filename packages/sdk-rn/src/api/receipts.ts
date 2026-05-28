@@ -10,10 +10,26 @@ async function call<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-export async function postAppleReceipt(jws: string, productId: string): Promise<ReceiptResult> {
-  return call(() => getNative().postAppleReceipt(jws, productId));
+export async function postAppleReceipt(
+  jws: string,
+  productId: string,
+  appAccountToken?: string,
+): Promise<ReceiptResult> {
+  return call(() => getNative().postAppleReceipt(jws, productId, appAccountToken));
 }
 
-export async function postGoogleReceipt(receipt: string, productId: string): Promise<ReceiptResult> {
-  return call(() => getNative().postGoogleReceipt(receipt, productId));
+export async function postGoogleReceipt(
+  receipt: string,
+  productId: string,
+  obfuscatedAccountId?: string,
+  obfuscatedProfileId?: string,
+): Promise<ReceiptResult> {
+  return call(() =>
+    getNative().postGoogleReceipt(
+      receipt,
+      productId,
+      obfuscatedAccountId,
+      obfuscatedProfileId,
+    ),
+  );
 }

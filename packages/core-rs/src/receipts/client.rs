@@ -22,6 +22,7 @@ impl ReceiptClient {
         app_user_id: &str,
         product_id: &str,
         idempotency_key: &str,
+        app_account_token: Option<&str>,
     ) -> RovenueResult<ReceiptResult> {
         self.post(
             "/v1/receipts/apple",
@@ -29,6 +30,9 @@ impl ReceiptClient {
             app_user_id,
             product_id,
             idempotency_key,
+            app_account_token,
+            None,
+            None,
         )
     }
 
@@ -38,6 +42,8 @@ impl ReceiptClient {
         app_user_id: &str,
         product_id: &str,
         idempotency_key: &str,
+        obfuscated_account_id: Option<&str>,
+        obfuscated_profile_id: Option<&str>,
     ) -> RovenueResult<ReceiptResult> {
         self.post(
             "/v1/receipts/google",
@@ -45,9 +51,13 @@ impl ReceiptClient {
             app_user_id,
             product_id,
             idempotency_key,
+            None,
+            obfuscated_account_id,
+            obfuscated_profile_id,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn post(
         &self,
         path: &str,
@@ -55,11 +65,17 @@ impl ReceiptClient {
         app_user_id: &str,
         product_id: &str,
         idempotency_key: &str,
+        app_account_token: Option<&str>,
+        obfuscated_account_id: Option<&str>,
+        obfuscated_profile_id: Option<&str>,
     ) -> RovenueResult<ReceiptResult> {
         let body = ReceiptBody {
             receipt,
             app_user_id,
             product_id,
+            app_account_token,
+            obfuscated_account_id,
+            obfuscated_profile_id,
         };
         let resp = self
             .http

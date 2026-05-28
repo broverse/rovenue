@@ -43,5 +43,23 @@ CREATE TABLE credit_balance (
 UPDATE schema_meta SET version = 2;
 "#;
 
-pub const MIGRATIONS: &[&str] = &[MIGRATION_V1, MIGRATION_V2];
-pub const LATEST: u32 = 2;
+pub const MIGRATION_V3: &str = r#"
+CREATE TABLE app_account_tokens (
+    scope TEXT PRIMARY KEY,
+    token TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE session_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    duration_ms INTEGER
+);
+CREATE INDEX idx_session_events_id ON session_events(id);
+
+UPDATE schema_meta SET version = 3;
+"#;
+
+pub const MIGRATIONS: &[&str] = &[MIGRATION_V1, MIGRATION_V2, MIGRATION_V3];
+pub const LATEST: u32 = 3;

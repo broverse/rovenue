@@ -19,8 +19,18 @@ public class RovenueModule: Module {
         Name("Rovenue")
 
         // ---------------- Sync ----------------
-        Function("configure") { (apiKey: String, baseUrl: String, debug: Bool) in
-            try Rovenue.configure(apiKey: apiKey, baseUrl: baseUrl, debug: debug)
+        //
+        // appVersion is optional from JS — when nil/omitted, the Swift
+        // façade falls back to Bundle.main.infoDictionary[CFBundleShortVersionString].
+        // For Expo apps that's the value baked from app.json's `expo.version`
+        // at prebuild time; for bare RN it's the host project's plist.
+        Function("configure") { (apiKey: String, baseUrl: String, debug: Bool, appVersion: String?) in
+            try Rovenue.configure(
+                apiKey: apiKey,
+                baseUrl: baseUrl,
+                debug: debug,
+                appVersion: appVersion
+            )
         }
         Function("shutdown") { Rovenue.shared.shutdown() }
         Function("setForeground") { (foreground: Bool) in
@@ -55,14 +65,48 @@ public class RovenueModule: Module {
             let b = try await Rovenue.shared.consumeCredits(Int64(amount), description: description)
             return Double(b)
         }
-        AsyncFunction("postAppleReceipt") { (jws: String, productId: String) -> [String: Any?] in
-            _ = try await Rovenue.shared.postAppleReceipt(jws, productId: productId)
+        AsyncFunction("postAppleReceipt") { (jws: String, productId: String, appAccountToken: String?) -> [String: Any?] in
+            _ = try await Rovenue.shared.postAppleReceipt(
+                jws,
+                productId: productId,
+                appAccountToken: appAccountToken
+            )
             // M3 only resolves on success and guarantees both caches refreshed.
             return ["ok": true, "entitlementsRefreshed": true, "creditsRefreshed": true]
         }
-        AsyncFunction("postGoogleReceipt") { (receipt: String, productId: String) -> [String: Any?] in
-            _ = try await Rovenue.shared.postGoogleReceipt(receipt, productId: productId)
+        AsyncFunction("postGoogleReceipt") { (receipt: String, productId: String, obfAccount: String?, obfProfile: String?) -> [String: Any?] in
+            // On iOS this is unreachable but kept for surface parity.
+            _ = try await Rovenue.shared.postGoogleReceipt(
+                receipt,
+                productId: productId,
+                obfuscatedAccountId: obfAccount,
+                obfuscatedProfileId: obfProfile
+            )
             return ["ok": true, "entitlementsRefreshed": true, "creditsRefreshed": true]
+        }
+
+        // ---------------- Refund Shield ----------------
+        AsyncFunction("getAppAccountToken") { () -> String in
+            try await Rovenue.shared.getAppAccountToken()
+        }
+        AsyncFunction("recordSessionEvent") { (kind: String, occurredAt: String, durationMs: Double?) -> Void in
+            let kindEnum: SessionEventKind = {
+                switch kind {
+                case "open": return .open
+                case "background": return .background
+                case "close": return .close
+                default: return .open
+                }
+            }()
+            try await Rovenue.shared.recordSessionEvent(
+                kind: kindEnum,
+                occurredAt: occurredAt,
+                durationMs: durationMs.map { UInt32($0) }
+            )
+        }
+        AsyncFunction("flushSessionEvents") { () -> Double in
+            let n = try await Rovenue.shared.flushSessionEvents()
+            return Double(n)
         }
 
         // ---------------- Events ----------------
