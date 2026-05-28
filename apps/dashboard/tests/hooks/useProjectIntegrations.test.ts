@@ -9,6 +9,8 @@ import {
   useCreateIntegration,
   useUpdateIntegration,
   useDeleteIntegration,
+  useValidateIntegrationCredentials,
+  useTestIntegrationEvent,
   type IntegrationConnectionRow,
 } from "../../src/lib/hooks/useProjectIntegrations";
 
@@ -141,5 +143,55 @@ describe("useDeleteIntegration", () => {
     result.current.mutate("conn_1");
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M6.3 — Validate + test-event mutations
+// ---------------------------------------------------------------------------
+
+describe("useValidateIntegrationCredentials", () => {
+  test("POST /validate returns ok:true", async () => {
+    server.use(
+      http.post(
+        `${BASE}/dashboard/projects/:projectId/integrations/:id/validate`,
+        () => HttpResponse.json({ data: { ok: true } }),
+      ),
+    );
+
+    const { result } = renderHook(
+      () => useValidateIntegrationCredentials("proj_1"),
+      { wrapper: makeWrapper() },
+    );
+
+    result.current.mutate("conn_1");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect((result.current.data as { ok: boolean }).ok).toBe(true);
+  });
+});
+
+describe("useTestIntegrationEvent", () => {
+  test("POST /test-event returns ok + httpStatus", async () => {
+    server.use(
+      http.post(
+        `${BASE}/dashboard/projects/:projectId/integrations/:id/test-event`,
+        () =>
+          HttpResponse.json({
+            data: { ok: true, httpStatus: 200, responseBody: '{"success":1}' },
+          }),
+      ),
+    );
+
+    const { result } = renderHook(
+      () => useTestIntegrationEvent("proj_1", "conn_1"),
+      { wrapper: makeWrapper() },
+    );
+
+    result.current.mutate();
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.ok).toBe(true);
+    expect(result.current.data?.httpStatus).toBe(200);
   });
 });

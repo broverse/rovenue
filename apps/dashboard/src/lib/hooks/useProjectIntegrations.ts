@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 
 // ---------------------------------------------------------------------------
@@ -109,5 +109,37 @@ export function useDeleteIntegration(projectId: string) {
       void qc.invalidateQueries({ queryKey: ["project-integrations", projectId] });
       void qc.invalidateQueries({ queryKey: ["project-app-connections", projectId] });
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// M6.3 — Validate credentials + test-event mutations
+// ---------------------------------------------------------------------------
+
+export function useValidateIntegrationCredentials(projectId: string) {
+  return useMutation({
+    mutationFn: (connectionId: string) =>
+      api<{ ok: true } | { ok: false; reason: string }>(
+        `/dashboard/projects/${projectId}/integrations/${connectionId}/validate`,
+        { method: "POST" },
+      ),
+  });
+}
+
+export function useTestIntegrationEvent(
+  projectId: string,
+  connectionId: string,
+) {
+  return useMutation({
+    mutationFn: () =>
+      api<{
+        ok: boolean;
+        httpStatus: number;
+        responseBody: string;
+        errorMessage?: string;
+      }>(
+        `/dashboard/projects/${projectId}/integrations/${connectionId}/test-event`,
+        { method: "POST" },
+      ),
   });
 }
