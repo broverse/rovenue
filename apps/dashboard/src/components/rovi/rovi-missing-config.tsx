@@ -9,8 +9,8 @@ export function RoviMissingConfig({ projectId }: { projectId: string }) {
         Rovi in this project.
       </p>
       <Link
-        to={"/projects/$projectId/settings/rovi" as never}
-        params={{ projectId } as never}
+        to="/projects/$projectId/settings/rovi"
+        params={{ projectId }}
         className="mt-4 inline-flex h-8 items-center rounded-md bg-rv-c4 px-3 text-xs font-medium text-foreground transition hover:opacity-90"
       >
         Add API key
