@@ -11,6 +11,7 @@ package dev.rovenue.sdk
 import dev.rovenue.sdk.generated.Config
 import dev.rovenue.sdk.generated.RovenueCore
 import dev.rovenue.sdk.generated.RovenueException
+import dev.rovenue.sdk.generated.SessionEventKind
 import dev.rovenue.sdk.generated.sdkVersion
 import dev.rovenue.sdk.internal.Dispatcher
 import dev.rovenue.sdk.internal.ObserverBridge
@@ -214,18 +215,76 @@ class Rovenue private constructor(
     // Receipts
     // ---------------------------------------------------------------
 
+    // ---------------------------------------------------------------
+    // Refund Shield — stable per-subscriber token
+    // ---------------------------------------------------------------
+
+    /**
+     * Returns a stable UUID for the current user. The host app passes this
+     * to `BillingFlowParams.Builder.setObfuscatedAccountId(token)` so Google
+     * can use it for fraud-detection signals and so the backend can attribute
+     * refund-related signals back to a known subscriber.
+     *
+     * The token is generated once per (project, current_user_scope) pair
+     * and persisted locally. Stable across app launches. Calling [identify]
+     * first changes the scope, so the next [getAppAccountToken] returns a
+     * different UUID for the now-known user.
+     */
+    @Throws(RovenueException::class)
+    suspend fun getAppAccountToken(): String =
+        dispatcher.run { core.getOrCreateAppAccountToken() }
+
+    // ---------------------------------------------------------------
+    // Refund Shield — session telemetry
+    // ---------------------------------------------------------------
+
+    /**
+     * Record a single SDK session-lifecycle event (open / background / close).
+     * Buffered locally and flushed in batches of up to 200 every ~30s by the
+     * Rust core's `SessionDispatcher`. Best-effort: dropped on network error.
+     */
+    @Throws(RovenueException::class)
+    suspend fun recordSessionEvent(
+        kind: SessionEventKind,
+        occurredAt: String,
+        durationMs: UInt? = null,
+    ) {
+        dispatcher.run { core.recordSessionEvent(kind, occurredAt, durationMs) }
+    }
+
+    /**
+     * Force an immediate flush of buffered session events. Returns the
+     * number of events drained. Normally callers don't invoke this — the
+     * Rust core's 30s poll covers it.
+     */
+    @Throws(RovenueException::class)
+    suspend fun flushSessionEvents(): UInt =
+        dispatcher.run { core.flushSessionEvents() }
+
+    // ---------------------------------------------------------------
+    // Receipts
+    // ---------------------------------------------------------------
+
     /** Post an Apple StoreKit 2 JWS to the server for validation.
      *  Caller obtains JWS via `Product.purchase()` on iOS (this SDK does
      *  NOT call StoreKit). On success, refreshes entitlements + credits
-     *  and returns a ReceiptResult. */
+     *  and returns a ReceiptResult.
+     *
+     *  [appAccountToken] is the UUID the host app supplied to
+     *  `Product.purchase(options: [.appAccountToken(uuid)])`. The backend
+     *  cross-references it vs the JWS-decoded `appAccountToken` claim.
+     *  Optional. */
     @Throws(RovenueException::class)
     suspend fun postAppleReceipt(
         jws: String,
         productId: String,
+        appAccountToken: String? = null,
     ): dev.rovenue.sdk.generated.ReceiptResult {
         emit(LogEntry(level = "info", message = "postAppleReceipt"))
         try {
-            val result = dispatcher.run { core.postAppleReceipt(jws, productId) }
+            val result = dispatcher.run {
+                core.postAppleReceipt(jws, productId, appAccountToken)
+            }
             emit(LogEntry(level = "info", message = "postAppleReceipt ok"))
             return result
         } catch (e: Throwable) {
@@ -237,15 +296,25 @@ class Rovenue private constructor(
     /** Post a Google Play Billing purchase token to the server for
      *  validation. Caller obtains the token via `Purchase.purchaseToken`
      *  on Android. On success, refreshes entitlements + credits and
-     *  returns a ReceiptResult. */
+     *  returns a ReceiptResult.
+     *
+     *  [obfuscatedAccountId] / [obfuscatedProfileId] are the values the
+     *  host app passed to `BillingFlowParams.Builder.setObfuscatedAccountId(...)`
+     *  / `setObfuscatedProfileId(...)`. They survive into Play's RTDN
+     *  messages and let the backend attribute refunds back to a known
+     *  subscriber. Optional. */
     @Throws(RovenueException::class)
     suspend fun postGoogleReceipt(
         receipt: String,
         productId: String,
+        obfuscatedAccountId: String? = null,
+        obfuscatedProfileId: String? = null,
     ): dev.rovenue.sdk.generated.ReceiptResult {
         emit(LogEntry(level = "info", message = "postGoogleReceipt"))
         try {
-            val result = dispatcher.run { core.postGoogleReceipt(receipt, productId) }
+            val result = dispatcher.run {
+                core.postGoogleReceipt(receipt, productId, obfuscatedAccountId, obfuscatedProfileId)
+            }
             emit(LogEntry(level = "info", message = "postGoogleReceipt ok"))
             return result
         } catch (e: Throwable) {
