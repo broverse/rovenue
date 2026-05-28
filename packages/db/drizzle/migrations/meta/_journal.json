@@ -414,6 +414,13 @@
       "when": 1780000220000,
       "tag": "0058_experiment_type_offering",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1779979092849,
+      "tag": "0059_brainy_prodigy",
+      "breakpoints": true
     }
   ]
 }

@@ -139,8 +139,8 @@ const envSchema = z
     // ---- Rovi (AI copilot) ------------------------------------------------
     // Self-host: set ROVI_UNLIMITED=true to disable tier quotas.
     // Cloud: leave false and set ROVI_TIER per deployment if not stored in
-    // projects.metadata. Defaults to true (self-hosted behavior).
-    ROVI_UNLIMITED: z.coerce.boolean().default(true),
+    // projects.metadata. Defaults to false (cloud safety, quota enforcement).
+    ROVI_UNLIMITED: z.coerce.boolean().default(false),
     ROVI_TIER: z.enum(["free", "team", "business", "enterprise"]).optional(),
     ROVI_RATE_LIMIT_PER_USER: z.coerce.number().int().positive().default(30),
     ROVI_MESSAGE_RETENTION_DAYS: z.coerce.number().int().positive().default(90),

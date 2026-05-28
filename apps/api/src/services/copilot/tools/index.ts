@@ -37,7 +37,6 @@ const STATIC_NAMES = [
   "query.subscribers.get",
   "query.subscriptions.list",
   "query.products.list",
-  "query.productGroups.list",
   "query.metrics.mrr",
   "query.metrics.churn",
   "query.metrics.conversion",

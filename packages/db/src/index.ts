@@ -185,6 +185,7 @@ export type {
 // =============================================================
 
 export * from "./helpers/encrypted-field";
+export { currentYearMonth } from "./drizzle/repositories/copilot-usage";
 
 // =============================================================
 // Validators (re-export selected schemas commonly used by routes)

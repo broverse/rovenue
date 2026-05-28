@@ -58,6 +58,14 @@ import {
   createCustomDomainCertPollerWorker,
   scheduleCustomDomainCertPoller,
 } from "./workers/custom-domain-cert-poller";
+import {
+  createRoviReaperWorker,
+  scheduleRoviReaper,
+} from "./workers/rovi-reaper";
+import {
+  createRoviRetentionWorker,
+  scheduleRoviRetention,
+} from "./workers/rovi-retention";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -173,6 +181,24 @@ scheduleCustomDomainVerifier().catch((err: unknown) => {
 createCustomDomainCertPollerWorker();
 scheduleCustomDomainCertPoller().catch((err: unknown) => {
   logger.error("failed to schedule custom-domain cert poller", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Rovi reaper — every 60 seconds, flips copilot_intents rows
+// past their expires_at from 'pending' to 'expired'.
+createRoviReaperWorker();
+scheduleRoviReaper().catch((err: unknown) => {
+  logger.error("failed to schedule rovi reaper", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Rovi retention — nightly at 03:00 UTC, hard-deletes copilot_messages
+// older than ROVI_MESSAGE_RETENTION_DAYS (GDPR Art. 5(1)(e)).
+createRoviRetentionWorker();
+scheduleRoviRetention().catch((err: unknown) => {
+  logger.error("failed to schedule rovi retention", {
     err: err instanceof Error ? err.message : String(err),
   });
 });
