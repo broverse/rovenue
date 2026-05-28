@@ -218,7 +218,30 @@ export async function claimPendingResponses(
     LIMIT ${args.batchSize}
     FOR UPDATE SKIP LOCKED
   `);
-  return (result as unknown as { rows: PendingResponseRow[] }).rows ?? [];
+  // `db.execute(sql`…`)` bypasses Drizzle's column mapper, so timestamp
+  // columns arrive as ISO strings from node-postgres. Coerce to `Date`
+  // here so downstream code (worker SLA math, audit emission) can call
+  // `.getTime()` without re-checking the row's shape.
+  const rows =
+    (result as unknown as { rows: Array<Record<string, unknown>> }).rows ?? [];
+  return rows.map((row) => ({
+    id: row.id as string,
+    projectId: row.projectId as string,
+    subscriberId: (row.subscriberId as string | null) ?? null,
+    appleNotificationUuid: row.appleNotificationUuid as string,
+    appleOriginalTransactionId: row.appleOriginalTransactionId as string,
+    appleTransactionId: row.appleTransactionId as string,
+    detectedAt:
+      row.detectedAt instanceof Date
+        ? row.detectedAt
+        : new Date(row.detectedAt as string),
+    scheduledFor:
+      row.scheduledFor instanceof Date
+        ? row.scheduledFor
+        : new Date(row.scheduledFor as string),
+    status: row.status as string,
+    retryCount: Number(row.retryCount),
+  }));
 }
 
 export interface MarkSentInput {
