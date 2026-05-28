@@ -60,7 +60,6 @@ CREATE INDEX "integration_deliveries_project_dead_letter_idx"
 SELECT partman.create_parent(
   p_parent_table => 'public.integration_deliveries',
   p_control => 'created_at',
-  p_type => 'native',
   p_interval => '1 day',
   p_premake => 7
 );
