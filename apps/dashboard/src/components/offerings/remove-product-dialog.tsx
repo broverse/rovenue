@@ -72,7 +72,7 @@ function Body({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const update = useUpdateOffering(projectId);
+  const update = useUpdateOffering(projectId, offering.id);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Drop the stale error whenever the dialog re-opens against a different
@@ -91,7 +91,7 @@ function Body({
         isPromoted: false,
       }));
     try {
-      await update.mutateAsync({ id: offering.id, products: next });
+      await update.mutateAsync({ products: next });
       onClose();
     } catch (err) {
       setSubmitError(

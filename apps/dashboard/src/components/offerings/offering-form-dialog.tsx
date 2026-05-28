@@ -99,7 +99,10 @@ function DialogBody(props: Props) {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const create = useCreateOffering(props.projectId);
-  const update = useUpdateOffering(props.projectId);
+  const update = useUpdateOffering(
+    props.projectId,
+    props.mode === "edit" ? props.offering.id : "",
+  );
   const offeringsQuery = useProjectOfferings(props.projectId);
   const accessQuery = useProjectAccess(props.projectId);
   const accessRows = accessQuery.data?.rows ?? [];
@@ -169,7 +172,6 @@ function DialogBody(props: Props) {
         props.onCreated?.(res.offering.id);
       } else {
         await update.mutateAsync({
-          id: props.offering.id,
           identifier: trimmedIdentifier,
           accessId: accessIdValue,
           isDefault,

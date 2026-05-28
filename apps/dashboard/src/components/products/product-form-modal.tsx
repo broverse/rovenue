@@ -23,9 +23,9 @@ import {
   useUpdateProduct,
 } from "../../lib/hooks/useProjectProducts";
 import {
-  useProjectProductGroups,
-  useUpdateProductGroup,
-} from "../../lib/hooks/useProjectProductGroups";
+  useProjectOfferings,
+  useUpdateOffering,
+} from "../../lib/hooks/useProjectOfferings";
 
 type Props = {
   projectId: string;
@@ -108,8 +108,8 @@ export function ProductFormModal({
   const create = useCreateProduct(projectId);
   const update = useUpdateProduct(projectId);
   const existing = useProductById(projectId, mode === "edit" ? editProductId! : null);
-  const groupsQuery = useProjectProductGroups(projectId);
-  const updateGroup = useUpdateProductGroup(projectId);
+  const groupsQuery = useProjectOfferings(projectId);
+  const updateGroup = useUpdateOffering(projectId);
 
   const allGroups = useMemo(
     () => groupsQuery.data?.groups ?? [],
@@ -188,7 +188,7 @@ export function ProductFormModal({
    * Apply the form's selected-group set to the project: for each group that
    * gained the product, PATCH with the product appended; for each that lost
    * it, PATCH with the product removed. Runs sequentially so the React Query
-   * cache stays consistent — `useUpdateProductGroup` invalidates per call,
+   * cache stays consistent — `useUpdateOffering` invalidates per call,
    * but our `allGroups` snapshot already encodes what needs to change so we
    * don't need to re-read between calls.
    */

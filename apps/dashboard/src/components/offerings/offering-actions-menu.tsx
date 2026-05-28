@@ -43,7 +43,7 @@ export function OfferingActionsMenu({
   onDelete,
 }: Props) {
   const { t } = useTranslation();
-  const update = useUpdateOffering(projectId);
+  const update = useUpdateOffering(projectId, offering.id);
   const [copiedKey, setCopiedKey] = useState<"identifier" | "id" | null>(null);
 
   const copy = async (kind: "identifier" | "id", value: string) => {
@@ -60,7 +60,7 @@ export function OfferingActionsMenu({
 
   const toggleDefault = () => {
     if (update.isPending) return;
-    update.mutate({ id: offering.id, isDefault: !offering.isDefault });
+    update.mutate({ isDefault: !offering.isDefault });
   };
 
   return (

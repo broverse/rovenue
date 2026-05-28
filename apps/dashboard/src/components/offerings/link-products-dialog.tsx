@@ -72,7 +72,7 @@ function Body({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const update = useUpdateOffering(projectId);
+  const update = useUpdateOffering(projectId, offering.id);
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -127,7 +127,6 @@ function Body({
     }));
     try {
       await update.mutateAsync({
-        id: offering.id,
         products: [...existing, ...toAdd],
       });
       onClose();

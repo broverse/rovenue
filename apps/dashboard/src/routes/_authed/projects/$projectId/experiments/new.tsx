@@ -44,7 +44,7 @@ import { cn } from "../../../../../lib/cn";
 import { ApiError } from "../../../../../lib/api";
 import { useProject } from "../../../../../lib/hooks/useProject";
 import { useAudiences } from "../../../../../lib/hooks/useProjectAdmin";
-import { useProjectProductGroups } from "../../../../../lib/hooks/useProjectProductGroups";
+import { useProjectOfferings } from "../../../../../lib/hooks/useProjectOfferings";
 import {
   useCreateExperiment,
   usePauseExperiment,
@@ -291,7 +291,7 @@ export function NewExperimentPage({
   const isEdit = Boolean(initialExperiment);
   const { data: audiences = [], isLoading: audiencesLoading } =
     useAudiences(projectId);
-  const productGroupsQuery = useProjectProductGroups(projectId);
+  const productGroupsQuery = useProjectOfferings(projectId);
   const productGroups = productGroupsQuery.data?.groups ?? [];
   const create = useCreateExperiment();
   const update = useUpdateExperiment();

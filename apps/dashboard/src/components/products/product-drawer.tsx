@@ -10,9 +10,9 @@ import type {
 import { Button, buttonVariants } from "../../ui/button";
 import { cn } from "../../lib/cn";
 import {
-  useProjectProductGroups,
-  useUpdateProductGroup,
-} from "../../lib/hooks/useProjectProductGroups";
+  useProjectOfferings,
+  useUpdateOffering,
+} from "../../lib/hooks/useProjectOfferings";
 import { Sparkline } from "../dashboard/sparkline";
 import { DurationTag } from "./duration-tag";
 import { formatDuration, formatPrice } from "./format";
@@ -241,8 +241,8 @@ function PricingTab({ product }: { product: Product }) {
 
 function GroupsTab({ projectId, product }: { projectId: string; product: Product }) {
   const { t } = useTranslation();
-  const groupsQuery = useProjectProductGroups(projectId);
-  const updateGroup = useUpdateProductGroup(projectId);
+  const groupsQuery = useProjectOfferings(projectId);
+  const updateGroup = useUpdateOffering(projectId);
 
   const allGroups = groupsQuery.data?.groups ?? [];
 
