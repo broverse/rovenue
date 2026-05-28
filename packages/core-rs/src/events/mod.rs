@@ -1,0 +1,13 @@
+// =============================================================
+// events — SDK event wire types (M7)
+// =============================================================
+
+pub mod envelope;
+pub mod identity_context;
+
+pub use envelope::EventEnvelope;
+pub use identity_context::IdentityContext;
+
+/// Wire version embedded in outbox_events rows so consumers can
+/// detect schema drift without inspecting the payload shape.
+pub const EVENT_WIRE_VERSION: u8 = 1;
