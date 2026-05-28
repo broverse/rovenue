@@ -4,24 +4,28 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, X } from "lucide-react";
 import { Button } from "../../ui/button";
 import { cn } from "../../lib/cn";
-import { useDeleteProductGroup } from "../../lib/hooks/useProjectProductGroups";
+import { useUpdateOffering } from "../../lib/hooks/useProjectOfferings";
 import { ApiError } from "../../lib/api";
-import type { ProductGroup } from "./types";
+import type { GroupProduct, Offering } from "./types";
 
 type Props = {
   projectId: string;
-  group: ProductGroup | null;
+  offering: Offering;
+  product: GroupProduct | null;
   open: boolean;
   onClose: () => void;
-  onDeleted?: () => void;
 };
 
-export function DeleteProductGroupDialog({
+/**
+ * Confirm modal for unlinking a single product from an offering. The product
+ * itself stays in the catalog — only the membership row is removed.
+ */
+export function RemoveProductDialog({
   projectId,
-  group,
+  offering,
+  product,
   open,
   onClose,
-  onDeleted,
 }: Props) {
   return (
     <Dialog.Root
@@ -34,7 +38,7 @@ export function DeleteProductGroupDialog({
         <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
         <Dialog.Popup
           className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[440px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2",
+            "fixed left-1/2 top-1/2 z-50 w-[420px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2",
             "rounded-xl border border-rv-divider bg-rv-c1 shadow-[0_30px_80px_rgba(0,0,0,0.45)]",
             "transition-[opacity,transform] duration-200 ease-out",
             "data-[ending-style]:opacity-0 data-[starting-style]:opacity-0",
@@ -42,12 +46,12 @@ export function DeleteProductGroupDialog({
             "focus:outline-none",
           )}
         >
-          {open && group && (
+          {open && product && (
             <Body
               projectId={projectId}
-              group={group}
+              offering={offering}
+              product={product}
               onClose={onClose}
-              onDeleted={onDeleted}
             />
           )}
         </Dialog.Popup>
@@ -58,43 +62,44 @@ export function DeleteProductGroupDialog({
 
 function Body({
   projectId,
-  group,
+  offering,
+  product,
   onClose,
-  onDeleted,
 }: {
   projectId: string;
-  group: ProductGroup;
+  offering: Offering;
+  product: GroupProduct;
   onClose: () => void;
-  onDeleted?: () => void;
 }) {
   const { t } = useTranslation();
-  const del = useDeleteProductGroup(projectId);
-  const [confirm, setConfirm] = useState("");
+  const update = useUpdateOffering(projectId, offering.id);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Reset typed confirmation whenever the dialog re-opens against a new group.
+  // Drop the stale error whenever the dialog re-opens against a different
+  // product (e.g. user removed one, then the dialog reopens for another).
   useEffect(() => {
-    setConfirm("");
     setSubmitError(null);
-  }, [group.id]);
-
-  const matches = confirm.trim() === group.key;
-  const productCount = group.products.length;
+  }, [product.id]);
 
   const onConfirm = async () => {
-    if (!matches) return;
     setSubmitError(null);
+    const next = offering.products
+      .filter((p) => p.id !== product.id)
+      .map((p, index) => ({
+        productId: p.id,
+        order: index,
+        isPromoted: false,
+      }));
     try {
-      await del.mutateAsync(group.id);
-      onDeleted?.();
+      await update.mutateAsync({ products: next });
       onClose();
     } catch (err) {
       setSubmitError(
         err instanceof ApiError
           ? err.message
           : t(
-              "productGroups.delete.errors.generic",
-              "Could not delete the group. Please try again.",
+              "offerings.removeProduct.errors.generic",
+              "Could not remove the product. Please try again.",
             ),
       );
     }
@@ -109,12 +114,12 @@ function Body({
           </div>
           <div>
             <Dialog.Title className="text-[15px] font-semibold leading-5">
-              {t("productGroups.delete.title", "Delete product group")}
+              {t("offerings.removeProduct.title", "Remove product from offering?")}
             </Dialog.Title>
             <Dialog.Description className="mt-0.5 text-[12px] text-rv-mute-500">
               {t(
-                "productGroups.delete.subtitle",
-                "Permanently remove this group. Linked products will not be deleted.",
+                "offerings.removeProduct.subtitle",
+                "The product stays in your catalog. Existing subscribers keep their access; new buyers won't enter this offering.",
               )}
             </Dialog.Description>
           </div>
@@ -131,45 +136,15 @@ function Body({
 
       <div className="flex flex-col gap-3 px-5 py-4">
         <div className="rounded-md border border-rv-divider bg-rv-c2 px-3 py-2.5">
-          <div className="text-[13px] font-semibold text-foreground">{group.name}</div>
-          <div className="font-rv-mono text-[11px] text-rv-mute-500">{group.key}</div>
-          <div className="mt-1.5 font-rv-mono text-[11px] text-rv-mute-500">
-            {t("productGroups.delete.productCount", {
-              count: productCount,
-              defaultValue_one: "{{count}} linked product",
-              defaultValue_other: "{{count}} linked products",
-            })}
-          </div>
+          <div className="text-[13px] font-semibold text-foreground">{product.name}</div>
+          <div className="font-rv-mono text-[11px] text-rv-mute-500">{product.sku}</div>
         </div>
 
-        {group.isDefault && (
-          <div className="rounded-md border border-rv-warning/30 bg-rv-warning/10 px-3 py-2 text-[12px] text-rv-warning">
-            {t(
-              "productGroups.delete.defaultWarning",
-              "This is the default group. New subscribers without a matching group will no longer fall back here.",
-            )}
-          </div>
-        )}
-
-        <div>
-          <label
-            htmlFor="confirm-identifier"
-            className="text-[12px] font-medium text-foreground"
-          >
-            {t("productGroups.delete.confirmLabel", {
-              defaultValue: "Type {{identifier}} to confirm",
-              identifier: group.key,
-            })}
-          </label>
-          <input
-            id="confirm-identifier"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            placeholder={group.key}
-            autoComplete="off"
-            spellCheck={false}
-            className="mt-1.5 w-full rounded-md border border-rv-divider bg-rv-c2 px-3 py-2 font-rv-mono text-[12px] text-foreground transition placeholder:text-rv-mute-500 focus:border-rv-danger focus:outline-none focus:ring-2 focus:ring-rv-danger/30"
-          />
+        <div className="font-rv-mono text-[11px] text-rv-mute-500">
+          {t("offerings.removeProduct.from", {
+            defaultValue: "From {{name}}",
+            name: offering.name,
+          })}
         </div>
 
         {submitError && (
@@ -185,7 +160,7 @@ function Body({
           variant="flat"
           size="sm"
           onClick={onClose}
-          disabled={del.isPending}
+          disabled={update.isPending}
         >
           {t("common.cancel", "Cancel")}
         </Button>
@@ -194,12 +169,12 @@ function Body({
           variant="solid-primary"
           size="sm"
           onClick={onConfirm}
-          disabled={!matches || del.isPending}
+          disabled={update.isPending}
           className="!bg-rv-danger !text-white hover:!bg-rv-danger/90 focus-visible:!ring-rv-danger"
         >
-          {del.isPending
-            ? t("productGroups.delete.deleting", "Deleting…")
-            : t("productGroups.delete.confirm", "Delete group")}
+          {update.isPending
+            ? t("offerings.removeProduct.removing", "Removing…")
+            : t("offerings.removeProduct.confirm", "Remove product")}
         </Button>
       </footer>
     </>

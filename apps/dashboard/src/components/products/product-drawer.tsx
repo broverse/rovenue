@@ -1,18 +1,18 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { Dialog } from "@base-ui-components/react/dialog";
 import { Popover } from "@base-ui-components/react/popover";
 import { ArrowUp, Check, Layers, Plus, X } from "lucide-react";
 import type {
-  DashboardProductGroupRow,
-  ProductGroupMembership,
+  DashboardOfferingRow,
+  DashboardOfferingUpdateInput,
+  OfferingMembership,
 } from "@rovenue/shared";
 import { Button, buttonVariants } from "../../ui/button";
 import { cn } from "../../lib/cn";
-import {
-  useProjectProductGroups,
-  useUpdateProductGroup,
-} from "../../lib/hooks/useProjectProductGroups";
+import { api } from "../../lib/api";
+import { useProjectOfferings } from "../../lib/hooks/useProjectOfferings";
 import { Sparkline } from "../dashboard/sparkline";
 import { DurationTag } from "./duration-tag";
 import { formatDuration, formatPrice } from "./format";
@@ -241,35 +241,70 @@ function PricingTab({ product }: { product: Product }) {
 
 function GroupsTab({ projectId, product }: { projectId: string; product: Product }) {
   const { t } = useTranslation();
-  const groupsQuery = useProjectProductGroups(projectId);
-  const updateGroup = useUpdateProductGroup(projectId);
+  const qc = useQueryClient();
+  const groupsQuery = useProjectOfferings(projectId);
+  const [pending, setPending] = useState(false);
+  const [mutationError, setMutationError] = useState<Error | null>(null);
 
-  const allGroups = groupsQuery.data?.groups ?? [];
+  const allGroups = groupsQuery.data?.offerings ?? [];
 
   const memberOf = useMemo(
-    () => allGroups.filter((g) => g.products.some((m) => m.productId === product.id)),
+    () =>
+      allGroups.filter((g: DashboardOfferingRow) =>
+        g.products.some((m: OfferingMembership) => m.productId === product.id),
+      ),
     [allGroups, product.id],
   );
   const candidates = useMemo(
-    () => allGroups.filter((g) => !g.products.some((m) => m.productId === product.id)),
+    () =>
+      allGroups.filter(
+        (g: DashboardOfferingRow) =>
+          !g.products.some((m: OfferingMembership) => m.productId === product.id),
+      ),
     [allGroups, product.id],
   );
 
-  const link = (group: DashboardProductGroupRow) => {
+  // `useUpdateOffering` is now per-id-bound, so we can't construct a single
+  // hook to PATCH whatever offering the user clicks. Issue the PATCH directly
+  // via `api()` and invalidate the cache by hand.
+  const patchOffering = async (
+    offeringId: string,
+    body: DashboardOfferingUpdateInput,
+  ) => {
+    setPending(true);
+    setMutationError(null);
+    try {
+      await api(`/dashboard/projects/${projectId}/offerings/${offeringId}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      await qc.invalidateQueries({ queryKey: ["offerings"] });
+    } catch (e) {
+      setMutationError(e instanceof Error ? e : new Error(String(e)));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const link = (group: DashboardOfferingRow) => {
     const nextOrder =
       group.products.length === 0
         ? 0
-        : Math.max(...group.products.map((m) => m.order ?? 0)) + 1;
-    const nextProducts: ProductGroupMembership[] = [
+        : Math.max(
+            ...group.products.map((m: OfferingMembership) => m.order ?? 0),
+          ) + 1;
+    const nextProducts: OfferingMembership[] = [
       ...group.products,
       { productId: product.id, order: nextOrder, isPromoted: false },
     ];
-    void updateGroup.mutateAsync({ id: group.id, products: nextProducts });
+    void patchOffering(group.id, { products: nextProducts });
   };
 
-  const unlink = (group: DashboardProductGroupRow) => {
-    const nextProducts = group.products.filter((m) => m.productId !== product.id);
-    void updateGroup.mutateAsync({ id: group.id, products: nextProducts });
+  const unlink = (group: DashboardOfferingRow) => {
+    const nextProducts = group.products.filter(
+      (m: OfferingMembership) => m.productId !== product.id,
+    );
+    void patchOffering(group.id, { products: nextProducts });
   };
 
   return (
@@ -320,7 +355,7 @@ function GroupsTab({ projectId, product }: { projectId: string; product: Product
                 <button
                   type="button"
                   onClick={() => unlink(g)}
-                  disabled={updateGroup.isPending}
+                  disabled={pending}
                   className="rounded-md p-1 text-rv-mute-500 transition hover:bg-rv-c2 hover:text-rv-danger disabled:opacity-60"
                   aria-label={t("products.drawer.groups.unlink", { name: g.identifier })}
                   title={t("products.drawer.groups.unlink", { name: g.identifier })}
@@ -333,11 +368,9 @@ function GroupsTab({ projectId, product }: { projectId: string; product: Product
         </ul>
       )}
 
-      {updateGroup.isError && (
+      {mutationError && (
         <p className="mt-2 text-[11px] text-rv-danger" role="alert">
-          {updateGroup.error instanceof Error
-            ? updateGroup.error.message
-            : t("products.drawer.groups.error")}
+          {mutationError.message || t("products.drawer.groups.error")}
         </p>
       )}
     </section>
@@ -350,8 +383,8 @@ function EmptyGroups({
   candidates,
 }: {
   hasCandidates: boolean;
-  onPick: (group: DashboardProductGroupRow) => void;
-  candidates: ReadonlyArray<DashboardProductGroupRow>;
+  onPick: (group: DashboardOfferingRow) => void;
+  candidates: ReadonlyArray<DashboardOfferingRow>;
 }) {
   const { t } = useTranslation();
   return (
@@ -371,8 +404,8 @@ function LinkGroupMenu({
   onPick,
   variant = "flat",
 }: {
-  candidates: ReadonlyArray<DashboardProductGroupRow>;
-  onPick: (group: DashboardProductGroupRow) => void;
+  candidates: ReadonlyArray<DashboardOfferingRow>;
+  onPick: (group: DashboardOfferingRow) => void;
   variant?: "flat" | "primary";
 }) {
   const { t } = useTranslation();

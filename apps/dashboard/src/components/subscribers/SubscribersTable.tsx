@@ -46,10 +46,10 @@ export function SubscribersTable({ projectId, rows }: Props) {
               <td className="py-2 pr-4">{s.purchaseCount}</td>
               <td className="py-2">
                 <div className="flex flex-wrap gap-1">
-                  {s.activeEntitlementKeys.length === 0 && (
+                  {s.activeAccessIds.length === 0 && (
                     <span className="text-default-400">—</span>
                   )}
-                  {s.activeEntitlementKeys.map((k) => (
+                  {s.activeAccessIds.map((k) => (
                     <Chip key={k} size="sm" color="success">
                       {k}
                     </Chip>

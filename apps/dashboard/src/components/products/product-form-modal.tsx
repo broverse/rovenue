@@ -1,14 +1,16 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { Dialog } from "@base-ui-components/react/dialog";
 import { Popover } from "@base-ui-components/react/popover";
 import { Check, ChevronDown, Plus, X } from "lucide-react";
 import type {
+  DashboardOfferingRow,
+  DashboardOfferingUpdateInput,
   DashboardProductCreateInput,
-  DashboardProductGroupRow,
   DashboardProductRow,
   DashboardProductUpdateInput,
-  ProductGroupMembership,
+  OfferingMembership,
   ProductTypeName,
 } from "@rovenue/shared";
 import { Button, buttonVariants } from "../../ui/button";
@@ -17,15 +19,14 @@ import { Input } from "../../ui/input";
 import { Select } from "../../ui/select";
 import { Switch } from "../../ui/switch";
 import { cn } from "../../lib/cn";
+import { api } from "../../lib/api";
 import {
   useCreateProduct,
   useProductById,
   useUpdateProduct,
 } from "../../lib/hooks/useProjectProducts";
-import {
-  useProjectProductGroups,
-  useUpdateProductGroup,
-} from "../../lib/hooks/useProjectProductGroups";
+import { useProjectOfferings } from "../../lib/hooks/useProjectOfferings";
+import { useProjectAccess } from "../../lib/hooks/useProjectAccess";
 
 type Props = {
   projectId: string;
@@ -46,6 +47,7 @@ type FormState = {
   webId: string;
   creditAmount: string;
   isActive: boolean;
+  accessIds: string[];
 };
 
 const EMPTY: FormState = {
@@ -58,6 +60,7 @@ const EMPTY: FormState = {
   webId: "",
   creditAmount: "",
   isActive: true,
+  accessIds: [],
 };
 
 const SLUG_RE = /^[a-zA-Z0-9._:-]+$/;
@@ -79,18 +82,20 @@ function rowToForm(row: DashboardProductRow): FormState {
     webId: stores.web ?? "",
     creditAmount: row.creditAmount != null ? String(row.creditAmount) : "",
     isActive: row.isActive,
+    accessIds: row.accessIds ?? [],
   };
 }
 
-/** Set of group ids that currently include the given product. */
+/** Set of offering ids that currently include the given product. */
 function membershipsFor(
-  groups: ReadonlyArray<DashboardProductGroupRow>,
+  offerings: ReadonlyArray<DashboardOfferingRow>,
   productId: string | null,
 ): Set<string> {
   const out = new Set<string>();
   if (!productId) return out;
-  for (const g of groups) {
-    if (g.products.some((m) => m.productId === productId)) out.add(g.id);
+  for (const g of offerings) {
+    if (g.products.some((m: OfferingMembership) => m.productId === productId))
+      out.add(g.id);
   }
   return out;
 }
@@ -105,16 +110,18 @@ export function ProductFormModal({
   const { t } = useTranslation();
   const mode: "create" | "edit" = editProductId ? "edit" : "create";
 
+  const qc = useQueryClient();
   const create = useCreateProduct(projectId);
   const update = useUpdateProduct(projectId);
   const existing = useProductById(projectId, mode === "edit" ? editProductId! : null);
-  const groupsQuery = useProjectProductGroups(projectId);
-  const updateGroup = useUpdateProductGroup(projectId);
+  const groupsQuery = useProjectOfferings(projectId);
+  const accessQuery = useProjectAccess(projectId);
 
   const allGroups = useMemo(
-    () => groupsQuery.data?.groups ?? [],
+    () => groupsQuery.data?.offerings ?? [],
     [groupsQuery.data],
   );
+  const accessRows = accessQuery.data?.rows ?? [];
 
   const [form, setForm] = useState<FormState>(EMPTY);
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(
@@ -123,6 +130,7 @@ export function ProductFormModal({
   const [initialGroupIds, setInitialGroupIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [syncingOfferings, setSyncingOfferings] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Reset whenever the modal re-opens or the target product changes. In edit
@@ -182,15 +190,18 @@ export function ProductFormModal({
   }, [form, loadingExisting]);
 
   const submitting =
-    create.isPending || update.isPending || updateGroup.isPending;
+    create.isPending || update.isPending || syncingOfferings;
 
   /**
-   * Apply the form's selected-group set to the project: for each group that
-   * gained the product, PATCH with the product appended; for each that lost
-   * it, PATCH with the product removed. Runs sequentially so the React Query
-   * cache stays consistent — `useUpdateProductGroup` invalidates per call,
-   * but our `allGroups` snapshot already encodes what needs to change so we
-   * don't need to re-read between calls.
+   * Apply the form's selected-offering set to the project: for each offering
+   * that gained the product, PATCH with the product appended; for each that
+   * lost it, PATCH with the product removed. Runs sequentially so the React
+   * Query cache stays consistent — our `allGroups` snapshot already encodes
+   * what needs to change so we don't need to re-read between calls.
+   *
+   * Implemented as a raw `api()` PATCH per offering because
+   * `useUpdateOffering(projectId, id)` is per-id-bound and hooks can't be
+   * called inside a loop. We invalidate the offerings cache once at the end.
    */
   const syncGroupMemberships = async (productId: string) => {
     const wantedIn = selectedGroupIds;
@@ -199,25 +210,47 @@ export function ProductFormModal({
         ? initialGroupIds
         : new Set<string>(); // brand-new products start with no memberships
 
+    const pending: Array<{ offeringId: string; body: DashboardOfferingUpdateInput }> = [];
     for (const g of allGroups) {
       const want = wantedIn.has(g.id);
       const have = wasIn.has(g.id);
       if (want === have) continue;
 
+      let products: OfferingMembership[];
       if (want) {
         const nextOrder =
           g.products.length === 0
             ? 0
-            : Math.max(...g.products.map((m) => m.order ?? 0)) + 1;
-        const products: ProductGroupMembership[] = [
+            : Math.max(
+                ...g.products.map((m: OfferingMembership) => m.order ?? 0),
+              ) + 1;
+        products = [
           ...g.products,
           { productId, order: nextOrder, isPromoted: false },
         ];
-        await updateGroup.mutateAsync({ id: g.id, products });
       } else {
-        const products = g.products.filter((m) => m.productId !== productId);
-        await updateGroup.mutateAsync({ id: g.id, products });
+        products = g.products.filter(
+          (m: OfferingMembership) => m.productId !== productId,
+        );
       }
+
+      pending.push({ offeringId: g.id, body: { products } });
+    }
+
+    if (pending.length === 0) return;
+    setSyncingOfferings(true);
+    try {
+      // Sequential to keep server-side ordering deterministic and avoid
+      // racing PATCHes against overlapping offerings.
+      for (const { offeringId, body } of pending) {
+        await api(`/dashboard/projects/${projectId}/offerings/${offeringId}`, {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        });
+      }
+    } finally {
+      setSyncingOfferings(false);
+      await qc.invalidateQueries({ queryKey: ["offerings"] });
     }
   };
 
@@ -254,9 +287,7 @@ export function ProductFormModal({
           displayName: form.displayName.trim(),
           type: form.type,
           storeIds,
-          // Entitlements are now expressed via product groups. Keep the field
-          // empty so the existing schema stays satisfied.
-          entitlementKeys: [],
+          accessIds: form.accessIds,
           creditAmount,
           isActive: form.isActive,
           metadata: baseMeta,
@@ -269,10 +300,7 @@ export function ProductFormModal({
           displayName: form.displayName.trim(),
           type: form.type,
           storeIds,
-          // Preserve any previously-set entitlement keys verbatim — the form
-          // no longer exposes them, but we shouldn't silently clear data the
-          // user (or an SDK consumer) may still rely on.
-          entitlementKeys: existing.data?.product?.entitlementKeys ?? [],
+          accessIds: form.accessIds,
           creditAmount,
           isActive: form.isActive,
           metadata: baseMeta,
@@ -336,8 +364,10 @@ export function ProductFormModal({
             ) : (
               <FormBody
                 form={form}
+                setForm={setForm}
                 set={set}
                 groups={allGroups}
+                accessRows={accessRows}
                 selectedGroupIds={selectedGroupIds}
                 onToggleGroup={toggleGroup}
                 lockIdentifier={mode === "edit"}
@@ -379,15 +409,19 @@ export function ProductFormModal({
 
 function FormBody({
   form,
+  setForm,
   set,
   groups,
+  accessRows,
   selectedGroupIds,
   onToggleGroup,
   lockIdentifier,
 }: {
   form: FormState;
+  setForm: React.Dispatch<React.SetStateAction<FormState>>;
   set: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-  groups: ReadonlyArray<DashboardProductGroupRow>;
+  groups: ReadonlyArray<DashboardOfferingRow>;
+  accessRows: ReadonlyArray<{ id: string; identifier: string; displayName: string }>;
   selectedGroupIds: ReadonlySet<string>;
   onToggleGroup: (id: string) => void;
   lockIdentifier: boolean;
@@ -496,6 +530,52 @@ function FormBody({
         />
       </fieldset>
 
+      <div>
+        <div className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-rv-mute-500">
+          {t("products.form.access.label", "Access granted")}
+        </div>
+        <div className="flex flex-col gap-1 rounded-md border border-rv-divider bg-rv-c2/50 p-3">
+          {accessRows.length === 0 && (
+            <p className="text-xs text-rv-mute-500">
+              {t(
+                "products.form.access.empty",
+                "No access defined yet. Create one from the Access page first.",
+              )}
+            </p>
+          )}
+          {accessRows.map((a) => {
+            const checked = form.accessIds.includes(a.id);
+            return (
+              <label
+                key={a.id}
+                className="flex cursor-pointer items-center gap-2 text-xs"
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      accessIds: e.target.checked
+                        ? [...form.accessIds, a.id]
+                        : form.accessIds.filter((id) => id !== a.id),
+                    })
+                  }
+                />
+                <span className="font-rv-mono">{a.identifier}</span>
+                <span className="text-rv-mute-500">{a.displayName}</span>
+              </label>
+            );
+          })}
+        </div>
+        <p className="mt-1 text-[11px] text-rv-mute-500">
+          {t(
+            "products.form.access.hint",
+            "Pick one or more access rows from the catalog. Subscribers see these as access.identifier in the SDK.",
+          )}
+        </p>
+      </div>
+
       <ProductGroupsField
         groups={groups}
         selectedGroupIds={selectedGroupIds}
@@ -519,7 +599,7 @@ function ProductGroupsField({
   selectedGroupIds,
   onToggle,
 }: {
-  groups: ReadonlyArray<DashboardProductGroupRow>;
+  groups: ReadonlyArray<DashboardOfferingRow>;
   selectedGroupIds: ReadonlySet<string>;
   onToggle: (id: string) => void;
 }) {

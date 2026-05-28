@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../ui/button";
-import { EntitlementChip } from "../products/entitlement-chip";
+import { AccessChip } from "../products/access-chip";
 import { ChevronsUpDown, Key, MoreHorizontal } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { ActivityTimeline } from "./activity-timeline";
@@ -11,7 +11,7 @@ import { SubscriberStatusChip } from "./subscriber-status-chip";
 import { UserAvatar } from "./user-avatar";
 import type { Subscriber, TimelineEntry } from "./types";
 
-type DetailTab = "activity" | "subs" | "entitlements";
+type DetailTab = "activity" | "subs" | "access";
 
 type Props = {
   subscriber: Subscriber;
@@ -20,7 +20,7 @@ type Props = {
 
 /**
  * Sticky right-rail panel. Shows the selected user's headline info + KPI
- * strip + tabbed content (activity / subscription / entitlements) and a
+ * strip + tabbed content (activity / subscription / access) and a
  * footer of grant/refund actions.
  */
 export function SubscriberDetailPanel({ subscriber, timeline }: Props) {
@@ -75,10 +75,10 @@ export function SubscriberDetailPanel({ subscriber, timeline }: Props) {
           {t("subscribers.panel.tabs.subs")}
           <span className="ml-1 font-rv-mono text-[10px] text-rv-mute-500">1</span>
         </DetailTabBtn>
-        <DetailTabBtn active={tab === "entitlements"} onClick={() => setTab("entitlements")}>
-          {t("subscribers.panel.tabs.entitlements")}
+        <DetailTabBtn active={tab === "access"} onClick={() => setTab("access")}>
+          {t("subscribers.panel.tabs.access")}
           <span className="ml-1 font-rv-mono text-[10px] text-rv-mute-500">
-            {subscriber.entitlements.length}
+            {subscriber.access.length}
           </span>
         </DetailTabBtn>
       </div>
@@ -118,22 +118,22 @@ export function SubscriberDetailPanel({ subscriber, timeline }: Props) {
         </div>
       )}
 
-      {tab === "entitlements" && (
+      {tab === "access" && (
         <div className="flex flex-col gap-2 px-4 pb-4 pt-2">
-          {subscriber.entitlements.length === 0 ? (
+          {subscriber.access.length === 0 ? (
             <div className="py-5 text-center text-[12px] text-rv-mute-500">
               {t("subscribers.panel.noGrants")}
             </div>
           ) : (
-            subscriber.entitlements.map((e) => (
+            subscriber.access.map((a) => (
               <div
-                key={e}
+                key={a}
                 className="flex items-center justify-between border-b border-rv-divider py-2 last:border-b-0"
               >
-                <EntitlementChip>
+                <AccessChip>
                   <Key size={9} />
-                  {e}
-                </EntitlementChip>
+                  {a}
+                </AccessChip>
                 <span className="text-[11px] text-rv-mute-500">
                   {t("subscribers.panel.viaProduct", { product: subscriber.product })}
                 </span>

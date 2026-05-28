@@ -1,7 +1,7 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/cn";
 
-export const productGroupIconVariants = cva(
+export const offeringIconVariants = cva(
   "relative inline-flex shrink-0 items-center justify-center rounded-lg font-rv-mono font-semibold uppercase text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]",
   {
     variants: {
@@ -15,7 +15,7 @@ export const productGroupIconVariants = cva(
   },
 );
 
-export type ProductGroupIconProps = VariantProps<typeof productGroupIconVariants> & {
+export type OfferingIconProps = VariantProps<typeof offeringIconVariants> & {
   initials: string;
   /** CSS gradient (or any background value) applied to the tile. */
   tint: string;
@@ -23,15 +23,15 @@ export type ProductGroupIconProps = VariantProps<typeof productGroupIconVariants
 };
 
 /**
- * Gradient-tinted initials avatar used in the product-groups list, header
+ * Gradient-tinted initials avatar used in the offerings list, header
  * and matrix rows. Pure presentation — `tint` is forwarded to inline style
- * so each group keeps its bespoke palette.
+ * so each offering keeps its bespoke palette.
  */
-export function ProductGroupIcon({ initials, tint, size, className }: ProductGroupIconProps) {
+export function OfferingIcon({ initials, tint, size, className }: OfferingIconProps) {
   return (
     <span
       aria-hidden="true"
-      className={cn(productGroupIconVariants({ size }), className)}
+      className={cn(offeringIconVariants({ size }), className)}
       style={{ background: tint }}
     >
       {initials}

@@ -4,11 +4,10 @@ export { FilterPopover, type FilterValue } from "./filter-popover";
 export { ImportFromStoreModal } from "./import-from-store-modal";
 export { ProductFormModal } from "./product-form-modal";
 export {
-  EntitlementChip,
-  EntitlementList,
-  entitlementChipVariants,
-  type EntitlementChipProps,
-} from "./entitlement-chip";
+  AccessChip,
+  AccessList,
+  type AccessChipEntry,
+} from "./access-chip";
 export { formatDuration, formatPrice, productInitials } from "./format";
 export { GroupSidebar } from "./group-sidebar";
 export { KeyboardTip } from "./keyboard-tip";

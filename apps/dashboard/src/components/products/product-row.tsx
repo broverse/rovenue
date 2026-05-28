@@ -3,7 +3,7 @@ import { Button } from "../../ui/button";
 import { MoreHorizontal } from "lucide-react";
 import { Checkbox } from "../../ui/checkbox";
 import { DurationTag } from "./duration-tag";
-import { EntitlementList } from "./entitlement-chip";
+import { AccessList } from "./access-chip";
 import { formatDuration, formatPrice } from "./format";
 import { ProductIcon } from "./product-icon";
 import { StatusChip } from "./status-chip";
@@ -62,7 +62,7 @@ export function ProductRow({ product, selected, active, onToggleSelected, onOpen
         <span className="text-[12px] text-rv-mute-700">{product.group}</span>
       </td>
       <td className="px-3 py-2.5">
-        <EntitlementList entitlements={product.entitlements} />
+        <AccessList access={product.access} />
       </td>
       <td className="whitespace-nowrap px-3 py-2.5 text-right font-rv-mono text-[13px] tabular-nums">
         {formatPrice(product.price, product.currency)}

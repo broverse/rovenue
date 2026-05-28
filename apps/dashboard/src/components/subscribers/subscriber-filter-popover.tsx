@@ -12,7 +12,7 @@ import { cn } from "../../lib/cn";
 
 export type SubscriberFilters = {
   status?: SubscriberListStatusFilter;
-  entitlement?: string;
+  access?: string;
   platforms?: ReadonlyArray<SubscriberListPlatform>;
   country?: string;
   ltvMin?: number;
@@ -55,7 +55,7 @@ export function SubscriberFilterPopover({
     // Trim empty strings so they don't pin a filter chip with no value.
     const next: SubscriberFilters = {
       status: draft.status,
-      entitlement: draft.entitlement?.trim() || undefined,
+      access: draft.access?.trim() || undefined,
       platforms:
         draft.platforms && draft.platforms.length > 0
           ? draft.platforms
@@ -151,8 +151,8 @@ export function SubscriberFilterPopover({
                 placeholder={t(
                   "subscribers.filterPopover.entitlementPlaceholder",
                 )}
-                value={draft.entitlement ?? ""}
-                onChange={(v) => setDraft((d) => ({ ...d, entitlement: v }))}
+                value={draft.access ?? ""}
+                onChange={(v) => setDraft((d) => ({ ...d, access: v }))}
               />
               <LabelInput
                 label={t("subscribers.filterPopover.countryLabel")}

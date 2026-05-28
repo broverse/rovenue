@@ -2,59 +2,59 @@ import { useTranslation } from "react-i18next";
 import { Layers } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Sparkline } from "../dashboard/sparkline";
-import { ProductGroupActionsMenu } from "./product-group-actions-menu";
-import { ProductGroupIcon } from "./product-group-icon";
-import type { ProductGroup } from "./types";
+import { OfferingActionsMenu } from "./offering-actions-menu";
+import { OfferingIcon } from "./offering-icon";
+import type { Offering } from "./types";
 
 type Props = {
   projectId: string;
-  group: ProductGroup;
+  offering: Offering;
   onLinkProduct: () => void;
   onEdit: () => void;
   onDelete: () => void;
 };
 
 /**
- * Top header card for a selected product group. Renders the gradient
+ * Top header card for a selected offering. Renders the gradient
  * identity, description, primary actions, and a 4-cell KPI strip ending
  * with an inline 28-day MRR sparkline.
  */
-export function ProductGroupHeader({
+export function OfferingHeader({
   projectId,
-  group,
+  offering,
   onLinkProduct,
   onEdit,
   onDelete,
 }: Props) {
   const { t } = useTranslation();
-  const archived = group.products.filter((p) => p.status === "archived").length;
-  const draft = group.products.filter((p) => p.status === "draft").length;
+  const archived = offering.products.filter((p) => p.status === "archived").length;
+  const draft = offering.products.filter((p) => p.status === "draft").length;
 
   return (
     <div className="rounded-lg border border-rv-divider bg-rv-c1 p-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-3">
-            <ProductGroupIcon initials={group.initials} tint={group.tint} size="lg" />
+            <OfferingIcon initials={offering.initials} tint={offering.tint} size="lg" />
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h2 className="text-[22px] font-semibold leading-7 tracking-tight">
-                  {group.name}
+                  {offering.name}
                 </h2>
-                {group.isDefault && (
+                {offering.isDefault && (
                   <span className="rounded-full border border-rv-accent-500/30 bg-rv-accent-500/10 px-2 py-0.5 font-rv-mono text-[10px] uppercase tracking-wider text-rv-accent-500">
-                    {t("productGroups.header.default", "Default")}
+                    {t("offerings.header.default", "Default")}
                   </span>
                 )}
               </div>
               <div className="mt-0.5 font-rv-mono text-[12px] text-rv-mute-500">
-                {group.key}
+                {offering.key}
               </div>
             </div>
           </div>
-          {group.description && (
+          {offering.description && (
             <p className="mt-2 max-w-[600px] text-[13px] text-rv-mute-600">
-              {group.description}
+              {offering.description}
             </p>
           )}
         </div>
@@ -62,11 +62,11 @@ export function ProductGroupHeader({
         <div className="flex flex-wrap gap-1.5">
           <Button variant="flat" size="sm" onClick={onLinkProduct}>
             <Layers size={13} />
-            {t("productGroups.actions.linkProduct")}
+            {t("offerings.actions.linkProduct")}
           </Button>
-          <ProductGroupActionsMenu
+          <OfferingActionsMenu
             projectId={projectId}
-            group={group}
+            offering={offering}
             onEdit={onEdit}
             onDelete={onDelete}
           />
@@ -75,26 +75,26 @@ export function ProductGroupHeader({
 
       <div className="mt-4 grid grid-cols-2 gap-y-4 border-t border-rv-divider pt-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCell
-          label={t("productGroups.kpi.mrr")}
-          value={`$${group.mrr.toLocaleString()}`}
-          delta={t("productGroups.kpi.deltaMrr")}
+          label={t("offerings.kpi.mrr")}
+          value={`$${offering.mrr.toLocaleString()}`}
+          delta={t("offerings.kpi.deltaMrr")}
           deltaTone="success"
           first
         />
         <KpiCell
-          label={t("productGroups.kpi.activeSubs")}
-          value={group.subs == null ? "—" : group.subs.toLocaleString()}
-          delta={t("productGroups.kpi.deltaSubs")}
+          label={t("offerings.kpi.activeSubs")}
+          value={offering.subs == null ? "—" : offering.subs.toLocaleString()}
+          delta={t("offerings.kpi.deltaSubs")}
           deltaTone="success"
         />
         <KpiCell
-          label={t("productGroups.kpi.products")}
-          value={group.products.length.toString()}
-          delta={t("productGroups.kpi.productsBreakdown", { archived, draft })}
+          label={t("offerings.kpi.products")}
+          value={offering.products.length.toString()}
+          delta={t("offerings.kpi.productsBreakdown", { archived, draft })}
         />
-        <KpiCell label={t("productGroups.kpi.mrr28d")} last>
+        <KpiCell label={t("offerings.kpi.mrr28d")} last>
           <div className="mt-0.5">
-            <Sparkline data={group.spark} color="var(--color-rv-accent-500)" height={38} />
+            <Sparkline data={offering.spark} color="var(--color-rv-accent-500)" height={38} />
           </div>
         </KpiCell>
       </div>

@@ -26,7 +26,7 @@ export function useSubscribers({
   projectId,
   q,
   status,
-  entitlement,
+  access,
   platforms,
   country,
   ltvMin,
@@ -47,7 +47,7 @@ export function useSubscribers({
       {
         q,
         status,
-        entitlement,
+        access,
         platforms: platformsKey,
         country,
         ltvMin,
@@ -63,7 +63,7 @@ export function useSubscribers({
       if (pageParam) params.set("cursor", pageParam as string);
       if (q) params.set("q", q);
       if (status) params.set("status", status);
-      if (entitlement) params.set("entitlement", entitlement);
+      if (access) params.set("access", access);
       if (platformsKey) params.set("platform", platformsKey.join(","));
       if (country) params.set("country", country);
       if (typeof ltvMin === "number") params.set("ltvMin", String(ltvMin));

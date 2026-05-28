@@ -128,7 +128,7 @@ export function SubscriberDetailPanel({ data, projectId }: Props) {
         <h2 className="mb-4 text-lg font-semibold">
           {t("subscribers.detail.access")}
         </h2>
-        <AccessTable rows={data.access} />
+        <AccessTable projectId={projectId} rows={data.access} />
       </Card>
 
       <Card className="p-6">

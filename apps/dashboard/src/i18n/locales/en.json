@@ -225,6 +225,7 @@
       "live": "Live events",
       "products": "Products",
       "groups": "Product groups",
+      "access": "Access",
       "subscribers": "Subscribers",
       "subscriptions": "Subscriptions",
       "transactions": "Transactions",
@@ -280,6 +281,8 @@
     "liveEvents": "Live events",
     "products": "Products",
     "productGroups": "Product groups",
+    "offerings": "Offerings",
+    "access": "Access",
     "transactions": "Transactions",
     "featureFlags": "Feature flags",
     "experiments": "Experiments",
@@ -609,7 +612,7 @@
       "all": "All",
       "subscription": "Subscriptions",
       "billing": "Billing",
-      "entitlement": "Entitlements",
+      "entitlement": "Access",
       "ledger": "Ledger"
     },
     "platforms": {
@@ -669,7 +672,7 @@
     },
     "timeline": {
       "normalized": "+12ms · schema v2026-03",
-      "entitlements": "+34ms · 1 entitlement granted",
+      "entitlements": "+34ms · 1 access granted",
       "webhook": "+128ms · 2 endpoints · 200 OK",
       "persisted": "+162ms · stored in events_2026_04"
     }
@@ -689,7 +692,7 @@
       "vsPrev": "vs prev 28d",
       "activeSubs": "Active subscribers",
       "acrossProducts": "across {{count}} products",
-      "entitlements": "Entitlements"
+      "access": "Access"
     },
     "groups": {
       "heading": "Groups"
@@ -706,7 +709,7 @@
     "bulk": {
       "selected": "selected",
       "changeGroup": "Change group…",
-      "linkEntitlement": "Link entitlement…",
+      "linkAccess": "Link access…",
       "archive": "Archive",
       "delete": "Delete",
       "clearSelection": "Clear selection"
@@ -730,10 +733,10 @@
       "performance": "Performance · last 28 days",
       "details": "Details",
       "storePricing": "Store pricing",
-      "regionalNote": "Regional pricing, tax handling and promo offers are inherited from the {{group}} product group.",
+      "regionalNote": "Regional pricing, tax handling and promo offers are inherited from the {{group}} offering.",
       "grantsOnPurchase": "Grants on purchase",
       "grantedOnPurchase": "granted on purchase",
-      "consumableNoGrants": "This product grants no entitlements (consumable).",
+      "consumableNoGrants": "This product grants no access (consumable).",
       "noSubscribersConsumable": "No subscribers (consumable)",
       "activeSubscribersCount": "{{count}} active subscribers",
       "openFullList": "Open the full subscriber list →",
@@ -743,7 +746,7 @@
       "tabs": {
         "overview": "Overview",
         "pricing": "Pricing",
-        "entitlements": "Entitlements",
+        "access": "Access",
         "subscribers": "Subscribers",
         "activity": "Activity"
       }
@@ -752,20 +755,27 @@
       "before": "Tip: press",
       "create": "to create a product",
       "search": "to focus search"
+    },
+    "form": {
+      "access": {
+        "label": "Access granted",
+        "hint": "Pick one or more access rows from the catalog. Subscribers see these as access.identifier in the SDK.",
+        "empty": "No access defined yet. Create one from the Access page first."
+      }
     }
   },
-  "productGroups": {
-    "title": "Product groups",
-    "subtitle": "Bundles of products that share entitlements. Offerings pick which products to show on a paywall.",
+  "offerings": {
+    "title": "Offerings",
+    "subtitle": "Bundles of products you show on a paywall, scoped to one access.",
     "actions": {
-      "guide": "Groups guide",
-      "newGroup": "New group",
+      "guide": "Offerings guide",
+      "newGroup": "New offering",
       "linkProduct": "Link product",
       "more": "More actions"
     },
     "search": {
-      "placeholder": "Search groups…",
-      "empty": "No groups match"
+      "placeholder": "Search offerings…",
+      "empty": "No offerings match"
     },
     "card": {
       "products": "products",
@@ -789,10 +799,10 @@
       "consumable": "consumable"
     },
     "products": {
-      "heading": "Products in this group",
-      "subtitle": "Subscribers who buy any product below enter this group.",
+      "heading": "Products in this offering",
+      "subtitle": "Subscribers who buy any product below enter this offering.",
       "link": "Link product",
-      "remove": "Remove from group",
+      "remove": "Remove from offering",
       "col": {
         "product": "Product",
         "duration": "Duration",
@@ -802,12 +812,12 @@
       },
       "empty": {
         "title": "No products linked yet",
-        "body": "Link existing products from your catalog to grant this group's entitlements on purchase."
+        "body": "Link existing products from your catalog to grant this offering's access on purchase."
       }
     },
     "removeProduct": {
-      "title": "Remove product from group?",
-      "subtitle": "The product stays in your catalog. Existing subscribers keep their access; new buyers won't enter this group.",
+      "title": "Remove product from offering?",
+      "subtitle": "The product stays in your catalog. Existing subscribers keep their access; new buyers won't enter this offering.",
       "from": "From {{name}}",
       "confirm": "Remove product",
       "removing": "Removing…",
@@ -819,9 +829,9 @@
       "default": "Default"
     },
     "empty": {
-      "title": "No product groups yet",
-      "body": "Create a product group to bundle SKUs that grant the same entitlements.",
-      "cta": "New group"
+      "title": "No offerings yet",
+      "body": "Create an offering to surface SKUs on a paywall scoped to an access right.",
+      "cta": "New offering"
     },
     "linkProducts": {
       "title": "Link products",
@@ -831,7 +841,7 @@
       "submit": "Link selected",
       "submitting": "Linking…",
       "empty": {
-        "allLinked": "All products are already in this group",
+        "allLinked": "All products are already in this offering",
         "none": "No products match",
         "hint": "Inactive products are hidden. Create a product in the catalog first."
       },
@@ -845,11 +855,11 @@
       }
     },
     "form": {
-      "createTitle": "New product group",
-      "editTitle": "Edit product group",
-      "createSubtitle": "Bundle SKUs that grant the same entitlements. You can link products afterwards.",
-      "editSubtitle": "Update the group's name, identifier or description. Linked products stay attached.",
-      "saveCreate": "Create group",
+      "createTitle": "New offering",
+      "editTitle": "Edit offering",
+      "createSubtitle": "Bundle SKUs scoped to one access right. You can link products afterwards.",
+      "editSubtitle": "Update the offering's name, identifier or description. Linked products stay attached.",
+      "saveCreate": "Create offering",
       "savingCreate": "Creating…",
       "saveEdit": "Save changes",
       "savingEdit": "Saving…",
@@ -862,47 +872,52 @@
         "label": "Identifier",
         "hint": "Stable key referenced by the SDK and webhooks. Changing it will break existing client integrations.",
         "invalid": "Use lowercase letters, numbers, hyphens or underscores.",
-        "taken": "An existing group already uses this identifier."
+        "taken": "An existing offering already uses this identifier."
       },
       "description": {
         "label": "Description",
-        "placeholder": "What does this group unlock for the user?",
+        "placeholder": "What does this offering unlock for the user?",
         "hint": "Optional context for teammates browsing the catalog."
       },
       "default": {
-        "label": "Set as default group",
-        "hint": "New subscribers fall into this group when no other group matches."
+        "label": "Set as default offering",
+        "hint": "New subscribers fall into this offering when no other offering matches."
+      },
+      "access": {
+        "label": "Access",
+        "hint": "Which access this offering grants on purchase",
+        "placeholder": "Select access…"
       },
       "errors": {
-        "generic": "Could not save the group. Please try again."
+        "generic": "Could not save the offering. Please try again."
       }
     },
     "menu": {
-      "edit": "Edit group",
+      "edit": "Edit offering",
       "setDefault": "Set as default",
       "unsetDefault": "Remove as default",
       "copyIdentifier": "Copy identifier",
-      "copyId": "Copy group ID",
+      "copyId": "Copy offering ID",
       "copied": "Copied",
-      "delete": "Delete group"
+      "delete": "Delete offering"
     },
     "delete": {
-      "title": "Delete product group",
-      "subtitle": "Permanently remove this group. Linked products will not be deleted.",
+      "title": "Delete offering",
+      "subtitle": "Permanently remove this offering. Linked products will not be deleted.",
       "confirmLabel": "Type {{identifier}} to confirm",
-      "confirm": "Delete group",
+      "confirm": "Delete offering",
       "deleting": "Deleting…",
       "productCount_one": "{{count}} linked product",
       "productCount_other": "{{count}} linked products",
-      "defaultWarning": "This is the default group. New subscribers without a matching group will no longer fall back here.",
+      "defaultWarning": "This is the default offering. New subscribers without a matching offering will no longer fall back here.",
       "errors": {
-        "generic": "Could not delete the group. Please try again."
+        "generic": "Could not delete the offering. Please try again."
       }
     }
   },
   "subscribers": {
     "title": "Subscribers",
-    "subtitle": "End users with at least one purchase, trial, or granted entitlement on {{project}} · Production.",
+    "subtitle": "End users with at least one purchase, trial, or granted access on {{project}} · Production.",
     "searchAria": "Search",
     "searchPlaceholder": "Search by app user id...",
     "empty": "No subscribers",
@@ -940,7 +955,7 @@
       "any": "any"
     },
     "filterKeys": {
-      "entitlement": "entitlement",
+      "access": "access",
       "platform": "platform",
       "country": "country",
       "ltv": "ltv"
@@ -949,8 +964,8 @@
       "statusHeading": "Status",
       "platformHeading": "Platforms",
       "refineHeading": "Refine",
-      "entitlementLabel": "Entitlement key",
-      "entitlementPlaceholder": "e.g. premium",
+      "accessLabel": "Access key",
+      "accessPlaceholder": "e.g. premium",
       "countryLabel": "Country (ISO-3166)",
       "countryPlaceholder": "e.g. US",
       "ltvMinLabel": "Min LTV (USD)",
@@ -992,7 +1007,7 @@
       "user": "User",
       "plan": "Plan",
       "status": "Status",
-      "entitlements": "Entitlements",
+      "access": "Access",
       "country": "Country",
       "platform": "Platform",
       "ltv": "LTV",
@@ -1019,7 +1034,7 @@
       "tabs": {
         "activity": "Activity",
         "subs": "Subscriptions",
-        "entitlements": "Entitlements"
+        "access": "Access"
       },
       "lastEvents": "Last events",
       "noGrants": "No active grants.",
@@ -1067,7 +1082,7 @@
     },
     "access": {
       "empty": "No active access.",
-      "entitlement": "Entitlement",
+      "access": "Access",
       "status": "Status",
       "expires": "Expires",
       "store": "Store",
@@ -1461,7 +1476,7 @@
       },
       "grants": {
         "heading": "Grants",
-        "empty": "No active entitlements",
+        "empty": "No active access",
         "active": "active",
         "refund": "Refund",
         "override": "Override",
@@ -1695,6 +1710,43 @@
       }
     }
   },
+  "access": {
+    "title": "Access",
+    "subtitle": "The catalog of access rights subscribers can earn. Products grant access; offerings show which products grant a given access.",
+    "create": "New",
+    "form": {
+      "createTitle": "New access",
+      "editTitle": "Edit access",
+      "identifier": {
+        "label": "Identifier",
+        "hint": "Slug shown to the SDK. Lowercase letters, digits, dashes or underscores."
+      },
+      "displayName": {
+        "label": "Display name"
+      },
+      "description": {
+        "label": "Description (optional)"
+      },
+      "create": "Create access",
+      "save": "Save changes",
+      "errors": {
+        "slug": "Identifier must be slug-like (lowercase letters/digits/_/-)",
+        "displayName": "Display name is required",
+        "inUse": "This access is in use by existing subscriber_access rows. Remove dependent rows first."
+      }
+    },
+    "offerings": {
+      "heading": "Offerings",
+      "empty": "No offerings yet — create one to use this access on a paywall.",
+      "placeholder": "Select an access to see its offerings.",
+      "create": "New offering",
+      "defaultBadge": "Default"
+    },
+    "list": {
+      "empty": "No access defined yet",
+      "searchPlaceholder": "Search access…"
+    }
+  },
   "audiences": {
     "title": "Audiences",
     "subtitle": "Targeting groups shared between feature flags and experiments. Editing rules invalidates both engines' caches.",
@@ -1815,7 +1867,7 @@
         "variantWeight": "Traffic weight",
         "variantValue": "Value (JSON)",
         "flagValue": "Variant value",
-        "productGroup": "Product group"
+        "offering": "Offering"
       },
       "descriptions": {
         "name": "Shown in the experiments list and reports. Keep it short.",
@@ -1826,11 +1878,11 @@
         "variantName": "Human label shown in dashboards.",
         "variantWeight": "Share of eligible users that get this arm. Moving one slider redistributes the rest so the total always stays at 100%.",
         "variantValue": "JSON value the SDK returns when this arm is picked. Use the wand to pretty-print.",
-        "productGroup": "Identifier the SDK loads when this arm is picked. Each arm should point at a different group."
+        "offering": "Compare different paywall offerings"
       },
       "typeDescriptions": {
         "flag": "Return a typed flag value (boolean, string, number) — best for on/off and copy tests.",
-        "product_group": "Swap the product group identifier the SDK loads — use for price and product mix tests.",
+        "offering": "Swap the offering identifier the SDK loads — use for price and product mix tests.",
         "paywall": "Ship a structured paywall config (title, CTA, layout) as remote config.",
         "element": "Return an arbitrary JSON blob — flexible escape hatch for one-off UI tests."
       },
@@ -1844,7 +1896,7 @@
       },
       "types": {
         "flag": "Feature flag",
-        "productGroup": "Product group",
+        "offering": "Offering",
         "paywall": "Paywall config",
         "element": "Element"
       },
@@ -1863,7 +1915,7 @@
         "noAudience": "Pick an audience to target.",
         "weightSum": "Variant weights must sum to 1 (got {{sum}}).",
         "invalidJson": "Variant value must be valid JSON: {{message}}",
-        "productGroupMissing": "Pick a product group for every variant.",
+        "offeringMissing": "Select an offering for this variant",
         "unknown": "Could not create experiment."
       },
       "flag": {
@@ -1884,11 +1936,11 @@
           "number": "Number value this arm returns from useFlag()."
         }
       },
-      "productGroup": {
-        "noneTitle": "You don't have any product groups yet. Create at least two before you can run a product-group experiment.",
-        "createCta": "Go to product groups",
-        "empty": "No product groups available",
-        "pick": "Pick a product group…"
+      "offering": {
+        "noneTitle": "No offerings yet",
+        "createCta": "Create access first",
+        "empty": "No offerings to assign",
+        "pick": "Select offering"
       },
       "paywall": {
         "heading": "Paywall config",
@@ -3478,7 +3530,7 @@
     },
     "quickstart": {
       "title": "Quickstart",
-      "subtitle": "Pick a target — install, configure, and read entitlements in under five minutes.",
+      "subtitle": "Pick a target — install, configure, and read access in under five minutes.",
       "tabsAria": "Quickstart platform",
       "platforms": {
         "reactNative": "React Native",
@@ -3577,12 +3629,12 @@
         "admin": "Admin"
       },
       "items": {
-        "subscribersGet": "Read subscriber profile + entitlements",
+        "subscribersGet": "Read subscriber profile + access",
         "subscribersAttrs": "Set subscriber attributes",
         "receipts": "Validate Apple / Google / Stripe receipt",
         "creditsGrant": "Grant credits with idempotency key",
         "creditsBalance": "Read current credit balance",
-        "entitlementsGet": "List active entitlements",
+        "entitlementsGet": "List active access",
         "experimentsAssign": "Record an experiment assignment",
         "subscribersDelete": "GDPR / KVKK anonymise + export"
       },

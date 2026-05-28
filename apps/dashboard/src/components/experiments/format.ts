@@ -31,7 +31,7 @@ function uiStatus(s: DashboardExperimentStatus): ExperimentStatus {
 function groupFromType(t: DashboardExperimentType): ExperimentGroup {
   if (t === "PAYWALL") return "paywall";
   if (t === "FLAG") return "engagement";
-  if (t === "PRODUCT_GROUP") return "monetization";
+  if (t === "OFFERING") return "monetization";
   return "onboarding";
 }
 

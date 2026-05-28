@@ -1,7 +1,8 @@
 import type {
-  DashboardProductGroupRow,
+  DashboardOfferingRow,
   DashboardProductRow,
 } from "@rovenue/shared";
+import type { AccessChipEntry } from "../components/products/access-chip";
 import type {
   Currency,
   DurationCode,
@@ -13,14 +14,14 @@ import type {
   GroupDuration,
   GroupProduct,
   GroupProductStatus,
-  ProductGroup,
-} from "../components/product-groups/types";
+  Offering,
+} from "../components/offerings/types";
 
 // Backend rows only carry identity + state. Pricing, MRR, and subscriber
 // counts come from the analytics path (not wired yet), so the mappers
 // keep those fields zero/null until those endpoints exist. tint/initials/
 // spark are pure visual derivations seeded off the identifier so a given
-// product or group looks stable across reloads.
+// product or offering looks stable across reloads.
 
 const TINTS: ReadonlyArray<string> = [
   "linear-gradient(135deg,#8B5CF6 0%,#6366F1 100%)",
@@ -97,13 +98,22 @@ function priceFromRow(row: DashboardProductRow): {
   return { price, currency };
 }
 
-function groupLabelFromRow(row: DashboardProductRow): string {
+function offeringLabelFromRow(row: DashboardProductRow): string {
   const tag = row.metadata?.group;
   if (typeof tag === "string" && tag.trim()) return tag.trim();
   return "Default";
 }
 
-export function rowToUiProduct(row: DashboardProductRow): Product {
+export interface RowToUiProductOpts {
+  /** Resolves an access cuid2 to a chip-displayable entry. Entries missing
+   *  from the map are silently dropped (e.g. stale id on the product row). */
+  accessById: ReadonlyMap<string, AccessChipEntry>;
+}
+
+export function rowToUiProduct(
+  row: DashboardProductRow,
+  opts: RowToUiProductOpts,
+): Product {
   const { price, currency } = priceFromRow(row);
   const isSubscription = row.type === "SUBSCRIPTION";
   const trialMeta = row.metadata?.trial;
@@ -111,8 +121,10 @@ export function rowToUiProduct(row: DashboardProductRow): Product {
     id: row.id,
     sku: row.identifier,
     name: row.displayName || row.identifier,
-    group: groupLabelFromRow(row),
-    entitlements: row.accessIds,
+    group: offeringLabelFromRow(row),
+    access: row.accessIds
+      .map((id) => opts.accessById.get(id))
+      .filter((a): a is AccessChipEntry => Boolean(a)),
     duration: durationFromRow(row),
     price,
     currency,
@@ -135,31 +147,31 @@ const DURATION_TO_GROUP: Record<DurationCode, GroupDuration> = {
 };
 
 function rowToGroupProduct(row: DashboardProductRow): GroupProduct {
-  const ui = rowToUiProduct(row);
   const { price, currency } = priceFromRow(row);
+  const isSubscription = row.type === "SUBSCRIPTION";
   return {
     id: row.id,
     sku: row.identifier,
     name: row.displayName || row.identifier,
-    duration: DURATION_TO_GROUP[ui.duration],
+    duration: DURATION_TO_GROUP[durationFromRow(row)],
     price: price ? `${currency} ${price.toFixed(2)}` : "—",
-    subs: ui.subs,
-    mrr: ui.mrr,
-    status: ui.status as GroupProductStatus,
+    subs: isSubscription ? 0 : null,
+    mrr: 0,
+    status: statusFromRow(row) as GroupProductStatus,
   };
 }
 
-export function rowToUiProductGroup(
-  row: DashboardProductGroupRow,
+export function rowToUiOffering(
+  row: DashboardOfferingRow,
   productById: ReadonlyMap<string, DashboardProductRow>,
-): ProductGroup {
+): Offering {
   const members = row.products
     .slice()
     .sort((a, b) => a.order - b.order)
     .map((m) => productById.get(m.productId))
     .filter((r): r is DashboardProductRow => Boolean(r));
 
-  const groupProducts = members.map(rowToGroupProduct);
+  const offeringProducts = members.map(rowToGroupProduct);
   const meta = row.metadata ?? {};
   const metaName = typeof meta.name === "string" ? meta.name : undefined;
   const description =
@@ -173,9 +185,10 @@ export function rowToUiProductGroup(
     tint: pickTint(row.identifier),
     description,
     isDefault: row.isDefault,
-    products: groupProducts,
+    accessId: row.accessId,
+    products: offeringProducts,
     mrr: 0,
-    subs: groupProducts.some((p) => p.subs !== null) ? 0 : null,
+    subs: offeringProducts.some((p) => p.subs !== null) ? 0 : null,
     spark: deterministicSpark(row.identifier),
   };
 }

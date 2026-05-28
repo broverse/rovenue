@@ -4,21 +4,21 @@ import { Layers, Plus, X } from "lucide-react";
 import { Button } from "../../ui/button";
 import { cn } from "../../lib/cn";
 import { RemoveProductDialog } from "./remove-product-dialog";
-import type { GroupProduct, ProductGroup } from "./types";
+import type { GroupProduct, Offering } from "./types";
 
 type Props = {
   projectId: string;
-  group: ProductGroup;
+  offering: Offering;
   /** Triggered by both the section header and the empty-state CTA. */
   onLinkProduct: () => void;
 };
 
 /**
- * Lists every product currently bound to the group with their pricing,
+ * Lists every product currently bound to the offering with their pricing,
  * duration, and revenue. Each row exposes a "Remove" action that opens a
- * confirm dialog before PATCHing the group's membership array.
+ * confirm dialog before PATCHing the offering's membership array.
  */
-export function GroupProductsSection({ projectId, group, onLinkProduct }: Props) {
+export function OfferingProductsSection({ projectId, offering, onLinkProduct }: Props) {
   const { t } = useTranslation();
   const [removeTarget, setRemoveTarget] = useState<GroupProduct | null>(null);
 
@@ -27,39 +27,39 @@ export function GroupProductsSection({ projectId, group, onLinkProduct }: Props)
       <header className="flex items-start justify-between gap-4 border-b border-rv-divider px-5 py-3.5">
         <div>
           <h3 className="text-[14px] font-semibold">
-            {t("productGroups.products.heading", "Products in this group")}
+            {t("offerings.products.heading", "Products in this offering")}
           </h3>
           <p className="mt-0.5 text-[12px] text-rv-mute-500">
             {t(
-              "productGroups.products.subtitle",
-              "Subscribers who buy any product below enter this group.",
+              "offerings.products.subtitle",
+              "Subscribers who buy any product below enter this offering.",
             )}
           </p>
         </div>
         <Button variant="flat" size="sm" onClick={onLinkProduct}>
           <Plus size={13} />
-          {t("productGroups.products.link", "Link product")}
+          {t("offerings.products.link", "Link product")}
         </Button>
       </header>
 
-      {group.products.length === 0 ? (
+      {offering.products.length === 0 ? (
         <EmptyState onLinkProduct={onLinkProduct} />
       ) : (
         <div>
           <div className="grid grid-cols-[minmax(0,1fr)_120px_120px_80px_100px_44px] gap-3 px-5 py-2 text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
-            <div>{t("productGroups.products.col.product", "Product")}</div>
-            <div>{t("productGroups.products.col.duration", "Duration")}</div>
-            <div>{t("productGroups.products.col.price", "Price")}</div>
+            <div>{t("offerings.products.col.product", "Product")}</div>
+            <div>{t("offerings.products.col.duration", "Duration")}</div>
+            <div>{t("offerings.products.col.price", "Price")}</div>
             <div className="text-right">
-              {t("productGroups.products.col.subs", "Subs")}
+              {t("offerings.products.col.subs", "Subs")}
             </div>
             <div className="text-right">
-              {t("productGroups.products.col.mrr", "MRR")}
+              {t("offerings.products.col.mrr", "MRR")}
             </div>
             <div />
           </div>
           <ul>
-            {group.products.map((product) => (
+            {offering.products.map((product) => (
               <ProductRow
                 key={product.id}
                 product={product}
@@ -72,7 +72,7 @@ export function GroupProductsSection({ projectId, group, onLinkProduct }: Props)
 
       <RemoveProductDialog
         projectId={projectId}
-        group={group}
+        offering={offering}
         product={removeTarget}
         open={removeTarget != null}
         onClose={() => setRemoveTarget(null)}
@@ -90,18 +90,18 @@ function EmptyState({ onLinkProduct }: { onLinkProduct: () => void }) {
       </div>
       <div>
         <div className="text-[14px] font-semibold">
-          {t("productGroups.products.empty.title", "No products linked yet")}
+          {t("offerings.products.empty.title", "No products linked yet")}
         </div>
         <p className="mt-0.5 max-w-[360px] text-[12px] text-rv-mute-500">
           {t(
-            "productGroups.products.empty.body",
-            "Link existing products from your catalog to grant this group's entitlements on purchase.",
+            "offerings.products.empty.body",
+            "Link existing products from your catalog to grant this offering's access on purchase.",
           )}
         </p>
       </div>
       <Button variant="solid-primary" size="sm" onClick={onLinkProduct}>
         <Plus size={13} />
-        {t("productGroups.products.link", "Link product")}
+        {t("offerings.products.link", "Link product")}
       </Button>
     </div>
   );
@@ -128,7 +128,7 @@ function ProductRow({
         </div>
       </div>
       <div className="font-rv-mono text-[12px] text-rv-mute-600">
-        {t(`productGroups.duration.${product.duration}`, product.duration)}
+        {t(`offerings.duration.${product.duration}`, product.duration)}
       </div>
       <div className="font-rv-mono text-[12px] tabular-nums text-foreground">
         {product.price}
@@ -143,7 +143,7 @@ function ProductRow({
         <button
           type="button"
           onClick={onRemove}
-          aria-label={t("productGroups.products.remove", "Remove from group")}
+          aria-label={t("offerings.products.remove", "Remove from offering")}
           className="rounded-md p-1.5 text-rv-mute-500 transition hover:bg-rv-c2 hover:text-rv-danger focus:outline-none focus-visible:ring-2 focus-visible:ring-rv-accent-500"
         >
           <X size={14} />

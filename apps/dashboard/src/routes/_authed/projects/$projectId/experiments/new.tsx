@@ -44,7 +44,7 @@ import { cn } from "../../../../../lib/cn";
 import { ApiError } from "../../../../../lib/api";
 import { useProject } from "../../../../../lib/hooks/useProject";
 import { useAudiences } from "../../../../../lib/hooks/useProjectAdmin";
-import { useProjectProductGroups } from "../../../../../lib/hooks/useProjectProductGroups";
+import { useProjectOfferings } from "../../../../../lib/hooks/useProjectOfferings";
 import {
   useCreateExperiment,
   usePauseExperiment,
@@ -81,7 +81,7 @@ const TYPE_OPTIONS: ReadonlyArray<{
   labelKey: string;
 }> = [
   { value: "FLAG", labelKey: "experiments.new.types.flag" },
-  { value: "PRODUCT_GROUP", labelKey: "experiments.new.types.productGroup" },
+  { value: "OFFERING", labelKey: "experiments.new.types.offering" },
   { value: "PAYWALL", labelKey: "experiments.new.types.paywall" },
   { value: "ELEMENT", labelKey: "experiments.new.types.element" },
 ];
@@ -110,7 +110,7 @@ interface DraftVariant {
   // Per-type value cells — kept in parallel so switching type back
   // restores the user's previous choice instead of wiping them.
   flag: { boolValue: boolean; strValue: string; numValue: number };
-  productGroupId: string;
+  offeringId: string;
   paywall: PaywallConfig;
   element: string;
 }
@@ -126,7 +126,7 @@ function makeVariant(idx: number): DraftVariant {
       strValue: isControl ? "control" : `variant_${variantLetter(idx)}`,
       numValue: isControl ? 0 : 1,
     },
-    productGroupId: "",
+    offeringId: "",
     paywall: { ...DEFAULT_PAYWALL, title: isControl ? "Unlock Pro" : "Unlock Pro" },
     element: JSON.stringify({ label: isControl ? "control" : "variant" }, null, 2),
   };
@@ -264,8 +264,8 @@ function seedDraftVariant(
     else if (flagSubtype === "number")
       draft.flag.numValue = Number(stored.value) || 0;
     else draft.flag.strValue = String(stored.value ?? "");
-  } else if (type === "PRODUCT_GROUP") {
-    draft.productGroupId = String(stored.value ?? "");
+  } else if (type === "OFFERING") {
+    draft.offeringId = String(stored.value ?? "");
   } else if (type === "PAYWALL") {
     draft.paywall = {
       ...DEFAULT_PAYWALL,
@@ -291,8 +291,8 @@ export function NewExperimentPage({
   const isEdit = Boolean(initialExperiment);
   const { data: audiences = [], isLoading: audiencesLoading } =
     useAudiences(projectId);
-  const productGroupsQuery = useProjectProductGroups(projectId);
-  const productGroups = productGroupsQuery.data?.groups ?? [];
+  const offeringsQuery = useProjectOfferings(projectId);
+  const offerings = offeringsQuery.data?.offerings ?? [];
   const create = useCreateExperiment();
   const update = useUpdateExperiment();
   const start = useStartExperiment();
@@ -478,12 +478,12 @@ export function NewExperimentPage({
       return;
     }
 
-    if (type === "PRODUCT_GROUP") {
+    if (type === "OFFERING") {
       const missing = parsedVariants.find(
         (v) => typeof v.value !== "string" || v.value.length === 0,
       );
       if (missing) {
-        setFormError(t("experiments.new.errors.productGroupMissing"));
+        setFormError(t("experiments.new.errors.offeringMissing"));
         return;
       }
     }
@@ -718,19 +718,19 @@ export function NewExperimentPage({
             </Field>
           )}
 
-          {type === "PRODUCT_GROUP" && productGroups.length === 0 && (
+          {type === "OFFERING" && offerings.length === 0 && (
             <div className="flex items-start gap-2 rounded-md border border-rv-warning/30 bg-rv-warning/10 px-3 py-2 text-[12px] text-rv-warning">
               <AlertCircle size={13} className="mt-0.5 flex-shrink-0" />
               <div>
                 <p className="leading-snug">
-                  {t("experiments.new.productGroup.noneTitle")}
+                  {t("experiments.new.offering.noneTitle")}
                 </p>
                 <Link
-                  to="/projects/$projectId/product-groups"
+                  to="/projects/$projectId/access"
                   params={{ projectId }}
                   className="mt-1 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
                 >
-                  {t("experiments.new.productGroup.createCta")} →
+                  {t("experiments.new.offering.createCta")} →
                 </Link>
               </div>
             </div>
@@ -876,12 +876,12 @@ export function NewExperimentPage({
                       type={type}
                       flagSubtype={flagSubtype}
                       variant={v}
-                      productGroups={productGroups}
-                      productGroupsLoading={productGroupsQuery.isLoading}
+                      offerings={offerings}
+                      offeringsLoading={offeringsQuery.isLoading}
                       jsonError={elementErrors[idx] ?? null}
                       onFlagChange={(patch) => updateVariantFlag(idx, patch)}
-                      onProductGroupChange={(id) =>
-                        updateVariant(idx, { productGroupId: id })
+                      onOfferingChange={(id) =>
+                        updateVariant(idx, { offeringId: id })
                       }
                       onPaywallChange={(patch) =>
                         updateVariantPaywall(idx, patch)
@@ -1059,7 +1059,7 @@ function extractVariantValue(
     if (flagSubtype === "string") return v.flag.strValue;
     return Number.isFinite(v.flag.numValue) ? v.flag.numValue : 0;
   }
-  if (type === "PRODUCT_GROUP") return v.productGroupId;
+  if (type === "OFFERING") return v.offeringId;
   if (type === "PAYWALL") return { ...v.paywall };
   // ELEMENT
   const parsed = validateJson(v.element);
@@ -1077,22 +1077,22 @@ function VariantValueEditor({
   type,
   flagSubtype,
   variant,
-  productGroups,
-  productGroupsLoading,
+  offerings,
+  offeringsLoading,
   jsonError,
   onFlagChange,
-  onProductGroupChange,
+  onOfferingChange,
   onPaywallChange,
   onElementChange,
 }: {
   type: DashboardExperimentType;
   flagSubtype: FlagSubtype;
   variant: DraftVariant;
-  productGroups: ReadonlyArray<{ id: string; identifier: string }>;
-  productGroupsLoading: boolean;
+  offerings: ReadonlyArray<{ id: string; identifier: string }>;
+  offeringsLoading: boolean;
   jsonError: string | null;
   onFlagChange: (patch: Partial<DraftVariant["flag"]>) => void;
-  onProductGroupChange: (identifier: string) => void;
+  onOfferingChange: (identifier: string) => void;
   onPaywallChange: (patch: Partial<PaywallConfig>) => void;
   onElementChange: (next: string) => void;
 }) {
@@ -1105,13 +1105,13 @@ function VariantValueEditor({
       />
     );
   }
-  if (type === "PRODUCT_GROUP") {
+  if (type === "OFFERING") {
     return (
-      <ProductGroupValueEditor
-        value={variant.productGroupId}
-        groups={productGroups}
-        loading={productGroupsLoading}
-        onChange={onProductGroupChange}
+      <OfferingValueEditor
+        value={variant.offeringId}
+        offerings={offerings}
+        loading={offeringsLoading}
+        onChange={onOfferingChange}
       />
     );
   }
@@ -1180,16 +1180,16 @@ function FlagValueEditor({
   );
 }
 
-// ---------- PRODUCT_GROUP ----------
+// ---------- OFFERING ----------
 
-function ProductGroupValueEditor({
+function OfferingValueEditor({
   value,
-  groups,
+  offerings,
   loading,
   onChange,
 }: {
   value: string;
-  groups: ReadonlyArray<{ id: string; identifier: string }>;
+  offerings: ReadonlyArray<{ id: string; identifier: string }>;
   loading: boolean;
   onChange: (identifier: string) => void;
 }) {
@@ -1197,21 +1197,21 @@ function ProductGroupValueEditor({
   return (
     <Field
       icon={<Package size={11} />}
-      label={t("experiments.new.fields.productGroup")}
-      description={t("experiments.new.descriptions.productGroup")}
+      label={t("experiments.new.fields.offering")}
+      description={t("experiments.new.descriptions.offering")}
       dense
     >
       <Select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        disabled={loading || groups.length === 0}
+        disabled={loading || offerings.length === 0}
       >
         <option value="">
-          {groups.length === 0
-            ? t("experiments.new.productGroup.empty")
-            : t("experiments.new.productGroup.pick")}
+          {offerings.length === 0
+            ? t("experiments.new.offering.empty")
+            : t("experiments.new.offering.pick")}
         </option>
-        {groups.map((g) => (
+        {offerings.map((g) => (
           <option key={g.id} value={g.identifier}>
             {g.identifier}
           </option>
