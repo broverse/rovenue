@@ -12,10 +12,11 @@ export type CreditLedgerType = (typeof creditLedgerType.enumValues)[number];
 
 /**
  * Dedup guard used by receipt verification: has this purchase
- * already produced a ledger entry?
+ * already produced a ledger entry? Accepts a tx handle so the
+ * check can run inside the per-subscriber advisory lock.
  */
 export async function findExistingPurchaseCredit(
-  db: Db,
+  db: DbOrTx,
   subscriberId: string,
   purchaseId: string,
 ): Promise<{ id: string } | null> {
