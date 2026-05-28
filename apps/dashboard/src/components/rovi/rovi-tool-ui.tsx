@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
+import { useParams } from "@tanstack/react-router";
 import { ApprovalCard } from "./tools/approval-card";
 import { MetricsChart } from "./tools/metrics-chart";
+import { NavigateCard } from "./tools/navigate-card";
 import { SubscriberCard } from "./tools/subscriber-card";
 import { SubscriberList } from "./tools/subscriber-list";
 
@@ -27,6 +29,7 @@ export type ToolPart = {
 // 12-13. Anything else falls back to the raw JSON dump so devs can
 // still inspect unmodelled tool shapes coming over the wire.
 export function RoviToolUI({ part }: { part: ToolPart }): ReactNode {
+  const { projectId } = useParams({ strict: false }) as { projectId?: string };
   const name = part.toolName ?? "";
   if (
     name.startsWith("action.") &&
@@ -58,6 +61,15 @@ export function RoviToolUI({ part }: { part: ToolPart }): ReactNode {
   }
   if (name.startsWith("query.metrics.")) {
     return <MetricsChart name={name} output={part.output} />;
+  }
+  if (
+    (name === "ui.navigate" || name === "ui.openSubscriber") &&
+    projectId &&
+    part.output
+  ) {
+    return (
+      <NavigateCard projectId={projectId} output={part.output as never} />
+    );
   }
   return (
     <pre className="overflow-auto rounded-md border border-rv-divider bg-rv-c2 p-2 text-[11px] text-rv-mute-700">
