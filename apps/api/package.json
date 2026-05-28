@@ -18,6 +18,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.80",
+    "@ai-sdk/mistral": "^3.0.37",
+    "@ai-sdk/openai": "^3.0.66",
     "@apple/app-store-server-library": "^1.4.0",
     "@aws-sdk/client-sesv2": "^3.1053.0",
     "@better-auth/drizzle-adapter": "^1.6.6",
@@ -28,6 +31,7 @@
     "@rovenue/db": "workspace:*",
     "@rovenue/email-templates": "workspace:*",
     "@rovenue/shared": "workspace:*",
+    "ai": "^6.0.191",
     "bcryptjs": "^2.4.3",
     "better-auth": "^1.0.0",
     "bullmq": "^5.0.0",
