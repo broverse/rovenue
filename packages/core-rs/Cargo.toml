@@ -20,6 +20,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 cuid2 = { workspace = true }
 rand = { workspace = true }
+uuid = { version = "1.10", features = ["v4"] }
 
 [build-dependencies]
 uniffi = { workspace = true, features = ["build"] }

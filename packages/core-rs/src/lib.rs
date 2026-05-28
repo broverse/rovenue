@@ -12,6 +12,7 @@ pub mod identity;
 pub mod observer;
 pub mod polling;
 pub mod receipts;
+pub mod sessions;
 pub mod time;
 pub mod transport;
 pub mod version;
@@ -24,6 +25,7 @@ pub use events::{EventEnvelope, IdentityContext, EVENT_WIRE_VERSION};
 pub use identity::User;
 pub use observer::{ChangeEvent, Observer};
 pub use receipts::ReceiptResult;
+pub use sessions::SessionEventKind;
 pub use version::SDK_VERSION;
 
 pub fn sdk_version() -> String {
