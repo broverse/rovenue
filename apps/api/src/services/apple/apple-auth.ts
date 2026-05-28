@@ -19,6 +19,15 @@ export interface AppleAuthConfig {
   privateKey: string;
 }
 
+/**
+ * Per-project Apple context: auth credentials plus the App Store Server API
+ * environment to target. Used by callers that hit Apple's Server API
+ * (e.g. consumption info) and need to pick between prod and sandbox base URLs.
+ */
+export interface ProjectAppleContext extends AppleAuthConfig {
+  environment: "PRODUCTION" | "SANDBOX";
+}
+
 interface CachedToken {
   token: string;
   expiresAt: number;
