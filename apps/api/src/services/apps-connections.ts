@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte } from "drizzle-orm";
+import { and, count, desc, eq, gte, isNull } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
 import type {
   AppConnectionRow,
@@ -45,6 +45,119 @@ function statusFromAge(ageMin: number): AppConnectionStatus {
   if (ageMin < DEGRADED_AFTER_MINUTES) return "connected";
   if (ageMin < NEVER_GRACE_MINUTES) return "error";
   return "available";
+}
+
+// =============================================================
+// Integration overlay helpers (M5.10)
+// =============================================================
+
+const INTEGRATION_CATALOG: ReadonlyArray<{
+  appId: string;
+  providerId: "META_CAPI" | "TIKTOK_EVENTS";
+  name: string;
+  description: string;
+}> = [
+  {
+    appId: "meta-capi",
+    providerId: "META_CAPI",
+    name: "Meta Conversions API",
+    description: "Send purchase and trial events to Meta (Facebook) Conversions API.",
+  },
+  {
+    appId: "tiktok-events",
+    providerId: "TIKTOK_EVENTS",
+    name: "TikTok Events API",
+    description: "Send purchase and trial events to TikTok Events API.",
+  },
+];
+
+const DEAD_LETTER_WINDOW_MS = 60 * 60 * 1000; // 60 minutes
+
+async function buildIntegrationOverlay(
+  projectId: string,
+  providerId: "META_CAPI" | "TIKTOK_EVENTS",
+  catalogId: string,
+  _catalogName: string,
+  _catalogDescription: string,
+): Promise<AppConnectionRow> {
+  const available: AppConnectionRow = {
+    appId: catalogId,
+    status: "available",
+    lastActivityAt: null,
+    lastSyncLabel: null,
+    account: null,
+  };
+
+  // Look up connection (not soft-deleted)
+  const [conn] = await drizzle.db
+    .select()
+    .from(drizzle.schema.integrationConnections)
+    .where(
+      and(
+        eq(drizzle.schema.integrationConnections.projectId, projectId),
+        eq(drizzle.schema.integrationConnections.providerId, providerId),
+        isNull(drizzle.schema.integrationConnections.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!conn || !conn.isEnabled) return available;
+
+  const now = Date.now();
+  const windowStart = new Date(now - DEAD_LETTER_WINDOW_MS);
+
+  // Check for dead_letter in the last 60 minutes
+  const [deadLetterRow] = await drizzle.db
+    .select({
+      errorMessage: drizzle.schema.integrationDeliveries.errorMessage,
+    })
+    .from(drizzle.schema.integrationDeliveries)
+    .where(
+      and(
+        eq(drizzle.schema.integrationDeliveries.connectionId, conn.id),
+        eq(drizzle.schema.integrationDeliveries.status, "dead_letter"),
+        gte(drizzle.schema.integrationDeliveries.createdAt, windowStart),
+      ),
+    )
+    .orderBy(desc(drizzle.schema.integrationDeliveries.createdAt))
+    .limit(1);
+
+  if (deadLetterRow) {
+    return {
+      appId: catalogId,
+      status: "error",
+      lastActivityAt: null,
+      lastSyncLabel: null,
+      account: conn.credentialsHint,
+      errorReason: deadLetterRow.errorMessage ?? conn.lastError ?? "delivery_failed",
+      credentialsHint: conn.credentialsHint,
+    };
+  }
+
+  // No dead_letter — find most recent succeeded delivery
+  const [succeededRow] = await drizzle.db
+    .select({ createdAt: drizzle.schema.integrationDeliveries.createdAt })
+    .from(drizzle.schema.integrationDeliveries)
+    .where(
+      and(
+        eq(drizzle.schema.integrationDeliveries.connectionId, conn.id),
+        eq(drizzle.schema.integrationDeliveries.status, "succeeded"),
+      ),
+    )
+    .orderBy(desc(drizzle.schema.integrationDeliveries.createdAt))
+    .limit(1);
+
+  const lastSyncLabel = succeededRow
+    ? `Last sync ${describeAge(now - succeededRow.createdAt.getTime())}`
+    : null;
+
+  return {
+    appId: catalogId,
+    status: "connected",
+    lastActivityAt: succeededRow ? succeededRow.createdAt.toISOString() : null,
+    lastSyncLabel,
+    account: conn.credentialsHint,
+  };
 }
 
 export async function readAppConnections(
@@ -120,6 +233,14 @@ export async function readAppConnections(
         : null,
     account: outgoingCount > 0 ? `${outgoingCount} in 7d` : null,
   });
+
+  // Integration overlays (meta-capi, tiktok-events)
+  const integrationRows = await Promise.all(
+    INTEGRATION_CATALOG.map(({ appId, providerId, name, description }) =>
+      buildIntegrationOverlay(projectId, providerId, appId, name, description),
+    ),
+  );
+  rows.push(...integrationRows);
 
   return { connections: rows };
 }
