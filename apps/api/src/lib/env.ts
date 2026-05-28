@@ -171,6 +171,11 @@ const envSchema = z
     };
 
     require(
+      data.DATABASE_URL,
+      "DATABASE_URL",
+      "the API cannot serve any request without a Postgres connection",
+    );
+    require(
       data.ENCRYPTION_KEY,
       "ENCRYPTION_KEY",
       "project credentials must be encrypted at rest",
