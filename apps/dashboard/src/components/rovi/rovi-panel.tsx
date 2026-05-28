@@ -1,19 +1,25 @@
+import { useParams } from "@tanstack/react-router";
 import { useRovi } from "../../lib/hooks/useRovi";
 import { useRoviChat } from "../../lib/hooks/useRoviChat";
 import { RoviHeader } from "./rovi-header";
 import { RoviEmptyState } from "./rovi-empty-state";
 import { RoviConversation } from "./rovi-conversation";
+import { RoviMissingConfig } from "./rovi-missing-config";
 import { RoviPromptInput } from "./rovi-prompt-input";
 import { RoviUsageBar } from "./rovi-usage-bar";
 
 export function RoviPanel() {
   const { open, setOpen, currentThreadId } = useRovi();
+  const { projectId } = useParams({ strict: false }) as { projectId?: string };
   // `useRoviChat` returns null when no `projectId` is in scope (e.g.
   // the panel is mounted at app-root before the user has entered a
   // project). Gate on that before reading `messages`.
   const chat = useRoviChat({ threadId: currentThreadId });
   const messages = chat?.messages ?? [];
   const busy = chat?.status === "streaming" || chat?.status === "submitted";
+  const errorText = chat?.error instanceof Error ? chat.error.message : "";
+  const notConfigured =
+    chat?.status === "error" && /ROVI_NOT_CONFIGURED|412/i.test(errorText);
   const send = (text: string) => {
     void chat?.sendMessage({ text });
   };
@@ -41,7 +47,9 @@ export function RoviPanel() {
         }
       >
         <RoviHeader />
-        {messages.length === 0 ? (
+        {notConfigured && projectId ? (
+          <RoviMissingConfig projectId={projectId} />
+        ) : messages.length === 0 ? (
           <RoviEmptyState />
         ) : (
           <RoviConversation messages={messages} />
