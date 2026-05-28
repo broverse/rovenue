@@ -36,7 +36,7 @@ export * as sessionRepo from "./repositories/sessions";
 export * as accountRepo from "./repositories/accounts";
 export * as personalAccessTokenRepo from "./repositories/personal-access-tokens";
 export * as userPreferencesRepo from "./repositories/user-preferences";
-export * as productGroupRepo from "./repositories/product-groups";
+export * as offeringRepo from "./repositories/offerings";
 export * as experimentAssignmentRepo from "./repositories/experiment-assignments";
 export * as purchaseRepo from "./repositories/purchases";
 export * as webhookEventRepo from "./repositories/webhook-events";

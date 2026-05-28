@@ -77,15 +77,15 @@ export const productInsertSchema = createInsertSchema(t.products, {
 });
 
 // =============================================================
-// product_groups
+// offerings (renamed from product_groups)
 // =============================================================
 
 /**
- * A paywall/product-group lists products with optional
- * display metadata. `order` drives UI sort order; `promoted`
- * flags the "best deal" badge.
+ * A paywall/offering lists products with optional display
+ * metadata. `order` drives UI sort order; `promoted` flags the
+ * "best deal" badge.
  */
-export const productGroupProductsSchema = z.array(
+export const offeringProductsSchema = z.array(
   z.object({
     productId: z.string().min(1),
     order: z.number().int().min(0).optional(),
@@ -93,8 +93,8 @@ export const productGroupProductsSchema = z.array(
   }),
 );
 
-export const productGroupSelectSchema = createSelectSchema(t.productGroups);
-export const productGroupInsertSchema = createInsertSchema(t.productGroups, {
+export const offeringSelectSchema = createSelectSchema(t.offerings);
+export const offeringInsertSchema = createInsertSchema(t.offerings, {
   identifier: (s) => s.regex(/^[a-z0-9][a-z0-9._-]*$/i),
 });
 

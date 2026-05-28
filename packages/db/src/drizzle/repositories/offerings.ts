@@ -1,61 +1,72 @@
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
-  productGroups,
+  offerings,
   products,
-  type NewProductGroup,
+  type NewOffering,
+  type Offering,
   type Product,
-  type ProductGroup,
 } from "../schema";
 
 // =============================================================
-// Product catalog reads — Drizzle repository
+// Offering catalog reads — Drizzle repository
 // =============================================================
 //
 // Covers every read currently in apps/api/src/routes/v1/
-// product-groups.ts. Product-group lookups are SDK hot paths
-// (paywall rendering) so single-row fetches stay index-driven.
+// offerings.ts. Offering lookups are SDK hot paths (paywall
+// rendering) so single-row fetches stay index-driven.
 
-export async function listProductGroups(
+export async function listOfferings(
   db: Db,
   projectId: string,
-): Promise<ProductGroup[]> {
+): Promise<Offering[]> {
   return db
     .select()
-    .from(productGroups)
-    .where(eq(productGroups.projectId, projectId))
-    .orderBy(desc(productGroups.isDefault), asc(productGroups.identifier));
+    .from(offerings)
+    .where(eq(offerings.projectId, projectId))
+    .orderBy(desc(offerings.isDefault), asc(offerings.identifier));
 }
 
-export async function findDefaultProductGroup(
+export async function listOfferingsByAccess(
   db: Db,
   projectId: string,
-): Promise<ProductGroup | null> {
+  accessId: string,
+): Promise<Offering[]> {
+  return db
+    .select()
+    .from(offerings)
+    .where(
+      and(eq(offerings.projectId, projectId), eq(offerings.accessId, accessId)),
+    )
+    .orderBy(desc(offerings.isDefault), asc(offerings.identifier));
+}
+
+export async function findDefaultOffering(
+  db: Db,
+  projectId: string,
+): Promise<Offering | null> {
   const rows = await db
     .select()
-    .from(productGroups)
+    .from(offerings)
     .where(
-      and(
-        eq(productGroups.projectId, projectId),
-        eq(productGroups.isDefault, true),
-      ),
+      and(eq(offerings.projectId, projectId), eq(offerings.isDefault, true)),
     )
     .limit(1);
   return rows[0] ?? null;
 }
 
-export async function findProductGroupByIdentifier(
+export async function findOfferingByIdentifier(
   db: Db,
   projectId: string,
   identifier: string,
-): Promise<ProductGroup | null> {
+): Promise<Offering | null> {
   const rows = await db
     .select()
-    .from(productGroups)
+    .from(offerings)
     .where(
       and(
-        eq(productGroups.projectId, projectId),
-        eq(productGroups.identifier, identifier),
+        eq(offerings.projectId, projectId),
+        eq(offerings.identifier, identifier),
       ),
     )
     .limit(1);
@@ -112,25 +123,23 @@ export async function findProductByStoreId(
 // fine to bundle here so the read + write surfaces share the
 // uniqueness constraints around `identifier` and `isDefault`.
 
-export async function findProductGroupById(
+export async function findOfferingById(
   db: Db,
   projectId: string,
   id: string,
-): Promise<ProductGroup | null> {
+): Promise<Offering | null> {
   const rows = await db
     .select()
-    .from(productGroups)
-    .where(
-      and(eq(productGroups.projectId, projectId), eq(productGroups.id, id)),
-    )
+    .from(offerings)
+    .where(and(eq(offerings.projectId, projectId), eq(offerings.id, id)))
     .limit(1);
   return rows[0] ?? null;
 }
 
-export async function createProductGroup(
+export async function createOffering(
   db: Db,
-  input: NewProductGroup,
-): Promise<ProductGroup> {
+  input: NewOffering,
+): Promise<Offering> {
   return db.transaction(async (tx) => {
     if (input.isDefault) {
       // Only one default per project. Clear the flag on any
@@ -140,68 +149,65 @@ export async function createProductGroup(
       // below run inside the same tx and serialise via the row
       // lock the UPDATE takes.
       await tx
-        .update(productGroups)
+        .update(offerings)
         .set({ isDefault: false, updatedAt: new Date() })
         .where(
           and(
-            eq(productGroups.projectId, input.projectId),
-            eq(productGroups.isDefault, true),
+            eq(offerings.projectId, input.projectId),
+            eq(offerings.isDefault, true),
           ),
         );
     }
-    const [row] = await tx.insert(productGroups).values(input).returning();
+    const [row] = await tx.insert(offerings).values(input).returning();
     return row!;
   });
 }
 
-export interface UpdateProductGroupInput {
+export interface UpdateOfferingInput {
   identifier?: string;
+  accessId?: string;
   isDefault?: boolean;
   products?: unknown;
   metadata?: Record<string, unknown>;
 }
 
-export async function updateProductGroup(
+export async function updateOffering(
   db: Db,
   projectId: string,
   id: string,
-  patch: UpdateProductGroupInput,
-): Promise<ProductGroup | null> {
+  patch: UpdateOfferingInput,
+): Promise<Offering | null> {
   return db.transaction(async (tx) => {
     if (patch.isDefault === true) {
       await tx
-        .update(productGroups)
+        .update(offerings)
         .set({ isDefault: false, updatedAt: new Date() })
         .where(
           and(
-            eq(productGroups.projectId, projectId),
-            eq(productGroups.isDefault, true),
-            ne(productGroups.id, id),
+            eq(offerings.projectId, projectId),
+            eq(offerings.isDefault, true),
+            ne(offerings.id, id),
           ),
         );
     }
     const [row] = await tx
-      .update(productGroups)
+      .update(offerings)
       .set({ ...patch, updatedAt: new Date() })
-      .where(
-        and(eq(productGroups.projectId, projectId), eq(productGroups.id, id)),
-      )
+      .where(and(eq(offerings.projectId, projectId), eq(offerings.id, id)))
       .returning();
     return row ?? null;
   });
 }
 
-export async function deleteProductGroup(
+export async function deleteOffering(
   db: Db,
   projectId: string,
   id: string,
 ): Promise<boolean> {
   const rows = await db
-    .delete(productGroups)
-    .where(
-      and(eq(productGroups.projectId, projectId), eq(productGroups.id, id)),
-    )
-    .returning({ id: productGroups.id });
+    .delete(offerings)
+    .where(and(eq(offerings.projectId, projectId), eq(offerings.id, id)))
+    .returning({ id: offerings.id });
   return rows.length > 0;
 }
 
