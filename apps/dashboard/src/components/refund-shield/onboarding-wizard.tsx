@@ -27,8 +27,10 @@ export function OnboardingWizard({
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const next = () => setStep((s) => Math.min(4, (s + 1) as Step));
-  const back = () => setStep((s) => Math.max(1, (s - 1) as Step));
+  const next = () =>
+    setStep((s) => (s < 4 ? ((s + 1) as Step) : s));
+  const back = () =>
+    setStep((s) => (s > 1 ? ((s - 1) as Step) : s));
 
   const finish = async () => {
     setError(null);

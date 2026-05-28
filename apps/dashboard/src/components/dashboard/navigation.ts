@@ -12,6 +12,7 @@ import {
   RotateCw,
   Search,
   Settings,
+  ShieldCheck,
   Target,
   Trophy,
   Users,
@@ -105,6 +106,12 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
         to: "/projects/$projectId/audiences",
       },
       { id: "cohorts", labelKey: "sidebar.items.cohorts", icon: Users2, to: "/projects/$projectId/cohorts" },
+      {
+        id: "refundShield",
+        labelKey: "sidebar.items.refundShield",
+        icon: ShieldCheck,
+        to: "/projects/$projectId/refund-shield",
+      },
     ],
   },
   {
