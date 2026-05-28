@@ -38,6 +38,7 @@ import {
   funnelSessionState,
   funnelStatus,
   funnelTemplateScope,
+  integrationDeliveryStatus,
   integrationProvider,
   invitationDeliveryStatus,
   memberRole,
@@ -2258,3 +2259,39 @@ export const integrationConnections = pgTable(
 
 export type IntegrationConnection = typeof integrationConnections.$inferSelect;
 export type NewIntegrationConnection = typeof integrationConnections.$inferInsert;
+
+export const integrationDeliveries = pgTable(
+  "integration_deliveries",
+  {
+    id: text("id").notNull(),
+    connectionId: text("connection_id").notNull(),
+    projectId: text("project_id").notNull(),
+    providerId: integrationProvider("provider_id").notNull(),
+    outboxEventId: text("outbox_event_id").notNull(),
+    eventKey: text("event_key").notNull(),
+    providerEvent: text("provider_event"),
+    status: integrationDeliveryStatus("status").notNull(),
+    attempt: smallint("attempt").notNull().default(0),
+    skipReason: text("skip_reason"),
+    httpStatus: smallint("http_status"),
+    responseBody: text("response_body"),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.id, t.createdAt] }),
+    dedupeUidx: uniqueIndex("integration_deliveries_dedupe_uidx").on(
+      t.connectionId, t.outboxEventId, t.createdAt,
+    ),
+    connStatusIdx: index("integration_deliveries_connection_status_idx").on(
+      t.connectionId, t.status, t.createdAt,
+    ),
+    deadLetterIdx: index("integration_deliveries_project_dead_letter_idx")
+      .on(t.projectId, t.createdAt)
+      .where(sql`status = 'dead_letter'`),
+  }),
+);
+
+export type IntegrationDelivery = typeof integrationDeliveries.$inferSelect;
+export type NewIntegrationDelivery = typeof integrationDeliveries.$inferInsert;
