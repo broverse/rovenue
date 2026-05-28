@@ -320,6 +320,29 @@ export async function runDeliverStep(
 }
 
 // =============================================================
+// recordDeadLetterAudit — 1-minute dedup window per connection (M9.2)
+// =============================================================
+
+const DEAD_LETTER_AUDIT_DEDUP_MS = 60_000;
+
+export async function recordDeadLetterAudit(params: {
+  connectionId: string;
+  projectId: string;
+  errorMessage: string;
+  now: () => number;
+  lastWriteAt: Map<string, number>;
+  writeAuditRow: (m: { now: number; connectionId: string; projectId: string; errorMessage: string }) => Promise<void>;
+}): Promise<void> {
+  const now = params.now();
+  const prev = params.lastWriteAt.get(params.connectionId);
+  if (prev !== undefined && now - prev < DEAD_LETTER_AUDIT_DEDUP_MS) return;
+  params.lastWriteAt.set(params.connectionId, now);
+  await params.writeAuditRow({
+    now, connectionId: params.connectionId, projectId: params.projectId, errorMessage: params.errorMessage,
+  });
+}
+
+// =============================================================
 // ensureIntegrationsDeliverWorker — BullMQ wiring (M2.5)
 // =============================================================
 
@@ -341,6 +364,7 @@ export async function ensureIntegrationsDeliverWorker(
   }
 
   const log = logger.child("integrations-deliver-worker");
+  const deadLetterLastWriteAt = new Map<string, number>();
   const connection = new Redis(env.REDIS_URL, {
     lazyConnect: true,
     maxRetriesPerRequest: null, // required by BullMQ
@@ -386,16 +410,25 @@ export async function ensureIntegrationsDeliverWorker(
           });
         },
         auditDeadLetter: async (input) => {
-          await audit({
+          await recordDeadLetterAudit({
+            connectionId: input.connectionId,
             projectId: input.projectId,
-            userId: "system",
-            action: "integration.delivery.dead_letter",
-            resource: "integration_connection",
-            resourceId: input.connectionId,
-            after: {
-              outboxEventId: input.outboxEventId,
-              providerId: input.providerId,
-              errorMessage: input.errorMessage ?? null,
+            errorMessage: input.errorMessage ?? "",
+            now: () => Date.now(),
+            lastWriteAt: deadLetterLastWriteAt,
+            writeAuditRow: async (m) => {
+              await audit({
+                projectId: m.projectId,
+                userId: "system",
+                action: "integration.delivery.dead_letter",
+                resource: "integration_connection",
+                resourceId: m.connectionId,
+                after: {
+                  outboxEventId: input.outboxEventId,
+                  providerId: input.providerId,
+                  errorMessage: m.errorMessage || null,
+                },
+              });
             },
           });
         },
