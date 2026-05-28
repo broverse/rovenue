@@ -7,7 +7,7 @@ import {
   KeyRound,
   LayoutGrid,
   LineChart,
-  Plug,
+  // Plug, // Re-enable when integrations (Meta CAPI / TikTok Events) backend lands.
   Receipt,
   RotateCw,
   Search,
@@ -141,12 +141,14 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
       },
     ],
   },
-  {
-    sectionKey: "integrations",
-    items: [
-      { id: "apps", labelKey: "sidebar.items.apps", icon: Plug, to: "/projects/$projectId/apps" },
-    ],
-  },
+  // Hidden until Meta CAPI / TikTok Events backend ships — UI catalog
+  // exists but no provider modules / connect endpoints are merged yet.
+  // {
+  //   sectionKey: "integrations",
+  //   items: [
+  //     { id: "apps", labelKey: "sidebar.items.apps", icon: Plug, to: "/projects/$projectId/apps" },
+  //   ],
+  // },
   {
     sectionKey: "admin",
     items: [
