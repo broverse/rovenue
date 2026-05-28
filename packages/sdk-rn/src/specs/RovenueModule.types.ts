@@ -29,7 +29,16 @@ export type LogEntryDTO = {
 
 export interface RovenueModuleSpec {
   // Lifecycle
-  configure(apiKey: string, baseUrl: string, debug: boolean): void;
+  //
+  // appVersion is optional from JS. When undefined the native modules
+  // auto-read the host bundle / packageManager value at the bridge
+  // boundary before calling into the Rust core.
+  configure(
+    apiKey: string,
+    baseUrl: string,
+    debug: boolean,
+    appVersion?: string,
+  ): void;
   shutdown(): void;
   setForeground(foreground: boolean): void;
   getVersion(): string;

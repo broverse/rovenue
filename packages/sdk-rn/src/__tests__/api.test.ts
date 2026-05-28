@@ -45,14 +45,26 @@ describe("Rovenue imperative API", () => {
 
   it("configure forwards to native + starts event bridge", () => {
     configure({ apiKey: "pk_test", baseUrl: "https://api.example.com", debug: true });
-    expect(native.configure).toHaveBeenCalledWith("pk_test", "https://api.example.com", true);
+    // 4th arg (appVersion) is undefined here — the native side will
+    // auto-read Bundle.main / PackageManager when nothing is supplied.
+    expect(native.configure).toHaveBeenCalledWith(
+      "pk_test",
+      "https://api.example.com",
+      true,
+      undefined,
+    );
     // Event bridge attached one change listener via the emitter.
     expect(native.__state.changeListeners.length).toBe(1);
   });
 
   it("configure debug defaults to false when omitted", () => {
     configure({ apiKey: "pk_test", baseUrl: "https://api.example.com" });
-    expect(native.configure).toHaveBeenCalledWith("pk_test", "https://api.example.com", false);
+    expect(native.configure).toHaveBeenCalledWith(
+      "pk_test",
+      "https://api.example.com",
+      false,
+      undefined,
+    );
   });
 
   // -------- identity --------

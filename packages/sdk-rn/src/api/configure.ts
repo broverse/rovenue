@@ -7,6 +7,16 @@ export type RovenueConfig = {
   apiKey: string;
   baseUrl: string;
   debug?: boolean;
+  /**
+   * Optional override for the host app's user-facing version. When
+   * omitted, the native modules auto-read the value:
+   *   - iOS: `Bundle.main.infoDictionary["CFBundleShortVersionString"]`
+   *   - Android: `packageManager.getPackageInfo(packageName, 0).versionName`
+   * For Expo apps the auto-read value is baked from `app.json`'s
+   * `expo.version` at prebuild time, so most callers should leave this
+   * undefined.
+   */
+  appVersion?: string;
 };
 
 export function configure(opts: RovenueConfig): void {
@@ -17,7 +27,12 @@ export function configure(opts: RovenueConfig): void {
     throw new InvalidApiKeyError("baseUrl must start with http:// or https://");
   }
   const native = getNative();
-  native.configure(opts.apiKey, opts.baseUrl, opts.debug ?? false);
+  native.configure(
+    opts.apiKey,
+    opts.baseUrl,
+    opts.debug ?? false,
+    opts.appVersion,
+  );
   startEventBridge();
   startSessionTracker();
 }
