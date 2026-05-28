@@ -26,7 +26,11 @@ const PROVIDER_FIELDS: Record<
   "META_CAPI" | "TIKTOK_EVENTS",
   { id: string; label: string }
 > = {
-  META_CAPI: { id: "pixelId", label: "Pixel ID" },
+  // Meta renamed "Pixel ID" → "Dataset ID" in the 2023 Events Manager
+  // refresh. Both terms point to the same underlying CAPI endpoint; we
+  // store the value under the legacy `pixelId` key for backwards-
+  // compat with existing connections.
+  META_CAPI: { id: "pixelId", label: "Dataset ID" },
   TIKTOK_EVENTS: { id: "pixelCode", label: "Pixel Code" },
 };
 
