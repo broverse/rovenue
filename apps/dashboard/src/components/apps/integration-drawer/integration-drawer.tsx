@@ -8,6 +8,7 @@ import { StepEvents } from "./step-events";
 import { StepMapping } from "./step-mapping";
 import { StepTest } from "./step-test";
 import { StepActivate } from "./step-activate";
+import { StepDeliveries } from "./step-deliveries";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -101,6 +102,7 @@ export function IntegrationDrawer({
   const [state, setState] = useState<DrawerState>(() =>
     defaultState(existingConnection),
   );
+  const [view, setView] = useState<"wizard" | "deliveries">("wizard");
 
   const currentStepIndex = STEPS.indexOf(state.step);
 
@@ -165,37 +167,69 @@ export function IntegrationDrawer({
             </button>
           </header>
 
-          {/* Step indicator */}
-          <div className="flex gap-1 border-b border-rv-divider px-5 py-2">
-            {STEPS.map((s, i) => (
-              <div
-                key={s}
-                className={cn(
-                  "h-1 flex-1 rounded-full transition-colors",
-                  i <= currentStepIndex
-                    ? "bg-rv-accent-500"
-                    : "bg-rv-c3",
-                )}
-              />
-            ))}
-          </div>
+          {/* Wizard / Deliveries tab row — only when there is an existing connection */}
+          {existingConnection && (
+            <div className="flex gap-0.5 border-b border-rv-divider px-5 py-2">
+              {(["wizard", "deliveries"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setView(tab)}
+                  className={cn(
+                    "rounded px-3 py-1 text-[12px] font-medium transition",
+                    view === tab
+                      ? "bg-rv-accent-500/14 text-rv-accent-400"
+                      : "text-rv-mute-500 hover:text-foreground",
+                  )}
+                >
+                  {tab === "wizard" ? "Wizard" : "Deliveries"}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Step indicator — only in wizard view */}
+          {view === "wizard" && (
+            <div className="flex gap-1 border-b border-rv-divider px-5 py-2">
+              {STEPS.map((s, i) => (
+                <div
+                  key={s}
+                  className={cn(
+                    "h-1 flex-1 rounded-full transition-colors",
+                    i <= currentStepIndex
+                      ? "bg-rv-accent-500"
+                      : "bg-rv-c3",
+                  )}
+                />
+              ))}
+            </div>
+          )}
 
           {/* Body */}
           <div className="flex-1 overflow-y-auto px-5 pb-10 pt-5 [scrollbar-color:var(--color-rv-c4)_transparent] [scrollbar-width:thin]">
-            {state.step === "credentials" && (
-              <StepCredentials {...(sharedStepProps as Record<string, unknown>)} />
-            )}
-            {state.step === "events" && (
-              <StepEvents {...(sharedStepProps as Record<string, unknown>)} />
-            )}
-            {state.step === "mapping" && (
-              <StepMapping {...(sharedStepProps as Record<string, unknown>)} />
-            )}
-            {state.step === "test" && (
-              <StepTest {...(sharedStepProps as Record<string, unknown>)} />
-            )}
-            {state.step === "activate" && (
-              <StepActivate {...(sharedStepProps as Record<string, unknown>)} />
+            {view === "deliveries" && existingConnection ? (
+              <StepDeliveries
+                projectId={projectId}
+                connectionId={existingConnection.id}
+              />
+            ) : (
+              <>
+                {state.step === "credentials" && (
+                  <StepCredentials {...(sharedStepProps as Record<string, unknown>)} />
+                )}
+                {state.step === "events" && (
+                  <StepEvents {...(sharedStepProps as Record<string, unknown>)} />
+                )}
+                {state.step === "mapping" && (
+                  <StepMapping {...(sharedStepProps as Record<string, unknown>)} />
+                )}
+                {state.step === "test" && (
+                  <StepTest {...(sharedStepProps as Record<string, unknown>)} />
+                )}
+                {state.step === "activate" && (
+                  <StepActivate {...(sharedStepProps as Record<string, unknown>)} />
+                )}
+              </>
             )}
           </div>
         </Dialog.Popup>
