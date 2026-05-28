@@ -17,7 +17,6 @@ describe("PROVIDERS registry", () => {
 
   it("throws on unknown provider", () => {
     expect(() =>
-      // @ts-expect-error intentional unknown provider id
       getProvider("UNKNOWN_PROVIDER" as ProviderId),
     ).toThrow("unknown provider: UNKNOWN_PROVIDER");
   });

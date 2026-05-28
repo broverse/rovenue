@@ -9,12 +9,14 @@ import {
   type EnableTransitionDeps,
 } from "./connection-events";
 
+
 function makeDeps(): EnableTransitionDeps & {
   enqueueBackfillMock: ReturnType<typeof vi.fn>;
 } {
-  const enqueueBackfillMock = vi.fn(async () => ({ eventCount: 5 }));
+  const enqueueBackfillMock = vi.fn() as ReturnType<typeof vi.fn>;
+  enqueueBackfillMock.mockResolvedValue({ eventCount: 5 });
   return {
-    enqueueBackfill: enqueueBackfillMock,
+    enqueueBackfill: enqueueBackfillMock as unknown as EnableTransitionDeps["enqueueBackfill"],
     enqueueBackfillMock,
   };
 }

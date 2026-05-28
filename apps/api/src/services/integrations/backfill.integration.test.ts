@@ -269,7 +269,7 @@ describe("backfill integration — M4.5", () => {
         connectionId: CONNECTION_ID,
         projectId: PROJECT_ID,
         providerId: "META_CAPI",
-        envelope: buildOutboxPayload(eventId) as IntegrationsDeliverJob["envelope"],
+        envelope: buildOutboxPayload(eventId) as unknown as IntegrationsDeliverJob["envelope"],
         isBackfill: false,
       },
       { jobId },

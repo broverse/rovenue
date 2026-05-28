@@ -6,7 +6,7 @@
 // log lines via the project-wide Logger instance. All callers get
 // consistent field names so log queries and alerts are predictable.
 
-import type { Logger } from "../../lib/logger";
+import type { Logger, LogFields } from "../../lib/logger";
 
 // =============================================================
 // Field bag types
@@ -39,7 +39,7 @@ export function logDeliveryAttempt(
   log: Logger,
   fields: AttemptFields,
 ): void {
-  log.info("integration.delivery.attempt", fields);
+  log.info("integration.delivery.attempt", fields as unknown as LogFields);
 }
 
 export function logDeliveryResult(
@@ -47,9 +47,9 @@ export function logDeliveryResult(
   fields: ResultFields,
 ): void {
   if (fields.success) {
-    log.info("integration.delivery.result", fields);
+    log.info("integration.delivery.result", fields as unknown as LogFields);
   } else {
-    log.warn("integration.delivery.result", fields);
+    log.warn("integration.delivery.result", fields as unknown as LogFields);
   }
 }
 
@@ -57,5 +57,5 @@ export function logDeliveryDeadLetter(
   log: Logger,
   fields: DeadLetterFields,
 ): void {
-  log.error("integration.delivery.dead_letter", fields);
+  log.error("integration.delivery.dead_letter", fields as unknown as LogFields);
 }

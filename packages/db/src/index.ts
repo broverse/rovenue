@@ -178,6 +178,10 @@ export type {
   CreditLedgerRow as CreditLedger,
   OutboxEvent,
   NewOutboxEvent,
+  IntegrationConnection,
+  NewIntegrationConnection,
+  IntegrationDelivery,
+  NewIntegrationDelivery,
 } from "./drizzle/schema";
 
 // =============================================================

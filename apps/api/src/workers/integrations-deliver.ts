@@ -35,7 +35,7 @@ import type {
   IntegrationConnection,
   IntegrationDelivery,
 } from "@rovenue/db";
-import type { ProviderCredentials, ProviderId } from "../services/integrations/types";
+import type { ProviderCredentials, ProviderId, ProviderPayload } from "../services/integrations/types";
 
 // =============================================================
 // Types
@@ -172,7 +172,7 @@ export async function runDeliverStep(
     return { outcome: "skipped", deliveryId: row?.id ?? deliveryId };
   }
 
-  const payload = mapResult;
+  const payload = mapResult as ProviderPayload;
 
   // 5. Check attempt exhaustion before calling provider
   if (deps.attempt >= INTEGRATIONS_DELIVER_ATTEMPTS) {
@@ -458,12 +458,6 @@ export async function ensureIntegrationsDeliverWorker(
           const idx = Math.min(attempt - 1, INTEGRATIONS_DELIVER_BACKOFF_MS.length - 1);
           return INTEGRATIONS_DELIVER_BACKOFF_MS[idx] ?? INTEGRATIONS_DELIVER_BACKOFF_MS[INTEGRATIONS_DELIVER_BACKOFF_MS.length - 1]!;
         },
-      },
-      defaultJobOptions: {
-        attempts: INTEGRATIONS_DELIVER_ATTEMPTS,
-        backoff: { type: "custom" },
-        removeOnComplete: { count: 200, age: 24 * 60 * 60 },
-        removeOnFail: { count: 1000, age: 7 * 24 * 60 * 60 },
       },
     },
   );

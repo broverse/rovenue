@@ -102,9 +102,7 @@ describe("enqueueBackfillForConnection — M4.2", () => {
     );
 
     // SQL should contain '7 days'
-    const [[firstCall]] = deps.executeMock.mock.calls as [
-      [{ sql: string; params: unknown[] }],
-    ][];
+    const firstCall = (deps.executeMock.mock.calls as Array<Array<{ sql: string; params: unknown[] }>>)[0]![0]!;
     expect(firstCall.sql).toContain("7 days");
   });
 
@@ -124,9 +122,7 @@ describe("enqueueBackfillForConnection — M4.2", () => {
 
     expect(result.eventCount).toBe(2);
 
-    const [[firstCall]] = deps.executeMock.mock.calls as [
-      [{ sql: string; params: unknown[] }],
-    ][];
+    const firstCall = (deps.executeMock.mock.calls as Array<Array<{ sql: string; params: unknown[] }>>)[0]![0]!;
     expect(firstCall.sql).toContain("3 days");
     expect(deps.auditMock).toHaveBeenCalledWith(
       expect.objectContaining({
