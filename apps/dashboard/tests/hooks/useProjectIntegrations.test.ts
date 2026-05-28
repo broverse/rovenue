@@ -11,7 +11,9 @@ import {
   useDeleteIntegration,
   useValidateIntegrationCredentials,
   useTestIntegrationEvent,
+  useIntegrationDeliveries,
   type IntegrationConnectionRow,
+  type IntegrationDeliveryRow,
 } from "../../src/lib/hooks/useProjectIntegrations";
 
 const BASE = "http://localhost:3000";
@@ -23,6 +25,20 @@ function makeWrapper() {
   return ({ children }: { children: ReactNode }) =>
     createElement(QueryClientProvider, { client: qc }, children);
 }
+
+const mockDelivery: IntegrationDeliveryRow = {
+  id: "del_1",
+  connectionId: "conn_1",
+  outboxEventId: "obx_1",
+  eventKey: "purchase",
+  providerEvent: "Purchase",
+  status: "succeeded",
+  attempt: 1,
+  httpStatus: 200,
+  responseBody: '{"events_received":1}',
+  errorMessage: null,
+  createdAt: "2026-05-27T12:00:00Z",
+};
 
 const mockConnection: IntegrationConnectionRow = {
   id: "conn_1",
@@ -193,5 +209,31 @@ describe("useTestIntegrationEvent", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.ok).toBe(true);
     expect(result.current.data?.httpStatus).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M6.4 — useIntegrationDeliveries (infinite query)
+// ---------------------------------------------------------------------------
+
+describe("useIntegrationDeliveries", () => {
+  test("single page returned; data.pages[0].deliveries has length 1", async () => {
+    server.use(
+      http.get(
+        `${BASE}/dashboard/projects/:projectId/integrations/:id/deliveries`,
+        () =>
+          HttpResponse.json({
+            data: { deliveries: [mockDelivery], nextCursor: null },
+          }),
+      ),
+    );
+
+    const { result } = renderHook(
+      () => useIntegrationDeliveries("proj_1", "conn_1"),
+      { wrapper: makeWrapper() },
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.pages[0]?.deliveries).toHaveLength(1);
   });
 });

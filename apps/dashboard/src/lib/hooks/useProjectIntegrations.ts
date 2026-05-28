@@ -143,3 +143,54 @@ export function useTestIntegrationEvent(
       ),
   });
 }
+
+// ---------------------------------------------------------------------------
+// M6.4 — Deliveries infinite query
+// ---------------------------------------------------------------------------
+
+export interface IntegrationDeliveryRow {
+  id: string;
+  connectionId: string;
+  outboxEventId: string;
+  eventKey: string;
+  providerEvent: string | null;
+  status: "pending" | "succeeded" | "failed" | "skipped" | "dead_letter";
+  attempt: number;
+  httpStatus: number | null;
+  responseBody: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+interface DeliveriesPage {
+  deliveries: IntegrationDeliveryRow[];
+  nextCursor: string | null;
+}
+
+interface DeliveriesParams {
+  status?: string;
+  limit?: number;
+}
+
+export function useIntegrationDeliveries(
+  projectId: string,
+  connectionId: string,
+  params: DeliveriesParams = {},
+) {
+  const { status, limit = 50 } = params;
+  return useInfiniteQuery({
+    queryKey: ["integration-deliveries", projectId, connectionId, params],
+    enabled: Boolean(projectId) && Boolean(connectionId),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => {
+      const qs = new URLSearchParams();
+      if (status) qs.set("status", status);
+      qs.set("limit", String(limit));
+      if (pageParam) qs.set("cursor", pageParam);
+      return api<DeliveriesPage>(
+        `/dashboard/projects/${projectId}/integrations/${connectionId}/deliveries?${qs.toString()}`,
+      );
+    },
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
+}
