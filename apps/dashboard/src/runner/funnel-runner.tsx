@@ -23,6 +23,8 @@ import {
   type AdvanceResponse,
   type PublishedFunnelConfig,
 } from "./runner-api";
+import { type LocaleCode } from "@rovenue/shared/i18n";
+import { useRunnerLocale } from "./use-runner-locale";
 
 type Status =
   | { kind: "loading" }
@@ -75,6 +77,17 @@ export function FunnelRunner({ slug }: { slug: string }) {
     if (!state) return null;
     return state.config.pages.find((p) => p.id === state.currentPageId) ?? null;
   }, [state]);
+
+  const localeConfig = useMemo(
+    () => ({
+      defaultLocale:
+        (state?.config as { defaultLocale?: string } | undefined)?.defaultLocale ?? "en",
+      locales:
+        ((state?.config as { locales?: string[] } | undefined)?.locales as LocaleCode[]) ?? ["en"],
+    }),
+    [state?.config],
+  );
+  const locale = useRunnerLocale(localeConfig);
 
   const handleAdvance = async () => {
     if (!state || !currentPage || busy) return;
@@ -162,6 +175,8 @@ export function FunnelRunner({ slug }: { slug: string }) {
         pages={state.config.pages}
         onAdvance={handleAdvance}
         chrome="full"
+        locale={locale}
+        defaultLocale={localeConfig.defaultLocale}
       />
     </div>
   );
