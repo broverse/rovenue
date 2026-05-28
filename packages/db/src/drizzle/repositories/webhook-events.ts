@@ -109,6 +109,47 @@ export async function upsertWebhookEvent(
   return row;
 }
 
+export interface ClaimWebhookEventInput {
+  projectId: string;
+  source: WebhookSource;
+  eventType: string;
+  storeEventId: string;
+  payload: unknown;
+}
+
+/**
+ * Atomically claim a webhook event for processing. Inserts the row
+ * as PROCESSING; on conflict it transitions an existing row to
+ * PROCESSING ONLY when its current status is neither PROCESSING nor
+ * PROCESSED. Returns the claimed row, or null when another worker
+ * already holds (PROCESSING) or finished (PROCESSED) it.
+ *
+ * This is the single-flight guard for concurrent deliveries of the
+ * same (source, storeEventId): exactly one caller gets a row back.
+ */
+export async function claimWebhookEvent(
+  db: DbOrTx,
+  input: ClaimWebhookEventInput,
+): Promise<WebhookEvent | null> {
+  const rows = await db
+    .insert(webhookEvents)
+    .values({
+      projectId: input.projectId,
+      source: input.source,
+      eventType: input.eventType,
+      storeEventId: input.storeEventId,
+      payload: input.payload as typeof webhookEvents.$inferInsert.payload,
+      status: "PROCESSING",
+    })
+    .onConflictDoUpdate({
+      target: [webhookEvents.source, webhookEvents.storeEventId],
+      set: { status: "PROCESSING" },
+      setWhere: sql`${webhookEvents.status} NOT IN ('PROCESSING', 'PROCESSED')`,
+    })
+    .returning();
+  return rows[0] ?? null;
+}
+
 export interface UpdateWebhookEventInput {
   status?: WebhookEventStatus;
   processedAt?: Date | null;
