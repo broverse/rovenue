@@ -495,7 +495,7 @@ interface GrantAccessArgs {
   ctx: DispatchContext;
   subscriber: { id: string };
   purchase: { id: string };
-  product: { id: string; entitlementKeys: string[] };
+  product: { id: string; accessIds: string[] };
 }
 
 async function grantAccess(args: GrantAccessArgs): Promise<void> {
@@ -504,12 +504,12 @@ async function grantAccess(args: GrantAccessArgs): Promise<void> {
     ? new Date(ctx.transaction.expiresDate)
     : null;
 
-  for (const key of product.entitlementKeys) {
-    const existing = await drizzle.accessRepo.findAccessByPurchaseAndKey(
+  for (const accessId of product.accessIds) {
+    const existing = await drizzle.accessRepo.findAccessByPurchaseAndAccessId(
       drizzle.db,
       subscriber.id,
       purchase.id,
-      key,
+      accessId,
     );
     if (existing) {
       await drizzle.accessRepo.setAccessActiveAndExpiry(
@@ -522,7 +522,7 @@ async function grantAccess(args: GrantAccessArgs): Promise<void> {
       await drizzle.accessRepo.createAccess(drizzle.db, {
         subscriberId: subscriber.id,
         purchaseId: purchase.id,
-        entitlementKey: key,
+        accessId,
         isActive: true,
         expiresDate,
         store: Store.APP_STORE,

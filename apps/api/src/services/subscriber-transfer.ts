@@ -84,7 +84,7 @@ export async function transferSubscriber(
     // --- Reassign purchases ---
     await drizzle.subscriberRepo.reassignPurchases(tx, from.id, to.id);
 
-    // --- Reassign entitlement access ---
+    // --- Reassign access rows ---
     await drizzle.subscriberRepo.reassignSubscriberAccess(tx, from.id, to.id);
 
     // --- Reassign experiment assignments ---

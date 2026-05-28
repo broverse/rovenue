@@ -112,14 +112,14 @@ export function mapRevenueEventType(
   }
 }
 
-const ENTITLEMENT_GRANTING_STATUSES: ReadonlySet<PurchaseStatus> = new Set<PurchaseStatus>([
+const ACCESS_GRANTING_STATUSES: ReadonlySet<PurchaseStatus> = new Set<PurchaseStatus>([
   PURCHASE_STATUS.ACTIVE,
   PURCHASE_STATUS.TRIAL,
   PURCHASE_STATUS.GRACE_PERIOD,
 ]);
 
-export function isEntitlementGranting(status: PurchaseStatus): boolean {
-  return ENTITLEMENT_GRANTING_STATUSES.has(status);
+export function isAccessGranting(status: PurchaseStatus): boolean {
+  return ACCESS_GRANTING_STATUSES.has(status);
 }
 
 export function extractCancelTime(
