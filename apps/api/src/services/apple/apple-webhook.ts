@@ -568,6 +568,23 @@ async function applyConsumptionRequest(ctx: DispatchContext): Promise<void> {
         ? "SKIPPED_NOT_FOUND"
         : "PENDING";
 
+  // Capture the Apple environment off the JWS *now*, so the responder
+  // worker (which runs hours later, after Apple's signed payload is
+  // gone from memory) can hit the right App Store Server API base
+  // URL without falling back to NODE_ENV. We prefer the top-level
+  // notification.data.environment over transaction.environment —
+  // they should agree, but the notification envelope is the source
+  // of truth for this delivery. Default to PRODUCTION on the off
+  // chance Apple omits the field; matches the column default and
+  // is the safer of the two failure modes (sandbox API rejects a
+  // prod transactionId cleanly, while a sandbox transactionId hits
+  // an opaque 404 against the prod API).
+  const appleEnvironment: "PRODUCTION" | "SANDBOX" =
+    notification.data?.environment === APPLE_ENVIRONMENT.SANDBOX ||
+    transaction.environment === APPLE_ENVIRONMENT.SANDBOX
+      ? "SANDBOX"
+      : "PRODUCTION";
+
   await drizzle.refundShieldResponseRepo.insertConsumptionRequest(
     drizzle.db,
     {
@@ -579,6 +596,7 @@ async function applyConsumptionRequest(ctx: DispatchContext): Promise<void> {
       detectedAt,
       scheduledFor,
       status,
+      appleEnvironment,
     },
   );
   incRefundShieldReceived(projectId);

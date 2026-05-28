@@ -108,7 +108,9 @@ interface MakeTxOverrides {
 }
 
 function makeFakeJwsTransactionPayload(
-  overrides: MakeTxOverrides,
+  overrides: MakeTxOverrides & {
+    environment?: typeof APPLE_ENVIRONMENT.SANDBOX | typeof APPLE_ENVIRONMENT.PRODUCTION;
+  },
 ): AppleJwsTransactionPayload {
   return {
     transactionId: overrides.transactionId,
@@ -123,7 +125,7 @@ function makeFakeJwsTransactionPayload(
     appAccountToken: overrides.appAccountToken,
     inAppOwnershipType: "PURCHASED",
     signedDate: 1_700_000_000_000,
-    environment: APPLE_ENVIRONMENT.SANDBOX,
+    environment: overrides.environment ?? APPLE_ENVIRONMENT.SANDBOX,
     storefront: "USA",
     storefrontId: "143441",
     currency: "USD",
@@ -133,6 +135,9 @@ function makeFakeJwsTransactionPayload(
 
 function makeConsumptionRequestNotification(
   uuid: string,
+  environment:
+    | typeof APPLE_ENVIRONMENT.SANDBOX
+    | typeof APPLE_ENVIRONMENT.PRODUCTION = APPLE_ENVIRONMENT.SANDBOX,
 ): AppleResponseBodyV2DecodedPayload {
   return {
     notificationType: APPLE_NOTIFICATION_TYPE.CONSUMPTION_REQUEST,
@@ -141,7 +146,7 @@ function makeConsumptionRequestNotification(
     signedDate: 1_700_000_000_000,
     data: {
       signedTransactionInfo: "signed-tx-stub",
-      environment: APPLE_ENVIRONMENT.SANDBOX,
+      environment,
     },
   } as AppleResponseBodyV2DecodedPayload;
 }
@@ -226,6 +231,7 @@ function lastInsertArgs(): {
   detectedAt: Date;
   scheduledFor: Date;
   status: string;
+  appleEnvironment: "PRODUCTION" | "SANDBOX";
 } {
   const calls = drizzleMock.refundShieldResponseRepo.insertConsumptionRequest
     .mock.calls as unknown as Array<unknown[]>;
@@ -278,10 +284,78 @@ describe("handleAppleNotification — CONSUMPTION_REQUEST", () => {
       appleOriginalTransactionId: "1000000001",
       appleTransactionId: "1000000099",
       status: "PENDING",
+      // Default fixture builds a SANDBOX JWS → row stores SANDBOX
+      // so the responder later hits the sandbox API base URL.
+      appleEnvironment: "SANDBOX",
     });
     expect(
       insertArgs.scheduledFor.getTime() - insertArgs.detectedAt.getTime(),
     ).toBe(60 * 60 * 1000);
+  });
+
+  test("persists PRODUCTION when notification.data.environment is Production", async () => {
+    drizzleMock.projectRepo.findProjectById.mockResolvedValue(
+      makeProjectRow({ refundShieldEnabled: true }),
+    );
+    drizzleMock.subscriberRepo.findSubscriberByAppleAppAccountToken.mockResolvedValue(
+      { id: "sub_1", appleAppAccountToken: APP_ACCOUNT_TOKEN } as never,
+    );
+
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000010",
+        transactionId: "1000000099",
+        environment: APPLE_ENVIRONMENT.PRODUCTION,
+      }),
+      makeConsumptionRequestNotification(
+        "uuid-prod-1",
+        APPLE_ENVIRONMENT.PRODUCTION,
+      ),
+    );
+
+    await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    const insertArgs = lastInsertArgs();
+    expect(insertArgs.appleEnvironment).toBe("PRODUCTION");
+  });
+
+  test("persists SANDBOX when notification.data.environment is Sandbox", async () => {
+    // This covers the canonical TestFlight flow: a single Rovenue API
+    // serves both prod and sandbox traffic, and the per-row column
+    // lets the responder hit the right base URL hours later.
+    drizzleMock.projectRepo.findProjectById.mockResolvedValue(
+      makeProjectRow({ refundShieldEnabled: true }),
+    );
+    drizzleMock.subscriberRepo.findSubscriberByAppleAppAccountToken.mockResolvedValue(
+      { id: "sub_1", appleAppAccountToken: APP_ACCOUNT_TOKEN } as never,
+    );
+
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000011",
+        transactionId: "1000000099",
+        environment: APPLE_ENVIRONMENT.SANDBOX,
+      }),
+      makeConsumptionRequestNotification(
+        "uuid-sbx-1",
+        APPLE_ENVIRONMENT.SANDBOX,
+      ),
+    );
+
+    await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    const insertArgs = lastInsertArgs();
+    expect(insertArgs.appleEnvironment).toBe("SANDBOX");
   });
 
   test("inserts SKIPPED_DISABLED when project not enabled", async () => {
