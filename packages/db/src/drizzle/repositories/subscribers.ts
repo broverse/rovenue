@@ -92,6 +92,31 @@ export async function findSubscriberById(
 }
 
 /**
+ * Lookup by (projectId, appleAppAccountToken). Used by the Refund
+ * Shield CONSUMPTION_REQUEST handler to resolve the owning subscriber
+ * from the JWS `appAccountToken` field without needing the original
+ * transaction id. Returns `null` when no row matches — callers fall
+ * back to a purchases.original_transaction_id join.
+ */
+export async function findSubscriberByAppleAppAccountToken(
+  db: Db,
+  projectId: string,
+  appleAppAccountToken: string,
+): Promise<Subscriber | null> {
+  const rows = await db
+    .select()
+    .from(subscribers)
+    .where(
+      and(
+        eq(subscribers.projectId, projectId),
+        eq(subscribers.appleAppAccountToken, appleAppAccountToken),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
  * Column-scoped lookup — returns just the projectId for a subscriber.
  * Used by the credit engine so ledger writes carry the correct
  * projectId without loading the entire row.

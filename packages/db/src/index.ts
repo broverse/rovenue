@@ -234,4 +234,10 @@ export {
   scheduledSubscriptionActions,
   funnels,
   customDomains,
+  refundShieldResponses,
+} from "./drizzle/schema";
+
+export type {
+  RefundShieldResponse,
+  NewRefundShieldResponse,
 } from "./drizzle/schema";

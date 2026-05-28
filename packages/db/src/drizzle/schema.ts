@@ -881,6 +881,9 @@ export const refundShieldResponses = pgTable(
   }),
 );
 
+export type RefundShieldResponse = typeof refundShieldResponses.$inferSelect;
+export type NewRefundShieldResponse = typeof refundShieldResponses.$inferInsert;
+
 // =============================================================
 // revenue_events (materialised financial log)
 // =============================================================

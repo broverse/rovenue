@@ -228,6 +228,8 @@ async function dispatch(ctx: DispatchContext): Promise<void> {
       return applyRefund(ctx);
     case APPLE_NOTIFICATION_TYPE.REVOKE:
       return applyRevoke(ctx);
+    case APPLE_NOTIFICATION_TYPE.CONSUMPTION_REQUEST:
+      return applyConsumptionRequest(ctx);
     default:
       log.debug("no state change for notification type", {
         type: ctx.notification.notificationType,
@@ -379,6 +381,105 @@ async function applyRevoke(ctx: DispatchContext): Promise<void> {
     { status: PurchaseStatus.REVOKED },
   );
   await revokeAccessForTransaction(ctx);
+}
+
+// =============================================================
+// Refund Shield: CONSUMPTION_REQUEST
+// =============================================================
+//
+// Apple sends CONSUMPTION_REQUEST when a customer files a refund
+// request through the App Store. Apple gives us a 12-hour window
+// to reply via `PUT /inApps/v1/transactions/consumption/{id}` with
+// a signal payload describing the user's engagement / refund
+// history. We don't send that reply synchronously here: instead
+// we enqueue a row in `refund_shield_responses` and let the
+// polling responder worker (T14) compute the payload + dispatch
+// it after the configured delay window.
+//
+// Decision tree for the inserted row's status:
+//   - project.refundShieldEnabled = false  → SKIPPED_DISABLED
+//   - subscriber unresolvable             → SKIPPED_NOT_FOUND
+//   - else                                 → PENDING
+//
+// Idempotency: `apple_notification_uuid` has a unique index and
+// the insert uses ON CONFLICT DO NOTHING — Apple retrying the
+// same notification is safe.
+
+async function applyConsumptionRequest(ctx: DispatchContext): Promise<void> {
+  const { projectId, transaction, notification } = ctx;
+
+  const project = await drizzle.projectRepo.findProjectById(
+    drizzle.db,
+    projectId,
+  );
+  if (!project) {
+    // Project deleted between webhook receipt and dispatch — drop
+    // silently; the outer webhook_event row is still marked
+    // PROCESSED so Apple doesn't retry endlessly.
+    log.warn("CONSUMPTION_REQUEST for unknown project", { projectId });
+    return;
+  }
+
+  const detectedAt = new Date();
+  const scheduledFor = project.refundShieldEnabled
+    ? new Date(
+        detectedAt.getTime() +
+          project.refundShieldResponseDelayMinutes * 60_000,
+      )
+    : detectedAt;
+
+  // Subscriber lookup: appAccountToken first (set on the
+  // subscribers row by T9's upsert path), then fall back to a
+  // chain lookup via purchases.original_transaction_id.
+  let subscriberId: string | null = null;
+  if (transaction.appAccountToken) {
+    const byToken =
+      await drizzle.subscriberRepo.findSubscriberByAppleAppAccountToken(
+        drizzle.db,
+        projectId,
+        transaction.appAccountToken,
+      );
+    subscriberId = byToken?.id ?? null;
+  }
+  if (subscriberId === null) {
+    const purchase =
+      await drizzle.purchaseExtRepo.findPurchaseByOriginalTransaction(
+        drizzle.db,
+        projectId,
+        transaction.originalTransactionId,
+      );
+    subscriberId = purchase?.subscriberId ?? null;
+  }
+
+  const status: "PENDING" | "SKIPPED_DISABLED" | "SKIPPED_NOT_FOUND" =
+    !project.refundShieldEnabled
+      ? "SKIPPED_DISABLED"
+      : subscriberId === null
+        ? "SKIPPED_NOT_FOUND"
+        : "PENDING";
+
+  await drizzle.refundShieldResponseRepo.insertConsumptionRequest(
+    drizzle.db,
+    {
+      projectId,
+      subscriberId,
+      appleNotificationUuid: notification.notificationUUID,
+      appleOriginalTransactionId: transaction.originalTransactionId,
+      appleTransactionId: transaction.transactionId,
+      detectedAt,
+      scheduledFor,
+      status,
+    },
+  );
+
+  if (subscriberId) ctx.outcome.subscriberId = subscriberId;
+
+  log.info("CONSUMPTION_REQUEST enqueued", {
+    projectId,
+    uuid: notification.notificationUUID,
+    status,
+    subscriberId,
+  });
 }
 
 // =============================================================

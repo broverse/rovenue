@@ -82,3 +82,4 @@ export * as copilotUsageRepo from "./repositories/copilot-usage";
 export { currentYearMonth } from "./repositories/copilot-usage";
 export * as integrationConnectionRepo from "./repositories/integration-connections";
 export * as integrationDeliveryRepo from "./repositories/integration-deliveries";
+export * as refundShieldResponseRepo from "./repositories/refund-shield-responses";
