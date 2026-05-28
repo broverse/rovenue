@@ -52,7 +52,7 @@ export const meRoute = new Hono()
   // Every /me endpoint requires the header → subscriber resolution.
   .use("*", appUserContext)
   // -------------------------------------------------------------
-  // GET /me — subscriber profile + entitlements + credit summary
+  // GET /me — subscriber profile + access + credit summary
   // -------------------------------------------------------------
   .get("/", async (c) => {
     const subscriber = c.get("subscriber");
@@ -67,18 +67,18 @@ export const meRoute = new Hono()
           appUserId: subscriber.appUserId,
           attributes: subscriber.attributes,
         },
-        entitlements: access,
+        access,
         credits: { balance },
       }),
     );
   })
   // -------------------------------------------------------------
-  // GET /me/entitlements
+  // GET /me/access
   // -------------------------------------------------------------
-  .get("/entitlements", async (c) => {
+  .get("/access", async (c) => {
     const subscriber = c.get("subscriber");
-    const entitlements = await buildAccessResponse(subscriber.id);
-    return c.json(ok({ entitlements }));
+    const access = await buildAccessResponse(subscriber.id);
+    return c.json(ok({ access }));
   })
   // -------------------------------------------------------------
   // GET /me/credits
