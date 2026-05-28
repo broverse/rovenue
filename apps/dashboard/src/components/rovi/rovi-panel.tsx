@@ -3,6 +3,7 @@ import { useRoviChat } from "../../lib/hooks/useRoviChat";
 import { RoviHeader } from "./rovi-header";
 import { RoviEmptyState } from "./rovi-empty-state";
 import { RoviConversation } from "./rovi-conversation";
+import { RoviPromptInput } from "./rovi-prompt-input";
 
 export function RoviPanel() {
   const { open, setOpen, currentThreadId } = useRovi();
@@ -11,6 +12,10 @@ export function RoviPanel() {
   // project). Gate on that before reading `messages`.
   const chat = useRoviChat({ threadId: currentThreadId });
   const messages = chat?.messages ?? [];
+  const busy = chat?.status === "streaming" || chat?.status === "submitted";
+  const send = (text: string) => {
+    void chat?.sendMessage({ text });
+  };
 
   return (
     <>
@@ -40,6 +45,7 @@ export function RoviPanel() {
         ) : (
           <RoviConversation messages={messages} />
         )}
+        <RoviPromptInput disabled={busy || !chat} onSubmit={send} />
       </aside>
     </>
   );
