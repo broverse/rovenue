@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { and, eq } from "drizzle-orm";
 import {
+  access,
   audiences,
   apiKeys,
   billingTierLimits,
@@ -8,8 +9,8 @@ import {
   experimentAssignments,
   experiments,
   featureFlags,
+  offerings,
   outgoingWebhooks,
-  productGroups,
   products,
   projectMembers,
   projects,
@@ -42,12 +43,14 @@ const PRODUCT_PRO_MONTHLY = "pro_monthly";
 const PRODUCT_CREDITS_100 = "credits_100";
 const DEMO_PRODUCT_PRO_ID = "prd_demo_pro_monthly";
 const DEMO_PRODUCT_CREDITS_ID = "prd_demo_credits_100";
-const DEMO_GROUP_ID = "pg_demo_default";
+const DEMO_OFFERING_ID = "ofr_demo_default";
+const DEMO_ACCESS_PREMIUM_ID = "acs_demo_premium000000000";
+const DEMO_ACCESS_ANALYTICS_ID = "acs_demo_analytics0000000";
 const DEMO_AUDIENCE_ALL_ID = "aud_demo_all";
 const DEMO_AUDIENCE_TR_ID = "aud_demo_tr";
 const DEMO_FLAG_ID = "ff_demo_onboarding";
 const DEMO_EXPERIMENT_ID = "exp_demo_paywall";
-const DEFAULT_GROUP = "default";
+const DEFAULT_OFFERING = "default";
 const SUBSCRIBER_COUNT = 20;
 const COUNTRIES = ["TR", "US", "DE", "GB", "BR", "JP", "IN", "FR"];
 const PLATFORMS = ["ios", "android", "web"];
@@ -152,6 +155,28 @@ async function main() {
     })
     .onConflictDoNothing();
 
+  // -------- Access catalog (replaces free-form entitlement keys) --------
+  await db
+    .insert(access)
+    .values({
+      id: DEMO_ACCESS_PREMIUM_ID,
+      projectId: DEMO_PROJECT_ID,
+      identifier: "premium",
+      displayName: "Premium",
+      description: "Unlocks premium features",
+    })
+    .onConflictDoNothing();
+  await db
+    .insert(access)
+    .values({
+      id: DEMO_ACCESS_ANALYTICS_ID,
+      projectId: DEMO_PROJECT_ID,
+      identifier: "analytics",
+      displayName: "Analytics",
+      description: "Advanced analytics dashboards",
+    })
+    .onConflictDoNothing();
+
   await db
     .insert(products)
     .values({
@@ -165,7 +190,7 @@ async function main() {
         google: PRODUCT_PRO_MONTHLY,
         stripe: "price_demo_pro_monthly",
       },
-      entitlementKeys: ["premium", "analytics"],
+      accessIds: [DEMO_ACCESS_PREMIUM_ID, DEMO_ACCESS_ANALYTICS_ID],
       isActive: true,
     })
     .onConflictDoNothing();
@@ -183,18 +208,19 @@ async function main() {
         google: PRODUCT_CREDITS_100,
         stripe: "price_demo_credits_100",
       },
-      entitlementKeys: [],
+      accessIds: [],
       creditAmount: 100,
       isActive: true,
     })
     .onConflictDoNothing();
 
   await db
-    .insert(productGroups)
+    .insert(offerings)
     .values({
-      id: DEMO_GROUP_ID,
+      id: DEMO_OFFERING_ID,
       projectId: DEMO_PROJECT_ID,
-      identifier: DEFAULT_GROUP,
+      accessId: DEMO_ACCESS_PREMIUM_ID,
+      identifier: DEFAULT_OFFERING,
       isDefault: true,
       products: [
         {
@@ -308,7 +334,7 @@ async function main() {
         .onConflictDoNothing();
 
       if (status !== "EXPIRED") {
-        for (const entitlement of ["premium", "analytics"]) {
+        for (const accessId of [DEMO_ACCESS_PREMIUM_ID, DEMO_ACCESS_ANALYTICS_ID]) {
           // subscriber_access has no composite unique in the
           // schema, so we check-then-insert.
           const existing = await db
@@ -318,7 +344,7 @@ async function main() {
               and(
                 eq(subscriberAccess.subscriberId, subId),
                 eq(subscriberAccess.purchaseId, purId),
-                eq(subscriberAccess.entitlementKey, entitlement),
+                eq(subscriberAccess.accessId, accessId),
               ),
             )
             .limit(1);
@@ -326,7 +352,7 @@ async function main() {
             await db.insert(subscriberAccess).values({
               subscriberId: subId,
               purchaseId: purId,
-              entitlementKey: entitlement,
+              accessId,
               isActive: true,
               expiresDate: expiresAt,
               store: "APP_STORE",
