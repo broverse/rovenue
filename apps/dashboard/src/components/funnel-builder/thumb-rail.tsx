@@ -36,7 +36,7 @@ export const ThumbRail = component(() => {
             <AddContentPopover
               align="rightOfTrigger"
               onPick={(t) => {
-                vm.addPage(blankPage(t), popover.insertAfter);
+                vm.addPage(blankPage(t, vm.defaultLocale), popover.insertAfter);
                 setPopover(null);
               }}
               onClose={() => setPopover(null)}
@@ -163,7 +163,7 @@ export const ThumbRail = component(() => {
               align="rightOfTrigger"
               verticalAlign="bottom"
               onPick={(t) => {
-                vm.addPage(blankPage(t), popover.insertAfter);
+                vm.addPage(blankPage(t, vm.defaultLocale), popover.insertAfter);
                 setPopover(null);
               }}
               onClose={() => setPopover(null)}

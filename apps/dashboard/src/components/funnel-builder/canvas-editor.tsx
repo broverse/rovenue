@@ -102,7 +102,7 @@ export const CanvasEditor = component(() => {
             <AddContentPopover
               onPick={(t) => {
                 setAddOpen(false);
-                vm.addPage(blankPage(t), page.id);
+                vm.addPage(blankPage(t, vm.defaultLocale), page.id);
               }}
               onClose={() => setAddOpen(false)}
             />
