@@ -1,473 +1,44 @@
-import {
-  ArrowLeftRight,
-  BarChart3,
-  Bell,
-  CircleCheck,
-  CreditCard,
-  Database,
-  KeyRound,
-  LayoutGrid,
-  Megaphone,
-  MessageSquare,
-  Zap,
-} from "lucide-react";
+import { CircleCheck, LayoutGrid, Megaphone } from "lucide-react";
 import type { AppDescriptor, CategoryId, FeaturedRecipe, RailEntry } from "./types";
 
+/**
+ * Static catalog of integrations Rovenue ships with.
+ *
+ * Currently only the two outbound ad-platform integrations are wired
+ * end-to-end (M0–M9 plan, branch `feat/integrations-meta-tiktok`).
+ * Other surfaces — attribution, analytics, lifecycle, etc. — are out
+ * of scope for the first integrations release. When a new provider
+ * lands, add it here with its own `custom` brand mark in
+ * `app-logo.tsx`.
+ */
 export const APPS: ReadonlyArray<AppDescriptor> = [
-  // Attribution & MMP
-  {
-    id: "appsflyer",
-    category: "attribution",
-    vendorKey: "appsflyer",
-    logo: { background: "linear-gradient(135deg,#7C5BFF,#3B82F6)", glyph: "AF" },
-    status: "connected",
-    account: "lumen-prod",
-    lastSync: "4m ago",
-    featured: true,
-  },
-  {
-    id: "adjust",
-    category: "attribution",
-    vendorKey: "adjust",
-    logo: { background: "linear-gradient(135deg,#0F86F5,#06B6D4)", glyph: "A" },
-    status: "available",
-  },
-  {
-    id: "branch",
-    category: "attribution",
-    vendorKey: "branch",
-    logo: { background: "#0070F3", glyph: "B" },
-    status: "available",
-  },
-  {
-    id: "kochava",
-    category: "attribution",
-    vendorKey: "kochava",
-    logo: { background: "#1A1A1A", glyph: "K" },
-    status: "available",
-    tag: "partner",
-  },
-  {
-    id: "singular",
-    category: "attribution",
-    vendorKey: "singular",
-    logo: { background: "linear-gradient(135deg,#FF6B35,#F59E0B)", glyph: "S" },
-    status: "available",
-  },
-  {
-    id: "tenjin",
-    category: "attribution",
-    vendorKey: "tenjin",
-    logo: { background: "#0EA5E9", glyph: "T" },
-    status: "available",
-  },
-
-  // Ads & marketing
-  {
-    id: "meta-ads",
-    category: "ads",
-    vendorKey: "meta",
-    logo: { background: "linear-gradient(135deg,#1877F2,#0866FF)", glyph: "M" },
-    status: "connected",
-    account: "lumen.co · 3 pixels",
-    lastSync: "1m ago",
-    featured: true,
-  },
-  {
-    id: "google-ads",
-    category: "ads",
-    vendorKey: "google",
-    logo: { background: "linear-gradient(135deg,#4285F4,#34A853 60%,#FBBC04)", glyph: "G" },
-    status: "connected",
-    account: "847-204-9912",
-    lastSync: "12m ago",
-  },
-  {
-    id: "tiktok-ads",
-    category: "ads",
-    vendorKey: "bytedance",
-    logo: { background: "linear-gradient(135deg,#FF0050,#00F2EA)", glyph: "TT" },
-    status: "available",
-    tag: "new",
-  },
-  {
-    id: "snapchat-ads",
-    category: "ads",
-    vendorKey: "snap",
-    logo: { background: "#FFFC00", glyph: "S", textColor: "#000" },
-    status: "available",
-  },
-  {
-    id: "reddit-ads",
-    category: "ads",
-    vendorKey: "reddit",
-    logo: { background: "#FF4500", glyph: "R" },
-    status: "available",
-  },
-  {
-    id: "apple-search-ads",
-    category: "ads",
-    vendorKey: "apple",
-    logo: { background: "#000", glyph: "", custom: "apple" },
-    status: "available",
-  },
-  {
-    id: "pinterest",
-    category: "ads",
-    vendorKey: "pinterest",
-    logo: { background: "#E60023", glyph: "P" },
-    status: "available",
-  },
-  {
-    id: "linkedin-ads",
-    category: "ads",
-    vendorKey: "linkedin",
-    logo: { background: "#0A66C2", glyph: "in" },
-    status: "available",
-  },
   {
     id: "meta-capi",
     category: "ads",
     vendorKey: "meta",
-    logo: { background: "linear-gradient(135deg,#1877F2,#0866FF)", glyph: "M" },
+    logo: {
+      // Meta brand blue (2024 refresh).
+      background: "#0866FF",
+      glyph: "",
+      custom: "meta",
+    },
     status: "available",
     tag: "new",
+    featured: true,
   },
   {
     id: "tiktok-events",
     category: "ads",
     vendorKey: "bytedance",
-    logo: { background: "linear-gradient(135deg,#FF0050,#00F2EA)", glyph: "TT" },
+    logo: {
+      // TikTok official mark on black.
+      background: "#000",
+      glyph: "",
+      custom: "tiktok",
+    },
     status: "available",
     tag: "new",
-  },
-
-  // Product analytics
-  {
-    id: "amplitude",
-    category: "analytics",
-    vendorKey: "amplitude",
-    logo: { background: "linear-gradient(135deg,#1E61F0,#3B82F6)", glyph: "A" },
-    status: "connected",
-    account: "lumen-prod",
-    lastSync: "2m ago",
-  },
-  {
-    id: "mixpanel",
-    category: "analytics",
-    vendorKey: "mixpanel",
-    logo: { background: "linear-gradient(135deg,#7856FF,#A78BFA)", glyph: "M" },
-    status: "available",
-  },
-  {
-    id: "posthog",
-    category: "analytics",
-    vendorKey: "posthog",
-    logo: { background: "#1D4AFF", glyph: "PH" },
-    status: "available",
-    tag: "partner",
-  },
-  {
-    id: "heap",
-    category: "analytics",
-    vendorKey: "heap",
-    logo: { background: "linear-gradient(135deg,#7547FF,#FF4080)", glyph: "H" },
-    status: "available",
-  },
-  {
-    id: "ga4",
-    category: "analytics",
-    vendorKey: "google",
-    logo: { background: "#F9AB00", glyph: "GA" },
-    status: "available",
-  },
-  {
-    id: "firebase",
-    category: "analytics",
-    vendorKey: "google",
-    logo: { background: "#FFA000", glyph: "F" },
-    status: "available",
-  },
-
-  // Data warehouse / CDP
-  {
-    id: "segment",
-    category: "data",
-    vendorKey: "twilio",
-    logo: { background: "linear-gradient(135deg,#52BD95,#00C49A)", glyph: "S" },
-    status: "connected",
-    account: "lumen / production",
-    lastSync: "8s ago",
-  },
-  {
-    id: "rudderstack",
-    category: "data",
-    vendorKey: "rudderstack",
-    logo: { background: "#3F8AE2", glyph: "R" },
-    status: "available",
-  },
-  {
-    id: "snowflake",
-    category: "data",
-    vendorKey: "snowflake",
-    logo: { background: "linear-gradient(135deg,#29B5E8,#0EA5E9)", glyph: "S" },
-    status: "connected",
-    account: "WH_REVENUE",
-    lastSync: "14m ago",
-  },
-  {
-    id: "bigquery",
-    category: "data",
-    vendorKey: "googleCloud",
-    logo: { background: "#669DF6", glyph: "BQ" },
-    status: "available",
-  },
-  {
-    id: "redshift",
-    category: "data",
-    vendorKey: "aws",
-    logo: { background: "#8C4FFF", glyph: "R" },
-    status: "available",
-  },
-  {
-    id: "databricks",
-    category: "data",
-    vendorKey: "databricks",
-    logo: { background: "#FF3621", glyph: "DB" },
-    status: "available",
-  },
-  {
-    id: "s3",
-    category: "data",
-    vendorKey: "aws",
-    logo: { background: "#FF9900", glyph: "S3" },
-    status: "available",
-  },
-
-  // CRM & lifecycle
-  {
-    id: "braze",
-    category: "lifecycle",
-    vendorKey: "braze",
-    logo: { background: "linear-gradient(135deg,#FF7E60,#F59E0B)", glyph: "B" },
-    status: "connected",
-    account: "lumen-prod-us8",
-    lastSync: "6m ago",
-  },
-  {
-    id: "iterable",
-    category: "lifecycle",
-    vendorKey: "iterable",
-    logo: { background: "#7B61FF", glyph: "I" },
-    status: "available",
-  },
-  {
-    id: "customerio",
-    category: "lifecycle",
-    vendorKey: "customerio",
-    logo: { background: "#7C3AED", glyph: "C" },
-    status: "available",
-  },
-  {
-    id: "klaviyo",
-    category: "lifecycle",
-    vendorKey: "klaviyo",
-    logo: { background: "#1E1E1E", glyph: "K" },
-    status: "available",
-  },
-  {
-    id: "onesignal",
-    category: "lifecycle",
-    vendorKey: "onesignal",
-    logo: { background: "#E54B4D", glyph: "OS" },
-    status: "available",
-  },
-  {
-    id: "hubspot",
-    category: "lifecycle",
-    vendorKey: "hubspot",
-    logo: { background: "#FF7A59", glyph: "H" },
-    status: "available",
-  },
-  {
-    id: "salesforce",
-    category: "lifecycle",
-    vendorKey: "salesforce",
-    logo: { background: "#00A1E0", glyph: "SF" },
-    status: "available",
-  },
-
-  // Communication
-  {
-    id: "slack",
-    category: "communication",
-    vendorKey: "slack",
-    logo: { background: "linear-gradient(135deg,#4A154B,#ECB22E)", glyph: "#" },
-    status: "connected",
-    account: "Lumen workspace · 4 channels",
-    lastSync: "12s ago",
-  },
-  {
-    id: "discord",
-    category: "communication",
-    vendorKey: "discord",
-    logo: { background: "#5865F2", glyph: "D" },
-    status: "available",
-  },
-  {
-    id: "pagerduty",
-    category: "communication",
-    vendorKey: "pagerduty",
-    logo: { background: "#06AC38", glyph: "PD" },
-    status: "connected",
-    account: "lumen-billing-svc",
-    lastSync: "2h ago",
-  },
-  {
-    id: "intercom",
-    category: "communication",
-    vendorKey: "intercom",
-    logo: { background: "#0057FF", glyph: "IC" },
-    status: "available",
-  },
-  {
-    id: "zendesk",
-    category: "communication",
-    vendorKey: "zendesk",
-    logo: { background: "#03363D", glyph: "Z" },
-    status: "available",
-  },
-
-  // Automation
-  {
-    id: "zapier",
-    category: "automation",
-    vendorKey: "zapier",
-    logo: { background: "#FF4F00", glyph: "Z" },
-    status: "connected",
-    account: "4 active zaps",
-    lastSync: "21m ago",
-  },
-  {
-    id: "make",
-    category: "automation",
-    vendorKey: "make",
-    logo: { background: "linear-gradient(135deg,#6D00CC,#9D00FF)", glyph: "M" },
-    status: "available",
-  },
-  {
-    id: "n8n",
-    category: "automation",
-    vendorKey: "n8n",
-    logo: { background: "#EA4B71", glyph: "n8" },
-    status: "available",
-    tag: "partner",
-  },
-  {
-    id: "linear",
-    category: "automation",
-    vendorKey: "linear",
-    logo: { background: "#5E6AD2", glyph: "L" },
-    status: "connected",
-    account: "Lumen · LUM project",
-    lastSync: "1d ago",
-  },
-  {
-    id: "notion",
-    category: "automation",
-    vendorKey: "notion",
-    logo: { background: "#000", glyph: "N" },
-    status: "available",
-  },
-
-  // Auth & identity
-  {
-    id: "auth0",
-    category: "identity",
-    vendorKey: "okta",
-    logo: { background: "#EB5424", glyph: "A0" },
-    status: "available",
-  },
-  {
-    id: "firebase-auth",
-    category: "identity",
-    vendorKey: "google",
-    logo: { background: "#FFCA28", glyph: "F", textColor: "#000" },
-    status: "available",
-  },
-  {
-    id: "clerk",
-    category: "identity",
-    vendorKey: "clerk",
-    logo: { background: "#6C47FF", glyph: "C" },
-    status: "available",
-    tag: "new",
-  },
-  {
-    id: "supabase",
-    category: "identity",
-    vendorKey: "supabase",
-    logo: { background: "#3ECF8E", glyph: "S" },
-    status: "available",
-  },
-
-  // Billing
-  {
-    id: "stripe",
-    category: "billing",
-    vendorKey: "stripe",
-    logo: { background: "linear-gradient(135deg,#635BFF,#7A73FF)", glyph: "S" },
-    status: "connected",
-    account: "acct_1Mp82QKlmnQ4cD",
-    lastSync: "4s ago",
     featured: true,
-  },
-  {
-    id: "paddle",
-    category: "billing",
-    vendorKey: "paddle",
-    logo: { background: "#FFE96B", glyph: "P", textColor: "#000" },
-    status: "available",
-  },
-  {
-    id: "lemonsqueezy",
-    category: "billing",
-    vendorKey: "lemonsqueezy",
-    logo: { background: "#FFC233", glyph: "🍋", textColor: "#000" },
-    status: "available",
-    tag: "new",
-  },
-  {
-    id: "apple-iap",
-    category: "billing",
-    vendorKey: "apple",
-    logo: { background: "#000", glyph: "A" },
-    status: "connected",
-    account: "co.lumen.lumen",
-    lastSync: "1m ago",
-  },
-  {
-    id: "play-billing",
-    category: "billing",
-    vendorKey: "google",
-    logo: { background: "linear-gradient(135deg,#34A853,#4285F4)", glyph: "G" },
-    status: "connected",
-    account: "co.lumen.android",
-    lastSync: "2m ago",
-  },
-  {
-    id: "amazon-iap",
-    category: "billing",
-    vendorKey: "amazon",
-    logo: { background: "#FF9900", glyph: "A" },
-    status: "available",
-  },
-  {
-    id: "roku",
-    category: "billing",
-    vendorKey: "roku",
-    logo: { background: "#662D91", glyph: "R" },
-    status: "available",
   },
 ];
 
@@ -475,31 +46,20 @@ export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [
   { kind: "item", id: "all", icon: LayoutGrid },
   { kind: "item", id: "connected", icon: CircleCheck },
   { kind: "section", labelKey: "byUseCase" },
-  { kind: "item", id: "attribution", icon: ArrowLeftRight },
   { kind: "item", id: "ads", icon: Megaphone },
-  { kind: "item", id: "analytics", icon: BarChart3 },
-  { kind: "item", id: "data", icon: Database },
-  { kind: "item", id: "lifecycle", icon: Bell },
-  { kind: "item", id: "communication", icon: MessageSquare },
-  { kind: "item", id: "automation", icon: Zap },
-  { kind: "item", id: "identity", icon: KeyRound },
-  { kind: "item", id: "billing", icon: CreditCard },
 ];
 
-export const HOMEPAGE_SECTIONS: ReadonlyArray<CategoryId> = [
-  "attribution",
-  "ads",
-  "analytics",
-  "data",
-  "lifecycle",
-  "communication",
-  "automation",
-  "billing",
-];
+export const HOMEPAGE_SECTIONS: ReadonlyArray<CategoryId> = ["ads"];
 
+/**
+ * Featured recipe banner — left in place but pointed at the two
+ * shipped integrations so the homepage banner has something to
+ * render. If the banner is later removed entirely, drop this export
+ * and its consumer at the same time.
+ */
 export const FEATURED_RECIPE: FeaturedRecipe = {
-  id: "asa-meta-capi",
-  appIds: ["appsflyer", "meta-ads", "apple-search-ads"],
+  id: "meta-tiktok-ads",
+  appIds: ["meta-capi", "tiktok-events"],
 };
 
 export const HERO_STATS = {

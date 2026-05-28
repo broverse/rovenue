@@ -28,8 +28,8 @@ export type AppLogo = {
   glyph: string;
   /** Override glyph foreground color when the logo background is light. */
   textColor?: string;
-  /** Render the Apple wordmark instead of a glyph. */
-  custom?: "apple";
+  /** Render a custom vector mark instead of the glyph. */
+  custom?: "apple" | "meta" | "tiktok";
 };
 
 export type AppDescriptor = {
