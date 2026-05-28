@@ -125,6 +125,22 @@ export const APPS: ReadonlyArray<AppDescriptor> = [
     logo: { background: "#0A66C2", glyph: "in" },
     status: "available",
   },
+  {
+    id: "meta-capi",
+    category: "ads",
+    vendorKey: "meta",
+    logo: { background: "linear-gradient(135deg,#1877F2,#0866FF)", glyph: "M" },
+    status: "available",
+    tag: "new",
+  },
+  {
+    id: "tiktok-events",
+    category: "ads",
+    vendorKey: "bytedance",
+    logo: { background: "linear-gradient(135deg,#FF0050,#00F2EA)", glyph: "TT" },
+    status: "available",
+    tag: "new",
+  },
 
   // Product analytics
   {
