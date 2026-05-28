@@ -183,10 +183,32 @@ export const tiktokEventsProvider: IntegrationProvider = {
   },
 
   async deliver(
-    _payload: ProviderPayload,
-    _creds: ProviderCredentials,
-    _http: HttpClient,
+    payload: ProviderPayload,
+    creds: ProviderCredentials,
+    http: HttpClient,
   ): Promise<DeliveryResult> {
-    throw new Error("not implemented yet");
+    const token = creds["access_token"] ?? "";
+    const url = "https://business-api.tiktok.com/open_api/v1.3/event/track/";
+
+    const res = await http.request({
+      method: "POST",
+      url,
+      headers: {
+        "content-type": "application/json",
+        "Access-Token": token,
+      },
+      body: JSON.stringify(payload.body),
+    });
+
+    const retriable = res.status === 429 || res.status >= 500;
+    const ok = res.status >= 200 && res.status < 300;
+
+    return {
+      ok,
+      httpStatus: res.status,
+      responseBody: res.body,
+      errorMessage: ok ? undefined : `HTTP ${res.status}`,
+      retriable,
+    };
   },
 };

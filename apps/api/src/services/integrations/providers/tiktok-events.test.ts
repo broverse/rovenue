@@ -112,3 +112,85 @@ describe("tiktokEventsProvider.mapEvent", () => {
     expect(result).toEqual({ skip: true, reason: "no_user_data" });
   });
 });
+
+// ---------------------------------------------------------------------------
+// M1.8 — deliver tests
+// ---------------------------------------------------------------------------
+
+describe("tiktokEventsProvider.deliver", () => {
+  let agent: MockAgent;
+
+  beforeEach(() => {
+    agent = new MockAgent();
+    agent.disableNetConnect();
+    setGlobalDispatcher(agent);
+  });
+
+  afterEach(async () => {
+    await agent.close();
+  });
+
+  const dummyPayload: ProviderPayload = {
+    eventKey: "revenue.RENEWAL",
+    providerEvent: "Subscribe",
+    body: { event_source: "web", event_source_id: "CXX", data: [] },
+  };
+
+  it("POSTs to /event/track/ with Access-Token header", async () => {
+    let observedTokenHeader: string | undefined;
+    agent
+      .get("https://business-api.tiktok.com")
+      .intercept({ path: "/open_api/v1.3/event/track/", method: "POST" })
+      .reply((opts) => {
+        // undici may pass headers as a flat string[] array or as a Record
+        const h = opts.headers;
+        if (Array.isArray(h)) {
+          // flat array: [key, val, key, val, ...]
+          for (let i = 0; i < h.length; i += 2) {
+            if (String(h[i]).toLowerCase() === "access-token") {
+              observedTokenHeader = String(h[i + 1]);
+            }
+          }
+        } else if (h && typeof h === "object") {
+          // object: lowercase keys
+          observedTokenHeader =
+            (h as Record<string, string>)["access-token"] ??
+            (h as Record<string, string>)["Access-Token"];
+        }
+        return { statusCode: 200, data: '{"code":0}' };
+      });
+    const http = createUndiciHttpClient();
+    await tiktokEventsProvider.deliver(dummyPayload, { access_token: "tok", pixel_code: "CXX" }, http);
+    expect(observedTokenHeader).toBe("tok");
+  });
+
+  it("429 → retriable true", async () => {
+    agent
+      .get("https://business-api.tiktok.com")
+      .intercept({ path: "/open_api/v1.3/event/track/", method: "POST" })
+      .reply(429, '{"code":40100}');
+    const http = createUndiciHttpClient();
+    const result = await tiktokEventsProvider.deliver(
+      dummyPayload,
+      { access_token: "tok", pixel_code: "CXX" },
+      http,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.retriable).toBe(true);
+  });
+
+  it("400 → retriable false", async () => {
+    agent
+      .get("https://business-api.tiktok.com")
+      .intercept({ path: "/open_api/v1.3/event/track/", method: "POST" })
+      .reply(400, '{"code":40000}');
+    const http = createUndiciHttpClient();
+    const result = await tiktokEventsProvider.deliver(
+      dummyPayload,
+      { access_token: "tok", pixel_code: "CXX" },
+      http,
+    );
+    expect(result.ok).toBe(false);
+    expect(result.retriable).toBe(false);
+  });
+});
