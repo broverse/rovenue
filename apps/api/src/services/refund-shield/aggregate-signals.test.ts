@@ -17,6 +17,7 @@ describe("aggregateRefundShieldSignals", () => {
   it("collects tenure + session + lifetime $ for a known subscriber", async () => {
     const dbMock = makeDbMock({
       first_seen_at: new Date("2026-01-01T00:00:00Z"),
+      apple_app_account_token: "550e8400-e29b-41d4-a716-446655440000",
       has_active_entitlement: false,
       purchase_started_at: new Date("2026-05-01T00:00:00Z"),
       purchase_ends_at: new Date("2026-06-01T00:00:00Z"),
@@ -42,6 +43,7 @@ describe("aggregateRefundShieldSignals", () => {
 
     expect(signals).toMatchObject({
       customerConsented: true,
+      appAccountToken: "550e8400-e29b-41d4-a716-446655440000",
       firstSeenAt: new Date("2026-01-01T00:00:00Z"),
       lifetimeSessionMs: 3_600_000,
       lifetimeDollarsPurchasedCents: 7500,
@@ -56,6 +58,7 @@ describe("aggregateRefundShieldSignals", () => {
   it("returns zero session_ms when subscriber has no telemetry yet", async () => {
     const dbMock = makeDbMock({
       first_seen_at: new Date("2026-05-20T00:00:00Z"),
+      apple_app_account_token: null,
       has_active_entitlement: false,
       purchase_started_at: new Date("2026-05-25T00:00:00Z"),
       purchase_ends_at: new Date("2026-06-25T00:00:00Z"),
@@ -77,11 +80,14 @@ describe("aggregateRefundShieldSignals", () => {
     expect(signals.lifetimeDollarsPurchasedCents).toBe(0);
     expect(signals.lifetimeDollarsRefundedCents).toBe(0);
     expect(signals.wasInTrial).toBe(true);
+    expect(signals.appAccountToken).toBeNull();
   });
 
   it("threads appAccountToken into the returned signals", async () => {
     const dbMock = makeDbMock({
       first_seen_at: new Date("2026-04-01T00:00:00Z"),
+      // DB column is NULL here so the input-based fallback kicks in.
+      apple_app_account_token: null,
       has_active_entitlement: true,
       purchase_started_at: new Date("2026-05-10T00:00:00Z"),
       purchase_ends_at: new Date("2026-06-10T00:00:00Z"),
@@ -116,6 +122,7 @@ describe("aggregateRefundShieldSignals", () => {
   it("throws when no purchase row matches the original transaction id", async () => {
     const dbMock = makeDbMock({
       first_seen_at: new Date("2026-05-20T00:00:00Z"),
+      apple_app_account_token: null,
       has_active_entitlement: false,
       purchase_started_at: null,
       purchase_ends_at: null,
@@ -141,6 +148,7 @@ describe("aggregateRefundShieldSignals", () => {
 
 interface PgRow {
   first_seen_at: Date;
+  apple_app_account_token: string | null;
   has_active_entitlement: boolean;
   purchase_started_at: Date | null;
   purchase_ends_at: Date | null;

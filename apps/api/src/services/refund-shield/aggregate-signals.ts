@@ -49,6 +49,7 @@ export interface AggregateInput {
 
 interface PgAggregateRow {
   first_seen_at: Date | string;
+  apple_app_account_token: string | null;
   has_active_entitlement: boolean;
   purchase_started_at: Date | string | null;
   purchase_ends_at: Date | string | null;
@@ -96,6 +97,7 @@ export async function aggregateRefundShieldSignals(
   const pgResult = (await input.db.execute(sql`
     SELECT
       s."firstSeenAt"                                                   AS first_seen_at,
+      s."apple_app_account_token"                                       AS apple_app_account_token,
       EXISTS(
         SELECT 1 FROM "subscriber_access"
         WHERE "subscriberId" = ${input.subscriberId}
@@ -177,7 +179,10 @@ export async function aggregateRefundShieldSignals(
 
   return {
     customerConsented: input.customerConsented,
-    appAccountToken: input.appAccountToken ?? null,
+    // Prefer the authoritative DB value (subscribers.apple_app_account_token,
+    // stamped by T9 when the SDK calls /v1/subscribers); fall back to the
+    // caller-supplied input only when the row hasn't been hydrated yet.
+    appAccountToken: pg.apple_app_account_token ?? input.appAccountToken ?? null,
     firstSeenAt: toDate(pg.first_seen_at, input.now),
     now: input.now,
     purchaseStartedAt: requireDate(pg.purchase_started_at),

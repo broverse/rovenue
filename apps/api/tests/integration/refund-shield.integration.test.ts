@@ -321,13 +321,11 @@ describe("Refund Shield — end-to-end", () => {
         platform: 1,
         sampleContentProvided: false,
         deliveryStatus: 0,
+        // `aggregate-signals` now reads subscribers.apple_app_account_token
+        // directly out of Postgres (T9 stamps it on the SDK identify path),
+        // so the bucket mapper forwards it into the Apple ConsumptionRequest.
+        appAccountToken: APP_ACCOUNT_TOKEN,
       });
-      // Note: `appAccountToken` is an AggregateInput passthrough that
-      // the worker doesn't currently populate (the row only carries
-      // `subscriberId`). When the field is null, the bucket mapper
-      // omits it from the Apple payload entirely. The downstream
-      // wiring is what we're validating here; per-field aggregator
-      // hydration is covered by aggregate-signals.test.ts.
       // Apple context wiring: bundleId + signing fields came from
       // the seeded project.appleCredentials row, not from a mock.
       expect(ctxArg).toMatchObject({
