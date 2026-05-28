@@ -1,6 +1,7 @@
 import { createId } from "@paralleldrive/cuid2";
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   date,
   decimal,
@@ -2108,3 +2109,143 @@ export type FunnelClaimToken = typeof funnelClaimTokens.$inferSelect;
 export type NewFunnelClaimToken = typeof funnelClaimTokens.$inferInsert;
 export type FunnelDeferredClaim = typeof funnelDeferredClaims.$inferSelect;
 export type NewFunnelDeferredClaim = typeof funnelDeferredClaims.$inferInsert;
+
+// ====================== Rovi (AI copilot) ======================
+
+export const copilotThreads = pgTable(
+  "copilot_threads",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+  },
+  (t) => ({
+    byUserRecent: index("copilot_threads_by_user_recent").on(
+      t.projectId,
+      t.userId,
+      t.lastMessageAt,
+    ),
+  }),
+);
+
+export const copilotMessages = pgTable(
+  "copilot_messages",
+  {
+    id: text("id").primaryKey(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => copilotThreads.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["user", "assistant", "tool"] }).notNull(),
+    parts: jsonb("parts").notNull(),
+    tokenIn: integer("token_in"),
+    tokenOut: integer("token_out"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    byThreadCreated: index("copilot_messages_by_thread").on(
+      t.threadId,
+      t.createdAt,
+    ),
+  }),
+);
+
+export const copilotIntents = pgTable(
+  "copilot_intents",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => copilotThreads.id, { onDelete: "cascade" }),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => copilotMessages.id, { onDelete: "cascade" }),
+    toolName: text("tool_name").notNull(),
+    payload: jsonb("payload").notNull(),
+    preview: jsonb("preview").notNull(),
+    requiresRole: text("requires_role").notNull(),
+    status: text("status", {
+      enum: ["pending", "approved", "rejected", "executed", "expired", "failed"],
+    })
+      .notNull()
+      .default("pending"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    executedAt: timestamp("executed_at", { withTimezone: true }),
+    result: jsonb("result"),
+    error: jsonb("error"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pendingByProject: index("copilot_intents_pending_by_project")
+      .on(t.projectId, t.expiresAt)
+      .where(sql`status = 'pending'`),
+  }),
+);
+
+// AMENDMENT A1: credentials use a single encrypted-string column,
+// matching the repo's existing crypto helper (`encrypt()` returns
+// "iv:tag:data" as one string).
+export const copilotCredentials = pgTable("copilot_credentials", {
+  projectId: text("project_id")
+    .primaryKey()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  apiKeyEncrypted: text("api_key_encrypted").notNull(),
+  defaultModel: text("default_model").notNull(),
+  baseUrl: text("base_url"),
+  updatedByUserId: text("updated_by_user_id")
+    .notNull()
+    .references(() => user.id),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const copilotUsageMonthly = pgTable(
+  "copilot_usage_monthly",
+  {
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    yearMonth: text("year_month").notNull(),
+    messages: integer("messages").notNull().default(0),
+    inputTokens: bigint("input_tokens", { mode: "number" })
+      .notNull()
+      .default(0),
+    outputTokens: bigint("output_tokens", { mode: "number" })
+      .notNull()
+      .default(0),
+    lastUpdated: timestamp("last_updated", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.projectId, t.yearMonth] }),
+  }),
+);
