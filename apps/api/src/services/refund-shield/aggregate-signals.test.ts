@@ -112,14 +112,39 @@ describe("aggregateRefundShieldSignals", () => {
     );
     expect(signals.hasActiveEntitlement).toBe(true);
   });
+
+  it("throws when no purchase row matches the original transaction id", async () => {
+    const dbMock = makeDbMock({
+      first_seen_at: new Date("2026-05-20T00:00:00Z"),
+      has_active_entitlement: false,
+      purchase_started_at: null,
+      purchase_ends_at: null,
+      was_in_trial: null,
+    });
+    // CH should never be reached — the PG check fails fast first.
+    const chMock = makeChMock([]);
+
+    await expect(
+      aggregateRefundShieldSignals({
+        db: dbMock,
+        ch: chMock,
+        projectId: "proj_1",
+        subscriberId: "sub_orphan",
+        originalTransactionId: "tx_orphan",
+        customerConsented: true,
+        now: new Date("2026-05-28T00:00:00Z"),
+      }),
+    ).rejects.toThrow(/No purchase found/);
+    expect((chMock as { query: { mock: { calls: unknown[] } } }).query.mock.calls).toHaveLength(0);
+  });
 });
 
 interface PgRow {
   first_seen_at: Date;
   has_active_entitlement: boolean;
-  purchase_started_at: Date;
-  purchase_ends_at: Date;
-  was_in_trial: boolean;
+  purchase_started_at: Date | null;
+  purchase_ends_at: Date | null;
+  was_in_trial: boolean | null;
 }
 
 function makeDbMock(pgRow: PgRow) {

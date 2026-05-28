@@ -70,6 +70,10 @@ function toDate(value: Date | string | null | undefined, fallback: Date): Date {
   return new Date(value);
 }
 
+function requireDate(value: Date | string): Date {
+  return value instanceof Date ? value : new Date(value);
+}
+
 function toNumber(value: string | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
   const n = typeof value === "number" ? value : Number(value);
@@ -125,6 +129,17 @@ export async function aggregateRefundShieldSignals(
     );
   }
 
+  // Fail fast if the purchase row is missing. Falling back to
+  // `input.now` would make the duration zero and push the bucket
+  // logic (T7) into the "fully consumed" branch, which is
+  // misleading. Skip the CH lookups entirely — no point hitting
+  // analytics when we already know the PG side is incomplete.
+  if (!pg.purchase_started_at || !pg.purchase_ends_at) {
+    throw new Error(
+      `No purchase found for original_transaction_id=${input.originalTransactionId} (subscriber=${input.subscriberId}, project=${input.projectId})`,
+    );
+  }
+
   // -----------------------------------------------------------
   // ClickHouse: two scoped lookups.
   //
@@ -165,8 +180,8 @@ export async function aggregateRefundShieldSignals(
     appAccountToken: input.appAccountToken ?? null,
     firstSeenAt: toDate(pg.first_seen_at, input.now),
     now: input.now,
-    purchaseStartedAt: toDate(pg.purchase_started_at, input.now),
-    purchaseEndsAt: toDate(pg.purchase_ends_at, input.now),
+    purchaseStartedAt: requireDate(pg.purchase_started_at),
+    purchaseEndsAt: requireDate(pg.purchase_ends_at),
     wasInTrial: !!pg.was_in_trial,
     hasActiveEntitlement: !!pg.has_active_entitlement,
     lifetimeSessionMs: toNumber(sessions?.lifetime_session_ms ?? 0),
