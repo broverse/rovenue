@@ -234,6 +234,33 @@ describe("runRefundShieldResponderTick", () => {
     );
   });
 
+  it("transitions to FAILED:MAX_RETRIES_EXHAUSTED on final retry", async () => {
+    // retryCount === MAX_RETRIES - 1 means this would be the
+    // last attempt. The claim query filters `retry_count < 5`,
+    // so leaving the row PENDING with retryCount === 5 would
+    // strand it forever — the worker must coerce to FAILED.
+    const row = makeRow({ retryCount: MAX_RETRIES - 1 });
+    claimPendingResponsesMock.mockResolvedValueOnce([row]);
+    findProjectByIdMock.mockResolvedValueOnce(makeProject());
+    processRefundShieldResponseMock.mockResolvedValueOnce({
+      status: "RETRY",
+      retryDelayMs: 60_000,
+      error: "apple 503",
+    });
+
+    await runRefundShieldResponderTick({ now: NOW });
+
+    expect(markResponseFailedMock).toHaveBeenCalledWith(
+      FAKE_TX,
+      expect.objectContaining({
+        id: "row_1",
+        error: expect.stringContaining("MAX_RETRIES_EXHAUSTED"),
+      }),
+    );
+    expect(markResponseRetryMock).not.toHaveBeenCalled();
+    expect(markResponseSentMock).not.toHaveBeenCalled();
+  });
+
   it("claims pending rows with FOR UPDATE SKIP LOCKED semantics + bounded batch", async () => {
     // Structural concurrency check: the worker must call
     // claimPendingResponses (which the repo implements with

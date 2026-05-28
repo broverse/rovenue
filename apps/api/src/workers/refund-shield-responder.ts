@@ -236,6 +236,21 @@ async function processOneRow(args: {
   }
 
   if (outcome.status === "RETRY") {
+    // Coerce to terminal FAILED at the retry boundary. The claim
+    // query filters `retry_count < MAX_RETRIES`, so a row left
+    // PENDING with retryCount === MAX_RETRIES would never be
+    // reclaimed — a silent black hole. Promote it to FAILED here.
+    if (row.retryCount + 1 >= MAX_RETRIES) {
+      await drizzle.refundShieldResponseRepo.markResponseFailed(tx, {
+        id: row.id,
+        error: `MAX_RETRIES_EXHAUSTED (last_error: ${outcome.error})`,
+        appleHttpStatus: null,
+        appleResponseBody: null,
+        updatedAt: now,
+      });
+      // TODO(T19): audit log + metrics on terminal failure
+      return "FAILED";
+    }
     await drizzle.refundShieldResponseRepo.markResponseRetry(tx, {
       id: row.id,
       retryCount: row.retryCount + 1,
