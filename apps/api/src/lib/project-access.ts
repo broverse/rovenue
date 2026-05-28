@@ -15,16 +15,16 @@ export interface ProjectMembership {
   role: MemberRole;
 }
 
-// Numeric ordering: higher = more privileged. OWNER > ADMIN >
-// DEVELOPER ≈ GROWTH ≈ CUSTOMER_SUPPORT (read-only callers get the
-// same baseline rank — capability gates handle the per-feature splits;
-// see Phase 2).
+// Numeric ordering: higher = more privileged.
+// OWNER(4) > ADMIN(3) > DEVELOPER(2) ≈ GROWTH(2) > CUSTOMER_SUPPORT(1)
+// CUSTOMER_SUPPORT is intentionally lower than DEVELOPER so that
+// intents with requiresRole="DEVELOPER" are denied to CS users.
 const ROLE_RANK: Record<MemberRole, number> = {
   [MemberRole.OWNER]: 4,
   [MemberRole.ADMIN]: 3,
   [MemberRole.DEVELOPER]: 2,
   [MemberRole.GROWTH]: 2,
-  [MemberRole.CUSTOMER_SUPPORT]: 2,
+  [MemberRole.CUSTOMER_SUPPORT]: 1,
 };
 
 export async function assertProjectAccess(
