@@ -1,5 +1,8 @@
 import type { ReactNode } from "react";
 import { ApprovalCard } from "./tools/approval-card";
+import { MetricsChart } from "./tools/metrics-chart";
+import { SubscriberCard } from "./tools/subscriber-card";
+import { SubscriberList } from "./tools/subscriber-list";
 
 // Shape of a v6 tool UI part as we expect to receive it from the
 // `useChat` SSE stream. The narrow `tool-${string}` template gives us
@@ -31,6 +34,30 @@ export function RoviToolUI({ part }: { part: ToolPart }): ReactNode {
     typeof part.output === "object"
   ) {
     return <ApprovalCard intent={part.output as never} />;
+  }
+  if (
+    name === "query.subscribers.get" &&
+    part.output &&
+    typeof part.output === "object"
+  ) {
+    return (
+      <SubscriberCard
+        {...(part.output as { id: string; plan?: string; status?: string })}
+      />
+    );
+  }
+  if (
+    name === "query.subscribers.search" &&
+    part.output &&
+    typeof part.output === "object"
+  ) {
+    const o = part.output as {
+      subscribers?: Array<{ id: string; plan?: string; status?: string }>;
+    };
+    return <SubscriberList subscribers={o.subscribers ?? []} />;
+  }
+  if (name.startsWith("query.metrics.")) {
+    return <MetricsChart name={name} output={part.output} />;
   }
   return (
     <pre className="overflow-auto rounded-md border border-rv-divider bg-rv-c2 p-2 text-[11px] text-rv-mute-700">
