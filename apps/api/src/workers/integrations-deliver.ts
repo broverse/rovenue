@@ -27,6 +27,10 @@ import {
 } from "../queues/integrations";
 import { getProvider } from "../services/integrations/registry";
 import { createUndiciHttpClient } from "../services/integrations/http-client";
+import { audit } from "../lib/audit";
+import { captureNotifierError } from "../lib/sentry-notifications";
+import { publishIntegrationDeliveryLiveEvent } from "../services/integrations/live-events";
+import { reportDeadLetterToSentry } from "../services/integrations/sentry-bridge";
 import type {
   IntegrationConnection,
   IntegrationDelivery,
@@ -343,6 +347,9 @@ export async function ensureIntegrationsDeliverWorker(
     enableOfflineQueue: false,
   });
 
+  // Separate Redis connection for pub/sub — must not share with BullMQ connection
+  const livePublisher = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
+
   const http = createUndiciHttpClient();
 
   const worker = new Worker<IntegrationsDeliverJob>(
@@ -365,6 +372,47 @@ export async function ensureIntegrationsDeliverWorker(
         provider: getProvider(job.providerId),
         http,
         attempt,
+        publishLiveEvent: async (ev) => {
+          await publishIntegrationDeliveryLiveEvent(livePublisher, {
+            type: "integration.delivery",
+            projectId: ev.projectId,
+            integrationId: ev.connectionId,
+            provider: ev.providerId,
+            eventType: ev.eventKey,
+            success: ev.status === "succeeded",
+            durationMs: 0,
+            attemptNumber: attempt,
+            timestamp: new Date().toISOString(),
+          });
+        },
+        auditDeadLetter: async (input) => {
+          await audit({
+            projectId: input.projectId,
+            userId: "system",
+            action: "integration.delivery.dead_letter",
+            resource: "integration_connection",
+            resourceId: input.connectionId,
+            after: {
+              outboxEventId: input.outboxEventId,
+              providerId: input.providerId,
+              errorMessage: input.errorMessage ?? null,
+            },
+          });
+        },
+        captureSentry: (ctx) => {
+          reportDeadLetterToSentry(
+            { captureNotifierError },
+            new Error(ctx.errorMessage ?? "dead_letter"),
+            {
+              integrationId: ctx.connectionId,
+              provider: ctx.providerId,
+              eventType: ctx.outboxEventId,
+              projectId: job.projectId,
+              attemptNumber: attempt,
+              reason: ctx.errorMessage ?? "dead_letter",
+            },
+          );
+        },
       };
 
       await runDeliverStep(job, deps);
@@ -408,6 +456,7 @@ export async function ensureIntegrationsDeliverWorker(
   return {
     stop: async () => {
       await worker.close();
+      await livePublisher.quit();
       await connection.quit();
       log.info("stopped");
     },
