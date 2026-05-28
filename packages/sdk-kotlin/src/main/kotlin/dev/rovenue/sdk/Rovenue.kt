@@ -36,7 +36,15 @@ class Rovenue private constructor(
     internal val core: RovenueCore,
     internal val bridge: ObserverBridge,
     internal val dispatcher: Dispatcher,
+    private val appVersion: String?,
 ) {
+    /**
+     * Test-only accessor that exposes the appVersion captured at
+     * configure() time. Used by `AppVersionTest` to verify the wiring
+     * without scraping the actual session-event request body.
+     */
+    internal val resolvedAppVersionForTesting: String? get() = appVersion
+
     companion object {
         // Guarded by `lock`. Configure-twice replaces the instance
         // (RevenueCat / Adapty pattern). Accessing `shared` before
@@ -48,17 +56,37 @@ class Rovenue private constructor(
         @Volatile
         private var _shared: Rovenue? = null
 
+        /**
+         * Configure the SDK.
+         *
+         * @param appVersion The host app's user-facing version string. On
+         *   Android, callers should pass
+         *   `context.packageManager.getPackageInfo(context.packageName, 0).versionName`
+         *   (or the API 33+ flags overload). The standalone JVM SDK has no
+         *   `Context`, so the value is supplied explicitly; the RN bridge
+         *   forwards the PackageManager value automatically.
+         */
         @Throws(RovenueException::class)
-        fun configure(apiKey: String, baseUrl: String, debug: Boolean = false) {
+        fun configure(
+            apiKey: String,
+            baseUrl: String,
+            debug: Boolean = false,
+            appVersion: String? = null,
+        ) {
             emit(LogEntry(level = "info", message = "configure"))
             if (apiKey.isBlank()) {
                 throw RovenueException.InvalidApiKey("apiKey is blank")
             }
-            val config = Config(apiKey = apiKey, baseUrl = baseUrl, debug = debug)
+            val config = Config(
+                apiKey = apiKey,
+                baseUrl = baseUrl,
+                debug = debug,
+                appVersion = appVersion,
+            )
             val core = RovenueCore(config)  // may throw RovenueException
             val bridge = ObserverBridge()
             core.registerObserver(bridge)
-            val instance = Rovenue(core, bridge, Dispatcher())
+            val instance = Rovenue(core, bridge, Dispatcher(), appVersion)
             synchronized(lock) {
                 _shared?.shutdownInternal()
                 _shared = instance
