@@ -321,7 +321,7 @@ describe("listDailyMrr (CH-exclusive)", () => {
         const rows = await queryAnalytics<{ c: string }>(
           projectId,
           `SELECT count() AS c
-             FROM rovenue.mv_mrr_daily_target FINAL
+             FROM rovenue.v_mrr_daily
             WHERE projectId = {projectId:String}`,
         );
         return Number(rows[0]?.c ?? 0) >= 2;

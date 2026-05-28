@@ -37,12 +37,11 @@ export async function listDailyMrr(
       toStartOfDay(day)               AS bucket,
       toString(gross_usd)             AS gross_usd,
       toUInt64(event_count)           AS event_count,
-      uniqMerge(subscribersHll)       AS active_subscribers
-    FROM rovenue.mv_mrr_daily_target FINAL
+      toUInt64(active_subscribers)    AS active_subscribers
+    FROM rovenue.v_mrr_daily
     WHERE projectId = {projectId:String}
       AND day >= {from:Date}
       AND day <= {to:Date}
-    GROUP BY projectId, day, gross_usd, event_count
     ORDER BY day ASC
   `;
 
