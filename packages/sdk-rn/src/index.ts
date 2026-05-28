@@ -48,6 +48,7 @@ import { entitlement, entitlementsAll, refreshEntitlements } from "./api/entitle
 import { creditBalance, refreshCredits, consumeCredits } from "./api/credits";
 import { postAppleReceipt, postGoogleReceipt } from "./api/receipts";
 import { setForeground, shutdown } from "./api/lifecycle";
+import { getAppAccountToken } from "./api/accountToken";
 import { SDK_VERSION } from "./version";
 import { getEmitter } from "./core/native";
 import { setLogHandler } from "./api/log";
@@ -65,6 +66,7 @@ export const Rovenue = {
   consumeCredits,
   postAppleReceipt,
   postGoogleReceipt,
+  getAppAccountToken,
   setForeground,
   shutdown,
   setLogHandler,
