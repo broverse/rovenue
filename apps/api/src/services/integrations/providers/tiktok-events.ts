@@ -120,7 +120,7 @@ export const tiktokEventsProvider: IntegrationProvider = {
     if (res.status >= 200 && res.status < 300) {
       return { ok: true };
     }
-    return { ok: false, reason: `HTTP ${res.status}: ${res.body}` };
+    return { ok: false, reason: `validate http ${res.status}: ${res.body.slice(0, 200)}` };
   },
 
   mapEvent(
@@ -207,7 +207,7 @@ export const tiktokEventsProvider: IntegrationProvider = {
       ok,
       httpStatus: res.status,
       responseBody: res.body,
-      errorMessage: ok ? undefined : `HTTP ${res.status}`,
+      errorMessage: ok ? undefined : `tiktok http ${res.status}`,
       retriable,
     };
   },
