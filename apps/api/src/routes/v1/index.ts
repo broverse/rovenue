@@ -7,6 +7,7 @@ import { experimentsRoute } from "./experiments";
 import { funnelClaimRoute } from "./funnel-claim";
 import { meRoute } from "./me";
 import { receiptsRoute } from "./receipts";
+import { sdkSessionsRoute } from "./sdk-sessions";
 import { subscribersRoute } from "./subscribers";
 import { offeringsRoute } from "./offerings";
 
@@ -40,6 +41,7 @@ export const v1Route = new Hono()
   .route("/experiments", experimentsRoute)
   .route("/me", meRoute)
   .route("/receipts", receiptsRoute)
+  .route("/sdk/sessions", sdkSessionsRoute)
   .route("/subscribers", subscribersRoute)
   .route("/offerings", offeringsRoute)
   // funnelClaimRoute owns `/subscribers/claim-funnel-token` and
