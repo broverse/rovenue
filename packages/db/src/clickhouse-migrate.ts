@@ -76,10 +76,22 @@ async function applyMigration(
   // ClickHouse does not support multi-statement in a single query;
   // split on `;` that end a line. Migration files must not contain
   // `;` mid-statement — the raw_* schemas in this plan honour that.
+  //
+  // Each chunk may carry leading `--` comment lines that belong to the
+  // statement that follows. Strip those leading comment (and blank)
+  // lines per chunk rather than discarding the whole chunk; otherwise a
+  // statement preceded by a comment block would be silently dropped
+  // while the migration is still recorded as applied.
   const statements = content
     .split(/;\s*$/m)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && !s.startsWith("--"));
+    .map((chunk) => {
+      const lines = chunk.split("\n");
+      const start = lines.findIndex(
+        (line) => line.trim().length > 0 && !line.trim().startsWith("--"),
+      );
+      return start >= 0 ? lines.slice(start).join("\n").trim() : "";
+    })
+    .filter((s) => s.length > 0);
 
   for (const statement of statements) {
     await client.command({ query: statement });
