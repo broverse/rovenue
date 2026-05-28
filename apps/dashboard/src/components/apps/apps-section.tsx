@@ -8,9 +8,10 @@ type Props = {
   totalCount: number;
   onViewAll: (category: CategoryId) => void;
   onSelect?: (id: string) => void;
+  onOpenIntegration?: (providerId: string) => void;
 };
 
-export function AppsSection({ category, apps, totalCount, onViewAll, onSelect }: Props) {
+export function AppsSection({ category, apps, totalCount, onViewAll, onSelect, onOpenIntegration }: Props) {
   const { t } = useTranslation();
   if (apps.length === 0) return null;
   return (
@@ -32,7 +33,7 @@ export function AppsSection({ category, apps, totalCount, onViewAll, onSelect }:
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]">
         {apps.map((app) => (
-          <AppCard key={app.id} app={app} onSelect={onSelect} />
+          <AppCard key={app.id} app={app} onSelect={onSelect} onOpenIntegration={onOpenIntegration} />
         ))}
       </div>
     </section>
