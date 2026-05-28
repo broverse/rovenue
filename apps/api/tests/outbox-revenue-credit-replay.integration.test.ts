@@ -31,12 +31,13 @@
 //   8. Assert: counts + sums are unchanged (ReplacingMergeTree
 //      on (projectId, eventDate/createdAt, eventId) dedupes).
 //
-// mv_mrr_daily_target and mv_credit_balance_target are intentionally
-// NOT asserted post-replay: the source of truth is raw_revenue_events
-// and raw_credit_ledger. Downstream MV idempotency follows from
-// raw-table idempotency. The MV chain quirk (documented in D.3)
-// means the MV may not fire from the Kafka chain in a fresh
-// testcontainer, so asserting MV counts is unreliable in this test.
+// Downstream aggregates are intentionally NOT asserted post-replay:
+// the source of truth is raw_revenue_events and raw_credit_ledger.
+// As of migration 0012 the money aggregates are query-time views
+// (v_mrr_daily, v_credit_consumption_daily, v_credit_balance,
+// v_revenue_lifetime_subscriber) over these deduped raw tables, so
+// their idempotency follows directly from raw-table idempotency —
+// asserting the raw FINAL snapshots below is sufficient.
 //
 // Port allocation (fixed host ports, no dynamic mapping):
 //   BROKER_EXTERNAL_PORT = 19097  (not used by any other test)
