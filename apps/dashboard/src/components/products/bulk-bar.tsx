@@ -23,7 +23,7 @@ export function BulkBar({ selectedCount, onClear }: Props) {
         {t("products.bulk.changeGroup")}
       </Button>
       <Button variant="light" size="sm" className="h-[26px] text-[12px]">
-        {t("products.bulk.linkEntitlement")}
+        {t("products.bulk.linkAccess")}
       </Button>
       <Button variant="light" size="sm" className="h-[26px] text-[12px]">
         {t("products.bulk.archive")}
