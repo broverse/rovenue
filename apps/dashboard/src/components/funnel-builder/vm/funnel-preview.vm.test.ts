@@ -23,9 +23,9 @@ function makeVm(
 describe("FunnelPreviewViewModel", () => {
   it("walks sequentially when no rule matches", () => {
     const vm = makeVm([
-      { id: "pg_1", type: "info", title: "A" },
-      { id: "pg_2", type: "info", title: "B" },
-      { id: "pg_pay", type: "paywall", headline: "Pay" },
+      { id: "pg_1", type: "info", title: { en: "A" } },
+      { id: "pg_2", type: "info", title: { en: "B" } },
+      { id: "pg_pay", type: "paywall", headline: { en: "Pay" } },
     ]);
     expect(vm.currentPageId).toBe("pg_1");
     vm.answerAndAdvance(null, null);
@@ -37,9 +37,9 @@ describe("FunnelPreviewViewModel", () => {
   it("jumps via 'paywall' literal goto", () => {
     const vm = makeVm(
       [
-        { id: "pg_1", type: "info", title: "A" },
-        { id: "pg_2", type: "info", title: "B" },
-        { id: "pg_pay", type: "paywall", headline: "Pay" },
+        { id: "pg_1", type: "info", title: { en: "A" } },
+        { id: "pg_2", type: "info", title: { en: "B" } },
+        { id: "pg_pay", type: "paywall", headline: { en: "Pay" } },
       ],
       {},
       { pg_1: "paywall" },
@@ -51,8 +51,8 @@ describe("FunnelPreviewViewModel", () => {
 
   it("reset returns to start", () => {
     const vm = makeVm([
-      { id: "pg_1", type: "info", title: "A" },
-      { id: "pg_2", type: "info", title: "B" },
+      { id: "pg_1", type: "info", title: { en: "A" } },
+      { id: "pg_2", type: "info", title: { en: "B" } },
       { id: "pg_pay", type: "paywall" },
     ]);
     vm.answerAndAdvance(null, null);

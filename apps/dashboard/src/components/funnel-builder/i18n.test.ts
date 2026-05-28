@@ -41,7 +41,7 @@ describe("normalizeFunnel", () => {
     const f = bareFunnel({
       pages: [{
         id: "p1", type: "single_choice",
-        options: [{ label: "Yes" as unknown as Page["options"][number]["label"], value: "y" }],
+        options: [{ label: "Yes" as unknown as NonNullable<Page["options"]>[number]["label"], value: "y" }],
       }],
     });
     const out = normalizeFunnel(f);

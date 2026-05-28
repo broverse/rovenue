@@ -67,7 +67,7 @@ describe("FunnelDraftViewModel", () => {
 
     vm.rename("renamed");
     vm.rename("renamed again");
-    vm.updatePage("pg_1", { title: "Bonjour" });
+    vm.updatePage("pg_1", { title: { en: "Bonjour" } });
     // Within the throttle window we expect at most one PATCH (the leading one).
     await vi.advanceTimersByTimeAsync(100);
     const beforeWindow = patchDraft.mock.calls.length;

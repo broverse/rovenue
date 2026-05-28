@@ -311,7 +311,10 @@ export class FunnelDraftViewModel {
     if (!page) return;
     if (!page.options) page.options = [];
     const i = page.options.length;
-    page.options.push({ label: `Option ${i + 1}`, value: `option_${i + 1}` });
+    page.options.push({
+      label: { [this.defaultLocale]: `Option ${i + 1}` },
+      value: `option_${i + 1}`,
+    });
   }
   updateOption(pageId: string, idx: number, patch: { label?: string; value?: string }) {
     const page = this.pages.find((p) => p.id === pageId);

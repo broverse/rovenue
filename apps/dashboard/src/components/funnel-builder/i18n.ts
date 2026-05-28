@@ -91,16 +91,14 @@ export function resolvePage(
 }
 
 function liftPageFields(page: Page, defaultLocale: LocaleCode): Page {
-  const next: Page = { ...page };
+  const next = { ...page } as Record<string, unknown>;
   for (const field of LOCALIZED_PAGE_FIELDS) {
     const v = next[field];
     if (v == null) continue;
-    const lifted = liftToLocalized(v as Localized<unknown> | unknown, defaultLocale);
-    if (lifted !== undefined) {
-      next[field] = lifted as Page[typeof field];
-    }
+    const lifted = liftToLocalized(v, defaultLocale);
+    if (lifted !== undefined) next[field] = lifted;
   }
-  return next;
+  return next as Page;
 }
 
 export type { Option };
