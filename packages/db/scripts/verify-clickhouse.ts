@@ -93,6 +93,9 @@ const EXPECTED_TABLES: ReadonlyArray<{ name: string; engine: string }> = [
   { name: "sdk_session_events_queue", engine: "Kafka" },
   { name: "raw_sdk_session_events", engine: "ReplacingMergeTree" },
   { name: "mv_sdk_sessions_to_raw", engine: "MaterializedView" },
+  // Plan 3 — Refund Shield per-subscriber daily session rollup
+  { name: "sdk_sessions_daily_tbl", engine: "SummingMergeTree" },
+  { name: "sdk_sessions_daily", engine: "MaterializedView" },
 ];
 
 interface TableRow {
