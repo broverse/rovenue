@@ -3,7 +3,7 @@ import { logger } from "../lib/logger";
 
 const log = logger.child("access-engine");
 
-const ENTITLEMENT_GRANTING_STATUSES: ReadonlySet<PurchaseStatus> = new Set<
+const ACCESS_GRANTING_STATUSES: ReadonlySet<PurchaseStatus> = new Set<
   PurchaseStatus
 >([PurchaseStatus.ACTIVE, PurchaseStatus.TRIAL, PurchaseStatus.GRACE_PERIOD]);
 
@@ -26,7 +26,7 @@ export async function syncAccess(subscriberId: string): Promise<void> {
     // subscribers; blocking for the same one.
     await drizzle.lockRepo.advisoryXactLock(tx, subscriberId);
 
-    const purchases = await drizzle.accessRepo.findPurchasesWithEntitlementKeys(
+    const purchases = await drizzle.accessRepo.findPurchasesWithAccessIds(
       tx,
       subscriberId,
     );
@@ -40,16 +40,16 @@ export async function syncAccess(subscriberId: string): Promise<void> {
     const desired = new Map<string, Target>();
 
     for (const purchase of purchases) {
-      if (!ENTITLEMENT_GRANTING_STATUSES.has(purchase.status as PurchaseStatus)) continue;
+      if (!ACCESS_GRANTING_STATUSES.has(purchase.status as PurchaseStatus)) continue;
       if (purchase.expiresDate && purchase.expiresDate < now) continue;
 
-      for (const key of purchase.entitlementKeys) {
-        const existing = desired.get(key);
+      for (const accessId of purchase.accessIds) {
+        const existing = desired.get(accessId);
         if (
           !existing ||
           isLaterExpiry(purchase.expiresDate, existing.expiresDate)
         ) {
-          desired.set(key, {
+          desired.set(accessId, {
             purchaseId: purchase.id,
             expiresDate: purchase.expiresDate,
             store: purchase.store,
@@ -64,17 +64,17 @@ export async function syncAccess(subscriberId: string): Promise<void> {
     );
 
     for (const record of current) {
-      const target = desired.get(record.entitlementKey);
+      const target = desired.get(record.accessId);
       const isSource = target?.purchaseId === record.purchaseId;
       if (!isSource && record.isActive) {
         await drizzle.accessRepo.setAccessActive(tx, record.id, false);
       }
     }
 
-    for (const [key, target] of desired) {
+    for (const [accessId, target] of desired) {
       const existing = current.find(
         (r) =>
-          r.entitlementKey === key && r.purchaseId === target.purchaseId,
+          r.accessId === accessId && r.purchaseId === target.purchaseId,
       );
       if (existing) {
         const expiryChanged =
@@ -91,7 +91,7 @@ export async function syncAccess(subscriberId: string): Promise<void> {
         await drizzle.accessRepo.createAccess(tx, {
           subscriberId,
           purchaseId: target.purchaseId,
-          entitlementKey: key,
+          accessId,
           isActive: true,
           expiresDate: target.expiresDate,
           store: target.store,
@@ -109,22 +109,20 @@ export async function syncAccess(subscriberId: string): Promise<void> {
 
 export async function hasAccess(
   subscriberId: string,
-  entitlementKey: string,
+  accessId: string,
 ): Promise<boolean> {
   const records = await drizzle.accessRepo.findActiveAccess(
     drizzle.db,
     subscriberId,
     new Date(),
   );
-  return records.some((r) => r.entitlementKey === entitlementKey);
+  return records.some((r) => r.accessId === accessId);
 }
 
 export async function getActiveAccess(
   subscriberId: string,
 ): Promise<Record<string, ActiveAccessEntry>> {
   const now = new Date();
-  // Phase 6 cutover: Drizzle canonical. SDK entitlement checks
-  // land on subscriberAccess.findActive via the repo.
   const records = await drizzle.accessRepo.findActiveAccess(
     drizzle.db,
     subscriberId,
@@ -133,12 +131,12 @@ export async function getActiveAccess(
 
   const result: Record<string, ActiveAccessEntry> = {};
   for (const record of records) {
-    const existing = result[record.entitlementKey];
+    const existing = result[record.accessId];
     if (
       !existing ||
       isLaterExpiry(record.expiresDate, existing.expiresDate)
     ) {
-      result[record.entitlementKey] = {
+      result[record.accessId] = {
         isActive: record.isActive,
         expiresDate: record.expiresDate,
         store: record.store,
