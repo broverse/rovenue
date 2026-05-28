@@ -315,7 +315,7 @@ function DialogBody(props: Props) {
             </option>
             {accessRows.map((row) => (
               <option key={row.id} value={row.id}>
-                {row.name} ({row.key})
+                {row.displayName} ({row.identifier})
               </option>
             ))}
           </select>

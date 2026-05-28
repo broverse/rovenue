@@ -19,11 +19,12 @@ export const accessChipVariants = cva(
 export type AccessChipProps = VariantProps<typeof accessChipVariants> & {
   children: ReactNode;
   className?: string;
+  title?: string;
 };
 
-export function AccessChip({ tone, children, className }: AccessChipProps) {
+export function AccessChip({ tone, children, className, title }: AccessChipProps) {
   return (
-    <span className={cn(accessChipVariants({ tone }), className)}>
+    <span className={cn(accessChipVariants({ tone }), className)} title={title}>
       {children}
     </span>
   );
