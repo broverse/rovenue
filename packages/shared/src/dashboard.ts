@@ -269,8 +269,8 @@ export interface SubscriberListFilters {
   q?: string;
   /** Derived lifecycle status — drives the dashboard scope tabs. */
   status?: SubscriberListStatusFilter;
-  /** Entitlement key the subscriber must currently hold. */
-  entitlement?: string;
+  /** Access identifier the subscriber must currently hold. */
+  access?: string;
   /** Any-of platform filter (`ios`/`android`/`web`). */
   platforms?: ReadonlyArray<SubscriberListPlatform>;
   /** 2-letter country code (case-insensitive). */
@@ -298,7 +298,7 @@ export interface SubscriberPurchase {
 }
 
 export interface SubscriberAccessRow {
-  entitlementKey: string;
+  accessId: string;
   isActive: boolean;
   expiresDate: string | null;
   store: "APP_STORE" | "PLAY_STORE" | "STRIPE" | "MANUAL";
@@ -1281,7 +1281,7 @@ export interface DashboardProductRow {
   type: ProductTypeName;
   displayName: string;
   storeIds: Record<string, string>;
-  entitlementKeys: string[];
+  accessIds: string[];
   creditAmount: number | null;
   isActive: boolean;
   metadata: Record<string, unknown>;
@@ -1299,7 +1299,7 @@ export interface DashboardProductCreateInput {
   type: ProductTypeName;
   displayName: string;
   storeIds?: Record<string, string>;
-  entitlementKeys?: string[];
+  accessIds?: string[];
   creditAmount?: number | null;
   isActive?: boolean;
   metadata?: Record<string, unknown>;
@@ -1310,7 +1310,7 @@ export interface DashboardProductUpdateInput {
   type?: ProductTypeName;
   displayName?: string;
   storeIds?: Record<string, string>;
-  entitlementKeys?: string[];
+  accessIds?: string[];
   creditAmount?: number | null;
   isActive?: boolean;
   metadata?: Record<string, unknown>;
@@ -1325,7 +1325,7 @@ export interface DashboardProductImportItem {
   /** Optional override; defaults to `storeId` when omitted. */
   displayName?: string;
   type: ProductTypeName;
-  entitlementKeys?: string[];
+  accessIds?: string[];
   creditAmount?: number | null;
   /** Optional metadata blob (e.g. `{ period: "P1M" }` for subscriptions). */
   metadata?: Record<string, unknown>;
@@ -1354,6 +1354,34 @@ export interface DashboardProductImportResponse {
   created: number;
   skipped: number;
   results: DashboardProductImportResultRow[];
+}
+
+// =============================================================
+// Dashboard: Access catalog
+// =============================================================
+
+export interface DashboardAccessRow {
+  id: string;
+  identifier: string;
+  displayName: string;
+  description: string | null;
+  productCount: number;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DashboardAccessCreateInput {
+  identifier: string;
+  displayName: string;
+  description?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export type DashboardAccessUpdateInput = Partial<DashboardAccessCreateInput>;
+
+export interface DashboardAccessListResponse {
+  rows: DashboardAccessRow[];
 }
 
 /** Membership entry inside a `ProductGroup.products` JSONB column. */

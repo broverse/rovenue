@@ -52,7 +52,7 @@ export const apiKeyInsertSchema = createInsertSchema(t.apiKeys, {
 });
 
 // =============================================================
-// products — with standalone storeIds / entitlementKeys schemas
+// products — with standalone storeIds / accessIds schemas
 // =============================================================
 
 /**
@@ -127,9 +127,19 @@ export const subscriberAccessSelectSchema = createSelectSchema(
 export const subscriberAccessInsertSchema = createInsertSchema(
   t.subscriberAccess,
   {
-    entitlementKey: (s) => s.regex(/^[a-z0-9][a-z0-9_-]*$/i),
+    // cuid2 FK to access.id — exactly 24 lowercase alphanumeric chars.
+    accessId: (s) => s.regex(/^[a-z0-9]{24}$/),
   },
 );
+
+/**
+ * Standalone schema for the cuid2 FK stored in `products.accessIds[]`
+ * (and `subscriber_access.accessId`). Route handlers and webhook
+ * adapters validate every member of the array with this.
+ */
+export const accessIdSchema = z.string().regex(/^[a-z0-9]{24}$/, {
+  message: "accessId must be a cuid2",
+});
 
 // =============================================================
 // credit_ledger (append-only)
