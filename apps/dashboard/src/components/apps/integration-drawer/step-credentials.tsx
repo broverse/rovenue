@@ -30,7 +30,7 @@ const PROVIDER_FIELDS: Record<
   // refresh. Both terms point to the same underlying CAPI endpoint; we
   // store the value under the legacy `pixelId` key for backwards-
   // compat with existing connections.
-  META_CAPI: { id: "pixelId", label: "Dataset ID" },
+  META_CAPI: { id: "pixelId", label: "Dataset ID (Pixel ID)" },
   TIKTOK_EVENTS: { id: "pixelCode", label: "Pixel Code" },
 };
 
