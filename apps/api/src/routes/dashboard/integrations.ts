@@ -31,6 +31,25 @@ import type { AuditTx } from "../../lib/audit";
 import type { NewIntegrationConnection } from "@rovenue/db/src/drizzle/schema";
 
 // =============================================================
+// Rollout ordering — first deploy of integrations framework
+// =============================================================
+//
+// 1. Apply migration 0053_integrations_framework.sql against the production
+//    database (pnpm db:migrate). pg_partman must be installed and the
+//    create_parent call inside the migration must succeed.
+// 2. Deploy the API binary. On boot, `startIntegrationsFanout()` joins the
+//    `rovenue-integrations-fanout` consumer group on rovenue.revenue +
+//    rovenue.billing and `ensureIntegrationsDeliverWorker()` starts.
+// 3. The dashboard route mounted below is reachable immediately, but until
+//    an operator creates a connection there are no consumers of the worker.
+//
+// No feature flag gates these routes — the only "off" state is "no
+// connection exists" or `is_enabled=false`. If we later want a hard kill
+// switch, add `INTEGRATIONS_FRAMEWORK_DISABLED=true` env check at the top
+// of this router.
+// =============================================================
+
+// =============================================================
 // Dashboard: Integration connections
 // =============================================================
 //
