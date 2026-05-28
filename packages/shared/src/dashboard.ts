@@ -363,7 +363,7 @@ export interface SubscriberDetail {
 
 export type DashboardExperimentType =
   | "FLAG"
-  | "PRODUCT_GROUP"
+  | "OFFERING"
   | "PAYWALL"
   | "ELEMENT";
 

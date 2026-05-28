@@ -322,7 +322,7 @@ export async function resolveProductGroup(
   );
 
   const override = Object.values(experiments).find(
-    (r) => r.type === "PRODUCT_GROUP",
+    (r) => r.type === "OFFERING",
   );
 
   if (override && typeof override.value === "string") {
@@ -332,7 +332,7 @@ export async function resolveProductGroup(
       override.value,
     );
     if (group) return group as unknown as ResolvedProductGroup;
-    log.warn("PRODUCT_GROUP experiment points at missing group", {
+    log.warn("OFFERING experiment points at missing offering", {
       projectId,
       experimentKey: override.key,
       identifier: override.value,

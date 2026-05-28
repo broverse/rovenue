@@ -400,6 +400,13 @@
       "when": 1780000210000,
       "tag": "0056_offerings",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1780000220000,
+      "tag": "0057_experiment_type_offering",
+      "breakpoints": true
     }
   ]
 }

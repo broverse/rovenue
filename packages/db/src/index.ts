@@ -116,7 +116,7 @@ export type RevenueEventType =
 
 export const ExperimentType = {
   FLAG: "FLAG",
-  PRODUCT_GROUP: "PRODUCT_GROUP",
+  OFFERING: "OFFERING",
   PAYWALL: "PAYWALL",
   ELEMENT: "ELEMENT",
 } as const;

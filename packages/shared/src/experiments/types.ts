@@ -9,10 +9,10 @@ import { z } from "zod";
 // The only thing that differs per type is what the SDK does with
 // `variant.value` at the call site:
 //
-//   FLAG          → boolean | string | number | null
-//   PRODUCT_GROUP → product group identifier (string)
-//   PAYWALL       → structured remote config (see PaywallConfig)
-//   ELEMENT       → arbitrary small object, one shape per experiment
+//   FLAG     → boolean | string | number | null
+//   OFFERING → offering identifier (string)
+//   PAYWALL  → structured remote config (see PaywallConfig)
+//   ELEMENT  → arbitrary small object, one shape per experiment
 //
 // The engine treats `variant.value` as opaque JSON. It never
 // introspects the shape — consumers cast it through a generic at
@@ -21,7 +21,7 @@ import { z } from "zod";
 
 export const EXPERIMENT_TYPE = {
   FLAG: "FLAG",
-  PRODUCT_GROUP: "PRODUCT_GROUP",
+  OFFERING: "OFFERING",
   PAYWALL: "PAYWALL",
   ELEMENT: "ELEMENT",
 } as const;
@@ -57,7 +57,7 @@ export type Variant = z.infer<typeof variantSchema>;
 export const experimentObjectSchema = z.object({
   type: z.enum([
     EXPERIMENT_TYPE.FLAG,
-    EXPERIMENT_TYPE.PRODUCT_GROUP,
+    EXPERIMENT_TYPE.OFFERING,
     EXPERIMENT_TYPE.PAYWALL,
     EXPERIMENT_TYPE.ELEMENT,
   ]),
