@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { streamText, convertToModelMessages } from "ai";
-import type { LanguageModel, UIMessage } from "ai";
+import { streamText, stepCountIs } from "ai";
+import type { LanguageModel, ModelMessage } from "ai";
 import { drizzle, currentYearMonth } from "@rovenue/db";
 import { decrypt } from "@rovenue/shared/crypto";
 import { requireDashboardAuth } from "../../../middleware/dashboard-auth";
@@ -38,16 +38,61 @@ export function __resetRoviModelFactoryForTests(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Input schema
+// Input schema — accepts the @ai-sdk/react v6 useChat payload
+// (`{ id, messages, trigger, ... }`) plus our custom `threadId` and `context`
+// fields. The legacy single-`message` form is also accepted so existing
+// integration tests keep working.
 // ---------------------------------------------------------------------------
-const chatBody = z.object({
-  threadId: z.string().min(1),
-  message: z.string().min(1).max(4000),
-  context: z.object({
-    route: z.string(),
-    focusedEntityId: z.string().optional(),
-  }),
+const uiPartSchema = z
+  .object({
+    type: z.string(),
+    text: z.string().optional(),
+  })
+  .passthrough();
+
+const uiMessageSchema = z.object({
+  id: z.string().optional(),
+  role: z.enum(["user", "assistant", "system"]),
+  parts: z.array(uiPartSchema).default([]),
 });
+
+const chatBody = z
+  .object({
+    /** v6 useChat session id — used as our threadId when none provided. */
+    id: z.string().min(1).optional(),
+    /** Our copilot thread id. Optional — auto-created from `id` on first use. */
+    threadId: z.string().optional(),
+    /** v6 useChat sends the full UI message history. We only use the last user message. */
+    messages: z.array(uiMessageSchema).optional(),
+    /** Legacy single-message shape (kept for integration tests + non-v6 callers). */
+    message: z.string().min(1).max(4000).optional(),
+    trigger: z.string().optional(),
+    context: z.object({
+      route: z.string(),
+      focusedEntityId: z.string().optional(),
+    }),
+  })
+  .refine((b) => Boolean(b.messages?.length || b.message), {
+    message: "Provide either `messages` (v6) or `message`",
+    path: ["messages"],
+  });
+
+function extractLastUserText(
+  body: z.infer<typeof chatBody>,
+): string | null {
+  if (body.message) return body.message;
+  const messages = body.messages ?? [];
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    const text = m.parts
+      .filter((p) => p.type === "text" && typeof p.text === "string")
+      .map((p) => p.text as string)
+      .join("");
+    if (text.trim().length > 0) return text;
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Route
@@ -59,25 +104,22 @@ export const copilotChatRoute = new Hono()
     const projectId = c.req.param("projectId")!;
     const user = c.get("user");
     const membership = await assertProjectAccess(projectId, user.id);
-    const { threadId, message, context } = c.req.valid("json");
+    const body = c.req.valid("json");
+    const { context } = body;
 
-    // ------------------------------------------------------------------
-    // 1. Verify thread ownership.
-    // ------------------------------------------------------------------
-    const thread = await drizzle.copilotThreadRepo.getThread(
-      drizzle.db,
-      threadId,
-    );
-    if (
-      !thread ||
-      thread.projectId !== projectId ||
-      thread.userId !== user.id
-    ) {
-      throw new HTTPException(404, { message: "Thread not found" });
+    const message = extractLastUserText(body);
+    if (!message) {
+      throw new HTTPException(400, { message: "No user message in payload" });
+    }
+    if (message.length > 4000) {
+      throw new HTTPException(400, {
+        message: "Message exceeds 4000 characters",
+      });
     }
 
     // ------------------------------------------------------------------
-    // 2. Resolve provider (BYOK > env fallback).
+    // 1. Resolve provider (BYOK > env fallback) — needed up-front so we
+    //    can stamp provider/model onto a newly created thread.
     // ------------------------------------------------------------------
     let resolved: Awaited<ReturnType<typeof resolveProviderForProject>>;
     try {
@@ -112,6 +154,35 @@ export const copilotChatRoute = new Hono()
       }
       throw e;
     }
+
+    // ------------------------------------------------------------------
+    // 2. Get-or-create the thread. Prefer `threadId`; fall back to the
+    //    v6 useChat `id` so the same chat session keeps the same thread.
+    // ------------------------------------------------------------------
+    const candidateThreadId =
+      (body.threadId && body.threadId.length > 0 ? body.threadId : null) ??
+      body.id ??
+      null;
+
+    let thread = candidateThreadId
+      ? await drizzle.copilotThreadRepo.getThread(drizzle.db, candidateThreadId)
+      : null;
+
+    if (thread) {
+      if (thread.projectId !== projectId || thread.userId !== user.id) {
+        throw new HTTPException(404, { message: "Thread not found" });
+      }
+    } else {
+      thread = await drizzle.copilotThreadRepo.createThread(drizzle.db, {
+        id: candidateThreadId ?? undefined,
+        projectId,
+        userId: user.id,
+        title: message.slice(0, 60),
+        provider: resolved.provider,
+        model: resolved.model,
+      });
+    }
+    const threadId = thread.id;
 
     // ------------------------------------------------------------------
     // 3. Pseudonymize user message (replace bare email addresses with
@@ -178,22 +249,27 @@ export const copilotChatRoute = new Hono()
     });
 
     // ------------------------------------------------------------------
-    // 7. Build UIMessage[] for convertToModelMessages (v6 async API).
+    // 7. Build ModelMessage[] directly from stored parts. Each row's
+    //    `parts` holds the v6 ModelMessage `content` array shape (text /
+    //    tool-call / tool-result blocks). Skip the empty placeholder row
+    //    we created in step 5 — it exists only so action tools can
+    //    foreign-key an intent to a real message id before streaming
+    //    finishes.
     // ------------------------------------------------------------------
-    const uiMessages: UIMessage[] = recent.map((m) => ({
-      id: m.id,
-      role: m.role as "user" | "assistant",
-      content: typeof m.parts === "string" ? m.parts : "",
-      parts: Array.isArray(m.parts)
-        ? (m.parts as UIMessage["parts"])
-        : [],
-      createdAt: m.createdAt,
-    }));
-
-    const modelMessages = await convertToModelMessages(uiMessages);
+    const modelMessages: ModelMessage[] = recent
+      .filter((m) => Array.isArray(m.parts) && (m.parts as unknown[]).length > 0)
+      .map(
+        (m) =>
+          ({
+            role: m.role as "user" | "assistant" | "tool",
+            content: m.parts as ModelMessage["content"],
+          }) as ModelMessage,
+      );
 
     // ------------------------------------------------------------------
-    // 8. Stream.
+    // 8. Stream. `stopWhen: stepCountIs(5)` lets the model emit text
+    //    AFTER tool calls — v6's default is a single step, which would
+    //    leave the user staring at a tool-result card with no answer.
     // ------------------------------------------------------------------
     const result = streamText({
       model: modelFactory(resolved),
@@ -207,15 +283,20 @@ export const copilotChatRoute = new Hono()
       messages: modelMessages,
       tools,
       maxOutputTokens: 4096,
-      onFinish: async ({ usage, content }) => {
-        // Persist actual assistant message (replace the empty placeholder).
-        await drizzle.copilotMessageRepo.appendMessage(drizzle.db, {
-          threadId,
-          role: "assistant",
-          parts: content,
-          tokenIn: usage.inputTokens ?? 0,
-          tokenOut: usage.outputTokens ?? 0,
-        });
+      stopWhen: stepCountIs(5),
+      onFinish: async ({ usage, response }) => {
+        // Persist every message this turn produced — assistant text /
+        // tool-call blocks AND the synthesised tool-role messages
+        // containing tool_result blocks. Without the tool-role rows the
+        // next request would replay an assistant tool_use with no
+        // matching tool_result and Anthropic would 400.
+        for (const m of response.messages) {
+          await drizzle.copilotMessageRepo.appendMessage(drizzle.db, {
+            threadId,
+            role: m.role as "user" | "assistant" | "tool",
+            parts: m.content as unknown as object,
+          });
+        }
         await drizzle.copilotUsageRepo.bumpUsage(drizzle.db, {
           projectId,
           yearMonth: currentYearMonth(),
@@ -226,6 +307,9 @@ export const copilotChatRoute = new Hono()
       },
     });
 
-    // v6 exposes toTextStreamResponse on the StreamTextResult object.
-    return result.toTextStreamResponse();
+    // v6 useChat (@ai-sdk/react) expects the UI message stream format —
+    // `toTextStreamResponse()` emits plain text which the default
+    // transport silently ignores. `toUIMessageStreamResponse()` produces
+    // the data-stream SSE format the React hook actually parses.
+    return result.toUIMessageStreamResponse();
   });

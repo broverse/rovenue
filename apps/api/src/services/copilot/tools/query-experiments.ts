@@ -16,7 +16,7 @@ const ListArgs = z.object({
 
 export function queryExperimentsTools(ctx: ToolContext) {
   return {
-    "query.experiments.list": tool({
+    "query_experiments_list": tool({
       description:
         "List A/B experiments in the current project. Returns id, name, status, type, audienceId, startedAt, endedAt.",
       inputSchema: ListArgs,

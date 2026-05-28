@@ -4,9 +4,9 @@ import type { ToolContext } from "./query-subscribers";
 
 export function actionProductsTools(ctx: ToolContext) {
   return {
-    "action.products.updatePrice": createIntentTool({
+    "action_products_updatePrice": createIntentTool({
       ctx,
-      toolName: "action.products.updatePrice",
+      toolName: "action_products_updatePrice",
       description:
         "Update the display price of a product. Returns a pending intent; the user must approve before it executes.",
       inputSchema: z.object({

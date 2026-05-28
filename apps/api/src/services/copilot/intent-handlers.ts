@@ -35,7 +35,7 @@ export function registerAllIntentHandlers(): void {
   // the outbox; that composite operation is not yet exposed as a single
   // repo function in this worktree.
   // ------------------------------------------------------------------
-  registerIntentHandler("action.subscriptions.cancel", async (_ctx, _payload) => {
+  registerIntentHandler("action_subscriptions_cancel", async (_ctx, _payload) => {
     throw new Error(
       "not implemented: cancelSubscription repo function missing in this worktree",
     );
@@ -47,7 +47,7 @@ export function registerAllIntentHandlers(): void {
   // App Store / Play Store API call which is handled by a dedicated
   // service not yet wired in this worktree.
   // ------------------------------------------------------------------
-  registerIntentHandler("action.subscriptions.refund", async (_ctx, _payload) => {
+  registerIntentHandler("action_subscriptions_refund", async (_ctx, _payload) => {
     throw new Error(
       "not implemented: refundPurchaseFull repo function missing in this worktree",
     );
@@ -58,7 +58,7 @@ export function registerAllIntentHandlers(): void {
   // Uses accessRepo.createAccess — creates a complimentary access row.
   // ------------------------------------------------------------------
   registerIntentHandler(
-    "action.subscribers.grantAccess",
+    "action_subscribers_grantAccess",
     async (ctx, payload) => {
       const { subscriberId, accessId, expiresDate } = payload as {
         subscriberId: string;
@@ -104,7 +104,7 @@ export function registerAllIntentHandlers(): void {
   // then soft-delete the source as merged. All four mutations + audit
   // run inside one transaction.
   // ------------------------------------------------------------------
-  registerIntentHandler("action.subscribers.transfer", async (ctx, payload) => {
+  registerIntentHandler("action_subscribers_transfer", async (ctx, payload) => {
     const { fromSubscriberId, toSubscriberId, reason } = payload as {
       fromSubscriberId: string;
       toSubscriberId: string;
@@ -177,7 +177,7 @@ export function registerAllIntentHandlers(): void {
   // driven); we patch metadata to record the intended price update.
   // ------------------------------------------------------------------
   registerIntentHandler(
-    "action.products.updatePrice",
+    "action_products_updatePrice",
     async (ctx, payload) => {
       const { productId, price, currency } = payload as {
         productId: string;
@@ -230,7 +230,7 @@ export function registerAllIntentHandlers(): void {
   // action.audiences.create
   // Uses audienceRepo.createAudience.
   // ------------------------------------------------------------------
-  registerIntentHandler("action.audiences.create", async (ctx, payload) => {
+  registerIntentHandler("action_audiences_create", async (ctx, payload) => {
     const { name, description, rules } = payload as {
       name: string;
       description?: string;
@@ -265,7 +265,7 @@ export function registerAllIntentHandlers(): void {
   // action.audiences.update
   // Uses audienceRepo.updateAudience.
   // ------------------------------------------------------------------
-  registerIntentHandler("action.audiences.update", async (ctx, payload) => {
+  registerIntentHandler("action_audiences_update", async (ctx, payload) => {
     const { audienceId, name, description, rules } = payload as {
       audienceId: string;
       name?: string;
@@ -300,7 +300,7 @@ export function registerAllIntentHandlers(): void {
   // action.featureFlags.toggle
   // Uses dashboardFeatureFlagRepo.updateFeatureFlag — flips isEnabled.
   // ------------------------------------------------------------------
-  registerIntentHandler("action.featureFlags.toggle", async (ctx, payload) => {
+  registerIntentHandler("action_featureFlags_toggle", async (ctx, payload) => {
     const { flagId, enabled } = payload as {
       flagId: string;
       enabled: boolean;
@@ -334,7 +334,7 @@ export function registerAllIntentHandlers(): void {
   // Uses dashboardFeatureFlagRepo.updateFeatureFlag — patches rules.
   // ------------------------------------------------------------------
   registerIntentHandler(
-    "action.featureFlags.updateRules",
+    "action_featureFlags_updateRules",
     async (ctx, payload) => {
       const { flagId, rules } = payload as {
         flagId: string;
@@ -369,7 +369,7 @@ export function registerAllIntentHandlers(): void {
   // action.experiments.start
   // Uses experimentRepo.updateExperiment — transitions status to RUNNING.
   // ------------------------------------------------------------------
-  registerIntentHandler("action.experiments.start", async (ctx, payload) => {
+  registerIntentHandler("action_experiments_start", async (ctx, payload) => {
     const { experimentId } = payload as { experimentId: string };
 
     return drizzle.db.transaction(async (tx) => {
@@ -399,7 +399,7 @@ export function registerAllIntentHandlers(): void {
   // action.experiments.stop
   // Uses experimentRepo.updateExperiment — transitions status to COMPLETED.
   // ------------------------------------------------------------------
-  registerIntentHandler("action.experiments.stop", async (ctx, payload) => {
+  registerIntentHandler("action_experiments_stop", async (ctx, payload) => {
     const { experimentId, winnerVariantId } = payload as {
       experimentId: string;
       winnerVariantId?: string;

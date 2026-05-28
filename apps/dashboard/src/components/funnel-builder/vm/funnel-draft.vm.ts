@@ -5,9 +5,11 @@ import {
 import type { NextRule } from "@rovenue/shared/funnel";
 import { validateFunnelGraph, type ValidatorIssue } from "@rovenue/shared/funnel";
 import { FunnelApi, type FunnelDetailDto } from "../../../lib/services/funnel-api";
-import type { Page, Theme, Settings, TabId } from "../types";
+import type { Page, Theme, Settings, TabId, Funnel } from "../types";
 import { toEvalPage } from "../types";
 import { loadFontFamily } from "../fonts";
+import { mapFunnelLocales, normalizeFunnel } from "../i18n";
+import type { LocaleCode } from "@rovenue/shared/i18n";
 
 export interface DraftProps {
   projectId: string;
@@ -66,6 +68,10 @@ export class FunnelDraftViewModel {
   // current snapshot to drive `isDirty` — so we don't ship no-op PATCHes
   // and the beforeunload guard only fires when there's something to lose.
   @state lastSavedSnapshot: string = "";
+
+  @state editLocale: LocaleCode = "en";
+  @state defaultLocale: LocaleCode = "en";
+  @state locales: LocaleCode[] = ["en"];
 
   // Canvas preview UI state lives on the VM so a) impair tracks change
   // for the `component()`-wrapped CanvasEditor and b) the wheel handler
@@ -179,12 +185,42 @@ export class FunnelDraftViewModel {
     }
   }
 
+  private applyFunnelDto(raw: FunnelDetailDto) {
+    // Locale metadata is authoritative on the DTO. Default-back to `en` only
+    // if the server omitted them (older payloads before the locale columns
+    // landed); page-level field lifting happens in applyServer when
+    // draftPages are written into this.pages.
+    this.defaultLocale = raw.defaultLocale ?? "en";
+    this.locales = raw.locales ?? [this.defaultLocale];
+    if (!this.locales.includes(this.editLocale)) this.editLocale = this.defaultLocale;
+    this.funnel = raw;
+  }
+
   private applyServer(funnel: FunnelDetailDto) {
-    this.funnel = funnel;
+    this.applyFunnelDto(funnel);
+    // Normalize page content (lift bare strings → Localized<string>) using
+    // the actual defaultLocale we just extracted from the DTO.
+    const rawPages = (funnel.draftPages as unknown as Page[]) ?? [];
+    const funnelForNorm: Funnel = {
+      id: funnel.id,
+      name: funnel.name,
+      slug: funnel.slug,
+      status: funnel.status,
+      version: 0,
+      draftDiffersFromPublished: funnel.draftDiffersFromPublished,
+      theme: {} as never,
+      settings: {} as never,
+      pages: rawPages,
+      rules: {},
+      default_next: {},
+      defaultLocale: this.defaultLocale,
+      locales: this.locales,
+    };
+    const normalized = normalizeFunnel(funnelForNorm);
     this.name = funnel.name;
     this.slug = funnel.slug;
     this.status = funnel.status;
-    this.pages = funnel.draftPages as unknown as Page[];
+    this.pages = normalized.pages;
     this.theme = { ...DEFAULT_THEME, ...(funnel.draftTheme as unknown as Partial<Theme>) };
     this.settings = { ...DEFAULT_SETTINGS, ...(funnel.draftSettings as unknown as Partial<Settings>) };
     this.rules = funnel.draftRules ?? {};
@@ -207,6 +243,8 @@ export class FunnelDraftViewModel {
       settings: this.settings,
       rules: this.rules,
       defaultNext: this.defaultNext,
+      defaultLocale: this.defaultLocale,
+      locales: this.locales,
     });
   }
 
@@ -275,7 +313,10 @@ export class FunnelDraftViewModel {
     if (!page) return;
     if (!page.options) page.options = [];
     const i = page.options.length;
-    page.options.push({ label: `Option ${i + 1}`, value: `option_${i + 1}` });
+    page.options.push({
+      label: { [this.defaultLocale]: `Option ${i + 1}` },
+      value: `option_${i + 1}`,
+    });
   }
   updateOption(pageId: string, idx: number, patch: { label?: string; value?: string }) {
     const page = this.pages.find((p) => p.id === pageId);
@@ -350,6 +391,8 @@ export class FunnelDraftViewModel {
         payload.draftSettings = this.settings as never;
         payload.draftRules = this.rules;
         payload.draftDefaultNext = this.defaultNext;
+        payload.defaultLocale = this.defaultLocale;
+        payload.locales = this.locales;
       } else if (scope === "settings") {
         payload.draftSettings = this.settings as never;
       } else if (scope === "theme") {
@@ -369,7 +412,7 @@ export class FunnelDraftViewModel {
         controller.signal,
       );
       if (this.saveController !== controller) return;
-      this.funnel = next;
+      this.applyFunnelDto(next);
       this.lastSavedAt = Date.now();
       this.lastSavedSnapshot = snap;
       this.autosaveStatus = "saved";
@@ -426,7 +469,7 @@ export class FunnelDraftViewModel {
     unreachable: Set<string>;
   } {
     const minimal = this.pages.map((p) =>
-      toEvalPage(p, this.rules[p.id] ?? [], this.defaultNext[p.id] ?? undefined),
+      toEvalPage(p, this.editLocale, this.rules[p.id] ?? [], this.defaultNext[p.id] ?? undefined),
     );
     const result = validateFunnelGraph(minimal as never);
     const errors = result.ok ? [] : result.issues;
@@ -482,6 +525,8 @@ export class FunnelDraftViewModel {
     void this.settings;
     void this.rules;
     void this.defaultNext;
+    void this.defaultLocale;
+    void this.locales;
     if (this.autosaveStatus === "error") this.autosaveStatus = "saving";
   }
 
@@ -490,7 +535,7 @@ export class FunnelDraftViewModel {
     if (!this.funnel || this.isLoading) return;
     // Touch every reactive field we want to send so the trigger re-runs when
     // any of them changes. impair's @trigger tracks reads inside the body.
-    const payload = {
+    const payload: Parameters<typeof this.api.patchDraft>[2] = {
       name: this.name,
       slug: this.slug,
       draftPages: this.pages as never,
@@ -498,6 +543,8 @@ export class FunnelDraftViewModel {
       draftSettings: this.settings as never,
       draftRules: this.rules,
       draftDefaultNext: this.defaultNext,
+      defaultLocale: this.defaultLocale,
+      locales: this.locales,
     };
     // Skip no-op PATCHes — the throttle fires on any read change, but
     // many of those (e.g. UI-only toggles wrapped in @state) leave the
@@ -519,7 +566,7 @@ export class FunnelDraftViewModel {
         controller.signal,
       );
       if (this.saveController !== controller) return;
-      this.funnel = next;
+      this.applyFunnelDto(next);
       this.lastSavedAt = Date.now();
       this.lastSavedSnapshot = snap;
       this.autosaveStatus = "saved";
@@ -553,6 +600,52 @@ export class FunnelDraftViewModel {
   async discardDraft() {
     const funnel = await this.api.get(this.props.projectId, this.props.funnelId);
     this.applyServer(funnel);
+  }
+
+  setEditLocale(locale: LocaleCode) {
+    if (!this.locales.includes(locale)) return;
+    this.editLocale = locale;
+  }
+
+  addLocale(locale: LocaleCode) {
+    if (this.locales.includes(locale)) return;
+    this.locales = [...this.locales, locale];
+    this.editLocale = locale;
+  }
+
+  setDefaultLocale(locale: LocaleCode) {
+    if (!this.locales.includes(locale)) return;
+    if (locale === this.defaultLocale) return;
+    this.defaultLocale = locale;
+  }
+
+  removeLocale(locale: LocaleCode) {
+    if (locale === this.defaultLocale) return;
+    if (!this.locales.includes(locale)) return;
+    this.locales = this.locales.filter((l) => l !== locale);
+    // Strip the removed locale key from every Localized<T> field on all pages.
+    const pagesShell: Funnel = {
+      id: "",
+      name: "",
+      slug: "",
+      status: "draft",
+      version: 0,
+      draftDiffersFromPublished: false,
+      theme: {} as never,
+      settings: {} as never,
+      pages: this.pages,
+      rules: {},
+      default_next: {},
+      defaultLocale: this.defaultLocale,
+      locales: this.locales,
+    };
+    const next = mapFunnelLocales(pagesShell, (loc) => {
+      const copy: Record<string, unknown> = { ...loc };
+      delete copy[locale];
+      return copy as typeof loc;
+    });
+    this.pages = next.pages;
+    if (this.editLocale === locale) this.editLocale = this.defaultLocale;
   }
 }
 

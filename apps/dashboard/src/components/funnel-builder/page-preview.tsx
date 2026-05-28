@@ -11,9 +11,11 @@ import {
   X,
 } from "lucide-react";
 import { component, useService } from "impair";
-import { useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { PAGE_TYPES, type Page, type ProgressStyle, type Theme } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
+import type { LocaleCode } from "@rovenue/shared/i18n";
+import { resolvePage, type ResolvedPage } from "./i18n";
 
 function isFilledColor(c?: string): c is string {
   return typeof c === "string" && c.trim().length > 0;
@@ -99,6 +101,8 @@ type Props = {
   // component doesn't depend on the draft VM and can be reused by the
   // public runner (which has no draft).
   pages: Page[];
+  locale: LocaleCode;
+  defaultLocale: LocaleCode;
   // When `editable`, choice rows surface hover affordances (drag handle on
   // the left, delete + branch icons on the right) and an "Add choice"
   // button appears below the list. The CanvasEditor turns this on; the
@@ -136,10 +140,16 @@ export const PagePreview = component(
     page,
     theme: rawTheme,
     pages,
+    locale,
+    defaultLocale,
     editable = false,
     onAdvance,
     chrome = "phone",
   }: Props) => {
+  const resolved: ResolvedPage = useMemo(
+    () => resolvePage(page, locale, defaultLocale),
+    [page, locale, defaultLocale],
+  );
   // Per-page overrides flow through `theme` — sub-components only see the
   // effective value and never need to know whether it came from the page or
   // the global theme.
@@ -174,11 +184,11 @@ export const PagePreview = component(
   const ctaLabel: string | null = (() => {
     switch (page.type) {
       case "welcome":
-        return page.cta || "Get started";
+        return resolved.cta || "Get started";
       case "paywall":
         return "Start free trial";
       case "success":
-        return page.cta || "Open app";
+        return resolved.cta || "Open app";
       case "single_choice":
       case "multi_choice":
       case "picture_choice":
@@ -198,7 +208,7 @@ export const PagePreview = component(
       case "text_input":
       case "statement":
       case "feature":
-        return page.cta || "Continue";
+        return resolved.cta || "Continue";
       default:
         return null;
     }
@@ -308,59 +318,59 @@ export const PagePreview = component(
           />
         )}
         <h1 className="m-0 text-[18px] font-semibold leading-tight tracking-tight">
-          {page.title || meta.label}
+          {resolved.title || meta.label}
         </h1>
-        {page.subtitle && (
-          <p className="m-0 text-[12px] leading-relaxed opacity-70">{page.subtitle}</p>
+        {resolved.subtitle && (
+          <p className="m-0 text-[12px] leading-relaxed opacity-70">{resolved.subtitle}</p>
         )}
         {(page.type === "single_choice" || page.type === "multi_choice") && (
           <Cap>
             {editable ? (
-              <ChoiceListEditable page={page} theme={theme} />
+              <ChoiceListEditable page={resolved} theme={theme} />
             ) : (
-              <ChoiceListReadOnly page={page} theme={theme} />
+              <ChoiceListReadOnly page={resolved} theme={theme} />
             )}
           </Cap>
         )}
         {page.type === "yes_no" && (
           <Cap>
-            <YesNoButtons page={page} theme={theme} />
+            <YesNoButtons page={resolved} theme={theme} />
           </Cap>
         )}
         {page.type === "picture_choice" && (
           <Cap>
-            <PictureChoiceList page={page} theme={theme} />
+            <PictureChoiceList page={resolved} theme={theme} />
           </Cap>
         )}
         {(page.type === "legal" || page.type === "checkbox") && (
           <Cap>
-            <LegalCheckbox page={page} theme={theme} />
+            <LegalCheckbox page={resolved} theme={theme} />
           </Cap>
         )}
         {page.type === "opinion_scale" && (
           <Cap>
-            <OpinionScale page={page} theme={theme} />
+            <OpinionScale page={resolved} theme={theme} />
           </Cap>
         )}
         {page.type === "rating" && (
           <Cap>
-            <RatingStars page={page} theme={theme} />
+            <RatingStars page={resolved} theme={theme} />
           </Cap>
         )}
         {page.type === "short_text" && (
           <Cap>
-            <TextField placeholder={page.placeholder} theme={theme} />
+            <TextField placeholder={resolved.placeholder} theme={theme} />
           </Cap>
         )}
         {page.type === "long_text" && (
           <Cap>
-            <TextArea placeholder={page.placeholder} theme={theme} />
+            <TextArea placeholder={resolved.placeholder} theme={theme} />
           </Cap>
         )}
         {page.type === "email" && (
           <Cap>
             <TextField
-              placeholder={page.placeholder ?? "you@example.com"}
+              placeholder={resolved.placeholder ?? "you@example.com"}
               theme={theme}
               type="email"
               icon={<Mail size={14} />}
@@ -370,7 +380,7 @@ export const PagePreview = component(
         {page.type === "phone" && (
           <Cap>
             <TextField
-              placeholder={page.placeholder ?? "+1 555 0000"}
+              placeholder={resolved.placeholder ?? "+1 555 0000"}
               theme={theme}
               type="tel"
               icon={<Phone size={14} />}
@@ -379,12 +389,12 @@ export const PagePreview = component(
         )}
         {page.type === "text_input" && (
           <Cap>
-            <TextField placeholder={page.placeholder} theme={theme} />
+            <TextField placeholder={resolved.placeholder} theme={theme} />
           </Cap>
         )}
         {page.type === "number_input" && (
           <Cap>
-            <NumberCounter page={page} theme={theme} />
+            <NumberCounter page={resolved} theme={theme} />
           </Cap>
         )}
         {page.type === "date_input" && (
@@ -394,25 +404,25 @@ export const PagePreview = component(
         )}
         {page.type === "slider" && (
           <Cap>
-            <SliderInput page={page} theme={theme} />
+            <SliderInput page={resolved} theme={theme} />
           </Cap>
         )}
         {page.type === "contact_info" && (
           <Cap>
-            <ContactInfoFields page={page} theme={theme} />
+            <ContactInfoFields page={resolved} theme={theme} />
           </Cap>
         )}
-        {page.type === "welcome" && <WelcomeBody page={page} theme={theme} />}
-        {page.type === "statement" && <StatementBody page={page} theme={theme} />}
-        {page.type === "feature" && <FeatureBody page={page} theme={theme} />}
-        {(page.type === "end_screen") && <EndScreenBody page={page} theme={theme} />}
+        {page.type === "welcome" && <WelcomeBody page={resolved} theme={theme} />}
+        {page.type === "statement" && <StatementBody page={resolved} theme={theme} />}
+        {page.type === "feature" && <FeatureBody page={resolved} theme={theme} />}
+        {(page.type === "end_screen") && <EndScreenBody page={resolved} theme={theme} />}
         {page.type === "paywall" && (
           <>
             <h2 className="mt-1 text-[18px] font-semibold leading-tight tracking-tight">
-              {page.headline}
+              {resolved.headline}
             </h2>
             <div className="mt-2 flex flex-col gap-2">
-              {(page.benefits || []).map((b) => (
+              {(resolved.benefits || []).map((b) => (
                 <div key={b} className="flex items-center gap-2 text-[12px]">
                   <span
                     className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-white"
@@ -438,9 +448,9 @@ export const PagePreview = component(
               <Check size={28} />
             </div>
             <h2 className="m-0 text-[18px] font-semibold leading-tight tracking-tight">
-              {page.title}
+              {resolved.title}
             </h2>
-            <p className="mt-1.5 text-[12px] leading-relaxed opacity-70">{page.body}</p>
+            <p className="mt-1.5 text-[12px] leading-relaxed opacity-70">{resolved.body}</p>
           </div>
         )}
       </div>
@@ -469,7 +479,7 @@ export const PagePreview = component(
 
 // ---------- Choice list ----------
 
-const ChoiceListReadOnly = component(({ page, theme }: { page: Page; theme: Theme }) => {
+const ChoiceListReadOnly = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
   return (
     <div className="mt-2 flex flex-col gap-2">
       {(page.options || []).slice(0, 6).map((o, i) => (
@@ -500,7 +510,7 @@ const ChoiceListReadOnly = component(({ page, theme }: { page: Page; theme: Them
   );
 });
 
-const ChoiceListEditable = component(({ page, theme }: { page: Page; theme: Theme }) => {
+const ChoiceListEditable = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
   const vm = useService(FunnelDraftViewModel);
   const options = page.options ?? [];
 
@@ -633,7 +643,7 @@ const ChoiceListEditable = component(({ page, theme }: { page: Page; theme: Them
 
 // ---------- Yes / No ----------
 
-const YesNoButtons = component(({ page, theme }: { page: Page; theme: Theme }) => {
+const YesNoButtons = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
   const opts = page.options?.length === 2 ? page.options : [
     { label: "Yes", value: "yes" },
     { label: "No", value: "no" },
@@ -667,7 +677,7 @@ const YesNoButtons = component(({ page, theme }: { page: Page; theme: Theme }) =
 
 // ---------- Number counter ----------
 
-const NumberCounter = component(({ page, theme }: { page: Page; theme: Theme }) => {
+const NumberCounter = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
   const min = page.min ?? 0;
   const max = page.max ?? 100;
   const step = page.step ?? 1;
@@ -723,7 +733,7 @@ function DatePicker({ theme }: { theme: Theme }) {
 
 // ---------- Slider ----------
 
-const SliderInput = component(({ page, theme }: { page: Page; theme: Theme }) => {
+const SliderInput = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
   const min = page.min ?? 0;
   const max = page.max ?? 100;
   const step = page.step ?? 1;
@@ -759,7 +769,7 @@ const SliderInput = component(({ page, theme }: { page: Page; theme: Theme }) =>
 
 // ---------- Picture choice ----------
 
-const PictureChoiceList = component(({ page, theme }: { page: Page; theme: Theme }) => (
+const PictureChoiceList = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => (
   <div className="mt-2 grid grid-cols-2 gap-2">
     {(page.options ?? []).slice(0, 6).map((o, i) => (
       <div
@@ -790,7 +800,7 @@ const PictureChoiceList = component(({ page, theme }: { page: Page; theme: Theme
 
 // ---------- Legal / checkbox ----------
 
-const LegalCheckbox = component(({ page, theme }: { page: Page; theme: Theme }) => (
+const LegalCheckbox = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => (
   <label className="mt-3 flex cursor-pointer items-start gap-2 text-[12px]">
     <span
       className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded"
@@ -809,7 +819,7 @@ const LegalCheckbox = component(({ page, theme }: { page: Page; theme: Theme }) 
 
 // ---------- Opinion scale 1-5 ----------
 
-const OpinionScale = component(({ page, theme }: { page: Page; theme: Theme }) => {
+const OpinionScale = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
   const min = page.min ?? 1;
   const max = page.max ?? 5;
   const items = [] as number[];
@@ -836,7 +846,7 @@ const OpinionScale = component(({ page, theme }: { page: Page; theme: Theme }) =
 
 // ---------- Rating stars ----------
 
-const RatingStars = component(({ page, theme }: { page: Page; theme: Theme }) => {
+const RatingStars = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
   const max = page.max ?? 5;
   // Local interactive preview state — click fills up to that star.
   // Hover lights up the in-flight rating so it feels live in the canvas.
@@ -919,7 +929,7 @@ function TextArea({ placeholder, theme }: { placeholder?: string; theme: Theme }
 
 // ---------- Contact info ----------
 
-const ContactInfoFields = component(({ page, theme }: { page: Page; theme: Theme }) => (
+const ContactInfoFields = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => (
   <div className="mt-3 flex flex-col gap-2">
     {page.collectName !== false && (
       <TextField placeholder="Full name" theme={theme} />
@@ -933,7 +943,7 @@ const ContactInfoFields = component(({ page, theme }: { page: Page; theme: Theme
 
 // ---------- Welcome / Statement / Feature / End ----------
 
-const WelcomeBody = component(({ page, theme }: { page: Page; theme: Theme }) => (
+const WelcomeBody = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => (
   <div className="flex flex-1 flex-col items-center justify-center px-2 text-center">
     <div
       className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl text-[24px] font-bold text-white"
@@ -948,7 +958,7 @@ const WelcomeBody = component(({ page, theme }: { page: Page; theme: Theme }) =>
   </div>
 ));
 
-const StatementBody = component(({ page }: { page: Page; theme: Theme }) => (
+const StatementBody = component(({ page }: { page: ResolvedPage; theme: Theme }) => (
   <div className="flex flex-1 items-center justify-center px-2 text-center">
     <p className="m-0 text-[14px] leading-relaxed opacity-80">
       {page.body || "Statement…"}
@@ -956,7 +966,7 @@ const StatementBody = component(({ page }: { page: Page; theme: Theme }) => (
   </div>
 ));
 
-const FeatureBody = component(({ page, theme }: { page: Page; theme: Theme }) => (
+const FeatureBody = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => (
   <div className="mt-1 flex flex-col gap-3">
     {page.headline && (
       <h2 className="m-0 text-[18px] font-semibold leading-tight">{page.headline}</h2>
@@ -977,7 +987,7 @@ const FeatureBody = component(({ page, theme }: { page: Page; theme: Theme }) =>
   </div>
 ));
 
-const EndScreenBody = component(({ page, theme }: { page: Page; theme: Theme }) => (
+const EndScreenBody = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => (
   <div className="flex flex-1 flex-col items-center justify-center px-2 text-center">
     <div
       className="mb-3 flex h-14 w-14 items-center justify-center rounded-full"

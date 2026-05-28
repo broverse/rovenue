@@ -16,7 +16,7 @@ const ListProductGroupsArgs = z.object({
 
 export function queryProductsTools(ctx: ToolContext) {
   return {
-    "query.products.list": tool({
+    "query_products_list": tool({
       description:
         "List products (in-app purchases / subscriptions) in the current project. Returns id, identifier, displayName, type, isActive.",
       inputSchema: ListProductsArgs,
@@ -29,7 +29,7 @@ export function queryProductsTools(ctx: ToolContext) {
         return sterilizeToolResult({ products: rows.slice(0, limit) });
       },
     }),
-    "query.productGroups.list": tool({
+    "query_productGroups_list": tool({
       description:
         "List product groups (offerings) in the current project. Returns id, identifier, isDefault.",
       inputSchema: ListProductGroupsArgs,

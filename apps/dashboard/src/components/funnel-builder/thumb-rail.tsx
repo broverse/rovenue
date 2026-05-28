@@ -6,6 +6,7 @@ import { PAGE_TYPES } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { AddContentPopover } from "./add-content-popover";
 import { blankPage } from "./blank-page";
+import { resolvePage } from "./i18n";
 
 export const ThumbRail = component(() => {
   const vm = useService(FunnelDraftViewModel);
@@ -36,7 +37,7 @@ export const ThumbRail = component(() => {
             <AddContentPopover
               align="rightOfTrigger"
               onPick={(t) => {
-                vm.addPage(blankPage(t), popover.insertAfter);
+                vm.addPage(blankPage(t, vm.defaultLocale), popover.insertAfter);
                 setPopover(null);
               }}
               onClose={() => setPopover(null)}
@@ -73,7 +74,8 @@ export const ThumbRail = component(() => {
           const hasError = issues.some((iss) => iss.code !== "UNREACHABLE");
           const branchCount = (vm.rules[p.id] ?? []).length;
           const selected = vm.selectedPageId === p.id;
-          const label = (p.title ?? "").trim() || (p.headline ?? "").trim() || meta.label;
+          const rp = resolvePage(p, vm.editLocale, vm.defaultLocale);
+          const label = (rp.title ?? "").trim() || (rp.headline ?? "").trim() || meta.label;
           return (
             <Fragment key={p.id}>
               {showEndingDivider && (
@@ -163,7 +165,7 @@ export const ThumbRail = component(() => {
               align="rightOfTrigger"
               verticalAlign="bottom"
               onPick={(t) => {
-                vm.addPage(blankPage(t), popover.insertAfter);
+                vm.addPage(blankPage(t, vm.defaultLocale), popover.insertAfter);
                 setPopover(null);
               }}
               onClose={() => setPopover(null)}

@@ -4,9 +4,9 @@ import type { ToolContext } from "./query-subscribers";
 
 export function actionAudiencesTools(ctx: ToolContext) {
   return {
-    "action.audiences.create": createIntentTool({
+    "action_audiences_create": createIntentTool({
       ctx,
-      toolName: "action.audiences.create",
+      toolName: "action_audiences_create",
       description:
         "Create a new audience segment with filter rules. Returns a pending intent; the user must approve before it executes.",
       inputSchema: z.object({
@@ -26,9 +26,9 @@ export function actionAudiencesTools(ctx: ToolContext) {
       }),
     }),
 
-    "action.audiences.update": createIntentTool({
+    "action_audiences_update": createIntentTool({
       ctx,
-      toolName: "action.audiences.update",
+      toolName: "action_audiences_update",
       description:
         "Update an existing audience segment. Returns a pending intent; the user must approve before it executes.",
       inputSchema: z.object({

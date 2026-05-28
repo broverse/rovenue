@@ -2,7 +2,46 @@ import { component, useService } from "impair";
 import { ArrowRight, Info, TriangleAlert, X } from "lucide-react";
 import { cn } from "../../lib/cn";
 import type { ValidatorIssue } from "@rovenue/shared/funnel";
+import { isLocalized, type LocaleCode } from "@rovenue/shared/i18n";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
+import { LOCALIZED_PAGE_FIELDS, type Funnel } from "./types";
+
+export type MissingTranslation = { locale: LocaleCode; pageId: string; field: string };
+
+/** Walk the funnel and collect every (locale, page, field) where the default
+ *  locale has a value but the non-default locale is empty. Warning-level. */
+export function collectMissingTranslations(funnel: Funnel): MissingTranslation[] {
+  const out: MissingTranslation[] = [];
+  const nonDefault = funnel.locales.filter((l) => l !== funnel.defaultLocale);
+  if (nonDefault.length === 0) return out;
+
+  for (const page of funnel.pages) {
+    for (const field of LOCALIZED_PAGE_FIELDS) {
+      const v = page[field];
+      if (!isLocalized(v)) continue;
+      const map = v as Record<string, unknown>;
+      const def = map[funnel.defaultLocale];
+      if (!def) continue;
+      for (const loc of nonDefault) {
+        const val = map[loc];
+        if (val === undefined || val === "" || (Array.isArray(val) && val.length === 0)) {
+          out.push({ locale: loc, pageId: page.id, field: String(field) });
+        }
+      }
+    }
+    if (page.options) {
+      page.options.forEach((o, idx) => {
+        if (!isLocalized(o.label)) return;
+        const map = o.label as Record<string, string>;
+        if (!map[funnel.defaultLocale]) return;
+        for (const loc of nonDefault) {
+          if (!map[loc]) out.push({ locale: loc, pageId: page.id, field: `options[${idx}].label` });
+        }
+      });
+    }
+  }
+  return out;
+}
 
 function titleFor(iss: ValidatorIssue): string {
   switch (iss.code) {
@@ -85,6 +124,57 @@ export const ValidationDrawer = component(() => {
           {errors.length === 0 && warns.length === 0 && (
             <div className="text-[12px] text-rv-mute-500">No issues — ready to publish.</div>
           )}
+          {(() => {
+            const funnelSnap: Funnel = {
+              id: "", name: "", slug: "", status: "draft", version: 1,
+              draftDiffersFromPublished: false,
+              theme: {} as Funnel["theme"],
+              settings: {} as Funnel["settings"],
+              rules: {}, default_next: {},
+              pages: vm.pages,
+              defaultLocale: vm.defaultLocale,
+              locales: vm.locales,
+            };
+            const missing = collectMissingTranslations(funnelSnap);
+            if (missing.length === 0) return null;
+            const byLocale = new Map<LocaleCode, MissingTranslation[]>();
+            for (const m of missing) {
+              if (!byLocale.has(m.locale)) byLocale.set(m.locale, []);
+              byLocale.get(m.locale)!.push(m);
+            }
+            return (
+              <>
+                <SectionLabel className="mt-5">Missing translations</SectionLabel>
+                {[...byLocale.entries()].map(([loc, items]) => (
+                  <div
+                    key={loc}
+                    className="mb-2.5 rounded-md border border-rv-warning/30 bg-rv-c2 p-3"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded bg-rv-warning/15 text-rv-warning">
+                        <TriangleAlert size={12} />
+                      </div>
+                      <div className="text-[13px] font-semibold text-foreground">
+                        <span className="font-rv-mono">{loc}</span> — {items.length} field{items.length === 1 ? "" : "s"} untranslated
+                      </div>
+                    </div>
+                    <ul className="ml-1 mt-1.5 list-none space-y-0.5">
+                      {items.slice(0, 8).map((m, i) => (
+                        <li key={i} className="font-rv-mono text-[11px] text-rv-mute-500">
+                          {m.pageId} · {m.field}
+                        </li>
+                      ))}
+                      {items.length > 8 && (
+                        <li className="font-rv-mono text-[11px] text-rv-mute-400">
+                          +{items.length - 8} more…
+                        </li>
+                      )}
+                    </ul>
+                  </div>
+                ))}
+              </>
+            );
+          })()}
           <div className="mt-4 flex items-start gap-2 rounded-md border border-rv-accent-500/25 bg-rv-accent-500/[0.08] px-3 py-2.5">
             <Info size={14} className="mt-0.5 flex-shrink-0 text-rv-accent-500" />
             <div className="text-[12px] leading-relaxed text-rv-mute-700">

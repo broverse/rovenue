@@ -2,6 +2,8 @@ import { createFileRoute, Outlet, useChildMatches, useParams } from "@tanstack/r
 import { Spinner } from "@heroui/react";
 import { useTranslation } from "react-i18next";
 import { DashboardShell } from "../../../../components/dashboard";
+import { RoviProvider } from "../../../../components/rovi/rovi-provider";
+import { RoviPanel } from "../../../../components/rovi/rovi-panel";
 import { useProject } from "../../../../lib/hooks/useProject";
 
 export const Route = createFileRoute("/_authed/projects/$projectId")({
@@ -62,8 +64,11 @@ function ProjectLayout() {
   }
 
   return (
-    <DashboardShell projectId={project.id} projectName={project.name} current={current}>
-      <Outlet />
-    </DashboardShell>
+    <RoviProvider>
+      <DashboardShell projectId={project.id} projectName={project.name} current={current}>
+        <Outlet />
+      </DashboardShell>
+      <RoviPanel />
+    </RoviProvider>
   );
 }

@@ -1,5 +1,6 @@
 import { component, useService } from "impair";
 import { ArrowLeftRight } from "lucide-react";
+import { pick } from "@rovenue/shared/i18n";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { RuleEditor } from "./rule-editor";
 
@@ -43,7 +44,9 @@ export const WorkflowTab = component(() => {
                   <span className="rounded border border-rv-divider bg-rv-c2 px-1.5 py-0.5 font-rv-mono text-[10px] text-rv-mute-600">
                     {pageId}
                   </span>
-                  <span className="text-[13px] text-rv-mute-700">{page?.title}</span>
+                  <span className="text-[13px] text-rv-mute-700">
+                    {page ? pick(page.title, vm.editLocale, [vm.defaultLocale]) : null}
+                  </span>
                   <span className="ml-auto font-rv-mono text-[11px] text-rv-mute-500">
                     {rules.length} rule{rules.length === 1 ? "" : "s"}
                   </span>

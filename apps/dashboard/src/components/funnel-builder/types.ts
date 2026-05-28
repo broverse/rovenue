@@ -26,6 +26,9 @@ import {
   Type as TypeIcon,
 } from "lucide-react";
 
+import type { Localized, LocaleCode } from "@rovenue/shared/i18n";
+import { pick } from "@rovenue/shared/i18n";
+
 export type PageType =
   // Original primitives
   | "single_choice"
@@ -205,16 +208,29 @@ export type Rule = {
   goto: string;
 };
 
-export type Option = { label: string; value: string; imageUrl?: string };
+export type Option = { label: Localized<string>; value: string; imageUrl?: string };
 
 export type Page = {
   id: string;
   type: PageType;
   question_id?: string;
-  title?: string;
-  subtitle?: string;
-  body?: string;
-  cta?: string;
+
+  // Localized<string> content:
+  title?: Localized<string>;
+  subtitle?: Localized<string>;
+  body?: Localized<string>;
+  cta?: Localized<string>;
+  headline?: Localized<string>;
+  placeholder?: Localized<string>;
+  suffix?: Localized<string>;
+  agreementLabel?: Localized<string>;
+
+  // Localized<string[]> content:
+  benefits?: Localized<string[]>;
+  features?: Localized<string[]>;
+  steps?: Localized<string[]>;
+
+  // Structural / non-text fields (unchanged):
   required?: boolean;
   branchCount?: number;
   validation_errors?: number;
@@ -222,44 +238,30 @@ export type Page = {
   min?: number;
   max?: number;
   step?: number;
-  suffix?: string;
   format?: string;
   max_selections?: number;
   duration?: number;
-  steps?: string[];
-  headline?: string;
   productId?: string;
   trial?: number;
-  benefits?: string[];
-  // Optional media displayed above the question on the preview.
-  // Driven by the Text / Image / Video segmented control in the sidebar.
   mediaKind?: "none" | "image" | "video";
   mediaUrl?: string;
-  // Inputs
-  placeholder?: string;
-  // contact_info — which sub-fields are required
   collectName?: boolean;
   collectEmail?: boolean;
   collectPhone?: boolean;
-  // legal — agreement label + link
-  agreementLabel?: string;
   termsUrl?: string;
-  // feature — a list of feature lines (headline already on .headline)
-  features?: string[];
-  // statement — the body text already lives on .body
-
-  // ----- Per-page design overrides -----
-  /** Full-bleed background behind the page content. Overrides theme.bg. */
   background?: PageBackground;
-  /** Optional sticky footer that lives below the primary CTA button. */
   footer?: PageFooter;
-  /** Show the progress indicator on this page. Defaults to false. */
   showProgress?: boolean;
-  /** Show the back button on this page. Defaults to false. */
   showBack?: boolean;
-  /** Override the theme default border-radius for this page. */
   radius?: number;
 };
+
+/** Single source of truth for which Page fields are Localized<…>. */
+export const LOCALIZED_PAGE_FIELDS = [
+  "title", "subtitle", "body", "cta", "headline",
+  "placeholder", "suffix", "agreementLabel",
+  "benefits", "features", "steps",
+] as const satisfies readonly (keyof Page)[];
 
 export type PageBackground = {
   kind: "none" | "color" | "image" | "video";
@@ -322,6 +324,11 @@ export type Funnel = {
   pages: Page[];
   rules: Record<string, Rule[]>;
   default_next: Record<string, string | null>;
+
+  /** Canonical authoring locale; resolver's terminal fallback. */
+  defaultLocale: LocaleCode;
+  /** All locales the funnel may render in. Includes defaultLocale. Order = switcher display order. */
+  locales: LocaleCode[];
 };
 
 export type ValidationIssue = {
@@ -353,20 +360,31 @@ export type Session = {
   paid: string | null;
 };
 
-export type TabId = "content" | "workflow" | "theme" | "settings" | "sessions" | "share";
+export type TabId =
+  | "content"
+  | "workflow"
+  | "theme"
+  | "localization"
+  | "settings"
+  | "sessions"
+  | "share";
 
 export const TABS: ReadonlyArray<{ id: TabId; label: string; hint: string; pip?: boolean }> = [
   { id: "content", label: "Content", hint: "Build pages & flow" },
   { id: "workflow", label: "Workflow", hint: "Branching & rules", pip: true },
   { id: "theme", label: "Theme", hint: "Brand & colors" },
+  { id: "localization", label: "Localization", hint: "Manage languages" },
   { id: "settings", label: "Settings", hint: "Store URLs, hand-off" },
   { id: "sessions", label: "Analytics", hint: "Live runs & metrics" },
   { id: "share", label: "Share", hint: "URL, QR, snippets" },
 ];
 
-/** Convert dashboard's flat Page into the shared validator/evaluator shape. */
+/** Convert dashboard's flat Page into the shared validator/evaluator shape.
+ *  Content fields are resolved against `locale`; structural fields pass through.
+ *  Option.value is intentionally NOT localized — branching compares on stable ids. */
 export function toEvalPage(
   p: Page,
+  locale: LocaleCode,
   rules?: unknown[],
   defaultNext?: string,
 ): {
@@ -381,21 +399,25 @@ export function toEvalPage(
     type: p.type,
     config: {
       question_id: p.question_id,
-      title: p.title,
-      subtitle: p.subtitle,
-      headline: p.headline,
-      body_markdown: p.body,
-      body: p.body,
-      options: p.options,
+      title: pick(p.title, locale),
+      subtitle: pick(p.subtitle, locale),
+      headline: pick(p.headline, locale),
+      body_markdown: pick(p.body, locale),
+      body: pick(p.body, locale),
+      options: p.options?.map((o) => ({
+        label: pick(o.label, locale),
+        value: o.value,
+        imageUrl: o.imageUrl,
+      })),
       min: p.min,
       max: p.max,
       step: p.step,
-      suffix: p.suffix,
+      suffix: pick(p.suffix, locale),
       duration_ms: p.duration,
-      steps: p.steps,
+      steps: pick(p.steps, locale),
       product_id: p.productId,
-      bullets: p.benefits,
-      open_app_label: p.cta,
+      bullets: pick(p.benefits, locale),
+      open_app_label: pick(p.cta, locale),
     },
     next_rules: rules,
     default_next: defaultNext,

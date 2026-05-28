@@ -76,6 +76,16 @@ const createFunnelBodySchema = z.object({
 const draftPagesJsonSchema = z.array(z.record(z.unknown()));
 const draftJsonObjectSchema = z.record(z.unknown());
 
+// BCP47 (e.g. "en", "pt-BR", "zh-Hant"). Matches the client-side regex.
+const bcp47Schema = z
+  .string()
+  .min(2)
+  .max(15)
+  .regex(/^[a-z]{2,3}(-[A-Za-z0-9]{2,4}){0,2}$/, {
+    message: "must be a BCP47 tag",
+  });
+const localesSchema = z.array(bcp47Schema).min(1).max(50);
+
 const updateFunnelBodySchema = z
   .object({
     name: z.string().min(1).max(120).optional(),
@@ -83,6 +93,8 @@ const updateFunnelBodySchema = z
     draft_pages_json: draftPagesJsonSchema.optional(),
     draft_theme_json: draftJsonObjectSchema.optional(),
     draft_settings_json: draftJsonObjectSchema.optional(),
+    default_locale: bcp47Schema.optional(),
+    locales: localesSchema.optional(),
   })
   .refine(
     (v) =>
@@ -90,8 +102,17 @@ const updateFunnelBodySchema = z
       v.slug !== undefined ||
       v.draft_pages_json !== undefined ||
       v.draft_theme_json !== undefined ||
-      v.draft_settings_json !== undefined,
+      v.draft_settings_json !== undefined ||
+      v.default_locale !== undefined ||
+      v.locales !== undefined,
     { message: "At least one field must be provided" },
+  )
+  .refine(
+    (v) =>
+      v.default_locale === undefined ||
+      v.locales === undefined ||
+      v.locales.includes(v.default_locale),
+    { message: "default_locale must be included in locales" },
   );
 
 const listSessionsQuerySchema = z.object({
@@ -208,6 +229,25 @@ export const funnelsRoute = new Hono()
     }
     if (body.draft_settings_json !== undefined) {
       patch.draftSettingsJson = body.draft_settings_json;
+    }
+    if (body.default_locale !== undefined) {
+      patch.defaultLocale = body.default_locale;
+    }
+    if (body.locales !== undefined) {
+      patch.locales = body.locales;
+    }
+
+    // Cross-field guard for the "only one of the two was sent" case —
+    // the body-schema refine above only fires when both arrive together.
+    const nextDefault = body.default_locale ?? existing.defaultLocale;
+    const nextLocales = body.locales ?? existing.locales;
+    if (!nextLocales.includes(nextDefault)) {
+      throw new HTTPException(400, {
+        message: JSON.stringify({
+          code: "FUNNEL_LOCALE_MISMATCH",
+          message: "default_locale must be one of locales",
+        }),
+      });
     }
 
     const updated = await drizzle.db.transaction(async (tx) => {

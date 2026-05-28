@@ -1,7 +1,8 @@
 import { hc, type InferRequestType, type InferResponseType } from "hono/client";
 import type { AppType } from "@rovenue/api";
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+export const API_BASE_URL =
+  import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 
 export class ApiError extends Error {
   constructor(
@@ -27,7 +28,7 @@ interface Envelope<T> {
 //
 // `credentials: "include"` is the dashboard default — Better Auth
 // session cookies must round-trip on every call.
-export const rpc = hc<AppType>(BASE_URL, {
+export const rpc = hc<AppType>(API_BASE_URL, {
   fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
     fetch(input, { credentials: "include", ...init })) as typeof fetch,
 });
@@ -77,7 +78,7 @@ export async function api<TResponse>(
     headers.set("content-type", "application/json");
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
     credentials: "include",
     ...init,
     headers,

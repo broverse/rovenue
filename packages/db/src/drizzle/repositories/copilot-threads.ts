@@ -9,6 +9,8 @@ export type NewCopilotThread = typeof copilotThreads.$inferInsert;
 export async function createThread(
   db: Db,
   input: {
+    /** Optional client-supplied id (e.g. v6 useChat session id). Defaults to a cuid2. */
+    id?: string;
     projectId: string;
     userId: string;
     title: string;
@@ -16,9 +18,10 @@ export async function createThread(
     model: string;
   },
 ): Promise<CopilotThread> {
+  const { id, ...rest } = input;
   const [row] = await db
     .insert(copilotThreads)
-    .values({ id: createId(), ...input })
+    .values({ id: id ?? createId(), ...rest })
     .returning();
   return row;
 }

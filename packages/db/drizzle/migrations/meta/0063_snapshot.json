@@ -1,6 +1,6 @@
 {
-  "id": "bbf07809-a2c5-4f5a-820f-0afcb5b63e3f",
-  "prevId": "7960ae89-3aa0-4341-bb33-174db3cea226",
+  "id": "7960ae89-3aa0-4341-bb33-174db3cea226",
+  "prevId": "3df8ade9-df8a-4f29-a336-14badb84f854",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4083,6 +4083,20 @@
           "notNull": true,
           "default": "'{}'::jsonb"
         },
+        "default_locale": {
+          "name": "default_locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'en'"
+        },
+        "locales": {
+          "name": "locales",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[\"en\"]'::jsonb"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -6055,32 +6069,6 @@
           "notNull": true,
           "default": "'{}'::jsonb"
         },
-        "refund_shield_enabled": {
-          "name": "refund_shield_enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "refund_shield_consent_acknowledged_at": {
-          "name": "refund_shield_consent_acknowledged_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "refund_shield_consent_acknowledged_by": {
-          "name": "refund_shield_consent_acknowledged_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "refund_shield_response_delay_minutes": {
-          "name": "refund_shield_response_delay_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 60
-        },
         "createdAt": {
           "name": "createdAt",
           "type": "timestamp with time zone",
@@ -6097,21 +6085,7 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {
-        "projects_refund_shield_consent_acknowledged_by_user_id_fk": {
-          "name": "projects_refund_shield_consent_acknowledged_by_user_id_fk",
-          "tableFrom": "projects",
-          "tableTo": "user",
-          "columnsFrom": [
-            "refund_shield_consent_acknowledged_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},

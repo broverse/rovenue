@@ -1,5 +1,5 @@
 {
-  "id": "7960ae89-3aa0-4341-bb33-174db3cea226",
+  "id": "3df8ade9-df8a-4f29-a336-14badb84f854",
   "prevId": "f8f7df2f-5df5-456b-8932-b58459702ce9",
   "version": "7",
   "dialect": "postgresql",
@@ -4083,6 +4083,20 @@
           "notNull": true,
           "default": "'{}'::jsonb"
         },
+        "default_locale": {
+          "name": "default_locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'en'"
+        },
+        "locales": {
+          "name": "locales",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[\"en\"]'::jsonb"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -7428,12 +7442,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "apple_app_account_token": {
-          "name": "apple_app_account_token",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "createdAt": {
           "name": "createdAt",
           "type": "timestamp with time zone",
@@ -7467,28 +7475,6 @@
             }
           ],
           "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_subscribers_apple_app_account_token": {
-          "name": "idx_subscribers_apple_app_account_token",
-          "columns": [
-            {
-              "expression": "projectId",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "apple_app_account_token",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"subscribers\".\"apple_app_account_token\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

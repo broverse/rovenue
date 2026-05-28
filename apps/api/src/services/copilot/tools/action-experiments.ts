@@ -4,9 +4,9 @@ import type { ToolContext } from "./query-subscribers";
 
 export function actionExperimentsTools(ctx: ToolContext) {
   return {
-    "action.experiments.start": createIntentTool({
+    "action_experiments_start": createIntentTool({
       ctx,
-      toolName: "action.experiments.start",
+      toolName: "action_experiments_start",
       description:
         "Start a draft experiment to begin enrolling subscribers. Returns a pending intent; the user must approve before it executes.",
       inputSchema: z.object({
@@ -24,9 +24,9 @@ export function actionExperimentsTools(ctx: ToolContext) {
       }),
     }),
 
-    "action.experiments.stop": createIntentTool({
+    "action_experiments_stop": createIntentTool({
       ctx,
-      toolName: "action.experiments.stop",
+      toolName: "action_experiments_stop",
       description:
         "Stop a running experiment and conclude enrollment. Returns a pending intent; the user must approve before it executes.",
       inputSchema: z.object({

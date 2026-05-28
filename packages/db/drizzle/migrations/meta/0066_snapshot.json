@@ -1,6 +1,6 @@
 {
-  "id": "e64d3a5a-b606-44d9-8bb8-31ec986b4119",
-  "prevId": "1edeea04-27a6-4dfd-a283-93d1be7395db",
+  "id": "1edeea04-27a6-4dfd-a283-93d1be7395db",
+  "prevId": "9546b708-2b4f-4bc3-93c7-95293ee788c1",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4083,6 +4083,20 @@
           "notNull": true,
           "default": "'{}'::jsonb"
         },
+        "default_locale": {
+          "name": "default_locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'en'"
+        },
+        "locales": {
+          "name": "locales",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[\"en\"]'::jsonb"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -6696,12 +6710,6 @@
         "idx_rss_outcome_lookup": {
           "name": "idx_rss_outcome_lookup",
           "columns": [
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
             {
               "expression": "apple_original_transaction_id",
               "isExpression": false,

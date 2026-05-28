@@ -31,6 +31,9 @@
   --color-rv-divider: rgb(255 255 255 / 0.08);
   --color-rv-divider-strong: rgb(255 255 255 / 0.12);
 
+  --font-sans:
+    "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-rv-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
 
   --animate-rv-pulse: rv-pulse 1.6s ease-out infinite;
@@ -83,5 +86,47 @@
   }
 }
 
-/* Geist + Geist Mono — used by the dashboard shell for tabular numbers. */
+/* Rovi chat — blinking caret on the actively streaming assistant text. */
+@keyframes rv-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Rovi chat — three-dot typing indicator while a request is in flight
+   but no first byte has arrived yet. */
+@keyframes rv-dot {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-2px);
+    opacity: 1;
+  }
+}
+
+/* Geist + Geist Mono — Vercel's typeface. Set as the global sans-serif
+ * via `--font-sans` above. The `font-feature-settings` enable contextual
+ * alternates ("cv11" stylistic 'a' / 'g') and tabular numerals so KPIs
+ * line up. */
 @import url("https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap");
+
+html,
+body {
+  font-family: var(--font-sans);
+  font-feature-settings:
+    "cv11" 1,
+    "ss01" 1,
+    "ss03" 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}

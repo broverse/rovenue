@@ -1,3 +1,4 @@
+import "reflect-metadata";
 import "@testing-library/jest-dom/vitest";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import { server } from "./msw/server";

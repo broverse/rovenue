@@ -1,6 +1,6 @@
 {
-  "id": "1edeea04-27a6-4dfd-a283-93d1be7395db",
-  "prevId": "9546b708-2b4f-4bc3-93c7-95293ee788c1",
+  "id": "9546b708-2b4f-4bc3-93c7-95293ee788c1",
+  "prevId": "bbf07809-a2c5-4f5a-820f-0afcb5b63e3f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4083,6 +4083,20 @@
           "notNull": true,
           "default": "'{}'::jsonb"
         },
+        "default_locale": {
+          "name": "default_locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'en'"
+        },
+        "locales": {
+          "name": "locales",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[\"en\"]'::jsonb"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -6521,240 +6535,6 @@
             "id"
           ],
           "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.refund_shield_responses": {
-      "name": "refund_shield_responses",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "subscriber_id": {
-          "name": "subscriber_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "apple_notification_uuid": {
-          "name": "apple_notification_uuid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "apple_original_transaction_id": {
-          "name": "apple_original_transaction_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "apple_transaction_id": {
-          "name": "apple_transaction_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "detected_at": {
-          "name": "detected_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "scheduled_for": {
-          "name": "scheduled_for",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sent_at": {
-          "name": "sent_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "request_payload": {
-          "name": "request_payload",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "apple_http_status": {
-          "name": "apple_http_status",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "apple_response_body": {
-          "name": "apple_response_body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "refund_shield_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'PENDING'"
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "refund_shield_outcome",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "outcome_received_at": {
-          "name": "outcome_received_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "error": {
-          "name": "error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "retry_count": {
-          "name": "retry_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_rss_notification_uniq": {
-          "name": "idx_rss_notification_uniq",
-          "columns": [
-            {
-              "expression": "apple_notification_uuid",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_rss_due": {
-          "name": "idx_rss_due",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "scheduled_for",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"refund_shield_responses\".\"status\" = 'PENDING'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_rss_outcome_lookup": {
-          "name": "idx_rss_outcome_lookup",
-          "columns": [
-            {
-              "expression": "apple_original_transaction_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_rss_dashboard": {
-          "name": "idx_rss_dashboard",
-          "columns": [
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "detected_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "refund_shield_responses_project_id_projects_id_fk": {
-          "name": "refund_shield_responses_project_id_projects_id_fk",
-          "tableFrom": "refund_shield_responses",
-          "tableTo": "projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "refund_shield_responses_subscriber_id_subscribers_id_fk": {
-          "name": "refund_shield_responses_subscriber_id_subscribers_id_fk",
-          "tableFrom": "refund_shield_responses",
-          "tableTo": "subscribers",
-          "columnsFrom": [
-            "subscriber_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

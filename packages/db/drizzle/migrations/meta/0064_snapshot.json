@@ -1,6 +1,6 @@
 {
-  "id": "9546b708-2b4f-4bc3-93c7-95293ee788c1",
-  "prevId": "bbf07809-a2c5-4f5a-820f-0afcb5b63e3f",
+  "id": "bbf07809-a2c5-4f5a-820f-0afcb5b63e3f",
+  "prevId": "7960ae89-3aa0-4341-bb33-174db3cea226",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4083,6 +4083,20 @@
           "notNull": true,
           "default": "'{}'::jsonb"
         },
+        "default_locale": {
+          "name": "default_locale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'en'"
+        },
+        "locales": {
+          "name": "locales",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[\"en\"]'::jsonb"
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -6108,7 +6122,7 @@
           "columnsTo": [
             "id"
           ],
-          "onDelete": "set null",
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
