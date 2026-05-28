@@ -1,9 +1,16 @@
 import { useRovi } from "../../lib/hooks/useRovi";
+import { useRoviChat } from "../../lib/hooks/useRoviChat";
 import { RoviHeader } from "./rovi-header";
 import { RoviEmptyState } from "./rovi-empty-state";
+import { RoviConversation } from "./rovi-conversation";
 
 export function RoviPanel() {
-  const { open, setOpen } = useRovi();
+  const { open, setOpen, currentThreadId } = useRovi();
+  // `useRoviChat` returns null when no `projectId` is in scope (e.g.
+  // the panel is mounted at app-root before the user has entered a
+  // project). Gate on that before reading `messages`.
+  const chat = useRoviChat({ threadId: currentThreadId });
+  const messages = chat?.messages ?? [];
 
   return (
     <>
@@ -28,9 +35,11 @@ export function RoviPanel() {
         }
       >
         <RoviHeader />
-        <div className="flex flex-1 flex-col overflow-hidden">
+        {messages.length === 0 ? (
           <RoviEmptyState />
-        </div>
+        ) : (
+          <RoviConversation messages={messages} />
+        )}
       </aside>
     </>
   );
