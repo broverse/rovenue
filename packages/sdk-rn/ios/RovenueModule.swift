@@ -55,14 +55,48 @@ public class RovenueModule: Module {
             let b = try await Rovenue.shared.consumeCredits(Int64(amount), description: description)
             return Double(b)
         }
-        AsyncFunction("postAppleReceipt") { (jws: String, productId: String) -> [String: Any?] in
-            _ = try await Rovenue.shared.postAppleReceipt(jws, productId: productId)
+        AsyncFunction("postAppleReceipt") { (jws: String, productId: String, appAccountToken: String?) -> [String: Any?] in
+            _ = try await Rovenue.shared.postAppleReceipt(
+                jws,
+                productId: productId,
+                appAccountToken: appAccountToken
+            )
             // M3 only resolves on success and guarantees both caches refreshed.
             return ["ok": true, "entitlementsRefreshed": true, "creditsRefreshed": true]
         }
-        AsyncFunction("postGoogleReceipt") { (receipt: String, productId: String) -> [String: Any?] in
-            _ = try await Rovenue.shared.postGoogleReceipt(receipt, productId: productId)
+        AsyncFunction("postGoogleReceipt") { (receipt: String, productId: String, obfAccount: String?, obfProfile: String?) -> [String: Any?] in
+            // On iOS this is unreachable but kept for surface parity.
+            _ = try await Rovenue.shared.postGoogleReceipt(
+                receipt,
+                productId: productId,
+                obfuscatedAccountId: obfAccount,
+                obfuscatedProfileId: obfProfile
+            )
             return ["ok": true, "entitlementsRefreshed": true, "creditsRefreshed": true]
+        }
+
+        // ---------------- Refund Shield ----------------
+        AsyncFunction("getAppAccountToken") { () -> String in
+            try await Rovenue.shared.getAppAccountToken()
+        }
+        AsyncFunction("recordSessionEvent") { (kind: String, occurredAt: String, durationMs: Double?) -> Void in
+            let kindEnum: SessionEventKind = {
+                switch kind {
+                case "open": return .open
+                case "background": return .background
+                case "close": return .close
+                default: return .open
+                }
+            }()
+            try await Rovenue.shared.recordSessionEvent(
+                kind: kindEnum,
+                occurredAt: occurredAt,
+                durationMs: durationMs.map { UInt32($0) }
+            )
+        }
+        AsyncFunction("flushSessionEvents") { () -> Double in
+            let n = try await Rovenue.shared.flushSessionEvents()
+            return Double(n)
         }
 
         // ---------------- Events ----------------
