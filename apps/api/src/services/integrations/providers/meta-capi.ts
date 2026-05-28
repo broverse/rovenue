@@ -100,10 +100,17 @@ export const metaCapiProvider: IntegrationProvider = {
   defaultEventMapping,
 
   async validateCredentials(
-    _creds: ProviderCredentials,
-    _http: HttpClient,
+    creds: ProviderCredentials,
+    http: HttpClient,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {
-    throw new Error("not implemented yet");
+    const token = creds["access_token"] ?? "";
+    const pixel = creds["pixel_id"] ?? "";
+    const url = `https://graph.facebook.com/v18.0/${pixel}?access_token=${token}`;
+    const res = await http.request({ method: "GET", url });
+    if (res.status >= 200 && res.status < 300) {
+      return { ok: true };
+    }
+    return { ok: false, reason: `HTTP ${res.status}: ${res.body}` };
   },
 
   mapEvent(
@@ -164,10 +171,30 @@ export const metaCapiProvider: IntegrationProvider = {
   },
 
   async deliver(
-    _payload: ProviderPayload,
-    _creds: ProviderCredentials,
-    _http: HttpClient,
+    payload: ProviderPayload,
+    creds: ProviderCredentials,
+    http: HttpClient,
   ): Promise<DeliveryResult> {
-    throw new Error("not implemented yet");
+    const token = creds["access_token"] ?? "";
+    const pixel = creds["pixel_id"] ?? "";
+    const url = `https://graph.facebook.com/v18.0/${pixel}/events?access_token=${token}`;
+
+    const res = await http.request({
+      method: "POST",
+      url,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload.body),
+    });
+
+    const retriable = res.status === 429 || res.status >= 500;
+    const ok = res.status >= 200 && res.status < 300;
+
+    return {
+      ok,
+      httpStatus: res.status,
+      responseBody: res.body,
+      errorMessage: ok ? undefined : `HTTP ${res.status}`,
+      retriable,
+    };
   },
 };
