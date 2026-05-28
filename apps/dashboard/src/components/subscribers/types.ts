@@ -38,8 +38,8 @@ export type Subscriber = {
   /** Display alias (e.g. masked email). */
   alias: string;
   country: CountryCode;
-  /** Active or last-known entitlement keys for this subscriber. */
-  entitlements: ReadonlyArray<string>;
+  /** Active or last-known access identifiers for this subscriber. */
+  access: ReadonlyArray<string>;
   /** Last-purchased product key. */
   product: string;
   status: SubscriberStatus;
@@ -78,7 +78,7 @@ export type TimelineEntry = {
   amount: string;
 };
 
-export type FilterPillKey = "entitlement" | "platform" | "country" | "ltv";
+export type FilterPillKey = "access" | "platform" | "country" | "ltv";
 
 export type FilterPillState = {
   key: FilterPillKey;

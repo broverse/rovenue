@@ -46,7 +46,7 @@ const PLATFORM_VALUES: ReadonlyArray<SubscriberListPlatform> = [
 interface SubscribersSearch {
   scope: SubscriberScope;
   q?: string;
-  entitlement?: string;
+  access?: string;
   platforms?: SubscriberListPlatform[];
   country?: string;
   ltvMin?: number;
@@ -138,9 +138,9 @@ export const Route = createFileRoute(
       scope: parseScope(search.scope),
       q:
         typeof search.q === "string" && search.q.length > 0 ? search.q : undefined,
-      entitlement:
-        typeof search.entitlement === "string" && search.entitlement.length > 0
-          ? search.entitlement
+      access:
+        typeof search.access === "string" && search.access.length > 0
+          ? search.access
           : undefined,
       platforms: parsePlatforms(search.platforms),
       country:
@@ -181,7 +181,7 @@ function SubscribersPage({
   const {
     scope,
     q: urlSearch,
-    entitlement,
+    access,
     platforms,
     country,
     ltvMin,
@@ -217,7 +217,7 @@ function SubscribersPage({
 
   const setFilters = (next: {
     status?: SubscriberListStatusFilter;
-    entitlement?: string;
+    access?: string;
     platforms?: ReadonlyArray<SubscriberListPlatform>;
     country?: string;
     ltvMin?: number;
@@ -233,7 +233,7 @@ function SubscribersPage({
           : prev.scope === "vip" || prev.scope === "risk"
             ? prev.scope
             : "all",
-        entitlement: next.entitlement,
+        access: next.access,
         platforms: next.platforms ? [...next.platforms] : undefined,
         country: next.country,
         ltvMin: next.ltvMin,
@@ -259,7 +259,7 @@ function SubscribersPage({
       projectId,
       q: urlSearch,
       status: backendStatus,
-      entitlement,
+      access,
       platforms,
       country,
       ltvMin,
@@ -303,7 +303,7 @@ function SubscribersPage({
             ? `${detailData.appUserId.slice(0, 21)}...`
             : detailData.appUserId,
         country: "US",
-        entitlements: detailData.access
+        access: detailData.access
           .filter((a) => a.isActive)
           .map((a) => a.accessId),
         product: detailData.purchases[0]?.productIdentifier ?? "—",
@@ -368,7 +368,7 @@ function SubscribersPage({
   const totalLoaded = flat.length;
   const activePopoverCount =
     (backendStatus ? 1 : 0) +
-    (entitlement ? 1 : 0) +
+    (access ? 1 : 0) +
     (platforms && platforms.length > 0 ? 1 : 0) +
     (country ? 1 : 0) +
     (typeof ltvMin === "number" ? 1 : 0);
@@ -449,11 +449,11 @@ function SubscribersPage({
           />
         </label>
 
-        {entitlement && (
-          <FilterPill active onClick={() => clearOne("entitlement")}>
-            {t("subscribers.filterKeys.entitlement")}
+        {access && (
+          <FilterPill active onClick={() => clearOne("access")}>
+            {t("subscribers.filterKeys.access")}
             <span className="font-rv-mono text-[11px] font-medium text-rv-mute-800">
-              {entitlement}
+              {access}
             </span>
             <X size={10} className="opacity-50" />
           </FilterPill>
@@ -489,7 +489,7 @@ function SubscribersPage({
         <SubscriberFilterPopover
           value={{
             status: backendStatus,
-            entitlement,
+            access,
             platforms,
             country,
             ltvMin,

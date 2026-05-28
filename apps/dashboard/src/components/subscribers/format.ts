@@ -22,7 +22,7 @@ export function mapApiSubscriber(item: SubscriberListItem): Subscriber {
   const full = item.appUserId;
   const truncated = full.length > 20 ? `${full.slice(0, 17)}...` : full;
   const alias = full.length > 24 ? `${full.slice(0, 21)}...` : full;
-  const status = item.activeEntitlementKeys.length > 0 ? "active" : "churned";
+  const status = item.activeAccessIds.length > 0 ? "active" : "churned";
   const country = toCountryCode(item.attributes["country"]);
 
   return {
@@ -30,7 +30,7 @@ export function mapApiSubscriber(item: SubscriberListItem): Subscriber {
     full,
     alias,
     country,
-    entitlements: item.activeEntitlementKeys,
+    access: item.activeAccessIds,
     product: "—",
     status,
     ltv: 0,
@@ -39,7 +39,7 @@ export function mapApiSubscriber(item: SubscriberListItem): Subscriber {
     renew: "—",
     platforms: [],
     risk: 0,
-    plan: item.activeEntitlementKeys.length > 0 ? item.activeEntitlementKeys[0]! : "—",
+    plan: item.activeAccessIds.length > 0 ? item.activeAccessIds[0]! : "—",
   };
 }
 

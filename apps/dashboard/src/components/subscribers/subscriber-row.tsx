@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Checkbox } from "../../ui/checkbox";
-import { EntitlementList } from "../products/entitlement-chip";
+import { AccessList } from "../products/access-chip";
 import { Chip } from "../../ui/chip";
 import { cn } from "../../lib/cn";
 import { CountryCell } from "./country-cell";
@@ -77,7 +77,13 @@ export function SubscriberRow({
         )}
       </td>
       <td className="px-3 py-2.5">
-        <EntitlementList entitlements={[...subscriber.entitlements]} />
+        <AccessList
+          access={subscriber.access.map((a) => ({
+            id: a,
+            identifier: a,
+            displayName: a,
+          }))}
+        />
       </td>
       <td className="px-3 py-2.5">
         <CountryCell country={subscriber.country} />
