@@ -105,7 +105,11 @@ export type AuditAction =
   | "integration.delivery.dead_letter"
   | "integration.test_event.sent"
   | "integration.backfill.started"
-  | "integration.backfill.completed";
+  | "integration.backfill.completed"
+  // --- refund shield ---
+  | "refund_shield.settings.updated"
+  | "refund_shield.response.sent"
+  | "refund_shield.response.failed";
 
 export type AuditResource =
   | "audience"
@@ -123,7 +127,8 @@ export type AuditResource =
   | "billing_subscription"
   | "funnel"
   | "custom_domain"
-  | "integration_connection";
+  | "integration_connection"
+  | "refund_shield_response";
 
 export interface AuditEntry {
   projectId: string;

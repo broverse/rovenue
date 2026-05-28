@@ -9,6 +9,12 @@ import {
 } from "@rovenue/db";
 import { env } from "../../lib/env";
 import { logger } from "../../lib/logger";
+import {
+  incRefundShieldOutcomeApproved,
+  incRefundShieldOutcomeDeclined,
+  incRefundShieldOutcomeReversed,
+  incRefundShieldReceived,
+} from "../../lib/metrics-refund-shield";
 import { loadAppleCredentials } from "../../lib/project-credentials";
 import { convertToUsd } from "../fx";
 import { maybeEmitRefundDetected } from "../notifications/refund-emit";
@@ -346,6 +352,7 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
       outcome: "REFUND_APPROVED",
     },
   );
+  incRefundShieldOutcomeApproved(ctx.projectId);
 
   const refundDate = new Date(ctx.transaction.signedDate);
   // Refund targets the specific transaction by (store, storeTxnId),
@@ -417,6 +424,7 @@ async function applyRefundDeclined(ctx: DispatchContext): Promise<void> {
       outcome: "REFUND_DECLINED",
     },
   );
+  incRefundShieldOutcomeDeclined(ctx.projectId);
 }
 
 // REFUND_REVERSED: Apple reversed a previously-approved refund (e.g.
@@ -438,6 +446,7 @@ async function applyRefundReversed(ctx: DispatchContext): Promise<void> {
       outcome: "REFUND_REVERSED",
     },
   );
+  incRefundShieldOutcomeReversed(ctx.projectId);
 }
 
 // =============================================================
@@ -528,6 +537,7 @@ async function applyConsumptionRequest(ctx: DispatchContext): Promise<void> {
       status,
     },
   );
+  incRefundShieldReceived(projectId);
 
   if (subscriberId) ctx.outcome.subscriberId = subscriberId;
 

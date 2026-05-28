@@ -25,12 +25,63 @@
 import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
 import { drizzle, type Db } from "@rovenue/db";
+import { audit, type AuditTx } from "../lib/audit";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import { getClickHouseClient } from "../lib/clickhouse";
+import {
+  incRefundShieldFailed,
+  incRefundShieldSent,
+  observeRefundShieldSlaRemainingSeconds,
+  type RefundShieldFailureReason,
+} from "../lib/metrics-refund-shield";
 import { loadAppleCredentials } from "../lib/project-credentials";
 import type { ProjectAppleContext } from "../services/apple/apple-auth";
 import { processRefundShieldResponse } from "../services/refund-shield/process-response";
+
+// Apple's CONSUMPTION_REQUEST -> response SLA is documented as 12h.
+// Used by the SENT-branch histogram to record how much head-room
+// remained when we dispatched.
+const APPLE_CONSUMPTION_SLA_MS = 12 * 60 * 60 * 1000;
+
+// =============================================================
+// Audit + metric helpers — wrapped in try/catch so a failed audit
+// or metric write can never crash the worker mid-batch. Worker
+// resilience > observability fidelity (per plan §"Audit failure
+// resilience").
+// =============================================================
+
+async function safeAudit(
+  entry: Parameters<typeof audit>[0],
+  tx: AuditTx,
+): Promise<void> {
+  try {
+    await audit(entry, tx);
+  } catch (err) {
+    log.warn("refund-shield audit write failed", {
+      action: entry.action,
+      resourceId: entry.resourceId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function classifyFailureReason(
+  error: string,
+  httpStatus: number | null | undefined,
+): RefundShieldFailureReason {
+  if (error.includes("MAX_RETRIES_EXHAUSTED")) return "max_retries";
+  if (error.includes("APPLE_CREDENTIALS_MISSING")) return "apple_ctx_missing";
+  if (error.includes("PROJECT_NOT_FOUND")) return "project_not_found";
+  if (error.includes("SLA_EXCEEDED") || error.includes("sla_exceeded"))
+    return "sla_exceeded";
+  if (error.startsWith("INTERNAL_ERROR")) return "internal_error";
+  if (typeof httpStatus === "number") {
+    if (httpStatus >= 500) return "apple_5xx";
+    if (httpStatus >= 400) return "apple_4xx";
+  }
+  return "internal_error";
+}
 
 const log = logger.child("refund-shield-responder");
 
@@ -165,6 +216,7 @@ async function processOneRow(args: {
       error: "PROJECT_NOT_FOUND",
       updatedAt: now,
     });
+    incRefundShieldFailed(row.projectId, "project_not_found");
     return "FAILED";
   }
   if (!project.refundShieldEnabled) {
@@ -197,6 +249,7 @@ async function processOneRow(args: {
       error: "APPLE_CREDENTIALS_MISSING",
       updatedAt: now,
     });
+    incRefundShieldFailed(row.projectId, "apple_ctx_missing");
     return "FAILED";
   }
 
@@ -229,9 +282,38 @@ async function processOneRow(args: {
       appleHttpStatus: outcome.httpStatus,
       sentAt: now,
     });
-    // TODO(T19): emit refund_shield.sent counter + audit row. The
-    // existing audit() helper requires an AuditAction/Resource that
-    // isn't yet defined for refund_shield_response — T19 wires both.
+    // Metrics: increment SENT counter and record how much of Apple's
+    // 12h SLA was still on the clock when we dispatched. The
+    // histogram lets Grafana surface "we keep cutting it close"
+    // before it manifests as a missed-SLA SENT_LATE row.
+    incRefundShieldSent(row.projectId);
+    const slaRemainingMs =
+      row.detectedAt.getTime() + APPLE_CONSUMPTION_SLA_MS - now.getTime();
+    observeRefundShieldSlaRemainingSeconds(
+      row.projectId,
+      Math.max(0, Math.floor(slaRemainingMs / 1000)),
+    );
+    // Audit: actor is "system" — the responder runs without a user
+    // session. The audit row commits in the same tx as markResponseSent
+    // so a rollback removes both atomically.
+    await safeAudit(
+      {
+        projectId: row.projectId,
+        userId: "system",
+        action: "refund_shield.response.sent",
+        resource: "refund_shield_response",
+        resourceId: row.id,
+        before: null,
+        after: {
+          appleHttpStatus: outcome.httpStatus,
+          appleNotificationUuid: row.appleNotificationUuid,
+          appleOriginalTransactionId: row.appleOriginalTransactionId,
+        },
+        ipAddress: null,
+        userAgent: null,
+      },
+      tx as unknown as AuditTx,
+    );
     return "SENT";
   }
 
@@ -241,14 +323,34 @@ async function processOneRow(args: {
     // PENDING with retryCount === MAX_RETRIES would never be
     // reclaimed — a silent black hole. Promote it to FAILED here.
     if (row.retryCount + 1 >= MAX_RETRIES) {
+      const finalError = `MAX_RETRIES_EXHAUSTED (last_error: ${outcome.error})`;
       await drizzle.refundShieldResponseRepo.markResponseFailed(tx, {
         id: row.id,
-        error: `MAX_RETRIES_EXHAUSTED (last_error: ${outcome.error})`,
+        error: finalError,
         appleHttpStatus: null,
         appleResponseBody: null,
         updatedAt: now,
       });
-      // TODO(T19): audit log + metrics on terminal failure
+      incRefundShieldFailed(row.projectId, "max_retries");
+      await safeAudit(
+        {
+          projectId: row.projectId,
+          userId: "system",
+          action: "refund_shield.response.failed",
+          resource: "refund_shield_response",
+          resourceId: row.id,
+          before: null,
+          after: {
+            error: finalError,
+            reason: "max_retries",
+            retryCount: row.retryCount + 1,
+            appleNotificationUuid: row.appleNotificationUuid,
+          },
+          ipAddress: null,
+          userAgent: null,
+        },
+        tx as unknown as AuditTx,
+      );
       return "FAILED";
     }
     await drizzle.refundShieldResponseRepo.markResponseRetry(tx, {
@@ -269,7 +371,27 @@ async function processOneRow(args: {
     appleResponseBody: outcome.responseBody ?? null,
     updatedAt: now,
   });
-  // TODO(T19): emit refund_shield.failed counter + audit row.
+  const reason = classifyFailureReason(outcome.error, outcome.httpStatus);
+  incRefundShieldFailed(row.projectId, reason);
+  await safeAudit(
+    {
+      projectId: row.projectId,
+      userId: "system",
+      action: "refund_shield.response.failed",
+      resource: "refund_shield_response",
+      resourceId: row.id,
+      before: null,
+      after: {
+        error: outcome.error,
+        reason,
+        appleHttpStatus: outcome.httpStatus ?? null,
+        appleNotificationUuid: row.appleNotificationUuid,
+      },
+      ipAddress: null,
+      userAgent: null,
+    },
+    tx as unknown as AuditTx,
+  );
   return "FAILED";
 }
 
@@ -287,8 +409,13 @@ async function processOneRow(args: {
 // signed JWS at receive time, but the responder fires hours later
 // without a fresh payload. We fall back to NODE_ENV — production
 // deploys hit PRODUCTION, every other environment uses SANDBOX.
-// TODO(T19): persist environment per-row at webhook time so we can
-// re-target the correct base URL without relying on NODE_ENV.
+// Follow-up (out of scope for T19 — schema migration required):
+// persist environment per-row at webhook time so we can re-target
+// the correct base URL without relying on NODE_ENV. Today the
+// NODE_ENV fallback is correct for every supported deployment
+// shape (dev = SANDBOX, prod = PRODUCTION) and incorrect only
+// when running a hybrid prod-API-against-sandbox-Apple setup,
+// which is an undocumented testing configuration.
 
 async function loadAppleContextForProject(
   projectId: string,

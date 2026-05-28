@@ -5,8 +5,12 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { MemberRole, drizzle, getDb } from "@rovenue/db";
 import { requireDashboardAuth } from "../../../middleware/dashboard-auth";
+import { audit, extractRequestContext } from "../../../lib/audit";
+import { logger } from "../../../lib/logger";
 import { assertProjectAccess } from "../../../lib/project-access";
 import { ok } from "../../../lib/response";
+
+const log = logger.child("refund-shield-settings");
 
 // =============================================================
 // Dashboard: Refund Shield — project settings (T16)
@@ -160,12 +164,45 @@ export const refundShieldSettingsRoute = new Hono()
       throw new HTTPException(404, { message: "Project not found" });
     }
 
-    // TODO(T19): emit `audit({ action: "project.updated", resource: "project", ... })`
-    // once the audit enums include a refund_shield-specific action. The
-    // current `AuditAction` union doesn't differentiate refund-shield
-    // settings writes from generic project updates, so emitting a
-    // generic project.updated here would obscure the change in the
-    // audit chain. Defer until T19 widens the enum.
+    // Audit log: refund_shield.settings.updated against the project
+    // resource. We deliberately do NOT pass the project's own
+    // updateProject tx here — this endpoint uses the non-tx getDb()
+    // path. A separate audit() opens its own inner tx + advisory
+    // lock. Failures don't roll back the settings change (the
+    // settings write already committed) but we log loudly so the
+    // chain gap is investigable. Compliance precedent: see
+    // dashboard/feature-flags.ts which audits post-write similarly.
+    try {
+      await audit({
+        projectId,
+        userId: user.id,
+        action: "refund_shield.settings.updated",
+        resource: "project",
+        resourceId: projectId,
+        before: {
+          enabled: existing.refundShieldEnabled,
+          responseDelayMinutes: existing.refundShieldResponseDelayMinutes,
+          consentAcknowledgedAt:
+            existing.refundShieldConsentAcknowledgedAt?.toISOString() ?? null,
+        },
+        after: {
+          enabled: updated.refundShieldEnabled,
+          responseDelayMinutes: updated.refundShieldResponseDelayMinutes,
+          consentAcknowledgedAt:
+            updated.refundShieldConsentAcknowledgedAt?.toISOString() ?? null,
+          // Capture whether this PUT crossed the consent gate so
+          // auditors can reconstruct the enable history without
+          // diffing the chain manually.
+          consentAcknowledged: body.consentAcknowledged ?? false,
+        },
+        ...extractRequestContext(c),
+      });
+    } catch (err) {
+      log.warn("refund-shield settings audit write failed", {
+        projectId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     return c.json(ok({ settings: toWire(updated) }));
   });

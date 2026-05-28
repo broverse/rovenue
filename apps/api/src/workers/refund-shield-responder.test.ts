@@ -67,11 +67,20 @@ vi.mock("../lib/clickhouse", () => ({
   getClickHouseClient: (...args: unknown[]) => getClickHouseClientMock(...args),
 }));
 
+// Audit helper. We intercept at the module boundary so we can assert
+// the worker emits a chained row on terminal SENT / FAILED without
+// standing up Postgres.
+const auditMock = vi.fn(async () => undefined);
+vi.mock("../lib/audit", () => ({
+  audit: (...args: unknown[]) => auditMock(...args),
+}));
+
 import {
   BATCH_SIZE,
   MAX_RETRIES,
   runRefundShieldResponderTick,
 } from "./refund-shield-responder";
+import { __testing as metricsTesting } from "../lib/metrics-refund-shield";
 
 // ----- Test fixtures -----
 
@@ -138,6 +147,9 @@ beforeEach(() => {
   getClickHouseClientMock.mockReturnValue({ __ch: true });
   // Default: Apple creds present.
   loadAppleCredentialsMock.mockResolvedValue(APPLE_CREDS);
+  auditMock.mockReset();
+  auditMock.mockResolvedValue(undefined);
+  metricsTesting.reset();
 });
 
 describe("runRefundShieldResponderTick", () => {
@@ -259,6 +271,109 @@ describe("runRefundShieldResponderTick", () => {
     );
     expect(markResponseRetryMock).not.toHaveBeenCalled();
     expect(markResponseSentMock).not.toHaveBeenCalled();
+  });
+
+  it("SENT outcome emits sent counter + sla histogram + audit", async () => {
+    const row = makeRow();
+    claimPendingResponsesMock.mockResolvedValueOnce([row]);
+    findProjectByIdMock.mockResolvedValueOnce(makeProject());
+    processRefundShieldResponseMock.mockResolvedValueOnce({
+      status: "SENT",
+      payload: FAKE_PAYLOAD,
+      httpStatus: 202,
+    });
+
+    await runRefundShieldResponderTick({ now: NOW });
+
+    const snap = metricsTesting.snapshot();
+    expect(snap.sent).toEqual({ proj_1: 1 });
+    expect(snap.failed).toEqual({});
+    // SLA: detectedAt = 01:00Z, now = 02:00Z, 12h SLA = 11h left = 39600s.
+    expect(snap.slaRemainingSamples).toHaveLength(1);
+    expect(snap.slaRemainingSamples[0]).toMatchObject({
+      projectId: "proj_1",
+      seconds: 11 * 3600,
+    });
+    expect(auditMock).toHaveBeenCalledTimes(1);
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "proj_1",
+        userId: "system",
+        action: "refund_shield.response.sent",
+        resource: "refund_shield_response",
+        resourceId: "row_1",
+      }),
+      FAKE_TX,
+    );
+  });
+
+  it("FAILED outcome emits failed counter with reason label + audit", async () => {
+    claimPendingResponsesMock.mockResolvedValueOnce([makeRow()]);
+    findProjectByIdMock.mockResolvedValueOnce(makeProject());
+    processRefundShieldResponseMock.mockResolvedValueOnce({
+      status: "FAILED",
+      error: "apple_400: bad request",
+      httpStatus: 400,
+      responseBody: "{\"errorCode\": 4000023}",
+    });
+
+    await runRefundShieldResponderTick({ now: NOW });
+
+    const snap = metricsTesting.snapshot();
+    expect(snap.failed).toEqual({ "proj_1::apple_4xx": 1 });
+    expect(snap.sent).toEqual({});
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "refund_shield.response.failed",
+        resource: "refund_shield_response",
+        after: expect.objectContaining({ reason: "apple_4xx" }),
+      }),
+      FAKE_TX,
+    );
+  });
+
+  it("MAX_RETRIES_EXHAUSTED emits failed counter with max_retries reason + audit", async () => {
+    const row = makeRow({ retryCount: MAX_RETRIES - 1 });
+    claimPendingResponsesMock.mockResolvedValueOnce([row]);
+    findProjectByIdMock.mockResolvedValueOnce(makeProject());
+    processRefundShieldResponseMock.mockResolvedValueOnce({
+      status: "RETRY",
+      retryDelayMs: 60_000,
+      error: "apple 503",
+    });
+
+    await runRefundShieldResponderTick({ now: NOW });
+
+    const snap = metricsTesting.snapshot();
+    expect(snap.failed).toEqual({ "proj_1::max_retries": 1 });
+    expect(auditMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "refund_shield.response.failed",
+        after: expect.objectContaining({ reason: "max_retries" }),
+      }),
+      FAKE_TX,
+    );
+  });
+
+  it("audit failure does not crash the worker", async () => {
+    // Audit DB write failing must NOT take down the responder mid-batch.
+    // The row's status update already committed; we'd rather have a
+    // chain gap than re-claim a row in a tight loop.
+    auditMock.mockRejectedValueOnce(new Error("audit_logs insert failed"));
+    claimPendingResponsesMock.mockResolvedValueOnce([makeRow()]);
+    findProjectByIdMock.mockResolvedValueOnce(makeProject());
+    processRefundShieldResponseMock.mockResolvedValueOnce({
+      status: "SENT",
+      payload: FAKE_PAYLOAD,
+      httpStatus: 202,
+    });
+
+    await expect(
+      runRefundShieldResponderTick({ now: NOW }),
+    ).resolves.toMatchObject({ sent: 1 });
+
+    // The SENT counter still ticked even though audit blew up.
+    expect(metricsTesting.snapshot().sent).toEqual({ proj_1: 1 });
   });
 
   it("claims pending rows with FOR UPDATE SKIP LOCKED semantics + bounded batch", async () => {

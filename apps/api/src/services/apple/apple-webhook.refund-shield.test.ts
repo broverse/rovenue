@@ -85,6 +85,7 @@ vi.mock("../notifications/refund-emit", () => ({
 // =============================================================
 
 import { handleAppleNotification } from "./apple-webhook";
+import { __testing as metricsTesting } from "../../lib/metrics-refund-shield";
 import {
   APPLE_ENVIRONMENT,
   APPLE_NOTIFICATION_TYPE,
@@ -203,6 +204,7 @@ function makeProjectRow(overrides: {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  metricsTesting.reset();
 
   drizzleMock.webhookEventRepo.upsertWebhookEvent.mockResolvedValue({
     id: "wh_1",
@@ -633,5 +635,122 @@ describe("handleAppleNotification — outcome linkage", () => {
       drizzleMock.refundShieldResponseRepo
         .updateOutcomeByOriginalTransactionIdIfNull,
     ).toHaveBeenCalledOnce();
+  });
+});
+
+// =============================================================
+// Metrics emission (T19)
+//
+// Asserts the in-process metric snapshot picks up exactly the
+// counters the spec §8 calls for: one `received` per
+// CONSUMPTION_REQUEST (regardless of status) and one
+// `outcome_*` per REFUND / REFUND_DECLINED / REFUND_REVERSED.
+// =============================================================
+
+describe("handleAppleNotification — metrics", () => {
+  test("CONSUMPTION_REQUEST increments refund_shield_received", async () => {
+    drizzleMock.projectRepo.findProjectById.mockResolvedValue(
+      makeProjectRow({ refundShieldEnabled: true }),
+    );
+    drizzleMock.subscriberRepo.findSubscriberByAppleAppAccountToken.mockResolvedValue(
+      { id: "sub_1", appleAppAccountToken: APP_ACCOUNT_TOKEN } as never,
+    );
+
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000020",
+        transactionId: "1000000099",
+      }),
+      makeConsumptionRequestNotification("uuid-m1"),
+    );
+
+    await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    expect(metricsTesting.snapshot().received).toEqual({ [PROJECT_ID]: 1 });
+  });
+
+  test("REFUND increments outcome_approved counter", async () => {
+    drizzleMock.purchaseExtRepo.findPurchaseByStoreTransaction.mockResolvedValue(
+      {
+        id: "pur_m1",
+        subscriberId: "sub_m1",
+        productId: "prod_m1",
+      } as never,
+    );
+    drizzleMock.subscriberRepo.findSubscriberById.mockResolvedValue({
+      id: "sub_m1",
+    } as never);
+
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000021",
+        transactionId: "1000000099",
+      }),
+      makeOutcomeNotification(APPLE_NOTIFICATION_TYPE.REFUND, "uuid-m2"),
+    );
+
+    await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    expect(metricsTesting.snapshot().outcomeApproved).toEqual({
+      [PROJECT_ID]: 1,
+    });
+  });
+
+  test("REFUND_DECLINED increments outcome_declined counter", async () => {
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000022",
+        transactionId: "1000000099",
+      }),
+      makeOutcomeNotification(
+        APPLE_NOTIFICATION_TYPE.REFUND_DECLINED,
+        "uuid-m3",
+      ),
+    );
+
+    await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    expect(metricsTesting.snapshot().outcomeDeclined).toEqual({
+      [PROJECT_ID]: 1,
+    });
+  });
+
+  test("REFUND_REVERSED increments outcome_reversed counter", async () => {
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000023",
+        transactionId: "1000000099",
+      }),
+      makeOutcomeNotification(
+        APPLE_NOTIFICATION_TYPE.REFUND_REVERSED,
+        "uuid-m4",
+      ),
+    );
+
+    await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    expect(metricsTesting.snapshot().outcomeReversed).toEqual({
+      [PROJECT_ID]: 1,
+    });
   });
 });
