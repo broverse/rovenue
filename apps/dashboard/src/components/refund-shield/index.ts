@@ -7,3 +7,4 @@ export { ResponsesFilterBar } from "./responses-filter-bar";
 export type { ResponsesFilters } from "./responses-filter-bar";
 export { ResponseTimeline } from "./response-timeline";
 export { JsonPayloadViewer } from "./json-payload-viewer";
+export { SubscriberRefundShieldCard } from "./subscriber-tab";

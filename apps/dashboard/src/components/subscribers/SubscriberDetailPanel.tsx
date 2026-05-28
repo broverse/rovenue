@@ -9,6 +9,7 @@ import { AccessTable } from "./AccessTable";
 import { PurchasesTable } from "./PurchasesTable";
 import { CreditLedgerTable } from "./CreditLedgerTable";
 import { AssignmentsList } from "./AssignmentsList";
+import { SubscriberRefundShieldCard } from "../refund-shield";
 import {
   useAnonymizeSubscriber,
   useExportSubscriber,
@@ -172,6 +173,11 @@ export function SubscriberDetailPanel({ data, projectId }: Props) {
         </h2>
         <AssignmentsList rows={data.assignments} />
       </Card>
+
+      <SubscriberRefundShieldCard
+        projectId={projectId}
+        subscriberId={data.id}
+      />
     </div>
   );
 }
