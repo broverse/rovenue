@@ -102,7 +102,7 @@ export const CanvasEditor = component(() => {
             <AddContentPopover
               onPick={(t) => {
                 setAddOpen(false);
-                vm.addPage(blankPage(t), page.id);
+                vm.addPage(blankPage(t, vm.defaultLocale), page.id);
               }}
               onClose={() => setAddOpen(false)}
             />
@@ -221,7 +221,7 @@ export const CanvasEditor = component(() => {
               {frame.notch && (
                 <div className="absolute left-1/2 top-2 z-10 h-1.5 w-20 -translate-x-1/2 rounded-full bg-black/40" />
               )}
-              <PagePreview page={page} theme={vm.theme} pages={vm.pages} editable />
+              <PagePreview page={page} theme={vm.theme} pages={vm.pages} locale={vm.editLocale} defaultLocale={vm.defaultLocale} editable />
             </div>
           </div>
         </div>

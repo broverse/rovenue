@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { rpc, unwrap } from "../../lib/api";
+import { LocalizedInput, LocalizedTextarea, LocalizedArrayInput } from "./localized-input";
+import type { LocaleCode } from "@rovenue/shared/i18n";
 import {
   PAGE_GROUPS,
   PAGE_TYPE_DESC,
@@ -61,7 +63,12 @@ function useProjectProducts(projectId: string | undefined) {
   });
 }
 
-export const PropertiesPanel = component(() => {
+interface PropertiesPanelProps {
+  editLocale: LocaleCode;
+  defaultLocale: LocaleCode;
+}
+
+export const PropertiesPanel = component(({ editLocale, defaultLocale }: PropertiesPanelProps) => {
   // Hooks must run unconditionally on every render — keep them above any
   // `return null`. React throws "Should have a queue" otherwise when the
   // selected page flips from undefined to set between renders.
@@ -163,18 +170,22 @@ export const PropertiesPanel = component(() => {
           {page.type !== "paywall" && page.type !== "success" && (
             <>
               <Field label="Title" className="mb-3">
-                <input
-                  value={page.title ?? ""}
-                  onChange={(e) => set({ title: e.currentTarget.value })}
+                <LocalizedInput
+                  value={page.title}
+                  editLocale={editLocale}
+                  defaultLocale={defaultLocale}
+                  onChange={(next) => set({ title: next })}
                   placeholder="Your question or screen title"
                   className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                 />
               </Field>
               {page.type !== "loading" && page.type !== "result" && (
                 <Field label="Subtitle" className="mb-3">
-                  <input
-                    value={page.subtitle ?? ""}
-                    onChange={(e) => set({ subtitle: e.currentTarget.value })}
+                  <LocalizedInput
+                    value={page.subtitle}
+                    editLocale={editLocale}
+                    defaultLocale={defaultLocale}
+                    onChange={(next) => set({ subtitle: next })}
                     placeholder="Optional helper text"
                     className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                   />
@@ -194,9 +205,15 @@ export const PropertiesPanel = component(() => {
                     <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded bg-rv-c3 font-rv-mono text-[10px] font-bold text-rv-mute-600">
                       {String.fromCharCode(65 + i)}
                     </span>
-                    <input
+                    <LocalizedInput
                       value={o.label}
-                      onChange={(e) => vm.updateOption(page.id, i, { label: e.currentTarget.value })}
+                      editLocale={editLocale}
+                      defaultLocale={defaultLocale}
+                      onChange={(next) => {
+                        const opts = [...(page.options ?? [])];
+                        opts[i] = { ...opts[i], label: next };
+                        set({ options: opts });
+                      }}
                       placeholder="Label"
                       className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none"
                     />
@@ -230,9 +247,11 @@ export const PropertiesPanel = component(() => {
 
           {page.type === "info" && (
             <Field label="Body · markdown">
-              <textarea
-                value={page.body ?? ""}
-                onChange={(e) => set({ body: e.currentTarget.value })}
+              <LocalizedTextarea
+                value={page.body}
+                editLocale={editLocale}
+                defaultLocale={defaultLocale}
+                onChange={(next) => set({ body: next })}
                 rows={4}
                 placeholder="Hello, world."
                 className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 text-[12px] leading-relaxed text-foreground outline-none focus:border-rv-accent-500"
@@ -242,9 +261,11 @@ export const PropertiesPanel = component(() => {
 
           {page.type === "result" && (
             <Field label="Body">
-              <textarea
-                value={page.body ?? ""}
-                onChange={(e) => set({ body: e.currentTarget.value })}
+              <LocalizedTextarea
+                value={page.body}
+                editLocale={editLocale}
+                defaultLocale={defaultLocale}
+                onChange={(next) => set({ body: next })}
                 rows={3}
                 placeholder="Supports {{question_id}} tokens"
                 className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 text-[12px] leading-relaxed text-foreground outline-none focus:border-rv-accent-500"
@@ -255,53 +276,23 @@ export const PropertiesPanel = component(() => {
           {page.type === "paywall" && (
             <>
               <Field label="Headline" className="mb-3">
-                <input
-                  value={page.headline ?? ""}
-                  onChange={(e) => set({ headline: e.currentTarget.value })}
+                <LocalizedInput
+                  value={page.headline}
+                  editLocale={editLocale}
+                  defaultLocale={defaultLocale}
+                  onChange={(next) => set({ headline: next })}
                   placeholder="Unlock your plan"
                   className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                 />
               </Field>
-              <Field label={`Benefits · ${(page.benefits ?? []).length}`}>
-                <div className="flex flex-col gap-1.5">
-                  {(page.benefits ?? []).map((b, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-1.5 rounded border border-rv-divider bg-rv-c2 px-1.5 py-1"
-                    >
-                      <input
-                        value={b}
-                        onChange={(e) => {
-                          const next = [...(page.benefits ?? [])];
-                          next[i] = e.currentTarget.value;
-                          set({ benefits: next });
-                        }}
-                        placeholder="Benefit line"
-                        className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none"
-                      />
-                      <button
-                        type="button"
-                        title="Remove"
-                        onClick={() => {
-                          const next = [...(page.benefits ?? [])];
-                          next.splice(i, 1);
-                          set({ benefits: next });
-                        }}
-                        className="flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded text-rv-mute-500 hover:bg-rv-c3 hover:text-rv-danger"
-                      >
-                        <X size={11} />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => set({ benefits: [...(page.benefits ?? []), "New benefit"] })}
-                    className="mt-1 inline-flex h-7 w-full cursor-pointer items-center justify-center gap-1.5 rounded border border-dashed border-rv-divider bg-rv-c2 px-2 text-[11px] text-rv-mute-600 transition hover:border-rv-accent-500 hover:text-rv-accent-500"
-                  >
-                    <Plus size={11} />
-                    Add benefit
-                  </button>
-                </div>
+              <Field label="Benefits">
+                <LocalizedArrayInput
+                  value={page.benefits}
+                  editLocale={editLocale}
+                  defaultLocale={defaultLocale}
+                  onChange={(next) => set({ benefits: next })}
+                  placeholder="Benefit line"
+                />
               </Field>
             </>
           )}
@@ -309,17 +300,21 @@ export const PropertiesPanel = component(() => {
           {page.type === "success" && (
             <>
               <Field label="Headline" className="mb-3">
-                <input
-                  value={page.title ?? ""}
-                  onChange={(e) => set({ title: e.currentTarget.value })}
+                <LocalizedInput
+                  value={page.title}
+                  editLocale={editLocale}
+                  defaultLocale={defaultLocale}
+                  onChange={(next) => set({ title: next })}
                   placeholder="You're in"
                   className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                 />
               </Field>
               <Field label="Body">
-                <input
-                  value={page.body ?? ""}
-                  onChange={(e) => set({ body: e.currentTarget.value })}
+                <LocalizedInput
+                  value={page.body}
+                  editLocale={editLocale}
+                  defaultLocale={defaultLocale}
+                  onChange={(next) => set({ body: next })}
                   placeholder="What happens next"
                   className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                 />
@@ -328,14 +323,13 @@ export const PropertiesPanel = component(() => {
           )}
 
           {page.type === "loading" && (
-            <Field label="Steps · one per line">
-              <textarea
-                value={(page.steps ?? []).join("\n")}
-                onChange={(e) =>
-                  set({ steps: e.currentTarget.value.split("\n").filter(Boolean) })
-                }
-                rows={4}
-                className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+            <Field label="Steps">
+              <LocalizedArrayInput
+                value={page.steps}
+                editLocale={editLocale}
+                defaultLocale={defaultLocale}
+                onChange={(next) => set({ steps: next })}
+                placeholder="Step text"
               />
             </Field>
           )}
@@ -347,9 +341,11 @@ export const PropertiesPanel = component(() => {
             page.type === "phone" ||
             page.type === "text_input") && (
             <Field label="Placeholder">
-              <input
-                value={page.placeholder ?? ""}
-                onChange={(e) => set({ placeholder: e.currentTarget.value })}
+              <LocalizedInput
+                value={page.placeholder}
+                editLocale={editLocale}
+                defaultLocale={defaultLocale}
+                onChange={(next) => set({ placeholder: next })}
                 placeholder="Type your answer…"
                 className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
               />
@@ -383,9 +379,11 @@ export const PropertiesPanel = component(() => {
           {(page.type === "legal" || page.type === "checkbox") && (
             <>
               <Field label="Agreement label" className="mb-3">
-                <input
-                  value={page.agreementLabel ?? ""}
-                  onChange={(e) => set({ agreementLabel: e.currentTarget.value })}
+                <LocalizedInput
+                  value={page.agreementLabel}
+                  editLocale={editLocale}
+                  defaultLocale={defaultLocale}
+                  onChange={(next) => set({ agreementLabel: next })}
                   className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                 />
               </Field>
@@ -416,9 +414,11 @@ export const PropertiesPanel = component(() => {
           {(page.type === "welcome" || page.type === "end_screen") && (
             <>
               <Field label="Body" className="mb-3">
-                <textarea
-                  value={page.body ?? ""}
-                  onChange={(e) => set({ body: e.currentTarget.value })}
+                <LocalizedTextarea
+                  value={page.body}
+                  editLocale={editLocale}
+                  defaultLocale={defaultLocale}
+                  onChange={(next) => set({ body: next })}
                   rows={3}
                   className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                 />
@@ -429,9 +429,11 @@ export const PropertiesPanel = component(() => {
           {/* Statement — body only; the CTA label lives in the Footer section. */}
           {page.type === "statement" && (
             <Field label="Body">
-              <textarea
-                value={page.body ?? ""}
-                onChange={(e) => set({ body: e.currentTarget.value })}
+              <LocalizedTextarea
+                value={page.body}
+                editLocale={editLocale}
+                defaultLocale={defaultLocale}
+                onChange={(next) => set({ body: next })}
                 rows={3}
                 className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
               />
@@ -442,53 +444,22 @@ export const PropertiesPanel = component(() => {
           {page.type === "feature" && (
             <>
               <Field label="Headline" className="mb-3">
-                <input
-                  value={page.headline ?? ""}
-                  onChange={(e) => set({ headline: e.currentTarget.value })}
+                <LocalizedInput
+                  value={page.headline}
+                  editLocale={editLocale}
+                  defaultLocale={defaultLocale}
+                  onChange={(next) => set({ headline: next })}
                   className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                 />
               </Field>
-              <Field label={`Features · ${(page.features ?? []).length}`} className="mb-3">
-                <div className="flex flex-col gap-1.5">
-                  {(page.features ?? []).map((f, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-1.5 rounded border border-rv-divider bg-rv-c2 px-1.5 py-1"
-                    >
-                      <input
-                        value={f}
-                        onChange={(e) => {
-                          const next = [...(page.features ?? [])];
-                          next[i] = e.currentTarget.value;
-                          set({ features: next });
-                        }}
-                        className="min-w-0 flex-1 bg-transparent text-[12px] text-foreground outline-none"
-                      />
-                      <button
-                        type="button"
-                        title="Remove"
-                        onClick={() => {
-                          const next = [...(page.features ?? [])];
-                          next.splice(i, 1);
-                          set({ features: next });
-                        }}
-                        className="flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded text-rv-mute-500 hover:bg-rv-c3 hover:text-rv-danger"
-                      >
-                        <X size={11} />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      set({ features: [...(page.features ?? []), "New feature"] })
-                    }
-                    className="mt-1 inline-flex h-7 w-full cursor-pointer items-center justify-center gap-1.5 rounded border border-dashed border-rv-divider bg-rv-c2 px-2 text-[11px] text-rv-mute-600 transition hover:border-rv-accent-500 hover:text-rv-accent-500"
-                  >
-                    <Plus size={11} />
-                    Add feature
-                  </button>
-                </div>
+              <Field label="Features" className="mb-3">
+                <LocalizedArrayInput
+                  value={page.features}
+                  editLocale={editLocale}
+                  defaultLocale={defaultLocale}
+                  onChange={(next) => set({ features: next })}
+                  placeholder="Feature line"
+                />
               </Field>
             </>
           )}
@@ -531,9 +502,11 @@ export const PropertiesPanel = component(() => {
               </Field>
             </div>
             <Field label="Suffix unit" className="mt-3">
-              <input
-                value={page.suffix ?? ""}
-                onChange={(e) => set({ suffix: e.currentTarget.value })}
+              <LocalizedInput
+                value={page.suffix}
+                editLocale={editLocale}
+                defaultLocale={defaultLocale}
+                onChange={(next) => set({ suffix: next })}
                 placeholder="kg, lbs, years…"
                 className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
               />
@@ -572,14 +545,13 @@ export const PropertiesPanel = component(() => {
             <Field label="Duration (ms) · 500–15000">
               <MonoInput value={page.duration} onChange={(v) => set({ duration: v })} />
             </Field>
-            <Field label="Steps · one per line" className="mt-3">
-              <textarea
-                value={(page.steps ?? []).join("\n")}
-                onChange={(e) =>
-                  set({ steps: e.currentTarget.value.split("\n").filter(Boolean) })
-                }
-                rows={4}
-                className="w-full resize-none rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
+            <Field label="Steps" className="mt-3">
+              <LocalizedArrayInput
+                value={page.steps}
+                editLocale={editLocale}
+                defaultLocale={defaultLocale}
+                onChange={(next) => set({ steps: next })}
+                placeholder="Step text"
               />
             </Field>
           </Section>
@@ -868,9 +840,11 @@ export const PropertiesPanel = component(() => {
               <>
                 {ctaEditable && (
                   <Field label="Button label" className="mt-3 mb-3">
-                    <input
-                      value={page.cta ?? ""}
-                      onChange={(e) => set({ cta: e.currentTarget.value })}
+                    <LocalizedInput
+                      value={page.cta}
+                      editLocale={editLocale}
+                      defaultLocale={defaultLocale}
+                      onChange={(next) => set({ cta: next })}
                       placeholder={ctaPlaceholder}
                       className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
                     />

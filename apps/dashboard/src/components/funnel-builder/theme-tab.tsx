@@ -166,7 +166,7 @@ export const ThemeTab = component(() => {
                 <div className="relative h-full w-full overflow-hidden rounded-[28px]">
                   <div className="absolute left-1/2 top-1.5 z-10 h-1.5 w-16 -translate-x-1/2 rounded-full bg-black/40" />
                   {currentPage && (
-                    <PagePreview page={currentPage} theme={theme} pages={vm.pages} />
+                    <PagePreview page={currentPage} theme={theme} pages={vm.pages} locale={vm.editLocale} defaultLocale={vm.defaultLocale} />
                   )}
                 </div>
               </div>

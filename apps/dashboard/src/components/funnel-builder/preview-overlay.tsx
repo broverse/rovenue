@@ -11,6 +11,7 @@ export const PreviewOverlay = component(() => {
     rules: draft.rules,
     defaultNext: draft.defaultNext,
     startId: draft.selectedPageId,
+    editLocale: draft.editLocale,
   });
 
   const idx = preview.currentPage
@@ -41,6 +42,8 @@ export const PreviewOverlay = component(() => {
               page={preview.currentPage}
               theme={draft.theme}
               pages={draft.pages}
+              locale={draft.editLocale}
+              defaultLocale={draft.defaultLocale}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-white text-[14px] text-rv-mute-700">
