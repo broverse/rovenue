@@ -4,6 +4,7 @@ import { RoviHeader } from "./rovi-header";
 import { RoviEmptyState } from "./rovi-empty-state";
 import { RoviConversation } from "./rovi-conversation";
 import { RoviPromptInput } from "./rovi-prompt-input";
+import { RoviUsageBar } from "./rovi-usage-bar";
 
 export function RoviPanel() {
   const { open, setOpen, currentThreadId } = useRovi();
@@ -46,6 +47,7 @@ export function RoviPanel() {
           <RoviConversation messages={messages} />
         )}
         <RoviPromptInput disabled={busy || !chat} onSubmit={send} />
+        <RoviUsageBar />
       </aside>
     </>
   );
