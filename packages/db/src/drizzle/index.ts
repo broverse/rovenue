@@ -74,3 +74,5 @@ export * as funnelPurchaseRepo from "./repositories/funnel-purchases";
 export * as funnelClaimTokenRepo from "./repositories/funnel-claim-tokens";
 export * as funnelDeferredClaimRepo from "./repositories/funnel-deferred-claims";
 export * as customDomainRepo from "./repositories/custom-domains";
+export * as integrationConnectionRepo from "./repositories/integration-connections";
+export * as integrationDeliveryRepo from "./repositories/integration-deliveries";
