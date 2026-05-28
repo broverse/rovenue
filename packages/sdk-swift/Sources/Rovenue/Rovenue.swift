@@ -50,12 +50,28 @@ public final class Rovenue: @unchecked Sendable {
     /// Configure the SDK. Must be called before any other API.
     /// Throws `Rovenue.Error.invalidApiKey` if the api key is empty/whitespace.
     /// Calling this a second time replaces the shared instance.
-    public static func configure(apiKey: String, baseUrl: String, debug: Bool = false) throws {
+    ///
+    /// `appVersion` defaults to `Bundle.main.infoDictionary?["CFBundleShortVersionString"]`
+    /// so the session-event telemetry payload carries the host app's user-facing
+    /// version automatically. Pass an explicit value to override (tests / unusual
+    /// bundle setups).
+    public static func configure(
+        apiKey: String,
+        baseUrl: String,
+        debug: Bool = false,
+        appVersion: String? = nil
+    ) throws {
         emit(LogEntry(level: "info", message: "configure"))
         guard !apiKey.trimmingCharacters(in: .whitespaces).isEmpty else {
             throw Rovenue.Error.invalidApiKey
         }
-        let config = Config(apiKey: apiKey, baseUrl: baseUrl, debug: debug)
+        let resolvedVersion = appVersion ?? readBundleAppVersion()
+        let config = Config(
+            apiKey: apiKey,
+            baseUrl: baseUrl,
+            debug: debug,
+            appVersion: resolvedVersion
+        )
         let core: RovenueCore
         do {
             core = try RovenueCore(config: config)
@@ -64,10 +80,26 @@ public final class Rovenue: @unchecked Sendable {
         }
         let bridge = ObserverBridge()
         core.registerObserver(obs: bridge)
-        let instance = Rovenue(core: core, bridge: bridge)
+        let instance = Rovenue(core: core, bridge: bridge, appVersion: resolvedVersion)
         lock.lock()
         defer { lock.unlock() }
         _shared = instance
+    }
+
+    // -----------------------------------------------------------------
+    // App-version reader — injectable for tests so we don't depend on
+    // whatever Bundle.main resolves to inside an XCTest runner.
+    // -----------------------------------------------------------------
+
+    /// Test seam. Production callers leave this nil and the default
+    /// Bundle.main lookup runs.
+    internal static var _appVersionReaderForTesting: (() -> String?)?
+
+    private static func readBundleAppVersion() -> String? {
+        if let reader = _appVersionReaderForTesting {
+            return reader()
+        }
+        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
     }
 
     /// Test-only: clears the shared instance so each test runs in isolation.
@@ -113,12 +145,21 @@ public final class Rovenue: @unchecked Sendable {
     internal let core: RovenueCore
     internal let bridge: ObserverBridge
     internal let dispatcher: Dispatcher
+    /// Captured at configure() time — exposed via
+    /// `resolvedAppVersionForTesting` so tests can verify the wiring
+    /// without scraping the actual session-event request body.
+    private let appVersion: String?
 
-    private init(core: RovenueCore, bridge: ObserverBridge) {
+    private init(core: RovenueCore, bridge: ObserverBridge, appVersion: String?) {
         self.core = core
         self.bridge = bridge
         self.dispatcher = Dispatcher()
+        self.appVersion = appVersion
     }
+
+    /// Test-only accessor — used by `AppVersionTests` to verify that
+    /// `configure(...)` correctly resolved the bundle / override.
+    internal var resolvedAppVersionForTesting: String? { appVersion }
 
     // MARK: - Version
 
