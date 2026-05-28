@@ -25,6 +25,7 @@ import { SessionsTab } from "./sessions-tab";
 import { ShareTab } from "./share-tab";
 import { ValidationDrawer } from "./validation-drawer";
 import { PreviewOverlay } from "./preview-overlay";
+import { LocaleSwitcher } from "./locale-switcher";
 
 type Props = {
   projectId: string;
@@ -64,7 +65,10 @@ export const BuilderShell = component(({ projectId }: Props) => {
           <>
             <ThumbRail />
             <CanvasEditor />
-            <PropertiesPanel />
+            <PropertiesPanel
+              editLocale={vm.editLocale}
+              defaultLocale={vm.defaultLocale}
+            />
           </>
         )}
         {vm.activeTab === "workflow" && <WorkflowTab />}
@@ -132,6 +136,14 @@ const TopBar = component(({ projectId }: { projectId: string }) => {
 
       <div className="flex items-center gap-2">
         <AutosaveBadge />
+        <LocaleSwitcher
+          defaultLocale={vm.defaultLocale}
+          locales={vm.locales}
+          editLocale={vm.editLocale}
+          onSelect={(l) => vm.setEditLocale(l)}
+          onAdd={(l) => vm.addLocale(l)}
+          onRemove={(l) => vm.removeLocale(l)}
+        />
         {vm.errorCount > 0 ? (
           <button
             type="button"
