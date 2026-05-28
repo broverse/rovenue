@@ -51,6 +51,8 @@ import {
   productType,
   purchaseStatus,
   pushPlatform,
+  refundShieldOutcomeEnum,
+  refundShieldStatusEnum,
   revenueEventType,
   scheduledActionStatus,
   scheduledActionType,
@@ -816,6 +818,65 @@ export const outgoingWebhooks = pgTable(
     projectIdStatusIdx: index(
       "outgoing_webhooks_projectId_status_idx",
     ).on(t.projectId, t.status),
+  }),
+);
+
+// =============================================================
+// refund_shield_responses (CONSUMPTION_REQUEST work queue + outcome log)
+// =============================================================
+// One row per Apple CONSUMPTION_REQUEST notification: serves as both
+// (a) the work queue consumed by the polling responder worker, and
+// (b) the long-lived outcome log used for win-rate analytics. The
+// outcome / outcomeReceivedAt columns are populated later when the
+// matching REFUND / REFUND_DECLINED / REFUND_REVERSED notification
+// arrives (lookup by appleOriginalTransactionId).
+
+export const refundShieldResponses = pgTable(
+  "refund_shield_responses",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    subscriberId: text("subscriber_id").references(() => subscribers.id, {
+      onDelete: "set null",
+    }),
+    appleNotificationUuid: text("apple_notification_uuid").notNull(),
+    appleOriginalTransactionId: text(
+      "apple_original_transaction_id",
+    ).notNull(),
+    appleTransactionId: text("apple_transaction_id").notNull(),
+    detectedAt: timestamp("detected_at", { withTimezone: true }).notNull(),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    requestPayload: jsonb("request_payload"),
+    appleHttpStatus: integer("apple_http_status"),
+    appleResponseBody: text("apple_response_body"),
+    status: refundShieldStatusEnum("status").notNull().default("PENDING"),
+    outcome: refundShieldOutcomeEnum("outcome"),
+    outcomeReceivedAt: timestamp("outcome_received_at", {
+      withTimezone: true,
+    }),
+    error: text("error"),
+    retryCount: integer("retry_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    notificationUniq: uniqueIndex("idx_rss_notification_uniq").on(
+      t.appleNotificationUuid,
+    ),
+    dueIdx: index("idx_rss_due")
+      .on(t.status, t.scheduledFor)
+      .where(sql`${t.status} = 'PENDING'`),
+    outcomeLookupIdx: index("idx_rss_outcome_lookup").on(
+      t.appleOriginalTransactionId,
+    ),
+    dashboardIdx: index("idx_rss_dashboard").on(t.projectId, t.detectedAt),
   }),
 );
 
