@@ -126,7 +126,11 @@ export function registerAllIntentHandlers(): void {
       };
 
       return drizzle.db.transaction(async (tx) => {
-        const before = await drizzle.productRepo.findProductById(tx as never, productId);
+        const before = await drizzle.productRepo.findProductById(
+          tx as never,
+          ctx.projectId,
+          productId,
+        );
 
         const result = await drizzle.productRepo.updateProduct(
           tx as never,
