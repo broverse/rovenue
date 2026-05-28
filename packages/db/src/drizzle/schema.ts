@@ -561,7 +561,7 @@ export const products = pgTable(
     storeIds: jsonb("storeIds").notNull(),
     displayName: text("displayName").notNull(),
     // Postgres TEXT[] column — Drizzle typing tracks the array shape.
-    entitlementKeys: text("entitlementKeys")
+    accessIds: text("accessIds")
       .array()
       .notNull()
       .default(sql`ARRAY[]::text[]`),
