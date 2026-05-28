@@ -11,6 +11,8 @@ export const ERROR_CODE = {
   NOT_FOUND: "NOT_FOUND",
   NOT_IMPLEMENTED: "NOT_IMPLEMENTED",
   RATE_LIMITED: "RATE_LIMITED",
+  ROVI_NOT_CONFIGURED: "ROVI_NOT_CONFIGURED",
+  ROVI_QUOTA_EXCEEDED: "ROVI_QUOTA_EXCEEDED",
   BEARER_REQUIRED: "BEARER_REQUIRED",
   INVALID_API_KEY: "INVALID_API_KEY",
   INVALID_API_KEY_FORMAT: "INVALID_API_KEY_FORMAT",
@@ -110,3 +112,9 @@ export * from "./billing";
 // =============================================================
 
 export * from "./funnel";
+
+// =============================================================
+// Copilot — types, tier limits, and intent handling
+// =============================================================
+
+export * from "./copilot";
