@@ -19,8 +19,18 @@ public class RovenueModule: Module {
         Name("Rovenue")
 
         // ---------------- Sync ----------------
-        Function("configure") { (apiKey: String, baseUrl: String, debug: Bool) in
-            try Rovenue.configure(apiKey: apiKey, baseUrl: baseUrl, debug: debug)
+        //
+        // appVersion is optional from JS — when nil/omitted, the Swift
+        // façade falls back to Bundle.main.infoDictionary[CFBundleShortVersionString].
+        // For Expo apps that's the value baked from app.json's `expo.version`
+        // at prebuild time; for bare RN it's the host project's plist.
+        Function("configure") { (apiKey: String, baseUrl: String, debug: Bool, appVersion: String?) in
+            try Rovenue.configure(
+                apiKey: apiKey,
+                baseUrl: baseUrl,
+                debug: debug,
+                appVersion: appVersion
+            )
         }
         Function("shutdown") { Rovenue.shared.shutdown() }
         Function("setForeground") { (foreground: Bool) in
