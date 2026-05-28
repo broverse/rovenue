@@ -110,3 +110,9 @@ export * from "./billing";
 // =============================================================
 
 export * from "./funnel";
+
+// =============================================================
+// Integrations — canonical event keys and provider types
+// =============================================================
+
+export * from "./integrations";
