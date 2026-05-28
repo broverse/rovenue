@@ -14,6 +14,60 @@
 
 ---
 
+## AMENDMENTS (post-inventory, applied 2026-05-28)
+
+The controller ran the Task 0 inventory and discovered three repo conventions that override what the plan body originally wrote. **Apply these everywhere they conflict with later task text.**
+
+### A1 — Credential encryption uses a single-string helper
+
+The repo's crypto helper at `packages/shared/src/crypto.ts` exposes:
+
+```ts
+encrypt(plaintext: string, hexKey: string): string  // returns "iv:tag:data"
+decrypt(ciphertext: string, hexKey: string): string
+```
+
+It returns ONE string, not the 3-tuple `{ciphertext, iv, tag}` the original plan assumed.
+
+Therefore:
+- `copilot_credentials` has a single column `api_key_encrypted TEXT NOT NULL`, NOT three separate columns. Update Task 2 schema + Task 3 repo + Task 17 route accordingly.
+- Encrypt with `encrypt(plain, env.ENCRYPTION_KEY)` from `@rovenue/shared/crypto`.
+- Decrypt the symmetric way in the chat / credentials-test paths.
+
+### A2 — `audit()` signature has no `source` field
+
+`apps/api/src/lib/audit.ts` defines:
+
+```ts
+interface AuditEntry {
+  projectId: string;
+  userId: string;
+  action: AuditAction;          // typed enum — see audit.ts for canonical list
+  resource: AuditResource;       // typed enum
+  resourceId: string;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+```
+
+There is no `source` or `detail` field. Therefore in Task 15 intent handlers:
+- Drop the `source: 'rovi'` argument.
+- Use the existing typed `AuditAction` / `AuditResource` enums. If the handler needs an action that isn't in the enum yet (e.g., `subscription.canceled`), **extend the enum** in `audit.ts` rather than inventing a string at the call site.
+- Put the human-readable detail into `after` as a redacted snapshot of the post-state, and `before` for the pre-state where useful.
+- The actor identity is already carried by `userId`; the fact that the call originated from Rovi is recoverable through the originating `copilot_intents` row, not from the audit row.
+
+### A3 — Existing `credentialsRoute` symbol; rename ours
+
+`apps/api/src/routes/dashboard/credentials.ts` already exports `credentialsRoute` (mounted under `/projects/:projectId/credentials` for store credentials). Our new file in `apps/api/src/routes/dashboard/copilot/credentials.ts` must export the symbol as `copilotCredentialsRoute` to avoid confusion at the call site that mounts both. Update Task 17, Task 21 accordingly.
+
+### A4 — BullMQ workers are self-registering files; no central registry
+
+Each worker file (see `apps/api/src/workers/funnel-token-expirer.ts` as the canonical pattern) declares its own `Queue` + `Worker` + repeatable job and exposes `<NAME>_QUEUE_NAME` plus a `run<Sweep>()` body for tests. Workers are wired into the bootstrap entrypoint(s) — discover whether a single file (e.g. `digest-scheduler-entry.ts` or similar) starts all workers, or whether they self-bootstrap on first import. Tasks 28 and 29 follow the same shape and self-register the same way.
+
+---
+
 ## File Structure
 
 ### New files
