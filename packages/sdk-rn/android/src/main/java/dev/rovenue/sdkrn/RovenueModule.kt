@@ -11,6 +11,9 @@
 
 package dev.rovenue.sdkrn
 
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import dev.rovenue.sdk.LogEntry
 import dev.rovenue.sdk.Rovenue
 import dev.rovenue.sdk.generated.ChangeEvent
@@ -34,8 +37,15 @@ class RovenueModule : Module() {
         Name("Rovenue")
 
         // ---------------- Sync ----------------
-        Function("configure") { apiKey: String, baseUrl: String, debug: Boolean ->
-            Rovenue.configure(apiKey, baseUrl, debug)
+        //
+        // appVersion is optional from JS — when null/omitted we read
+        // PackageManager.PackageInfo.versionName from the host context.
+        // For Expo apps that's the value baked from app.json's
+        // `expo.version` at prebuild time (into android/app/build.gradle
+        // versionName); for bare RN it's the host project's gradle config.
+        Function("configure") { apiKey: String, baseUrl: String, debug: Boolean, appVersion: String? ->
+            val resolved = appVersion ?: readPackageVersionName()
+            Rovenue.configure(apiKey, baseUrl, debug, resolved)
         }
         Function("shutdown") { Rovenue.shared.shutdown() }
         Function("setForeground") { foreground: Boolean ->
@@ -124,4 +134,32 @@ class RovenueModule : Module() {
         "expiresAt" to e.expiresIso,
         "productId" to e.productIdentifier,
     )
+
+    /**
+     * Reads the host app's `versionName` from its installed PackageInfo.
+     * Returns null if the context isn't available (module instantiated
+     * outside an Activity host) or the lookup throws — telemetry then
+     * falls back to the pre-0.7 empty-string wire format.
+     *
+     * Uses the API 33+ `PackageInfoFlags.of(0)` overload on supported
+     * devices and the legacy int-flag overload as a fallback.
+     */
+    private fun readPackageVersionName(): String? {
+        val context: Context = appContext.reactContext ?: return null
+        return try {
+            val pm = context.packageManager
+            val pkg = context.packageName
+            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(pkg, 0)
+            }
+            info.versionName
+        } catch (_: PackageManager.NameNotFoundException) {
+            null
+        } catch (_: Throwable) {
+            null
+        }
+    }
 }
