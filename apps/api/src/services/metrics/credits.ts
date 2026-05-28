@@ -82,15 +82,14 @@ async function readVolume(
     projectId,
     `
       SELECT
-        toString(day)                            AS day,
-        toString(sum(granted_credits))           AS issued,
-        toString(sum(debited_credits))           AS burned,
-        toString(sum(net_flow))                  AS net
-      FROM rovenue.mv_credit_consumption_daily_target FINAL
+        toString(day)                  AS day,
+        toString(granted_credits)      AS issued,
+        toString(debited_credits)      AS burned,
+        toString(net_flow)             AS net
+      FROM rovenue.v_credit_consumption_daily
       WHERE projectId = {projectId:String}
         AND day >= {from:Date}
         AND day <= {to:Date}
-      GROUP BY day
       ORDER BY day ASC
     `,
     { from: toDateOnly(window.from), to: toDateOnly(window.to) },
