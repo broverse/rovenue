@@ -11,9 +11,14 @@
 // on `subscriber_access`. To avoid overloading "access", this repo
 // is exported as `accessCatalogRepo` from the drizzle barrel.
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../client";
-import { access, type AccessRow, type NewAccessRow } from "../schema";
+import {
+  access,
+  products,
+  type AccessRow,
+  type NewAccessRow,
+} from "../schema";
 
 export async function create(
   db: Db,
@@ -78,4 +83,20 @@ export async function update(
 
 export async function deleteById(db: Db, id: string): Promise<void> {
   await db.delete(access).where(eq(access.id, id));
+}
+
+/**
+ * Count products in this project whose `accessIds[]` array contains
+ * the given access id. Used by the dashboard catalog list to show
+ * "linked products" per access row.
+ */
+export async function countProducts(
+  db: Db,
+  accessId: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(products)
+    .where(sql`${accessId} = ANY(${products.accessIds})`);
+  return row?.n ?? 0;
 }

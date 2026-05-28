@@ -170,6 +170,8 @@ export type {
   WebhookEvent,
   OutgoingWebhook,
   RevenueEvent,
+  AccessRow,
+  NewAccessRow,
   SubscriberAccessRow,
   AuditLogRow,
   CreditLedgerRow as CreditLedger,
