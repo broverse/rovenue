@@ -16,6 +16,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 
 import {
@@ -379,6 +380,13 @@ export const subscribers = pgTable(
     attributes: jsonb("attributes").notNull().default(sql`'{}'::jsonb`),
     deletedAt: timestamp("deletedAt", { withTimezone: true }),
     mergedInto: text("mergedInto"),
+    // Apple StoreKit `appAccountToken` (UUID v4) — opaque per-user
+    // identifier sent with the purchase and echoed in every
+    // ASSN v2 notification for that transaction. Persisted so the
+    // CONSUMPTION_REQUEST responder can look up the owning
+    // subscriber from an inbound webhook payload. See Refund Shield
+    // design spec (docs/superpowers/specs/2026-05-28-refund-shield-design.md).
+    appleAppAccountToken: uuid("apple_app_account_token"),
     createdAt: timestamp("createdAt", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -390,6 +398,9 @@ export const subscribers = pgTable(
     projectIdAppUserIdKey: uniqueIndex(
       "subscribers_projectId_appUserId_key",
     ).on(t.projectId, t.appUserId),
+    appleTokenIdx: uniqueIndex("idx_subscribers_apple_app_account_token")
+      .on(t.projectId, t.appleAppAccountToken)
+      .where(sql`${t.appleAppAccountToken} IS NOT NULL`),
   }),
 );
 
