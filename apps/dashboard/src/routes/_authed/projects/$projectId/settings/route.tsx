@@ -13,6 +13,7 @@ import {
   KeyRound,
   Receipt,
   Settings as SettingsIcon,
+  Sparkles,
   UserCog,
 } from "lucide-react";
 import { cn } from "../../../../../lib/cn";
@@ -28,6 +29,13 @@ const TABS = [
     icon: SettingsIcon,
     to: "/projects/$projectId/settings" as const,
     match: (id: string) => id.endsWith("/settings/") || id.endsWith("/settings"),
+  },
+  {
+    id: "rovi",
+    labelKey: "settings.tabs.rovi",
+    icon: Sparkles,
+    to: "/projects/$projectId/settings/rovi" as const,
+    match: (id: string) => id.endsWith("/settings/rovi"),
   },
   {
     id: "sdk",
