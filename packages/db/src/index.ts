@@ -182,6 +182,7 @@ export type {
 // =============================================================
 
 export * from "./helpers/encrypted-field";
+export { currentYearMonth } from "./drizzle/repositories/copilot-usage";
 
 // =============================================================
 // Drizzle namespace
