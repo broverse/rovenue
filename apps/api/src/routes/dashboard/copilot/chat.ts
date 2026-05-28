@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { streamText, convertToModelMessages } from "ai";
-import type { LanguageModel, UIMessage } from "ai";
+import { streamText, stepCountIs } from "ai";
+import type { LanguageModel, ModelMessage } from "ai";
 import { drizzle, currentYearMonth } from "@rovenue/db";
 import { decrypt } from "@rovenue/shared/crypto";
 import { requireDashboardAuth } from "../../../middleware/dashboard-auth";
@@ -249,22 +249,27 @@ export const copilotChatRoute = new Hono()
     });
 
     // ------------------------------------------------------------------
-    // 7. Build UIMessage[] for convertToModelMessages (v6 async API).
+    // 7. Build ModelMessage[] directly from stored parts. Each row's
+    //    `parts` holds the v6 ModelMessage `content` array shape (text /
+    //    tool-call / tool-result blocks). Skip the empty placeholder row
+    //    we created in step 5 — it exists only so action tools can
+    //    foreign-key an intent to a real message id before streaming
+    //    finishes.
     // ------------------------------------------------------------------
-    const uiMessages: UIMessage[] = recent.map((m) => ({
-      id: m.id,
-      role: m.role as "user" | "assistant",
-      content: typeof m.parts === "string" ? m.parts : "",
-      parts: Array.isArray(m.parts)
-        ? (m.parts as UIMessage["parts"])
-        : [],
-      createdAt: m.createdAt,
-    }));
-
-    const modelMessages = await convertToModelMessages(uiMessages);
+    const modelMessages: ModelMessage[] = recent
+      .filter((m) => Array.isArray(m.parts) && (m.parts as unknown[]).length > 0)
+      .map(
+        (m) =>
+          ({
+            role: m.role as "user" | "assistant" | "tool",
+            content: m.parts as ModelMessage["content"],
+          }) as ModelMessage,
+      );
 
     // ------------------------------------------------------------------
-    // 8. Stream.
+    // 8. Stream. `stopWhen: stepCountIs(5)` lets the model emit text
+    //    AFTER tool calls — v6's default is a single step, which would
+    //    leave the user staring at a tool-result card with no answer.
     // ------------------------------------------------------------------
     const result = streamText({
       model: modelFactory(resolved),
@@ -278,15 +283,20 @@ export const copilotChatRoute = new Hono()
       messages: modelMessages,
       tools,
       maxOutputTokens: 4096,
-      onFinish: async ({ usage, content }) => {
-        // Persist actual assistant message (replace the empty placeholder).
-        await drizzle.copilotMessageRepo.appendMessage(drizzle.db, {
-          threadId,
-          role: "assistant",
-          parts: content,
-          tokenIn: usage.inputTokens ?? 0,
-          tokenOut: usage.outputTokens ?? 0,
-        });
+      stopWhen: stepCountIs(5),
+      onFinish: async ({ usage, response }) => {
+        // Persist every message this turn produced — assistant text /
+        // tool-call blocks AND the synthesised tool-role messages
+        // containing tool_result blocks. Without the tool-role rows the
+        // next request would replay an assistant tool_use with no
+        // matching tool_result and Anthropic would 400.
+        for (const m of response.messages) {
+          await drizzle.copilotMessageRepo.appendMessage(drizzle.db, {
+            threadId,
+            role: m.role as "user" | "assistant" | "tool",
+            parts: m.content as unknown as object,
+          });
+        }
         await drizzle.copilotUsageRepo.bumpUsage(drizzle.db, {
           projectId,
           yearMonth: currentYearMonth(),
