@@ -1,6 +1,17 @@
 import { EventEmitter } from "node:events";
 import type { IntegrationConnection } from "@rovenue/db";
 
+// =============================================================
+// Multi-replica cache invalidation contract
+// =============================================================
+//
+// In-process EventEmitter invalidation only reaches the replica that
+// served the dashboard PATCH/DELETE. Sibling replicas pick up the
+// change via the 60-second TTL — same pattern as the webhook-delivery
+// connection cache. If on-call observes >60s replica lag in
+// production, replace this cache with a Redis pub/sub bridge.
+// =============================================================
+
 interface CacheEntry {
   value: IntegrationConnection[];
   expiresAt: number;
