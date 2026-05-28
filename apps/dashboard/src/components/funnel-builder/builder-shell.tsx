@@ -4,14 +4,13 @@ import {
   Book,
   Check,
   ChevronDown,
-  ChevronRight,
   History,
   RotateCcw,
   Share2,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
-import logoSquareUrl from "../../assets/logos/logo-square.png";
 import { TABS, type TabId } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { FunnelVersionsViewModel } from "./vm/funnel-versions.vm";
@@ -26,6 +25,7 @@ import { ShareTab } from "./share-tab";
 import { ValidationDrawer } from "./validation-drawer";
 import { PreviewOverlay } from "./preview-overlay";
 import { LocaleSwitcher } from "./locale-switcher";
+import { LocalizationTab } from "./localization-tab";
 
 type Props = {
   projectId: string;
@@ -73,6 +73,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
         )}
         {vm.activeTab === "workflow" && <WorkflowTab />}
         {vm.activeTab === "theme" && <ThemeTab />}
+        {vm.activeTab === "localization" && <LocalizationTab />}
         {vm.activeTab === "settings" && <SettingsTab />}
         {vm.activeTab === "sessions" && <SessionsTab />}
         {vm.activeTab === "share" && <ShareTab />}
@@ -93,21 +94,11 @@ const TopBar = component(({ projectId }: { projectId: string }) => {
         <Link
           to="/projects/$projectId/funnels"
           params={{ projectId }}
-          className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-md"
-          title="Back to all funnels"
+          className="flex h-8 w-8 items-center justify-center rounded-md text-rv-mute-600 transition hover:bg-rv-c2 hover:text-foreground"
+          title="Close funnel"
         >
-          <img src={logoSquareUrl} alt="Rovenue" className="h-full w-full object-cover" />
+          <X size={16} />
         </Link>
-        <Link
-          to="/projects/$projectId/funnels"
-          params={{ projectId }}
-          className="text-rv-mute-600 hover:text-foreground"
-        >
-          Funnels
-        </Link>
-        <ChevronRight size={12} className="text-rv-mute-500" />
-        <span className="font-medium text-foreground">{vm.name}</span>
-        <ChevronDown size={12} className="text-rv-mute-500" />
       </div>
 
       <div className="absolute left-1/2 -translate-x-1/2">
@@ -141,8 +132,7 @@ const TopBar = component(({ projectId }: { projectId: string }) => {
           locales={vm.locales}
           editLocale={vm.editLocale}
           onSelect={(l) => vm.setEditLocale(l)}
-          onAdd={(l) => vm.addLocale(l)}
-          onRemove={(l) => vm.removeLocale(l)}
+          onManage={() => vm.setActiveTab("localization")}
         />
         {vm.errorCount > 0 ? (
           <button

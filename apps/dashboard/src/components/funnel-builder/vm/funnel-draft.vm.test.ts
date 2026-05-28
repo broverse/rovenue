@@ -25,6 +25,8 @@ function fakeFunnel(): FunnelDetailDto {
     draftRules: {},
     draftDefaultNext: {},
     draftDiffersFromPublished: false,
+    defaultLocale: "en",
+    locales: ["en"],
     updatedAt: "",
     createdAt: "",
   };

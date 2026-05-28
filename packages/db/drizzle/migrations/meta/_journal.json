@@ -435,6 +435,13 @@
       "when": 1780001100000,
       "tag": "0061_integration_connections_soft_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1780001700000,
+      "tag": "0062_funnel_locales",
+      "breakpoints": true
     }
   ]
 }

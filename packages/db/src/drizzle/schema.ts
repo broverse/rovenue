@@ -1934,6 +1934,12 @@ export const funnels = pgTable(
     draftPagesJson: jsonb("draft_pages_json").notNull().default(sql`'[]'::jsonb`),
     draftThemeJson: jsonb("draft_theme_json").notNull().default(sql`'{}'::jsonb`),
     draftSettingsJson: jsonb("draft_settings_json").notNull().default(sql`'{}'::jsonb`),
+    // BCP47 fallback locale + the full set of locales this funnel renders
+    // in. The renderer falls back to defaultLocale whenever a string is
+    // missing for the active locale. Both are draft-side: published
+    // versions snapshot them into funnel_versions.metadata.
+    defaultLocale: text("default_locale").notNull().default("en"),
+    locales: jsonb("locales").$type<string[]>().notNull().default(sql`'["en"]'::jsonb`),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),

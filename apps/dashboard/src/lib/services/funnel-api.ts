@@ -25,6 +25,8 @@ export interface FunnelDetailDto {
   draftRules: Record<string, NextRule[]>;
   draftDefaultNext: Record<string, string | null>;
   draftDiffersFromPublished: boolean;
+  defaultLocale: string;
+  locales: string[];
   updatedAt: string;
   createdAt: string;
 }
@@ -37,6 +39,8 @@ export interface PatchDraftPayload {
   draftSettings?: FunnelSettingsDto;
   draftRules?: Record<string, NextRule[]>;
   draftDefaultNext?: Record<string, string | null>;
+  defaultLocale?: string;
+  locales?: string[];
 }
 
 interface RawFunnelRow {
@@ -49,6 +53,8 @@ interface RawFunnelRow {
   draftPagesJson: unknown;
   draftThemeJson: unknown;
   draftSettingsJson: unknown;
+  defaultLocale?: string;
+  locales?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -89,6 +95,8 @@ function decompose(row: RawFunnelRow): FunnelDetailDto {
     draftRules: rules,
     draftDefaultNext: defaultNext,
     draftDiffersFromPublished: row.currentVersionId !== null,
+    defaultLocale: row.defaultLocale ?? "en",
+    locales: row.locales ?? [row.defaultLocale ?? "en"],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -136,6 +144,8 @@ export class FunnelApi {
     }
     if (payload.draftTheme !== undefined) body.draft_theme_json = payload.draftTheme;
     if (payload.draftSettings !== undefined) body.draft_settings_json = payload.draftSettings;
+    if (payload.defaultLocale !== undefined) body.default_locale = payload.defaultLocale;
+    if (payload.locales !== undefined) body.locales = payload.locales;
 
     const row = await unwrap<RawFunnelRow>(
       rpc.dashboard.projects[":projectId"].funnels[":funnelId"].$patch(

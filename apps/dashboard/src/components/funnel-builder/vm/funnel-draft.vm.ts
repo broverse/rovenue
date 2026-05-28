@@ -186,12 +186,12 @@ export class FunnelDraftViewModel {
   }
 
   private applyFunnelDto(raw: FunnelDetailDto) {
-    // Normalize locale metadata from the DTO. We only need defaultLocale/locales
-    // from normalizeFunnel here; page-level field lifting happens in applyServer
-    // when draftPages are written into this.pages.
-    const dtoLocale = (raw as unknown as Record<string, unknown>);
-    this.defaultLocale = (dtoLocale.defaultLocale as LocaleCode | undefined) ?? "en";
-    this.locales = (dtoLocale.locales as LocaleCode[] | undefined) ?? [this.defaultLocale];
+    // Locale metadata is authoritative on the DTO. Default-back to `en` only
+    // if the server omitted them (older payloads before the locale columns
+    // landed); page-level field lifting happens in applyServer when
+    // draftPages are written into this.pages.
+    this.defaultLocale = raw.defaultLocale ?? "en";
+    this.locales = raw.locales ?? [this.defaultLocale];
     if (!this.locales.includes(this.editLocale)) this.editLocale = this.defaultLocale;
     this.funnel = raw;
   }
@@ -243,6 +243,8 @@ export class FunnelDraftViewModel {
       settings: this.settings,
       rules: this.rules,
       defaultNext: this.defaultNext,
+      defaultLocale: this.defaultLocale,
+      locales: this.locales,
     });
   }
 
@@ -389,8 +391,8 @@ export class FunnelDraftViewModel {
         payload.draftSettings = this.settings as never;
         payload.draftRules = this.rules;
         payload.draftDefaultNext = this.defaultNext;
-        (payload as unknown as Record<string, unknown>).defaultLocale = this.defaultLocale;
-        (payload as unknown as Record<string, unknown>).locales = this.locales;
+        payload.defaultLocale = this.defaultLocale;
+        payload.locales = this.locales;
       } else if (scope === "settings") {
         payload.draftSettings = this.settings as never;
       } else if (scope === "theme") {
@@ -523,6 +525,8 @@ export class FunnelDraftViewModel {
     void this.settings;
     void this.rules;
     void this.defaultNext;
+    void this.defaultLocale;
+    void this.locales;
     if (this.autosaveStatus === "error") this.autosaveStatus = "saving";
   }
 
@@ -531,7 +535,7 @@ export class FunnelDraftViewModel {
     if (!this.funnel || this.isLoading) return;
     // Touch every reactive field we want to send so the trigger re-runs when
     // any of them changes. impair's @trigger tracks reads inside the body.
-    const payload = {
+    const payload: Parameters<typeof this.api.patchDraft>[2] = {
       name: this.name,
       slug: this.slug,
       draftPages: this.pages as never,
@@ -541,7 +545,7 @@ export class FunnelDraftViewModel {
       draftDefaultNext: this.defaultNext,
       defaultLocale: this.defaultLocale,
       locales: this.locales,
-    } as Parameters<typeof this.api.patchDraft>[2] & { defaultLocale: LocaleCode; locales: LocaleCode[] };
+    };
     // Skip no-op PATCHes — the throttle fires on any read change, but
     // many of those (e.g. UI-only toggles wrapped in @state) leave the
     // shipped payload identical.
@@ -607,6 +611,12 @@ export class FunnelDraftViewModel {
     if (this.locales.includes(locale)) return;
     this.locales = [...this.locales, locale];
     this.editLocale = locale;
+  }
+
+  setDefaultLocale(locale: LocaleCode) {
+    if (!this.locales.includes(locale)) return;
+    if (locale === this.defaultLocale) return;
+    this.defaultLocale = locale;
   }
 
   removeLocale(locale: LocaleCode) {

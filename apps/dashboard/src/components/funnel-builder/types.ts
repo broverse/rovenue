@@ -360,12 +360,20 @@ export type Session = {
   paid: string | null;
 };
 
-export type TabId = "content" | "workflow" | "theme" | "settings" | "sessions" | "share";
+export type TabId =
+  | "content"
+  | "workflow"
+  | "theme"
+  | "localization"
+  | "settings"
+  | "sessions"
+  | "share";
 
 export const TABS: ReadonlyArray<{ id: TabId; label: string; hint: string; pip?: boolean }> = [
   { id: "content", label: "Content", hint: "Build pages & flow" },
   { id: "workflow", label: "Workflow", hint: "Branching & rules", pip: true },
   { id: "theme", label: "Theme", hint: "Brand & colors" },
+  { id: "localization", label: "Localization", hint: "Manage languages" },
   { id: "settings", label: "Settings", hint: "Store URLs, hand-off" },
   { id: "sessions", label: "Analytics", hint: "Live runs & metrics" },
   { id: "share", label: "Share", hint: "URL, QR, snippets" },
