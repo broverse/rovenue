@@ -17,8 +17,8 @@ describe("integrations queue constants", () => {
     ]);
   });
 
-  it("buildIntegrationsDeliverJobId concatenates connectionId:outboxEventId", () => {
-    expect(buildIntegrationsDeliverJobId("c1", "o1")).toBe("c1:o1");
+  it("buildIntegrationsDeliverJobId concatenates connectionId|outboxEventId (pipe separator, BullMQ v5 safe)", () => {
+    expect(buildIntegrationsDeliverJobId("c1", "o1")).toBe("c1|o1");
   });
 
   it("IntegrationsDeliverJob type compiles", () => {

@@ -49,11 +49,11 @@ describe("processFanoutMessage", () => {
     expect(enqueue).toHaveBeenCalledTimes(2);
     expect(enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ connectionId: "c1" }),
-      "c1:ob1",
+      "c1|ob1",
     );
     expect(enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ connectionId: "c2" }),
-      "c2:ob1",
+      "c2|ob1",
     );
   });
 
