@@ -267,7 +267,7 @@ export const projects = pgTable("projects", {
   settings: jsonb("settings").notNull().default(sql`'{}'::jsonb`),
   refundShieldEnabled: boolean("refund_shield_enabled").notNull().default(false),
   refundShieldConsentAcknowledgedAt: timestamp("refund_shield_consent_acknowledged_at", { withTimezone: true }),
-  refundShieldConsentAcknowledgedBy: text("refund_shield_consent_acknowledged_by").references(() => user.id),
+  refundShieldConsentAcknowledgedBy: text("refund_shield_consent_acknowledged_by").references(() => user.id, { onDelete: "set null" }),
   refundShieldResponseDelayMinutes: integer("refund_shield_response_delay_minutes").notNull().default(60),
   createdAt: timestamp("createdAt", { withTimezone: true })
     .notNull()
