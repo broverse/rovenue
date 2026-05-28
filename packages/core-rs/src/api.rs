@@ -11,6 +11,7 @@ use crate::identity::{IdentityManager, User};
 use crate::observer::{Observer, ObserverBus};
 use crate::polling::PollingScheduler;
 use crate::receipts::{ReceiptClient, ReceiptResult};
+use crate::sessions::{AccountTokenStore, SessionBuffer, SessionDispatcher, SessionEventKind};
 use crate::time::{Clock, SystemClock};
 use crate::transport::http_client::HttpClient;
 use crate::transport::idempotency::IdempotencyKey;
@@ -25,6 +26,9 @@ pub struct RovenueCore {
     entitlements: Arc<EntitlementReader>,
     credits: Arc<CreditReader>,
     receipts: Arc<ReceiptClient>,
+    account_tokens: Arc<AccountTokenStore>,
+    sessions: Arc<SessionBuffer>,
+    session_dispatcher: Arc<SessionDispatcher>,
     scheduler: PollingScheduler,
 }
 
@@ -62,6 +66,21 @@ impl RovenueCore {
                 .with_clock(Arc::clone(&clock)),
         );
         let receipts = Arc::new(ReceiptClient::new(Arc::clone(&http)));
+        let account_tokens = Arc::new(AccountTokenStore::new(Arc::clone(&store)));
+        let sessions = Arc::new(SessionBuffer::new(Arc::clone(&store)));
+        let identity_for_sub = Arc::clone(&identity);
+        let session_dispatcher = Arc::new(SessionDispatcher::new(
+            Arc::clone(&sessions),
+            Arc::clone(&http),
+            Arc::new(move || {
+                let scope = identity_for_sub.current_user_scope();
+                if scope.is_empty() {
+                    None
+                } else {
+                    Some(scope)
+                }
+            }),
+        ));
         let scheduler = PollingScheduler::new();
         {
             let reader = Arc::clone(&reader);
@@ -79,6 +98,7 @@ impl RovenueCore {
                 let _ = reader.refresh();
             });
         }
+        Arc::clone(&session_dispatcher).start(&scheduler);
         Ok(Self {
             _config: Arc::new(config),
             bus,
@@ -86,6 +106,9 @@ impl RovenueCore {
             entitlements: reader,
             credits,
             receipts,
+            account_tokens,
+            sessions,
+            session_dispatcher,
             scheduler,
         })
     }
@@ -164,12 +187,17 @@ impl RovenueCore {
         &self,
         receipt: String,
         product_id: String,
+        app_account_token: Option<String>,
     ) -> RovenueResult<ReceiptResult> {
         let scope = self.identity.current_user_scope();
         let key = IdempotencyKey::new();
-        let result = self
-            .receipts
-            .post_apple(&receipt, &scope, &product_id, key.as_str())?;
+        let result = self.receipts.post_apple(
+            &receipt,
+            &scope,
+            &product_id,
+            key.as_str(),
+            app_account_token.as_deref(),
+        )?;
         let _ = self.entitlements.refresh();
         let _ = self.credits.refresh();
         Ok(result)
@@ -179,15 +207,40 @@ impl RovenueCore {
         &self,
         receipt: String,
         product_id: String,
+        obfuscated_account_id: Option<String>,
+        obfuscated_profile_id: Option<String>,
     ) -> RovenueResult<ReceiptResult> {
         let scope = self.identity.current_user_scope();
         let key = IdempotencyKey::new();
-        let result = self
-            .receipts
-            .post_google(&receipt, &scope, &product_id, key.as_str())?;
+        let result = self.receipts.post_google(
+            &receipt,
+            &scope,
+            &product_id,
+            key.as_str(),
+            obfuscated_account_id.as_deref(),
+            obfuscated_profile_id.as_deref(),
+        )?;
         let _ = self.entitlements.refresh();
         let _ = self.credits.refresh();
         Ok(result)
+    }
+
+    pub fn record_session_event(
+        &self,
+        kind: SessionEventKind,
+        occurred_at: String,
+        duration_ms: Option<u32>,
+    ) -> RovenueResult<()> {
+        self.sessions.record(kind, &occurred_at, duration_ms)
+    }
+
+    pub fn flush_session_events(&self) -> RovenueResult<u32> {
+        self.session_dispatcher.flush_once().map(|n| n as u32)
+    }
+
+    pub fn get_or_create_app_account_token(&self) -> RovenueResult<String> {
+        let scope = self.identity.current_user_scope();
+        self.account_tokens.get_or_create(&scope)
     }
 }
 

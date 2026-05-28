@@ -54,6 +54,12 @@ dictionary ReceiptResult {
     i64 credit_balance;
 };
 
+enum SessionEventKind {
+    "Open",
+    "Background",
+    "Close",
+};
+
 interface RovenueCore {
     [Throws=RovenueError]
     constructor(Config config);
@@ -80,10 +86,32 @@ interface RovenueCore {
     i64 consume_credits(i64 amount, string? description);
 
     [Throws=RovenueError]
-    ReceiptResult post_apple_receipt(string receipt, string product_id);
+    ReceiptResult post_apple_receipt(
+        string receipt,
+        string product_id,
+        string? app_account_token
+    );
 
     [Throws=RovenueError]
-    ReceiptResult post_google_receipt(string receipt, string product_id);
+    ReceiptResult post_google_receipt(
+        string receipt,
+        string product_id,
+        string? obfuscated_account_id,
+        string? obfuscated_profile_id
+    );
+
+    [Throws=RovenueError]
+    void record_session_event(
+        SessionEventKind kind,
+        string occurred_at,
+        u32? duration_ms
+    );
+
+    [Throws=RovenueError]
+    u32 flush_session_events();
+
+    [Throws=RovenueError]
+    string get_or_create_app_account_token();
 
     void register_observer(Observer obs);
     void set_foreground(boolean foreground);

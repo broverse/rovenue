@@ -32,6 +32,8 @@ fn post_google_success() {
             "anon_99",
             "pro_monthly_v2",
             "idem_google_001",
+            None,
+            None,
         )
         .unwrap();
     assert_eq!(result.subscriber_id, "sub_2");

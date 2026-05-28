@@ -8,6 +8,23 @@ pub struct ReceiptBody<'a> {
     pub app_user_id: &'a str,
     #[serde(rename = "productId")]
     pub product_id: &'a str,
+    /// Apple: sanity-check passthrough of the UUID the host app supplied to
+    /// `Product.purchase(options: [.appAccountToken(uuid)])`. Backend may
+    /// cross-reference vs the JWS-decoded `appAccountToken` claim.
+    #[serde(rename = "appAccountToken", skip_serializing_if = "Option::is_none")]
+    pub app_account_token: Option<&'a str>,
+    /// Google: sanity-check passthrough of `setObfuscatedAccountId`.
+    #[serde(
+        rename = "obfuscatedAccountId",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub obfuscated_account_id: Option<&'a str>,
+    /// Google: sanity-check passthrough of `setObfuscatedProfileId`.
+    #[serde(
+        rename = "obfuscatedProfileId",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub obfuscated_profile_id: Option<&'a str>,
 }
 
 /// Wire model for the receipt response body (inside the `data` envelope).

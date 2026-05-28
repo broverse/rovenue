@@ -27,7 +27,7 @@ fn post_apple_success() {
 
     let c = ReceiptClient::new(http(&server.url()));
     let result = c
-        .post_apple("<jws>", "anon_99", "pro_monthly", "idem_apple_001")
+        .post_apple("<jws>", "anon_99", "pro_monthly", "idem_apple_001", None)
         .unwrap();
     assert_eq!(result.subscriber_id, "sub_1");
     assert_eq!(result.app_user_id, "anon_99");
@@ -46,7 +46,7 @@ fn post_apple_403_is_fatal() {
 
     let c = ReceiptClient::new(http(&server.url()));
     let err = c
-        .post_apple("<jws>", "anon_99", "pro", "idem_x")
+        .post_apple("<jws>", "anon_99", "pro", "idem_x", None)
         .unwrap_err();
     assert!(matches!(err, rovenue::RovenueError::ServerError));
     m.assert();
