@@ -20,5 +20,8 @@ export function buildIntegrationsDeliverJobId(
   connectionId: string,
   outboxEventId: string,
 ): string {
-  return `${connectionId}:${outboxEventId}`;
+  // BullMQ v5 rejects custom jobIds that contain `:` unless they have
+  // exactly 3 colon-delimited segments (the repeatable-job wire format).
+  // Use `|` as the separator so the id is URL-safe and BullMQ-safe.
+  return `${connectionId}|${outboxEventId}`;
 }
