@@ -16,6 +16,7 @@ describe("loadTools", () => {
       userId: "u_1",
       role: "CUSTOMER_SUPPORT",
       threadId: "th_1",
+      messageId: "msg_1",
     });
     expect(tools["query.subscribers.search"]).toBeDefined();
     expect(tools["query.subscribers.search"]).toHaveProperty("execute");
@@ -37,6 +38,41 @@ describe("loadTools", () => {
       "query.featureFlags.list",
     ]) {
       expect(names).toContain(n);
+    }
+  });
+
+  it("includes all v1 action tools", () => {
+    const names = listToolNames();
+    for (const n of [
+      "action.subscriptions.cancel",
+      "action.subscriptions.refund",
+      "action.subscribers.grantAccess",
+      "action.subscribers.transfer",
+      "action.products.updatePrice",
+      "action.audiences.create",
+      "action.audiences.update",
+      "action.featureFlags.toggle",
+      "action.featureFlags.updateRules",
+      "action.experiments.start",
+      "action.experiments.stop",
+    ]) {
+      expect(names).toContain(n);
+    }
+  });
+
+  it("never includes excluded domains", () => {
+    const names = listToolNames();
+    for (const banned of [
+      "billing",
+      "payment",
+      "invoice",
+      "webhook",
+      "custom-domain",
+      "customDomain",
+      "apiKey",
+      "member",
+    ]) {
+      for (const n of names) expect(n).not.toContain(banned);
     }
   });
 });

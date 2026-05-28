@@ -5,6 +5,12 @@ import { queryMetricsTools } from "./query-metrics";
 import { queryAudiencesTools } from "./query-audiences";
 import { queryExperimentsTools } from "./query-experiments";
 import { queryFeatureFlagsTools } from "./query-feature-flags";
+import { actionSubscriptionsTools } from "./action-subscriptions";
+import { actionSubscribersTools } from "./action-subscribers";
+import { actionProductsTools } from "./action-products";
+import { actionAudiencesTools } from "./action-audiences";
+import { actionFeatureFlagsTools } from "./action-feature-flags";
+import { actionExperimentsTools } from "./action-experiments";
 
 export function loadTools(ctx: ToolContext) {
   return {
@@ -15,6 +21,12 @@ export function loadTools(ctx: ToolContext) {
     ...queryAudiencesTools(ctx),
     ...queryExperimentsTools(ctx),
     ...queryFeatureFlagsTools(ctx),
+    ...actionSubscriptionsTools(ctx),
+    ...actionSubscribersTools(ctx),
+    ...actionProductsTools(ctx),
+    ...actionAudiencesTools(ctx),
+    ...actionFeatureFlagsTools(ctx),
+    ...actionExperimentsTools(ctx),
   };
 }
 
@@ -30,6 +42,17 @@ const STATIC_NAMES = [
   "query.audiences.list",
   "query.experiments.list",
   "query.featureFlags.list",
+  "action.subscriptions.cancel",
+  "action.subscriptions.refund",
+  "action.subscribers.grantAccess",
+  "action.subscribers.transfer",
+  "action.products.updatePrice",
+  "action.audiences.create",
+  "action.audiences.update",
+  "action.featureFlags.toggle",
+  "action.featureFlags.updateRules",
+  "action.experiments.start",
+  "action.experiments.stop",
 ] as const;
 
 export function listToolNames(): string[] {

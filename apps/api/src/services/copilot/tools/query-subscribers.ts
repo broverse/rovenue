@@ -8,6 +8,7 @@ export interface ToolContext {
   userId: string;
   role: string;
   threadId: string;
+  messageId: string;
 }
 
 const SearchArgs = z.object({
