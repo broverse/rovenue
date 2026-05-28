@@ -51,6 +51,7 @@ import {
   productType,
   purchaseStatus,
   pushPlatform,
+  refundShieldAppleEnvironmentEnum,
   refundShieldOutcomeEnum,
   refundShieldStatusEnum,
   revenueEventType,
@@ -853,6 +854,13 @@ export const refundShieldResponses = pgTable(
     appleHttpStatus: integer("apple_http_status"),
     appleResponseBody: text("apple_response_body"),
     status: refundShieldStatusEnum("status").notNull().default("PENDING"),
+    // Apple environment captured from the JWS at webhook receipt time.
+    // The responder worker reads it back to pick the correct App
+    // Store Server API base URL — see refund-shield-responder.ts
+    // `loadAppleContextForProject`.
+    appleEnvironment: refundShieldAppleEnvironmentEnum("apple_environment")
+      .notNull()
+      .default("PRODUCTION"),
     outcome: refundShieldOutcomeEnum("outcome"),
     outcomeReceivedAt: timestamp("outcome_received_at", {
       withTimezone: true,

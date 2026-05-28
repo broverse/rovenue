@@ -108,7 +108,9 @@ interface MakeTxOverrides {
 }
 
 function makeFakeJwsTransactionPayload(
-  overrides: MakeTxOverrides,
+  overrides: MakeTxOverrides & {
+    environment?: typeof APPLE_ENVIRONMENT.SANDBOX | typeof APPLE_ENVIRONMENT.PRODUCTION;
+  },
 ): AppleJwsTransactionPayload {
   return {
     transactionId: overrides.transactionId,
@@ -123,7 +125,7 @@ function makeFakeJwsTransactionPayload(
     appAccountToken: overrides.appAccountToken,
     inAppOwnershipType: "PURCHASED",
     signedDate: 1_700_000_000_000,
-    environment: APPLE_ENVIRONMENT.SANDBOX,
+    environment: overrides.environment ?? APPLE_ENVIRONMENT.SANDBOX,
     storefront: "USA",
     storefrontId: "143441",
     currency: "USD",
@@ -133,6 +135,9 @@ function makeFakeJwsTransactionPayload(
 
 function makeConsumptionRequestNotification(
   uuid: string,
+  environment:
+    | typeof APPLE_ENVIRONMENT.SANDBOX
+    | typeof APPLE_ENVIRONMENT.PRODUCTION = APPLE_ENVIRONMENT.SANDBOX,
 ): AppleResponseBodyV2DecodedPayload {
   return {
     notificationType: APPLE_NOTIFICATION_TYPE.CONSUMPTION_REQUEST,
@@ -141,7 +146,7 @@ function makeConsumptionRequestNotification(
     signedDate: 1_700_000_000_000,
     data: {
       signedTransactionInfo: "signed-tx-stub",
-      environment: APPLE_ENVIRONMENT.SANDBOX,
+      environment,
     },
   } as AppleResponseBodyV2DecodedPayload;
 }
@@ -226,6 +231,7 @@ function lastInsertArgs(): {
   detectedAt: Date;
   scheduledFor: Date;
   status: string;
+  appleEnvironment: "PRODUCTION" | "SANDBOX";
 } {
   const calls = drizzleMock.refundShieldResponseRepo.insertConsumptionRequest
     .mock.calls as unknown as Array<unknown[]>;
@@ -278,10 +284,78 @@ describe("handleAppleNotification — CONSUMPTION_REQUEST", () => {
       appleOriginalTransactionId: "1000000001",
       appleTransactionId: "1000000099",
       status: "PENDING",
+      // Default fixture builds a SANDBOX JWS → row stores SANDBOX
+      // so the responder later hits the sandbox API base URL.
+      appleEnvironment: "SANDBOX",
     });
     expect(
       insertArgs.scheduledFor.getTime() - insertArgs.detectedAt.getTime(),
     ).toBe(60 * 60 * 1000);
+  });
+
+  test("persists PRODUCTION when notification.data.environment is Production", async () => {
+    drizzleMock.projectRepo.findProjectById.mockResolvedValue(
+      makeProjectRow({ refundShieldEnabled: true }),
+    );
+    drizzleMock.subscriberRepo.findSubscriberByAppleAppAccountToken.mockResolvedValue(
+      { id: "sub_1", appleAppAccountToken: APP_ACCOUNT_TOKEN } as never,
+    );
+
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000010",
+        transactionId: "1000000099",
+        environment: APPLE_ENVIRONMENT.PRODUCTION,
+      }),
+      makeConsumptionRequestNotification(
+        "uuid-prod-1",
+        APPLE_ENVIRONMENT.PRODUCTION,
+      ),
+    );
+
+    await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    const insertArgs = lastInsertArgs();
+    expect(insertArgs.appleEnvironment).toBe("PRODUCTION");
+  });
+
+  test("persists SANDBOX when notification.data.environment is Sandbox", async () => {
+    // This covers the canonical TestFlight flow: a single Rovenue API
+    // serves both prod and sandbox traffic, and the per-row column
+    // lets the responder hit the right base URL hours later.
+    drizzleMock.projectRepo.findProjectById.mockResolvedValue(
+      makeProjectRow({ refundShieldEnabled: true }),
+    );
+    drizzleMock.subscriberRepo.findSubscriberByAppleAppAccountToken.mockResolvedValue(
+      { id: "sub_1", appleAppAccountToken: APP_ACCOUNT_TOKEN } as never,
+    );
+
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000011",
+        transactionId: "1000000099",
+        environment: APPLE_ENVIRONMENT.SANDBOX,
+      }),
+      makeConsumptionRequestNotification(
+        "uuid-sbx-1",
+        APPLE_ENVIRONMENT.SANDBOX,
+      ),
+    );
+
+    await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    const insertArgs = lastInsertArgs();
+    expect(insertArgs.appleEnvironment).toBe("SANDBOX");
   });
 
   test("inserts SKIPPED_DISABLED when project not enabled", async () => {
@@ -550,6 +624,19 @@ describe("handleAppleNotification — outcome linkage", () => {
   });
 
   test("sets outcome=REFUND_REVERSED for REFUND_REVERSED notification", async () => {
+    // Compensation path needs a resolvable purchase + subscriber so the
+    // REACTIVATION revenue_events emission can run.
+    drizzleMock.purchaseExtRepo.findPurchaseByStoreTransaction.mockResolvedValue(
+      {
+        id: "pur_rev",
+        subscriberId: "sub_rev",
+        productId: "prod_rev",
+      } as never,
+    );
+    drizzleMock.subscriberRepo.findSubscriberById.mockResolvedValue({
+      id: "sub_rev",
+    } as never);
+
     const verifier = makeStubVerifier(
       makeFakeJwsTransactionPayload({
         appAccountToken: APP_ACCOUNT_TOKEN,
@@ -587,6 +674,61 @@ describe("handleAppleNotification — outcome linkage", () => {
       originalTransactionId: "1000000012",
       outcome: "REFUND_REVERSED",
     });
+
+    // Compensation: a positive REACTIVATION revenue_events row must be
+    // emitted to undo the prior REFUND's effect in MRR / lifetime
+    // analytics. Amount mirrors the JWS price (positive, since the
+    // customer is keeping the charge).
+    expect(
+      drizzleMock.revenueEventRepo.createRevenueEvent,
+    ).toHaveBeenCalledOnce();
+    const [, revenueArgs] = drizzleMock.revenueEventRepo.createRevenueEvent
+      .mock.calls[0] as unknown as [unknown, Record<string, unknown>];
+    expect(revenueArgs).toMatchObject({
+      projectId: PROJECT_ID,
+      subscriberId: "sub_rev",
+      purchaseId: "pur_rev",
+      productId: "prod_rev",
+      type: "REACTIVATION",
+      currency: "USD",
+    });
+    // price is 9_990_000 micro-units → 9.99 in major units, positive.
+    expect(Number(revenueArgs.amount)).toBeCloseTo(9.99, 5);
+  });
+
+  test("REFUND_REVERSED with no matching purchase skips compensation cleanly", async () => {
+    // No purchase row resolves — should still update outcome but skip
+    // the revenue_events emission without throwing.
+    drizzleMock.purchaseExtRepo.findPurchaseByStoreTransaction.mockResolvedValue(
+      null,
+    );
+
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000014",
+        transactionId: "1000000099",
+      }),
+      makeOutcomeNotification(
+        APPLE_NOTIFICATION_TYPE.REFUND_REVERSED,
+        "uuid-r5",
+      ),
+    );
+
+    const result = await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    expect(result.status).toBe("processed");
+    expect(
+      drizzleMock.refundShieldResponseRepo
+        .updateOutcomeByOriginalTransactionIdOverwrite,
+    ).toHaveBeenCalledOnce();
+    expect(
+      drizzleMock.revenueEventRepo.createRevenueEvent,
+    ).not.toHaveBeenCalled();
   });
 
   test("ignores outcome update silently when no matching response row exists", async () => {

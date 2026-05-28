@@ -333,3 +333,15 @@ export const refundShieldOutcomeEnum = pgEnum("refund_shield_outcome", [
   "REFUND_DECLINED",
   "REFUND_REVERSED",
 ]);
+
+// Apple's notification + transaction JWS carry an `environment`
+// field — we persist it per-row at CONSUMPTION_REQUEST insert time
+// so the responder worker (which runs hours later, after Apple's
+// signed payload is gone) can hit the correct App Store Server API
+// base URL without falling back to NODE_ENV. Apple's wire values
+// are "Production" / "Sandbox" but we normalise to the canonical
+// uppercase form used by ProjectAppleContext.
+export const refundShieldAppleEnvironmentEnum = pgEnum(
+  "refund_shield_apple_environment",
+  ["PRODUCTION", "SANDBOX"],
+);

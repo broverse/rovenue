@@ -98,6 +98,11 @@ function makeRow(overrides: Partial<Record<string, unknown>> = {}) {
     scheduledFor: new Date("2026-05-28T01:30:00Z"),
     status: "PENDING",
     retryCount: 0,
+    // Persisted from the JWS at webhook time — the worker reads it
+    // back to pick the Apple Server API base URL. Default to
+    // PRODUCTION since most rows in fixtures represent live traffic;
+    // a dedicated test below covers the SANDBOX branch.
+    appleEnvironment: "PRODUCTION",
     ...overrides,
   };
 }
@@ -374,6 +379,49 @@ describe("runRefundShieldResponderTick", () => {
 
     // The SENT counter still ticked even though audit blew up.
     expect(metricsTesting.snapshot().sent).toEqual({ proj_1: 1 });
+  });
+
+  it("forwards row.appleEnvironment=SANDBOX into the ProjectAppleContext", async () => {
+    // Multi-environment deployments (TestFlight + prod served by one
+    // API) require the responder to target the same Apple base URL
+    // the originating CONSUMPTION_REQUEST arrived from. The worker
+    // reads `apple_environment` off the row instead of NODE_ENV, so
+    // a SANDBOX row dispatches against the sandbox API even on a
+    // production deploy.
+    const row = makeRow({ appleEnvironment: "SANDBOX" });
+    claimPendingResponsesMock.mockResolvedValueOnce([row]);
+    findProjectByIdMock.mockResolvedValueOnce(makeProject());
+    processRefundShieldResponseMock.mockResolvedValueOnce({
+      status: "SENT",
+      payload: FAKE_PAYLOAD,
+      httpStatus: 202,
+    });
+
+    await runRefundShieldResponderTick({ now: NOW });
+
+    expect(processRefundShieldResponseMock).toHaveBeenCalledTimes(1);
+    const callArgs = processRefundShieldResponseMock.mock.calls[0]?.[0] as {
+      ctx: { environment: "PRODUCTION" | "SANDBOX" };
+    };
+    expect(callArgs.ctx.environment).toBe("SANDBOX");
+  });
+
+  it("forwards row.appleEnvironment=PRODUCTION into the ProjectAppleContext", async () => {
+    const row = makeRow({ appleEnvironment: "PRODUCTION" });
+    claimPendingResponsesMock.mockResolvedValueOnce([row]);
+    findProjectByIdMock.mockResolvedValueOnce(makeProject());
+    processRefundShieldResponseMock.mockResolvedValueOnce({
+      status: "SENT",
+      payload: FAKE_PAYLOAD,
+      httpStatus: 202,
+    });
+
+    await runRefundShieldResponderTick({ now: NOW });
+
+    const callArgs = processRefundShieldResponseMock.mock.calls[0]?.[0] as {
+      ctx: { environment: "PRODUCTION" | "SANDBOX" };
+    };
+    expect(callArgs.ctx.environment).toBe("PRODUCTION");
   });
 
   it("claims pending rows with FOR UPDATE SKIP LOCKED semantics + bounded batch", async () => {

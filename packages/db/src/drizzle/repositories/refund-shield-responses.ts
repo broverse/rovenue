@@ -23,6 +23,12 @@ export type RefundShieldOutcome =
   | "REFUND_DECLINED"
   | "REFUND_REVERSED";
 
+// Per-row Apple environment captured from the JWS at webhook
+// receipt time. The responder worker reads it back to pick the
+// correct App Store Server API base URL — see
+// refund-shield-responder.ts `loadAppleContextForProject`.
+export type RefundShieldAppleEnvironment = "PRODUCTION" | "SANDBOX";
+
 export interface InsertConsumptionRequestInput {
   projectId: string;
   subscriberId: string | null;
@@ -32,6 +38,7 @@ export interface InsertConsumptionRequestInput {
   detectedAt: Date;
   scheduledFor: Date;
   status: RefundShieldStatus;
+  appleEnvironment: RefundShieldAppleEnvironment;
 }
 
 /**
@@ -56,6 +63,7 @@ export async function insertConsumptionRequest(
       detectedAt: input.detectedAt,
       scheduledFor: input.scheduledFor,
       status: input.status,
+      appleEnvironment: input.appleEnvironment,
     })
     .onConflictDoNothing({ target: refundShieldResponses.appleNotificationUuid });
 }
@@ -184,6 +192,10 @@ export interface PendingResponseRow {
   scheduledFor: Date;
   status: string;
   retryCount: number;
+  // Persisted at CONSUMPTION_REQUEST insert time from the JWS —
+  // worker uses it to pick the App Store Server API base URL
+  // rather than falling back to NODE_ENV.
+  appleEnvironment: RefundShieldAppleEnvironment;
 }
 
 /**
@@ -209,7 +221,8 @@ export async function claimPendingResponses(
            detected_at             AS "detectedAt",
            scheduled_for           AS "scheduledFor",
            status,
-           retry_count             AS "retryCount"
+           retry_count             AS "retryCount",
+           apple_environment       AS "appleEnvironment"
     FROM ${refundShieldResponses}
     WHERE status = 'PENDING'
       AND scheduled_for <= ${args.now}
@@ -241,6 +254,7 @@ export async function claimPendingResponses(
         : new Date(row.scheduledFor as string),
     status: row.status as string,
     retryCount: Number(row.retryCount),
+    appleEnvironment: row.appleEnvironment as RefundShieldAppleEnvironment,
   }));
 }
 

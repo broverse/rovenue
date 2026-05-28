@@ -241,8 +241,14 @@ async function processOneRow(args: {
 
   // Load Apple credentials. The worker can't recover from missing
   // creds, so a missing config is a terminal FAILED for the row —
-  // an operator must wire the project before retrying.
-  const ctx = await loadAppleContextForProject(row.projectId);
+  // an operator must wire the project before retrying. The
+  // environment is read off the row (captured from the JWS at T10
+  // webhook receive time) so this dispatch hits the same base URL
+  // Apple originally addressed.
+  const ctx = await loadAppleContextForProject(
+    row.projectId,
+    row.appleEnvironment as "PRODUCTION" | "SANDBOX",
+  );
   if (!ctx) {
     await drizzle.refundShieldResponseRepo.markResponseFailed(tx, {
       id: row.id,
@@ -405,20 +411,18 @@ async function processOneRow(args: {
 // hits the Server API by transactionId, not appAppleId, so we only
 // require the JWT signing inputs.
 //
-// Environment selection: the webhook verifier reads it off the
-// signed JWS at receive time, but the responder fires hours later
-// without a fresh payload. We fall back to NODE_ENV — production
-// deploys hit PRODUCTION, every other environment uses SANDBOX.
-// Follow-up (out of scope for T19 — schema migration required):
-// persist environment per-row at webhook time so we can re-target
-// the correct base URL without relying on NODE_ENV. Today the
-// NODE_ENV fallback is correct for every supported deployment
-// shape (dev = SANDBOX, prod = PRODUCTION) and incorrect only
-// when running a hybrid prod-API-against-sandbox-Apple setup,
-// which is an undocumented testing configuration.
+// Environment selection: the per-row `apple_environment` column is
+// captured from the JWS at webhook receive time (T10) and persisted
+// alongside the rest of the CONSUMPTION_REQUEST work-queue row.
+// This is correct even for hybrid deployments where one Rovenue API
+// serves both TestFlight (SANDBOX) and production (PRODUCTION)
+// traffic — every row carries the environment it actually arrived
+// with, so we can re-target the correct base URL hours later
+// without a fresh JWS or a NODE_ENV fallback.
 
 async function loadAppleContextForProject(
   projectId: string,
+  environment: "PRODUCTION" | "SANDBOX",
 ): Promise<ProjectAppleContext | null> {
   const creds = await loadAppleCredentials(projectId);
   if (!creds) return null;
@@ -431,7 +435,7 @@ async function loadAppleContextForProject(
     keyId: creds.keyId,
     issuerId: creds.issuerId,
     privateKey: creds.privateKey,
-    environment: env.NODE_ENV === "production" ? "PRODUCTION" : "SANDBOX",
+    environment,
   };
 }
 
