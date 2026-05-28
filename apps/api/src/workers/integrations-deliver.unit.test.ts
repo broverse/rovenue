@@ -209,6 +209,95 @@ describe("runDeliverStep", () => {
     );
   });
 
+  it("publishes live event + skips audit on success", async () => {
+    const deliveryRow = makeDelivery("d1");
+    const updatedRow = { ...deliveryRow, status: "succeeded" as const };
+    const publishLiveEvent = vi.fn().mockResolvedValue(undefined);
+    const auditDeadLetter = vi.fn().mockResolvedValue(undefined);
+    const captureSentry = vi.fn();
+    const deps: DeliverStepDeps = {
+      loadConnection: vi.fn().mockResolvedValue(makeConn()),
+      decrypt: vi.fn().mockReturnValue({ accessToken: "tok" }),
+      insertPendingDelivery: vi.fn().mockResolvedValue(deliveryRow),
+      updateDeliveryStatus: vi.fn().mockResolvedValue(updatedRow),
+      provider: {
+        id: "META_CAPI",
+        defaultEventMapping: {},
+        validateCredentials: vi.fn(),
+        mapEvent: vi.fn().mockReturnValue({
+          eventKey: "revenue.event.recorded",
+          providerEvent: "Purchase",
+          body: { data: [] },
+        }),
+        deliver: vi.fn().mockResolvedValue({
+          ok: true,
+          httpStatus: 200,
+          responseBody: "{}",
+          retriable: false,
+        }),
+      },
+      http: { request: vi.fn() },
+      attempt: 0,
+      publishLiveEvent,
+      auditDeadLetter,
+      captureSentry,
+    };
+
+    const result = await runDeliverStep(makeJob(), deps);
+    expect(result.outcome).toBe("succeeded");
+    expect(publishLiveEvent).toHaveBeenCalledOnce();
+    expect(publishLiveEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "succeeded" }),
+    );
+    expect(auditDeadLetter).not.toHaveBeenCalled();
+    expect(captureSentry).not.toHaveBeenCalled();
+  });
+
+  it("fires audit + sentry on dead_letter", async () => {
+    const deliveryRow = makeDelivery("d1");
+    const updatedRow = { ...deliveryRow, status: "dead_letter" as const };
+    const publishLiveEvent = vi.fn().mockResolvedValue(undefined);
+    const auditDeadLetter = vi.fn().mockResolvedValue(undefined);
+    const captureSentry = vi.fn();
+    const deps: DeliverStepDeps = {
+      loadConnection: vi.fn().mockResolvedValue(makeConn()),
+      decrypt: vi.fn().mockReturnValue({ accessToken: "tok" }),
+      insertPendingDelivery: vi.fn().mockResolvedValue(deliveryRow),
+      updateDeliveryStatus: vi.fn().mockResolvedValue(updatedRow),
+      provider: {
+        id: "META_CAPI",
+        defaultEventMapping: {},
+        validateCredentials: vi.fn(),
+        mapEvent: vi.fn().mockReturnValue({
+          eventKey: "revenue.event.recorded",
+          providerEvent: "Purchase",
+          body: { data: [] },
+        }),
+        deliver: vi.fn().mockResolvedValue({
+          ok: false,
+          httpStatus: 400,
+          responseBody: "bad request",
+          errorMessage: "invalid payload",
+          retriable: false,
+        }),
+      },
+      http: { request: vi.fn() },
+      attempt: 0,
+      publishLiveEvent,
+      auditDeadLetter,
+      captureSentry,
+    };
+
+    const result = await runDeliverStep(makeJob(), deps);
+    expect(result.outcome).toBe("dead_letter");
+    expect(publishLiveEvent).toHaveBeenCalledOnce();
+    expect(publishLiveEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "dead_letter" }),
+    );
+    expect(auditDeadLetter).toHaveBeenCalledOnce();
+    expect(captureSentry).toHaveBeenCalledOnce();
+  });
+
   it("returns succeeded without re-delivering when insertPendingDelivery hits dedupe (returns undefined)", async () => {
     const insertPendingDelivery = vi.fn().mockResolvedValue(undefined); // simulate UNIQUE conflict
     const updateDeliveryStatus = vi.fn();

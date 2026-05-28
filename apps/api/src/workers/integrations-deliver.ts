@@ -31,7 +31,7 @@ import type {
   IntegrationConnection,
   IntegrationDelivery,
 } from "@rovenue/db";
-import type { ProviderCredentials } from "../services/integrations/types";
+import type { ProviderCredentials, ProviderId } from "../services/integrations/types";
 
 // =============================================================
 // Types
@@ -81,6 +81,26 @@ export interface DeliverStepDeps {
   provider: ReturnType<typeof getProvider>;
   http: ReturnType<typeof createUndiciHttpClient>;
   attempt: number;
+  publishLiveEvent?: (ev: {
+    projectId: string;
+    connectionId: string;
+    providerId: ProviderId;
+    eventKey: string;
+    status: "succeeded" | "failed" | "skipped" | "dead_letter";
+  }) => Promise<void>;
+  auditDeadLetter?: (input: {
+    projectId: string;
+    connectionId: string;
+    outboxEventId: string;
+    providerId: ProviderId;
+    errorMessage?: string | null;
+  }) => Promise<void>;
+  captureSentry?: (input: {
+    connectionId: string;
+    providerId: ProviderId;
+    outboxEventId: string;
+    errorMessage?: string | null;
+  }) => void;
 }
 
 // =============================================================
@@ -212,6 +232,15 @@ export async function runDeliverStep(
       providerEvent: payload.providerEvent,
       attempt: deps.attempt,
     });
+    if (deps.publishLiveEvent) {
+      await deps.publishLiveEvent({
+        projectId: conn.projectId,
+        connectionId: conn.id,
+        providerId: conn.providerId as ProviderId,
+        eventKey: payload.eventKey,
+        status: "succeeded",
+      });
+    }
     log.info("succeeded", {
       connectionId: conn.id,
       eventKey: deriveEventKeyForLog(job),
@@ -232,6 +261,32 @@ export async function runDeliverStep(
       providerEvent: payload.providerEvent,
       attempt: deps.attempt,
     });
+    if (deps.publishLiveEvent) {
+      await deps.publishLiveEvent({
+        projectId: conn.projectId,
+        connectionId: conn.id,
+        providerId: conn.providerId as ProviderId,
+        eventKey: payload.eventKey,
+        status: "dead_letter",
+      });
+    }
+    if (deps.auditDeadLetter) {
+      await deps.auditDeadLetter({
+        projectId: conn.projectId,
+        connectionId: conn.id,
+        outboxEventId: job.envelope.outboxEventId,
+        providerId: conn.providerId as ProviderId,
+        errorMessage: result.errorMessage,
+      });
+    }
+    if (deps.captureSentry) {
+      deps.captureSentry({
+        connectionId: conn.id,
+        providerId: conn.providerId as ProviderId,
+        outboxEventId: job.envelope.outboxEventId,
+        errorMessage: result.errorMessage,
+      });
+    }
     log.warn("dead_letter_non_retriable", {
       connectionId: conn.id,
       httpStatus: result.httpStatus,
