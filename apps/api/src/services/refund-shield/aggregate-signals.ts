@@ -21,7 +21,7 @@ import type { RefundShieldSignals } from "../apple/refund-shield-buckets";
 //    window/trial flag scoped to the originating transaction.
 // 2. ClickHouse `sdk_sessions_daily_tbl` — lifetime session_ms,
 //    aggregated across all `(projectId, subscriberId)` rows.
-// 3. ClickHouse `revenue_lifetime_subscriber_tbl` — lifetime $
+// 3. ClickHouse `v_revenue_lifetime_subscriber` — lifetime $
 //    purchased + refunded in cents.
 //
 // We deliberately run the two CH lookups as separate queries
@@ -168,7 +168,7 @@ export async function aggregateRefundShieldSignals(
       SELECT
         coalesce(sum(lifetime_dollars_purchased_cents), 0) AS lifetime_dollars_purchased_cents,
         coalesce(sum(lifetime_dollars_refunded_cents), 0)  AS lifetime_dollars_refunded_cents
-      FROM revenue_lifetime_subscriber_tbl
+      FROM v_revenue_lifetime_subscriber
       WHERE projectId = {pid:String} AND subscriberId = {sid:String}
     `,
     query_params: { pid: input.projectId, sid: input.subscriberId },
