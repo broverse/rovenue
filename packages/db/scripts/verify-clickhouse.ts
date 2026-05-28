@@ -89,6 +89,16 @@ const EXPECTED_TABLES: ReadonlyArray<{ name: string; engine: string }> = [
   // Plan 2 — credit consumption rollup
   { name: "mv_credit_consumption_daily_target", engine: "SummingMergeTree" },
   { name: "mv_credit_consumption_daily", engine: "MaterializedView" },
+  // Plan 3 — Refund Shield SDK session pipeline
+  { name: "sdk_session_events_queue", engine: "Kafka" },
+  { name: "raw_sdk_session_events", engine: "ReplacingMergeTree" },
+  { name: "mv_sdk_sessions_to_raw", engine: "MaterializedView" },
+  // Plan 3 — Refund Shield per-subscriber daily session rollup
+  { name: "sdk_sessions_daily_tbl", engine: "SummingMergeTree" },
+  { name: "sdk_sessions_daily", engine: "MaterializedView" },
+  // Plan 3 — Refund Shield per-subscriber lifetime revenue rollup
+  { name: "revenue_lifetime_subscriber_tbl", engine: "SummingMergeTree" },
+  { name: "revenue_lifetime_subscriber_mv", engine: "MaterializedView" },
 ];
 
 interface TableRow {

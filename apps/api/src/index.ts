@@ -66,6 +66,10 @@ import {
   createRoviRetentionWorker,
   scheduleRoviRetention,
 } from "./workers/rovi-retention";
+import {
+  createRefundShieldResponderWorker,
+  scheduleRefundShieldResponder,
+} from "./workers/refund-shield-responder";
 import { bootIntegrations } from "./integrations-boot";
 
 // Start the in-process webhook worker alongside the HTTP server. For
@@ -200,6 +204,18 @@ scheduleRoviReaper().catch((err: unknown) => {
 createRoviRetentionWorker();
 scheduleRoviRetention().catch((err: unknown) => {
   logger.error("failed to schedule rovi retention", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Refund Shield responder — 30-second repeatable BullMQ job. Claims
+// PENDING refund_shield_responses rows whose scheduledFor has arrived
+// and POSTs the per-subscriber ConsumptionRequest to Apple. Multiple
+// API replicas can run safely (FOR UPDATE SKIP LOCKED inside the
+// claim repo). See workers/refund-shield-responder.ts.
+createRefundShieldResponderWorker();
+scheduleRefundShieldResponder().catch((err: unknown) => {
+  logger.error("failed to schedule refund shield responder", {
     err: err instanceof Error ? err.message : String(err),
   });
 });

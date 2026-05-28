@@ -16,6 +16,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 
 import {
@@ -50,6 +51,8 @@ import {
   productType,
   purchaseStatus,
   pushPlatform,
+  refundShieldOutcomeEnum,
+  refundShieldStatusEnum,
   revenueEventType,
   scheduledActionStatus,
   scheduledActionType,
@@ -264,6 +267,10 @@ export const projects = pgTable("projects", {
   webhookUrl: text("webhookUrl"),
   webhookSecret: text("webhookSecret"),
   settings: jsonb("settings").notNull().default(sql`'{}'::jsonb`),
+  refundShieldEnabled: boolean("refund_shield_enabled").notNull().default(false),
+  refundShieldConsentAcknowledgedAt: timestamp("refund_shield_consent_acknowledged_at", { withTimezone: true }),
+  refundShieldConsentAcknowledgedBy: text("refund_shield_consent_acknowledged_by").references(() => user.id, { onDelete: "set null" }),
+  refundShieldResponseDelayMinutes: integer("refund_shield_response_delay_minutes").notNull().default(60),
   createdAt: timestamp("createdAt", { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -379,6 +386,13 @@ export const subscribers = pgTable(
     attributes: jsonb("attributes").notNull().default(sql`'{}'::jsonb`),
     deletedAt: timestamp("deletedAt", { withTimezone: true }),
     mergedInto: text("mergedInto"),
+    // Apple StoreKit `appAccountToken` (UUID v4) — opaque per-user
+    // identifier sent with the purchase and echoed in every
+    // ASSN v2 notification for that transaction. Persisted so the
+    // CONSUMPTION_REQUEST responder can look up the owning
+    // subscriber from an inbound webhook payload. See Refund Shield
+    // design spec (docs/superpowers/specs/2026-05-28-refund-shield-design.md).
+    appleAppAccountToken: uuid("apple_app_account_token"),
     createdAt: timestamp("createdAt", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -390,6 +404,9 @@ export const subscribers = pgTable(
     projectIdAppUserIdKey: uniqueIndex(
       "subscribers_projectId_appUserId_key",
     ).on(t.projectId, t.appUserId),
+    appleTokenIdx: uniqueIndex("idx_subscribers_apple_app_account_token")
+      .on(t.projectId, t.appleAppAccountToken)
+      .where(sql`${t.appleAppAccountToken} IS NOT NULL`),
   }),
 );
 
@@ -803,6 +820,69 @@ export const outgoingWebhooks = pgTable(
     ).on(t.projectId, t.status),
   }),
 );
+
+// =============================================================
+// refund_shield_responses (CONSUMPTION_REQUEST work queue + outcome log)
+// =============================================================
+// One row per Apple CONSUMPTION_REQUEST notification: serves as both
+// (a) the work queue consumed by the polling responder worker, and
+// (b) the long-lived outcome log used for win-rate analytics. The
+// outcome / outcomeReceivedAt columns are populated later when the
+// matching REFUND / REFUND_DECLINED / REFUND_REVERSED notification
+// arrives (lookup by appleOriginalTransactionId).
+
+export const refundShieldResponses = pgTable(
+  "refund_shield_responses",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    subscriberId: text("subscriber_id").references(() => subscribers.id, {
+      onDelete: "set null",
+    }),
+    appleNotificationUuid: text("apple_notification_uuid").notNull(),
+    appleOriginalTransactionId: text(
+      "apple_original_transaction_id",
+    ).notNull(),
+    appleTransactionId: text("apple_transaction_id").notNull(),
+    detectedAt: timestamp("detected_at", { withTimezone: true }).notNull(),
+    scheduledFor: timestamp("scheduled_for", { withTimezone: true }).notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    requestPayload: jsonb("request_payload"),
+    appleHttpStatus: integer("apple_http_status"),
+    appleResponseBody: text("apple_response_body"),
+    status: refundShieldStatusEnum("status").notNull().default("PENDING"),
+    outcome: refundShieldOutcomeEnum("outcome"),
+    outcomeReceivedAt: timestamp("outcome_received_at", {
+      withTimezone: true,
+    }),
+    error: text("error"),
+    retryCount: integer("retry_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    notificationUniq: uniqueIndex("idx_rss_notification_uniq").on(
+      t.appleNotificationUuid,
+    ),
+    dueIdx: index("idx_rss_due")
+      .on(t.status, t.scheduledFor)
+      .where(sql`${t.status} = 'PENDING'`),
+    outcomeLookupIdx: index("idx_rss_outcome_lookup").on(
+      t.projectId,
+      t.appleOriginalTransactionId,
+    ),
+    dashboardIdx: index("idx_rss_dashboard").on(t.projectId, t.detectedAt),
+  }),
+);
+
+export type RefundShieldResponse = typeof refundShieldResponses.$inferSelect;
+export type NewRefundShieldResponse = typeof refundShieldResponses.$inferInsert;
 
 // =============================================================
 // revenue_events (materialised financial log)

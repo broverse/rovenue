@@ -315,3 +315,21 @@ export const integrationDeliveryStatus = pgEnum("IntegrationDeliveryStatus", [
   "skipped",
   "dead_letter",
 ]);
+
+// =============================================================
+// Refund Shield pgEnums
+// =============================================================
+
+export const refundShieldStatusEnum = pgEnum("refund_shield_status", [
+  "PENDING",
+  "SENT",
+  "FAILED",
+  "SKIPPED_NOT_FOUND",
+  "SKIPPED_DISABLED",
+]);
+
+export const refundShieldOutcomeEnum = pgEnum("refund_shield_outcome", [
+  "REFUND_APPROVED",
+  "REFUND_DECLINED",
+  "REFUND_REVERSED",
+]);

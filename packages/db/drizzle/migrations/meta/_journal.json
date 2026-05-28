@@ -442,6 +442,41 @@
       "when": 1780001700000,
       "tag": "0062_funnel_locales",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1780001800000,
+      "tag": "0063_subscribers_apple_app_account_token",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1780001900000,
+      "tag": "0064_projects_refund_shield",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1780002000000,
+      "tag": "0065_projects_refund_shield_fk_fix",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1780002100000,
+      "tag": "0066_refund_shield_responses",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1780002200000,
+      "tag": "0067_refund_shield_outcome_index_fix",
+      "breakpoints": true
     }
   ]
 }

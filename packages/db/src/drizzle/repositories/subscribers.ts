@@ -92,6 +92,31 @@ export async function findSubscriberById(
 }
 
 /**
+ * Lookup by (projectId, appleAppAccountToken). Used by the Refund
+ * Shield CONSUMPTION_REQUEST handler to resolve the owning subscriber
+ * from the JWS `appAccountToken` field without needing the original
+ * transaction id. Returns `null` when no row matches — callers fall
+ * back to a purchases.original_transaction_id join.
+ */
+export async function findSubscriberByAppleAppAccountToken(
+  db: Db,
+  projectId: string,
+  appleAppAccountToken: string,
+): Promise<Subscriber | null> {
+  const rows = await db
+    .select()
+    .from(subscribers)
+    .where(
+      and(
+        eq(subscribers.projectId, projectId),
+        eq(subscribers.appleAppAccountToken, appleAppAccountToken),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
  * Column-scoped lookup — returns just the projectId for a subscriber.
  * Used by the credit engine so ledger writes carry the correct
  * projectId without loading the entire row.
@@ -144,6 +169,14 @@ export interface UpsertSubscriberInput {
   createAttributes?: unknown;
   /** Applied ONLY on update. Omit for lastSeenAt-only touches. */
   updateAttributes?: unknown;
+  /**
+   * Apple StoreKit `appAccountToken` (UUID) attached to the purchase.
+   * On insert this is written verbatim. On update it is COALESCEd so
+   * an existing token is never clobbered by a later notification that
+   * happens to lack the field — Refund Shield depends on this column
+   * to look up the owning subscriber from CONSUMPTION_REQUEST.
+   */
+  appleAppAccountToken?: string | null;
 }
 
 /**
@@ -163,6 +196,13 @@ export async function upsertSubscriber(
     update.attributes =
       input.updateAttributes as typeof subscribers.$inferInsert.attributes;
   }
+  // Only overwrite the existing column when the caller actually has a
+  // token. Apple notifications without `appAccountToken` (e.g. legacy
+  // purchases or non-token-binding flows) must not erase a previously
+  // captured token — COALESCE keeps the old value in that case.
+  if (input.appleAppAccountToken != null) {
+    update.appleAppAccountToken = input.appleAppAccountToken;
+  }
   const rows = await db
     .insert(subscribers)
     .values({
@@ -170,6 +210,7 @@ export async function upsertSubscriber(
       appUserId: input.appUserId,
       attributes: (input.createAttributes ??
         {}) as typeof subscribers.$inferInsert.attributes,
+      appleAppAccountToken: input.appleAppAccountToken ?? null,
     })
     .onConflictDoUpdate({
       target: [subscribers.projectId, subscribers.appUserId],

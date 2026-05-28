@@ -9,6 +9,12 @@ import {
 } from "@rovenue/db";
 import { env } from "../../lib/env";
 import { logger } from "../../lib/logger";
+import {
+  incRefundShieldOutcomeApproved,
+  incRefundShieldOutcomeDeclined,
+  incRefundShieldOutcomeReversed,
+  incRefundShieldReceived,
+} from "../../lib/metrics-refund-shield";
 import { loadAppleCredentials } from "../../lib/project-credentials";
 import { convertToUsd } from "../fx";
 import { maybeEmitRefundDetected } from "../notifications/refund-emit";
@@ -226,8 +232,14 @@ async function dispatch(ctx: DispatchContext): Promise<void> {
       return applyExpired(ctx);
     case APPLE_NOTIFICATION_TYPE.REFUND:
       return applyRefund(ctx);
+    case APPLE_NOTIFICATION_TYPE.REFUND_DECLINED:
+      return applyRefundDeclined(ctx);
+    case APPLE_NOTIFICATION_TYPE.REFUND_REVERSED:
+      return applyRefundReversed(ctx);
     case APPLE_NOTIFICATION_TYPE.REVOKE:
       return applyRevoke(ctx);
+    case APPLE_NOTIFICATION_TYPE.CONSUMPTION_REQUEST:
+      return applyConsumptionRequest(ctx);
     default:
       log.debug("no state change for notification type", {
         type: ctx.notification.notificationType,
@@ -325,6 +337,23 @@ async function applyExpired(ctx: DispatchContext): Promise<void> {
 }
 
 async function applyRefund(ctx: DispatchContext): Promise<void> {
+  // Refund Shield outcome linkage (T11): Apple's REFUND notification
+  // is the "refund approved" signal that closes out the
+  // CONSUMPTION_REQUEST loop started earlier. The WHERE clause on
+  // (projectId, originalTransactionId, outcome IS NULL) silently
+  // matches zero rows when no prior CONSUMPTION_REQUEST was seen
+  // (e.g. Refund Shield wasn't enabled at the time), which is the
+  // desired no-op — the revenue-events path below still runs.
+  await drizzle.refundShieldResponseRepo.updateOutcomeByOriginalTransactionIdIfNull(
+    drizzle.db,
+    {
+      projectId: ctx.projectId,
+      originalTransactionId: ctx.transaction.originalTransactionId,
+      outcome: "REFUND_APPROVED",
+    },
+  );
+  incRefundShieldOutcomeApproved(ctx.projectId);
+
   const refundDate = new Date(ctx.transaction.signedDate);
   // Refund targets the specific transaction by (store, storeTxnId),
   // not the whole chain. updatePurchasesByOriginalTransaction is the
@@ -381,6 +410,145 @@ async function applyRevoke(ctx: DispatchContext): Promise<void> {
   await revokeAccessForTransaction(ctx);
 }
 
+// REFUND_DECLINED: Apple rejected the customer's refund request.
+// Only the refund_shield_responses outcome moves — no revenue impact
+// because no money was returned. First-wins: don't overwrite an
+// existing outcome (a duplicate redelivery shouldn't flip the
+// record).
+async function applyRefundDeclined(ctx: DispatchContext): Promise<void> {
+  await drizzle.refundShieldResponseRepo.updateOutcomeByOriginalTransactionIdIfNull(
+    drizzle.db,
+    {
+      projectId: ctx.projectId,
+      originalTransactionId: ctx.transaction.originalTransactionId,
+      outcome: "REFUND_DECLINED",
+    },
+  );
+  incRefundShieldOutcomeDeclined(ctx.projectId);
+}
+
+// REFUND_REVERSED: Apple reversed a previously-approved refund (e.g.
+// chargeback successfully disputed by the developer). This is the
+// only outcome that legitimately OVERWRITES an earlier value —
+// typically REFUND_APPROVED → REFUND_REVERSED — so it routes through
+// the unconditional overwrite method.
+//
+// TODO (out of scope T11): emit a compensating revenue_events row to
+// reverse the earlier negative refund event. T11 wires only the
+// outcome; revenue accounting reversal is a separate concern tracked
+// by the plan's revenue-event compensation note.
+async function applyRefundReversed(ctx: DispatchContext): Promise<void> {
+  await drizzle.refundShieldResponseRepo.updateOutcomeByOriginalTransactionIdOverwrite(
+    drizzle.db,
+    {
+      projectId: ctx.projectId,
+      originalTransactionId: ctx.transaction.originalTransactionId,
+      outcome: "REFUND_REVERSED",
+    },
+  );
+  incRefundShieldOutcomeReversed(ctx.projectId);
+}
+
+// =============================================================
+// Refund Shield: CONSUMPTION_REQUEST
+// =============================================================
+//
+// Apple sends CONSUMPTION_REQUEST when a customer files a refund
+// request through the App Store. Apple gives us a 12-hour window
+// to reply via `PUT /inApps/v1/transactions/consumption/{id}` with
+// a signal payload describing the user's engagement / refund
+// history. We don't send that reply synchronously here: instead
+// we enqueue a row in `refund_shield_responses` and let the
+// polling responder worker (T14) compute the payload + dispatch
+// it after the configured delay window.
+//
+// Decision tree for the inserted row's status:
+//   - project.refundShieldEnabled = false  → SKIPPED_DISABLED
+//   - subscriber unresolvable             → SKIPPED_NOT_FOUND
+//   - else                                 → PENDING
+//
+// Idempotency: `apple_notification_uuid` has a unique index and
+// the insert uses ON CONFLICT DO NOTHING — Apple retrying the
+// same notification is safe.
+
+async function applyConsumptionRequest(ctx: DispatchContext): Promise<void> {
+  const { projectId, transaction, notification } = ctx;
+
+  const project = await drizzle.projectRepo.findProjectById(
+    drizzle.db,
+    projectId,
+  );
+  if (!project) {
+    // Project deleted between webhook receipt and dispatch — drop
+    // silently; the outer webhook_event row is still marked
+    // PROCESSED so Apple doesn't retry endlessly.
+    log.warn("CONSUMPTION_REQUEST for unknown project", { projectId });
+    return;
+  }
+
+  const detectedAt = new Date();
+  const scheduledFor = project.refundShieldEnabled
+    ? new Date(
+        detectedAt.getTime() +
+          project.refundShieldResponseDelayMinutes * 60_000,
+      )
+    : detectedAt;
+
+  // Subscriber lookup: appAccountToken first (set on the
+  // subscribers row by T9's upsert path), then fall back to a
+  // chain lookup via purchases.original_transaction_id.
+  let subscriberId: string | null = null;
+  if (transaction.appAccountToken) {
+    const byToken =
+      await drizzle.subscriberRepo.findSubscriberByAppleAppAccountToken(
+        drizzle.db,
+        projectId,
+        transaction.appAccountToken,
+      );
+    subscriberId = byToken?.id ?? null;
+  }
+  if (subscriberId === null) {
+    const purchase =
+      await drizzle.purchaseExtRepo.findPurchaseByOriginalTransaction(
+        drizzle.db,
+        projectId,
+        transaction.originalTransactionId,
+      );
+    subscriberId = purchase?.subscriberId ?? null;
+  }
+
+  const status: "PENDING" | "SKIPPED_DISABLED" | "SKIPPED_NOT_FOUND" =
+    !project.refundShieldEnabled
+      ? "SKIPPED_DISABLED"
+      : subscriberId === null
+        ? "SKIPPED_NOT_FOUND"
+        : "PENDING";
+
+  await drizzle.refundShieldResponseRepo.insertConsumptionRequest(
+    drizzle.db,
+    {
+      projectId,
+      subscriberId,
+      appleNotificationUuid: notification.notificationUUID,
+      appleOriginalTransactionId: transaction.originalTransactionId,
+      appleTransactionId: transaction.transactionId,
+      detectedAt,
+      scheduledFor,
+      status,
+    },
+  );
+  incRefundShieldReceived(projectId);
+
+  if (subscriberId) ctx.outcome.subscriberId = subscriberId;
+
+  log.info("CONSUMPTION_REQUEST enqueued", {
+    projectId,
+    uuid: notification.notificationUUID,
+    status,
+    subscriberId,
+  });
+}
+
 // =============================================================
 // Helpers
 // =============================================================
@@ -402,11 +570,19 @@ function mapEnvironment(tx: AppleJwsTransactionPayload): Environment {
 
 async function resolveSubscriber(ctx: DispatchContext) {
   const { projectId, transaction } = ctx;
+  // JWS `appAccountToken` is an opaque UUID the client attaches at
+  // purchase time via `Product.PurchaseOption.appAccountToken(_:)`.
+  // We persist it on the subscriber row so Refund Shield's
+  // CONSUMPTION_REQUEST handler can look the subscriber back up from
+  // an inbound webhook payload without needing the original
+  // transaction id.
+  const appleAppAccountToken = transaction.appAccountToken ?? null;
 
   if (transaction.appAccountToken) {
     return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
       projectId,
       appUserId: transaction.appAccountToken,
+      appleAppAccountToken,
     });
   }
 
