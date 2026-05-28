@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createId } from "@paralleldrive/cuid2";
 import { Pool } from "pg";
 import { drizzle as drizzleClient } from "drizzle-orm/node-postgres";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 import { MockAgent, setGlobalDispatcher } from "undici";
@@ -293,5 +293,51 @@ describe("integrations-deliver worker (e2e)", () => {
     expect(row).toBeDefined();
     expect(row!.status).toBe("dead_letter");
     expect(row!.httpStatus).toBe(401);
+  }, 30_000);
+
+  it("dead_letter case writes an audit_logs row", async () => {
+    const outboxEventId = `e2e-audit-dead-${createId()}`;
+    const jobId = buildIntegrationsDeliverJobId(CONNECTION_ID, outboxEventId);
+    const job: IntegrationsDeliverJob = {
+      connectionId: CONNECTION_ID,
+      projectId: PROJECT_ID,
+      providerId: "META_CAPI",
+      envelope: buildEnvelope(outboxEventId, true),
+    };
+
+    // Stub Meta CAPI → 401 (non-retriable) so the job dead-letters
+    metaPool
+      .intercept({
+        path: (p) => p.startsWith(`/v18.0/${PIXEL_ID}/events`),
+        method: "POST",
+      })
+      .reply(401, JSON.stringify({ error: { message: "Unauthorized" } }), {
+        headers: { "content-type": "application/json" },
+      });
+
+    await queue.add("deliver", job, { jobId, attempts: 5 });
+
+    // Wait for the delivery row to be written first
+    const deliveryRow = await pollDelivery(CONNECTION_ID, outboxEventId);
+    expect(deliveryRow).toBeDefined();
+    expect(deliveryRow!.status).toBe("dead_letter");
+
+    // Poll for the audit_logs row (audit() is async after updateDeliveryStatus)
+    const start = Date.now();
+    let hit: (typeof schema.auditLogs)["$inferSelect"] | undefined;
+    while (Date.now() - start < 10_000) {
+      const audits = await testDb
+        .select()
+        .from(schema.auditLogs)
+        .where(eq(schema.auditLogs.projectId, PROJECT_ID))
+        .orderBy(desc(schema.auditLogs.createdAt))
+        .limit(10);
+      hit = audits.find((a) => a.action === "integration.delivery.dead_letter" && a.resourceId === CONNECTION_ID);
+      if (hit) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+
+    expect(hit).toBeDefined();
+    expect(hit?.resourceId).toBe(CONNECTION_ID);
   }, 30_000);
 });
