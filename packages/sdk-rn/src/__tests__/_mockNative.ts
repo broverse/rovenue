@@ -90,16 +90,34 @@ export function makeMockNative(): MockNative {
       mock.__emit("CREDIT_BALANCE_CHANGED");
       return state.creditBalance;
     }),
-    postAppleReceipt: vi.fn(async (): Promise<ReceiptResultDTO> => ({
+    postAppleReceipt: vi.fn(async (
+      _jws: string,
+      _productId: string,
+      _appAccountToken?: string | null,
+    ): Promise<ReceiptResultDTO> => ({
       ok: true,
       entitlementsRefreshed: true,
       creditsRefreshed: false,
     })),
-    postGoogleReceipt: vi.fn(async (): Promise<ReceiptResultDTO> => ({
+    postGoogleReceipt: vi.fn(async (
+      _receipt: string,
+      _productId: string,
+      _obfuscatedAccountId?: string | null,
+      _obfuscatedProfileId?: string | null,
+    ): Promise<ReceiptResultDTO> => ({
       ok: true,
       entitlementsRefreshed: true,
       creditsRefreshed: false,
     })),
+    getAppAccountToken: vi.fn(async () => "00000000-0000-0000-0000-000000000001"),
+    recordSessionEvent: vi.fn(
+      async (
+        _kind: "open" | "background" | "close",
+        _occurredAt: string,
+        _durationMs?: number,
+      ) => undefined,
+    ),
+    flushSessionEvents: vi.fn(async () => 0),
     // Expo EventEmitter wire methods — no-op (stub's EventEmitter
     // delegates to __addChangeListener/__addLogListener instead).
     addListener: vi.fn(),

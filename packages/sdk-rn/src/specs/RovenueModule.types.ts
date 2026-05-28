@@ -49,8 +49,28 @@ export interface RovenueModuleSpec {
   consumeCredits(amount: number, description: string | null): Promise<number>;
 
   // Receipts
-  postAppleReceipt(jws: string, productId: string): Promise<ReceiptResultDTO>;
-  postGoogleReceipt(receipt: string, productId: string): Promise<ReceiptResultDTO>;
+  postAppleReceipt(
+    jws: string,
+    productId: string,
+    appAccountToken?: string | null,
+  ): Promise<ReceiptResultDTO>;
+  postGoogleReceipt(
+    receipt: string,
+    productId: string,
+    obfuscatedAccountId?: string | null,
+    obfuscatedProfileId?: string | null,
+  ): Promise<ReceiptResultDTO>;
+
+  // Refund Shield — stable per-subscriber app-account token (UUID).
+  getAppAccountToken(): Promise<string>;
+
+  // Refund Shield — per-app-session telemetry (open/background/close).
+  recordSessionEvent(
+    kind: "open" | "background" | "close",
+    occurredAt: string,
+    durationMs?: number,
+  ): Promise<void>;
+  flushSessionEvents(): Promise<number>;
 
   // Required by `new EventEmitter(nativeModule)` — Expo's runtime checks
   // these exist; our mock implements them as no-ops because emit routing
