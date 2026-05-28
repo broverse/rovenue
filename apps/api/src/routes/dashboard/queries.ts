@@ -120,6 +120,19 @@ export const queriesRoute = new Hono()
     });
     return c.json(ok({ query: toWire(row) }));
   })
+  // ----- Schema introspection -----
+  // Registered before "/:id" so a request to "/schema" is not
+  // captured by the param route (Hono matches in registration order).
+  .get("/schema", async (c) => {
+    const projectId = c.req.param("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "Missing projectId" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+    return c.json(ok(await readPlaygroundSchema(projectId)));
+  })
   .get("/:id", async (c) => {
     const projectId = c.req.param("projectId");
     const id = c.req.param("id");
@@ -212,15 +225,4 @@ export const queriesRoute = new Hono()
       }
       throw err;
     }
-  })
-  // ----- Schema introspection -----
-  .get("/schema", async (c) => {
-    const projectId = c.req.param("projectId");
-    if (!projectId) {
-      throw new HTTPException(400, { message: "Missing projectId" });
-    }
-    const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
-
-    return c.json(ok(await readPlaygroundSchema(projectId)));
   });
