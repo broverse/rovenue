@@ -53,6 +53,10 @@ import {
   createRoviReaperWorker,
   scheduleRoviReaper,
 } from "./workers/rovi-reaper";
+import {
+  createRoviRetentionWorker,
+  scheduleRoviRetention,
+} from "./workers/rovi-retention";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -156,6 +160,15 @@ scheduleFunnelDeferredCleanup().catch((err: unknown) => {
 createRoviReaperWorker();
 scheduleRoviReaper().catch((err: unknown) => {
   logger.error("failed to schedule rovi reaper", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Rovi retention — nightly at 03:00 UTC, hard-deletes copilot_messages
+// older than ROVI_MESSAGE_RETENTION_DAYS (GDPR Art. 5(1)(e)).
+createRoviRetentionWorker();
+scheduleRoviRetention().catch((err: unknown) => {
+  logger.error("failed to schedule rovi retention", {
     err: err instanceof Error ? err.message : String(err),
   });
 });

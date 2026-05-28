@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, lt, sql } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { type Db } from "../client";
 import { copilotMessages } from "../schema";
@@ -45,4 +45,17 @@ export async function recentMessages(
     .where(eq(copilotMessages.threadId, threadId))
     .orderBy(asc(copilotMessages.createdAt));
   return rows.slice(-limit);
+}
+
+/**
+ * Hard-delete copilot_messages older than `retentionDays` days.
+ * Called by the daily retention worker to satisfy GDPR Art. 5(1)(e).
+ * Returns the number of rows deleted.
+ */
+export async function purgeOldMessages(db: Db, retentionDays: number): Promise<number> {
+  const cutoff = sql`now() - (${retentionDays} || ' days')::interval`;
+  const result = await db
+    .delete(copilotMessages)
+    .where(lt(copilotMessages.createdAt, cutoff));
+  return Number((result as unknown as { rowCount?: number }).rowCount ?? 0);
 }
