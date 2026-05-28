@@ -31,7 +31,7 @@ const PROVIDER_FIELDS: Record<
   // store the value under the legacy `pixelId` key for backwards-
   // compat with existing connections.
   META_CAPI: { id: "pixelId", label: "Dataset ID (Pixel ID)" },
-  TIKTOK_EVENTS: { id: "pixelCode", label: "Pixel Code" },
+  TIKTOK_EVENTS: { id: "pixelCode", label: "Pixel ID" },
 };
 
 // ---------------------------------------------------------------------------
