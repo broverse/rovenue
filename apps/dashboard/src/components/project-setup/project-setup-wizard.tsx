@@ -16,6 +16,8 @@ type ProjectSetupWizardProps = {
   onSubmit: (form: SetupForm) => void;
   isSubmitting?: boolean;
   onCancel?: () => void;
+  /** Forwarded to the topbar; defaults to dismissible. See SetupTopbar. */
+  dismissible?: boolean;
 };
 
 const isStepCompleteFor = (form: SetupForm, stepId: number): boolean => {
@@ -43,6 +45,7 @@ export function ProjectSetupWizard({
   onSubmit,
   isSubmitting,
   onCancel,
+  dismissible,
 }: ProjectSetupWizardProps) {
   const seed = useMemo<SetupForm>(
     () => initialForm ?? EMPTY_FORM,
@@ -82,7 +85,12 @@ export function ProjectSetupWizard({
 
   return (
     <div className="min-h-screen bg-rv-bg text-foreground">
-      <SetupTopbar mode={mode} projectName={projectName ?? null} onCancel={onCancel} />
+      <SetupTopbar
+        mode={mode}
+        projectName={projectName ?? null}
+        onCancel={onCancel}
+        dismissible={dismissible}
+      />
 
       <div className="flex min-h-[calc(100vh-3.5rem)] flex-col md:flex-row">
         <StepperRail

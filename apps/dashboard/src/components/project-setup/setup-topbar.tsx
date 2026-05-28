@@ -11,6 +11,13 @@ type SetupTopbarProps = {
   onModeChange?: (next: SetupMode) => void;
   showModeSwitch?: boolean;
   onCancel?: () => void;
+  /**
+   * Whether the wizard can be left without finishing. Defaults to `true`
+   * (the X links home). The create flow sets this to `false` when the
+   * account has no projects yet — setup is mandatory, so no escape hatch
+   * is rendered at all.
+   */
+  dismissible?: boolean;
 };
 
 /**
@@ -24,6 +31,7 @@ export function SetupTopbar({
   onModeChange,
   showModeSwitch,
   onCancel,
+  dismissible = true,
 }: SetupTopbarProps) {
   const { t } = useTranslation();
   const isUpdate = mode === "update";
@@ -77,13 +85,13 @@ export function SetupTopbar({
         >
           {t("projectSetup.cancel")}
         </Button>
-      ) : (
+      ) : dismissible ? (
         <Link to="/">
           <Button variant="light" size="icon" aria-label={t("projectSetup.close")}>
             <X className="size-3.5" strokeWidth={2} aria-hidden="true" />
           </Button>
         </Link>
-      )}
+      ) : null}
     </header>
   );
 }

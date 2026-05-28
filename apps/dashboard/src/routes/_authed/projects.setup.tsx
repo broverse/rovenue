@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ProjectSetupWizard } from "../../components/project-setup";
 import type { SetupForm } from "../../components/project-setup";
 import { useCreateProject } from "../../lib/hooks/useCreateProject";
+import { useProjects } from "../../lib/hooks/useProjects";
 import { api } from "../../lib/api";
 
 export const Route = createFileRoute("/_authed/projects/setup")({
@@ -34,17 +35,30 @@ function ProjectSetupCreate() {
   const navigate = useNavigate();
   const createProject = useCreateProject();
 
+  // Setup is mandatory until the account owns at least one project: with
+  // zero projects there is no escape hatch (no Cancel, no X) so the user
+  // has to finish the wizard. Once they have a project, the wizard becomes
+  // dismissible — they may have come here just to add another. While the
+  // query is still loading we treat the account as project-less, which
+  // fails safe toward "must complete setup".
+  const { data: projects } = useProjects();
+  const hasProjects = (projects?.length ?? 0) > 0;
+
   const lastProjectId =
     typeof localStorage !== "undefined"
       ? localStorage.getItem("lastProjectId")
       : null;
 
-  const handleCancel = lastProjectId
+  const handleCancel = hasProjects
     ? () => {
-        void navigate({
-          to: "/projects/$projectId",
-          params: { projectId: lastProjectId },
-        });
+        if (lastProjectId) {
+          void navigate({
+            to: "/projects/$projectId",
+            params: { projectId: lastProjectId },
+          });
+        } else {
+          void navigate({ to: "/" });
+        }
       }
     : undefined;
 
@@ -93,6 +107,7 @@ function ProjectSetupCreate() {
       onSubmit={handleSubmit}
       isSubmitting={createProject.isPending}
       onCancel={handleCancel}
+      dismissible={hasProjects}
     />
   );
 }
