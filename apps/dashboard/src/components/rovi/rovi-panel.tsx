@@ -54,7 +54,7 @@ export function RoviPanel() {
         ) : (
           <RoviConversation messages={messages} />
         )}
-        <RoviPromptInput disabled={busy || !chat} onSubmit={send} />
+        <RoviPromptInput disabled={busy || !chat || notConfigured} onSubmit={send} />
         <RoviUsageBar />
       </aside>
     </>
