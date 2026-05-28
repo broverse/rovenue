@@ -250,4 +250,10 @@ serve({ fetch: internalApp.fetch, port: env.INTERNAL_PORT }, (info) => {
 
 // Outbox → Redpanda dispatcher loop. Fire-and-forget; the loop
 // handles its own errors and will no-op when KAFKA_BROKERS is unset.
-void runOutboxDispatcher();
+// Gated by OUTBOX_DISPATCHER_ENABLED so a horizontally-scaled API can
+// run the dispatcher on a single instance only.
+if (env.OUTBOX_DISPATCHER_ENABLED) {
+  void runOutboxDispatcher();
+} else {
+  logger.info("outbox dispatcher disabled (OUTBOX_DISPATCHER_ENABLED=false)");
+}

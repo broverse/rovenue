@@ -31,6 +31,16 @@ const envSchema = z
     // land in outbox_events, pending a dispatcher). Required in
     // production; without it exposure events never reach CH.
     KAFKA_BROKERS: z.string().min(1).optional(),
+    // Gates the in-process outbox→Kafka dispatcher loop. Default true
+    // (every instance runs it, as before). Set to "false" on all but one
+    // instance when scaling the API horizontally so only a single
+    // dispatcher publishes — delivery is at-least-once, so multiple
+    // dispatchers merely re-publish (collapsed downstream by the 0012
+    // idempotent CH views) and waste load.
+    OUTBOX_DISPATCHER_ENABLED: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
     BETTER_AUTH_SECRET: z.string().min(1).optional(),
     BETTER_AUTH_URL: z.string().url().default("http://localhost:3000"),
     DASHBOARD_URL: z.string().url().default("http://localhost:5173"),
