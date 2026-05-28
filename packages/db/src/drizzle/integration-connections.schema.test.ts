@@ -12,7 +12,7 @@ describe("integrationConnections table", () => {
         "enabledEvents", "eventMapping",
         "actionSource", "testEventCode",
         "isEnabled", "lastValidatedAt", "lastError", "lastBackfillAt",
-        "createdAt", "updatedAt",
+        "createdAt", "updatedAt", "deletedAt",
       ].sort(),
     );
   });
@@ -25,7 +25,7 @@ describe("integrationConnections table", () => {
       enabledEvents: ["revenue.RENEWAL"], eventMapping: {},
       actionSource: "app", testEventCode: null,
       isEnabled: false, lastValidatedAt: null, lastError: null, lastBackfillAt: null,
-      createdAt: new Date(), updatedAt: new Date(),
+      createdAt: new Date(), updatedAt: new Date(), deletedAt: null,
     };
     expect(sample.providerId).toBe("META_CAPI");
   });

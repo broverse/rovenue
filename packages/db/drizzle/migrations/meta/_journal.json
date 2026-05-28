@@ -421,6 +421,13 @@
       "when": 1780001000000,
       "tag": "0053_integrations_framework",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1780001100000,
+      "tag": "0059_integration_connections_soft_delete",
+      "breakpoints": true
     }
   ]
 }
