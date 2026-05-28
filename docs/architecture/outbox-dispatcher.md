@@ -17,8 +17,8 @@ domain tx ──> outbox_events ──[dispatcher]──> Kafka/Redpanda topic
                                           Kafka Engine queue table
                                                     │  (MV)
                                           raw_*_events (ReplacingMergeTree)
-                                                    │  (MV, fires per insert block)
-                                          mv_*_daily / lifetime (SummingMergeTree…)
+                                                    │  (query-time VIEW; dedup via FINAL / GROUP BY eventId)
+                                          v_mrr_daily / v_credit_* / v_revenue_lifetime_subscriber
 ```
 
 ## 2. Delivery semantics: AT-LEAST-ONCE
@@ -42,7 +42,9 @@ re-claimed and **re-published** on the next tick / restart. Duplicate Kafka
 messages with the same `eventId` are an expected, normal outcome.
 
 (The dispatcher's own header comment claims "ClickHouse de-duplicates on
-eventId via ReplacingMergeTree" — that is only *partially* true; see §4.)
+eventId via ReplacingMergeTree" — true at the raw layer, and as of migration
+`0012` the money/credit aggregates also collapse duplicates before summation;
+see §4.)
 
 ## 3. Horizontal-scaling hazard
 
@@ -62,14 +64,18 @@ own dispatcher loop. `SKIP LOCKED` prevents two dispatchers from claiming the
 *same* row in the *same instant*, but because the claim tx commits before
 publish, a row published by instance A but not yet `markPublished` is fully
 claimable by instance B — so the same `eventId` is **published to Kafka more
-than once, concurrently**. Combined with §2 this multiplies duplicate
-delivery.
+than once, concurrently**. Combined with §2 this multiplies the duplicate
+*rate*. Since migration `0012` (§4) this no longer corrupts any aggregate — it
+only adds redundant collapsed rows and wasted ingest work — so it is an
+efficiency hazard, not a correctness one.
 
-## 4. Why it is only *conditionally* safe — and where it is NOT
+## 4. Why it is safe downstream — raw layer and aggregates
 
 Duplicate Kafka delivery is safe **only if every downstream consumer collapses
-duplicates on the event id**. ClickHouse does this **only at the raw-table
-layer**, not at the aggregate layer.
+duplicates on the event id**. ClickHouse does this at the raw-table layer
+(`ReplacingMergeTree`) and — as of migration `0012` (2026-05-29) — at the
+money/credit aggregate layer too, which is now query-time `FINAL` / `GROUP BY
+eventId` over those deduped raw tables rather than additive materialized views.
 
 ### Raw event tables — dedup-safe (ReplacingMergeTree on the event id)
 
@@ -89,48 +95,48 @@ the duplicate and are dedup-safe. The revenue/credit read services do use
 `routes/dashboard/leaderboards.ts`, `services/cohorts.ts` — all
 `FROM rovenue.raw_revenue_events FINAL`.
 
-### ⚠️ Aggregate rollup tables — NOT dedup-safe under duplicate delivery
+### Money/credit aggregates — dedup-safe as of migration `0012` (2026-05-29)
 
-A ClickHouse materialized view fires on **each insert block written to its
-source table**, *before* the `ReplacingMergeTree` dedup merge runs. The
-revenue/credit rollup MVs read `FROM raw_revenue_events` /
-`FROM raw_credit_ledger` (no `FINAL` in the MV's SELECT — `FINAL` is not
-applied at MV-trigger time anyway), so a duplicate delivery produces a **second
-insert block** that the rollup **adds again**:
+These aggregates **used to** double-count. A ClickHouse materialized view fires
+on **each insert block written to its source table**, *before* the
+`ReplacingMergeTree` dedup merge runs, so the former additive rollup MVs
+(`SummingMergeTree` / `AggregatingMergeTree` `sumState` columns) read
+`FROM raw_revenue_events` / `FROM raw_credit_ledger` at MV-trigger time and
+**added a duplicate delivery's insert block a second time**. `FINAL` on a
+summed/aggregated rollup only finishes pending same-key merges; it could not
+remove a duplicate's contribution, because the duplicate had already been
+folded into the sum as a distinct insert.
 
-| Aggregate target | Engine | What double-counts on duplicate delivery |
+Migration `0012` **drops those four additive rollups and replaces each with a
+query-time `VIEW`** over the deduped raw `ReplacingMergeTree` tables. A
+duplicate `eventId` is now collapsed **before** any summation, so the
+at-least-once dispatcher (§2) — and even a misconfigured multi-dispatcher
+deployment (§3) — **can no longer inflate revenue or credit totals**:
+
+| View (replaces) | Dedup mechanism | What it serves |
 |---|---|---|
-| `rovenue.mv_mrr_daily_target` (`0006`) | `SummingMergeTree`, `ORDER BY (projectId, day)` | `gross_usd`, `refunds_usd`, `net_usd`, `event_count` are **summed twice**. (`subscribersHll` = `AggregateFunction(uniq)` is idempotent — a re-seen subscriberId does not change the HLL.) |
-| `rovenue.revenue_lifetime_subscriber_tbl` (`0011`) | `SummingMergeTree`, `ORDER BY (projectId, subscriberId)` | `lifetime_dollars_purchased_cents` / `lifetime_dollars_refunded_cents` **summed twice** — feeds Refund Shield's Apple consumption-request responder. |
-| `rovenue.mv_credit_consumption_daily_target` (`0008`) | `SummingMergeTree`, `ORDER BY (projectId, day)` | `granted_credits`, `debited_credits`, `net_flow`, `event_count` **summed twice** (`subscribersHll` idempotent). |
-| `rovenue.mv_credit_balance_target` (`0007`) | `AggregatingMergeTree`, `ORDER BY (projectId, subscriberId)` | `latestBalanceState` (`argMaxState(balance, createdAt)`) is **idempotent** (same value). `totalGrantedState` / `totalDebitedState` (`sumState`) **double-count**. |
+| `rovenue.v_mrr_daily` (was `mv_mrr_daily_target`, `0006`) | `FROM raw_revenue_events FINAL` collapses the duplicate `eventId` before `sumIf`/`count`; `uniq(subscriberId)` for active subs | daily MRR — `gross_usd`, `refunds_usd`, `net_usd`, `event_count`, `active_subscribers` counted once |
+| `rovenue.v_revenue_lifetime_subscriber` (was `revenue_lifetime_subscriber_tbl`, `0011`) | inner `GROUP BY eventId` (immutable business fields → `any()`), then per-subscriber sum; `proj_by_subscriber` projection serves the lookup as an index seek | Refund Shield's Apple consumption-request responder — `lifetime_dollars_purchased_cents` / `lifetime_dollars_refunded_cents` counted once |
+| `rovenue.v_credit_consumption_daily` (was `mv_credit_consumption_daily_target`, `0008`) | `FROM raw_credit_ledger FINAL` before `sumIf`/`count` | daily credit flow — `granted_credits`, `debited_credits`, `net_flow`, `event_count` counted once |
+| `rovenue.v_credit_balance` (was `mv_credit_balance_target`, `0007`) | `FROM raw_credit_ledger FINAL` before `argMax`/`sumIf` | per-subscriber `latest_balance` / `total_granted` / `total_debited` counted once |
 
-`FINAL` on a `SummingMergeTree`/`AggregatingMergeTree` only finishes pending
-same-key merges; it does **not** remove a duplicate's contribution, because the
-duplicate was already folded into the sum as a distinct insert. The
-`SummingMergeTree + AggregateFunction(uniq)` pattern is *correct for what it
-does* (distinct counts dedup; sums do not) — the gap is specifically the
-**summed money/credit columns**, which have no event-id idempotency.
+The three read paths that touched the old rollups (`services/metrics/mrr.ts`,
+`services/metrics/credits.ts`, `services/refund-shield/aggregate-signals.ts`)
+now read these views; a duplicate-`eventId` regression test
+(`apps/api/tests/revenue-aggregates-idempotency.integration.test.ts`) guards
+the property. See
+`docs/superpowers/specs/2026-05-29-idempotent-revenue-aggregates-design.md`.
 
-**Consequence:** with more than one dispatcher (or a crash between Kafka ack
-and `markPublished`), MRR / net revenue / lifetime $ purchased+refunded / daily
-credit flow can be **over-reported**. Refund Shield's lifetime-$ signal is on
-this path, so over-counting could change automated refund decisions.
+**Consequence:** MRR / net revenue / lifetime $ purchased+refunded / daily
+credit flow / credit balance are now correct under duplicate delivery, and
+Refund Shield's lifetime-$ signal can no longer be skewed by re-delivery. The
+delivery layer itself is unchanged (still at-least-once, §2), so a duplicate
+still *occurs*; it is simply collapsed before it can affect a total.
 
-**Required fix before relying on these aggregates under duplicate delivery
-(choose one):**
+## 5. Before horizontal scaling — recommended (no longer a correctness blocker)
 
-1. Guarantee single delivery operationally (see §5), **or**
-2. Re-base the money/credit aggregates on the deduplicated raw layer — e.g.
-   read aggregates from `... FINAL` at query time instead of a pre-summed MV,
-   or rebuild the rollups as `AggregatingMergeTree` over an idempotent,
-   event-id-keyed state (e.g. `argMaxState`/`uniq`-based) rather than additive
-   `sum`.
-
-## 5. Requirement before horizontal scaling — HARD REQUIREMENT
-
-Before scaling the API to more than one instance, **one** of the following MUST
-be true:
+Before scaling the API to more than one instance, **one** of the following
+should be put in place (for efficiency, not correctness — see the note below):
 
 1. **Exactly one dispatcher.** Run the dispatcher in a single dedicated worker
    process (not in every API replica), or add leader election so only one
@@ -138,14 +144,18 @@ be true:
    starts it everywhere — this must be gated. **OR**
 2. **Shard claims** by a hash of `aggregateId` so each dispatcher owns a
    disjoint slice (the worker comment at `outbox-dispatcher.ts:80-81` names this
-   as the intended Plan-3 scale path). **AND**
-3. Regardless of the above, the §4 aggregate double-count must be addressed,
-   because a single-instance dispatcher can still re-deliver after a crash
-   (§2). Single-instance only bounds the *rate* of duplicates; it does not make
-   them impossible.
+   as the intended Plan-3 scale path).
 
-Do **not** add API replicas while the dispatcher is started unconditionally and
-the summed aggregates remain non-idempotent.
+This single-leader / sharded-dispatcher gate is **still deferred** — the
+delivery layer is unchanged. The §4 aggregate double-count that previously made
+this a hard correctness blocker is **resolved** by migration `0012`: the
+money/credit aggregates collapse duplicate `eventId`s before summation, so a
+re-delivery (after a crash, §2) or even an accidental multi-dispatcher
+deployment (§3) no longer corrupts revenue/credit totals — it only produces
+**redundant collapsed rows** and wasted Kafka/ingest work. In other words,
+single-instance now bounds the duplicate *rate*; correctness no longer depends
+on it. Gating the dispatcher remains the right thing to do before scaling for
+efficiency and load reasons, but it is no longer a data-correctness prerequisite.
 
 ## 6. Outgoing webhooks (lower severity)
 
