@@ -31,6 +31,9 @@
   --color-rv-divider: rgb(255 255 255 / 0.08);
   --color-rv-divider-strong: rgb(255 255 255 / 0.12);
 
+  --font-sans:
+    "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-rv-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
 
   --animate-rv-pulse: rv-pulse 1.6s ease-out infinite;
@@ -110,5 +113,20 @@
   }
 }
 
-/* Geist + Geist Mono — used by the dashboard shell for tabular numbers. */
+/* Geist + Geist Mono — Vercel's typeface. Set as the global sans-serif
+ * via `--font-sans` above. The `font-feature-settings` enable contextual
+ * alternates ("cv11" stylistic 'a' / 'g') and tabular numerals so KPIs
+ * line up. */
 @import url("https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap");
+
+html,
+body {
+  font-family: var(--font-sans);
+  font-feature-settings:
+    "cv11" 1,
+    "ss01" 1,
+    "ss03" 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
