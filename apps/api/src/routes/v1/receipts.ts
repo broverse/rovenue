@@ -64,21 +64,14 @@ async function handleReceipt(
     product.creditAmount &&
     product.creditAmount > 0
   ) {
-    const alreadyCredited =
-      await drizzle.creditLedgerRepo.findExistingPurchaseCredit(
-        drizzle.db,
-        subscriber.id,
-        purchase.id,
-      );
-    if (!alreadyCredited) {
-      await addCredits({
-        subscriberId: subscriber.id,
-        amount: product.creditAmount,
-        referenceType: "purchase",
-        referenceId: purchase.id,
-        description: `Credits for ${product.identifier}`,
-      });
-    }
+    await addCredits({
+      subscriberId: subscriber.id,
+      amount: product.creditAmount,
+      referenceType: "purchase",
+      referenceId: purchase.id,
+      description: `Credits for ${product.identifier}`,
+      dedupeOnReference: true,
+    });
   }
 
   const [access, balance] = await Promise.all([

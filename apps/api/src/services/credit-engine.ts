@@ -1,3 +1,4 @@
+import { and, eq } from "drizzle-orm";
 import {
   CreditLedgerType,
   drizzle,
@@ -37,6 +38,15 @@ export interface AddCreditsArgs {
   referenceId?: string;
   description?: string;
   metadata?: unknown;
+  /**
+   * When true and referenceId is set, re-check inside the advisory
+   * lock whether a ledger row already exists for this purchase
+   * reference; if so, return the existing row instead of inserting
+   * a duplicate. The lock serialises concurrent grants per
+   * subscriber, making check-then-insert atomic — credit_ledger is
+   * range-partitioned so a unique index cannot enforce this.
+   */
+  dedupeOnReference?: boolean;
 }
 
 /**
@@ -59,6 +69,32 @@ export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
     );
     if (!subscriber) {
       throw new Error(`Subscriber ${args.subscriberId} not found`);
+    }
+
+    if (args.dedupeOnReference && args.referenceId) {
+      const existing = await drizzle.creditLedgerRepo.findExistingPurchaseCredit(
+        tx,
+        args.subscriberId,
+        args.referenceId,
+      );
+      if (existing) {
+        log.debug("credit already granted for reference, skipping", {
+          subscriberId: args.subscriberId,
+          referenceId: args.referenceId,
+        });
+        const rows = await tx
+          .select()
+          .from(drizzle.schema.creditLedger)
+          .where(
+            and(
+              eq(drizzle.schema.creditLedger.subscriberId, args.subscriberId),
+              eq(drizzle.schema.creditLedger.referenceType, "purchase"),
+              eq(drizzle.schema.creditLedger.referenceId, args.referenceId),
+            ),
+          )
+          .limit(1);
+        return rows[0] as CreditLedger;
+      }
     }
 
     const last = await drizzle.creditLedgerRepo.findLatestBalance(
