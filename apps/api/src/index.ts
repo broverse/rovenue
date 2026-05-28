@@ -49,6 +49,10 @@ import {
   createFunnelDeferredCleanupWorker,
   scheduleFunnelDeferredCleanup,
 } from "./workers/funnel-deferred-cleanup";
+import {
+  createRoviReaperWorker,
+  scheduleRoviReaper,
+} from "./workers/rovi-reaper";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -143,6 +147,15 @@ scheduleFunnelTokenExpirer().catch((err: unknown) => {
 createFunnelDeferredCleanupWorker();
 scheduleFunnelDeferredCleanup().catch((err: unknown) => {
   logger.error("failed to schedule funnel deferred cleanup", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Rovi reaper — every 60 seconds, flips copilot_intents rows
+// past their expires_at from 'pending' to 'expired'.
+createRoviReaperWorker();
+scheduleRoviReaper().catch((err: unknown) => {
+  logger.error("failed to schedule rovi reaper", {
     err: err instanceof Error ? err.message : String(err),
   });
 });
