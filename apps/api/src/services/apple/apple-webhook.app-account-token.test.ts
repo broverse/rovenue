@@ -15,7 +15,7 @@ const { drizzleMock } = vi.hoisted(() => {
   const drizzleMock = {
     db: {} as unknown,
     webhookEventRepo: {
-      upsertWebhookEvent: vi.fn(),
+      claimWebhookEvent: vi.fn(),
       updateWebhookEvent: vi.fn(async () => undefined),
     },
     subscriberRepo: {
@@ -149,7 +149,7 @@ function makeStubVerifier(
 beforeEach(() => {
   vi.clearAllMocks();
 
-  drizzleMock.webhookEventRepo.upsertWebhookEvent.mockResolvedValue({
+  drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValue({
     id: "wh_1",
     status: "PROCESSING",
   });

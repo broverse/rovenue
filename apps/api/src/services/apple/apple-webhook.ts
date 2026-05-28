@@ -87,9 +87,8 @@ export async function handleAppleNotification(
   const verifier = await resolveVerifier(opts);
   const notification = await verifier.verifyNotification(opts.signedPayload);
 
-  // Idempotent insert — concurrent workers see the same row and we check
-  // the claimed status below.
-  const webhookEvent = await drizzle.webhookEventRepo.upsertWebhookEvent(
+  // Atomic single-flight claim — exactly one concurrent worker wins.
+  const webhookEvent = await drizzle.webhookEventRepo.claimWebhookEvent(
     drizzle.db,
     {
       projectId: opts.projectId,
@@ -97,12 +96,11 @@ export async function handleAppleNotification(
       eventType: notification.notificationType,
       storeEventId: notification.notificationUUID,
       payload: JSON.parse(JSON.stringify(notification)),
-      status: WebhookEventStatus.PROCESSING,
     },
   );
 
-  if (webhookEvent.status === WebhookEventStatus.PROCESSED) {
-    log.info("duplicate notification, skipping", {
+  if (!webhookEvent) {
+    log.info("notification already claimed or processed, skipping", {
       uuid: notification.notificationUUID,
       type: notification.notificationType,
     });

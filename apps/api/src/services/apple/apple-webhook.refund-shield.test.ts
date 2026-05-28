@@ -15,7 +15,7 @@ const { drizzleMock } = vi.hoisted(() => {
   const drizzleMock = {
     db: {} as unknown,
     webhookEventRepo: {
-      upsertWebhookEvent: vi.fn(),
+      claimWebhookEvent: vi.fn(),
       updateWebhookEvent: vi.fn(async () => undefined),
     },
     projectRepo: {
@@ -211,7 +211,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   metricsTesting.reset();
 
-  drizzleMock.webhookEventRepo.upsertWebhookEvent.mockResolvedValue({
+  drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValue({
     id: "wh_1",
     status: "PROCESSING",
   });
@@ -480,13 +480,11 @@ describe("handleAppleNotification — CONSUMPTION_REQUEST", () => {
       verifier,
     });
 
-    // Second delivery: webhook_events.upsert returns the prior row in
-    // PROCESSED state. The handler short-circuits as "duplicate" and
-    // never re-invokes the dispatch path → no second insert.
-    drizzleMock.webhookEventRepo.upsertWebhookEvent.mockResolvedValueOnce({
-      id: "wh_1",
-      status: "PROCESSED",
-    });
+    // Second delivery: the atomic claim returns null because the row
+    // is already PROCESSING/PROCESSED. The handler short-circuits as
+    // "duplicate" and never re-invokes the dispatch path → no second
+    // insert.
+    drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValueOnce(null);
     const result2 = await handleAppleNotification({
       projectId: PROJECT_ID,
       signedPayload: "signed-envelope-stub",
