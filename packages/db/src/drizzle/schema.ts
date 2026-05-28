@@ -2,6 +2,7 @@ import { createId } from "@paralleldrive/cuid2";
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   date,
   decimal,
   index,
@@ -37,6 +38,7 @@ import {
   funnelSessionState,
   funnelStatus,
   funnelTemplateScope,
+  integrationProvider,
   invitationDeliveryStatus,
   memberRole,
   notificationChannel,
@@ -2205,3 +2207,54 @@ export type FunnelDeferredClaim = typeof funnelDeferredClaims.$inferSelect;
 export type NewFunnelDeferredClaim = typeof funnelDeferredClaims.$inferInsert;
 export type CustomDomain = typeof customDomains.$inferSelect;
 export type NewCustomDomain = typeof customDomains.$inferInsert;
+
+// === Integrations tables ===
+
+export const integrationConnections = pgTable(
+  "integration_connections",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    providerId: integrationProvider("provider_id").notNull(),
+    displayName: text("display_name").notNull(),
+    credentialsCipher: text("credentials_cipher").notNull(),
+    credentialsHint: text("credentials_hint").notNull(),
+    enabledEvents: text("enabled_events")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    eventMapping: jsonb("event_mapping")
+      .$type<Record<string, { eventName?: string; skip?: true }>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    actionSource: text("action_source").notNull().default("app"),
+    testEventCode: text("test_event_code"),
+    isEnabled: boolean("is_enabled").notNull().default(false),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    lastBackfillAt: timestamp("last_backfill_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectProviderUidx: uniqueIndex(
+      "integration_connections_project_provider_uidx",
+    ).on(t.projectId, t.providerId),
+    enabledIdx: index("integration_connections_enabled_idx")
+      .on(t.projectId)
+      .where(sql`is_enabled = true`),
+    actionSourceChk: check(
+      "integration_connections_action_source_chk",
+      sql`action_source IN ('app', 'website', 'system_generated')`,
+    ),
+  }),
+);
+
+export type IntegrationConnection = typeof integrationConnections.$inferSelect;
+export type NewIntegrationConnection = typeof integrationConnections.$inferInsert;
