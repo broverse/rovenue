@@ -587,16 +587,21 @@ export const products = pgTable(
 );
 
 // =============================================================
-// product_groups
+// offerings (paywall configurations — was product_groups)
+//
+// Each offering is scoped to one Access; A/B variants land here.
 // =============================================================
 
-export const productGroups = pgTable(
-  "product_groups",
+export const offerings = pgTable(
+  "offerings",
   {
     id: text("id").primaryKey().$defaultFn(() => createId()),
     projectId: text("projectId")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    accessId: text("accessId")
+      .notNull()
+      .references(() => access.id, { onDelete: "cascade" }),
     identifier: text("identifier").notNull(),
     isDefault: boolean("isDefault").notNull().default(false),
     // Array of product references with order/promoted flags.
@@ -611,11 +616,11 @@ export const productGroups = pgTable(
   },
   (t) => ({
     projectIdIdentifierKey: uniqueIndex(
-      "product_groups_projectId_identifier_key",
+      "offerings_projectId_identifier_key",
     ).on(t.projectId, t.identifier),
-    projectIdIsDefaultIdx: index(
-      "product_groups_projectId_isDefault_idx",
-    ).on(t.projectId, t.isDefault),
+    accessIdIsDefaultIdx: index(
+      "offerings_accessId_isDefault_idx",
+    ).on(t.accessId, t.isDefault),
   }),
 );
 
@@ -1641,8 +1646,8 @@ export type NewAccessRow = typeof access.$inferInsert;
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
 
-export type ProductGroup = typeof productGroups.$inferSelect;
-export type NewProductGroup = typeof productGroups.$inferInsert;
+export type Offering = typeof offerings.$inferSelect;
+export type NewOffering = typeof offerings.$inferInsert;
 
 export type Purchase = typeof purchases.$inferSelect;
 export type NewPurchase = typeof purchases.$inferInsert;
