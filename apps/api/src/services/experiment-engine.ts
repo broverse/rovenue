@@ -322,17 +322,17 @@ export async function resolveProductGroup(
   );
 
   const override = Object.values(experiments).find(
-    (r) => r.type === "PRODUCT_GROUP",
+    (r) => r.type === "OFFERING",
   );
 
   if (override && typeof override.value === "string") {
-    const group = await drizzle.productGroupRepo.findProductGroupByIdentifier(
+    const group = await drizzle.offeringRepo.findOfferingByIdentifier(
       drizzle.db,
       projectId,
       override.value,
     );
     if (group) return group as unknown as ResolvedProductGroup;
-    log.warn("PRODUCT_GROUP experiment points at missing group", {
+    log.warn("OFFERING experiment points at missing offering", {
       projectId,
       experimentKey: override.key,
       identifier: override.value,
@@ -340,7 +340,7 @@ export async function resolveProductGroup(
   }
 
   if (requestedGroup) {
-    const group = await drizzle.productGroupRepo.findProductGroupByIdentifier(
+    const group = await drizzle.offeringRepo.findOfferingByIdentifier(
       drizzle.db,
       projectId,
       requestedGroup,
@@ -348,7 +348,7 @@ export async function resolveProductGroup(
     if (group) return group as unknown as ResolvedProductGroup;
   }
 
-  const fallback = await drizzle.productGroupRepo.findDefaultProductGroup(
+  const fallback = await drizzle.offeringRepo.findDefaultOffering(
     drizzle.db,
     projectId,
   );

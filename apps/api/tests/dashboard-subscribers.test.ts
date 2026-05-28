@@ -95,7 +95,7 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
             }),
             dbMock.subscriberAccess.findMany({
               where: { subscriberId },
-              orderBy: { entitlementKey: "asc" },
+              orderBy: { accessId: "asc" },
             }),
             dbMock.experimentAssignment.findMany({
               where: { subscriberId },
@@ -265,13 +265,13 @@ describe("GET /dashboard/projects/:projectId/subscribers", () => {
     );
     const call = drizzleMock.subscriberRepo.listSubscribers.mock.calls[0]?.[1] as {
       status?: string;
-      entitlementKey?: string;
+      accessId?: string;
       platforms?: ReadonlyArray<string>;
       country?: string;
       ltvMin?: number;
     };
     expect(call.status).toBe("trial");
-    expect(call.entitlementKey).toBe("premium");
+    expect(call.accessId).toBe("premium");
     expect(call.platforms).toEqual(["ios", "android"]);
     // Country casing is normalised inside the repo (UPPER on both
     // sides); the route preserves whatever the URL carried.
@@ -393,7 +393,7 @@ describe("GET /dashboard/projects/:projectId/subscribers/:id", () => {
       },
     ]);
     dbMock.subscriberAccess.findMany.mockResolvedValue([
-      { entitlementKey: "premium", isActive: true, expiresDate: null, store: "APP_STORE", purchaseId: "pur_1" },
+      { accessId: "premium", isActive: true, expiresDate: null, store: "APP_STORE", purchaseId: "pur_1" },
     ]);
     // Plan 3 §B.1: credit history + latest balance now come from
     // ClickHouse. The CH preview's first row supplies `creditBalance`.

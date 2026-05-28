@@ -112,23 +112,23 @@ export async function findPurchaseWithCreditInfo(
 }
 
 /**
- * Purchases owned by a subscriber with the product's entitlement
- * keys joined in one query. Used by access-engine's syncAccess
- * to reconcile entitlement grants against current purchases.
+ * Purchases owned by a subscriber with the product's access ids
+ * joined in one query. Used by access-engine's syncAccess to
+ * reconcile access grants against current purchases.
  */
-export interface PurchaseWithEntitlements {
+export interface PurchaseWithAccess {
   id: string;
   subscriberId: string;
   status: Purchase["status"];
   expiresDate: Date | null;
   store: Purchase["store"];
-  entitlementKeys: string[];
+  accessIds: string[];
 }
 
-export async function findPurchasesForSubscriberWithEntitlements(
+export async function findPurchasesForSubscriberWithAccess(
   db: Db,
   subscriberId: string,
-): Promise<PurchaseWithEntitlements[]> {
+): Promise<PurchaseWithAccess[]> {
   const rows = await db
     .select({
       id: purchases.id,
@@ -136,7 +136,7 @@ export async function findPurchasesForSubscriberWithEntitlements(
       status: purchases.status,
       expiresDate: purchases.expiresDate,
       store: purchases.store,
-      entitlementKeys: products.entitlementKeys,
+      accessIds: products.accessIds,
     })
     .from(purchases)
     .innerJoin(products, eq(products.id, purchases.productId))

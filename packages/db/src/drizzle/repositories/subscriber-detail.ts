@@ -27,7 +27,7 @@ export async function listAccessBySubscriber(
     .select()
     .from(subscriberAccess)
     .where(eq(subscriberAccess.subscriberId, subscriberId))
-    .orderBy(asc(subscriberAccess.entitlementKey));
+    .orderBy(asc(subscriberAccess.accessId));
 }
 
 export interface SubscriberDetailPurchase {

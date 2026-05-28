@@ -109,7 +109,7 @@ export const handlers = [
           deletedAt: null,
           mergedInto: null,
           access: [
-            { entitlementKey: "premium", isActive: true, expiresDate: null, store: "APP_STORE", purchaseId: "pur_1" },
+            { accessId: "acs_demo_premium000000000", isActive: true, expiresDate: null, store: "APP_STORE", purchaseId: "pur_1" },
           ],
           purchases: [],
           creditBalance: "42",

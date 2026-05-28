@@ -16,15 +16,14 @@ type DbOrTx = Db;
 
 /**
  * First subscriberAccess row matching (subscriberId, purchaseId,
- * entitlementKey). Webhook services call this to decide whether
- * to insert a new access row or flip the existing one back to
- * active.
+ * accessId). Webhook services call this to decide whether to insert
+ * a new access row or flip the existing one back to active.
  */
-export async function findAccessByPurchaseAndKey(
+export async function findAccessByPurchaseAndAccessId(
   db: Db,
   subscriberId: string,
   purchaseId: string,
-  entitlementKey: string,
+  accessId: string,
 ): Promise<SubscriberAccessRow | null> {
   const rows = await db
     .select()
@@ -33,7 +32,7 @@ export async function findAccessByPurchaseAndKey(
       and(
         eq(subscriberAccess.subscriberId, subscriberId),
         eq(subscriberAccess.purchaseId, purchaseId),
-        eq(subscriberAccess.entitlementKey, entitlementKey),
+        eq(subscriberAccess.accessId, accessId),
       ),
     )
     .limit(1);
@@ -68,11 +67,11 @@ export async function findAccessIdsForPurchaseChain(
 export { inArray };
 
 // =============================================================
-// Entitlement access reads
+// Access reads
 // =============================================================
 //
-// "Live" entitlement = active AND not past expiresDate. Either
-// perpetual (null expiry) or future-dated rows qualify.
+// "Live" access = active AND not past expiresDate. Either perpetual
+// (null expiry) or future-dated rows qualify.
 
 export async function findActiveAccess(
   db: Db,
@@ -110,30 +109,30 @@ export async function findAllAccessBySubscriber(
     .where(eq(subscriberAccess.subscriberId, subscriberId));
 }
 
-/** Purchase rows + entitlementKeys from the joined product, used by
- *  syncAccess to derive the desired entitlement set. */
-export interface PurchaseWithEntitlementKeys {
+/** Purchase rows + accessIds from the joined product, used by
+ *  syncAccess to derive the desired access set. */
+export interface PurchaseWithAccessIds {
   id: string;
   status: string;
   expiresDate: Date | null;
   store: Store;
-  entitlementKeys: string[];
+  accessIds: string[];
 }
 
-export async function findPurchasesWithEntitlementKeys(
+export async function findPurchasesWithAccessIds(
   db: DbOrTx,
   subscriberId: string,
-): Promise<PurchaseWithEntitlementKeys[]> {
+): Promise<PurchaseWithAccessIds[]> {
   // Inner join on products (required — every purchase has a
-  // product) so we can pull entitlementKeys[] alongside the
-  // purchase columns syncAccess reads.
+  // product) so we can pull accessIds[] alongside the purchase
+  // columns syncAccess reads.
   const rows = await db
     .select({
       id: purchases.id,
       status: purchases.status,
       expiresDate: purchases.expiresDate,
       store: purchases.store,
-      entitlementKeys: products.entitlementKeys,
+      accessIds: products.accessIds,
     })
     .from(purchases)
     .innerJoin(products, eq(products.id, purchases.productId))
@@ -143,7 +142,7 @@ export async function findPurchasesWithEntitlementKeys(
     status: r.status,
     expiresDate: r.expiresDate,
     store: r.store,
-    entitlementKeys: (r.entitlementKeys ?? []) as string[],
+    accessIds: (r.accessIds ?? []) as string[],
   }));
 }
 
@@ -175,13 +174,13 @@ export async function setAccessActiveAndExpiry(
 export interface CreateAccessInput {
   subscriberId: string;
   purchaseId: string;
-  entitlementKey: string;
+  accessId: string;
   isActive: boolean;
   expiresDate: Date | null;
   store: Store;
 }
 
-/** Insert a new access row. syncAccess inserts one per (key, purchase). */
+/** Insert a new access row. syncAccess inserts one per (accessId, purchase). */
 export async function createAccess(
   db: DbOrTx,
   input: CreateAccessInput,
@@ -189,7 +188,7 @@ export async function createAccess(
   await db.insert(subscriberAccess).values({
     subscriberId: input.subscriberId,
     purchaseId: input.purchaseId,
-    entitlementKey: input.entitlementKey,
+    accessId: input.accessId,
     isActive: input.isActive,
     expiresDate: input.expiresDate,
     store: input.store,

@@ -33,7 +33,7 @@ function inferPromotedFlagType(
     if (typeof value === "string") return FeatureFlagType.STRING;
     if (typeof value === "number") return FeatureFlagType.NUMBER;
   }
-  if (experimentType === "PRODUCT_GROUP" && typeof value === "string") {
+  if (experimentType === "OFFERING" && typeof value === "string") {
     return FeatureFlagType.STRING;
   }
   return FeatureFlagType.JSON;
@@ -53,7 +53,7 @@ export const createExperimentBodySchema = z.object({
   description: z.string().optional(),
   type: z.enum([
     EXPERIMENT_TYPE.FLAG,
-    EXPERIMENT_TYPE.PRODUCT_GROUP,
+    EXPERIMENT_TYPE.OFFERING,
     EXPERIMENT_TYPE.PAYWALL,
     EXPERIMENT_TYPE.ELEMENT,
   ]),
@@ -73,7 +73,7 @@ export const updateDraftExperimentBodySchema = z.object({
   type: z
     .enum([
       EXPERIMENT_TYPE.FLAG,
-      EXPERIMENT_TYPE.PRODUCT_GROUP,
+      EXPERIMENT_TYPE.OFFERING,
       EXPERIMENT_TYPE.PAYWALL,
       EXPERIMENT_TYPE.ELEMENT,
     ])

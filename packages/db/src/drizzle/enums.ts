@@ -96,7 +96,7 @@ export const revenueEventType = pgEnum("RevenueEventType", [
 
 export const experimentType = pgEnum("ExperimentType", [
   "FLAG",
-  "PRODUCT_GROUP",
+  "OFFERING",
   "PAYWALL",
   "ELEMENT",
 ]);

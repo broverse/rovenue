@@ -131,13 +131,13 @@ export async function grantComp(
       throw new Error("grantComp: purchase insert returned no rows");
     }
 
-    // Step 2d — write subscriber_access rows for every entitlement key
-    const entitlementKeys = (prod.entitlementKeys ?? []) as string[];
-    for (const key of entitlementKeys) {
+    // Step 2d — write subscriber_access rows for every access id
+    const accessIds = (prod.accessIds ?? []) as string[];
+    for (const accessId of accessIds) {
       await drizzle.accessRepo.createAccess(tx, {
         subscriberId: sub.id,
         purchaseId: purchase.id,
-        entitlementKey: key,
+        accessId,
         isActive: true,
         expiresDate,
         store: "MANUAL",

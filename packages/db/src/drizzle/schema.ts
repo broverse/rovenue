@@ -515,6 +515,37 @@ export const apiKeys = pgTable(
 );
 
 // =============================================================
+// access (catalog of access rights — replaces free-form
+// entitlement key strings). One row per (projectId, identifier).
+// Referenced from products.accessIds[] and subscriber_access.accessId.
+// =============================================================
+
+export const access = pgTable(
+  "access",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    identifier: text("identifier").notNull(),
+    displayName: text("displayName").notNull(),
+    description: text("description"),
+    metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectIdIdentifierKey: uniqueIndex(
+      "access_projectId_identifier_key",
+    ).on(t.projectId, t.identifier),
+  }),
+);
+
+// =============================================================
 // products
 // =============================================================
 
@@ -531,7 +562,7 @@ export const products = pgTable(
     storeIds: jsonb("storeIds").notNull(),
     displayName: text("displayName").notNull(),
     // Postgres TEXT[] column — Drizzle typing tracks the array shape.
-    entitlementKeys: text("entitlementKeys")
+    accessIds: text("accessIds")
       .array()
       .notNull()
       .default(sql`ARRAY[]::text[]`),
@@ -557,16 +588,21 @@ export const products = pgTable(
 );
 
 // =============================================================
-// product_groups
+// offerings (paywall configurations — was product_groups)
+//
+// Each offering is scoped to one Access; A/B variants land here.
 // =============================================================
 
-export const productGroups = pgTable(
-  "product_groups",
+export const offerings = pgTable(
+  "offerings",
   {
     id: text("id").primaryKey().$defaultFn(() => createId()),
     projectId: text("projectId")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    accessId: text("accessId")
+      .notNull()
+      .references(() => access.id, { onDelete: "cascade" }),
     identifier: text("identifier").notNull(),
     isDefault: boolean("isDefault").notNull().default(false),
     // Array of product references with order/promoted flags.
@@ -581,11 +617,11 @@ export const productGroups = pgTable(
   },
   (t) => ({
     projectIdIdentifierKey: uniqueIndex(
-      "product_groups_projectId_identifier_key",
+      "offerings_projectId_identifier_key",
     ).on(t.projectId, t.identifier),
-    projectIdIsDefaultIdx: index(
-      "product_groups_projectId_isDefault_idx",
-    ).on(t.projectId, t.isDefault),
+    accessIdIsDefaultIdx: index(
+      "offerings_accessId_isDefault_idx",
+    ).on(t.accessId, t.isDefault),
   }),
 );
 
@@ -665,7 +701,9 @@ export const subscriberAccess = pgTable(
     purchaseId: text("purchaseId")
       .notNull()
       .references(() => purchases.id, { onDelete: "cascade" }),
-    entitlementKey: text("entitlementKey").notNull(),
+    accessId: text("accessId")
+      .notNull()
+      .references(() => access.id, { onDelete: "restrict" }),
     isActive: boolean("isActive").notNull().default(true),
     expiresDate: timestamp("expiresDate", { withTimezone: true }),
     store: store("store").notNull(),
@@ -680,9 +718,9 @@ export const subscriberAccess = pgTable(
     subscriberIdIsActiveIdx: index(
       "subscriber_access_subscriberId_isActive_idx",
     ).on(t.subscriberId, t.isActive),
-    subscriberIdEntitlementKeyIdx: index(
-      "subscriber_access_subscriberId_entitlementKey_idx",
-    ).on(t.subscriberId, t.entitlementKey),
+    subscriberIdAccessIdIdx: index(
+      "subscriber_access_subscriberId_accessId_idx",
+    ).on(t.subscriberId, t.accessId),
   }),
 );
 
@@ -1603,11 +1641,14 @@ export type NewAuditLogRow = typeof auditLogs.$inferInsert;
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type NewApiKey = typeof apiKeys.$inferInsert;
 
+export type AccessRow = typeof access.$inferSelect;
+export type NewAccessRow = typeof access.$inferInsert;
+
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
 
-export type ProductGroup = typeof productGroups.$inferSelect;
-export type NewProductGroup = typeof productGroups.$inferInsert;
+export type Offering = typeof offerings.$inferSelect;
+export type NewOffering = typeof offerings.$inferInsert;
 
 export type Purchase = typeof purchases.$inferSelect;
 export type NewPurchase = typeof purchases.$inferInsert;

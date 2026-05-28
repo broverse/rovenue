@@ -112,7 +112,7 @@ export function rowToUiProduct(row: DashboardProductRow): Product {
     sku: row.identifier,
     name: row.displayName || row.identifier,
     group: groupLabelFromRow(row),
-    entitlements: row.entitlementKeys,
+    entitlements: row.accessIds,
     duration: durationFromRow(row),
     price,
     currency,

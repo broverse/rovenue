@@ -1,0 +1,1 @@
+ALTER TYPE "public"."ExperimentType" RENAME VALUE 'PRODUCT_GROUP' TO 'OFFERING';

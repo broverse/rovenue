@@ -134,7 +134,7 @@ async function verifyAppleReceipt(
     );
   }
 
-  const product = (await drizzle.productGroupRepo.findProductByIdentifierOrStoreId(
+  const product = (await drizzle.offeringRepo.findProductByIdentifierOrStoreId(
     drizzle.db,
     args.projectId,
     args.productId,
@@ -229,7 +229,7 @@ async function verifyGoogleReceipt(
 ): Promise<VerifyReceiptResult> {
   const verifyConfig = await loadGoogleConfig(args.projectId);
 
-  const product = (await drizzle.productGroupRepo.findProductByIdentifierOrStoreId(
+  const product = (await drizzle.offeringRepo.findProductByIdentifierOrStoreId(
     drizzle.db,
     args.projectId,
     args.productId,

@@ -48,7 +48,7 @@ export async function findRunningExperimentsByProject(
 export interface ExperimentFilters {
   projectId: string;
   status?: "DRAFT" | "RUNNING" | "PAUSED" | "COMPLETED";
-  type?: "FLAG" | "PRODUCT_GROUP" | "PAYWALL" | "ELEMENT";
+  type?: "FLAG" | "OFFERING" | "PAYWALL" | "ELEMENT";
 }
 
 export async function findExperimentsByProject(

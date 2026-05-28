@@ -19,7 +19,7 @@ import {
 import {
   classifyNotification,
   extractCancelTime,
-  isEntitlementGranting,
+  isAccessGranting,
   mapRevenueEventType,
   mapStatus,
   parsePushBody,
@@ -207,7 +207,7 @@ async function processSubscriptionNotification(
 
   const lineItem = purchase.lineItems?.[0];
   const productId = lineItem?.productId ?? ctx.notification.subscriptionId;
-  const product = await drizzle.productGroupRepo.findProductByStoreId(
+  const product = await drizzle.offeringRepo.findProductByStoreId(
     drizzle.db,
     ctx.projectId,
     "google",
@@ -273,11 +273,11 @@ async function processSubscriptionNotification(
     },
   });
 
-  if (isEntitlementGranting(status)) {
+  if (isAccessGranting(status)) {
     await grantAccess({
       subscriberId: subscriber.id,
       purchaseId: persisted.id,
-      entitlementKeys: product.entitlementKeys,
+      accessIds: product.accessIds,
       expiresDate,
     });
   } else {
@@ -413,17 +413,17 @@ async function resolveSubscriber(
 interface GrantAccessArgs {
   subscriberId: string;
   purchaseId: string;
-  entitlementKeys: string[];
+  accessIds: string[];
   expiresDate: Date | null;
 }
 
 async function grantAccess(args: GrantAccessArgs): Promise<void> {
-  for (const key of args.entitlementKeys) {
-    const existing = await drizzle.accessRepo.findAccessByPurchaseAndKey(
+  for (const accessId of args.accessIds) {
+    const existing = await drizzle.accessRepo.findAccessByPurchaseAndAccessId(
       drizzle.db,
       args.subscriberId,
       args.purchaseId,
-      key,
+      accessId,
     );
     if (existing) {
       await drizzle.accessRepo.setAccessActiveAndExpiry(
@@ -436,7 +436,7 @@ async function grantAccess(args: GrantAccessArgs): Promise<void> {
       await drizzle.accessRepo.createAccess(drizzle.db, {
         subscriberId: args.subscriberId,
         purchaseId: args.purchaseId,
-        entitlementKey: key,
+        accessId,
         isActive: true,
         expiresDate: args.expiresDate,
         store: Store.PLAY_STORE,

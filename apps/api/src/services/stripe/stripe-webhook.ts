@@ -218,11 +218,11 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
   ctx.outcome.subscriberId = subscriber.id;
   ctx.outcome.purchaseId = purchase.id;
 
-  if (ENTITLEMENT_GRANTING_STATUSES.has(status)) {
+  if (ACCESS_GRANTING_STATUSES.has(status)) {
     await grantAccess({
       subscriberId: subscriber.id,
       purchaseId: purchase.id,
-      entitlementKeys: product.entitlementKeys,
+      accessIds: product.accessIds,
       expiresDate: purchase.expiresDate,
     });
   } else {
@@ -423,7 +423,7 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
 // Helpers
 // =============================================================
 
-const ENTITLEMENT_GRANTING_STATUSES: ReadonlySet<PurchaseStatus> =
+const ACCESS_GRANTING_STATUSES: ReadonlySet<PurchaseStatus> =
   new Set<PurchaseStatus>([
     PurchaseStatus.ACTIVE,
     PurchaseStatus.TRIAL,
@@ -485,7 +485,7 @@ async function upsertPurchaseFromSubscription(
   }
   const priceId = item.price.id;
 
-  const product = await drizzle.productGroupRepo.findProductByStoreId(
+  const product = await drizzle.offeringRepo.findProductByStoreId(
     drizzle.db,
     ctx.projectId,
     "stripe",
@@ -552,17 +552,17 @@ async function upsertPurchaseFromSubscription(
 interface GrantAccessArgs {
   subscriberId: string;
   purchaseId: string;
-  entitlementKeys: string[];
+  accessIds: string[];
   expiresDate: Date | null;
 }
 
 async function grantAccess(args: GrantAccessArgs): Promise<void> {
-  for (const key of args.entitlementKeys) {
-    const existing = await drizzle.accessRepo.findAccessByPurchaseAndKey(
+  for (const accessId of args.accessIds) {
+    const existing = await drizzle.accessRepo.findAccessByPurchaseAndAccessId(
       drizzle.db,
       args.subscriberId,
       args.purchaseId,
-      key,
+      accessId,
     );
     if (existing) {
       await drizzle.accessRepo.setAccessActiveAndExpiry(
@@ -575,7 +575,7 @@ async function grantAccess(args: GrantAccessArgs): Promise<void> {
       await drizzle.accessRepo.createAccess(drizzle.db, {
         subscriberId: args.subscriberId,
         purchaseId: args.purchaseId,
-        entitlementKey: key,
+        accessId,
         isActive: true,
         expiresDate: args.expiresDate,
         store: Store.STRIPE,

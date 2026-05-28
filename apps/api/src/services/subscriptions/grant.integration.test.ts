@@ -17,6 +17,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import {
+  access,
   getDb,
   projects,
   subscribers,
@@ -61,11 +62,33 @@ async function seedSubscriber({
   return { id };
 }
 
-async function seedProduct({
+async function seedAccess({
   projectId,
   suffix = "",
 }: {
   projectId: string;
+  suffix?: string;
+}) {
+  const db = getDb();
+  // cuid2 shape: 24 lowercase alphanumeric — make it deterministic-ish
+  // by hashing the suffix into the trailing chars.
+  const id = `acsgranttest${String(RUN_ID).padStart(10, "0").slice(-10)}${suffix.padEnd(2, "x").slice(0, 2)}`.padEnd(24, "0").slice(0, 24);
+  await db.insert(access).values({
+    id,
+    projectId,
+    identifier: `pro_${RUN_ID}${suffix}`,
+    displayName: `Pro Access ${RUN_ID}${suffix}`,
+  });
+  return { id };
+}
+
+async function seedProduct({
+  projectId,
+  accessIds,
+  suffix = "",
+}: {
+  projectId: string;
+  accessIds: string[];
   suffix?: string;
 }) {
   const db = getDb();
@@ -77,7 +100,7 @@ async function seedProduct({
     type: "SUBSCRIPTION",
     storeIds: {},
     displayName: `Test Product ${RUN_ID}${suffix}`,
-    entitlementKeys: [`pro_${RUN_ID}${suffix}`],
+    accessIds,
   });
   return { id };
 }
@@ -117,7 +140,7 @@ describe("grantComp", () => {
   it("creates a MANUAL purchase with computed expiresDate for a 3mo preset", async () => {
     const project = await seedProject();
     const sub = await seedSubscriber({ projectId: project.id });
-    const prod = await seedProduct({ projectId: project.id });
+    const prod = await seedProduct({ ...{ projectId: project.id }, accessIds: [(await seedAccess({ projectId: project.id })).id] });
     const db = getDb();
 
     const result = await grantComp({
@@ -165,7 +188,7 @@ describe("grantComp", () => {
   it("creates a lifetime grant with expiresDate=null", async () => {
     const project = await seedProject("A");
     const sub = await seedSubscriber({ projectId: project.id, suffix: "A" });
-    const prod = await seedProduct({ projectId: project.id, suffix: "A" });
+    const prod = await seedProduct({ ...{ projectId: project.id, suffix: "A" }, accessIds: [(await seedAccess({ projectId: project.id, suffix: "A" })).id] });
 
     const result = await grantComp({
       projectId: project.id,
@@ -184,7 +207,7 @@ describe("grantComp", () => {
     const projectA = await seedProject("C");
     const projectB = await seedProject("D");
     const subB = await seedSubscriber({ projectId: projectB.id, suffix: "D" });
-    const prodA = await seedProduct({ projectId: projectA.id, suffix: "C" });
+    const prodA = await seedProduct({ ...{ projectId: projectA.id, suffix: "C" }, accessIds: [(await seedAccess({ projectId: projectA.id, suffix: "C" })).id] });
 
     await expect(
       grantComp({
@@ -202,7 +225,7 @@ describe("grantComp", () => {
   it("rejects a custom expiresAt in the past", async () => {
     const project = await seedProject("custom");
     const sub = await seedSubscriber({ projectId: project.id, suffix: "custom" });
-    const prod = await seedProduct({ projectId: project.id, suffix: "custom" });
+    const prod = await seedProduct({ ...{ projectId: project.id, suffix: "custom" }, accessIds: [(await seedAccess({ projectId: project.id, suffix: "custom" })).id] });
 
     await expect(
       grantComp({

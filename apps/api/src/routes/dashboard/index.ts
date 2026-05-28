@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { dashboardUserRateLimit } from "../../middleware/rate-limit";
+import { accessRoute } from "./access";
 import { appsRoute } from "./apps";
 import { audiencesRoute } from "./audiences";
 import { auditLogsRoute } from "./audit-logs";
@@ -24,7 +25,7 @@ import { pushDevicesRoute } from "./push-devices";
 import { membersRoute } from "./members";
 import { metricsRoute } from "./metrics";
 import { overviewRoute } from "./overview";
-import { productGroupsDashboardRoute } from "./product-groups";
+import { offeringsDashboardRoute } from "./offerings";
 import { productsDashboardRoute } from "./products";
 import { projectsRoute } from "./projects";
 import { queriesRoute } from "./queries";
@@ -59,6 +60,7 @@ export const dashboardRoute = new Hono()
   .route("/notifications", notificationsRoute)
   .route("/push-devices", pushDevicesRoute)
   .route("/projects", projectsRoute)
+  .route("/projects/:projectId/access", accessRoute)
   .route("/projects/:projectId/apps", appsRoute)
   .route("/projects/:projectId/billing", billingSubRouter)
   .route("/projects/:projectId/charts", chartsRoute)
@@ -77,7 +79,7 @@ export const dashboardRoute = new Hono()
   )
   .route("/projects/:projectId/metrics", metricsRoute)
   .route("/projects/:projectId/overview", overviewRoute)
-  .route("/projects/:projectId/product-groups", productGroupsDashboardRoute)
+  .route("/projects/:projectId/offerings", offeringsDashboardRoute)
   .route("/projects/:projectId/products", productsDashboardRoute)
   .route("/projects/:projectId/queries", queriesRoute)
   .route("/projects/:projectId/subscribers", subscribersRoute)

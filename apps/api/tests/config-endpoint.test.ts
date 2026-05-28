@@ -91,16 +91,16 @@ const { dbMock, drizzleMock, engineMock, flagMock } = vi.hoisted(() => {
           }),
       ),
     },
-    productGroupRepo: {
+    offeringRepo: {
       listProductGroups: vi.fn(async () => []),
       findDefaultProductGroup: vi.fn(async (_db: unknown, projectId: string) =>
-        dbMock.productGroup.findFirst({
+        dbMock.offering.findFirst({
           where: { projectId, isDefault: true },
         }),
       ),
       findProductGroupByIdentifier: vi.fn(
         async (_db: unknown, projectId: string, identifier: string) =>
-          dbMock.productGroup.findUnique({
+          dbMock.offering.findUnique({
             where: { projectId_identifier: { projectId, identifier } },
           }),
       ),
@@ -315,7 +315,7 @@ describe("GET /v1/config", () => {
       "pricing-test": {
         experimentId: "exp_1",
         key: "pricing-test",
-        type: "PRODUCT_GROUP",
+        type: "OFFERING",
         variantId: "variant_a",
         variantName: "Weekly First",
         value: "weekly_first",
@@ -334,7 +334,7 @@ describe("GET /v1/config", () => {
     });
     expect(body.data.experiments["pricing-test"]).toMatchObject({
       variantId: "variant_a",
-      type: "PRODUCT_GROUP",
+      type: "OFFERING",
       value: "weekly_first",
     });
   });
@@ -513,7 +513,7 @@ describe("POST /v1/experiments/track", () => {
 // =============================================================
 
 describe("GET /v1/product-groups/:identifier with subscriberId", () => {
-  it("applies PRODUCT_GROUP experiment override and sets X-Rovenue-Experiment header", async () => {
+  it("applies OFFERING experiment override and sets X-Rovenue-Experiment header", async () => {
     dbMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_internal_1",
       projectId: "proj_test",
@@ -524,13 +524,13 @@ describe("GET /v1/product-groups/:identifier with subscriberId", () => {
       "pricing-test": {
         experimentId: "exp_1",
         key: "pricing-test",
-        type: "PRODUCT_GROUP",
+        type: "OFFERING",
         variantId: "variant_a",
         variantName: "Weekly First",
         value: "weekly_first",
       },
     });
-    dbMock.productGroup.findUnique.mockResolvedValue({
+    dbMock.offering.findUnique.mockResolvedValue({
       id: "pg_weekly",
       identifier: "weekly_first",
       isDefault: false,
@@ -554,7 +554,7 @@ describe("GET /v1/product-groups/:identifier with subscriberId", () => {
   });
 
   it("falls through to the direct lookup when no subscriberId is provided", async () => {
-    dbMock.productGroup.findFirst.mockResolvedValue({
+    dbMock.offering.findFirst.mockResolvedValue({
       id: "pg_default",
       identifier: "default",
       isDefault: true,

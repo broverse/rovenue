@@ -116,7 +116,7 @@ export type RevenueEventType =
 
 export const ExperimentType = {
   FLAG: "FLAG",
-  PRODUCT_GROUP: "PRODUCT_GROUP",
+  OFFERING: "OFFERING",
   PAYWALL: "PAYWALL",
   ELEMENT: "ELEMENT",
 } as const;
@@ -163,13 +163,16 @@ export type {
   Subscriber,
   ApiKey,
   Product,
-  ProductGroup,
+  Offering,
+  NewOffering,
   Purchase,
   Audience,
   Experiment,
   WebhookEvent,
   OutgoingWebhook,
   RevenueEvent,
+  AccessRow,
+  NewAccessRow,
   SubscriberAccessRow,
   AuditLogRow,
   CreditLedgerRow as CreditLedger,
@@ -182,6 +185,12 @@ export type {
 // =============================================================
 
 export * from "./helpers/encrypted-field";
+
+// =============================================================
+// Validators (re-export selected schemas commonly used by routes)
+// =============================================================
+
+export { accessIdSchema } from "./drizzle/validators";
 
 // =============================================================
 // Drizzle namespace
@@ -198,10 +207,11 @@ export { getDb, createDb, db } from "./drizzle";
 // =============================================================
 
 export {
+  access,
   projects,
   subscribers,
   products,
-  productGroups,
+  offerings,
   purchases,
   subscriberAccess,
   auditLogs,

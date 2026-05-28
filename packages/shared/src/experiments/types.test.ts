@@ -13,9 +13,9 @@ import {
 // =============================================================
 
 describe("EXPERIMENT_TYPE", () => {
-  test("enumerates FLAG, PRODUCT_GROUP, PAYWALL, ELEMENT", () => {
+  test("enumerates FLAG, OFFERING, PAYWALL, ELEMENT", () => {
     expect(EXPERIMENT_TYPE.FLAG).toBe("FLAG");
-    expect(EXPERIMENT_TYPE.PRODUCT_GROUP).toBe("PRODUCT_GROUP");
+    expect(EXPERIMENT_TYPE.OFFERING).toBe("OFFERING");
     expect(EXPERIMENT_TYPE.PAYWALL).toBe("PAYWALL");
     expect(EXPERIMENT_TYPE.ELEMENT).toBe("ELEMENT");
   });
@@ -88,9 +88,9 @@ describe("experimentSchema", () => {
     expect(parsed.variants).toHaveLength(2);
   });
 
-  test("parses a PRODUCT_GROUP experiment", () => {
+  test("parses a OFFERING experiment", () => {
     const input = {
-      type: "PRODUCT_GROUP",
+      type: "OFFERING",
       key: "pricing-test",
       variants: [
         { id: "control", name: "Default", value: "default", weight: 0.5 },
@@ -104,7 +104,7 @@ describe("experimentSchema", () => {
     };
 
     const parsed = experimentSchema.parse(input);
-    expect(parsed.type).toBe("PRODUCT_GROUP");
+    expect(parsed.type).toBe("OFFERING");
     expect(parsed.variants[0]!.value).toBe("default");
   });
 

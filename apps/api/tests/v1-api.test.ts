@@ -189,21 +189,21 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
           creditLedger.create({ data: entry }),
       ),
     },
-    productGroupRepo: {
+    offeringRepo: {
       listProductGroups: vi.fn(async (_db: unknown, projectId: string) =>
-        productGroup.findMany({
+        offering.findMany({
           where: { projectId },
           orderBy: [{ isDefault: "desc" }, { identifier: "asc" }],
         }),
       ),
       findDefaultProductGroup: vi.fn(async (_db: unknown, projectId: string) =>
-        productGroup.findFirst({
+        offering.findFirst({
           where: { projectId, isDefault: true },
         }),
       ),
       findProductGroupByIdentifier: vi.fn(
         async (_db: unknown, projectId: string, identifier: string) =>
-          productGroup.findUnique({
+          offering.findUnique({
             where: { projectId_identifier: { projectId, identifier } },
           }),
       ),
@@ -438,7 +438,7 @@ describe("POST /v1/receipts/apple", () => {
       type: "SUBSCRIPTION",
       displayName: "Pro Monthly",
       creditAmount: null,
-      entitlementKeys: ["premium"],
+      accessIds: ["premium"],
       isActive: true,
     };
     const purchaseRow = {
@@ -455,7 +455,7 @@ describe("POST /v1/receipts/apple", () => {
 
     dbMock.subscriberAccess.findMany.mockResolvedValue([
       {
-        entitlementKey: "premium",
+        accessId: "premium",
         isActive: true,
         expiresDate: new Date("2026-05-01T00:00:00Z"),
         store: "APP_STORE",
@@ -512,7 +512,7 @@ describe("POST /v1/receipts/google", () => {
       type: "SUBSCRIPTION",
       displayName: "Pro Monthly",
       creditAmount: null,
-      entitlementKeys: ["premium"],
+      accessIds: ["premium"],
       isActive: true,
     };
     const purchaseRow = {
@@ -563,7 +563,7 @@ describe("GET /v1/subscribers/:appUserId/access", () => {
 
     dbMock.subscriberAccess.findMany.mockResolvedValue([
       {
-        entitlementKey: "premium",
+        accessId: "premium",
         isActive: true,
         expiresDate: null,
         store: "APP_STORE",
@@ -835,7 +835,7 @@ describe("POST /v1/subscribers/:appUserId/credits/add", () => {
 
 describe("GET /v1/product-groups/:identifier", () => {
   it("returns a sorted product list for the named group", async () => {
-    dbMock.productGroup.findUnique.mockResolvedValue({
+    dbMock.offering.findUnique.mockResolvedValue({
       id: "pg_1",
       projectId: "proj_test",
       identifier: "premium",
@@ -863,7 +863,7 @@ describe("GET /v1/product-groups/:identifier", () => {
         type: "SUBSCRIPTION",
         displayName: "Pro Monthly",
         creditAmount: null,
-        entitlementKeys: ["premium"],
+        accessIds: ["premium"],
         isActive: true,
       },
       {
@@ -872,7 +872,7 @@ describe("GET /v1/product-groups/:identifier", () => {
         type: "CONSUMABLE",
         displayName: "100 Credits",
         creditAmount: 100,
-        entitlementKeys: [],
+        accessIds: [],
         isActive: true,
       },
     ]);
@@ -890,7 +890,7 @@ describe("GET /v1/product-groups/:identifier", () => {
   });
 
   it("looks up the default group when identifier is 'default'", async () => {
-    dbMock.productGroup.findFirst.mockResolvedValue({
+    dbMock.offering.findFirst.mockResolvedValue({
       id: "pg_1",
       projectId: "proj_test",
       identifier: "default",
@@ -907,7 +907,7 @@ describe("GET /v1/product-groups/:identifier", () => {
   });
 
   it("returns 404 when the group doesn't exist", async () => {
-    dbMock.productGroup.findUnique.mockResolvedValue(null);
+    dbMock.offering.findUnique.mockResolvedValue(null);
     const res = await app.request(
       withPublicAuth("/v1/product-groups/missing"),
     );
@@ -921,7 +921,7 @@ describe("GET /v1/product-groups/:identifier", () => {
 
 describe("GET /v1/product-groups", () => {
   it("lists groups with product counts", async () => {
-    dbMock.productGroup.findMany.mockResolvedValue([
+    dbMock.offering.findMany.mockResolvedValue([
       {
         identifier: "default",
         isDefault: true,
@@ -968,7 +968,7 @@ describe("GET /v1/me", () => {
     } as any);
     dbMock.subscriberAccess.findMany.mockResolvedValue([
       {
-        entitlementKey: "premium",
+        accessId: "premium",
         isActive: true,
         expiresDate: new Date("2026-05-01T00:00:00Z"),
         store: "APP_STORE",
@@ -1012,7 +1012,7 @@ describe("GET /v1/me/entitlements", () => {
     } as any);
     dbMock.subscriberAccess.findMany.mockResolvedValue([
       {
-        entitlementKey: "premium",
+        accessId: "premium",
         isActive: true,
         expiresDate: null,
         store: "PLAY_STORE",

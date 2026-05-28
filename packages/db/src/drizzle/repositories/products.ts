@@ -148,7 +148,7 @@ export interface UpdateProductInput {
   displayName?: string;
   type?: Product["type"];
   storeIds?: Record<string, string>;
-  entitlementKeys?: string[];
+  accessIds?: string[];
   creditAmount?: number | null;
   isActive?: boolean;
   metadata?: Record<string, unknown>;
@@ -194,7 +194,7 @@ export interface BulkCreateProductsInput {
     displayName: string;
     type: Product["type"];
     storeId: string;
-    entitlementKeys?: ReadonlyArray<string>;
+    accessIds?: ReadonlyArray<string>;
     creditAmount?: number | null;
     metadata?: Record<string, unknown>;
   }>;
@@ -305,7 +305,7 @@ export async function bulkCreateProducts(
         type: item.type,
         displayName: item.displayName,
         storeIds: { [input.store]: item.storeId },
-        entitlementKeys: item.entitlementKeys ? [...item.entitlementKeys] : [],
+        accessIds: item.accessIds ? [...item.accessIds] : [],
         creditAmount: item.creditAmount ?? null,
         isActive: true,
         metadata: item.metadata ?? {},
