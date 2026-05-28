@@ -81,3 +81,10 @@ process.env.AWS_SES_EVENTS_VERIFY_SIGNATURE ??= "false";
 // key is fine for tests; production refuses to start without a real
 // value via the lib/env zod check at module load.
 process.env.UNSUB_SIGNING_KEY ??= "0".repeat(64);
+// Rovi copilot provider fallback — used by copilot integration tests.
+// The actual LLM call is intercepted by __setRoviModelFactoryForTests so no
+// real API key is needed; we just need the three vars to be non-empty so
+// resolveProviderForProject doesn't throw RoviConfigError.
+process.env.ROVI_DEFAULT_PROVIDER ??= "openai";
+process.env.ROVI_DEFAULT_MODEL ??= "mock";
+process.env.ROVI_DEFAULT_API_KEY ??= "mock-key-for-tests";

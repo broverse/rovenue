@@ -36,33 +36,23 @@ export function queryMetricsTools(ctx: ToolContext) {
     }),
     "query.metrics.churn": tool({
       description:
-        "Get churn metrics for the current project. Returns daily MRR data filtered to show subscription losses (event_count as proxy for churn events).",
+        "Compute churn rate over a time window. (not implemented in this release)",
       inputSchema: DateRangeArgs,
-      execute: async ({ from, to }) => {
-        // Re-use the MRR daily series; churn is exposed as event_count drops.
-        // A dedicated ClickHouse churn view is not yet implemented.
-        const rows = await listDailyMrr({
-          projectId: ctx.projectId,
-          from: new Date(from),
-          to: new Date(to),
-        });
-        return sterilizeToolResult({ churn: rows });
+      execute: async () => {
+        throw new Error(
+          "query.metrics.churn is not implemented yet — a dedicated ClickHouse view is required.",
+        );
       },
-    }),
+    } as unknown as ReturnType<typeof tool>),
     "query.metrics.conversion": tool({
       description:
-        "Get conversion metrics for the current project. Returns daily MRR data that can be used to infer trial-to-paid conversion trends.",
+        "Compute trial-to-paid conversion rate over a time window. (not implemented in this release)",
       inputSchema: DateRangeArgs,
-      execute: async ({ from, to }) => {
-        // A dedicated ClickHouse conversion view is not yet implemented.
-        // Re-use the MRR daily series as a proxy.
-        const rows = await listDailyMrr({
-          projectId: ctx.projectId,
-          from: new Date(from),
-          to: new Date(to),
-        });
-        return sterilizeToolResult({ conversion: rows });
+      execute: async () => {
+        throw new Error(
+          "query.metrics.conversion is not implemented yet — funnel-conversion ClickHouse view does not exist.",
+        );
       },
-    }),
+    } as unknown as ReturnType<typeof tool>),
   };
 }

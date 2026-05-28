@@ -99,15 +99,75 @@ export function registerAllIntentHandlers(): void {
 
   // ------------------------------------------------------------------
   // action.subscribers.transfer
-  // STUB: There is no single transferSubscriber function. The worktree
-  // exposes reassignPurchases, reassignSubscriberAccess, and
-  // softDeleteSubscriberAsMerged separately; a safe composite transfer
-  // needs an orchestrating function that does not exist yet.
+  // Multi-step composite: reassign purchases, access rows, and
+  // experiment assignments from the source subscriber to the target,
+  // then soft-delete the source as merged. All four mutations + audit
+  // run inside one transaction.
   // ------------------------------------------------------------------
-  registerIntentHandler("action.subscribers.transfer", async (_ctx, _payload) => {
-    throw new Error(
-      "not implemented: transferSubscriber composite function missing in this worktree",
-    );
+  registerIntentHandler("action.subscribers.transfer", async (ctx, payload) => {
+    const { fromSubscriberId, toSubscriberId, reason } = payload as {
+      fromSubscriberId: string;
+      toSubscriberId: string;
+      reason: string;
+    };
+
+    return drizzle.db.transaction(async (tx) => {
+      // Validate both subscribers exist and belong to this project.
+      const [fromSub, toSub] = await Promise.all([
+        drizzle.subscriberRepo.findSubscriberById(tx as never, fromSubscriberId),
+        drizzle.subscriberRepo.findSubscriberById(tx as never, toSubscriberId),
+      ]);
+      if (!fromSub || fromSub.projectId !== ctx.projectId) {
+        throw new Error(`Source subscriber ${fromSubscriberId} not found in project`);
+      }
+      if (!toSub || toSub.projectId !== ctx.projectId) {
+        throw new Error(`Target subscriber ${toSubscriberId} not found in project`);
+      }
+      if (fromSubscriberId === toSubscriberId) {
+        throw new Error("Cannot transfer to the same subscriber");
+      }
+
+      // Three reassignments, then mark the source as merged.
+      await drizzle.subscriberRepo.reassignPurchases(
+        tx as never,
+        fromSubscriberId,
+        toSubscriberId,
+      );
+      await drizzle.subscriberRepo.reassignSubscriberAccess(
+        tx as never,
+        fromSubscriberId,
+        toSubscriberId,
+      );
+      await drizzle.subscriberRepo.reassignExperimentAssignments(
+        tx as never,
+        fromSubscriberId,
+        toSubscriberId,
+      );
+      await drizzle.subscriberRepo.softDeleteSubscriberAsMerged(
+        tx as never,
+        fromSubscriberId,
+        toSubscriberId,
+        new Date(),
+      );
+
+      await audit(
+        {
+          projectId: ctx.projectId,
+          userId: ctx.userId,
+          action: "update",
+          resource: "subscriber",
+          resourceId: fromSubscriberId,
+          after: { mergedInto: toSubscriberId, reason },
+        },
+        tx as Parameters<typeof audit>[1],
+      );
+
+      return {
+        fromSubscriberId,
+        toSubscriberId,
+        transferred: true,
+      };
+    });
   });
 
   // ------------------------------------------------------------------
