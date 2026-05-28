@@ -11,6 +11,10 @@ export default defineConfig({
         __dirname,
         "src/__tests__/_stubExpoModules.ts",
       ),
+      "react-native": resolve(
+        __dirname,
+        "src/__tests__/_stubReactNative.ts",
+      ),
     },
   },
   test: {

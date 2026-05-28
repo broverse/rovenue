@@ -1,6 +1,7 @@
 import { startEventBridge } from "../core/eventBridge";
 import { getNative } from "../core/native";
 import { InvalidApiKeyError } from "../errors";
+import { startSessionTracker } from "./sessionTracker";
 
 export type RovenueConfig = {
   apiKey: string;
@@ -18,4 +19,5 @@ export function configure(opts: RovenueConfig): void {
   const native = getNative();
   native.configure(opts.apiKey, opts.baseUrl, opts.debug ?? false);
   startEventBridge();
+  startSessionTracker();
 }
