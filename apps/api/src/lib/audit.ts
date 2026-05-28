@@ -102,7 +102,10 @@ export type AuditAction =
   | "integration.connection.updated"
   | "integration.connection.deleted"
   | "integration.credentials.rotated"
-  | "integration.delivery.dead_letter";
+  | "integration.delivery.dead_letter"
+  | "integration.test_event.sent"
+  | "integration.backfill.started"
+  | "integration.backfill.completed";
 
 export type AuditResource =
   | "audience"

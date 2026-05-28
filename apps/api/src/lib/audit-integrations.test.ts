@@ -16,4 +16,11 @@ describe("audit unions — integrations", () => {
     const r: AuditResource = "integration_connection";
     expect(r).toBe("integration_connection");
   });
+  it("AuditAction includes the three backfill/test-event actions", () => {
+    const a: AuditAction = "integration.backfill.started";
+    const b: AuditAction = "integration.backfill.completed";
+    const c: AuditAction = "integration.test_event.sent";
+    const extra: AuditAction[] = [a, b, c];
+    expect(extra.length).toBe(3);
+  });
 });
