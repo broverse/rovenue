@@ -2,3 +2,6 @@ export { StatusChip } from "./status-chip";
 export { OutcomeChip } from "./outcome-chip";
 export { OnboardingWizard } from "./onboarding-wizard";
 export type { OnboardingWizardProps } from "./onboarding-wizard";
+export { ResponsesTable } from "./responses-table";
+export { ResponsesFilterBar } from "./responses-filter-bar";
+export type { ResponsesFilters } from "./responses-filter-bar";
