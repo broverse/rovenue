@@ -15,6 +15,7 @@ import * as schema from "../schema";
 import { createConnection } from "./integration-connections";
 import {
   insertPendingDelivery,
+  listDeliveriesForConnection,
   updateDeliveryStatus,
 } from "./integration-deliveries";
 
@@ -169,5 +170,42 @@ describe("updateDeliveryStatus", () => {
     expect(updated.status).toBe("succeeded");
     expect(updated.httpStatus).toBe(200);
     expect(updated.attempt).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listDeliveriesForConnection
+// ---------------------------------------------------------------------------
+
+describe("listDeliveriesForConnection", () => {
+  it("returns rows ordered by createdAt desc with cursor paging", async () => {
+    const projectId = await seedProject();
+    const connectionId = await seedConnection(projectId);
+    for (let i = 0; i < 3; i++) {
+      await insertPendingDelivery(db, {
+        id: createId(),
+        connectionId,
+        projectId,
+        providerId: "META_CAPI",
+        outboxEventId: createId(),
+        eventKey: "revenue.RENEWAL",
+        status: "pending",
+        attempt: 0,
+      });
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    const page1 = await listDeliveriesForConnection(db, {
+      connectionId,
+      limit: 2,
+    });
+    expect(page1.rows.length).toBe(2);
+    expect(page1.nextCursor).toBeDefined();
+    const page2 = await listDeliveriesForConnection(db, {
+      connectionId,
+      limit: 2,
+      cursor: page1.nextCursor,
+    });
+    expect(page2.rows.length).toBe(1);
+    expect(page2.nextCursor).toBeUndefined();
   });
 });

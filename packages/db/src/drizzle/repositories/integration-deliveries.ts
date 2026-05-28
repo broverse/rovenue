@@ -91,3 +91,49 @@ export async function updateDeliveryStatus(
   if (!row) throw new Error(`updateDeliveryStatus: id=${input.id} not found`);
   return row;
 }
+
+// =============================================================
+// listDeliveriesForConnection
+// =============================================================
+//
+// Cursor-paginated, newest-first. Cursor is the ISO-8601 string
+// of the last seen createdAt. Fetches limit+1 rows to determine
+// whether a next page exists, then slices back to limit.
+
+export interface ListDeliveriesInput {
+  connectionId: string;
+  limit: number;
+  cursor?: string; // ISO timestamp of last seen createdAt
+  status?: IntegrationDelivery["status"];
+}
+
+export interface ListDeliveriesPage {
+  rows: IntegrationDelivery[];
+  nextCursor?: string;
+}
+
+export async function listDeliveriesForConnection(
+  db: Db,
+  input: ListDeliveriesInput,
+): Promise<ListDeliveriesPage> {
+  const conds = [eq(integrationDeliveries.connectionId, input.connectionId)];
+  if (input.cursor) {
+    conds.push(lt(integrationDeliveries.createdAt, new Date(input.cursor)));
+  }
+  if (input.status) {
+    conds.push(eq(integrationDeliveries.status, input.status));
+  }
+  const rows = await db
+    .select()
+    .from(integrationDeliveries)
+    .where(and(...conds))
+    .orderBy(desc(integrationDeliveries.createdAt))
+    .limit(input.limit + 1);
+  const hasMore = rows.length > input.limit;
+  const page = hasMore ? rows.slice(0, input.limit) : rows;
+  const last = page[page.length - 1];
+  return {
+    rows: page,
+    nextCursor: hasMore && last ? last.createdAt.toISOString() : undefined,
+  };
+}
