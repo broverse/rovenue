@@ -11,6 +11,7 @@ import { actionProductsTools } from "./action-products";
 import { actionAudiencesTools } from "./action-audiences";
 import { actionFeatureFlagsTools } from "./action-feature-flags";
 import { actionExperimentsTools } from "./action-experiments";
+import { uiTools } from "./ui";
 
 export function loadTools(ctx: ToolContext) {
   return {
@@ -27,6 +28,7 @@ export function loadTools(ctx: ToolContext) {
     ...actionAudiencesTools(ctx),
     ...actionFeatureFlagsTools(ctx),
     ...actionExperimentsTools(ctx),
+    ...uiTools(ctx),
   };
 }
 
@@ -35,7 +37,6 @@ const STATIC_NAMES = [
   "query.subscribers.get",
   "query.subscriptions.list",
   "query.products.list",
-  "query.productGroups.list",
   "query.metrics.mrr",
   "query.metrics.churn",
   "query.metrics.conversion",
@@ -53,6 +54,9 @@ const STATIC_NAMES = [
   "action.featureFlags.updateRules",
   "action.experiments.start",
   "action.experiments.stop",
+  "ui.navigate",
+  "ui.filter",
+  "ui.openSubscriber",
 ] as const;
 
 export function listToolNames(): string[] {

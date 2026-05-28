@@ -9,7 +9,7 @@ const ListArgs = z.object({
     .enum(["DRAFT", "RUNNING", "PAUSED", "COMPLETED"])
     .optional(),
   type: z
-    .enum(["FLAG", "OFFERING", "PAYWALL", "ELEMENT"])
+    .enum(["FLAG", "PRODUCT_GROUP", "PAYWALL", "ELEMENT"])
     .optional(),
   limit: z.number().int().positive().max(100).default(50),
 });
