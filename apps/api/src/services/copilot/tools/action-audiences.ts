@@ -15,7 +15,7 @@ export function actionAudiencesTools(ctx: ToolContext) {
         filters: z.record(z.unknown()),
         reason: z.string().min(1),
       }),
-      requiresRole: "ADMIN",
+      requiresRole: "DEVELOPER",
       buildPreview: (i) => ({
         title: `Create audience "${i.name}"`,
         fields: [
@@ -38,7 +38,7 @@ export function actionAudiencesTools(ctx: ToolContext) {
         filters: z.record(z.unknown()).optional(),
         reason: z.string().min(1),
       }),
-      requiresRole: "ADMIN",
+      requiresRole: "DEVELOPER",
       buildPreview: (i) => ({
         title: `Update audience ${i.audienceId}`,
         fields: [

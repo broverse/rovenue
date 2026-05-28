@@ -14,7 +14,7 @@ export function actionFeatureFlagsTools(ctx: ToolContext) {
         enabled: z.boolean(),
         reason: z.string().min(1),
       }),
-      requiresRole: "ADMIN",
+      requiresRole: "DEVELOPER",
       buildPreview: (i) => ({
         title: `${i.enabled ? "Enable" : "Disable"} feature flag ${i.featureFlagId}`,
         fields: [
@@ -35,7 +35,7 @@ export function actionFeatureFlagsTools(ctx: ToolContext) {
         rules: z.array(z.record(z.unknown())),
         reason: z.string().min(1),
       }),
-      requiresRole: "ADMIN",
+      requiresRole: "DEVELOPER",
       buildPreview: (i) => ({
         title: `Update rules for feature flag ${i.featureFlagId}`,
         fields: [
