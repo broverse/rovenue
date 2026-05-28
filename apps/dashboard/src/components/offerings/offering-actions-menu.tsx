@@ -12,12 +12,12 @@ import {
 } from "lucide-react";
 import { buttonVariants } from "../../ui/button";
 import { cn } from "../../lib/cn";
-import { useUpdateProductGroup } from "../../lib/hooks/useProjectProductGroups";
-import type { ProductGroup } from "./types";
+import { useUpdateOffering } from "../../lib/hooks/useProjectOfferings";
+import type { Offering } from "./types";
 
 type Props = {
   projectId: string;
-  group: ProductGroup;
+  offering: Offering;
   onEdit: () => void;
   onDelete: () => void;
 };
@@ -32,18 +32,18 @@ const DANGER_ITEM_CLASS =
   "flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-rv-danger outline-none data-[highlighted]:bg-rv-danger/10 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50";
 
 /**
- * "More actions" dropdown for the selected product group. Owns its own
+ * "More actions" dropdown for the selected offering. Owns its own
  * transient state (copy feedback, default-toggle pending) but delegates
  * edit + delete to dialogs at the route level.
  */
-export function ProductGroupActionsMenu({
+export function OfferingActionsMenu({
   projectId,
-  group,
+  offering,
   onEdit,
   onDelete,
 }: Props) {
   const { t } = useTranslation();
-  const update = useUpdateProductGroup(projectId);
+  const update = useUpdateOffering(projectId);
   const [copiedKey, setCopiedKey] = useState<"identifier" | "id" | null>(null);
 
   const copy = async (kind: "identifier" | "id", value: string) => {
@@ -60,14 +60,14 @@ export function ProductGroupActionsMenu({
 
   const toggleDefault = () => {
     if (update.isPending) return;
-    update.mutate({ id: group.id, isDefault: !group.isDefault });
+    update.mutate({ id: offering.id, isDefault: !offering.isDefault });
   };
 
   return (
     <Menu.Root>
       <Menu.Trigger
         className={cn(buttonVariants({ variant: "light", size: "icon" }))}
-        aria-label={t("productGroups.actions.more", "More actions")}
+        aria-label={t("offerings.actions.more", "More actions")}
       >
         <MoreHorizontal size={14} />
       </Menu.Trigger>
@@ -77,7 +77,7 @@ export function ProductGroupActionsMenu({
             <Menu.Item className={ITEM_CLASS} onClick={onEdit}>
               <Pencil size={13} />
               <span className="flex-1">
-                {t("productGroups.menu.edit", "Edit group")}
+                {t("offerings.menu.edit", "Edit offering")}
               </span>
             </Menu.Item>
 
@@ -86,11 +86,11 @@ export function ProductGroupActionsMenu({
               onClick={toggleDefault}
               disabled={update.isPending}
             >
-              {group.isDefault ? <StarOff size={13} /> : <Star size={13} />}
+              {offering.isDefault ? <StarOff size={13} /> : <Star size={13} />}
               <span className="flex-1">
-                {group.isDefault
-                  ? t("productGroups.menu.unsetDefault", "Remove as default")
-                  : t("productGroups.menu.setDefault", "Set as default")}
+                {offering.isDefault
+                  ? t("offerings.menu.unsetDefault", "Remove as default")
+                  : t("offerings.menu.setDefault", "Set as default")}
               </span>
             </Menu.Item>
 
@@ -99,7 +99,7 @@ export function ProductGroupActionsMenu({
             <Menu.Item
               className={ITEM_CLASS}
               closeOnClick={false}
-              onClick={() => copy("identifier", group.key)}
+              onClick={() => copy("identifier", offering.key)}
             >
               {copiedKey === "identifier" ? (
                 <Check size={13} className="text-rv-success" />
@@ -108,18 +108,18 @@ export function ProductGroupActionsMenu({
               )}
               <span className="flex-1">
                 {copiedKey === "identifier"
-                  ? t("productGroups.menu.copied", "Copied")
-                  : t("productGroups.menu.copyIdentifier", "Copy identifier")}
+                  ? t("offerings.menu.copied", "Copied")
+                  : t("offerings.menu.copyIdentifier", "Copy identifier")}
               </span>
               <span className="font-rv-mono text-[11px] text-rv-mute-500">
-                {group.key}
+                {offering.key}
               </span>
             </Menu.Item>
 
             <Menu.Item
               className={ITEM_CLASS}
               closeOnClick={false}
-              onClick={() => copy("id", group.id)}
+              onClick={() => copy("id", offering.id)}
             >
               {copiedKey === "id" ? (
                 <Check size={13} className="text-rv-success" />
@@ -128,8 +128,8 @@ export function ProductGroupActionsMenu({
               )}
               <span className="flex-1">
                 {copiedKey === "id"
-                  ? t("productGroups.menu.copied", "Copied")
-                  : t("productGroups.menu.copyId", "Copy group ID")}
+                  ? t("offerings.menu.copied", "Copied")
+                  : t("offerings.menu.copyId", "Copy offering ID")}
               </span>
             </Menu.Item>
 
@@ -138,7 +138,7 @@ export function ProductGroupActionsMenu({
             <Menu.Item className={DANGER_ITEM_CLASS} onClick={onDelete}>
               <Trash2 size={13} />
               <span className="flex-1">
-                {t("productGroups.menu.delete", "Delete group")}
+                {t("offerings.menu.delete", "Delete offering")}
               </span>
             </Menu.Item>
           </Menu.Popup>

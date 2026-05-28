@@ -7,13 +7,13 @@ import { Button } from "../../ui/button";
 import { Checkbox } from "../../ui/checkbox";
 import { SearchInput } from "../../ui/search-input";
 import { cn } from "../../lib/cn";
-import { useUpdateProductGroup } from "../../lib/hooks/useProjectProductGroups";
+import { useUpdateOffering } from "../../lib/hooks/useProjectOfferings";
 import { ApiError } from "../../lib/api";
-import type { ProductGroup } from "./types";
+import type { Offering } from "./types";
 
 type Props = {
   projectId: string;
-  group: ProductGroup | null;
+  offering: Offering | null;
   /** All project products, already loaded by the parent route. */
   allProducts: ReadonlyArray<DashboardProductRow>;
   open: boolean;
@@ -22,7 +22,7 @@ type Props = {
 
 export function LinkProductsDialog({
   projectId,
-  group,
+  offering,
   allProducts,
   open,
   onClose,
@@ -46,10 +46,10 @@ export function LinkProductsDialog({
             "focus:outline-none",
           )}
         >
-          {open && group && (
+          {open && offering && (
             <Body
               projectId={projectId}
-              group={group}
+              offering={offering}
               allProducts={allProducts}
               onClose={onClose}
             />
@@ -62,33 +62,33 @@ export function LinkProductsDialog({
 
 function Body({
   projectId,
-  group,
+  offering,
   allProducts,
   onClose,
 }: {
   projectId: string;
-  group: ProductGroup;
+  offering: Offering;
   allProducts: ReadonlyArray<DashboardProductRow>;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const update = useUpdateProductGroup(projectId);
+  const update = useUpdateOffering(projectId);
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Reset selection whenever the picker opens against a different group.
+  // Reset selection whenever the picker opens against a different offering.
   useEffect(() => {
     setSelectedIds(new Set());
     setSearch("");
     setSubmitError(null);
-  }, [group.id]);
+  }, [offering.id]);
 
   const memberIds = useMemo(() => {
     const s = new Set<string>();
-    for (const p of group.products) s.add(p.id);
+    for (const p of offering.products) s.add(p.id);
     return s;
-  }, [group.products]);
+  }, [offering.products]);
 
   const candidates = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -115,7 +115,7 @@ function Body({
   const onSubmit = async () => {
     if (selectedIds.size === 0) return;
     setSubmitError(null);
-    const existing = group.products.map((p, index) => ({
+    const existing = offering.products.map((p, index) => ({
       productId: p.id,
       order: index,
       isPromoted: false,
@@ -127,7 +127,7 @@ function Body({
     }));
     try {
       await update.mutateAsync({
-        id: group.id,
+        id: offering.id,
         products: [...existing, ...toAdd],
       });
       onClose();
@@ -136,7 +136,7 @@ function Body({
         err instanceof ApiError
           ? err.message
           : t(
-              "productGroups.linkProducts.errors.generic",
+              "offerings.linkProducts.errors.generic",
               "Could not link the selected products. Please try again.",
             ),
       );
@@ -148,12 +148,12 @@ function Body({
       <header className="flex items-start justify-between border-b border-rv-divider px-5 pb-3 pt-4">
         <div>
           <Dialog.Title className="text-[15px] font-semibold leading-5">
-            {t("productGroups.linkProducts.title", "Link products")}
+            {t("offerings.linkProducts.title", "Link products")}
           </Dialog.Title>
           <Dialog.Description className="mt-0.5 text-[12px] text-rv-mute-500">
-            {t("productGroups.linkProducts.subtitle", {
+            {t("offerings.linkProducts.subtitle", {
               defaultValue: "Add products to {{name}}.",
-              name: group.name,
+              name: offering.name,
             })}
           </Dialog.Description>
         </div>
@@ -172,7 +172,7 @@ function Body({
           value={search}
           onValueChange={setSearch}
           placeholder={t(
-            "productGroups.linkProducts.search",
+            "offerings.linkProducts.search",
             "Search products…",
           )}
           size="sm"
@@ -185,17 +185,17 @@ function Body({
             <div className="text-[13px] font-semibold">
               {memberIds.size === allProducts.length
                 ? t(
-                    "productGroups.linkProducts.empty.allLinked",
-                    "All products are already in this group",
+                    "offerings.linkProducts.empty.allLinked",
+                    "All products are already in this offering",
                   )
                 : t(
-                    "productGroups.linkProducts.empty.none",
+                    "offerings.linkProducts.empty.none",
                     "No products match",
                   )}
             </div>
             <p className="mt-1 max-w-[320px] text-[12px] text-rv-mute-500">
               {t(
-                "productGroups.linkProducts.empty.hint",
+                "offerings.linkProducts.empty.hint",
                 "Inactive products are hidden. Create a product in the catalog first.",
               )}
             </p>
@@ -242,7 +242,7 @@ function Body({
 
       <footer className="flex items-center justify-between gap-2 border-t border-rv-divider px-5 py-3">
         <div className="font-rv-mono text-[11px] text-rv-mute-500">
-          {t("productGroups.linkProducts.counter", {
+          {t("offerings.linkProducts.counter", {
             defaultValue: "{{count}} selected",
             count: selectedIds.size,
           })}
@@ -265,8 +265,8 @@ function Body({
             disabled={selectedIds.size === 0 || update.isPending}
           >
             {update.isPending
-              ? t("productGroups.linkProducts.submitting", "Linking…")
-              : t("productGroups.linkProducts.submit", "Link selected")}
+              ? t("offerings.linkProducts.submitting", "Linking…")
+              : t("offerings.linkProducts.submit", "Link selected")}
           </Button>
         </div>
       </footer>
@@ -278,10 +278,10 @@ function ProductTypeChip({ type }: { type: DashboardProductRow["type"] }) {
   const { t } = useTranslation();
   const label =
     type === "SUBSCRIPTION"
-      ? t("productGroups.linkProducts.type.subscription", "Subscription")
+      ? t("offerings.linkProducts.type.subscription", "Subscription")
       : type === "CONSUMABLE"
-        ? t("productGroups.linkProducts.type.consumable", "Consumable")
-        : t("productGroups.linkProducts.type.nonConsumable", "Lifetime");
+        ? t("offerings.linkProducts.type.consumable", "Consumable")
+        : t("offerings.linkProducts.type.nonConsumable", "Lifetime");
   return (
     <span className="shrink-0 rounded-full border border-rv-divider bg-rv-c2 px-2 py-0.5 font-rv-mono text-[10px] uppercase tracking-wider text-rv-mute-500">
       {label}

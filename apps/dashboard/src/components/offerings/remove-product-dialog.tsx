@@ -4,25 +4,25 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, X } from "lucide-react";
 import { Button } from "../../ui/button";
 import { cn } from "../../lib/cn";
-import { useUpdateProductGroup } from "../../lib/hooks/useProjectProductGroups";
+import { useUpdateOffering } from "../../lib/hooks/useProjectOfferings";
 import { ApiError } from "../../lib/api";
-import type { GroupProduct, ProductGroup } from "./types";
+import type { GroupProduct, Offering } from "./types";
 
 type Props = {
   projectId: string;
-  group: ProductGroup;
+  offering: Offering;
   product: GroupProduct | null;
   open: boolean;
   onClose: () => void;
 };
 
 /**
- * Confirm modal for unlinking a single product from a group. The product
+ * Confirm modal for unlinking a single product from an offering. The product
  * itself stays in the catalog — only the membership row is removed.
  */
 export function RemoveProductDialog({
   projectId,
-  group,
+  offering,
   product,
   open,
   onClose,
@@ -49,7 +49,7 @@ export function RemoveProductDialog({
           {open && product && (
             <Body
               projectId={projectId}
-              group={group}
+              offering={offering}
               product={product}
               onClose={onClose}
             />
@@ -62,17 +62,17 @@ export function RemoveProductDialog({
 
 function Body({
   projectId,
-  group,
+  offering,
   product,
   onClose,
 }: {
   projectId: string;
-  group: ProductGroup;
+  offering: Offering;
   product: GroupProduct;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const update = useUpdateProductGroup(projectId);
+  const update = useUpdateOffering(projectId);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Drop the stale error whenever the dialog re-opens against a different
@@ -83,7 +83,7 @@ function Body({
 
   const onConfirm = async () => {
     setSubmitError(null);
-    const next = group.products
+    const next = offering.products
       .filter((p) => p.id !== product.id)
       .map((p, index) => ({
         productId: p.id,
@@ -91,14 +91,14 @@ function Body({
         isPromoted: false,
       }));
     try {
-      await update.mutateAsync({ id: group.id, products: next });
+      await update.mutateAsync({ id: offering.id, products: next });
       onClose();
     } catch (err) {
       setSubmitError(
         err instanceof ApiError
           ? err.message
           : t(
-              "productGroups.removeProduct.errors.generic",
+              "offerings.removeProduct.errors.generic",
               "Could not remove the product. Please try again.",
             ),
       );
@@ -114,12 +114,12 @@ function Body({
           </div>
           <div>
             <Dialog.Title className="text-[15px] font-semibold leading-5">
-              {t("productGroups.removeProduct.title", "Remove product from group?")}
+              {t("offerings.removeProduct.title", "Remove product from offering?")}
             </Dialog.Title>
             <Dialog.Description className="mt-0.5 text-[12px] text-rv-mute-500">
               {t(
-                "productGroups.removeProduct.subtitle",
-                "The product stays in your catalog. Existing subscribers keep their access; new buyers won't enter this group.",
+                "offerings.removeProduct.subtitle",
+                "The product stays in your catalog. Existing subscribers keep their access; new buyers won't enter this offering.",
               )}
             </Dialog.Description>
           </div>
@@ -141,9 +141,9 @@ function Body({
         </div>
 
         <div className="font-rv-mono text-[11px] text-rv-mute-500">
-          {t("productGroups.removeProduct.from", {
+          {t("offerings.removeProduct.from", {
             defaultValue: "From {{name}}",
-            name: group.name,
+            name: offering.name,
           })}
         </div>
 
@@ -173,8 +173,8 @@ function Body({
           className="!bg-rv-danger !text-white hover:!bg-rv-danger/90 focus-visible:!ring-rv-danger"
         >
           {update.isPending
-            ? t("productGroups.removeProduct.removing", "Removing…")
-            : t("productGroups.removeProduct.confirm", "Remove product")}
+            ? t("offerings.removeProduct.removing", "Removing…")
+            : t("offerings.removeProduct.confirm", "Remove product")}
         </Button>
       </footer>
     </>

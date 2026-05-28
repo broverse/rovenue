@@ -8,12 +8,13 @@ import { Switch } from "../../ui/switch";
 import { Textarea } from "../../ui/textarea";
 import { cn } from "../../lib/cn";
 import {
-  useCreateProductGroup,
-  useProjectProductGroups,
-  useUpdateProductGroup,
-} from "../../lib/hooks/useProjectProductGroups";
+  useCreateOffering,
+  useProjectOfferings,
+  useUpdateOffering,
+} from "../../lib/hooks/useProjectOfferings";
+import { useProjectAccess } from "../../lib/hooks/useProjectAccess";
 import { ApiError } from "../../lib/api";
-import type { ProductGroup } from "./types";
+import type { Offering } from "./types";
 
 type CreateProps = {
   mode: "create";
@@ -21,6 +22,7 @@ type CreateProps = {
   open: boolean;
   onClose: () => void;
   onCreated?: (id: string) => void;
+  initial?: { accessId?: string };
 };
 
 type EditProps = {
@@ -28,7 +30,7 @@ type EditProps = {
   projectId: string;
   open: boolean;
   onClose: () => void;
-  group: ProductGroup;
+  offering: Offering;
 };
 
 type Props = CreateProps | EditProps;
@@ -44,7 +46,7 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-export function ProductGroupFormDialog(props: Props) {
+export function OfferingFormDialog(props: Props) {
   return (
     <Dialog.Root
       open={props.open}
@@ -75,37 +77,44 @@ function DialogBody(props: Props) {
   const { t } = useTranslation();
   const nameId = useId();
   const identifierId = useId();
+  const accessId = useId();
   const descriptionId = useId();
   const defaultId = useId();
   const nameRef = useRef<HTMLInputElement>(null);
 
   const editing = props.mode === "edit";
-  const initialGroup = editing ? props.group : null;
+  const initialOffering = editing ? props.offering : null;
+  const initialPrefill = !editing ? props.initial : undefined;
 
-  const [name, setName] = useState(initialGroup?.name ?? "");
-  const [identifier, setIdentifier] = useState(initialGroup?.key ?? "");
+  const [name, setName] = useState(initialOffering?.name ?? "");
+  const [identifier, setIdentifier] = useState(initialOffering?.key ?? "");
   // In edit mode we never want to overwrite the user's existing identifier
   // from the name field; treat it as "touched" from the start.
   const [identifierTouched, setIdentifierTouched] = useState(editing);
-  const [description, setDescription] = useState(initialGroup?.description ?? "");
-  const [isDefault, setIsDefault] = useState(initialGroup?.isDefault ?? false);
+  const [description, setDescription] = useState(initialOffering?.description ?? "");
+  const [isDefault, setIsDefault] = useState(initialOffering?.isDefault ?? false);
+  const [accessIdValue, setAccessIdValue] = useState(
+    (editing ? (initialOffering as Offering | null)?.accessId : initialPrefill?.accessId) ?? "",
+  );
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const create = useCreateProductGroup(props.projectId);
-  const update = useUpdateProductGroup(props.projectId);
-  const groupsQuery = useProjectProductGroups(props.projectId);
+  const create = useCreateOffering(props.projectId);
+  const update = useUpdateOffering(props.projectId);
+  const offeringsQuery = useProjectOfferings(props.projectId);
+  const accessQuery = useProjectAccess(props.projectId);
+  const accessRows = accessQuery.data?.rows ?? [];
 
-  const editingId = initialGroup?.id ?? null;
+  const editingId = initialOffering?.id ?? null;
   const existingIdentifiers = useMemo(() => {
     const set = new Set<string>();
-    for (const g of groupsQuery.data?.groups ?? []) {
-      // In edit mode, exclude the group being edited from the collision check
+    for (const o of offeringsQuery.data?.offerings ?? []) {
+      // In edit mode, exclude the offering being edited from the collision check
       // so the user can keep the same identifier on save.
-      if (editingId && g.id === editingId) continue;
-      set.add(g.identifier);
+      if (editingId && o.id === editingId) continue;
+      set.add(o.identifier);
     }
     return set;
-  }, [groupsQuery.data, editingId]);
+  }, [offeringsQuery.data, editingId]);
 
   // Auto-focus the name input on open so the user can start typing.
   useEffect(() => {
@@ -126,10 +135,11 @@ function DialogBody(props: Props) {
 
   const trimmedDescription = description.trim();
   const isDirty = editing
-    ? trimmedName !== (initialGroup?.name ?? "") ||
-      trimmedIdentifier !== (initialGroup?.key ?? "") ||
-      trimmedDescription !== (initialGroup?.description ?? "") ||
-      isDefault !== (initialGroup?.isDefault ?? false)
+    ? trimmedName !== (initialOffering?.name ?? "") ||
+      trimmedIdentifier !== (initialOffering?.key ?? "") ||
+      trimmedDescription !== (initialOffering?.description ?? "") ||
+      isDefault !== (initialOffering?.isDefault ?? false) ||
+      accessIdValue !== ((initialOffering as Offering | null)?.accessId ?? "")
     : true;
 
   const pending = create.isPending || update.isPending;
@@ -152,14 +162,16 @@ function DialogBody(props: Props) {
       if (props.mode === "create") {
         const res = await create.mutateAsync({
           identifier: trimmedIdentifier,
+          accessId: accessIdValue,
           isDefault,
           metadata,
         });
-        props.onCreated?.(res.group.id);
+        props.onCreated?.(res.offering.id);
       } else {
         await update.mutateAsync({
-          id: props.group.id,
+          id: props.offering.id,
           identifier: trimmedIdentifier,
+          accessId: accessIdValue,
           isDefault,
           metadata,
         });
@@ -171,8 +183,8 @@ function DialogBody(props: Props) {
       } else {
         setSubmitError(
           t(
-            "productGroups.form.errors.generic",
-            "Could not save the group. Please try again.",
+            "offerings.form.errors.generic",
+            "Could not save the offering. Please try again.",
           ),
         );
       }
@@ -181,16 +193,16 @@ function DialogBody(props: Props) {
 
   const identifierHint = identifierTaken
     ? t(
-        "productGroups.form.identifier.taken",
-        "An existing group already uses this identifier.",
+        "offerings.form.identifier.taken",
+        "An existing offering already uses this identifier.",
       )
     : trimmedIdentifier.length > 0 && !identifierValid
       ? t(
-          "productGroups.form.identifier.invalid",
+          "offerings.form.identifier.invalid",
           "Use lowercase letters, numbers, hyphens or underscores.",
         )
       : t(
-          "productGroups.form.identifier.hint",
+          "offerings.form.identifier.hint",
           "Stable key referenced by the SDK and webhooks. Changing it will break existing client integrations.",
         );
   const identifierTone =
@@ -199,24 +211,24 @@ function DialogBody(props: Props) {
       : "text-rv-mute-500";
 
   const title = editing
-    ? t("productGroups.form.editTitle", "Edit product group")
-    : t("productGroups.form.createTitle", "New product group");
+    ? t("offerings.form.editTitle", "Edit offering")
+    : t("offerings.form.createTitle", "New offering");
   const subtitle = editing
     ? t(
-        "productGroups.form.editSubtitle",
-        "Update the group's name, identifier or description. Linked products stay attached.",
+        "offerings.form.editSubtitle",
+        "Update the offering's name, identifier or description. Linked products stay attached.",
       )
     : t(
-        "productGroups.form.createSubtitle",
-        "Bundle SKUs that grant the same entitlements. You can link products afterwards.",
+        "offerings.form.createSubtitle",
+        "Bundle SKUs that grant the same access. You can link products afterwards.",
       );
   const submitLabel = editing
     ? pending
-      ? t("productGroups.form.savingEdit", "Saving…")
-      : t("productGroups.form.saveEdit", "Save changes")
+      ? t("offerings.form.savingEdit", "Saving…")
+      : t("offerings.form.saveEdit", "Save changes")
     : pending
-      ? t("productGroups.form.savingCreate", "Creating…")
-      : t("productGroups.form.saveCreate", "Create group");
+      ? t("offerings.form.savingCreate", "Creating…")
+      : t("offerings.form.saveCreate", "Create offering");
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col">
@@ -242,9 +254,9 @@ function DialogBody(props: Props) {
       <div className="flex flex-col gap-4 px-5 py-5">
         <Field
           id={nameId}
-          label={t("productGroups.form.name.label", "Name")}
+          label={t("offerings.form.name.label", "Name")}
           hint={t(
-            "productGroups.form.name.hint",
+            "offerings.form.name.hint",
             "Shown across the dashboard and on paywalls.",
           )}
         >
@@ -254,7 +266,7 @@ function DialogBody(props: Props) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={t(
-              "productGroups.form.name.placeholder",
+              "offerings.form.name.placeholder",
               "e.g. Pro subscriptions",
             )}
             autoComplete="off"
@@ -263,7 +275,7 @@ function DialogBody(props: Props) {
 
         <Field
           id={identifierId}
-          label={t("productGroups.form.identifier.label", "Identifier")}
+          label={t("offerings.form.identifier.label", "Identifier")}
           hint={identifierHint}
           hintClassName={identifierTone}
         >
@@ -283,11 +295,36 @@ function DialogBody(props: Props) {
         </Field>
 
         <Field
+          id={accessId}
+          label={t("offerings.form.access.label", "Access")}
+          hint={t(
+            "offerings.form.access.hint",
+            "The access this offering grants to subscribers.",
+          )}
+        >
+          <select
+            id={accessId}
+            value={accessIdValue}
+            onChange={(e) => setAccessIdValue(e.target.value)}
+            className="h-9 w-full rounded-md border border-rv-divider bg-rv-c2 px-2.5 font-rv-mono text-[12px] text-foreground transition focus:border-rv-accent-500 focus:outline-none focus:ring-2 focus:ring-rv-accent-500/30"
+          >
+            <option value="">
+              {t("offerings.form.access.placeholder", "Select access…")}
+            </option>
+            {accessRows.map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.name} ({row.key})
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field
           id={descriptionId}
-          label={t("productGroups.form.description.label", "Description")}
+          label={t("offerings.form.description.label", "Description")}
           optional
           hint={t(
-            "productGroups.form.description.hint",
+            "offerings.form.description.hint",
             "Optional context for teammates browsing the catalog.",
           )}
         >
@@ -296,8 +333,8 @@ function DialogBody(props: Props) {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder={t(
-              "productGroups.form.description.placeholder",
-              "What does this group unlock for the user?",
+              "offerings.form.description.placeholder",
+              "What does this offering unlock for the user?",
             )}
             rows={3}
           />
@@ -311,19 +348,19 @@ function DialogBody(props: Props) {
             checked={isDefault}
             onChange={setIsDefault}
             ariaLabel={t(
-              "productGroups.form.default.label",
-              "Set as default group",
+              "offerings.form.default.label",
+              "Set as default offering",
             )}
             className="mt-0.5"
           />
           <span className="flex flex-col gap-0.5">
             <span className="text-[13px] font-medium text-foreground" id={defaultId}>
-              {t("productGroups.form.default.label", "Set as default group")}
+              {t("offerings.form.default.label", "Set as default offering")}
             </span>
             <span className="text-[12px] text-rv-mute-500">
               {t(
-                "productGroups.form.default.hint",
-                "New subscribers fall into this group when no other group matches.",
+                "offerings.form.default.hint",
+                "New subscribers fall into this offering when no other offering matches.",
               )}
             </span>
           </span>

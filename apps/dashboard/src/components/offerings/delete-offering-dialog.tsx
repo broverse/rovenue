@@ -4,21 +4,21 @@ import { useTranslation } from "react-i18next";
 import { AlertTriangle, X } from "lucide-react";
 import { Button } from "../../ui/button";
 import { cn } from "../../lib/cn";
-import { useDeleteProductGroup } from "../../lib/hooks/useProjectProductGroups";
+import { useDeleteOffering } from "../../lib/hooks/useProjectOfferings";
 import { ApiError } from "../../lib/api";
-import type { ProductGroup } from "./types";
+import type { Offering } from "./types";
 
 type Props = {
   projectId: string;
-  group: ProductGroup | null;
+  offering: Offering | null;
   open: boolean;
   onClose: () => void;
   onDeleted?: () => void;
 };
 
-export function DeleteProductGroupDialog({
+export function DeleteOfferingDialog({
   projectId,
-  group,
+  offering,
   open,
   onClose,
   onDeleted,
@@ -42,10 +42,10 @@ export function DeleteProductGroupDialog({
             "focus:outline-none",
           )}
         >
-          {open && group && (
+          {open && offering && (
             <Body
               projectId={projectId}
-              group={group}
+              offering={offering}
               onClose={onClose}
               onDeleted={onDeleted}
             />
@@ -58,34 +58,34 @@ export function DeleteProductGroupDialog({
 
 function Body({
   projectId,
-  group,
+  offering,
   onClose,
   onDeleted,
 }: {
   projectId: string;
-  group: ProductGroup;
+  offering: Offering;
   onClose: () => void;
   onDeleted?: () => void;
 }) {
   const { t } = useTranslation();
-  const del = useDeleteProductGroup(projectId);
+  const del = useDeleteOffering(projectId);
   const [confirm, setConfirm] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Reset typed confirmation whenever the dialog re-opens against a new group.
+  // Reset typed confirmation whenever the dialog re-opens against a new offering.
   useEffect(() => {
     setConfirm("");
     setSubmitError(null);
-  }, [group.id]);
+  }, [offering.id]);
 
-  const matches = confirm.trim() === group.key;
-  const productCount = group.products.length;
+  const matches = confirm.trim() === offering.key;
+  const productCount = offering.products.length;
 
   const onConfirm = async () => {
     if (!matches) return;
     setSubmitError(null);
     try {
-      await del.mutateAsync(group.id);
+      await del.mutateAsync(offering.id);
       onDeleted?.();
       onClose();
     } catch (err) {
@@ -93,8 +93,8 @@ function Body({
         err instanceof ApiError
           ? err.message
           : t(
-              "productGroups.delete.errors.generic",
-              "Could not delete the group. Please try again.",
+              "offerings.delete.errors.generic",
+              "Could not delete the offering. Please try again.",
             ),
       );
     }
@@ -109,12 +109,12 @@ function Body({
           </div>
           <div>
             <Dialog.Title className="text-[15px] font-semibold leading-5">
-              {t("productGroups.delete.title", "Delete product group")}
+              {t("offerings.delete.title", "Delete offering")}
             </Dialog.Title>
             <Dialog.Description className="mt-0.5 text-[12px] text-rv-mute-500">
               {t(
-                "productGroups.delete.subtitle",
-                "Permanently remove this group. Linked products will not be deleted.",
+                "offerings.delete.subtitle",
+                "Permanently remove this offering. Linked products will not be deleted.",
               )}
             </Dialog.Description>
           </div>
@@ -131,10 +131,10 @@ function Body({
 
       <div className="flex flex-col gap-3 px-5 py-4">
         <div className="rounded-md border border-rv-divider bg-rv-c2 px-3 py-2.5">
-          <div className="text-[13px] font-semibold text-foreground">{group.name}</div>
-          <div className="font-rv-mono text-[11px] text-rv-mute-500">{group.key}</div>
+          <div className="text-[13px] font-semibold text-foreground">{offering.name}</div>
+          <div className="font-rv-mono text-[11px] text-rv-mute-500">{offering.key}</div>
           <div className="mt-1.5 font-rv-mono text-[11px] text-rv-mute-500">
-            {t("productGroups.delete.productCount", {
+            {t("offerings.delete.productCount", {
               count: productCount,
               defaultValue_one: "{{count}} linked product",
               defaultValue_other: "{{count}} linked products",
@@ -142,11 +142,11 @@ function Body({
           </div>
         </div>
 
-        {group.isDefault && (
+        {offering.isDefault && (
           <div className="rounded-md border border-rv-warning/30 bg-rv-warning/10 px-3 py-2 text-[12px] text-rv-warning">
             {t(
-              "productGroups.delete.defaultWarning",
-              "This is the default group. New subscribers without a matching group will no longer fall back here.",
+              "offerings.delete.defaultWarning",
+              "This is the default offering. New subscribers without a matching offering will no longer fall back here.",
             )}
           </div>
         )}
@@ -156,16 +156,16 @@ function Body({
             htmlFor="confirm-identifier"
             className="text-[12px] font-medium text-foreground"
           >
-            {t("productGroups.delete.confirmLabel", {
+            {t("offerings.delete.confirmLabel", {
               defaultValue: "Type {{identifier}} to confirm",
-              identifier: group.key,
+              identifier: offering.key,
             })}
           </label>
           <input
             id="confirm-identifier"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
-            placeholder={group.key}
+            placeholder={offering.key}
             autoComplete="off"
             spellCheck={false}
             className="mt-1.5 w-full rounded-md border border-rv-divider bg-rv-c2 px-3 py-2 font-rv-mono text-[12px] text-foreground transition placeholder:text-rv-mute-500 focus:border-rv-danger focus:outline-none focus:ring-2 focus:ring-rv-danger/30"
@@ -198,8 +198,8 @@ function Body({
           className="!bg-rv-danger !text-white hover:!bg-rv-danger/90 focus-visible:!ring-rv-danger"
         >
           {del.isPending
-            ? t("productGroups.delete.deleting", "Deleting…")
-            : t("productGroups.delete.confirm", "Delete group")}
+            ? t("offerings.delete.deleting", "Deleting…")
+            : t("offerings.delete.confirm", "Delete offering")}
         </Button>
       </footer>
     </>
