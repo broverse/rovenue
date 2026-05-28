@@ -19,6 +19,9 @@ import { publicUnsubscribeRoute } from "./routes/public/unsubscribe";
 import { publicFunnelsRoute } from "./routes/public/funnels";
 import { publicFunnelUniversalRoute } from "./routes/public/funnel-universal";
 import { publicFunnelMagicRoute } from "./routes/public/funnel-magic";
+import { registerAllIntentHandlers } from "./services/copilot/intent-handlers";
+
+registerAllIntentHandlers();
 
 // =============================================================
 // Hono app + RPC-ready AppType export
