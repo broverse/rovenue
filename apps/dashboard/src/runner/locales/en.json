@@ -1,0 +1,21 @@
+{
+  "cta": {
+    "continue": "Continue",
+    "back": "Back",
+    "submit": "Submit",
+    "tryAgain": "Try again",
+    "openApp": "Open app",
+    "getStarted": "Get started"
+  },
+  "validation": {
+    "required": "This field is required",
+    "invalidEmail": "Enter a valid email address",
+    "invalidPhone": "Enter a valid phone number"
+  },
+  "loading": {
+    "default": "Just a moment…"
+  },
+  "legal": {
+    "agreeFallback": "I agree"
+  }
+}
