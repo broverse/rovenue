@@ -1384,39 +1384,42 @@ export interface DashboardAccessListResponse {
   rows: DashboardAccessRow[];
 }
 
-/** Membership entry inside a `ProductGroup.products` JSONB column. */
-export interface ProductGroupMembership {
+/** Membership entry inside an `Offering.products` JSONB column. */
+export interface OfferingMembership {
   productId: string;
   order: number;
   isPromoted: boolean;
   metadata?: Record<string, unknown>;
 }
 
-export interface DashboardProductGroupRow {
+export interface DashboardOfferingRow {
   id: string;
   identifier: string;
+  accessId: string;
   isDefault: boolean;
-  products: ProductGroupMembership[];
+  products: OfferingMembership[];
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface DashboardProductGroupsListResponse {
-  groups: DashboardProductGroupRow[];
+export interface DashboardOfferingsListResponse {
+  offerings: DashboardOfferingRow[];
 }
 
-export interface DashboardProductGroupCreateInput {
+export interface DashboardOfferingCreateInput {
   identifier: string;
+  accessId: string;
   isDefault?: boolean;
-  products?: ProductGroupMembership[];
+  products?: OfferingMembership[];
   metadata?: Record<string, unknown>;
 }
 
-export interface DashboardProductGroupUpdateInput {
+export interface DashboardOfferingUpdateInput {
   identifier?: string;
+  accessId?: string;
   isDefault?: boolean;
-  products?: ProductGroupMembership[];
+  products?: OfferingMembership[];
   metadata?: Record<string, unknown>;
 }
 

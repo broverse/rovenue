@@ -14,7 +14,7 @@ import {
   featureFlags,
   outboxEvents,
   outgoingWebhooks,
-  productGroups,
+  offerings,
   products,
   projectMembers,
   projects,
@@ -41,7 +41,7 @@ import {
 import {
   experimentVariantsSchema,
   featureFlagRulesSchema,
-  productGroupProductsSchema,
+  offeringProductsSchema,
   productInsertSchema,
   productStoreIdsSchema,
   projectInsertSchema,
@@ -65,7 +65,7 @@ describe("schema shapes compile", () => {
       projectMembers,
       apiKeys,
       products,
-      productGroups,
+      offerings,
       subscribers,
       purchases,
       subscriberAccess,
@@ -284,10 +284,10 @@ describe("featureFlagRulesSchema", () => {
   });
 });
 
-describe("productGroupProductsSchema", () => {
+describe("offeringProductsSchema", () => {
   it("accepts a simple product group", () => {
     expect(() =>
-      productGroupProductsSchema.parse([
+      offeringProductsSchema.parse([
         { productId: "prod_1", order: 0, promoted: true },
         { productId: "prod_2", order: 1 },
       ]),

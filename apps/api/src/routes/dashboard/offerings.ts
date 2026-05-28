@@ -2,19 +2,19 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { MemberRole, drizzle } from "@rovenue/db";
+import { MemberRole, accessIdSchema, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { ok } from "../../lib/response";
 import type {
-  DashboardProductGroupRow,
-  DashboardProductGroupsListResponse,
-  ProductGroupMembership,
+  DashboardOfferingRow,
+  DashboardOfferingsListResponse,
+  OfferingMembership,
 } from "@rovenue/shared";
 
 // =============================================================
-// Dashboard: Product Groups CRUD (Phase 4.1)
+// Dashboard: Offerings CRUD (renamed from product-groups)
 // =============================================================
 
 const membershipSchema = z.object({
@@ -26,6 +26,7 @@ const membershipSchema = z.object({
 
 const createBodySchema = z.object({
   identifier: z.string().trim().min(1).max(160),
+  accessId: accessIdSchema,
   isDefault: z.boolean().optional(),
   products: z.array(membershipSchema).optional(),
   metadata: z.record(z.unknown()).optional(),
@@ -34,18 +35,18 @@ const createBodySchema = z.object({
 const updateBodySchema = z
   .object({
     identifier: z.string().trim().min(1).max(160).optional(),
+    accessId: accessIdSchema.optional(),
     isDefault: z.boolean().optional(),
     products: z.array(membershipSchema).optional(),
     metadata: z.record(z.unknown()).optional(),
   })
-  .refine(
-    (v) => Object.values(v).some((x) => x !== undefined),
-    { message: "At least one field is required" },
-  );
+  .refine((v) => Object.values(v).some((x) => x !== undefined), {
+    message: "At least one field is required",
+  });
 
-function parseMemberships(raw: unknown): ProductGroupMembership[] {
+function parseMemberships(raw: unknown): OfferingMembership[] {
   if (!Array.isArray(raw)) return [];
-  const out: ProductGroupMembership[] = [];
+  const out: OfferingMembership[] = [];
   for (const item of raw) {
     if (
       typeof item === "object" &&
@@ -74,15 +75,17 @@ function parseMemberships(raw: unknown): ProductGroupMembership[] {
 function toWire(row: {
   id: string;
   identifier: string;
+  accessId: string;
   isDefault: boolean;
   products: unknown;
   metadata: unknown;
   createdAt: Date;
   updatedAt: Date;
-}): DashboardProductGroupRow {
+}): DashboardOfferingRow {
   return {
     id: row.id,
     identifier: row.identifier,
+    accessId: row.accessId,
     isDefault: row.isDefault,
     products: parseMemberships(row.products),
     metadata: (row.metadata as Record<string, unknown> | null) ?? {},
@@ -110,7 +113,19 @@ async function assertProductsExist(
   }
 }
 
-export const productGroupsDashboardRoute = new Hono()
+async function assertAccessIdExists(
+  projectId: string,
+  accessId: string,
+): Promise<void> {
+  const row = await drizzle.accessCatalogRepo.findById(drizzle.db, accessId);
+  if (!row || row.projectId !== projectId) {
+    throw new HTTPException(400, {
+      message: `Unknown access id: ${accessId}`,
+    });
+  }
+}
+
+export const offeringsDashboardRoute = new Hono()
   .use("*", requireDashboardAuth)
   .get("/", async (c) => {
     const projectId = c.req.param("projectId");
@@ -120,12 +135,9 @@ export const productGroupsDashboardRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
-    const rows = await drizzle.productGroupRepo.listProductGroups(
-      drizzle.db,
-      projectId,
-    );
-    const payload: DashboardProductGroupsListResponse = {
-      groups: rows.map(toWire),
+    const rows = await drizzle.offeringRepo.listOfferings(drizzle.db, projectId);
+    const payload: DashboardOfferingsListResponse = {
+      offerings: rows.map(toWire),
     };
     return c.json(ok(payload));
   })
@@ -138,16 +150,17 @@ export const productGroupsDashboardRoute = new Hono()
     await assertProjectCapability(projectId, user.id, "products:write");
     const body = c.req.valid("json");
 
-    const existing = await drizzle.productGroupRepo.findProductGroupByIdentifier(
+    const existing = await drizzle.offeringRepo.findOfferingByIdentifier(
       drizzle.db,
       projectId,
       body.identifier,
     );
     if (existing) {
       throw new HTTPException(409, {
-        message: `Product group identifier already in use: ${body.identifier}`,
+        message: `Offering identifier already in use: ${body.identifier}`,
       });
     }
+    await assertAccessIdExists(projectId, body.accessId);
     if (body.products) {
       await assertProductsExist(
         projectId,
@@ -155,14 +168,15 @@ export const productGroupsDashboardRoute = new Hono()
       );
     }
 
-    const row = await drizzle.productGroupRepo.createProductGroup(drizzle.db, {
+    const row = await drizzle.offeringRepo.createOffering(drizzle.db, {
       projectId,
+      accessId: body.accessId,
       identifier: body.identifier,
       isDefault: body.isDefault ?? false,
       products: body.products ?? [],
       metadata: body.metadata ?? {},
     });
-    return c.json(ok({ group: toWire(row) }));
+    return c.json(ok({ offering: toWire(row) }));
   })
   .get("/:id", async (c) => {
     const projectId = c.req.param("projectId");
@@ -173,15 +187,15 @@ export const productGroupsDashboardRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
-    const row = await drizzle.productGroupRepo.findProductGroupById(
+    const row = await drizzle.offeringRepo.findOfferingById(
       drizzle.db,
       projectId,
       id,
     );
     if (!row) {
-      throw new HTTPException(404, { message: "Product group not found" });
+      throw new HTTPException(404, { message: "Offering not found" });
     }
-    return c.json(ok({ group: toWire(row) }));
+    return c.json(ok({ offering: toWire(row) }));
   })
   .patch("/:id", zValidator("json", updateBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
@@ -194,16 +208,19 @@ export const productGroupsDashboardRoute = new Hono()
     const body = c.req.valid("json");
 
     if (body.identifier) {
-      const clash = await drizzle.productGroupRepo.findProductGroupByIdentifier(
+      const clash = await drizzle.offeringRepo.findOfferingByIdentifier(
         drizzle.db,
         projectId,
         body.identifier,
       );
       if (clash && clash.id !== id) {
         throw new HTTPException(409, {
-          message: `Product group identifier already in use: ${body.identifier}`,
+          message: `Offering identifier already in use: ${body.identifier}`,
         });
       }
+    }
+    if (body.accessId) {
+      await assertAccessIdExists(projectId, body.accessId);
     }
     if (body.products) {
       await assertProductsExist(
@@ -212,16 +229,16 @@ export const productGroupsDashboardRoute = new Hono()
       );
     }
 
-    const row = await drizzle.productGroupRepo.updateProductGroup(
+    const row = await drizzle.offeringRepo.updateOffering(
       drizzle.db,
       projectId,
       id,
       body,
     );
     if (!row) {
-      throw new HTTPException(404, { message: "Product group not found" });
+      throw new HTTPException(404, { message: "Offering not found" });
     }
-    return c.json(ok({ group: toWire(row) }));
+    return c.json(ok({ offering: toWire(row) }));
   })
   .delete("/:id", async (c) => {
     const projectId = c.req.param("projectId");
@@ -232,13 +249,13 @@ export const productGroupsDashboardRoute = new Hono()
     const user = c.get("user");
     await assertProjectCapability(projectId, user.id, "products:write");
 
-    const removed = await drizzle.productGroupRepo.deleteProductGroup(
+    const removed = await drizzle.offeringRepo.deleteOffering(
       drizzle.db,
       projectId,
       id,
     );
     if (!removed) {
-      throw new HTTPException(404, { message: "Product group not found" });
+      throw new HTTPException(404, { message: "Offering not found" });
     }
     return c.json(ok({ deleted: true }));
   });

@@ -187,6 +187,12 @@ export type {
 export * from "./helpers/encrypted-field";
 
 // =============================================================
+// Validators (re-export selected schemas commonly used by routes)
+// =============================================================
+
+export { accessIdSchema } from "./drizzle/validators";
+
+// =============================================================
 // Drizzle namespace
 // =============================================================
 

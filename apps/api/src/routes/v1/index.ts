@@ -7,7 +7,7 @@ import { funnelClaimRoute } from "./funnel-claim";
 import { meRoute } from "./me";
 import { receiptsRoute } from "./receipts";
 import { subscribersRoute } from "./subscribers";
-import { productGroupsRoute } from "./product-groups";
+import { offeringsRoute } from "./offerings";
 
 // =============================================================
 // /v1 route tree
@@ -20,7 +20,7 @@ import { productGroupsRoute } from "./product-groups";
 // request context first.
 //
 // Sub-routes that still use the statement-per-handler pattern
-// (receiptsRoute, subscribersRoute, productGroupsRoute) will have
+// (receiptsRoute, subscribersRoute, offeringsRoute) will have
 // their paths in the AppType surface but no body/response
 // inference yet — those conversions are tracked as Phase 1
 // follow-ups.
@@ -39,7 +39,7 @@ export const v1Route = new Hono()
   .route("/me", meRoute)
   .route("/receipts", receiptsRoute)
   .route("/subscribers", subscribersRoute)
-  .route("/product-groups", productGroupsRoute)
+  .route("/offerings", offeringsRoute)
   // funnelClaimRoute owns `/subscribers/claim-funnel-token` and
   // `/sdk/claim-*`; mounted at root so its handler paths apply
   // verbatim under /v1.

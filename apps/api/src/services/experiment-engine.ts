@@ -326,7 +326,7 @@ export async function resolveProductGroup(
   );
 
   if (override && typeof override.value === "string") {
-    const group = await drizzle.productGroupRepo.findProductGroupByIdentifier(
+    const group = await drizzle.offeringRepo.findOfferingByIdentifier(
       drizzle.db,
       projectId,
       override.value,
@@ -340,7 +340,7 @@ export async function resolveProductGroup(
   }
 
   if (requestedGroup) {
-    const group = await drizzle.productGroupRepo.findProductGroupByIdentifier(
+    const group = await drizzle.offeringRepo.findOfferingByIdentifier(
       drizzle.db,
       projectId,
       requestedGroup,
@@ -348,7 +348,7 @@ export async function resolveProductGroup(
     if (group) return group as unknown as ResolvedProductGroup;
   }
 
-  const fallback = await drizzle.productGroupRepo.findDefaultProductGroup(
+  const fallback = await drizzle.offeringRepo.findDefaultOffering(
     drizzle.db,
     projectId,
   );

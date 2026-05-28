@@ -441,7 +441,7 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
   const { ctx, subscriberId, status, autoRenewStatus } = args;
   const tx = ctx.transaction;
 
-  const product = await drizzle.productGroupRepo.findProductByStoreId(
+  const product = await drizzle.offeringRepo.findProductByStoreId(
     drizzle.db,
     ctx.projectId,
     "apple",

@@ -24,7 +24,7 @@ import { pushDevicesRoute } from "./push-devices";
 import { membersRoute } from "./members";
 import { metricsRoute } from "./metrics";
 import { overviewRoute } from "./overview";
-import { productGroupsDashboardRoute } from "./product-groups";
+import { offeringsDashboardRoute } from "./offerings";
 import { productsDashboardRoute } from "./products";
 import { projectsRoute } from "./projects";
 import { queriesRoute } from "./queries";
@@ -77,7 +77,7 @@ export const dashboardRoute = new Hono()
   )
   .route("/projects/:projectId/metrics", metricsRoute)
   .route("/projects/:projectId/overview", overviewRoute)
-  .route("/projects/:projectId/product-groups", productGroupsDashboardRoute)
+  .route("/projects/:projectId/offerings", offeringsDashboardRoute)
   .route("/projects/:projectId/products", productsDashboardRoute)
   .route("/projects/:projectId/queries", queriesRoute)
   .route("/projects/:projectId/subscribers", subscribersRoute)

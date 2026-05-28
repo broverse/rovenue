@@ -485,7 +485,7 @@ async function upsertPurchaseFromSubscription(
   }
   const priceId = item.price.id;
 
-  const product = await drizzle.productGroupRepo.findProductByStoreId(
+  const product = await drizzle.offeringRepo.findProductByStoreId(
     drizzle.db,
     ctx.projectId,
     "stripe",

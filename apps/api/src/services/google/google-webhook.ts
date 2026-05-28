@@ -207,7 +207,7 @@ async function processSubscriptionNotification(
 
   const lineItem = purchase.lineItems?.[0];
   const productId = lineItem?.productId ?? ctx.notification.subscriptionId;
-  const product = await drizzle.productGroupRepo.findProductByStoreId(
+  const product = await drizzle.offeringRepo.findProductByStoreId(
     drizzle.db,
     ctx.projectId,
     "google",
