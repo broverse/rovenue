@@ -80,6 +80,7 @@ impl RovenueCore {
                     Some(scope)
                 }
             }),
+            config.app_version.clone(),
         ));
         let scheduler = PollingScheduler::new();
         {

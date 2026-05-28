@@ -23,6 +23,7 @@ dictionary Config {
     string api_key;
     string base_url;
     boolean debug;
+    string? app_version;
 };
 
 dictionary User {

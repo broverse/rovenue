@@ -11,6 +11,10 @@ pub struct SessionDispatcher {
     buffer: Arc<SessionBuffer>,
     http: Arc<HttpClient>,
     subscriber_id_provider: Arc<dyn Fn() -> Option<String> + Send + Sync>,
+    /// Captured at configure() time from the host app's bundle/PackageInfo.
+    /// Serialized as `""` when None to preserve the pre-0.7 wire format
+    /// the backend expects.
+    app_version: Option<String>,
 }
 
 impl SessionDispatcher {
@@ -18,11 +22,13 @@ impl SessionDispatcher {
         buffer: Arc<SessionBuffer>,
         http: Arc<HttpClient>,
         subscriber_id_provider: Arc<dyn Fn() -> Option<String> + Send + Sync>,
+        app_version: Option<String>,
     ) -> Self {
         Self {
             buffer,
             http,
             subscriber_id_provider,
+            app_version,
         }
     }
 
@@ -37,6 +43,7 @@ impl SessionDispatcher {
         if rows.is_empty() {
             return Ok(0);
         }
+        let app_version = self.app_version.as_deref().unwrap_or("");
         let events: Vec<_> = rows
             .iter()
             .map(|r| {
@@ -44,7 +51,7 @@ impl SessionDispatcher {
                     "type": r.kind,
                     "occurredAt": r.occurred_at,
                     "durationMs": r.duration_ms,
-                    "appVersion": "",
+                    "appVersion": app_version,
                     "sdkVersion": crate::version::SDK_VERSION,
                 })
             })
