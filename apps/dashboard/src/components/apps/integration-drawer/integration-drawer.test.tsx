@@ -17,7 +17,8 @@ describe("IntegrationDrawer shell", () => {
 
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toBeTruthy();
-    expect(screen.getByText("Credentials")).toBeTruthy();
+    // The header shows "Credentials — Step 1 of 5"; and the step renders a Pixel ID field
+    expect(screen.getByText(/credentials/i)).toBeTruthy();
   });
 
   it("renders nothing when open=false", () => {

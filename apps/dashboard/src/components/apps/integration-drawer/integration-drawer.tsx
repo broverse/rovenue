@@ -119,6 +119,7 @@ export function IntegrationDrawer({
     onChange: (next: DrawerState) => setState(next),
     onNext: handleNext,
     onBack: handleBack,
+    onClose,
     existingConnection: existingConnection ?? null,
     providerId,
     projectId,
