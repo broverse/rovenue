@@ -1,0 +1,78 @@
+// =============================================================
+// events — SDK event wire types + serialiser (M7.2)
+// =============================================================
+//
+// Mirrors the Rust EventEnvelope / IdentityContext structs
+// (packages/core-rs/src/events/) in TypeScript.  The serialiser
+// strips `undefined` values at both the top level and inside
+// `identityContext` so the wire payload stays compact and matches
+// the camelCase JSON the server validates.
+
+export const EVENT_WIRE_VERSION = 1 as const;
+
+export interface IdentityContext {
+  email?: string;
+  externalId?: string;
+  phone?: string;
+  ip?: string;
+  userAgent?: string;
+  firstName?: string;
+  lastName?: string;
+  city?: string;
+  countryCode?: string;
+}
+
+export interface EventEnvelope {
+  eventType: string;
+  /** ISO-8601 UTC, e.g. "2026-05-28T10:00:00Z" */
+  occurredAt: string;
+  subscriberId?: string;
+  productId?: string;
+  /** Decimal string, e.g. "9.99" */
+  amount?: string;
+  /** ISO-4217 three-letter code, e.g. "USD" */
+  currency?: string;
+  eventSourceUrl?: string;
+  identityContext?: IdentityContext;
+}
+
+// =============================================================
+// helpers
+// =============================================================
+
+/**
+ * Remove keys whose value is `undefined` from a shallow object.
+ * Returns a new object — never mutates the input.
+ */
+export function stripUndefined<T extends Record<string, unknown>>(
+  o: T,
+): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(o).filter(([, v]) => v !== undefined),
+  ) as Partial<T>;
+}
+
+/**
+ * Serialise an EventEnvelope to a compact JSON string.
+ *
+ * - Strips `undefined` at the top level.
+ * - Strips `undefined` inside `identityContext` (if present).
+ * - Omits `identityContext` entirely when all its fields are
+ *   `undefined` or when it was not supplied.
+ */
+export function serializeEnvelope(env: EventEnvelope): string {
+  const { identityContext, ...rest } = env;
+
+  const top = stripUndefined(rest as Record<string, unknown>);
+
+  if (identityContext !== undefined) {
+    const cleanIc = stripUndefined(
+      identityContext as Record<string, unknown>,
+    );
+    if (Object.keys(cleanIc).length > 0) {
+      (top as Record<string, unknown>).identityContext = cleanIc;
+    }
+  }
+
+  return JSON.stringify(top);
+}

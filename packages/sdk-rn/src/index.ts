@@ -6,6 +6,13 @@
 
 export { SDK_VERSION } from "./version";
 
+export {
+  EVENT_WIRE_VERSION,
+  serializeEnvelope,
+  stripUndefined,
+} from "./events";
+export type { EventEnvelope, IdentityContext } from "./events";
+
 export type {
   User,
   Entitlement,
