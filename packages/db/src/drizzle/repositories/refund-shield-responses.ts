@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   refundShieldResponses,
@@ -153,4 +153,163 @@ export async function updateOutcomeByOriginalTransactionIdOverwrite(
         ),
       ),
     );
+}
+
+// =============================================================
+// Responder worker (T14) helpers
+// =============================================================
+//
+// `FOR UPDATE SKIP LOCKED` lets multiple replicas of the polling
+// worker safely contend for the same backlog: each transaction
+// grabs an exclusive lock on its claimed rows and skips any rows
+// another worker already locked. The Drizzle query builder does
+// not expose a typed `FOR UPDATE SKIP LOCKED` chainable, so we
+// drop to raw SQL — same pattern the outgoing-webhook claim uses.
+
+/**
+ * Shape returned by `claimPendingResponses`. Mirrors the columns
+ * `processRefundShieldResponse` needs at the worker hot path.
+ * Re-declared (rather than re-exporting `RefundShieldResponse`)
+ * so the SQL projection stays narrow and the type doesn't drift
+ * with future schema changes.
+ */
+export interface PendingResponseRow {
+  id: string;
+  projectId: string;
+  subscriberId: string | null;
+  appleNotificationUuid: string;
+  appleOriginalTransactionId: string;
+  appleTransactionId: string;
+  detectedAt: Date;
+  scheduledFor: Date;
+  status: string;
+  retryCount: number;
+}
+
+/**
+ * Claim a batch of PENDING rows whose `scheduledFor` has arrived
+ * and whose `retryCount` is below `maxRetries`. Returns the rows
+ * locked in the caller's transaction via `FOR UPDATE SKIP LOCKED`
+ * — concurrent worker replicas will pick disjoint batches.
+ *
+ * Requires a real Postgres connection — MVCC + row locks don't
+ * exist on the SQLite test engine. Unit tests mock this call.
+ */
+export async function claimPendingResponses(
+  db: DbOrTx,
+  args: { now: Date; batchSize: number; maxRetries: number },
+): Promise<PendingResponseRow[]> {
+  const result = await db.execute(sql`
+    SELECT id,
+           project_id              AS "projectId",
+           subscriber_id           AS "subscriberId",
+           apple_notification_uuid AS "appleNotificationUuid",
+           apple_original_transaction_id AS "appleOriginalTransactionId",
+           apple_transaction_id    AS "appleTransactionId",
+           detected_at             AS "detectedAt",
+           scheduled_for           AS "scheduledFor",
+           status,
+           retry_count             AS "retryCount"
+    FROM ${refundShieldResponses}
+    WHERE status = 'PENDING'
+      AND scheduled_for <= ${args.now}
+      AND retry_count < ${args.maxRetries}
+    ORDER BY scheduled_for ASC
+    LIMIT ${args.batchSize}
+    FOR UPDATE SKIP LOCKED
+  `);
+  return (result as unknown as { rows: PendingResponseRow[] }).rows ?? [];
+}
+
+export interface MarkSentInput {
+  id: string;
+  requestPayload: unknown;
+  appleHttpStatus: number;
+  sentAt: Date;
+}
+
+export async function markResponseSent(
+  db: DbOrTx,
+  input: MarkSentInput,
+): Promise<void> {
+  await db
+    .update(refundShieldResponses)
+    .set({
+      status: "SENT",
+      sentAt: input.sentAt,
+      requestPayload:
+        input.requestPayload as typeof refundShieldResponses.$inferInsert.requestPayload,
+      appleHttpStatus: input.appleHttpStatus,
+      error: null,
+      updatedAt: input.sentAt,
+    })
+    .where(eq(refundShieldResponses.id, input.id));
+}
+
+export interface MarkRetryInput {
+  id: string;
+  retryCount: number;
+  scheduledFor: Date;
+  error: string;
+  updatedAt: Date;
+}
+
+export async function markResponseRetry(
+  db: DbOrTx,
+  input: MarkRetryInput,
+): Promise<void> {
+  await db
+    .update(refundShieldResponses)
+    .set({
+      retryCount: input.retryCount,
+      scheduledFor: input.scheduledFor,
+      error: input.error,
+      updatedAt: input.updatedAt,
+    })
+    .where(eq(refundShieldResponses.id, input.id));
+}
+
+export interface MarkFailedInput {
+  id: string;
+  error: string;
+  appleHttpStatus?: number | null;
+  appleResponseBody?: string | null;
+  updatedAt: Date;
+}
+
+export async function markResponseFailed(
+  db: DbOrTx,
+  input: MarkFailedInput,
+): Promise<void> {
+  await db
+    .update(refundShieldResponses)
+    .set({
+      status: "FAILED",
+      error: input.error,
+      appleHttpStatus: input.appleHttpStatus ?? null,
+      appleResponseBody: input.appleResponseBody ?? null,
+      updatedAt: input.updatedAt,
+    })
+    .where(eq(refundShieldResponses.id, input.id));
+}
+
+export interface MarkSkippedInput {
+  id: string;
+  status: "SKIPPED_DISABLED" | "SKIPPED_NOT_FOUND";
+  error?: string | null;
+  updatedAt: Date;
+}
+
+export async function markResponseSkipped(
+  db: DbOrTx,
+  input: MarkSkippedInput,
+): Promise<void> {
+  await db
+    .update(refundShieldResponses)
+    .set({
+      status: input.status,
+      error: input.error ?? null,
+      updatedAt: input.updatedAt,
+    })
+    .where(eq(refundShieldResponses.id, input.id));
 }
