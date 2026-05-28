@@ -226,6 +226,10 @@ async function dispatch(ctx: DispatchContext): Promise<void> {
       return applyExpired(ctx);
     case APPLE_NOTIFICATION_TYPE.REFUND:
       return applyRefund(ctx);
+    case APPLE_NOTIFICATION_TYPE.REFUND_DECLINED:
+      return applyRefundDeclined(ctx);
+    case APPLE_NOTIFICATION_TYPE.REFUND_REVERSED:
+      return applyRefundReversed(ctx);
     case APPLE_NOTIFICATION_TYPE.REVOKE:
       return applyRevoke(ctx);
     case APPLE_NOTIFICATION_TYPE.CONSUMPTION_REQUEST:
@@ -327,6 +331,22 @@ async function applyExpired(ctx: DispatchContext): Promise<void> {
 }
 
 async function applyRefund(ctx: DispatchContext): Promise<void> {
+  // Refund Shield outcome linkage (T11): Apple's REFUND notification
+  // is the "refund approved" signal that closes out the
+  // CONSUMPTION_REQUEST loop started earlier. The WHERE clause on
+  // (projectId, originalTransactionId, outcome IS NULL) silently
+  // matches zero rows when no prior CONSUMPTION_REQUEST was seen
+  // (e.g. Refund Shield wasn't enabled at the time), which is the
+  // desired no-op — the revenue-events path below still runs.
+  await drizzle.refundShieldResponseRepo.updateOutcomeByOriginalTransactionIdIfNull(
+    drizzle.db,
+    {
+      projectId: ctx.projectId,
+      originalTransactionId: ctx.transaction.originalTransactionId,
+      outcome: "REFUND_APPROVED",
+    },
+  );
+
   const refundDate = new Date(ctx.transaction.signedDate);
   // Refund targets the specific transaction by (store, storeTxnId),
   // not the whole chain. updatePurchasesByOriginalTransaction is the
@@ -381,6 +401,43 @@ async function applyRevoke(ctx: DispatchContext): Promise<void> {
     { status: PurchaseStatus.REVOKED },
   );
   await revokeAccessForTransaction(ctx);
+}
+
+// REFUND_DECLINED: Apple rejected the customer's refund request.
+// Only the refund_shield_responses outcome moves — no revenue impact
+// because no money was returned. First-wins: don't overwrite an
+// existing outcome (a duplicate redelivery shouldn't flip the
+// record).
+async function applyRefundDeclined(ctx: DispatchContext): Promise<void> {
+  await drizzle.refundShieldResponseRepo.updateOutcomeByOriginalTransactionIdIfNull(
+    drizzle.db,
+    {
+      projectId: ctx.projectId,
+      originalTransactionId: ctx.transaction.originalTransactionId,
+      outcome: "REFUND_DECLINED",
+    },
+  );
+}
+
+// REFUND_REVERSED: Apple reversed a previously-approved refund (e.g.
+// chargeback successfully disputed by the developer). This is the
+// only outcome that legitimately OVERWRITES an earlier value —
+// typically REFUND_APPROVED → REFUND_REVERSED — so it routes through
+// the unconditional overwrite method.
+//
+// TODO (out of scope T11): emit a compensating revenue_events row to
+// reverse the earlier negative refund event. T11 wires only the
+// outcome; revenue accounting reversal is a separate concern tracked
+// by the plan's revenue-event compensation note.
+async function applyRefundReversed(ctx: DispatchContext): Promise<void> {
+  await drizzle.refundShieldResponseRepo.updateOutcomeByOriginalTransactionIdOverwrite(
+    drizzle.db,
+    {
+      projectId: ctx.projectId,
+      originalTransactionId: ctx.transaction.originalTransactionId,
+      outcome: "REFUND_REVERSED",
+    },
+  );
 }
 
 // =============================================================

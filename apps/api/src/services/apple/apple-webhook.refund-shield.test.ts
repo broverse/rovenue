@@ -54,6 +54,10 @@ const { drizzleMock } = vi.hoisted(() => {
     },
     refundShieldResponseRepo: {
       insertConsumptionRequest: vi.fn(async () => undefined),
+      updateOutcomeByOriginalTransactionIdIfNull: vi.fn(async () => undefined),
+      updateOutcomeByOriginalTransactionIdOverwrite: vi.fn(
+        async () => undefined,
+      ),
     },
   };
   return { drizzleMock };
@@ -131,6 +135,25 @@ function makeConsumptionRequestNotification(
 ): AppleResponseBodyV2DecodedPayload {
   return {
     notificationType: APPLE_NOTIFICATION_TYPE.CONSUMPTION_REQUEST,
+    notificationUUID: uuid,
+    version: "2.0",
+    signedDate: 1_700_000_000_000,
+    data: {
+      signedTransactionInfo: "signed-tx-stub",
+      environment: APPLE_ENVIRONMENT.SANDBOX,
+    },
+  } as AppleResponseBodyV2DecodedPayload;
+}
+
+function makeOutcomeNotification(
+  type:
+    | typeof APPLE_NOTIFICATION_TYPE.REFUND
+    | typeof APPLE_NOTIFICATION_TYPE.REFUND_DECLINED
+    | typeof APPLE_NOTIFICATION_TYPE.REFUND_REVERSED,
+  uuid: string,
+): AppleResponseBodyV2DecodedPayload {
+  return {
+    notificationType: type,
     notificationUUID: uuid,
     version: "2.0",
     signedDate: 1_700_000_000_000,
@@ -397,6 +420,218 @@ describe("handleAppleNotification — CONSUMPTION_REQUEST", () => {
     expect(result2.status).toBe("duplicate");
     expect(
       drizzleMock.refundShieldResponseRepo.insertConsumptionRequest,
+    ).toHaveBeenCalledOnce();
+  });
+});
+
+// =============================================================
+// Outcome notifications (REFUND / REFUND_DECLINED / REFUND_REVERSED)
+// =============================================================
+//
+// These three notification types arrive AFTER the originating
+// CONSUMPTION_REQUEST has already created the refund_shield_responses
+// row. Their job is to link the outcome back to that row so the
+// dashboard can compute win rate. The existing applyRefund handler
+// also updates revenue_events — those existing assertions must keep
+// working.
+
+/**
+ * Pull the typed update args out of the most recent invocation of
+ * EITHER outcome update method. T11 split the API into two methods
+ * (`...IfNull` for first-wins REFUND/DECLINED, `...Overwrite` for
+ * REFUND_REVERSED) so individual tests assert against whichever spy
+ * fired.
+ */
+type OutcomeSpy =
+  | "updateOutcomeByOriginalTransactionIdIfNull"
+  | "updateOutcomeByOriginalTransactionIdOverwrite";
+
+function lastOutcomeArgsFrom(method: OutcomeSpy): {
+  projectId: string;
+  originalTransactionId: string;
+  outcome: string;
+} {
+  const calls = drizzleMock.refundShieldResponseRepo[method].mock
+    .calls as unknown as Array<unknown[]>;
+  const last = calls[calls.length - 1];
+  if (!last) throw new Error(`${method} was never called`);
+  return last[1] as never;
+}
+
+describe("handleAppleNotification — outcome linkage", () => {
+  test("sets outcome=REFUND_APPROVED when REFUND notification arrives", async () => {
+    // applyRefund's existing path performs two purchase lookups and a
+    // subscriber lookup; stub them so the revenue-event branch runs to
+    // completion. The outcome update is the new assertion.
+    drizzleMock.purchaseExtRepo.findPurchaseByStoreTransaction.mockResolvedValue(
+      {
+        id: "pur_1",
+        subscriberId: "sub_1",
+        productId: "prod_1",
+      } as never,
+    );
+    drizzleMock.subscriberRepo.findSubscriberById.mockResolvedValue({
+      id: "sub_1",
+    } as never);
+
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000010",
+        transactionId: "1000000099",
+      }),
+      makeOutcomeNotification(APPLE_NOTIFICATION_TYPE.REFUND, "uuid-r1"),
+    );
+
+    const result = await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    expect(result.status).toBe("processed");
+    expect(
+      drizzleMock.refundShieldResponseRepo
+        .updateOutcomeByOriginalTransactionIdIfNull,
+    ).toHaveBeenCalledOnce();
+    expect(
+      lastOutcomeArgsFrom("updateOutcomeByOriginalTransactionIdIfNull"),
+    ).toMatchObject({
+      projectId: PROJECT_ID,
+      originalTransactionId: "1000000010",
+      outcome: "REFUND_APPROVED",
+    });
+    // Existing applyRefund logic must still run.
+    expect(
+      drizzleMock.purchaseRepo.updatePurchase,
+    ).toHaveBeenCalled();
+    expect(
+      drizzleMock.revenueEventRepo.createRevenueEvent,
+    ).toHaveBeenCalled();
+  });
+
+  test("sets outcome=REFUND_DECLINED for REFUND_DECLINED notification", async () => {
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000011",
+        transactionId: "1000000099",
+      }),
+      makeOutcomeNotification(
+        APPLE_NOTIFICATION_TYPE.REFUND_DECLINED,
+        "uuid-r2",
+      ),
+    );
+
+    const result = await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    expect(result.status).toBe("processed");
+    expect(
+      drizzleMock.refundShieldResponseRepo
+        .updateOutcomeByOriginalTransactionIdIfNull,
+    ).toHaveBeenCalledOnce();
+    expect(
+      lastOutcomeArgsFrom("updateOutcomeByOriginalTransactionIdIfNull"),
+    ).toMatchObject({
+      projectId: PROJECT_ID,
+      originalTransactionId: "1000000011",
+      outcome: "REFUND_DECLINED",
+    });
+    // REFUND_DECLINED does not move money — no revenue_events write.
+    expect(
+      drizzleMock.revenueEventRepo.createRevenueEvent,
+    ).not.toHaveBeenCalled();
+  });
+
+  test("sets outcome=REFUND_REVERSED for REFUND_REVERSED notification", async () => {
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000012",
+        transactionId: "1000000099",
+      }),
+      makeOutcomeNotification(
+        APPLE_NOTIFICATION_TYPE.REFUND_REVERSED,
+        "uuid-r3",
+      ),
+    );
+
+    const result = await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    expect(result.status).toBe("processed");
+    // REFUND_REVERSED must be able to overwrite a prior REFUND_APPROVED,
+    // so it MUST route through the unconditional overwrite method —
+    // not the IfNull variant.
+    expect(
+      drizzleMock.refundShieldResponseRepo
+        .updateOutcomeByOriginalTransactionIdOverwrite,
+    ).toHaveBeenCalledOnce();
+    expect(
+      drizzleMock.refundShieldResponseRepo
+        .updateOutcomeByOriginalTransactionIdIfNull,
+    ).not.toHaveBeenCalled();
+    expect(
+      lastOutcomeArgsFrom("updateOutcomeByOriginalTransactionIdOverwrite"),
+    ).toMatchObject({
+      projectId: PROJECT_ID,
+      originalTransactionId: "1000000012",
+      outcome: "REFUND_REVERSED",
+    });
+  });
+
+  test("ignores outcome update silently when no matching response row exists", async () => {
+    // The repo update is a WHERE on (projectId, originalTransactionId)
+    // — if zero rows match it's a no-op. From the handler's POV this
+    // looks identical to the success case: no throw, existing
+    // revenue-events path still runs.
+    drizzleMock.refundShieldResponseRepo.updateOutcomeByOriginalTransactionIdIfNull.mockResolvedValueOnce(
+      undefined,
+    );
+    drizzleMock.purchaseExtRepo.findPurchaseByStoreTransaction.mockResolvedValue(
+      {
+        id: "pur_orphan",
+        subscriberId: "sub_orphan",
+        productId: "prod_orphan",
+      } as never,
+    );
+    drizzleMock.subscriberRepo.findSubscriberById.mockResolvedValue({
+      id: "sub_orphan",
+    } as never);
+
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: APP_ACCOUNT_TOKEN,
+        originalTransactionId: "1000000013",
+        transactionId: "1000000099",
+      }),
+      makeOutcomeNotification(APPLE_NOTIFICATION_TYPE.REFUND, "uuid-r4"),
+    );
+
+    await expect(
+      handleAppleNotification({
+        projectId: PROJECT_ID,
+        signedPayload: "signed-envelope-stub",
+        verifier,
+      }),
+    ).resolves.toMatchObject({ status: "processed" });
+
+    // Existing applyRefund revenue-events path still ran.
+    expect(
+      drizzleMock.revenueEventRepo.createRevenueEvent,
+    ).toHaveBeenCalled();
+    // Outcome update was attempted (the silent no-op happens at the
+    // SQL layer, not in our handler — handler must always issue it).
+    expect(
+      drizzleMock.refundShieldResponseRepo
+        .updateOutcomeByOriginalTransactionIdIfNull,
     ).toHaveBeenCalledOnce();
   });
 });
