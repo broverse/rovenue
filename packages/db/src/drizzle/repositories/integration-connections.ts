@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   integrationConnections,
@@ -27,4 +27,19 @@ export async function getConnection(
     .from(integrationConnections)
     .where(eq(integrationConnections.id, id));
   return row;
+}
+
+export async function listActiveConnectionsForProject(
+  db: Db,
+  projectId: string,
+): Promise<IntegrationConnection[]> {
+  return db
+    .select()
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.projectId, projectId),
+        eq(integrationConnections.isEnabled, true),
+      ),
+    );
 }

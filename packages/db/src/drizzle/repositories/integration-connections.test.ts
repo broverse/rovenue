@@ -13,6 +13,7 @@ import * as schema from "../schema";
 import {
   createConnection,
   getConnection,
+  listActiveConnectionsForProject,
 } from "./integration-connections";
 
 // ---------------------------------------------------------------------------
@@ -77,5 +78,43 @@ describe("createConnection", () => {
     expect(row.providerId).toBe("META_CAPI");
     const fetched = await getConnection(db, row.id);
     expect(fetched?.id).toBe(row.id);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listActiveConnectionsForProject
+// ---------------------------------------------------------------------------
+
+describe("listActiveConnectionsForProject", () => {
+  it("returns only is_enabled=true rows", async () => {
+    const projectId = await seedProject();
+    const enabledId = createId();
+    const disabledId = createId();
+    await createConnection(db, {
+      id: enabledId,
+      projectId,
+      providerId: "META_CAPI",
+      displayName: "Meta on",
+      credentialsCipher: "v1:1",
+      credentialsHint: "h",
+      enabledEvents: ["revenue.RENEWAL"],
+      eventMapping: {},
+      actionSource: "app",
+      isEnabled: true,
+    });
+    await createConnection(db, {
+      id: disabledId,
+      projectId,
+      providerId: "TIKTOK_EVENTS",
+      displayName: "Tt off",
+      credentialsCipher: "v1:2",
+      credentialsHint: "h",
+      enabledEvents: [],
+      eventMapping: {},
+      actionSource: "app",
+      isEnabled: false,
+    });
+    const active = await listActiveConnectionsForProject(db, projectId);
+    expect(active.map((r) => r.id)).toEqual([enabledId]);
   });
 });
