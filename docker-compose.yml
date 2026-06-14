@@ -53,6 +53,9 @@ services:
       CLICKHOUSE_USER: rovenue_reader
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
       KAFKA_BROKERS: redpanda:9092
+      APPLE_ROOT_CERTS_DIR: /etc/rovenue/apple-certs
+    volumes:
+      - ${APPLE_ROOT_CERTS_HOST_DIR:-./deploy/apple-certs}:/etc/rovenue/apple-certs:ro
     ports:
       # Only the public port is mapped to the host. 3001 stays
       # docker-network-only so Caddy is the only thing that can hit it.
