@@ -1,0 +1,15 @@
+# Static file server for the built dashboard SPA. Baked into the
+# dashboard image and run on :80 inside the docker network; the edge
+# Caddy (deploy/caddy/Caddyfile) reverse-proxies app.rovenue.app here.
+:80 {
+	root * /srv
+	encode zstd gzip
+	# SPA fallback: serve index.html for any path that is not a real
+	# file, so TanStack Router client routes resolve on hard refresh.
+	try_files {path} /index.html
+	file_server
+	# Long-cache fingerprinted assets; never cache index.html.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	header /index.html Cache-Control "no-cache"
+}
