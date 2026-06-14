@@ -1,0 +1,102 @@
+---
+title: App Lifecycle
+description: Wire up foreground/background signals so the SDK can manage polling and background work.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The SDK uses `setForeground` to drive its internal polling:
+
+- `setForeground(true)` — starts periodic entitlement and credit refreshes
+- `setForeground(false)` — pauses polling to save battery and network
+- `shutdown()` — stops **all** background work (polling, outbox flushing,
+  change stream)
+
+Session events (app open, background, close) are recorded automatically — you
+do not need to emit them manually.
+
+## Wiring it up
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { useEffect } from 'react';
+    import { AppState } from 'react-native';
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    useEffect(() => {
+      // Signal foreground on mount
+      Rovenue.setForeground(true);
+
+      const sub = AppState.addEventListener('change', (state) => {
+        Rovenue.setForeground(state === 'active');
+      });
+
+      return () => {
+        sub.remove();
+        Rovenue.shutdown();
+      };
+    }, []);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // AppDelegate.swift
+    import Rovenue
+
+    func applicationDidBecomeActive(_ application: UIApplication) {
+      Rovenue.shared.setForeground(true)
+    }
+
+    func applicationDidEnterBackground(_ application: UIApplication) {
+      Rovenue.shared.setForeground(false)
+    }
+
+    func applicationWillTerminate(_ application: UIApplication) {
+      Rovenue.shared.shutdown()
+    }
+    ```
+
+    If you use `SceneDelegate`, wire the same calls to
+    `sceneDidBecomeActive`, `sceneDidEnterBackground`, and
+    `sceneWillDeactivate` respectively.
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // Application.kt (using ProcessLifecycleOwner)
+    import dev.rovenue.sdk.Rovenue
+    import androidx.lifecycle.DefaultLifecycleObserver
+    import androidx.lifecycle.LifecycleOwner
+    import androidx.lifecycle.ProcessLifecycleOwner
+
+    class App : Application() {
+      override fun onCreate() {
+        super.onCreate()
+        ProcessLifecycleOwner.get().lifecycle.addObserver(
+          object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) {
+              Rovenue.shared.setForeground(true)
+            }
+            override fun onStop(owner: LifecycleOwner) {
+              Rovenue.shared.setForeground(false)
+            }
+          }
+        )
+      }
+
+      override fun onTerminate() {
+        Rovenue.shared.shutdown()
+        super.onTerminate()
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+Call `shutdown()` when the app is terminating, not merely backgrounding.
+`shutdown()` drains any queued outbox events synchronously before returning,
+so a short grace period (e.g. a `beginBackgroundTask` on iOS) may improve
+delivery reliability.
+</Callout>
