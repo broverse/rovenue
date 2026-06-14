@@ -69,6 +69,11 @@ services:
       redpanda:
         condition: service_healthy
     restart: unless-stopped
+    # The outbox dispatcher runs in-process here (OUTBOX_DISPATCHER_ENABLED
+    # from .env). It MUST be a single instance — do not raise replicas
+    # without first moving the dispatcher to a dedicated 1-replica worker.
+    deploy:
+      replicas: 1
 
   # Caddy edge — terminates TLS, gates on-demand cert issuance through
   # the api's internal ask-endpoint. See deploy/caddy/Caddyfile for the
@@ -135,6 +140,10 @@ services:
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: rovenue_reader
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
+      # Single-dispatcher contract: only `api` runs the outbox
+      # dispatcher. Workers MUST keep this false or CH aggregates
+      # double-count. See docs/architecture/outbox-dispatcher.md.
+      OUTBOX_DISPATCHER_ENABLED: "false"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -156,6 +165,10 @@ services:
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: rovenue_reader
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
+      # Single-dispatcher contract: only `api` runs the outbox
+      # dispatcher. Workers MUST keep this false or CH aggregates
+      # double-count. See docs/architecture/outbox-dispatcher.md.
+      OUTBOX_DISPATCHER_ENABLED: "false"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -178,6 +191,10 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
       REDIS_URL: redis://redis:6379
+      # Single-dispatcher contract: only `api` runs the outbox
+      # dispatcher. Workers MUST keep this false or CH aggregates
+      # double-count. See docs/architecture/outbox-dispatcher.md.
+      OUTBOX_DISPATCHER_ENABLED: "false"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -195,6 +212,10 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
       REDIS_URL: redis://redis:6379
+      # Single-dispatcher contract: only `api` runs the outbox
+      # dispatcher. Workers MUST keep this false or CH aggregates
+      # double-count. See docs/architecture/outbox-dispatcher.md.
+      OUTBOX_DISPATCHER_ENABLED: "false"
     depends_on:
       migrate:
         condition: service_completed_successfully
