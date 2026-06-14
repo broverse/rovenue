@@ -1,0 +1,92 @@
+---
+title: Quick Start
+description: Configure the SDK, check an entitlement, and validate a purchase in five minutes.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+<Steps>
+<Step>
+### Configure once at startup
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    Rovenue.configure({ apiKey: 'rov_pub_...', baseUrl: 'https://edge.rovenue.app' });
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    import Rovenue
+
+    Rovenue.configure(apiKey: "rov_pub_...", baseUrl: "https://edge.rovenue.app")
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    import dev.rovenue.sdk.Rovenue
+
+    Rovenue.configure(apiKey = "rov_pub_...", baseUrl = "https://edge.rovenue.app")
+    ```
+  </Tab>
+</Tabs>
+</Step>
+
+<Step>
+### Check an entitlement
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```tsx
+    import { useEntitlement } from '@rovenue/react-native-sdk';
+    const pro = useEntitlement('pro'); // reactive, cache-first
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let pro = await Rovenue.shared.entitlement("pro")
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val pro = Rovenue.shared.entitlement("pro")
+    ```
+  </Tab>
+</Tabs>
+</Step>
+
+<Step>
+### Validate a purchase
+
+The SDK never calls StoreKit/Play Billing. Run your store's purchase flow,
+then hand the token to the SDK:
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const result = await Rovenue.postAppleReceipt(jws, 'pro_monthly', appAccountToken);
+    // or: Rovenue.postGoogleReceipt(purchaseToken, 'pro_monthly', acctId, profileId)
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let result = try await Rovenue.shared.postAppleReceipt(jws, productId: "pro_monthly", appAccountToken: token)
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val result = Rovenue.shared.postGoogleReceipt(purchaseToken, "pro_monthly", acctId, profileId)
+    ```
+  </Tab>
+</Tabs>
+</Step>
+</Steps>
+
+<Callout type="info">
+On success, the SDK refreshes entitlements and credits automatically and emits
+a change event. See [Reacting to changes](/docs/guides/reacting-to-changes).
+</Callout>

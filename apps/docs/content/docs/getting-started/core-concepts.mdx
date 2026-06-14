@@ -1,0 +1,42 @@
+---
+title: Core Concepts
+description: The mental model behind the Rovenue SDK.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The Rovenue SDK is built around a small set of concepts that apply across React Native, Swift, and Kotlin. Understanding them makes the rest of the API predictable.
+
+## Anonymous vs known user
+
+Every install starts in an anonymous state. The SDK generates a stable `anonId` on first launch and uses it to track events and entitlements before you know who the user is.
+
+Call `identify(knownUserId)` once you have an app-side identity (after login, for example). This is **client-local** — it records the mapping on-device and tags subsequent events with the new ID. It does not merge purchase history or credits across accounts on its own.
+
+Server-side account merging — linking the anonymous session to a known user and consolidating their purchases — must be triggered from your backend. See [Identifying users](/docs/guides/identifying-users) for the full flow.
+
+## Entitlement vs product
+
+An **entitlement** is an access grant your app checks at runtime (for example, `"pro"` or `"credits_pack_100"`). Store products — App Store subscriptions, Play Store products, or Stripe prices — are mapped to entitlements in the Rovenue dashboard.
+
+Your app should always check entitlements, not product IDs. This keeps your feature-gating code decoupled from store-specific SKUs and lets you remap products (for example during a pricing change) without shipping a new binary.
+
+## Cache-first reads and background refresh
+
+All read operations — `entitlement()`, `entitlementsAll()`, `creditBalance()`, and their hook equivalents — return instantly from an on-device SQLite cache. They never block on a network call.
+
+The SDK keeps the cache warm automatically: while the app is in the foreground it polls the server and applies updates in the background. Your UI reacts to the change without doing anything. When you need an authoritative up-to-date snapshot immediately (for example, right after a purchase), call `refreshEntitlements()` explicitly — that method contacts the server before resolving.
+
+## Credits
+
+Credits are an integer balance associated with a subscriber. The SDK exposes `creditBalance()` (or `useCreditBalance()` in React) as a cache-first read.
+
+Deducting credits is done server-side via `consumeCredits`. The SDK sends an `Idempotency-Key` with every consume call, so retrying after a network failure does not double-deduct the balance.
+
+## The SDK does not call StoreKit or Play Billing
+
+<Callout type="info">
+Your app owns the entire purchase UI and flow. The SDK's only role in the purchase path is server validation: after your app completes a purchase, pass the resulting Apple JWS or Google purchase token to the SDK and it validates the receipt with the respective store server.
+</Callout>
+
+This design keeps the SDK out of the critical payment path and lets you use any StoreKit 2 / Play Billing wrapper you prefer. The relevant calls are `postAppleReceipt(jws, productId, appAccountToken?)` and `postGoogleReceipt(purchaseToken, productId, obfuscatedAccountId?, obfuscatedProfileId?)`. On success, the SDK refreshes entitlements and credits automatically.

@@ -1,0 +1,40 @@
+---
+title: Installation
+description: Add the Rovenue SDK to your React Native, iOS, or Android app.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```sh
+    npm install @rovenue/react-native-sdk
+    # Expo: the config plugin auto-wires native deps on prebuild.
+    ```
+    Add the plugin in `app.json`:
+    ```json
+    { "expo": { "plugins": ["@rovenue/react-native-sdk/app.plugin"] } }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    Swift Package Manager — add the package URL in Xcode, or in `Package.swift`:
+    ```swift
+    .package(url: "https://github.com/rovenue/sdk-swift.git", from: "0.2.0")
+    ```
+    CocoaPods:
+    ```ruby
+    pod 'Rovenue'
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    Gradle (`build.gradle.kts`):
+    ```kotlin
+    dependencies {
+      implementation("dev.rovenue:sdk:0.2.0")
+    }
+    ```
+  </Tab>
+</Tabs>
+
+See the per-platform [Platforms](/docs/platforms/react-native) guides for
+native wiring details (Expo plugin, AppDelegate, Application).
