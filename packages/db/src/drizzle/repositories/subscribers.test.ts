@@ -34,9 +34,9 @@ import { upsertSubscriber } from "./subscribers";
 // ---------------------------------------------------------------
 
 function makeFakeDb(returningRow: Record<string, unknown> = { id: "sub_1" }) {
-  const setSpy = vi.fn<(set: Record<string, unknown>) => void>();
+  const setSpy = vi.fn<[Record<string, unknown>], void>();
   const valuesSpy =
-    vi.fn<(values: Record<string, unknown>) => void>();
+    vi.fn<[Record<string, unknown>], void>();
   const fakeDb = {
     insert: vi.fn(() => ({
       values: vi.fn((vals: Record<string, unknown>) => {
