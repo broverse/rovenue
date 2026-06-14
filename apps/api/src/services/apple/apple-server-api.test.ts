@@ -4,6 +4,9 @@ import { sendConsumptionInfo, AppleServerApiError } from "./apple-server-api";
 const ctx = {
   bundleId: "com.example.app",
   environment: "PRODUCTION" as const,
+  keyId: "TESTKEY0001",
+  issuerId: "00000000-0000-0000-0000-000000000000",
+  privateKey: "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----\n",
 };
 
 const fetchMock = vi.fn();
@@ -15,7 +18,7 @@ vi.mock("./apple-auth", () => ({
 
 describe("sendConsumptionInfo", () => {
   beforeEach(() => fetchMock.mockReset());
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => { vi.restoreAllMocks(); });
 
   it("PUTs to the production endpoint with bearer JWT and JSON body", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 202 }));

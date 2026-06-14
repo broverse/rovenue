@@ -72,7 +72,7 @@ vi.mock("../lib/clickhouse", () => ({
 // standing up Postgres.
 const auditMock = vi.fn(async () => undefined);
 vi.mock("../lib/audit", () => ({
-  audit: (...args: unknown[]) => auditMock(...args),
+  audit: (...args: Parameters<typeof auditMock>) => auditMock(...args),
 }));
 
 import {

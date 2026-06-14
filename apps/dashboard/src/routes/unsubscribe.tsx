@@ -110,6 +110,7 @@ function UnsubscribeRoute() {
         <div className="mt-6 flex gap-3">
           <Link
             to="/login"
+            search={{ error: undefined }}
             className="rounded-md bg-rv-accent-500 px-3 py-1.5 text-[12px] font-medium text-white"
           >
             {t("unsubscribe.error.signIn", "Sign in")}
