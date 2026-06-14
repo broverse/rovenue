@@ -17,7 +17,7 @@ export function meta({}: Route.MetaArgs) {
 export default function Home() {
   return (
     <HomeLayout {...baseOptions()}>
-      <main className="flex flex-1 flex-col items-center justify-center gap-6 px-6 text-center">
+      <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 text-center">
         <h1 className="text-4xl font-bold">Rovenue SDK</h1>
         <p className="max-w-xl text-fd-muted-foreground">
           Subscriptions, entitlements, and credits for iOS, Android, and React
@@ -29,7 +29,7 @@ export default function Home() {
         >
           Get Started
         </Link>
-      </main>
+      </div>
     </HomeLayout>
   );
 }
