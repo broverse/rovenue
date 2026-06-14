@@ -38,6 +38,16 @@
 }
 
 # -------------------------------------------------------------
+# Dashboard SPA — explicit host, proxied to the static-serving
+# dashboard container. Must precede the *.rovenue.app wildcard
+# (which targets the api); most-specific host wins in Caddy.
+# -------------------------------------------------------------
+app.rovenue.app {
+	encode zstd gzip
+	reverse_proxy dashboard:80
+}
+
+# -------------------------------------------------------------
 # Canonical surface — explicit cert via standard ACME.
 # -------------------------------------------------------------
 rovenue.app, *.rovenue.app, edge.rovenue.app {

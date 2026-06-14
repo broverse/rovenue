@@ -23,7 +23,7 @@ services:
       # Internal port serves the Caddy on-demand-TLS ask endpoint. NOT
       # published in `ports:` — only reachable inside the docker network.
       INTERNAL_PORT: 3001
-      CANONICAL_HOSTS: ${CANONICAL_HOSTS:-rovenue.app,edge.rovenue.app}
+      CANONICAL_HOSTS: ${CANONICAL_HOSTS:-rovenue.app,edge.rovenue.app,app.rovenue.app}
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: rovenue_reader
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
@@ -68,7 +68,25 @@ services:
     depends_on:
       api:
         condition: service_started
+      dashboard:
+        condition: service_started
     restart: unless-stopped
+
+  # Dashboard SPA — built by apps/dashboard/Dockerfile, served as static
+  # files by an in-image Caddy on :80. The edge Caddy proxies
+  # app.rovenue.app here. VITE_API_URL is baked at build time and must
+  # point at the PUBLIC api origin (not the docker-internal name).
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+    restart: unless-stopped
+    # No published ports — only the edge Caddy reaches it on the
+    # docker network. Exposed container port is 80.
+    expose:
+      - "80"
 
   # --- Notification pipeline workers ---
   # Four separate processes, all built from the same image as `api`
