@@ -5,26 +5,31 @@ import { baseOptions } from '@/lib/layout.shared';
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: 'New React Router App' },
-    { name: 'description', content: 'Welcome to React Router!' },
+    { title: 'Rovenue SDK' },
+    {
+      name: 'description',
+      content:
+        'Subscriptions, entitlements, and credits for iOS, Android, and React Native — one shared core, three native SDKs.',
+    },
   ];
 }
 
 export default function Home() {
   return (
     <HomeLayout {...baseOptions()}>
-      <div className="p-4 flex flex-col items-center justify-center text-center flex-1">
-        <h1 className="text-xl font-bold mb-2">Fumadocs on React Router.</h1>
-        <p className="text-fd-muted-foreground mb-4">
-          The truly flexible docs framework on React.js.
+      <main className="flex flex-1 flex-col items-center justify-center gap-6 px-6 text-center">
+        <h1 className="text-4xl font-bold">Rovenue SDK</h1>
+        <p className="max-w-xl text-fd-muted-foreground">
+          Subscriptions, entitlements, and credits for iOS, Android, and React
+          Native — one shared core, three native SDKs.
         </p>
         <Link
-          className="text-sm bg-fd-primary text-fd-primary-foreground rounded-full font-medium px-4 py-2.5"
           to="/docs"
+          className="rounded-md bg-fd-primary px-5 py-2.5 font-medium text-fd-primary-foreground"
         >
-          Open Docs
+          Get Started
         </Link>
-      </div>
+      </main>
     </HomeLayout>
   );
 }

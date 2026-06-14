@@ -1,32 +1,29 @@
 ---
-title: Hello World
-description: |
-  Your first `document`
-  You'll love it!
+title: Introduction
+description: One shared core, three native SDKs for subscriptions, entitlements, and credits.
 ---
 
-Hey there! Fumadocs is the docs framework that also works on React Router!
+Rovenue ships three client SDKs — **Swift** (iOS/macOS/tvOS/watchOS),
+**Kotlin** (Android/JVM), and **React Native** — all thin façades over one
+shared **Rust core** (`librovenue`). The business logic (HTTP transport with
+idempotency + retry, an on-device SQLite cache, foreground polling, receipt
+validation, entitlements, credits, identity) lives in the core; each façade
+exposes it idiomatically.
 
-## Heading
+## What the SDK does
 
-Hello World
+- Checks a user's **entitlements** (cache-first, refreshed in the background).
+- Tracks a **credit** balance and spends credits server-side, idempotently.
+- Sends store **receipts** to your Rovenue server for validation.
+- Manages **identity** (anonymous → known user).
 
-<Cards>
-  <Card title="Learn more about React Router" href="https://reactrouter.com" />
-  <Card title="Learn more about Fumadocs" href="https://fumadocs.dev" />
-</Cards>
+## What the SDK does NOT do
 
-```ts
-console.log('I love React!');
-```
+- It does **not** call StoreKit or Play Billing. Your app performs the
+  purchase, then hands the resulting Apple JWS or Google purchase token to the
+  SDK for server validation.
+- It does **not** merge users itself. `identify()` is client-local; account
+  merging is a server operation your backend triggers.
 
-### Heading
-
-#### Heading
-
-| Head                            | Description                         |
-| ------------------------------- | ----------------------------------- |
-| `hello`                         | Hello World                         |
-| very **important**              | Hey                                 |
-| _Surprisingly_                  | Fumadocs                            |
-| very long text that looks weird | hello world hello world hello world |
+Pick your platform in the [Installation](/docs/getting-started/installation)
+guide, then follow the [Quick Start](/docs/getting-started/quickstart).
