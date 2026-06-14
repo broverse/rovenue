@@ -77,9 +77,9 @@ import {
   APPLE_ENVIRONMENT,
   APPLE_NOTIFICATION_TYPE,
   type AppleJwsTransactionPayload,
-  type AppleNotificationVerifier,
   type AppleResponseBodyV2DecodedPayload,
 } from "./apple-types";
+import type { AppleNotificationVerifier } from "./apple-verify";
 
 // =============================================================
 // Fixture helpers
@@ -97,9 +97,7 @@ function makeFakeJwsTransactionPayload(
 ): AppleJwsTransactionPayload {
   return {
     transactionId: overrides.originalTransactionId,
-    originalTransactionId: overrides.originalTransactionId,
     bundleId: "com.example.app",
-    productId: overrides.productId,
     purchaseDate: 1_700_000_000_000,
     originalPurchaseDate: 1_700_000_000_000,
     expiresDate: 1_700_000_000_000 + 30 * 86_400_000,
