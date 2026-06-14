@@ -47,14 +47,14 @@ export function makeMockNative(): MockNative {
     __emitLog(entry: LogEntryDTO) {
       state.logListeners.forEach((cb) => cb(entry));
     },
-    __addChangeListener(cb) {
+    __addChangeListener(cb: (payload: { event: string }) => void) {
       state.changeListeners.push(cb);
       return () => {
         const i = state.changeListeners.indexOf(cb);
         if (i >= 0) state.changeListeners.splice(i, 1);
       };
     },
-    __addLogListener(cb) {
+    __addLogListener(cb: (entry: LogEntryDTO) => void) {
       state.logListeners.push(cb);
       return () => {
         const i = state.logListeners.indexOf(cb);
