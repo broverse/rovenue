@@ -33,6 +33,9 @@ page presents Swift / Kotlin / React Native side by side.
   then the docs under `/docs`.
 - **Delivery model:** Docs site is the single source of truth; per-package
   READMEs become thin and link to the site.
+- **Deploy:** In scope. Docs ship as a container behind the existing Caddy
+  edge at `docs.rovenue.app`, wired into the root `docker-compose.yml`
+  (Coolify-ready), mirroring the dashboard's build-and-serve pattern.
 
 ## The Core Insight: One Source, Three Platforms
 
@@ -153,9 +156,7 @@ apps/docs/
 - `package.json` scripts replace the `echo` placeholders with real
   `dev` / `build` / `start` commands.
 - Turborepo `turbo.json` gains a real `build` for `@rovenue/docs`.
-- Deploy: static build is supported by Fumadocs; target `docs.rovenue.dev`
-  (Coolify static or Node SSR server — final call at deploy time, out of scope
-  for content).
+- Deploy is covered in the **Deployment** section below.
 
 ## Components / Units
 
@@ -177,12 +178,74 @@ All code samples and reference tables are derived from the real source:
 StoreKit/Play Billing" and "identify is client-local" invariants are stated
 explicitly on the relevant pages, matching the README guarantees.
 
+## Deployment
+
+The site deploys behind the existing infrastructure, mirroring the dashboard's
+proven build-and-serve pattern (`apps/dashboard/Dockerfile` +
+`deploy/caddy/Caddyfile.dashboard` + a Caddy host block + a compose service).
+
+**Serving mode — static, served by Caddy (recommended).**
+React Router v7 docs content is fully static; we prerender all routes to static
+HTML (React Router prerender / Fumadocs static build) and serve them with Caddy,
+exactly like the dashboard. This reuses a proven pattern, adds no long-running
+Node process, and is the cheapest, lowest-failure-mode option. React Router
+remains the build framework (honoring the "not Next.js" decision); SSR-at-runtime
+buys nothing for static docs.
+(Alternative, documented but not chosen: a Node container running
+`react-router-serve` for true runtime SSR, reverse-proxied by Caddy. Flip to
+this only if a future need for per-request rendering appears.)
+
+**1. Dockerfile** — `apps/docs/Dockerfile`, multi-stage, monorepo build context:
+- Builder (`node:22-alpine` + pnpm): install workspace deps, build + prerender
+  the docs site to a static `dist`/`build/client` directory.
+- Runtime (`caddy:2-alpine`): copy the static output to `/srv`, copy a docs
+  Caddyfile, `EXPOSE 80`.
+- Note: `apps/dashboard/Dockerfile` already COPYs `apps/docs/package.json` into
+  its install layer, so the workspace is already aware of the docs package.
+
+**2. Static-serving Caddyfile** — `deploy/caddy/Caddyfile.docs`, modeled on
+`Caddyfile.dashboard`: `root * /srv`, `try_files {path} /index.html`,
+`file_server`, long-cache fingerprinted assets, `no-cache` for HTML.
+
+**3. Compose service** — add a `docs` service to the root `docker-compose.yml`:
+```yaml
+docs:
+  build:
+    context: .
+    dockerfile: apps/docs/Dockerfile
+  restart: unless-stopped
+```
+No published ports (only Caddy reaches it on the docker network), no env vars
+baked at build time (docs are content-only; unlike the dashboard there is no
+`VITE_API_URL` to inline).
+
+**4. Edge routing** — add an explicit host block to `deploy/caddy/Caddyfile`
+**above** the `*.rovenue.app` wildcard (most-specific host wins in Caddy; the
+wildcard currently routes to `api`, so without this `docs.rovenue.app` would
+hit the API):
+```
+docs.rovenue.app {
+    encode zstd gzip
+    reverse_proxy docs:80
+}
+```
+Place it next to the existing `app.rovenue.app` block.
+
+**5. DNS** — add an A record for `docs.rovenue.app` → host (or a CNAME to the
+canonical surface). Add it to the prerequisites in the deployment runbook.
+Certs are issued automatically by Caddy via standard ACME (the hostname is
+explicit, not on-demand), reusing the persisted `caddy-data` volume.
+
+**6. Runbook** — update `docs/operations/deployment.md`: new `docs` service in
+the build/start steps, the new DNS record in prerequisites, and a smoke-test
+line (`curl -I https://docs.rovenue.app` returns 200).
+
 ## Out of Scope
 
 - Auto-generating reference from the UDL (UniFFI renames per platform; hand-
   curated tables are more reliable). Noted as possible future work.
-- Final hosting/deploy pipeline wiring (DNS, Coolify service) — the site will
-  build and run locally; deploy is a follow-up.
+- Runtime SSR for docs (the Node `react-router-serve` container) — documented
+  as an alternative above but not built; static serving is chosen.
 - API server (REST) reference — this project is SDK docs only.
 - i18n / translations.
 
@@ -194,6 +257,9 @@ explicitly on the relevant pages, matching the README guarantees.
 - Platform tabs work and persist across pages; search returns SDK pages.
 - Each SDK README is trimmed and links to the site.
 - No Next.js dependency anywhere in `apps/docs`.
+- `docker compose build docs` succeeds; `docker compose up docs caddy` serves
+  the site, reachable through Caddy at the `docs.rovenue.app` host block.
+- Deployment runbook updated (service, DNS, smoke test).
 
 ## Testing
 
@@ -201,3 +267,5 @@ explicitly on the relevant pages, matching the README guarantees.
 - A link-validation pass (Fumadocs `validate-links` integration) to catch
   broken internal links.
 - Manual spot-check that code samples match the real method signatures.
+- Docker image builds and the static output is served; Caddy host block routes
+  `docs.rovenue.app` to the docs container (local smoke via `Host:` header).
