@@ -1,6 +1,5 @@
 import { TIER_LIMITS } from "@rovenue/shared";
 import type { RoviTier } from "@rovenue/shared";
-import type { Project } from "@rovenue/db";
 
 export interface QuotaInput {
   tier: RoviTier;

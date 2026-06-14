@@ -215,19 +215,19 @@ export function IntegrationDrawer({
             ) : (
               <>
                 {state.step === "credentials" && (
-                  <StepCredentials {...(sharedStepProps as Record<string, unknown>)} />
+                  <StepCredentials {...sharedStepProps} />
                 )}
                 {state.step === "events" && (
-                  <StepEvents {...(sharedStepProps as Record<string, unknown>)} />
+                  <StepEvents {...sharedStepProps} />
                 )}
                 {state.step === "mapping" && (
-                  <StepMapping {...(sharedStepProps as Record<string, unknown>)} />
+                  <StepMapping {...sharedStepProps} />
                 )}
                 {state.step === "test" && (
-                  <StepTest {...(sharedStepProps as Record<string, unknown>)} />
+                  <StepTest {...sharedStepProps} />
                 )}
                 {state.step === "activate" && (
-                  <StepActivate {...(sharedStepProps as Record<string, unknown>)} />
+                  <StepActivate {...sharedStepProps} />
                 )}
               </>
             )}

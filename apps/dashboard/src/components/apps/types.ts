@@ -13,7 +13,7 @@ export type CategoryId =
 
 export type RailEntryId = CategoryId | "all" | "connected";
 
-export type AppStatus = "connected" | "available" | "error";
+export type AppStatus = "connected" | "available" | "error" | "unavailable";
 
 export type AppTag = "new" | "beta" | "partner";
 
