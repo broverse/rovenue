@@ -10,6 +10,31 @@
 # drains it into Redpanda, and ClickHouse's Kafka Engine consumes
 # the topic. No CDC. See docs/superpowers/specs/2026-04-20-tech-stack-upgrade/06-clickhouse.md §14.
 services:
+  # One-shot migration runner. Applies Drizzle (Postgres) then
+  # ClickHouse migrations, then exits 0. api + workers gate on its
+  # successful completion so nothing serves an un-migrated schema.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
+      CLICKHOUSE_URL: http://clickhouse:8123
+    command:
+      - sh
+      - -c
+      - >
+        pnpm --filter @rovenue/db db:migrate &&
+        pnpm --filter @rovenue/db db:clickhouse:migrate
+    depends_on:
+      db:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build:
       context: .
@@ -33,6 +58,8 @@ services:
       # docker-network-only so Caddy is the only thing that can hit it.
       - "3000:3000"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
@@ -109,6 +136,8 @@ services:
       CLICKHOUSE_USER: rovenue_reader
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db: { condition: service_healthy }
       redis: { condition: service_started }
       redpanda: { condition: service_healthy }
@@ -128,6 +157,8 @@ services:
       CLICKHOUSE_USER: rovenue_reader
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db: { condition: service_healthy }
       redis: { condition: service_started }
       clickhouse: { condition: service_healthy }
@@ -148,6 +179,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
       REDIS_URL: redis://redis:6379
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db: { condition: service_healthy }
       redis: { condition: service_started }
     restart: unless-stopped
@@ -163,6 +196,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
       REDIS_URL: redis://redis:6379
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db: { condition: service_healthy }
       redis: { condition: service_started }
     restart: unless-stopped
