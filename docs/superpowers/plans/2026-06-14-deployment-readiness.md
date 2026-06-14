@@ -355,6 +355,8 @@ git commit -m "feat(deploy): one-shot migrate service gates api + workers on sch
 
 # Task 4: Re-enable CI
 
+> **DEFERRED (2026-06-14):** A naive rename makes CI red. `pnpm build` runs `tsc` in three packages that have **~31 pre-existing type errors** (`@rovenue/dashboard` 12, `@rovenue/db` 10, `@rovenue/api` 9 — only ~4 are trivial unused-import `TS6133`; the rest are real type mismatches: `TS2740/2345/7053/2367/...`). CI was almost certainly disabled for this reason. Re-enabling it requires either fixing those errors first or scoping CI to a green subset — a separate effort tracked outside this plan. Tasks 1–3, 5, 6 shipped without it.
+
 **Problem:** `.github/workflows/ci.yml.disabled` means no automated build/test gate runs on push or PR.
 
 **Fix:** Restore the workflow file. Keep the existing `install → build → test` job; the `*.integration.test.ts` suites use testcontainers, which work on `ubuntu-latest` (Docker preinstalled).
