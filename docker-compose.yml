@@ -10,6 +10,31 @@
 # drains it into Redpanda, and ClickHouse's Kafka Engine consumes
 # the topic. No CDC. See docs/superpowers/specs/2026-04-20-tech-stack-upgrade/06-clickhouse.md §14.
 services:
+  # One-shot migration runner. Applies Drizzle (Postgres) then
+  # ClickHouse migrations, then exits 0. api + workers gate on its
+  # successful completion so nothing serves an un-migrated schema.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
+      CLICKHOUSE_URL: http://clickhouse:8123
+    command:
+      - sh
+      - -c
+      - >
+        pnpm --filter @rovenue/db db:migrate &&
+        pnpm --filter @rovenue/db db:clickhouse:migrate
+    depends_on:
+      db:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build:
       context: .
@@ -23,16 +48,21 @@ services:
       # Internal port serves the Caddy on-demand-TLS ask endpoint. NOT
       # published in `ports:` — only reachable inside the docker network.
       INTERNAL_PORT: 3001
-      CANONICAL_HOSTS: ${CANONICAL_HOSTS:-rovenue.app,edge.rovenue.app}
+      CANONICAL_HOSTS: ${CANONICAL_HOSTS:-rovenue.app,edge.rovenue.app,app.rovenue.app}
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: rovenue_reader
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
       KAFKA_BROKERS: redpanda:9092
+      APPLE_ROOT_CERTS_DIR: /etc/rovenue/apple-certs
+    volumes:
+      - ${APPLE_ROOT_CERTS_HOST_DIR:-./deploy/apple-certs}:/etc/rovenue/apple-certs:ro
     ports:
       # Only the public port is mapped to the host. 3001 stays
       # docker-network-only so Caddy is the only thing that can hit it.
       - "3000:3000"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
@@ -42,6 +72,11 @@ services:
       redpanda:
         condition: service_healthy
     restart: unless-stopped
+    # The outbox dispatcher runs in-process here (OUTBOX_DISPATCHER_ENABLED
+    # from .env). It MUST be a single instance — do not raise replicas
+    # without first moving the dispatcher to a dedicated 1-replica worker.
+    deploy:
+      replicas: 1
 
   # Caddy edge — terminates TLS, gates on-demand cert issuance through
   # the api's internal ask-endpoint. See deploy/caddy/Caddyfile for the
@@ -68,7 +103,25 @@ services:
     depends_on:
       api:
         condition: service_started
+      dashboard:
+        condition: service_started
     restart: unless-stopped
+
+  # Dashboard SPA — built by apps/dashboard/Dockerfile, served as static
+  # files by an in-image Caddy on :80. The edge Caddy proxies
+  # app.rovenue.app here. VITE_API_URL is baked at build time and must
+  # point at the PUBLIC api origin (not the docker-internal name).
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+    restart: unless-stopped
+    # No published ports — only the edge Caddy reaches it on the
+    # docker network. Exposed container port is 80.
+    expose:
+      - "80"
 
   # --- Notification pipeline workers ---
   # Four separate processes, all built from the same image as `api`
@@ -90,7 +143,13 @@ services:
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: rovenue_reader
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
+      # Single-dispatcher contract: only `api` runs the outbox
+      # dispatcher. Workers MUST keep this false or CH aggregates
+      # double-count. See docs/architecture/outbox-dispatcher.md.
+      OUTBOX_DISPATCHER_ENABLED: "false"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db: { condition: service_healthy }
       redis: { condition: service_started }
       redpanda: { condition: service_healthy }
@@ -109,7 +168,13 @@ services:
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: rovenue_reader
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
+      # Single-dispatcher contract: only `api` runs the outbox
+      # dispatcher. Workers MUST keep this false or CH aggregates
+      # double-count. See docs/architecture/outbox-dispatcher.md.
+      OUTBOX_DISPATCHER_ENABLED: "false"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db: { condition: service_healthy }
       redis: { condition: service_started }
       clickhouse: { condition: service_healthy }
@@ -129,7 +194,13 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
       REDIS_URL: redis://redis:6379
+      # Single-dispatcher contract: only `api` runs the outbox
+      # dispatcher. Workers MUST keep this false or CH aggregates
+      # double-count. See docs/architecture/outbox-dispatcher.md.
+      OUTBOX_DISPATCHER_ENABLED: "false"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db: { condition: service_healthy }
       redis: { condition: service_started }
     restart: unless-stopped
@@ -144,7 +215,13 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
       REDIS_URL: redis://redis:6379
+      # Single-dispatcher contract: only `api` runs the outbox
+      # dispatcher. Workers MUST keep this false or CH aggregates
+      # double-count. See docs/architecture/outbox-dispatcher.md.
+      OUTBOX_DISPATCHER_ENABLED: "false"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db: { condition: service_healthy }
       redis: { condition: service_started }
     restart: unless-stopped
