@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::credits::CreditReader;
 use crate::entitlements::{Entitlement, EntitlementReader};
 use crate::error::{RovenueError, RovenueResult};
+use crate::identify::IdentifyClient;
 use crate::identity::{IdentityManager, User};
 use crate::observer::{Observer, ObserverBus};
 use crate::offerings::{CoreOfferings, OfferingsClient};
@@ -28,6 +29,7 @@ pub struct RovenueCore {
     credits: Arc<CreditReader>,
     receipts: Arc<ReceiptClient>,
     offerings: Arc<OfferingsClient>,
+    identify: Arc<IdentifyClient>,
     account_tokens: Arc<AccountTokenStore>,
     sessions: Arc<SessionBuffer>,
     session_dispatcher: Arc<SessionDispatcher>,
@@ -71,6 +73,7 @@ impl RovenueCore {
         );
         let receipts = Arc::new(ReceiptClient::new(Arc::clone(&http)));
         let offerings = Arc::new(OfferingsClient::new(Arc::clone(&http)));
+        let identify = Arc::new(IdentifyClient::new(Arc::clone(&http)));
         let account_tokens = Arc::new(AccountTokenStore::new(Arc::clone(&store)));
         let sessions = Arc::new(SessionBuffer::new(Arc::clone(&store)));
         let identity_for_sub = Arc::clone(&identity);
@@ -105,7 +108,17 @@ impl RovenueCore {
             });
         }
         Arc::clone(&session_dispatcher).start(&scheduler);
-        Ok(Self {
+        {
+            // Best-effort offline reconcile of a pending identify(): retries the
+            // server POST on the scheduler thread (foreground only), never blocking
+            // new()/configure(). The tick is a no-op when nothing is pending.
+            let identity = Arc::clone(&identity);
+            let identify = Arc::clone(&identify);
+            scheduler.register("identify_reconcile", Duration::from_secs(30), move || {
+                reconcile_identity_impl(&identity, &identify);
+            });
+        }
+        let core = Self {
             _config: Arc::new(config),
             bus,
             identity,
@@ -113,12 +126,19 @@ impl RovenueCore {
             credits,
             receipts,
             offerings,
+            identify,
             account_tokens,
             sessions,
             session_dispatcher,
             scheduler,
             store: store_for_self,
-        })
+        };
+        // One best-effort reconcile at startup so a pending identify() from a
+        // prior offline session syncs without waiting for the first scheduler
+        // tick (which also only runs in foreground). Non-blocking: a single
+        // short-timeout POST; failure is swallowed and retried by the tick.
+        core.reconcile_identity();
+        Ok(core)
     }
 
     /// In-memory constructor for tests — avoids filesystem I/O and test isolation issues.
@@ -140,8 +160,29 @@ impl RovenueCore {
         self.identity.current_user()
     }
 
+    /// Optimistic-local identity link with a best-effort `POST /v1/identify`.
+    /// The local write always succeeds (and emits `IdentityChanged`); if the
+    /// server call fails (offline/5xx) the row stays `synced: false` and
+    /// [`reconcile_identity`](Self::reconcile_identity) retries it later.
+    /// Validation errors (empty id) propagate as `Err`.
     pub fn identify(&self, app_user_id: String) -> RovenueResult<()> {
-        self.identity.identify(app_user_id)
+        let changed = self.identity.set_app_user_id(app_user_id.clone())?;
+        if changed {
+            let rovenue_id = self.identity.rovenue_id();
+            match self.identify.identify(&rovenue_id, &app_user_id) {
+                Ok(_) => {
+                    let _ = self.identity.mark_synced();
+                }
+                Err(_e) => { /* offline: keep synced=false; reconcile retries */ }
+            }
+        }
+        Ok(())
+    }
+
+    /// Retries a pending (`synced == false`) identify against the server.
+    /// Best-effort and non-blocking-friendly: a single POST, errors swallowed.
+    pub fn reconcile_identity(&self) {
+        reconcile_identity_impl(&self.identity, &self.identify);
     }
 
     /// Logs out the current user: mints a fresh anonymous `rovenue_id`, drops the
@@ -278,6 +319,19 @@ impl RovenueCore {
 
     pub fn get_offerings(&self) -> RovenueResult<CoreOfferings> {
         self.offerings.get_offerings()
+    }
+}
+
+/// Shared reconcile body used by both `RovenueCore::reconcile_identity` and the
+/// scheduler tick. If a pending `app_user_id` exists, attempts one
+/// `POST /v1/identify`; on success marks the row synced. All errors are
+/// swallowed (best-effort retry).
+fn reconcile_identity_impl(identity: &IdentityManager, identify: &IdentifyClient) {
+    if let Some(app_user_id) = identity.pending_app_user_id() {
+        let rovenue_id = identity.rovenue_id();
+        if identify.identify(&rovenue_id, &app_user_id).is_ok() {
+            let _ = identity.mark_synced();
+        }
     }
 }
 
