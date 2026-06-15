@@ -66,8 +66,8 @@ class RovenueTest {
     fun `facade currentUser has anon id`() = runTest {
         Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.dev")
         val user = Rovenue.shared.currentUser()
-        assertTrue(user.anonId.startsWith("anon_"))
-        assertNull(user.knownUserId)
+        assertTrue(user.rovenueId.startsWith("rov_"))
+        assertNull(user.appUserId)
     }
 
     @Test
@@ -101,6 +101,6 @@ class RovenueTest {
         Rovenue.shared.identify("user_42")
         job.join()
         assertEquals(listOf(ChangeEvent.IDENTITY_CHANGED), collected)
-        assertEquals("user_42", Rovenue.shared.currentUser().knownUserId)
+        assertEquals("user_42", Rovenue.shared.currentUser().appUserId)
     }
 }

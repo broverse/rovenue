@@ -197,13 +197,27 @@ class Rovenue private constructor(
      *  Client-local only — server-side merging happens via the customer's
      *  backend calling /v1/subscribers/transfer with the secret key. */
     @Throws(RovenueException::class)
-    suspend fun identify(knownUserId: String) {
+    suspend fun identify(appUserId: String) {
         emit(LogEntry(level = "info", message = "identify"))
         try {
-            dispatcher.run { core.identify(knownUserId) }
+            dispatcher.run { core.identify(appUserId) }
             emit(LogEntry(level = "info", message = "identify ok"))
         } catch (e: Throwable) {
             emit(LogEntry(level = "error", message = "identify failed: ${e.message ?: e.javaClass.simpleName}"))
+            throw e
+        }
+    }
+
+    /** Reset the SDK to an anonymous user, discarding the current app-user-id
+     *  association. Client-local only — does not contact the server. */
+    @Throws(RovenueException::class)
+    suspend fun logOut() {
+        emit(LogEntry(level = "info", message = "logOut"))
+        try {
+            dispatcher.run { core.logOut() }
+            emit(LogEntry(level = "info", message = "logOut ok"))
+        } catch (e: Throwable) {
+            emit(LogEntry(level = "error", message = "logOut failed: ${e.message ?: e.javaClass.simpleName}"))
             throw e
         }
     }
