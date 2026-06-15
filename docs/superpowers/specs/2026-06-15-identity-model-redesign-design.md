@@ -1,6 +1,7 @@
 # Identity Model Redesign — `rovenueId` + `appUserId`
 
 - **Date:** 2026-06-15
+- **Amendment (2026-06-15):** No production data exists, so the legacy `appUserId` dual-read / migration-window fallback (D6) was dropped during implementation — resolution is **rovenueId-only** plus the `mergedInto` redirect-follow. The migration is retained (safe no-op on empty tables). The `logOut()` + optimistic-identify client behavior (D4/D5) remains in the separate client/Rust follow-up plan.
 - **Status:** Draft for review
 - **Author:** brainstormed with Claude
 - **Supersedes the identity half of:** spec §5.4 (identify-is-client-local, 2026-05-19)
