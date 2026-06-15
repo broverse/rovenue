@@ -43,9 +43,9 @@ export function normalizeAppleStatus(
     case APPLE_NOTIFICATION_TYPE.DID_RENEW:
       return STATUS.ACTIVE;
     case APPLE_NOTIFICATION_TYPE.DID_FAIL_TO_RENEW:
-      return subtype === APPLE_NOTIFICATION_SUBTYPE.GRACE_PERIOD
-        ? STATUS.GRACE_PERIOD
-        : STATUS.ACTIVE;
+      // No grace subtype still means billing-retry limbo, not active
+      // revenue. Keep access during Apple's retry window (OD-1).
+      return STATUS.GRACE_PERIOD;
     case APPLE_NOTIFICATION_TYPE.GRACE_PERIOD_EXPIRED:
     case APPLE_NOTIFICATION_TYPE.EXPIRED:
       return STATUS.EXPIRED;
