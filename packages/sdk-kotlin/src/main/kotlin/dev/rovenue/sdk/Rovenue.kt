@@ -10,6 +10,9 @@ package dev.rovenue.sdk
 
 import android.app.Activity
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import androidx.lifecycle.ProcessLifecycleOwner
 import dev.rovenue.sdk.generated.Config
 import dev.rovenue.sdk.generated.CoreOfferings
 import dev.rovenue.sdk.generated.RovenueCore
@@ -17,6 +20,8 @@ import dev.rovenue.sdk.generated.RovenueException
 import dev.rovenue.sdk.generated.SessionEventKind
 import dev.rovenue.sdk.generated.sdkVersion
 import dev.rovenue.sdk.internal.Dispatcher
+import dev.rovenue.sdk.internal.ForegroundReconcileObserver
+import dev.rovenue.sdk.internal.ForegroundReconcileTrigger
 import dev.rovenue.sdk.internal.NoPriceStore
 import dev.rovenue.sdk.internal.ObserverBridge
 import dev.rovenue.sdk.internal.PlayBillingStore
@@ -63,6 +68,15 @@ class Rovenue private constructor(
     // (e.g. the post-configure purchase reconciliation). SupervisorJob so one
     // failed child never tears the scope down; cancelled on shutdown.
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Coalesces foreground-triggered reconciliations (post-configure + every
+    // app foreground) so overlapping triggers run at most one reconcile.
+    private val reconcileTrigger = ForegroundReconcileTrigger()
+
+    // Lifecycle observer driving foreground reconciliation; held so it can be
+    // removed on shutdown. Registered/removed on the main thread.
+    private var foregroundObserver: ForegroundReconcileObserver? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     companion object {
         // Guarded by `lock`. Configure-twice replaces the instance
@@ -121,12 +135,10 @@ class Rovenue private constructor(
                 _shared = instance
             }
 
-            // Best-effort: reconcile any unfinished purchases in the background.
-            // Must NOT block configure() and must never surface errors — a
-            // device with no Play Billing / offline simply skips reconciliation.
-            instance.scope.launch {
-                runCatching { instance.reconcilePurchases() }
-            }
+            // Best-effort startup reconcile + continuous foreground reconcile.
+            // Both go through the trigger so they share the in-flight guard.
+            instance.startForegroundReconcile()
+            instance.reconcileTrigger.fire(instance.scope) { instance.reconcilePurchases() }
         }
 
         val shared: Rovenue
@@ -168,7 +180,29 @@ class Rovenue private constructor(
     // Internal teardown (used by configure-twice and resetForTesting)
     // ---------------------------------------------------------------
 
+    // Registers the ProcessLifecycleOwner observer on the main thread (the
+    // lifecycle APIs are main-thread only). Each app foreground fires a
+    // coalesced reconcile on the background scope.
+    private fun startForegroundReconcile() {
+        val observer = ForegroundReconcileObserver {
+            reconcileTrigger.fire(scope) { reconcilePurchases() }
+        }
+        foregroundObserver = observer
+        mainHandler.post {
+            ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
+        }
+    }
+
+    private fun stopForegroundReconcile() {
+        val observer = foregroundObserver ?: return
+        foregroundObserver = null
+        mainHandler.post {
+            ProcessLifecycleOwner.get().lifecycle.removeObserver(observer)
+        }
+    }
+
     private fun shutdownInternal() {
+        stopForegroundReconcile()
         scope.cancel()
         core.shutdown()
     }
