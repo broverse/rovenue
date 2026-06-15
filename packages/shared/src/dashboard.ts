@@ -600,6 +600,40 @@ export interface LtvDistributionResponse {
   histogram: LtvHistogramBucket[];
 }
 
+// =============================================================
+// Predictive LTV — Level 1 (cohort curve scaling)
+// =============================================================
+
+export interface LtvSegment {
+  /** store code, productId, or "__all__". */
+  key: string;
+  label: string;
+  size: number;
+  observedLtvUsd: string;
+  predictedLtvUsd: string;
+  /** thin-segment / cold-start flag. */
+  warning: string | null;
+}
+
+export interface LtvPredictionCohort {
+  cohortMonth: string;
+  size: number;
+  observedLtvUsd: string;
+  predictedLtvUsd: string;
+  maturity: number;
+  isMature: boolean;
+}
+
+export interface LtvPredictionResponse {
+  horizonMonths: number;
+  blendedPredictedLtvUsd: string;
+  maturityCurve: Array<{ ageMonth: number; fraction: number }>;
+  cohorts: LtvPredictionCohort[];
+  byStore: LtvSegment[];
+  byProduct: LtvSegment[];
+  warning: string | null;
+}
+
 export interface MrrDecompositionResponse {
   from: string;
   to: string;
