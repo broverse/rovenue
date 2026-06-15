@@ -1,6 +1,8 @@
 package dev.rovenue.sdk
 
 import dev.rovenue.sdk.internal.ForegroundReconcileTrigger
+import dev.rovenue.sdk.internal.ForegroundReconcileObserver
+import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -44,5 +46,20 @@ class ForegroundReconcileTriggerTest {
         trigger.fire(this) { runs.incrementAndGet() }
         advanceUntilIdle()
         assertEquals(2, runs.get())
+    }
+}
+
+class ForegroundReconcileObserverTest {
+
+    @Test
+    fun `onStart invokes the callback each time`() {
+        val calls = AtomicInteger(0)
+        val observer = ForegroundReconcileObserver { calls.incrementAndGet() }
+        val owner = mockk<androidx.lifecycle.LifecycleOwner>()
+
+        observer.onStart(owner)
+        observer.onStart(owner)
+
+        assertEquals(2, calls.get())
     }
 }

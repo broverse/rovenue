@@ -39,6 +39,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
     implementation("com.android.billingclient:billing-ktx:6.2.0")
+    implementation("androidx.lifecycle:lifecycle-process:2.6.2")
 
     // Host-JVM unit tests run JNA on the desktop, which needs the regular
     // jar's bundled libjnidispatch.jnilib — the @aar artifact strips it
