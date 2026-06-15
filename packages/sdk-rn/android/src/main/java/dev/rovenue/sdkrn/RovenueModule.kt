@@ -72,10 +72,13 @@ class RovenueModule : Module() {
         // ---------------- Async ----------------
         AsyncFunction("currentUser") Coroutine { ->
             val u = Rovenue.shared.currentUser()
-            mapOf("anonId" to u.anonId, "knownUserId" to u.knownUserId)
+            mapOf("rovenueId" to u.rovenueId, "appUserId" to u.appUserId)
         }
-        AsyncFunction("identify") Coroutine { knownUserId: String ->
-            Rovenue.shared.identify(knownUserId)
+        AsyncFunction("identify") Coroutine { appUserId: String ->
+            Rovenue.shared.identify(appUserId)
+        }
+        AsyncFunction("logOut") Coroutine { ->
+            Rovenue.shared.logOut()
         }
         AsyncFunction("entitlement") Coroutine { id: String ->
             Rovenue.shared.entitlement(id)?.let(::dtoFromEntitlement)

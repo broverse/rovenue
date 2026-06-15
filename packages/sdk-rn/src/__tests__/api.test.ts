@@ -4,7 +4,7 @@ import { stopEventBridge } from "../core/eventBridge";
 import { store } from "../store/reactiveStore";
 import { makeMockNative, MockNative } from "./_mockNative";
 import { configure } from "../api/configure";
-import { currentUser, identify } from "../api/identity";
+import { currentUser, identify, logOut } from "../api/identity";
 import { entitlement, entitlementsAll, refreshEntitlements } from "../api/entitlements";
 import { creditBalance, refreshCredits, consumeCredits } from "../api/credits";
 import { getOfferings, purchase, restorePurchases } from "../api/purchases";
@@ -70,7 +70,7 @@ describe("Rovenue imperative API", () => {
   // -------- identity --------
   it("currentUser proxies to native", async () => {
     const u = await currentUser();
-    expect(u).toEqual({ anonId: "anon_test", knownUserId: null });
+    expect(u).toEqual({ rovenueId: "anon_test", appUserId: null });
   });
 
   it("identify forwards arg + emits IDENTITY_CHANGED via mock", async () => {
@@ -78,7 +78,17 @@ describe("Rovenue imperative API", () => {
     await identify("user_42");
     await new Promise((r) => setTimeout(r, 0));
     expect(native.identify).toHaveBeenCalledWith("user_42");
-    expect(store.get<{ knownUserId: string | null }>("user")?.knownUserId).toBe("user_42");
+    expect(store.get<{ appUserId: string | null }>("user")?.appUserId).toBe("user_42");
+  });
+
+  it("logOut calls native logOut", async () => {
+    await logOut();
+    expect(native.logOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("Rovenue.logOut calls native logOut", async () => {
+    await Rovenue.logOut();
+    expect(native.logOut).toHaveBeenCalledTimes(1);
   });
 
   // -------- entitlements --------

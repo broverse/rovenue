@@ -31,7 +31,7 @@ export type MockNative = RovenueModuleSpec & {
 
 export function makeMockNative(): MockNative {
   const state = {
-    user: { anonId: "anon_test", knownUserId: null } as UserDTO,
+    user: { rovenueId: "anon_test", appUserId: null } as UserDTO,
     entitlements: new Map<string, EntitlementDTO>(),
     creditBalance: 0,
     changeListeners: [] as Array<(payload: { event: string }) => void>,
@@ -65,8 +65,12 @@ export function makeMockNative(): MockNative {
     setForeground: vi.fn(),
     getVersion: vi.fn(() => "0.1.0"),
     currentUser: vi.fn(async () => state.user),
-    identify: vi.fn(async (knownUserId: string) => {
-      state.user = { ...state.user, knownUserId };
+    identify: vi.fn(async (appUserId: string) => {
+      state.user = { ...state.user, appUserId };
+      mock.__emit("IDENTITY_CHANGED");
+    }),
+    logOut: vi.fn(async () => {
+      state.user = { rovenueId: "anon_new", appUserId: null };
       mock.__emit("IDENTITY_CHANGED");
     }),
     entitlement: vi.fn(async (id: string) => state.entitlements.get(id) ?? null),

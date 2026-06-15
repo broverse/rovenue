@@ -2,8 +2,8 @@
 // serialise across the Nitro bridge without custom converters.
 
 export type User = {
-  anonId: string;
-  knownUserId: string | null;
+  rovenueId: string;
+  appUserId: string | null;
 };
 
 export type Entitlement = {

@@ -52,7 +52,7 @@ export { useEntitlements } from "./hooks/useEntitlements";
 export { useCreditBalance } from "./hooks/useCreditBalance";
 
 import { configure } from "./api/configure";
-import { currentUser, identify } from "./api/identity";
+import { currentUser, identify, logOut } from "./api/identity";
 import { entitlement, entitlementsAll, refreshEntitlements } from "./api/entitlements";
 import { creditBalance, refreshCredits, consumeCredits } from "./api/credits";
 import { getOfferings, purchase, restorePurchases } from "./api/purchases";
@@ -67,6 +67,7 @@ export const Rovenue = {
   getVersion: () => SDK_VERSION,
   currentUser,
   identify,
+  logOut,
   entitlement,
   entitlementsAll,
   refreshEntitlements,

@@ -69,10 +69,13 @@ public class RovenueModule: Module {
         // ---------------- Async ----------------
         AsyncFunction("currentUser") { () -> [String: Any?] in
             let u = await Rovenue.shared.currentUser()
-            return ["anonId": u.anonId, "knownUserId": u.knownUserId as Any?]
+            return ["rovenueId": u.rovenueId, "appUserId": u.appUserId as Any?]
         }
-        AsyncFunction("identify") { (knownUserId: String) in
-            try await Rovenue.shared.identify(knownUserId)
+        AsyncFunction("identify") { (appUserId: String) in
+            try await Rovenue.shared.identify(appUserId)
+        }
+        AsyncFunction("logOut") {
+            try await Rovenue.shared.logOut()
         }
         AsyncFunction("entitlement") { (id: String) -> [String: Any?]? in
             guard let e = await Rovenue.shared.entitlement(id) else { return nil }

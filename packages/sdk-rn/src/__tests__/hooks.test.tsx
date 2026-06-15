@@ -36,10 +36,10 @@ describe("Rovenue hooks", () => {
   });
 
   it("useCurrentUser warms up on mount then renders", async () => {
-    native.__state.user = { anonId: "anon_1", knownUserId: null };
+    native.__state.user = { rovenueId: "anon_1", appUserId: null };
     function App() {
       const user = useCurrentUser();
-      return <span data-testid="u">{user?.anonId ?? "loading"}</span>;
+      return <span data-testid="u">{user?.rovenueId ?? "loading"}</span>;
     }
     render(<App />);
     // Initial render: warm-up is in-flight, store empty.
@@ -52,13 +52,13 @@ describe("Rovenue hooks", () => {
   it("useCurrentUser updates on IDENTITY_CHANGED event", async () => {
     function App() {
       const user = useCurrentUser();
-      return <span data-testid="u">{user?.knownUserId ?? "anon"}</span>;
+      return <span data-testid="u">{user?.appUserId ?? "anon"}</span>;
     }
     render(<App />);
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     expect(screen.getByTestId("u").textContent).toBe("anon");
     await act(async () => {
-      native.__state.user = { anonId: "anon_1", knownUserId: "user_42" };
+      native.__state.user = { rovenueId: "anon_1", appUserId: "user_42" };
       native.__emit("IDENTITY_CHANGED");
       await new Promise((r) => setTimeout(r, 0));
     });

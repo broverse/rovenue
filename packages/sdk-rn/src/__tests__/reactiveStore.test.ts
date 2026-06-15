@@ -17,7 +17,7 @@ describe("ReactiveStore", () => {
     const s = new ReactiveStore();
     const cb = vi.fn();
     s.subscribe(cb);
-    s.set("user", { anonId: "a", knownUserId: null });
+    s.set("user", { rovenueId: "a", appUserId: null });
     expect(cb).toHaveBeenCalledTimes(1);
   });
 
@@ -25,7 +25,7 @@ describe("ReactiveStore", () => {
     const s = new ReactiveStore();
     const cb = vi.fn();
     const unsub = s.subscribe(cb);
-    s.set("user", { anonId: "a", knownUserId: null });
+    s.set("user", { rovenueId: "a", appUserId: null });
     unsub();
     s.set("creditBalance", 5);
     expect(cb).toHaveBeenCalledTimes(1);
@@ -44,7 +44,7 @@ describe("ReactiveStore", () => {
 
   it("clear empties values and notifies subscribers", () => {
     const s = new ReactiveStore();
-    s.set("user", { anonId: "a", knownUserId: null });
+    s.set("user", { rovenueId: "a", appUserId: null });
     const cb = vi.fn();
     s.subscribe(cb);
     s.clear();

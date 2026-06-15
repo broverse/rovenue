@@ -20,11 +20,11 @@ describe("eventBridge", () => {
 
   it("IDENTITY_CHANGED refreshes user in store", async () => {
     startEventBridge();
-    native.__state.user = { anonId: "anon_xyz", knownUserId: "user_42" };
+    native.__state.user = { rovenueId: "anon_xyz", appUserId: "user_42" };
     native.__emit("IDENTITY_CHANGED");
     // The handler awaits native.currentUser(), so flush microtasks.
     await new Promise((r) => setTimeout(r, 0));
-    expect(store.get("user")).toEqual({ anonId: "anon_xyz", knownUserId: "user_42" });
+    expect(store.get("user")).toEqual({ rovenueId: "anon_xyz", appUserId: "user_42" });
   });
 
   it("ENTITLEMENTS_CHANGED refreshes entitlementsAll + per-id slots", async () => {

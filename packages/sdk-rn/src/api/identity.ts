@@ -14,6 +14,10 @@ export async function currentUser(): Promise<User> {
   return call(() => getNative().currentUser());
 }
 
-export async function identify(knownUserId: string): Promise<void> {
-  return call(() => getNative().identify(knownUserId));
+export async function identify(appUserId: string): Promise<void> {
+  return call(() => getNative().identify(appUserId));
+}
+
+export async function logOut(): Promise<void> {
+  return call(() => getNative().logOut());
 }

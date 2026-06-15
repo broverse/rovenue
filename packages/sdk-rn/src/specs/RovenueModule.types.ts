@@ -4,8 +4,8 @@
 // `requireNativeModule('Rovenue')`.
 
 export type UserDTO = {
-  anonId: string;
-  knownUserId: string | null;
+  rovenueId: string;
+  appUserId: string | null;
 };
 
 export type EntitlementDTO = {
@@ -73,7 +73,8 @@ export interface RovenueModuleSpec {
 
   // Identity
   currentUser(): Promise<UserDTO>;
-  identify(knownUserId: string): Promise<void>;
+  identify(appUserId: string): Promise<void>;
+  logOut(): Promise<void>;
 
   // Entitlements
   entitlement(id: string): Promise<EntitlementDTO | null>;
