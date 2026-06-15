@@ -9,6 +9,8 @@ import { ok } from "../../lib/response";
 import { listDailyMrr } from "../../services/metrics/mrr";
 import { getRevenueSummary } from "../../services/metrics/summary";
 import { getLtvDistribution } from "../../services/metrics/ltv";
+import { getMrrDecomposition } from "../../services/metrics/mrr-decomposition";
+import { listEngagement } from "../../services/metrics/engagement";
 
 // =============================================================
 // Dashboard: Project metrics
@@ -132,4 +134,47 @@ export const metricsRoute = new Hono()
 
     const distribution = await getLtvDistribution(projectId);
     return c.json(ok(distribution));
+  })
+  .get(
+    "/mrr-decomposition",
+    zValidator("query", mrrQuerySchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      if (!projectId) {
+        throw new HTTPException(400, { message: "Missing projectId" });
+      }
+      const user = c.get("user");
+      await assertProjectAccess(
+        projectId,
+        user.id,
+        MemberRole.CUSTOMER_SUPPORT,
+      );
+      const { from, to } = c.req.valid("query");
+      const d = await getMrrDecomposition({ projectId, from, to });
+      return c.json(
+        ok({ from: from.toISOString(), to: to.toISOString(), ...d }),
+      );
+    },
+  )
+  .get("/engagement", zValidator("query", mrrQuerySchema), async (c) => {
+    const projectId = c.req.param("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "Missing projectId" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+    const { from, to } = c.req.valid("query");
+    const points = await listEngagement({ projectId, from, to });
+    return c.json(
+      ok({
+        from: from.toISOString(),
+        to: to.toISOString(),
+        points: points.map((p) => ({
+          bucket: p.bucket.toISOString(),
+          sessionCount: p.sessionCount,
+          avgSessionMs: p.avgSessionMs,
+          activeSubscribers: p.activeSubscribers,
+        })),
+      }),
+    );
   });
