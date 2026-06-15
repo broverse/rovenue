@@ -30,6 +30,11 @@ SET attributes = (
     '{}'::jsonb
   )
   FROM jsonb_each(s.attributes) AS kv
+  -- A legacy key stored with an explicit JSON null means "no value" —
+  -- drop it entirely (spec: null = delete, no tombstone). Filtering here
+  -- keeps it out of jsonb_object_agg, which would otherwise preserve it
+  -- as a jsonb null rather than removing the key.
+  WHERE jsonb_typeof(kv.value) <> 'null'
 )
 WHERE s.attributes IS NOT NULL
   AND s.attributes <> '{}'::jsonb;

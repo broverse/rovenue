@@ -52,7 +52,8 @@ impl AttributeDispatcher {
         self.http.post_attributes(&sub_id, &map)?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
         self.buffer.delete(&ids)?;
-        Ok(rows.len())
+        // Report distinct keys synced (coalesced), not raw queue rows drained.
+        Ok(map.len())
     }
 
     /// Register the periodic flush on the scheduler (30s, same cadence

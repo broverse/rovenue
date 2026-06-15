@@ -1,16 +1,15 @@
-import { Chip } from "@heroui/react";
 import { useTranslation } from "react-i18next";
 import type {
   AttributeEntry,
   AttributeSource,
   SubscriberAttributes,
 } from "@rovenue/shared";
+import { Chip, type ChipProps } from "../../ui/chip";
 
-const SOURCE_COLOR: Record<
-  AttributeSource,
-  "accent" | "warning" | "success" | "default"
-> = {
-  sdk: "accent",
+// Use the project's design-token Chip (tone-based) for visual
+// consistency with the other subscriber-detail status chips.
+const SOURCE_TONE: Record<AttributeSource, NonNullable<ChipProps["tone"]>> = {
+  sdk: "primary",
   server: "warning",
   dashboard: "success",
   legacy: "default",
@@ -65,11 +64,7 @@ export function AttributesTable({
               <td className="py-2 pr-4 font-mono text-xs">{key}</td>
               <td className="py-2 pr-4 break-all">{entry.value}</td>
               <td className="py-2 pr-4">
-                <Chip
-                  size="sm"
-                  variant="soft"
-                  color={SOURCE_COLOR[entry.source] ?? "default"}
-                >
+                <Chip tone={SOURCE_TONE[entry.source] ?? "default"}>
                   {entry.source}
                 </Chip>
               </td>

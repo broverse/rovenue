@@ -219,7 +219,7 @@ impl RovenueCore {
         // token and buffered session events are tied to the previous scope.
         self.account_tokens.clear()?;
         self.sessions.clear()?;
-        let _ = self.attributes.clear();
+        self.attributes.clear()?;
         // Entitlements and credits are stateless scope-keyed readers (no in-memory
         // cache); the new rovenue_id scope naturally reads empty, so no clear call.
         Ok(())

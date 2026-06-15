@@ -174,7 +174,7 @@ export const meRoute = new Hono()
         ok({
           subscriber: {
             id: updated.id,
-            appUserId: updated.rovenueId,
+            appUserId: updated.appUserId,
             attributes: flattenAttributes(updated.attributes),
           },
         }),
