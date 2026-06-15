@@ -3,6 +3,12 @@ import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { FeatureFlagEnv, drizzle } from "@rovenue/db";
+import {
+  attributesBodySchema,
+  applyMutations,
+  flattenAttributes,
+  normalizeStored,
+} from "@rovenue/shared";
 import { evaluateAllFlags } from "../../services/flag-engine";
 import { evaluateExperiments } from "../../services/experiment-engine";
 import { ok } from "../../lib/response";
@@ -59,7 +65,7 @@ function resolveEnv(c: Context): FeatureFlagEnv {
 }
 
 export const configBodySchema = z.object({
-  attributes: z.record(z.unknown()).optional(),
+  attributes: attributesBodySchema.shape.attributes.optional(),
 });
 
 export type ConfigBody = z.infer<typeof configBodySchema>;
@@ -74,7 +80,7 @@ function resolveSubscriberId(c: Context): string | null {
 
 async function handleConfig(
   c: Context,
-  requestAttributes: Record<string, unknown>,
+  requestAttributes: Record<string, string | null>,
 ) {
   const project = c.get("project");
   const appUserId = resolveSubscriberId(c);
@@ -86,35 +92,34 @@ async function handleConfig(
   }
 
   // Read-then-upsert so we can merge request-supplied attributes
-  // into the stored set instead of overwriting. A subscriber who
-  // moves from country=TR to country=US must be reflected in both
-  // the evaluation path AND the stored attributes, otherwise the
-  // dashboard's "subscribers with country=TR" view goes stale.
+  // into the stored nested set instead of overwriting. We persist the
+  // nested shape and pass a FLAT projection to flag/experiment
+  // evaluation so the engines keep receiving flat maps.
   const existing =
     await drizzle.subscriberRepo.findSubscriberAttributesByRovenueId(
       drizzle.db,
       { projectId: project.id, rovenueId: appUserId },
     );
-  const mergedAttributes: Record<string, unknown> = {
-    ...((existing?.attributes as Record<string, unknown> | null) ?? {}),
-    ...requestAttributes,
-  };
-
+  const currentNested = normalizeStored(existing?.attributes);
   const hasNewAttributes = Object.keys(requestAttributes).length > 0;
+  const now = new Date().toISOString();
+  const mergedNested = applyMutations(currentNested, requestAttributes, "sdk", now);
+  const evalAttributes = flattenAttributes(mergedNested);
+
   const subscriber = await drizzle.subscriberRepo.upsertSubscriber(
     drizzle.db,
     {
       projectId: project.id,
       rovenueId: appUserId,
-      createAttributes: requestAttributes,
-      ...(hasNewAttributes && { updateAttributes: mergedAttributes }),
+      createAttributes: mergedNested,
+      ...(hasNewAttributes && { updateAttributes: mergedNested }),
     },
   );
 
   const env = resolveEnv(c);
   const [flags, experiments] = await Promise.all([
-    evaluateAllFlags(project.id, env, subscriber.id, mergedAttributes),
-    evaluateExperiments(project.id, subscriber.id, mergedAttributes),
+    evaluateAllFlags(project.id, env, subscriber.id, evalAttributes),
+    evaluateExperiments(project.id, subscriber.id, evalAttributes),
   ]);
 
   return c.json(ok({ flags, experiments }));

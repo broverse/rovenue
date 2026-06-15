@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { drizzle } from "@rovenue/db";
+import { flattenAttributes } from "@rovenue/shared";
 import { evaluateExperiments } from "../../services/experiment-engine";
 import { ok } from "../../lib/response";
 
@@ -164,8 +165,7 @@ export const offeringsRoute = new Hono()
         { projectId: project.id, key: subscriberAppUserId },
       );
       if (subscriber) {
-        const attributes =
-          (subscriber.attributes as Record<string, unknown> | null) ?? {};
+        const attributes = flattenAttributes(subscriber.attributes);
         const experiments = await evaluateExperiments(
           project.id,
           subscriber.id,
