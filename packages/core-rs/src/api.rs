@@ -136,11 +136,11 @@ impl RovenueCore {
             scheduler,
             store: store_for_self,
         };
-        // One best-effort reconcile at startup so a pending identify() from a
-        // prior offline session syncs without waiting for the first scheduler
-        // tick (which also only runs in foreground). Non-blocking: a single
-        // short-timeout POST; failure is swallowed and retried by the tick.
-        core.reconcile_identity();
+        // No synchronous startup reconcile: it would block configure() on the
+        // network, and spawning it on a thread races a concurrent identify()
+        // (both observe the same pending state before mark_synced → double
+        // POST). The foreground "identify_reconcile" scheduler tick registered
+        // above is the sole retry path for a pending offline identify().
         Ok(core)
     }
 
