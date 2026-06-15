@@ -417,7 +417,9 @@ Call `reconcile_identity()` once near the end of `from_store` (spawn on the exis
 
 - [ ] **Step 1: Failing test**
 
-Add `IdentityTests` asserting: `currentUser()` exposes `.rovenueId` / `.appUserId` (the generated `User` fields), and `Rovenue.shared.logOut()` exists and runs (mirror the existing test harness: `configure()` + `resetForTesting()`). Run `swift test --package-path packages/sdk-swift --filter IdentityTests` → FAIL.
+Add `IdentityTests` asserting: `currentUser()` exposes `.rovenueId` / `.appUserId` (the generated `User` fields), and `Rovenue.shared.logOut()` exists and runs.
+
+**REQUIRED test isolation (added by commit `0dfcf69`):** identity writes to the Rust core's on-disk SQLite cache, which persists across tests. Use the existing `Support/TestHome.swift` helper — call `isolateRovenueHome(self)` at the **very top of `setUp()`**, before `Rovenue.resetForTesting()` / `Rovenue.configure(...)`. Mirror the other suites (e.g. `RovenueTests.swift`) that already do this. Without it, `identify`/`logOut` state leaks between tests and causes flakes. Run `swift test --package-path packages/sdk-swift --filter IdentityTests` → FAIL.
 
 - [ ] **Step 2: Implement**
 
