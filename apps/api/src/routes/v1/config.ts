@@ -90,10 +90,11 @@ async function handleConfig(
   // moves from country=TR to country=US must be reflected in both
   // the evaluation path AND the stored attributes, otherwise the
   // dashboard's "subscribers with country=TR" view goes stale.
-  const existing = await drizzle.subscriberRepo.findSubscriberAttributes(
-    drizzle.db,
-    { projectId: project.id, appUserId },
-  );
+  const existing =
+    await drizzle.subscriberRepo.findSubscriberAttributesByRovenueId(
+      drizzle.db,
+      { projectId: project.id, rovenueId: appUserId },
+    );
   const mergedAttributes: Record<string, unknown> = {
     ...((existing?.attributes as Record<string, unknown> | null) ?? {}),
     ...requestAttributes,

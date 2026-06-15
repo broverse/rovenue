@@ -57,6 +57,34 @@ export async function findSubscriberAttributes(
   return rows[0] ?? null;
 }
 
+export interface FindByRovenueIdForAttributesArgs {
+  projectId: string;
+  rovenueId: string;
+}
+
+/**
+ * Attribute-only lookup by (projectId, rovenueId). Returns `null`
+ * when the row doesn't exist. Used by the /v1/config route to read
+ * existing attributes before the upsert so they can be merged
+ * rather than overwritten.
+ */
+export async function findSubscriberAttributesByRovenueId(
+  db: Db,
+  args: FindByRovenueIdForAttributesArgs,
+): Promise<{ attributes: unknown } | null> {
+  const rows = await db
+    .select({ attributes: subscribers.attributes })
+    .from(subscribers)
+    .where(
+      and(
+        eq(subscribers.projectId, args.projectId),
+        eq(subscribers.rovenueId, args.rovenueId),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 /**
  * Full-row lookup by (projectId, appUserId). Used when the caller
  * needs more than just attributes (e.g. the transfer service

@@ -20,13 +20,15 @@ declare module "hono" {
  */
 export const appUserContext: MiddlewareHandler = async (c, next) => {
   const project = c.get("project");
-  const appUserId = c.req.header(HEADER.X_ROVENUE_APP_USER_ID)?.trim();
-  if (!appUserId) {
+  // Carries the device key: a rovenueId going forward, a legacy
+  // appUserId during the dual-read migration window.
+  const key = c.req.header(HEADER.X_ROVENUE_APP_USER_ID)?.trim();
+  if (!key) {
     throw new HTTPException(400, {
       message: `${HEADER.X_ROVENUE_APP_USER_ID} header is required`,
     });
   }
-  const subscriber = await resolveSubscriber(project.id, appUserId);
+  const subscriber = await resolveSubscriber(project.id, key);
   c.set("subscriber", subscriber);
   await next();
 };
