@@ -23,11 +23,23 @@ export interface RateLimitOptions {
   identify?: (c: Context) => string;
 }
 
-function clientIp(c: Context): string {
-  return (
-    c.req.header(HEADER.X_FORWARDED_FOR)?.split(",")[0]?.trim() ||
-    ANONYMOUS_ID
-  );
+export function clientIp(c: Context): string {
+  const xff = c.req.header(HEADER.X_FORWARDED_FOR);
+  if (xff) {
+    const hops = xff
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (hops.length > 0) {
+      // Read at call time so tests (and runtime restarts) can vary the value.
+      const trustedProxyCount = Number(
+        process.env.TRUSTED_PROXY_COUNT ?? "1",
+      );
+      const idx = Math.max(0, hops.length - 1 - trustedProxyCount);
+      return hops[idx];
+    }
+  }
+  return c.req.header("x-real-ip") ?? "unknown";
 }
 
 function rateLimitedResponse(
