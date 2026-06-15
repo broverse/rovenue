@@ -5,6 +5,7 @@ import { cn } from "../../lib/cn";
 import { formatCurrencyCompact } from "./format";
 import { useProjectMrr } from "../../lib/hooks/useProjectMrr";
 import { useChartAnnotations } from "../../lib/hooks/useProjectCharts";
+import { useProjectMrrDecomposition } from "../../lib/hooks/useProjectMrrDecomposition";
 import type { ChartType, RangeOption } from "./types";
 
 // =============================================================
@@ -157,6 +158,11 @@ export function MrrChartPanel({ projectId, chartType, compare, range }: Props) {
   }, [prevTo, months]);
 
   const currentQuery = useProjectMrr({
+    projectId,
+    from: currentFrom,
+    to: currentTo,
+  });
+  const decomposition = useProjectMrrDecomposition({
     projectId,
     from: currentFrom,
     to: currentTo,
@@ -543,7 +549,12 @@ export function MrrChartPanel({ projectId, chartType, compare, range }: Props) {
         )}
       </svg>
 
-      <Decomposition />
+      <Decomposition
+        newUsd={decomposition.data?.newUsd}
+        expansionUsd={decomposition.data?.expansionUsd}
+        churnedUsd={decomposition.data?.churnedUsd}
+        loading={decomposition.isLoading}
+      />
     </section>
   );
 }
@@ -571,18 +582,30 @@ function Legend({
   );
 }
 
-function Decomposition() {
+function Decomposition({
+  newUsd,
+  expansionUsd,
+  churnedUsd,
+  loading,
+}: {
+  newUsd?: string;
+  expansionUsd?: string;
+  churnedUsd?: string;
+  loading?: boolean;
+}) {
   const { t } = useTranslation();
-  // The new/expansion/contraction/churn breakdown isn't exposed by
-  // the read API yet. Render the four cells with zeros so the
-  // panel keeps its shape; tracked as a follow-up.
+  const fmt = (v?: string) =>
+    loading || v == null ? "—" : formatCurrencyCompact(Number(v));
   const items = [
-    { key: "newMrr", labelKey: "charts.decomposition.newMrr" },
-    { key: "expansion", labelKey: "charts.decomposition.expansion" },
-    { key: "contraction", labelKey: "charts.decomposition.contraction" },
-    { key: "churned", labelKey: "charts.decomposition.churned" },
+    { key: "newMrr", labelKey: "charts.decomposition.newMrr", value: fmt(newUsd) },
+    { key: "expansion", labelKey: "charts.decomposition.expansion", value: fmt(expansionUsd) },
+    { key: "contraction", labelKey: "charts.decomposition.contraction", value: "—" },
+    {
+      key: "churned",
+      labelKey: "charts.decomposition.churned",
+      value: loading || churnedUsd == null ? "—" : `−${formatCurrencyCompact(Number(churnedUsd))}`,
+    },
   ];
-  const zero = formatCurrencyCompact(0);
 
   return (
     <div className="mt-3.5 grid grid-cols-2 gap-3 border-t border-rv-divider pt-3.5 md:grid-cols-4">
@@ -592,11 +615,9 @@ function Decomposition() {
             {t(item.labelKey)}
           </div>
           <div className="mt-1 font-rv-mono text-[16px] font-medium tabular-nums text-rv-mute-700">
-            {zero}
+            {item.value}
           </div>
-          <div className="mt-0.5 font-rv-mono text-[11px] text-rv-mute-500">
-            —
-          </div>
+          <div className="mt-0.5 font-rv-mono text-[11px] text-rv-mute-500">—</div>
         </div>
       ))}
     </div>
