@@ -551,7 +551,8 @@ export function MrrChartPanel({ projectId, chartType, compare, range }: Props) {
 
       <Decomposition
         newUsd={decomposition.data?.newUsd}
-        expansionUsd={decomposition.data?.expansionUsd}
+        retainedUsd={decomposition.data?.retainedUsd}
+        reactivationUsd={decomposition.data?.reactivationUsd}
         churnedUsd={decomposition.data?.churnedUsd}
         loading={decomposition.isLoading}
       />
@@ -584,20 +585,22 @@ function Legend({
 
 function Decomposition({
   newUsd,
-  expansionUsd,
+  retainedUsd,
+  reactivationUsd,
   churnedUsd,
   loading,
 }: {
   newUsd?: string;
-  expansionUsd?: string;
+  retainedUsd?: string;
+  reactivationUsd?: string;
   churnedUsd?: string;
   loading?: boolean;
 }) {
   const { t } = useTranslation();
   const items = [
     { key: "newMrr", labelKey: "charts.decomposition.newMrr", value: fmtMoney(newUsd, loading) },
-    { key: "expansion", labelKey: "charts.decomposition.expansion", value: fmtMoney(expansionUsd, loading) },
-    { key: "contraction", labelKey: "charts.decomposition.contraction", value: "—" }, // contraction has no backing field in MrrDecompositionResponse (no downgrade events) — intentionally blank, not a loading placeholder
+    { key: "retained", labelKey: "charts.decomposition.retained", value: fmtMoney(retainedUsd, loading) },
+    { key: "reactivation", labelKey: "charts.decomposition.reactivation", value: fmtMoney(reactivationUsd, loading) },
     {
       key: "churned",
       labelKey: "charts.decomposition.churned",

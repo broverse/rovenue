@@ -2631,8 +2631,8 @@
     },
     "decomposition": {
       "newMrr": "New MRR",
-      "expansion": "Expansion",
-      "contraction": "Contraction",
+      "retained": "Retained",
+      "reactivation": "Reactivation",
       "churned": "Churned"
     },
     "revenueKpis": {
