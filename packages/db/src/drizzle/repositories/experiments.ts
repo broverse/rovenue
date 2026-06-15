@@ -73,6 +73,25 @@ export async function findExperimentById(
   return rows[0] ?? null;
 }
 
+/**
+ * Project-scoped lookup. Returns the experiment only when it belongs to
+ * the given project — used by SDK public-key endpoints so a caller can't
+ * reference another tenant's experiment id. Returns null on no match or
+ * cross-project id.
+ */
+export async function findByIdInProject(
+  db: Db,
+  id: string,
+  projectId: string,
+): Promise<Experiment | null> {
+  const rows = await db
+    .select()
+    .from(experiments)
+    .where(and(eq(experiments.id, id), eq(experiments.projectId, projectId)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function findFirstExperimentByAudience(
   db: Db,
   audienceId: string,

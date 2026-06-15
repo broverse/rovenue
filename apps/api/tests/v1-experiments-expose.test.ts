@@ -23,7 +23,15 @@ vi.mock("@rovenue/db", () => ({
   }),
   drizzle: {
     db: {} as unknown,
+    experimentRepo: {
+      // Default: experiment is owned by the caller's project.
+      findByIdInProject: vi.fn(async (_db: unknown, id: string) => ({
+        id,
+        projectId: "proj_test",
+      })),
+    },
     subscriberRepo: {
+      // Resolves the client-supplied id to a project-owned subscriber.
       upsertSubscriber: vi.fn(async () => ({ id: "sub_stub" })),
     },
     outboxRepo: { insert: vi.fn(async () => undefined) },
@@ -81,7 +89,8 @@ describe("POST /v1/experiments/:id/expose", () => {
       experimentId: "exp_1",
       variantId: "control",
       projectId: "proj_test",
-      subscriberId: "sub_1",
+      // Resolved, project-owned subscriber id — NOT the raw body id.
+      subscriberId: "sub_stub",
       platform: "ios",
       country: "US",
     });

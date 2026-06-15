@@ -133,13 +133,36 @@ export const experimentsRoute = new Hono()
       const input = c.req.valid("json");
       const project = c.get("project");
 
+      // Tenant ownership: the experiment must belong to the caller's
+      // project. A cross-project id surfaces as 404 (mirrors /results)
+      // so a shipped public key can't poison another tenant's analytics.
+      const experiment = await drizzle.experimentRepo.findByIdInProject(
+        drizzle.db,
+        experimentId,
+        project.id,
+      );
+      if (!experiment) {
+        throw new HTTPException(404, { message: "experiment not found" });
+      }
+
+      // Resolve the client-supplied id to a project-owned subscriber so
+      // the exposure is always stamped with an id we own (mirrors /track).
+      const subscriber = await drizzle.subscriberRepo.upsertSubscriber(
+        drizzle.db,
+        {
+          projectId: project.id,
+          rovenueId: input.subscriberId,
+          createAttributes: {},
+        },
+      );
+
       try {
         await getDb().transaction(async (tx) => {
           await eventBus.publishExposure(tx, {
             experimentId,
             variantId: input.variantId,
             projectId: project.id,
-            subscriberId: input.subscriberId,
+            subscriberId: subscriber.id,
             platform: input.platform,
             country: input.country,
             exposedAt: input.exposedAt ? new Date(input.exposedAt) : undefined,
