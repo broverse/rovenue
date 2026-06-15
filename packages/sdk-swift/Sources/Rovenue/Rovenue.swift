@@ -190,12 +190,12 @@ public final class Rovenue: @unchecked Sendable {
     /// Associate the SDK's user with the customer's app-side user id.
     /// Client-local only — server-side merging happens via the customer's
     /// backend calling `/v1/subscribers/transfer` with the secret key.
-    public func identify(_ knownUserId: String) async throws {
+    public func identify(_ appUserId: String) async throws {
         Self.emit(LogEntry(level: "info", message: "identify"))
         do {
             try await dispatcher.run { [core] in
                 do {
-                    try core.identify(knownUserId: knownUserId)
+                    try core.identify(appUserId: appUserId)
                 } catch let err as RovenueError {
                     throw mapError(err)
                 }
@@ -203,6 +203,22 @@ public final class Rovenue: @unchecked Sendable {
             Self.emit(LogEntry(level: "info", message: "identify ok"))
         } catch {
             Self.emit(LogEntry(level: "error", message: "identify failed: \(error.localizedDescription)"))
+            throw error
+        }
+    }
+
+    /// Reset the SDK to an anonymous state, discarding any associated app user id.
+    /// The core generates a new anonymous `rovenueId`; `appUserId` becomes nil.
+    @available(iOS 15.0, macOS 12.0, *)
+    public func logOut() async throws {
+        Self.emit(LogEntry(level: "info", message: "logOut"))
+        do {
+            try await dispatcher.run { [core] in
+                do { try core.logOut() } catch let e as RovenueError { throw mapError(e) }
+            }
+            Self.emit(LogEntry(level: "info", message: "logOut ok"))
+        } catch {
+            Self.emit(LogEntry(level: "error", message: "logOut failed: \(error.localizedDescription)"))
             throw error
         }
     }

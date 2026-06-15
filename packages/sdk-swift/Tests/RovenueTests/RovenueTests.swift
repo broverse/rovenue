@@ -41,11 +41,11 @@ final class RovenueTests: XCTestCase {
         XCTAssertEqual(Rovenue.shared.version, sdkVersion())
     }
 
-    func test_facade_currentUserHasAnonId() async throws {
+    func test_facade_currentUserHasRovenueId() async throws {
         try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.dev")
         let user = await Rovenue.shared.currentUser()
-        XCTAssertTrue(user.anonId.hasPrefix("anon_"))
-        XCTAssertNil(user.knownUserId)
+        XCTAssertTrue(user.rovenueId.hasPrefix("rov_"))
+        XCTAssertNil(user.appUserId)
     }
 
     func test_facade_entitlementsEmpty() async throws {
@@ -70,6 +70,6 @@ final class RovenueTests: XCTestCase {
         let event = await iterator.next()
         XCTAssertEqual(event, .identityChanged)
         let user = await Rovenue.shared.currentUser()
-        XCTAssertEqual(user.knownUserId, "user_42")
+        XCTAssertEqual(user.appUserId, "user_42")
     }
 }
