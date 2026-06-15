@@ -8,13 +8,20 @@
 
 package dev.rovenue.sdk
 
+import android.app.Activity
+import android.content.Context
 import dev.rovenue.sdk.generated.Config
+import dev.rovenue.sdk.generated.CoreOffering
+import dev.rovenue.sdk.generated.CoreOfferingProduct
+import dev.rovenue.sdk.generated.CoreOfferings
 import dev.rovenue.sdk.generated.RovenueCore
 import dev.rovenue.sdk.generated.RovenueException
 import dev.rovenue.sdk.generated.SessionEventKind
 import dev.rovenue.sdk.generated.sdkVersion
 import dev.rovenue.sdk.internal.Dispatcher
 import dev.rovenue.sdk.internal.ObserverBridge
+import dev.rovenue.sdk.internal.PlayBillingStore
+import dev.rovenue.sdk.internal.PlayPurchaseFlow
 import java.util.UUID
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -37,6 +44,7 @@ class Rovenue private constructor(
     internal val bridge: ObserverBridge,
     internal val dispatcher: Dispatcher,
     private val appVersion: String?,
+    private val appContext: Context?,
 ) {
     /**
      * Test-only accessor that exposes the appVersion captured at
@@ -59,6 +67,9 @@ class Rovenue private constructor(
         /**
          * Configure the SDK.
          *
+         * @param context An Android [Context]; the application context is
+         *   retained and used to drive Play Billing during [purchase]. May be
+         *   null only in pure-JVM/unit-test scenarios that never purchase.
          * @param appVersion The host app's user-facing version string. On
          *   Android, callers should pass
          *   `context.packageManager.getPackageInfo(context.packageName, 0).versionName`
@@ -72,6 +83,7 @@ class Rovenue private constructor(
             baseUrl: String,
             debug: Boolean = false,
             appVersion: String? = null,
+            context: Context? = null,
         ) {
             emit(LogEntry(level = "info", message = "configure"))
             if (apiKey.isBlank()) {
@@ -86,7 +98,13 @@ class Rovenue private constructor(
             val core = RovenueCore(config)  // may throw RovenueException
             val bridge = ObserverBridge()
             core.registerObserver(bridge)
-            val instance = Rovenue(core, bridge, Dispatcher(), appVersion)
+            val instance = Rovenue(
+                core,
+                bridge,
+                Dispatcher(),
+                appVersion,
+                context?.applicationContext,
+            )
             synchronized(lock) {
                 _shared?.shutdownInternal()
                 _shared = instance
@@ -240,10 +258,6 @@ class Rovenue private constructor(
     }
 
     // ---------------------------------------------------------------
-    // Receipts
-    // ---------------------------------------------------------------
-
-    // ---------------------------------------------------------------
     // Refund Shield — stable per-subscriber token
     // ---------------------------------------------------------------
 
@@ -290,65 +304,85 @@ class Rovenue private constructor(
         dispatcher.run { core.flushSessionEvents() }
 
     // ---------------------------------------------------------------
-    // Receipts
+    // Offerings & purchasing
     // ---------------------------------------------------------------
 
-    /** Post an Apple StoreKit 2 JWS to the server for validation.
-     *  Caller obtains JWS via `Product.purchase()` on iOS (this SDK does
-     *  NOT call StoreKit). On success, refreshes entitlements + credits
-     *  and returns a ReceiptResult.
-     *
-     *  [appAccountToken] is the UUID the host app supplied to
-     *  `Product.purchase(options: [.appAccountToken(uuid)])`. The backend
-     *  cross-references it vs the JWS-decoded `appAccountToken` claim.
-     *  Optional. */
+    /** Fetch the project's offerings. The list (and which one is `current`)
+     *  comes from the Rovenue backend. In v1 the price fields are null —
+     *  offerings are configuration-only; localized prices come from Play
+     *  Billing's ProductDetails at purchase time. */
     @Throws(RovenueException::class)
-    suspend fun postAppleReceipt(
-        jws: String,
-        productId: String,
-        appAccountToken: String? = null,
-    ): dev.rovenue.sdk.generated.ReceiptResult {
-        emit(LogEntry(level = "info", message = "postAppleReceipt"))
+    suspend fun getOfferings(): Offerings {
+        emit(LogEntry(level = "info", message = "getOfferings"))
         try {
-            val result = dispatcher.run {
-                core.postAppleReceipt(jws, productId, appAccountToken)
-            }
-            emit(LogEntry(level = "info", message = "postAppleReceipt ok"))
-            return result
+            val core: CoreOfferings = dispatcher.run { core.getOfferings() }
+            val offerings = core.offerings.map(::mapOffering)
+            val all = offerings.associateBy { it.identifier }
+            val current = core.current?.let { all[it] }
+            emit(LogEntry(level = "info", message = "getOfferings ok"))
+            return Offerings(current = current, all = all)
         } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "postAppleReceipt failed: ${e.message ?: e.javaClass.simpleName}"))
+            emit(LogEntry(level = "error", message = "getOfferings failed: ${e.message ?: e.javaClass.simpleName}"))
             throw e
         }
     }
 
-    /** Post a Google Play Billing purchase token to the server for
-     *  validation. Caller obtains the token via `Purchase.purchaseToken`
-     *  on Android. On success, refreshes entitlements + credits and
-     *  returns a ReceiptResult.
-     *
-     *  [obfuscatedAccountId] / [obfuscatedProfileId] are the values the
-     *  host app passed to `BillingFlowParams.Builder.setObfuscatedAccountId(...)`
-     *  / `setObfuscatedProfileId(...)`. They survive into Play's RTDN
-     *  messages and let the backend attribute refunds back to a known
-     *  subscriber. Optional. */
-    @Throws(RovenueException::class)
-    suspend fun postGoogleReceipt(
-        receipt: String,
-        productId: String,
-        obfuscatedAccountId: String? = null,
-        obfuscatedProfileId: String? = null,
-    ): dev.rovenue.sdk.generated.ReceiptResult {
-        emit(LogEntry(level = "info", message = "postGoogleReceipt"))
+    private fun mapProduct(p: CoreOfferingProduct): StoreProduct =
+        StoreProduct(
+            id = p.googleProductId ?: p.identifier,
+            type = ProductType.from(p.productType),
+            displayName = p.displayName,
+        )
+
+    private fun mapOffering(o: CoreOffering): Offering =
+        Offering(
+            identifier = o.identifier,
+            isDefault = o.isDefault,
+            packages = o.packages.map { Package(identifier = it.identifier, product = mapProduct(it)) },
+        )
+
+    /** Purchase the product backing a [Package]. */
+    suspend fun purchase(activity: Activity, pkg: Package): PurchaseResult =
+        purchase(activity, pkg.product)
+
+    /** Purchase a [StoreProduct] via Play Billing. Launches the billing flow,
+     *  validates the purchase token server-side, acknowledges/consumes it,
+     *  then returns the refreshed entitlement/credit state. */
+    suspend fun purchase(activity: Activity, product: StoreProduct): PurchaseResult {
+        emit(LogEntry(level = "info", message = "purchase"))
+        val context = appContext
+            ?: throw StoreProblemException("Rovenue.configure(...) must be called with a Context before purchasing")
+        val token = runCatching { getAppAccountToken() }.getOrNull()
+        val flow = PlayPurchaseFlow(
+            store = PlayBillingStore(context),
+            validate = { receiptToken, pid ->
+                dispatcher.run { core.postGoogleReceipt(receiptToken, pid, token, null) }
+            },
+            snapshot = { entitlementsAll() to creditBalance() },
+        )
         try {
-            val result = dispatcher.run {
-                core.postGoogleReceipt(receipt, productId, obfuscatedAccountId, obfuscatedProfileId)
-            }
-            emit(LogEntry(level = "info", message = "postGoogleReceipt ok"))
+            val result = flow.run(activity, product.id, product.type, token)
+            emit(LogEntry(level = "info", message = "purchase ok"))
             return result
         } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "postGoogleReceipt failed: ${e.message ?: e.javaClass.simpleName}"))
+            emit(LogEntry(level = "error", message = "purchase failed: ${e.message ?: e.javaClass.simpleName}"))
             throw e
         }
+    }
+
+    /** Restore the user's prior purchases. v1: refreshes entitlements from the
+     *  server (Play Billing's queryPurchases-driven restore lands in a later
+     *  revision) and returns the resulting entitlement/credit state. */
+    @Throws(RovenueException::class)
+    suspend fun restorePurchases(activity: Activity): PurchaseResult {
+        emit(LogEntry(level = "info", message = "restorePurchases"))
+        refreshEntitlements()
+        return PurchaseResult(
+            entitlements = entitlementsAll(),
+            creditBalance = creditBalance(),
+            productId = "",
+            storeTransactionId = "",
+        )
     }
 
     // ---------------------------------------------------------------
