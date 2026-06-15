@@ -97,6 +97,32 @@ describe("metaCapiProvider.mapEvent", () => {
     const body = payload.body as Record<string, unknown>;
     expect(body.test_event_code).toBe("TEST123");
   });
+
+  it("throws when outboxEventId is empty (idempotency boundary missing)", () => {
+    // event_id is the SOLE provider-side dedup key; an empty one would
+    // silently degrade dedup, so mapEvent must fail loudly into the
+    // retry/dead-letter path rather than build a payload.
+    expect(() =>
+      metaCapiProvider.mapEvent(
+        makeEnvelope({ outboxEventId: "" }),
+        makeConfig(),
+        {},
+      ),
+    ).toThrow(/non-empty outboxEventId/);
+  });
+
+  it("a normal envelope still sets event_id from outboxEventId", () => {
+    const result = metaCapiProvider.mapEvent(
+      makeEnvelope({ outboxEventId: "ob-ok-1" }),
+      makeConfig(),
+      {},
+    );
+    expect(result).not.toHaveProperty("skip");
+    const body = (result as ProviderPayload).body as {
+      data: Array<{ event_id: string }>;
+    };
+    expect(body.data[0]!.event_id).toBe("ob-ok-1");
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -128,6 +128,19 @@ export const tiktokEventsProvider: IntegrationProvider = {
     config: ConnectionConfig,
     creds: ProviderCredentials,
   ): MapEventResult {
+    // outboxEventId is the SOLE provider-side idempotency boundary (it is
+    // stamped into TikTok's `event_id` for dedup; the DB unique index was
+    // intentionally dropped). In the real path it is a non-empty cuid2, but
+    // a future producer (e.g. a backfill building its own envelope) could
+    // pass an empty id and silently degrade dedup to "every send unique".
+    // Fail loudly so the delivery falls into the existing retry/dead-letter
+    // path instead of double-sending.
+    if (!envelope.outboxEventId) {
+      throw new Error(
+        "integration delivery requires a non-empty outboxEventId for provider-side idempotency",
+      );
+    }
+
     const eventKey = deriveEventKey(envelope);
     if (!eventKey) {
       return { skip: true, reason: "no_mapping" };

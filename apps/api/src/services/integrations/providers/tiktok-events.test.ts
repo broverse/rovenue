@@ -111,6 +111,32 @@ describe("tiktokEventsProvider.mapEvent", () => {
     );
     expect(result).toEqual({ skip: true, reason: "no_user_data" });
   });
+
+  it("throws when outboxEventId is empty (idempotency boundary missing)", () => {
+    // event_id is the SOLE provider-side dedup key; an empty one would
+    // silently degrade dedup, so mapEvent must fail loudly into the
+    // retry/dead-letter path rather than build a payload.
+    expect(() =>
+      tiktokEventsProvider.mapEvent(
+        makeEnvelope({ outboxEventId: "" }),
+        makeConfig(),
+        makeCreds(),
+      ),
+    ).toThrow(/non-empty outboxEventId/);
+  });
+
+  it("a normal envelope still sets event_id from outboxEventId", () => {
+    const result = tiktokEventsProvider.mapEvent(
+      makeEnvelope({ outboxEventId: "ob-ok-2" }),
+      makeConfig(),
+      makeCreds(),
+    );
+    expect(result).not.toHaveProperty("skip");
+    const body = (result as ProviderPayload).body as {
+      data: Array<{ event_id: string }>;
+    };
+    expect(body.data[0]!.event_id).toBe("ob-ok-2");
+  });
 });
 
 // ---------------------------------------------------------------------------
