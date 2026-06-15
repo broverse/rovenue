@@ -7,6 +7,7 @@ import XCTest
 final class AppVersionTests: XCTestCase {
     override func setUp() {
         super.setUp()
+        isolateRovenueHome(self)
         Rovenue.resetForTesting()
     }
 

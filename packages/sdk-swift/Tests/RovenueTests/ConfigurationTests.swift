@@ -4,6 +4,7 @@ import XCTest
 final class ConfigurationTests: XCTestCase {
     override func setUp() {
         super.setUp()
+        isolateRovenueHome(self)
         // Tests in this file must not assume any prior shared instance state.
         Rovenue.resetForTesting()
     }

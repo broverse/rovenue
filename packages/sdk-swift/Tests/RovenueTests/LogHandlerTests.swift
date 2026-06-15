@@ -5,6 +5,7 @@ final class LogHandlerTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
+        isolateRovenueHome(self)
         Rovenue.resetForTesting()
         try Rovenue.configure(apiKey: "pk_test", baseUrl: "https://api.test", debug: true)
     }
