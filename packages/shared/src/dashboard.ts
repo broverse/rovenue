@@ -537,6 +537,34 @@ export interface MrrSeriesResponse {
 }
 
 // =============================================================
+// Revenue summary — window KPIs (analytics surfacing Phase 1)
+// =============================================================
+//
+// Pure-ClickHouse window aggregate. ARPU (net ÷ active base) is
+// intentionally absent — it lands in Phase 2 with the active-base
+// source decision. All monetary fields are decimal-as-string.
+
+export interface RevenueSummaryResponse {
+  from: string;
+  to: string;
+  grossUsd: string;
+  refundsUsd: string;
+  netUsd: string;
+  /** refundsUsd / grossUsd in [0,1]; null when grossUsd is 0. */
+  refundRate: number | null;
+  /** Distinct subscribers with a non-refund revenue event in the window. */
+  payingSubscribers: number;
+  /** netUsd / payingSubscribers; null when payingSubscribers is 0. */
+  arppu: string | null;
+  /** Lifetime net (purchased - refunded) per subscriber, in USD. */
+  avgLtvUsd: string;
+  medianLtvUsd: string;
+  p90LtvUsd: string;
+  /** Subscribers contributing to the LTV aggregate. */
+  ltvSubscribers: number;
+}
+
+// =============================================================
 // Project overview — KPI summary + panels (Phase 3.1)
 // =============================================================
 //
