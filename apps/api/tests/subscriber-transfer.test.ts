@@ -38,6 +38,14 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
     );
   }
 
+  function findByRovenueId(projectId: string, rovenueId: string) {
+    return (
+      Object.values(subscriberData).find(
+        (s) => s.projectId === projectId && s.rovenueId === rovenueId,
+      ) ?? null
+    );
+  }
+
   const drizzleDb = {
     transaction: vi.fn(async <T>(fn: (tx: unknown) => Promise<T>) =>
       fn(drizzleDb),
@@ -82,6 +90,12 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
       args: { projectId: string; appUserId: string },
     ) => findByAppUserId(args.projectId, args.appUserId),
   );
+  const findSubscriberByRovenueId = vi.fn(
+    async (
+      _tx: unknown,
+      args: { projectId: string; rovenueId: string },
+    ) => findByRovenueId(args.projectId, args.rovenueId),
+  );
   const findLatestBalance = vi.fn(
     async (_tx: unknown, _subscriberId: string) => null as null | { balance: number },
   );
@@ -94,6 +108,7 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
       db: drizzleDb,
       subscriberRepo: {
         findSubscriberByAppUserId,
+        findSubscriberByRovenueId,
         reassignPurchases,
         reassignSubscriberAccess,
         reassignExperimentAssignments,
@@ -338,6 +353,31 @@ describe("anonymizeSubscriber", () => {
     expect(call[1]).toBe("sub_1");
     expect(call[2]).toBe(result.anonymousId);
     expect(call[3]).toBeInstanceOf(Date);
+  });
+
+  test("anonymizes an SDK-only subscriber (null appUserId) looked up by rovenueId", async () => {
+    subscriberStore["sub_sdk"] = {
+      id: "sub_sdk",
+      projectId: "proj_a",
+      rovenueId: "rov_device_99",
+      appUserId: null,
+      attributes: { country: "TR" },
+      deletedAt: null,
+    };
+
+    const result = await anonymizeSubscriber(
+      "proj_a",
+      "rov_device_99",
+      "user_admin",
+    );
+
+    expect(result.alreadyAnonymized).toBe(false);
+    expect(result.subscriberId).toBe("sub_sdk");
+    expect(result.anonymousId).toMatch(/^anon:[a-f0-9]{32}$/);
+
+    const call =
+      drizzleMock.subscriberRepo.anonymizeSubscriberRow.mock.calls[0]!;
+    expect(call[1]).toBe("sub_sdk");
   });
 
   test("rejects already-anonymized input to prevent double-hashing", async () => {

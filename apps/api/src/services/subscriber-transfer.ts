@@ -197,6 +197,11 @@ export interface AnonymizeResult {
   alreadyAnonymized: boolean;
 }
 
+/**
+ * @param appUserId Either a customer `appUserId` OR a `rovenueId`.
+ *   SDK-only subscribers have a null appUserId, so GDPR/KVKK erasure
+ *   requested by device id must fall back to a rovenueId lookup.
+ */
 export async function anonymizeSubscriber(
   projectId: string,
   appUserId: string,
@@ -217,10 +222,18 @@ export async function anonymizeSubscriber(
       `anon:${projectId}:${appUserId}`,
     );
 
-    const subscriber = await drizzle.subscriberRepo.findSubscriberByAppUserId(
-      tx,
-      { projectId, appUserId },
-    );
+    // The identifier may be a customer appUserId or a rovenueId (SDK-only
+    // subscribers have a null appUserId). Try the appUserId column first,
+    // then fall back to a rovenueId lookup.
+    const subscriber =
+      (await drizzle.subscriberRepo.findSubscriberByAppUserId(tx, {
+        projectId,
+        appUserId,
+      })) ??
+      (await drizzle.subscriberRepo.findSubscriberByRovenueId(tx, {
+        projectId,
+        rovenueId: appUserId,
+      }));
     if (!subscriber) {
       throw new Error(`Subscriber '${appUserId}' not found`);
     }

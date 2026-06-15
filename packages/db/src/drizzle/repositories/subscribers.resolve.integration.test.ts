@@ -92,6 +92,47 @@ describe("rovenueId resolution repo functions", () => {
     expect(resolved?.rovenueId).toBe(canonicalRovenueId);
   });
 
+  it("resolve follows a multi-hop mergedInto chain (A→B→C) to the live row", async () => {
+    const db = getDb();
+    const rovA = `rov_chainA_${RUN_ID}`;
+    const rovB = `rov_chainB_${RUN_ID}`;
+    const rovC = `rov_chainC_${RUN_ID}`;
+
+    // C is the live canonical row.
+    const [c] = await db
+      .insert(subscribers)
+      .values({ projectId: PROJECT_ID, rovenueId: rovC })
+      .returning();
+
+    // B is soft-deleted and merged into C (the intermediate dead hop).
+    const [b] = await db
+      .insert(subscribers)
+      .values({
+        projectId: PROJECT_ID,
+        rovenueId: rovB,
+        deletedAt: new Date(),
+        mergedInto: c!.id,
+      })
+      .returning();
+
+    // A is soft-deleted and merged into B (the deleted intermediate).
+    await db.insert(subscribers).values({
+      projectId: PROJECT_ID,
+      rovenueId: rovA,
+      deletedAt: new Date(),
+      mergedInto: b!.id,
+    });
+
+    const resolved = await resolveSubscriberByRovenueIdOrLegacy(db, {
+      projectId: PROJECT_ID,
+      key: rovA,
+    });
+    expect(resolved).not.toBeNull();
+    expect(resolved?.id).toBe(c!.id);
+    expect(resolved?.rovenueId).toBe(rovC);
+    expect(resolved?.deletedAt).toBeNull();
+  });
+
   it("resolve falls back to a legacy active appUserId match", async () => {
     const db = getDb();
     const rovenueId = `rov_legacy_${RUN_ID}`;

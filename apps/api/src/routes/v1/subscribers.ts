@@ -116,10 +116,14 @@ export const subscribersRoute = new Hono()
     const appUserId = c.req.param("appUserId");
     const body = c.req.valid("json");
 
-    let subscriber = (await drizzle.subscriberRepo.findSubscriberByAppUserId(
-      drizzle.db,
-      { projectId: project.id, appUserId },
-    )) as Subscriber | null;
+    // The path param is the device key (rovenueId in the new model),
+    // so resolve by rovenueId (following any merge redirect) rather
+    // than by appUserId.
+    let subscriber =
+      (await drizzle.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy(
+        drizzle.db,
+        { projectId: project.id, key: appUserId },
+      )) as Subscriber | null;
 
     const restored: Array<{ productId: string; store: string }> = [];
 
@@ -169,13 +173,15 @@ export const subscribersRoute = new Hono()
       const body = c.req.valid("json");
 
       // Read existing attributes so we can compute the merge key-by-
-      // key (request fields overwrite stored fields). A missing
-      // subscriber is treated as "no attributes yet".
+      // key (request fields overwrite stored fields). The path param
+      // is the device key (rovenueId); read the merge base from the
+      // rovenueId-keyed row so it matches the upsert target below. A
+      // missing subscriber is treated as "no attributes yet".
       const existing =
-        await drizzle.subscriberRepo.findSubscriberByAppUserId(drizzle.db, {
-          projectId: project.id,
-          appUserId,
-        });
+        await drizzle.subscriberRepo.findSubscriberAttributesByRovenueId(
+          drizzle.db,
+          { projectId: project.id, rovenueId: appUserId },
+        );
       const currentAttributes =
         (existing?.attributes as Record<string, unknown> | null) ?? {};
       const merged: Record<string, unknown> = {

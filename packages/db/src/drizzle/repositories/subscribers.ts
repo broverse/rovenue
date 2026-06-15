@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, ilike, isNull, lte, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, isNull, lte, or, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   experimentAssignments,
@@ -152,10 +152,19 @@ export async function resolveSubscriberByRovenueIdOrLegacy(
     rovenueId: args.key,
   });
   if (byRovenue) {
-    if (byRovenue.deletedAt && byRovenue.mergedInto) {
-      return findSubscriberById(db, byRovenue.mergedInto);
+    if (!byRovenue.deletedAt) return byRovenue;
+    // Soft-deleted: follow the mergedInto chain to the live canonical
+    // row. A multi-hop chain (A→B→C) can occur when an already-merged
+    // row is itself merged again, and an intermediate hop may be
+    // soft-deleted too — so loop while the cursor is dead and points
+    // onward. A depth cap guards against an accidental cycle.
+    let cursor = byRovenue;
+    for (let i = 0; i < 5 && cursor.deletedAt && cursor.mergedInto; i++) {
+      const next = await findSubscriberById(db, cursor.mergedInto);
+      if (!next) return null;
+      cursor = next;
     }
-    return byRovenue;
+    return cursor.deletedAt ? null : cursor;
   }
   const rows = await db
     .select()
@@ -428,7 +437,15 @@ export async function listSubscribers(
     isNull(subscribers.deletedAt),
   ];
   if (args.q) {
-    whereClauses.push(ilike(subscribers.appUserId, `%${args.q}%`));
+    // appUserId is null for SDK-only subscribers, which makes an
+    // appUserId-only ILIKE evaluate to NULL (excluded). OR in the
+    // rovenueId column so those rows stay searchable.
+    whereClauses.push(
+      or(
+        ilike(subscribers.appUserId, `%${args.q}%`),
+        ilike(subscribers.rovenueId, `%${args.q}%`),
+      )!,
+    );
   }
 
   // --- status (derived from access + purchase rows) -----------

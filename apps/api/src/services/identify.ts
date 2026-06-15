@@ -30,19 +30,41 @@ export async function bindAppUserId(
   return drizzle.db.transaction(async (tx) => {
     // Acquire advisory locks in sorted order to avoid deadlocks when two
     // concurrent calls swap the same pair of keys in opposite order.
-    const [k1, k2] = [`r:${rovenueId}`, `u:${appUserId}`].sort();
-    await drizzle.lockRepo.advisoryXactLock2(
-      tx,
-      `${projectId}:${k1}`,
-      `${projectId}:${k2}`,
-    );
+    // The appUserId key MUST match transferSubscriber's construction
+    // byte-for-byte (`${projectId}:${appUserId}`, no prefix) so identify
+    // and transfer serialize on the same lock when they touch the same
+    // label. The rovenueId gets a distinct, prefixed key since
+    // transferSubscriber never locks rovenueIds.
+    const keys = [
+      `${projectId}:${appUserId}`,
+      `${projectId}:rov:${rovenueId}`,
+    ].sort();
+    await drizzle.lockRepo.advisoryXactLock2(tx, keys[0]!, keys[1]!);
 
-    const self = await drizzle.subscriberRepo.findSubscriberByRovenueId(tx, {
+    let self = await drizzle.subscriberRepo.findSubscriberByRovenueId(tx, {
       projectId,
       rovenueId,
     });
     if (!self) {
       throw new Error(`Device subscriber '${rovenueId}' not found`);
+    }
+
+    // If the device row was already merged away (soft-deleted with a
+    // mergedInto target), its identity now lives on the canonical row.
+    // Re-resolve and operate on THAT live row — never bind a label onto
+    // a dead source row.
+    if (self.deletedAt) {
+      const canonical =
+        await drizzle.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy(tx, {
+          projectId,
+          key: rovenueId,
+        });
+      if (!canonical) {
+        throw new Error(
+          `Device subscriber '${rovenueId}' has been merged and cannot be resolved`,
+        );
+      }
+      self = canonical;
     }
 
     // Idempotent: label already set on this row — ensure identifiedAt is

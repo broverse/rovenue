@@ -102,6 +102,40 @@ describe("bindAppUserId", () => {
     expect(bal?.balance).toBe(50);
   });
 
+  it("binds onto the canonical live row when the device row was already merged", async () => {
+    // R2 is the live canonical row (no appUserId yet).
+    const r2 = await insertSub("rov_canonical", null);
+    // R1 is a soft-deleted device row already merged into R2.
+    const [r1] = await getDb()
+      .insert(subscribers)
+      .values({
+        projectId: PROJECT_ID,
+        rovenueId: "rov_merged_device",
+        appUserId: null,
+        deletedAt: new Date(),
+        mergedInto: r2.id,
+      })
+      .returning();
+
+    const res = await bindAppUserId(PROJECT_ID, "rov_merged_device", "userX");
+
+    // The label must land on R2 (the live row), NOT R1.
+    expect(res.subscriberId).toBe(r2.id);
+
+    const r2After = await drizzle.subscriberRepo.findSubscriberById(
+      getDb(),
+      r2.id,
+    );
+    expect(r2After?.appUserId).toBe("userX");
+
+    const r1After = await drizzle.subscriberRepo.findSubscriberById(
+      getDb(),
+      r1!.id,
+    );
+    expect(r1After?.appUserId).toBeNull();
+    expect(r1After?.deletedAt).not.toBeNull();
+  });
+
   it("throws when the device row (rovenueId) does not exist", async () => {
     await expect(
       bindAppUserId(PROJECT_ID, "rov_missing", "user_x"),
