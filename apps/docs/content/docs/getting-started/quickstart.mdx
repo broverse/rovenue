@@ -259,9 +259,9 @@ The `Entitlement` type and its fields are documented at [`/docs/reference/types#
 
         print("Entitlements:", result.entitlements)
         print("Credit balance:", result.creditBalance)
-      } catch is PurchaseCancelledError {
+      } catch Rovenue.Error.purchaseCancelled {
         // User dismissed — not an error
-      } catch is PurchasePendingError {
+      } catch Rovenue.Error.purchasePending {
         // Ask-to-Buy / deferred — inform user
       } catch {
         throw error
@@ -274,30 +274,32 @@ The `Entitlement` type and its fields are documented at [`/docs/reference/types#
   </Tab>
   <Tab value="Kotlin">
     ```kotlin title="PaywallViewModel.kt"
+    import android.app.Activity
     import dev.rovenue.sdk.Rovenue
-    import dev.rovenue.sdk.errors.PurchaseCancelledError
-    import dev.rovenue.sdk.errors.PurchasePendingError
+    import dev.rovenue.sdk.PurchaseCancelledException
+    import dev.rovenue.sdk.PurchasePendingException
 
-    suspend fun handlePurchase() {
+    // `activity` is your current Activity — Play Billing requires it.
+    suspend fun handlePurchase(activity: Activity) {
       // 1. Fetch the current offering
       val offerings = Rovenue.shared.getOfferings()
       val pkg = offerings.current?.packages?.firstOrNull() ?: return
 
       try {
         // 2. Launch native purchase sheet; resolves after server validation
-        val result = Rovenue.shared.purchase(pkg)
+        val result = Rovenue.shared.purchase(activity, pkg)
 
         println("Entitlements: ${result.entitlements}")
         println("Credit balance: ${result.creditBalance}")
-      } catch (e: PurchaseCancelledError) {
+      } catch (e: PurchaseCancelledException) {
         // User dismissed — not an error
-      } catch (e: PurchasePendingError) {
+      } catch (e: PurchasePendingException) {
         // Deferred payment — inform user
       }
     }
 
-    // Restore purchases
-    Rovenue.shared.restorePurchases()
+    // Restore purchases (also needs the current Activity)
+    Rovenue.shared.restorePurchases(activity)
     ```
   </Tab>
 </Tabs>
@@ -342,7 +344,7 @@ The SDK starts every install in anonymous mode with a stable `rovenueId`. Once y
     func onLoginSuccess(userId: String) {
       Rovenue.shared.identify(appUserId: userId) // optimistic
 
-      let user = Rovenue.shared.currentUser()
+      let user = await Rovenue.shared.currentUser()
       // user.rovenueId  → permanent install id (rov_...)
       // user.appUserId  → userId
     }

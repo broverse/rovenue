@@ -145,7 +145,7 @@ Credits also refresh automatically while the app is in the foreground. See [App 
         description: "image-generation"
       )
       print("Remaining credits: \(newBalance)")
-    } catch is InsufficientCreditsError {
+    } catch Rovenue.Error.insufficientCredits {
       // User does not have enough credits — show an upgrade prompt
       showUpgradeSheet()
     }
@@ -154,7 +154,7 @@ Credits also refresh automatically while the app is in the foreground. See [App 
   <Tab value="Kotlin">
     ```kotlin
     import dev.rovenue.sdk.Rovenue
-    import dev.rovenue.sdk.InsufficientCreditsError
+    import dev.rovenue.sdk.generated.RovenueException
 
     try {
       val newBalance = Rovenue.shared.consumeCredits(
@@ -162,7 +162,7 @@ Credits also refresh automatically while the app is in the foreground. See [App 
         description = "image-generation"
       )
       println("Remaining credits: $newBalance")
-    } catch (e: InsufficientCreditsError) {
+    } catch (e: RovenueException.InsufficientCredits) {
       // User does not have enough credits — show an upgrade prompt
       showUpgradeSheet()
     }

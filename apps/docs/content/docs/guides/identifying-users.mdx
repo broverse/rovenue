@@ -67,7 +67,7 @@ use the React Native `useCurrentUser()` hook for reactive rendering.
   </Tab>
   <Tab value="Swift">
     ```swift
-    let user = Rovenue.shared.currentUser()
+    let user = await Rovenue.shared.currentUser()
     print(user.rovenueId)               // always present, e.g. "rov_01abc..."
     print(user.appUserId ?? "(anonymous)") // nil until identify() has been called
     ```
@@ -115,7 +115,7 @@ is required.
     try await Rovenue.shared.identify("user_abc123")
 
     // The local user now reflects the new appUserId
-    let user = Rovenue.shared.currentUser()
+    let user = await Rovenue.shared.currentUser()
     print(user.appUserId ?? "nil") // "user_abc123"
     ```
   </Tab>
@@ -167,7 +167,7 @@ entitlements or credit balance.
     // Call when your user signs out
     try await Rovenue.shared.logOut()
 
-    let user = Rovenue.shared.currentUser()
+    let user = await Rovenue.shared.currentUser()
     print(user.appUserId ?? "nil")  // nil — fresh anonymous install
     print(user.rovenueId)           // new rov_ id
     ```

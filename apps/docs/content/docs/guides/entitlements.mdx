@@ -78,7 +78,7 @@ automatically whenever the entitlement changes (purchase, expiry, restore).
   <Tab value="Swift">
     ```swift
     // Imperative cache read
-    let pro = Rovenue.shared.entitlement("pro")
+    let pro = await Rovenue.shared.entitlement("pro")
     if pro?.isActive == true {
       enableProFeatures()
     }
@@ -129,7 +129,7 @@ grants.
   <Tab value="Swift">
     ```swift
     // Imperative cache read
-    let all = Rovenue.shared.entitlementsAll()
+    let all = await Rovenue.shared.entitlementsAll()
     let active = all.filter { $0.isActive }
     for ent in active {
       print("\(ent.id) expires \(ent.expiresIso ?? "never")")
@@ -174,7 +174,7 @@ anything changed.
     // After a purchase, force a server refresh to confirm the new entitlement
     try await Rovenue.shared.refreshEntitlements()
 
-    let pro = Rovenue.shared.entitlement("pro")
+    let pro = await Rovenue.shared.entitlement("pro")
     print("pro active:", pro?.isActive ?? false)
     ```
   </Tab>
@@ -226,7 +226,7 @@ push changes the entitlement state.
     Task {
       for await event in Rovenue.shared.changeStream {
         if event == .entitlementsChanged {
-          let pro = Rovenue.shared.entitlement("pro")
+          let pro = await Rovenue.shared.entitlement("pro")
           await updateUI(pro?.isActive ?? false)
         }
       }

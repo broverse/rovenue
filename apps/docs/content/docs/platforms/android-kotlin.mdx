@@ -145,15 +145,16 @@ Use `getOfferings()` to fetch products configured in your Rovenue dashboard, the
 
 ```kotlin
 import dev.rovenue.sdk.Rovenue
-import dev.rovenue.sdk.exception.PurchaseCancelledException
-import dev.rovenue.sdk.exception.PurchasePendingException
+import dev.rovenue.sdk.PurchaseCancelledException
+import dev.rovenue.sdk.PurchasePendingException
 
 val offerings = Rovenue.shared.getOfferings()
 val pkg = offerings.current?.packages?.firstOrNull()
 
 if (pkg != null) {
   try {
-    val result = Rovenue.shared.purchase(pkg)
+    // `activity` is your current Activity — Play Billing requires it.
+    val result = Rovenue.shared.purchase(activity, pkg)
     // result.entitlements and result.creditBalance are already up to date
   } catch (e: PurchaseCancelledException) {
     // User dismissed the store sheet — no action needed
@@ -163,7 +164,7 @@ if (pkg != null) {
 }
 
 // Re-validate all prior transactions (e.g. after reinstall):
-Rovenue.shared.restorePurchases()
+Rovenue.shared.restorePurchases(activity)
 ```
 
 ```kotlin

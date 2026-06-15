@@ -56,7 +56,7 @@ Initialise the SDK. Call this **once at app startup**, before any other Rovenue 
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    import com.rovenue.Rovenue
+    import dev.rovenue.sdk.Rovenue
 
     Rovenue.configure(
         apiKey = "rov_pub_…",
@@ -576,6 +576,8 @@ Trigger a native store sheet for the given package. The SDK handles the full pur
 |-----------|------|----------|-------------|
 | `pkg` | [`Package`](/docs/reference/types#package) | Yes | A package from [`getOfferings()`](#getofferings). |
 
+> **Android:** Kotlin requires the current `Activity` as the first argument — `purchase(activity, pkg)`. iOS (Swift) and React Native take only the package.
+
 **Returns**
 
 ```ts
@@ -640,9 +642,9 @@ type PurchaseResult = {
       do {
         let result = try await Rovenue.shared.purchase(pkg)
         print("Purchase succeeded: \(result.productId)")
-      } catch is PurchaseCancelledError {
+      } catch Rovenue.Error.purchaseCancelled {
         // User dismissed — no action needed
-      } catch is PurchasePendingError {
+      } catch Rovenue.Error.purchasePending {
         // Ask-to-Buy — tell the user to wait for approval
       } catch Rovenue.Error.receiptInvalid {
         // Show a retry prompt
@@ -657,7 +659,8 @@ type PurchaseResult = {
 
     if (pkg != null) {
       try {
-        val result = Rovenue.shared.purchase(pkg)
+        // `activity` is your current Activity — Play Billing requires it.
+        val result = Rovenue.shared.purchase(activity, pkg)
         Log.d("App", "Purchase succeeded: ${result.productId}")
       } catch (e: PurchaseCancelledException) {
         // User dismissed — no action needed
@@ -679,7 +682,7 @@ type PurchaseResult = {
 
 Re-validate the user's existing store receipts against the Rovenue server and update the entitlement cache. Required by App Store guidelines to offer a "Restore purchases" button.
 
-**Params** — none
+**Params** — none on iOS / React Native. **Android:** Kotlin requires the current `Activity` — `restorePurchases(activity)`.
 
 **Returns** — `void`
 
@@ -699,7 +702,7 @@ Re-validate the user's existing store receipts against the Rovenue server and up
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    Rovenue.shared.restorePurchases() // suspend fun
+    Rovenue.shared.restorePurchases(activity) // suspend fun; needs the current Activity
     ```
   </Tab>
 </Tabs>

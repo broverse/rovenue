@@ -139,12 +139,16 @@ All throwing SDK methods should be wrapped in try/catch. The recommended pattern
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    import com.rovenue.Rovenue
-    import com.rovenue.RovenueException
+    import dev.rovenue.sdk.Rovenue
+    import dev.rovenue.sdk.generated.RovenueException
+    import dev.rovenue.sdk.PurchaseCancelledException
+    import dev.rovenue.sdk.PurchasePendingException
+    import dev.rovenue.sdk.ProductNotAvailableException
 
     // --- Purchase flow ---
     try {
-        val result = Rovenue.shared.purchase(pkg)
+        // `activity` is your current Activity — Play Billing requires it.
+        val result = Rovenue.shared.purchase(activity, pkg)
         // success
     } catch (e: PurchaseCancelledException) {
         // User dismissed the store sheet — no action needed

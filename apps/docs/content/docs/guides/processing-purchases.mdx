@@ -233,14 +233,14 @@ unlocks) or adds credits (consumables). Both product types go through the same
         print("Transaction ID: \(result.storeTransactionId)")
 
         navigateToSuccess()
-      } catch is PurchaseCancelledError {
+      } catch Rovenue.Error.purchaseCancelled {
         // User dismissed the store sheet — no action needed
-      } catch is PurchasePendingError {
+      } catch Rovenue.Error.purchasePending {
         // Ask-to-Buy / deferred — inform the user and wait for a change event
         showPendingMessage()
-      } catch is ProductNotAvailableError {
+      } catch Rovenue.Error.productNotAvailable {
         showError("This product is not available. Please try again later.")
-      } catch is StoreProblemError {
+      } catch Rovenue.Error.storeProblem {
         showError("Store error. Please try again.")
       }
     }
@@ -248,9 +248,10 @@ unlocks) or adds credits (consumables). Both product types go through the same
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    suspend fun handlePurchase(pkg: Package) {
+    // `activity` is your current Activity — Play Billing requires it.
+    suspend fun handlePurchase(activity: Activity, pkg: Package) {
       try {
-        val result = Rovenue.shared.purchase(pkg)
+        val result = Rovenue.shared.purchase(activity, pkg)
 
         // result.entitlements — verified, up-to-date list
         // result.creditBalance — updated balance (for consumables)
@@ -313,14 +314,14 @@ devices.
     try await Rovenue.shared.restorePurchases()
 
     // Entitlements are refreshed; read from cache
-    let pro = Rovenue.shared.entitlement("pro")
+    let pro = await Rovenue.shared.entitlement("pro")
     print("pro restored:", pro?.isActive ?? false)
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    // Triggered by a "Restore Purchases" button
-    Rovenue.shared.restorePurchases()
+    // Triggered by a "Restore Purchases" button (needs the current Activity)
+    Rovenue.shared.restorePurchases(activity)
 
     // Entitlements are refreshed; read from cache
     val pro = Rovenue.shared.entitlement("pro")

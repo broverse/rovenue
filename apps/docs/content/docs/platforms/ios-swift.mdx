@@ -120,9 +120,9 @@ if let pkg = offerings.current?.packages.first {
   do {
     let result = try await Rovenue.shared.purchase(pkg)
     // result.entitlements and result.creditBalance are already up to date
-  } catch is PurchaseCancelledError {
+  } catch Rovenue.Error.purchaseCancelled {
     // User dismissed the sheet — no action needed
-  } catch is PurchasePendingError {
+  } catch Rovenue.Error.purchasePending {
     // Ask-to-Buy / deferred — inform the user and wait for a change event
   }
 }

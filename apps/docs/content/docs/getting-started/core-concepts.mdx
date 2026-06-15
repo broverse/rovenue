@@ -72,7 +72,7 @@ The `rovenueId` is the unit of billing: it is what gets linked to App Store / Pl
     ```swift
     import Rovenue
 
-    let user = Rovenue.shared.currentUser()
+    let user = await Rovenue.shared.currentUser()
     // user.rovenueId  → "rov_abc123..."
     // user.appUserId  → nil (anonymous) or "usr_123" (identified)
     ```
@@ -349,7 +349,7 @@ type ChangeEvent =
           let balance = await Rovenue.shared.creditBalance()
           print("New balance:", balance)
         case .identityChanged:
-          let user = Rovenue.shared.currentUser()
+          let user = await Rovenue.shared.currentUser()
           print("Now identified as:", user.appUserId ?? "anonymous")
         }
       }
