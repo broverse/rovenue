@@ -138,6 +138,12 @@ interface RovenueCore {
     u32 flush_session_events();
 
     [Throws=RovenueError]
+    void set_attributes(record<DOMString, string?> attributes);
+
+    [Throws=RovenueError]
+    u32 flush_attributes();
+
+    [Throws=RovenueError]
     string get_or_create_app_account_token();
 
     void register_observer(Observer obs);
