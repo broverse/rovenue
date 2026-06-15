@@ -290,7 +290,11 @@ async function main() {
         id: subId,
         projectId: DEMO_PROJECT_ID,
         appUserId,
-        attributes: { country, platform, appVersion: "1.2.0" },
+        attributes: {
+          country: { value: country, updatedAt: "2026-01-01T00:00:00.000Z", source: "legacy" },
+          platform: { value: platform, updatedAt: "2026-01-01T00:00:00.000Z", source: "legacy" },
+          appVersion: { value: "1.2.0", updatedAt: "2026-01-01T00:00:00.000Z", source: "legacy" },
+        },
         firstSeenAt: firstSeen,
         lastSeenAt: lastSeen,
       })
