@@ -182,3 +182,78 @@ mod stale_tests {
         assert!(!is_stale(100_000, 100_000, 60_000));
     }
 }
+
+#[cfg(test)]
+mod panic_safety_tests {
+    use super::EntitlementReader;
+    use crate::cache::CacheStore;
+    use crate::identity::IdentityManager;
+    use crate::observer::{ChangeEvent, Observer, ObserverBus};
+    use crate::time::{Clock, SystemClock};
+    use crate::transport::http_client::HttpClient;
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+
+    /// Observer whose callback unwinds — simulates a host (Swift/Kotlin) closure
+    /// panicking across the FFI boundary during `emit`.
+    struct PanickingObserver;
+    impl Observer for PanickingObserver {
+        fn on_change(&self, _event: ChangeEvent) {
+            panic!("boom from observer");
+        }
+    }
+
+    /// Regression: `maybe_refresh_async` spawns a background `refresh()`. If that
+    /// refresh unwinds (e.g. a panicking observer in `emit`), the `refreshing`
+    /// coalesce flag must STILL be cleared — otherwise a single panic would
+    /// permanently disable all future background refreshes. Guarded by an
+    /// RAII `ClearOnDrop` in the spawned thread.
+    #[test]
+    fn maybe_refresh_async_clears_flag_even_if_refresh_panics() {
+        let mut server = mockito::Server::new();
+        // refresh() GETs entitlements, upserts, stamps freshness, THEN emit()s —
+        // so the spawned thread reaches the panicking observer and unwinds.
+        let _m = server
+            .mock("GET", "/v1/me/entitlements")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"entitlements":{}}}"#)
+            .create();
+
+        let store = Arc::new(CacheStore::open_in_memory().unwrap());
+        let bus = Arc::new(ObserverBus::default());
+        bus.register(Arc::new(PanickingObserver));
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+        let identity = Arc::new(IdentityManager::new(
+            Arc::clone(&store),
+            Arc::clone(&bus),
+            Arc::clone(&clock),
+        ));
+        let http = Arc::new(HttpClient::new(server.url(), "pk_test".to_string()));
+        let reader = Arc::new(
+            EntitlementReader::new(Arc::clone(&store), Arc::clone(&identity))
+                .with_http(http)
+                .with_observer_bus(Arc::clone(&bus))
+                .with_clock(clock),
+        );
+
+        // last_refresh_ms == 0 → stale → spawns a refresh that will unwind in emit().
+        reader.maybe_refresh_async(60_000);
+
+        // Let the background thread run, unwind, and drop the ClearOnDrop guard.
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
+        assert!(
+            !reader.refreshing.load(Ordering::SeqCst),
+            "refreshing flag must be cleared even when the background refresh() panics"
+        );
+        // Directly prove the coalesce slot is reclaimable (not wedged `true`).
+        assert!(
+            reader
+                .refreshing
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok(),
+            "flag must be claimable again after a panicking refresh"
+        );
+    }
+}
