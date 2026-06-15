@@ -94,6 +94,7 @@ export type WebhookEventStatus =
 
 export const OutgoingWebhookStatus = {
   PENDING: "PENDING",
+  DELIVERING: "DELIVERING",
   SENT: "SENT",
   FAILED: "FAILED",
   DEAD: "DEAD",

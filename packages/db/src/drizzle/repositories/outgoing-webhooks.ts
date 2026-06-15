@@ -158,7 +158,7 @@ export async function markWebhookDismissed(
 }
 
 export interface UpdateOutgoingWebhookInput {
-  status?: "PENDING" | "SENT" | "FAILED" | "DEAD" | "DISMISSED";
+  status?: "PENDING" | "DELIVERING" | "SENT" | "FAILED" | "DEAD" | "DISMISSED";
   httpStatus?: number | null;
   responseBody?: string | null;
   lastErrorMessage?: string | null;
@@ -206,10 +206,19 @@ export interface PendingWebhookRow {
 }
 
 /**
- * Claim a batch of pending webhooks with `FOR UPDATE OF w SKIP
- * LOCKED` so two replicas can't grab the same row. The join pulls
- * the project's webhook secret so the delivery worker can sign
- * payloads without a second round trip.
+ * Atomically claim a batch of due webhooks. A CTE selects due rows
+ * with `FOR UPDATE … SKIP LOCKED` and the outer UPDATE flips them to
+ * `DELIVERING` (stamping `claimedAt`) in the SAME statement, RETURNING
+ * the delivery columns. Because the status flip commits with the
+ * SELECT's row locks, a claimed row is `DELIVERING` before any HTTP
+ * runs — a second replica's `status IN ('PENDING','FAILED')` predicate
+ * can no longer re-select it, so two replicas polling the same cadence
+ * never double-deliver. (The old query held `FOR UPDATE` locks under
+ * autocommit, which released the instant the SELECT returned, leaving
+ * the HTTP POST + status write unprotected.)
+ *
+ * The project webhook secret is pulled via a correlated subquery so the
+ * delivery worker can sign payloads without a second round trip.
  *
  * Requires a real Postgres connection — MVCC + row locks don't
  * exist on the SQLite test engine. Tests mock this call.
@@ -220,15 +229,22 @@ export async function claimPendingWebhooks(
   batchSize: number,
 ): Promise<PendingWebhookRow[]> {
   const result = await db.execute(sql`
-    SELECT w.id, w.url, w.payload, w.attempts, w."projectId",
-           p."webhookSecret" AS "projectWebhookSecret"
-    FROM ${outgoingWebhooks} w
-    JOIN projects p ON p.id = w."projectId"
-    WHERE w.status = 'PENDING'
-       OR (w.status = 'FAILED' AND w."nextRetryAt" <= ${now})
-    ORDER BY w."createdAt" ASC
-    LIMIT ${batchSize}
-    FOR UPDATE OF w SKIP LOCKED
+    WITH due AS (
+      SELECT w.id, w."createdAt"
+      FROM ${outgoingWebhooks} w
+      WHERE w.status = 'PENDING'
+         OR (w.status = 'FAILED' AND w."nextRetryAt" <= ${now})
+      ORDER BY w."createdAt" ASC
+      LIMIT ${batchSize}
+      FOR UPDATE OF w SKIP LOCKED
+    )
+    UPDATE ${outgoingWebhooks} w
+    SET status = 'DELIVERING', "claimedAt" = ${now}
+    FROM due
+    WHERE w.id = due.id AND w."createdAt" = due."createdAt"
+    RETURNING w.id, w.url, w.payload, w.attempts, w."projectId",
+      (SELECT p."webhookSecret" FROM projects p WHERE p.id = w."projectId")
+        AS "projectWebhookSecret"
   `);
   // drizzle-orm's .execute() returns the node-postgres result shape
   // with `.rows`. Cast to our row type (raw SQL bypasses schema

@@ -78,6 +78,12 @@ export const webhookEventStatus = pgEnum("WebhookEventStatus", [
 
 export const outgoingWebhookStatus = pgEnum("OutgoingWebhookStatus", [
   "PENDING",
+  // DELIVERING: a worker has atomically claimed this row (status-flip
+  // under the same SELECT … FOR UPDATE SKIP LOCKED) before any HTTP runs,
+  // so a second replica's `status IN ('PENDING','FAILED')` claim query
+  // can't re-select it. The stale-claim reaper resets orphaned rows
+  // (claimedAt older than the lease window) back to PENDING.
+  "DELIVERING",
   "SENT",
   "FAILED",
   "DEAD",

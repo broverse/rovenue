@@ -810,6 +810,9 @@ export const outgoingWebhooks = pgTable(
     lastErrorMessage: text("lastErrorMessage"),
     attempts: integer("attempts").notNull().default(0),
     nextRetryAt: timestamp("nextRetryAt", { withTimezone: true }),
+    // Set when a worker flips the row to DELIVERING; the reaper uses it
+    // as a lease timestamp to reclaim deliveries orphaned by a crash.
+    claimedAt: timestamp("claimedAt", { withTimezone: true }),
     sentAt: timestamp("sentAt", { withTimezone: true }),
     deadAt: timestamp("deadAt", { withTimezone: true }),
     createdAt: timestamp("createdAt", { withTimezone: true })
