@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { CreditLedgerType, drizzle } from "@rovenue/db";
+import { type Db, CreditLedgerType, drizzle } from "@rovenue/db";
 import { logger } from "../lib/logger";
 import { audit } from "../lib/audit";
 
@@ -29,6 +29,61 @@ function deriveAnonymousId(projectId: string, appUserId: string): string {
   // staying readable in the dashboard — full 64-char hexes are
   // noisy in the UI and don't buy additional collision safety.
   return `${ANON_PREFIX}${h.slice(0, 32)}`;
+}
+
+/**
+ * Moves every asset (purchases, access, experiment assignments, credit
+ * balance) from `fromId` to `toId` and soft-deletes the source as merged.
+ * MUST run inside a transaction that already holds the advisory locks for
+ * both subscribers. Returns the number of credits moved. Reused by both
+ * `transferSubscriber` (secret-key) and `bindAppUserId` (identify).
+ */
+export async function reassignAllAssets(
+  tx: Db,
+  projectId: string,
+  from: { id: string; label: string },
+  to: { id: string; label: string },
+): Promise<number> {
+  await drizzle.subscriberRepo.reassignPurchases(tx, from.id, to.id);
+  await drizzle.subscriberRepo.reassignSubscriberAccess(tx, from.id, to.id);
+  await drizzle.subscriberRepo.reassignExperimentAssignments(tx, from.id, to.id);
+
+  let creditsTransferred = 0;
+  const fromBalance = await drizzle.creditLedgerRepo.findLatestBalance(tx, from.id);
+  const fromBal = fromBalance?.balance ?? 0;
+  if (fromBal > 0) {
+    creditsTransferred = fromBal;
+    await drizzle.creditLedgerRepo.insertCreditLedger(tx, {
+      projectId,
+      subscriberId: from.id,
+      type: CreditLedgerType.TRANSFER_OUT,
+      amount: -fromBal,
+      balance: 0,
+      referenceType: "transfer",
+      referenceId: to.id,
+      description: `Credits transferred to ${to.label}`,
+    });
+    const toBalance = await drizzle.creditLedgerRepo.findLatestBalance(tx, to.id);
+    const toBal = toBalance?.balance ?? 0;
+    await drizzle.creditLedgerRepo.insertCreditLedger(tx, {
+      projectId,
+      subscriberId: to.id,
+      type: CreditLedgerType.TRANSFER_IN,
+      amount: fromBal,
+      balance: toBal + fromBal,
+      referenceType: "transfer",
+      referenceId: from.id,
+      description: `Credits received from ${from.label}`,
+    });
+  }
+
+  await drizzle.subscriberRepo.softDeleteSubscriberAsMerged(
+    tx,
+    from.id,
+    to.id,
+    new Date(),
+  );
+  return creditsTransferred;
 }
 
 export interface TransferResult {
@@ -81,67 +136,11 @@ export async function transferSubscriber(
       throw new Error(`Target subscriber '${toAppUserId}' not found`);
     }
 
-    // --- Reassign purchases ---
-    await drizzle.subscriberRepo.reassignPurchases(tx, from.id, to.id);
-
-    // --- Reassign access rows ---
-    await drizzle.subscriberRepo.reassignSubscriberAccess(tx, from.id, to.id);
-
-    // --- Reassign experiment assignments ---
-    await drizzle.subscriberRepo.reassignExperimentAssignments(
+    const creditsTransferred = await reassignAllAssets(
       tx,
-      from.id,
-      to.id,
-    );
-
-    // --- Transfer credits ---
-    let creditsTransferred = 0;
-    const fromBalance = await drizzle.creditLedgerRepo.findLatestBalance(
-      tx,
-      from.id,
-    );
-    const fromBal = fromBalance?.balance ?? 0;
-
-    if (fromBal > 0) {
-      creditsTransferred = fromBal;
-
-      // Zero out the source subscriber
-      await drizzle.creditLedgerRepo.insertCreditLedger(tx, {
-        projectId,
-        subscriberId: from.id,
-        type: CreditLedgerType.TRANSFER_OUT,
-        amount: -fromBal,
-        balance: 0,
-        referenceType: "transfer",
-        referenceId: to.id,
-        description: `Credits transferred to ${toAppUserId}`,
-      });
-
-      // Credit the target subscriber
-      const toBalance = await drizzle.creditLedgerRepo.findLatestBalance(
-        tx,
-        to.id,
-      );
-      const toBal = toBalance?.balance ?? 0;
-
-      await drizzle.creditLedgerRepo.insertCreditLedger(tx, {
-        projectId,
-        subscriberId: to.id,
-        type: CreditLedgerType.TRANSFER_IN,
-        amount: fromBal,
-        balance: toBal + fromBal,
-        referenceType: "transfer",
-        referenceId: from.id,
-        description: `Credits received from ${fromAppUserId}`,
-      });
-    }
-
-    // --- Soft-delete the source ---
-    await drizzle.subscriberRepo.softDeleteSubscriberAsMerged(
-      tx,
-      from.id,
-      to.id,
-      new Date(),
+      projectId,
+      { id: from.id, label: fromAppUserId },
+      { id: to.id, label: toAppUserId },
     );
 
     log.info("subscriber transferred", {
