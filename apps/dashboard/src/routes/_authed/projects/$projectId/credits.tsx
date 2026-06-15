@@ -18,7 +18,6 @@ import {
   type LedgerScope,
   type VolumePoint,
 } from "../../../../components/credits";
-import { CreditVolumeCard } from "../../../../components/charts";
 import { GrantCreditsModal } from "../../../../components/credits/grant-credits-modal";
 import { useProject } from "../../../../lib/hooks/useProject";
 import { useProjectCreditsRollup } from "../../../../lib/hooks/useProjectCredits";
@@ -312,10 +311,6 @@ function CreditsPage({ projectId }: { projectId: string }) {
 
       <CreditFlow flow={ui?.response.flow} />
       <VolumeChart series={ui?.volume} />
-
-      <div className="mt-4">
-        <CreditVolumeCard projectId={projectId} />
-      </div>
 
       <div className="grid items-start gap-4 max-[1280px]:grid-cols-1 grid-cols-[minmax(0,1fr)_380px]">
         <LedgerTable
