@@ -11,7 +11,6 @@ import { vi } from "vitest";
 import type {
   EntitlementDTO,
   LogEntryDTO,
-  ReceiptResultDTO,
   RovenueModuleSpec,
   UserDTO,
 } from "../specs/RovenueModule.types";
@@ -90,25 +89,9 @@ export function makeMockNative(): MockNative {
       mock.__emit("CREDIT_BALANCE_CHANGED");
       return state.creditBalance;
     }),
-    postAppleReceipt: vi.fn(async (
-      _jws: string,
-      _productId: string,
-      _appAccountToken?: string | null,
-    ): Promise<ReceiptResultDTO> => ({
-      ok: true,
-      entitlementsRefreshed: true,
-      creditsRefreshed: false,
-    })),
-    postGoogleReceipt: vi.fn(async (
-      _receipt: string,
-      _productId: string,
-      _obfuscatedAccountId?: string | null,
-      _obfuscatedProfileId?: string | null,
-    ): Promise<ReceiptResultDTO> => ({
-      ok: true,
-      entitlementsRefreshed: true,
-      creditsRefreshed: false,
-    })),
+    getOfferings: vi.fn(async () => ({ current: null, offerings: [] })),
+    purchase: vi.fn(async () => ({ entitlements: [], creditBalance: 0, productId: "", storeTransactionId: "" })),
+    restorePurchases: vi.fn(async () => ({ entitlements: [], creditBalance: 0, productId: "", storeTransactionId: "" })),
     getAppAccountToken: vi.fn(async () => "00000000-0000-0000-0000-000000000001"),
     recordSessionEvent: vi.fn(
       async (

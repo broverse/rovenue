@@ -15,10 +15,38 @@ export type EntitlementDTO = {
   productId: string | null;
 };
 
-export type ReceiptResultDTO = {
-  ok: boolean;
-  entitlementsRefreshed: boolean;
-  creditsRefreshed: boolean;
+export type ProductTypeDTO = "subscription" | "consumable" | "non_consumable";
+
+export type StoreProductDTO = {
+  id: string;
+  type: ProductTypeDTO;
+  displayName: string;
+  priceString: string | null;
+  price: number | null;
+  currencyCode: string | null;
+};
+
+export type PackageDTO = {
+  identifier: string;
+  product: StoreProductDTO;
+};
+
+export type OfferingDTO = {
+  identifier: string;
+  isDefault: boolean;
+  packages: PackageDTO[];
+};
+
+export type OfferingsDTO = {
+  current: string | null;
+  offerings: OfferingDTO[];
+};
+
+export type PurchaseResultDTO = {
+  entitlements: EntitlementDTO[];
+  creditBalance: number;
+  productId: string;
+  storeTransactionId: string;
 };
 
 export type LogEntryDTO = {
@@ -57,18 +85,10 @@ export interface RovenueModuleSpec {
   refreshCredits(): Promise<void>;
   consumeCredits(amount: number, description: string | null): Promise<number>;
 
-  // Receipts
-  postAppleReceipt(
-    jws: string,
-    productId: string,
-    appAccountToken?: string | null,
-  ): Promise<ReceiptResultDTO>;
-  postGoogleReceipt(
-    receipt: string,
-    productId: string,
-    obfuscatedAccountId?: string | null,
-    obfuscatedProfileId?: string | null,
-  ): Promise<ReceiptResultDTO>;
+  // Purchases
+  getOfferings(): Promise<OfferingsDTO>;
+  purchase(productId: string, productType: ProductTypeDTO): Promise<PurchaseResultDTO>;
+  restorePurchases(): Promise<PurchaseResultDTO>;
 
   // Refund Shield — stable per-subscriber app-account token (UUID).
   getAppAccountToken(): Promise<string>;

@@ -7,10 +7,10 @@ import { configure } from "../api/configure";
 import { currentUser, identify } from "../api/identity";
 import { entitlement, entitlementsAll, refreshEntitlements } from "../api/entitlements";
 import { creditBalance, refreshCredits, consumeCredits } from "../api/credits";
-import { postAppleReceipt, postGoogleReceipt } from "../api/receipts";
+import { getOfferings, purchase, restorePurchases } from "../api/purchases";
 import { setForeground, shutdown } from "../api/lifecycle";
 import { Rovenue } from "../index";
-import { InvalidApiKeyError, InsufficientCreditsError } from "../errors";
+import { InvalidApiKeyError, InsufficientCreditsError, PurchaseCancelledError } from "../errors";
 
 describe("Rovenue imperative API", () => {
   let native: MockNative;
@@ -135,48 +135,71 @@ describe("Rovenue imperative API", () => {
     expect(store.get<number>("creditBalance")).toBe(50);
   });
 
-  // -------- receipts --------
-  it("postAppleReceipt forwards args + returns ReceiptResult", async () => {
-    const r = await postAppleReceipt("jws.token.here", "com.foo.pro");
-    expect(r.ok).toBe(true);
-    expect(native.postAppleReceipt).toHaveBeenCalledWith(
-      "jws.token.here",
-      "com.foo.pro",
-      undefined,
-    );
+  // -------- purchases --------
+  it("getOfferings maps DTO current id to all[current] offering", async () => {
+    native.getOfferings = vi.fn(async () => ({
+      current: "default",
+      offerings: [{
+        identifier: "default",
+        isDefault: true,
+        packages: [{
+          identifier: "monthly",
+          product: {
+            id: "com.x.m",
+            type: "subscription" as const,
+            displayName: "Monthly",
+            priceString: "$4.99",
+            price: 4.99,
+            currencyCode: "USD",
+          },
+        }],
+      }],
+    }));
+    const offerings = await getOfferings();
+    expect(offerings.current?.identifier).toBe("default");
+    expect(offerings.all["default"].packages[0].product.id).toBe("com.x.m");
   });
 
-  it("postAppleReceipt forwards optional appAccountToken", async () => {
-    await postAppleReceipt(
-      "jws.token.here",
-      "com.foo.pro",
-      "550e8400-e29b-41d4-a716-446655440000",
-    );
-    expect(native.postAppleReceipt).toHaveBeenCalledWith(
-      "jws.token.here",
-      "com.foo.pro",
-      "550e8400-e29b-41d4-a716-446655440000",
-    );
+  it("purchase forwards product id + type to native.purchase", async () => {
+    native.purchase = vi.fn(async () => ({
+      entitlements: [],
+      creditBalance: 0,
+      productId: "com.x.m",
+      storeTransactionId: "txn_abc",
+    }));
+    const pkg = {
+      identifier: "monthly",
+      product: { id: "com.x.m", type: "subscription" as const, displayName: "Monthly", priceString: "$4.99", price: 4.99, currencyCode: "USD" },
+    };
+    const result = await purchase(pkg);
+    expect(native.purchase).toHaveBeenCalledWith("com.x.m", "subscription");
+    expect(result.storeTransactionId).toBe("txn_abc");
+    expect(result.productId).toBe("com.x.m");
   });
 
-  it("postGoogleReceipt forwards args + returns ReceiptResult", async () => {
-    const r = await postGoogleReceipt("play.token", "com.foo.pro");
-    expect(r.ok).toBe(true);
+  it("purchase maps PurchaseCancelled native rejection to PurchaseCancelledError", async () => {
+    native.purchase = vi.fn(async () => {
+      const err: any = new Error("cancelled by user");
+      err.code = "PurchaseCancelled";
+      throw err;
+    });
+    const pkg = {
+      identifier: "monthly",
+      product: { id: "com.x.m", type: "subscription" as const, displayName: "Monthly", priceString: "$4.99", price: 4.99, currencyCode: "USD" },
+    };
+    await expect(purchase(pkg)).rejects.toBeInstanceOf(PurchaseCancelledError);
   });
 
-  it("postGoogleReceipt forwards optional obfuscated ids", async () => {
-    await postGoogleReceipt(
-      "play.token",
-      "com.foo.pro",
-      "550e8400-e29b-41d4-a716-446655440000",
-      "project-abc",
-    );
-    expect(native.postGoogleReceipt).toHaveBeenCalledWith(
-      "play.token",
-      "com.foo.pro",
-      "550e8400-e29b-41d4-a716-446655440000",
-      "project-abc",
-    );
+  it("restorePurchases delegates to native.restorePurchases", async () => {
+    native.restorePurchases = vi.fn(async () => ({
+      entitlements: [],
+      creditBalance: 5,
+      productId: "com.x.pro",
+      storeTransactionId: "txn_restore",
+    }));
+    const result = await restorePurchases();
+    expect(native.restorePurchases).toHaveBeenCalledTimes(1);
+    expect(result.creditBalance).toBe(5);
   });
 
   // -------- account token --------
