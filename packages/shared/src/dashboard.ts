@@ -524,6 +524,8 @@ export interface CreditHistoryResponse {
 export interface MrrSeriesPoint {
   bucket: string; // ISO timestamp at start-of-day UTC
   grossUsd: string; // decimal-as-string for precision
+  refundsUsd: string; // decimal-as-string; refunds + chargebacks for the day
+  netUsd: string; // decimal-as-string; grossUsd - refundsUsd
   eventCount: number;
   activeSubscribers: number;
 }
