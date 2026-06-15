@@ -16,7 +16,7 @@ import { resolveSubscriber } from "../src/lib/resolve-subscriber";
 const RUN_ID = Date.now();
 const PROJECT_ID = `prj_resolve_lib_${RUN_ID}`;
 
-describe("resolveSubscriber (rovenueId-first)", () => {
+describe("resolveSubscriber (rovenueId-only)", () => {
   beforeAll(async () => {
     await getDb()
       .insert(projects)
@@ -40,15 +40,6 @@ describe("resolveSubscriber (rovenueId-first)", () => {
       .values({ projectId: PROJECT_ID, rovenueId: "rov_lib_1", appUserId: null })
       .returning();
     const got = await resolveSubscriber(PROJECT_ID, "rov_lib_1");
-    expect(got.id).toBe(row!.id);
-  });
-
-  it("resolves by legacy appUserId (dual-read window)", async () => {
-    const [row] = await getDb()
-      .insert(subscribers)
-      .values({ projectId: PROJECT_ID, rovenueId: "rov_lib_2", appUserId: "legacy_user_2" })
-      .returning();
-    const got = await resolveSubscriber(PROJECT_ID, "legacy_user_2");
     expect(got.id).toBe(row!.id);
   });
 

@@ -120,9 +120,9 @@ export const subscribersRoute = new Hono()
     // so resolve by rovenueId (following any merge redirect) rather
     // than by appUserId.
     let subscriber =
-      (await drizzle.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy(
+      (await drizzle.subscriberRepo.resolveSubscriberByRovenueId(
         drizzle.db,
-        { projectId: project.id, key: appUserId },
+        { projectId: project.id, rovenueId: appUserId },
       )) as Subscriber | null;
 
     const restored: Array<{ productId: string; store: string }> = [];

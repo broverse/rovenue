@@ -2,18 +2,18 @@ import { HTTPException } from "hono/http-exception";
 import { drizzle, type Subscriber } from "@rovenue/db";
 
 /**
- * Resolves the subscriber for an inbound SDK request. `key` is the value
- * the SDK sent — a `rovenueId` going forward, or a legacy `appUserId`
- * during the migration dual-read window. Follows `mergedInto` redirects.
+ * Resolves the subscriber for an inbound SDK request. `key` is the
+ * rovenueId the SDK sent. Follows `mergedInto` redirects to the live
+ * canonical row.
  */
 export async function resolveSubscriber(
   projectId: string,
   key: string,
 ): Promise<Subscriber> {
   const subscriber =
-    await drizzle.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy(
+    await drizzle.subscriberRepo.resolveSubscriberByRovenueId(
       drizzle.db,
-      { projectId, key },
+      { projectId, rovenueId: key },
     );
   if (!subscriber) {
     throw new HTTPException(404, { message: `Subscriber ${key} not found` });

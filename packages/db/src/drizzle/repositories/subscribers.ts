@@ -130,54 +130,39 @@ export async function findSubscriberByRovenueId(
   return rows[0] ?? null;
 }
 
-export interface ResolveKeyArgs {
+export interface ResolveByRovenueIdArgs {
   projectId: string;
-  /** The id the SDK sent — a rovenueId, or a legacy appUserId mid-migration. */
-  key: string;
+  rovenueId: string;
 }
 
 /**
- * Request→subscriber resolution for the rovenueId era:
- *  1. match by rovenueId; if the row is soft-deleted with a mergedInto
- *     target, follow the redirect to the canonical row;
- *  2. else fall back to a legacy active appUserId match (dual-read window).
- * Returns null when nothing resolves.
+ * Resolves a subscriber by rovenueId. If the matching row is soft-deleted
+ * with a mergedInto target, follows the redirect chain (up to 5 hops) to
+ * the live canonical row. Returns null when no rovenueId match exists or
+ * the redirect chain cannot be resolved.
  */
-export async function resolveSubscriberByRovenueIdOrLegacy(
+export async function resolveSubscriberByRovenueId(
   db: Db,
-  args: ResolveKeyArgs,
+  args: ResolveByRovenueIdArgs,
 ): Promise<Subscriber | null> {
   const byRovenue = await findSubscriberByRovenueId(db, {
     projectId: args.projectId,
-    rovenueId: args.key,
+    rovenueId: args.rovenueId,
   });
-  if (byRovenue) {
-    if (!byRovenue.deletedAt) return byRovenue;
-    // Soft-deleted: follow the mergedInto chain to the live canonical
-    // row. A multi-hop chain (A→B→C) can occur when an already-merged
-    // row is itself merged again, and an intermediate hop may be
-    // soft-deleted too — so loop while the cursor is dead and points
-    // onward. A depth cap guards against an accidental cycle.
-    let cursor = byRovenue;
-    for (let i = 0; i < 5 && cursor.deletedAt && cursor.mergedInto; i++) {
-      const next = await findSubscriberById(db, cursor.mergedInto);
-      if (!next) return null;
-      cursor = next;
-    }
-    return cursor.deletedAt ? null : cursor;
+  if (!byRovenue) return null;
+  if (!byRovenue.deletedAt) return byRovenue;
+  // Soft-deleted: follow the mergedInto chain to the live canonical
+  // row. A multi-hop chain (A→B→C) can occur when an already-merged
+  // row is itself merged again, and an intermediate hop may be
+  // soft-deleted too — so loop while the cursor is dead and points
+  // onward. A depth cap guards against an accidental cycle.
+  let cursor = byRovenue;
+  for (let i = 0; i < 5 && cursor.deletedAt && cursor.mergedInto; i++) {
+    const next = await findSubscriberById(db, cursor.mergedInto);
+    if (!next) return null;
+    cursor = next;
   }
-  const rows = await db
-    .select()
-    .from(subscribers)
-    .where(
-      and(
-        eq(subscribers.projectId, args.projectId),
-        eq(subscribers.appUserId, args.key),
-        isNull(subscribers.deletedAt),
-      ),
-    )
-    .limit(1);
-  return rows[0] ?? null;
+  return cursor.deletedAt ? null : cursor;
 }
 
 /** Attach (or change) the customer label on a subscriber row. */

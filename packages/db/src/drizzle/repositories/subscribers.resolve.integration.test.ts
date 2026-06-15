@@ -9,7 +9,7 @@
 //
 // Covers the three rovenueId-era repo functions added in Task 2:
 //   - findSubscriberByRovenueId
-//   - resolveSubscriberByRovenueIdOrLegacy (redirect-following + legacy fallback)
+//   - resolveSubscriberByRovenueId (redirect-following; rovenueId-only)
 //   - setAppUserId
 
 process.env.DATABASE_URL ??=
@@ -21,7 +21,7 @@ import { getDb } from "../client";
 import { projects, subscribers } from "../schema";
 import {
   findSubscriberByRovenueId,
-  resolveSubscriberByRovenueIdOrLegacy,
+  resolveSubscriberByRovenueId,
   setAppUserId,
 } from "./subscribers";
 
@@ -83,9 +83,9 @@ describe("rovenueId resolution repo functions", () => {
       mergedInto: canonical!.id,
     });
 
-    const resolved = await resolveSubscriberByRovenueIdOrLegacy(db, {
+    const resolved = await resolveSubscriberByRovenueId(db, {
       projectId: PROJECT_ID,
-      key: mergedRovenueId,
+      rovenueId: mergedRovenueId,
     });
     expect(resolved).not.toBeNull();
     expect(resolved?.id).toBe(canonical!.id);
@@ -123,9 +123,9 @@ describe("rovenueId resolution repo functions", () => {
       mergedInto: b!.id,
     });
 
-    const resolved = await resolveSubscriberByRovenueIdOrLegacy(db, {
+    const resolved = await resolveSubscriberByRovenueId(db, {
       projectId: PROJECT_ID,
-      key: rovA,
+      rovenueId: rovA,
     });
     expect(resolved).not.toBeNull();
     expect(resolved?.id).toBe(c!.id);
@@ -133,34 +133,11 @@ describe("rovenueId resolution repo functions", () => {
     expect(resolved?.deletedAt).toBeNull();
   });
 
-  it("resolve falls back to a legacy active appUserId match", async () => {
-    const db = getDb();
-    const rovenueId = `rov_legacy_${RUN_ID}`;
-    const legacyAppUserId = `legacy_app_user_${RUN_ID}`;
-    const [row] = await db
-      .insert(subscribers)
-      .values({
-        projectId: PROJECT_ID,
-        rovenueId,
-        appUserId: legacyAppUserId,
-      })
-      .returning();
-
-    // The SDK sent the legacy appUserId, which is NOT a rovenueId match,
-    // so resolution must dual-read and find it via the appUserId column.
-    const resolved = await resolveSubscriberByRovenueIdOrLegacy(db, {
-      projectId: PROJECT_ID,
-      key: legacyAppUserId,
-    });
-    expect(resolved).not.toBeNull();
-    expect(resolved?.id).toBe(row!.id);
-  });
-
   it("resolve returns null when nothing matches", async () => {
     const db = getDb();
-    const resolved = await resolveSubscriberByRovenueIdOrLegacy(db, {
+    const resolved = await resolveSubscriberByRovenueId(db, {
       projectId: PROJECT_ID,
-      key: `totally_unknown_${RUN_ID}`,
+      rovenueId: `totally_unknown_${RUN_ID}`,
     });
     expect(resolved).toBeNull();
   });

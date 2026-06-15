@@ -70,7 +70,7 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
       ),
       findSubscriberByAppUserId: vi.fn(async () => null),
       findSubscriberByRovenueId: vi.fn(async () => null),
-      resolveSubscriberByRovenueIdOrLegacy: vi.fn(async () => null),
+      resolveSubscriberByRovenueId: vi.fn(async () => null),
       upsertSubscriber: vi.fn(
         async (
           _db: unknown,

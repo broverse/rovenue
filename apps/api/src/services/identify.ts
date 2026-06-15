@@ -55,9 +55,9 @@ export async function bindAppUserId(
     // a dead source row.
     if (self.deletedAt) {
       const canonical =
-        await drizzle.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy(tx, {
+        await drizzle.subscriberRepo.resolveSubscriberByRovenueId(tx, {
           projectId,
-          key: rovenueId,
+          rovenueId,
         });
       if (!canonical) {
         throw new Error(
