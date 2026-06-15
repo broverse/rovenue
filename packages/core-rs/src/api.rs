@@ -291,7 +291,7 @@ impl RovenueCore {
         app_account_token: Option<String>,
     ) -> RovenueResult<ReceiptResult> {
         let scope = self.identity.current_user_scope();
-        let key = IdempotencyKey::new();
+        let key = IdempotencyKey::for_receipt("apple", &receipt);
         let result = self.receipts.post_apple(
             &receipt,
             &scope,
@@ -312,7 +312,7 @@ impl RovenueCore {
         obfuscated_profile_id: Option<String>,
     ) -> RovenueResult<ReceiptResult> {
         let scope = self.identity.current_user_scope();
-        let key = IdempotencyKey::new();
+        let key = IdempotencyKey::for_receipt("google", &receipt);
         let result = self.receipts.post_google(
             &receipt,
             &scope,
