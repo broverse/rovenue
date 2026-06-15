@@ -132,6 +132,10 @@ services:
       context: .
       dockerfile: apps/docs/Dockerfile
     restart: unless-stopped
+    # No published ports — only the edge Caddy reaches it on the
+    # docker network. Exposed container port is 80.
+    expose:
+      - "80"
 
   # --- Notification pipeline workers ---
   # Four separate processes, all built from the same image as `api`
