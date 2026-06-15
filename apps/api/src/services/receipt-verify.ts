@@ -373,11 +373,13 @@ async function verifyGoogleProductReceipt(
 
 async function upsertSubscriber(
   projectId: string,
-  appUserId: string,
+  rovenueId: string,
 ): Promise<Subscriber> {
+  // Receipts identify by the device key (= rovenueId); the customer
+  // label (appUserId) is attached later via POST /v1/identify.
   const row = await drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
     projectId,
-    appUserId,
+    rovenueId,
   });
   return row as unknown as Subscriber;
 }

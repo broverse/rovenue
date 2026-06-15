@@ -386,6 +386,7 @@ async function resolveSubscriber(
   if (externalId) {
     return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
       projectId: ctx.projectId,
+      rovenueId: externalId,
       appUserId: externalId,
     });
   }
@@ -404,9 +405,11 @@ async function resolveSubscriber(
     if (existingSubscriber) return existingSubscriber;
   }
 
+  const syntheticId = `google:${ctx.notification.purchaseToken.slice(0, 24)}`;
   return drizzle.subscriberRepo.createSubscriber(drizzle.db, {
     projectId: ctx.projectId,
-    appUserId: `google:${ctx.notification.purchaseToken.slice(0, 24)}`,
+    rovenueId: syntheticId,
+    appUserId: syntheticId,
   });
 }
 

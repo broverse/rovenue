@@ -468,6 +468,7 @@ async function resolveSubscriber(
 
   return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
     projectId: ctx.projectId,
+    rovenueId: appUserId,
     appUserId,
     createAttributes: { stripe_customer_id: customerId },
   });

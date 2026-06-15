@@ -641,6 +641,7 @@ async function resolveSubscriber(ctx: DispatchContext) {
   if (transaction.appAccountToken) {
     return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
       projectId,
+      rovenueId: transaction.appAccountToken,
       appUserId: transaction.appAccountToken,
       appleAppAccountToken,
     });
@@ -660,9 +661,11 @@ async function resolveSubscriber(ctx: DispatchContext) {
     if (existingSubscriber) return existingSubscriber;
   }
 
+  const syntheticId = `apple:${transaction.originalTransactionId}`;
   return drizzle.subscriberRepo.createSubscriber(drizzle.db, {
     projectId,
-    appUserId: `apple:${transaction.originalTransactionId}`,
+    rovenueId: syntheticId,
+    appUserId: syntheticId,
   });
 }
 

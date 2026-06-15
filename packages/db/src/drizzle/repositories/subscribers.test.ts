@@ -66,6 +66,7 @@ describe("upsertSubscriber — appleAppAccountToken preservation on UPDATE", () 
 
     await upsertSubscriber(fakeDb, {
       projectId: "proj_1",
+      rovenueId: "user_1",
       appUserId: "user_1",
       appleAppAccountToken: null,
     });
@@ -92,6 +93,7 @@ describe("upsertSubscriber — appleAppAccountToken preservation on UPDATE", () 
 
     await upsertSubscriber(fakeDb, {
       projectId: "proj_1",
+      rovenueId: "user_1",
       appUserId: "user_1",
     });
 
@@ -106,6 +108,7 @@ describe("upsertSubscriber — appleAppAccountToken preservation on UPDATE", () 
 
     await upsertSubscriber(fakeDb, {
       projectId: "proj_1",
+      rovenueId: "user_1",
       appUserId: "user_1",
       appleAppAccountToken: token,
     });
@@ -133,6 +136,7 @@ describe("upsertSubscriber — appleAppAccountToken preservation on UPDATE", () 
 
     await upsertSubscriber(fakeDb, {
       projectId: "proj_1",
+      rovenueId: "user_1",
       appUserId: "user_1",
     });
 

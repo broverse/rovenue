@@ -104,7 +104,7 @@ async function handleConfig(
     drizzle.db,
     {
       projectId: project.id,
-      appUserId,
+      rovenueId: appUserId,
       createAttributes: requestAttributes,
       ...(hasNewAttributes && { updateAttributes: mergedAttributes }),
     },

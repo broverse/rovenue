@@ -149,7 +149,7 @@ export const funnelClaimRoute = new Hono()
       // stable subscriber row.
       const subscriber = await drizzle.subscriberRepo.upsertSubscriber(
         drizzle.db,
-        { projectId: project.id, appUserId: anon_id },
+        { projectId: project.id, rovenueId: anon_id },
       );
 
       // Idempotent reclaim by SAME subscriber: return the same

@@ -93,7 +93,7 @@ export const experimentsRoute = new Hono()
         drizzle.db,
         {
           projectId: project.id,
-          appUserId,
+          rovenueId: appUserId,
           createAttributes: {},
         },
       );

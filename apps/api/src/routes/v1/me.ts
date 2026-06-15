@@ -155,7 +155,7 @@ export const meRoute = new Hono()
         drizzle.db,
         {
           projectId: project.id,
-          appUserId: subscriber.rovenueId,
+          rovenueId: subscriber.rovenueId,
           createAttributes: merged,
           updateAttributes: merged,
         },

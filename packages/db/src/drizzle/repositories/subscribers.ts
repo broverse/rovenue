@@ -79,6 +79,83 @@ export async function findSubscriberByAppUserId(
   return rows[0] ?? null;
 }
 
+export interface FindByRovenueIdArgs {
+  projectId: string;
+  rovenueId: string;
+}
+
+/** Full-row lookup by (projectId, rovenueId). The primary device key. */
+export async function findSubscriberByRovenueId(
+  db: Db,
+  args: FindByRovenueIdArgs,
+): Promise<Subscriber | null> {
+  const rows = await db
+    .select()
+    .from(subscribers)
+    .where(
+      and(
+        eq(subscribers.projectId, args.projectId),
+        eq(subscribers.rovenueId, args.rovenueId),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export interface ResolveKeyArgs {
+  projectId: string;
+  /** The id the SDK sent — a rovenueId, or a legacy appUserId mid-migration. */
+  key: string;
+}
+
+/**
+ * Request→subscriber resolution for the rovenueId era:
+ *  1. match by rovenueId; if the row is soft-deleted with a mergedInto
+ *     target, follow the redirect to the canonical row;
+ *  2. else fall back to a legacy active appUserId match (dual-read window).
+ * Returns null when nothing resolves.
+ */
+export async function resolveSubscriberByRovenueIdOrLegacy(
+  db: Db,
+  args: ResolveKeyArgs,
+): Promise<Subscriber | null> {
+  const byRovenue = await findSubscriberByRovenueId(db, {
+    projectId: args.projectId,
+    rovenueId: args.key,
+  });
+  if (byRovenue) {
+    if (byRovenue.deletedAt && byRovenue.mergedInto) {
+      return findSubscriberById(db, byRovenue.mergedInto);
+    }
+    return byRovenue;
+  }
+  const rows = await db
+    .select()
+    .from(subscribers)
+    .where(
+      and(
+        eq(subscribers.projectId, args.projectId),
+        eq(subscribers.appUserId, args.key),
+        isNull(subscribers.deletedAt),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/** Attach (or change) the customer label on a subscriber row. */
+export async function setAppUserId(
+  db: DbOrTx,
+  id: string,
+  appUserId: string,
+  identifiedAt: Date,
+): Promise<void> {
+  await db
+    .update(subscribers)
+    .set({ appUserId, identifiedAt, updatedAt: new Date() })
+    .where(eq(subscribers.id, id));
+}
+
 export async function findSubscriberById(
   db: Db,
   id: string,
@@ -135,13 +212,14 @@ export async function findSubscriberProjectId(
 
 export interface CreateSubscriberInput {
   projectId: string;
-  appUserId: string;
+  rovenueId: string;
+  appUserId?: string | null;
   attributes?: unknown;
 }
 
 /**
  * Plain INSERT (no upsert semantics). Used when the caller already
- * knows the (projectId, appUserId) pair doesn't exist, e.g. the
+ * knows the (projectId, rovenueId) pair doesn't exist, e.g. the
  * Apple webhook minting a synthetic `apple:<origTxId>` subscriber.
  */
 export async function createSubscriber(
@@ -152,8 +230,8 @@ export async function createSubscriber(
     .insert(subscribers)
     .values({
       projectId: input.projectId,
-      rovenueId: input.appUserId,
-      appUserId: input.appUserId,
+      rovenueId: input.rovenueId,
+      appUserId: input.appUserId ?? null,
       attributes: (input.attributes ??
         {}) as typeof subscribers.$inferInsert.attributes,
     })
@@ -165,7 +243,8 @@ export async function createSubscriber(
 
 export interface UpsertSubscriberInput {
   projectId: string;
-  appUserId: string;
+  rovenueId: string;
+  appUserId?: string | null;
   /** Applied ONLY on insert. */
   createAttributes?: unknown;
   /** Applied ONLY on update. Omit for lastSeenAt-only touches. */
@@ -181,7 +260,7 @@ export interface UpsertSubscriberInput {
 }
 
 /**
- * Insert-or-touch a subscriber row keyed on (projectId, appUserId)
+ * Insert-or-touch a subscriber row keyed on (projectId, rovenueId)
  * via `INSERT … ON CONFLICT DO UPDATE`:
  * - new row: attributes = createAttributes (defaults to {})
  * - existing: lastSeenAt = now(), attributes optionally merged
@@ -208,8 +287,8 @@ export async function upsertSubscriber(
     .insert(subscribers)
     .values({
       projectId: input.projectId,
-      rovenueId: input.appUserId,
-      appUserId: input.appUserId,
+      rovenueId: input.rovenueId,
+      appUserId: input.appUserId ?? null,
       attributes: (input.createAttributes ??
         {}) as typeof subscribers.$inferInsert.attributes,
       appleAppAccountToken: input.appleAppAccountToken ?? null,
