@@ -4,6 +4,13 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { CreditLedgerType, drizzle, type Subscriber } from "@rovenue/db";
 import {
+  attributesBodySchema,
+  normalizeStored,
+  applyMutations,
+  flattenAttributes,
+  validateAttributeInput,
+} from "@rovenue/shared";
+import {
   addCredits,
   getBalance,
   InsufficientCreditsError,
@@ -19,6 +26,7 @@ import { buildAccessResponse } from "../../lib/access-response";
 import { resolveSubscriber } from "../../lib/resolve-subscriber";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
+import { InvalidArgumentError } from "../../lib/invalid-argument-error";
 
 // =============================================================
 // /v1/subscribers — SDK + server-side subscriber operations
@@ -46,10 +54,6 @@ export const restoreBodySchema = z.object({
       }),
     )
     .optional(),
-});
-
-export const attributesBodySchema = z.object({
-  attributes: z.record(z.unknown()),
 });
 
 export const spendBodySchema = z.object({
@@ -172,27 +176,26 @@ export const subscribersRoute = new Hono()
       const appUserId = c.req.param("appUserId");
       const body = c.req.valid("json");
 
-      // Read existing attributes so we can compute the merge key-by-
-      // key (request fields overwrite stored fields). The path param
-      // is the device key (rovenueId); read the merge base from the
-      // rovenueId-keyed row so it matches the upsert target below. A
-      // missing subscriber is treated as "no attributes yet".
+      // Read existing attributes so we can compute the merge. The path
+      // param is the device key (rovenueId); read the merge base from
+      // the rovenueId-keyed row so it matches the upsert target below.
+      // A missing subscriber is treated as "no attributes yet".
       const existing =
         await drizzle.subscriberRepo.findSubscriberAttributesByRovenueId(
           drizzle.db,
           { projectId: project.id, rovenueId: appUserId },
         );
-      const currentAttributes =
-        (existing?.attributes as Record<string, unknown> | null) ?? {};
-      const merged: Record<string, unknown> = {
-        ...currentAttributes,
-        ...body.attributes,
-      };
+      const current = normalizeStored(existing?.attributes);
+      const errors = validateAttributeInput(body.attributes, current);
+      if (errors.length > 0) {
+        throw new InvalidArgumentError(
+          errors.map((e) => `${e.key}: ${e.reason}`).join("; "),
+        );
+      }
 
-      // Single upsert collapses the previous upsert-then-update pair:
-      // on insert we store `merged` (== body.attributes since there's
-      // no existing row), on update we overwrite with the merge and
-      // bump lastSeenAt.
+      const now = new Date().toISOString();
+      const merged = applyMutations(current, body.attributes, "sdk", now);
+
       const updated = await drizzle.subscriberRepo.upsertSubscriber(
         drizzle.db,
         {
@@ -208,7 +211,7 @@ export const subscribersRoute = new Hono()
           subscriber: {
             id: updated.id,
             appUserId: updated.appUserId,
-            attributes: updated.attributes,
+            attributes: flattenAttributes(updated.attributes),
           },
         }),
       );
