@@ -491,6 +491,13 @@
       "when": 1781515250531,
       "tag": "0069_damp_kingpin",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1781542615497,
+      "tag": "0070_subscriber_attributes_nested",
+      "breakpoints": true
     }
   ]
 }
