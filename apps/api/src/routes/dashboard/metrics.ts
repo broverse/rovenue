@@ -87,6 +87,8 @@ export const metricsRoute = new Hono()
         points: points.map((p) => ({
           bucket: p.bucket.toISOString(),
           grossUsd: p.grossUsd,
+          refundsUsd: p.refundsUsd,
+          netUsd: p.netUsd,
           eventCount: p.eventCount,
           activeSubscribers: p.activeSubscribers,
         })),

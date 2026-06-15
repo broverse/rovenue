@@ -37,6 +37,8 @@ const { mrrMock } = vi.hoisted(() => ({
       {
         bucket: new Date("2026-04-01T00:00:00Z"),
         grossUsd: "99.90",
+        refundsUsd: "9.99",
+        netUsd: "89.91",
         eventCount: 10,
         activeSubscribers: 8,
       },
@@ -47,6 +49,7 @@ const { mrrMock } = vi.hoisted(() => ({
 const { drizzleMock, authMock } = vi.hoisted(() => {
   const drizzleMock = {
     db: {} as unknown,
+    schema: { notifications: {} },
     projectRepo: {
       findMembership: vi.fn(async (_db: unknown, projectId: string, userId: string) =>
         dbMock.projectMember.findUnique({
@@ -56,6 +59,12 @@ const { drizzleMock, authMock } = vi.hoisted(() => {
       ),
       findProjectById: vi.fn(async () => null),
       findProjectCredentials: vi.fn(async () => null),
+    },
+    notificationRepo: {
+      listNotifications: vi.fn(async () => []),
+      countUnread: vi.fn(async () => 0),
+      markRead: vi.fn(async () => undefined),
+      markAllRead: vi.fn(async () => undefined),
     },
     shadowRead: vi.fn(
       async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
@@ -99,6 +108,8 @@ beforeEach(() => {
     {
       bucket: new Date("2026-04-01T00:00:00Z"),
       grossUsd: "99.90",
+      refundsUsd: "9.99",
+      netUsd: "89.91",
       eventCount: 10,
       activeSubscribers: 8,
     },
@@ -149,6 +160,8 @@ describe("GET /dashboard/projects/:projectId/metrics/mrr", () => {
     expect(body.data.points[0]).toMatchObject({
       bucket: "2026-04-01T00:00:00.000Z",
       grossUsd: "99.90",
+      refundsUsd: "9.99",
+      netUsd: "89.91",
       eventCount: 10,
       activeSubscribers: 8,
     });
