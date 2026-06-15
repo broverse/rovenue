@@ -31,6 +31,7 @@ import {
   type BasePlanPricing,
   type GoogleVerifyConfig,
 } from "./google-verify";
+import { guardStatusWrite } from "../subscription-transition-guard";
 
 const log = logger.child("google-webhook");
 
@@ -237,6 +238,15 @@ async function processSubscriptionNotification(
     regionCode: purchase.regionCode,
   });
 
+  const guard = await guardStatusWrite({
+    db: drizzle.db,
+    projectId: ctx.projectId,
+    store: Store.PLAY_STORE,
+    storeTransactionId: ctx.notification.purchaseToken,
+    to: status,
+    source: `google:${ctx.notification.notificationType}`,
+  });
+
   const persisted = await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
     store: Store.PLAY_STORE,
     storeTransactionId: ctx.notification.purchaseToken,
@@ -261,7 +271,7 @@ async function processSubscriptionNotification(
       verifiedAt: new Date(),
     },
     update: {
-      status,
+      ...(guard.apply ? { status } : {}),
       expiresDate,
       autoRenewStatus,
       cancellationDate,
@@ -273,7 +283,11 @@ async function processSubscriptionNotification(
     },
   });
 
-  if (isAccessGranting(status)) {
+  // When the status write was withheld (illegal transition from a
+  // terminal state), don't grant access either — the row keeps its
+  // prior terminal status, so access must follow that, not the
+  // rejected notification.
+  if (guard.apply && isAccessGranting(status)) {
     await grantAccess({
       subscriberId: subscriber.id,
       purchaseId: persisted.id,
@@ -467,8 +481,16 @@ async function processVoidedPurchase(
   );
 
   if (purchase) {
+    const guard = await guardStatusWrite({
+      db: drizzle.db,
+      projectId: args.projectId,
+      store: Store.PLAY_STORE,
+      storeTransactionId: args.purchaseToken,
+      to: PurchaseStatus.REFUNDED,
+      source: "google:VOIDED_PURCHASE",
+    });
     await drizzle.purchaseRepo.updatePurchase(drizzle.db, purchase.id, {
-      status: PurchaseStatus.REFUNDED,
+      ...(guard.apply ? { status: PurchaseStatus.REFUNDED } : {}),
       refundDate: new Date(),
     });
     await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);

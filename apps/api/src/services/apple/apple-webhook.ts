@@ -36,6 +36,7 @@ import {
   type AppleKeyLookup,
   type AppleNotificationVerifier,
 } from "./apple-verify";
+import { guardStatusWrite } from "../subscription-transition-guard";
 
 const log = logger.child("apple-webhook");
 
@@ -252,7 +253,7 @@ async function dispatch(ctx: DispatchContext): Promise<void> {
 
 async function applySubscribed(ctx: DispatchContext): Promise<void> {
   const subscriber = await resolveSubscriber(ctx);
-  const { product, purchase } = await upsertPurchase({
+  const { product, purchase, statusApplied } = await upsertPurchase({
     ctx,
     subscriberId: subscriber.id,
     status: isTrial(ctx.transaction)
@@ -262,6 +263,10 @@ async function applySubscribed(ctx: DispatchContext): Promise<void> {
   });
   ctx.outcome.subscriberId = subscriber.id;
   ctx.outcome.purchaseId = purchase.id;
+  // A rejected transition means the row is already terminal
+  // (REFUNDED / REVOKED). Don't re-grant access or re-add revenue
+  // off a late / replayed notification.
+  if (!statusApplied) return;
   await grantAccess({ subscriber, purchase, product, ctx });
   await emitRevenueEvent({
     ctx,
@@ -277,7 +282,7 @@ async function applySubscribed(ctx: DispatchContext): Promise<void> {
 
 async function applyRenewal(ctx: DispatchContext): Promise<void> {
   const subscriber = await resolveSubscriber(ctx);
-  const { product, purchase } = await upsertPurchase({
+  const { product, purchase, statusApplied } = await upsertPurchase({
     ctx,
     subscriberId: subscriber.id,
     status: PurchaseStatus.ACTIVE,
@@ -285,6 +290,7 @@ async function applyRenewal(ctx: DispatchContext): Promise<void> {
   });
   ctx.outcome.subscriberId = subscriber.id;
   ctx.outcome.purchaseId = purchase.id;
+  if (!statusApplied) return;
   await grantAccess({ subscriber, purchase, product, ctx });
   await emitRevenueEvent({
     ctx,
@@ -365,8 +371,16 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
     ctx.transaction.transactionId,
   );
   if (found) {
+    const guard = await guardStatusWrite({
+      db: drizzle.db,
+      projectId: ctx.projectId,
+      store: Store.APP_STORE,
+      storeTransactionId: ctx.transaction.transactionId,
+      to: PurchaseStatus.REFUNDED,
+      source: `apple:${ctx.notification.notificationType}`,
+    });
     await drizzle.purchaseRepo.updatePurchase(drizzle.db, found.id, {
-      status: PurchaseStatus.REFUNDED,
+      ...(guard.apply ? { status: PurchaseStatus.REFUNDED } : {}),
       refundDate,
     });
   }
@@ -693,6 +707,16 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
   }
 
   const environment = mapEnvironment(tx);
+
+  const guard = await guardStatusWrite({
+    db: drizzle.db,
+    projectId: ctx.projectId,
+    store: Store.APP_STORE,
+    storeTransactionId: tx.transactionId,
+    to: status,
+    source: `apple:${ctx.notification.notificationType}`,
+  });
+
   const purchase = await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
     store: Store.APP_STORE,
     storeTransactionId: tx.transactionId,
@@ -720,14 +744,14 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
       verifiedAt: new Date(),
     },
     update: {
-      status,
+      ...(guard.apply ? { status } : {}),
       autoRenewStatus,
       expiresDate: tx.expiresDate ? new Date(tx.expiresDate) : null,
       verifiedAt: new Date(),
     },
   });
 
-  return { product, purchase };
+  return { product, purchase, statusApplied: guard.apply };
 }
 
 interface GrantAccessArgs {

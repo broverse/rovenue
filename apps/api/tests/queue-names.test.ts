@@ -17,6 +17,10 @@ vi.mock("@rovenue/db", () => ({
   Store: {},
   WebhookEventStatus: {},
   WebhookSource: {},
+  // The webhook processors now transitively load the audit lib
+  // (`drizzle.schema.auditLogs`) via the status-transition guard, so
+  // the side-effect imports below need a `drizzle` namespace present.
+  drizzle: { schema: { auditLogs: {} } },
 }));
 vi.mock("../src/lib/redis", () => ({ redis: {} }));
 

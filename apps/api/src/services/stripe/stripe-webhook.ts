@@ -18,6 +18,7 @@ import {
   STRIPE_SUBSCRIPTION_STATUS,
   type StripeProjectCredentials,
 } from "./stripe-types";
+import { guardStatusWrite } from "../subscription-transition-guard";
 
 const log = logger.child("stripe-webhook");
 
@@ -208,17 +209,30 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
   const subscription = ctx.event.data.object as Stripe.Subscription;
   const subscriber = await resolveSubscriber(ctx, subscription);
   const status = mapStripeSubscriptionStatus(subscription.status);
+
+  const guard = await guardStatusWrite({
+    db: drizzle.db,
+    projectId: ctx.projectId,
+    store: Store.STRIPE,
+    storeTransactionId: subscription.id,
+    to: status,
+    source: `stripe:${ctx.event.type}`,
+  });
+
   const { product, purchase } = await upsertPurchaseFromSubscription(
     ctx,
     subscription,
     subscriber.id,
     status,
+    guard.apply,
   );
 
   ctx.outcome.subscriberId = subscriber.id;
   ctx.outcome.purchaseId = purchase.id;
 
-  if (ACCESS_GRANTING_STATUSES.has(status)) {
+  // A rejected transition means the row stays terminal; access must
+  // follow the prior state, not the replayed event.
+  if (guard.apply && ACCESS_GRANTING_STATUSES.has(status)) {
     await grantAccess({
       subscriberId: subscriber.id,
       purchaseId: purchase.id,
@@ -243,8 +257,17 @@ async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
   ctx.outcome.subscriberId = purchase.subscriberId;
   ctx.outcome.purchaseId = purchase.id;
 
+  const guard = await guardStatusWrite({
+    db: drizzle.db,
+    projectId: ctx.projectId,
+    store: Store.STRIPE,
+    storeTransactionId: subscription.id,
+    to: PurchaseStatus.EXPIRED,
+    source: `stripe:${ctx.event.type}`,
+  });
+
   await drizzle.purchaseRepo.updatePurchase(drizzle.db, purchase.id, {
-    status: PurchaseStatus.EXPIRED,
+    ...(guard.apply ? { status: PurchaseStatus.EXPIRED } : {}),
     cancellationDate: subscription.canceled_at
       ? new Date(subscription.canceled_at * 1000)
       : new Date(),
@@ -341,6 +364,16 @@ async function applyInvoicePaymentFailed(
       : invoice.subscription?.id;
   if (!subscriptionId) return;
 
+  const guard = await guardStatusWrite({
+    db: drizzle.db,
+    projectId: ctx.projectId,
+    store: Store.STRIPE,
+    storeTransactionId: subscriptionId,
+    to: PurchaseStatus.GRACE_PERIOD,
+    source: `stripe:${ctx.event.type}`,
+  });
+  if (!guard.apply) return;
+
   await drizzle.purchaseRepo.updatePurchaseByStoreTransaction(
     drizzle.db,
     Store.STRIPE,
@@ -385,8 +418,17 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
   ctx.outcome.subscriberId = purchase.subscriberId;
   ctx.outcome.purchaseId = purchase.id;
 
+  const guard = await guardStatusWrite({
+    db: drizzle.db,
+    projectId: ctx.projectId,
+    store: Store.STRIPE,
+    storeTransactionId: subscriptionId,
+    to: PurchaseStatus.REFUNDED,
+    source: `stripe:${ctx.event.type}`,
+  });
+
   await drizzle.purchaseRepo.updatePurchase(drizzle.db, purchase.id, {
-    status: PurchaseStatus.REFUNDED,
+    ...(guard.apply ? { status: PurchaseStatus.REFUNDED } : {}),
     refundDate: new Date(),
   });
 
@@ -479,6 +521,7 @@ async function upsertPurchaseFromSubscription(
   subscription: Stripe.Subscription,
   subscriberId: string,
   status: PurchaseStatus,
+  applyStatus: boolean,
 ) {
   const item = subscription.items.data[0];
   if (!item) {
@@ -536,7 +579,7 @@ async function upsertPurchaseFromSubscription(
       verifiedAt: new Date(),
     },
     update: {
-      status,
+      ...(applyStatus ? { status } : {}),
       isTrial,
       expiresDate,
       ...(priceAmount != null && { priceAmount: priceAmount.toString() }),

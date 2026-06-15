@@ -39,6 +39,7 @@ const { drizzleMock } = vi.hoisted(() => {
       upsertPurchase: vi.fn(),
       updatePurchase: vi.fn(async () => undefined),
       updatePurchasesByOriginalTransaction: vi.fn(async () => undefined),
+      lockPurchaseStatusByStoreTransaction: vi.fn(async () => null),
     },
     offeringRepo: {
       findProductByStoreId: vi.fn(),
@@ -68,7 +69,10 @@ vi.mock("@rovenue/db", async () => {
     await vi.importActual<typeof import("@rovenue/db")>("@rovenue/db");
   return {
     ...actual,
-    drizzle: drizzleMock,
+    // Expose the real schema so the transitively-imported audit lib
+    // (`drizzle.schema.auditLogs`) loads; only the repo namespaces
+    // used by the handler are swapped for our mock.
+    drizzle: { schema: actual.drizzle.schema, ...drizzleMock },
   };
 });
 
