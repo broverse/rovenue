@@ -1,12 +1,22 @@
 import type { Db, PurchaseStatus, Store } from "@rovenue/db";
 import { drizzle } from "@rovenue/db";
-import { audit } from "../lib/audit";
+import { audit, type AuditTx } from "../lib/audit";
 import { logger } from "../lib/logger";
 import { decideTransition } from "./subscription-state";
 
 const log = logger.child("subscription-transition-guard");
 
 export interface GuardStatusWriteArgs {
+  /**
+   * The Drizzle handle the guarded read + (rejection) audit run on.
+   * Pass the SAME transaction the caller will use for the guarded
+   * `upsertPurchase` / `updatePurchase` so the `FOR UPDATE` row lock
+   * is held across the whole read-decide-write and concurrent handlers
+   * for the same transaction serialize (FINDING 1, mechanism (a)).
+   * When called with the plain singleton the read still works but the
+   * lock releases at statement end — rely on the SQL-level terminal
+   * guard in `upsertPurchase`/`updatePurchase` (mechanism (b)) then.
+   */
   db: Db;
   projectId: string;
   store: Store;
@@ -58,17 +68,22 @@ export async function guardStatusWrite(
       to: decision.to,
       source: args.source,
     });
-    await audit({
-      projectId: args.projectId,
-      userId: "system",
-      action: "subscription.transition_rejected",
-      resource: "purchase",
-      resourceId: current?.id ?? args.storeTransactionId,
-      before: { status: decision.from },
-      after: { status: decision.to },
-      ipAddress: null,
-      userAgent: null,
-    });
+    await audit(
+      {
+        projectId: args.projectId,
+        userId: "system",
+        action: "subscription.transition_rejected",
+        resource: "purchase",
+        resourceId: current?.id ?? args.storeTransactionId,
+        before: { status: decision.from },
+        after: { status: decision.to },
+        ipAddress: null,
+        userAgent: null,
+      },
+      // Write the audit row on the caller's tx so it commits/rolls back
+      // atomically with the guarded status write.
+      args.db as unknown as AuditTx,
+    );
   }
 
   return {

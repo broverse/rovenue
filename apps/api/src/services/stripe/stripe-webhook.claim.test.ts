@@ -15,8 +15,13 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 // =============================================================
 
 const { drizzleMock } = vi.hoisted(() => {
+  const db: Record<string, unknown> = {
+    // FINDING 1: syncSubscription runs the guard + upsert inside
+    // db.transaction(...). Run the callback inline with the same stub.
+    transaction: async (fn: (tx: unknown) => unknown) => fn(db),
+  };
   const drizzleMock = {
-    db: {} as unknown,
+    db: db as unknown,
     webhookEventRepo: {
       claimWebhookEvent: vi.fn(),
       updateWebhookEvent: vi.fn(async () => undefined),

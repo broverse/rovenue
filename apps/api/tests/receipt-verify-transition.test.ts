@@ -11,8 +11,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { drizzleMock, auditMock } = vi.hoisted(() => {
   const auditMock = vi.fn(async () => undefined);
+  // FINDING 1: verifyReceipt runs the guard + upsert inside
+  // db.transaction(...). Run the callback inline with the same stub.
+  const db: Record<string, unknown> = {
+    transaction: async (fn: (tx: unknown) => unknown) => fn(db),
+  };
   const drizzleMock = {
-    db: {} as unknown,
+    db: db as unknown,
     subscriberRepo: {
       upsertSubscriber: vi.fn(async () => ({ id: "sub_1" })),
     },

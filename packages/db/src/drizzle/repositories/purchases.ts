@@ -1,11 +1,27 @@
-import { and, eq, inArray, notInArray } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { products, purchases, type Purchase } from "../schema";
 import { purchaseStatus, store as storeEnum } from "../enums";
 
+// A repository helper accepts either the singleton `Db` or a Drizzle
+// transaction handle. Both share the same query-builder surface, so a
+// plain `Db` alias is the project-wide convention (see projects.ts,
+// subscribers.ts). Threading a tx in lets the `FOR UPDATE` read in
+// `lockPurchaseStatusByStoreTransaction` and the subsequent guarded
+// write run inside one transaction so the row lock is actually held
+// across the read-decide-write (FINDING 1, mechanism (a)).
 type DbOrTx = Db;
 type Store = (typeof storeEnum.enumValues)[number];
 type PurchaseStatus = (typeof purchaseStatus.enumValues)[number];
+
+/**
+ * Terminal statuses are absorbing: once a row reaches REFUNDED or
+ * REVOKED the state machine (`TRANSITIONS` in subscription-state.ts)
+ * permits no outgoing edge. Mirrored here at the data layer so every
+ * status write can refuse to resurrect a terminal row even when the
+ * caller's read-decide-write was not perfectly serialized.
+ */
+const TERMINAL_STATUSES: PurchaseStatus[] = ["REFUNDED", "REVOKED"];
 
 // =============================================================
 // Purchase reads
@@ -48,6 +64,19 @@ export type UpdatePurchaseFields = Partial<typeof purchases.$inferInsert>;
  * INSERT ... ON CONFLICT (store, storeTransactionId) DO UPDATE
  * SET …. Returns the final row (inserted or updated) via
  * .returning().
+ *
+ * Terminal-resurrection backstop (FINDING 1, mechanism (b)): when the
+ * `update` patch carries a `status`, the ON CONFLICT branch only
+ * applies it when the EXISTING row is non-terminal — implemented as
+ * `status = CASE WHEN purchases.status IN ('REFUNDED','REVOKED')
+ * THEN purchases.status ELSE <new status> END`. Non-status fields
+ * (expiry, price, verifiedAt) still update unconditionally, and the
+ * first-insert (no conflict) path is unaffected. This makes a
+ * REFUNDED/REVOKED row impossible to resurrect to ACTIVE via the
+ * upsert even if two distinct events for the same transaction
+ * interleave outside a serializing transaction. Pass
+ * `guardTerminalStatus: false` only for paths that legitimately need
+ * to overwrite a terminal status (none today).
  */
 export async function upsertPurchase(
   db: DbOrTx,
@@ -56,14 +85,30 @@ export async function upsertPurchase(
     storeTransactionId: string;
     create: NewPurchaseFields;
     update: UpdatePurchaseFields;
+    guardTerminalStatus?: boolean;
   },
 ): Promise<Purchase> {
+  const guardTerminalStatus = args.guardTerminalStatus ?? true;
+  let set: Record<string, unknown> = args.update;
+
+  if (
+    guardTerminalStatus &&
+    "status" in args.update &&
+    args.update.status !== undefined
+  ) {
+    set = {
+      ...args.update,
+      // Only advance `status` when the conflicting row is non-terminal.
+      status: sql`CASE WHEN ${purchases.status} IN ('REFUNDED', 'REVOKED') THEN ${purchases.status} ELSE ${args.update.status} END`,
+    };
+  }
+
   const rows = await db
     .insert(purchases)
     .values(args.create)
     .onConflictDoUpdate({
       target: [purchases.store, purchases.storeTransactionId],
-      set: args.update,
+      set,
     })
     .returning();
   const row = rows[0];
@@ -99,16 +144,33 @@ export async function lockPurchaseStatusByStoreTransaction(
  * Partial update keyed on the primary id. Used by the Apple and
  * Google webhook handlers when they need to record renewal /
  * cancellation state.
+ *
+ * Terminal-resurrection backstop (FINDING 1, mechanism (b)): like
+ * `upsertPurchase`, when the patch carries a `status` it is wrapped in
+ * a `CASE WHEN purchases.status IN ('REFUNDED','REVOKED') THEN
+ * purchases.status ELSE <new status> END` so a terminal row's status
+ * is never overwritten, while non-status fields (refundDate,
+ * cancellationDate, …) still apply unconditionally. Pass
+ * `guardTerminalStatus: false` to opt out (none today).
  */
 export async function updatePurchase(
   db: DbOrTx,
   id: string,
   patch: UpdatePurchaseFields,
+  opts?: { guardTerminalStatus?: boolean },
 ): Promise<Purchase | null> {
   if (Object.keys(patch).length === 0) return null;
+  const guardTerminalStatus = opts?.guardTerminalStatus ?? true;
+  let set: Record<string, unknown> = patch;
+  if (guardTerminalStatus && "status" in patch && patch.status !== undefined) {
+    set = {
+      ...patch,
+      status: sql`CASE WHEN ${purchases.status} IN ('REFUNDED', 'REVOKED') THEN ${purchases.status} ELSE ${patch.status} END`,
+    };
+  }
   const rows = await db
     .update(purchases)
-    .set(patch)
+    .set(set)
     .where(eq(purchases.id, id))
     .returning();
   return rows[0] ?? null;
@@ -137,14 +199,6 @@ export async function updatePurchasesByOriginalTransaction(
       ),
     );
 }
-
-/**
- * Terminal statuses are absorbing: once a row reaches REFUNDED or
- * REVOKED the state machine (`TRANSITIONS` in subscription-state.ts)
- * permits no outgoing edge. Mirrored here at the data layer so the
- * chain-wide updater can refuse to resurrect a terminal row.
- */
-const TERMINAL_STATUSES: PurchaseStatus[] = ["REFUNDED", "REVOKED"];
 
 export interface GuardedChainUpdateResult {
   /** ids of rows the patch was actually applied to. */

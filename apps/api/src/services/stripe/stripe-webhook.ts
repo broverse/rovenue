@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { HTTPException } from "hono/http-exception";
 import {
+  type Db,
   Environment,
   PurchaseStatus,
   RevenueEventType,
@@ -213,21 +214,30 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
   const subscriber = await resolveSubscriber(ctx, subscription);
   const status = mapStripeSubscriptionStatus(subscription.status);
 
-  const guard = await guardStatusWrite({
-    db: drizzle.db,
-    projectId: ctx.projectId,
-    store: Store.STRIPE,
-    storeTransactionId: subscription.id,
-    to: status,
-    source: `stripe:${ctx.event.type}`,
-  });
+  // FINDING 1: guarded read + upsert in one tx so the FOR UPDATE lock
+  // is held across the write (mechanism (a)); upsertPurchase also
+  // CASE-guards the terminal status at SQL level (mechanism (b)).
+  const { product, purchase, statusApplied } = await drizzle.db.transaction(
+    async (dbTx) => {
+      const guard = await guardStatusWrite({
+        db: dbTx,
+        projectId: ctx.projectId,
+        store: Store.STRIPE,
+        storeTransactionId: subscription.id,
+        to: status,
+        source: `stripe:${ctx.event.type}`,
+      });
 
-  const { product, purchase } = await upsertPurchaseFromSubscription(
-    ctx,
-    subscription,
-    subscriber.id,
-    status,
-    guard.apply,
+      const result = await upsertPurchaseFromSubscription(
+        dbTx,
+        ctx,
+        subscription,
+        subscriber.id,
+        status,
+        guard.apply,
+      );
+      return { ...result, statusApplied: guard.apply };
+    },
   );
 
   ctx.outcome.subscriberId = subscriber.id;
@@ -235,7 +245,7 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
 
   // A rejected transition means the row stays terminal; access must
   // follow the prior state, not the replayed event.
-  if (guard.apply && ACCESS_GRANTING_STATUSES.has(status)) {
+  if (statusApplied && ACCESS_GRANTING_STATUSES.has(status)) {
     await grantAccess({
       subscriberId: subscriber.id,
       purchaseId: purchase.id,
@@ -260,21 +270,25 @@ async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
   ctx.outcome.subscriberId = purchase.subscriberId;
   ctx.outcome.purchaseId = purchase.id;
 
-  const guard = await guardStatusWrite({
-    db: drizzle.db,
-    projectId: ctx.projectId,
-    store: Store.STRIPE,
-    storeTransactionId: subscription.id,
-    to: PurchaseStatus.EXPIRED,
-    source: `stripe:${ctx.event.type}`,
-  });
+  // FINDING 1: guarded read + status write in one tx (a); the
+  // updatePurchase also CASE-guards the terminal status (b).
+  await drizzle.db.transaction(async (dbTx) => {
+    const guard = await guardStatusWrite({
+      db: dbTx,
+      projectId: ctx.projectId,
+      store: Store.STRIPE,
+      storeTransactionId: subscription.id,
+      to: PurchaseStatus.EXPIRED,
+      source: `stripe:${ctx.event.type}`,
+    });
 
-  await drizzle.purchaseRepo.updatePurchase(drizzle.db, purchase.id, {
-    ...(guard.apply ? { status: PurchaseStatus.EXPIRED } : {}),
-    cancellationDate: subscription.canceled_at
-      ? new Date(subscription.canceled_at * 1000)
-      : new Date(),
-    autoRenewStatus: false,
+    await drizzle.purchaseRepo.updatePurchase(dbTx, purchase.id, {
+      ...(guard.apply ? { status: PurchaseStatus.EXPIRED } : {}),
+      cancellationDate: subscription.canceled_at
+        ? new Date(subscription.canceled_at * 1000)
+        : new Date(),
+      autoRenewStatus: false,
+    });
   });
 
   await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);
@@ -520,6 +534,7 @@ async function resolveSubscriber(
 }
 
 async function upsertPurchaseFromSubscription(
+  db: Db,
   ctx: DispatchContext,
   subscription: Stripe.Subscription,
   subscriberId: string,
@@ -558,7 +573,7 @@ async function upsertPurchaseFromSubscription(
     ? new Date(subscription.canceled_at * 1000)
     : null;
 
-  const purchase = await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
+  const purchase = await drizzle.purchaseRepo.upsertPurchase(db, {
     store: Store.STRIPE,
     storeTransactionId: subscription.id,
     create: {

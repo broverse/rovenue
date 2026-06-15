@@ -425,17 +425,21 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
     ctx.transaction.transactionId,
   );
   if (found) {
-    const guard = await guardStatusWrite({
-      db: drizzle.db,
-      projectId: ctx.projectId,
-      store: Store.APP_STORE,
-      storeTransactionId: ctx.transaction.transactionId,
-      to: PurchaseStatus.REFUNDED,
-      source: `apple:${ctx.notification.notificationType}`,
-    });
-    await drizzle.purchaseRepo.updatePurchase(drizzle.db, found.id, {
-      ...(guard.apply ? { status: PurchaseStatus.REFUNDED } : {}),
-      refundDate,
+    // FINDING 1: guarded read + status write in one tx (a); the
+    // updatePurchase also CASE-guards the terminal status (b).
+    await drizzle.db.transaction(async (dbTx) => {
+      const guard = await guardStatusWrite({
+        db: dbTx,
+        projectId: ctx.projectId,
+        store: Store.APP_STORE,
+        storeTransactionId: ctx.transaction.transactionId,
+        to: PurchaseStatus.REFUNDED,
+        source: `apple:${ctx.notification.notificationType}`,
+      });
+      await drizzle.purchaseRepo.updatePurchase(dbTx, found.id, {
+        ...(guard.apply ? { status: PurchaseStatus.REFUNDED } : {}),
+        refundDate,
+      });
     });
   }
   await revokeAccessForTransaction(ctx);
@@ -757,50 +761,58 @@ async function upsertPurchase(args: UpsertPurchaseArgs) {
 
   const environment = mapEnvironment(tx);
 
-  const guard = await guardStatusWrite({
-    db: drizzle.db,
-    projectId: ctx.projectId,
-    store: Store.APP_STORE,
-    storeTransactionId: tx.transactionId,
-    to: status,
-    source: `apple:${ctx.notification.notificationType}`,
-  });
+  // FINDING 1: guarded read + upsert in one tx so the FOR UPDATE lock
+  // is held across the write (mechanism (a)); upsertPurchase also
+  // CASE-guards the terminal status at SQL level (mechanism (b)).
+  const { purchase, statusApplied } = await drizzle.db.transaction(
+    async (dbTx) => {
+      const guard = await guardStatusWrite({
+        db: dbTx,
+        projectId: ctx.projectId,
+        store: Store.APP_STORE,
+        storeTransactionId: tx.transactionId,
+        to: status,
+        source: `apple:${ctx.notification.notificationType}`,
+      });
 
-  const purchase = await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
-    store: Store.APP_STORE,
-    storeTransactionId: tx.transactionId,
-    create: {
-      projectId: ctx.projectId,
-      subscriberId,
-      productId: product.id,
-      store: Store.APP_STORE,
-      storeTransactionId: tx.transactionId,
-      originalTransactionId: tx.originalTransactionId,
-      status,
-      isTrial: isTrial(tx),
-      isIntroOffer: tx.offerType !== undefined,
-      isSandbox: environment === Environment.SANDBOX,
-      environment,
-      purchaseDate: new Date(tx.purchaseDate),
-      originalPurchaseDate: new Date(tx.originalPurchaseDate),
-      expiresDate: tx.expiresDate ? new Date(tx.expiresDate) : null,
-      // Drizzle decimal columns round-trip as strings.
-      priceAmount:
-        tx.price != null ? (tx.price / 1_000_000).toString() : null,
-      priceCurrency: tx.currency ?? null,
-      autoRenewStatus,
-      ownershipType: tx.inAppOwnershipType,
-      verifiedAt: new Date(),
+      const persisted = await drizzle.purchaseRepo.upsertPurchase(dbTx, {
+        store: Store.APP_STORE,
+        storeTransactionId: tx.transactionId,
+        create: {
+          projectId: ctx.projectId,
+          subscriberId,
+          productId: product.id,
+          store: Store.APP_STORE,
+          storeTransactionId: tx.transactionId,
+          originalTransactionId: tx.originalTransactionId,
+          status,
+          isTrial: isTrial(tx),
+          isIntroOffer: tx.offerType !== undefined,
+          isSandbox: environment === Environment.SANDBOX,
+          environment,
+          purchaseDate: new Date(tx.purchaseDate),
+          originalPurchaseDate: new Date(tx.originalPurchaseDate),
+          expiresDate: tx.expiresDate ? new Date(tx.expiresDate) : null,
+          // Drizzle decimal columns round-trip as strings.
+          priceAmount:
+            tx.price != null ? (tx.price / 1_000_000).toString() : null,
+          priceCurrency: tx.currency ?? null,
+          autoRenewStatus,
+          ownershipType: tx.inAppOwnershipType,
+          verifiedAt: new Date(),
+        },
+        update: {
+          ...(guard.apply ? { status } : {}),
+          autoRenewStatus,
+          expiresDate: tx.expiresDate ? new Date(tx.expiresDate) : null,
+          verifiedAt: new Date(),
+        },
+      });
+      return { purchase: persisted, statusApplied: guard.apply };
     },
-    update: {
-      ...(guard.apply ? { status } : {}),
-      autoRenewStatus,
-      expiresDate: tx.expiresDate ? new Date(tx.expiresDate) : null,
-      verifiedAt: new Date(),
-    },
-  });
+  );
 
-  return { product, purchase, statusApplied: guard.apply };
+  return { product, purchase, statusApplied };
 }
 
 interface GrantAccessArgs {

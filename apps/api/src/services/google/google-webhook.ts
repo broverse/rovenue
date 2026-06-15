@@ -241,49 +241,55 @@ async function processSubscriptionNotification(
     regionCode: purchase.regionCode,
   });
 
-  const guard = await guardStatusWrite({
-    db: drizzle.db,
-    projectId: ctx.projectId,
-    store: Store.PLAY_STORE,
-    storeTransactionId: ctx.notification.purchaseToken,
-    to: status,
-    source: `google:${ctx.notification.notificationType}`,
-  });
-
-  const persisted = await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
-    store: Store.PLAY_STORE,
-    storeTransactionId: ctx.notification.purchaseToken,
-    create: {
+  // FINDING 1: guarded read + upsert in one tx so the FOR UPDATE lock
+  // is held across the write (mechanism (a)); upsertPurchase also
+  // CASE-guards the terminal status at SQL level (mechanism (b)).
+  const { persisted, guard } = await drizzle.db.transaction(async (dbTx) => {
+    const decided = await guardStatusWrite({
+      db: dbTx,
       projectId: ctx.projectId,
-      subscriberId: subscriber.id,
-      productId: product.id,
       store: Store.PLAY_STORE,
       storeTransactionId: ctx.notification.purchaseToken,
-      originalTransactionId:
-        purchase.linkedPurchaseToken ?? ctx.notification.purchaseToken,
-      status,
-      purchaseDate: startTime,
-      originalPurchaseDate: startTime,
-      expiresDate,
-      environment: Environment.PRODUCTION,
-      autoRenewStatus,
-      cancellationDate,
-      // Drizzle decimal columns round-trip as strings.
-      priceAmount: pricing?.amount != null ? pricing.amount.toString() : null,
-      priceCurrency: pricing?.currency ?? null,
-      verifiedAt: new Date(),
-    },
-    update: {
-      ...(guard.apply ? { status } : {}),
-      expiresDate,
-      autoRenewStatus,
-      cancellationDate,
-      ...(pricing?.amount != null && {
-        priceAmount: pricing.amount.toString(),
-      }),
-      ...(pricing?.currency != null && { priceCurrency: pricing.currency }),
-      verifiedAt: new Date(),
-    },
+      to: status,
+      source: `google:${ctx.notification.notificationType}`,
+    });
+
+    const row = await drizzle.purchaseRepo.upsertPurchase(dbTx, {
+      store: Store.PLAY_STORE,
+      storeTransactionId: ctx.notification.purchaseToken,
+      create: {
+        projectId: ctx.projectId,
+        subscriberId: subscriber.id,
+        productId: product.id,
+        store: Store.PLAY_STORE,
+        storeTransactionId: ctx.notification.purchaseToken,
+        originalTransactionId:
+          purchase.linkedPurchaseToken ?? ctx.notification.purchaseToken,
+        status,
+        purchaseDate: startTime,
+        originalPurchaseDate: startTime,
+        expiresDate,
+        environment: Environment.PRODUCTION,
+        autoRenewStatus,
+        cancellationDate,
+        // Drizzle decimal columns round-trip as strings.
+        priceAmount: pricing?.amount != null ? pricing.amount.toString() : null,
+        priceCurrency: pricing?.currency ?? null,
+        verifiedAt: new Date(),
+      },
+      update: {
+        ...(decided.apply ? { status } : {}),
+        expiresDate,
+        autoRenewStatus,
+        cancellationDate,
+        ...(pricing?.amount != null && {
+          priceAmount: pricing.amount.toString(),
+        }),
+        ...(pricing?.currency != null && { priceCurrency: pricing.currency }),
+        verifiedAt: new Date(),
+      },
+    });
+    return { persisted: row, guard: decided };
   });
 
   // When the status write was withheld (illegal transition from a
@@ -484,17 +490,21 @@ async function processVoidedPurchase(
   );
 
   if (purchase) {
-    const guard = await guardStatusWrite({
-      db: drizzle.db,
-      projectId: args.projectId,
-      store: Store.PLAY_STORE,
-      storeTransactionId: args.purchaseToken,
-      to: PurchaseStatus.REFUNDED,
-      source: "google:VOIDED_PURCHASE",
-    });
-    await drizzle.purchaseRepo.updatePurchase(drizzle.db, purchase.id, {
-      ...(guard.apply ? { status: PurchaseStatus.REFUNDED } : {}),
-      refundDate: new Date(),
+    // FINDING 1: guarded read + status write in one tx (a); the
+    // updatePurchase also CASE-guards the terminal status (b).
+    await drizzle.db.transaction(async (dbTx) => {
+      const guard = await guardStatusWrite({
+        db: dbTx,
+        projectId: args.projectId,
+        store: Store.PLAY_STORE,
+        storeTransactionId: args.purchaseToken,
+        to: PurchaseStatus.REFUNDED,
+        source: "google:VOIDED_PURCHASE",
+      });
+      await drizzle.purchaseRepo.updatePurchase(dbTx, purchase.id, {
+        ...(guard.apply ? { status: PurchaseStatus.REFUNDED } : {}),
+        refundDate: new Date(),
+      });
     });
     await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);
   }

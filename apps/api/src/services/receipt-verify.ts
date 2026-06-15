@@ -162,57 +162,64 @@ async function verifyAppleReceipt(
   // State-machine guard: never resurrect a terminal (REFUNDED /
   // REVOKED) purchase via a late verify. Non-status fields still
   // update; only `status` is withheld + audited on rejection.
-  const guard = await guardStatusWrite({
-    db: drizzle.db,
-    projectId: args.projectId,
-    store: Store.APP_STORE,
-    storeTransactionId: transaction.transactionId,
-    to: status,
-    source: "receipt-verify",
-  });
-
-  const purchase = (await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
-    store: Store.APP_STORE,
-    storeTransactionId: transaction.transactionId,
-    create: {
+  //
+  // FINDING 1: run the guarded read + upsert in ONE transaction so the
+  // `FOR UPDATE` lock from guardStatusWrite is held across the write
+  // (mechanism (a)); upsertPurchase additionally CASE-guards the
+  // terminal status at SQL level (mechanism (b)).
+  const purchase = (await drizzle.db.transaction(async (tx) => {
+    const guard = await guardStatusWrite({
+      db: tx,
       projectId: args.projectId,
-      subscriberId: subscriber.id,
-      productId: product.id,
       store: Store.APP_STORE,
       storeTransactionId: transaction.transactionId,
-      originalTransactionId: transaction.originalTransactionId,
-      status,
-      isTrial,
-      isIntroOffer: transaction.offerType !== undefined,
-      isSandbox: environment === Environment.SANDBOX,
-      environment,
-      purchaseDate: new Date(transaction.purchaseDate),
-      originalPurchaseDate: new Date(transaction.originalPurchaseDate),
-      expiresDate: transaction.expiresDate
-        ? new Date(transaction.expiresDate)
-        : null,
-      // Drizzle decimal columns round-trip as strings.
-      priceAmount:
-        transaction.price != null
-          ? (transaction.price / 1_000_000).toString()
+      to: status,
+      source: "receipt-verify",
+    });
+
+    return drizzle.purchaseRepo.upsertPurchase(tx, {
+      store: Store.APP_STORE,
+      storeTransactionId: transaction.transactionId,
+      create: {
+        projectId: args.projectId,
+        subscriberId: subscriber.id,
+        productId: product.id,
+        store: Store.APP_STORE,
+        storeTransactionId: transaction.transactionId,
+        originalTransactionId: transaction.originalTransactionId,
+        status,
+        isTrial,
+        isIntroOffer: transaction.offerType !== undefined,
+        isSandbox: environment === Environment.SANDBOX,
+        environment,
+        purchaseDate: new Date(transaction.purchaseDate),
+        originalPurchaseDate: new Date(transaction.originalPurchaseDate),
+        expiresDate: transaction.expiresDate
+          ? new Date(transaction.expiresDate)
           : null,
-      priceCurrency: transaction.currency ?? null,
-      ownershipType: transaction.inAppOwnershipType,
-      verifiedAt: new Date(),
-    },
-    update: {
-      ...(guard.apply ? { status } : {}),
-      expiresDate: transaction.expiresDate
-        ? new Date(transaction.expiresDate)
-        : null,
-      ...(transaction.price != null && {
-        priceAmount: (transaction.price / 1_000_000).toString(),
-      }),
-      ...(transaction.currency != null && {
-        priceCurrency: transaction.currency,
-      }),
-      verifiedAt: new Date(),
-    },
+        // Drizzle decimal columns round-trip as strings.
+        priceAmount:
+          transaction.price != null
+            ? (transaction.price / 1_000_000).toString()
+            : null,
+        priceCurrency: transaction.currency ?? null,
+        ownershipType: transaction.inAppOwnershipType,
+        verifiedAt: new Date(),
+      },
+      update: {
+        ...(guard.apply ? { status } : {}),
+        expiresDate: transaction.expiresDate
+          ? new Date(transaction.expiresDate)
+          : null,
+        ...(transaction.price != null && {
+          priceAmount: (transaction.price / 1_000_000).toString(),
+        }),
+        ...(transaction.currency != null && {
+          priceCurrency: transaction.currency,
+        }),
+        verifiedAt: new Date(),
+      },
+    });
   })) as unknown as Purchase;
 
   return { subscriber, product, purchase };
@@ -293,42 +300,46 @@ async function verifyGoogleSubscriptionReceipt(
     ? new Date(subscription.startTime)
     : new Date();
 
-  const guard = await guardStatusWrite({
-    db: drizzle.db,
-    projectId: args.projectId,
-    store: Store.PLAY_STORE,
-    storeTransactionId: args.receipt,
-    to: PurchaseStatus.ACTIVE,
-    source: "receipt-verify",
-  });
-
-  const purchase = (await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
-    store: Store.PLAY_STORE,
-    storeTransactionId: args.receipt,
-    create: {
+  // FINDING 1: guarded read + upsert in one tx (mechanism (a)); the
+  // upsert also CASE-guards the terminal status at SQL level (b).
+  const purchase = (await drizzle.db.transaction(async (tx) => {
+    const guard = await guardStatusWrite({
+      db: tx,
       projectId: args.projectId,
-      subscriberId: subscriber.id,
-      productId: product.id,
       store: Store.PLAY_STORE,
       storeTransactionId: args.receipt,
-      originalTransactionId:
-        subscription.linkedPurchaseToken ?? args.receipt,
-      status: PurchaseStatus.ACTIVE,
-      purchaseDate: startTime,
-      originalPurchaseDate: startTime,
-      expiresDate,
-      environment: Environment.PRODUCTION,
-      autoRenewStatus:
-        lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null,
-      verifiedAt: new Date(),
-    },
-    update: {
-      ...(guard.apply ? { status: PurchaseStatus.ACTIVE } : {}),
-      expiresDate,
-      autoRenewStatus:
-        lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null,
-      verifiedAt: new Date(),
-    },
+      to: PurchaseStatus.ACTIVE,
+      source: "receipt-verify",
+    });
+
+    return drizzle.purchaseRepo.upsertPurchase(tx, {
+      store: Store.PLAY_STORE,
+      storeTransactionId: args.receipt,
+      create: {
+        projectId: args.projectId,
+        subscriberId: subscriber.id,
+        productId: product.id,
+        store: Store.PLAY_STORE,
+        storeTransactionId: args.receipt,
+        originalTransactionId:
+          subscription.linkedPurchaseToken ?? args.receipt,
+        status: PurchaseStatus.ACTIVE,
+        purchaseDate: startTime,
+        originalPurchaseDate: startTime,
+        expiresDate,
+        environment: Environment.PRODUCTION,
+        autoRenewStatus:
+          lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null,
+        verifiedAt: new Date(),
+      },
+      update: {
+        ...(guard.apply ? { status: PurchaseStatus.ACTIVE } : {}),
+        expiresDate,
+        autoRenewStatus:
+          lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null,
+        verifiedAt: new Date(),
+      },
+    });
   })) as unknown as Purchase;
 
   return { subscriber, product, purchase };
