@@ -93,9 +93,8 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
             store: FakeStore(outcome: .userCancelled),
             validate: { _, _ in
                 await validated.mark()
-                return ReceiptResult(subscriberId: "s", appUserId: "u", creditBalance: 0)
-            },
-            snapshot: { ([], 0) }
+                return ReceiptResult(subscriberId: "s", appUserId: "u", creditBalance: 0, entitlements: [])
+            }
         )
         do {
             _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
@@ -112,8 +111,7 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
     func test_pending_throws_purchasePending() async {
         let flow = ApplePurchaseFlow(
             store: FakeStore(outcome: .pending),
-            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", creditBalance: 0) },
-            snapshot: { ([], 0) }
+            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", creditBalance: 0, entitlements: []) }
         )
         do {
             _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
@@ -128,8 +126,7 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
     func test_productNotFound_throws_productNotAvailable() async {
         let flow = ApplePurchaseFlow(
             store: FakeStore(outcome: .productNotFound),
-            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", creditBalance: 0) },
-            snapshot: { ([], 0) }
+            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", creditBalance: 0, entitlements: []) }
         )
         do {
             _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
@@ -155,9 +152,8 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
                 // finish must NOT have run before validation succeeds.
                 let wasFinished = await finished.finished
                 XCTAssertFalse(wasFinished, "finish() must run after validate, not before")
-                return ReceiptResult(subscriberId: "sub_1", appUserId: "user_1", creditBalance: 250)
-            },
-            snapshot: { ([self.sampleEntitlement()], 250) }
+                return ReceiptResult(subscriberId: "sub_1", appUserId: "user_1", creditBalance: 250, entitlements: [self.sampleEntitlement()])
+            }
         )
 
         let result = try await flow.run(productId: "premium_monthly", appAccountToken: "tok")
@@ -179,8 +175,7 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
             store: FakeStore(outcome: .success(jws: "jws-blob", transactionId: "txn-99", finish: {
                 await finished.mark()
             })),
-            validate: { _, _ in throw Rovenue.Error.receiptInvalid },
-            snapshot: { ([], 0) }
+            validate: { _, _ in throw Rovenue.Error.receiptInvalid }
         )
         do {
             _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
