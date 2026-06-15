@@ -44,3 +44,21 @@ Entitlements refresh automatically while the app is in the foreground (see
 [App lifecycle](/docs/guides/app-lifecycle)). Manual `refresh` is only needed
 when you require immediate consistency, e.g. right after a purchase.
 </Callout>
+
+## The `Entitlement` shape
+
+Each entitlement carries more than its active flag — use these fields to drive
+subscription UI (the product, the store, the renewal date):
+
+```ts
+type Entitlement = {
+  id: string;                  // the entitlement key you check, e.g. "pro"
+  isActive: boolean;           // whether access is currently granted
+  productIdentifier: string;   // the store product mapped to this entitlement
+  store: string;               // "app_store" | "play_store" | ...
+  expiresIso?: string;         // ISO-8601 expiry; absent for non-expiring grants
+};
+```
+
+`entitlement(id)` returns `Entitlement | null` (null when the user has no such
+entitlement cached); `entitlementsAll()` returns every cached entitlement.

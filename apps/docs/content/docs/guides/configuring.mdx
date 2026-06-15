@@ -48,6 +48,13 @@ other method before `configure` throws `NotConfigured`.
   </Tab>
 </Tabs>
 
+<Callout type="info">
+`configure` is a **static entry point** (`Rovenue.configure(...)`). On iOS and
+Android it initializes the shared singleton; every method afterwards is called
+on that instance — `Rovenue.shared.entitlement(...)` in Swift/Kotlin, or
+directly on `Rovenue` in React Native.
+</Callout>
+
 ## Parameters
 
 | Parameter | Required | Description |
