@@ -298,9 +298,22 @@ describe("runDeliverStep", () => {
     expect(captureSentry).toHaveBeenCalledOnce();
   });
 
-  it("returns succeeded without re-delivering when insertPendingDelivery hits dedupe (returns undefined)", async () => {
-    const insertPendingDelivery = vi.fn().mockResolvedValue(undefined); // simulate UNIQUE conflict
-    const updateDeliveryStatus = vi.fn();
+  it("still delivers when a second job arrives for the same (connection, outbox event)", async () => {
+    // The (connection_id, outbox_event_id, created_at) index is non-unique
+    // (partition constraint), so insertPendingDelivery never returns
+    // undefined to signal "already delivered". A retry-after-success or a
+    // concurrent worker therefore re-runs deliver() — idempotency is the
+    // provider's job via the native event_id in the body, not the worker's.
+    const deliveryRow = makeDelivery("d-second");
+    const updatedRow = { ...deliveryRow, status: "succeeded" as const };
+    const insertPendingDelivery = vi.fn().mockResolvedValue(deliveryRow);
+    const updateDeliveryStatus = vi.fn().mockResolvedValue(updatedRow);
+    const deliver = vi.fn().mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      responseBody: "{}",
+      retriable: false,
+    });
     const provider = {
       id: "META_CAPI" as const,
       defaultEventMapping: {},
@@ -308,9 +321,11 @@ describe("runDeliverStep", () => {
       mapEvent: vi.fn().mockReturnValue({
         eventKey: "revenue.RENEWAL",
         providerEvent: "Purchase",
-        body: {},
+        // event_id is what the platform dedupes on — same outbox event id
+        // produces the same body on every (re)delivery.
+        body: { data: [{ event_id: "ob1", event_name: "Purchase" }] },
       }),
-      deliver: vi.fn(),
+      deliver,
     };
     const r = await runDeliverStep(makeJob(), {
       loadConnection: vi.fn().mockResolvedValue(makeConn()),
@@ -322,8 +337,51 @@ describe("runDeliverStep", () => {
       attempt: 1,
     });
     expect(r.outcome).toBe("succeeded");
-    expect(provider.deliver).not.toHaveBeenCalled();
-    expect(updateDeliveryStatus).not.toHaveBeenCalled();
+    // Worker no longer short-circuits on a (now non-existent) conflict.
+    expect(provider.deliver).toHaveBeenCalledOnce();
+    const [deliveredPayload] = deliver.mock.calls[0]!;
+    expect(deliveredPayload.body.data[0].event_id).toBe("ob1");
+    expect(updateDeliveryStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "succeeded" }),
+    );
+  });
+
+  it("still delivers (does not throw) when insertPendingDelivery returns undefined on a PK collision", async () => {
+    // Defensive path: even if the belt-and-braces onConflictDoNothing fires
+    // on a cuid2 PK collision, the worker must NOT treat that as 'already
+    // delivered' and skip the provider call — it falls back to the generated
+    // ids and proceeds.
+    const insertPendingDelivery = vi.fn().mockResolvedValue(undefined);
+    const updateDeliveryStatus = vi.fn().mockResolvedValue(makeDelivery("d1"));
+    const deliver = vi.fn().mockResolvedValue({
+      ok: true,
+      httpStatus: 200,
+      responseBody: "{}",
+      retriable: false,
+    });
+    const provider = {
+      id: "META_CAPI" as const,
+      defaultEventMapping: {},
+      validateCredentials: vi.fn(),
+      mapEvent: vi.fn().mockReturnValue({
+        eventKey: "revenue.RENEWAL",
+        providerEvent: "Purchase",
+        body: { data: [{ event_id: "ob1" }] },
+      }),
+      deliver,
+    };
+    const r = await runDeliverStep(makeJob(), {
+      loadConnection: vi.fn().mockResolvedValue(makeConn()),
+      decrypt: () => ({ pixel_id: "p", access_token: "t" }),
+      insertPendingDelivery,
+      updateDeliveryStatus,
+      provider: provider as never,
+      http: { request: vi.fn() } as never,
+      attempt: 1,
+    });
+    expect(r.outcome).toBe("succeeded");
+    expect(deliver).toHaveBeenCalledOnce();
+    expect(updateDeliveryStatus).toHaveBeenCalledOnce();
   });
 });
 

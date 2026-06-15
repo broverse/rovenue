@@ -2525,7 +2525,15 @@ export const integrationDeliveries = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.id, t.createdAt] }),
-    dedupeUidx: uniqueIndex("integration_deliveries_dedupe_uidx").on(
+    // NOTE: intentionally a NON-unique index. A unique
+    // (connection_id, outbox_event_id) constraint is impossible here:
+    // the table is PARTITION BY RANGE (created_at) and Postgres requires
+    // the partition key in every unique index — so created_at would have
+    // to be part of the key, and since each insert gets a fresh now()
+    // timestamp the uniqueness would never fire. Provider-side idempotency
+    // (native event_id on Meta CAPI / TikTok Events) is the real dedupe;
+    // this index exists purely to speed (connection_id, outbox_event_id) lookups.
+    connEventIdx: index("integration_deliveries_conn_event_idx").on(
       t.connectionId, t.outboxEventId, t.createdAt,
     ),
     connStatusIdx: index("integration_deliveries_connection_status_idx").on(

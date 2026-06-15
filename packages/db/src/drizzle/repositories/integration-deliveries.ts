@@ -10,17 +10,19 @@ import {
 // insertPendingDelivery
 // =============================================================
 //
-// ON CONFLICT DO NOTHING on the dedupe unique index
-// (connection_id, outbox_event_id, created_at).
-// Returns the inserted row, or undefined when a duplicate was
-// silently skipped.
+// Inserts a delivery audit row. This is NOT a dedupe boundary —
+// there is no unique constraint that can fire here (the table is
+// PARTITION BY RANGE (created_at), so a 2-column
+// (connection_id, outbox_event_id) unique index is impossible, and
+// any index including created_at never collides because each insert
+// gets a fresh now()). Idempotency for ad-platform deliveries is
+// enforced provider-side via the native event_id field.
 //
-// Note: `onConflictDoNothing()` is called WITHOUT an explicit
-// `target` because the table is partitioned. Postgres does not
-// support an explicit conflict target referencing a partial/unique
-// index on a partitioned table parent — the bare DO NOTHING form
-// correctly catches any unique-constraint violation across all
-// partitions.
+// `onConflictDoNothing()` is retained only as a belt-and-braces guard
+// against a primary-key (id, created_at) collision on the cuid2 id;
+// in practice it never fires and the inserted row is always returned.
+// It is called WITHOUT an explicit target because the table is
+// partitioned and Postgres rejects a target referencing the parent.
 
 export async function insertPendingDelivery(
   db: Db,

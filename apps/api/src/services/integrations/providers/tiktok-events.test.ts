@@ -193,4 +193,34 @@ describe("tiktokEventsProvider.deliver", () => {
     expect(result.ok).toBe(false);
     expect(result.retriable).toBe(false);
   });
+
+  it("outgoing body carries data[].event_id === outboxEventId (TikTok dedupe key)", async () => {
+    // Build the real payload via mapEvent so the envelope.outboxEventId →
+    // body.data[].event_id wiring is exercised, then assert the bytes sent
+    // to TikTok's Events API carry that dedup key.
+    const mapped = tiktokEventsProvider.mapEvent(
+      makeEnvelope({ outboxEventId: "ob-dedupe-456" }),
+      makeConfig(),
+      makeCreds(),
+    );
+    expect(mapped).not.toHaveProperty("skip");
+    const payload = mapped as ProviderPayload;
+
+    let observedBody: string | undefined;
+    agent
+      .get("https://business-api.tiktok.com")
+      .intercept({ path: "/open_api/v1.3/event/track/", method: "POST" })
+      .reply((opts) => {
+        observedBody = opts.body as string;
+        return { statusCode: 200, data: '{"code":0}' };
+      });
+
+    const http = createUndiciHttpClient();
+    await tiktokEventsProvider.deliver(payload, makeCreds(), http);
+
+    const sent = JSON.parse(observedBody ?? "{}") as {
+      data: Array<{ event_id: string }>;
+    };
+    expect(sent.data[0]!.event_id).toBe("ob-dedupe-456");
+  });
 });

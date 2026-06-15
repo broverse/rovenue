@@ -1,0 +1,2 @@
+DROP INDEX "integration_deliveries_dedupe_uidx";--> statement-breakpoint
+CREATE INDEX "integration_deliveries_conn_event_idx" ON "integration_deliveries" USING btree ("connection_id","outbox_event_id","created_at");

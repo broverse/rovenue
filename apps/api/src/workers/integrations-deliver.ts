@@ -196,8 +196,20 @@ export async function runDeliverStep(
     return { outcome: "dead_letter", deliveryId: row?.id ?? deliveryId };
   }
 
-  // 6. Insert pending delivery
+  // 6. Insert the pending delivery audit row.
+  //
+  // This insert is NOT a single-flight / dedupe boundary. The table is
+  // partitioned by created_at, so the old (connection_id, outbox_event_id,
+  // created_at) unique index could never enforce 2-column dedupe — it has
+  // been demoted to a plain index. Duplicate jobs (BullMQ retry-after-
+  // success, concurrent workers) are now made harmless by the provider's
+  // native event_id (Meta CAPI `data[].event_id`, TikTok `event_id`), which
+  // is baked into `payload.body` and dedup'd server-side by the ad platform.
+  //
+  // Therefore we ALWAYS attempt delivery and record a per-attempt audit row;
+  // we never short-circuit on a "conflict" that can no longer occur.
   const deliveryId = createId();
+  const fallbackCreatedAt = new Date();
   const pendingRow = await deps.insertPendingDelivery({
     id: deliveryId,
     connectionId: conn.id,
@@ -210,18 +222,11 @@ export async function runDeliverStep(
     attempt: deps.attempt,
   });
 
-  if (!pendingRow) {
-    // dedupe — another worker already succeeded (UNIQUE constraint on
-    // (connection_id, outbox_event_id, created_at) fired).
-    log.info("dedupe_skip", {
-      connectionId: conn.id,
-      outboxEventId: job.envelope.outboxEventId,
-    });
-    return { outcome: "succeeded" };
-  }
-
-  const rowId = pendingRow.id;
-  const rowCreatedAt = pendingRow.createdAt;
+  // `pendingRow` is undefined only on the (practically impossible) cuid2
+  // primary-key collision caught by onConflictDoNothing. Fall back to the
+  // ids we generated so the delivery still proceeds and stays auditable.
+  const rowId = pendingRow?.id ?? deliveryId;
+  const rowCreatedAt = pendingRow?.createdAt ?? fallbackCreatedAt;
 
   // 7. Deliver
   const result = await deps.provider.deliver(payload, creds, deps.http);

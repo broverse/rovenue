@@ -206,4 +206,34 @@ describe("metaCapiProvider.deliver", () => {
     expect(result.ok).toBe(false);
     expect(result.retriable).toBe(true);
   });
+
+  it("outgoing body carries data[].event_id === outboxEventId (server-side dedupe key)", async () => {
+    // Build the real payload via mapEvent so we exercise the actual wiring
+    // from envelope.outboxEventId → body.data[].event_id, then assert the
+    // bytes that hit Meta's Conversions API contain that dedup key.
+    const mapped = metaCapiProvider.mapEvent(
+      makeEnvelope({ outboxEventId: "ob-dedupe-123" }),
+      makeConfig(),
+      {},
+    );
+    expect(mapped).not.toHaveProperty("skip");
+    const payload = mapped as ProviderPayload;
+
+    let observedBody: string | undefined;
+    agent
+      .get("https://graph.facebook.com")
+      .intercept({ path: /\/events/, method: "POST" })
+      .reply((opts) => {
+        observedBody = opts.body as string;
+        return { statusCode: 200, data: '{"events_received":1}' };
+      });
+
+    const http = createUndiciHttpClient();
+    await metaCapiProvider.deliver(payload, { access_token: "tok", pixel_id: "px1" }, http);
+
+    const sent = JSON.parse(observedBody ?? "{}") as {
+      data: Array<{ event_id: string }>;
+    };
+    expect(sent.data[0]!.event_id).toBe("ob-dedupe-123");
+  });
 });
