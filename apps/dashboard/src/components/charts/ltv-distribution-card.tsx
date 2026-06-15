@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useProjectLtv } from "../../lib/hooks/useProjectLtv";
 import { formatCurrencyCompact } from "./format";
 
@@ -9,6 +10,7 @@ function bandLabel(lowerUsd: number, upperUsd: number | null): string {
 }
 
 export function LtvDistributionCard({ projectId }: Props) {
+  const { t } = useTranslation();
   const { data, isLoading } = useProjectLtv(projectId);
   const buckets = data?.histogram ?? [];
   const max = Math.max(1, ...buckets.map((b) => b.count));
@@ -17,10 +19,14 @@ export function LtvDistributionCard({ projectId }: Props) {
     <section className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
       <div className="mb-3.5 flex items-baseline justify-between">
         <div className="font-rv-mono text-[11px] uppercase tracking-wider text-rv-mute-500">
-          Lifetime value distribution
+          {t("charts.ltvDistribution.title")}
         </div>
         <div className="font-rv-mono text-[11px] text-rv-mute-500">
-          {isLoading ? "—" : `median ${formatCurrencyCompact(Number(data?.medianUsd ?? 0))}`}
+          {isLoading
+            ? "—"
+            : t("charts.ltvDistribution.median", {
+                value: formatCurrencyCompact(Number(data?.medianUsd ?? 0)),
+              })}
         </div>
       </div>
       <div className="space-y-1.5">

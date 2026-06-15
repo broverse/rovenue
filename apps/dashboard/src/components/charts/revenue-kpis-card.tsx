@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useProjectRevenueSummary } from "../../lib/hooks/useProjectRevenueSummary";
 import { formatCurrencyCompact } from "./format";
 
@@ -19,6 +20,7 @@ function Kpi({ label, value }: { label: string; value: string }) {
 }
 
 export function RevenueKpisCard({ projectId }: Props) {
+  const { t } = useTranslation();
   const { data, isLoading } = useProjectRevenueSummary({ projectId });
 
   const dash = "—";
@@ -30,18 +32,18 @@ export function RevenueKpisCard({ projectId }: Props) {
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
       <div className="mb-3.5 font-rv-mono text-[11px] uppercase tracking-wider text-rv-mute-500">
-        Revenue (last 30 days)
+        {t("charts.revenueKpis.title")}
       </div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-3">
-        <Kpi label="Net revenue" value={money(data?.netUsd)} />
-        <Kpi label="Refunds" value={money(data?.refundsUsd)} />
-        <Kpi label="Refund rate" value={pct(data?.refundRate)} />
-        <Kpi label="ARPPU" value={money(data?.arppu)} />
-        <Kpi label="Avg LTV" value={money(data?.avgLtvUsd)} />
-        <Kpi label="Median LTV" value={money(data?.medianLtvUsd)} />
-        <Kpi label="ARPU" value={money(data?.arpu)} />
-        <Kpi label="Churn rate" value={pct(data?.churnRate)} />
-        <Kpi label="Trial→paid" value={pct(data?.trialConversionRate)} />
+        <Kpi label={t("charts.revenueKpis.netRevenue")} value={money(data?.netUsd)} />
+        <Kpi label={t("charts.revenueKpis.refunds")} value={money(data?.refundsUsd)} />
+        <Kpi label={t("charts.revenueKpis.refundRate")} value={pct(data?.refundRate)} />
+        <Kpi label={t("charts.revenueKpis.arppu")} value={money(data?.arppu)} />
+        <Kpi label={t("charts.revenueKpis.avgLtv")} value={money(data?.avgLtvUsd)} />
+        <Kpi label={t("charts.revenueKpis.medianLtv")} value={money(data?.medianLtvUsd)} />
+        <Kpi label={t("charts.revenueKpis.arpu")} value={money(data?.arpu)} />
+        <Kpi label={t("charts.revenueKpis.churnRate")} value={pct(data?.churnRate)} />
+        <Kpi label={t("charts.revenueKpis.trialToPaid")} value={pct(data?.trialConversionRate)} />
       </div>
     </section>
   );

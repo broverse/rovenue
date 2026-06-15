@@ -2625,6 +2625,7 @@
       "legendCurrent": "Current",
       "legendPrev": "Prev period",
       "legendAnnotations": "Annotations",
+      "legendNet": "Net",
       "tooltipPrev": "prev: {{value}}",
       "error": "Couldn't load MRR — using sample series."
     },
@@ -2633,6 +2634,34 @@
       "expansion": "Expansion",
       "contraction": "Contraction",
       "churned": "Churned"
+    },
+    "revenueKpis": {
+      "title": "Revenue (last 30 days)",
+      "netRevenue": "Net revenue",
+      "refunds": "Refunds",
+      "refundRate": "Refund rate",
+      "arppu": "ARPPU",
+      "avgLtv": "Avg LTV",
+      "medianLtv": "Median LTV",
+      "arpu": "ARPU",
+      "churnRate": "Churn rate",
+      "trialToPaid": "Trial → paid"
+    },
+    "ltvDistribution": {
+      "title": "Lifetime value distribution",
+      "median": "median {{value}}"
+    },
+    "predictedLtv": {
+      "title": "Predicted LTV ({{months}}mo)",
+      "byStore": "By store",
+      "byProduct": "By product",
+      "cohorts": "Cohorts (observed → predicted)"
+    },
+    "engagement": {
+      "title": "Engagement (last 30 days)",
+      "sessions": "Sessions",
+      "avgDuration": "Avg duration",
+      "peakDau": "Peak DAU"
     },
     "channels": {
       "title": "Acquisition channel split",

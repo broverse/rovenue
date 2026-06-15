@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useProjectLtvPrediction } from "../../lib/hooks/useProjectLtvPrediction";
 import { formatCurrencyCompact } from "./format";
 import type { LtvSegment } from "@rovenue/shared";
@@ -25,13 +26,14 @@ function SegmentList({ title, segments }: { title: string; segments: LtvSegment[
 }
 
 export function PredictedLtvCard({ projectId }: Props) {
+  const { t } = useTranslation();
   const { data, isLoading } = useProjectLtvPrediction(projectId);
 
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
       <div className="mb-3.5 flex items-baseline justify-between">
         <div className="font-rv-mono text-[11px] uppercase tracking-wider text-rv-mute-500">
-          Predicted LTV ({data?.horizonMonths ?? 12}mo)
+          {t("charts.predictedLtv.title", { months: data?.horizonMonths ?? 12 })}
         </div>
       </div>
 
@@ -46,14 +48,14 @@ export function PredictedLtvCard({ projectId }: Props) {
       )}
 
       <div className="mt-4 grid grid-cols-2 gap-4">
-        <SegmentList title="By store" segments={data?.byStore ?? []} />
-        <SegmentList title="By product" segments={data?.byProduct ?? []} />
+        <SegmentList title={t("charts.predictedLtv.byStore")} segments={data?.byStore ?? []} />
+        <SegmentList title={t("charts.predictedLtv.byProduct")} segments={data?.byProduct ?? []} />
       </div>
 
       {data && data.cohorts.length > 0 && (
         <div className="mt-4 border-t border-rv-divider pt-3">
           <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
-            Cohorts (observed → predicted)
+            {t("charts.predictedLtv.cohorts")}
           </div>
           <div className="space-y-1">
             {data.cohorts.slice(-6).map((c) => (
