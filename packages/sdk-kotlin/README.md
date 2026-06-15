@@ -18,29 +18,13 @@ dependencies {
 import io.rovenue.Rovenue
 
 Rovenue.configure(publicApiKey = "rov_pub_...")
+
+val pro = Rovenue.entitlement("pro")
+if (pro.isActive) { /* unlock features */ }
 ```
 
----
+## Documentation
 
-## Identity context & consent
-
-When you call `Rovenue.identify()` or pass an `IdentityContext` with an event, the following fields are accepted by the SDK and forwarded to the Rovenue API server for fan-out to downstream ad-attribution integrations (Meta CAPI, TikTok Events API, etc.).
-
-| Field | Forwarded as | Hashing |
-|---|---|---|
-| `email` | `user_data.em` | SHA-256 (lowercased + trimmed before hashing) |
-| `phone` | `user_data.ph` | SHA-256 (digits only before hashing) |
-| `externalId` | `user_data.external_id` | SHA-256 (trimmed before hashing) |
-| `ip` | `user_data.client_ip_address` / `context.ip` | Forwarded verbatim — not hashed |
-| `userAgent` | `user_data.client_user_agent` / `context.user_agent` | Forwarded verbatim — not hashed |
-| `fbp` / `fbc` | `user_data.fbp` / `user_data.fbc` | Forwarded verbatim — not hashed |
-| `ttclid` / `ttp` | `context.ttclid` / `properties.ttp` | Forwarded verbatim — not hashed |
-
-**Consent is your responsibility.**
-
-Rovenue acts as a **data processor**. Your application (the host app) is the **data controller**. You must obtain the end-user's informed consent before passing any personally identifiable information (email, phone, IP address, etc.) in `IdentityContext`. This applies regardless of your jurisdiction — GDPR, CCPA, KVKK, PDPA, and similar regulations all place the consent obligation on the controller (you), not the processor (Rovenue).
-
-Additional data-handling guarantees:
-- Rovenue **never persists** `IdentityContext` fields at rest. PII is hashed in-process and the hash is forwarded downstream; the raw values are not written to any database.
-- `response_body` from downstream providers is stored but **truncated to 4096 bytes** to prevent inadvertent PII capture in error messages.
-- The wire format uses **camelCase JSON** with `ROVENUE_EVENT_WIRE_VERSION: "v1"` in the envelope header. Do not construct envelope JSON manually — use the SDK methods which enforce the schema and version negotiation.
+Full guides, API reference, and the identity & consent policy live at
+**https://docs.rovenue.app** — start with the
+[Quick Start](https://docs.rovenue.app/docs/getting-started/quickstart).

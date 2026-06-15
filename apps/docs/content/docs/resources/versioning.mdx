@@ -1,0 +1,14 @@
+---
+title: Versioning
+description: How the Rovenue SDKs are versioned.
+---
+
+All three Rovenue SDKs — Swift (`Rovenue`), Kotlin (`dev.rovenue:sdk`), and React Native (`@rovenue/react-native-sdk`) — share a single Rust core library called `librovenue`. Each SDK release tracks the same `librovenue` version, so the version number you see on any one SDK tells you the exact core revision in use. The current stable line is `0.2.x`.
+
+Rovenue SDKs follow [Semantic Versioning](https://semver.org):
+
+- **Patch** (`0.2.x`): bug fixes and internal improvements with no API change. Safe to adopt immediately.
+- **Minor** (`0.x.0`): new, backwards-compatible features. Existing call sites continue to compile without modification.
+- **Major** (`x.0.0`): breaking changes. Breaking changes are announced in the release notes for the corresponding GitHub release before they ship.
+
+Because all three SDKs advance together, you can match versions across platforms — if you pin `0.2.3` in your iOS app, the Android and React Native packages at `0.2.3` contain the same core behaviour.
