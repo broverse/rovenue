@@ -9,7 +9,7 @@
 // SES MessageId / FCM message_id / APNs apns-id used to
 // correlate webhook feedback to the originating row.
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, notInArray, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import type { DbOrTx } from "./projects";
 import {
@@ -117,4 +117,56 @@ export async function incrementDeliveryAttempts(
       lastAttemptAt: new Date(),
     })
     .where(eq(notificationDeliveries.id, id));
+}
+
+/**
+ * Statuses a delivery row can no longer be claimed-for-send from. `sent`
+ * and `suppressed` are terminal from the worker's own write; `delivered`
+ * and `bounced` are post-send terminal states fed by transport feedback
+ * webhooks; `sending` means another job has already won the claim and is
+ * mid-flight. A `queued` (fresh) or `failed` (genuine prior failure) row
+ * is still claimable — preserving the BullMQ retry-after-FAILED path.
+ */
+const UNCLAIMABLE_SEND_STATUSES: NotificationDeliveryStatus[] = [
+  "sending",
+  "sent",
+  "delivered",
+  "bounced",
+  "suppressed",
+];
+
+/**
+ * Atomic single-flight claim for the send path. Flips a claimable row to
+ * `sending` (bumping attempts + lastAttemptAt) in ONE statement, gated on
+ * the status NOT already being terminal/in-flight, and RETURNS whether a
+ * row was claimed.
+ *
+ * Because the UPDATE both tests and mutates `status`, two jobs racing for
+ * the same `deliveryId` are serialised by the row lock: the first flips
+ * `queued`/`failed` → `sending` and matches; the second re-evaluates its
+ * predicate against the now-`sending` row and matches 0 rows. The caller
+ * that gets `true` owns the send; `false` means already terminal or
+ * another worker is mid-flight, so skip. This closes the concurrent-
+ * duplicate TOCTOU window the plain findDeliveryById read left open.
+ */
+export async function claimDeliveryForSend(
+  db: Db,
+  id: string,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const claimed = await db
+    .update(notificationDeliveries)
+    .set({
+      status: "sending",
+      attempts: sql`${notificationDeliveries.attempts} + 1`,
+      lastAttemptAt: now,
+    })
+    .where(
+      and(
+        eq(notificationDeliveries.id, id),
+        notInArray(notificationDeliveries.status, UNCLAIMABLE_SEND_STATUSES),
+      ),
+    )
+    .returning({ id: notificationDeliveries.id });
+  return claimed.length > 0;
 }

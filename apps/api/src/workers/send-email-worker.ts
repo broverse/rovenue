@@ -51,14 +51,21 @@ export function startSendEmailWorker(
       const { data } = job;
       const to = data.to.toLowerCase();
 
-      // Guard: if the delivery row is already terminal, a previous attempt
-      // already completed (the process crashed between provider send and
-      // BullMQ ACK). Skip to prevent duplicate emails.
-      const existing = await notificationDeliveryRepo.findDeliveryById(deps.db, data.deliveryId);
-      if (existing && (existing.status === "sent" || existing.status === "suppressed")) {
-        log.info("delivery already terminal, skipping resend", {
+      // Atomic single-flight claim. Flips a claimable row to `sending`
+      // (bumping attempts) in one statement. A `false` return means the
+      // row is already terminal (a previous attempt completed — e.g. the
+      // process crashed between provider send and BullMQ ACK) OR another
+      // job concurrently won the claim and is mid-flight. Either way, skip
+      // to prevent a duplicate email. This replaces the prior read-then-
+      // check guard, which closed the crash-retry window but not the
+      // concurrent-duplicate one.
+      const claimed = await notificationDeliveryRepo.claimDeliveryForSend(
+        deps.db,
+        data.deliveryId,
+      );
+      if (!claimed) {
+        log.info("delivery already claimed or terminal, skipping resend", {
           deliveryId: data.deliveryId,
-          status: existing.status,
         });
         return;
       }
@@ -75,20 +82,38 @@ export function startSendEmailWorker(
         return;
       }
 
-      await notificationDeliveryRepo.incrementDeliveryAttempts(
-        deps.db,
-        data.deliveryId,
-      );
-
+      // (attempts already bumped by claimDeliveryForSend above)
       const startMs = performance.now();
-      const result = await deps.mailer.send({
-        to: data.to,
-        subject: data.subject,
-        html: data.html,
-        text: data.text,
-        headers: data.headers,
-        correlationId: data.deliveryId,
-      });
+      let result: Awaited<ReturnType<typeof deps.mailer.send>>;
+      try {
+        result = await deps.mailer.send({
+          to: data.to,
+          subject: data.subject,
+          html: data.html,
+          text: data.text,
+          headers: data.headers,
+          correlationId: data.deliveryId,
+        });
+      } catch (sendErr) {
+        // Release the single-flight claim synchronously before rethrowing.
+        // The claim flipped the row to `sending`; resetting it to `failed`
+        // (a claimable status) here — rather than only in the async
+        // `failed` handler — guarantees the row is re-claimable by the time
+        // BullMQ retries this job, with no dependency on event-handler
+        // timing. The `failed` handler still fires metrics/Sentry on the
+        // final exhausted attempt.
+        await notificationDeliveryRepo.markDeliveryStatus(
+          deps.db,
+          data.deliveryId,
+          "failed",
+          {
+            providerResponse: {
+              error: sendErr instanceof Error ? sendErr.message : String(sendErr),
+            },
+          },
+        );
+        throw sendErr;
+      }
       observeSendDuration("email", "ses", "ok", performance.now() - startMs);
 
       await notificationDeliveryRepo.markDeliveryStatus(
@@ -121,6 +146,9 @@ export function startSendEmailWorker(
     });
     if (job.attemptsMade >= attempts) {
       try {
+        // The job body already released the claim to `failed` on the throw;
+        // re-assert `failed` here (idempotent) to cover the edge where the
+        // in-body release itself failed, then fire terminal metrics/Sentry.
         await notificationDeliveryRepo.markDeliveryStatus(
           deps.db,
           job.data.deliveryId,

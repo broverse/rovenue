@@ -251,6 +251,13 @@ export const notificationChannel = pgEnum("NotificationChannel", [
 
 export const notificationDeliveryStatus = pgEnum("NotificationDeliveryStatus", [
   "queued",
+  // sending: a send-worker has atomically claimed this row (single-flight
+  // status-flip via claimDeliveryForSend) before the transport call runs,
+  // so a second concurrent job's `status NOT IN (...,'sending')` claim
+  // predicate misses it and won't double-send. Mirrors the OutgoingWebhook
+  // 'DELIVERING' claim state. A row stuck 'sending' after a crash is
+  // re-claimable once the BullMQ retry surfaces it as 'failed'.
+  "sending",
   "sent",
   "delivered",
   "bounced",

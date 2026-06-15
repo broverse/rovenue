@@ -62,14 +62,21 @@ export function startSendPushWorker(
     async (job: Job<SendPushJob>) => {
       const { data } = job;
 
-      // Guard: if the delivery row is already terminal, a previous attempt
-      // already completed (the process crashed between provider send and
-      // BullMQ ACK). Skip to prevent duplicate pushes.
-      const existing = await notificationDeliveryRepo.findDeliveryById(deps.db, data.deliveryId);
-      if (existing && (existing.status === "sent" || existing.status === "suppressed")) {
-        log.info("delivery already terminal, skipping resend", {
+      // Atomic single-flight claim. Flips a claimable row to `sending`
+      // (bumping attempts) in one statement. A `false` return means the
+      // row is already terminal (a previous attempt completed — e.g. the
+      // process crashed between provider send and BullMQ ACK) OR another
+      // job concurrently won the claim and is mid-flight. Either way, skip
+      // to prevent a duplicate push. This replaces the prior read-then-
+      // check guard, which closed the crash-retry window but not the
+      // concurrent-duplicate one.
+      const claimed = await notificationDeliveryRepo.claimDeliveryForSend(
+        deps.db,
+        data.deliveryId,
+      );
+      if (!claimed) {
+        log.info("delivery already claimed or terminal, skipping resend", {
           deliveryId: data.deliveryId,
-          status: existing.status,
         });
         return;
       }
@@ -89,11 +96,7 @@ export function startSendPushWorker(
         throw new UnrecoverableError("no active devices for user");
       }
 
-      await notificationDeliveryRepo.incrementDeliveryAttempts(
-        deps.db,
-        data.deliveryId,
-      );
-
+      // (attempts already bumped by claimDeliveryForSend above)
       const outcomes: DeviceOutcome[] = [];
       for (const device of devices) {
         const transport: PushTransport | undefined =
@@ -182,6 +185,17 @@ export function startSendPushWorker(
           deliveryId: data.deliveryId,
           outcomes: summariseOutcomes(outcomes),
         });
+        // Release the single-flight claim synchronously before rethrowing.
+        // The claim flipped the row to `sending`; resetting it to `failed`
+        // (a claimable status) here guarantees the row is re-claimable by
+        // the time BullMQ retries this job, with no dependency on async
+        // `failed`-handler timing.
+        await notificationDeliveryRepo.markDeliveryStatus(
+          deps.db,
+          data.deliveryId,
+          "failed",
+          { providerResponse: { devices: summariseOutcomes(outcomes) } },
+        );
         throw new Error("all push sends failed (transient)");
       }
 
@@ -221,11 +235,15 @@ export function startSendPushWorker(
       err: err?.message,
     });
     if (err instanceof UnrecoverableError) {
-      // Status row was already written before the throw; nothing else to do.
+      // Status row was already written (to `failed`) before the throw, so
+      // the claim is already released and there is nothing else to do.
       return;
     }
     if (job.attemptsMade >= attempts) {
       try {
+        // The job body already released the claim to `failed` on the throw;
+        // re-assert `failed` here (idempotent) to cover the edge where the
+        // in-body release itself failed, then fire terminal metrics/Sentry.
         await notificationDeliveryRepo.markDeliveryStatus(
           deps.db,
           job.data.deliveryId,
