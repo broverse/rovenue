@@ -61,5 +61,19 @@ CREATE INDEX idx_session_events_id ON session_events(id);
 UPDATE schema_meta SET version = 3;
 "#;
 
-pub const MIGRATIONS: &[&str] = &[MIGRATION_V1, MIGRATION_V2, MIGRATION_V3];
-pub const LATEST: u32 = 3;
+pub const MIGRATION_V4: &str = r#"
+DROP TABLE IF EXISTS identity;
+
+CREATE TABLE IF NOT EXISTS identity (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    rovenue_id TEXT NOT NULL,
+    app_user_id TEXT,
+    synced INTEGER NOT NULL DEFAULT 1,
+    created_at_ms INTEGER NOT NULL
+);
+
+UPDATE schema_meta SET version = 4;
+"#;
+
+pub const MIGRATIONS: &[&str] = &[MIGRATION_V1, MIGRATION_V2, MIGRATION_V3, MIGRATION_V4];
+pub const LATEST: u32 = 4;

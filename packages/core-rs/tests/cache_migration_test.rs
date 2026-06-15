@@ -6,7 +6,7 @@ fn opens_fresh_db_runs_all_migrations() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("rovenue.db");
     let store = CacheStore::open(&path).expect("open fresh db");
-    assert_eq!(store.schema_version().unwrap(), 3);
+    assert_eq!(store.schema_version().unwrap(), 4);
 }
 
 #[test]
@@ -15,7 +15,7 @@ fn reopens_existing_db_idempotently() {
     let path = dir.path().join("rovenue.db");
     let _a = CacheStore::open(&path).unwrap();
     let b = CacheStore::open(&path).expect("reopen existing");
-    assert_eq!(b.schema_version().unwrap(), 3);
+    assert_eq!(b.schema_version().unwrap(), 4);
 }
 
 #[test]
