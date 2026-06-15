@@ -177,3 +177,29 @@ fn rate_limited_budget_exhausted_surfaces_error() {
     assert!(matches!(err, rovenue::RovenueError::RateLimited));
     m.assert();
 }
+
+#[test]
+fn post_attributes_sends_attributes_map_to_me_endpoint() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("POST", "/v1/me/attributes")
+        .match_header("authorization", "Bearer pk_test_abc")
+        .match_header("x-rovenue-app-user-id", "rov_x")
+        .match_body(mockito::Matcher::JsonString(
+            r#"{"attributes":{"$email":"a@b.com","country":null}}"#.into(),
+        ))
+        .with_status(200)
+        .with_body(r#"{"data":{"ok":true}}"#)
+        .create();
+
+    let mut attributes = serde_json::Map::new();
+    attributes.insert(
+        "$email".to_string(),
+        serde_json::Value::String("a@b.com".to_string()),
+    );
+    attributes.insert("country".to_string(), serde_json::Value::Null);
+
+    let c = client(&server.url());
+    c.post_attributes("rov_x", &attributes).unwrap();
+    m.assert();
+}

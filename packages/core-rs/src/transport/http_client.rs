@@ -171,6 +171,22 @@ impl HttpClient {
         Ok(())
     }
 
+    /// POST a batch of attribute mutations to /v1/me/attributes. The
+    /// subscriber is resolved server-side from the user-scope header.
+    /// `attributes` maps key -> Some(value) to set, or None to delete.
+    pub fn post_attributes(
+        &self,
+        subscriber_id: &str,
+        attributes: &serde_json::Map<String, serde_json::Value>,
+    ) -> RovenueResult<()> {
+        let body = serde_json::json!({ "attributes": attributes });
+        let _resp = self.post_json::<serde_json::Value, serde_json::Value>(
+            super::types::HttpPostRequest::new("/v1/me/attributes").user_scope(subscriber_id),
+            &body,
+        )?;
+        Ok(())
+    }
+
     pub fn post_json<B: Serialize, T: DeserializeOwned>(
         &self,
         req: super::types::HttpPostRequest<'_>,
