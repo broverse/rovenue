@@ -600,6 +600,30 @@ export interface LtvDistributionResponse {
   histogram: LtvHistogramBucket[];
 }
 
+export interface MrrDecompositionResponse {
+  from: string;
+  to: string;
+  /** INITIAL + TRIAL_CONVERSION, decimal-as-string USD. */
+  newUsd: string;
+  /** REACTIVATION, decimal-as-string USD. */
+  expansionUsd: string;
+  /** REFUND + CHARGEBACK (money out), positive magnitude, decimal-as-string USD. */
+  churnedUsd: string;
+}
+
+export interface EngagementPoint {
+  bucket: string;
+  sessionCount: number;
+  avgSessionMs: number;
+  activeSubscribers: number;
+}
+
+export interface EngagementResponse {
+  from: string;
+  to: string;
+  points: EngagementPoint[];
+}
+
 // =============================================================
 // Project overview — KPI summary + panels (Phase 3.1)
 // =============================================================
