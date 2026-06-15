@@ -31,6 +31,8 @@ const { dbMock, drizzleMock, fetchMock } = vi.hoisted(() => {
         async (_db: unknown, id: string, patch: Record<string, unknown>) =>
           dbMock.outgoingWebhook.update({ where: { id }, data: patch }),
       ),
+      // Stale-claim reaper — runs at the top of each tick; no-op here.
+      reclaimStaleDeliveries: vi.fn(async () => 0),
     },
   };
 
@@ -47,6 +49,7 @@ vi.mock("@rovenue/db", () => ({
   drizzle: drizzleMock,
   OutgoingWebhookStatus: {
     PENDING: "PENDING",
+    DELIVERING: "DELIVERING",
     SENT: "SENT",
     FAILED: "FAILED",
     DEAD: "DEAD",
@@ -233,7 +236,11 @@ describe("deliverWebhooks — failure + retry", () => {
 // =============================================================
 
 describe("deliverWebhooks — dead letter", () => {
-  test("marks DEAD after exhausting all retries", async () => {
+  test("the MAX_ATTEMPTS-th attempt still schedules the final backoff (not DEAD)", async () => {
+    // attempts = MAX_ATTEMPTS - 1 (=4) → newAttempts = MAX_ATTEMPTS (=5):
+    // the row has not yet used all its attempts, so it schedules the
+    // last (12h) backoff entry rather than dead-lettering. (Pre-fix this
+    // wrongly DEAD-ed here, leaving the 5th backoff unreachable.)
     fetchMock.mockResolvedValue({
       ok: false,
       status: 502,
@@ -250,10 +257,32 @@ describe("deliverWebhooks — dead letter", () => {
         data: Record<string, unknown>;
       }
     ).data;
+    expect(data.status).toBe("FAILED");
+    expect(data.nextRetryAt).toBeInstanceOf(Date);
+    expect(data.attempts).toBe(MAX_ATTEMPTS);
+  });
+
+  test("marks DEAD only after all MAX_ATTEMPTS attempts are exhausted", async () => {
+    // attempts = MAX_ATTEMPTS (=5) → newAttempts = MAX_ATTEMPTS + 1 (=6):
+    // every backoff entry has been used, so the row dead-letters.
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 502,
+      text: async () => "Bad Gateway",
+    });
+    dbMock.$queryRaw.mockResolvedValue([webhook({ attempts: MAX_ATTEMPTS })]);
+
+    await deliverWebhooks(fetchMock);
+
+    const data = (
+      dbMock.outgoingWebhook.update.mock.calls[0]![0] as {
+        data: Record<string, unknown>;
+      }
+    ).data;
     expect(data.status).toBe("DEAD");
     expect(data.deadAt).toBeInstanceOf(Date);
     expect(data.nextRetryAt).toBeNull();
-    expect(data.attempts).toBe(MAX_ATTEMPTS);
+    expect(data.attempts).toBe(MAX_ATTEMPTS + 1);
   });
 
   test("still retries when attempts < MAX_ATTEMPTS - 1", async () => {
