@@ -2065,6 +2065,29 @@ git commit -m "docs: flip SDK-purchase narrative across quickstart/RN/index/RC-m
 - [ ] Docs: no "does not call StoreKit" strings; docs build passes.
 - [ ] Repo-wide: `grep -rn "postAppleReceipt\|postGoogleReceipt" packages apps | grep -v core-rs | grep -v Generated | grep -v librovenue` — only internal core usages remain (Swift/Kotlin purchase flows + Rust), no public surface.
 
+## Cross-plan dependency: Identity Model Redesign
+
+A parallel plan (`docs/superpowers/plans/2026-06-15-identity-model-redesign-backend.md`)
+re-keys subscribers onto `rovenueId` and makes `appUserId` nullable. Coordination:
+
+- **Receipt validation (hard dependency).** This plan's `purchase()` flow validates
+  through the existing `/v1/receipts/apple|google` → `verifyReceipt` →
+  `upsertSubscriber(projectId, appUserId)` (`apps/api/src/services/receipt-verify.ts`
+  lines ~150/273/340/374). The identity plan's Task 2 changes `upsertSubscriber` to
+  require `rovenueId` and conflict-key on it. **Before Phase 3/4 validation can pass,
+  those `receipt-verify.ts` upsert call sites must pass `rovenueId`** (covered by the
+  identity plan's Task 2 Step 6 grep-and-fix, but not named there — verify explicitly).
+- **SDK identity surface (sequence, not conflict).** The identity plan's *client*
+  follow-up renames `UserDTO` (`anonId/knownUserId` → `rovenueId/appUserId`) and reworks
+  the Rust `current_user_scope`/`identify`/`logOut` — touching the same files as Phase 5
+  and the Swift/Kotlin phases (`RovenueModule.types.ts`, identity API, façades). Rebase
+  the two SDK-touching plans in sequence. This plan's `getAppAccountToken()` calls are
+  unaffected by the rename (scope semantics change, call site does not).
+- **Offerings experiment override (note only).** `/v1/offerings/:identifier` resolves
+  subscribers via `findSubscriberByAppUserId`; under the new model the device key is
+  `rovenueId`, so that lookup may miss for rovenueId-identified devices. Out of scope
+  for both plans — flag to the experiments owner.
+
 ## Notes / deferred (YAGNI)
 
 - Offline offerings cache (Rust persistent cache + ETag) — deferred; v1 fetches live.
