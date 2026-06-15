@@ -41,19 +41,25 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift (SPM)', 'Swift (CocoaPods)', 'Kotlin']}>
   <Tab value="React Native">
-    Install from npm (works with bare React Native and Expo):
+    Install with your package manager (works with bare React Native and Expo). Pick a package manager once — your choice is remembered across the whole site:
 
-    ```sh
-    npm install @rovenue/react-native-sdk
-    ```
-
-    Or with yarn / pnpm:
-
-    ```sh
-    yarn add @rovenue/react-native-sdk
-    # or
-    pnpm add @rovenue/react-native-sdk
-    ```
+    <Tabs groupId="package-manager" persist items={['npm', 'yarn', 'pnpm']}>
+      <Tab value="npm">
+        ```sh
+        npm install @rovenue/react-native-sdk
+        ```
+      </Tab>
+      <Tab value="yarn">
+        ```sh
+        yarn add @rovenue/react-native-sdk
+        ```
+      </Tab>
+      <Tab value="pnpm">
+        ```sh
+        pnpm add @rovenue/react-native-sdk
+        ```
+      </Tab>
+    </Tabs>
 
     **Peer dependencies:** React Native ≥ 0.73, React ≥ 18. The Nitro module bundles the prebuilt `librovenue` dylib — no separate native install is needed.
   </Tab>

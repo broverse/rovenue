@@ -5,17 +5,32 @@ description: Install and wire the Rovenue SDK in an Expo or bare React Native ap
 
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Steps, Step } from 'fumadocs-ui/components/steps';
+import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 <Steps>
 
 <Step>
 ### Install the package
 
-Install from npm:
+Install with your package manager (your choice is remembered across the whole site):
 
-```bash
-npm install @rovenue/react-native-sdk
-```
+<Tabs groupId="package-manager" persist items={['npm', 'yarn', 'pnpm']}>
+  <Tab value="npm">
+    ```bash
+    npm install @rovenue/react-native-sdk
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @rovenue/react-native-sdk
+    ```
+  </Tab>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @rovenue/react-native-sdk
+    ```
+  </Tab>
+</Tabs>
 
 **Expo managed workflow** — add the config plugin to `app.json` (or `app.config.js`). It auto-wires the iOS CocoaPods dependency and Android Gradle on prebuild:
 
