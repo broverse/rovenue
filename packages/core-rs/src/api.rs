@@ -23,6 +23,7 @@ use crate::transport::idempotency::IdempotencyKey;
 use crate::version::SDK_VERSION;
 
 const ENTITLEMENTS_INTERVAL_MS: u64 = 30_000;
+const STALENESS_MS: u64 = 60_000;
 
 pub struct RovenueCore {
     _config: Arc<Config>,
@@ -241,11 +242,15 @@ impl RovenueCore {
     }
 
     pub fn entitlement(&self, id: String) -> Option<Entitlement> {
-        self.entitlements.get(&id).ok().flatten()
+        let out = self.entitlements.get(&id).ok().flatten();
+        self.entitlements.maybe_refresh_async(STALENESS_MS);
+        out
     }
 
     pub fn entitlements_all(&self) -> Vec<Entitlement> {
-        self.entitlements.list_all().unwrap_or_default()
+        let out = self.entitlements.list_all().unwrap_or_default();
+        self.entitlements.maybe_refresh_async(STALENESS_MS);
+        out
     }
 
     pub fn refresh_entitlements(&self) -> RovenueResult<()> {
@@ -264,6 +269,10 @@ impl RovenueCore {
 
     pub fn set_foreground(&self, foreground: bool) {
         self.scheduler.set_foreground(foreground);
+        if foreground {
+            // Refresh now instead of waiting out the remaining poll interval.
+            self.scheduler.reset_cadence();
+        }
     }
 
     pub fn shutdown(&self) {
@@ -271,7 +280,9 @@ impl RovenueCore {
     }
 
     pub fn credit_balance(&self) -> i64 {
-        self.credits.balance().unwrap_or(0)
+        let out = self.credits.balance().unwrap_or(0);
+        self.credits.maybe_refresh_async(STALENESS_MS);
+        out
     }
 
     pub fn refresh_credits(&self) -> RovenueResult<()> {
@@ -544,6 +555,30 @@ mod tests {
         assert_eq!(result.subscriber_id, "sub_2");
         assert_eq!(result.entitlements.len(), 0);
 
+        _m_ent.assert();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn stale_read_triggers_single_coalesced_refresh() {
+        let mut server = mockito::Server::new();
+
+        // A freshly built core has last_refresh_ms == 0 so every read is stale.
+        // Five rapid calls must coalesce into exactly one GET.
+        let _m_ent = server
+            .mock("GET", "/v1/me/entitlements")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"entitlements":{}}}"#)
+            .expect(1)
+            .create();
+
+        let core = make_core(&server.url());
+        for _ in 0..5 {
+            let _ = core.entitlements_all();
+        }
+        // Allow the background thread to complete its single refresh.
+        std::thread::sleep(std::time::Duration::from_millis(300));
         _m_ent.assert();
     }
 }

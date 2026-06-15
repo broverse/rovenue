@@ -58,6 +58,16 @@ impl PollingScheduler {
         self.inner.foreground.store(foreground, Ordering::SeqCst);
     }
 
+    /// Clear every registration's last-fired time so the loop fires each task on
+    /// its next tick. Used on foreground transitions to refresh immediately
+    /// instead of waiting out the remaining interval.
+    pub fn reset_cadence(&self) {
+        let regs = self.inner.registrations.lock().expect("regs poisoned");
+        for (_name, reg) in regs.iter() {
+            *reg.last_fired.lock().expect("last_fired poisoned") = None;
+        }
+    }
+
     pub fn shutdown(&self) {
         if self.inner.running.swap(false, Ordering::SeqCst) {
             // Wake up a sleeping loop quickly.
@@ -104,5 +114,32 @@ fn run_loop(inner: Arc<SchedulerInner>) {
             }
         }
         thread::sleep(tick_resolution);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reset_cadence_refires_immediately_after_reforeground() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let sched = PollingScheduler::new();
+        let count = Arc::new(AtomicUsize::new(0));
+        {
+            let count = Arc::clone(&count);
+            sched.register("t", std::time::Duration::from_secs(3600), move || {
+                count.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+        sched.set_foreground(true);
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert_eq!(count.load(Ordering::SeqCst), 1, "first foreground fires once");
+
+        sched.reset_cadence();
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        assert_eq!(count.load(Ordering::SeqCst), 2, "reset_cadence re-fires immediately");
     }
 }
