@@ -105,6 +105,12 @@ export function makeMockNative(): MockNative {
       ) => undefined,
     ),
     flushSessionEvents: vi.fn(async () => 0),
+    setAttributes: vi.fn(async (_attributes: Record<string, string | null>) => undefined),
+    setEmail: vi.fn(async (_email: string | null) => undefined),
+    setDisplayName: vi.fn(async (_name: string | null) => undefined),
+    setPhoneNumber: vi.fn(async (_phone: string | null) => undefined),
+    setPushToken: vi.fn(async (_token: string | null) => undefined),
+    flushAttributes: vi.fn(async () => 0),
     // Expo EventEmitter wire methods — no-op (stub's EventEmitter
     // delegates to __addChangeListener/__addLogListener instead).
     addListener: vi.fn(),

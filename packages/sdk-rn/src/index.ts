@@ -59,6 +59,14 @@ import { creditBalance, refreshCredits, consumeCredits } from "./api/credits";
 import { getOfferings, purchase, restorePurchases } from "./api/purchases";
 import { setForeground, shutdown } from "./api/lifecycle";
 import { getAppAccountToken } from "./api/accountToken";
+import {
+  setAttributes,
+  setEmail,
+  setDisplayName,
+  setPhoneNumber,
+  setPushToken,
+  flushAttributes,
+} from "./api/attributes";
 import { SDK_VERSION } from "./version";
 import { getEmitter } from "./core/native";
 import { setLogHandler } from "./api/log";
@@ -82,6 +90,12 @@ export const Rovenue = {
   setForeground,
   shutdown,
   setLogHandler,
+  setAttributes,
+  setEmail,
+  setDisplayName,
+  setPhoneNumber,
+  setPushToken,
+  flushAttributes,
   addChangeListener: (cb: (event: import("./types").ChangeEvent) => void): (() => void) => {
     const sub = getEmitter().addListener("onChange", (payload: { event: string }) => {
       cb(payload.event as import("./types").ChangeEvent);

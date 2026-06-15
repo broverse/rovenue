@@ -102,6 +102,14 @@ export interface RovenueModuleSpec {
   ): Promise<void>;
   flushSessionEvents(): Promise<number>;
 
+  // Subscriber attributes — batch set + reserved-key setters + durable flush.
+  setAttributes(attributes: Record<string, string | null>): Promise<void>;
+  setEmail(email: string | null): Promise<void>;
+  setDisplayName(name: string | null): Promise<void>;
+  setPhoneNumber(phone: string | null): Promise<void>;
+  setPushToken(token: string | null): Promise<void>;
+  flushAttributes(): Promise<number>;
+
   // Required by `new EventEmitter(nativeModule)` — Expo's runtime checks
   // these exist; our mock implements them as no-ops because emit routing
   // happens through __addChangeListener / __emit on the mock state.
