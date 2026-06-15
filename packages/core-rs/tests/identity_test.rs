@@ -23,8 +23,8 @@ fn fresh() -> (Arc<CacheStore>, Arc<ObserverBus>, IdentityManager) {
 fn first_load_generates_anon_id() {
     let (_, _, mgr) = fresh();
     let u = mgr.current_user();
-    assert!(u.anon_id.starts_with("anon_"));
-    assert!(u.known_user_id.is_none());
+    assert!(u.rovenue_id.starts_with("rov_"));
+    assert!(u.app_user_id.is_none());
 }
 
 #[test]
@@ -32,9 +32,9 @@ fn anon_id_persists_across_open() {
     let store = Arc::new(CacheStore::open_in_memory().unwrap());
     let bus = Arc::new(ObserverBus::default());
     let mgr1 = IdentityManager::new(Arc::clone(&store), Arc::clone(&bus), Arc::new(SystemClock));
-    let first = mgr1.current_user().anon_id.clone();
+    let first = mgr1.current_user().rovenue_id.clone();
     let mgr2 = IdentityManager::new(Arc::clone(&store), Arc::clone(&bus), Arc::new(SystemClock));
-    assert_eq!(mgr2.current_user().anon_id, first);
+    assert_eq!(mgr2.current_user().rovenue_id, first);
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn identify_sets_known_id_and_emits() {
     bus.register(Arc::clone(&cap) as Arc<dyn Observer>);
     mgr.identify("user_42".into()).unwrap();
     let u = mgr.current_user();
-    assert_eq!(u.known_user_id.as_deref(), Some("user_42"));
+    assert_eq!(u.app_user_id.as_deref(), Some("user_42"));
     let events = cap.0.lock().unwrap().clone();
     assert!(events.contains(&ChangeEvent::IdentityChanged));
 }

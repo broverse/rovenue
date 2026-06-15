@@ -28,7 +28,7 @@ fn core_new_rejects_invalid_config() {
 fn current_user_has_anon_id_by_default() {
     let core = test_core();
     let u = core.current_user();
-    assert!(u.anon_id.starts_with("anon_"));
+    assert!(u.rovenue_id.starts_with("rov_"));
 }
 
 #[test]
@@ -36,7 +36,7 @@ fn identify_then_current_user_reflects_known_id() {
     let core = test_core();
     core.identify("user_42".into()).unwrap();
     assert_eq!(
-        core.current_user().known_user_id.as_deref(),
+        core.current_user().app_user_id.as_deref(),
         Some("user_42")
     );
 }

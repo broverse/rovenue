@@ -137,8 +137,8 @@ impl RovenueCore {
         self.identity.current_user()
     }
 
-    pub fn identify(&self, known_user_id: String) -> RovenueResult<()> {
-        self.identity.identify(known_user_id)
+    pub fn identify(&self, app_user_id: String) -> RovenueResult<()> {
+        self.identity.identify(app_user_id)
     }
 
     pub fn entitlement(&self, id: String) -> Option<Entitlement> {

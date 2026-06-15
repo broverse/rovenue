@@ -27,8 +27,8 @@ dictionary Config {
 };
 
 dictionary User {
-    string anon_id;
-    string? known_user_id;
+    string rovenue_id;
+    string? app_user_id;
 };
 
 dictionary Entitlement {
@@ -89,7 +89,7 @@ interface RovenueCore {
     User current_user();
 
     [Throws=RovenueError]
-    void identify(string known_user_id);
+    void identify(string app_user_id);
 
     Entitlement? entitlement(string id);
     sequence<Entitlement> entitlements_all();

@@ -15,7 +15,7 @@ impl AccountTokenStore {
     }
 
     /// Returns the stable token for the given scope (typically the
-    /// subscriber's anon_id or known_user_id). Generates + persists on
+    /// subscriber's rovenue_id or app_user_id). Generates + persists on
     /// first call; subsequent calls return the same UUID.
     pub fn get_or_create(&self, scope: &str) -> RovenueResult<String> {
         if scope.trim().is_empty() {
