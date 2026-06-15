@@ -57,7 +57,12 @@ impl IdentityManager {
         u.app_user_id.clone().unwrap_or_else(|| u.rovenue_id.clone())
     }
 
-    pub fn identify(&self, app_user_id: String) -> RovenueResult<()> {
+    /// Optimistic-local identity set. Persists the `app_user_id` with
+    /// `synced: false` (a follow-up `POST /v1/identify` flips it to synced via
+    /// [`mark_synced`]). Emits `IdentityChanged` only when the value actually
+    /// changes. Returns `true` when the identity changed, `false` when it was
+    /// already this `app_user_id` (no write, no emit).
+    pub fn set_app_user_id(&self, app_user_id: String) -> RovenueResult<bool> {
         if app_user_id.trim().is_empty() {
             return Err(RovenueError::InvalidApiKey); // reuse "invalid input" semantic
         }
@@ -79,13 +84,47 @@ impl IdentityManager {
                     .rovenue_id
                     .clone(),
                 app_user_id: Some(app_user_id),
-                synced: true,
+                synced: false,
                 created_at_ms: self.clock.now_unix_ms(),
             };
             IdentityRepo::new(&self.store).save(&row)?;
             self.bus.emit(ChangeEvent::IdentityChanged);
         }
+        Ok(changed)
+    }
+
+    /// Marks the persisted identity row as synced (server `POST /v1/identify`
+    /// succeeded). Does not touch the in-memory `User` (it never carried the
+    /// flag) or emit — the `app_user_id` is unchanged.
+    pub fn mark_synced(&self) -> RovenueResult<()> {
+        let repo = IdentityRepo::new(&self.store);
+        if let Some(mut row) = repo.load()? {
+            if !row.synced {
+                row.synced = true;
+                repo.save(&row)?;
+            }
+        }
         Ok(())
+    }
+
+    /// Returns the `app_user_id` awaiting server sync — `Some` only while the
+    /// persisted row has `synced == false` and carries an `app_user_id`.
+    pub fn pending_app_user_id(&self) -> Option<String> {
+        let row = IdentityRepo::new(&self.store).load().ok().flatten()?;
+        if row.synced {
+            None
+        } else {
+            row.app_user_id
+        }
+    }
+
+    /// The current anonymous device id.
+    pub fn rovenue_id(&self) -> String {
+        self.cached
+            .lock()
+            .expect("identity mutex poisoned")
+            .rovenue_id
+            .clone()
     }
 
     /// Resets identity to a fresh anonymous user: mints a new `rovenue_id`,
