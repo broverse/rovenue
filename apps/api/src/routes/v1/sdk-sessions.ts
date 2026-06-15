@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
 import { API_KEY_KIND } from "@rovenue/shared";
 import { HTTPException } from "hono/http-exception";
+import { drizzle } from "@rovenue/db";
 import { getProducer } from "../../lib/kafka";
 import { logger } from "../../lib/logger";
 
@@ -74,7 +75,21 @@ export const sdkSessionsRoute = new Hono().post(
   zValidator("json", bodySchema),
   async (c) => {
     const project = c.get("project");
-    const { subscriberId, events } = c.req.valid("json");
+    const { subscriberId: rawSubscriberId, events } = c.req.valid("json");
+
+    // Tenant ownership: resolve the client-supplied id to a project-owned
+    // subscriber so the Kafka key + payload always carry an id we own
+    // (mirrors /me, /track). A raw foreign id would otherwise corrupt the
+    // engagement aggregates feeding Refund Shield.
+    const subscriber = await drizzle.subscriberRepo.upsertSubscriber(
+      drizzle.db,
+      {
+        projectId: project.id,
+        rovenueId: rawSubscriberId,
+        createAttributes: {},
+      },
+    );
+    const subscriberId = subscriber.id;
 
     const messages = events.map((e) => ({
       // Partition key — same subscriber's events land on the same

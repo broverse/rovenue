@@ -24,6 +24,20 @@ vi.mock("../../lib/kafka", () => ({
   getProducer: vi.fn(async () => ({ send: sendMock })),
 }));
 
+// Resolve the client-supplied id to a project-owned subscriber. The
+// route uses `subscriber.id` (project-owned) as the Kafka key + payload
+// id, never the raw foreign id from the body.
+const upsertSubscriberMock = vi.fn();
+
+vi.mock("@rovenue/db", () => ({
+  drizzle: {
+    db: {},
+    subscriberRepo: {
+      upsertSubscriber: (...args: unknown[]) => upsertSubscriberMock(...args),
+    },
+  },
+}));
+
 // Stub the api-key-auth middleware. The real implementation hits
 // the DB; we only need to assert: (a) absent bearer → 401, (b)
 // public key path → project is set on context.
@@ -68,9 +82,18 @@ describe("POST /v1/sdk/sessions", () => {
   beforeEach(() => {
     sendMock.mockReset();
     sendMock.mockResolvedValue(undefined);
+    upsertSubscriberMock.mockReset();
+    // The repo resolves the client-supplied rovenueId to the canonical,
+    // project-owned subscriber row. Echo a distinct id so tests can prove
+    // the route uses the resolved id, not the raw body value.
+    upsertSubscriberMock.mockImplementation(async (_db: unknown, input: any) => ({
+      id: `resolved_${input.rovenueId}`,
+      projectId: input.projectId,
+      rovenueId: input.rovenueId,
+    }));
   });
 
-  it("produces events to rovenue.sdk-sessions topic and returns 202", async () => {
+  it("produces events with the project-owned subscriber id and returns 202", async () => {
     const app = await buildApp();
     const res = await app.request("/v1/sdk/sessions", {
       method: "POST",
@@ -79,7 +102,9 @@ describe("POST /v1/sdk/sessions", () => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        subscriberId: "sub_test_1",
+        // A foreign / caller-supplied id — must be resolved within the
+        // authenticated project, never trusted verbatim.
+        subscriberId: "foreign_sub_xyz",
         events: [
           {
             type: "background",
@@ -92,22 +117,33 @@ describe("POST /v1/sdk/sessions", () => {
       }),
     });
     expect(res.status).toBe(202);
+
+    // Resolution happened within the authenticated project.
+    expect(upsertSubscriberMock).toHaveBeenCalledTimes(1);
+    const upsertArgs = upsertSubscriberMock.mock.calls[0]?.[1];
+    expect(upsertArgs).toMatchObject({
+      projectId: "proj_test_1",
+      rovenueId: "foreign_sub_xyz",
+      createAttributes: {},
+    });
+
     expect(sendMock).toHaveBeenCalledTimes(1);
     const call = sendMock.mock.calls[0]?.[0];
     expect(call.topic).toBe("rovenue.sdk-sessions");
     expect(call.messages).toHaveLength(1);
     const msg = call.messages[0];
-    expect(msg.key).toBe("sub_test_1");
+    // Key + payload use the resolved id, NOT the raw foreign id.
+    expect(msg.key).toBe("resolved_foreign_sub_xyz");
     const envelope = JSON.parse(msg.value);
     expect(envelope.eventType).toBe("sdk.session");
-    expect(envelope.aggregateId).toBe("sub_test_1");
+    expect(envelope.aggregateId).toBe("resolved_foreign_sub_xyz");
     expect(typeof envelope.eventId).toBe("string");
     expect(envelope.eventId.length).toBeGreaterThan(0);
     expect(typeof envelope.payload).toBe("string");
     const payload = JSON.parse(envelope.payload);
     expect(payload).toMatchObject({
       projectId: "proj_test_1",
-      subscriberId: "sub_test_1",
+      subscriberId: "resolved_foreign_sub_xyz",
       eventType: "background",
       occurredAt: "2026-05-28T10:00:00.000Z",
       durationMs: 60000,
