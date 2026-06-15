@@ -98,8 +98,35 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
       fn(drizzleDb),
     ),
   };
+
+  // Proxy so any drizzle.schema.<table> reference resolves to {} at module load
+  // (prevents "Cannot destructure property X of undefined" on top-level imports)
+  const schemaMock = new Proxy({} as Record<string, unknown>, {
+    get(_target, prop) {
+      return prop === Symbol.toPrimitive ? undefined : {};
+    },
+  });
+
   const drizzleMock = {
     db: drizzleDb,
+    schema: schemaMock,
+    notificationRepo: {
+      listNotificationsForUser: vi.fn(async () => []),
+      unreadNotificationCount: vi.fn(async () => 0),
+      markNotificationRead: vi.fn(async () => undefined),
+      markAllNotificationsRead: vi.fn(async () => undefined),
+    },
+    notificationPreferencesRepo: {
+      listPreferencesForUser: vi.fn(async () => []),
+      upsertPreference: vi.fn(async () => undefined),
+      listDefaultsForProject: vi.fn(async () => []),
+      upsertDefault: vi.fn(async () => undefined),
+    },
+    pushDeviceRepo: {
+      upsertDevice: vi.fn(async () => undefined),
+      deleteDevice: vi.fn(async () => undefined),
+      listDevicesForSubscriber: vi.fn(async () => []),
+    },
     subscriberRepo: {
       findSubscriberAttributes: vi.fn(async () => null),
       findSubscriberByAppUserId: vi.fn(
@@ -335,6 +362,12 @@ vi.mock("@rovenue/db", () => ({
     COMPLETED: "COMPLETED",
   },
   FeatureFlagEnv: { PROD: "PROD", STAGING: "STAGING", DEVELOPMENT: "DEVELOPMENT" },
+  // Zod schema stub — just pass anything through
+  accessIdSchema: { parse: (v: unknown) => v, safeParse: (v: unknown) => ({ success: true, data: v }), optional: () => ({ parse: (v: unknown) => v }) },
+  currentYearMonth: () => "2026-06",
+  getDb: () => ({}),
+  db: {},
+  decryptCredential: (v: unknown) => v,
 }));
 
 // Stub bcrypt so secret key compare is deterministic in tests

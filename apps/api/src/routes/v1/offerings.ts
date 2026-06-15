@@ -31,6 +31,17 @@ const productMembershipSchema = z.object({
 });
 const productMembershipsSchema = z.array(productMembershipSchema);
 
+const storeIdsSchema = z.object({
+  apple: z.string().optional(),
+  google: z.string().optional(),
+  stripe: z.string().optional(),
+}).passthrough();
+
+function parseStoreIds(raw: unknown): Record<string, string> {
+  const parsed = storeIdsSchema.safeParse(raw);
+  return parsed.success ? (parsed.data as Record<string, string>) : {};
+}
+
 interface OfferingProductEntry {
   identifier: string;
   type: string;
@@ -39,7 +50,42 @@ interface OfferingProductEntry {
   isPromoted: boolean;
   creditAmount: number | null;
   accessIds: string[];
+  storeIds: Record<string, string>;
   metadata: unknown;
+}
+
+type Membership = z.infer<typeof productMembershipSchema>;
+
+function hydrateProducts(
+  memberships: Membership[],
+  productById: Map<string, {
+    identifier: string;
+    type: string;
+    displayName: string;
+    creditAmount: number | null;
+    accessIds: string[];
+    isActive: boolean;
+    storeIds: unknown;
+  }>,
+): OfferingProductEntry[] {
+  return [...memberships]
+    .sort((a, b) => a.order - b.order)
+    .map((entry): OfferingProductEntry | null => {
+      const product = productById.get(entry.productId);
+      if (!product || !product.isActive) return null;
+      return {
+        identifier: product.identifier,
+        type: product.type,
+        displayName: product.displayName,
+        order: entry.order,
+        isPromoted: entry.isPromoted,
+        creditAmount: product.creditAmount,
+        accessIds: product.accessIds,
+        storeIds: parseStoreIds(product.storeIds),
+        metadata: entry.metadata ?? {},
+      };
+    })
+    .filter((p): p is OfferingProductEntry => p !== null);
 }
 
 export const offeringsRoute = new Hono()
@@ -58,17 +104,38 @@ export const offeringsRoute = new Hono()
         )
       : await drizzle.offeringRepo.listOfferings(drizzle.db, project.id);
 
+    // Parse memberships for all offerings up-front so we can batch-fetch products
+    const parsedByOffering = offerings.map((o) => ({
+      offering: o,
+      memberships: productMembershipsSchema.safeParse(o.products),
+    }));
+
+    // Collect unique product ids across all offerings for a single DB round-trip
+    const allIds = Array.from(
+      new Set(
+        parsedByOffering.flatMap((p) =>
+          p.memberships.success ? p.memberships.data.map((m) => m.productId) : [],
+        ),
+      ),
+    );
+
+    const products = await drizzle.offeringRepo.findProductsByIds(
+      drizzle.db,
+      project.id,
+      allIds,
+    );
+    const productById = new Map(products.map((p) => [p.id, p] as const));
+
     return c.json(
       ok({
-        offerings: offerings.map((offering) => {
-          const products = productMembershipsSchema.safeParse(offering.products);
-          return {
-            identifier: offering.identifier,
-            accessId: offering.accessId,
-            isDefault: offering.isDefault,
-            productCount: products.success ? products.data.length : 0,
-          };
-        }),
+        offerings: parsedByOffering.map(({ offering, memberships }) => ({
+          identifier: offering.identifier,
+          accessId: offering.accessId,
+          isDefault: offering.isDefault,
+          products: memberships.success
+            ? hydrateProducts(memberships.data, productById as any)
+            : [],
+        })),
       }),
     );
   })
@@ -158,24 +225,7 @@ export const offeringsRoute = new Hono()
       productIds,
     );
     const productById = new Map(products.map((p) => [p.id, p] as const));
-
-    const sorted = [...memberships.data].sort((a, b) => a.order - b.order);
-    const payload: OfferingProductEntry[] = sorted
-      .map((entry): OfferingProductEntry | null => {
-        const product = productById.get(entry.productId);
-        if (!product || !product.isActive) return null;
-        return {
-          identifier: product.identifier,
-          type: product.type,
-          displayName: product.displayName,
-          order: entry.order,
-          isPromoted: entry.isPromoted,
-          creditAmount: product.creditAmount,
-          accessIds: product.accessIds,
-          metadata: entry.metadata ?? {},
-        };
-      })
-      .filter((p): p is OfferingProductEntry => p !== null);
+    const payload: OfferingProductEntry[] = hydrateProducts(memberships.data, productById as any);
 
     return c.json(
       ok({
