@@ -19,7 +19,7 @@ function toCountryCode(value: unknown): CountryCode {
  * safe blanks so the UI stays functional.
  */
 export function mapApiSubscriber(item: SubscriberListItem): Subscriber {
-  const full = item.appUserId;
+  const full = item.appUserId ?? "";
   const truncated = full.length > 20 ? `${full.slice(0, 17)}...` : full;
   const alias = full.length > 24 ? `${full.slice(0, 21)}...` : full;
   const status = item.activeAccessIds.length > 0 ? "active" : "churned";

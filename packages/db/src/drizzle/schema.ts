@@ -377,7 +377,8 @@ export const subscribers = pgTable(
     projectId: text("projectId")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    appUserId: text("appUserId").notNull(),
+    rovenueId: text("rovenueId").notNull(),
+    appUserId: text("appUserId"),
     firstSeenAt: timestamp("firstSeenAt", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -387,6 +388,7 @@ export const subscribers = pgTable(
     attributes: jsonb("attributes").notNull().default(sql`'{}'::jsonb`),
     deletedAt: timestamp("deletedAt", { withTimezone: true }),
     mergedInto: text("mergedInto"),
+    identifiedAt: timestamp("identifiedAt", { withTimezone: true }),
     // Apple StoreKit `appAccountToken` (UUID v4) — opaque per-user
     // identifier sent with the purchase and echoed in every
     // ASSN v2 notification for that transaction. Persisted so the
@@ -402,9 +404,12 @@ export const subscribers = pgTable(
       .defaultNow(),
   },
   (t) => ({
-    projectIdAppUserIdKey: uniqueIndex(
-      "subscribers_projectId_appUserId_key",
-    ).on(t.projectId, t.appUserId),
+    projectIdRovenueIdKey: uniqueIndex(
+      "subscribers_projectId_rovenueId_key",
+    ).on(t.projectId, t.rovenueId),
+    projectIdAppUserIdKey: uniqueIndex("subscribers_projectId_appUserId_key")
+      .on(t.projectId, t.appUserId)
+      .where(sql`${t.appUserId} IS NOT NULL AND ${t.deletedAt} IS NULL`),
     appleTokenIdx: uniqueIndex("idx_subscribers_apple_app_account_token")
       .on(t.projectId, t.appleAppAccountToken)
       .where(sql`${t.appleAppAccountToken} IS NOT NULL`),

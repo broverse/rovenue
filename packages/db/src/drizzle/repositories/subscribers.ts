@@ -152,6 +152,7 @@ export async function createSubscriber(
     .insert(subscribers)
     .values({
       projectId: input.projectId,
+      rovenueId: input.appUserId,
       appUserId: input.appUserId,
       attributes: (input.attributes ??
         {}) as typeof subscribers.$inferInsert.attributes,
@@ -207,13 +208,14 @@ export async function upsertSubscriber(
     .insert(subscribers)
     .values({
       projectId: input.projectId,
+      rovenueId: input.appUserId,
       appUserId: input.appUserId,
       attributes: (input.createAttributes ??
         {}) as typeof subscribers.$inferInsert.attributes,
       appleAppAccountToken: input.appleAppAccountToken ?? null,
     })
     .onConflictDoUpdate({
-      target: [subscribers.projectId, subscribers.appUserId],
+      target: [subscribers.projectId, subscribers.rovenueId],
       set: update,
     })
     .returning();
@@ -278,7 +280,7 @@ export interface ListSubscribersArgs {
 
 export interface ListedSubscriber {
   id: string;
-  appUserId: string;
+  appUserId: string | null;
   attributes: unknown;
   firstSeenAt: Date;
   lastSeenAt: Date;

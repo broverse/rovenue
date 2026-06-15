@@ -292,16 +292,17 @@ function SubscribersPage({
       const status = detailData.access.some((a) => a.isActive)
         ? "active"
         : "churned";
+      const subUserId = detailData.appUserId ?? "";
       return {
         id:
-          detailData.appUserId.length > 20
-            ? `${detailData.appUserId.slice(0, 17)}...`
-            : detailData.appUserId,
-        full: detailData.appUserId,
+          subUserId.length > 20
+            ? `${subUserId.slice(0, 17)}...`
+            : subUserId,
+        full: subUserId,
         alias:
-          detailData.appUserId.length > 24
-            ? `${detailData.appUserId.slice(0, 21)}...`
-            : detailData.appUserId,
+          subUserId.length > 24
+            ? `${subUserId.slice(0, 21)}...`
+            : subUserId,
         country: "US",
         access: detailData.access
           .filter((a) => a.isActive)

@@ -106,6 +106,7 @@ async function seedSubscriber({
   await getDb().insert(subscribers).values({
     id,
     projectId,
+    rovenueId: `app_rstest_${RUN_ID}_${suffix}`,
     appUserId: `app_rstest_${RUN_ID}_${suffix}`,
   });
   return { id };

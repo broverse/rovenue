@@ -85,6 +85,7 @@ async function seedSubscriber({
   await db.insert(subscribers).values({
     id,
     projectId,
+    rovenueId: `app_cred_${RUN_ID}${suffix}`,
     appUserId: `app_cred_${RUN_ID}${suffix}`,
   });
   return { id };

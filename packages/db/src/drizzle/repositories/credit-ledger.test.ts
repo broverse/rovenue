@@ -53,7 +53,7 @@ async function seedProject() {
 async function seedSubscriber(projectId: string) {
   const [subscriber] = await db
     .insert(schema.subscribers)
-    .values({ projectId, appUserId: `user-cl-${Date.now()}` })
+    .values({ projectId, rovenueId: `user-cl-${Date.now()}`, appUserId: `user-cl-${Date.now()}` })
     .returning();
   if (!subscriber) throw new Error("seedSubscriber: no row returned");
   return subscriber;

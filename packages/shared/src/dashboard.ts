@@ -252,7 +252,7 @@ export type SubscriberListSortMode =
 
 export interface SubscriberListItem {
   id: string;
-  appUserId: string;
+  appUserId: string | null;
   attributes: Record<string, unknown>;
   firstSeenAt: string;
   lastSeenAt: string;
@@ -337,7 +337,7 @@ export interface SubscriberOutgoingWebhook {
 
 export interface SubscriberDetail {
   id: string;
-  appUserId: string;
+  appUserId: string | null;
   attributes: Record<string, unknown>;
   firstSeenAt: string;
   lastSeenAt: string;
