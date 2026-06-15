@@ -7,6 +7,8 @@
 
 import { z } from "zod";
 
+import type { AttributeMap, SubscriberAttributes } from "./attributes";
+
 export type MemberRoleName =
   | "OWNER"
   | "ADMIN"
@@ -253,7 +255,7 @@ export type SubscriberListSortMode =
 export interface SubscriberListItem {
   id: string;
   appUserId: string | null;
-  attributes: Record<string, unknown>;
+  attributes: AttributeMap;
   firstSeenAt: string;
   lastSeenAt: string;
   purchaseCount: number;
@@ -338,7 +340,7 @@ export interface SubscriberOutgoingWebhook {
 export interface SubscriberDetail {
   id: string;
   appUserId: string | null;
-  attributes: Record<string, unknown>;
+  attributes: SubscriberAttributes;
   firstSeenAt: string;
   lastSeenAt: string;
   deletedAt: string | null;
