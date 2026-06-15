@@ -2,7 +2,7 @@
 //
 // Imperative API:    Rovenue.configure(...), Rovenue.identify(...), ...
 // React hooks:       useCurrentUser, useEntitlement, useEntitlements, useCreditBalance
-// Error classes:     RovenueError + 13 subclasses
+// Error classes:     RovenueError + 17 subclasses
 
 export { SDK_VERSION } from "./version";
 
@@ -16,7 +16,12 @@ export type { EventEnvelope, IdentityContext } from "./events";
 export type {
   User,
   Entitlement,
-  ReceiptResult,
+  ProductType,
+  StoreProduct,
+  Package,
+  Offering,
+  Offerings,
+  PurchaseResult,
   ChangeEvent,
 } from "./types";
 
@@ -34,6 +39,10 @@ export {
   EntitlementInactiveError,
   DuplicatePurchaseError,
   ReceiptInvalidError,
+  PurchaseCancelledError,
+  PurchasePendingError,
+  ProductNotAvailableError,
+  StoreProblemError,
   InternalError,
 } from "./errors";
 
@@ -46,7 +55,7 @@ import { configure } from "./api/configure";
 import { currentUser, identify } from "./api/identity";
 import { entitlement, entitlementsAll, refreshEntitlements } from "./api/entitlements";
 import { creditBalance, refreshCredits, consumeCredits } from "./api/credits";
-import { postAppleReceipt, postGoogleReceipt } from "./api/receipts";
+import { getOfferings, purchase, restorePurchases } from "./api/purchases";
 import { setForeground, shutdown } from "./api/lifecycle";
 import { getAppAccountToken } from "./api/accountToken";
 import { SDK_VERSION } from "./version";
@@ -64,8 +73,9 @@ export const Rovenue = {
   creditBalance,
   refreshCredits,
   consumeCredits,
-  postAppleReceipt,
-  postGoogleReceipt,
+  getOfferings,
+  purchase,
+  restorePurchases,
   getAppAccountToken,
   setForeground,
   shutdown,
