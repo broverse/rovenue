@@ -9,13 +9,13 @@ Returned by [`currentUser()`](/docs/reference/methods#identity).
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `anonId` | `string` | Stable anonymous identifier generated on first launch. Persists across app restarts. |
-| `knownUserId` | `string \| undefined` | Your app's user ID, set after a successful `identify()` call. `undefined` until the user is identified. |
+| `rovenueId` | `string` | Permanent per-install identifier generated on first launch (prefix `rov_`). Always present; never changes for the lifetime of the install. |
+| `appUserId` | `string \| null` | Your backend's user ID, attached after a successful `identify()` call. `null` until the user is identified. |
 
 ```ts
 type User = {
-  anonId: string;
-  knownUserId?: string;
+  rovenueId: string;
+  appUserId: string | null;
 };
 ```
 
@@ -68,7 +68,7 @@ Emitted by the [change stream](/docs/reference/methods#change-stream) whenever i
 | Value | When it fires |
 |-------|--------------|
 | `EntitlementsChanged` | Emitted after the entitlement cache is refreshed — e.g. after a successful purchase, `refreshEntitlements()`, or a foreground transition that triggers a background sync. |
-| `IdentityChanged` | Emitted after `identify()` succeeds or after an anonymous reset, indicating the active user context has changed. |
+| `IdentityChanged` | Emitted after `identify()` succeeds or after `logOut()` resets the user, indicating the active user context has changed. |
 | `CreditBalanceChanged` | Emitted after the credit balance changes — e.g. after `refreshCredits()` or a successful `consumeCredits()` call. |
 
 ```ts

@@ -9,11 +9,11 @@ The Rovenue SDK is built around a small set of concepts that apply across React 
 
 ## Anonymous vs known user
 
-Every install starts in an anonymous state. The SDK generates a stable `anonId` on first launch and uses it to track events and entitlements before you know who the user is.
+Every install starts in an anonymous state. The SDK generates a stable `rovenueId` on first launch (prefix `rov_`) and uses it to track events, entitlements, and credits before you know who the user is. The `rovenueId` is permanent for the lifetime of the install.
 
-Call `identify(knownUserId)` once you have an app-side identity (after login, for example). This is **client-local** — it records the mapping on-device and tags subsequent events with the new ID. It does not merge purchase history or credits across accounts on its own.
+Call `identify(appUserId)` once you have an app-side identity (after login, for example). This is a **server-side bind**: Rovenue attaches your `appUserId` to the current `rovenueId` and automatically transfers any prior install's purchases and credits to this device. The call is optimistic — local state updates immediately.
 
-Server-side account merging — linking the anonymous session to a known user and consolidating their purchases — must be triggered from your backend. See [Identifying users](/docs/guides/identifying-users) for the full flow.
+On user sign-out, call `logOut()`. This mints a fresh `rovenueId` and clears the `appUserId` so the next user on a shared device starts clean. See [Identifying users](/docs/guides/identifying-users) for the full flow.
 
 ## Entitlement vs product
 

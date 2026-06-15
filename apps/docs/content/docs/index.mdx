@@ -20,8 +20,9 @@ exposes it idiomatically.
 
 ## What the SDK does NOT do
 
-- It does **not** merge users itself. `identify()` is client-local; account
-  merging is a server operation your backend triggers.
+- **Bulk merges.** `identify()` auto-transfers a prior install's purchases to
+  the current device, but programmatic bulk merging (e.g. platform migrations)
+  is a server operation your backend triggers via the secret-key API.
 
 Pick your platform in the [Installation](/docs/getting-started/installation)
 guide, then follow the [Quick Start](/docs/getting-started/quickstart).

@@ -118,11 +118,16 @@ Collect `Rovenue.shared.changes` from a scope **outside** the SDK's own internal
 
 ## Suspend functions
 
-SDK methods such as `identify`, `refreshEntitlements`, and `consumeCredits` are suspend functions. They must be called from a coroutine:
+SDK methods such as `identify`, `logOut`, `refreshEntitlements`, and `consumeCredits` are suspend functions. They must be called from a coroutine:
 
 ```kotlin
 lifecycleScope.launch {
-  Rovenue.shared.identify(userId = "user_123")
+  // After your auth flow completes:
+  Rovenue.shared.identify("user_123")
+
+  // When your user signs out:
+  Rovenue.shared.logOut()
+
   val entitlements = Rovenue.shared.refreshEntitlements()
 }
 ```

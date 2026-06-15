@@ -11,7 +11,7 @@ Rovenue covers the same subscription-management use cases as RevenueCat but runs
 |---|---|
 | `Purchases.configure(apiKey)` | `Rovenue.configure({ apiKey, baseUrl })` |
 | `getCustomerInfo().entitlements` | `entitlement(id)` / `entitlementsAll()` |
-| `logIn(appUserID)` | `identify(knownUserId)` (client-local; server merge via your backend) |
+| `logIn(appUserID)` | `identify(appUserId)` — server-side bind + auto-transfer of prior installs |
 | `Purchases.getOfferings()` | `Rovenue.getOfferings()` |
 | SDK-driven `purchase(package)` | `Rovenue.purchase(pkg)` — same pattern; `getOfferings()` then `purchase(pkg)` |
 | `addCustomerInfoUpdateListener` | `addChangeListener` (RN) / `changes` AsyncStream (Swift) / SharedFlow (Kotlin) |
@@ -48,7 +48,5 @@ await Rovenue.restorePurchases();
   no third-party data processing. You own the database and control retention.
 - **Credits built-in.** Rovenue ships a first-class append-only credit ledger
   for consumable products, loyalty systems, and metered billing.
-- **Identity model.** `identify()` is client-local (sets a known user ID on
-  the device). Cross-device account merging is a server operation your backend
-  triggers via the secret-key API — Rovenue does not auto-merge on the client.
+- **Identity model.** `identify(appUserId)` performs a server-side bind and automatically transfers any prior install's purchases and credits to the current device (similar to RevenueCat's "transfer to new ID" behaviour). Call `logOut()` on sign-out to mint a fresh `rovenueId`. Bulk or programmatic merges are available via the secret-key backend API.
 - **Open source (AGPLv3).** You can read, audit, and fork the full stack.

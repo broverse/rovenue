@@ -4,6 +4,7 @@ description: Every Rovenue SDK method, grouped by capability.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
 
 ## Configuration
 
@@ -44,34 +45,62 @@ Call `configure` once at app startup before accessing `Rovenue.shared`.
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
 | `currentUser` | `currentUser()` | `User` | — |
-| `identify` | `identify(knownUserId)` | `void` | — |
+| `identify` | `identify(appUserId)` | `void` | — |
+| `logOut` | `logOut()` | `void` | — |
+
+`currentUser()` is a **cache read** — instant, no network. It returns a [`User`](/docs/reference/types#user) with two fields:
+- **`rovenueId`** — permanent per-install identifier (prefix `rov_`); always present.
+- **`appUserId`** — your backend's user ID; `null` until `identify()` is called.
+
+`identify(appUserId)` performs a **server-side bind**: Rovenue attaches the `appUserId` label to the current `rovenueId` and, if that `appUserId` already exists on another install, automatically transfers that install's purchases and credits to this device. The call is **optimistic** — local state updates immediately and the server sync completes in the background. See the [Identifying users guide](/docs/guides/identifying-users) for the full flow.
+
+`logOut()` mints a fresh `rovenueId`, clears `appUserId`, and drops all scope-bound caches. Call it when your user signs out so the next user on a shared device starts with a clean slate.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
     const user = await Rovenue.currentUser();
-    // user.anonId, user.knownUserId
+    // user.rovenueId — always present (e.g. "rov_01abc...")
+    // user.appUserId — null until identify() has been called
 
+    // After your auth flow completes:
     await Rovenue.identify('user_123');
+
+    // When your user signs out:
+    await Rovenue.logOut();
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
     let user = await Rovenue.shared.currentUser()
-    // user.anonId, user.knownUserId
+    // user.rovenueId — always present (e.g. "rov_01abc...")
+    // user.appUserId — nil until identify() has been called
 
-    await Rovenue.shared.identify(knownUserId: "user_123")
+    // After your auth flow completes:
+    try await Rovenue.shared.identify("user_123")
+
+    // When your user signs out:
+    try await Rovenue.shared.logOut()
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
     val user = Rovenue.shared.currentUser()
-    // user.anonId, user.knownUserId
+    // user.rovenueId — always present (e.g. "rov_01abc...")
+    // user.appUserId — null until identify() has been called
 
-    Rovenue.shared.identify(knownUserId = "user_123")
+    // After your auth flow completes:
+    Rovenue.shared.identify("user_123") // suspend
+
+    // When your user signs out:
+    Rovenue.shared.logOut() // suspend
     ```
   </Tab>
 </Tabs>
+
+<Callout type="warn">
+Use **opaque, unguessable** IDs for `appUserId` — never an email address or username. Because `identify()` can transfer purchases between installs, a guessable ID is an account-takeover surface.
+</Callout>
 
 ## Entitlements
 
