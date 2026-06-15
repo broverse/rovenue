@@ -12,6 +12,8 @@ export interface MrrPoint {
   bucket: Date;
   /** Decimal string to preserve precision across the wire. */
   grossUsd: string;
+  refundsUsd: string;
+  netUsd: string;
   eventCount: number;
   activeSubscribers: number;
 }
@@ -25,6 +27,8 @@ export interface ListDailyMrrInput {
 interface ChMrrRow {
   bucket: string;
   gross_usd: string;
+  refunds_usd: string;
+  net_usd: string;
   event_count: string;
   active_subscribers: string;
 }
@@ -36,6 +40,8 @@ export async function listDailyMrr(
     SELECT
       toStartOfDay(day)               AS bucket,
       toString(gross_usd)             AS gross_usd,
+      toString(refunds_usd)           AS refunds_usd,
+      toString(net_usd)               AS net_usd,
       toUInt64(event_count)           AS event_count,
       toUInt64(active_subscribers)    AS active_subscribers
     FROM rovenue.v_mrr_daily
@@ -56,6 +62,8 @@ export async function listDailyMrr(
     // get the same instant regardless of host timezone.
     bucket: new Date(r.bucket.replace(" ", "T") + "Z"),
     grossUsd: r.gross_usd,
+    refundsUsd: r.refunds_usd,
+    netUsd: r.net_usd,
     eventCount: Number(r.event_count),
     activeSubscribers: Number(r.active_subscribers),
   }));
