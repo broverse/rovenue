@@ -786,11 +786,11 @@ it("deletes a key when value is null and preserves others", async () => {
   expect(body.data.subscriber.attributes).toEqual({ $email: "a@b.com" });
 });
 
-it("rejects an unknown reserved key with 400 INVALID_ARGUMENT", async () => {
+it("rejects an unknown reserved key with 400 VALIDATION_ERROR", async () => {
   const res = await post({ $nope: "x" });
   expect(res.status).toBe(400);
   const body = await res.json();
-  expect(body.error.code).toBe("INVALID_ARGUMENT");
+  expect(body.error.code).toBe("VALIDATION_ERROR");
 });
 
 it("stores nested shape with server-set updatedAt + source", async () => {
@@ -873,11 +873,11 @@ export const meAttributesBodySchema = attributesBodySchema;
   );
 ```
 
-> The error path throws `HTTPException(400, …)`. Confirm the global error
-> handler maps a 400 `HTTPException` to `{ error: { code: "INVALID_ARGUMENT", message } }`
-> (it should — check `apps/api/src/middleware/error-handler` or equivalent).
-> If the handler keys off a different mechanism, match how other routes
-> raise `INVALID_ARGUMENT` (grep `INVALID_ARGUMENT` in `apps/api/src`).
+> The error path throws `HTTPException(400, …)`. The global error handler
+> (`apps/api/src/middleware/error.ts`) maps a 400 `HTTPException` to
+> `{ error: { code: "VALIDATION_ERROR", message } }` via `mapHttpStatus`.
+> Do NOT invent a new error code or error class — `VALIDATION_ERROR` is the
+> established code for bad input (Zod failures map to it too).
 
 - [ ] **Step 5: Also flatten the GET /me response**
 

@@ -98,7 +98,7 @@ Single source of truth in `packages/shared`. Catalog entry = `{ key, validate }`
   (enum: `notDetermined | restricted | denied | authorized`).
 
 Rules:
-- A `$`-prefixed key **not** in the catalog → rejected (`400 INVALID_ARGUMENT`).
+- A `$`-prefixed key **not** in the catalog → rejected (`400 VALIDATION_ERROR`).
 - Reserved value must pass its catalog validator.
 
 ## 4. Custom key rules
@@ -113,7 +113,7 @@ Request body unchanged: `{ attributes: { [key: string]: string | null } }`.
 
 Behavior:
 1. Zod + catalog validation (reserved + custom rules). On violation:
-   `400 INVALID_ARGUMENT` naming the offending key and reason.
+   `400 VALIDATION_ERROR` naming the offending key and reason.
 2. Read current nested → apply per key (`null` = delete; else
    `{value, updatedAt: now, source}`) → write.
 3. Response flattened via `flattenAttributes` to `{key: value}`.
