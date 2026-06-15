@@ -339,12 +339,14 @@ const WINDOW = {
 };
 
 describe("analytics CH services (real ClickHouse)", () => {
-  it("getMrrDecomposition splits new / expansion / churned", async () => {
+  it("getMrrDecomposition splits new / retained / reactivation / churned", async () => {
     const d = await getMrrDecomposition({ projectId: PROJECT, ...WINDOW });
     // new = INITIAL(10+20) + TRIAL_CONVERSION(5) = 35
     expect(Number(d.newUsd)).toBeCloseTo(35, 4);
-    // expansion = REACTIVATION(8)
-    expect(Number(d.expansionUsd)).toBeCloseTo(8, 4);
+    // retained = RENEWAL(10+10+5) = 25  (previously dropped into no bucket)
+    expect(Number(d.retainedUsd)).toBeCloseTo(25, 4);
+    // reactivation = REACTIVATION(8)  (winback, was mislabelled "expansion")
+    expect(Number(d.reactivationUsd)).toBeCloseTo(8, 4);
     // churned = REFUND(20)
     expect(Number(d.churnedUsd)).toBeCloseTo(20, 4);
   });
