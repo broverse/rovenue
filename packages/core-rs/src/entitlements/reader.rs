@@ -18,6 +18,12 @@ use super::types::{Entitlement, EntitlementWire, EntitlementsResponse};
 
 const RESOURCE: &str = "entitlements";
 
+/// True when cached data is older than `staleness_ms`. `last == 0` (never
+/// refreshed, e.g. cold start) is always stale.
+pub(crate) fn is_stale(now: u64, last: u64, staleness_ms: u64) -> bool {
+    now.saturating_sub(last) > staleness_ms
+}
+
 pub struct EntitlementReader {
     store: Arc<CacheStore>,
     identity: Arc<IdentityManager>,
@@ -25,7 +31,6 @@ pub struct EntitlementReader {
     bus: Option<Arc<ObserverBus>>,
     clock: Option<Arc<dyn Clock>>,
     last_refresh_ms: AtomicU64,
-    #[allow(dead_code)]
     refreshing: AtomicBool,
 }
 
@@ -87,6 +92,7 @@ impl EntitlementReader {
         let resp = http.get_json::<ApiEnvelope<EntitlementsResponse>>(req)?;
 
         if resp.status == 304 {
+            self.last_refresh_ms.store(clock.now_unix_ms(), Ordering::Relaxed);
             return Ok(());
         }
 
@@ -120,6 +126,31 @@ impl EntitlementReader {
         }
         Ok(())
     }
+
+    /// Non-blocking stale-while-revalidate trigger. Returns immediately; if the
+    /// cache is stale and no refresh is in flight, spawns one background refresh
+    /// (coalesced via `refreshing`) that emits the observer on completion.
+    pub fn maybe_refresh_async(self: &std::sync::Arc<Self>, staleness_ms: u64) {
+        let now = match &self.clock {
+            Some(c) => c.now_unix_ms(),
+            None => return,
+        };
+        if !is_stale(now, self.last_refresh_ms.load(Ordering::Relaxed), staleness_ms) {
+            return;
+        }
+        if self
+            .refreshing
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return; // a refresh is already running — coalesce
+        }
+        let this = std::sync::Arc::clone(self);
+        std::thread::spawn(move || {
+            let _ = this.refresh();
+            this.refreshing.store(false, Ordering::Release);
+        });
+    }
 }
 
 fn row_to_entitlement(r: crate::cache::entitlements::EntitlementRow) -> Entitlement {
@@ -129,5 +160,17 @@ fn row_to_entitlement(r: crate::cache::entitlements::EntitlementRow) -> Entitlem
         product_identifier: r.product_identifier,
         store: r.store,
         expires_iso: r.expires_iso,
+    }
+}
+
+#[cfg(test)]
+mod stale_tests {
+    use super::is_stale;
+    #[test]
+    fn staleness_decision() {
+        assert!(is_stale(100_000, 0, 60_000));
+        assert!(is_stale(100_000, 30_000, 60_000));
+        assert!(!is_stale(100_000, 50_000, 60_000));
+        assert!(!is_stale(100_000, 100_000, 60_000));
     }
 }

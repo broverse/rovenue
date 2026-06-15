@@ -20,7 +20,6 @@ pub struct CreditReader {
     bus: Option<Arc<ObserverBus>>,
     clock: Option<Arc<dyn Clock>>,
     last_refresh_ms: AtomicU64,
-    #[allow(dead_code)]
     refreshing: AtomicBool,
 }
 
@@ -64,7 +63,7 @@ impl CreditReader {
             HttpRequest::new("/v1/me/credits").user_scope(&scope),
         )?;
         let body = resp.body.ok_or(RovenueError::Internal)?;
-        self.store_and_emit(&scope, body.data.balance, clock.now_unix_ms())
+        self.set_balance(&scope, body.data.balance, clock.now_unix_ms())
     }
 
     pub fn consume(
@@ -90,6 +89,32 @@ impl CreditReader {
         let new_balance = body.data.balance;
         self.store_and_emit(&scope, new_balance, clock.now_unix_ms())?;
         Ok(new_balance)
+    }
+
+    fn is_stale(&self, now: u64, staleness_ms: u64) -> bool {
+        now.saturating_sub(self.last_refresh_ms.load(Ordering::Relaxed)) > staleness_ms
+    }
+
+    pub fn maybe_refresh_async(self: &std::sync::Arc<Self>, staleness_ms: u64) {
+        let now = match &self.clock {
+            Some(c) => c.now_unix_ms(),
+            None => return,
+        };
+        if !self.is_stale(now, staleness_ms) {
+            return;
+        }
+        if self
+            .refreshing
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+        let this = std::sync::Arc::clone(self);
+        std::thread::spawn(move || {
+            let _ = this.refresh();
+            this.refreshing.store(false, Ordering::Release);
+        });
     }
 
     /// Set the balance straight from a known value (e.g. a receipt POST
