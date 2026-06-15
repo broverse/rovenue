@@ -5,6 +5,7 @@ import {
   flattenAttributes,
   applyMutations,
   validateAttributeInput,
+  attributesBodySchema,
 } from "./helpers";
 
 const NOW = "2026-06-15T10:00:00.000Z";
@@ -92,5 +93,16 @@ describe("validateAttributeInput", () => {
     expect(validateAttributeInput({ k0: "v2" }, current)).toEqual([]);
     // deleting is always fine
     expect(validateAttributeInput({ extra: null }, current)).toEqual([]);
+  });
+});
+
+describe("attributesBodySchema", () => {
+  it("accepts strings and nulls", () => {
+    const r = attributesBodySchema.safeParse({ attributes: { a: "x", b: null } });
+    expect(r.success).toBe(true);
+  });
+  it("rejects non-string/non-null values", () => {
+    const r = attributesBodySchema.safeParse({ attributes: { a: 5 } });
+    expect(r.success).toBe(false);
   });
 });

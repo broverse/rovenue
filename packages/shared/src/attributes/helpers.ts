@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type {
   AttributeEntry,
   AttributeMap,
@@ -13,6 +14,11 @@ export const ATTRIBUTE_LIMITS = {
   /** Max custom (non-reserved) keys per subscriber. */
   customMax: 50,
 } as const;
+
+export const attributesBodySchema = z.object({
+  attributes: z.record(z.union([z.string(), z.null()])),
+});
+export type AttributesBody = z.infer<typeof attributesBodySchema>;
 
 export const CUSTOM_KEY_RE = /^[A-Za-z0-9_.-]{1,40}$/;
 
