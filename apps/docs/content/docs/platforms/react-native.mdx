@@ -4,18 +4,20 @@ description: Install and wire the Rovenue SDK in an Expo or bare React Native ap
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
 
-## Install
+<Steps>
 
-Install the package from npm:
+<Step>
+### Install the package
+
+Install from npm:
 
 ```bash
 npm install @rovenue/react-native-sdk
 ```
 
-### Expo managed workflow
-
-Add the config plugin to your `app.json` (or `app.config.js`). It auto-wires the iOS CocoaPods dependency and Android Gradle on prebuild:
+**Expo managed workflow** — add the config plugin to `app.json` (or `app.config.js`). It auto-wires the iOS CocoaPods dependency and Android Gradle on prebuild:
 
 ```json
 {
@@ -31,23 +33,23 @@ Then run:
 npx expo prebuild
 ```
 
-### Bare React Native
-
-After installing, run pod install for iOS:
+**Bare React Native** — after installing, run pod install for iOS:
 
 ```bash
 cd ios && pod install
 ```
 
-**Peer dependencies:** `expo >=51 <53`, `expo-modules-core`, `react >=18`, `react-native >=0.73`.
+<Callout type="info">
+Peer dependencies: `expo >=51 <53`, `expo-modules-core`, `react >=18`, `react-native >=0.73`.
+</Callout>
+</Step>
 
-## Configure
+<Step>
+### Configure the SDK
 
 Call `Rovenue.configure` once at the root of your app — before any hooks are used. `App.tsx` is the right place:
 
 ```tsx
-import { useEffect } from 'react';
-import { AppState } from 'react-native';
 import { Rovenue } from '@rovenue/react-native-sdk';
 
 Rovenue.configure({
@@ -56,21 +58,104 @@ Rovenue.configure({
 });
 
 export default function App() {
-  // Foreground wiring — see section below
+  // Foreground wiring added in the next step
   return <RootNavigator />;
 }
 ```
 
+### Types on this page
+
+```ts
+type RovenueConfig = {
+  apiKey: string;      // public SDK key — prefix rov_pub_
+  baseUrl: string;     // always https://edge.rovenue.app
+  debug?: boolean;     // verbose SDK logs (dev only)
+  appVersion?: string; // override auto-detected version
+};
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `apiKey` | `string` | Public SDK key from your Rovenue dashboard. Prefix `rov_pub_`. |
+| `baseUrl` | `string` | Always `https://edge.rovenue.app` unless self-hosting. |
+| `debug` | `boolean` | Enables verbose SDK logs. Do not ship enabled in production. |
+| `appVersion` | `string` | Overrides the version auto-read from the bundle. |
+
+<Callout type="warn">
+Call `configure` exactly once, before rendering any component that calls a Rovenue hook. Calling it more than once after initialisation is a no-op but logs a warning.
+</Callout>
+</Step>
+
+<Step>
+### Wire foreground signals
+
+The SDK uses `setForeground` to manage its internal polling cadence. Wire it to React Native's `AppState` inside your root component:
+
+```tsx
+import { useEffect } from 'react';
+import { AppState } from 'react-native';
+import { Rovenue } from '@rovenue/react-native-sdk';
+
+export default function App() {
+  useEffect(() => {
+    // Signal foreground on mount
+    Rovenue.setForeground(true);
+
+    const sub = AppState.addEventListener('change', (state) => {
+      Rovenue.setForeground(state === 'active');
+    });
+
+    return () => {
+      sub.remove();
+    };
+  }, []);
+
+  return <RootNavigator />;
+}
+```
+
+<Callout type="info">
+`Rovenue.shutdown()` stops all background work (polling, in-flight refreshes). Reserve it for full app teardown — do **not** call it on every background transition. `setForeground(false)` already pauses polling when the app backgrounds.
+</Callout>
+</Step>
+
+</Steps>
+
+---
+
 ## React hooks
 
-All hooks must be called from components rendered inside the Rovenue-aware tree (after `configure` has been called).
+All hooks must be called from components rendered after `configure` has been called.
 
 | Hook | Returns |
 |------|---------|
-| `useCurrentUser()` | The identified subscriber, or `null` |
-| `useEntitlement(id)` | Entitlement object for the given ID |
-| `useEntitlements()` | All active entitlements |
-| `useCreditBalance()` | Current credit balance |
+| `useCurrentUser()` | `User \| null` — the identified subscriber, or `null` |
+| `useEntitlement(id)` | `Entitlement \| null` — entitlement object for the given ID |
+| `useEntitlements()` | `Entitlement[]` — all active entitlements |
+| `useCreditBalance()` | `number` — current credit balance |
+
+```ts
+type User = {
+  rovenueId: string;        // permanent per-install id (prefix rov_), always present
+  appUserId: string | null; // your backend user id, null until identify()
+};
+
+type Entitlement = {
+  id: string;                // e.g. "pro", "credits_500"
+  isActive: boolean;
+  productIdentifier: string;
+  store: string;             // "app_store" | "play_store" | "stripe"
+  expiresIso?: string;       // ISO 8601 — present for time-limited entitlements
+};
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `rovenueId` | `string` | Permanent per-install id (prefix `rov_`); never changes. |
+| `appUserId` | `string \| null` | Your backend user id; `null` until `identify()`. |
+| `id` | `string` | Entitlement identifier configured in your dashboard. |
+| `isActive` | `boolean` | `true` if the entitlement is currently active. |
+| `expiresIso` | `string` | ISO 8601 expiry; present for time-limited entitlements. |
 
 ### Example — gating on an entitlement
 
@@ -88,14 +173,28 @@ export function ProBadge() {
 }
 ```
 
+### Example — displaying credit balance
+
+```tsx
+import { useCreditBalance } from '@rovenue/react-native-sdk';
+
+export function CreditsLabel() {
+  const balance = useCreditBalance();
+  return <Text>{balance} credits</Text>;
+}
+```
+
+<Callout type="info">
+See [Entitlements](/docs/guides/entitlements) and [Credits](/docs/guides/credits) for the full guide on reading and reacting to subscription state.
+</Callout>
+
+---
+
 ## Purchases
 
-Use `getOfferings()` to fetch products configured in your Rovenue dashboard,
-then `purchase(pkg)` to drive the full purchase flow. The SDK triggers the
-native StoreKit 2 / Play Billing sheet, validates the receipt server-side, and
-resolves with updated entitlements and credit balance.
+Use `getOfferings()` to fetch products configured in your Rovenue dashboard, then `purchase(pkg)` to drive the full purchase flow. The SDK triggers the native StoreKit 2 / Play Billing sheet, validates the receipt server-side, and resolves with updated entitlements and credit balance.
 
-```ts
+```tsx
 import {
   Rovenue,
   PurchaseCancelledError,
@@ -127,8 +226,27 @@ To re-validate all prior transactions (e.g. after a reinstall):
 await Rovenue.restorePurchases();
 ```
 
-See [Processing Purchases](/docs/guides/processing-purchases) for the full API
-reference including error types and `StoreProduct` shape.
+```ts
+type PurchaseResult = {
+  entitlements: Entitlement[];
+  creditBalance: number;
+  productId: string;
+  storeTransactionId: string;
+};
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entitlements` | `Entitlement[]` | Updated entitlement list after the purchase. |
+| `creditBalance` | `number` | Updated credit balance after the purchase. |
+| `productId` | `string` | The product identifier that was purchased. |
+| `storeTransactionId` | `string` | The store-side transaction ID. |
+
+<Callout type="info">
+See [Processing Purchases](/docs/guides/processing-purchases) for the full API reference including all error types and the `StoreProduct` shape.
+</Callout>
+
+---
 
 ## Change listener
 
@@ -140,6 +258,7 @@ import { Rovenue } from '@rovenue/react-native-sdk';
 
 useEffect(() => {
   const unsub = Rovenue.addChangeListener((event) => {
+    // event: 'EntitlementsChanged' | 'IdentityChanged' | 'CreditBalanceChanged'
     console.log('Rovenue change:', event);
   });
 
@@ -149,30 +268,18 @@ useEffect(() => {
 }, []);
 ```
 
-## Foreground wiring
+<Callout type="info">
+See [Reacting to Changes](/docs/guides/reacting-to-changes) for a complete guide on handling live subscription events.
+</Callout>
 
-The SDK uses `setForeground` to manage its internal polling cadence. Wire it to React Native's `AppState`:
+---
 
-```tsx
-import { useEffect } from 'react';
-import { AppState } from 'react-native';
-import { Rovenue } from '@rovenue/react-native-sdk';
+## What's next
 
-useEffect(() => {
-  // Signal foreground on mount
-  Rovenue.setForeground(true);
-
-  const sub = AppState.addEventListener('change', (state) => {
-    Rovenue.setForeground(state === 'active');
-  });
-
-  return () => {
-    sub.remove();
-  };
-}, []);
-```
-
-The SDK also exposes `Rovenue.shutdown()`, which stops all background work
-(polling, in-flight refreshes). Reserve it for full app teardown — do **not**
-call it on every background transition or component unmount; `setForeground(false)`
-already pauses polling when the app backgrounds.
+- [Identifying Users](/docs/guides/identifying-users) — link your backend user to the Rovenue subscriber.
+- [Entitlements](/docs/guides/entitlements) — read and gate on active subscriptions.
+- [Credits](/docs/guides/credits) — manage consumable credit balances.
+- [Processing Purchases](/docs/guides/processing-purchases) — full purchase API and error handling.
+- [App Lifecycle](/docs/guides/app-lifecycle) — foreground/background wiring in depth.
+- [Reference: Methods](/docs/reference/methods) — full method reference.
+- [Reference: Types](/docs/reference/types) — all SDK types in one place.

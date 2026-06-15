@@ -1,0 +1,122 @@
+---
+title: Using Rovenue with AI & LLMs
+description: Machine-readable docs endpoints, copy-paste context primers, and tips for integrating Rovenue with coding assistants and AI agents.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Rovenue's documentation is structured so that LLMs and coding agents can consume it directly — no scraping required. Every page is available as raw markdown, and the whole site is indexed in a single flat file. Use these endpoints to give an AI assistant full context before asking it to write Rovenue integration code.
+
+---
+
+## LLM-ready endpoints
+
+The docs site exposes three machine-readable endpoints following the [llmstxt.org](https://llmstxt.org) convention:
+
+| Endpoint | Contents |
+|----------|----------|
+| [`/llms.txt`](/llms.txt) | A concise index of all docs pages — titles, paths, and one-line summaries. |
+| [`/llms-full.txt`](/llms-full.txt) | The entire documentation as a single concatenated markdown file. Paste it or fetch it for full context. |
+| `/llms.mdx/docs/<path>` | Any single page as raw markdown. Example: [`/llms.mdx/docs/guides/configuring`](/llms.mdx/docs/guides/configuring). |
+
+These endpoints can be:
+- **Pasted directly** into ChatGPT, Claude, or any other chat interface.
+- **Fetched by an agent** using an HTTP GET — no authentication required.
+- **Embedded** in a RAG pipeline as a continuously up-to-date source.
+
+<Callout type="info">
+For quick questions about a specific area (e.g. purchases or identity), use the per-page endpoint (`/llms.mdx/docs/...`) to keep context small. For broad integration questions, use `/llms-full.txt`.
+</Callout>
+
+---
+
+## Copy-paste context primer
+
+Paste the following block into any LLM before asking it to write Rovenue integration code. It covers the complete SDK surface in a compact form and links to the full docs for detail.
+
+```text
+# Rovenue SDK — context primer
+
+## Package names
+- React Native: @rovenue/react-native-sdk
+- Swift: import Rovenue  (package url: https://github.com/rovenue/sdk-swift.git)
+- Kotlin: import dev.rovenue.sdk.Rovenue  (artifact: dev.rovenue:sdk:0.6.0)
+
+## Configuration
+- Public API key prefix: rov_pub_
+- baseUrl: https://edge.rovenue.app
+- Call configure() once at app start, before any other SDK call.
+  RN:     Rovenue.configure({ apiKey: 'rov_pub_...', baseUrl: 'https://edge.rovenue.app' })
+  Swift:  Rovenue.configure(apiKey: "rov_pub_...", baseUrl: "https://edge.rovenue.app")
+  Kotlin: Rovenue.configure(apiKey = "rov_pub_...", baseUrl = "https://edge.rovenue.app", appVersion = ...)
+
+## Core methods (TypeScript names; Swift/Kotlin mirror with idiomatic casing)
+configure(config)         — initialise SDK (call once)
+currentUser()             — returns User { rovenueId, appUserId }
+identify(appUserId)       — bind your backend user id (optimistic local + background server bind)
+logOut()                  — mint fresh rovenueId, clear appUserId and caches
+entitlement(id)           — Entitlement | null for a given entitlement id
+entitlementsAll()         — Entitlement[] all active entitlements
+refreshEntitlements()     — force network refresh of entitlements
+creditBalance()           — number — current credit balance
+refreshCredits()          — force network refresh of credit balance
+consumeCredits(amount, description?) — deduct credits; returns new balance
+getOfferings()            — Offerings { current, all } — fetch products from dashboard
+purchase(pkg)             — Promise<PurchaseResult> — native store sheet + server validation
+restorePurchases()        — re-validate all prior transactions (e.g. after reinstall)
+getAppAccountToken()      — opaque token for App Store fraud prevention
+setForeground(bool)       — signal foreground/background to manage polling cadence
+shutdown()                — stop all background work (call only at full app teardown)
+setLogHandler(fn)         — receive structured SDK log entries
+addChangeListener(cb)     — subscribe to ChangeEvent; returns unsubscribe fn (RN/TS)
+  Swift:  Rovenue.shared.changes  AsyncStream<ChangeEvent>
+  Kotlin: Rovenue.shared.changes  SharedFlow<ChangeEvent>
+
+## React Native hooks
+useCurrentUser()     — User | null
+useEntitlement(id)   — Entitlement | null
+useEntitlements()    — Entitlement[]
+useCreditBalance()   — number
+
+## Key types
+type RovenueConfig  = { apiKey: string; baseUrl: string; debug?: boolean; appVersion?: string }
+type User           = { rovenueId: string; appUserId: string | null }
+type Entitlement    = { id: string; isActive: boolean; productIdentifier: string; store: string; expiresIso?: string }
+type Offerings      = { current: Offering | null; all: Record<string, Offering> }
+type Offering       = { identifier: string; isDefault: boolean; packages: Package[] }
+type Package        = { identifier: string; product: StoreProduct }
+type StoreProduct   = { id: string; type: ProductType; displayName: string; priceString: string | null; price: number | null; currencyCode: string | null }
+type PurchaseResult = { entitlements: Entitlement[]; creditBalance: number; productId: string; storeTransactionId: string }
+type ChangeEvent    = 'EntitlementsChanged' | 'IdentityChanged' | 'CreditBalanceChanged'
+type ProductType    = 'subscription' | 'consumable' | 'non_consumable'
+
+## Identity model
+- rovenueId: permanent per-install id (prefix rov_); always present, never changes.
+- appUserId: your backend user id; null until identify() is called.
+- identify() binds the anonymous rovenueId to your user and transfers any entitlements.
+- logOut() mints a fresh anonymous rovenueId and clears all caches.
+
+## Platform integrations
+- iOS: SDK drives StoreKit 2; receipt chain-validated against Apple Root CA G3.
+- Android: SDK drives Play Billing 6; receipt validated against Google Play Developer API.
+- Server-side: all receipts validated by Rovenue backend — never trust the client.
+
+## Full docs
+https://docs.rovenue.app/llms-full.txt — complete documentation as a single markdown file.
+```
+
+---
+
+## Tips for AI-assisted integration
+
+Keep these facts in mind when prompting an LLM to write Rovenue code:
+
+- **Use an opaque `appUserId`.** Pass your backend's internal user ID — not an email address or any PII. The `appUserId` is sent to the Rovenue server and stored as-is.
+- **Call `configure` exactly once.** Place it in `App.tsx` (React Native), `AppDelegate` (Swift), or `Application.onCreate` (Kotlin). It must run before any hook or SDK method.
+- **Call `identify` after login.** Once your auth flow resolves with a user ID, call `identify(userId)`. This binds the current anonymous subscriber to your user and transfers their entitlements.
+- **Call `logOut` on sign-out.** This mints a fresh anonymous `rovenueId` so the next user who logs in starts with a clean slate.
+- **Handle `PurchaseCancelled` and `PurchasePending` gracefully.** These are not errors — they are normal user flows. Do not show an error dialog for either.
+
+<Callout type="info">
+See [Identifying Users](/docs/guides/identifying-users) for the full identity model, including the server-side transfer flow. See [Processing Purchases](/docs/guides/processing-purchases) for the complete error type reference.
+</Callout>

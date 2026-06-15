@@ -4,10 +4,14 @@ description: Install and wire the Rovenue SDK in an Android/Kotlin app.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
 
-## Install
+<Steps>
 
-Add the dependency to your module-level `build.gradle.kts`:
+<Step>
+### Add the dependency
+
+Add the SDK to your module-level `build.gradle.kts`:
 
 ```kotlin
 dependencies {
@@ -15,7 +19,7 @@ dependencies {
 }
 ```
 
-Or in Groovy DSL:
+Or in Groovy DSL (`build.gradle`):
 
 ```groovy
 dependencies {
@@ -24,10 +28,12 @@ dependencies {
 ```
 
 <Callout type="info">
-The SDK does **not** call Play Billing. Receipt processing happens server-side via the Rovenue API.
+The SDK drives Play Billing natively. Receipt processing and server-side validation happen automatically via the Rovenue API — you do not need to call Play Billing directly.
 </Callout>
+</Step>
 
-## Configure
+<Step>
+### Configure the SDK
 
 Call `Rovenue.configure` once in your `Application.onCreate()`, before any component starts:
 
@@ -59,9 +65,34 @@ Register `App` in your `AndroidManifest.xml`:
 <application android:name=".App" ...>
 ```
 
-## Foreground wiring
+### Types on this page
 
-Use `ProcessLifecycleOwner` from `androidx.lifecycle` to observe the process-level foreground state:
+```kotlin
+// Kotlin mirror of RovenueConfig
+data class RovenueConfig(
+  val apiKey: String,          // public SDK key — prefix rov_pub_
+  val baseUrl: String,         // always https://edge.rovenue.app
+  val debug: Boolean = false,
+  val appVersion: String? = null,
+)
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `apiKey` | `String` | Public SDK key from your Rovenue dashboard. Prefix `rov_pub_`. |
+| `baseUrl` | `String` | Always `https://edge.rovenue.app` unless self-hosting. |
+| `debug` | `Boolean` | Enables verbose SDK logs. Default `false`. |
+| `appVersion` | `String?` | Overrides the version read from the package manager. |
+
+<Callout type="warn">
+Call `configure` in `Application.onCreate` — not inside an `Activity`. Calling SDK methods before `configure` throws `RovenueException.NotConfigured`.
+</Callout>
+</Step>
+
+<Step>
+### Wire foreground signals
+
+Use `ProcessLifecycleOwner` from `androidx.lifecycle` to observe the process-level foreground state. Add the observer in `Application.onCreate`, after the `configure` call:
 
 ```kotlin
 import android.app.Application
@@ -75,7 +106,15 @@ class App : Application() {
   override fun onCreate() {
     super.onCreate()
 
-    // ... configure() call above ...
+    val versionName = packageManager
+      .getPackageInfo(packageName, 0)
+      .versionName
+
+    Rovenue.configure(
+      apiKey = "rov_pub_YOUR_API_KEY",
+      baseUrl = "https://edge.rovenue.app",
+      appVersion = versionName,
+    )
 
     ProcessLifecycleOwner.get().lifecycle.addObserver(
       object : DefaultLifecycleObserver {
@@ -91,6 +130,73 @@ class App : Application() {
 }
 ```
 
+<Callout type="info">
+`ProcessLifecycleOwner` fires `onStart`/`onStop` at the process level — not per-Activity. This is the correct granularity for the SDK's polling cadence.
+</Callout>
+</Step>
+
+</Steps>
+
+---
+
+## Purchases
+
+Use `getOfferings()` to fetch products configured in your Rovenue dashboard, then `purchase(pkg)` to drive the full Play Billing flow. The SDK validates the receipt server-side and resolves with updated entitlements.
+
+```kotlin
+import dev.rovenue.sdk.Rovenue
+import dev.rovenue.sdk.exception.PurchaseCancelledException
+import dev.rovenue.sdk.exception.PurchasePendingException
+
+val offerings = Rovenue.shared.getOfferings()
+val pkg = offerings.current?.packages?.firstOrNull()
+
+if (pkg != null) {
+  try {
+    val result = Rovenue.shared.purchase(pkg)
+    // result.entitlements and result.creditBalance are already up to date
+  } catch (e: PurchaseCancelledException) {
+    // User dismissed the store sheet — no action needed
+  } catch (e: PurchasePendingException) {
+    // Deferred — inform the user and wait for a change event
+  }
+}
+
+// Re-validate all prior transactions (e.g. after reinstall):
+Rovenue.shared.restorePurchases()
+```
+
+```kotlin
+// Kotlin mirror of PurchaseResult
+data class PurchaseResult(
+  val entitlements: List<Entitlement>,
+  val creditBalance: Int,
+  val productId: String,
+  val storeTransactionId: String,
+)
+
+data class Entitlement(
+  val id: String,
+  val isActive: Boolean,
+  val productIdentifier: String,
+  val store: String,
+  val expiresIso: String?, // ISO 8601 — present for time-limited entitlements
+)
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entitlements` | `List<Entitlement>` | Updated entitlement list after the purchase. |
+| `creditBalance` | `Int` | Updated credit balance after the purchase. |
+| `productId` | `String` | The product identifier that was purchased. |
+| `storeTransactionId` | `String` | The Play Store transaction ID. |
+
+<Callout type="info">
+See [Processing Purchases](/docs/guides/processing-purchases) for the full API reference including all error types and the `StoreProduct` shape.
+</Callout>
+
+---
+
 ## Observing changes
 
 `Rovenue.shared.changes` is a `SharedFlow` of change events. Collect it from a coroutine scope tied to your component's lifecycle:
@@ -105,7 +211,7 @@ import dev.rovenue.sdk.Rovenue
 lifecycleScope.launch {
   repeatOnLifecycle(Lifecycle.State.STARTED) {
     Rovenue.shared.changes.collect { event ->
-      // Update UI here
+      // event: ChangeEvent (ENTITLEMENTS_CHANGED | IDENTITY_CHANGED | CREDIT_BALANCE_CHANGED)
       println("Rovenue change: $event")
     }
   }
@@ -113,12 +219,14 @@ lifecycleScope.launch {
 ```
 
 <Callout type="warn">
-Collect `Rovenue.shared.changes` from a scope **outside** the SDK's own internal scope. If you call `Rovenue.shared.shutdown()` from inside an active collector's coroutine, the shutdown cancels the scope and may interrupt the collector mid-flight. Use an `Activity` or `ViewModel` scope instead.
+Collect `Rovenue.shared.changes` from an `Activity` or `ViewModel` scope — not from inside the SDK's own internal scope. Calling `Rovenue.shared.shutdown()` from inside an active collector's coroutine may interrupt the collector mid-flight.
 </Callout>
+
+---
 
 ## Suspend functions
 
-SDK methods such as `identify`, `logOut`, `refreshEntitlements`, and `consumeCredits` are suspend functions. They must be called from a coroutine:
+SDK methods such as `identify`, `logOut`, `refreshEntitlements`, and `consumeCredits` are suspend functions. Call them from a coroutine:
 
 ```kotlin
 lifecycleScope.launch {
@@ -131,3 +239,19 @@ lifecycleScope.launch {
   val entitlements = Rovenue.shared.refreshEntitlements()
 }
 ```
+
+<Callout type="info">
+See [Identifying Users](/docs/guides/identifying-users) for the full identity model, including what happens when `identify` and `logOut` are called.
+</Callout>
+
+---
+
+## What's next
+
+- [Identifying Users](/docs/guides/identifying-users) — link your backend user to the Rovenue subscriber.
+- [Entitlements](/docs/guides/entitlements) — read and gate on active subscriptions.
+- [Credits](/docs/guides/credits) — manage consumable credit balances.
+- [Processing Purchases](/docs/guides/processing-purchases) — full purchase API and error handling.
+- [App Lifecycle](/docs/guides/app-lifecycle) — foreground/background wiring in depth.
+- [Reference: Methods](/docs/reference/methods) — full method reference.
+- [Reference: Types](/docs/reference/types) — all SDK types in one place.

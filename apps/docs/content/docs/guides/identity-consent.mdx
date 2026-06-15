@@ -3,54 +3,140 @@ title: Identity Context & Consent
 description: Understand which PII fields are forwarded, how they are hashed, and where consent responsibility lies.
 ---
 
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-When you call `identify()` or pass an `identityContext` with an event, the
-following fields are accepted by the SDK and forwarded to the Rovenue API server
-for fan-out to downstream ad-attribution integrations (Meta CAPI, TikTok Events
-API, etc.).
-
-## PII field handling
-
-| Field | Forwarded as | Hashing |
-|-------|-------------|---------|
-| `email` | `user_data.em` | SHA-256 (lowercased + trimmed before hashing) |
-| `phone` | `user_data.ph` | SHA-256 (digits only before hashing) |
-| `externalId` | `user_data.external_id` | SHA-256 (trimmed before hashing) |
-| `ip` | `user_data.client_ip_address` / `context.ip` | Forwarded verbatim — not hashed |
-| `userAgent` | `user_data.client_user_agent` / `context.user_agent` | Forwarded verbatim — not hashed |
-| `fbp` / `fbc` | `user_data.fbp` / `user_data.fbc` | Forwarded verbatim — not hashed |
-| `ttclid` / `ttp` | `context.ttclid` / `properties.ttp` | Forwarded verbatim — not hashed |
-
-## Consent is your responsibility
-
-Rovenue acts as a **data processor**. Your application (the host app) is the
-**data controller**. You must obtain the end-user's informed consent before
-passing any personally identifiable information (email, phone, IP address, etc.)
-in `identityContext`. This applies regardless of your jurisdiction — GDPR, CCPA,
-KVKK, PDPA, and similar regulations all place the consent obligation on the
-controller (you), not the processor (Rovenue).
+When you call `identify()` or pass an `identityContext` with an event, the SDK forwards certain fields to the Rovenue API server for fan-out to downstream ad-attribution integrations (Meta CAPI, TikTok Events API, etc.). This guide explains which fields are forwarded, how each is handled, and where consent responsibility lies.
 
 <Callout type="warn">
-Do not pass PII in `identityContext` without collecting the required consent.
-The fields are forwarded to third-party attribution networks; once sent,
-Rovenue cannot recall them on your behalf.
+You must obtain end-user consent **before** passing any personally identifiable information in `identityContext`. Rovenue is a data processor — the consent obligation rests with you, the data controller.
 </Callout>
+
+### Types on this page
+
+The `identityContext` object is the only input type in this guide. It is called `identityContext` (camelCase) in the React Native SDK and `IdentityContext` (PascalCase) in the Swift and Kotlin SDKs; the fields and semantics are identical across all three platforms.
+
+```ts
+// React Native
+type identityContext = {
+  email?: string;       // PII — SHA-256 hashed before forwarding
+  phone?: string;       // PII — SHA-256 hashed before forwarding
+  externalId?: string;  // PII — SHA-256 hashed before forwarding
+  ip?: string;          // PII — forwarded verbatim, not hashed
+  userAgent?: string;   // forwarded verbatim, not hashed
+  fbp?: string;         // Meta click ID — forwarded verbatim
+  fbc?: string;         // Meta browser ID — forwarded verbatim
+  ttclid?: string;      // TikTok click ID — forwarded verbatim
+  ttp?: string;         // TikTok pixel ID — forwarded verbatim
+};
+```
+
+Fields marked **PII** must only be populated after obtaining the required consent. See [Consent is your responsibility](#consent-is-your-responsibility) below.
+
+---
+
+<Steps>
+<Step>
+
+### Understand how each field is handled
+
+The table below describes exactly what Rovenue does with each field. "Hashed" means the raw value is never sent over the wire or stored — only its SHA-256 digest is forwarded.
+
+| Field | Forwarded as | Handling |
+|-------|-------------|----------|
+| `email` | `user_data.em` | SHA-256 — lowercased and trimmed before hashing |
+| `phone` | `user_data.ph` | SHA-256 — digits only extracted before hashing |
+| `externalId` | `user_data.external_id` | SHA-256 — trimmed before hashing |
+| `ip` | `user_data.client_ip_address` / `context.ip` | Forwarded verbatim — **not** hashed |
+| `userAgent` | `user_data.client_user_agent` / `context.user_agent` | Forwarded verbatim — **not** hashed |
+| `fbp` | `user_data.fbp` | Forwarded verbatim — **not** hashed |
+| `fbc` | `user_data.fbc` | Forwarded verbatim — **not** hashed |
+| `ttclid` | `context.ttclid` | Forwarded verbatim — **not** hashed |
+| `ttp` | `properties.ttp` | Forwarded verbatim — **not** hashed |
+
+<Callout type="warn">
+`ip`, `userAgent`, `fbp`, `fbc`, `ttclid`, and `ttp` are **not hashed**. They are forwarded verbatim to downstream networks. Only collect and pass these fields after the user has given explicit, informed consent.
+</Callout>
+
+</Step>
+<Step>
+
+### Pass identityContext after consent is collected
+
+Only populate `identityContext` fields once your consent gate has been accepted. Below is the pattern for each platform.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    // Only call after the user has accepted your privacy/consent prompt
+    await Rovenue.identify('user_123', {
+      email: 'user@example.com',   // hashed before forwarding
+      phone: '+15555550100',        // hashed before forwarding
+      ip: requestIp,                // forwarded verbatim — consent required
+    });
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    import Rovenue
+
+    // Only call after the user has accepted your privacy/consent prompt
+    try await Rovenue.shared.identify(
+      "user_123",
+      identityContext: IdentityContext(
+        email: "user@example.com",   // hashed before forwarding
+        phone: "+15555550100",        // hashed before forwarding
+        ip: requestIp                 // forwarded verbatim — consent required
+      )
+    )
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    import dev.rovenue.sdk.Rovenue
+    import dev.rovenue.sdk.IdentityContext
+
+    // Only call after the user has accepted your privacy/consent prompt
+    Rovenue.shared.identify(
+      "user_123",
+      identityContext = IdentityContext(
+        email = "user@example.com",   // hashed before forwarding
+        phone = "+15555550100",        // hashed before forwarding
+        ip = requestIp                 // forwarded verbatim — consent required
+      )
+    )
+    ```
+  </Tab>
+</Tabs>
+
+</Step>
+<Step>
+
+### Consent is your responsibility
+
+Rovenue acts as a **data processor**. Your application is the **data controller**. You must obtain informed consent from the end-user before passing any PII in `identityContext`. This obligation applies regardless of jurisdiction — GDPR, CCPA, KVKK, PDPA, and similar regulations all place the consent responsibility on the controller, not the processor.
+
+<Callout type="warn">
+Do not pass PII in `identityContext` without collecting the required consent. The fields are forwarded to third-party attribution networks (Meta, TikTok). Once sent, Rovenue **cannot** recall them on your behalf.
+</Callout>
+
+Practical checklist before passing any PII field:
+
+- You have a privacy policy that discloses the use of ad-attribution networks.
+- The user has been shown a consent prompt and actively accepted it.
+- Your consent record is tied to the user session and survives app restarts.
+- You have a mechanism to withdraw consent and stop forwarding PII if the user opts out.
+
+See also: [Identifying users](/docs/guides/identifying-users) for the full `identify()` flow, and [Meta CAPI](/docs/integrations/meta-capi) / [TikTok Events](/docs/integrations/tiktok-events) for integration-specific consent requirements.
+
+</Step>
+</Steps>
 
 ## Additional data-handling guarantees
 
-- Rovenue **never persists** `identityContext` fields at rest. PII is hashed
-  in-process and the hash is forwarded downstream; the raw values are not
-  written to any database.
-- `response_body` from downstream providers is stored but **truncated to
-  4096 bytes** to prevent inadvertent PII capture in error messages.
-- The wire format uses **camelCase JSON** with
-  `ROVENUE_EVENT_WIRE_VERSION: "v1"` in the envelope header. Do not construct
-  envelope JSON manually — use the SDK methods which enforce the schema and
-  version negotiation.
-
-## Type names per platform
-
-The type is called `identityContext` (camelCase) in the React Native SDK and
-`IdentityContext` (PascalCase) in the Swift and Kotlin SDKs, but the fields and
-semantics are identical across all three.
+- Rovenue **never persists** `identityContext` fields at rest. PII is hashed in-process and only the hash is forwarded downstream; raw values are not written to any database.
+- `response_body` from downstream providers is stored but **truncated to 4096 bytes** to prevent inadvertent PII capture in error messages.
+- The wire format uses **camelCase JSON** with `ROVENUE_EVENT_WIRE_VERSION: "v1"` in the envelope header. Do not construct envelope JSON manually — use the SDK methods, which enforce the schema and version negotiation.

@@ -4,10 +4,64 @@ description: Initialize the Rovenue SDK once at startup before making any other 
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Call `configure` once at app startup — before any other SDK method. Calling any
-other method before `configure` throws `NotConfigured`.
+`configure` is the single entry point for the SDK. Call it once at app startup,
+before any other Rovenue method. Every other method is invalid until
+`configure` has run.
+
+<Callout type="warn">
+Calling any SDK method before `configure` throws `NotConfigured`. Put
+`configure` at the earliest possible entry point — `App.tsx` on React Native,
+`AppDelegate.application(_:didFinishLaunchingWithOptions:)` on iOS, or
+`Application.onCreate()` on Android.
+</Callout>
+
+### Types on this page
+
+```ts
+type RovenueConfig = {
+  apiKey: string;       // your public SDK key (prefix rov_pub_)
+  baseUrl: string;      // your Rovenue API base URL
+  debug?: boolean;      // verbose logging; default false
+  appVersion?: string;  // overrides the platform manifest value
+};
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `apiKey` | `string` | Yes | Your **public** SDK key (`rov_pub_…`). Never use the secret key in the app. |
+| `baseUrl` | `string` | Yes | Your Rovenue API base URL (e.g. `https://edge.rovenue.app`). |
+| `debug` | `boolean` | No | When `true`, routes verbose logs to your log handler. Default `false`. |
+| `appVersion` | `string` | No | App version string. Auto-read from the platform manifest — only override for standalone JVM builds. |
+
+> Swift and Kotlin mirror these with platform-idiomatic parameter labels. See [Types](/docs/reference/types).
+
+---
+
+## Setting up
+
+<Steps>
+<Step>
+
+### Find your API key
+
+Open the [Rovenue dashboard](https://edge.rovenue.app), navigate to your
+project, and copy the **public** SDK key. It starts with `rov_pub_`.
+
+<Callout type="warn">
+Never embed your **secret** key (`rov_sec_…`) in the app binary. Secret keys
+are for server-to-server calls only. See [Methods — Configuration](/docs/reference/methods#configuration).
+</Callout>
+
+</Step>
+<Step>
+
+### Call `configure` at startup
+
+Pass a `RovenueConfig` object (React Native) or named parameters (Swift /
+Kotlin) at the very first line of your app's lifecycle hook.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -17,7 +71,7 @@ other method before `configure` throws `NotConfigured`.
     Rovenue.configure({
       apiKey: 'rov_pub_...',
       baseUrl: 'https://edge.rovenue.app',
-      debug: true,       // optional — enables verbose logging
+      debug: true,       // optional — enables verbose logging in dev
       appVersion: '1.2', // optional — inferred from app.json by default
     });
     ```
@@ -26,6 +80,7 @@ other method before `configure` throws `NotConfigured`.
     ```swift
     import Rovenue
 
+    // AppDelegate.application(_:didFinishLaunchingWithOptions:)
     Rovenue.configure(
       apiKey: "rov_pub_...",
       baseUrl: "https://edge.rovenue.app",
@@ -38,6 +93,7 @@ other method before `configure` throws `NotConfigured`.
     ```kotlin
     import dev.rovenue.sdk.Rovenue
 
+    // Application.onCreate()
     Rovenue.configure(
       apiKey = "rov_pub_...",
       baseUrl = "https://edge.rovenue.app",
@@ -48,30 +104,97 @@ other method before `configure` throws `NotConfigured`.
   </Tab>
 </Tabs>
 
+</Step>
+<Step>
+
+### Verify the singleton is ready
+
+After `configure`, all SDK methods become available. On iOS and Android,
+subsequent calls go through the shared singleton (`Rovenue.shared`). On React
+Native they go directly through the `Rovenue` namespace.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    // Smoke-check: log the SDK version
+    console.log('Rovenue SDK', Rovenue.getVersion());
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Smoke-check: log the SDK version
+    print("Rovenue SDK", Rovenue.shared.getVersion())
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // Smoke-check: log the SDK version
+    println("Rovenue SDK ${Rovenue.shared.getVersion()}")
+    ```
+  </Tab>
+</Tabs>
+
 <Callout type="info">
-`configure` is a **static entry point** (`Rovenue.configure(...)`). On iOS and
-Android it initializes the shared singleton; every method afterwards is called
-on that instance — `Rovenue.shared.entitlement(...)` in Swift/Kotlin, or
-directly on `Rovenue` in React Native.
+`configure` is a **static entry point**. On iOS and Android it initialises
+the shared singleton; every method afterwards is called on that instance
+(`Rovenue.shared.entitlement(…)` in Swift/Kotlin), or directly on `Rovenue`
+in React Native.
 </Callout>
 
-## Parameters
+</Step>
+<Step>
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `apiKey` | Yes | Your **public** API key (`rov_pub_…`). Never use the secret key in the app. |
-| `baseUrl` | Yes | Your Rovenue API base URL. |
-| `debug` | No | When `true`, routes verbose logs to your log handler. Default `false`. |
-| `appVersion` | No | App version string. Auto-read from the platform manifest — only override for standalone JVM builds. |
+### (Optional) Attach a log handler
+
+Set a custom log handler immediately after `configure` to route SDK logs into
+your own logging infrastructure.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    Rovenue.setLogHandler((entry) => {
+      myLogger.log(entry.level, entry.message);
+    });
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    Rovenue.shared.setLogHandler { entry in
+      myLogger.log(level: entry.level, message: entry.message)
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.setLogHandler { entry ->
+      myLogger.log(entry.level, entry.message)
+    }
+    ```
+  </Tab>
+</Tabs>
+
+</Step>
+</Steps>
+
+---
 
 ## Platform defaults for `appVersion`
 
-- **iOS / Expo:** read from `CFBundleShortVersionString` / `app.json`
-- **Android:** read from `versionName` in `build.gradle`
-- **Standalone JVM SDK:** no manifest available — provide the value explicitly
+| Platform | Source |
+|----------|--------|
+| iOS / Expo | `CFBundleShortVersionString` / `app.json` |
+| Android | `versionName` in `build.gradle` |
+| Standalone JVM SDK | No manifest — provide the value explicitly |
 
-<Callout type="warn">
-Calling any SDK method before `configure` throws `NotConfigured`. Call
-`configure` at the earliest possible entry point (e.g., `App.tsx`, `AppDelegate`,
-`Application.onCreate`).
+---
+
+<Callout type="info">
+**Next steps:** After configuring the SDK, identify the logged-in user with
+[`identify()`](/docs/guides/identifying-users) and check their entitlements
+with [`entitlement()`](/docs/guides/entitlements). See also:
+[Methods — Configuration](/docs/reference/methods#configuration).
 </Callout>

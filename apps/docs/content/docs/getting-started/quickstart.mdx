@@ -1,132 +1,387 @@
 ---
 title: Quick Start
-description: Configure the SDK, check an entitlement, and make a purchase in five minutes.
+description: Configure the SDK, check an entitlement, fetch offerings, make a purchase, and identify a logged-in user — end to end in one page.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { Steps, Step } from 'fumadocs-ui/components/steps';
 import { Callout } from 'fumadocs-ui/components/callout';
 
+This page walks through the four actions every Rovenue integration needs. Each step is self-contained — you can copy it straight into your project.
+
+If you have not installed the SDK yet, start with [Installation](/docs/getting-started/installation).
+
+---
+
+### Types on this page
+
+```ts
+type RovenueConfig = {
+  apiKey: string;      // public SDK key — prefix rov_pub_
+  baseUrl: string;     // edge endpoint
+  debug?: boolean;
+  appVersion?: string;
+};
+
+type User = {
+  rovenueId: string;        // permanent per-install id, prefix rov_
+  appUserId: string | null; // your backend user id; null until identify()
+};
+
+type Entitlement = {
+  id: string;                // entitlement id as configured in the dashboard
+  isActive: boolean;         // true = access is currently granted
+  productIdentifier: string; // the store SKU that unlocked it
+  store: string;             // "app_store" | "play_store" | "stripe"
+  expiresIso?: string;       // ISO-8601 expiry; undefined for lifetime products
+};
+
+type Offerings = {
+  current: Offering | null;         // the default offering for this user
+  all: Record<string, Offering>;    // all offerings keyed by identifier
+};
+
+type Offering = {
+  identifier: string;
+  isDefault: boolean;
+  packages: Package[];
+};
+
+type Package = {
+  identifier: string;   // e.g. "$rc_monthly", "$rc_annual"
+  product: StoreProduct;
+};
+
+type StoreProduct = {
+  id: string;
+  type: 'subscription' | 'consumable' | 'non_consumable';
+  displayName: string;
+  priceString: string | null; // localised price string, e.g. "$4.99"
+  price: number | null;
+  currencyCode: string | null;
+};
+
+type PurchaseResult = {
+  entitlements: Entitlement[];  // all active entitlements after the purchase
+  creditBalance: number;        // credit balance after the purchase
+  productId: string;
+  storeTransactionId: string;
+};
+```
+
+| Type | Description |
+|------|-------------|
+| [`RovenueConfig`](/docs/reference/types#rovenueconfig) | Passed to `configure()` once at startup. |
+| [`User`](/docs/reference/types#user) | The two IDs the SDK manages — permanent `rovenueId` and optional `appUserId`. |
+| [`Entitlement`](/docs/reference/types#entitlement) | A single access grant. Check `isActive` at the gate. |
+| [`Offerings`](/docs/reference/types#offerings) | The product catalogue fetched from the store, structured by offering. |
+| [`PurchaseResult`](/docs/reference/types#purchaseresult) | Returned by `purchase()` after server-side validation succeeds. |
+
+> Swift and Kotlin expose the same fields with platform-idiomatic names. See [Types](/docs/reference/types).
+
+---
+
 <Steps>
 <Step>
 ### Configure once at startup
 
+Call `configure()` before any other SDK method — in your app entry point, before the UI renders. Pass your public API key and the edge base URL.
+
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
+    ```ts title="index.ts"
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    Rovenue.configure({
+      apiKey: 'rov_pub_your_key_here',
+      baseUrl: 'https://edge.rovenue.app',
+    });
+    ```
+
+    For Expo Router, put this in `app/_layout.tsx` before `<Stack />` renders.
+  </Tab>
+  <Tab value="Swift">
+    ```swift title="AppDelegate.swift"
+    import Rovenue
+
+    Rovenue.configure(
+      apiKey: "rov_pub_your_key_here",
+      baseUrl: "https://edge.rovenue.app"
+    )
+    ```
+
+    Call from `application(_:didFinishLaunchingWithOptions:)` (UIKit) or your `@main` `init()` (SwiftUI). See [App lifecycle](/docs/guides/app-lifecycle).
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin title="App.kt"
+    import dev.rovenue.sdk.Rovenue
+
+    Rovenue.configure(
+      context = this,
+      apiKey = "rov_pub_your_key_here",
+      baseUrl = "https://edge.rovenue.app"
+    )
+    ```
+
+    Call from `Application.onCreate()`. See [App lifecycle](/docs/guides/app-lifecycle).
+  </Tab>
+</Tabs>
+
+<Callout type="warn">
+Call `configure()` exactly **once** per process. Calling it a second time without first calling `shutdown()` is a programmer error. The SDK throws `NotConfiguredError` if any method is called before `configure()`.
+</Callout>
+
+See [Configuring](/docs/guides/configuring) for all `RovenueConfig` options, including `debug`, `appVersion`, and self-hosted `baseUrl` values.
+</Step>
+
+<Step>
+### Check an entitlement
+
+All entitlement reads are **cache-first** — they return instantly from the on-device SQLite store and never block on the network. The SDK keeps the cache warm in the background while the app is foregrounded.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    Use the reactive hook in any component. It re-renders automatically whenever the entitlement changes:
+
+    ```tsx title="ProBadge.tsx"
+    import { useEntitlement } from '@rovenue/react-native-sdk';
+
+    export function ProBadge() {
+      const pro = useEntitlement('pro'); // Entitlement | null
+
+      if (!pro?.isActive) return null;
+      return <View><Text>Pro</Text></View>;
+    }
+    ```
+
+    Or read imperatively (outside a component):
+
     ```ts
     import { Rovenue } from '@rovenue/react-native-sdk';
 
-    Rovenue.configure({ apiKey: 'rov_pub_...', baseUrl: 'https://edge.rovenue.app' });
+    const pro = Rovenue.entitlement('pro'); // Entitlement | null
+    if (pro?.isActive) {
+      // grant access
+    }
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
     import Rovenue
 
-    Rovenue.configure(apiKey: "rov_pub_...", baseUrl: "https://edge.rovenue.app")
+    // Async read — resolves from cache, never suspends on network
+    let pro = await Rovenue.shared.entitlement("pro")
+
+    if pro?.isActive == true {
+      // grant access
+    }
     ```
+
+    In SwiftUI you can observe entitlements via the change stream. See [Reacting to changes](/docs/guides/reacting-to-changes).
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
     import dev.rovenue.sdk.Rovenue
 
-    Rovenue.configure(apiKey = "rov_pub_...", baseUrl = "https://edge.rovenue.app")
-    ```
-  </Tab>
-</Tabs>
-</Step>
-
-<Step>
-### Check an entitlement
-
-<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
-  <Tab value="React Native">
-    ```tsx
-    import { useEntitlement } from '@rovenue/react-native-sdk';
-    const pro = useEntitlement('pro'); // reactive, cache-first
-    ```
-  </Tab>
-  <Tab value="Swift">
-    ```swift
-    let pro = await Rovenue.shared.entitlement("pro")
-    ```
-  </Tab>
-  <Tab value="Kotlin">
-    ```kotlin
     val pro = Rovenue.shared.entitlement("pro")
+
+    if (pro?.isActive == true) {
+      // grant access
+    }
     ```
+
+    Collect the `SharedFlow<ChangeEvent>` for reactive UI updates. See [Reacting to changes](/docs/guides/reacting-to-changes).
   </Tab>
 </Tabs>
+
+<Callout type="info">
+Always check the `isActive` boolean — not `expiresIso`. An entitlement with a future expiry where `isActive` is `false` is in grace-period or revoked state. See [Entitlements](/docs/guides/entitlements) for the full state model.
+</Callout>
+
+The `Entitlement` type and its fields are documented at [`/docs/reference/types#entitlement`](/docs/reference/types#entitlement). The method reference is at [`/docs/reference/methods#entitlement`](/docs/reference/methods#entitlement).
 </Step>
 
 <Step>
 ### Fetch offerings and make a purchase
 
-The SDK fetches products directly from the store, drives the native purchase
-sheet (StoreKit 2 on iOS, Play Billing on Android), and validates the receipt
-server-side. Your app receives updated entitlements in the result.
+`getOfferings()` returns the product catalogue configured in your dashboard, with localised pricing from the store. `purchase(pkg)` drives the native purchase sheet (StoreKit 2 on iOS, Play Billing 6 on Android) and validates the receipt server-side — all in one call.
+
+`purchase()` resolves only after server-side validation succeeds. The returned `PurchaseResult` contains up-to-date `entitlements` and `creditBalance` — no polling needed.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
-    ```ts
+    ```ts title="PaywallScreen.tsx"
     import {
       Rovenue,
       PurchaseCancelledError,
       PurchasePendingError,
     } from '@rovenue/react-native-sdk';
 
-    const offerings = await Rovenue.getOfferings();
-    const pkg = offerings.current?.packages[0];
+    async function handlePurchase() {
+      // 1. Fetch the current offering (cached; network-refreshed in background)
+      const offerings = await Rovenue.getOfferings();
+      const pkg = offerings.current?.packages[0];
+      if (!pkg) return; // no products configured
 
-    if (pkg) {
       try {
+        // 2. Launch native purchase sheet; resolves after server validation
         const result = await Rovenue.purchase(pkg);
-        // result.entitlements / result.creditBalance are already up to date
+
+        console.log('Entitlements:', result.entitlements);
+        console.log('Credit balance:', result.creditBalance);
       } catch (e) {
-        if (e instanceof PurchaseCancelledError) { /* user dismissed — ignore */ }
-        else if (e instanceof PurchasePendingError) { /* Ask-to-Buy / deferred */ }
-        else throw e;
+        if (e instanceof PurchaseCancelledError) {
+          // User dismissed the sheet — not an error; do nothing
+        } else if (e instanceof PurchasePendingError) {
+          // Ask-to-Buy / deferred payment — inform the user to wait
+        } else {
+          throw e;
+        }
       }
     }
 
+    // Restore purchases (call on a "Restore" button)
     await Rovenue.restorePurchases();
     ```
   </Tab>
   <Tab value="Swift">
-    ```swift
-    let offerings = try await Rovenue.shared.getOfferings()
-    if let pkg = offerings.current?.packages.first {
+    ```swift title="PaywallView.swift"
+    import Rovenue
+
+    func handlePurchase() async {
+      // 1. Fetch the current offering
+      guard let offerings = try? await Rovenue.shared.getOfferings(),
+            let pkg = offerings.current?.packages.first else { return }
+
       do {
+        // 2. Launch native purchase sheet; resolves after server validation
         let result = try await Rovenue.shared.purchase(pkg)
-        // result.entitlements / result.creditBalance are already up to date
-      } catch is PurchaseCancelledError { /* user dismissed — ignore */ }
-        catch is PurchasePendingError   { /* Ask-to-Buy / deferred */ }
+
+        print("Entitlements:", result.entitlements)
+        print("Credit balance:", result.creditBalance)
+      } catch is PurchaseCancelledError {
+        // User dismissed — not an error
+      } catch is PurchasePendingError {
+        // Ask-to-Buy / deferred — inform user
+      } catch {
+        throw error
+      }
     }
 
-    try await Rovenue.shared.restorePurchases()
+    // Restore purchases
+    try? await Rovenue.shared.restorePurchases()
     ```
   </Tab>
   <Tab value="Kotlin">
-    ```kotlin
-    val offerings = Rovenue.shared.getOfferings()
-    val pkg = offerings.current?.packages?.firstOrNull()
+    ```kotlin title="PaywallViewModel.kt"
+    import dev.rovenue.sdk.Rovenue
+    import dev.rovenue.sdk.errors.PurchaseCancelledError
+    import dev.rovenue.sdk.errors.PurchasePendingError
 
-    if (pkg != null) {
+    suspend fun handlePurchase() {
+      // 1. Fetch the current offering
+      val offerings = Rovenue.shared.getOfferings()
+      val pkg = offerings.current?.packages?.firstOrNull() ?: return
+
       try {
+        // 2. Launch native purchase sheet; resolves after server validation
         val result = Rovenue.shared.purchase(pkg)
-        // result.entitlements / result.creditBalance are already up to date
-      } catch (e: PurchaseCancelledError) { /* user dismissed — ignore */ }
-        catch (e: PurchasePendingError)   { /* Ask-to-Buy / deferred */ }
+
+        println("Entitlements: ${result.entitlements}")
+        println("Credit balance: ${result.creditBalance}")
+      } catch (e: PurchaseCancelledError) {
+        // User dismissed — not an error
+      } catch (e: PurchasePendingError) {
+        // Deferred payment — inform user
+      }
     }
 
+    // Restore purchases
     Rovenue.shared.restorePurchases()
     ```
   </Tab>
 </Tabs>
+
+<Callout type="info">
+On purchase success, the SDK automatically refreshes entitlements and credits and emits a `ChangeEvent`. Any `useEntitlement()` hook or change listener updates without extra code. See [Reacting to changes](/docs/guides/reacting-to-changes) and [Processing purchases](/docs/guides/processing-purchases).
+</Callout>
+
+Method references: [`getOfferings`](/docs/reference/methods#getofferings), [`purchase`](/docs/reference/methods#purchase), [`restorePurchases`](/docs/reference/methods#restorepurchases). Type references: [`Offerings`](/docs/reference/types#offerings), [`Package`](/docs/reference/types#package), [`PurchaseResult`](/docs/reference/types#purchaseresult).
+</Step>
+
+<Step>
+### Identify the user after login
+
+The SDK starts every install in anonymous mode with a stable `rovenueId`. Once your user logs in, call `identify(appUserId)` to bind your backend user ID to the current install. Rovenue automatically transfers any anonymous purchases and credits to the identified account.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    // After your auth flow resolves and you have a stable user ID:
+    async function onLoginSuccess(userId: string) {
+      Rovenue.identify(userId); // optimistic: local state updates immediately
+
+      const user = Rovenue.currentUser();
+      // user.rovenueId  → permanent install id (rov_...)
+      // user.appUserId  → userId you just passed
+    }
+
+    // On sign-out: clear appUserId and mint a fresh rovenueId
+    async function onLogOut() {
+      Rovenue.logOut();
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    import Rovenue
+
+    // After login:
+    func onLoginSuccess(userId: String) {
+      Rovenue.shared.identify(appUserId: userId) // optimistic
+
+      let user = Rovenue.shared.currentUser()
+      // user.rovenueId  → permanent install id (rov_...)
+      // user.appUserId  → userId
+    }
+
+    // On sign-out:
+    func onLogOut() {
+      Rovenue.shared.logOut()
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    import dev.rovenue.sdk.Rovenue
+
+    // After login:
+    fun onLoginSuccess(userId: String) {
+      Rovenue.shared.identify(appUserId = userId) // optimistic
+
+      val user = Rovenue.shared.currentUser()
+      // user.rovenueId  → permanent install id (rov_...)
+      // user.appUserId  → userId
+    }
+
+    // On sign-out:
+    fun onLogOut() {
+      Rovenue.shared.logOut()
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="warn">
+`identify()` is **not** how the user logs into your app — it is how you bind your backend's user ID to the Rovenue install. Call it only after your own auth flow completes and you have a stable, permanent user ID. Passing a temporary or session-scoped ID creates a new subscriber record per login and cannot be undone. See [Identifying users](/docs/guides/identifying-users) and [Identity & consent](/docs/guides/identity-consent) for guidance.
+</Callout>
+
+Method references: [`identify`](/docs/reference/methods#identity), [`logOut`](/docs/reference/methods#logout), [`currentUser`](/docs/reference/methods#currentuser). Type reference: [`User`](/docs/reference/types#user).
 </Step>
 </Steps>
 
 <Callout type="info">
-On purchase success, the SDK refreshes entitlements and credits automatically and emits
-a change event. See [Reacting to changes](/docs/guides/reacting-to-changes).
+**You're set up.** For a deeper understanding of how the two user IDs relate, how the cache-first model works, and what the `ChangeEvent` stream does, read [Core Concepts](/docs/getting-started/core-concepts). For a full API reference, see [Methods](/docs/reference/methods) and [Types](/docs/reference/types).
 </Callout>

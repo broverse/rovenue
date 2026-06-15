@@ -1,42 +1,412 @@
 ---
 title: Core Concepts
-description: The mental model behind the Rovenue SDK.
+description: The mental model behind the Rovenue SDK — two IDs, cache-first reads, the change stream, and how purchases flow.
 ---
 
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-The Rovenue SDK is built around a small set of concepts that apply across React Native, Swift, and Kotlin. Understanding them makes the rest of the API predictable.
+The Rovenue SDK is built around a small set of concepts that apply identically across React Native, Swift, and Kotlin. Understanding them makes every other part of the API predictable.
 
-## Anonymous vs known user
+---
 
-Every install starts in an anonymous state. The SDK generates a stable `rovenueId` on first launch (prefix `rov_`) and uses it to track events, entitlements, and credits before you know who the user is. The `rovenueId` is permanent for the lifetime of the install.
+## The two user IDs: `rovenueId` and `appUserId`
 
-Call `identify(appUserId)` once you have an app-side identity (after login, for example). This is a **server-side bind**: Rovenue attaches your `appUserId` to the current `rovenueId` and automatically transfers any prior install's purchases and credits to this device. The call is optimistic — local state updates immediately.
+Every install gets a **permanent, anonymous** `rovenueId` (prefix `rov_`) the moment `configure()` is called. It is stable for the lifetime of the app install — it does not rotate on app restart, network change, or OS update.
 
-On user sign-out, call `logOut()`. This mints a fresh `rovenueId` and clears the `appUserId` so the next user on a shared device starts clean. See [Identifying users](/docs/guides/identifying-users) for the full flow.
+At login, you call `identify(appUserId)` to attach your own backend user ID to the `rovenueId`. From that point, Rovenue uses the `appUserId` as the canonical subscriber identity.
 
-## Entitlement vs product
+```
+Install                   Login                       Sign-out
+  │                          │                            │
+  ▼                          ▼                            ▼
+rovenueId = rov_abc...   appUserId = "usr_123"        logOut()
+(anonymous subscriber)   (identified subscriber)      (new rovenueId minted)
+```
 
-An **entitlement** is an access grant your app checks at runtime (for example, `"pro"` or `"credits_pack_100"`). Store products — App Store subscriptions, Play Store products, or Stripe prices — are mapped to entitlements in the Rovenue dashboard.
+The current state is always available via `currentUser()`:
 
-Your app should always check entitlements, not product IDs. This keeps your feature-gating code decoupled from store-specific SKUs and lets you remap products (for example during a pricing change) without shipping a new binary.
+### Types on this page
 
-## Cache-first reads and background refresh
+```ts
+type User = {
+  rovenueId: string;        // permanent per-install id, prefix rov_; never changes
+  appUserId: string | null; // your backend user id; null until identify()
+};
 
-All read operations — `entitlement()`, `entitlementsAll()`, `creditBalance()`, and their hook equivalents — return instantly from an on-device SQLite cache. They never block on a network call.
+type ChangeEvent =
+  | 'EntitlementsChanged'   // active entitlements updated
+  | 'IdentityChanged'       // rovenueId or appUserId changed (identify / logOut)
+  | 'CreditBalanceChanged'; // credit balance changed
+```
 
-The SDK keeps the cache warm automatically: while the app is in the foreground it polls the server and applies updates in the background. Your UI reacts to the change without doing anything. When you need an authoritative up-to-date snapshot immediately (for example, right after a purchase), call `refreshEntitlements()` explicitly — that method contacts the server before resolving.
+| Field | Type | Description |
+|-------|------|-------------|
+| `rovenueId` | `string` | Permanent per-install identifier. Never reassigned for the life of the install. |
+| `appUserId` | `string \| null` | Your backend's user ID. `null` in anonymous mode. Set by `identify()`; cleared by `logOut()`. |
 
-## Credits
-
-Credits are an integer balance associated with a subscriber. The SDK exposes `creditBalance()` (or `useCreditBalance()` in React) as a cache-first read.
-
-Deducting credits is done server-side via `consumeCredits`. The SDK sends an `Idempotency-Key` with every consume call, so retrying after a network failure does not double-deduct the balance.
-
-## SDK-driven purchases
+> Swift uses `User.rovenueId` / `User.appUserId`. Kotlin mirrors the same field names. `ChangeEvent` is a Swift enum (`.entitlementsChanged`) and a Kotlin enum (`ENTITLEMENTS_CHANGED`). See [Types](/docs/reference/types#user).
 
 <Callout type="info">
-The SDK drives the full purchase lifecycle. Call `getOfferings()` to fetch your configured products, then `purchase(pkg)` to trigger the native store sheet (StoreKit 2 on iOS, Play Billing on Android) and validate the receipt server-side — all in one call.
+The `rovenueId` is the unit of billing: it is what gets linked to App Store / Play Store receipts and what holds the credit balance. Even in anonymous mode, purchases work correctly — they attach to the `rovenueId` and are transferred to the `appUserId` automatically when `identify()` is called.
 </Callout>
 
-`purchase(pkg)` resolves only after server-side validation succeeds and returns a `PurchaseResult` with up-to-date `entitlements` and `creditBalance`. Your app does not need to post receipts manually or poll for state changes. On success the SDK also emits a change event so any listening UI updates automatically.
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue, useCurrentUser } from '@rovenue/react-native-sdk';
+
+    // Imperative read
+    const user = Rovenue.currentUser();
+    // user.rovenueId  → "rov_abc123..."
+    // user.appUserId  → null (anonymous) or "usr_123" (identified)
+
+    // Reactive hook (re-renders on IdentityChanged)
+    function Header() {
+      const user = useCurrentUser(); // User | null
+      return <Text>{user?.appUserId ?? user?.rovenueId}</Text>;
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    import Rovenue
+
+    let user = Rovenue.shared.currentUser()
+    // user.rovenueId  → "rov_abc123..."
+    // user.appUserId  → nil (anonymous) or "usr_123" (identified)
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    import dev.rovenue.sdk.Rovenue
+
+    val user = Rovenue.shared.currentUser()
+    // user.rovenueId  → "rov_abc123..."
+    // user.appUserId  → null (anonymous) or "usr_123" (identified)
+    ```
+  </Tab>
+</Tabs>
+
+### `identify()` — binding a logged-in user
+
+Call `identify(appUserId)` once your auth flow completes and you have a stable, permanent user ID. The call is **optimistic**: local state (including `currentUser()`) updates synchronously; in the background the SDK calls `POST /v1/identify` to perform the server-side bind and purchase transfer.
+
+<Callout type="warn">
+Pass a **stable, permanent** user ID — a UUID or database primary key from your backend. Never pass a session token, email address, or anything that can change. Passing an unstable ID creates a new subscriber record per login and the merge cannot be undone. See [Identifying users](/docs/guides/identifying-users) and [Identity & consent](/docs/guides/identity-consent).
+</Callout>
+
+### `logOut()` — clearing identity on sign-out
+
+`logOut()` mints a fresh `rovenueId` and clears the `appUserId`. All scope-bound caches (entitlements, credits, offerings) are cleared. The next user on a shared device starts completely clean. No network call is needed — the operation is local-only.
+
+<Callout type="warn">
+Always call `logOut()` on sign-out, especially on shared devices (family iPad, demo devices). Failing to do so leaves the previous user's entitlements accessible to the next session.
+</Callout>
+
+Method references: [`identify`](/docs/reference/methods#identity), [`logOut`](/docs/reference/methods#logout), [`currentUser`](/docs/reference/methods#currentuser).
+
+---
+
+## Entitlements — what your app actually checks
+
+An **entitlement** is a named access grant your app checks at runtime (for example, `"pro"`, `"premium"`, or `"credits_pack"`). Entitlements are independent of store SKUs: you configure the mapping in the Rovenue dashboard, then check the entitlement ID in code.
+
+<Callout type="info">
+**The key mental model:** your feature-gating code never references a product ID or SKU. It only ever asks "does the current user have entitlement `"pro"`?" The Rovenue dashboard is where you wire store products to entitlements. This means you can add new products, change prices, or run a promo without shipping a new binary.
+</Callout>
+
+Entitlements have an `isActive` boolean — the only field your app needs at the gate:
+
+```ts
+type Entitlement = {
+  id: string;                // entitlement id as configured in the dashboard
+  isActive: boolean;         // true = access currently granted
+  productIdentifier: string; // store SKU that created the grant
+  store: string;             // "app_store" | "play_store" | "stripe"
+  expiresIso?: string;       // ISO-8601 expiry; undefined for lifetime products
+};
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Dashboard entitlement ID. This is what you pass to `entitlement()`. |
+| `isActive` | `boolean` | The only field to check at the gate. |
+| `productIdentifier` | `string` | The store SKU that created the grant. |
+| `store` | `string` | Which store issued the grant. |
+| `expiresIso` | `string?` | Expiry in ISO-8601. Absent for lifetime products. |
+
+> See [Types](/docs/reference/types#entitlement) and [Entitlements guide](/docs/guides/entitlements).
+
+<Callout type="warn">
+Check `isActive`, not `expiresIso`. An entitlement with a future expiry date and `isActive: false` is in a grace period or was revoked. The server sets `isActive` based on subscription state — your app should treat it as a boolean gate.
+</Callout>
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```tsx
+    import { useEntitlement, Rovenue } from '@rovenue/react-native-sdk';
+
+    // Reactive hook — re-renders on EntitlementsChanged
+    function ProFeature() {
+      const pro = useEntitlement('pro');
+      if (!pro?.isActive) return <Paywall />;
+      return <TheActualFeature />;
+    }
+
+    // Imperative — for non-component code
+    const pro = Rovenue.entitlement('pro');
+    const all = Rovenue.entitlementsAll();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    import Rovenue
+
+    // Cache-first read; never suspends on network
+    let pro = await Rovenue.shared.entitlement("pro")
+    let all = await Rovenue.shared.entitlementsAll()
+
+    if pro?.isActive == true {
+      showProFeature()
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    import dev.rovenue.sdk.Rovenue
+
+    val pro = Rovenue.shared.entitlement("pro")
+    val all = Rovenue.shared.entitlementsAll()
+
+    if (pro?.isActive == true) {
+      showProFeature()
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Credits — integer balance, server-deducted
+
+Credits are an integer balance associated with the current subscriber. The SDK exposes them as a cache-first read (`creditBalance()` / `useCreditBalance()`). Deduction happens server-side via `consumeCredits()`.
+
+```ts
+// Read (cache-first)
+Rovenue.creditBalance()    // number
+
+// Deduct (server-side; returns new balance)
+Rovenue.consumeCredits(amount: number, description?: string) // number
+```
+
+Every `consumeCredits` call includes an idempotency key generated by the SDK. If the network drops after the server deducts but before the client receives the response, retrying the call does not double-deduct.
+
+<Callout type="info">
+Credit balance is part of the `PurchaseResult` — after a credit pack purchase, `result.creditBalance` already reflects the newly added credits. No separate refresh is needed. See [Credits guide](/docs/guides/credits).
+</Callout>
+
+---
+
+## Offerings and packages — the product catalogue
+
+An **offering** is a named, versioned slice of your product catalogue as configured in the Rovenue dashboard. The `current` offering is what you show on the paywall for this user (you can A/B test offerings with experiments). Each offering contains **packages** — individual purchasable items.
+
+```ts
+type Offerings = {
+  current: Offering | null;
+  all: Record<string, Offering>;
+};
+
+type Offering  = { identifier: string; isDefault: boolean; packages: Package[] };
+type Package   = { identifier: string; product: StoreProduct };
+type StoreProduct = {
+  id: string;
+  type: 'subscription' | 'consumable' | 'non_consumable';
+  displayName: string;
+  priceString: string | null; // localised, e.g. "$4.99"
+  price: number | null;
+  currencyCode: string | null;
+};
+```
+
+`getOfferings()` returns a cached result and refreshes in the background. When you need a guaranteed-fresh list (unusual; typically not needed on the critical path), call `refreshEntitlements()` and then `getOfferings()`.
+
+---
+
+## Cache-first reads and background sync
+
+All read operations — `entitlement()`, `entitlementsAll()`, `creditBalance()`, `getOfferings()` — return instantly from an on-device SQLite cache powered by the Rust core. They **never block on a network call**.
+
+The SDK keeps the cache warm automatically:
+
+1. On `configure()`: loads the SQLite snapshot, serves it immediately.
+2. While foregrounded: polls the server on a configurable interval (default: 30 s) and applies deltas silently.
+3. On purchase: immediately calls `refreshEntitlements()` before resolving `purchase()`, so `PurchaseResult` is always authoritative.
+4. On `setForeground(true)`: forces an immediate refresh (call this from your app's foreground lifecycle event).
+
+<Callout type="info">
+The cache is backed by rusqlite — it persists across app restarts. On first launch (empty cache) entitlements are `null` / empty until the first network poll completes. Design your paywall to handle this gracefully (show a loading state, not a blank screen).
+</Callout>
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+    import { AppState } from 'react-native';
+
+    // Tell the SDK when the app foregrounds so it refreshes immediately
+    AppState.addEventListener('change', state => {
+      Rovenue.setForeground(state === 'active');
+    });
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    import Rovenue
+    import UIKit
+
+    // In SceneDelegate or AppDelegate:
+    func sceneDidBecomeActive(_ scene: UIScene) {
+      Rovenue.shared.setForeground(true)
+    }
+
+    func sceneWillResignActive(_ scene: UIScene) {
+      Rovenue.shared.setForeground(false)
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    import dev.rovenue.sdk.Rovenue
+    import androidx.lifecycle.DefaultLifecycleObserver
+    import androidx.lifecycle.ProcessLifecycleOwner
+
+    ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+      override fun onStart(owner: LifecycleOwner) = Rovenue.shared.setForeground(true)
+      override fun onStop(owner: LifecycleOwner) = Rovenue.shared.setForeground(false)
+    })
+    ```
+  </Tab>
+</Tabs>
+
+See [App lifecycle](/docs/guides/app-lifecycle) for the full setup.
+
+---
+
+## The change stream — reacting to updates
+
+When the SDK receives updated data from the server, it emits a `ChangeEvent`. Subscribe once and update your UI reactively — no polling, no manual refresh.
+
+```ts
+type ChangeEvent =
+  | 'EntitlementsChanged'   // active entitlements updated
+  | 'IdentityChanged'       // rovenueId or appUserId changed
+  | 'CreditBalanceChanged'; // credit balance changed
+```
+
+| Event | When it fires |
+|-------|---------------|
+| `EntitlementsChanged` | After purchase, restore, server-side revocation, or background poll. |
+| `IdentityChanged` | After `identify()` or `logOut()`. |
+| `CreditBalanceChanged` | After a purchase that grants credits or a `consumeCredits` call. |
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+    import { useEffect } from 'react';
+
+    function useRovenueChanges() {
+      useEffect(() => {
+        const unsubscribe = Rovenue.addChangeListener(event => {
+          if (event === 'EntitlementsChanged') {
+            console.log('Entitlements updated');
+          }
+          if (event === 'CreditBalanceChanged') {
+            console.log('New balance:', Rovenue.creditBalance());
+          }
+        });
+        return unsubscribe; // cleans up on unmount
+      }, []);
+    }
+    ```
+
+    In practice, using `useEntitlement()` and `useCreditBalance()` hooks is simpler — they subscribe to the change stream internally and re-render automatically.
+  </Tab>
+  <Tab value="Swift">
+    Swift exposes `ChangeEvent` as a typed enum and the stream as `AsyncStream<ChangeEvent>`:
+
+    ```swift
+    import Rovenue
+
+    Task {
+      for await event in Rovenue.shared.changes {
+        switch event {
+        case .entitlementsChanged:
+          // read new entitlements
+        case .creditBalanceChanged:
+          let balance = await Rovenue.shared.creditBalance()
+          print("New balance:", balance)
+        case .identityChanged:
+          let user = Rovenue.shared.currentUser()
+          print("Now identified as:", user.appUserId ?? "anonymous")
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    Kotlin exposes `ChangeEvent` as a typed enum and the stream as `SharedFlow<ChangeEvent>`:
+
+    ```kotlin
+    import dev.rovenue.sdk.Rovenue
+    import dev.rovenue.sdk.ChangeEvent
+
+    viewModelScope.launch {
+      Rovenue.shared.changes.collect { event ->
+        when (event) {
+          ChangeEvent.ENTITLEMENTS_CHANGED -> {
+            // read new entitlements
+          }
+          ChangeEvent.CREDIT_BALANCE_CHANGED -> {
+            val balance = Rovenue.shared.creditBalance()
+            println("New balance: $balance")
+          }
+          ChangeEvent.IDENTITY_CHANGED -> {
+            val user = Rovenue.shared.currentUser()
+            println("Now identified as: ${user.appUserId ?: "anonymous"}")
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+See [Reacting to changes](/docs/guides/reacting-to-changes) for patterns including Combine publishers, SwiftUI `.task` modifiers, and Compose `collectAsState`.
+
+---
+
+## `logOut()` — the shared-device contract
+
+When a user signs out, call `logOut()`. This:
+
+1. Mints a fresh `rovenueId` (the old one is preserved on the server, attached to the `appUserId`).
+2. Clears `appUserId` from local state.
+3. Clears all scope-bound caches (entitlements, credits, offerings).
+4. Emits `IdentityChanged`.
+
+The next user who opens the app starts in a clean anonymous session. Their subsequent `identify()` call attaches them to their own subscriber record.
+
+<Callout type="warn">
+Skipping `logOut()` on a shared device means the next user sees the previous user's entitlements until the background poll overwrites the cache — up to 30 seconds. Always call it on sign-out.
+</Callout>
+
+Method reference: [`logOut`](/docs/reference/methods#logout).
+
+---
+
+<Callout type="info">
+**Further reading:** [Quick Start](/docs/getting-started/quickstart) for runnable end-to-end code. [Identifying users](/docs/guides/identifying-users) for the full `identify()` / `logOut()` flow. [Entitlements](/docs/guides/entitlements) for the subscription state machine. [Reacting to changes](/docs/guides/reacting-to-changes) for reactive UI patterns. [Methods](/docs/reference/methods) and [Types](/docs/reference/types) for the full API reference.
+</Callout>

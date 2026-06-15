@@ -4,54 +4,96 @@ description: Subscribe to real-time SDK events for entitlement, identity, and cr
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-The SDK emits a `ChangeEvent` whenever its internal state changes. There are
-three event kinds:
+The SDK emits a `ChangeEvent` whenever its internal state changes — after a purchase, an identity update, or a credit deduction. Subscribe to drive UI updates without polling.
 
-- `EntitlementsChanged` — entitlement cache was updated (e.g. after a
-  purchase or foreground refresh)
-- `IdentityChanged` — `identify()` was called or the user was reset
-- `CreditBalanceChanged` — credit balance was updated
+<Callout type="info">
+In React Native you rarely need the imperative listener directly — the hooks (`useEntitlement`, `useEntitlements`, `useCurrentUser`, `useCreditBalance`) subscribe and unsubscribe automatically. Use the imperative API for non-component code or for Swift/Kotlin.
+</Callout>
 
-## Subscribing to changes
+### Types on this page
+
+`ChangeEvent` is an enum whose value tells you which cache to re-read. Full definition: [Types → ChangeEvent](/docs/reference/types#changeevent).
+
+```ts
+// React Native — string union
+type ChangeEvent =
+  | 'EntitlementsChanged'
+  | 'IdentityChanged'
+  | 'CreditBalanceChanged';
+```
+
+On **Swift** the change stream is `AsyncStream<ChangeEvent>` and the cases are `.entitlementsChanged`, `.identityChanged`, `.creditBalanceChanged`.
+
+On **Kotlin** the change stream is `SharedFlow<ChangeEvent>` and the constants are `ChangeEvent.ENTITLEMENTS_CHANGED`, `ChangeEvent.IDENTITY_CHANGED`, `ChangeEvent.CREDIT_BALANCE_CHANGED`.
+
+| Event value | When it fires |
+|-------------|--------------|
+| `EntitlementsChanged` | After the entitlement cache is refreshed — e.g. after a purchase, `refreshEntitlements()`, or a foreground sync. |
+| `IdentityChanged` | After `identify()` succeeds or `logOut()` resets the user. |
+| `CreditBalanceChanged` | After `refreshCredits()` or a successful `consumeCredits()` call. |
+
+---
+
+<Steps>
+<Step>
+
+### Subscribe to the change stream
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
     import { Rovenue } from '@rovenue/react-native-sdk';
 
-    // Imperative listener — returns an unsubscribe function
+    // addChangeListener returns an unsubscribe function — call it to clean up
     const unsub = Rovenue.addChangeListener((event) => {
-      if (event.type === 'EntitlementsChanged') {
-        console.log('Entitlements updated');
+      switch (event) {
+        case 'EntitlementsChanged':
+          console.log('Entitlements updated — re-check access');
+          break;
+        case 'IdentityChanged':
+          console.log('Identity changed — re-read current user');
+          break;
+        case 'CreditBalanceChanged':
+          console.log('Credit balance changed — re-read balance');
+          break;
       }
     });
-
-    // Later, to stop listening:
-    unsub();
     ```
 
-    For React components, prefer the reactive hooks instead — they wire up and
-    tear down the listener automatically:
+    In React components, use the hooks instead — they handle subscription lifecycle automatically:
 
     ```tsx
-    import { useEntitlement, useEntitlements, useCurrentUser, useCreditBalance }
-      from '@rovenue/react-native-sdk';
+    import {
+      useEntitlement,
+      useEntitlements,
+      useCurrentUser,
+      useCreditBalance,
+    } from '@rovenue/react-native-sdk';
+
+    function ProBadge() {
+      const pro = useEntitlement('pro'); // re-renders on EntitlementsChanged
+      return pro?.isActive ? <Crown /> : null;
+    }
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
+    import Rovenue
+
     // Rovenue.shared.changes is an AsyncStream<ChangeEvent>
-    Task {
+    // Consume it inside a Task that you own so you can cancel it later
+    let task = Task {
       for await event in Rovenue.shared.changes {
         switch event {
         case .entitlementsChanged:
-          print("Entitlements updated")
+          print("Entitlements updated — re-check access")
         case .identityChanged:
-          print("Identity changed")
+          print("Identity changed — re-read current user")
         case .creditBalanceChanged:
-          print("Credit balance changed")
+          print("Credit balance changed — re-read balance")
         }
       }
     }
@@ -59,13 +101,17 @@ three event kinds:
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
+    import dev.rovenue.sdk.Rovenue
+    import dev.rovenue.sdk.ChangeEvent
+
     // Rovenue.shared.changes is a SharedFlow<ChangeEvent>
+    // Collect from a scope you own — see the warning below
     viewModelScope.launch {
       Rovenue.shared.changes.collect { event ->
         when (event) {
-          is ChangeEvent.EntitlementsChanged -> println("Entitlements updated")
-          is ChangeEvent.IdentityChanged -> println("Identity changed")
-          is ChangeEvent.CreditBalanceChanged -> println("Credit balance changed")
+          ChangeEvent.ENTITLEMENTS_CHANGED  -> println("Entitlements updated")
+          ChangeEvent.IDENTITY_CHANGED      -> println("Identity changed")
+          ChangeEvent.CREDIT_BALANCE_CHANGED -> println("Credit balance changed")
         }
       }
     }
@@ -73,9 +119,135 @@ three event kinds:
   </Tab>
 </Tabs>
 
+</Step>
+<Step>
+
+### Unsubscribe when done
+
+Always clean up your subscription to prevent memory leaks or stale callbacks.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    // Call the function returned by addChangeListener
+    unsub();
+
+    // In a React effect:
+    useEffect(() => {
+      const unsub = Rovenue.addChangeListener((event) => {
+        // handle event
+      });
+      return () => unsub(); // cleanup on unmount
+    }, []);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Cancel the Task you created in Step 1
+    task.cancel()
+
+    // In a SwiftUI view model, store the task and cancel on deinit:
+    deinit {
+      task.cancel()
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // If you collected with launchIn, cancel the resulting Job:
+    val job = Rovenue.shared.changes
+      .onEach { event -> /* handle */ }
+      .launchIn(viewModelScope)
+
+    // Cancel explicitly if needed (viewModelScope cancels automatically on ViewModel cleared):
+    job.cancel()
+    ```
+  </Tab>
+</Tabs>
+
 <Callout type="warn">
-**Kotlin:** collect `changes` from a coroutine scope you control (e.g.
-`viewModelScope`) — not from a scope that the SDK owns. Calling `shutdown()`
-cancels the SDK's internal scope, which will also cancel any collector running
-inside it.
+**Kotlin:** collect `changes` from a coroutine scope **you** control (e.g. `viewModelScope`) — not from a scope the SDK owns. Calling `shutdown()` cancels the SDK's internal scope, which also cancels any collector running inside it. See [App lifecycle](/docs/guides/app-lifecycle) for shutdown sequencing.
 </Callout>
+
+</Step>
+<Step>
+
+### Re-read the updated cache after an event
+
+A `ChangeEvent` is a signal to re-read — the event itself does not carry the new value. After receiving it, call the corresponding cache read to get the updated data.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    const unsub = Rovenue.addChangeListener(async (event) => {
+      switch (event) {
+        case 'EntitlementsChanged': {
+          const all = await Rovenue.entitlementsAll();
+          console.log('Active entitlements:', all.filter(e => e.isActive));
+          break;
+        }
+        case 'IdentityChanged': {
+          const user = await Rovenue.currentUser();
+          console.log('Current user:', user.rovenueId, user.appUserId);
+          break;
+        }
+        case 'CreditBalanceChanged': {
+          const balance = await Rovenue.creditBalance();
+          console.log('New balance:', balance);
+          break;
+        }
+      }
+    });
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let task = Task {
+      for await event in Rovenue.shared.changes {
+        switch event {
+        case .entitlementsChanged:
+          let all = await Rovenue.shared.entitlementsAll()
+          print("Active entitlements:", all.filter { $0.isActive })
+        case .identityChanged:
+          let user = await Rovenue.shared.currentUser()
+          print("Current user:", user.rovenueId, user.appUserId ?? "anonymous")
+        case .creditBalanceChanged:
+          let balance = await Rovenue.shared.creditBalance()
+          print("New balance:", balance)
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    viewModelScope.launch {
+      Rovenue.shared.changes.collect { event ->
+        when (event) {
+          ChangeEvent.ENTITLEMENTS_CHANGED -> {
+            val all = Rovenue.shared.entitlementsAll()
+            println("Active: ${all.filter { it.isActive }}")
+          }
+          ChangeEvent.IDENTITY_CHANGED -> {
+            val user = Rovenue.shared.currentUser()
+            println("Current user: ${user.rovenueId} / ${user.appUserId}")
+          }
+          ChangeEvent.CREDIT_BALANCE_CHANGED -> {
+            val balance = Rovenue.shared.creditBalance()
+            println("New balance: $balance")
+          }
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+Related reads: [Checking entitlements](/docs/guides/entitlements) · [Identifying users](/docs/guides/identifying-users) · [Working with credits](/docs/guides/credits).
+</Callout>
+
+</Step>
+</Steps>

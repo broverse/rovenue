@@ -4,61 +4,257 @@ description: Read a user's active entitlements and refresh them from the server.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Entitlement reads are **cache-first** — they return instantly and never hit the
-network. Call `refreshEntitlements()` to pull the latest from the server.
+Entitlements are the access grants that determine what a subscriber can do in
+your app — "pro", "annual", "lifetime", and so on. The SDK keeps them in a local
+cache so reads are always instant; you fetch from the server only when you need
+guaranteed freshness.
+
+<Callout type="info">
+Entitlements refresh automatically while the app is in the foreground (see
+[App lifecycle](/docs/guides/app-lifecycle)). Manual `refreshEntitlements()`
+is only needed when you require immediate consistency — for example, right after
+a purchase completes. See [Methods — Entitlements](/docs/reference/methods#entitlements).
+</Callout>
+
+### Types on this page
+
+```ts
+type Entitlement = {
+  id: string;                // the entitlement key you check, e.g. "pro"
+  isActive: boolean;         // whether access is currently granted
+  productIdentifier: string; // the store product mapped to this entitlement
+  store: string;             // "app_store" | "play_store" | ...
+  expiresIso?: string;       // ISO-8601 expiry; absent for non-expiring grants
+};
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | The entitlement key configured in the dashboard (e.g. `"pro"`). |
+| `isActive` | `boolean` | `true` when the user currently has access. Always check this field — don't rely on `expiresIso` alone. |
+| `productIdentifier` | `string` | The store product ID that granted this entitlement. |
+| `store` | `string` | The store that owns this grant: `"app_store"`, `"play_store"`, etc. |
+| `expiresIso` | `string \| undefined` | ISO-8601 renewal / expiry timestamp. Absent for non-expiring (lifetime) grants. |
+
+> Swift and Kotlin mirror these with platform-idiomatic names. See [Types — Entitlement](/docs/reference/types#entitlement).
+
+---
+
+## Reading and refreshing entitlements
+
+<Steps>
+<Step>
+
+### Check a single entitlement (cache read)
+
+`entitlement(id)` returns the cached `Entitlement` for the given key, or `null`
+if the user has no such entitlement. The call never hits the network — it is
+safe to call in render paths and tight loops.
+
+On React Native, the `useEntitlement(id)` hook re-renders your component
+automatically whenever the entitlement changes (purchase, expiry, restore).
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```tsx
     import { Rovenue, useEntitlement } from '@rovenue/react-native-sdk';
 
+    // Reactive hook — updates automatically when entitlement state changes
     function ProBadge() {
-      const pro = useEntitlement('pro'); // reactive cache read
+      const pro = useEntitlement('pro');
       return pro?.isActive ? <Crown /> : null;
     }
 
-    await Rovenue.refreshEntitlements();
-    const all = await Rovenue.entitlementsAll();
+    // Imperative cache read
+    const pro = Rovenue.entitlement('pro');
+    if (pro?.isActive) {
+      enableProFeatures();
+    }
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
-    let pro = await Rovenue.shared.entitlement("pro")     // cache
-    if pro?.isActive == true { showCrown() }
-    try await Rovenue.shared.refreshEntitlements()         // network
+    // Imperative cache read
+    let pro = Rovenue.shared.entitlement("pro")
+    if pro?.isActive == true {
+      enableProFeatures()
+    }
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    val pro = Rovenue.shared.entitlement("pro")            // cache
-    if (pro?.isActive == true) showCrown()
-    Rovenue.shared.refreshEntitlements()                   // network
+    // Imperative cache read
+    val pro = Rovenue.shared.entitlement("pro")
+    if (pro?.isActive == true) {
+      enableProFeatures()
+    }
+    ```
+  </Tab>
+</Tabs>
+
+</Step>
+<Step>
+
+### Read all entitlements
+
+`entitlementsAll()` returns every cached entitlement for the current user. Use
+it when your paywall or settings screen needs to display the full set of active
+grants.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```tsx
+    import { Rovenue, useEntitlements } from '@rovenue/react-native-sdk';
+
+    // Reactive hook — returns all entitlements, re-renders on change
+    function SubscriptionStatus() {
+      const all = useEntitlements();
+      return (
+        <View>
+          {all.filter(e => e.isActive).map(e => (
+            <Text key={e.id}>{e.id} — expires {e.expiresIso ?? 'never'}</Text>
+          ))}
+        </View>
+      );
+    }
+
+    // Imperative cache read
+    const all = Rovenue.entitlementsAll();
+    const active = all.filter(e => e.isActive);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Imperative cache read
+    let all = Rovenue.shared.entitlementsAll()
+    let active = all.filter { $0.isActive }
+    for ent in active {
+      print("\(ent.id) expires \(ent.expiresIso ?? "never")")
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // Imperative cache read
+    val all = Rovenue.shared.entitlementsAll()
+    val active = all.filter { it.isActive }
+    active.forEach { ent ->
+      println("${ent.id} expires ${ent.expiresIso ?: "never"}")
+    }
+    ```
+  </Tab>
+</Tabs>
+
+</Step>
+<Step>
+
+### Refresh from the server
+
+Call `refreshEntitlements()` to pull the latest entitlement state from the
+server. The SDK updates its cache and emits an `EntitlementsChanged` event if
+anything changed.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    // After a purchase, force a server refresh to confirm the new entitlement
+    await Rovenue.refreshEntitlements();
+
+    const pro = Rovenue.entitlement('pro');
+    console.log('pro active:', pro?.isActive);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // After a purchase, force a server refresh to confirm the new entitlement
+    try await Rovenue.shared.refreshEntitlements()
+
+    let pro = Rovenue.shared.entitlement("pro")
+    print("pro active:", pro?.isActive ?? false)
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // After a purchase, force a server refresh to confirm the new entitlement
+    Rovenue.shared.refreshEntitlements()
+
+    val pro = Rovenue.shared.entitlement("pro")
+    println("pro active: ${pro?.isActive}")
     ```
   </Tab>
 </Tabs>
 
 <Callout type="info">
-Entitlements refresh automatically while the app is in the foreground (see
-[App lifecycle](/docs/guides/app-lifecycle)). Manual `refresh` is only needed
-when you require immediate consistency, e.g. right after a purchase.
+`purchase()` already returns an up-to-date `PurchaseResult` that includes the
+new entitlements — you do not need a separate `refreshEntitlements()` call
+immediately after a purchase. See [Processing Purchases](/docs/guides/processing-purchases).
 </Callout>
 
-## The `Entitlement` shape
+</Step>
+<Step>
 
-Each entitlement carries more than its active flag — use these fields to drive
-subscription UI (the product, the store, the renewal date):
+### React to entitlement changes (optional)
 
-```ts
-type Entitlement = {
-  id: string;                  // the entitlement key you check, e.g. "pro"
-  isActive: boolean;           // whether access is currently granted
-  productIdentifier: string;   // the store product mapped to this entitlement
-  store: string;               // "app_store" | "play_store" | ...
-  expiresIso?: string;         // ISO-8601 expiry; absent for non-expiring grants
-};
-```
+Use `addChangeListener` to respond to `EntitlementsChanged` events without
+polling — the listener fires whenever a purchase, restore, expiry, or server
+push changes the entitlement state.
 
-`entitlement(id)` returns `Entitlement | null` (null when the user has no such
-entitlement cached); `entitlementsAll()` returns every cached entitlement.
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    const removeListener = Rovenue.addChangeListener((event) => {
+      if (event === 'EntitlementsChanged') {
+        const pro = Rovenue.entitlement('pro');
+        updateUI(pro?.isActive ?? false);
+      }
+    });
+
+    // Later, when your component unmounts:
+    removeListener();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Consume the AsyncStream on a background Task
+    Task {
+      for await event in Rovenue.shared.changeStream {
+        if event == .entitlementsChanged {
+          let pro = Rovenue.shared.entitlement("pro")
+          await updateUI(pro?.isActive ?? false)
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // Collect the SharedFlow in a coroutine scope
+    scope.launch {
+      Rovenue.shared.changeStream.collect { event ->
+        if (event == RovenueChangeEvent.ENTITLEMENTS_CHANGED) {
+          val pro = Rovenue.shared.entitlement("pro")
+          updateUI(pro?.isActive ?: false)
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+</Step>
+</Steps>
+
+---
+
+<Callout type="info">
+**Related:** [Processing Purchases](/docs/guides/processing-purchases) · [Reacting to
+changes](/docs/guides/reacting-to-changes) · [Methods — Entitlements](/docs/reference/methods#entitlements) ·
+[Types — Entitlement](/docs/reference/types#entitlement)
+</Callout>

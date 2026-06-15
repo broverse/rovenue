@@ -1,40 +1,283 @@
 ---
 title: Installation
-description: Add the Rovenue SDK to your React Native, iOS, or Android app.
+description: Add the Rovenue SDK to your React Native, iOS, or Android app in three steps.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
+import { Callout } from 'fumadocs-ui/components/callout';
 
-<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+The Rovenue SDK shares a single Rust core (`librovenue`) across all three platforms. Native billing — StoreKit 2 on iOS, Play Billing 6 on Android — is handled by the platform-specific façade. Pick your platform path and follow the steps below.
+
+### Types on this page
+
+```ts
+type RovenueConfig = {
+  apiKey: string;      // public SDK key — prefix rov_pub_
+  baseUrl: string;     // edge endpoint — https://edge.rovenue.app
+  debug?: boolean;     // verbose log output; default false
+  appVersion?: string; // override version reported to the server
+};
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `apiKey` | `string` | Public SDK key from the Rovenue dashboard. Prefix `rov_pub_`. |
+| `baseUrl` | `string` | Edge endpoint. Use `https://edge.rovenue.app` unless self-hosting. |
+| `debug` | `boolean?` | Enables verbose SDK logging. Keep `false` in production. |
+| `appVersion` | `string?` | App version string reported to the server. Defaults to the OS-reported value. |
+
+> Swift and Kotlin mirror this with platform-idiomatic parameters. See [Types](/docs/reference/types#rovenueconfig).
+
+<Callout type="warn">
+The `rov_pub_` key is safe to ship in client code — it can only read public project data. Never embed your **secret** API key (`rov_sec_...`) in a mobile binary.
+</Callout>
+
+---
+
+<Steps>
+<Step>
+### Add the package
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift (SPM)', 'Swift (CocoaPods)', 'Kotlin']}>
   <Tab value="React Native">
+    Install from npm (works with bare React Native and Expo):
+
     ```sh
     npm install @rovenue/react-native-sdk
-    # Expo: the config plugin auto-wires native deps on prebuild.
     ```
-    Add the plugin in `app.json`:
-    ```json
-    { "expo": { "plugins": ["@rovenue/react-native-sdk/app.plugin"] } }
+
+    Or with yarn / pnpm:
+
+    ```sh
+    yarn add @rovenue/react-native-sdk
+    # or
+    pnpm add @rovenue/react-native-sdk
+    ```
+
+    **Peer dependencies:** React Native ≥ 0.73, React ≥ 18. The Nitro module bundles the prebuilt `librovenue` dylib — no separate native install is needed.
+  </Tab>
+  <Tab value="Swift (SPM)">
+    In Xcode: **File → Add Package Dependencies** and enter:
+
+    ```
+    https://github.com/rovenue/sdk-swift.git
+    ```
+
+    Or add to your `Package.swift`:
+
+    ```swift
+    dependencies: [
+      .package(
+        url: "https://github.com/rovenue/sdk-swift.git",
+        from: "0.6.0"
+      )
+    ],
+    targets: [
+      .target(
+        name: "YourTarget",
+        dependencies: ["Rovenue"]
+      )
+    ]
     ```
   </Tab>
-  <Tab value="Swift">
-    Swift Package Manager — add the package URL in Xcode, or in `Package.swift`:
-    ```swift
-    .package(url: "https://github.com/rovenue/sdk-swift.git", from: "0.6.0")
-    ```
-    CocoaPods:
+  <Tab value="Swift (CocoaPods)">
+    Add to your `Podfile`:
+
     ```ruby
-    pod 'Rovenue'
+    pod 'Rovenue', '~> 0.6'
+    ```
+
+    Then run:
+
+    ```sh
+    pod install
     ```
   </Tab>
   <Tab value="Kotlin">
-    Gradle (`build.gradle.kts`):
+    In `build.gradle.kts` (module level):
+
     ```kotlin
     dependencies {
       implementation("dev.rovenue:sdk:0.6.0")
     }
     ```
+
+    Make sure `mavenCentral()` is in your `settings.gradle.kts` repository list.
+  </Tab>
+</Tabs>
+</Step>
+
+<Step>
+### Wire up native entry points
+
+<Tabs groupId="platform" persist items={['React Native / Expo', 'Swift', 'Kotlin']}>
+  <Tab value="React Native / Expo">
+    **Expo (recommended):** Add the config plugin so `expo prebuild` auto-wires the native layer:
+
+    ```json title="app.json"
+    {
+      "expo": {
+        "plugins": ["@rovenue/react-native-sdk/app.plugin"]
+      }
+    }
+    ```
+
+    Then run prebuild:
+
+    ```sh
+    npx expo prebuild
+    ```
+
+    **Bare React Native:** Link native modules (React Native ≥ 0.73 auto-links via the Nitro module spec — no manual `react-native link` needed). For Android, ensure `minSdkVersion` is 24 or higher in `android/build.gradle`.
+  </Tab>
+  <Tab value="Swift">
+    No additional wiring is needed beyond adding the package. The SDK hooks into StoreKit 2 automatically at runtime.
+
+    If you are using **UIKit** (non-SwiftUI), ensure your `AppDelegate` does not override `application(_:open:options:)` in a way that swallows deep links — the SDK uses SKPaymentQueue for fallback receipt handling on older OS versions.
+  </Tab>
+  <Tab value="Kotlin">
+    The SDK requires the `BILLING` permission. Confirm your `AndroidManifest.xml` includes it (the AAR ships with a merged manifest, so it is usually added automatically):
+
+    ```xml title="AndroidManifest.xml"
+    <uses-permission android:name="com.android.vending.BILLING" />
+    ```
+
+    Ensure your app targets **minSdk 24** or higher. Initialize the SDK from your `Application` subclass, not from an `Activity`, to avoid lifecycle issues (see Step 3).
+  </Tab>
+</Tabs>
+</Step>
+
+<Step>
+### Call `configure()` once at startup
+
+`configure()` must be called before any other SDK method. It initialises the Rust core, opens the SQLite cache, and starts the background poller.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    Call it at the top of your app entry file, before the component tree renders:
+
+    ```ts title="index.ts"
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    Rovenue.configure({
+      apiKey: 'rov_pub_your_key_here',
+      baseUrl: 'https://edge.rovenue.app',
+    });
+    ```
+
+    With Expo Router, put this in `app/_layout.tsx` before the `<Stack />` render, or in a dedicated `app/init.ts` that is imported first.
+  </Tab>
+  <Tab value="Swift">
+    Call from `application(_:didFinishLaunchingWithOptions:)` (UIKit) or the `@main` struct `init()` (SwiftUI):
+
+    ```swift title="AppDelegate.swift"
+    import Rovenue
+
+    @UIApplicationMain
+    class AppDelegate: UIResponder, UIApplicationDelegate {
+      func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+      ) -> Bool {
+        Rovenue.configure(
+          apiKey: "rov_pub_your_key_here",
+          baseUrl: "https://edge.rovenue.app"
+        )
+        return true
+      }
+    }
+    ```
+
+    SwiftUI `@main`:
+
+    ```swift title="YourApp.swift"
+    import SwiftUI
+    import Rovenue
+
+    @main
+    struct YourApp: App {
+      init() {
+        Rovenue.configure(
+          apiKey: "rov_pub_your_key_here",
+          baseUrl: "https://edge.rovenue.app"
+        )
+      }
+
+      var body: some Scene {
+        WindowGroup { ContentView() }
+      }
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    Call from your `Application.onCreate()`:
+
+    ```kotlin title="App.kt"
+    import android.app.Application
+    import dev.rovenue.sdk.Rovenue
+
+    class App : Application() {
+      override fun onCreate() {
+        super.onCreate()
+        Rovenue.configure(
+          context = this,
+          apiKey = "rov_pub_your_key_here",
+          baseUrl = "https://edge.rovenue.app"
+        )
+      }
+    }
+    ```
+
+    Register `App` in `AndroidManifest.xml`:
+
+    ```xml title="AndroidManifest.xml"
+    <application android:name=".App" ...>
+    ```
   </Tab>
 </Tabs>
 
-See the per-platform [Platforms](/docs/platforms/react-native) guides for
-native wiring details (Expo plugin, AppDelegate, Application).
+<Callout type="warn">
+Call `configure()` exactly once per process. Calling it again after initialisation throws `NotConfiguredError` on iOS/Android and a `console.error` on React Native. If you need to change the key (e.g. in a multi-tenant app), call `shutdown()` first.
+</Callout>
+</Step>
+
+<Step>
+### Verify the installation
+
+After `configure()`, call `getVersion()` to confirm the SDK is wired correctly. The version string is also logged at `info` level on startup.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    console.log('Rovenue SDK', Rovenue.getVersion());
+    // → "Rovenue SDK 0.2.0"
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    import Rovenue
+
+    print("Rovenue SDK", Rovenue.shared.getVersion())
+    // → "Rovenue SDK 0.6.0"
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    import dev.rovenue.sdk.Rovenue
+
+    println("Rovenue SDK ${Rovenue.shared.getVersion()}")
+    // → "Rovenue SDK 0.6.0"
+    ```
+  </Tab>
+</Tabs>
+
+If you see a `NotConfigured` error here, `configure()` was either not called or called after this code ran. See [App lifecycle](/docs/guides/app-lifecycle) for the correct startup order.
+</Step>
+</Steps>
+
+<Callout type="info">
+**Next step:** Continue to the [Quick Start](/docs/getting-started/quickstart) to check your first entitlement and make a test purchase. For platform-specific details — Expo plugin options, AppDelegate wiring, Gradle flavours — see the per-platform guides: [React Native](/docs/platforms/react-native), [iOS Swift](/docs/platforms/ios-swift), [Android Kotlin](/docs/platforms/android-kotlin).
+</Callout>

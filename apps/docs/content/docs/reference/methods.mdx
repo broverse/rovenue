@@ -6,179 +6,598 @@ description: Every Rovenue SDK method, grouped by capability.
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { Callout } from 'fumadocs-ui/components/callout';
 
+Quick navigation: [Configuration](#configuration) · [Identity](#identity) · [Entitlements](#entitlements) · [Credits](#credits) · [Purchases](#purchases) · [Account Token](#account-token) · [Lifecycle](#lifecycle) · [Logging](#logging) · [Change Stream](#change-stream)
+
+---
+
 ## Configuration
 
-Call `configure` once at app startup before accessing `Rovenue.shared`.
+### `configure`
 
-| Method | Signature (RN) | Returns | Throws |
-|--------|---------------|---------|--------|
-| `configure` | `configure(apiKey, baseUrl, debug?, appVersion?)` | `void` | `InvalidApiKeyError` |
+Initialise the SDK. Call this **once at app startup**, before any other Rovenue call. On React Native, pass a single config object. On Swift and Kotlin, use labelled parameters.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `apiKey` | `string` | Yes | Your project's public API key. Prefix `rov_pub_`. |
+| `baseUrl` | `string` | Yes | Edge endpoint. Use `https://edge.rovenue.app` for production. |
+| `debug` | `boolean` | No | Enable verbose SDK logging. Defaults to `false`. |
+| `appVersion` | `string` | No | App version string forwarded to the server for analytics. Defaults to the value reported by the OS. |
+
+**Returns** — `void`
+
+**Throws** — [`InvalidApiKeyError`](/docs/reference/errors#error-table) if the key format is invalid at call time (a malformed prefix). The key is not validated against the server until the first network request.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
     import { Rovenue } from '@rovenue/react-native-sdk';
 
-    Rovenue.configure({ apiKey: 'rov_pub_…', baseUrl: 'https://edge.rovenue.app' });
+    Rovenue.configure({
+      apiKey: 'rov_pub_…',
+      baseUrl: 'https://edge.rovenue.app',
+      debug: __DEV__,
+      appVersion: '3.1.0',
+    });
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
+    import Rovenue
+
     Rovenue.configure(
         apiKey: "rov_pub_…",
-        baseUrl: "https://edge.rovenue.app"
+        baseUrl: "https://edge.rovenue.app",
+        debug: true,
+        appVersion: "3.1.0"
     )
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
+    import com.rovenue.Rovenue
+
     Rovenue.configure(
         apiKey = "rov_pub_…",
-        baseUrl = "https://edge.rovenue.app"
+        baseUrl = "https://edge.rovenue.app",
+        debug = BuildConfig.DEBUG,
+        appVersion = BuildConfig.VERSION_NAME
     )
     ```
   </Tab>
 </Tabs>
 
+<Callout type="info">
+`configure` must be called before `Rovenue.shared` is accessed. Accessing any other method before `configure` throws [`NotConfiguredError`](/docs/reference/errors#error-table).
+</Callout>
+
+**See also:** [Configuring the SDK guide](/docs/guides/configuring)
+
+---
+
 ## Identity
+
+### Method summary
 
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
-| `currentUser` | `currentUser()` | `User` | — |
-| `identify` | `identify(appUserId)` | `void` | — |
+| `currentUser` | `currentUser()` | [`User`](/docs/reference/types#user) | — |
+| `identify` | `identify(appUserId)` | `void` | [`InvalidArgumentError`](/docs/reference/errors#error-table) |
 | `logOut` | `logOut()` | `void` | — |
 
-`currentUser()` is a **cache read** — instant, no network. It returns a [`User`](/docs/reference/types#user) with two fields:
-- **`rovenueId`** — permanent per-install identifier (prefix `rov_`); always present.
-- **`appUserId`** — your backend's user ID; `null` until `identify()` is called.
+---
 
-`identify(appUserId)` performs a **server-side bind**: Rovenue attaches the `appUserId` label to the current `rovenueId` and, if that `appUserId` already exists on another install, automatically transfers that install's purchases and credits to this device. The call is **optimistic** — local state updates immediately and the server sync completes in the background. See the [Identifying users guide](/docs/guides/identifying-users) for the full flow.
+### `currentUser`
 
-`logOut()` mints a fresh `rovenueId`, clears `appUserId`, and drops all scope-bound caches. Call it when your user signs out so the next user on a shared device starts with a clean slate.
+Synchronous cache read — no network call. Returns the [`User`](/docs/reference/types#user) for the current install.
+
+**Params** — none
+
+**Returns**
+
+```ts
+type User = {
+  rovenueId: string;      // always present, prefix "rov_"
+  appUserId: string | null; // null until identify() has been called
+};
+```
+
+→ Full type reference: [`User`](/docs/reference/types#user)
+
+**Throws** — nothing
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
     const user = await Rovenue.currentUser();
-    // user.rovenueId — always present (e.g. "rov_01abc...")
-    // user.appUserId — null until identify() has been called
-
-    // After your auth flow completes:
-    await Rovenue.identify('user_123');
-
-    // When your user signs out:
-    await Rovenue.logOut();
+    console.log(user.rovenueId);  // e.g. "rov_01abc..."
+    console.log(user.appUserId);  // null until identify() called
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
     let user = await Rovenue.shared.currentUser()
-    // user.rovenueId — always present (e.g. "rov_01abc...")
-    // user.appUserId — nil until identify() has been called
-
-    // After your auth flow completes:
-    try await Rovenue.shared.identify("user_123")
-
-    // When your user signs out:
-    try await Rovenue.shared.logOut()
+    print(user.rovenueId)   // "rov_01abc..."
+    print(user.appUserId ?? "anonymous")
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
     val user = Rovenue.shared.currentUser()
-    // user.rovenueId — always present (e.g. "rov_01abc...")
-    // user.appUserId — null until identify() has been called
+    Log.d("App", user.rovenueId)         // "rov_01abc..."
+    Log.d("App", user.appUserId ?: "anonymous")
+    ```
+  </Tab>
+</Tabs>
 
-    // After your auth flow completes:
-    Rovenue.shared.identify("user_123") // suspend
+---
 
-    // When your user signs out:
-    Rovenue.shared.logOut() // suspend
+### `identify`
+
+Bind a backend user ID to the current install. Rovenue attaches the `appUserId` label to the `rovenueId` and, if that `appUserId` already exists on another install, transfers that install's purchases and credits to this device. The call is **optimistic** — local state updates immediately; the server sync completes in the background.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `appUserId` | `string` | Yes | Your backend's stable user identifier. Must be non-empty. |
+
+**Returns** — `void`
+
+**Throws** — [`InvalidArgumentError`](/docs/reference/errors#error-table) if `appUserId` is empty or blank.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    // After your auth flow resolves:
+    await Rovenue.identify('user_123');
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    try await Rovenue.shared.identify("user_123")
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.identify("user_123") // suspend fun
     ```
   </Tab>
 </Tabs>
 
 <Callout type="warn">
-Use **opaque, unguessable** IDs for `appUserId` — never an email address or username. Because `identify()` can transfer purchases between installs, a guessable ID is an account-takeover surface.
+Use **opaque, unguessable** IDs — never an email address or username. Because `identify()` can transfer purchases between installs, a guessable ID is an account-takeover surface. See the [Identifying users guide](/docs/guides/identifying-users) for the recommended token-based flow.
 </Callout>
+
+**Errors:** [`InvalidArgumentError`](/docs/reference/errors#error-table)
+
+---
+
+### `logOut`
+
+Mint a fresh anonymous `rovenueId`, clear `appUserId`, and drop all scope-bound caches. Call when your user signs out so the next user on a shared device starts clean.
+
+**Params** — none
+
+**Returns** — `void`
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    await Rovenue.logOut();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    try await Rovenue.shared.logOut()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.logOut() // suspend fun
+    ```
+  </Tab>
+</Tabs>
+
+**See also:** [Identifying users guide](/docs/guides/identifying-users), [Identity consent guide](/docs/guides/identity-consent)
+
+---
 
 ## Entitlements
 
+### Method summary
+
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
-| `entitlement` | `entitlement(id)` | `Entitlement \| null` (cache) | — |
-| `entitlementsAll` | `entitlementsAll()` | `Entitlement[]` (cache) | — |
-| `refreshEntitlements` | `refreshEntitlements()` | `void` (network) | — |
+| `entitlement` | `entitlement(id)` | [`Entitlement`](/docs/reference/types#entitlement) `\| null` | — |
+| `entitlementsAll` | `entitlementsAll()` | [`Entitlement[]`](/docs/reference/types#entitlement) | — |
+| `refreshEntitlements` | `refreshEntitlements()` | `void` | [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
+
+`entitlement()` and `entitlementsAll()` are **synchronous cache reads** — instant, no network. The cache is populated on configure and kept current by the [change stream](#change-stream). Call `refreshEntitlements()` to force a server round-trip (e.g. after a server-side grant).
+
+---
+
+### `entitlement`
+
+Return a single cached entitlement by its dashboard identifier, or `null` if the user holds no such entitlement.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | `string` | Yes | The entitlement key as configured in the Rovenue dashboard (e.g. `"pro"`, `"credits_pack"`). |
+
+**Returns**
+
+```ts
+// Entitlement | null
+```
+
+→ Full type reference: [`Entitlement`](/docs/reference/types#entitlement)
+
+**Throws** — nothing
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
     const ent = await Rovenue.entitlement('pro');
-    const all = await Rovenue.entitlementsAll();
-    await Rovenue.refreshEntitlements();
+    if (ent?.isActive) {
+      // unlock Pro features
+    }
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
     let ent = await Rovenue.shared.entitlement(id: "pro")
-    let all = await Rovenue.shared.entitlementsAll()
-    try await Rovenue.shared.refreshEntitlements()
+    if ent?.isActive == true {
+        // unlock Pro features
+    }
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
     val ent = Rovenue.shared.entitlement(id = "pro")
-    val all = Rovenue.shared.entitlementsAll()
-    Rovenue.shared.refreshEntitlements()
+    if (ent?.isActive == true) {
+        // unlock Pro features
+    }
     ```
   </Tab>
 </Tabs>
 
+---
+
+### `entitlementsAll`
+
+Return every cached entitlement for the current user.
+
+**Params** — none
+
+**Returns**
+
+```ts
+// Entitlement[]
+```
+
+→ Full type reference: [`Entitlement`](/docs/reference/types#entitlement)
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const all = await Rovenue.entitlementsAll();
+    const active = all.filter(e => e.isActive);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let all = await Rovenue.shared.entitlementsAll()
+    let active = all.filter { $0.isActive }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val all = Rovenue.shared.entitlementsAll()
+    val active = all.filter { it.isActive }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### `refreshEntitlements`
+
+Force a server round-trip to refresh the entitlement cache. Fires a [`EntitlementsChanged`](/docs/reference/types#changeevent) change event when the cache is updated.
+
+**Params** — none
+
+**Returns** — `void`
+
+**Throws** — [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    // After a server-side entitlement grant, force-refresh:
+    await Rovenue.refreshEntitlements();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    try await Rovenue.shared.refreshEntitlements()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.refreshEntitlements() // suspend fun
+    ```
+  </Tab>
+</Tabs>
+
+**Errors:** [`NetworkUnavailableError`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
+
+**See also:** [Entitlements guide](/docs/guides/entitlements)
+
+---
+
 ## Credits
+
+### Method summary
 
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
-| `creditBalance` | `creditBalance()` | `number` (cache, 0 if empty) | — |
-| `refreshCredits` | `refreshCredits()` | `void` (network) | — |
-| `consumeCredits` | `consumeCredits(amount, description?)` | `number` (new balance) | `InsufficientCreditsError` |
+| `creditBalance` | `creditBalance()` | `number` | — |
+| `refreshCredits` | `refreshCredits()` | `void` | [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
+| `consumeCredits` | `consumeCredits(amount, description?)` | `number` | [`InsufficientCreditsError`](/docs/reference/errors#error-table) |
+
+`creditBalance()` is a **synchronous cache read** — returns `0` if no balance is cached yet. `refreshCredits()` forces a server round-trip. `consumeCredits()` atomically deducts credits server-side.
+
+---
+
+### `creditBalance`
+
+Return the cached credit balance for the current user.
+
+**Params** — none
+
+**Returns** — `number` (the current balance; `0` if not yet loaded)
+
+**Throws** — nothing
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
     const balance = await Rovenue.creditBalance();
-    await Rovenue.refreshCredits();
-    const newBalance = await Rovenue.consumeCredits(10, 'AI generation');
+    console.log(`You have ${balance} credits`);
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
     let balance = await Rovenue.shared.creditBalance()
-    try await Rovenue.shared.refreshCredits()
-    let newBalance = try await Rovenue.shared.consumeCredits(
-        amount: 10,
-        description: "AI generation"
-    )
+    print("You have \(balance) credits")
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
     val balance = Rovenue.shared.creditBalance()
-    Rovenue.shared.refreshCredits()
-    val newBalance = Rovenue.shared.consumeCredits(
-        amount = 10,
-        description = "AI generation"
-    )
+    Log.d("App", "You have $balance credits")
     ```
   </Tab>
 </Tabs>
 
+---
+
+### `refreshCredits`
+
+Force a server round-trip to refresh the credit balance cache. Fires a [`CreditBalanceChanged`](/docs/reference/types#changeevent) change event when the cache is updated.
+
+**Params** — none
+
+**Returns** — `void`
+
+**Throws** — [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    await Rovenue.refreshCredits();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    try await Rovenue.shared.refreshCredits()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.refreshCredits() // suspend fun
+    ```
+  </Tab>
+</Tabs>
+
+**Errors:** [`NetworkUnavailableError`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
+
+---
+
+### `consumeCredits`
+
+Atomically deduct credits from the user's balance. The deduction is applied server-side and the updated balance is returned. If the user has insufficient credits, the call throws without modifying the balance.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `amount` | `number` | Yes | Number of credits to deduct. Must be a positive integer. |
+| `description` | `string` | No | Human-readable label for this deduction (e.g. `"AI generation"`). Stored in the credit ledger for audit purposes. |
+
+**Returns** — `number` (the new balance after deduction)
+
+**Throws** — [`InsufficientCreditsError`](/docs/reference/errors#error-table) if the user has fewer credits than `amount`.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue, InsufficientCreditsError } from '@rovenue/react-native-sdk';
+
+    try {
+      const newBalance = await Rovenue.consumeCredits(10, 'AI generation');
+      console.log(`Balance after: ${newBalance}`);
+    } catch (e) {
+      if (e instanceof InsufficientCreditsError) {
+        // Prompt the user to purchase more credits
+      } else {
+        throw e;
+      }
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    do {
+      let newBalance = try await Rovenue.shared.consumeCredits(
+          amount: 10,
+          description: "AI generation"
+      )
+      print("Balance after: \(newBalance)")
+    } catch Rovenue.Error.insufficientCredits {
+      // Prompt the user to purchase more credits
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    try {
+      val newBalance = Rovenue.shared.consumeCredits(
+          amount = 10,
+          description = "AI generation"
+      )
+      Log.d("App", "Balance after: $newBalance")
+    } catch (e: RovenueException.InsufficientCredits) {
+      // Prompt the user to purchase more credits
+    }
+    ```
+  </Tab>
+</Tabs>
+
+**Errors:** [`InsufficientCreditsError`](/docs/reference/errors#error-table)
+
+**See also:** [Credits guide](/docs/guides/credits)
+
+---
+
 ## Purchases
+
+### Method summary
 
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
-| `getOfferings` | `getOfferings()` | `{ current: Offering \| null; all: Record<string, Offering> }` | `NetworkUnavailableError`, `ServerError` |
-| `purchase` | `purchase(pkg)` | `PurchaseResult` | `PurchaseCancelledError`, `PurchasePendingError`, `ProductNotAvailableError`, `StoreProblemError`, `ReceiptInvalidError` |
-| `restorePurchases` | `restorePurchases()` | `void` | `NetworkUnavailableError`, `ServerError` |
+| `getOfferings` | `getOfferings()` | [`Offerings`](/docs/reference/types#offerings) | [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
+| `purchase` | `purchase(pkg)` | [`PurchaseResult`](/docs/reference/types#purchaseresult) | [`PurchaseCancelledError`](/docs/reference/errors#error-table), [`PurchasePendingError`](/docs/reference/errors#error-table), [`ProductNotAvailableError`](/docs/reference/errors#error-table), [`StoreProblemError`](/docs/reference/errors#error-table), [`ReceiptInvalidError`](/docs/reference/errors#error-table) |
+| `restorePurchases` | `restorePurchases()` | `void` | [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
+
+---
+
+### `getOfferings`
+
+Fetch the offerings configured in the Rovenue dashboard. Each offering contains one or more packages, each wrapping a store product with localised pricing. Call this when your paywall opens.
+
+**Params** — none
+
+**Returns**
+
+```ts
+type Offerings = {
+  current: Offering | null;           // the default offering, or null if none is set
+  all: Record<string, Offering>;      // all offerings keyed by identifier
+};
+```
+
+→ Full type reference: [`Offerings`](/docs/reference/types#offerings), [`Offering`](/docs/reference/types#offering), [`Package`](/docs/reference/types#package), [`StoreProduct`](/docs/reference/types#storeproduct)
+
+**Throws** — [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    const offerings = await Rovenue.getOfferings();
+    // offerings.current — default Offering | null
+    // offerings.all     — Record<string, Offering>
+
+    const packages = offerings.current?.packages ?? [];
+    packages.forEach(pkg => {
+      console.log(pkg.product.displayName, pkg.product.priceString);
+    });
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let offerings = try await Rovenue.shared.getOfferings()
+    // offerings.current — Offering?
+    // offerings.all     — [String: Offering]
+
+    let packages = offerings.current?.packages ?? []
+    for pkg in packages {
+        print(pkg.product.displayName, pkg.product.priceString)
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val offerings = Rovenue.shared.getOfferings()
+    // offerings.current — Offering?
+    // offerings.all     — Map<String, Offering>
+
+    val packages = offerings.current?.packages ?: emptyList()
+    packages.forEach { pkg ->
+        Log.d("App", "${pkg.product.displayName} ${pkg.product.priceString}")
+    }
+    ```
+  </Tab>
+</Tabs>
+
+**Errors:** [`NetworkUnavailableError`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
+
+---
+
+### `purchase`
+
+Trigger a native store sheet for the given package. The SDK handles the full purchase lifecycle: StoreKit 2 on iOS, Play Billing on Android, server-side receipt validation. Resolves with updated entitlements and credit balance — no additional polling needed.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `pkg` | [`Package`](/docs/reference/types#package) | Yes | A package from [`getOfferings()`](#getofferings). |
+
+**Returns**
+
+```ts
+type PurchaseResult = {
+  entitlements: Entitlement[];   // full set of active entitlements after the purchase
+  creditBalance: number;         // total credit balance after the purchase
+  productId: string;             // the store product ID purchased
+  storeTransactionId: string;    // StoreKit 2 transaction ID or Play Billing order ID
+};
+```
+
+→ Full type reference: [`PurchaseResult`](/docs/reference/types#purchaseresult)
+
+**Throws** — see table below
+
+| Error | When it fires |
+|-------|--------------|
+| [`PurchaseCancelledError`](/docs/reference/errors#error-table) | User dismissed the store sheet without completing payment |
+| [`PurchasePendingError`](/docs/reference/errors#error-table) | Ask-to-Buy / parental approval pending — transaction not yet complete |
+| [`ProductNotAvailableError`](/docs/reference/errors#error-table) | The product is not available in the user's storefront |
+| [`StoreProblemError`](/docs/reference/errors#error-table) | The store returned a non-specific error (e.g. billing issue) |
+| [`ReceiptInvalidError`](/docs/reference/errors#error-table) | Server-side receipt validation failed |
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -187,6 +606,9 @@ Use **opaque, unguessable** IDs for `appUserId` — never an email address or us
       Rovenue,
       PurchaseCancelledError,
       PurchasePendingError,
+      ProductNotAvailableError,
+      StoreProblemError,
+      ReceiptInvalidError,
     } from '@rovenue/react-native-sdk';
 
     const offerings = await Rovenue.getOfferings();
@@ -195,15 +617,20 @@ Use **opaque, unguessable** IDs for `appUserId` — never an email address or us
     if (pkg) {
       try {
         const result = await Rovenue.purchase(pkg);
-        // result.entitlements / result.creditBalance are up to date
+        console.log('Purchase succeeded:', result.productId);
+        // result.entitlements and result.creditBalance are already up to date
       } catch (e) {
-        if (e instanceof PurchaseCancelledError) { /* user dismissed */ }
-        else if (e instanceof PurchasePendingError) { /* Ask-to-Buy */ }
-        else throw e;
+        if (e instanceof PurchaseCancelledError) {
+          // User dismissed — no action needed
+        } else if (e instanceof PurchasePendingError) {
+          // Ask-to-Buy — tell the user to wait for approval
+        } else if (e instanceof ReceiptInvalidError) {
+          // Show a retry prompt
+        } else {
+          throw e;
+        }
       }
     }
-
-    await Rovenue.restorePurchases();
     ```
   </Tab>
   <Tab value="Swift">
@@ -212,12 +639,15 @@ Use **opaque, unguessable** IDs for `appUserId` — never an email address or us
     if let pkg = offerings.current?.packages.first {
       do {
         let result = try await Rovenue.shared.purchase(pkg)
-        // result.entitlements / result.creditBalance are up to date
-      } catch is PurchaseCancelledError { /* user dismissed */ }
-        catch is PurchasePendingError   { /* Ask-to-Buy */ }
+        print("Purchase succeeded: \(result.productId)")
+      } catch is PurchaseCancelledError {
+        // User dismissed — no action needed
+      } catch is PurchasePendingError {
+        // Ask-to-Buy — tell the user to wait for approval
+      } catch Rovenue.Error.receiptInvalid {
+        // Show a retry prompt
+      }
     }
-
-    try await Rovenue.shared.restorePurchases()
     ```
   </Tab>
   <Tab value="Kotlin">
@@ -228,69 +658,140 @@ Use **opaque, unguessable** IDs for `appUserId` — never an email address or us
     if (pkg != null) {
       try {
         val result = Rovenue.shared.purchase(pkg)
-        // result.entitlements / result.creditBalance are up to date
-      } catch (e: PurchaseCancelledException) { /* user dismissed */ }
-        catch (e: PurchasePendingException)   { /* deferred */ }
+        Log.d("App", "Purchase succeeded: ${result.productId}")
+      } catch (e: PurchaseCancelledException) {
+        // User dismissed — no action needed
+      } catch (e: PurchasePendingException) {
+        // Ask-to-Buy — tell the user to wait for approval
+      } catch (e: RovenueException.ReceiptInvalid) {
+        // Show a retry prompt
+      }
     }
-
-    Rovenue.shared.restorePurchases()
     ```
   </Tab>
 </Tabs>
 
+**Errors:** [`PurchaseCancelledError`](/docs/reference/errors#error-table) · [`PurchasePendingError`](/docs/reference/errors#error-table) · [`ProductNotAvailableError`](/docs/reference/errors#error-table) · [`StoreProblemError`](/docs/reference/errors#error-table) · [`ReceiptInvalidError`](/docs/reference/errors#error-table)
+
+---
+
+### `restorePurchases`
+
+Re-validate the user's existing store receipts against the Rovenue server and update the entitlement cache. Required by App Store guidelines to offer a "Restore purchases" button.
+
+**Params** — none
+
+**Returns** — `void`
+
+**Throws** — [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table)
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    await Rovenue.restorePurchases();
+    // Entitlements are refreshed; check entitlement() afterwards
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    try await Rovenue.shared.restorePurchases()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.restorePurchases() // suspend fun
+    ```
+  </Tab>
+</Tabs>
+
+**Errors:** [`NetworkUnavailableError`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
+
+**See also:** [Processing purchases guide](/docs/guides/processing-purchases)
+
+---
+
 ## Account Token
 
-| Method | Signature (RN) | Returns | Throws |
-|--------|---------------|---------|--------|
-| `getAppAccountToken` | `getAppAccountToken()` | `string` (UUID) | `Storage` |
+### `getAppAccountToken`
 
-Returns a stable UUID scoped to the current user. Pass it to StoreKit's `.appAccountToken(uuid)` or Play Billing's `setObfuscatedAccountId()` before purchase. Calling `identify()` changes the scope, so the next call returns a new UUID for the known user.
+Return a stable UUID tied to the current `rovenueId`. Pass it to StoreKit's `.appAccountToken(uuid)` or Play Billing's `setObfuscatedAccountId()` before initiating a purchase so the store can attribute the transaction to the correct Rovenue subscriber. The token changes when `identify()` is called with a new user.
+
+**Params** — none
+
+**Returns** — `string` (UUID v4)
+
+**Throws** — [`StorageError`](/docs/reference/errors#error-table) if MMKV is unavailable.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
     const token = await Rovenue.getAppAccountToken();
+    // Pass to your custom StoreKit integration if needed.
+    // Most apps don't need to call this directly — purchase() handles it.
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
     let token = try await Rovenue.shared.getAppAccountToken()
+    // Pass as .appAccountToken(UUID(uuidString: token)!) in a custom SKProduct request
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
     val token = Rovenue.shared.getAppAccountToken()
+    // Pass as setObfuscatedAccountId(token) in a custom BillingFlowParams builder
     ```
   </Tab>
 </Tabs>
 
+**Errors:** [`StorageError`](/docs/reference/errors#error-table)
+
+---
+
 ## Lifecycle
+
+### Method summary
 
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
-| `setForeground` | `setForeground(bool)` | `void` | — |
+| `setForeground` | `setForeground(isForeground)` | `void` | — |
 | `shutdown` | `shutdown()` | `void` | — |
+
+Wire these into your platform's app lifecycle hooks so the SDK can pause background work when the app is in the background and trigger a refresh when it returns to the foreground.
+
+---
+
+### `setForeground`
+
+Notify the SDK of foreground/background transitions. When `true`, the SDK schedules a background entitlement sync to catch any server-side changes that occurred while the app was inactive.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `isForeground` | `boolean` | Yes | `true` when the app enters the foreground; `false` when it goes to the background. |
+
+**Returns** — `void`
+
+**Throws** — nothing
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
     import { AppState } from 'react-native';
+    import { Rovenue } from '@rovenue/react-native-sdk';
 
     AppState.addEventListener('change', (state) => {
       Rovenue.setForeground(state === 'active');
     });
-
-    // On logout / app teardown:
-    await Rovenue.shutdown();
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
     // In SceneDelegate or SwiftUI .scenePhase observer:
-    Rovenue.shared.setForeground(scene.activationState == .foregroundActive)
-
-    // On teardown:
-    await Rovenue.shared.shutdown()
+    .onChange(of: scenePhase) { phase in
+        Rovenue.shared.setForeground(phase == .active)
+    }
     ```
   </Tab>
   <Tab value="Kotlin">
@@ -302,27 +803,81 @@ Returns a stable UUID scoped to the current user. Pass it to StoreKit's `.appAcc
     override fun onStop(owner: LifecycleOwner) {
         Rovenue.shared.setForeground(false)
     }
-
-    // On teardown:
-    Rovenue.shared.shutdown()
     ```
   </Tab>
 </Tabs>
 
+---
+
+### `shutdown`
+
+Flush pending work and cleanly release SDK resources. Call when the process is about to exit or on explicit user logout if you are not reusing the process.
+
+**Params** — none
+
+**Returns** — `void`
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    // On app teardown:
+    await Rovenue.shutdown();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    await Rovenue.shared.shutdown()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.shutdown() // suspend fun
+    ```
+  </Tab>
+</Tabs>
+
+**See also:** [App lifecycle guide](/docs/guides/app-lifecycle)
+
+---
+
 ## Logging
 
-| Method | Signature (RN) | Returns | Throws |
-|--------|---------------|---------|--------|
-| `setLogHandler` | `setLogHandler(fn)` | unsubscribe function (RN) / `void` (Swift, Kotlin) | — |
+### `setLogHandler`
+
+Install a custom log handler to receive structured SDK log entries. Useful for routing SDK logs into your own logging infrastructure. On React Native, returns an unsubscribe function.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `handler` | `(entry: LogEntry) => void` | Yes | Callback invoked for each SDK log entry. |
+
+**Returns** — `() => void` on React Native (call to stop receiving logs); `void` on Swift and Kotlin (set to `nil` / `null` to detach).
+
+**Throws** — nothing
+
+The [`LogEntry`](/docs/reference/types#logentry) shape:
+
+```ts
+type LogEntry = {
+  level: 'debug' | 'info' | 'warn' | 'error';
+  message: string;
+  timestamp: string; // ISO 8601
+};
+```
+
+→ Full type reference: [`LogEntry`](/docs/reference/types#logentry)
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
     const unsub = Rovenue.setLogHandler((entry) => {
-      console.log(`[Rovenue ${entry.level}]`, entry.message);
+      console.log(`[Rovenue ${entry.level}] ${entry.message}`);
     });
 
-    // Later:
+    // Later, to stop receiving logs:
     unsub();
     ```
   </Tab>
@@ -331,6 +886,9 @@ Returns a stable UUID scoped to the current user. Pass it to StoreKit's `.appAcc
     Rovenue.shared.setLogHandler { entry in
         print("[Rovenue \(entry.level)] \(entry.message)")
     }
+
+    // To detach:
+    Rovenue.shared.setLogHandler(nil)
     ```
   </Tab>
   <Tab value="Kotlin">
@@ -338,62 +896,87 @@ Returns a stable UUID scoped to the current user. Pass it to StoreKit's `.appAcc
     Rovenue.shared.setLogHandler { entry ->
         Log.d("Rovenue", "[${entry.level}] ${entry.message}")
     }
+
+    // To detach:
+    Rovenue.shared.setLogHandler(null)
     ```
   </Tab>
 </Tabs>
 
+---
+
 ## Change Stream
 
-Listen for real-time state changes from the SDK. The event type is one of `EntitlementsChanged`, `IdentityChanged`, or `CreditBalanceChanged`.
+Subscribe to real-time state change notifications from the SDK. The SDK fires an event whenever the entitlement cache, identity, or credit balance is updated. React to these events to keep your UI in sync without polling.
+
+| Method / Property | Platform | Description |
+|-------------------|----------|-------------|
+| `addChangeListener(handler)` | React Native | Register a callback; returns an unsubscribe function. |
+| `changes` | Swift | `AsyncStream<ChangeEvent>` — iterate with `for await`. |
+| `changes` | Kotlin | `SharedFlow<ChangeEvent>` — collect with `.onEach { }.launchIn(scope)`. |
+
+The [`ChangeEvent`](/docs/reference/types#changeevent) values:
+
+| Value | When it fires |
+|-------|--------------|
+| `EntitlementsChanged` | After any entitlement cache refresh (purchase, `refreshEntitlements()`, foreground sync). |
+| `IdentityChanged` | After `identify()` succeeds or `logOut()` resets the user. |
+| `CreditBalanceChanged` | After `refreshCredits()` or a successful `consumeCredits()` call. |
+
+→ Full type reference: [`ChangeEvent`](/docs/reference/types#changeevent)
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
     const unsub = Rovenue.addChangeListener((event) => {
       switch (event) {
         case 'EntitlementsChanged':
-          // Re-read entitlements
+          // Re-read entitlements and update gated UI
           break;
         case 'IdentityChanged':
-          // User identity updated
+          // User identity has changed — re-read currentUser()
           break;
         case 'CreditBalanceChanged':
-          // Re-read credit balance
+          // Re-read creditBalance() and update the balance display
           break;
       }
     });
 
-    // To unsubscribe:
+    // When your component unmounts:
     unsub();
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
-    // changes is an AsyncStream<ChangeEvent>
+    // Typically in a Task {} inside your SwiftUI view or view model:
     for await event in Rovenue.shared.changes {
         switch event {
         case .entitlementsChanged:
-            // Re-read entitlements
+            // Re-read entitlements and update gated UI
         case .identityChanged:
-            // User identity updated
+            // User identity has changed — re-read currentUser()
         case .creditBalanceChanged:
-            // Re-read credit balance
+            // Re-read creditBalance() and update the balance display
         }
     }
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    // changes is a SharedFlow<ChangeEvent>
+    // In a ViewModel or LifecycleCoroutineScope:
     Rovenue.shared.changes
         .onEach { event ->
             when (event) {
-                ChangeEvent.ENTITLEMENTS_CHANGED -> { /* re-read entitlements */ }
-                ChangeEvent.IDENTITY_CHANGED     -> { /* user identity updated */ }
+                ChangeEvent.ENTITLEMENTS_CHANGED   -> { /* re-read entitlements */ }
+                ChangeEvent.IDENTITY_CHANGED       -> { /* user identity changed */ }
                 ChangeEvent.CREDIT_BALANCE_CHANGED -> { /* re-read balance */ }
             }
         }
-        .launchIn(lifecycleScope)
+        .launchIn(viewModelScope)
     ```
   </Tab>
 </Tabs>
+
+**See also:** [Reacting to changes guide](/docs/guides/reacting-to-changes)

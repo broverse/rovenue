@@ -3,14 +3,55 @@ title: Types
 description: Data types returned by the Rovenue SDK.
 ---
 
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Type gallery: [RovenueConfig](#rovenueconfig) · [User](#user) · [Entitlement](#entitlement) · [ProductType](#producttype) · [StoreProduct](#storeproduct) · [Package](#package) · [Offering](#offering) · [Offerings](#offerings) · [PurchaseResult](#purchaseresult) · [ChangeEvent](#changeevent) · [LogEntry](#logentry)
+
+---
+
+## RovenueConfig
+
+The configuration object passed to [`configure()`](/docs/reference/methods#configuration) on React Native. Swift and Kotlin use labelled parameters directly.
+
+```ts
+type RovenueConfig = {
+  apiKey: string;
+  baseUrl: string;
+  debug?: boolean;
+  appVersion?: string;
+};
+```
+
+**Fields**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `apiKey` | `string` | Yes | Your project's public API key. Prefix `rov_pub_`. Obtain it from the Rovenue dashboard → API Keys. |
+| `baseUrl` | `string` | Yes | Edge endpoint URL. Use `https://edge.rovenue.app` for production. |
+| `debug` | `boolean` | No | When `true`, the SDK emits verbose log entries. Defaults to `false`. |
+| `appVersion` | `string` | No | App version string forwarded to the server. Defaults to the value reported by the OS. |
+
+**Returned by / used by:** [`configure()`](/docs/reference/methods#configuration)
+
+**Usage**
+
+```ts
+import { Rovenue } from '@rovenue/react-native-sdk';
+
+Rovenue.configure({
+  apiKey: 'rov_pub_…',
+  baseUrl: 'https://edge.rovenue.app',
+  debug: __DEV__,
+  appVersion: '3.1.0',
+});
+```
+
+---
+
 ## User
 
-Returned by [`currentUser()`](/docs/reference/methods#identity).
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `rovenueId` | `string` | Permanent per-install identifier generated on first launch (prefix `rov_`). Always present; never changes for the lifetime of the install. |
-| `appUserId` | `string \| null` | Your backend's user ID, attached after a successful `identify()` call. `null` until the user is identified. |
+Represents the current device's identity.
 
 ```ts
 type User = {
@@ -19,17 +60,58 @@ type User = {
 };
 ```
 
-## Entitlement
-
-Returned by [`entitlement(id)`](/docs/reference/methods#entitlements) and [`entitlementsAll()`](/docs/reference/methods#entitlements).
+**Fields**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | `string` | The entitlement identifier as configured in your Rovenue project (e.g. `"pro"`, `"credits_pack"`). |
-| `isActive` | `boolean` | `true` if the entitlement is currently active (not expired, not refunded). |
-| `productIdentifier` | `string` | The store product ID that granted this entitlement (e.g. `"com.example.pro_monthly"`). |
-| `store` | `string` | The store that originated the purchase: `"app_store"`, `"play_store"`, or `"stripe"`. |
-| `expiresIso` | `string \| undefined` | ISO 8601 expiry timestamp. `undefined` for non-expiring (lifetime) entitlements. |
+| `rovenueId` | `string` | Permanent per-install identifier generated on first launch (prefix `rov_`). Always present; never changes for the lifetime of the install. |
+| `appUserId` | `string \| null` | Your backend's user ID, attached after a successful [`identify()`](/docs/reference/methods#identify) call. `null` until the user is identified. |
+
+**Returned by:** [`currentUser()`](/docs/reference/methods#currentuser)
+
+**Usage**
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const user = await Rovenue.currentUser();
+
+    if (user.appUserId) {
+      console.log(`Known user: ${user.appUserId}`);
+    } else {
+      console.log(`Anonymous install: ${user.rovenueId}`);
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let user = await Rovenue.shared.currentUser()
+
+    if let appUserId = user.appUserId {
+        print("Known user: \(appUserId)")
+    } else {
+        print("Anonymous install: \(user.rovenueId)")
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val user = Rovenue.shared.currentUser()
+
+    if (user.appUserId != null) {
+        Log.d("App", "Known user: ${user.appUserId}")
+    } else {
+        Log.d("App", "Anonymous install: ${user.rovenueId}")
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Entitlement
+
+Represents a single access entitlement. An entitlement is active when the user has a valid subscription or has made a one-time unlock purchase for the corresponding product.
 
 ```ts
 type Entitlement = {
@@ -41,16 +123,246 @@ type Entitlement = {
 };
 ```
 
-## PurchaseResult
-
-Returned by [`purchase()`](/docs/reference/methods#purchases) after the store transaction and server-side validation both succeed.
+**Fields**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `entitlements` | `Entitlement[]` | The user's full set of active entitlements after the purchase. |
-| `creditBalance` | `number` | The user's total credit balance after the purchase was applied. |
-| `productId` | `string` | The store product ID that was purchased. |
-| `storeTransactionId` | `string` | The platform transaction ID (StoreKit 2 transaction ID or Play Billing order ID). |
+| `id` | `string` | The entitlement key as configured in the Rovenue dashboard (e.g. `"pro"`, `"credits_pack"`). |
+| `isActive` | `boolean` | `true` if the entitlement is currently active (not expired, not refunded). Always check this field before granting access. |
+| `productIdentifier` | `string` | The store product ID that granted this entitlement (e.g. `"com.example.pro_monthly"`). |
+| `store` | `string` | The store that originated the purchase. One of `"app_store"`, `"play_store"`, or `"stripe"`. |
+| `expiresIso` | `string \| undefined` | ISO 8601 expiry timestamp (e.g. `"2026-12-31T23:59:59Z"`). `undefined` for non-expiring (lifetime) entitlements. |
+
+**Returned by:** [`entitlement(id)`](/docs/reference/methods#entitlement), [`entitlementsAll()`](/docs/reference/methods#entitlementsall), [`PurchaseResult.entitlements`](#purchaseresult)
+
+**Usage**
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const ent = await Rovenue.entitlement('pro');
+
+    if (ent?.isActive) {
+      // Grant Pro access
+      const expiresAt = ent.expiresIso
+        ? new Date(ent.expiresIso)
+        : null; // null = lifetime
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let ent = await Rovenue.shared.entitlement(id: "pro")
+
+    if ent?.isActive == true {
+        // Grant Pro access
+        let expiresAt = ent?.expiresIso.flatMap { ISO8601DateFormatter().date(from: $0) }
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val ent = Rovenue.shared.entitlement(id = "pro")
+
+    if (ent?.isActive == true) {
+        // Grant Pro access
+        val expiresAt = ent.expiresIso?.let { Instant.parse(it) } // null = lifetime
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## ProductType
+
+A string enum describing what a store product delivers.
+
+```ts
+type ProductType = 'subscription' | 'consumable' | 'non_consumable';
+```
+
+**Values**
+
+| Value | Description |
+|-------|-------------|
+| `subscription` | Auto-renewing subscription. Grants entitlements for the subscription period. |
+| `consumable` | One-time purchase that adds credits to the user's balance. |
+| `non_consumable` | One-time permanent unlock. Grants a lifetime entitlement. |
+
+**Used by:** [`StoreProduct.type`](#storeproduct)
+
+---
+
+## StoreProduct
+
+Represents a store product with localised pricing from the App Store or Google Play. You receive this as `Package.product` — you do not construct it directly.
+
+```ts
+type StoreProduct = {
+  id: string;
+  type: ProductType;
+  displayName: string;
+  priceString: string;
+  price: number;
+  currencyCode: string;
+};
+```
+
+**Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | The store product identifier (e.g. `"com.example.pro_monthly"`). |
+| `type` | [`ProductType`](#producttype) | What the product delivers: subscription, consumable, or non-consumable. |
+| `displayName` | `string` | Localised product name from the store (e.g. `"Pro Monthly"`). |
+| `priceString` | `string` | Localised, formatted price string (e.g. `"$4.99"`, `"€4,99"`). Display this directly in your paywall. |
+| `price` | `number` | Numeric price in the user's currency (e.g. `4.99`). |
+| `currencyCode` | `string` | ISO 4217 currency code (e.g. `"USD"`, `"EUR"`). |
+
+**Used by:** [`Package.product`](#package)
+
+**Usage**
+
+```ts
+const pkg = offerings.current?.packages[0];
+if (pkg) {
+  const { displayName, priceString, type } = pkg.product;
+  console.log(`${displayName} — ${priceString} (${type})`);
+  // e.g. "Pro Monthly — $4.99 (subscription)"
+}
+```
+
+---
+
+## Package
+
+A wrapper around a [`StoreProduct`](#storeproduct) as configured in the Rovenue dashboard. Packages are the unit you pass to [`purchase()`](/docs/reference/methods#purchase).
+
+```ts
+type Package = {
+  id: string;
+  product: StoreProduct;
+};
+```
+
+**Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | The package identifier as configured in the Rovenue dashboard (e.g. `"monthly"`, `"annual"`, `"credits_100"`). |
+| `product` | [`StoreProduct`](#storeproduct) | The underlying store product with localised pricing. |
+
+**Returned by:** [`Offering.packages`](#offering) (via [`getOfferings()`](/docs/reference/methods#getofferings))
+
+**Usage**
+
+```ts
+const offerings = await Rovenue.getOfferings();
+const pkg = offerings.current?.packages.find(p => p.id === 'annual');
+
+if (pkg) {
+  console.log(`Annual plan: ${pkg.product.priceString}`);
+  const result = await Rovenue.purchase(pkg);
+}
+```
+
+---
+
+## Offering
+
+A named group of packages configured in the Rovenue dashboard. The dashboard controls which offering is marked as `current` (default), allowing remote paywall changes without an app release.
+
+```ts
+type Offering = {
+  id: string;
+  packages: Package[];
+};
+```
+
+**Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | The offering identifier as configured in the dashboard (e.g. `"default"`, `"sale_q4"`). |
+| `packages` | [`Package[]`](#package) | The packages belonging to this offering, in dashboard-configured order. |
+
+**Used by:** [`Offerings.current`](#offerings), [`Offerings.all`](#offerings)
+
+**Usage**
+
+```ts
+const offering = offerings.all['sale_q4'];
+offering?.packages.forEach(pkg => {
+  console.log(pkg.id, pkg.product.priceString);
+});
+```
+
+---
+
+## Offerings
+
+The top-level response from [`getOfferings()`](/docs/reference/methods#getofferings).
+
+```ts
+type Offerings = {
+  current: Offering | null;
+  all: Record<string, Offering>;
+};
+```
+
+**Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `current` | [`Offering`](#offering) `\| null` | The offering marked as default in the dashboard. `null` if no default is configured. |
+| `all` | `Record<string,` [`Offering`](#offering)`>` | All configured offerings, keyed by their identifier. |
+
+**Returned by:** [`getOfferings()`](/docs/reference/methods#getofferings)
+
+**Usage**
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const offerings = await Rovenue.getOfferings();
+
+    // Show the default paywall:
+    const packages = offerings.current?.packages ?? [];
+
+    // Or show a specific named offering (e.g. for an A/B test):
+    const saleOffering = offerings.all['sale_q4'];
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let offerings = try await Rovenue.shared.getOfferings()
+
+    // Show the default paywall:
+    let packages = offerings.current?.packages ?? []
+
+    // Or show a specific offering:
+    let saleOffering = offerings.all["sale_q4"]
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val offerings = Rovenue.shared.getOfferings()
+
+    // Show the default paywall:
+    val packages = offerings.current?.packages ?: emptyList()
+
+    // Or show a specific offering:
+    val saleOffering = offerings.all["sale_q4"]
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## PurchaseResult
+
+Returned by [`purchase()`](/docs/reference/methods#purchase) after the store transaction and server-side validation both succeed. Contains the fully-refreshed state — no additional polling is needed.
 
 ```ts
 type PurchaseResult = {
@@ -61,15 +373,33 @@ type PurchaseResult = {
 };
 ```
 
+**Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entitlements` | [`Entitlement[]`](#entitlement) | The user's full set of active entitlements after the purchase. Use this to update gated UI immediately. |
+| `creditBalance` | `number` | The user's total credit balance after the purchase was applied. Reflects any credits added by a consumable product. |
+| `productId` | `string` | The store product ID that was purchased (e.g. `"com.example.pro_monthly"`). |
+| `storeTransactionId` | `string` | The platform transaction ID: StoreKit 2 transaction ID on iOS, Play Billing order ID on Android. |
+
+**Returned by:** [`purchase()`](/docs/reference/methods#purchase)
+
+**Usage**
+
+```ts
+const result = await Rovenue.purchase(pkg);
+
+// Grant access based on updated entitlements:
+const hasPro = result.entitlements.some(e => e.id === 'pro' && e.isActive);
+console.log(`Pro: ${hasPro}, Credits: ${result.creditBalance}`);
+console.log(`Transaction: ${result.storeTransactionId}`);
+```
+
+---
+
 ## ChangeEvent
 
-Emitted by the [change stream](/docs/reference/methods#change-stream) whenever internal SDK state is updated. The event is an enum — check the value to determine which cache to re-read.
-
-| Value | When it fires |
-|-------|--------------|
-| `EntitlementsChanged` | Emitted after the entitlement cache is refreshed — e.g. after a successful purchase, `refreshEntitlements()`, or a foreground transition that triggers a background sync. |
-| `IdentityChanged` | Emitted after `identify()` succeeds or after `logOut()` resets the user, indicating the active user context has changed. |
-| `CreditBalanceChanged` | Emitted after the credit balance changes — e.g. after `refreshCredits()` or a successful `consumeCredits()` call. |
+Emitted by the [change stream](/docs/reference/methods#change-stream) whenever internal SDK state is updated. React to these events to keep your UI in sync without polling.
 
 ```ts
 // React Native — string union
@@ -79,4 +409,112 @@ type ChangeEvent =
   | 'CreditBalanceChanged';
 ```
 
-On Swift the change stream is `AsyncStream<ChangeEvent>` where `ChangeEvent` is a Swift enum with cases `.entitlementsChanged`, `.identityChanged`, and `.creditBalanceChanged`. On Kotlin it is `SharedFlow<ChangeEvent>` where the Kotlin enum constants are `ENTITLEMENTS_CHANGED`, `IDENTITY_CHANGED`, and `CREDIT_BALANCE_CHANGED`.
+On Swift, `ChangeEvent` is a Swift enum with cases `.entitlementsChanged`, `.identityChanged`, and `.creditBalanceChanged`, delivered as `AsyncStream<ChangeEvent>` via `Rovenue.shared.changes`.
+
+On Kotlin, `ChangeEvent` is a Kotlin enum with constants `ENTITLEMENTS_CHANGED`, `IDENTITY_CHANGED`, and `CREDIT_BALANCE_CHANGED`, delivered as `SharedFlow<ChangeEvent>` via `Rovenue.shared.changes`.
+
+**Values**
+
+| Value (RN) | Swift case | Kotlin constant | When it fires |
+|------------|------------|-----------------|---------------|
+| `'EntitlementsChanged'` | `.entitlementsChanged` | `ENTITLEMENTS_CHANGED` | After the entitlement cache is refreshed — e.g. after a successful purchase, `refreshEntitlements()`, or a foreground transition that triggers a background sync. |
+| `'IdentityChanged'` | `.identityChanged` | `IDENTITY_CHANGED` | After `identify()` succeeds or `logOut()` resets the user. |
+| `'CreditBalanceChanged'` | `.creditBalanceChanged` | `CREDIT_BALANCE_CHANGED` | After `refreshCredits()` or a successful `consumeCredits()` call. |
+
+**Emitted by:** [`addChangeListener()`](/docs/reference/methods#change-stream) (RN), `Rovenue.shared.changes` (Swift/Kotlin)
+
+**Usage**
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const unsub = Rovenue.addChangeListener(async (event) => {
+      if (event === 'EntitlementsChanged') {
+        const ent = await Rovenue.entitlement('pro');
+        setHasPro(ent?.isActive ?? false);
+      }
+      if (event === 'CreditBalanceChanged') {
+        const balance = await Rovenue.creditBalance();
+        setBalance(balance);
+      }
+    });
+
+    return () => unsub(); // cleanup on unmount
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    Task {
+      for await event in Rovenue.shared.changes {
+        switch event {
+        case .entitlementsChanged:
+          let ent = await Rovenue.shared.entitlement(id: "pro")
+          await MainActor.run { hasPro = ent?.isActive ?? false }
+        case .creditBalanceChanged:
+          let balance = await Rovenue.shared.creditBalance()
+          await MainActor.run { self.balance = balance }
+        case .identityChanged:
+          break
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.changes
+        .onEach { event ->
+            when (event) {
+                ChangeEvent.ENTITLEMENTS_CHANGED -> {
+                    val ent = Rovenue.shared.entitlement(id = "pro")
+                    _hasPro.value = ent?.isActive == true
+                }
+                ChangeEvent.CREDIT_BALANCE_CHANGED -> {
+                    _balance.value = Rovenue.shared.creditBalance()
+                }
+                ChangeEvent.IDENTITY_CHANGED -> { /* re-read user if needed */ }
+            }
+        }
+        .launchIn(viewModelScope)
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## LogEntry
+
+A structured log entry delivered to the handler registered via [`setLogHandler()`](/docs/reference/methods#setloghandler).
+
+```ts
+type LogEntry = {
+  level: 'debug' | 'info' | 'warn' | 'error';
+  message: string;
+  timestamp: string;
+};
+```
+
+**Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `level` | `'debug' \| 'info' \| 'warn' \| 'error'` | Severity level. `debug` entries are only emitted when `debug: true` is set in [`RovenueConfig`](#rovenueconfig). |
+| `message` | `string` | Human-readable log message from the SDK. |
+| `timestamp` | `string` | ISO 8601 timestamp of when the entry was generated (e.g. `"2026-06-15T10:30:00.000Z"`). |
+
+**Used by:** [`setLogHandler()`](/docs/reference/methods#logging)
+
+**Usage**
+
+```ts
+const unsub = Rovenue.setLogHandler((entry) => {
+  if (entry.level === 'error' || entry.level === 'warn') {
+    // Forward to your error tracking service
+    Sentry.addBreadcrumb({
+      message: entry.message,
+      level: entry.level,
+      timestamp: new Date(entry.timestamp).getTime() / 1000,
+    });
+  }
+});
+```

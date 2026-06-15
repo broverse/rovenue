@@ -4,12 +4,14 @@ description: Install and wire the Rovenue SDK in a Swift app.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
 
-## Install
+<Steps>
 
-### Swift Package Manager
+<Step>
+### Install the SDK
 
-In Xcode choose **File → Add Package Dependencies** and enter the repository URL, or add it to your `Package.swift`:
+**Swift Package Manager** — in Xcode choose **File → Add Package Dependencies** and enter the repository URL, or add it to your `Package.swift`:
 
 ```swift
 dependencies: [
@@ -20,15 +22,15 @@ targets: [
 ]
 ```
 
-### CocoaPods
+**CocoaPods** — add to your `Podfile` and run `pod install`:
 
 ```ruby
 pod 'Rovenue'
 ```
+</Step>
 
-Then run `pod install`.
-
-## Configure
+<Step>
+### Configure the SDK
 
 Call `Rovenue.configure` once, before any SDK method is used. `AppDelegate.application(_:didFinishLaunchingWithOptions:)` is the correct place:
 
@@ -54,7 +56,32 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
 The SDK reads `CFBundleShortVersionString` from the main bundle automatically — you do not need to pass `appVersion` manually.
 
-## Foreground wiring
+### Types on this page
+
+```swift
+// Swift mirror of RovenueConfig
+struct RovenueConfig {
+  var apiKey: String       // public SDK key — prefix rov_pub_
+  var baseUrl: String      // always https://edge.rovenue.app
+  var debug: Bool          // default false
+  var appVersion: String?  // override auto-detected version
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `apiKey` | `String` | Public SDK key from your Rovenue dashboard. Prefix `rov_pub_`. |
+| `baseUrl` | `String` | Always `https://edge.rovenue.app` unless self-hosting. |
+| `debug` | `Bool` | Enables verbose SDK logs. Do not ship enabled in production. |
+| `appVersion` | `String?` | Overrides the version auto-read from the bundle. |
+
+<Callout type="warn">
+Call `configure` exactly once before any other SDK call. The ideal location is `applicationDidFinishLaunching`. Calling it after the first SDK method is invoked will throw `RovenueError.notConfigured`.
+</Callout>
+</Step>
+
+<Step>
+### Wire foreground signals
 
 The SDK uses `setForeground` to drive its internal polling cadence. Wire it from your `SceneDelegate`:
 
@@ -74,11 +101,18 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 }
 ```
 
+<Callout type="info">
+If your app uses the SwiftUI `@main` lifecycle rather than a `SceneDelegate`, observe `scenePhase` from the environment and call `setForeground` from `.onChange(of: scenePhase)`.
+</Callout>
+</Step>
+
+</Steps>
+
+---
+
 ## Purchases
 
-Use `getOfferings()` to fetch products configured in your Rovenue dashboard,
-then `purchase(_:)` to drive the full StoreKit 2 purchase flow. The SDK
-validates the receipt server-side and resolves with updated entitlements.
+Use `getOfferings()` to fetch products configured in your Rovenue dashboard, then `purchase(_:)` to drive the full StoreKit 2 purchase flow. The SDK validates the receipt server-side and resolves with updated entitlements.
 
 ```swift
 let offerings = try await Rovenue.shared.getOfferings()
@@ -89,7 +123,7 @@ if let pkg = offerings.current?.packages.first {
   } catch is PurchaseCancelledError {
     // User dismissed the sheet — no action needed
   } catch is PurchasePendingError {
-    // Ask-to-Buy / deferred — inform the user
+    // Ask-to-Buy / deferred — inform the user and wait for a change event
   }
 }
 
@@ -97,8 +131,36 @@ if let pkg = offerings.current?.packages.first {
 try await Rovenue.shared.restorePurchases()
 ```
 
-See [Processing Purchases](/docs/guides/processing-purchases) for the full API
-reference including error types and `StoreProduct` shape.
+```swift
+// Swift mirror of PurchaseResult
+struct PurchaseResult {
+  var entitlements: [Entitlement]
+  var creditBalance: Int
+  var productId: String
+  var storeTransactionId: String
+}
+
+struct Entitlement {
+  var id: String
+  var isActive: Bool
+  var productIdentifier: String
+  var store: String
+  var expiresIso: String? // ISO 8601 — present for time-limited entitlements
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entitlements` | `[Entitlement]` | Updated entitlement list after the purchase. |
+| `creditBalance` | `Int` | Updated credit balance after the purchase. |
+| `productId` | `String` | The product identifier that was purchased. |
+| `storeTransactionId` | `String` | The StoreKit transaction ID. |
+
+<Callout type="info">
+See [Processing Purchases](/docs/guides/processing-purchases) for the full API reference including all error types and the `StoreProduct` shape.
+</Callout>
+
+---
 
 ## Observing changes
 
@@ -109,6 +171,7 @@ import Rovenue
 
 Task {
   for await event in Rovenue.shared.changes {
+    // event: ChangeEvent (.entitlementsChanged | .identityChanged | .creditBalanceChanged)
     print("Rovenue change:", event)
     // Update your UI or local state here
   }
@@ -117,9 +180,15 @@ Task {
 
 Cancel the `Task` (or call `Rovenue.shared.shutdown()`) when the owning object is deallocated.
 
+<Callout type="info">
+See [Reacting to Changes](/docs/guides/reacting-to-changes) for a complete guide on handling live subscription events.
+</Callout>
+
+---
+
 ## Debugging
 
-Register a log handler to receive structured log entries from the SDK:
+Register a log handler to receive structured log entries from the SDK. Set it up before `Rovenue.configure` to capture initialisation logs:
 
 ```swift
 Rovenue.shared.setLogHandler { entry in
@@ -127,4 +196,14 @@ Rovenue.shared.setLogHandler { entry in
 }
 ```
 
-Set this up before `Rovenue.configure` to capture initialisation logs.
+---
+
+## What's next
+
+- [Identifying Users](/docs/guides/identifying-users) — link your backend user to the Rovenue subscriber.
+- [Entitlements](/docs/guides/entitlements) — read and gate on active subscriptions.
+- [Credits](/docs/guides/credits) — manage consumable credit balances.
+- [Processing Purchases](/docs/guides/processing-purchases) — full purchase API and error handling.
+- [App Lifecycle](/docs/guides/app-lifecycle) — foreground/background wiring in depth.
+- [Reference: Methods](/docs/reference/methods) — full method reference.
+- [Reference: Types](/docs/reference/types) — all SDK types in one place.

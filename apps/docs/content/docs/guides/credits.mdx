@@ -1,92 +1,178 @@
 ---
 title: Working with Credits
-description: Read, refresh, and consume a user's credit balance.
+description: Read, refresh, and consume a user's credit balance across React Native, Swift, and Kotlin.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Credits are managed server-side. Like entitlements, balance reads are
-**cache-first** and return instantly. Call `refreshCredits()` to pull the
-latest balance from the server.
+Credits let you grant and deduct a consumable balance — useful for AI generations, messages, or any metered feature. The balance is **server-authoritative**: the SDK caches the last-known value locally and syncs with the server on demand.
 
-## Reading the balance
+<Callout type="info">
+The credit balance is managed entirely on the Rovenue server. Local reads return the cached value; call `refreshCredits()` whenever you need a guaranteed-fresh number before gating access.
+</Callout>
+
+### Types on this page
+
+Credit operations do not introduce a dedicated data type — the balance is always a plain `number` (integer, credits remaining). The methods below are defined in the [Methods reference](/docs/reference/methods#credits).
+
+| Method | Returns | Throws | Notes |
+|--------|---------|--------|-------|
+| `creditBalance()` | `number` | — | Cache read; returns `0` if no balance is cached |
+| `refreshCredits()` | `void` | — | Network call; updates the local cache |
+| `consumeCredits(amount, description?)` | `number` (new balance) | `InsufficientCreditsError` | Server-deduped via Idempotency-Key |
+
+React Native also ships the `useCreditBalance()` hook, which subscribes to the local cache and re-renders when the balance changes — no listener wiring required.
+
+---
+
+<Steps>
+<Step>
+
+### Read the current balance
+
+Use the reactive hook in React components, or the imperative method elsewhere.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
-    ```ts
+    ```tsx
     import { Rovenue, useCreditBalance } from '@rovenue/react-native-sdk';
 
-    // Reactive hook — re-renders when the balance changes
+    // Reactive hook — re-renders automatically when the balance changes
     function BalanceBadge() {
-      const balance = useCreditBalance(); // returns 0 if empty
+      const balance = useCreditBalance(); // returns 0 if the cache is empty
       return <Text>{balance} credits</Text>;
     }
 
-    // Imperative cache read
-    const balance = await Rovenue.creditBalance();
+    // Imperative cache read (outside a component)
+    const balance = await Rovenue.creditBalance(); // instant, no network
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
-    let balance = await Rovenue.shared.creditBalance() // cache, returns 0 if empty
+    // Cache read — instant, no network
+    let balance = await Rovenue.shared.creditBalance() // 0 if cache is empty
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    val balance = Rovenue.shared.creditBalance() // cache, returns 0 if empty
-    ```
-  </Tab>
-</Tabs>
-
-## Refreshing from the server
-
-<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
-  <Tab value="React Native">
-    ```ts
-    await Rovenue.refreshCredits();
-    ```
-  </Tab>
-  <Tab value="Swift">
-    ```swift
-    await Rovenue.shared.refreshCredits()
-    ```
-  </Tab>
-  <Tab value="Kotlin">
-    ```kotlin
-    Rovenue.shared.refreshCredits()
-    ```
-  </Tab>
-</Tabs>
-
-## Consuming credits
-
-`consumeCredits` deducts the given amount and returns the new balance.
-
-<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
-  <Tab value="React Native">
-    ```ts
-    const newBalance = await Rovenue.consumeCredits(5, 'image-generation');
-    console.log('Remaining:', newBalance);
-    ```
-  </Tab>
-  <Tab value="Swift">
-    ```swift
-    let newBalance = try await Rovenue.shared.consumeCredits(5, description: "image-generation")
-    print("Remaining: \(newBalance)")
-    ```
-  </Tab>
-  <Tab value="Kotlin">
-    ```kotlin
-    val newBalance = Rovenue.shared.consumeCredits(5, "image-generation")
-    println("Remaining: $newBalance")
+    // Cache read — instant, no network
+    val balance = Rovenue.shared.creditBalance() // 0 if cache is empty
     ```
   </Tab>
 </Tabs>
 
 <Callout type="info">
-`consumeCredits` is **server-deduped** via an internal Idempotency-Key, so
-retrying a failed network call will not double-deduct. If the user's balance is
-too low the SDK throws `InsufficientCredits` — catch it to show an upgrade
-prompt.
+`creditBalance()` never hits the network. It is safe to call on the main thread and will return instantly even in offline scenarios. The value reflects the last successful sync with the server.
 </Callout>
+
+</Step>
+<Step>
+
+### Refresh from the server
+
+Call `refreshCredits()` when you need a guaranteed-fresh balance — for example, after a purchase or before gating access to a metered feature.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    // Pull latest balance from server and update the local cache
+    await Rovenue.refreshCredits();
+
+    // Now creditBalance() and useCreditBalance() reflect the server value
+    const fresh = await Rovenue.creditBalance();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Pull latest balance from server and update the local cache
+    try await Rovenue.shared.refreshCredits()
+
+    // Now creditBalance() reflects the server value
+    let fresh = await Rovenue.shared.creditBalance()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // Pull latest balance from server and update the local cache
+    Rovenue.shared.refreshCredits()
+
+    // Now creditBalance() reflects the server value
+    val fresh = Rovenue.shared.creditBalance()
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+Credits also refresh automatically while the app is in the foreground. See [App lifecycle](/docs/guides/app-lifecycle) for the polling behaviour. Manual `refreshCredits()` is only needed when you require immediate consistency.
+</Callout>
+
+</Step>
+<Step>
+
+### Consume credits
+
+`consumeCredits(amount, description?)` deducts the given integer amount from the server balance and returns the new balance. Pass an optional human-readable `description` for audit trail entries.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue, InsufficientCreditsError } from '@rovenue/react-native-sdk';
+
+    try {
+      const newBalance = await Rovenue.consumeCredits(5, 'image-generation');
+      console.log('Remaining credits:', newBalance);
+    } catch (e) {
+      if (e instanceof InsufficientCreditsError) {
+        // User does not have enough credits — show an upgrade prompt
+        showUpgradeSheet();
+      } else {
+        throw e;
+      }
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    import Rovenue
+
+    do {
+      let newBalance = try await Rovenue.shared.consumeCredits(
+        amount: 5,
+        description: "image-generation"
+      )
+      print("Remaining credits: \(newBalance)")
+    } catch is InsufficientCreditsError {
+      // User does not have enough credits — show an upgrade prompt
+      showUpgradeSheet()
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    import dev.rovenue.sdk.Rovenue
+    import dev.rovenue.sdk.InsufficientCreditsError
+
+    try {
+      val newBalance = Rovenue.shared.consumeCredits(
+        amount = 5,
+        description = "image-generation"
+      )
+      println("Remaining credits: $newBalance")
+    } catch (e: InsufficientCreditsError) {
+      // User does not have enough credits — show an upgrade prompt
+      showUpgradeSheet()
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+`consumeCredits` is **server-deduped** via an internal Idempotency-Key. Retrying a failed network call will not double-deduct. A `CreditBalanceChanged` event is emitted on success — see [Reacting to changes](/docs/guides/reacting-to-changes) if you need to react to the new balance elsewhere in your app.
+</Callout>
+
+</Step>
+</Steps>

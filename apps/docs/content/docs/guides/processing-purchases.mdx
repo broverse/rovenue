@@ -4,30 +4,90 @@ description: Use the SDK to fetch offerings and drive the purchase flow end-to-e
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Steps, Step } from 'fumadocs-ui/components/steps';
 import { Callout } from 'fumadocs-ui/components/callout';
 
 The SDK drives the full purchase lifecycle — fetching products from the store,
-presenting them, triggering StoreKit 2 / Play Billing, and validating the
-receipt server-side — all in a single `purchase(pkg)` call. Your app only
-decides *which* package to offer.
+presenting them, triggering StoreKit 2 (iOS) or Play Billing 6 (Android), and
+validating the receipt server-side — all in a single `purchase(pkg)` call. Your
+app only decides which package to present.
 
-## Fetch offerings
+<Callout type="info">
+Rovenue handles receipt validation server-side before resolving the purchase
+promise. Your app receives verified entitlements and an updated credit balance
+in the result — no additional polling or webhook listener is needed on the
+client. See [Methods — Purchases](/docs/reference/methods#purchases).
+</Callout>
 
-Offerings are configured in the Rovenue dashboard. Fetch them at app launch or
-when your paywall opens:
+### Types on this page
+
+```ts
+type Offerings = {
+  current: Offering | null;           // default offering; null if none configured
+  all: Record<string, Offering>;      // all offerings by identifier
+};
+
+type Offering = {
+  identifier: string;    // e.g. "default" or "annual_promo"
+  isDefault: boolean;    // true for the offering marked default in the dashboard
+  packages: Package[];   // ordered list of packages in this offering
+};
+
+type Package = {
+  identifier: string;    // e.g. "$rc_monthly", "$rc_annual"
+  product: StoreProduct; // localised product from the store
+};
+
+type StoreProduct = {
+  id: string;                      // store product ID
+  type: ProductType;               // "subscription" | "consumable" | "non_consumable"
+  displayName: string;             // localised product name
+  priceString: string | null;      // localised price string, e.g. "$4.99"
+  price: number | null;            // raw price in the account currency
+  currencyCode: string | null;     // ISO 4217 currency code, e.g. "USD"
+};
+
+type ProductType = 'subscription' | 'consumable' | 'non_consumable';
+
+type PurchaseResult = {
+  entitlements: Entitlement[];  // verified entitlements after the purchase
+  creditBalance: number;        // updated credit balance (for consumables)
+  productId: string;            // store product ID that was purchased
+  storeTransactionId: string;   // store-issued transaction identifier
+};
+```
+
+| Type | Key fields | Description |
+|------|-----------|-------------|
+| `Offerings` | `current`, `all` | Container returned by `getOfferings()`. |
+| `Offering` | `identifier`, `packages` | A named group of packages configured in the dashboard. |
+| `Package` | `identifier`, `product` | A purchasable unit wrapping a `StoreProduct`. |
+| `StoreProduct` | `type`, `priceString`, `price` | Live pricing data from the store; localised automatically. |
+| `PurchaseResult` | `entitlements`, `creditBalance` | Returned after server-validated purchase. |
+
+> See [Types](/docs/reference/types) for the full `Entitlement` shape included in `PurchaseResult`.
+
+---
+
+## Purchase flow
+
+<Steps>
+<Step>
+
+### Fetch offerings
+
+Offerings are configured in the Rovenue dashboard and cached locally after the
+first fetch. Fetch them at app launch or when your paywall opens so pricing is
+always available instantly.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
-    import {
-      Rovenue,
-      PurchaseCancelledError,
-      PurchasePendingError,
-    } from '@rovenue/react-native-sdk';
+    import { Rovenue } from '@rovenue/react-native-sdk';
 
     const offerings = await Rovenue.getOfferings();
-    // offerings.current — the default offering (or null if none configured)
-    // offerings.all    — Record<string, Offering> for all offerings
+    // offerings.current — the default Offering (or null if none configured)
+    // offerings.all     — Record<string, Offering> for all named offerings
     ```
   </Tab>
   <Tab value="Swift">
@@ -46,27 +106,79 @@ when your paywall opens:
   </Tab>
 </Tabs>
 
-Each `Offering` contains a list of `Package` objects. Each `Package` wraps a
-`StoreProduct` with localised pricing from the store:
+</Step>
+<Step>
 
-```ts
-type StoreProduct = {
-  id: string;
-  type: 'subscription' | 'consumable' | 'non_consumable';
-  displayName: string;
-  priceString: string; // e.g. "$4.99"
-  price: number;
-  currencyCode: string;
-};
-```
+### Present packages to the user
 
-## Purchase a package
+Iterate over `offering.packages` to build your paywall UI. Each `Package`
+exposes a `StoreProduct` with localised pricing directly from the store — use
+`priceString` for display and `price` for analytics.
 
-Pass the chosen `Package` to `Rovenue.purchase()`. The SDK triggers the native
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```tsx
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    const offerings = await Rovenue.getOfferings();
+    const packages = offerings.current?.packages ?? [];
+
+    function Paywall() {
+      return (
+        <View>
+          {packages.map((pkg) => (
+            <TouchableOpacity key={pkg.identifier} onPress={() => handlePurchase(pkg)}>
+              <Text>{pkg.product.displayName}</Text>
+              <Text>{pkg.product.priceString}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      );
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let offerings = try await Rovenue.shared.getOfferings()
+    let packages = offerings.current?.packages ?? []
+
+    for pkg in packages {
+      print("\(pkg.product.displayName) — \(pkg.product.priceString ?? "?")")
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val offerings = Rovenue.shared.getOfferings()
+    val packages = offerings.current?.packages ?: emptyList()
+
+    for (pkg in packages) {
+      println("${pkg.product.displayName} — ${pkg.product.priceString}")
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+`priceString` and `price` are fetched live from the store at runtime, so they
+reflect the user's locale and currency without any extra work on your part.
+</Callout>
+
+</Step>
+<Step>
+
+### Call `purchase(pkg)` on selection
+
+Pass the chosen `Package` to `Rovenue.purchase()`. The SDK presents the native
 store sheet (StoreKit 2 on iOS, Play Billing on Android), waits for the
-transaction to complete, and validates it server-side before resolving. Your
-app receives updated entitlements and credit balance in the result — no
-additional polling needed.
+transaction to complete, and validates the receipt server-side before resolving.
+The resolved `PurchaseResult` carries verified entitlements and credit balance —
+no additional polling needed.
+
+Rovenue decides server-side — based on your product configuration in the
+dashboard — whether a purchase grants an entitlement (subscriptions, one-time
+unlocks) or adds credits (consumables). Both product types go through the same
+`purchase(pkg)` call.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -79,21 +191,31 @@ additional polling needed.
       StoreProblemError,
     } from '@rovenue/react-native-sdk';
 
-    const offerings = await Rovenue.getOfferings();
-    const pkg = offerings.current?.packages[0];
-
-    if (pkg) {
+    async function handlePurchase(pkg) {
       try {
         const result = await Rovenue.purchase(pkg);
-        // result.entitlements and result.creditBalance are already up to date
+
+        // result.entitlements — verified, up-to-date array
+        // result.creditBalance — updated balance (for consumables)
         console.log('Purchase succeeded:', result.productId);
+        console.log('Transaction ID:', result.storeTransactionId);
+
+        navigateToSuccess();
       } catch (e) {
         if (e instanceof PurchaseCancelledError) {
           // User dismissed the store sheet — no action needed
         } else if (e instanceof PurchasePendingError) {
-          // Ask-to-Buy / deferred — inform the user and wait for a change event
+          // Ask-to-Buy / deferred payment — show a "waiting for approval" message
+          // The SDK will emit EntitlementsChanged when it resolves
+          showPendingMessage();
+        } else if (e instanceof ProductNotAvailableError) {
+          // Product ID not available in this store environment
+          showError('This product is not available. Please try again later.');
+        } else if (e instanceof StoreProblemError) {
+          // Unexpected StoreKit / Play Billing error
+          showError('Store error. Please try again.');
         } else {
-          throw e;
+          throw e; // unexpected — re-throw
         }
       }
     }
@@ -101,89 +223,126 @@ additional polling needed.
   </Tab>
   <Tab value="Swift">
     ```swift
-    let offerings = try await Rovenue.shared.getOfferings()
-    if let pkg = offerings.current?.packages.first {
+    func handlePurchase(pkg: Package) async {
       do {
         let result = try await Rovenue.shared.purchase(pkg)
+
+        // result.entitlements — verified, up-to-date array
+        // result.creditBalance — updated balance (for consumables)
         print("Purchase succeeded: \(result.productId)")
-        // result.entitlements and result.creditBalance are already up to date
+        print("Transaction ID: \(result.storeTransactionId)")
+
+        navigateToSuccess()
       } catch is PurchaseCancelledError {
         // User dismissed the store sheet — no action needed
       } catch is PurchasePendingError {
         // Ask-to-Buy / deferred — inform the user and wait for a change event
+        showPendingMessage()
+      } catch is ProductNotAvailableError {
+        showError("This product is not available. Please try again later.")
+      } catch is StoreProblemError {
+        showError("Store error. Please try again.")
       }
     }
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    val offerings = Rovenue.shared.getOfferings()
-    val pkg = offerings.current?.packages?.firstOrNull()
-
-    if (pkg != null) {
+    suspend fun handlePurchase(pkg: Package) {
       try {
         val result = Rovenue.shared.purchase(pkg)
+
+        // result.entitlements — verified, up-to-date list
+        // result.creditBalance — updated balance (for consumables)
         println("Purchase succeeded: ${result.productId}")
-        // result.entitlements and result.creditBalance are already up to date
-      } catch (e: PurchaseCancelledError) {
+        println("Transaction ID: ${result.storeTransactionId}")
+
+        navigateToSuccess()
+      } catch (e: PurchaseCancelledException) {
         // User dismissed the store sheet — no action needed
-      } catch (e: PurchasePendingError) {
-        // Ask-to-Buy / deferred — inform the user and wait for a change event
+      } catch (e: PurchasePendingException) {
+        // Deferred payment — inform the user and wait for a change event
+        showPendingMessage()
+      } catch (e: ProductNotAvailableException) {
+        showError("This product is not available. Please try again later.")
+      } catch (e: StoreProblemException) {
+        showError("Store error. Please try again.")
       }
     }
     ```
   </Tab>
 </Tabs>
 
-`purchase()` resolves with a `PurchaseResult` after server-side validation
-completes:
-
-```ts
-type PurchaseResult = {
-  entitlements: Entitlement[];
-  creditBalance: number;
-  productId: string;
-  storeTransactionId: string;
-};
-```
-
-Rovenue decides server-side — based on your product configuration in the
-dashboard — whether a product grants an entitlement (subscriptions, one-time
-unlocks) or adds credits (consumables). Both product types go through the same
-`purchase(pkg)` call.
-
 <Callout type="warn">
-**Possible errors**
+**Errors to handle explicitly**
 
-- `PurchaseCancelledError` — the user dismissed the store sheet. Safe to ignore.
-- `PurchasePendingError` — Ask-to-Buy (iOS) or a pending Play Billing transaction.
-  Show a "waiting for approval" message and listen for a change event.
-- `ProductNotAvailableError` — the product ID is not available in this store environment.
+- `PurchaseCancelledError` — the user dismissed the store sheet. Safe to ignore; do not show an error.
+- `PurchasePendingError` — Ask-to-Buy (iOS) or a pending Play Billing transaction. Show a "waiting for approval" message and listen for an `EntitlementsChanged` event via `addChangeListener`.
+- `ProductNotAvailableError` — the product ID is not available in this store environment. Check your dashboard configuration.
 - `StoreProblemError` — an unexpected StoreKit / Play Billing error. Retry or surface to the user.
+
+See [Errors](/docs/reference/errors) for the full error reference.
 </Callout>
 
-## Restore purchases
+</Step>
+<Step>
 
-Call `restorePurchases()` to re-validate all prior transactions for the current
-user (e.g. after a reinstall or platform restore prompt):
+### Restore purchases
+
+Apple's App Store guidelines require a **Restore Purchases** button in your
+paywall UI. Call `restorePurchases()` to re-validate all prior transactions for
+the current user — for example, after a reinstall or when a user switches
+devices.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    // Triggered by a "Restore Purchases" button
     await Rovenue.restorePurchases();
+
+    // Entitlements are refreshed; read from cache
+    const pro = Rovenue.entitlement('pro');
+    console.log('pro restored:', pro?.isActive);
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
+    // Triggered by a "Restore Purchases" button
     try await Rovenue.shared.restorePurchases()
+
+    // Entitlements are refreshed; read from cache
+    let pro = Rovenue.shared.entitlement("pro")
+    print("pro restored:", pro?.isActive ?? false)
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
+    // Triggered by a "Restore Purchases" button
     Rovenue.shared.restorePurchases()
+
+    // Entitlements are refreshed; read from cache
+    val pro = Rovenue.shared.entitlement("pro")
+    println("pro restored: ${pro?.isActive}")
     ```
   </Tab>
 </Tabs>
 
-On completion the SDK emits a change event with the refreshed entitlement
-state. See [Reacting to changes](/docs/guides/reacting-to-changes).
+<Callout type="info">
+On completion, the SDK emits an `EntitlementsChanged` change event with the
+refreshed entitlement state. If you have a listener attached via
+`addChangeListener`, it fires automatically — you do not need to poll. See
+[Reacting to changes](/docs/guides/reacting-to-changes).
+</Callout>
+
+</Step>
+</Steps>
+
+---
+
+<Callout type="info">
+**Related:** [Checking Entitlements](/docs/guides/entitlements) · [Reacting to
+changes](/docs/guides/reacting-to-changes) · [Methods — Purchases](/docs/reference/methods#purchases) ·
+[Types](/docs/reference/types) · [Errors](/docs/reference/errors)
+</Callout>

@@ -3,83 +3,196 @@ title: Errors
 description: The RovenueError family and how each surfaces per platform.
 ---
 
-Every Rovenue SDK error originates from the same Rust-core `RovenueError` enum and is mapped to an idiomatic type on each platform. The table below shows all 14 variants and their per-platform names.
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
 
-| Meaning | React Native (class) | Swift (enum case) | Kotlin (exception) |
-|---------|---------------------|-------------------|--------------------|
+Every Rovenue SDK error originates from the same Rust-core `RovenueError` enum and is mapped to an idiomatic type on each platform:
+
+- **React Native** — thrown as a JS class extending `Error` (e.g. `NotConfiguredError`). Use `instanceof` to narrow.
+- **Swift** — thrown as a Swift enum `Rovenue.Error` with associated cases (e.g. `.notConfigured`). Catch with `catch Rovenue.Error.xxx` or `catch let e as Rovenue.Error`.
+- **Kotlin** — thrown as a sealed class hierarchy under `RovenueException` (e.g. `RovenueException.NotConfigured`). Catch by subclass or the sealed base.
+
+---
+
+## Error table
+
+| When it fires | React Native (class) | Swift (enum case) | Kotlin (exception) |
+|---------------|---------------------|-------------------|--------------------|
 | SDK not configured — `configure()` was not called before accessing `Rovenue.shared` | `NotConfiguredError` | `.notConfigured` | `RovenueException.NotConfigured` |
-| API key is missing or rejected by the server | `InvalidApiKeyError` | `.invalidApiKey` | `RovenueException.InvalidApiKey` |
-| An argument was invalid (e.g. an empty `appUserId` passed to `identify()`) | `InvalidArgumentError` | `.invalidArgument` | `RovenueException.InvalidArgument` |
+| API key is missing, malformed, or rejected by the server | `InvalidApiKeyError` | `.invalidApiKey` | `RovenueException.InvalidApiKey` |
+| An argument was invalid — e.g. an empty string passed to `identify()` | `InvalidArgumentError` | `.invalidArgument` | `RovenueException.InvalidArgument` |
 | Server returned a non-recoverable error response | `ServerError` | `.serverError` | `RovenueException.ServerException` |
 | Device has no network connectivity | `NetworkUnavailableError` | `.networkUnavailable` | `RovenueException.NetworkUnavailable` |
 | Request exceeded the allowed time limit | `TimeoutError` | `.timeout` | `RovenueException.Timeout` |
-| Too many requests — back off and retry | `RateLimitedError` | `.rateLimited` | `RovenueException.RateLimited` |
+| Too many requests — SDK is being rate-limited; back off and retry | `RateLimitedError` | `.rateLimited` | `RovenueException.RateLimited` |
 | Local persistent storage (MMKV) read/write failure | `StorageError` | `.storage` | `RovenueException.Storage` |
 | Subscriber record not found on the server | `UserNotFoundError` | `.userNotFound` | `RovenueException.UserNotFound` |
-| `consumeCredits` requested more credits than the user holds | `InsufficientCreditsError` | `.insufficientCredits` | `RovenueException.InsufficientCredits` |
+| `consumeCredits()` requested more credits than the user holds | `InsufficientCreditsError` | `.insufficientCredits` | `RovenueException.InsufficientCredits` |
 | Entitlement exists but is not currently active | `EntitlementInactiveError` | `.entitlementInactive` | `RovenueException.EntitlementInactive` |
-| Receipt was already recorded for this transaction | `DuplicatePurchaseError` | `.duplicatePurchase` | `RovenueException.DuplicatePurchase` |
+| Receipt was already recorded for this transaction (idempotency deduplication) | `DuplicatePurchaseError` | `.duplicatePurchase` | `RovenueException.DuplicatePurchase` |
 | Receipt could not be validated by the store or server | `ReceiptInvalidError` | `.receiptInvalid` | `RovenueException.ReceiptInvalid` |
 | Unexpected internal SDK error | `InternalError` | `.internalError` | `RovenueException.Internal` |
+| User cancelled the store purchase sheet | `PurchaseCancelledError` | `.purchaseCancelled` | `PurchaseCancelledException` |
+| Purchase is pending approval (Ask-to-Buy / parental controls) | `PurchasePendingError` | `.purchasePending` | `PurchasePendingException` |
+| The selected product is not available in the user's storefront | `ProductNotAvailableError` | `.productNotAvailable` | `ProductNotAvailableException` |
+| The store returned a non-specific billing or connectivity error | `StoreProblemError` | `.storeProblem` | `StoreProblemException` |
+
+<Callout type="warn">
+**`InvalidApiKeyError` vs `InvalidArgumentError`**
+
+`InvalidApiKeyError` fires when the SDK detects that your API key is malformed (wrong prefix) at `configure()` time, or when the server rejects it on the first network request. It indicates a **configuration problem** — check your dashboard key.
+
+`InvalidArgumentError` fires when your code passes an invalid value to a method at call time — for example, an empty string to `identify()`. It indicates a **programming error** in your call site.
+</Callout>
+
+---
 
 ## Handling errors
 
-**React Native** — all async methods return Promises. Use `instanceof` to narrow to a specific subclass:
+All throwing SDK methods should be wrapped in try/catch. The recommended pattern is to handle the errors you expect explicitly, then re-throw anything unexpected so it surfaces in your crash reporting.
 
-```ts
-import {
-  Rovenue,
-  PurchaseCancelledError,
-  PurchasePendingError,
-  ReceiptInvalidError,
-} from '@rovenue/react-native-sdk';
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import {
+      Rovenue,
+      PurchaseCancelledError,
+      PurchasePendingError,
+      ProductNotAvailableError,
+      ReceiptInvalidError,
+      NetworkUnavailableError,
+      InsufficientCreditsError,
+    } from '@rovenue/react-native-sdk';
 
-try {
-  const result = await Rovenue.purchase(pkg);
-} catch (e) {
-  if (e instanceof PurchaseCancelledError) {
-    // User dismissed the store sheet — no action needed
-  } else if (e instanceof PurchasePendingError) {
-    // Ask-to-Buy / deferred — inform the user
-  } else if (e instanceof ReceiptInvalidError) {
-    // Receipt failed server-side validation — show a retry prompt
-  } else {
-    throw e; // re-throw unexpected errors
-  }
-}
-```
+    // --- Purchase flow ---
+    try {
+      const result = await Rovenue.purchase(pkg);
+      // success
+    } catch (e) {
+      if (e instanceof PurchaseCancelledError) {
+        // User dismissed the store sheet — no action needed
+      } else if (e instanceof PurchasePendingError) {
+        // Ask-to-Buy — inform the user to wait for parental approval
+        showToast('Your purchase is awaiting approval.');
+      } else if (e instanceof ProductNotAvailableError) {
+        // Product not available in this storefront
+        showToast('This product is not available in your region.');
+      } else if (e instanceof ReceiptInvalidError) {
+        // Receipt validation failed — offer a retry
+        showRetryPrompt();
+      } else if (e instanceof NetworkUnavailableError) {
+        showToast('No internet connection. Please try again.');
+      } else {
+        throw e; // re-throw unexpected errors
+      }
+    }
 
-**Swift** — errors are thrown as `Rovenue.Error` (a nested enum on the `Rovenue` type). Catch the base type and switch on its cases:
+    // --- Credits flow ---
+    try {
+      const newBalance = await Rovenue.consumeCredits(10, 'AI generation');
+    } catch (e) {
+      if (e instanceof InsufficientCreditsError) {
+        // Prompt the user to purchase more credits
+        openPaywall();
+      } else {
+        throw e;
+      }
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    import Rovenue
 
-```swift
-do {
-  let result = try await Rovenue.shared.purchase(pkg)
-} catch is PurchaseCancelledError {
-  // User dismissed the store sheet — no action needed
-} catch is PurchasePendingError {
-  // Ask-to-Buy / deferred — inform the user
-} catch let e as Rovenue.Error {
-  switch e {
-  case .receiptInvalid:
-    // Receipt failed server-side validation
-  default:
-    throw e
-  }
-}
-```
+    // --- Purchase flow ---
+    do {
+      let result = try await Rovenue.shared.purchase(pkg)
+      // success
+    } catch Rovenue.Error.purchaseCancelled {
+      // User dismissed the store sheet — no action needed
+    } catch Rovenue.Error.purchasePending {
+      // Ask-to-Buy — inform the user to wait for parental approval
+      showToast("Your purchase is awaiting approval.")
+    } catch Rovenue.Error.productNotAvailable {
+      showToast("This product is not available in your region.")
+    } catch Rovenue.Error.receiptInvalid {
+      // Receipt validation failed — offer a retry
+      showRetryPrompt()
+    } catch Rovenue.Error.networkUnavailable {
+      showToast("No internet connection. Please try again.")
+    } catch {
+      throw error // re-throw unexpected errors
+    }
 
-**Kotlin** — errors are thrown as subclasses of `RovenueException`. Catch the specific subclass or the sealed base:
+    // --- Credits flow ---
+    do {
+      let newBalance = try await Rovenue.shared.consumeCredits(
+          amount: 10,
+          description: "AI generation"
+      )
+    } catch Rovenue.Error.insufficientCredits {
+      openPaywall()
+    } catch {
+      throw error
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    import com.rovenue.Rovenue
+    import com.rovenue.RovenueException
 
-```kotlin
-try {
-    val result = Rovenue.shared.purchase(pkg)
-} catch (e: PurchaseCancelledException) {
-    // User dismissed the store sheet — no action needed
-} catch (e: PurchasePendingException) {
-    // Deferred / pending approval — inform the user
-} catch (e: RovenueException.ReceiptInvalid) {
-    // Receipt failed server-side validation
-} catch (e: RovenueException) {
-    throw e // re-throw other SDK errors
-}
-```
+    // --- Purchase flow ---
+    try {
+        val result = Rovenue.shared.purchase(pkg)
+        // success
+    } catch (e: PurchaseCancelledException) {
+        // User dismissed the store sheet — no action needed
+    } catch (e: PurchasePendingException) {
+        // Ask-to-Buy — inform the user to wait for parental approval
+        showToast("Your purchase is awaiting approval.")
+    } catch (e: ProductNotAvailableException) {
+        showToast("This product is not available in your region.")
+    } catch (e: RovenueException.ReceiptInvalid) {
+        showRetryPrompt()
+    } catch (e: RovenueException.NetworkUnavailable) {
+        showToast("No internet connection. Please try again.")
+    } catch (e: RovenueException) {
+        throw e // re-throw unexpected SDK errors
+    }
+
+    // --- Credits flow ---
+    try {
+        val newBalance = Rovenue.shared.consumeCredits(
+            amount = 10,
+            description = "AI generation"
+        )
+    } catch (e: RovenueException.InsufficientCredits) {
+        openPaywall()
+    } catch (e: RovenueException) {
+        throw e
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+`PurchaseCancelledError` is **not an error** from the user's perspective. It fires whenever the store sheet is dismissed without a completed payment — including when the user deliberately taps Cancel. Do not show an error dialog for this case.
+</Callout>
+
+---
+
+## Which methods throw which errors
+
+| Method | Possible errors |
+|--------|----------------|
+| [`configure()`](/docs/reference/methods#configuration) | `InvalidApiKeyError` |
+| [`identify(appUserId)`](/docs/reference/methods#identify) | `InvalidArgumentError` |
+| [`refreshEntitlements()`](/docs/reference/methods#refreshentitlements) | `NetworkUnavailableError`, `ServerError` |
+| [`refreshCredits()`](/docs/reference/methods#refreshcredits) | `NetworkUnavailableError`, `ServerError` |
+| [`consumeCredits()`](/docs/reference/methods#consumecredits) | `InsufficientCreditsError`, `NetworkUnavailableError`, `ServerError` |
+| [`getOfferings()`](/docs/reference/methods#getofferings) | `NetworkUnavailableError`, `ServerError` |
+| [`purchase()`](/docs/reference/methods#purchase) | `PurchaseCancelledError`, `PurchasePendingError`, `ProductNotAvailableError`, `StoreProblemError`, `ReceiptInvalidError`, `NetworkUnavailableError` |
+| [`restorePurchases()`](/docs/reference/methods#restorepurchases) | `NetworkUnavailableError`, `ServerError` |
+| [`getAppAccountToken()`](/docs/reference/methods#account-token) | `StorageError` |
+| All methods | `NotConfiguredError` (if `configure()` was not called), `InternalError` (unexpected failures) |
