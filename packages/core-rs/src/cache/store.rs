@@ -15,6 +15,14 @@ pub struct SessionEventRow {
     pub duration_ms: Option<u32>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AttributeMutationRow {
+    pub id: i64,
+    pub key: String,
+    /// None means "delete this key".
+    pub value: Option<String>,
+}
+
 pub struct CacheStore {
     conn: Mutex<Connection>,
 }
@@ -208,6 +216,83 @@ impl CacheStore {
             .map_err(|_| RovenueError::Storage)?;
         Ok(())
     }
+
+    pub fn append_attribute_mutation(
+        &self,
+        key: &str,
+        value: Option<&str>,
+    ) -> RovenueResult<()> {
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        guard
+            .execute(
+                "INSERT INTO attribute_mutations (key, value) VALUES (?1, ?2)",
+                rusqlite::params![key, value],
+            )
+            .map_err(|_| RovenueError::Storage)?;
+        // FIFO trim — keep newest 1000 (backstop for an endlessly-failing flush).
+        guard
+            .execute(
+                "DELETE FROM attribute_mutations WHERE id NOT IN \
+                 (SELECT id FROM attribute_mutations ORDER BY id DESC LIMIT 1000)",
+                [],
+            )
+            .map_err(|_| RovenueError::Storage)?;
+        Ok(())
+    }
+
+    pub fn list_attribute_mutations(
+        &self,
+        limit: usize,
+    ) -> RovenueResult<Vec<AttributeMutationRow>> {
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let mut stmt = guard
+            .prepare(
+                "SELECT id, key, value FROM attribute_mutations \
+                 ORDER BY id ASC LIMIT ?1",
+            )
+            .map_err(|_| RovenueError::Storage)?;
+        let rows = stmt
+            .query_map([limit as i64], |r| {
+                Ok(AttributeMutationRow {
+                    id: r.get(0)?,
+                    key: r.get(1)?,
+                    value: r.get(2)?,
+                })
+            })
+            .map_err(|_| RovenueError::Storage)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| RovenueError::Storage)?;
+        Ok(rows)
+    }
+
+    pub fn delete_attribute_mutations(&self, ids: &[i64]) -> RovenueResult<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let placeholders = std::iter::repeat("?")
+            .take(ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "DELETE FROM attribute_mutations WHERE id IN ({})",
+            placeholders
+        );
+        let params: Vec<&dyn rusqlite::ToSql> =
+            ids.iter().map(|i| i as &dyn rusqlite::ToSql).collect();
+        guard
+            .execute(&sql, params.as_slice())
+            .map_err(|_| RovenueError::Storage)?;
+        Ok(())
+    }
+
+    pub fn clear_attribute_mutations(&self) -> RovenueResult<()> {
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        guard
+            .execute("DELETE FROM attribute_mutations", [])
+            .map_err(|_| RovenueError::Storage)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -257,5 +342,27 @@ mod tests {
         let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
         store.delete_session_events(&ids).unwrap();
         assert_eq!(store.list_session_events(2000).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn attribute_mutations_crud() {
+        let store = CacheStore::open_in_memory().unwrap();
+        store.append_attribute_mutation("$email", Some("a@b.com")).unwrap();
+        store.append_attribute_mutation("favoriteTeam", Some("GS")).unwrap();
+        store.append_attribute_mutation("country", None).unwrap(); // delete marker
+
+        let rows = store.list_attribute_mutations(100).unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].key, "$email");
+        assert_eq!(rows[0].value.as_deref(), Some("a@b.com"));
+        assert_eq!(rows[2].key, "country");
+        assert_eq!(rows[2].value, None);
+
+        let ids: Vec<i64> = rows.iter().take(2).map(|r| r.id).collect();
+        store.delete_attribute_mutations(&ids).unwrap();
+        assert_eq!(store.list_attribute_mutations(100).unwrap().len(), 1);
+
+        store.clear_attribute_mutations().unwrap();
+        assert_eq!(store.list_attribute_mutations(100).unwrap().len(), 0);
     }
 }

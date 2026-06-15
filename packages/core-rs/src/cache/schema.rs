@@ -85,11 +85,22 @@ CREATE TABLE offerings_cache (
 UPDATE schema_meta SET version = 5;
 "#;
 
+pub const MIGRATION_V6: &str = "\
+CREATE TABLE attribute_mutations (\
+    id INTEGER PRIMARY KEY AUTOINCREMENT,\
+    key TEXT NOT NULL,\
+    value TEXT\
+);\
+CREATE INDEX idx_attribute_mutations_id ON attribute_mutations(id);\
+UPDATE schema_meta SET version = 6;\
+";
+
 pub const MIGRATIONS: &[&str] = &[
     MIGRATION_V1,
     MIGRATION_V2,
     MIGRATION_V3,
     MIGRATION_V4,
     MIGRATION_V5,
+    MIGRATION_V6,
 ];
-pub const LATEST: u32 = 5;
+pub const LATEST: u32 = 6;
