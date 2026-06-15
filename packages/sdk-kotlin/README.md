@@ -8,19 +8,19 @@ Add to your `build.gradle.kts`:
 
 ```kotlin
 dependencies {
-    implementation("io.rovenue:sdk-kotlin:0.1.0")
+    implementation("dev.rovenue:sdk:0.6.0")
 }
 ```
 
 ## Quick Start
 
 ```kotlin
-import io.rovenue.Rovenue
+import dev.rovenue.sdk.Rovenue
 
-Rovenue.configure(publicApiKey = "rov_pub_...")
+Rovenue.configure(apiKey = "rov_pub_...", baseUrl = "https://edge.rovenue.app")
 
-val pro = Rovenue.entitlement("pro")
-if (pro.isActive) { /* unlock features */ }
+val pro = Rovenue.shared.entitlement("pro")
+if (pro?.isActive == true) { /* unlock features */ }
 ```
 
 ## Documentation

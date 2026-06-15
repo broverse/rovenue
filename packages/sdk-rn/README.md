@@ -5,20 +5,20 @@ Open-source subscription management SDK for React Native. Integrates with the Ro
 ## Installation
 
 ```sh
-npm install @rovenue/sdk-rn
+npm install @rovenue/react-native-sdk
 # or
-yarn add @rovenue/sdk-rn
+yarn add @rovenue/react-native-sdk
 ```
 
 ## Quick Start
 
 ```ts
-import { Rovenue } from '@rovenue/sdk-rn';
+import { Rovenue } from '@rovenue/react-native-sdk';
 
-Rovenue.configure({ publicApiKey: 'rov_pub_...' });
+Rovenue.configure({ apiKey: 'rov_pub_...', baseUrl: 'https://edge.rovenue.app' });
 
 const pro = await Rovenue.entitlement('pro');
-if (pro.isActive) { /* unlock features */ }
+if (pro?.isActive) { /* unlock features */ }
 ```
 
 ## Documentation

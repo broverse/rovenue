@@ -9,7 +9,7 @@ Open-source subscription management SDK for iOS, macOS, tvOS, and watchOS. Integ
 Add the following to your `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/rovenue/sdk-swift", from: "0.1.0")
+.package(url: "https://github.com/rovenue/sdk-swift", from: "0.6.0")
 ```
 
 ## Quick Start
@@ -17,10 +17,10 @@ Add the following to your `Package.swift`:
 ```swift
 import Rovenue
 
-Rovenue.configure(publicApiKey: "rov_pub_...")
+Rovenue.configure(apiKey: "rov_pub_...", baseUrl: "https://edge.rovenue.app")
 
-let pro = await Rovenue.entitlement("pro")
-if pro.isActive { /* unlock features */ }
+let pro = await Rovenue.shared.entitlement("pro")
+if pro?.isActive == true { /* unlock features */ }
 ```
 
 ## Documentation
