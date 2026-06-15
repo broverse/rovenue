@@ -35,6 +35,10 @@ import {
 import type { AppleNotificationVerifier } from "./apple-verify";
 
 const RUN_ID = Date.now();
+// Use a current timestamp for signed/purchase dates so any
+// revenue_events row the handler emits (e.g. EXPIRED ->
+// emitCancellationEvent) lands in a live declarative partition.
+const NOW_MS = Date.now();
 const PROJECT_ID = `prj_tguard_${RUN_ID}`;
 const SUBSCRIBER_ID = `sub_tguard_${RUN_ID}`;
 const PRODUCT_ID = `prod_tguard_${RUN_ID}`;
@@ -48,9 +52,10 @@ function makeTransaction(): AppleJwsTransactionPayload {
     transactionId: TXN_ID,
     originalTransactionId: OTXN_ID,
     productId: APPLE_PRODUCT_ID,
-    purchaseDate: 1_700_000_000_000,
-    originalPurchaseDate: 1_700_000_000_000,
-    expiresDate: 1_900_000_000_000,
+    purchaseDate: NOW_MS,
+    originalPurchaseDate: NOW_MS,
+    expiresDate: NOW_MS + 30 * 86_400_000,
+    signedDate: NOW_MS,
     price: 9_990_000,
     currency: "USD",
     environment: APPLE_ENVIRONMENT.SANDBOX,
@@ -64,7 +69,7 @@ function makeNotification(
     notificationType,
     notificationUUID: `${NOTIFICATION_UUID}_${notificationType}`,
     version: "2.0",
-    signedDate: 1_700_000_000_000,
+    signedDate: NOW_MS,
     data: {
       environment: APPLE_ENVIRONMENT.SANDBOX,
       signedTransactionInfo: "stub-transaction-jws",
@@ -86,7 +91,7 @@ function makeStubVerifier(
       originalTransactionId: OTXN_ID,
       productId: APPLE_PRODUCT_ID,
       autoRenewStatus: 0 as const,
-      signedDate: 1_700_000_000_000,
+      signedDate: NOW_MS,
       environment: APPLE_ENVIRONMENT.SANDBOX,
     })),
   };
