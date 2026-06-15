@@ -8,6 +8,7 @@
 //  queue keeps in-flight calls ordered without adding contention.
 
 import Foundation
+import StoreKit
 
 // MARK: - LogEntry
 
@@ -108,6 +109,8 @@ public final class Rovenue: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if let s = _shared {
+            s.transactionListener?.cancel()
+            s.transactionListener = nil
             s.core.shutdown()
             s.bridge.finishAll()
         }
@@ -150,11 +153,19 @@ public final class Rovenue: @unchecked Sendable {
     /// without scraping the actual session-event request body.
     private let appVersion: String?
 
+    /// Background task draining `Transaction.updates` (renewals, refunds,
+    /// Ask-to-Buy approvals, cross-device purchases). Started in `init`,
+    /// cancelled in `shutdown()` / `resetForTesting()`.
+    private var transactionListener: Task<Void, Never>?
+
     private init(core: RovenueCore, bridge: ObserverBridge, appVersion: String?) {
         self.core = core
         self.bridge = bridge
         self.dispatcher = Dispatcher()
         self.appVersion = appVersion
+        if #available(iOS 15.0, macOS 12.0, *) {
+            startTransactionListener()
+        }
     }
 
     /// Test-only accessor — used by `AppVersionTests` to verify that
@@ -424,7 +435,155 @@ public final class Rovenue: @unchecked Sendable {
     /// Stop background work cleanly. Called automatically on `resetForTesting`.
     public func shutdown() {
         Self.emit(LogEntry(level: "info", message: "shutdown"))
+        transactionListener?.cancel()
+        transactionListener = nil
         core.shutdown()
+    }
+
+    // MARK: - Purchasing
+    //
+    // SDK-driven StoreKit 2 purchasing. The SDK runs the StoreKit flow,
+    // validates the resulting JWS against the Rovenue backend, and only then
+    // finishes the transaction. The legacy "host app posts the receipt"
+    // surface is gone — callers no longer touch StoreKit directly.
+
+    /// Fetch the project's offerings and enrich each product with live
+    /// StoreKit price metadata. The list of offerings (and which one is
+    /// `current`) comes from the Rovenue backend; prices come from StoreKit.
+    /// Products missing from StoreKit still appear, just without price fields.
+    @available(iOS 15.0, macOS 12.0, *)
+    public func getOfferings() async throws -> Offerings {
+        Self.emit(LogEntry(level: "info", message: "getOfferings"))
+        let ffi: CoreOfferings
+        do {
+            ffi = try await dispatcher.run { [core] in
+                do { return try core.getOfferings() }
+                catch let err as RovenueError { throw mapError(err) }
+            }
+        } catch {
+            Self.emit(LogEntry(level: "error", message: "getOfferings failed: \(error.localizedDescription)"))
+            throw error
+        }
+
+        // Batch-load every Apple product id referenced across all offerings.
+        let appleIds = ffi.offerings
+            .flatMap { $0.packages }
+            .compactMap { $0.appleProductId }
+        let skProducts = await StoreKitAppleStore().products(for: Array(Set(appleIds)))
+
+        func buildProduct(_ p: CoreOfferingProduct) -> StoreProduct {
+            let sk = p.appleProductId.flatMap { skProducts[$0] }
+            return StoreProduct(
+                id: p.appleProductId ?? p.identifier,
+                type: ProductType.from(p.productType),
+                displayName: sk?.displayName ?? p.displayName,
+                priceString: sk?.displayPrice,
+                price: sk?.price,
+                currencyCode: sk?.priceFormatStyle.currencyCode
+            )
+        }
+
+        func buildOffering(_ o: CoreOffering) -> Offering {
+            Offering(
+                identifier: o.identifier,
+                isDefault: o.isDefault,
+                packages: o.packages.map { Package(identifier: $0.identifier, product: buildProduct($0)) }
+            )
+        }
+
+        let offerings = ffi.offerings.map(buildOffering)
+        let all = Dictionary(uniqueKeysWithValues: offerings.map { ($0.identifier, $0) })
+        let current = ffi.current.flatMap { all[$0] }
+        Self.emit(LogEntry(level: "info", message: "getOfferings ok"))
+        return Offerings(current: current, all: all)
+    }
+
+    /// Purchase the product backing a `Package`.
+    @available(iOS 15.0, macOS 12.0, *)
+    public func purchase(_ package: Package) async throws -> PurchaseResult {
+        try await purchase(package.product)
+    }
+
+    /// Purchase a `StoreProduct`. Runs the StoreKit flow, validates the JWS
+    /// server-side, finishes the transaction, then returns refreshed state.
+    @available(iOS 15.0, macOS 12.0, *)
+    public func purchase(_ product: StoreProduct) async throws -> PurchaseResult {
+        Self.emit(LogEntry(level: "info", message: "purchase"))
+        let token = try? await getAppAccountToken()
+        let flow = ApplePurchaseFlow(
+            store: StoreKitAppleStore(),
+            validate: { [core] jws, pid in
+                try await self.dispatcher.run {
+                    do {
+                        return try core.postAppleReceipt(receipt: jws, productId: pid, appAccountToken: token)
+                    } catch let err as RovenueError {
+                        throw mapError(err)
+                    }
+                }
+            },
+            snapshot: { [weak self] in
+                guard let self else { return ([], 0) }
+                return (await self.entitlementsAll(), await self.creditBalance())
+            }
+        )
+        do {
+            let result = try await flow.run(productId: product.id, appAccountToken: token)
+            Self.emit(LogEntry(level: "info", message: "purchase ok"))
+            return result
+        } catch {
+            Self.emit(LogEntry(level: "error", message: "purchase failed: \(error.localizedDescription)"))
+            throw error
+        }
+    }
+
+    /// Restore the user's prior purchases. Syncs with the App Store, re-posts
+    /// every current entitlement's JWS for validation (best-effort), then
+    /// refreshes and returns the resulting entitlement/credit state.
+    @available(iOS 15.0, macOS 12.0, *)
+    public func restorePurchases() async throws -> PurchaseResult {
+        Self.emit(LogEntry(level: "info", message: "restorePurchases"))
+        try? await AppStore.sync()
+        for await result in Transaction.currentEntitlements {
+            guard case let .verified(t) = result else { continue }
+            _ = try? await dispatcher.run { [core] in
+                try? core.postAppleReceipt(
+                    receipt: result.jwsRepresentation,
+                    productId: t.productID,
+                    appAccountToken: nil
+                )
+            }
+        }
+        try await refreshEntitlements()
+        let result = PurchaseResult(
+            entitlements: await entitlementsAll(),
+            creditBalance: await creditBalance(),
+            productId: "",
+            storeTransactionId: ""
+        )
+        Self.emit(LogEntry(level: "info", message: "restorePurchases ok"))
+        return result
+    }
+
+    /// Drain `Transaction.updates` for the lifetime of the instance, posting
+    /// each verified update's JWS to the backend and finishing the transaction.
+    /// Covers renewals, refunds, Ask-to-Buy approvals, and cross-device buys.
+    @available(iOS 15.0, macOS 12.0, *)
+    private func startTransactionListener() {
+        transactionListener = Task.detached { [weak self] in
+            for await update in Transaction.updates {
+                guard let self else { break }
+                if case let .verified(t) = update {
+                    _ = try? await self.dispatcher.run { [core = self.core] in
+                        try? core.postAppleReceipt(
+                            receipt: update.jwsRepresentation,
+                            productId: t.productID,
+                            appAccountToken: nil
+                        )
+                    }
+                    await t.finish()
+                }
+            }
+        }
     }
 
     // MARK: - Observer stream
