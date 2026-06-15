@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoreOfferingProduct {
@@ -20,12 +20,12 @@ pub struct CoreOfferings {
     pub offerings: Vec<CoreOffering>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct StoreIdsWire {
     pub apple: Option<String>,
     pub google: Option<String>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct OfferingProductWire {
     pub identifier: String,
     #[serde(rename = "type")]
@@ -35,14 +35,14 @@ pub struct OfferingProductWire {
     #[serde(rename = "storeIds")]
     pub store_ids: StoreIdsWire,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct OfferingWire {
     pub identifier: String,
     #[serde(rename = "isDefault")]
     pub is_default: bool,
     pub products: Vec<OfferingProductWire>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct OfferingsResponse {
     pub offerings: Vec<OfferingWire>,
 }

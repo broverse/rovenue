@@ -75,5 +75,21 @@ CREATE TABLE IF NOT EXISTS identity (
 UPDATE schema_meta SET version = 4;
 "#;
 
-pub const MIGRATIONS: &[&str] = &[MIGRATION_V1, MIGRATION_V2, MIGRATION_V3, MIGRATION_V4];
-pub const LATEST: u32 = 4;
+pub const MIGRATION_V5: &str = r#"
+CREATE TABLE offerings_cache (
+    resource TEXT PRIMARY KEY,
+    body TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+
+UPDATE schema_meta SET version = 5;
+"#;
+
+pub const MIGRATIONS: &[&str] = &[
+    MIGRATION_V1,
+    MIGRATION_V2,
+    MIGRATION_V3,
+    MIGRATION_V4,
+    MIGRATION_V5,
+];
+pub const LATEST: u32 = 5;

@@ -72,7 +72,10 @@ impl RovenueCore {
                 .with_clock(Arc::clone(&clock)),
         );
         let receipts = Arc::new(ReceiptClient::new(Arc::clone(&http)));
-        let offerings = Arc::new(OfferingsClient::new(Arc::clone(&http)));
+        let offerings = Arc::new(
+            OfferingsClient::new(Arc::clone(&http), Arc::clone(&store))
+                .with_clock(Arc::clone(&clock)),
+        );
         let identify = Arc::new(IdentifyClient::new(Arc::clone(&http)));
         let account_tokens = Arc::new(AccountTokenStore::new(Arc::clone(&store)));
         let sessions = Arc::new(SessionBuffer::new(Arc::clone(&store)));
