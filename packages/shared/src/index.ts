@@ -114,6 +114,12 @@ export * from "./billing";
 export * from "./funnel";
 
 // =============================================================
+// Subscriber attributes — types, catalog, and helpers
+// =============================================================
+
+export * from "./attributes";
+
+// =============================================================
 // Copilot — types, tier limits, and intent handling
 // =============================================================
 
