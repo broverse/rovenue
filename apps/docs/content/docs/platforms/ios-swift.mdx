@@ -47,7 +47,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
   ) -> Bool {
     Rovenue.configure(
       apiKey: "rov_pub_YOUR_API_KEY",
-      baseUrl: "https://edge.rovenue.app"
+      baseUrl: "https://edge.rovenue.io"
     )
     return true
   }
@@ -62,7 +62,7 @@ The SDK reads `CFBundleShortVersionString` from the main bundle automatically â€
 // Swift mirror of RovenueConfig
 struct RovenueConfig {
   var apiKey: String       // public SDK key â€” prefix rov_pub_
-  var baseUrl: String      // always https://edge.rovenue.app
+  var baseUrl: String      // always https://edge.rovenue.io
   var debug: Bool          // default false
   var appVersion: String?  // override auto-detected version
 }
@@ -71,7 +71,7 @@ struct RovenueConfig {
 | Field | Type | Description |
 |-------|------|-------------|
 | `apiKey` | `String` | Public SDK key from your Rovenue dashboard. Prefix `rov_pub_`. |
-| `baseUrl` | `String` | Always `https://edge.rovenue.app` unless self-hosting. |
+| `baseUrl` | `String` | Always `https://edge.rovenue.io` unless self-hosting. |
 | `debug` | `Bool` | Enables verbose SDK logs. Do not ship enabled in production. |
 | `appVersion` | `String?` | Overrides the version auto-read from the bundle. |
 

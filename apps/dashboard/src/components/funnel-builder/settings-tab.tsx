@@ -320,10 +320,10 @@ function CustomDomainSection({ projectId, funnelId }: { projectId: string; funne
       <h3 className="m-0 mb-1 text-[14px] font-semibold">Custom domain</h3>
       <p className="m-0 mb-4 text-[12px] leading-relaxed text-rv-mute-500">
         Serve this funnel from your own hostname. Point a CNAME at{" "}
-        <span className="font-rv-mono text-foreground">edge.rovenue.app</span> plus a TXT record at{" "}
+        <span className="font-rv-mono text-foreground">edge.rovenue.io</span> plus a TXT record at{" "}
         <span className="font-rv-mono text-foreground">_rovenue.{`{hostname}`}</span>, then click
         Verify. Leave blank to keep the default{" "}
-        <span className="font-rv-mono text-foreground">{`{slug}.rovenue.app`}</span> URL.
+        <span className="font-rv-mono text-foreground">{`{slug}.rovenue.io`}</span> URL.
       </p>
 
       {isLoading ? (
@@ -553,7 +553,7 @@ function humanizeVerifyReason(reason: string): string {
     case "cname_missing":
       return "We can't find a CNAME for this hostname yet.";
     case "cname_mismatch":
-      return "CNAME exists but doesn't point at edge.rovenue.app.";
+      return "CNAME exists but doesn't point at edge.rovenue.io.";
     case "txt_missing":
       return "Missing TXT record at _rovenue.<hostname>.";
     case "txt_mismatch":

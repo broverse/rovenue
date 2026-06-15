@@ -51,7 +51,7 @@ export function Topbar({ projectName, current, onMenuClick }: TopbarProps) {
 
       <div className="ml-auto flex items-center gap-1 sm:gap-1.5">
         <a
-          href="https://docs.rovenue.dev"
+          href="https://docs.rovenue.io"
           target="_blank"
           rel="noreferrer"
           aria-label={t("topbar.docs")}

@@ -33,7 +33,7 @@ import { db } from "./src/drizzle/client";
 // script against a seeded DB is a no-op.
 
 const DEMO_USER_ID = "usr_demo";
-const DEMO_USER_EMAIL = "demo@rovenue.dev";
+const DEMO_USER_EMAIL = "demo@rovenue.io";
 const DEMO_PROJECT_ID = "proj_demo_seed";
 const DEMO_PROJECT_SLUG = "demo";
 const DEMO_PUBLIC_KEY = "rov_pub_demo_production";

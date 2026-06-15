@@ -4,8 +4,8 @@ import { Resolver } from "node:dns/promises";
 // Keep this list narrow — we only block what would actively conflict with
 // our own surface or break sanity (local-only addresses).
 const RESERVED_HOSTNAMES = [
-  /^rovenue\.(app|com|dev)$/i,
-  /^[^.]+\.rovenue\.(app|com|dev)$/i,
+  /^rovenue\.(app|com|dev|io)$/i,
+  /^[^.]+\.rovenue\.(app|com|dev|io)$/i,
   /^localhost$/i,
   /^[^.]+\.local$/i,
   /^[^.]+\.localhost$/i,
@@ -19,7 +19,7 @@ const HOSTNAME_REGEX =
 
 // Pinned to the project edge. Used both as the CNAME target and as the
 // resolver target in the public verification UI.
-export const CANONICAL_EDGE_HOST = "edge.rovenue.app";
+export const CANONICAL_EDGE_HOST = "edge.rovenue.io";
 
 export type VerifyFailureReason =
   | "cname_missing"

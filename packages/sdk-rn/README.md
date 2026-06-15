@@ -15,7 +15,7 @@ yarn add @rovenue/react-native-sdk
 ```ts
 import { Rovenue } from '@rovenue/react-native-sdk';
 
-Rovenue.configure({ apiKey: 'rov_pub_...', baseUrl: 'https://edge.rovenue.app' });
+Rovenue.configure({ apiKey: 'rov_pub_...', baseUrl: 'https://edge.rovenue.io' });
 
 const pro = await Rovenue.entitlement('pro');
 if (pro?.isActive) { /* unlock features */ }
@@ -24,5 +24,5 @@ if (pro?.isActive) { /* unlock features */ }
 ## Documentation
 
 Full guides, API reference, and the identity & consent policy live at
-**https://docs.rovenue.app** — start with the
-[Quick Start](https://docs.rovenue.app/docs/getting-started/quickstart).
+**https://docs.rovenue.io** — start with the
+[Quick Start](https://docs.rovenue.io/docs/getting-started/quickstart).

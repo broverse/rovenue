@@ -5,7 +5,7 @@ use rovenue::observer::{ChangeEvent, Observer};
 use rovenue::{Config, RovenueCore, SDK_VERSION};
 
 fn test_core() -> RovenueCore {
-    let cfg = Config::new("pk_test_xyz".into(), "https://api.rovenue.dev".into()).unwrap();
+    let cfg = Config::new("pk_test_xyz".into(), "https://api.rovenue.io".into()).unwrap();
     RovenueCore::new_for_test(cfg).expect("core must construct")
 }
 
@@ -17,7 +17,7 @@ fn core_new_returns_handle() {
 
 #[test]
 fn core_new_rejects_invalid_config() {
-    let cfg = Config::new("".into(), "https://api.rovenue.dev".into());
+    let cfg = Config::new("".into(), "https://api.rovenue.io".into());
     assert!(
         cfg.is_err(),
         "empty api key must error before reaching core"
@@ -171,14 +171,14 @@ fn set_foreground_runs_without_panic() {
 
 #[test]
 fn credit_balance_starts_zero() {
-    let cfg = Config::new("pk_test_xyz".into(), "https://api.rovenue.dev".into()).unwrap();
+    let cfg = Config::new("pk_test_xyz".into(), "https://api.rovenue.io".into()).unwrap();
     let core = RovenueCore::new_for_test(cfg).unwrap();
     assert_eq!(core.credit_balance(), 0);
 }
 
 #[test]
 fn consume_credits_rejects_zero_or_negative() {
-    let cfg = Config::new("pk_test_xyz".into(), "https://api.rovenue.dev".into()).unwrap();
+    let cfg = Config::new("pk_test_xyz".into(), "https://api.rovenue.io".into()).unwrap();
     let core = RovenueCore::new_for_test(cfg).unwrap();
     assert!(matches!(
         core.consume_credits(0, None),

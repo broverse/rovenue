@@ -76,12 +76,12 @@ async function call(path: string) {
 
 describe("GET /internal/domains/check", () => {
   it("returns 200 for the canonical edge host", async () => {
-    const res = await call("/internal/domains/check?domain=edge.rovenue.app");
+    const res = await call("/internal/domains/check?domain=edge.rovenue.io");
     expect(res.status).toBe(200);
   });
 
   it("returns 200 for the bare canonical host", async () => {
-    const res = await call("/internal/domains/check?domain=rovenue.app");
+    const res = await call("/internal/domains/check?domain=rovenue.io");
     expect(res.status).toBe(200);
   });
 

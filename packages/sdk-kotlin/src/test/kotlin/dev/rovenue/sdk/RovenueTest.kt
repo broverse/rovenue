@@ -26,7 +26,7 @@ class RovenueTest {
 
     @Test
     fun `getVersion matches Cargo pkg version`() {
-        val cfg = Config(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.dev", debug = false, appVersion = null)
+        val cfg = Config(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.io", debug = false, appVersion = null)
         val core = RovenueCore(cfg)
         // core.getVersion() reports the librovenue crate version (workspace
         // version), which is the same value the namespace sdkVersion() returns.
@@ -35,7 +35,7 @@ class RovenueTest {
 
     @Test
     fun `invalid api key throws at generated layer`() {
-        val cfg = Config(apiKey = "", baseUrl = "https://api.rovenue.dev", debug = false, appVersion = null)
+        val cfg = Config(apiKey = "", baseUrl = "https://api.rovenue.io", debug = false, appVersion = null)
         assertFailsWith<RovenueException.InvalidApiKey> {
             RovenueCore(cfg)
         }
@@ -58,13 +58,13 @@ class RovenueTest {
 
     @Test
     fun `facade version matches generated`() {
-        Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.dev")
+        Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.io")
         assertEquals(sdkVersion(), Rovenue.shared.version)
     }
 
     @Test
     fun `facade currentUser has anon id`() = runTest {
-        Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.dev")
+        Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.io")
         val user = Rovenue.shared.currentUser()
         assertTrue(user.rovenueId.startsWith("rov_"))
         assertNull(user.appUserId)
@@ -72,14 +72,14 @@ class RovenueTest {
 
     @Test
     fun `facade entitlements are empty by default`() = runTest {
-        Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.dev")
+        Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.io")
         assertNull(Rovenue.shared.entitlement("pro"))
         assertTrue(Rovenue.shared.entitlementsAll().isEmpty())
     }
 
     @Test
     fun `facade credit balance is zero by default`() = runTest {
-        Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.dev")
+        Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.io")
         assertEquals(0L, Rovenue.shared.creditBalance())
     }
 
@@ -92,7 +92,7 @@ class RovenueTest {
     // they stay on runTest for faster execution.
     @Test
     fun `facade identify emits IDENTITY_CHANGED`() = runBlocking {
-        Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.dev")
+        Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.io")
         val collected = mutableListOf<ChangeEvent>()
         val job = launch {
             Rovenue.shared.changes.take(1).toList(collected)

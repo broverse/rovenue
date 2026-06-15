@@ -9,7 +9,7 @@ export default function App() {
   useEffect(() => {
     Rovenue.configure({
       apiKey: "pk_smoke_test",
-      baseUrl: "https://api.rovenue.dev",
+      baseUrl: "https://api.rovenue.io",
       debug: true,
     });
     setVersion(Rovenue.getVersion());

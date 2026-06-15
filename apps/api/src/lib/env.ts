@@ -12,7 +12,7 @@ const envSchema = z
     // issuance for anything outside (custom domains | canonical).
     CANONICAL_HOSTS: z
       .string()
-      .default("rovenue.app,edge.rovenue.app")
+      .default("rovenue.io,edge.rovenue.io")
       .transform((v) => v.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)),
     NODE_ENV: z
       .enum(["development", "production", "test"])

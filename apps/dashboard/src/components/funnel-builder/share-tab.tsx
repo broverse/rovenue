@@ -43,7 +43,7 @@ export const ShareTab = component(() => {
             <h3 className="m-0 mb-1 text-[14px] font-semibold">Set a universal link domain</h3>
             <p className="m-0 mb-4 text-[12px] leading-relaxed text-rv-mute-500">
               You're published, but no universal-link domain is set. Open Settings → Hand-off and
-              point a domain at <span className="font-rv-mono">claim.rovenue.dev</span>.
+              point a domain at <span className="font-rv-mono">claim.rovenue.io</span>.
             </p>
             <button
               type="button"

@@ -5,8 +5,8 @@ from the repo root on the host.
 
 ## 0. Prerequisites
 - Docker + Compose v2.
-- DNS A records for `rovenue.app`, `edge.rovenue.app`, `app.rovenue.app`,
-  `docs.rovenue.app` pointing at the host. CNAMEs for any custom domains
+- DNS A records for `rovenue.io`, `edge.rovenue.io`, `app.rovenue.io`,
+  `docs.rovenue.io` pointing at the host. CNAMEs for any custom domains
   pointing the same.
 - Apple Root CA `.cer` files placed in `./deploy/apple-certs/`
   (Apple Root CA G3 + Apple Inc Root).
@@ -15,10 +15,10 @@ from the repo root on the host.
 Copy `.env.example` to `.env` and fill, at minimum, the prod-required keys
 (enforced by `apps/api/src/lib/env.ts`):
 `DATABASE_URL`, `ENCRYPTION_KEY` (32-byte hex), `BETTER_AUTH_SECRET`,
-`BETTER_AUTH_URL`, `DASHBOARD_URL=https://app.rovenue.app`,
-`VITE_API_URL=https://rovenue.app`, `GITHUB_CLIENT_ID/SECRET`,
+`BETTER_AUTH_URL`, `DASHBOARD_URL=https://app.rovenue.io`,
+`VITE_API_URL=https://rovenue.io`, `GITHUB_CLIENT_ID/SECRET`,
 `GOOGLE_CLIENT_ID/SECRET`, `CLICKHOUSE_*`, `KAFKA_BROKERS`,
-`TLS_EMAIL`, `CANONICAL_HOSTS=rovenue.app,edge.rovenue.app,app.rovenue.app`,
+`TLS_EMAIL`, `CANONICAL_HOSTS=rovenue.io,edge.rovenue.io,app.rovenue.io`,
 `OUTBOX_DISPATCHER_ENABLED=true`.
 
 ## 2. Build
@@ -39,9 +39,9 @@ run it explicitly the first time:
     docker compose run --rm migrate pnpm --filter @rovenue/db seed
 
 ## 6. Smoke test
-    curl -fsS https://rovenue.app/health
-    curl -fsS -o /dev/null -w '%{http_code}\n' https://app.rovenue.app/
-    curl -I https://docs.rovenue.app
+    curl -fsS https://rovenue.io/health
+    curl -fsS -o /dev/null -w '%{http_code}\n' https://app.rovenue.io/
+    curl -I https://docs.rovenue.io
 Expected: health 200, dashboard 200, docs 200.
 
 ## Invariants

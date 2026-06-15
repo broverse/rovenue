@@ -52,7 +52,7 @@ class App : Application() {
 
     Rovenue.configure(
       apiKey = "rov_pub_YOUR_API_KEY",
-      baseUrl = "https://edge.rovenue.app",
+      baseUrl = "https://edge.rovenue.io",
       appVersion = versionName,
     )
   }
@@ -71,7 +71,7 @@ Register `App` in your `AndroidManifest.xml`:
 // Kotlin mirror of RovenueConfig
 data class RovenueConfig(
   val apiKey: String,          // public SDK key — prefix rov_pub_
-  val baseUrl: String,         // always https://edge.rovenue.app
+  val baseUrl: String,         // always https://edge.rovenue.io
   val debug: Boolean = false,
   val appVersion: String? = null,
 )
@@ -80,7 +80,7 @@ data class RovenueConfig(
 | Field | Type | Description |
 |-------|------|-------------|
 | `apiKey` | `String` | Public SDK key from your Rovenue dashboard. Prefix `rov_pub_`. |
-| `baseUrl` | `String` | Always `https://edge.rovenue.app` unless self-hosting. |
+| `baseUrl` | `String` | Always `https://edge.rovenue.io` unless self-hosting. |
 | `debug` | `Boolean` | Enables verbose SDK logs. Default `false`. |
 | `appVersion` | `String?` | Overrides the version read from the package manager. |
 
@@ -112,7 +112,7 @@ class App : Application() {
 
     Rovenue.configure(
       apiKey = "rov_pub_YOUR_API_KEY",
-      baseUrl = "https://edge.rovenue.app",
+      baseUrl = "https://edge.rovenue.io",
       appVersion = versionName,
     )
 

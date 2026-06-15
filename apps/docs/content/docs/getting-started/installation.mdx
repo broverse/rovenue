@@ -14,7 +14,7 @@ The Rovenue SDK shares a single Rust core (`librovenue`) across all three platfo
 ```ts
 type RovenueConfig = {
   apiKey: string;      // public SDK key — prefix rov_pub_
-  baseUrl: string;     // edge endpoint — https://edge.rovenue.app
+  baseUrl: string;     // edge endpoint — https://edge.rovenue.io
   debug?: boolean;     // verbose log output; default false
   appVersion?: string; // override version reported to the server
 };
@@ -23,7 +23,7 @@ type RovenueConfig = {
 | Field | Type | Description |
 |-------|------|-------------|
 | `apiKey` | `string` | Public SDK key from the Rovenue dashboard. Prefix `rov_pub_`. |
-| `baseUrl` | `string` | Edge endpoint. Use `https://edge.rovenue.app` unless self-hosting. |
+| `baseUrl` | `string` | Edge endpoint. Use `https://edge.rovenue.io` unless self-hosting. |
 | `debug` | `boolean?` | Enables verbose SDK logging. Keep `false` in production. |
 | `appVersion` | `string?` | App version string reported to the server. Defaults to the OS-reported value. |
 
@@ -154,7 +154,7 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
 
     Rovenue.configure({
       apiKey: 'rov_pub_your_key_here',
-      baseUrl: 'https://edge.rovenue.app',
+      baseUrl: 'https://edge.rovenue.io',
     });
     ```
 
@@ -174,7 +174,7 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
       ) -> Bool {
         Rovenue.configure(
           apiKey: "rov_pub_your_key_here",
-          baseUrl: "https://edge.rovenue.app"
+          baseUrl: "https://edge.rovenue.io"
         )
         return true
       }
@@ -192,7 +192,7 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
       init() {
         Rovenue.configure(
           apiKey: "rov_pub_your_key_here",
-          baseUrl: "https://edge.rovenue.app"
+          baseUrl: "https://edge.rovenue.io"
         )
       }
 
@@ -215,7 +215,7 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
         Rovenue.configure(
           context = this,
           apiKey = "rov_pub_your_key_here",
-          baseUrl = "https://edge.rovenue.app"
+          baseUrl = "https://edge.rovenue.io"
         )
       }
     }

@@ -6,7 +6,7 @@ Pod::Spec.new do |s|
   s.name           = 'RovenueSdkRn'
   s.version        = package['version']
   s.summary        = 'Rovenue React Native SDK — Expo Module bridge'
-  s.homepage       = 'https://rovenue.dev'
+  s.homepage       = 'https://rovenue.io'
   s.license        = { :type => 'AGPL-3.0' }
   s.authors        = 'Rovenue'
   s.platforms      = { :ios => '13.0' }

@@ -32,7 +32,7 @@ registerAllIntentHandlers();
 // resulting `Hono<...>` type. That lets consumers do:
 //
 //   import type { AppType } from "@rovenue/api";
-//   const client = hc<AppType>("https://api.rovenue.com");
+//   const client = hc<AppType>("https://api.rovenue.io");
 //   const res = await client.v1.config.$get();
 //
 // Sub-route files (routes/v1/*.ts, routes/dashboard/*.ts) still use

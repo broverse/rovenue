@@ -7,7 +7,7 @@ final class RovenueTests: XCTestCase {
     // -----------------------------------------------------------------
 
     func test_getVersion_matchesCargoPkgVersion() throws {
-        let cfg = Config(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.dev", debug: false, appVersion: nil)
+        let cfg = Config(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.io", debug: false, appVersion: nil)
         let core = try RovenueCore(config: cfg)
         XCTAssertFalse(core.getVersion().isEmpty)
         // Both derive from the librovenue crate (workspace) version; asserting
@@ -17,7 +17,7 @@ final class RovenueTests: XCTestCase {
     }
 
     func test_invalidApiKey_throws_atGeneratedLayer() {
-        let cfg = Config(apiKey: "", baseUrl: "https://api.rovenue.dev", debug: false, appVersion: nil)
+        let cfg = Config(apiKey: "", baseUrl: "https://api.rovenue.io", debug: false, appVersion: nil)
         XCTAssertThrowsError(try RovenueCore(config: cfg)) { err in
             guard case RovenueError.InvalidApiKey = err else {
                 return XCTFail("expected InvalidApiKey, got \(err)")
@@ -40,19 +40,19 @@ final class RovenueTests: XCTestCase {
     }
 
     func test_facade_versionMatchesGenerated() throws {
-        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.dev")
+        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.io")
         XCTAssertEqual(Rovenue.shared.version, sdkVersion())
     }
 
     func test_facade_currentUserHasRovenueId() async throws {
-        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.dev")
+        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.io")
         let user = await Rovenue.shared.currentUser()
         XCTAssertTrue(user.rovenueId.hasPrefix("rov_"))
         XCTAssertNil(user.appUserId)
     }
 
     func test_facade_entitlementsEmpty() async throws {
-        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.dev")
+        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.io")
         let pro = await Rovenue.shared.entitlement("pro")
         XCTAssertNil(pro)
         let all = await Rovenue.shared.entitlementsAll()
@@ -60,13 +60,13 @@ final class RovenueTests: XCTestCase {
     }
 
     func test_facade_creditBalanceZeroByDefault() async throws {
-        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.dev")
+        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.io")
         let balance = await Rovenue.shared.creditBalance()
         XCTAssertEqual(balance, 0)
     }
 
     func test_facade_identifyEmitsChange() async throws {
-        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.dev")
+        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.io")
         let stream = Rovenue.shared.changes
         var iterator = stream.makeAsyncIterator()
         try await Rovenue.shared.identify("user_42")

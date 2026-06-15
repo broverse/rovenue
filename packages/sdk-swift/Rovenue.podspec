@@ -11,7 +11,7 @@ Pod::Spec.new do |s|
   s.name             = 'Rovenue'
   s.version          = '0.6.0'
   s.summary          = 'Rovenue Swift façade'
-  s.homepage         = 'https://rovenue.dev'
+  s.homepage         = 'https://rovenue.io'
   s.license          = { :type => 'AGPL-3.0' }
   s.authors          = 'Rovenue'
   s.platforms        = { :ios => '13.0' }

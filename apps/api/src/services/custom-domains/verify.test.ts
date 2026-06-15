@@ -42,6 +42,8 @@ describe("checkHostname", () => {
     "anything.rovenue.app",
     "rovenue.com",
     "rovenue.dev",
+    "rovenue.io",
+    "anything.rovenue.io",
     "foo.local",
   ])("rejects reserved hostname %s", (host) => {
     const result = checkHostname(host);
@@ -89,7 +91,7 @@ describe("verifyCustomDomain", () => {
 
   it("ok when CNAME comes back uppercased — resolver case is not significant", async () => {
     const probe = fakeProbe({
-      "1.1.1.1": { cnames: ["EDGE.ROVENUE.APP"], txt: [expectedTxt] },
+      "1.1.1.1": { cnames: ["EDGE.ROVENUE.IO"], txt: [expectedTxt] },
       "8.8.8.8": { cnames: [CANONICAL_EDGE_HOST], txt: [expectedTxt] },
     });
     // liveDnsProbe lowercases — emulate that here.

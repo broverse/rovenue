@@ -4,7 +4,7 @@
 #
 # Two terminate-and-proxy scopes:
 #
-#   1. Canonical surface — *.rovenue.app, rovenue.app, edge.rovenue.app
+#   1. Canonical surface — *.rovenue.io, rovenue.io, edge.rovenue.io
 #      → automatic HTTPS via standard ACME (no on-demand). The
 #      hostnames are known up front so Caddy can solicit certs at
 #      startup and renew on the normal schedule.
@@ -25,7 +25,7 @@
 #     port 3001 — only Caddy can reach it.
 
 {
-    email {$TLS_EMAIL:ops@rovenue.app}
+    email {$TLS_EMAIL:ops@rovenue.io}
 
     # Gate on-demand cert issuance through the api's ask-endpoint.
     on_demand_tls {
@@ -39,19 +39,19 @@
 
 # -------------------------------------------------------------
 # Dashboard SPA — explicit host, proxied to the static-serving
-# dashboard container. Must precede the *.rovenue.app wildcard
+# dashboard container. Must precede the *.rovenue.io wildcard
 # (which targets the api); most-specific host wins in Caddy.
 # -------------------------------------------------------------
-app.rovenue.app {
+app.rovenue.io {
 	encode zstd gzip
 	reverse_proxy dashboard:80
 }
 
 # -------------------------------------------------------------
 # Docs site — explicit host, proxied to the static-serving docs
-# container. Must precede the *.rovenue.app wildcard.
+# container. Must precede the *.rovenue.io wildcard.
 # -------------------------------------------------------------
-docs.rovenue.app {
+docs.rovenue.io {
 	encode zstd gzip
 	reverse_proxy docs:80
 }
@@ -59,7 +59,7 @@ docs.rovenue.app {
 # -------------------------------------------------------------
 # Canonical surface — explicit cert via standard ACME.
 # -------------------------------------------------------------
-rovenue.app, *.rovenue.app, edge.rovenue.app {
+rovenue.io, *.rovenue.io, edge.rovenue.io {
     encode zstd gzip
     reverse_proxy api:3000 {
         header_up X-Forwarded-Host {host}

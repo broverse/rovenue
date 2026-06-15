@@ -54,7 +54,7 @@ import { Rovenue } from '@rovenue/react-native-sdk';
 
 Rovenue.configure({
   apiKey: 'rov_pub_YOUR_API_KEY',
-  baseUrl: 'https://edge.rovenue.app',
+  baseUrl: 'https://edge.rovenue.io',
 });
 
 export default function App() {
@@ -68,7 +68,7 @@ export default function App() {
 ```ts
 type RovenueConfig = {
   apiKey: string;      // public SDK key — prefix rov_pub_
-  baseUrl: string;     // always https://edge.rovenue.app
+  baseUrl: string;     // always https://edge.rovenue.io
   debug?: boolean;     // verbose SDK logs (dev only)
   appVersion?: string; // override auto-detected version
 };
@@ -77,7 +77,7 @@ type RovenueConfig = {
 | Field | Type | Description |
 |-------|------|-------------|
 | `apiKey` | `string` | Public SDK key from your Rovenue dashboard. Prefix `rov_pub_`. |
-| `baseUrl` | `string` | Always `https://edge.rovenue.app` unless self-hosting. |
+| `baseUrl` | `string` | Always `https://edge.rovenue.io` unless self-hosting. |
 | `debug` | `boolean` | Enables verbose SDK logs. Do not ship enabled in production. |
 | `appVersion` | `string` | Overrides the version auto-read from the bundle. |
 

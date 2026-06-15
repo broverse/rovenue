@@ -17,7 +17,7 @@ Add the following to your `Package.swift`:
 ```swift
 import Rovenue
 
-Rovenue.configure(apiKey: "rov_pub_...", baseUrl: "https://edge.rovenue.app")
+Rovenue.configure(apiKey: "rov_pub_...", baseUrl: "https://edge.rovenue.io")
 
 let pro = await Rovenue.shared.entitlement("pro")
 if pro?.isActive == true { /* unlock features */ }
@@ -26,5 +26,5 @@ if pro?.isActive == true { /* unlock features */ }
 ## Documentation
 
 Full guides, API reference, and the identity & consent policy live at
-**https://docs.rovenue.app** — start with the
-[Quick Start](https://docs.rovenue.app/docs/getting-started/quickstart).
+**https://docs.rovenue.io** — start with the
+[Quick Start](https://docs.rovenue.io/docs/getting-started/quickstart).

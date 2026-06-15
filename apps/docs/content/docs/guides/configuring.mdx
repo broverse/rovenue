@@ -32,7 +32,7 @@ type RovenueConfig = {
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `apiKey` | `string` | Yes | Your **public** SDK key (`rov_pub_…`). Never use the secret key in the app. |
-| `baseUrl` | `string` | Yes | Your Rovenue API base URL (e.g. `https://edge.rovenue.app`). |
+| `baseUrl` | `string` | Yes | Your Rovenue API base URL (e.g. `https://edge.rovenue.io`). |
 | `debug` | `boolean` | No | When `true`, routes verbose logs to your log handler. Default `false`. |
 | `appVersion` | `string` | No | App version string. Auto-read from the platform manifest — only override for standalone JVM builds. |
 
@@ -47,7 +47,7 @@ type RovenueConfig = {
 
 ### Find your API key
 
-Open the [Rovenue dashboard](https://edge.rovenue.app), navigate to your
+Open the [Rovenue dashboard](https://edge.rovenue.io), navigate to your
 project, and copy the **public** SDK key. It starts with `rov_pub_`.
 
 <Callout type="warn">
@@ -70,7 +70,7 @@ Kotlin) at the very first line of your app's lifecycle hook.
 
     Rovenue.configure({
       apiKey: 'rov_pub_...',
-      baseUrl: 'https://edge.rovenue.app',
+      baseUrl: 'https://edge.rovenue.io',
       debug: true,       // optional — enables verbose logging in dev
       appVersion: '1.2', // optional — inferred from app.json by default
     });
@@ -83,7 +83,7 @@ Kotlin) at the very first line of your app's lifecycle hook.
     // AppDelegate.application(_:didFinishLaunchingWithOptions:)
     Rovenue.configure(
       apiKey: "rov_pub_...",
-      baseUrl: "https://edge.rovenue.app",
+      baseUrl: "https://edge.rovenue.io",
       debug: true,        // optional
       appVersion: "1.2"   // optional — inferred from CFBundleShortVersionString
     )
@@ -96,7 +96,7 @@ Kotlin) at the very first line of your app's lifecycle hook.
     // Application.onCreate()
     Rovenue.configure(
       apiKey = "rov_pub_...",
-      baseUrl = "https://edge.rovenue.app",
+      baseUrl = "https://edge.rovenue.io",
       debug = true,        // optional
       appVersion = "1.2",  // optional — inferred from versionName
     )

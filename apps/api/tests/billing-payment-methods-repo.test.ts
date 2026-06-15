@@ -26,7 +26,7 @@ async function setup() {
     .values({
       id: OWNER_ID,
       name: "Demo User",
-      email: "demo@rovenue.dev",
+      email: "demo@rovenue.io",
       emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),

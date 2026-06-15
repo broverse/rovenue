@@ -48,7 +48,7 @@ services:
       # Internal port serves the Caddy on-demand-TLS ask endpoint. NOT
       # published in `ports:` — only reachable inside the docker network.
       INTERNAL_PORT: 3001
-      CANONICAL_HOSTS: ${CANONICAL_HOSTS:-rovenue.app,edge.rovenue.app,app.rovenue.app}
+      CANONICAL_HOSTS: ${CANONICAL_HOSTS:-rovenue.io,edge.rovenue.io,app.rovenue.io}
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: rovenue_reader
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
@@ -92,7 +92,7 @@ services:
   caddy:
     image: caddy:2-alpine
     environment:
-      TLS_EMAIL: ${TLS_EMAIL:-ops@rovenue.app}
+      TLS_EMAIL: ${TLS_EMAIL:-ops@rovenue.io}
     ports:
       - "80:80"
       - "443:443"
@@ -111,7 +111,7 @@ services:
 
   # Dashboard SPA — built by apps/dashboard/Dockerfile, served as static
   # files by an in-image Caddy on :80. The edge Caddy proxies
-  # app.rovenue.app here. VITE_API_URL is baked at build time and must
+  # app.rovenue.io here. VITE_API_URL is baked at build time and must
   # point at the PUBLIC api origin (not the docker-internal name).
   dashboard:
     build:

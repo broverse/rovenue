@@ -9,7 +9,7 @@ WORKDIR /app
 
 # VITE_API_URL is inlined into the bundle at build time (Vite reads
 # import.meta.env.* during `vite build`). Override per environment:
-#   docker build --build-arg VITE_API_URL=https://rovenue.app ...
+#   docker build --build-arg VITE_API_URL=https://rovenue.io ...
 ARG VITE_API_URL=http://localhost:3000
 ENV VITE_API_URL=${VITE_API_URL}
 

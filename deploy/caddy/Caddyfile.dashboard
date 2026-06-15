@@ -1,6 +1,6 @@
 # Static file server for the built dashboard SPA. Baked into the
 # dashboard image and run on :80 inside the docker network; the edge
-# Caddy (deploy/caddy/Caddyfile) reverse-proxies app.rovenue.app here.
+# Caddy (deploy/caddy/Caddyfile) reverse-proxies app.rovenue.io here.
 :80 {
 	root * /srv
 	encode zstd gzip

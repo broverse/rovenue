@@ -17,7 +17,7 @@ final class AppVersionTests: XCTestCase {
         Rovenue._appVersionReaderForTesting = { "9.9.9-fake" }
         defer { Rovenue._appVersionReaderForTesting = nil }
 
-        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.dev")
+        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.io")
         XCTAssertEqual(Rovenue.shared.resolvedAppVersionForTesting, "9.9.9-fake")
     }
 
@@ -27,7 +27,7 @@ final class AppVersionTests: XCTestCase {
 
         try Rovenue.configure(
             apiKey: "pk_test_xyz",
-            baseUrl: "https://api.rovenue.dev",
+            baseUrl: "https://api.rovenue.io",
             appVersion: "1.2.3"
         )
         XCTAssertEqual(Rovenue.shared.resolvedAppVersionForTesting, "1.2.3")
@@ -37,7 +37,7 @@ final class AppVersionTests: XCTestCase {
         Rovenue._appVersionReaderForTesting = { nil }
         defer { Rovenue._appVersionReaderForTesting = nil }
 
-        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.dev")
+        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.io")
         XCTAssertNil(Rovenue.shared.resolvedAppVersionForTesting)
     }
 }

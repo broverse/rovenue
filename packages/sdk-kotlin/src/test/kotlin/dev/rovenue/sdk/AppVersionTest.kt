@@ -23,7 +23,7 @@ class AppVersionTest {
     fun `configure stores explicit appVersion`() {
         Rovenue.configure(
             apiKey = "pk_test_xyz",
-            baseUrl = "https://api.rovenue.dev",
+            baseUrl = "https://api.rovenue.io",
             appVersion = "4.5.6"
         )
         assertEquals("4.5.6", Rovenue.shared.resolvedAppVersionForTesting)
@@ -33,7 +33,7 @@ class AppVersionTest {
     fun `configure leaves appVersion null when omitted`() {
         Rovenue.configure(
             apiKey = "pk_test_xyz",
-            baseUrl = "https://api.rovenue.dev"
+            baseUrl = "https://api.rovenue.io"
         )
         assertNull(Rovenue.shared.resolvedAppVersionForTesting)
     }
@@ -42,12 +42,12 @@ class AppVersionTest {
     fun `configure twice with different versions uses the latest`() {
         Rovenue.configure(
             apiKey = "pk_test_xyz",
-            baseUrl = "https://api.rovenue.dev",
+            baseUrl = "https://api.rovenue.io",
             appVersion = "1.0.0"
         )
         Rovenue.configure(
             apiKey = "pk_test_xyz",
-            baseUrl = "https://api.rovenue.dev",
+            baseUrl = "https://api.rovenue.io",
             appVersion = "2.0.0"
         )
         assertEquals("2.0.0", Rovenue.shared.resolvedAppVersionForTesting)

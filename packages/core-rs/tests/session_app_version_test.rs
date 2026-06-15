@@ -78,7 +78,7 @@ fn dispatcher_serializes_empty_app_version_when_none() {
 fn config_accepts_optional_app_version() {
     let cfg = Config::new(
         "pk_test_abc".into(),
-        "https://api.rovenue.dev".into(),
+        "https://api.rovenue.io".into(),
     )
     .unwrap()
     .with_app_version(Some("4.5.6".into()));
