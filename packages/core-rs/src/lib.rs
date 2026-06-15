@@ -2,6 +2,7 @@
 #![allow(clippy::empty_line_after_doc_comments)]
 
 pub mod api;
+pub mod attributes;
 pub mod cache;
 pub mod config;
 pub mod credits;
