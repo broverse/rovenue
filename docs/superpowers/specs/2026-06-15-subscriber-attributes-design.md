@@ -50,10 +50,10 @@ This work turns attributes into a first-class, well-typed feature:
 - **Migration:** backfill existing flat rows to
   `{key: {value, updatedAt: <migration timestamp>, source: "legacy"}}`.
   Deletion (`null` value) removes the key entirely; we do not keep tombstones.
-  **Known limitation:** because deletes leave no tombstone, an out-of-order
-  flush carrying an older value for a just-deleted key can resurrect it (the
-  last-write-wins compare in §5 has nothing to compare against). Acceptable for
-  v1; revisit with soft-delete tombstones if it bites.
+  **Known limitation:** with last-flush-wins (§5) and no tombstones, a delete on
+  one device can be undone by a later flush from another device that still has
+  the old value queued — the later flush simply wins. Acceptable for v1; revisit
+  with soft-delete tombstones if it bites.
 - **Public contract unchanged:** every outward-facing surface (SDK, `/me`,
   offerings, dashboard API) continues to return/accept flat `{key: value}`. The
   nested shape is internal storage only.
@@ -120,25 +120,24 @@ Behavior:
 
 - `source` = `"sdk"` for `/me/*` and `:appUserId/*`; dashboard writes (future)
   use `"dashboard"`.
-- **Conflict resolution:** the SDK may send a per-attribute `updatedAt` (the
-  client time the attribute was set). The server writes only if incoming
-  `updatedAt` > stored `updatedAt` (true per-key last-write-wins). To avoid
-  expanding the body shape, `updatedAt` is accepted as optional per-key meta;
-  if absent the server uses `now`.
+- **`updatedAt` is server-only.** Clients never send it. On every write the
+  server stamps each touched key with `updatedAt: now`. The body carries only
+  `{key: value|null}` — never timestamps or `source`.
+- **Conflict resolution:** per-key **last flush to reach the server wins**. Each
+  key is applied independently and re-stamped with the server `now`; there is no
+  client-clock comparison. (We deliberately trade strict client-set-order LWW
+  for simplicity and trust — client clocks are not authoritative.)
 
-### Body shape (with optional meta)
+### Body shape
 
-Accept both the simple form and the meta form:
+Single form only:
 
 ```jsonc
-// simple
 { "attributes": { "$email": "a@b.com", "favoriteTeam": null } }
-
-// with client timestamps (SDK flush)
-{ "attributes": { "$email": { "value": "a@b.com", "updatedAt": "..." } } }
 ```
 
-The validator normalizes both into `{key -> {value, updatedAt?}}` before applying.
+The validator normalizes to `{key -> value|null}`; the route adds
+`updatedAt: now` and `source` server-side before applying.
 
 ## 6. SDK surface (4 layers)
 
@@ -170,8 +169,9 @@ Reference infra: `packages/core-rs/src/sessions/{buffer,dispatcher}.rs`,
   (b) app background, (c) after `identify()`, (d) before purchase,
   (e) manual `flushAttributes()`.
 - **Flush:** if a subscriber id is present, batch dirty mutations to
-  `POST /v1/me/attributes` (sending per-key `updatedAt`); on success clear dirty,
-  on failure leave queued for retry.
+  `POST /v1/me/attributes` (key→value only — no timestamps); on success clear
+  dirty, on failure leave queued for retry. The local `updatedAt` column is used
+  only to order the SDK's own queue, never sent to the server.
 - **logout:** dirty attribute queue is `clear()`-ed, like the session buffer.
 
 ## 8. Testing & observability
