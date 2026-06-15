@@ -24,7 +24,7 @@ final class ConfigurationTests: XCTestCase {
 
     func test_configure_succeedsWithValidConfig() throws {
         try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.dev")
-        XCTAssertEqual(Rovenue.shared.version, "0.7.0")
+        XCTAssertEqual(Rovenue.shared.version, sdkVersion())
     }
 
     func test_configureTwice_lastWriteWins() throws {

@@ -10,7 +10,10 @@ final class RovenueTests: XCTestCase {
         let cfg = Config(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.dev", debug: false, appVersion: nil)
         let core = try RovenueCore(config: cfg)
         XCTAssertFalse(core.getVersion().isEmpty)
-        XCTAssertEqual(core.getVersion(), "0.7.0")
+        // Both derive from the librovenue crate (workspace) version; asserting
+        // their equality tracks the source of truth without hardcoding a literal
+        // that drifts on every version bump.
+        XCTAssertEqual(sdkVersion(), core.getVersion())
     }
 
     func test_invalidApiKey_throws_atGeneratedLayer() {
@@ -23,7 +26,7 @@ final class RovenueTests: XCTestCase {
     }
 
     func test_sdkVersionFreeFunction() {
-        XCTAssertEqual(sdkVersion(), "0.7.0")
+        XCTAssertFalse(sdkVersion().isEmpty)
     }
 
     // -----------------------------------------------------------------
