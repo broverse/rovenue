@@ -15,10 +15,19 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import dev.rovenue.sdk.LogEntry
+import dev.rovenue.sdk.Offerings
+import dev.rovenue.sdk.ProductNotAvailableException
+import dev.rovenue.sdk.ProductType
+import dev.rovenue.sdk.PurchaseCancelledException
+import dev.rovenue.sdk.PurchasePendingException
+import dev.rovenue.sdk.PurchaseResult
 import dev.rovenue.sdk.Rovenue
+import dev.rovenue.sdk.StoreProblemException
+import dev.rovenue.sdk.StoreProduct
 import dev.rovenue.sdk.generated.ChangeEvent
 import dev.rovenue.sdk.generated.Entitlement
 import dev.rovenue.sdk.generated.SessionEventKind
+import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import kotlinx.coroutines.CoroutineScope
@@ -45,7 +54,14 @@ class RovenueModule : Module() {
         // versionName); for bare RN it's the host project's gradle config.
         Function("configure") { apiKey: String, baseUrl: String, debug: Boolean, appVersion: String? ->
             val resolved = appVersion ?: readPackageVersionName()
-            Rovenue.configure(apiKey, baseUrl, debug, resolved)
+            // The M4 Kotlin façade needs a Context to drive Play Billing.
+            Rovenue.configure(
+                apiKey = apiKey,
+                baseUrl = baseUrl,
+                debug = debug,
+                appVersion = resolved,
+                context = appContext.reactContext?.applicationContext,
+            )
         }
         Function("shutdown") { Rovenue.shared.shutdown() }
         Function("setForeground") { foreground: Boolean ->
@@ -77,13 +93,40 @@ class RovenueModule : Module() {
         AsyncFunction("consumeCredits") Coroutine { amount: Double, description: String? ->
             Rovenue.shared.consumeCredits(amount.toLong(), description).toDouble()
         }
-        AsyncFunction("postAppleReceipt") Coroutine { jws: String, productId: String, appAccountToken: String? ->
-            Rovenue.shared.postAppleReceipt(jws, productId, appAccountToken)
-            mapOf("ok" to true, "entitlementsRefreshed" to true, "creditsRefreshed" to true)
+        // ---------------- Purchases ----------------
+        AsyncFunction("getOfferings") Coroutine { ->
+            try {
+                dtoFromOfferings(Rovenue.shared.getOfferings())
+            } catch (e: Throwable) {
+                throw codedError(e)
+            }
         }
-        AsyncFunction("postGoogleReceipt") Coroutine { receipt: String, productId: String, obfAccount: String?, obfProfile: String? ->
-            Rovenue.shared.postGoogleReceipt(receipt, productId, obfAccount, obfProfile)
-            mapOf("ok" to true, "entitlementsRefreshed" to true, "creditsRefreshed" to true)
+        AsyncFunction("purchase") Coroutine { productId: String, productType: String ->
+            // Play Billing needs the foreground Activity to launch the flow.
+            val activity = appContext.currentActivity
+                ?: throw StoreProblemCodedException("No foreground Activity available for purchase")
+            // JS sends the lowercase DTO string; reconstruct the façade enum.
+            // The façade re-resolves the real Play product by id, so
+            // displayName/price are not needed here.
+            val product = StoreProduct(
+                id = productId,
+                type = productTypeFrom(productType),
+                displayName = "",
+            )
+            try {
+                dtoFromPurchaseResult(Rovenue.shared.purchase(activity, product))
+            } catch (e: Throwable) {
+                throw codedError(e)
+            }
+        }
+        AsyncFunction("restorePurchases") Coroutine { ->
+            val activity = appContext.currentActivity
+                ?: throw StoreProblemCodedException("No foreground Activity available for restore")
+            try {
+                dtoFromPurchaseResult(Rovenue.shared.restorePurchases(activity))
+            } catch (e: Throwable) {
+                throw codedError(e)
+            }
         }
 
         // ---------------- Refund Shield ----------------
@@ -135,6 +178,71 @@ class RovenueModule : Module() {
         "productId" to e.productIdentifier,
     )
 
+    // ---------------- Purchase DTO encoders ----------------
+
+    /** Façade [ProductType] enum → lowercase DTO string (OUTBOUND). */
+    private fun productTypeString(t: ProductType): String = when (t) {
+        ProductType.SUBSCRIPTION    -> "subscription"
+        ProductType.CONSUMABLE      -> "consumable"
+        ProductType.NON_CONSUMABLE  -> "non_consumable"
+    }
+
+    /**
+     * Lowercase DTO string → façade [ProductType] enum (INBOUND). Unknown
+     * values default to SUBSCRIPTION (mirrors the façade's safest assumption).
+     */
+    private fun productTypeFrom(raw: String): ProductType = when (raw) {
+        "consumable"     -> ProductType.CONSUMABLE
+        "non_consumable" -> ProductType.NON_CONSUMABLE
+        else             -> ProductType.SUBSCRIPTION
+    }
+
+    private fun dtoFromStoreProduct(p: StoreProduct): Map<String, Any?> = mapOf(
+        "id"           to p.id,
+        "type"         to productTypeString(p.type),
+        "displayName"  to p.displayName,
+        "priceString"  to p.priceString,
+        "price"        to p.price,
+        "currencyCode" to p.currencyCode,
+    )
+
+    private fun dtoFromOfferings(o: Offerings): Map<String, Any?> = mapOf(
+        "current" to o.current?.identifier,
+        "offerings" to o.all.values.map { off ->
+            mapOf(
+                "identifier" to off.identifier,
+                "isDefault"  to off.isDefault,
+                "packages"   to off.packages.map { pkg ->
+                    mapOf(
+                        "identifier" to pkg.identifier,
+                        "product"    to dtoFromStoreProduct(pkg.product),
+                    )
+                },
+            )
+        },
+    )
+
+    private fun dtoFromPurchaseResult(r: PurchaseResult): Map<String, Any?> = mapOf(
+        "entitlements"      to r.entitlements.map(::dtoFromEntitlement),
+        "creditBalance"     to r.creditBalance.toDouble(),
+        "productId"         to r.productId,
+        "storeTransactionId" to r.storeTransactionId,
+    )
+
+    /**
+     * Map the four façade purchase exceptions to Expo coded exceptions whose
+     * `code` matches the RN `mapNativeError` switch in
+     * packages/sdk-rn/src/errors.ts. Anything else is rethrown unchanged so
+     * Expo surfaces its default code/message.
+     */
+    private fun codedError(e: Throwable): Throwable = when (e) {
+        is PurchaseCancelledException   -> PurchaseCancelledCodedException(e.message)
+        is PurchasePendingException     -> PurchasePendingCodedException(e.message)
+        is ProductNotAvailableException -> ProductNotAvailableCodedException(e.message)
+        is StoreProblemException        -> StoreProblemCodedException(e.message)
+        else                            -> e
+    }
+
     /**
      * Reads the host app's `versionName` from its installed PackageInfo.
      * Returns null if the context isn't available (module instantiated
@@ -163,3 +271,18 @@ class RovenueModule : Module() {
         }
     }
 }
+
+// Expo coded exceptions for the Play Billing purchase flow. The explicit
+// `code` surfaces to JS unchanged and is matched by `mapNativeError` in
+// packages/sdk-rn/src/errors.ts.
+private class PurchaseCancelledCodedException(message: String?) :
+    CodedException("PurchaseCancelled", message ?: "The purchase was cancelled", null)
+
+private class PurchasePendingCodedException(message: String?) :
+    CodedException("PurchasePending", message ?: "The purchase is pending", null)
+
+private class ProductNotAvailableCodedException(message: String?) :
+    CodedException("ProductNotAvailable", message ?: "The product is not available", null)
+
+private class StoreProblemCodedException(message: String?) :
+    CodedException("StoreProblem", message ?: "A store error occurred", null)

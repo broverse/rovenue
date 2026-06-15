@@ -11,6 +11,34 @@
 import ExpoModulesCore
 import Rovenue
 
+// Expo coded exceptions for the StoreKit purchase flow. The `code` of each
+// surfaces to JS unchanged and is matched by `mapNativeError` in
+// packages/sdk-rn/src/errors.ts.
+final class PurchaseCancelledException: Exception {
+    private let _reason: String
+    init(_ reason: String) { _reason = reason; super.init() }
+    override var code: String { "PurchaseCancelled" }
+    override var reason: String { _reason }
+}
+final class PurchasePendingException: Exception {
+    private let _reason: String
+    init(_ reason: String) { _reason = reason; super.init() }
+    override var code: String { "PurchasePending" }
+    override var reason: String { _reason }
+}
+final class ProductNotAvailableException: Exception {
+    private let _reason: String
+    init(_ reason: String) { _reason = reason; super.init() }
+    override var code: String { "ProductNotAvailable" }
+    override var reason: String { _reason }
+}
+final class StoreProblemException: Exception {
+    private let _reason: String
+    init(_ reason: String) { _reason = reason; super.init() }
+    override var code: String { "StoreProblem" }
+    override var reason: String { _reason }
+}
+
 public class RovenueModule: Module {
     private var changesTask: Task<Void, Never>?
     private var logUnsubscribe: (() -> Void)?
@@ -65,24 +93,51 @@ public class RovenueModule: Module {
             let b = try await Rovenue.shared.consumeCredits(Int64(amount), description: description)
             return Double(b)
         }
-        AsyncFunction("postAppleReceipt") { (jws: String, productId: String, appAccountToken: String?) -> [String: Any?] in
-            _ = try await Rovenue.shared.postAppleReceipt(
-                jws,
-                productId: productId,
-                appAccountToken: appAccountToken
-            )
-            // M3 only resolves on success and guarantees both caches refreshed.
-            return ["ok": true, "entitlementsRefreshed": true, "creditsRefreshed": true]
+        // ---------------- Purchases ----------------
+        //
+        // StoreKit-backed, so gated on iOS 15 / macOS 12 to mirror the
+        // Swift façade's `@available`. On older OS versions these reject
+        // with a `StoreProblem` coded error rather than crashing.
+        AsyncFunction("getOfferings") { () -> [String: Any] in
+            guard #available(iOS 15.0, macOS 12.0, *) else {
+                throw StoreProblemException("Offerings require iOS 15 / macOS 12 or newer")
+            }
+            do {
+                let o = try await Rovenue.shared.getOfferings()
+                return Self.dtoFromOfferings(o)
+            } catch let e as Rovenue.Error {
+                throw Self.codedError(for: e)
+            }
         }
-        AsyncFunction("postGoogleReceipt") { (receipt: String, productId: String, obfAccount: String?, obfProfile: String?) -> [String: Any?] in
-            // On iOS this is unreachable but kept for surface parity.
-            _ = try await Rovenue.shared.postGoogleReceipt(
-                receipt,
-                productId: productId,
-                obfuscatedAccountId: obfAccount,
-                obfuscatedProfileId: obfProfile
+        AsyncFunction("purchase") { (productId: String, productType: String) -> [String: Any?] in
+            guard #available(iOS 15.0, macOS 12.0, *) else {
+                throw StoreProblemException("Purchases require iOS 15 / macOS 12 or newer")
+            }
+            // JS sends the lowercase DTO string; reconstruct the façade
+            // enum. The façade re-resolves the real StoreKit product by
+            // id, so displayName/price are not needed here.
+            let product = StoreProduct(
+                id: productId,
+                type: Self.productType(from: productType),
+                displayName: ""
             )
-            return ["ok": true, "entitlementsRefreshed": true, "creditsRefreshed": true]
+            do {
+                let r = try await Rovenue.shared.purchase(product)
+                return Self.dtoFromPurchaseResult(r)
+            } catch let e as Rovenue.Error {
+                throw Self.codedError(for: e)
+            }
+        }
+        AsyncFunction("restorePurchases") { () -> [String: Any?] in
+            guard #available(iOS 15.0, macOS 12.0, *) else {
+                throw StoreProblemException("Restore requires iOS 15 / macOS 12 or newer")
+            }
+            do {
+                let r = try await Rovenue.shared.restorePurchases()
+                return Self.dtoFromPurchaseResult(r)
+            } catch let e as Rovenue.Error {
+                throw Self.codedError(for: e)
+            }
         }
 
         // ---------------- Refund Shield ----------------
@@ -141,6 +196,84 @@ public class RovenueModule: Module {
             "expiresAt": e.expiresIso as Any?,
             "productId": e.productIdentifier,
         ]
+    }
+
+    // ---------------- Purchase DTO encoders ----------------
+
+    /// Façade `ProductType` enum → lowercase DTO string (OUTBOUND).
+    private static func productTypeString(_ t: ProductType) -> String {
+        switch t {
+        case .subscription:   return "subscription"
+        case .consumable:     return "consumable"
+        case .nonConsumable:  return "non_consumable"
+        }
+    }
+
+    /// Lowercase DTO string → façade `ProductType` enum (INBOUND).
+    /// Unknown values default to `.subscription` (mirrors the core's
+    /// safest-assumption behaviour for product types).
+    private static func productType(from raw: String) -> ProductType {
+        switch raw {
+        case "consumable":      return .consumable
+        case "non_consumable":  return .nonConsumable
+        default:                return .subscription
+        }
+    }
+
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func dtoFromStoreProduct(_ p: StoreProduct) -> [String: Any] {
+        [
+            "id": p.id,
+            "type": productTypeString(p.type),
+            "displayName": p.displayName,
+            "priceString": p.priceString as Any,
+            // Decimal → Double for the JS number bridge; NSNull when absent.
+            "price": p.price.map { NSDecimalNumber(decimal: $0).doubleValue } as Any,
+            "currencyCode": p.currencyCode as Any,
+        ]
+    }
+
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func dtoFromOfferings(_ o: Offerings) -> [String: Any] {
+        let offerings: [[String: Any]] = o.all.values.map { off in
+            [
+                "identifier": off.identifier,
+                "isDefault": off.isDefault,
+                "packages": off.packages.map { pkg in
+                    [
+                        "identifier": pkg.identifier,
+                        "product": dtoFromStoreProduct(pkg.product),
+                    ] as [String: Any]
+                },
+            ]
+        }
+        return [
+            "current": o.current?.identifier as Any,
+            "offerings": offerings,
+        ]
+    }
+
+    private static func dtoFromPurchaseResult(_ r: PurchaseResult) -> [String: Any?] {
+        [
+            "entitlements": r.entitlements.map(dtoFromEntitlement),
+            "creditBalance": Double(r.creditBalance),
+            "productId": r.productId,
+            "storeTransactionId": r.storeTransactionId,
+        ]
+    }
+
+    /// Map the four Swift purchase-flow errors to Expo coded exceptions whose
+    /// `code` matches the RN `mapNativeError` switch. Any other `Rovenue.Error`
+    /// is rethrown unchanged (Expo surfaces its default code/message).
+    private static func codedError(for e: Rovenue.Error) -> Exception {
+        let message = e.errorDescription ?? "purchase error"
+        switch e {
+        case .purchaseCancelled:    return PurchaseCancelledException(message)
+        case .purchasePending:      return PurchasePendingException(message)
+        case .productNotAvailable:  return ProductNotAvailableException(message)
+        case .storeProblem:         return StoreProblemException(message)
+        default:                    return StoreProblemException(message)
+        }
     }
     private static func eventName(_ event: ChangeEvent) -> String {
         switch event {
