@@ -252,6 +252,36 @@ export async function claimPendingWebhooks(
   return (result as unknown as { rows: PendingWebhookRow[] }).rows ?? [];
 }
 
+// Webhooks claimed but not resolved within this window are assumed
+// orphaned (the worker that claimed them crashed mid-delivery) and
+// are reset to PENDING for re-claim. Must exceed the per-attempt HTTP
+// timeout (10s) plus normal batch processing time by a wide margin.
+const CLAIM_LEASE_MS = 5 * 60_000;
+
+/**
+ * Reclaim stale DELIVERING rows. If a worker crashes between flipping
+ * a row to DELIVERING and writing its delivery result, the row would
+ * otherwise be stuck DELIVERING forever (invisible to claim queries).
+ * Reset any DELIVERING row whose claimedAt is older than the lease
+ * window back to PENDING (clearing claimedAt) so a healthy worker
+ * picks it up. Returns the number of rows reclaimed.
+ *
+ * Called at the top of each delivery tick; cheap when nothing is
+ * stale (indexed status predicate, empty result set).
+ */
+export async function reclaimStaleDeliveries(
+  db: DbOrTx,
+  now: Date,
+): Promise<number> {
+  const cutoff = new Date(now.getTime() - CLAIM_LEASE_MS);
+  const result = await db.execute(sql`
+    UPDATE ${outgoingWebhooks}
+    SET status = 'PENDING', "claimedAt" = NULL
+    WHERE status = 'DELIVERING' AND "claimedAt" < ${cutoff}
+  `);
+  return (result as unknown as { rowCount?: number }).rowCount ?? 0;
+}
+
 export interface EnqueueOutgoingWebhookInput {
   projectId: string;
   eventType: string;

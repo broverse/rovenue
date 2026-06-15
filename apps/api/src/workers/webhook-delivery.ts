@@ -45,10 +45,21 @@ export async function deliverWebhooks(
 ): Promise<{ delivered: number; failed: number; dead: number }> {
   const now = new Date();
 
-  // `FOR UPDATE SKIP LOCKED` prevents two replicas from grabbing
-  // the same row. Falls back silently on backends that don't
-  // support it (e.g. SQLite); tests mock the repo method so the
-  // raw query path is only hit in real Postgres deploys.
+  // Reclaim deliveries orphaned by a crashed worker (stuck DELIVERING
+  // past the lease window) before claiming, so they re-enter the
+  // PENDING pool instead of being lost.
+  const reclaimed = await drizzle.outgoingWebhookRepo.reclaimStaleDeliveries(
+    drizzle.db,
+    now,
+  );
+  if (reclaimed > 0) {
+    log.warn("reclaimed stale webhook deliveries", { count: reclaimed });
+  }
+
+  // The atomic status-flip claim (DELIVERING + claimedAt under
+  // `FOR UPDATE SKIP LOCKED`) prevents two replicas from grabbing the
+  // same row. Requires real Postgres MVCC; tests mock the repo method
+  // so the raw query path is only hit in real deploys.
   const pending = (await drizzle.outgoingWebhookRepo.claimPendingWebhooks(
     drizzle.db,
     now,
