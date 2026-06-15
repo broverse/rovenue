@@ -31,6 +31,39 @@ cross-cutting (Swift, Kotlin, Rust, RN, API, docs).
 4. **`restorePurchases()`** is included.
 5. **finish-only-after-validation** rule and a **background transaction listener**
    are both included (correctness; avoids lost purchases).
+6. **Android hosting (added during plan):** `sdk-kotlin` is converted from a
+   pure-JVM library to an Android library (`com.android.library`, `minSdk`, Play
+   Billing 6 dependency) so it can host the billing flow (needs an `Activity`).
+   Both standalone Android apps and the RN Android module consume it.
+7. **Scope (added during plan):** This plan covers **all SDKs end-to-end** —
+   backend gap, Rust core, Swift (standalone + RN iOS), Kotlin/Android (standalone +
+   RN Android), the RN/TS surface, and docs.
+
+## Backend status (discovered during planning)
+
+Most of the backend already exists and need not be rebuilt:
+- `GET /v1/offerings` and `GET /v1/offerings/:identifier` exist
+  (`apps/api/src/routes/v1/offerings.ts`), the latter with OFFERING-experiment
+  override support.
+- `POST /v1/receipts/apple` and `POST /v1/receipts/google` exist and verify +
+  grant.
+- `offeringRepo` (`packages/db/src/drizzle/repositories/offerings.ts`) covers all
+  reads.
+
+**The only backend gap:** the `/v1/offerings/:identifier` product payload returns
+`identifier / type / displayName / creditAmount / accessIds / metadata` but **not
+`storeIds`** (the `{ apple, google }` store product ids). The SDK needs `storeIds`
+to query StoreKit / Play for live pricing. Phase 1 adds that field.
+
+## iOS vs Android hosting (discovered during planning)
+
+- **iOS:** StoreKit 2 lives in the `sdk-swift` package (targets iOS 15). The RN iOS
+  module (`packages/sdk-rn/ios/RovenueModule.swift`) wraps the Swift façade, so RN
+  iOS inherits it — no duplication.
+- **Android:** Play Billing lives in `sdk-kotlin` after its conversion to an Android
+  library (decision #6). The RN Android module
+  (`packages/sdk-rn/android/.../RovenueModule.kt`) already wraps the Kotlin façade,
+  so RN Android inherits it.
 
 ## Data model (already in place — no schema change)
 
@@ -148,11 +181,13 @@ New endpoint **`GET /v1/offerings`** (public API key / Bearer auth):
 }}
 ```
 
-Flow: `getOfferings()` → core fetches/caches this JSON (ETag, same pattern as
-entitlements) → native layer queries StoreKit / Play for each platform `storeId` to
-fill live price → returns merged `Offerings`. `current` = the offering with
-`isDefault = true`. Offline: serve cached offering config; live price may be stale
-or absent (`StoreProduct` price fields nullable in that case).
+Flow: `getOfferings()` → core does a **live fetch** of this JSON → native layer
+queries StoreKit / Play for each platform `storeId` to fill live price → returns
+merged `Offerings`. `current` = the offering with `isDefault = true`. A persistent
+offline offerings cache is **deferred** (follow-up); v1 fetches live each call
+(offerings are read rarely, at paywall-display time) and surfaces a network error
+if offline. Live price fields on `StoreProduct` are nullable when the store query
+can't run.
 
 Experiment- / placement-driven offering overrides are **out of scope** (YAGNI);
 Rovenue's `experiments` table can drive `current` selection in a later iteration.
