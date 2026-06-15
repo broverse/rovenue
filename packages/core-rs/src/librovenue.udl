@@ -54,6 +54,7 @@ dictionary ReceiptResult {
     string subscriber_id;
     string app_user_id;
     i64 credit_balance;
+    sequence<Entitlement> entitlements;
 };
 
 dictionary CoreOfferingProduct {

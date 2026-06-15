@@ -1,4 +1,8 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
+
+use crate::entitlements::types::{Entitlement, EntitlementWire};
 
 /// Body of POST /v1/receipts/{apple|google}.
 #[derive(Debug, Serialize)]
@@ -32,6 +36,10 @@ pub struct ReceiptBody<'a> {
 pub struct ReceiptResponse {
     pub subscriber: ReceiptSubscriber,
     pub credits: ReceiptCredits,
+    /// Entitlement access map. `None` when the server omits the field entirely
+    /// (pre-0.7 API); `Some({})` means the subscriber genuinely has none.
+    #[serde(default)]
+    pub access: Option<HashMap<String, EntitlementWire>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,12 +54,23 @@ pub struct ReceiptCredits {
     pub balance: i64,
 }
 
-/// FFI-visible projection. The server's `access` field is dropped here — callers
-/// should call `entitlements_all()` to read the cache; we refresh entitlements +
-/// emit the observer instead of duplicating the access map onto the receipt struct.
+/// Internal result of a receipt POST, carrying the raw access map so the core
+/// can hydrate the cache without a follow-up GET. Not exposed across FFI.
+#[derive(Debug)]
+pub struct ReceiptPostOutcome {
+    pub subscriber_id: String,
+    pub app_user_id: String,
+    pub credit_balance: i64,
+    pub access: Option<HashMap<String, EntitlementWire>>,
+}
+
+/// FFI-visible result of a successful receipt post. Entitlements + balance are
+/// taken from the POST response (the core hydrates the cache from it), so the
+/// façade builds its public PurchaseResult without any follow-up GET.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReceiptResult {
     pub subscriber_id: String,
     pub app_user_id: String,
     pub credit_balance: i64,
+    pub entitlements: Vec<Entitlement>,
 }

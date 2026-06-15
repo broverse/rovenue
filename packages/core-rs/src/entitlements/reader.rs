@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::cache::entitlements::EntitlementsRepo;
@@ -12,7 +14,7 @@ use crate::transport::http_client::HttpClient;
 use crate::transport::types::HttpRequest;
 
 use super::api::map_to_rows;
-use super::types::{Entitlement, EntitlementsResponse};
+use super::types::{Entitlement, EntitlementWire, EntitlementsResponse};
 
 const RESOURCE: &str = "entitlements";
 
@@ -22,6 +24,9 @@ pub struct EntitlementReader {
     http: Option<Arc<HttpClient>>,
     bus: Option<Arc<ObserverBus>>,
     clock: Option<Arc<dyn Clock>>,
+    last_refresh_ms: AtomicU64,
+    #[allow(dead_code)]
+    refreshing: AtomicBool,
 }
 
 impl EntitlementReader {
@@ -32,6 +37,8 @@ impl EntitlementReader {
             http: None,
             bus: None,
             clock: None,
+            last_refresh_ms: AtomicU64::new(0),
+            refreshing: AtomicBool::new(false),
         }
     }
 
@@ -90,6 +97,24 @@ impl EntitlementReader {
         if let Some(etag) = resp.etag {
             etag_repo.put(RESOURCE, &etag, now)?;
         }
+        self.last_refresh_ms.store(now, Ordering::Relaxed);
+        if let Some(bus) = &self.bus {
+            bus.emit(ChangeEvent::EntitlementsChanged);
+        }
+        Ok(())
+    }
+
+    /// Write entitlements straight from an in-memory access map (e.g. a receipt
+    /// POST response) — no network. Stamps freshness and emits the observer.
+    pub fn hydrate(
+        &self,
+        scope: &str,
+        map: HashMap<String, EntitlementWire>,
+        now: u64,
+    ) -> RovenueResult<()> {
+        let rows = map_to_rows(map, now);
+        EntitlementsRepo::new(&self.store).upsert_many(scope, &rows)?;
+        self.last_refresh_ms.store(now, Ordering::Relaxed);
         if let Some(bus) = &self.bus {
             bus.emit(ChangeEvent::EntitlementsChanged);
         }

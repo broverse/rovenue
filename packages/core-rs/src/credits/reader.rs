@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::cache::credits::{CreditBalanceRepo, CreditBalanceRow};
@@ -18,6 +19,9 @@ pub struct CreditReader {
     http: Option<Arc<HttpClient>>,
     bus: Option<Arc<ObserverBus>>,
     clock: Option<Arc<dyn Clock>>,
+    last_refresh_ms: AtomicU64,
+    #[allow(dead_code)]
+    refreshing: AtomicBool,
 }
 
 impl CreditReader {
@@ -28,6 +32,8 @@ impl CreditReader {
             http: None,
             bus: None,
             clock: None,
+            last_refresh_ms: AtomicU64::new(0),
+            refreshing: AtomicBool::new(false),
         }
     }
     pub fn with_http(mut self, http: Arc<HttpClient>) -> Self {
@@ -84,6 +90,14 @@ impl CreditReader {
         let new_balance = body.data.balance;
         self.store_and_emit(&scope, new_balance, clock.now_unix_ms())?;
         Ok(new_balance)
+    }
+
+    /// Set the balance straight from a known value (e.g. a receipt POST
+    /// response) — no network. Stamps freshness and emits on change.
+    pub fn set_balance(&self, scope: &str, balance: i64, now: u64) -> RovenueResult<()> {
+        self.store_and_emit(scope, balance, now)?;
+        self.last_refresh_ms.store(now, Ordering::Relaxed);
+        Ok(())
     }
 
     fn store_and_emit(&self, scope: &str, balance: i64, now: u64) -> RovenueResult<()> {

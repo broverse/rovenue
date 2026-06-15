@@ -15,6 +15,7 @@ use crate::observer::{Observer, ObserverBus};
 use crate::offerings::{CoreOfferings, OfferingsClient};
 use crate::polling::PollingScheduler;
 use crate::receipts::{ReceiptClient, ReceiptResult};
+use crate::receipts::types::ReceiptPostOutcome;
 use crate::sessions::{AccountTokenStore, SessionBuffer, SessionDispatcher, SessionEventKind};
 use crate::time::{Clock, SystemClock};
 use crate::transport::http_client::HttpClient;
@@ -39,6 +40,7 @@ pub struct RovenueCore {
     attribute_dispatcher: Arc<AttributeDispatcher>,
     scheduler: PollingScheduler,
     store: Arc<CacheStore>,
+    clock: Arc<dyn Clock>,
 }
 
 impl RovenueCore {
@@ -156,6 +158,7 @@ impl RovenueCore {
             attribute_dispatcher,
             scheduler,
             store: store_for_self,
+            clock: Arc::clone(&clock),
         };
         // No synchronous startup reconcile: it would block configure() on the
         // network, and spawning it on a thread races a concurrent identify()
@@ -292,16 +295,14 @@ impl RovenueCore {
     ) -> RovenueResult<ReceiptResult> {
         let scope = self.identity.current_user_scope();
         let key = IdempotencyKey::for_receipt("apple", &receipt);
-        let result = self.receipts.post_apple(
+        let outcome = self.receipts.post_apple(
             &receipt,
             &scope,
             &product_id,
             key.as_str(),
             app_account_token.as_deref(),
         )?;
-        let _ = self.entitlements.refresh();
-        let _ = self.credits.refresh();
-        Ok(result)
+        Ok(self.finish_receipt(&scope, outcome))
     }
 
     pub fn post_google_receipt(
@@ -313,7 +314,7 @@ impl RovenueCore {
     ) -> RovenueResult<ReceiptResult> {
         let scope = self.identity.current_user_scope();
         let key = IdempotencyKey::for_receipt("google", &receipt);
-        let result = self.receipts.post_google(
+        let outcome = self.receipts.post_google(
             &receipt,
             &scope,
             &product_id,
@@ -321,9 +322,29 @@ impl RovenueCore {
             obfuscated_account_id.as_deref(),
             obfuscated_profile_id.as_deref(),
         )?;
-        let _ = self.entitlements.refresh();
-        let _ = self.credits.refresh();
-        Ok(result)
+        Ok(self.finish_receipt(&scope, outcome))
+    }
+
+    /// Hydrate entitlement + credit caches from a receipt POST response and
+    /// build the FFI result — no follow-up GETs. Falls back to a GET refresh
+    /// only when an older server omitted `access` entirely.
+    fn finish_receipt(&self, scope: &str, outcome: ReceiptPostOutcome) -> ReceiptResult {
+        let now = self.clock.now_unix_ms();
+        match outcome.access {
+            Some(access) => {
+                let _ = self.entitlements.hydrate(scope, access, now);
+            }
+            None => {
+                let _ = self.entitlements.refresh();
+            }
+        }
+        let _ = self.credits.set_balance(scope, outcome.credit_balance, now);
+        ReceiptResult {
+            subscriber_id: outcome.subscriber_id,
+            app_user_id: outcome.app_user_id,
+            credit_balance: outcome.credit_balance,
+            entitlements: self.entitlements.list_all().unwrap_or_default(),
+        }
     }
 
     pub fn record_session_event(
@@ -436,4 +457,93 @@ fn dirs_path() -> Option<PathBuf> {
             pb.push("rovenue");
             pb
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    fn make_core(base_url: &str) -> RovenueCore {
+        let config = Config::new("pk_test_abc".into(), base_url.to_string()).unwrap();
+        RovenueCore::new_for_test(config).unwrap()
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn post_apple_receipt_hydrates_without_followup_get() {
+        let mut server = mockito::Server::new();
+
+        // The receipt POST — returns subscriber + credits + access map
+        let _m_receipt = server
+            .mock("POST", "/v1/receipts/apple")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"data":{"subscriber":{"id":"sub_1","appUserId":"u1"},
+                    "credits":{"balance":7},
+                    "access":{"pro":{"isActive":true,"expiresDate":null,
+                              "store":"APP_STORE","productIdentifier":"pro_monthly"}}}}"#,
+            )
+            .create();
+
+        // Ensure no GET calls to entitlements or credits are made
+        let _m_ent = server
+            .mock("GET", "/v1/me/entitlements")
+            .expect(0)
+            .create();
+        let _m_cred = server
+            .mock("GET", "/v1/me/credits")
+            .expect(0)
+            .create();
+
+        let core = make_core(&server.url());
+        let result = core
+            .post_apple_receipt("jws_token".into(), "pro_monthly".into(), None)
+            .expect("receipt ok");
+
+        assert_eq!(result.credit_balance, 7);
+        assert_eq!(result.entitlements.len(), 1);
+        assert_eq!(result.entitlements[0].id, "pro");
+        assert!(result.entitlements[0].is_active);
+
+        _m_ent.assert();
+        _m_cred.assert();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn post_apple_receipt_falls_back_to_get_when_access_absent() {
+        let mut server = mockito::Server::new();
+
+        // Receipt POST without `access` field (pre-0.7 server)
+        let _m_receipt = server
+            .mock("POST", "/v1/receipts/apple")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"data":{"subscriber":{"id":"sub_2","appUserId":"u2"},
+                    "credits":{"balance":0}}}"#,
+            )
+            .create();
+
+        // Exactly one GET to entitlements should fire as fallback
+        let _m_ent = server
+            .mock("GET", "/v1/me/entitlements")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"entitlements":{}}}"#)
+            .expect(1)
+            .create();
+
+        let core = make_core(&server.url());
+        let result = core
+            .post_apple_receipt("jws_token_2".into(), "basic".into(), None)
+            .expect("receipt ok");
+
+        assert_eq!(result.subscriber_id, "sub_2");
+        assert_eq!(result.entitlements.len(), 0);
+
+        _m_ent.assert();
+    }
 }
