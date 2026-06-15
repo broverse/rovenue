@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use rovenue::api::RovenueCore;
+use rovenue::config::Config;
 use rovenue::offerings::OfferingsClient;
 use rovenue::transport::http_client::HttpClient;
 
@@ -41,4 +43,29 @@ fn get_offerings_maps_wire_to_ffi_and_sets_current() {
     assert_eq!(second.identifier, "promo");
     assert!(!second.is_default);
     assert_eq!(second.packages[0].google_product_id, None);
+}
+
+#[test]
+fn core_get_offerings_round_trips() {
+    let mut server = mockito::Server::new();
+    let body = include_str!("fixtures/offerings_response.json");
+    let m = server
+        .mock("GET", "/v1/offerings")
+        .with_status(200)
+        .with_body(body)
+        .create();
+
+    let core = RovenueCore::new_for_test(Config {
+        api_key: "pk_test".into(),
+        base_url: server.url(),
+        debug: true,
+        app_version: None,
+    })
+    .unwrap();
+
+    let offerings = core.get_offerings().unwrap();
+    m.assert();
+
+    assert_eq!(offerings.current.as_deref(), Some("default"));
+    assert_eq!(offerings.offerings.len(), 2);
 }

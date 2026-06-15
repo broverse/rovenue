@@ -9,6 +9,7 @@ use crate::entitlements::{Entitlement, EntitlementReader};
 use crate::error::{RovenueError, RovenueResult};
 use crate::identity::{IdentityManager, User};
 use crate::observer::{Observer, ObserverBus};
+use crate::offerings::{Offerings, OfferingsClient};
 use crate::polling::PollingScheduler;
 use crate::receipts::{ReceiptClient, ReceiptResult};
 use crate::sessions::{AccountTokenStore, SessionBuffer, SessionDispatcher, SessionEventKind};
@@ -26,6 +27,7 @@ pub struct RovenueCore {
     entitlements: Arc<EntitlementReader>,
     credits: Arc<CreditReader>,
     receipts: Arc<ReceiptClient>,
+    offerings: Arc<OfferingsClient>,
     account_tokens: Arc<AccountTokenStore>,
     sessions: Arc<SessionBuffer>,
     session_dispatcher: Arc<SessionDispatcher>,
@@ -66,6 +68,7 @@ impl RovenueCore {
                 .with_clock(Arc::clone(&clock)),
         );
         let receipts = Arc::new(ReceiptClient::new(Arc::clone(&http)));
+        let offerings = Arc::new(OfferingsClient::new(Arc::clone(&http)));
         let account_tokens = Arc::new(AccountTokenStore::new(Arc::clone(&store)));
         let sessions = Arc::new(SessionBuffer::new(Arc::clone(&store)));
         let identity_for_sub = Arc::clone(&identity);
@@ -107,6 +110,7 @@ impl RovenueCore {
             entitlements: reader,
             credits,
             receipts,
+            offerings,
             account_tokens,
             sessions,
             session_dispatcher,
@@ -242,6 +246,10 @@ impl RovenueCore {
     pub fn get_or_create_app_account_token(&self) -> RovenueResult<String> {
         let scope = self.identity.current_user_scope();
         self.account_tokens.get_or_create(&scope)
+    }
+
+    pub fn get_offerings(&self) -> RovenueResult<Offerings> {
+        self.offerings.get_offerings()
     }
 }
 

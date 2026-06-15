@@ -55,6 +55,25 @@ dictionary ReceiptResult {
     i64 credit_balance;
 };
 
+dictionary OfferingProduct {
+    string identifier;
+    string product_type;
+    string display_name;
+    string? apple_product_id;
+    string? google_product_id;
+};
+
+dictionary Offering {
+    string identifier;
+    boolean is_default;
+    sequence<OfferingProduct> packages;
+};
+
+dictionary Offerings {
+    string? current;
+    sequence<Offering> offerings;
+};
+
 enum SessionEventKind {
     "Open",
     "Background",
@@ -100,6 +119,9 @@ interface RovenueCore {
         string? obfuscated_account_id,
         string? obfuscated_profile_id
     );
+
+    [Throws=RovenueError]
+    Offerings get_offerings();
 
     [Throws=RovenueError]
     void record_session_event(
