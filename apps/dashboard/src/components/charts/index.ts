@@ -8,6 +8,7 @@ export { GroupByCard } from "./group-by-card";
 export { HourDayHeatmap } from "./hour-day-heatmap";
 export { EngagementCard } from "./engagement-card";
 export { LtvDistributionCard } from "./ltv-distribution-card";
+export { PredictedLtvCard } from "./predicted-ltv-card";
 export { MrrChartPanel } from "./mrr-chart-panel";
 export { RevenueKpisCard } from "./revenue-kpis-card";
 export { NewAnnotationDialog } from "./new-annotation-dialog";

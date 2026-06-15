@@ -14,7 +14,7 @@ import {
   SystemHealthPanel,
   TopProductsPanel,
 } from "../../../../components/dashboard";
-import { EngagementCard, LtvDistributionCard, RevenueKpisCard } from "../../../../components/charts";
+import { EngagementCard, LtvDistributionCard, PredictedLtvCard, RevenueKpisCard } from "../../../../components/charts";
 import type {
   ActivityEvent,
   ActivityKind,
@@ -543,6 +543,10 @@ function ProjectOverview() {
 
       <div className="mt-4">
         <LtvDistributionCard projectId={projectId} />
+      </div>
+
+      <div className="mt-4">
+        <PredictedLtvCard projectId={projectId} />
       </div>
 
       <div className="mt-4">
