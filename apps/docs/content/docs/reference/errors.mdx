@@ -1,0 +1,73 @@
+---
+title: Errors
+description: The RovenueError family and how each surfaces per platform.
+---
+
+Every Rovenue SDK error originates from the same Rust-core `RovenueError` enum and is mapped to an idiomatic type on each platform. The table below shows all 13 variants and their per-platform names.
+
+| Meaning | React Native (class) | Swift (enum case) | Kotlin (exception) |
+|---------|---------------------|-------------------|--------------------|
+| SDK not configured — `configure()` was not called before accessing `Rovenue.shared` | `NotConfiguredError` | `.notConfigured` | `RovenueException.NotConfigured` |
+| API key is missing or rejected by the server | `InvalidApiKeyError` | `.invalidApiKey` | `RovenueException.InvalidApiKey` |
+| Server returned a non-recoverable error response | `ServerError` | `.serverError` | `RovenueException.ServerException` |
+| Device has no network connectivity | `NetworkUnavailableError` | `.networkUnavailable` | `RovenueException.NetworkUnavailable` |
+| Request exceeded the allowed time limit | `TimeoutError` | `.timeout` | `RovenueException.Timeout` |
+| Too many requests — back off and retry | `RateLimitedError` | `.rateLimited` | `RovenueException.RateLimited` |
+| Local persistent storage (MMKV) read/write failure | `StorageError` | `.storage` | `RovenueException.Storage` |
+| Subscriber record not found on the server | `UserNotFoundError` | `.userNotFound` | `RovenueException.UserNotFound` |
+| `consumeCredits` requested more credits than the user holds | `InsufficientCreditsError` | `.insufficientCredits` | `RovenueException.InsufficientCredits` |
+| Entitlement exists but is not currently active | `EntitlementInactiveError` | `.entitlementInactive` | `RovenueException.EntitlementInactive` |
+| Receipt was already recorded for this transaction | `DuplicatePurchaseError` | `.duplicatePurchase` | `RovenueException.DuplicatePurchase` |
+| Receipt could not be validated by the store or server | `ReceiptInvalidError` | `.receiptInvalid` | `RovenueException.ReceiptInvalid` |
+| Unexpected internal SDK error | `InternalError` | `.internalError` | `RovenueException.Internal` |
+
+## Handling errors
+
+**React Native** — all async methods return Promises. Use `instanceof` to narrow to a specific subclass:
+
+```ts
+import { Rovenue, ReceiptInvalidError, DuplicatePurchaseError } from '@rovenue/react-native-sdk';
+
+try {
+  const result = await Rovenue.postAppleReceipt(jws, productId);
+} catch (e) {
+  if (e instanceof ReceiptInvalidError) {
+    // Receipt failed validation — show user a retry prompt
+  } else if (e instanceof DuplicatePurchaseError) {
+    // Already recorded — safe to ignore or refresh entitlements
+  } else {
+    throw e; // re-throw unexpected errors
+  }
+}
+```
+
+**Swift** — errors are thrown as `Rovenue.Error` (a nested enum on the `Rovenue` type). Catch the base type and switch on its cases:
+
+```swift
+do {
+  let result = try await Rovenue.shared.postAppleReceipt(jws: jws, productId: productId)
+} catch let e as Rovenue.Error {
+  switch e {
+  case .receiptInvalid:
+    // Receipt failed validation
+  case .duplicatePurchase:
+    // Already recorded — safe to refresh entitlements
+  default:
+    throw e
+  }
+}
+```
+
+**Kotlin** — errors are thrown as subclasses of `RovenueException`. Catch the specific subclass or the sealed base:
+
+```kotlin
+try {
+    val result = Rovenue.shared.postAppleReceipt(jws = jws, productId = productId)
+} catch (e: RovenueException.ReceiptInvalid) {
+    // Receipt failed validation
+} catch (e: RovenueException.DuplicatePurchase) {
+    // Already recorded — safe to refresh entitlements
+} catch (e: RovenueException) {
+    throw e // re-throw other SDK errors
+}
+```

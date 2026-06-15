@@ -1,0 +1,355 @@
+---
+title: Methods
+description: Every Rovenue SDK method, grouped by capability.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+
+## Configuration
+
+Call `configure` once at app startup before accessing `Rovenue.shared`.
+
+| Method | Signature (RN) | Returns | Throws |
+|--------|---------------|---------|--------|
+| `configure` | `configure(apiKey, baseUrl, debug?, appVersion?)` | `void` | `InvalidApiKeyError` |
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    await Rovenue.configure('rvn_pub_…', 'https://api.example.com');
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    try Rovenue.configure(
+        apiKey: "rvn_pub_…",
+        baseUrl: "https://api.example.com"
+    )
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.configure(
+        apiKey = "rvn_pub_…",
+        baseUrl = "https://api.example.com"
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## Identity
+
+| Method | Signature (RN) | Returns | Throws |
+|--------|---------------|---------|--------|
+| `currentUser` | `currentUser()` | `User` | — |
+| `identify` | `identify(knownUserId)` | `void` | — |
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const user = await Rovenue.currentUser();
+    // user.anonId, user.knownUserId
+
+    await Rovenue.identify('user_123');
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let user = await Rovenue.shared.currentUser()
+    // user.anonId, user.knownUserId
+
+    await Rovenue.shared.identify(knownUserId: "user_123")
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val user = Rovenue.shared.currentUser()
+    // user.anonId, user.knownUserId
+
+    Rovenue.shared.identify(knownUserId = "user_123")
+    ```
+  </Tab>
+</Tabs>
+
+## Entitlements
+
+| Method | Signature (RN) | Returns | Throws |
+|--------|---------------|---------|--------|
+| `entitlement` | `entitlement(id)` | `Entitlement \| null` (cache) | — |
+| `entitlementsAll` | `entitlementsAll()` | `Entitlement[]` (cache) | — |
+| `refreshEntitlements` | `refreshEntitlements()` | `void` (network) | — |
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const ent = await Rovenue.entitlement('pro');
+    const all = await Rovenue.entitlementsAll();
+    await Rovenue.refreshEntitlements();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let ent = await Rovenue.shared.entitlement(id: "pro")
+    let all = await Rovenue.shared.entitlementsAll()
+    try await Rovenue.shared.refreshEntitlements()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val ent = Rovenue.shared.entitlement(id = "pro")
+    val all = Rovenue.shared.entitlementsAll()
+    Rovenue.shared.refreshEntitlements()
+    ```
+  </Tab>
+</Tabs>
+
+## Credits
+
+| Method | Signature (RN) | Returns | Throws |
+|--------|---------------|---------|--------|
+| `creditBalance` | `creditBalance()` | `number` (cache, 0 if empty) | — |
+| `refreshCredits` | `refreshCredits()` | `void` (network) | — |
+| `consumeCredits` | `consumeCredits(amount, description?)` | `number` (new balance) | `InsufficientCreditsError` |
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const balance = await Rovenue.creditBalance();
+    await Rovenue.refreshCredits();
+    const newBalance = await Rovenue.consumeCredits(10, 'AI generation');
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let balance = await Rovenue.shared.creditBalance()
+    try await Rovenue.shared.refreshCredits()
+    let newBalance = try await Rovenue.shared.consumeCredits(
+        amount: 10,
+        description: "AI generation"
+    )
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val balance = Rovenue.shared.creditBalance()
+    Rovenue.shared.refreshCredits()
+    val newBalance = Rovenue.shared.consumeCredits(
+        amount = 10,
+        description = "AI generation"
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## Receipts
+
+| Method | Signature (RN) | Returns | Throws |
+|--------|---------------|---------|--------|
+| `postAppleReceipt` | `postAppleReceipt(jws, productId, appAccountToken?)` | `ReceiptResult` | `ReceiptInvalidError`, `DuplicatePurchaseError` |
+| `postGoogleReceipt` | `postGoogleReceipt(receipt, productId, obfuscatedAccountId?, obfuscatedProfileId?)` | `ReceiptResult` | `ReceiptInvalidError`, `DuplicatePurchaseError` |
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    // Apple StoreKit 2
+    const result = await Rovenue.postAppleReceipt(jws, 'pro_monthly', appAccountToken);
+
+    // Google Play Billing
+    const result = await Rovenue.postGoogleReceipt(purchaseToken, 'pro_monthly');
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Apple StoreKit 2
+    let result = try await Rovenue.shared.postAppleReceipt(
+        jws: jwsString,
+        productId: "pro_monthly",
+        appAccountToken: uuid
+    )
+
+    // Google Play Billing
+    let result = try await Rovenue.shared.postGoogleReceipt(
+        receipt: purchaseToken,
+        productId: "pro_monthly"
+    )
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // Apple StoreKit 2
+    val result = Rovenue.shared.postAppleReceipt(
+        jws = jwsString,
+        productId = "pro_monthly",
+        appAccountToken = uuid
+    )
+
+    // Google Play Billing
+    val result = Rovenue.shared.postGoogleReceipt(
+        receipt = purchaseToken,
+        productId = "pro_monthly"
+    )
+    ```
+  </Tab>
+</Tabs>
+
+## Account Token
+
+| Method | Signature (RN) | Returns | Throws |
+|--------|---------------|---------|--------|
+| `getAppAccountToken` | `getAppAccountToken()` | `string` (UUID) | — |
+
+Returns a stable UUID scoped to the current user. Pass it to StoreKit's `.appAccountToken(uuid)` or Play Billing's `setObfuscatedAccountId()` before purchase. Calling `identify()` changes the scope, so the next call returns a new UUID for the known user.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const token = await Rovenue.getAppAccountToken();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let token = try await Rovenue.shared.getAppAccountToken()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val token = Rovenue.shared.getAppAccountToken()
+    ```
+  </Tab>
+</Tabs>
+
+## Lifecycle
+
+| Method | Signature (RN) | Returns | Throws |
+|--------|---------------|---------|--------|
+| `setForeground` | `setForeground(bool)` | `void` | — |
+| `shutdown` | `shutdown()` | `void` | — |
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { AppState } from 'react-native';
+
+    AppState.addEventListener('change', (state) => {
+      Rovenue.setForeground(state === 'active');
+    });
+
+    // On logout / app teardown:
+    await Rovenue.shutdown();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // In SceneDelegate or SwiftUI .scenePhase observer:
+    Rovenue.shared.setForeground(scene.activationState == .foregroundActive)
+
+    // On teardown:
+    await Rovenue.shared.shutdown()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // In DefaultLifecycleObserver:
+    override fun onStart(owner: LifecycleOwner) {
+        Rovenue.shared.setForeground(true)
+    }
+    override fun onStop(owner: LifecycleOwner) {
+        Rovenue.shared.setForeground(false)
+    }
+
+    // On teardown:
+    Rovenue.shared.shutdown()
+    ```
+  </Tab>
+</Tabs>
+
+## Logging
+
+| Method | Signature (RN) | Returns | Throws |
+|--------|---------------|---------|--------|
+| `setLogHandler` | `setLogHandler(fn)` | unsubscribe function (RN) / `void` (Swift, Kotlin) | — |
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const unsub = Rovenue.setLogHandler((entry) => {
+      console.log(`[Rovenue ${entry.level}]`, entry.message);
+    });
+
+    // Later:
+    unsub();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    Rovenue.shared.setLogHandler { entry in
+        print("[Rovenue \(entry.level)] \(entry.message)")
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.setLogHandler { entry ->
+        Log.d("Rovenue", "[${entry.level}] ${entry.message}")
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Change Stream
+
+Listen for real-time state changes from the SDK. The event type is one of `EntitlementsChanged`, `IdentityChanged`, or `CreditBalanceChanged`.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const unsub = Rovenue.addChangeListener((event) => {
+      switch (event) {
+        case 'EntitlementsChanged':
+          // Re-read entitlements
+          break;
+        case 'IdentityChanged':
+          // User identity updated
+          break;
+        case 'CreditBalanceChanged':
+          // Re-read credit balance
+          break;
+      }
+    });
+
+    // To unsubscribe:
+    unsub();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // changes is an AsyncStream<ChangeEvent>
+    for await event in Rovenue.shared.changes {
+        switch event {
+        case .entitlementsChanged:
+            // Re-read entitlements
+        case .identityChanged:
+            // User identity updated
+        case .creditBalanceChanged:
+            // Re-read credit balance
+        }
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // changes is a SharedFlow<ChangeEvent>
+    Rovenue.shared.changes
+        .onEach { event ->
+            when (event) {
+                ChangeEvent.ENTITLEMENTS_CHANGED -> { /* re-read entitlements */ }
+                ChangeEvent.IDENTITY_CHANGED     -> { /* user identity updated */ }
+                ChangeEvent.CREDIT_BALANCE_CHANGED -> { /* re-read balance */ }
+            }
+        }
+        .launchIn(lifecycleScope)
+    ```
+  </Tab>
+</Tabs>

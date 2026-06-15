@@ -1,0 +1,80 @@
+---
+title: Types
+description: Data types returned by the Rovenue SDK.
+---
+
+## User
+
+Returned by [`currentUser()`](/docs/reference/methods#identity).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `anonId` | `string` | Stable anonymous identifier generated on first launch. Persists across app restarts. |
+| `knownUserId` | `string \| undefined` | Your app's user ID, set after a successful `identify()` call. `undefined` until the user is identified. |
+
+```ts
+type User = {
+  anonId: string;
+  knownUserId?: string;
+};
+```
+
+## Entitlement
+
+Returned by [`entitlement(id)`](/docs/reference/methods#entitlements) and [`entitlementsAll()`](/docs/reference/methods#entitlements).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | The entitlement identifier as configured in your Rovenue project (e.g. `"pro"`, `"credits_pack"`). |
+| `isActive` | `boolean` | `true` if the entitlement is currently active (not expired, not refunded). |
+| `productIdentifier` | `string` | The store product ID that granted this entitlement (e.g. `"com.example.pro_monthly"`). |
+| `store` | `string` | The store that originated the purchase: `"app_store"`, `"play_store"`, or `"stripe"`. |
+| `expiresIso` | `string \| undefined` | ISO 8601 expiry timestamp. `undefined` for non-expiring (lifetime) entitlements. |
+
+```ts
+type Entitlement = {
+  id: string;
+  isActive: boolean;
+  productIdentifier: string;
+  store: string;
+  expiresIso?: string;
+};
+```
+
+## ReceiptResult
+
+Returned by [`postAppleReceipt()`](/docs/reference/methods#receipts) and [`postGoogleReceipt()`](/docs/reference/methods#receipts) on successful server-side validation.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `subscriberId` | `string` | Rovenue's internal subscriber UUID for this user. |
+| `appUserId` | `string` | The effective app user ID at the time of purchase — either the known user ID or the anonymous ID. |
+| `creditBalance` | `number` | The user's total credit balance after the purchase was applied. |
+
+```ts
+type ReceiptResult = {
+  subscriberId: string;
+  appUserId: string;
+  creditBalance: number;
+};
+```
+
+## ChangeEvent
+
+Emitted by the [change stream](/docs/reference/methods#change-stream) whenever internal SDK state is updated. The event is an enum — check the value to determine which cache to re-read.
+
+| Value | When it fires |
+|-------|--------------|
+| `EntitlementsChanged` | Emitted after the entitlement cache is refreshed — e.g. after a successful purchase, `refreshEntitlements()`, or a foreground transition that triggers a background sync. |
+| `IdentityChanged` | Emitted after `identify()` succeeds or after an anonymous reset, indicating the active user context has changed. |
+| `CreditBalanceChanged` | Emitted after the credit balance changes — e.g. after `refreshCredits()` or a successful `consumeCredits()` call. |
+
+```ts
+// React Native — string union
+type ChangeEvent =
+  | 'EntitlementsChanged'
+  | 'IdentityChanged'
+  | 'CreditBalanceChanged';
+```
+
+On Swift the change stream is `AsyncStream<ChangeEvent>` where `ChangeEvent` is a Swift enum with cases `.entitlementsChanged`, `.identityChanged`, and `.creditBalanceChanged`. On Kotlin it is `SharedFlow<ChangeEvent>` where the Kotlin enum constants are `ENTITLEMENTS_CHANGED`, `IDENTITY_CHANGED`, and `CREDIT_BALANCE_CHANGED`.
