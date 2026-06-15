@@ -14,9 +14,10 @@ import type { ChartType, RangeOption } from "./types";
 //
 // The endpoint returns per-day buckets; this panel rolls them up
 // into months so we can render the familiar 6/12/All-month line.
-// Decomposition (New / Expansion / Contraction / Churn) still
-// uses mock data — that breakdown isn't surfaced by the read API
-// yet and is tracked as a separate follow-up.
+// Decomposition (New / Retained / Reactivation / Churn) is backed
+// by real data via useProjectMrrDecomposition (/metrics/mrr/
+// decomposition); it is the recurring-only view and excludes
+// one-time credit purchases, so it does not sum to gross MRR.
 
 const W = 800;
 const H = 360;

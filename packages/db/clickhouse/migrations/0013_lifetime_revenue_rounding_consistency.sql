@@ -1,8 +1,10 @@
 -- 0013_lifetime_revenue_rounding_consistency.sql
--- Two money bugs in v_revenue_lifetime_subscriber (0012):
---   1. toUInt64(amountUsd * 100) does a binary-float multiply then TRUNCATES,
---      so $19.99 -> 1998.9999... -> 1998 cents (loses 1c). round() before the
---      UInt64 truncation gives the correct 1999.
+-- Two issues in v_revenue_lifetime_subscriber (0012):
+--   1. toUInt64(amountUsd * 100) TRUNCATES toward zero. amountUsd is Decimal(12,4)
+--      (not Float), so whole-cent prices like $19.99 are already exact (1999) and
+--      were never mis-counted; the truncation only loses value on sub-cent (3rd/4th
+--      decimal) amounts, e.g. $5.4999 -> 549 instead of 550. round() before the
+--      UInt64 cast makes those round-half-to-even instead of truncating.
 --   2. The view counted only type = 'REFUND' as a refund and omitted CHARGEBACK
 --      (and REACTIVATION on the purchase side), while the sibling v_mrr_daily
 --      (0012) correctly treats CHARGEBACK as a refund. That made LTV / Refund
