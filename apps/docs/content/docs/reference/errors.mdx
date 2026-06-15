@@ -3,12 +3,13 @@ title: Errors
 description: The RovenueError family and how each surfaces per platform.
 ---
 
-Every Rovenue SDK error originates from the same Rust-core `RovenueError` enum and is mapped to an idiomatic type on each platform. The table below shows all 13 variants and their per-platform names.
+Every Rovenue SDK error originates from the same Rust-core `RovenueError` enum and is mapped to an idiomatic type on each platform. The table below shows all 14 variants and their per-platform names.
 
 | Meaning | React Native (class) | Swift (enum case) | Kotlin (exception) |
 |---------|---------------------|-------------------|--------------------|
 | SDK not configured — `configure()` was not called before accessing `Rovenue.shared` | `NotConfiguredError` | `.notConfigured` | `RovenueException.NotConfigured` |
 | API key is missing or rejected by the server | `InvalidApiKeyError` | `.invalidApiKey` | `RovenueException.InvalidApiKey` |
+| An argument was invalid (e.g. an empty `appUserId` passed to `identify()`) | `InvalidArgumentError` | `.invalidArgument` | `RovenueException.InvalidArgument` |
 | Server returned a non-recoverable error response | `ServerError` | `.serverError` | `RovenueException.ServerException` |
 | Device has no network connectivity | `NetworkUnavailableError` | `.networkUnavailable` | `RovenueException.NetworkUnavailable` |
 | Request exceeded the allowed time limit | `TimeoutError` | `.timeout` | `RovenueException.Timeout` |

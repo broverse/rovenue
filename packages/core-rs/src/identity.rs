@@ -64,7 +64,7 @@ impl IdentityManager {
     /// already this `app_user_id` (no write, no emit).
     pub fn set_app_user_id(&self, app_user_id: String) -> RovenueResult<bool> {
         if app_user_id.trim().is_empty() {
-            return Err(RovenueError::InvalidApiKey); // reuse "invalid input" semantic
+            return Err(RovenueError::InvalidArgument); // dedicated invalid-argument error (distinct from InvalidApiKey)
         }
         // Capture `rovenue_id` in the SAME critical section that mutates
         // `app_user_id`, so a concurrent `log_out()` cannot swap the rovenue_id

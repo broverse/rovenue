@@ -11,6 +11,7 @@ public extension Rovenue {
     enum Error: Swift.Error, Equatable, Sendable, LocalizedError {
         case notConfigured
         case invalidApiKey
+        case invalidArgument
         case serverError
         case networkUnavailable
         case timeout
@@ -37,6 +38,8 @@ public extension Rovenue {
                 return "Rovenue.configure() must be called before accessing Rovenue.shared"
             case .invalidApiKey:
                 return "API key is missing or invalid"
+            case .invalidArgument:
+                return "An argument was invalid (e.g. an empty value)"
             case .serverError:
                 return "Server returned an error"
             case .networkUnavailable:
@@ -79,6 +82,7 @@ internal func mapError(_ generated: RovenueError) -> Rovenue.Error {
     switch generated {
     case .NotConfigured:        return .notConfigured
     case .InvalidApiKey:        return .invalidApiKey
+    case .InvalidArgument:      return .invalidArgument
     case .ServerError:          return .serverError
     case .NetworkUnavailable:   return .networkUnavailable
     case .Timeout:              return .timeout

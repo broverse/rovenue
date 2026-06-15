@@ -6,6 +6,7 @@ namespace librovenue {
 enum RovenueError {
     "NotConfigured",
     "InvalidApiKey",
+    "InvalidArgument",
     "ServerError",
     "NetworkUnavailable",
     "Timeout",

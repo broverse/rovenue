@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   RovenueError,
   InvalidApiKeyError,
+  InvalidArgumentError,
   NotConfiguredError,
   NetworkUnavailableError,
   TimeoutError,
@@ -22,9 +23,10 @@ import {
 } from "../errors";
 
 describe("Rovenue error classes", () => {
-  it("all 13 subclasses extend RovenueError", () => {
+  it("all 14 subclasses extend RovenueError", () => {
     const cases: Array<[new (m: string) => RovenueError, string]> = [
       [InvalidApiKeyError, "InvalidApiKey"],
+      [InvalidArgumentError, "InvalidArgument"],
       [NotConfiguredError, "NotConfigured"],
       [NetworkUnavailableError, "NetworkUnavailable"],
       [TimeoutError, "Timeout"],
@@ -49,6 +51,7 @@ describe("Rovenue error classes", () => {
 
   it("mapNativeError picks the right class by code", () => {
     expect(mapNativeError("InvalidApiKey", "x")).toBeInstanceOf(InvalidApiKeyError);
+    expect(mapNativeError("InvalidArgument", "x")).toBeInstanceOf(InvalidArgumentError);
     expect(mapNativeError("InsufficientCredits", "x", { available: 3 })).toBeInstanceOf(
       InsufficientCreditsError,
     );

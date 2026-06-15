@@ -10,6 +10,10 @@ final class ErrorMappingTests: XCTestCase {
         XCTAssertEqual(mapError(.InvalidApiKey(message: "x")), .invalidApiKey)
     }
 
+    func test_mapError_InvalidArgument() {
+        XCTAssertEqual(mapError(.InvalidArgument(message: "x")), .invalidArgument)
+    }
+
     func test_mapError_ServerError() {
         XCTAssertEqual(mapError(.ServerError(message: "x")), .serverError)
     }
@@ -57,7 +61,7 @@ final class ErrorMappingTests: XCTestCase {
     func test_errorDescription_isHumanReadable() {
         // Every case has a non-empty description for debugging.
         let cases: [Rovenue.Error] = [
-            .notConfigured, .invalidApiKey, .serverError, .networkUnavailable,
+            .notConfigured, .invalidApiKey, .invalidArgument, .serverError, .networkUnavailable,
             .timeout, .rateLimited, .storage, .userNotFound, .insufficientCredits,
             .entitlementInactive, .duplicatePurchase, .receiptInvalid, .internalError,
         ]

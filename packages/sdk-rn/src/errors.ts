@@ -21,6 +21,9 @@ export class RovenueError extends Error {
 export class InvalidApiKeyError extends RovenueError {
   constructor(message: string) { super("InvalidApiKey", message); this.name = "InvalidApiKeyError"; }
 }
+export class InvalidArgumentError extends RovenueError {
+  constructor(message: string) { super("InvalidArgument", message); this.name = "InvalidArgumentError"; }
+}
 export class NotConfiguredError extends RovenueError {
   constructor(message: string) { super("NotConfigured", message); this.name = "NotConfiguredError"; }
 }
@@ -90,6 +93,7 @@ type Extras = { available?: number; retryAfter?: number; httpStatus?: number };
 export function mapNativeError(code: string, message: string, extras?: Extras): RovenueError {
   switch (code) {
     case "InvalidApiKey":         return new InvalidApiKeyError(message);
+    case "InvalidArgument":       return new InvalidArgumentError(message);
     case "NotConfigured":         return new NotConfiguredError(message);
     case "NetworkUnavailable":    return new NetworkUnavailableError(message);
     case "Timeout":               return new TimeoutError(message);

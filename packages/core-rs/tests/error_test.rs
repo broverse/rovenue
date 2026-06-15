@@ -14,6 +14,14 @@ fn invalid_api_key_displays() {
 }
 
 #[test]
+fn invalid_argument_displays() {
+    assert_eq!(
+        format!("{}", RovenueError::InvalidArgument),
+        "invalid argument"
+    );
+}
+
+#[test]
 fn server_error_displays() {
     assert_eq!(format!("{}", RovenueError::ServerError), "server error");
 }

@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use rovenue::cache::identity::IdentityRepo;
 use rovenue::cache::CacheStore;
+use rovenue::error::RovenueError;
 use rovenue::identity::IdentityManager;
 use rovenue::observer::{ChangeEvent, Observer, ObserverBus};
 use rovenue::time::SystemClock;
@@ -65,6 +66,21 @@ fn identify_is_idempotent_for_same_known_id() {
         .filter(|e| **e == ChangeEvent::IdentityChanged)
         .count();
     assert_eq!(n, 1, "second identify with same id should not re-emit");
+}
+
+#[test]
+fn set_app_user_id_rejects_empty_input_with_invalid_argument() {
+    let (_, _, mgr) = fresh();
+    // Empty / whitespace-only input is an invalid argument, NOT an invalid API
+    // key — consumers catching InvalidApiKey must not catch this.
+    assert!(matches!(
+        mgr.set_app_user_id("".into()),
+        Err(RovenueError::InvalidArgument)
+    ));
+    assert!(matches!(
+        mgr.set_app_user_id("   ".into()),
+        Err(RovenueError::InvalidArgument)
+    ));
 }
 
 #[test]

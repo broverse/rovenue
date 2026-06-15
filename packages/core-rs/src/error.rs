@@ -8,6 +8,9 @@ pub enum RovenueError {
     #[error("invalid api key")]
     InvalidApiKey,
 
+    #[error("invalid argument")]
+    InvalidArgument,
+
     #[error("server error")]
     ServerError,
 

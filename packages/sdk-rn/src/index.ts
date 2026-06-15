@@ -28,6 +28,7 @@ export type {
 export {
   RovenueError,
   InvalidApiKeyError,
+  InvalidArgumentError,
   NotConfiguredError,
   NetworkUnavailableError,
   TimeoutError,
