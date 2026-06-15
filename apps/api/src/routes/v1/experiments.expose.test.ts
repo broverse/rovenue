@@ -110,6 +110,11 @@ describe("POST /v1/experiments/:id/expose — tenant ownership", () => {
     findByIdInProjectMock.mockResolvedValue({
       id: "exp_owned",
       projectId: "proj_owner",
+      status: "RUNNING",
+      variants: [
+        { id: "control", name: "Control", value: 0, weight: 1 },
+        { id: "variant_a", name: "A", value: 1, weight: 1 },
+      ],
     });
 
     const app = await buildApp();
@@ -139,5 +144,91 @@ describe("POST /v1/experiments/:id/expose — tenant ownership", () => {
       subscriberId: "resolved_foreign_sub_xyz",
     });
     expect(published.subscriberId).not.toBe("foreign_sub_xyz");
+  });
+});
+
+describe("POST /v1/experiments/:id/expose — variant + status validation", () => {
+  beforeEach(() => {
+    publishExposureMock.mockReset();
+    publishExposureMock.mockResolvedValue(undefined);
+    findByIdInProjectMock.mockReset();
+    upsertSubscriberMock.mockReset();
+    transactionMock.mockClear();
+    upsertSubscriberMock.mockImplementation(async (_db: unknown, input: any) => ({
+      id: `resolved_${input.rovenueId}`,
+      projectId: input.projectId,
+      rovenueId: input.rovenueId,
+    }));
+  });
+
+  it("returns 400 and publishes NOTHING when variantId is not one of the experiment's variants", async () => {
+    findByIdInProjectMock.mockResolvedValue({
+      id: "exp_owned",
+      projectId: "proj_owner",
+      status: "RUNNING",
+      // Note: no "variant_a" here — VALID_BODY's variantId is bogus.
+      variants: [
+        { id: "control", name: "Control", value: 0, weight: 1 },
+        { id: "variant_b", name: "B", value: 2, weight: 1 },
+      ],
+    });
+
+    const app = await buildApp();
+    const res = await app.request("/v1/experiments/exp_owned/expose", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(VALID_BODY),
+    });
+
+    expect(res.status).toBe(400);
+    // Validation happens before subscriber resolution + outbox write.
+    expect(publishExposureMock).not.toHaveBeenCalled();
+    expect(upsertSubscriberMock).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 and publishes NOTHING when the experiment is not RUNNING", async () => {
+    findByIdInProjectMock.mockResolvedValue({
+      id: "exp_owned",
+      projectId: "proj_owner",
+      status: "DRAFT",
+      variants: [{ id: "variant_a", name: "A", value: 1, weight: 1 }],
+    });
+
+    const app = await buildApp();
+    const res = await app.request("/v1/experiments/exp_owned/expose", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(VALID_BODY),
+    });
+
+    expect(res.status).toBe(409);
+    expect(publishExposureMock).not.toHaveBeenCalled();
+    expect(upsertSubscriberMock).not.toHaveBeenCalled();
+  });
+
+  it("publishes when variantId is a valid member of a RUNNING experiment", async () => {
+    findByIdInProjectMock.mockResolvedValue({
+      id: "exp_owned",
+      projectId: "proj_owner",
+      status: "RUNNING",
+      variants: [
+        { id: "control", name: "Control", value: 0, weight: 1 },
+        { id: "variant_a", name: "A", value: 1, weight: 1 },
+      ],
+    });
+
+    const app = await buildApp();
+    const res = await app.request("/v1/experiments/exp_owned/expose", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(VALID_BODY),
+    });
+
+    expect(res.status).toBe(200);
+    expect(publishExposureMock).toHaveBeenCalledTimes(1);
+    expect(publishExposureMock.mock.calls[0]?.[1]).toMatchObject({
+      experimentId: "exp_owned",
+      variantId: "variant_a",
+    });
   });
 });

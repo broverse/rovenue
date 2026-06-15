@@ -145,6 +145,32 @@ export const experimentsRoute = new Hono()
         throw new HTTPException(404, { message: "experiment not found" });
       }
 
+      // Only accept exposures for a running experiment. A DRAFT / PAUSED /
+      // COMPLETED experiment has no live assignment surface, so an exposure
+      // against it is either a client bug or an attempt to inject rows
+      // outside the experiment's active window — reject as a state conflict.
+      if (experiment.status !== "RUNNING") {
+        throw new HTTPException(409, {
+          message: "experiment is not running",
+        });
+      }
+
+      // Validate variantId membership. `variants` is a JSON array of
+      // { id, name, value, weight } and the engine keys variants by `id`
+      // everywhere (selectVariant / per-variant aggregation). A variantId
+      // that isn't one of the experiment's variants would poison SRM and
+      // per-variant stats with a phantom arm, so reject it before any
+      // outbox row is written.
+      const variants = Array.isArray(experiment.variants)
+        ? (experiment.variants as Array<{ id?: unknown }>)
+        : [];
+      const isKnownVariant = variants.some((v) => v?.id === input.variantId);
+      if (!isKnownVariant) {
+        throw new HTTPException(400, {
+          message: "unknown variantId for experiment",
+        });
+      }
+
       // Resolve the client-supplied id to a project-owned subscriber so
       // the exposure is always stamped with an id we own (mirrors /track).
       const subscriber = await drizzle.subscriberRepo.upsertSubscriber(
