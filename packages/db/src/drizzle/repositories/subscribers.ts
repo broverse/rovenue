@@ -528,10 +528,10 @@ export async function listSubscribers(
     )`);
   }
 
-  // --- country (attributes JSON) ------------------------------
+  // --- country (nested attribute value) -----------------------
   if (args.country) {
     whereClauses.push(
-      sql`UPPER(${subscribers.attributes}->>'country') = ${args.country.toUpperCase()}`,
+      sql`UPPER(${subscribers.attributes}->'country'->>'value') = ${args.country.toUpperCase()}`,
     );
   }
 
