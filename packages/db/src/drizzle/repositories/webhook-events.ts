@@ -1,4 +1,4 @@
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { webhookEvents, type WebhookEvent } from "../schema";
 import { webhookEventStatus, webhookSource } from "../enums";
@@ -189,7 +189,15 @@ export async function updateWebhookEvent(
 /**
  * Bulk-delete webhook_events rows older than the retention cutoff.
  * Used by the nightly webhook-retention BullMQ job. Returns the
- * count of rows removed.
+ * total count of rows removed.
+ *
+ * Batched: deletes at most `batchSize` rows per iteration (bounded
+ * subselect), loops until a batch is partial, and caps at
+ * `maxBatches` iterations as a safety brake. This avoids a single
+ * long table-wide lock, WAL spike, or OOM from a large `.returning()`.
+ *
+ * Mirrors the outbox-cleanup worker's `deletePublishedOlderThan`
+ * pattern (see packages/db/src/drizzle/repositories/outbox.ts).
  *
  * Rationale: webhook_events is not a hypertable (the UNIQUE
  * (source, storeEventId) key is load-bearing for the upsert
@@ -200,10 +208,26 @@ export async function updateWebhookEvent(
 export async function deleteWebhookEventsOlderThan(
   db: DbOrTx,
   cutoff: Date,
+  batchSize = 10_000,
+  maxBatches = 1_000,
 ): Promise<number> {
-  const result = await db
-    .delete(webhookEvents)
-    .where(lt(webhookEvents.createdAt, cutoff))
-    .returning({ id: webhookEvents.id });
-  return result.length;
+  let total = 0;
+  for (let i = 0; i < maxBatches; i++) {
+    const result = await db.execute(sql`
+      DELETE FROM ${webhookEvents}
+      WHERE id IN (
+        SELECT id FROM ${webhookEvents}
+        WHERE "createdAt" < ${cutoff}
+        ORDER BY "createdAt" ASC
+        LIMIT ${batchSize}
+      )
+    `);
+    // node-postgres returns rowCount on Result; drizzle's execute
+    // returns the underlying QueryResult. Both expose `rowCount`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const n = (result as any)?.rowCount ?? 0;
+    total += Number(n);
+    if (Number(n) < batchSize) break;
+  }
+  return total;
 }
