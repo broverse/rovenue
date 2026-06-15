@@ -87,4 +87,24 @@ impl IdentityManager {
         }
         Ok(())
     }
+
+    /// Resets identity to a fresh anonymous user: mints a new `rovenue_id`,
+    /// drops any `app_user_id`, persists, and notifies observers. Callers that
+    /// hold scope-bound caches must clear them after this returns.
+    pub fn log_out(&self) -> RovenueResult<()> {
+        let new_row = IdentityRow {
+            rovenue_id: format!("rov_{}", cuid2::create_id()),
+            app_user_id: None,
+            synced: true,
+            created_at_ms: self.clock.now_unix_ms(),
+        };
+        IdentityRepo::new(&self.store).save(&new_row)?;
+        {
+            let mut u = self.cached.lock().expect("identity mutex poisoned");
+            u.rovenue_id = new_row.rovenue_id.clone();
+            u.app_user_id = None;
+        }
+        self.bus.emit(ChangeEvent::IdentityChanged);
+        Ok(())
+    }
 }

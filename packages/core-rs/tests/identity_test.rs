@@ -67,6 +67,26 @@ fn identify_is_idempotent_for_same_known_id() {
 }
 
 #[test]
+fn log_out_mints_new_rovenue_id_and_clears_app_user_id_and_emits() {
+    let (_, bus, mgr) = fresh();
+    let cap = Arc::new(Capture(Mutex::new(vec![])));
+    bus.register(Arc::clone(&cap) as Arc<dyn Observer>);
+    let before = mgr.current_user().rovenue_id;
+    mgr.identify("user_1".into()).unwrap();
+    mgr.log_out().unwrap();
+    let after = mgr.current_user();
+    assert_ne!(after.rovenue_id, before);
+    assert!(after.rovenue_id.starts_with("rov_"));
+    assert_eq!(after.app_user_id, None);
+    assert!(cap
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|e| matches!(e, ChangeEvent::IdentityChanged)));
+}
+
+#[test]
 fn current_user_returns_known_id_for_scope_when_present() {
     let (_, _, mgr) = fresh();
     let scope_before = mgr.current_user_scope();
