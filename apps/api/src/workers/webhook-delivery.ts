@@ -178,8 +178,15 @@ async function attemptDelivery(
     errorMessage = err instanceof Error ? err.message : String(err);
   }
 
-  // Failed — dead letter or schedule retry
-  if (newAttempts >= MAX_ATTEMPTS) {
+  // Failed — dead letter or schedule retry.
+  //
+  // Dead-letter only AFTER the row has used all MAX_ATTEMPTS attempts.
+  // With `>=` the row died at newAttempts === MAX_ATTEMPTS, so the 5th
+  // (12h) backoff entry was never scheduled and only 4 retries ran —
+  // an off-by-one. `>` lets newAttempts === MAX_ATTEMPTS schedule the
+  // final backoff[MAX_ATTEMPTS - 1] entry; death comes on the next
+  // failure (newAttempts === MAX_ATTEMPTS + 1).
+  if (newAttempts > MAX_ATTEMPTS) {
     await drizzle.outgoingWebhookRepo.updateOutgoingWebhook(
       drizzle.db,
       wh.id,
