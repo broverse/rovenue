@@ -9,6 +9,7 @@ import { meRoute } from "./me";
 import { receiptsRoute } from "./receipts";
 import { sdkSessionsRoute } from "./sdk-sessions";
 import { subscribersRoute } from "./subscribers";
+import { identifyRoute } from "./identify";
 import { offeringsRoute } from "./offerings";
 
 // =============================================================
@@ -37,6 +38,7 @@ export const v1Route = new Hono()
   // the IP.
   .use("*", apiKeyRateLimit())
   .route("/config", configRoute)
+  .route("/identify", identifyRoute)
   .route("/events", eventsRoute)
   .route("/experiments", experimentsRoute)
   .route("/me", meRoute)
