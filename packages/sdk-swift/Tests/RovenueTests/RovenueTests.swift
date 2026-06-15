@@ -10,7 +10,7 @@ final class RovenueTests: XCTestCase {
         let cfg = Config(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.dev", debug: false, appVersion: nil)
         let core = try RovenueCore(config: cfg)
         XCTAssertFalse(core.getVersion().isEmpty)
-        XCTAssertEqual(core.getVersion(), "0.6.0")
+        XCTAssertEqual(core.getVersion(), "0.7.0")
     }
 
     func test_invalidApiKey_throws_atGeneratedLayer() {
@@ -23,7 +23,7 @@ final class RovenueTests: XCTestCase {
     }
 
     func test_sdkVersionFreeFunction() {
-        XCTAssertEqual(sdkVersion(), "0.6.0")
+        XCTAssertEqual(sdkVersion(), "0.7.0")
     }
 
     // -----------------------------------------------------------------
