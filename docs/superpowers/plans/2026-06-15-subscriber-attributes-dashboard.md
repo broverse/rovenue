@@ -223,9 +223,12 @@ import { Chip } from "@heroui/react";
 import { useTranslation } from "react-i18next";
 import type { AttributeEntry, AttributeSource, SubscriberAttributes } from "@rovenue/shared";
 
-const SOURCE_COLOR: Record<AttributeSource, "primary" | "secondary" | "success" | "default"> = {
-  sdk: "primary",
-  server: "secondary",
+// NOTE: this repo's @heroui/react Chip accepts color ∈
+// "default"|"success"|"warning"|"accent"|"danger" and variant ∈
+// "primary"|"soft"|"secondary"|"tertiary" (NOT "flat"). Use these tokens.
+const SOURCE_COLOR: Record<AttributeSource, "accent" | "warning" | "success" | "default"> = {
+  sdk: "accent",
+  server: "warning",
   dashboard: "success",
   legacy: "default",
 };
@@ -262,7 +265,7 @@ export function AttributesTable({ attributes }: { attributes: SubscriberAttribut
             <td className="py-1.5 pr-4 font-mono text-xs">{key}</td>
             <td className="py-1.5 pr-4 break-all">{entry.value}</td>
             <td className="py-1.5 pr-4">
-              <Chip size="sm" variant="flat" color={SOURCE_COLOR[entry.source] ?? "default"}>
+              <Chip size="sm" variant="soft" color={SOURCE_COLOR[entry.source] ?? "default"}>
                 {entry.source}
               </Chip>
             </td>
