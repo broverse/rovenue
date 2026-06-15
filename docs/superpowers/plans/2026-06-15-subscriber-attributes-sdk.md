@@ -105,8 +105,11 @@ CREATE TABLE attribute_mutations (\
     value TEXT\
 );\
 CREATE INDEX idx_attribute_mutations_id ON attribute_mutations(id);\
+UPDATE schema_meta SET version = 6;\
 ";
 ```
+
+**Important:** each `MIGRATION_Vx` in this crate ends with `UPDATE schema_meta SET version = x;` — the runner relies on the migration SQL bumping the version. Omitting it makes a reopened DB re-run V6 and crash on `CREATE TABLE … already exists` (the `reopens_existing_db_idempotently` test covers this). Match the V2–V5 format exactly.
 
 Bump the latest-version constant from `5` to `6` and append `MIGRATION_V6` to the `MIGRATIONS` array (match the existing names — the grounding shows `LATEST = 5` and `MIGRATIONS = [MIGRATION_V1, …, MIGRATION_V5]`).
 
@@ -678,13 +681,13 @@ In the `interface RovenueCore { … }` block in `librovenue.udl`, add (matching 
 
 - [ ] **Step 2: Regenerate + build the core**
 
-Run: `cargo build -p rovenue-core`
-Expected: builds clean; UniFFI scaffolding regenerates. If the generated Swift/Kotlin bindings are checked in (the grounding shows `Generated/RovenueFFI.swift` and `generated/librovenue.kt`), regenerate them with the project's generation command (check `packages/core-rs` build scripts / Makefile / justfile for the `uniffi-bindgen` invocation) and include the regenerated files in this commit.
+Run: `cargo build -p librovenue`
+Expected: builds clean; UniFFI scaffolding regenerates. Regenerate the native bindings with `packages/core-rs/scripts/build-bindings.sh` (builds the release dylib + `rovenue-uniffi-bindgen`, then generates Swift + Kotlin). **Note:** the generated binding files (`Generated/RovenueFFI.swift`, `generated/librovenue.kt`) are **gitignored** in this repo (only `.gitkeep` is tracked) — they are regenerated at build time, so this commit contains only the `.udl` source. Still RUN the generation to confirm `setAttributes`/`flushAttributes` appear in both generated files before moving on. (swiftformat/ktlint "NotFound" warnings are cosmetic.)
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add packages/core-rs/src/librovenue.udl packages/sdk-swift/Sources/Rovenue/Generated packages/sdk-kotlin/src/main/kotlin/dev/rovenue/sdk/generated
+git add packages/core-rs/src/librovenue.udl
 git commit -m "feat(core): expose set_attributes/flush_attributes via UniFFI"
 ```
 
