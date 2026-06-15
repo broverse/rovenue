@@ -169,4 +169,55 @@ describe("revenue/credit aggregate idempotency", () => {
     expect(Number(bal.total_granted)).toBe(100);
     expect(Number(bal.latest_balance)).toBe(100);
   }, 120_000);
+
+  // 0013: v_revenue_lifetime_subscriber must round cents (not truncate the
+  // binary-float product) and treat CHARGEBACK as a refund, matching v_mrr_daily.
+  it("rounds lifetime cents and counts CHARGEBACK as a refund", async () => {
+    const RUN = Date.now();
+    const projectId = `prj_life_${RUN}`;
+    const subscriberId = `sub_life_${RUN}`;
+
+    // $19.99 INITIAL: 19.99 * 100 = 1998.9999... in binary float; round() must
+    // recover 1999, whereas the old toUInt64(... * 100) truncates to 1998.
+    const purchaseRow = {
+      eventId: `evt_life_init_${RUN}`,
+      revenueEventId: `rev_init_${RUN}`,
+      projectId, subscriberId,
+      purchaseId: `pur_${RUN}`, productId: `prod_${RUN}`,
+      type: "INITIAL", store: "APP_STORE",
+      amount: "19.9900", amountUsd: "19.9900", currency: "USD",
+      eventDate: "2026-05-02 00:00:00.000",
+      ingestedAt: "2026-05-02 00:00:00.000",
+      _version: 1,
+    };
+    // CHARGEBACK ($5.00) must be included in lifetime_dollars_refunded_cents.
+    const chargebackRow = {
+      eventId: `evt_life_cb_${RUN}`,
+      revenueEventId: `rev_cb_${RUN}`,
+      projectId, subscriberId,
+      purchaseId: `pur_${RUN}`, productId: `prod_${RUN}`,
+      type: "CHARGEBACK", store: "APP_STORE",
+      amount: "5.0000", amountUsd: "5.0000", currency: "USD",
+      eventDate: "2026-05-03 00:00:00.000",
+      ingestedAt: "2026-05-03 00:00:00.000",
+      _version: 1,
+    };
+    await ch.insert({ table: "raw_revenue_events", values: [purchaseRow], format: "JSONEachRow" });
+    await ch.insert({ table: "raw_revenue_events", values: [chargebackRow], format: "JSONEachRow" });
+
+    const res = await ch.query({
+      query: `SELECT toString(lifetime_dollars_purchased_cents) AS purchased,
+                     toString(lifetime_dollars_refunded_cents)  AS refunded
+              FROM rovenue.v_revenue_lifetime_subscriber
+              WHERE projectId = {pid:String} AND subscriberId = {sid:String}`,
+      query_params: { pid: projectId, sid: subscriberId },
+      format: "JSONEachRow",
+    });
+    const life = ((await res.json()) as Array<Record<string, string>>)[0] ?? {};
+
+    // Rounded, not truncated: $19.99 -> 1999 cents (the bug produced 1998).
+    expect(Number(life.purchased)).toBe(1999);
+    // CHARGEBACK is treated as a refund -> $5.00 = 500 cents.
+    expect(Number(life.refunded)).toBe(500);
+  }, 120_000);
 });
