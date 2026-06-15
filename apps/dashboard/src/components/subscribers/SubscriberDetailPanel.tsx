@@ -6,6 +6,7 @@ import type {
   SubscriberDetail,
 } from "@rovenue/shared";
 import { AccessTable } from "./AccessTable";
+import { AttributesTable } from "./AttributesTable";
 import { PurchasesTable } from "./PurchasesTable";
 import { CreditLedgerTable } from "./CreditLedgerTable";
 import { AssignmentsList } from "./AssignmentsList";
@@ -115,14 +116,12 @@ export function SubscriberDetailPanel({ data, projectId }: Props) {
             {anonymizeMutation.error?.message}
           </div>
         )}
-        <details className="mt-4 text-sm">
-          <summary className="cursor-pointer text-default-500">
+        <div className="mt-4 text-sm">
+          <h3 className="mb-2 text-default-500">
             {t("subscribers.detail.attributes")}
-          </summary>
-          <pre className="mt-2 overflow-x-auto rounded-md bg-default-100 p-3 text-xs">
-            {JSON.stringify(data.attributes, null, 2)}
-          </pre>
-        </details>
+          </h3>
+          <AttributesTable attributes={data.attributes} />
+        </div>
       </Card>
 
       <Card className="p-6">

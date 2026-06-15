@@ -1076,6 +1076,13 @@
       "deleted": "Deleted: {{date}}",
       "mergedInto": "Merged into: {{id}}",
       "attributes": "Attributes",
+      "attributesTable": {
+        "empty": "No attributes",
+        "key": "Attribute",
+        "value": "Value",
+        "source": "Source",
+        "updatedAt": "Updated"
+      },
       "access": "Access",
       "purchases": "Purchases",
       "credits": "Credits",
