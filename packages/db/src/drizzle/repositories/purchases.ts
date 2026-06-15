@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, notInArray } from "drizzle-orm";
 import type { Db } from "../client";
 import { products, purchases, type Purchase } from "../schema";
 import { purchaseStatus, store as storeEnum } from "../enums";
@@ -136,6 +136,77 @@ export async function updatePurchasesByOriginalTransaction(
         eq(purchases.originalTransactionId, originalTransactionId),
       ),
     );
+}
+
+/**
+ * Terminal statuses are absorbing: once a row reaches REFUNDED or
+ * REVOKED the state machine (`TRANSITIONS` in subscription-state.ts)
+ * permits no outgoing edge. Mirrored here at the data layer so the
+ * chain-wide updater can refuse to resurrect a terminal row.
+ */
+const TERMINAL_STATUSES: PurchaseStatus[] = ["REFUNDED", "REVOKED"];
+
+export interface GuardedChainUpdateResult {
+  /** ids of rows the patch was actually applied to. */
+  updatedIds: string[];
+  /** ids of terminal rows skipped because the patch carried `status`. */
+  skippedTerminalIds: string[];
+}
+
+/**
+ * Chain-wide partial update that NEVER resurrects a terminal row.
+ *
+ * Behaves like `updatePurchasesByOriginalTransaction`, but when the
+ * patch carries a `status` field it adds a
+ * `WHERE status NOT IN ('REFUNDED','REVOKED')` predicate so a
+ * late / replayed non-refund notification (DID_FAIL_TO_RENEW,
+ * EXPIRED, REVOKE) cannot overwrite a row the state machine treats
+ * as absorbing. Returns the ids actually updated plus the ids of any
+ * terminal rows that were skipped, so the caller can audit the
+ * withheld transition.
+ *
+ * When the patch has no `status` field there is nothing to guard, so
+ * every matching row is updated (no terminal rows are "skipped").
+ */
+export async function updateChainStatusGuarded(
+  db: DbOrTx,
+  projectId: string,
+  originalTransactionId: string,
+  patch: UpdatePurchaseFields,
+): Promise<GuardedChainUpdateResult> {
+  if (Object.keys(patch).length === 0) {
+    return { updatedIds: [], skippedTerminalIds: [] };
+  }
+
+  const guardsStatus = "status" in patch && patch.status !== undefined;
+  const chainMatch = and(
+    eq(purchases.projectId, projectId),
+    eq(purchases.originalTransactionId, originalTransactionId),
+  );
+
+  const updated = await db
+    .update(purchases)
+    .set(patch)
+    .where(
+      guardsStatus
+        ? and(chainMatch, notInArray(purchases.status, TERMINAL_STATUSES))
+        : chainMatch,
+    )
+    .returning({ id: purchases.id });
+  const updatedIds = updated.map((r) => r.id);
+
+  if (!guardsStatus) {
+    return { updatedIds, skippedTerminalIds: [] };
+  }
+
+  // Surface the terminal rows that were left untouched so the caller
+  // can record a `subscription.transition_rejected` audit entry.
+  const skipped = await db
+    .select({ id: purchases.id })
+    .from(purchases)
+    .where(and(chainMatch, inArray(purchases.status, TERMINAL_STATUSES)));
+
+  return { updatedIds, skippedTerminalIds: skipped.map((r) => r.id) };
 }
 
 /**

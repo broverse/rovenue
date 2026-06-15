@@ -57,10 +57,12 @@ function makeTransaction(): AppleJwsTransactionPayload {
   } as AppleJwsTransactionPayload;
 }
 
-function makeRenewNotification(): AppleResponseBodyV2DecodedPayload {
+function makeNotification(
+  notificationType: AppleResponseBodyV2DecodedPayload["notificationType"],
+): AppleResponseBodyV2DecodedPayload {
   return {
-    notificationType: APPLE_NOTIFICATION_TYPE.DID_RENEW,
-    notificationUUID: NOTIFICATION_UUID,
+    notificationType,
+    notificationUUID: `${NOTIFICATION_UUID}_${notificationType}`,
     version: "2.0",
     signedDate: 1_700_000_000_000,
     data: {
@@ -70,15 +72,23 @@ function makeRenewNotification(): AppleResponseBodyV2DecodedPayload {
   } as AppleResponseBodyV2DecodedPayload;
 }
 
-function makeStubVerifier(): AppleNotificationVerifier {
-  const notification = makeRenewNotification();
+function makeStubVerifier(
+  notificationType: AppleResponseBodyV2DecodedPayload["notificationType"] = APPLE_NOTIFICATION_TYPE.DID_RENEW,
+): AppleNotificationVerifier {
+  const notification = makeNotification(notificationType);
   const transaction = makeTransaction();
   return {
     verifyNotification: vi.fn(async () => notification),
     verifyTransaction: vi.fn(async () => transaction),
-    verifyRenewalInfo: vi.fn(async () => {
-      throw new Error("verifyRenewalInfo not used in this test");
-    }),
+    // The chain handlers (fail-to-renew / expired / revoke) read
+    // renewalInfo for grace-period dates; return a benign stub.
+    verifyRenewalInfo: vi.fn(async () => ({
+      originalTransactionId: OTXN_ID,
+      productId: APPLE_PRODUCT_ID,
+      autoRenewStatus: 0 as const,
+      signedDate: 1_700_000_000_000,
+      environment: APPLE_ENVIRONMENT.SANDBOX,
+    })),
   };
 }
 
@@ -158,4 +168,58 @@ describe("handleAppleNotification — terminal transition guard", () => {
       );
     expect(audits.length).toBeGreaterThanOrEqual(1);
   });
+
+  // Chain-wide guard (GAP 1): the three non-refund handlers
+  // (DID_FAIL_TO_RENEW, EXPIRED, REVOKE) propagate status across the
+  // whole transaction chain via updatePurchasesByOriginalTransaction.
+  // A late/replayed one on a REFUNDED chain must NOT overwrite the
+  // terminal row, and the withheld write must be audited.
+  async function countRejections(): Promise<number> {
+    const rows = await getDb()
+      .select({ id: auditLogs.id })
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.projectId, PROJECT_ID),
+          eq(auditLogs.action, "subscription.transition_rejected"),
+        ),
+      );
+    return rows.length;
+  }
+
+  it.each([
+    APPLE_NOTIFICATION_TYPE.DID_FAIL_TO_RENEW,
+    APPLE_NOTIFICATION_TYPE.EXPIRED,
+    APPLE_NOTIFICATION_TYPE.REVOKE,
+  ])(
+    "keeps a REFUNDED chain REFUNDED on a late %s and audits the rejection",
+    async (notificationType) => {
+      const before = await countRejections();
+
+      const result = await handleAppleNotification({
+        projectId: PROJECT_ID,
+        signedPayload: "signed-envelope-stub",
+        verifier: makeStubVerifier(notificationType),
+      });
+      expect(result.status).toBe("processed");
+
+      const db = getDb();
+      const [row] = await db
+        .select({ status: purchases.status })
+        .from(purchases)
+        .where(
+          and(
+            eq(purchases.store, "APP_STORE"),
+            eq(purchases.storeTransactionId, TXN_ID),
+          ),
+        );
+      // Terminal row is never resurrected by a non-refund chain write.
+      expect(row?.status).toBe("REFUNDED");
+
+      // One transition_rejected audit row was added for the skipped
+      // terminal row.
+      const after = await countRejections();
+      expect(after).toBeGreaterThan(before);
+    },
+  );
 });

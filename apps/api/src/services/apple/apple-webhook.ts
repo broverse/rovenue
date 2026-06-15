@@ -37,8 +37,68 @@ import {
   type AppleNotificationVerifier,
 } from "./apple-verify";
 import { guardStatusWrite } from "../subscription-transition-guard";
+import { audit } from "../../lib/audit";
 
 const log = logger.child("apple-webhook");
+
+/**
+ * Chain-wide status write that refuses to resurrect a terminal row.
+ *
+ * The three non-refund chain transitions (DID_FAIL_TO_RENEW,
+ * EXPIRED, REVOKE) propagate across the whole transaction chain via
+ * `updatePurchasesByOriginalTransaction`, which has no per-row guard.
+ * A late / replayed one of these on a chain whose row is already
+ * REFUNDED / REVOKED would silently overwrite that terminal state
+ * (e.g. a failed-renewal resurrecting a refunded purchase). This
+ * routes the write through the data-layer guard
+ * (`updateChainStatusGuarded`, `WHERE status NOT IN
+ * ('REFUNDED','REVOKED')`) and writes one
+ * `subscription.transition_rejected` audit row per skipped terminal
+ * row so the withheld transition is tamper-evidently recorded.
+ *
+ * The single-transaction REFUND chain-revoke in `applyRefund` is the
+ * spec's intentional non-goal and does NOT route through here.
+ */
+async function guardedChainStatusWrite(
+  ctx: DispatchContext,
+  patch: { status: PurchaseStatus; [key: string]: unknown },
+): Promise<void> {
+  const { skippedTerminalIds } =
+    await drizzle.purchaseRepo.updateChainStatusGuarded(
+      drizzle.db,
+      ctx.projectId,
+      ctx.transaction.originalTransactionId,
+      patch,
+    );
+
+  if (skippedTerminalIds.length === 0) return;
+
+  log.warn("withheld chain status write on terminal rows", {
+    projectId: ctx.projectId,
+    originalTransactionId: ctx.transaction.originalTransactionId,
+    attemptedStatus: patch.status,
+    source: `apple:${ctx.notification.notificationType}`,
+    skipped: skippedTerminalIds.length,
+  });
+
+  for (const id of skippedTerminalIds) {
+    await audit({
+      projectId: ctx.projectId,
+      userId: "system",
+      action: "subscription.transition_rejected",
+      resource: "purchase",
+      resourceId: id,
+      before: null,
+      after: {
+        status: patch.status,
+        originalTransactionId: ctx.transaction.originalTransactionId,
+        source: `apple:${ctx.notification.notificationType}`,
+      },
+      ipAddress: null,
+      userAgent: null,
+    });
+  }
+}
 
 export interface HandleAppleNotificationOptions {
   projectId: string;
@@ -318,24 +378,14 @@ async function applyFailedRenewal(ctx: DispatchContext): Promise<void> {
     ? new Date(ctx.renewalInfo.gracePeriodExpiresDate)
     : null;
 
-  await drizzle.purchaseRepo.updatePurchasesByOriginalTransaction(
-    drizzle.db,
-    ctx.projectId,
-    ctx.transaction.originalTransactionId,
-    {
-      status: inGrace ? PurchaseStatus.GRACE_PERIOD : PurchaseStatus.ACTIVE,
-      gracePeriodExpires,
-    },
-  );
+  await guardedChainStatusWrite(ctx, {
+    status: inGrace ? PurchaseStatus.GRACE_PERIOD : PurchaseStatus.ACTIVE,
+    gracePeriodExpires,
+  });
 }
 
 async function applyExpired(ctx: DispatchContext): Promise<void> {
-  await drizzle.purchaseRepo.updatePurchasesByOriginalTransaction(
-    drizzle.db,
-    ctx.projectId,
-    ctx.transaction.originalTransactionId,
-    { status: PurchaseStatus.EXPIRED },
-  );
+  await guardedChainStatusWrite(ctx, { status: PurchaseStatus.EXPIRED });
   await revokeAccessForTransaction(ctx);
   await emitCancellationEvent(ctx);
 }
@@ -413,12 +463,7 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
 }
 
 async function applyRevoke(ctx: DispatchContext): Promise<void> {
-  await drizzle.purchaseRepo.updatePurchasesByOriginalTransaction(
-    drizzle.db,
-    ctx.projectId,
-    ctx.transaction.originalTransactionId,
-    { status: PurchaseStatus.REVOKED },
-  );
+  await guardedChainStatusWrite(ctx, { status: PurchaseStatus.REVOKED });
   await revokeAccessForTransaction(ctx);
 }
 
