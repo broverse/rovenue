@@ -143,53 +143,68 @@ Call `configure` once at app startup before accessing `Rovenue.shared`.
   </Tab>
 </Tabs>
 
-## Receipts
+## Purchases
 
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
-| `postAppleReceipt` | `postAppleReceipt(jws, productId, appAccountToken?)` | `ReceiptResult` | `ReceiptInvalidError`, `DuplicatePurchaseError` |
-| `postGoogleReceipt` | `postGoogleReceipt(receipt, productId, obfuscatedAccountId?, obfuscatedProfileId?)` | `ReceiptResult` | `ReceiptInvalidError`, `DuplicatePurchaseError` |
+| `getOfferings` | `getOfferings()` | `{ current: Offering \| null; all: Record<string, Offering> }` | `NetworkUnavailableError`, `ServerError` |
+| `purchase` | `purchase(pkg)` | `PurchaseResult` | `PurchaseCancelledError`, `PurchasePendingError`, `ProductNotAvailableError`, `StoreProblemError`, `ReceiptInvalidError` |
+| `restorePurchases` | `restorePurchases()` | `void` | `NetworkUnavailableError`, `ServerError` |
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
-    // Apple StoreKit 2
-    const result = await Rovenue.postAppleReceipt(jws, 'pro_monthly', appAccountToken);
+    import {
+      Rovenue,
+      PurchaseCancelledError,
+      PurchasePendingError,
+    } from '@rovenue/react-native-sdk';
 
-    // Google Play Billing
-    const result = await Rovenue.postGoogleReceipt(purchaseToken, 'pro_monthly');
+    const offerings = await Rovenue.getOfferings();
+    const pkg = offerings.current?.packages[0];
+
+    if (pkg) {
+      try {
+        const result = await Rovenue.purchase(pkg);
+        // result.entitlements / result.creditBalance are up to date
+      } catch (e) {
+        if (e instanceof PurchaseCancelledError) { /* user dismissed */ }
+        else if (e instanceof PurchasePendingError) { /* Ask-to-Buy */ }
+        else throw e;
+      }
+    }
+
+    await Rovenue.restorePurchases();
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
-    // Apple StoreKit 2
-    let result = try await Rovenue.shared.postAppleReceipt(
-        jws: jwsString,
-        productId: "pro_monthly",
-        appAccountToken: uuid
-    )
+    let offerings = try await Rovenue.shared.getOfferings()
+    if let pkg = offerings.current?.packages.first {
+      do {
+        let result = try await Rovenue.shared.purchase(pkg)
+        // result.entitlements / result.creditBalance are up to date
+      } catch is PurchaseCancelledError { /* user dismissed */ }
+        catch is PurchasePendingError   { /* Ask-to-Buy */ }
+    }
 
-    // Google Play Billing
-    let result = try await Rovenue.shared.postGoogleReceipt(
-        receipt: purchaseToken,
-        productId: "pro_monthly"
-    )
+    try await Rovenue.shared.restorePurchases()
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    // Apple StoreKit 2
-    val result = Rovenue.shared.postAppleReceipt(
-        jws = jwsString,
-        productId = "pro_monthly",
-        appAccountToken = uuid
-    )
+    val offerings = Rovenue.shared.getOfferings()
+    val pkg = offerings.current?.packages?.firstOrNull()
 
-    // Google Play Billing
-    val result = Rovenue.shared.postGoogleReceipt(
-        receipt = purchaseToken,
-        productId = "pro_monthly"
-    )
+    if (pkg != null) {
+      try {
+        val result = Rovenue.shared.purchase(pkg)
+        // result.entitlements / result.creditBalance are up to date
+      } catch (e: PurchaseCancelledException) { /* user dismissed */ }
+        catch (e: PurchasePendingException)   { /* deferred */ }
+    }
+
+    Rovenue.shared.restorePurchases()
     ```
   </Tab>
 </Tabs>

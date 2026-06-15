@@ -1,6 +1,6 @@
 ---
 title: Quick Start
-description: Configure the SDK, check an entitlement, and validate a purchase in five minutes.
+description: Configure the SDK, check an entitlement, and make a purchase in five minutes.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
@@ -60,26 +60,66 @@ import { Callout } from 'fumadocs-ui/components/callout';
 </Step>
 
 <Step>
-### Validate a purchase
+### Fetch offerings and make a purchase
 
-The SDK never calls StoreKit/Play Billing. Run your store's purchase flow,
-then hand the token to the SDK:
+The SDK fetches products directly from the store, drives the native purchase
+sheet (StoreKit 2 on iOS, Play Billing on Android), and validates the receipt
+server-side. Your app receives updated entitlements in the result.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
-    const result = await Rovenue.postAppleReceipt(jws, 'pro_monthly', appAccountToken);
-    // or: Rovenue.postGoogleReceipt(purchaseToken, 'pro_monthly', acctId, profileId)
+    import {
+      Rovenue,
+      PurchaseCancelledError,
+      PurchasePendingError,
+    } from '@rovenue/react-native-sdk';
+
+    const offerings = await Rovenue.getOfferings();
+    const pkg = offerings.current?.packages[0];
+
+    if (pkg) {
+      try {
+        const result = await Rovenue.purchase(pkg);
+        // result.entitlements / result.creditBalance are already up to date
+      } catch (e) {
+        if (e instanceof PurchaseCancelledError) { /* user dismissed — ignore */ }
+        else if (e instanceof PurchasePendingError) { /* Ask-to-Buy / deferred */ }
+        else throw e;
+      }
+    }
+
+    await Rovenue.restorePurchases();
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
-    let result = try await Rovenue.shared.postAppleReceipt(jws, productId: "pro_monthly", appAccountToken: token)
+    let offerings = try await Rovenue.shared.getOfferings()
+    if let pkg = offerings.current?.packages.first {
+      do {
+        let result = try await Rovenue.shared.purchase(pkg)
+        // result.entitlements / result.creditBalance are already up to date
+      } catch is PurchaseCancelledError { /* user dismissed — ignore */ }
+        catch is PurchasePendingError   { /* Ask-to-Buy / deferred */ }
+    }
+
+    try await Rovenue.shared.restorePurchases()
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    val result = Rovenue.shared.postGoogleReceipt(purchaseToken, "pro_monthly", acctId, profileId)
+    val offerings = Rovenue.shared.getOfferings()
+    val pkg = offerings.current?.packages?.firstOrNull()
+
+    if (pkg != null) {
+      try {
+        val result = Rovenue.shared.purchase(pkg)
+        // result.entitlements / result.creditBalance are already up to date
+      } catch (e: PurchaseCancelledError) { /* user dismissed — ignore */ }
+        catch (e: PurchasePendingError)   { /* Ask-to-Buy / deferred */ }
+    }
+
+    Rovenue.shared.restorePurchases()
     ```
   </Tab>
 </Tabs>
@@ -87,6 +127,6 @@ then hand the token to the SDK:
 </Steps>
 
 <Callout type="info">
-On success, the SDK refreshes entitlements and credits automatically and emits
+On purchase success, the SDK refreshes entitlements and credits automatically and emits
 a change event. See [Reacting to changes](/docs/guides/reacting-to-changes).
 </Callout>

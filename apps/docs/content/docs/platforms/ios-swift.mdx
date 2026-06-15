@@ -28,10 +28,6 @@ pod 'Rovenue'
 
 Then run `pod install`.
 
-<Callout type="info">
-The SDK does **not** call StoreKit. Receipt processing happens server-side via the Rovenue API.
-</Callout>
-
 ## Configure
 
 Call `Rovenue.configure` once, before any SDK method is used. `AppDelegate.application(_:didFinishLaunchingWithOptions:)` is the correct place:
@@ -77,6 +73,32 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
   }
 }
 ```
+
+## Purchases
+
+Use `getOfferings()` to fetch products configured in your Rovenue dashboard,
+then `purchase(_:)` to drive the full StoreKit 2 purchase flow. The SDK
+validates the receipt server-side and resolves with updated entitlements.
+
+```swift
+let offerings = try await Rovenue.shared.getOfferings()
+if let pkg = offerings.current?.packages.first {
+  do {
+    let result = try await Rovenue.shared.purchase(pkg)
+    // result.entitlements and result.creditBalance are already up to date
+  } catch is PurchaseCancelledError {
+    // User dismissed the sheet — no action needed
+  } catch is PurchasePendingError {
+    // Ask-to-Buy / deferred — inform the user
+  }
+}
+
+// Re-validate all prior transactions (e.g. after reinstall):
+try await Rovenue.shared.restorePurchases()
+```
+
+See [Processing Purchases](/docs/guides/processing-purchases) for the full API
+reference including error types and `StoreProduct` shape.
 
 ## Observing changes
 

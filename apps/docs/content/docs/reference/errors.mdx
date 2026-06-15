@@ -26,15 +26,22 @@ Every Rovenue SDK error originates from the same Rust-core `RovenueError` enum a
 **React Native** — all async methods return Promises. Use `instanceof` to narrow to a specific subclass:
 
 ```ts
-import { Rovenue, ReceiptInvalidError, DuplicatePurchaseError } from '@rovenue/react-native-sdk';
+import {
+  Rovenue,
+  PurchaseCancelledError,
+  PurchasePendingError,
+  ReceiptInvalidError,
+} from '@rovenue/react-native-sdk';
 
 try {
-  const result = await Rovenue.postAppleReceipt(jws, productId);
+  const result = await Rovenue.purchase(pkg);
 } catch (e) {
-  if (e instanceof ReceiptInvalidError) {
-    // Receipt failed validation — show user a retry prompt
-  } else if (e instanceof DuplicatePurchaseError) {
-    // Already recorded — safe to ignore or refresh entitlements
+  if (e instanceof PurchaseCancelledError) {
+    // User dismissed the store sheet — no action needed
+  } else if (e instanceof PurchasePendingError) {
+    // Ask-to-Buy / deferred — inform the user
+  } else if (e instanceof ReceiptInvalidError) {
+    // Receipt failed server-side validation — show a retry prompt
   } else {
     throw e; // re-throw unexpected errors
   }
@@ -45,13 +52,15 @@ try {
 
 ```swift
 do {
-  let result = try await Rovenue.shared.postAppleReceipt(jws: jws, productId: productId)
+  let result = try await Rovenue.shared.purchase(pkg)
+} catch is PurchaseCancelledError {
+  // User dismissed the store sheet — no action needed
+} catch is PurchasePendingError {
+  // Ask-to-Buy / deferred — inform the user
 } catch let e as Rovenue.Error {
   switch e {
   case .receiptInvalid:
-    // Receipt failed validation
-  case .duplicatePurchase:
-    // Already recorded — safe to refresh entitlements
+    // Receipt failed server-side validation
   default:
     throw e
   }
@@ -62,11 +71,13 @@ do {
 
 ```kotlin
 try {
-    val result = Rovenue.shared.postAppleReceipt(jws = jws, productId = productId)
+    val result = Rovenue.shared.purchase(pkg)
+} catch (e: PurchaseCancelledException) {
+    // User dismissed the store sheet — no action needed
+} catch (e: PurchasePendingException) {
+    // Deferred / pending approval — inform the user
 } catch (e: RovenueException.ReceiptInvalid) {
-    // Receipt failed validation
-} catch (e: RovenueException.DuplicatePurchase) {
-    // Already recorded — safe to refresh entitlements
+    // Receipt failed server-side validation
 } catch (e: RovenueException) {
     throw e // re-throw other SDK errors
 }

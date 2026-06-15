@@ -12,16 +12,14 @@ exposes it idiomatically.
 
 ## What the SDK does
 
+- Drives the store **purchase** end-to-end: fetches offerings, triggers the
+  native StoreKit 2 / Play Billing sheet, and validates receipts transparently.
 - Checks a user's **entitlements** (cache-first, refreshed in the background).
 - Tracks a **credit** balance and spends credits server-side, idempotently.
-- Sends store **receipts** to your Rovenue server for validation.
 - Manages **identity** (anonymous → known user).
 
 ## What the SDK does NOT do
 
-- It does **not** call StoreKit or Play Billing. Your app performs the
-  purchase, then hands the resulting Apple JWS or Google purchase token to the
-  SDK for server validation.
 - It does **not** merge users itself. `identify()` is client-local; account
   merging is a server operation your backend triggers.
 

@@ -41,10 +41,6 @@ cd ios && pod install
 
 **Peer dependencies:** `expo >=51 <53`, `expo-modules-core`, `react >=18`, `react-native >=0.73`.
 
-<Callout type="info">
-The SDK does **not** call StoreKit or Play Billing. Receipt processing happens server-side via the Rovenue API.
-</Callout>
-
 ## Configure
 
 Call `Rovenue.configure` once at the root of your app — before any hooks are used. `App.tsx` is the right place:
@@ -91,6 +87,48 @@ export function ProBadge() {
   return <Text>Pro member</Text>;
 }
 ```
+
+## Purchases
+
+Use `getOfferings()` to fetch products configured in your Rovenue dashboard,
+then `purchase(pkg)` to drive the full purchase flow. The SDK triggers the
+native StoreKit 2 / Play Billing sheet, validates the receipt server-side, and
+resolves with updated entitlements and credit balance.
+
+```ts
+import {
+  Rovenue,
+  PurchaseCancelledError,
+  PurchasePendingError,
+} from '@rovenue/react-native-sdk';
+
+const offerings = await Rovenue.getOfferings();
+const pkg = offerings.current?.packages[0];
+
+if (pkg) {
+  try {
+    const result = await Rovenue.purchase(pkg);
+    // result.entitlements and result.creditBalance are already up to date
+  } catch (e) {
+    if (e instanceof PurchaseCancelledError) {
+      // User dismissed the store sheet — no action needed
+    } else if (e instanceof PurchasePendingError) {
+      // Ask-to-Buy / deferred — inform the user and wait for a change event
+    } else {
+      throw e;
+    }
+  }
+}
+```
+
+To re-validate all prior transactions (e.g. after a reinstall):
+
+```ts
+await Rovenue.restorePurchases();
+```
+
+See [Processing Purchases](/docs/guides/processing-purchases) for the full API
+reference including error types and `StoreProduct` shape.
 
 ## Change listener
 

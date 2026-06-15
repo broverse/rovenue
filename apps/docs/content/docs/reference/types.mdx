@@ -41,21 +41,23 @@ type Entitlement = {
 };
 ```
 
-## ReceiptResult
+## PurchaseResult
 
-Returned by [`postAppleReceipt()`](/docs/reference/methods#receipts) and [`postGoogleReceipt()`](/docs/reference/methods#receipts) on successful server-side validation.
+Returned by [`purchase()`](/docs/reference/methods#purchases) after the store transaction and server-side validation both succeed.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `subscriberId` | `string` | Rovenue's internal subscriber UUID for this user. |
-| `appUserId` | `string` | The effective app user ID at the time of purchase — either the known user ID or the anonymous ID. |
+| `entitlements` | `Entitlement[]` | The user's full set of active entitlements after the purchase. |
 | `creditBalance` | `number` | The user's total credit balance after the purchase was applied. |
+| `productId` | `string` | The store product ID that was purchased. |
+| `storeTransactionId` | `string` | The platform transaction ID (StoreKit 2 transaction ID or Play Billing order ID). |
 
 ```ts
-type ReceiptResult = {
-  subscriberId: string;
-  appUserId: string;
+type PurchaseResult = {
+  entitlements: Entitlement[];
   creditBalance: number;
+  productId: string;
+  storeTransactionId: string;
 };
 ```
 
