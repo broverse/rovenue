@@ -639,8 +639,10 @@ export interface MrrDecompositionResponse {
   to: string;
   /** INITIAL + TRIAL_CONVERSION, decimal-as-string USD. */
   newUsd: string;
-  /** REACTIVATION, decimal-as-string USD. */
-  expansionUsd: string;
+  /** RENEWAL, decimal-as-string USD. */
+  retainedUsd: string;
+  /** REACTIVATION (winback), decimal-as-string USD. */
+  reactivationUsd: string;
   /** REFUND + CHARGEBACK (money out), positive magnitude, decimal-as-string USD. */
   churnedUsd: string;
 }
