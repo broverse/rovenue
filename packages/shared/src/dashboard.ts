@@ -579,6 +579,26 @@ export interface RevenueSummaryResponse {
 }
 
 // =============================================================
+// LTV distribution — lifetime-value histogram (Phase 2)
+// =============================================================
+
+export interface LtvHistogramBucket {
+  /** Inclusive lower bound in USD. */
+  lowerUsd: number;
+  /** Exclusive upper bound in USD; null for the open-ended top bucket. */
+  upperUsd: number | null;
+  count: number;
+}
+
+export interface LtvDistributionResponse {
+  avgUsd: string;
+  medianUsd: string;
+  p90Usd: string;
+  totalSubscribers: number;
+  histogram: LtvHistogramBucket[];
+}
+
+// =============================================================
 // Project overview — KPI summary + panels (Phase 3.1)
 // =============================================================
 //
