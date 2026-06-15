@@ -29,6 +29,8 @@ maturity(c)     = f(a)                     (0…1 — how "settled" the estimate
 
 **Blended project pLTV** = size-weighted average of `predictedLtv(c)` across all cohorts in range.
 
+**Segmentation (approved for v1 — store + product).** The maturity curve `f(t)` is learned **once, project-wide** (most data → most stable shape) and then applied to scale each segment's cohorts. Each subscriber is attributed to the **store + product of their acquisition event** (the `INITIAL`/`TRIAL_CONVERSION` that defines their join), so all their revenue rolls into one stable segment. Per-segment pLTV = size-weighted blend of its cohorts, each scaled by the shared `f(age)`. This avoids unstable per-segment curve fitting on thin slices while still giving store- and product-level pLTV. Segments too thin to be meaningful carry the same cold-start `warning`.
+
 That's the whole model — no regression library required. (A later refinement could fit an explicit decay to the marginal curve; not needed for Level 1.)
 
 ---
@@ -78,6 +80,15 @@ Cohort size `N(c)` = sum of `joiners` at `age_month = 0` for that cohort (or a s
 Query: `{ horizonMonths?: 1–36 (default 12), minMatureCohorts?: default 3 }`
 
 ```ts
+interface LtvSegment {
+  key: string;                // store code, productId, or "__all__" for blended
+  label: string;              // display name
+  size: number;
+  observedLtvUsd: string;
+  predictedLtvUsd: string;
+  warning: string | null;     // thin-segment / cold-start flag
+}
+
 { data: {
   horizonMonths: number;
   /** Size-weighted predicted LTV across all cohorts, decimal-as-string USD. */
@@ -92,10 +103,16 @@ Query: `{ horizonMonths?: 1–36 (default 12), minMatureCohorts?: default 3 }`
     maturity: number;           // f(a) in [0,1]
     isMature: boolean;          // observed age ≥ horizon
   }>;
+  /** Per-acquisition-store pLTV (segment attributed by join event's store). */
+  byStore: LtvSegment[];
+  /** Per-acquisition-product pLTV (segment attributed by join event's productId). */
+  byProduct: LtvSegment[];
   /** Set when fewer than minMatureCohorts mature cohorts exist → predictions are low-confidence. */
   warning: string | null;
 }}
 ```
+
+The CH query (§3) is extended to carry the acquisition `store` + `productId` on the `joins` CTE (via `argMin(store, eventDate)` / `argMin(productId, eventDate)` over acquisition events) and to `GROUP BY cohort_month, join_store, join_product, age_month`. The JS layer builds `f(t)` from the project-wide cohort roll-up, then aggregates predictions three ways: blended, by `join_store`, by `join_product`. `byProduct` labels resolve productId → display name via the existing Postgres product lookup (as `overview.ts` does with `fetchProductDisplay`).
 
 **Cold-start honesty:** if there aren't `minMatureCohorts` cohorts old enough to reach the horizon, `f(t)` is unreliable → return predictions but set `warning` (and the UI shows a "low confidence / not enough history" badge). Never present a confident number we can't back.
 
