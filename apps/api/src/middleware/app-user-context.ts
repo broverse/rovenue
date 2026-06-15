@@ -20,8 +20,8 @@ declare module "hono" {
  */
 export const appUserContext: MiddlewareHandler = async (c, next) => {
   const project = c.get("project");
-  // Carries the device key: a rovenueId going forward, a legacy
-  // appUserId during the dual-read migration window.
+  // Carries the device key (the SDK's permanent rovenueId). Header
+  // name kept as X-Rovenue-App-User-Id for wire back-compat.
   const key = c.req.header(HEADER.X_ROVENUE_APP_USER_ID)?.trim();
   if (!key) {
     throw new HTTPException(400, {
