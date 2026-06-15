@@ -76,13 +76,16 @@ class Rovenue private constructor(
     // Lifecycle observer driving foreground reconciliation; held so it can be
     // removed on shutdown. Registered/removed on the main thread.
     private var foregroundObserver: ForegroundReconcileObserver? = null
-    private val mainHandler = Handler(Looper.getMainLooper())
 
     companion object {
         // Guarded by `lock`. Configure-twice replaces the instance
         // (RevenueCat / Adapty pattern). Accessing `shared` before
         // configure() throws IllegalStateException — silent fallback
         // would mask developer mistakes.
+
+        // Single shared main-thread handler so lifecycle add/remove posts across
+        // configure/reconfigure share one FIFO queue regardless of caller thread.
+        private val mainHandler = Handler(Looper.getMainLooper())
 
         private val lock = Any()
 
@@ -136,7 +139,10 @@ class Rovenue private constructor(
             }
 
             // Best-effort startup reconcile + continuous foreground reconcile.
-            // Both go through the trigger so they share the in-flight guard.
+            // When the app is already foregrounded, addObserver also fires an
+            // immediate onStart reconcile; the in-flight guard collapses the two
+            // while they overlap. A rare extra reconcile is harmless (server-side
+            // idempotent), so we don't synchronize them further.
             instance.startForegroundReconcile()
             instance.reconcileTrigger.fire(instance.scope) { instance.reconcilePurchases() }
         }

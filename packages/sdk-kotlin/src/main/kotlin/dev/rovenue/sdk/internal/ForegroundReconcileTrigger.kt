@@ -15,21 +15,23 @@ internal class ForegroundReconcileTrigger {
     /**
      * Launches [block] on [scope] unless a run is already in flight. Swallows
      * non-cancellation failures (foreground reconcile is best-effort and must
-     * never crash the app) and clears the flag in `finally`, so a failed or
-     * cancelled run never wedges it.
+     * never crash the app) and clears the flag via [kotlinx.coroutines.Job.invokeOnCompletion],
+     * which runs on every terminal state — normal, exception, or scope-cancelled
+     * before the body starts — so the flag can never wedge.
      */
     fun fire(scope: CoroutineScope, block: suspend () -> Unit) {
         if (!inFlight.compareAndSet(false, true)) return
-        scope.launch {
+        val job = scope.launch {
             try {
                 block()
             } catch (c: kotlin.coroutines.cancellation.CancellationException) {
                 throw c // preserve structured concurrency
             } catch (t: Throwable) {
                 // best-effort; never crash the app on a foreground reconcile
-            } finally {
-                inFlight.set(false)
             }
         }
+        // Clear on every terminal state — including a job cancelled before its
+        // body runs, where the in-coroutine finally would never execute.
+        job.invokeOnCompletion { inFlight.set(false) }
     }
 }
