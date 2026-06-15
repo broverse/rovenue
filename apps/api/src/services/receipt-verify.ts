@@ -36,6 +36,7 @@ import type {
   GoogleServiceAccountCredentials,
   GoogleVerifyConfig,
 } from "./google";
+import { guardStatusWrite } from "./subscription-transition-guard";
 
 const log = logger.child("receipt-verify");
 
@@ -158,6 +159,18 @@ async function verifyAppleReceipt(
     (transaction.price ?? 0) === 0;
   const status = isTrial ? PurchaseStatus.TRIAL : PurchaseStatus.ACTIVE;
 
+  // State-machine guard: never resurrect a terminal (REFUNDED /
+  // REVOKED) purchase via a late verify. Non-status fields still
+  // update; only `status` is withheld + audited on rejection.
+  const guard = await guardStatusWrite({
+    db: drizzle.db,
+    projectId: args.projectId,
+    store: Store.APP_STORE,
+    storeTransactionId: transaction.transactionId,
+    to: status,
+    source: "receipt-verify",
+  });
+
   const purchase = (await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
     store: Store.APP_STORE,
     storeTransactionId: transaction.transactionId,
@@ -188,7 +201,7 @@ async function verifyAppleReceipt(
       verifiedAt: new Date(),
     },
     update: {
-      status,
+      ...(guard.apply ? { status } : {}),
       expiresDate: transaction.expiresDate
         ? new Date(transaction.expiresDate)
         : null,
@@ -280,6 +293,15 @@ async function verifyGoogleSubscriptionReceipt(
     ? new Date(subscription.startTime)
     : new Date();
 
+  const guard = await guardStatusWrite({
+    db: drizzle.db,
+    projectId: args.projectId,
+    store: Store.PLAY_STORE,
+    storeTransactionId: args.receipt,
+    to: PurchaseStatus.ACTIVE,
+    source: "receipt-verify",
+  });
+
   const purchase = (await drizzle.purchaseRepo.upsertPurchase(drizzle.db, {
     store: Store.PLAY_STORE,
     storeTransactionId: args.receipt,
@@ -301,7 +323,7 @@ async function verifyGoogleSubscriptionReceipt(
       verifiedAt: new Date(),
     },
     update: {
-      status: PurchaseStatus.ACTIVE,
+      ...(guard.apply ? { status: PurchaseStatus.ACTIVE } : {}),
       expiresDate,
       autoRenewStatus:
         lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null,

@@ -70,6 +70,7 @@ export type AuditAction =
   | "subscription.schedule_canceled"
   | "subscription.cancel_executed"
   | "subscription.cancel_failed"
+  | "subscription.transition_rejected"
   | "subscriptions.exported"
   // --- members ---
   | "member.invited"
