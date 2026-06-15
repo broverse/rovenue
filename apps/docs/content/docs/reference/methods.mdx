@@ -198,7 +198,7 @@ Call `configure` once at app startup before accessing `Rovenue.shared`.
 
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
-| `getAppAccountToken` | `getAppAccountToken()` | `string` (UUID) | — |
+| `getAppAccountToken` | `getAppAccountToken()` | `string` (UUID) | `Storage` |
 
 Returns a stable UUID scoped to the current user. Pass it to StoreKit's `.appAccountToken(uuid)` or Play Billing's `setObfuscatedAccountId()` before purchase. Calling `identify()` changes the scope, so the next call returns a new UUID for the known user.
 
