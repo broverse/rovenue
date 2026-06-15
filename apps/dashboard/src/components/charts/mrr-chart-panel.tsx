@@ -64,6 +64,8 @@ interface MonthlyBucket {
   month: number;
   /** Sum of grossUsd within the calendar month. */
   total: number;
+  net: number;
+  refunds: number;
 }
 
 function bucketKey(d: Date): string {
@@ -84,15 +86,19 @@ function bucketLabel(ym: string): string {
  * even when the project has gaps.
  */
 function rollupToMonths(
-  points: ReadonlyArray<{ bucket: string; grossUsd: string }>,
+  points: ReadonlyArray<{ bucket: string; grossUsd: string; netUsd: string; refundsUsd: string }>,
   months: number,
   now: Date,
 ): MonthlyBucket[] {
   const totals = new Map<string, number>();
+  const nets = new Map<string, number>();
+  const refunds = new Map<string, number>();
   for (const p of points) {
     const d = new Date(p.bucket);
     const key = bucketKey(d);
     totals.set(key, (totals.get(key) ?? 0) + Number(p.grossUsd));
+    nets.set(key, (nets.get(key) ?? 0) + Number(p.netUsd));
+    refunds.set(key, (refunds.get(key) ?? 0) + Number(p.refundsUsd));
   }
   const out: MonthlyBucket[] = [];
   // Walk back from `now` so the last entry is always "current month".
@@ -107,6 +113,8 @@ function rollupToMonths(
       ym,
       month: d.getUTCMonth(),
       total: totals.get(ym) ?? 0,
+      net: nets.get(ym) ?? 0,
+      refunds: refunds.get(ym) ?? 0,
     });
   }
   return out;
@@ -179,6 +187,10 @@ export function MrrChartPanel({ projectId, chartType, compare, range }: Props) {
   // and never silently swap to anything else.
   const currentValues = useMemo(
     () => series.current.map((b) => b.total),
+    [series.current],
+  );
+  const netValues = useMemo(
+    () => series.current.map((b) => b.net),
     [series.current],
   );
 
@@ -269,6 +281,10 @@ export function MrrChartPanel({ projectId, chartType, compare, range }: Props) {
           <Legend
             color="var(--color-rv-accent-500)"
             label={t("charts.mrr.legendCurrent")}
+          />
+          <Legend
+            color="var(--color-rv-success)"
+            label={t("charts.mrr.legendNet", "Net")}
           />
           {compare && (
             <Legend
@@ -424,6 +440,13 @@ export function MrrChartPanel({ projectId, chartType, compare, range }: Props) {
                 strokeDasharray="4 4"
               />
             )}
+            <path
+              d={pathFor(netValues)}
+              fill="none"
+              stroke="var(--color-rv-success)"
+              strokeWidth="1.75"
+              strokeDasharray="5 3"
+            />
             <path
               d={pathFor(currentValues)}
               fill="none"
