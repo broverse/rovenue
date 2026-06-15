@@ -7,6 +7,7 @@ import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
 import { listDailyMrr } from "../../services/metrics/mrr";
+import { getRevenueSummary } from "../../services/metrics/summary";
 
 // =============================================================
 // Dashboard: Project metrics
@@ -92,6 +93,25 @@ export const metricsRoute = new Hono()
           eventCount: p.eventCount,
           activeSubscribers: p.activeSubscribers,
         })),
+      }),
+    );
+  })
+  .get("/summary", zValidator("query", mrrQuerySchema), async (c) => {
+    const projectId = c.req.param("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "Missing projectId" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+    const { from, to } = c.req.valid("query");
+    const summary = await getRevenueSummary({ projectId, from, to });
+
+    return c.json(
+      ok({
+        from: from.toISOString(),
+        to: to.toISOString(),
+        ...summary,
       }),
     );
   });
