@@ -9,6 +9,7 @@ import type {
   SubscriberListItem,
   SubscriberListResponse,
 } from "@rovenue/shared";
+import { flattenAttributes, normalizeStored } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
@@ -266,7 +267,7 @@ export const subscribersRoute = new Hono()
   const subscribers: SubscriberListItem[] = page.map((s) => ({
     id: s.id,
     appUserId: s.appUserId,
-    attributes: (s.attributes as Record<string, unknown> | null) ?? {},
+    attributes: flattenAttributes(s.attributes),
     firstSeenAt: s.firstSeenAt.toISOString(),
     lastSeenAt: s.lastSeenAt.toISOString(),
     purchaseCount: s.purchaseCount,
@@ -326,7 +327,7 @@ export const subscribersRoute = new Hono()
   const payload: SubscriberDetail = {
     id: subscriber.id,
     appUserId: subscriber.appUserId,
-    attributes: (subscriber.attributes as Record<string, unknown> | null) ?? {},
+    attributes: normalizeStored(subscriber.attributes),
     firstSeenAt: subscriber.firstSeenAt.toISOString(),
     lastSeenAt: subscriber.lastSeenAt.toISOString(),
     deletedAt: subscriber.deletedAt?.toISOString() ?? null,

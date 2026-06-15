@@ -137,54 +137,20 @@ const { dbMock, drizzleMock, authMock } = vi.hoisted(() => {
   return { dbMock, drizzleMock, authMock };
 });
 
-vi.mock("@rovenue/db", () => ({
-  default: dbMock,
-  drizzle: drizzleMock,
-  MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
-  FeatureFlagType: { BOOLEAN: "BOOLEAN", STRING: "STRING", NUMBER: "NUMBER", JSON: "JSON" },
-  ExperimentStatus: { DRAFT: "DRAFT", RUNNING: "RUNNING", PAUSED: "PAUSED", COMPLETED: "COMPLETED" },
-  Store: { APP_STORE: "APP_STORE", PLAY_STORE: "PLAY_STORE", STRIPE: "STRIPE" },
-  Environment: { PRODUCTION: "PRODUCTION", SANDBOX: "SANDBOX" },
-  PurchaseStatus: {
-    TRIAL: "TRIAL",
-    ACTIVE: "ACTIVE",
-    EXPIRED: "EXPIRED",
-    REFUNDED: "REFUNDED",
-    REVOKED: "REVOKED",
-    PAUSED: "PAUSED",
-    GRACE_PERIOD: "GRACE_PERIOD",
-  },
-  ProductType: {
-    SUBSCRIPTION: "SUBSCRIPTION",
-    CONSUMABLE: "CONSUMABLE",
-    NON_CONSUMABLE: "NON_CONSUMABLE",
-  },
-  CreditLedgerType: {
-    PURCHASE: "PURCHASE",
-    SPEND: "SPEND",
-    REFUND: "REFUND",
-    BONUS: "BONUS",
-    EXPIRE: "EXPIRE",
-  },
-  WebhookEventStatus: {
-    RECEIVED: "RECEIVED",
-    PROCESSING: "PROCESSING",
-    PROCESSED: "PROCESSED",
-    FAILED: "FAILED",
-  },
-  WebhookSource: { APPLE: "APPLE", GOOGLE: "GOOGLE", STRIPE: "STRIPE" },
-  OutgoingWebhookStatus: { PENDING: "PENDING", SENT: "SENT", FAILED: "FAILED" },
-  RevenueEventType: {
-    INITIAL: "INITIAL",
-    RENEWAL: "RENEWAL",
-    TRIAL_CONVERSION: "TRIAL_CONVERSION",
-    CANCELLATION: "CANCELLATION",
-    REFUND: "REFUND",
-    REACTIVATION: "REACTIVATION",
-    CREDIT_PURCHASE: "CREDIT_PURCHASE",
-  },
-  FeatureFlagEnv: { PROD: "PROD", STAGING: "STAGING", DEVELOPMENT: "DEVELOPMENT" },
-}));
+// Spread the real module so enum value-objects, zod validators
+// (e.g. accessIdSchema), and the real `drizzle.schema` table objects
+// stay available for sibling dashboard routes that load at module
+// scope — overriding only the runtime `drizzle` repos + default `db`
+// the subscribers handlers actually call. (Importing @rovenue/db is
+// side-effect-free: the pool is created lazily via getPool().)
+vi.mock("@rovenue/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@rovenue/db")>();
+  return {
+    ...actual,
+    default: dbMock,
+    drizzle: { ...actual.drizzle, ...drizzleMock },
+  };
+});
 vi.mock("../src/lib/auth", () => ({ auth: authMock }));
 
 import { app } from "../src/app";
@@ -262,7 +228,7 @@ describe("GET /dashboard/projects/:projectId/subscribers", () => {
     drizzleMock.subscriberRepo.listSubscribers.mockResolvedValue([]);
 
     await app.request(
-      "/dashboard/projects/proj_1/subscribers?status=trial&entitlement=premium&platform=ios,android&country=tr&ltvMin=25",
+      "/dashboard/projects/proj_1/subscribers?status=trial&access=premium&platform=ios,android&country=tr&ltvMin=25",
     );
     const call = drizzleMock.subscriberRepo.listSubscribers.mock.calls[0]?.[1] as {
       status?: string;
@@ -445,6 +411,75 @@ describe("GET /dashboard/projects/:projectId/subscribers/:id", () => {
     expect(s.creditBalance).toBe("42");
     expect(Array.isArray(s.assignments)).toBe(true);
     expect(Array.isArray(s.outgoingWebhooks)).toBe(true);
+  });
+
+  test("list returns flat attributes; detail returns nested", async () => {
+    signedIn("user_1");
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "VIEWER" });
+
+    const nestedAttributes = {
+      country: {
+        value: "US",
+        updatedAt: "2026-06-15T10:00:00.000Z",
+        source: "sdk",
+      },
+    };
+
+    // LIST: the list repo yields the raw nested jsonb; the route flattens it.
+    drizzleMock.subscriberRepo.listSubscribers.mockResolvedValue([
+      {
+        id: "sub_attrs",
+        appUserId: "user_attrs",
+        attributes: nestedAttributes,
+        firstSeenAt: new Date("2026-04-10"),
+        lastSeenAt: new Date("2026-04-18"),
+        createdAt: new Date("2026-04-10T12:00:00Z"),
+        purchaseCount: 0,
+        activeEntitlementKeys: [],
+      },
+    ]);
+
+    const listRes = await app.request(
+      "/dashboard/projects/proj_1/subscribers",
+    );
+    expect(listRes.status).toBe(200);
+    const listBody = (await listRes.json()) as {
+      data: {
+        subscribers: Array<{ id: string; attributes: Record<string, unknown> }>;
+      };
+    };
+    const row = listBody.data.subscribers.find((sub) => sub.id === "sub_attrs")!;
+    expect(row.attributes).toEqual({ country: "US" });
+
+    // DETAIL: the route normalizes the raw nested jsonb back to the typed shape.
+    dbMock.subscriber.findUnique.mockResolvedValue({
+      id: "sub_attrs",
+      projectId: "proj_1",
+      appUserId: "user_attrs",
+      attributes: nestedAttributes,
+      firstSeenAt: new Date("2026-04-01"),
+      lastSeenAt: new Date("2026-04-18"),
+      deletedAt: null,
+      mergedInto: null,
+    });
+
+    const detailRes = await app.request(
+      "/dashboard/projects/proj_1/subscribers/sub_attrs",
+    );
+    expect(detailRes.status).toBe(200);
+    const detailBody = (await detailRes.json()) as {
+      data: {
+        subscriber: {
+          attributes: Record<
+            string,
+            { value: string; source: string; updatedAt: string }
+          >;
+        };
+      };
+    };
+    const attrs = detailBody.data.subscriber.attributes;
+    expect(attrs.country).toMatchObject({ value: "US", source: "sdk" });
+    expect(typeof attrs.country.updatedAt).toBe("string");
   });
 });
 
