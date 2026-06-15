@@ -7,6 +7,7 @@ export { FunnelCard } from "./funnel-card";
 export { GroupByCard } from "./group-by-card";
 export { HourDayHeatmap } from "./hour-day-heatmap";
 export { MrrChartPanel } from "./mrr-chart-panel";
+export { RevenueKpisCard } from "./revenue-kpis-card";
 export { NewAnnotationDialog } from "./new-annotation-dialog";
 export { NewChartDialog } from "./new-chart-dialog";
 export { SavedViewsCard } from "./saved-views-card";

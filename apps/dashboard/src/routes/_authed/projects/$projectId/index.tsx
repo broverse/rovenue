@@ -14,6 +14,7 @@ import {
   SystemHealthPanel,
   TopProductsPanel,
 } from "../../../../components/dashboard";
+import { RevenueKpisCard } from "../../../../components/charts";
 import type {
   ActivityEvent,
   ActivityKind,
@@ -521,6 +522,10 @@ function ProjectOverview() {
             sparkColor="var(--color-rv-danger)"
           />
         </div>
+      </div>
+
+      <div className="mt-4">
+        <RevenueKpisCard projectId={projectId} />
       </div>
 
       <div className="mt-4 grid grid-cols-12 gap-4">
