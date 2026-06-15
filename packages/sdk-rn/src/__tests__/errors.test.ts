@@ -14,6 +14,10 @@ import {
   DuplicatePurchaseError,
   ReceiptInvalidError,
   InternalError,
+  PurchaseCancelledError,
+  PurchasePendingError,
+  ProductNotAvailableError,
+  StoreProblemError,
   mapNativeError,
 } from "../errors";
 
@@ -74,5 +78,23 @@ describe("Rovenue error classes", () => {
   it("ServerError preserves httpStatus extra (null when missing)", () => {
     const e = mapNativeError("Server", "boom", { httpStatus: 503 });
     expect((e as ServerError).httpStatus).toBe(503);
+  });
+
+  it("purchase-flow error classes extend RovenueError with correct codes", () => {
+    expect(new PurchaseCancelledError("x")).toBeInstanceOf(RovenueError);
+    expect(new PurchaseCancelledError("x").code).toBe("PurchaseCancelled");
+    expect(new PurchasePendingError("x")).toBeInstanceOf(RovenueError);
+    expect(new PurchasePendingError("x").code).toBe("PurchasePending");
+    expect(new ProductNotAvailableError("x")).toBeInstanceOf(RovenueError);
+    expect(new ProductNotAvailableError("x").code).toBe("ProductNotAvailable");
+    expect(new StoreProblemError("x")).toBeInstanceOf(RovenueError);
+    expect(new StoreProblemError("x").code).toBe("StoreProblem");
+  });
+
+  it("mapNativeError maps purchase-flow codes to correct classes", () => {
+    expect(mapNativeError("PurchaseCancelled", "x")).toBeInstanceOf(PurchaseCancelledError);
+    expect(mapNativeError("PurchasePending", "x")).toBeInstanceOf(PurchasePendingError);
+    expect(mapNativeError("ProductNotAvailable", "x")).toBeInstanceOf(ProductNotAvailableError);
+    expect(mapNativeError("StoreProblem", "x")).toBeInstanceOf(StoreProblemError);
   });
 });

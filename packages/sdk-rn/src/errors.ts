@@ -69,6 +69,18 @@ export class DuplicatePurchaseError extends RovenueError {
 export class ReceiptInvalidError extends RovenueError {
   constructor(message: string) { super("ReceiptInvalid", message); this.name = "ReceiptInvalidError"; }
 }
+export class PurchaseCancelledError extends RovenueError {
+  constructor(message: string) { super("PurchaseCancelled", message); this.name = "PurchaseCancelledError"; }
+}
+export class PurchasePendingError extends RovenueError {
+  constructor(message: string) { super("PurchasePending", message); this.name = "PurchasePendingError"; }
+}
+export class ProductNotAvailableError extends RovenueError {
+  constructor(message: string) { super("ProductNotAvailable", message); this.name = "ProductNotAvailableError"; }
+}
+export class StoreProblemError extends RovenueError {
+  constructor(message: string) { super("StoreProblem", message); this.name = "StoreProblemError"; }
+}
 export class InternalError extends RovenueError {
   constructor(message: string) { super("Internal", message); this.name = "InternalError"; }
 }
@@ -89,6 +101,10 @@ export function mapNativeError(code: string, message: string, extras?: Extras): 
     case "EntitlementInactive":   return new EntitlementInactiveError(message);
     case "DuplicatePurchase":     return new DuplicatePurchaseError(message);
     case "ReceiptInvalid":        return new ReceiptInvalidError(message);
+    case "PurchaseCancelled":     return new PurchaseCancelledError(message);
+    case "PurchasePending":       return new PurchasePendingError(message);
+    case "ProductNotAvailable":   return new ProductNotAvailableError(message);
+    case "StoreProblem":          return new StoreProblemError(message);
     case "Internal":              return new InternalError(message);
     default:                      return new InternalError(message);
   }
