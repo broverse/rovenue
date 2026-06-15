@@ -63,7 +63,7 @@ export async function getLtvPrediction(input: GetLtvPredictionInput) {
             sumIf(e.amountUsd, e.type NOT IN ('REFUND','CHARGEBACK'))
               - sumIf(e.amountUsd, e.type IN ('REFUND','CHARGEBACK'))
           )                                                                  AS net_usd
-        FROM rovenue.raw_revenue_events FINAL AS e
+        FROM rovenue.raw_revenue_events AS e FINAL
         INNER JOIN joins AS j ON e.subscriberId = j.subscriberId
         WHERE e.projectId = {projectId:String}
         GROUP BY cohort_month, store, product_id, age_month

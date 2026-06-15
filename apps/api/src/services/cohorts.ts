@@ -252,7 +252,7 @@ export async function computeRetention(
       SELECT
         toString(${intervalFn}, m.join_bucket, ${bucketFn}(e.eventDate))) AS period,
         toString(uniqExact(e.subscriberId)) AS active
-      FROM rovenue.raw_revenue_events FINAL AS e
+      FROM rovenue.raw_revenue_events AS e FINAL
       JOIN members AS m ON e.subscriberId = m.subscriberId
       WHERE e.projectId = {projectId:String}
         AND ${bucketFn}(e.eventDate) >= m.join_bucket
