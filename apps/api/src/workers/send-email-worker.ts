@@ -51,6 +51,18 @@ export function startSendEmailWorker(
       const { data } = job;
       const to = data.to.toLowerCase();
 
+      // Guard: if the delivery row is already terminal, a previous attempt
+      // already completed (the process crashed between provider send and
+      // BullMQ ACK). Skip to prevent duplicate emails.
+      const existing = await notificationDeliveryRepo.findDeliveryById(deps.db, data.deliveryId);
+      if (existing && (existing.status === "sent" || existing.status === "suppressed")) {
+        log.info("delivery already terminal, skipping resend", {
+          deliveryId: data.deliveryId,
+          status: existing.status,
+        });
+        return;
+      }
+
       if (await isEmailSuppressed(deps.db, to)) {
         await notificationDeliveryRepo.markDeliveryStatus(
           deps.db,

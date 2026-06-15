@@ -244,4 +244,69 @@ describe.sequential("send-email-worker (integration)", () => {
     const row = await waitForStatus(deliveryId, "failed");
     expect(row.providerResponse).toMatchObject({ error: "permanent-ish" });
   });
+
+  it("already-terminal 'sent' → job exits without calling mailer (idempotent retry guard)", async () => {
+    mailer.failWith = null;
+    mailer.failureBudget = 0;
+    const sentBefore = mailer.sent.length;
+
+    // Seed a delivery that's already marked 'sent' (simulating a crash
+    // after the provider call but before BullMQ ACK on a previous attempt).
+    const { deliveryId, email } = await seedDelivery();
+    await db
+      .update(schema.notificationDeliveries)
+      .set({ status: "sent", providerMessageId: "ses-already-sent" })
+      .where(eqRow(schema.notificationDeliveries.id, deliveryId));
+
+    await queue.add(
+      "send",
+      {
+        deliveryId,
+        to: email,
+        headers: {},
+        subject: "hi",
+        html: "<p>hi</p>",
+        text: "hi",
+      },
+      // Use a unique jobId so BullMQ doesn't dedupe against prior test jobs.
+      { jobId: `retry-${deliveryId}` },
+    );
+
+    // Give the worker time to process.
+    await new Promise((r) => setTimeout(r, 1_500));
+    expect(mailer.sent.length).toBe(sentBefore); // no new send
+    // Row should still be 'sent' (not regressed to queued or failed).
+    const row = await readDelivery(deliveryId);
+    expect(row?.status).toBe("sent");
+  });
+
+  it("already-terminal 'suppressed' → job exits without calling mailer", async () => {
+    mailer.failWith = null;
+    mailer.failureBudget = 0;
+    const sentBefore = mailer.sent.length;
+
+    const { deliveryId, email } = await seedDelivery();
+    await db
+      .update(schema.notificationDeliveries)
+      .set({ status: "suppressed" })
+      .where(eqRow(schema.notificationDeliveries.id, deliveryId));
+
+    await queue.add(
+      "send",
+      {
+        deliveryId,
+        to: email,
+        headers: {},
+        subject: "hi",
+        html: "<p>hi</p>",
+        text: "hi",
+      },
+      { jobId: `retry-sup-${deliveryId}` },
+    );
+
+    await new Promise((r) => setTimeout(r, 1_500));
+    expect(mailer.sent.length).toBe(sentBefore);
+    const row = await readDelivery(deliveryId);
+    expect(row?.status).toBe("suppressed");
+  });
 });

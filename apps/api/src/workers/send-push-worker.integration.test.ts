@@ -292,4 +292,31 @@ describe.sequential("send-push-worker (integration)", () => {
     expect(row.providerMessageId).toBe("apns-retry-ok");
     expect(calls).toBeGreaterThanOrEqual(2);
   });
+
+  it("already-terminal 'sent' → job exits without calling transport (idempotent retry guard)", async () => {
+    const sentBefore = ios.sent.length + android.sent.length;
+    const { userId, deliveryId } = await seedDelivery();
+    // Seed a device so the worker would normally proceed.
+    const token = `tok-${createId()}`;
+    await addDevice(userId, "ios", token);
+
+    // Pre-mark the delivery as already sent (crash-after-send scenario).
+    await db
+      .update(schema.notificationDeliveries)
+      .set({ status: "sent", providerMessageId: "apns-already-sent" })
+      .where(eq(schema.notificationDeliveries.id, deliveryId));
+
+    await queue.add(
+      "send",
+      { deliveryId, userId, title: "t", body: "b", data: {} },
+      { jobId: `retry-${deliveryId}` },
+    );
+
+    // Give the worker time to process.
+    await new Promise((r) => setTimeout(r, 1_500));
+    expect(ios.sent.length + android.sent.length).toBe(sentBefore); // no new send
+    // Row stays 'sent'.
+    const row = await readDelivery(deliveryId);
+    expect(row?.status).toBe("sent");
+  });
 });

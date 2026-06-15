@@ -63,6 +63,25 @@ export async function markDeliveryStatus(
     .where(eq(notificationDeliveries.id, id));
 }
 
+// ---------- reads ----------
+
+/**
+ * Lightweight read used by send-workers to short-circuit duplicate
+ * deliveries on BullMQ retry. Only fetches id + status to keep the
+ * round-trip cheap.
+ */
+export async function findDeliveryById(
+  db: DbOrTx,
+  id: string,
+): Promise<{ id: string; status: string } | null> {
+  const rows = await db
+    .select({ id: notificationDeliveries.id, status: notificationDeliveries.status })
+    .from(notificationDeliveries)
+    .where(eq(notificationDeliveries.id, id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 /**
  * Reverse lookup for SES/FCM/APNs feedback webhooks. providerMessageId
  * is unique-by-construction per channel (transports never collide on
