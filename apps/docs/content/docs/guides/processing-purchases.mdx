@@ -1,107 +1,189 @@
 ---
 title: Processing Purchases
-description: Hand a purchase token to the SDK after your store flow completes.
+description: Use the SDK to fetch offerings and drive the purchase flow end-to-end.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-The SDK does **not** call StoreKit or Play Billing. Run your store's purchase
-flow first, then pass the resulting token to the SDK for server-side receipt
-verification.
+The SDK drives the full purchase lifecycle — fetching products from the store,
+presenting them, triggering StoreKit 2 / Play Billing, and validating the
+receipt server-side — all in a single `purchase(pkg)` call. Your app only
+decides *which* package to offer.
 
-On success both methods return a `ReceiptResult` and automatically refresh
-entitlements and credits:
+## Fetch offerings
+
+Offerings are configured in the Rovenue dashboard. Fetch them at app launch or
+when your paywall opens:
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import {
+      Rovenue,
+      PurchaseCancelledError,
+      PurchasePendingError,
+    } from '@rovenue/react-native-sdk';
+
+    const offerings = await Rovenue.getOfferings();
+    // offerings.current — the default offering (or null if none configured)
+    // offerings.all    — Record<string, Offering> for all offerings
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let offerings = try await Rovenue.shared.getOfferings()
+    // offerings.current — the default Offering? 
+    // offerings.all     — [String: Offering]
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val offerings = Rovenue.shared.getOfferings()
+    // offerings.current — the default Offering?
+    // offerings.all     — Map<String, Offering>
+    ```
+  </Tab>
+</Tabs>
+
+Each `Offering` contains a list of `Package` objects. Each `Package` wraps a
+`StoreProduct` with localised pricing from the store:
 
 ```ts
-type ReceiptResult = {
-  subscriberId: string;
-  appUserId: string;
-  creditBalance: number;
+type StoreProduct = {
+  id: string;
+  type: 'subscription' | 'consumable' | 'non_consumable';
+  displayName: string;
+  priceString: string; // e.g. "$4.99"
+  price: number;
+  currencyCode: string;
 };
 ```
 
-## Apple (StoreKit 2)
+## Purchase a package
 
-Pass the JWS transaction string from `Product.purchase()` along with the
-matching `productId`. The optional `appAccountToken` is the UUID you passed to
-`.appAccountToken(...)` during purchase; it is cross-checked server-side for
-fraud attribution.
-
-<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
-  <Tab value="React Native">
-    ```ts
-    import { Rovenue } from '@rovenue/react-native-sdk';
-
-    // After your StoreKit purchase flow resolves with a JWS string:
-    const result = await Rovenue.postAppleReceipt(
-      jws,           // JWS transaction from StoreKit 2
-      'pro_monthly', // productId
-      appAccountToken, // optional UUID
-    );
-    console.log('New credit balance:', result.creditBalance);
-    ```
-  </Tab>
-  <Tab value="Swift">
-    ```swift
-    // After Product.purchase() succeeds and you have the JWS:
-    let result = try await Rovenue.shared.postAppleReceipt(
-      jws,
-      productId: "pro_monthly",
-      appAccountToken: token // optional UUID
-    )
-    print("New credit balance: \(result.creditBalance)")
-    ```
-  </Tab>
-  <Tab value="Kotlin">
-    ```kotlin
-    // Apple receipts are not applicable on Android.
-    // Use postGoogleReceipt instead (see below).
-    ```
-  </Tab>
-</Tabs>
-
-## Google Play
-
-Pass the `purchaseToken` from `Purchase.purchaseToken`. The obfuscated account
-and profile IDs are optional but recommended — they survive into Play
-Real-Time Developer Notifications (RTDN) for refund attribution.
+Pass the chosen `Package` to `Rovenue.purchase()`. The SDK triggers the native
+store sheet (StoreKit 2 on iOS, Play Billing on Android), waits for the
+transaction to complete, and validates it server-side before resolving. Your
+app receives updated entitlements and credit balance in the result — no
+additional polling needed.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
-    const result = await Rovenue.postGoogleReceipt(
-      purchaseToken,       // from Purchase.purchaseToken
-      'pro_monthly',       // productId
-      obfuscatedAccountId, // optional
-      obfuscatedProfileId, // optional
-    );
+    import {
+      Rovenue,
+      PurchaseCancelledError,
+      PurchasePendingError,
+      ProductNotAvailableError,
+      StoreProblemError,
+    } from '@rovenue/react-native-sdk';
+
+    const offerings = await Rovenue.getOfferings();
+    const pkg = offerings.current?.packages[0];
+
+    if (pkg) {
+      try {
+        const result = await Rovenue.purchase(pkg);
+        // result.entitlements and result.creditBalance are already up to date
+        console.log('Purchase succeeded:', result.productId);
+      } catch (e) {
+        if (e instanceof PurchaseCancelledError) {
+          // User dismissed the store sheet — no action needed
+        } else if (e instanceof PurchasePendingError) {
+          // Ask-to-Buy / deferred — inform the user and wait for a change event
+        } else {
+          throw e;
+        }
+      }
+    }
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
-    // Google receipts are not applicable on iOS.
-    // Use postAppleReceipt instead (see above).
+    let offerings = try await Rovenue.shared.getOfferings()
+    if let pkg = offerings.current?.packages.first {
+      do {
+        let result = try await Rovenue.shared.purchase(pkg)
+        print("Purchase succeeded: \(result.productId)")
+        // result.entitlements and result.creditBalance are already up to date
+      } catch is PurchaseCancelledError {
+        // User dismissed the store sheet — no action needed
+      } catch is PurchasePendingError {
+        // Ask-to-Buy / deferred — inform the user and wait for a change event
+      }
+    }
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    val result = Rovenue.shared.postGoogleReceipt(
-      purchaseToken,        // from Purchase.purchaseToken
-      "pro_monthly",        // productId
-      obfuscatedAccountId,  // optional
-      obfuscatedProfileId,  // optional
-    )
-    println("New credit balance: ${result.creditBalance}")
+    val offerings = Rovenue.shared.getOfferings()
+    val pkg = offerings.current?.packages?.firstOrNull()
+
+    if (pkg != null) {
+      try {
+        val result = Rovenue.shared.purchase(pkg)
+        println("Purchase succeeded: ${result.productId}")
+        // result.entitlements and result.creditBalance are already up to date
+      } catch (e: PurchaseCancelledError) {
+        // User dismissed the store sheet — no action needed
+      } catch (e: PurchasePendingError) {
+        // Ask-to-Buy / deferred — inform the user and wait for a change event
+      }
+    }
     ```
   </Tab>
 </Tabs>
+
+`purchase()` resolves with a `PurchaseResult` after server-side validation
+completes:
+
+```ts
+type PurchaseResult = {
+  entitlements: Entitlement[];
+  creditBalance: number;
+  productId: string;
+  storeTransactionId: string;
+};
+```
+
+Rovenue decides server-side — based on your product configuration in the
+dashboard — whether a product grants an entitlement (subscriptions, one-time
+unlocks) or adds credits (consumables). Both product types go through the same
+`purchase(pkg)` call.
 
 <Callout type="warn">
 **Possible errors**
 
-- `ReceiptInvalid` — the JWS/token failed server-side verification (expired,
-  tampered, or wrong environment).
-- `DuplicatePurchase` — the receipt was already processed. Safe to ignore; the
-  SDK still updates local entitlements.
+- `PurchaseCancelledError` — the user dismissed the store sheet. Safe to ignore.
+- `PurchasePendingError` — Ask-to-Buy (iOS) or a pending Play Billing transaction.
+  Show a "waiting for approval" message and listen for a change event.
+- `ProductNotAvailableError` — the product ID is not available in this store environment.
+- `StoreProblemError` — an unexpected StoreKit / Play Billing error. Retry or surface to the user.
 </Callout>
+
+## Restore purchases
+
+Call `restorePurchases()` to re-validate all prior transactions for the current
+user (e.g. after a reinstall or platform restore prompt):
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    await Rovenue.restorePurchases();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    try await Rovenue.shared.restorePurchases()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.restorePurchases()
+    ```
+  </Tab>
+</Tabs>
+
+On completion the SDK emits a change event with the refreshed entitlement
+state. See [Reacting to changes](/docs/guides/reacting-to-changes).
