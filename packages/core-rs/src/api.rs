@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::attributes::buffer::AttributeBuffer;
+use crate::attributes::dispatcher::AttributeDispatcher;
 use crate::cache::CacheStore;
 use crate::config::Config;
 use crate::credits::CreditReader;
@@ -33,6 +35,8 @@ pub struct RovenueCore {
     account_tokens: Arc<AccountTokenStore>,
     sessions: Arc<SessionBuffer>,
     session_dispatcher: Arc<SessionDispatcher>,
+    attributes: Arc<AttributeBuffer>,
+    attribute_dispatcher: Arc<AttributeDispatcher>,
     scheduler: PollingScheduler,
     store: Arc<CacheStore>,
 }
@@ -93,6 +97,20 @@ impl RovenueCore {
             }),
             config.app_version.clone(),
         ));
+        let attributes = Arc::new(AttributeBuffer::new(Arc::clone(&store)));
+        let identity_for_attr = Arc::clone(&identity);
+        let attribute_dispatcher = Arc::new(AttributeDispatcher::new(
+            Arc::clone(&attributes),
+            Arc::clone(&http),
+            Box::new(move || {
+                let scope = identity_for_attr.current_user_scope();
+                if scope.is_empty() {
+                    None
+                } else {
+                    Some(scope)
+                }
+            }),
+        ));
         let scheduler = PollingScheduler::new();
         {
             let reader = Arc::clone(&reader);
@@ -111,6 +129,7 @@ impl RovenueCore {
             });
         }
         Arc::clone(&session_dispatcher).start(&scheduler);
+        Arc::clone(&attribute_dispatcher).start(&scheduler);
         {
             // Best-effort offline reconcile of a pending identify(): retries the
             // server POST on the scheduler thread (foreground only), never blocking
@@ -133,6 +152,8 @@ impl RovenueCore {
             account_tokens,
             sessions,
             session_dispatcher,
+            attributes,
+            attribute_dispatcher,
             scheduler,
             store: store_for_self,
         };
@@ -198,6 +219,7 @@ impl RovenueCore {
         // token and buffered session events are tied to the previous scope.
         self.account_tokens.clear()?;
         self.sessions.clear()?;
+        let _ = self.attributes.clear();
         // Entitlements and credits are stateless scope-keyed readers (no in-memory
         // cache); the new rovenue_id scope naturally reads empty, so no clear call.
         Ok(())
@@ -315,6 +337,33 @@ impl RovenueCore {
 
     pub fn flush_session_events(&self) -> RovenueResult<u32> {
         self.session_dispatcher.flush_once().map(|n| n as u32)
+    }
+
+    /// Queue a batch of attribute mutations. `None` value deletes the key.
+    /// Written locally immediately; flushed to the server in the background
+    /// (30s tick / foreground / manual flush_attributes).
+    pub fn set_attributes(
+        &self,
+        attributes: std::collections::HashMap<String, Option<String>>,
+    ) -> RovenueResult<()> {
+        for (key, value) in attributes.iter() {
+            self.attributes.set(key, value.as_deref())?;
+        }
+        Ok(())
+    }
+
+    /// Force an immediate flush. Returns the number of mutations sent.
+    pub fn flush_attributes(&self) -> RovenueResult<u32> {
+        self.attribute_dispatcher.flush_once().map(|n| n as u32)
+    }
+
+    /// Test-only: number of queued attribute mutations.
+    #[doc(hidden)]
+    pub fn test_attribute_queue_len(&self) -> i64 {
+        self.store
+            .list_attribute_mutations(usize::MAX)
+            .map(|r| r.len() as i64)
+            .unwrap_or(0)
     }
 
     pub fn get_or_create_app_account_token(&self) -> RovenueResult<String> {

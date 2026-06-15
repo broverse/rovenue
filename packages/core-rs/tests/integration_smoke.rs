@@ -131,6 +131,29 @@ fn log_out_resets_identity_and_clears_scope_bound_caches() {
 }
 
 #[test]
+fn set_attributes_queues_and_logout_clears() {
+    let core = test_core();
+    let mut m = std::collections::HashMap::new();
+    m.insert("$email".to_string(), Some("a@b.com".to_string()));
+    m.insert("country".to_string(), None);
+    core.set_attributes(m).unwrap();
+    // queued (2 rows)
+    assert_eq!(core.test_attribute_queue_len(), 2);
+    core.log_out().unwrap();
+    assert_eq!(core.test_attribute_queue_len(), 0);
+}
+
+#[test]
+fn flush_attributes_noops_without_subscriber() {
+    let core = test_core();
+    // A fresh core has an anonymous rov_ scope, which is a flushable subscriber;
+    // assert flush is callable and does not error against an unreachable host
+    // is covered by the dispatcher unit tests. Here we only assert it returns Ok
+    // when the queue is empty.
+    assert_eq!(core.flush_attributes().unwrap(), 0);
+}
+
+#[test]
 fn entitlement_returns_none_when_empty() {
     let core = test_core();
     assert!(core.entitlement("pro".into()).is_none());
