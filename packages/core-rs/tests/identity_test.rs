@@ -21,7 +21,7 @@ fn fresh() -> (Arc<CacheStore>, Arc<ObserverBus>, IdentityManager) {
 }
 
 #[test]
-fn first_load_generates_anon_id() {
+fn first_load_generates_rovenue_id() {
     let (_, _, mgr) = fresh();
     let u = mgr.current_user();
     assert!(u.rovenue_id.starts_with("rov_"));
@@ -29,7 +29,7 @@ fn first_load_generates_anon_id() {
 }
 
 #[test]
-fn anon_id_persists_across_open() {
+fn rovenue_id_persists_across_open() {
     let store = Arc::new(CacheStore::open_in_memory().unwrap());
     let bus = Arc::new(ObserverBus::default());
     let mgr1 = IdentityManager::new(Arc::clone(&store), Arc::clone(&bus), Arc::new(SystemClock));
@@ -143,8 +143,28 @@ fn mark_synced_flips_persisted_synced_true() {
     let (store, _, mgr) = fresh();
     mgr.set_app_user_id("user_1".into()).unwrap();
     assert!(!persisted_synced(&store));
-    mgr.mark_synced().unwrap();
+    mgr.mark_synced("user_1").unwrap();
     assert!(persisted_synced(&store), "mark_synced should persist synced=true");
+}
+
+#[test]
+fn mark_synced_ignores_a_stale_app_user_id() {
+    // Models the identify(A)-slow then identify(B) race: A's POST completes and
+    // calls mark_synced("A"), but the pending row is now B. The guard must NOT
+    // mark B synced (B was never sent).
+    let (store, _, mgr) = fresh();
+    mgr.set_app_user_id("user_A".into()).unwrap();
+    mgr.set_app_user_id("user_B".into()).unwrap();
+    mgr.mark_synced("user_A").unwrap();
+    assert!(!persisted_synced(&store), "stale id must not mark the row synced");
+    assert_eq!(
+        mgr.pending_app_user_id().as_deref(),
+        Some("user_B"),
+        "B must remain pending until its own POST confirms it",
+    );
+    // The matching confirmation does flip it.
+    mgr.mark_synced("user_B").unwrap();
+    assert!(persisted_synced(&store));
 }
 
 #[test]
@@ -153,7 +173,7 @@ fn pending_app_user_id_reflects_sync_state() {
     assert_eq!(mgr.pending_app_user_id(), None, "no app_user_id yet");
     mgr.set_app_user_id("user_1".into()).unwrap();
     assert_eq!(mgr.pending_app_user_id().as_deref(), Some("user_1"));
-    mgr.mark_synced().unwrap();
+    mgr.mark_synced("user_1").unwrap();
     assert_eq!(mgr.pending_app_user_id(), None, "synced => no pending");
 }
 

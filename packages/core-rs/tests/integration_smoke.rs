@@ -25,7 +25,7 @@ fn core_new_rejects_invalid_config() {
 }
 
 #[test]
-fn current_user_has_anon_id_by_default() {
+fn current_user_has_rovenue_id_by_default() {
     let core = test_core();
     let u = core.current_user();
     assert!(u.rovenue_id.starts_with("rov_"));

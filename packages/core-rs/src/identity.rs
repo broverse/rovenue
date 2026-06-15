@@ -66,23 +66,22 @@ impl IdentityManager {
         if app_user_id.trim().is_empty() {
             return Err(RovenueError::InvalidApiKey); // reuse "invalid input" semantic
         }
-        let changed = {
+        // Capture `rovenue_id` in the SAME critical section that mutates
+        // `app_user_id`, so a concurrent `log_out()` cannot swap the rovenue_id
+        // between the read and the persist (which would store a mismatched
+        // rovenue_id/app_user_id pair).
+        let (changed, rovenue_id) = {
             let mut u = self.cached.lock().expect("identity mutex poisoned");
             if u.app_user_id.as_deref() == Some(app_user_id.as_str()) {
-                false
+                (false, String::new())
             } else {
                 u.app_user_id = Some(app_user_id.clone());
-                true
+                (true, u.rovenue_id.clone())
             }
         };
         if changed {
             let row = IdentityRow {
-                rovenue_id: self
-                    .cached
-                    .lock()
-                    .expect("identity mutex poisoned")
-                    .rovenue_id
-                    .clone(),
+                rovenue_id,
                 app_user_id: Some(app_user_id),
                 synced: false,
                 created_at_ms: self.clock.now_unix_ms(),
@@ -94,12 +93,16 @@ impl IdentityManager {
     }
 
     /// Marks the persisted identity row as synced (server `POST /v1/identify`
-    /// succeeded). Does not touch the in-memory `User` (it never carried the
-    /// flag) or emit — the `app_user_id` is unchanged.
-    pub fn mark_synced(&self) -> RovenueResult<()> {
+    /// succeeded) — but ONLY when the row still carries the `app_user_id` that
+    /// was actually sent. This guards the race where `identify(A)`'s slow POST
+    /// completes after a concurrent `identify(B)` has already overwritten the
+    /// row: without the guard we'd stamp `B` as synced though only `A` was sent,
+    /// stranding `B` (never delivered) yet believed-synced. Does not touch the
+    /// in-memory `User` or emit — the `app_user_id` is unchanged.
+    pub fn mark_synced(&self, for_app_user_id: &str) -> RovenueResult<()> {
         let repo = IdentityRepo::new(&self.store);
         if let Some(mut row) = repo.load()? {
-            if !row.synced {
+            if !row.synced && row.app_user_id.as_deref() == Some(for_app_user_id) {
                 row.synced = true;
                 repo.save(&row)?;
             }

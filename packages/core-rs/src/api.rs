@@ -174,7 +174,9 @@ impl RovenueCore {
             let rovenue_id = self.identity.rovenue_id();
             match self.identify.identify(&rovenue_id, &app_user_id) {
                 Ok(_) => {
-                    let _ = self.identity.mark_synced();
+                    // Guarded by the posted id so a concurrent identify() of a
+                    // different id isn't falsely marked synced.
+                    let _ = self.identity.mark_synced(&app_user_id);
                 }
                 Err(_e) => { /* offline: keep synced=false; reconcile retries */ }
             }
@@ -333,7 +335,9 @@ fn reconcile_identity_impl(identity: &IdentityManager, identify: &IdentifyClient
     if let Some(app_user_id) = identity.pending_app_user_id() {
         let rovenue_id = identity.rovenue_id();
         if identify.identify(&rovenue_id, &app_user_id).is_ok() {
-            let _ = identity.mark_synced();
+            // Guard by the id we posted: if a concurrent identify() changed the
+            // pending id meanwhile, don't mark the newer one synced.
+            let _ = identity.mark_synced(&app_user_id);
         }
     }
 }
