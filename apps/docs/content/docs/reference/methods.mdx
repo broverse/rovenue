@@ -18,22 +18,22 @@ Call `configure` once at app startup before accessing `Rovenue.shared`.
     ```ts
     import { Rovenue } from '@rovenue/react-native-sdk';
 
-    await Rovenue.configure('rvn_pub_…', 'https://api.example.com');
+    Rovenue.configure({ apiKey: 'rov_pub_…', baseUrl: 'https://edge.rovenue.app' });
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
-    try Rovenue.configure(
-        apiKey: "rvn_pub_…",
-        baseUrl: "https://api.example.com"
+    Rovenue.configure(
+        apiKey: "rov_pub_…",
+        baseUrl: "https://edge.rovenue.app"
     )
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
     Rovenue.configure(
-        apiKey = "rvn_pub_…",
-        baseUrl = "https://api.example.com"
+        apiKey = "rov_pub_…",
+        baseUrl = "https://edge.rovenue.app"
     )
     ```
   </Tab>
