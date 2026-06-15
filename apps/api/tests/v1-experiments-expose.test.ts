@@ -24,10 +24,16 @@ vi.mock("@rovenue/db", () => ({
   drizzle: {
     db: {} as unknown,
     experimentRepo: {
-      // Default: experiment is owned by the caller's project.
+      // Default: a RUNNING experiment owned by the caller's project whose
+      // variants include the `control` id the happy-path test exposes.
       findByIdInProject: vi.fn(async (_db: unknown, id: string) => ({
         id,
         projectId: "proj_test",
+        status: "RUNNING",
+        variants: [
+          { id: "control", name: "Control", value: 0, weight: 1 },
+          { id: "variant_a", name: "A", value: 1, weight: 1 },
+        ],
       })),
     },
     subscriberRepo: {
