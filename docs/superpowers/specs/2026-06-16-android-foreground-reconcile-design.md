@@ -70,13 +70,19 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class ForegroundReconcileTrigger {
     private val inFlight = AtomicBoolean(false)
 
-    /** Launches [block] on [scope] unless a run is already in flight. The flag
-     *  is cleared in `finally`, so a failed/cancelled run never wedges it. */
+    /** Launches [block] on [scope] unless a run is already in flight. Swallows
+     *  non-cancellation failures (foreground reconcile is best-effort and must
+     *  never crash the app) and clears the flag in `finally`, so a failed or
+     *  cancelled run never wedges it. */
     fun fire(scope: CoroutineScope, block: suspend () -> Unit) {
         if (!inFlight.compareAndSet(false, true)) return
         scope.launch {
             try {
                 block()
+            } catch (c: kotlin.coroutines.cancellation.CancellationException) {
+                throw c // preserve structured concurrency
+            } catch (t: Throwable) {
+                // best-effort; never crash the app on a foreground reconcile
             } finally {
                 inFlight.set(false)
             }
@@ -115,9 +121,8 @@ internal class ForegroundReconcileObserver(
 ```kotlin
 private fun registerForegroundObserver() {
     val observer = ForegroundReconcileObserver {
-        reconcileTrigger.fire(scope) {
-            runCatching { reconcilePurchases() } // best-effort; never surface errors
-        }
+        // The trigger coalesces and swallows non-cancellation failures.
+        reconcileTrigger.fire(scope) { reconcilePurchases() }
     }
     foregroundObserver = observer
     mainHandler.post {
@@ -164,15 +169,16 @@ configure(...)  (existing, unchanged)
 
 The existing post-configure reconcile (`Rovenue.kt:124`) stays. If it overlaps with an
 `onStart` (e.g. configure called while the app is already foregrounded), the in-flight guard
-prevents a duplicate concurrent run. Note: the existing post-configure launch goes straight to
-`reconcilePurchases()` (not through the trigger); to share the coalesce guard, route it through
-`reconcileTrigger.fire(scope) { runCatching { reconcilePurchases() } }` as part of this change.
+prevents a duplicate concurrent run. The existing post-configure launch goes straight to
+`runCatching { reconcilePurchases() }` today; route it through
+`reconcileTrigger.fire(scope) { reconcilePurchases() }` as part of this change so it shares the
+coalesce guard.
 
 ## Error handling
 
-- The observer callback must never crash the app: the reconcile body is wrapped in
-  `runCatching` (offline / no Play Billing / no `appContext` → silently skipped, matching the
-  existing post-configure behavior).
+- The observer callback must never crash the app: `ForegroundReconcileTrigger.fire` swallows
+  non-cancellation throwables (offline / no Play Billing / no `appContext` → silently skipped,
+  matching the existing post-configure behavior) and rethrows `CancellationException`.
 - The in-flight flag is cleared in `finally`, so a thrown/cancelled reconcile never wedges the
   trigger.
 - `reconcilePurchases()` already requires `appContext`; if absent it throws, which `runCatching`
@@ -193,8 +199,8 @@ prevents a duplicate concurrent run. Note: the existing post-configure launch go
   completes, a third `fire` runs again (flag cleared).
 - **`ForegroundReconcileObserver` (unit):** construct with a counter lambda; call
   `onStart(mockOwner)`; assert the lambda fired once per `onStart`.
-- **In-flight clears on failure (unit):** a `fire` whose block throws still clears the flag
-  (a subsequent `fire` runs). Verifies the `finally`.
+- **In-flight clears on failure (unit):** a `fire` whose block throws is swallowed and still
+  clears the flag (a subsequent `fire` runs). Verifies the catch + `finally`.
 - ProcessLifecycleOwner integration itself is not unit-tested (Android framework); the logic
   is fully covered by the decoupled trigger/observer tests.
 
