@@ -112,8 +112,16 @@ impl CreditReader {
         }
         let this = std::sync::Arc::clone(self);
         std::thread::spawn(move || {
+            // Clear the coalesce flag even if refresh() unwinds, so a panicking
+            // observer callback can't permanently disable background refresh.
+            struct ClearOnDrop<'a>(&'a std::sync::atomic::AtomicBool);
+            impl Drop for ClearOnDrop<'_> {
+                fn drop(&mut self) {
+                    self.0.store(false, std::sync::atomic::Ordering::Release);
+                }
+            }
+            let _guard = ClearOnDrop(&this.refreshing);
             let _ = this.refresh();
-            this.refreshing.store(false, Ordering::Release);
         });
     }
 

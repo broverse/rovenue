@@ -28,12 +28,12 @@ pub struct ObserverBus {
 
 impl ObserverBus {
     pub fn register(&self, obs: Arc<dyn Observer>) {
-        let mut guard = self.subs.lock().expect("observer bus poisoned");
+        let mut guard = self.subs.lock().unwrap_or_else(|e| e.into_inner());
         guard.push(obs);
     }
 
     pub fn emit(&self, event: ChangeEvent) {
-        let guard = self.subs.lock().expect("observer bus poisoned");
+        let guard = self.subs.lock().unwrap_or_else(|e| e.into_inner());
         for s in guard.iter() {
             s.on_change(event);
         }
@@ -42,12 +42,12 @@ impl ObserverBus {
     /// Releases all registered observers. Primarily intended for tests and
     /// shutdown paths.
     pub fn clear(&self) {
-        let mut guard = self.subs.lock().expect("observer bus poisoned");
+        let mut guard = self.subs.lock().unwrap_or_else(|e| e.into_inner());
         guard.clear();
     }
 
     pub fn live_count(&self) -> usize {
-        let guard = self.subs.lock().expect("observer bus poisoned");
+        let guard = self.subs.lock().unwrap_or_else(|e| e.into_inner());
         guard.len()
     }
 }
