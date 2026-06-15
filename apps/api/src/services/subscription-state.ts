@@ -199,3 +199,26 @@ export function allowedTransitions(
 ): ReadonlySet<PurchaseStatus> {
   return TRANSITIONS[from] ?? new Set();
 }
+
+// =============================================================
+// Transition guard — applied at every ingestion status write
+// =============================================================
+
+export interface TransitionDecision {
+  /** true when the status write should be applied. */
+  apply: boolean;
+  from: PurchaseStatus | null;
+  to: PurchaseStatus;
+}
+
+/**
+ * Decides whether `to` may be written given the current `from`.
+ * A null `from` (row not yet present) is always allowed (first insert).
+ */
+export function decideTransition(
+  from: PurchaseStatus | null,
+  to: PurchaseStatus,
+): TransitionDecision {
+  if (from === null) return { apply: true, from, to };
+  return { apply: validateTransition(from, to), from, to };
+}

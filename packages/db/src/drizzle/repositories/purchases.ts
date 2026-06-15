@@ -72,6 +72,30 @@ export async function upsertPurchase(
 }
 
 /**
+ * Reads the current status of a purchase by natural key, taking a
+ * row lock so concurrent webhook deliveries of the same transaction
+ * serialize. Returns null when the row does not yet exist (first
+ * insert — no prior state to guard).
+ */
+export async function lockPurchaseStatusByStoreTransaction(
+  db: DbOrTx,
+  store: Store,
+  storeTransactionId: string,
+): Promise<{ id: string; status: PurchaseStatus } | null> {
+  const rows = await db
+    .select({ id: purchases.id, status: purchases.status })
+    .from(purchases)
+    .where(
+      and(
+        eq(purchases.store, store),
+        eq(purchases.storeTransactionId, storeTransactionId),
+      ),
+    )
+    .for("update");
+  return rows[0] ?? null;
+}
+
+/**
  * Partial update keyed on the primary id. Used by the Apple and
  * Google webhook handlers when they need to record renewal /
  * cancellation state.
