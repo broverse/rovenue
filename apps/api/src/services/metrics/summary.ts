@@ -1,4 +1,6 @@
 import { queryAnalytics } from "../../lib/clickhouse";
+import { and, eq, gte, inArray, isNotNull, isNull, lte, or, countDistinct } from "drizzle-orm";
+import { drizzle } from "@rovenue/db";
 
 // =============================================================
 // Revenue summary read service — ClickHouse exclusive
@@ -30,12 +32,20 @@ export interface RevenueSummary {
   medianLtvUsd: string;
   p90LtvUsd: string;
   ltvSubscribers: number;
+  activeSubscriberBase: number;
+  arpu: string | null;
+  churnedInWindow: number;
+  churnRate: number | null;
+  trialStarts: number;
+  trialConversions: number;
+  trialConversionRate: number | null;
 }
 
 interface ChWindowRow {
   gross_usd: string;
   refunds_usd: string;
   paying_subs: string;
+  trial_conversions: string;
 }
 
 interface ChLtvRow {
@@ -64,7 +74,8 @@ export async function getRevenueSummary(
         SELECT
           toString(sumIf(amountUsd, type NOT IN ('REFUND','CHARGEBACK')))          AS gross_usd,
           toString(sumIf(amountUsd, type IN ('REFUND','CHARGEBACK')))              AS refunds_usd,
-          toString(uniqExactIf(subscriberId, type NOT IN ('REFUND','CHARGEBACK'))) AS paying_subs
+          toString(uniqExactIf(subscriberId, type NOT IN ('REFUND','CHARGEBACK'))) AS paying_subs,
+          toString(uniqExactIf(subscriberId, type = 'TRIAL_CONVERSION'))           AS trial_conversions
         FROM rovenue.raw_revenue_events FINAL
         WHERE projectId = {projectId:String}
           AND toDate(eventDate) >= {from:Date}
@@ -92,10 +103,52 @@ export async function getRevenueSummary(
     ),
   ]);
 
+  const p = drizzle.schema.purchases;
+  const [activeRow, churnedRow, trialStartRow] = await Promise.all([
+    drizzle.db
+      .select({ c: countDistinct(p.subscriberId) })
+      .from(p)
+      .where(and(eq(p.projectId, input.projectId), eq(p.status, "ACTIVE"))),
+    drizzle.db
+      .select({ c: countDistinct(p.subscriberId) })
+      .from(p)
+      .where(
+        and(
+          eq(p.projectId, input.projectId),
+          inArray(p.status, ["EXPIRED", "REFUNDED", "REVOKED"]),
+          or(
+            and(
+              isNotNull(p.cancellationDate),
+              gte(p.cancellationDate, input.from),
+              lte(p.cancellationDate, input.to),
+            ),
+            and(
+              isNull(p.cancellationDate),
+              isNotNull(p.expiresDate),
+              gte(p.expiresDate, input.from),
+              lte(p.expiresDate, input.to),
+            ),
+          ),
+        ),
+      ),
+    drizzle.db
+      .select({ c: countDistinct(p.subscriberId) })
+      .from(p)
+      .where(
+        and(
+          eq(p.projectId, input.projectId),
+          eq(p.isTrial, true),
+          gte(p.purchaseDate, input.from),
+          lte(p.purchaseDate, input.to),
+        ),
+      ),
+  ]);
+
   const w = windowRows[0] ?? {
     gross_usd: "0",
     refunds_usd: "0",
     paying_subs: "0",
+    trial_conversions: "0",
   };
   const l = ltvRows[0] ?? {
     avg_usd: "0",
@@ -113,6 +166,18 @@ export async function getRevenueSummary(
   const arppu =
     payingSubscribers > 0 ? (net / payingSubscribers).toFixed(4) : null;
 
+  const trialConversions = Number(w.trial_conversions);
+  const activeSubscriberBase = Number(activeRow[0]?.c ?? 0);
+  const churnedInWindow = Number(churnedRow[0]?.c ?? 0);
+  const trialStarts = Number(trialStartRow[0]?.c ?? 0);
+
+  const arpu =
+    activeSubscriberBase > 0 ? (net / activeSubscriberBase).toFixed(4) : null;
+  const churnDenom = activeSubscriberBase + churnedInWindow;
+  const churnRate = churnDenom > 0 ? churnedInWindow / churnDenom : null;
+  const trialConversionRate =
+    trialStarts > 0 ? trialConversions / trialStarts : null;
+
   return {
     grossUsd: gross.toFixed(4),
     refundsUsd: refunds.toFixed(4),
@@ -124,5 +189,12 @@ export async function getRevenueSummary(
     medianLtvUsd: l.median_usd,
     p90LtvUsd: l.p90_usd,
     ltvSubscribers: Number(l.subscribers),
+    activeSubscriberBase,
+    arpu,
+    churnedInWindow,
+    churnRate,
+    trialStarts,
+    trialConversions,
+    trialConversionRate,
   };
 }
