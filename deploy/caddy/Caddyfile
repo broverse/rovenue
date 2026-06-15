@@ -48,6 +48,15 @@ app.rovenue.app {
 }
 
 # -------------------------------------------------------------
+# Docs site — explicit host, proxied to the static-serving docs
+# container. Must precede the *.rovenue.app wildcard.
+# -------------------------------------------------------------
+docs.rovenue.app {
+	encode zstd gzip
+	reverse_proxy docs:80
+}
+
+# -------------------------------------------------------------
 # Canonical surface — explicit cert via standard ACME.
 # -------------------------------------------------------------
 rovenue.app, *.rovenue.app, edge.rovenue.app {

@@ -1,0 +1,29 @@
+---
+title: Introduction
+description: One shared core, three native SDKs for subscriptions, entitlements, and credits.
+---
+
+Rovenue ships three client SDKs — **Swift** (iOS/macOS/tvOS/watchOS),
+**Kotlin** (Android/JVM), and **React Native** — all thin façades over one
+shared **Rust core** (`librovenue`). The business logic (HTTP transport with
+idempotency + retry, an on-device SQLite cache, foreground polling, receipt
+validation, entitlements, credits, identity) lives in the core; each façade
+exposes it idiomatically.
+
+## What the SDK does
+
+- Checks a user's **entitlements** (cache-first, refreshed in the background).
+- Tracks a **credit** balance and spends credits server-side, idempotently.
+- Sends store **receipts** to your Rovenue server for validation.
+- Manages **identity** (anonymous → known user).
+
+## What the SDK does NOT do
+
+- It does **not** call StoreKit or Play Billing. Your app performs the
+  purchase, then hands the resulting Apple JWS or Google purchase token to the
+  SDK for server validation.
+- It does **not** merge users itself. `identify()` is client-local; account
+  merging is a server operation your backend triggers.
+
+Pick your platform in the [Installation](/docs/getting-started/installation)
+guide, then follow the [Quick Start](/docs/getting-started/quickstart).

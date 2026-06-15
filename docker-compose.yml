@@ -105,6 +105,8 @@ services:
         condition: service_started
       dashboard:
         condition: service_started
+      docs:
+        condition: service_started
     restart: unless-stopped
 
   # Dashboard SPA — built by apps/dashboard/Dockerfile, served as static
@@ -117,6 +119,18 @@ services:
       dockerfile: apps/dashboard/Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+    restart: unless-stopped
+    # No published ports — only the edge Caddy reaches it on the
+    # docker network. Exposed container port is 80.
+    expose:
+      - "80"
+
+  # Docs site — built by apps/docs/Dockerfile, served as prerendered static
+  # files. No published ports; only Caddy reaches it on the docker network.
+  docs:
+    build:
+      context: .
+      dockerfile: apps/docs/Dockerfile
     restart: unless-stopped
     # No published ports — only the edge Caddy reaches it on the
     # docker network. Exposed container port is 80.

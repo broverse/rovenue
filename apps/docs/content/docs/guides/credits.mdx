@@ -1,0 +1,92 @@
+---
+title: Working with Credits
+description: Read, refresh, and consume a user's credit balance.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Credits are managed server-side. Like entitlements, balance reads are
+**cache-first** and return instantly. Call `refreshCredits()` to pull the
+latest balance from the server.
+
+## Reading the balance
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue, useCreditBalance } from '@rovenue/react-native-sdk';
+
+    // Reactive hook — re-renders when the balance changes
+    function BalanceBadge() {
+      const balance = useCreditBalance(); // returns 0 if empty
+      return <Text>{balance} credits</Text>;
+    }
+
+    // Imperative cache read
+    const balance = await Rovenue.creditBalance();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let balance = await Rovenue.shared.creditBalance() // cache, returns 0 if empty
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val balance = Rovenue.shared.creditBalance() // cache, returns 0 if empty
+    ```
+  </Tab>
+</Tabs>
+
+## Refreshing from the server
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    await Rovenue.refreshCredits();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    await Rovenue.shared.refreshCredits()
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.refreshCredits()
+    ```
+  </Tab>
+</Tabs>
+
+## Consuming credits
+
+`consumeCredits` deducts the given amount and returns the new balance.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const newBalance = await Rovenue.consumeCredits(5, 'image-generation');
+    console.log('Remaining:', newBalance);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let newBalance = try await Rovenue.shared.consumeCredits(5, description: "image-generation")
+    print("Remaining: \(newBalance)")
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val newBalance = Rovenue.shared.consumeCredits(5, "image-generation")
+    println("Remaining: $newBalance")
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+`consumeCredits` is **server-deduped** via an internal Idempotency-Key, so
+retrying a failed network call will not double-deduct. If the user's balance is
+too low the SDK throws `InsufficientCredits` — catch it to show an upgrade
+prompt.
+</Callout>

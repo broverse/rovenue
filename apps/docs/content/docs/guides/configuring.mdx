@@ -1,0 +1,77 @@
+---
+title: Configuring the SDK
+description: Initialize the Rovenue SDK once at startup before making any other calls.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Call `configure` once at app startup — before any other SDK method. Calling any
+other method before `configure` throws `NotConfigured`.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    Rovenue.configure({
+      apiKey: 'rov_pub_...',
+      baseUrl: 'https://edge.rovenue.app',
+      debug: true,       // optional — enables verbose logging
+      appVersion: '1.2', // optional — inferred from app.json by default
+    });
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    import Rovenue
+
+    Rovenue.configure(
+      apiKey: "rov_pub_...",
+      baseUrl: "https://edge.rovenue.app",
+      debug: true,        // optional
+      appVersion: "1.2"   // optional — inferred from CFBundleShortVersionString
+    )
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    import dev.rovenue.sdk.Rovenue
+
+    Rovenue.configure(
+      apiKey = "rov_pub_...",
+      baseUrl = "https://edge.rovenue.app",
+      debug = true,        // optional
+      appVersion = "1.2",  // optional — inferred from versionName
+    )
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+`configure` is a **static entry point** (`Rovenue.configure(...)`). On iOS and
+Android it initializes the shared singleton; every method afterwards is called
+on that instance — `Rovenue.shared.entitlement(...)` in Swift/Kotlin, or
+directly on `Rovenue` in React Native.
+</Callout>
+
+## Parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `apiKey` | Yes | Your **public** API key (`rov_pub_…`). Never use the secret key in the app. |
+| `baseUrl` | Yes | Your Rovenue API base URL. |
+| `debug` | No | When `true`, routes verbose logs to your log handler. Default `false`. |
+| `appVersion` | No | App version string. Auto-read from the platform manifest — only override for standalone JVM builds. |
+
+## Platform defaults for `appVersion`
+
+- **iOS / Expo:** read from `CFBundleShortVersionString` / `app.json`
+- **Android:** read from `versionName` in `build.gradle`
+- **Standalone JVM SDK:** no manifest available — provide the value explicitly
+
+<Callout type="warn">
+Calling any SDK method before `configure` throws `NotConfigured`. Call
+`configure` at the earliest possible entry point (e.g., `App.tsx`, `AppDelegate`,
+`Application.onCreate`).
+</Callout>

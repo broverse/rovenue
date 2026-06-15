@@ -1,0 +1,94 @@
+---
+title: Identifying Users
+description: Tag events with your own user ID and understand how account merging works.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The SDK starts every session with an anonymous ID. Once a user signs in, call
+`identify` to tag subsequent events with your own user ID.
+
+## Reading the current user
+
+`currentUser()` is a **cache read** — it never hits the network and returns
+instantly. It returns a `User` object with shape:
+
+```ts
+type User = {
+  anonId: string;       // always present
+  knownUserId?: string; // present after identify()
+};
+```
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue, useCurrentUser } from '@rovenue/react-native-sdk';
+
+    // Imperative cache read
+    const user = await Rovenue.currentUser();
+    console.log(user.anonId, user.knownUserId);
+
+    // Reactive hook alternative
+    function Header() {
+      const user = useCurrentUser();
+      return <Text>{user?.knownUserId ?? user?.anonId}</Text>;
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let user = await Rovenue.shared.currentUser()
+    print(user.anonId, user.knownUserId ?? "(anon)")
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val user = Rovenue.shared.currentUser()
+    println("${user.anonId} / ${user.knownUserId}")
+    ```
+  </Tab>
+</Tabs>
+
+## Identifying a user
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    await Rovenue.identify('user_abc123');
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    await Rovenue.shared.identify("user_abc123")
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    Rovenue.shared.identify("user_abc123") // suspend
+    ```
+  </Tab>
+</Tabs>
+
+`identify` is **client-local**. It tags events from this device with your ID but
+does **not** merge accounts on the server. If the same user logged in on two
+devices, they may have two separate anonymous subscriber records until a merge
+is performed.
+
+## Server-side account merging
+
+To merge an anonymous subscriber into a known account, your **backend** must
+call:
+
+```
+POST /v1/subscribers/transfer
+Authorization: Bearer <secret-api-key>
+```
+
+<Callout type="warn">
+Never put your **secret** API key (`rov_sec_…`) in the app. The transfer
+endpoint is a server-to-server call only. Expose a lightweight endpoint in your
+own backend that verifies the user session and then calls Rovenue on their
+behalf.
+</Callout>

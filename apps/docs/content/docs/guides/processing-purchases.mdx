@@ -1,0 +1,107 @@
+---
+title: Processing Purchases
+description: Hand a purchase token to the SDK after your store flow completes.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The SDK does **not** call StoreKit or Play Billing. Run your store's purchase
+flow first, then pass the resulting token to the SDK for server-side receipt
+verification.
+
+On success both methods return a `ReceiptResult` and automatically refresh
+entitlements and credits:
+
+```ts
+type ReceiptResult = {
+  subscriberId: string;
+  appUserId: string;
+  creditBalance: number;
+};
+```
+
+## Apple (StoreKit 2)
+
+Pass the JWS transaction string from `Product.purchase()` along with the
+matching `productId`. The optional `appAccountToken` is the UUID you passed to
+`.appAccountToken(...)` during purchase; it is cross-checked server-side for
+fraud attribution.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    // After your StoreKit purchase flow resolves with a JWS string:
+    const result = await Rovenue.postAppleReceipt(
+      jws,           // JWS transaction from StoreKit 2
+      'pro_monthly', // productId
+      appAccountToken, // optional UUID
+    );
+    console.log('New credit balance:', result.creditBalance);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // After Product.purchase() succeeds and you have the JWS:
+    let result = try await Rovenue.shared.postAppleReceipt(
+      jws,
+      productId: "pro_monthly",
+      appAccountToken: token // optional UUID
+    )
+    print("New credit balance: \(result.creditBalance)")
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // Apple receipts are not applicable on Android.
+    // Use postGoogleReceipt instead (see below).
+    ```
+  </Tab>
+</Tabs>
+
+## Google Play
+
+Pass the `purchaseToken` from `Purchase.purchaseToken`. The obfuscated account
+and profile IDs are optional but recommended — they survive into Play
+Real-Time Developer Notifications (RTDN) for refund attribution.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const result = await Rovenue.postGoogleReceipt(
+      purchaseToken,       // from Purchase.purchaseToken
+      'pro_monthly',       // productId
+      obfuscatedAccountId, // optional
+      obfuscatedProfileId, // optional
+    );
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Google receipts are not applicable on iOS.
+    // Use postAppleReceipt instead (see above).
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val result = Rovenue.shared.postGoogleReceipt(
+      purchaseToken,        // from Purchase.purchaseToken
+      "pro_monthly",        // productId
+      obfuscatedAccountId,  // optional
+      obfuscatedProfileId,  // optional
+    )
+    println("New credit balance: ${result.creditBalance}")
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="warn">
+**Possible errors**
+
+- `ReceiptInvalid` — the JWS/token failed server-side verification (expired,
+  tampered, or wrong environment).
+- `DuplicatePurchase` — the receipt was already processed. Safe to ignore; the
+  SDK still updates local entitlements.
+</Callout>

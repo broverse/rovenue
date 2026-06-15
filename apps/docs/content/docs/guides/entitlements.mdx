@@ -1,0 +1,64 @@
+---
+title: Checking Entitlements
+description: Read a user's active entitlements and refresh them from the server.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Entitlement reads are **cache-first** — they return instantly and never hit the
+network. Call `refreshEntitlements()` to pull the latest from the server.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```tsx
+    import { Rovenue, useEntitlement } from '@rovenue/react-native-sdk';
+
+    function ProBadge() {
+      const pro = useEntitlement('pro'); // reactive cache read
+      return pro?.isActive ? <Crown /> : null;
+    }
+
+    await Rovenue.refreshEntitlements();
+    const all = await Rovenue.entitlementsAll();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let pro = await Rovenue.shared.entitlement("pro")     // cache
+    if pro?.isActive == true { showCrown() }
+    try await Rovenue.shared.refreshEntitlements()         // network
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val pro = Rovenue.shared.entitlement("pro")            // cache
+    if (pro?.isActive == true) showCrown()
+    Rovenue.shared.refreshEntitlements()                   // network
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+Entitlements refresh automatically while the app is in the foreground (see
+[App lifecycle](/docs/guides/app-lifecycle)). Manual `refresh` is only needed
+when you require immediate consistency, e.g. right after a purchase.
+</Callout>
+
+## The `Entitlement` shape
+
+Each entitlement carries more than its active flag — use these fields to drive
+subscription UI (the product, the store, the renewal date):
+
+```ts
+type Entitlement = {
+  id: string;                  // the entitlement key you check, e.g. "pro"
+  isActive: boolean;           // whether access is currently granted
+  productIdentifier: string;   // the store product mapped to this entitlement
+  store: string;               // "app_store" | "play_store" | ...
+  expiresIso?: string;         // ISO-8601 expiry; absent for non-expiring grants
+};
+```
+
+`entitlement(id)` returns `Entitlement | null` (null when the user has no such
+entitlement cached); `entitlementsAll()` returns every cached entitlement.

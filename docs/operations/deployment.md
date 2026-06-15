@@ -5,8 +5,9 @@ from the repo root on the host.
 
 ## 0. Prerequisites
 - Docker + Compose v2.
-- DNS A records for `rovenue.app`, `edge.rovenue.app`, `app.rovenue.app`
-  pointing at the host. CNAMEs for any custom domains pointing the same.
+- DNS A records for `rovenue.app`, `edge.rovenue.app`, `app.rovenue.app`,
+  `docs.rovenue.app` pointing at the host. CNAMEs for any custom domains
+  pointing the same.
 - Apple Root CA `.cer` files placed in `./deploy/apple-certs/`
   (Apple Root CA G3 + Apple Inc Root).
 
@@ -22,6 +23,7 @@ Copy `.env.example` to `.env` and fill, at minimum, the prod-required keys
 
 ## 2. Build
     docker compose build
+Builds `api`, `dashboard`, and `docs` images.
 
 ## 3. Data plane + migrations
 The `migrate` service runs automatically before `api`/workers, but you can
@@ -39,7 +41,8 @@ run it explicitly the first time:
 ## 6. Smoke test
     curl -fsS https://rovenue.app/health
     curl -fsS -o /dev/null -w '%{http_code}\n' https://app.rovenue.app/
-Expected: health 200, dashboard 200.
+    curl -I https://docs.rovenue.app
+Expected: health 200, dashboard 200, docs 200.
 
 ## Invariants
 - **Single dispatcher:** only `api` has `OUTBOX_DISPATCHER_ENABLED=true`

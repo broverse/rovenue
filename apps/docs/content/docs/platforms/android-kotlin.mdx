@@ -1,0 +1,128 @@
+---
+title: Android (Kotlin)
+description: Install and wire the Rovenue SDK in an Android/Kotlin app.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Install
+
+Add the dependency to your module-level `build.gradle.kts`:
+
+```kotlin
+dependencies {
+  implementation("dev.rovenue:sdk:0.6.0")
+}
+```
+
+Or in Groovy DSL:
+
+```groovy
+dependencies {
+  implementation 'dev.rovenue:sdk:0.6.0'
+}
+```
+
+<Callout type="info">
+The SDK does **not** call Play Billing. Receipt processing happens server-side via the Rovenue API.
+</Callout>
+
+## Configure
+
+Call `Rovenue.configure` once in your `Application.onCreate()`, before any component starts:
+
+```kotlin
+import android.app.Application
+import dev.rovenue.sdk.Rovenue
+
+class App : Application() {
+
+  override fun onCreate() {
+    super.onCreate()
+
+    val versionName = packageManager
+      .getPackageInfo(packageName, 0)
+      .versionName
+
+    Rovenue.configure(
+      apiKey = "rov_pub_YOUR_API_KEY",
+      baseUrl = "https://edge.rovenue.app",
+      appVersion = versionName,
+    )
+  }
+}
+```
+
+Register `App` in your `AndroidManifest.xml`:
+
+```xml
+<application android:name=".App" ...>
+```
+
+## Foreground wiring
+
+Use `ProcessLifecycleOwner` from `androidx.lifecycle` to observe the process-level foreground state:
+
+```kotlin
+import android.app.Application
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
+import dev.rovenue.sdk.Rovenue
+
+class App : Application() {
+
+  override fun onCreate() {
+    super.onCreate()
+
+    // ... configure() call above ...
+
+    ProcessLifecycleOwner.get().lifecycle.addObserver(
+      object : DefaultLifecycleObserver {
+        override fun onStart(owner: LifecycleOwner) {
+          Rovenue.shared.setForeground(true)
+        }
+        override fun onStop(owner: LifecycleOwner) {
+          Rovenue.shared.setForeground(false)
+        }
+      }
+    )
+  }
+}
+```
+
+## Observing changes
+
+`Rovenue.shared.changes` is a `SharedFlow` of change events. Collect it from a coroutine scope tied to your component's lifecycle:
+
+```kotlin
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.Lifecycle
+import dev.rovenue.sdk.Rovenue
+
+// Inside an Activity or Fragment:
+lifecycleScope.launch {
+  repeatOnLifecycle(Lifecycle.State.STARTED) {
+    Rovenue.shared.changes.collect { event ->
+      // Update UI here
+      println("Rovenue change: $event")
+    }
+  }
+}
+```
+
+<Callout type="warn">
+Collect `Rovenue.shared.changes` from a scope **outside** the SDK's own internal scope. If you call `Rovenue.shared.shutdown()` from inside an active collector's coroutine, the shutdown cancels the scope and may interrupt the collector mid-flight. Use an `Activity` or `ViewModel` scope instead.
+</Callout>
+
+## Suspend functions
+
+SDK methods such as `identify`, `refreshEntitlements`, and `consumeCredits` are suspend functions. They must be called from a coroutine:
+
+```kotlin
+lifecycleScope.launch {
+  Rovenue.shared.identify(userId = "user_123")
+  val entitlements = Rovenue.shared.refreshEntitlements()
+}
+```

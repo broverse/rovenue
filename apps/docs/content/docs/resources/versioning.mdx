@@ -1,0 +1,16 @@
+---
+title: Versioning
+description: How the Rovenue SDKs are versioned.
+---
+
+All three Rovenue SDKs — Swift (`Rovenue`), Kotlin (`dev.rovenue:sdk`), and React Native (`@rovenue/react-native-sdk`) — are thin façades over a single Rust core library called `librovenue`. The native SDKs (Swift and Kotlin) version in lockstep with the core: their version number is the exact `librovenue` revision they embed. The current core line is `0.6.x`.
+
+The React Native package is published separately on npm and may trail the native versions for a release or two while the JavaScript layer catches up — always install the latest from npm rather than pinning to match the native version.
+
+Rovenue SDKs follow [Semantic Versioning](https://semver.org):
+
+- **Patch** (`0.6.x`): bug fixes and internal improvements with no API change. Safe to adopt immediately.
+- **Minor** (`0.x.0`): new, backwards-compatible features. Existing call sites continue to compile without modification.
+- **Major** (`x.0.0`): breaking changes. Breaking changes are announced in the release notes for the corresponding GitHub release before they ship.
+
+The native SDKs advance together, so an iOS app pinned to Swift `0.6.0` and an Android app on Kotlin `0.6.0` run the identical core behaviour.

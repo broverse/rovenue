@@ -1,0 +1,12 @@
+# Static file server for the prerendered docs site. Baked into the docs
+# image, run on :80 inside the docker network; the edge Caddy reverse-proxies
+# docs.rovenue.app here.
+:80 {
+	root * /srv
+	encode zstd gzip
+	try_files {path} {path}/index.html /index.html
+	file_server
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	header /index.html Cache-Control "no-cache"
+}

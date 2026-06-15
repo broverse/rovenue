@@ -1,0 +1,81 @@
+---
+title: Reacting to Changes
+description: Subscribe to real-time SDK events for entitlement, identity, and credit updates.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+The SDK emits a `ChangeEvent` whenever its internal state changes. There are
+three event kinds:
+
+- `EntitlementsChanged` — entitlement cache was updated (e.g. after a
+  purchase or foreground refresh)
+- `IdentityChanged` — `identify()` was called or the user was reset
+- `CreditBalanceChanged` — credit balance was updated
+
+## Subscribing to changes
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    // Imperative listener — returns an unsubscribe function
+    const unsub = Rovenue.addChangeListener((event) => {
+      if (event.type === 'EntitlementsChanged') {
+        console.log('Entitlements updated');
+      }
+    });
+
+    // Later, to stop listening:
+    unsub();
+    ```
+
+    For React components, prefer the reactive hooks instead — they wire up and
+    tear down the listener automatically:
+
+    ```tsx
+    import { useEntitlement, useEntitlements, useCurrentUser, useCreditBalance }
+      from '@rovenue/react-native-sdk';
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Rovenue.shared.changes is an AsyncStream<ChangeEvent>
+    Task {
+      for await event in Rovenue.shared.changes {
+        switch event {
+        case .entitlementsChanged:
+          print("Entitlements updated")
+        case .identityChanged:
+          print("Identity changed")
+        case .creditBalanceChanged:
+          print("Credit balance changed")
+        }
+      }
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // Rovenue.shared.changes is a SharedFlow<ChangeEvent>
+    viewModelScope.launch {
+      Rovenue.shared.changes.collect { event ->
+        when (event) {
+          is ChangeEvent.EntitlementsChanged -> println("Entitlements updated")
+          is ChangeEvent.IdentityChanged -> println("Identity changed")
+          is ChangeEvent.CreditBalanceChanged -> println("Credit balance changed")
+        }
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="warn">
+**Kotlin:** collect `changes` from a coroutine scope you control (e.g.
+`viewModelScope`) — not from a scope that the SDK owns. Calling `shutdown()`
+cancels the SDK's internal scope, which will also cancel any collector running
+inside it.
+</Callout>
