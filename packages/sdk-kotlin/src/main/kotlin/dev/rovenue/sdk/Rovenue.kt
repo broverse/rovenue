@@ -223,6 +223,40 @@ class Rovenue private constructor(
     }
 
     // ---------------------------------------------------------------
+    // Subscriber attributes
+    // ---------------------------------------------------------------
+
+    /** Set arbitrary subscriber attributes. Buffered locally and flushed by
+     *  the Rust core. Reserved keys (prefixed with `$`) map to first-class
+     *  fields server-side; pass a null value to clear an attribute. */
+    @Throws(RovenueException::class)
+    suspend fun setAttributes(attributes: Map<String, String?>) {
+        emit(LogEntry(level = "info", message = "setAttributes"))
+        try {
+            dispatcher.run { core.setAttributes(attributes) }
+            emit(LogEntry(level = "info", message = "setAttributes ok"))
+        } catch (e: Throwable) {
+            emit(LogEntry(level = "error", message = "setAttributes failed: ${e.message ?: e.javaClass.simpleName}"))
+            throw e
+        }
+    }
+
+    @Throws(RovenueException::class)
+    suspend fun setEmail(email: String?) = setAttributes(mapOf("\$email" to email))
+    @Throws(RovenueException::class)
+    suspend fun setDisplayName(name: String?) = setAttributes(mapOf("\$displayName" to name))
+    @Throws(RovenueException::class)
+    suspend fun setPhoneNumber(phone: String?) = setAttributes(mapOf("\$phoneNumber" to phone))
+    /** Android push token → the $fcmTokens reserved attribute. */
+    @Throws(RovenueException::class)
+    suspend fun setPushToken(token: String?) = setAttributes(mapOf("\$fcmTokens" to token))
+
+    /** Force an immediate flush of buffered attributes. Returns the number
+     *  of attributes drained. */
+    @Throws(RovenueException::class)
+    suspend fun flushAttributes(): UInt = dispatcher.run { core.flushAttributes() }
+
+    // ---------------------------------------------------------------
     // Entitlements (cache-first reads; refresh hits HTTP)
     // ---------------------------------------------------------------
 
