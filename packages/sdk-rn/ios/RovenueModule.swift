@@ -167,6 +167,27 @@ public class RovenueModule: Module {
             return Double(n)
         }
 
+        // ---------------- Subscriber Attributes ----------------
+        AsyncFunction("setAttributes") { (attributes: [String: String?]) in
+            try await Rovenue.shared.setAttributes(attributes)
+        }
+        AsyncFunction("setEmail") { (email: String?) in
+            try await Rovenue.shared.setEmail(email)
+        }
+        AsyncFunction("setDisplayName") { (name: String?) in
+            try await Rovenue.shared.setDisplayName(name)
+        }
+        AsyncFunction("setPhoneNumber") { (phone: String?) in
+            try await Rovenue.shared.setPhoneNumber(phone)
+        }
+        AsyncFunction("setPushToken") { (token: String?) in
+            try await Rovenue.shared.setPushToken(token)
+        }
+        AsyncFunction("flushAttributes") { () -> Double in
+            // UInt32 → Double for the JS number bridge (lossless).
+            Double(try await Rovenue.shared.flushAttributes())
+        }
+
         // ---------------- Events ----------------
         Events("onChange", "onLog")
 

@@ -149,6 +149,27 @@ class RovenueModule : Module() {
             Rovenue.shared.flushSessionEvents().toDouble()
         }
 
+        // ---------------- Subscriber Attributes ----------------
+        AsyncFunction("setAttributes") Coroutine { attributes: Map<String, String?> ->
+            Rovenue.shared.setAttributes(attributes)
+        }
+        AsyncFunction("setEmail") Coroutine { email: String? ->
+            Rovenue.shared.setEmail(email)
+        }
+        AsyncFunction("setDisplayName") Coroutine { name: String? ->
+            Rovenue.shared.setDisplayName(name)
+        }
+        AsyncFunction("setPhoneNumber") Coroutine { phone: String? ->
+            Rovenue.shared.setPhoneNumber(phone)
+        }
+        AsyncFunction("setPushToken") Coroutine { token: String? ->
+            Rovenue.shared.setPushToken(token)
+        }
+        AsyncFunction("flushAttributes") Coroutine { ->
+            // UInt → Double for the JS number bridge.
+            Rovenue.shared.flushAttributes().toDouble()
+        }
+
         // ---------------- Events ----------------
         Events("onChange", "onLog")
 
