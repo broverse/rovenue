@@ -108,7 +108,9 @@ The cache read APIs (`entitlements_all()` / `entitlement(id)` / `credit_balance(
 ### Threshold
 - `staleness_threshold = 60_000 ms` for **both** entitlements and credits (single value,
   applied per resource).
-- Configurable via the SDK configure options with this default; not exposed in per-read APIs.
+- Implemented as a core constant (`STALENESS_MS`). The FFI `Config` dictionary maps 1:1 to
+  the Rust `Config` via uniffi, so exposing this as a configure option would require touching
+  every façade; that exposure is a deferred follow-up, not part of this change.
 
 ---
 
