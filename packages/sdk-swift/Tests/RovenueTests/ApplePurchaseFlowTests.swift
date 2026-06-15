@@ -67,3 +67,27 @@ final class PurchaseTypesTests: XCTestCase {
         XCTAssertTrue(offerings.all.isEmpty)
     }
 }
+
+final class PurchaseErrorTests: XCTestCase {
+    func test_purchase_error_cases_exist() {
+        // These are Swift-origin (not mapped from RovenueError) — they describe
+        // StoreKit-side outcomes that never reach the Rust core.
+        let cases: [Rovenue.Error] = [
+            .purchaseCancelled,
+            .purchasePending,
+            .productNotAvailable,
+            .storeProblem,
+        ]
+        XCTAssertEqual(cases.count, 4)
+        // Each must be distinct + Equatable.
+        XCTAssertNotEqual(Rovenue.Error.purchaseCancelled, .purchasePending)
+        XCTAssertNotEqual(Rovenue.Error.productNotAvailable, .storeProblem)
+    }
+
+    func test_purchase_errors_have_descriptions() {
+        XCTAssertNotNil(Rovenue.Error.purchaseCancelled.errorDescription)
+        XCTAssertNotNil(Rovenue.Error.purchasePending.errorDescription)
+        XCTAssertNotNil(Rovenue.Error.productNotAvailable.errorDescription)
+        XCTAssertNotNil(Rovenue.Error.storeProblem.errorDescription)
+    }
+}

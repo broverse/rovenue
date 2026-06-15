@@ -23,6 +23,14 @@ public extension Rovenue {
         case receiptInvalid
         case internalError
 
+        // Swift-origin purchase-flow errors. These never come from the Rust
+        // core (so they are absent from `mapError`) — they describe StoreKit
+        // outcomes surfaced by the SDK-driven purchase flow.
+        case purchaseCancelled
+        case purchasePending
+        case productNotAvailable
+        case storeProblem
+
         public var errorDescription: String? {
             switch self {
             case .notConfigured:
@@ -51,6 +59,14 @@ public extension Rovenue {
                 return "Receipt could not be validated"
             case .internalError:
                 return "Internal SDK error"
+            case .purchaseCancelled:
+                return "The purchase was cancelled by the user"
+            case .purchasePending:
+                return "The purchase is pending external action (e.g. Ask to Buy)"
+            case .productNotAvailable:
+                return "The requested product is not available from the store"
+            case .storeProblem:
+                return "An unexpected error occurred communicating with the store"
             }
         }
     }
