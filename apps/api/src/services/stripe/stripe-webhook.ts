@@ -272,7 +272,7 @@ async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
 
   // FINDING 1: guarded read + status write in one tx (a); the
   // updatePurchase also CASE-guards the terminal status (b).
-  await drizzle.db.transaction(async (dbTx) => {
+  const statusApplied = await drizzle.db.transaction(async (dbTx) => {
     const guard = await guardStatusWrite({
       db: dbTx,
       projectId: ctx.projectId,
@@ -289,9 +289,17 @@ async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
         : new Date(),
       autoRenewStatus: false,
     });
+    return guard.apply;
   });
 
+  // Access revoke stays unconditional (idempotent / conservative).
   await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);
+
+  // FINDING 2: only emit the $0 CANCELLATION lifecycle event when the
+  // EXPIRED write actually applied. A withheld EXPIRED on an already
+  // terminal (REFUNDED/REVOKED) row must NOT produce a spurious churn
+  // event on a refunded subscription.
+  if (!statusApplied) return;
 
   await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
     projectId: ctx.projectId,

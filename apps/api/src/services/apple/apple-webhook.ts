@@ -62,8 +62,8 @@ const log = logger.child("apple-webhook");
 async function guardedChainStatusWrite(
   ctx: DispatchContext,
   patch: { status: PurchaseStatus; [key: string]: unknown },
-): Promise<void> {
-  const { skippedTerminalIds } =
+): Promise<{ updatedCount: number; skippedCount: number }> {
+  const { updatedIds, skippedTerminalIds } =
     await drizzle.purchaseRepo.updateChainStatusGuarded(
       drizzle.db,
       ctx.projectId,
@@ -71,7 +71,9 @@ async function guardedChainStatusWrite(
       patch,
     );
 
-  if (skippedTerminalIds.length === 0) return;
+  if (skippedTerminalIds.length === 0) {
+    return { updatedCount: updatedIds.length, skippedCount: 0 };
+  }
 
   log.warn("withheld chain status write on terminal rows", {
     projectId: ctx.projectId,
@@ -98,6 +100,11 @@ async function guardedChainStatusWrite(
       userAgent: null,
     });
   }
+
+  return {
+    updatedCount: updatedIds.length,
+    skippedCount: skippedTerminalIds.length,
+  };
 }
 
 export interface HandleAppleNotificationOptions {
@@ -389,8 +396,17 @@ async function applyFailedRenewal(ctx: DispatchContext): Promise<void> {
 }
 
 async function applyExpired(ctx: DispatchContext): Promise<void> {
-  await guardedChainStatusWrite(ctx, { status: PurchaseStatus.EXPIRED });
+  const { updatedCount } = await guardedChainStatusWrite(ctx, {
+    status: PurchaseStatus.EXPIRED,
+  });
+  // Access revoke stays unconditional (idempotent / conservative,
+  // matches the spec's intentional full-chain revoke).
   await revokeAccessForTransaction(ctx);
+  // FINDING 2: only emit the $0 CANCELLATION lifecycle event when the
+  // EXPIRED write actually applied to at least one row. A fully
+  // withheld EXPIRED (every chain row already REFUNDED/REVOKED) must
+  // NOT produce a spurious churn event on a refunded subscription.
+  if (updatedCount === 0) return;
   await emitCancellationEvent(ctx);
 }
 

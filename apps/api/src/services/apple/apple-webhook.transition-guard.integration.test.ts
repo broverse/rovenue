@@ -23,6 +23,7 @@ import {
   products,
   projects,
   purchases,
+  revenueEvents,
   subscribers,
 } from "@rovenue/db";
 import { handleAppleNotification } from "./apple-webhook";
@@ -227,4 +228,63 @@ describe("handleAppleNotification — terminal transition guard", () => {
       expect(after).toBeGreaterThan(before);
     },
   );
+
+  // FINDING 2: applyExpired emits a $0 CANCELLATION lifecycle event,
+  // but ONLY when the EXPIRED status write actually applied. On an
+  // already-REFUNDED chain the write is fully withheld, so NO
+  // CANCELLATION revenue event may be emitted (it would be a spurious
+  // churn event on a refunded subscription).
+  it("does not emit a CANCELLATION event when expiring an already-REFUNDED chain", async () => {
+    const db = getDb();
+
+    const before = await db
+      .select({ id: revenueEvents.id })
+      .from(revenueEvents)
+      .where(
+        and(
+          eq(revenueEvents.projectId, PROJECT_ID),
+          eq(revenueEvents.type, "CANCELLATION"),
+        ),
+      );
+
+    // Fresh notificationUUID so this EXPIRED is a distinct webhook
+    // event (the earlier it.each already consumed the shared-UUID one).
+    const verifier = makeStubVerifier(APPLE_NOTIFICATION_TYPE.EXPIRED);
+    const notification = makeNotification(APPLE_NOTIFICATION_TYPE.EXPIRED);
+    (notification as { notificationUUID: string }).notificationUUID = `${NOTIFICATION_UUID}_expired_finding2`;
+    verifier.verifyNotification = vi.fn(async () => notification);
+
+    const result = await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+    expect(result.status).toBe("processed");
+
+    const after = await db
+      .select({ id: revenueEvents.id })
+      .from(revenueEvents)
+      .where(
+        and(
+          eq(revenueEvents.projectId, PROJECT_ID),
+          eq(revenueEvents.type, "CANCELLATION"),
+        ),
+      );
+
+    // No new CANCELLATION row: the EXPIRED write was withheld on the
+    // terminal row, so the gated emit is skipped.
+    expect(after.length).toBe(before.length);
+
+    // Row is still REFUNDED — confirms the EXPIRED write was withheld.
+    const [row] = await db
+      .select({ status: purchases.status })
+      .from(purchases)
+      .where(
+        and(
+          eq(purchases.store, "APP_STORE"),
+          eq(purchases.storeTransactionId, TXN_ID),
+        ),
+      );
+    expect(row?.status).toBe("REFUNDED");
+  });
 });
