@@ -121,10 +121,17 @@ class PlayPurchaseFlowTest {
             productType: ProductType,
             obfuscatedAccountId: String?,
         ): StorePurchaseOutcome = outcome
+
+        override suspend fun queryPrices(
+            productIds: List<String>,
+            subscriptionIds: List<String>,
+        ): Map<String, dev.rovenue.sdk.internal.PriceInfo> = emptyMap()
+
+        override suspend fun queryUnacknowledgedPurchases(): List<dev.rovenue.sdk.internal.PendingPurchase> = emptyList()
     }
 
     private fun receipt(balance: Long) =
-        ReceiptResult(subscriberId = "sub_1", appUserId = "anon_1", creditBalance = balance)
+        ReceiptResult(subscriberId = "sub_1", appUserId = "anon_1", creditBalance = balance, entitlements = emptyList())
 
     @Test
     fun `cancelled outcome throws and never validates`() = runTest {
@@ -132,7 +139,6 @@ class PlayPurchaseFlowTest {
         val flow = PlayPurchaseFlow(
             store = storeReturning(StorePurchaseOutcome.UserCancelled),
             validate = { _, _ -> validated = true; receipt(0) },
-            snapshot = { emptyList<dev.rovenue.sdk.generated.Entitlement>() to 0L },
         )
         assertFailsWith<PurchaseCancelledException> {
             flow.run(activity, "pro_monthly", ProductType.SUBSCRIPTION, null)
@@ -145,7 +151,6 @@ class PlayPurchaseFlowTest {
         val flow = PlayPurchaseFlow(
             store = storeReturning(StorePurchaseOutcome.Pending),
             validate = { _, _ -> error("should not validate") },
-            snapshot = { emptyList<dev.rovenue.sdk.generated.Entitlement>() to 0L },
         )
         assertFailsWith<PurchasePendingException> {
             flow.run(activity, "pro_monthly", ProductType.SUBSCRIPTION, null)
@@ -157,7 +162,6 @@ class PlayPurchaseFlowTest {
         val flow = PlayPurchaseFlow(
             store = storeReturning(StorePurchaseOutcome.ProductNotFound),
             validate = { _, _ -> error("should not validate") },
-            snapshot = { emptyList<dev.rovenue.sdk.generated.Entitlement>() to 0L },
         )
         assertFailsWith<ProductNotAvailableException> {
             flow.run(activity, "missing", ProductType.CONSUMABLE, null)
@@ -180,7 +184,6 @@ class PlayPurchaseFlowTest {
                 assertEquals("coins_100", pid)
                 receipt(500)
             },
-            snapshot = { emptyList<dev.rovenue.sdk.generated.Entitlement>() to 500L },
         )
 
         val result = flow.run(activity, "coins_100", ProductType.CONSUMABLE, "obf_1")
@@ -204,7 +207,6 @@ class PlayPurchaseFlowTest {
         val flow = PlayPurchaseFlow(
             store = storeReturning(success),
             validate = { _, _ -> throw StoreProblemException("server rejected") },
-            snapshot = { emptyList<dev.rovenue.sdk.generated.Entitlement>() to 0L },
         )
 
         assertFailsWith<StoreProblemException> {
