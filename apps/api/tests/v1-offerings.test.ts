@@ -19,6 +19,13 @@ const auditMock = vi.hoisted(() => ({
 }));
 vi.mock("../src/lib/audit", () => auditMock);
 
+// Stub the experiment engine so tests that don't need experiments get a no-op
+// default, and individual tests can override with vi.mocked(...).mockResolvedValue.
+const evaluateExperimentsMock = vi.hoisted(() => vi.fn(async () => ({})));
+vi.mock("../src/services/experiment-engine", () => ({
+  evaluateExperiments: evaluateExperimentsMock,
+}));
+
 // =============================================================
 // Hoisted mocks
 // =============================================================
@@ -145,6 +152,12 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
                 appUserId: args.appUserId,
               },
             },
+          }),
+      ),
+      resolveSubscriberByRovenueIdOrLegacy: vi.fn(
+        async (_db: unknown, args: { projectId: string; key: string }) =>
+          subscriber.findUnique({
+            where: { id: args.key, projectId: args.projectId },
           }),
       ),
       findSubscriberProjectId: vi.fn(async (_db: unknown, id: string) =>

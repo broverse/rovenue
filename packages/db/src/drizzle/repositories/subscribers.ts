@@ -165,6 +165,38 @@ export async function resolveSubscriberByRovenueId(
   return cursor.deletedAt ? null : cursor;
 }
 
+export interface ResolveByKeyArgs {
+  projectId: string;
+  /** The key the SDK sent — treated as a rovenueId first, with a
+   *  legacy appUserId fallback for devices that haven't migrated. */
+  key: string;
+}
+
+/**
+ * RovenueId-first subscriber resolution for SDK surfaces that accept
+ * a generic device key. Tries to resolve the key as a rovenueId
+ * (following `mergedInto` redirects). If no row is found, falls back
+ * to a legacy appUserId lookup. Returns null when neither strategy
+ * resolves a live subscriber.
+ */
+export async function resolveSubscriberByRovenueIdOrLegacy(
+  db: Db,
+  args: ResolveByKeyArgs,
+): Promise<Subscriber | null> {
+  const byRovenue = await resolveSubscriberByRovenueId(db, {
+    projectId: args.projectId,
+    rovenueId: args.key,
+  });
+  if (byRovenue) return byRovenue;
+
+  // Legacy fallback: device was identified by appUserId before the
+  // rovenueId-first identity model landed.
+  return findSubscriberByAppUserId(db, {
+    projectId: args.projectId,
+    appUserId: args.key,
+  });
+}
+
 /** Attach (or change) the customer label on a subscriber row. */
 export async function setAppUserId(
   db: DbOrTx,

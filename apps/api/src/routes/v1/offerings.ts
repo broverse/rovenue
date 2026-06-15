@@ -159,9 +159,9 @@ export const offeringsRoute = new Hono()
     let appliedExperiment: { key: string; variantId: string } | null = null;
 
     if (subscriberAppUserId) {
-      const subscriber = await drizzle.subscriberRepo.findSubscriberByAppUserId(
+      const subscriber = await drizzle.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy(
         drizzle.db,
-        { projectId: project.id, appUserId: subscriberAppUserId },
+        { projectId: project.id, key: subscriberAppUserId },
       );
       if (subscriber) {
         const attributes =
