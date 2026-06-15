@@ -45,6 +45,7 @@ public enum ProductType: Sendable, Equatable {
         switch raw {
         case "CONSUMABLE": return .consumable
         case "NON_CONSUMABLE": return .nonConsumable
+        case "SUBSCRIPTION": return .subscription
         default: return .subscription
         }
     }

@@ -497,14 +497,17 @@ public final class Rovenue: @unchecked Sendable {
             for await update in Transaction.updates {
                 guard let self else { break }
                 if case let .verified(t) = update {
-                    _ = try? await self.dispatcher.run { [core = self.core] in
-                        try? core.postAppleReceipt(
+                    let validated = (try? await self.dispatcher.run { [core = self.core] in
+                        try core.postAppleReceipt(
                             receipt: update.jwsRepresentation,
                             productId: t.productID,
                             appAccountToken: nil
                         )
+                    }) != nil
+                    if validated {
+                        await t.finish()
                     }
-                    await t.finish()
+                    // validation failed → leave unfinished; StoreKit re-delivers, listener retries.
                 }
             }
         }
