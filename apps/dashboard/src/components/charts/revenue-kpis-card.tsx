@@ -1,33 +1,15 @@
 import { useTranslation } from "react-i18next";
 import { useProjectRevenueSummary } from "../../lib/hooks/useProjectRevenueSummary";
-import { formatCurrencyCompact } from "./format";
+import { fmtMoney, fmtPct } from "./format";
+import { KpiTile } from "./kpi-tile";
 
 type Props = {
   projectId: string;
 };
 
-function Kpi({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
-        {label}
-      </div>
-      <div className="mt-1 font-rv-mono text-[18px] font-medium tabular-nums">
-        {value}
-      </div>
-    </div>
-  );
-}
-
 export function RevenueKpisCard({ projectId }: Props) {
   const { t } = useTranslation();
   const { data, isLoading } = useProjectRevenueSummary({ projectId });
-
-  const dash = "—";
-  const money = (v?: string | null) =>
-    isLoading || v == null ? dash : formatCurrencyCompact(Number(v));
-  const pct = (v?: number | null) =>
-    isLoading || v == null ? dash : `${(v * 100).toFixed(1)}%`;
 
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
@@ -35,15 +17,15 @@ export function RevenueKpisCard({ projectId }: Props) {
         {t("charts.revenueKpis.title")}
       </div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-3">
-        <Kpi label={t("charts.revenueKpis.netRevenue")} value={money(data?.netUsd)} />
-        <Kpi label={t("charts.revenueKpis.refunds")} value={money(data?.refundsUsd)} />
-        <Kpi label={t("charts.revenueKpis.refundRate")} value={pct(data?.refundRate)} />
-        <Kpi label={t("charts.revenueKpis.arppu")} value={money(data?.arppu)} />
-        <Kpi label={t("charts.revenueKpis.avgLtv")} value={money(data?.avgLtvUsd)} />
-        <Kpi label={t("charts.revenueKpis.medianLtv")} value={money(data?.medianLtvUsd)} />
-        <Kpi label={t("charts.revenueKpis.arpu")} value={money(data?.arpu)} />
-        <Kpi label={t("charts.revenueKpis.churnRate")} value={pct(data?.churnRate)} />
-        <Kpi label={t("charts.revenueKpis.trialToPaid")} value={pct(data?.trialConversionRate)} />
+        <KpiTile label={t("charts.revenueKpis.netRevenue")} value={fmtMoney(data?.netUsd, isLoading)} />
+        <KpiTile label={t("charts.revenueKpis.refunds")} value={fmtMoney(data?.refundsUsd, isLoading)} />
+        <KpiTile label={t("charts.revenueKpis.refundRate")} value={fmtPct(data?.refundRate, isLoading)} />
+        <KpiTile label={t("charts.revenueKpis.arppu")} value={fmtMoney(data?.arppu, isLoading)} />
+        <KpiTile label={t("charts.revenueKpis.avgLtv")} value={fmtMoney(data?.avgLtvUsd, isLoading)} />
+        <KpiTile label={t("charts.revenueKpis.medianLtv")} value={fmtMoney(data?.medianLtvUsd, isLoading)} />
+        <KpiTile label={t("charts.revenueKpis.arpu")} value={fmtMoney(data?.arpu, isLoading)} />
+        <KpiTile label={t("charts.revenueKpis.churnRate")} value={fmtPct(data?.churnRate, isLoading)} />
+        <KpiTile label={t("charts.revenueKpis.trialToPaid")} value={fmtPct(data?.trialConversionRate, isLoading)} />
       </div>
     </section>
   );

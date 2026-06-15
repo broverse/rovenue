@@ -29,3 +29,11 @@ export const heatColor = (v: number): string => {
   const a = 0.05 + Math.min(1, Math.max(0, v)) * 0.85;
   return `oklch(0.65 0.16 240 / ${a})`;
 };
+
+export function fmtMoney(v: string | number | null | undefined, loading = false): string {
+  return loading || v == null ? "—" : formatCurrencyCompact(Number(v));
+}
+
+export function fmtPct(v: number | null | undefined, loading = false): string {
+  return loading || v == null ? "—" : `${(v * 100).toFixed(1)}%`;
+}

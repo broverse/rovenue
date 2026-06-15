@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
 import { queryAnalytics } from "../../lib/clickhouse";
+import { toDateOnly } from "./_utils";
 import {
   computeLtvPrediction,
   type LtvRawRow,
@@ -99,7 +100,7 @@ export async function getLtvPrediction(input: GetLtvPredictionInput) {
   }));
 
   const now = new Date();
-  const asOfMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  const asOfMonth = toDateOnly(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)));
 
   const data = computeLtvPrediction(
     rows,

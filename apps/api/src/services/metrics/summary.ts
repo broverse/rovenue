@@ -1,6 +1,7 @@
 import { queryAnalytics } from "../../lib/clickhouse";
 import { and, eq, gte, inArray, isNotNull, isNull, lte, or, countDistinct } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
+import { toDateOnly } from "./_utils";
 
 // =============================================================
 // Revenue summary read service — ClickHouse exclusive
@@ -55,10 +56,6 @@ interface ChLtvRow {
   subscribers: string;
 }
 
-function toDateOnly(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
 export async function getRevenueSummary(
   input: GetRevenueSummaryInput,
 ): Promise<RevenueSummary> {
@@ -67,7 +64,8 @@ export async function getRevenueSummary(
     to: toDateOnly(input.to),
   };
 
-  const [windowRows, ltvRows] = await Promise.all([
+  const p = drizzle.schema.purchases;
+  const [windowRows, ltvRows, activeRow, churnedRow, trialStartRow] = await Promise.all([
     queryAnalytics<ChWindowRow>(
       input.projectId,
       `
@@ -101,10 +99,6 @@ export async function getRevenueSummary(
       `,
       params,
     ),
-  ]);
-
-  const p = drizzle.schema.purchases;
-  const [activeRow, churnedRow, trialStartRow] = await Promise.all([
     drizzle.db
       .select({ c: countDistinct(p.subscriberId) })
       .from(p)

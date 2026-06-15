@@ -1,4 +1,5 @@
 import { queryAnalytics } from "../../lib/clickhouse";
+import { toDateOnly, moneyStr } from "./_utils";
 
 export interface GetMrrDecompositionInput {
   projectId: string;
@@ -16,10 +17,6 @@ interface ChDecompRow {
   new_usd: string;
   expansion_usd: string;
   churned_usd: string;
-}
-
-function toDateOnly(d: Date): string {
-  return d.toISOString().slice(0, 10);
 }
 
 export async function getMrrDecomposition(
@@ -41,10 +38,9 @@ export async function getMrrDecomposition(
   );
 
   const r = rows[0] ?? { new_usd: "0", expansion_usd: "0", churned_usd: "0" };
-  const fix = (v: string): string => Number(v).toFixed(4);
   return {
-    newUsd: fix(r.new_usd),
-    expansionUsd: fix(r.expansion_usd),
-    churnedUsd: fix(r.churned_usd),
+    newUsd: moneyStr(r.new_usd),
+    expansionUsd: moneyStr(r.expansion_usd),
+    churnedUsd: moneyStr(r.churned_usd),
   };
 }

@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useProjectEngagement } from "../../lib/hooks/useProjectEngagement";
+import { KpiTile } from "./kpi-tile";
 
 type Props = { projectId: string };
 
@@ -20,22 +21,15 @@ export function EngagementCard({ projectId }: Props) {
   const avgMs = totalSessions > 0 ? weightedMs / totalSessions : 0;
   const peakActive = points.reduce((a, p) => Math.max(a, p.activeSubscribers), 0);
 
-  const tile = (label: string, value: string) => (
-    <div>
-      <div className="text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">{label}</div>
-      <div className="mt-1 font-rv-mono text-[18px] font-medium tabular-nums">{value}</div>
-    </div>
-  );
-
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
       <div className="mb-3.5 font-rv-mono text-[11px] uppercase tracking-wider text-rv-mute-500">
         {t("charts.engagement.title")}
       </div>
       <div className="grid grid-cols-3 gap-4">
-        {tile(t("charts.engagement.sessions"), isLoading ? "—" : totalSessions.toLocaleString())}
-        {tile(t("charts.engagement.avgDuration"), isLoading ? "—" : fmtDuration(avgMs))}
-        {tile(t("charts.engagement.peakDau"), isLoading ? "—" : peakActive.toLocaleString())}
+        <KpiTile label={t("charts.engagement.sessions")} value={isLoading ? "—" : totalSessions.toLocaleString()} />
+        <KpiTile label={t("charts.engagement.avgDuration")} value={isLoading ? "—" : fmtDuration(avgMs)} />
+        <KpiTile label={t("charts.engagement.peakDau")} value={isLoading ? "—" : peakActive.toLocaleString()} />
       </div>
     </section>
   );

@@ -71,6 +71,14 @@ export const mrrQuerySchema = z
 
 export const metricsRoute = new Hono()
   .use("*", requireDashboardAuth)
+  .use("*", async (c, next) => {
+    const projectId = c.req.param("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "Missing projectId" });
+    }
+    await assertProjectAccess(projectId, c.get("user").id, MemberRole.CUSTOMER_SUPPORT);
+    await next();
+  })
   // =============================================================
   // GET /dashboard/projects/:projectId/metrics/mrr
   // =============================================================
@@ -79,13 +87,7 @@ export const metricsRoute = new Hono()
   // subscribers for the window. Returns buckets in ascending
   // order so the client can render a line chart without sorting.
   .get("/mrr", zValidator("query", mrrQuerySchema), async (c) => {
-    const projectId = c.req.param("projectId");
-    if (!projectId) {
-      throw new HTTPException(400, { message: "Missing projectId" });
-    }
-    const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
-
+    const projectId = c.req.param("projectId")!;
     const { from, to } = c.req.valid("query");
 
     const points = await listDailyMrr({ projectId, from, to });
@@ -106,13 +108,7 @@ export const metricsRoute = new Hono()
     );
   })
   .get("/summary", zValidator("query", mrrQuerySchema), async (c) => {
-    const projectId = c.req.param("projectId");
-    if (!projectId) {
-      throw new HTTPException(400, { message: "Missing projectId" });
-    }
-    const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
-
+    const projectId = c.req.param("projectId")!;
     const { from, to } = c.req.valid("query");
     const summary = await getRevenueSummary({ projectId, from, to });
 
@@ -131,13 +127,7 @@ export const metricsRoute = new Hono()
   // Lifetime-value distribution across all subscribers: avg/median/
   // p90 plus a fixed-band histogram. Cumulative, so no window.
   .get("/ltv", async (c) => {
-    const projectId = c.req.param("projectId");
-    if (!projectId) {
-      throw new HTTPException(400, { message: "Missing projectId" });
-    }
-    const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
-
+    const projectId = c.req.param("projectId")!;
     const distribution = await getLtvDistribution(projectId);
     return c.json(ok(distribution));
   })
@@ -145,16 +135,7 @@ export const metricsRoute = new Hono()
     "/mrr-decomposition",
     zValidator("query", mrrQuerySchema),
     async (c) => {
-      const projectId = c.req.param("projectId");
-      if (!projectId) {
-        throw new HTTPException(400, { message: "Missing projectId" });
-      }
-      const user = c.get("user");
-      await assertProjectAccess(
-        projectId,
-        user.id,
-        MemberRole.CUSTOMER_SUPPORT,
-      );
+      const projectId = c.req.param("projectId")!;
       const { from, to } = c.req.valid("query");
       const d = await getMrrDecomposition({ projectId, from, to });
       return c.json(
@@ -163,12 +144,7 @@ export const metricsRoute = new Hono()
     },
   )
   .get("/engagement", zValidator("query", mrrQuerySchema), async (c) => {
-    const projectId = c.req.param("projectId");
-    if (!projectId) {
-      throw new HTTPException(400, { message: "Missing projectId" });
-    }
-    const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+    const projectId = c.req.param("projectId")!;
     const { from, to } = c.req.valid("query");
     const points = await listEngagement({ projectId, from, to });
     return c.json(
@@ -188,12 +164,7 @@ export const metricsRoute = new Hono()
     "/ltv-prediction",
     zValidator("query", ltvPredictionQuerySchema),
     async (c) => {
-      const projectId = c.req.param("projectId");
-      if (!projectId) {
-        throw new HTTPException(400, { message: "Missing projectId" });
-      }
-      const user = c.get("user");
-      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+      const projectId = c.req.param("projectId")!;
       const { horizonMonths, minMatureCohorts } = c.req.valid("query");
       const data = await getLtvPrediction({ projectId, horizonMonths, minMatureCohorts });
       return c.json(ok(data));

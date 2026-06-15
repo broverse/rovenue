@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { cn } from "../../lib/cn";
-import { formatCurrencyCompact } from "./format";
+import { formatCurrencyCompact, fmtMoney } from "./format";
 import { useProjectMrr } from "../../lib/hooks/useProjectMrr";
 import { useChartAnnotations } from "../../lib/hooks/useProjectCharts";
 import { useProjectMrrDecomposition } from "../../lib/hooks/useProjectMrrDecomposition";
@@ -594,16 +594,14 @@ function Decomposition({
   loading?: boolean;
 }) {
   const { t } = useTranslation();
-  const fmt = (v?: string) =>
-    loading || v == null ? "—" : formatCurrencyCompact(Number(v));
   const items = [
-    { key: "newMrr", labelKey: "charts.decomposition.newMrr", value: fmt(newUsd) },
-    { key: "expansion", labelKey: "charts.decomposition.expansion", value: fmt(expansionUsd) },
-    { key: "contraction", labelKey: "charts.decomposition.contraction", value: "—" },
+    { key: "newMrr", labelKey: "charts.decomposition.newMrr", value: fmtMoney(newUsd, loading) },
+    { key: "expansion", labelKey: "charts.decomposition.expansion", value: fmtMoney(expansionUsd, loading) },
+    { key: "contraction", labelKey: "charts.decomposition.contraction", value: "—" }, // contraction has no backing field in MrrDecompositionResponse (no downgrade events) — intentionally blank, not a loading placeholder
     {
       key: "churned",
       labelKey: "charts.decomposition.churned",
-      value: loading || churnedUsd == null ? "—" : `−${formatCurrencyCompact(Number(churnedUsd))}`,
+      value: loading || churnedUsd == null ? "—" : `−${fmtMoney(churnedUsd)}`,
     },
   ];
 

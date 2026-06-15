@@ -1,4 +1,5 @@
 import { queryAnalytics } from "../../lib/clickhouse";
+import { toDateOnly } from "./_utils";
 
 // =============================================================
 // MRR read service — ClickHouse exclusive
@@ -52,8 +53,8 @@ export async function listDailyMrr(
   `;
 
   const rows = await queryAnalytics<ChMrrRow>(input.projectId, sql, {
-    from: input.from.toISOString().slice(0, 10),
-    to: input.to.toISOString().slice(0, 10),
+    from: toDateOnly(input.from),
+    to: toDateOnly(input.to),
   });
 
   return rows.map((r) => ({

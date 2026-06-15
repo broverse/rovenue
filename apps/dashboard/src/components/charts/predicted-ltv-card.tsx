@@ -41,6 +41,7 @@ export function PredictedLtvCard({ projectId }: Props) {
         {isLoading || !data ? "—" : formatCurrencyCompact(Number(data.blendedPredictedLtvUsd))}
       </div>
 
+      {/* server-provided cold-start message; intentionally raw (not i18n) */}
       {data?.warning && (
         <div className="mt-2 rounded-md border border-rv-warning/30 bg-rv-warning/10 px-3 py-2 text-[11px] text-rv-warning">
           {data.warning}

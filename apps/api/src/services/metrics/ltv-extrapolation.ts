@@ -55,6 +55,12 @@ function cumAt(byAge: Map<number, number>, t: number): number {
   return acc;
 }
 
+function scaledPrediction(byAge: Map<number, number>, a: number, fa: number, n: number, isMature: boolean, H: number): number {
+  const observed = cumAt(byAge, a) / (n || 1);
+  if (isMature) return cumAt(byAge, H) / (n || 1);
+  return fa > 0 ? observed / fa : observed;
+}
+
 export function computeLtvPrediction(
   rows: LtvRawRow[],
   sizes: LtvSizeRow[],
@@ -135,7 +141,7 @@ export function computeLtvPrediction(
     const observed = cumAt(byAge, a) / (size || 1);
     const isMature = observedAge(c) >= H;
     const fa = f[a] ?? 0;
-    const predicted = isMature ? cumAt(byAge, H) / (size || 1) : fa > 0 ? observed / fa : observed;
+    const predicted = scaledPrediction(byAge, a, fa, size, isMature, H);
     return {
       cohortMonth: c,
       size,
@@ -167,7 +173,7 @@ export function computeLtvPrediction(
           const observed = cumAt(byAge, a) / (n || 1);
           const isMature = observedAge(c) >= H;
           const fa = f[a] ?? 0;
-          const predicted = isMature ? cumAt(byAge, H) / (n || 1) : fa > 0 ? observed / fa : observed;
+          const predicted = scaledPrediction(byAge, a, fa, n, isMature, H);
           wPred += n * predicted;
           wObs += n * observed;
           segSize += n;

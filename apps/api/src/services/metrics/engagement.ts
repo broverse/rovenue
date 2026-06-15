@@ -1,4 +1,5 @@
 import { queryAnalytics } from "../../lib/clickhouse";
+import { toDateOnly } from "./_utils";
 
 export interface ListEngagementInput {
   projectId: string;
@@ -39,8 +40,8 @@ export async function listEngagement(
       ORDER BY day ASC
     `,
     {
-      from: input.from.toISOString().slice(0, 10),
-      to: input.to.toISOString().slice(0, 10),
+      from: toDateOnly(input.from),
+      to: toDateOnly(input.to),
     },
   );
 
