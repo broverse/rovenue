@@ -8,6 +8,7 @@ import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
 import { listDailyMrr } from "../../services/metrics/mrr";
 import { getRevenueSummary } from "../../services/metrics/summary";
+import { getLtvDistribution } from "../../services/metrics/ltv";
 
 // =============================================================
 // Dashboard: Project metrics
@@ -114,4 +115,21 @@ export const metricsRoute = new Hono()
         ...summary,
       }),
     );
+  })
+  // =============================================================
+  // GET /dashboard/projects/:projectId/metrics/ltv
+  // =============================================================
+  //
+  // Lifetime-value distribution across all subscribers: avg/median/
+  // p90 plus a fixed-band histogram. Cumulative, so no window.
+  .get("/ltv", async (c) => {
+    const projectId = c.req.param("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "Missing projectId" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+    const distribution = await getLtvDistribution(projectId);
+    return c.json(ok(distribution));
   });
