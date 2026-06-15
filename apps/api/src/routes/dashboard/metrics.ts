@@ -11,6 +11,7 @@ import { getRevenueSummary } from "../../services/metrics/summary";
 import { getLtvDistribution } from "../../services/metrics/ltv";
 import { getMrrDecomposition } from "../../services/metrics/mrr-decomposition";
 import { listEngagement } from "../../services/metrics/engagement";
+import { getLtvPrediction } from "../../services/metrics/ltv-prediction";
 
 // =============================================================
 // Dashboard: Project metrics
@@ -32,6 +33,11 @@ import { listEngagement } from "../../services/metrics/engagement";
 const MRR_WINDOW_MAX_DAYS = 800;
 const DEFAULT_WINDOW_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+export const ltvPredictionQuerySchema = z.object({
+  horizonMonths: z.coerce.number().int().min(1).max(36).default(12),
+  minMatureCohorts: z.coerce.number().int().min(1).max(24).default(3),
+});
 
 export const mrrQuerySchema = z
   .object({
@@ -177,4 +183,19 @@ export const metricsRoute = new Hono()
         })),
       }),
     );
-  });
+  })
+  .get(
+    "/ltv-prediction",
+    zValidator("query", ltvPredictionQuerySchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      if (!projectId) {
+        throw new HTTPException(400, { message: "Missing projectId" });
+      }
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+      const { horizonMonths, minMatureCohorts } = c.req.valid("query");
+      const data = await getLtvPrediction({ projectId, horizonMonths, minMatureCohorts });
+      return c.json(ok(data));
+    },
+  );
