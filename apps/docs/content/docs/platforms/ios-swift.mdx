@@ -1,0 +1,108 @@
+---
+title: iOS (Swift)
+description: Install and wire the Rovenue SDK in a Swift app.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Install
+
+### Swift Package Manager
+
+In Xcode choose **File → Add Package Dependencies** and enter the repository URL, or add it to your `Package.swift`:
+
+```swift
+dependencies: [
+  .package(url: "https://github.com/rovenue/sdk-swift.git", from: "0.2.0"),
+],
+targets: [
+  .target(name: "YourApp", dependencies: ["Rovenue"]),
+]
+```
+
+### CocoaPods
+
+```ruby
+pod 'Rovenue'
+```
+
+Then run `pod install`.
+
+<Callout type="info">
+The SDK does **not** call StoreKit. Receipt processing happens server-side via the Rovenue API.
+</Callout>
+
+## Configure
+
+Call `Rovenue.configure` once, before any SDK method is used. `AppDelegate.application(_:didFinishLaunchingWithOptions:)` is the correct place:
+
+```swift
+import UIKit
+import Rovenue
+
+@main
+class AppDelegate: UIResponder, UIApplicationDelegate {
+
+  func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+  ) -> Bool {
+    Rovenue.configure(
+      apiKey: "pk_live_YOUR_API_KEY",
+      baseUrl: "https://api.yourhost.com"
+    )
+    return true
+  }
+}
+```
+
+The SDK reads `CFBundleShortVersionString` from the main bundle automatically — you do not need to pass `appVersion` manually.
+
+## Foreground wiring
+
+The SDK uses `setForeground` to drive its internal polling cadence. Wire it from your `SceneDelegate`:
+
+```swift
+import UIKit
+import Rovenue
+
+class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+
+  func sceneWillEnterForeground(_ scene: UIScene) {
+    Rovenue.shared.setForeground(true)
+  }
+
+  func sceneDidEnterBackground(_ scene: UIScene) {
+    Rovenue.shared.setForeground(false)
+  }
+}
+```
+
+## Observing changes
+
+`Rovenue.shared.changes` is an `AsyncStream` of change events. Consume it inside a long-lived `Task`:
+
+```swift
+import Rovenue
+
+Task {
+  for await event in Rovenue.shared.changes {
+    print("Rovenue change:", event)
+    // Update your UI or local state here
+  }
+}
+```
+
+Cancel the `Task` (or call `Rovenue.shared.shutdown()`) when the owning object is deallocated.
+
+## Debugging
+
+Register a log handler to receive structured log entries from the SDK:
+
+```swift
+Rovenue.shared.setLogHandler { entry in
+  print("[\(entry.level)] \(entry.message)")
+}
+```
+
+Set this up before `Rovenue.configure` to capture initialisation logs.
