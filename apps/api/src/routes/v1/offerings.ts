@@ -135,6 +135,7 @@ export const offeringsRoute = new Hono()
           products: memberships.success
             ? hydrateProducts(memberships.data, productById as any)
             : [],
+          metadata: offering.metadata,
         })),
       }),
     );

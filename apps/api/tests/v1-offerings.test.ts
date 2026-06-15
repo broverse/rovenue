@@ -468,6 +468,25 @@ describe("GET /v1/offerings", () => {
     expect(product.type).toBe("SUBSCRIPTION");
   });
 
+  it("includes metadata on each offering in the list response", async () => {
+    vi.mocked(drizzleMock.offeringRepo.listOfferings).mockResolvedValue([
+      {
+        id: "off_meta",
+        identifier: "default",
+        accessId: "acc_x",
+        isDefault: true,
+        products: [],
+        metadata: { theme: "dark" },
+      },
+    ] as any);
+    vi.mocked(drizzleMock.offeringRepo.findProductsByIds).mockResolvedValue([] as any);
+
+    const res = await app.request(withPublicAuth("/v1/offerings"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.offerings[0].metadata).toEqual({ theme: "dark" });
+  });
+
   it("returns empty products array when offering has no product memberships", async () => {
     vi.mocked(drizzleMock.offeringRepo.listOfferings).mockResolvedValue([
       {
