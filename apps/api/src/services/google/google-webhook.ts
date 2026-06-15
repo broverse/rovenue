@@ -89,7 +89,11 @@ export async function handleGoogleNotification(
 
   const kind = classifyNotification(payload);
 
-  const webhookEvent = await drizzle.webhookEventRepo.upsertWebhookEvent(
+  // Atomic single-flight claim — exactly one concurrent worker wins.
+  // A null return means another worker already holds (PROCESSING) or
+  // finished (PROCESSED) this (source, storeEventId); FAILED/RECEIVED
+  // rows are re-claimable so BullMQ retries re-process.
+  const webhookEvent = await drizzle.webhookEventRepo.claimWebhookEvent(
     drizzle.db,
     {
       projectId: opts.projectId,
@@ -97,11 +101,10 @@ export async function handleGoogleNotification(
       eventType: kind,
       storeEventId,
       payload: JSON.parse(JSON.stringify(payload)),
-      status: WebhookEventStatus.PROCESSING,
     },
   );
 
-  if (webhookEvent.status === WebhookEventStatus.PROCESSED) {
+  if (!webhookEvent) {
     log.info("duplicate notification, skipping", { storeEventId, kind });
     return { status: "duplicate", kind };
   }

@@ -11,9 +11,9 @@ import type Stripe from "stripe";
 // and the handler modules so only the dispatcher's branching is
 // exercised.
 
-const { findByCustomer, upsertWh, updateWh } = vi.hoisted(() => ({
+const { findByCustomer, claimWh, updateWh } = vi.hoisted(() => ({
   findByCustomer: vi.fn(),
-  upsertWh: vi.fn(),
+  claimWh: vi.fn(),
   updateWh: vi.fn(),
 }));
 
@@ -27,7 +27,7 @@ vi.mock("@rovenue/db", async () => {
         findByStripeCustomerId: findByCustomer,
       },
       webhookEventRepo: {
-        upsertWebhookEvent: upsertWh,
+        claimWebhookEvent: claimWh,
         updateWebhookEvent: updateWh,
       },
     },
@@ -117,7 +117,7 @@ describe("dispatchStripeBillingEvent", () => {
 
     expect(result).toEqual({ status: "ignored" });
     expect(findByCustomer).not.toHaveBeenCalled();
-    expect(upsertWh).not.toHaveBeenCalled();
+    expect(claimWh).not.toHaveBeenCalled();
     expect(updateWh).not.toHaveBeenCalled();
   });
 
@@ -131,14 +131,17 @@ describe("dispatchStripeBillingEvent", () => {
 
     expect(result).toEqual({ status: "project_not_found" });
     expect(findByCustomer).toHaveBeenCalledWith(expect.anything(), "cus_orphan");
-    expect(upsertWh).not.toHaveBeenCalled();
+    expect(claimWh).not.toHaveBeenCalled();
     expect(updateWh).not.toHaveBeenCalled();
     expect(subscriptionUpdatedHandler).not.toHaveBeenCalled();
   });
 
-  it("returns 'duplicate' when webhook_events row is already PROCESSED and skips the handler", async () => {
+  it("returns 'duplicate' when the atomic claim returns null and skips the handler", async () => {
+    // null = another worker already holds (PROCESSING) or finished
+    // (PROCESSED) this event id; the single-flight claim is what makes
+    // concurrent duplicate deliveries collapse to one effect.
     findByCustomer.mockResolvedValueOnce({ projectId: "proj_1" });
-    upsertWh.mockResolvedValueOnce({ id: "wh_1", status: "PROCESSED" });
+    claimWh.mockResolvedValueOnce(null);
 
     const event = makeEvent(
       "customer.subscription.updated",
@@ -155,7 +158,8 @@ describe("dispatchStripeBillingEvent", () => {
 
   it("happy path: runs handler in tx and marks webhook_events PROCESSED", async () => {
     findByCustomer.mockResolvedValueOnce({ projectId: "proj_42" });
-    upsertWh.mockResolvedValueOnce({ id: "wh_42", status: "RECEIVED" });
+    // The claim sets PROCESSING itself and returns the claimed row.
+    claimWh.mockResolvedValueOnce({ id: "wh_42", status: "PROCESSING" });
     updateWh.mockResolvedValueOnce(undefined);
 
     const event = makeEvent(
@@ -167,14 +171,13 @@ describe("dispatchStripeBillingEvent", () => {
     const result = await dispatchStripeBillingEvent(event);
 
     expect(result).toEqual({ status: "ok" });
-    expect(upsertWh).toHaveBeenCalledWith(
+    expect(claimWh).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         projectId: "proj_42",
         source: "STRIPE",
         eventType: "customer.subscription.updated",
         storeEventId: "evt_happy",
-        status: "RECEIVED",
       }),
     );
     expect(subscriptionUpdatedHandler).toHaveBeenCalledTimes(1);

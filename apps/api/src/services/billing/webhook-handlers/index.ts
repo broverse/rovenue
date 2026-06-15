@@ -97,16 +97,22 @@ export async function dispatchStripeBillingEvent(
 
   const projectId = sub.projectId;
 
-  // Idempotency check via webhook_events dedupe table.
-  const whRow = await drizzle.webhookEventRepo.upsertWebhookEvent(db, {
+  // Atomic single-flight claim via webhook_events dedupe table. The
+  // claim sets PROCESSING itself (folding the prior RECEIVED step);
+  // a null return means another worker already holds (PROCESSING) or
+  // finished (PROCESSED) this (source, storeEventId). FAILED/RECEIVED
+  // rows stay re-claimable so Stripe's at-least-once retries
+  // re-process. This closes the double-dispatch race the old no-op
+  // upsert + `status === PROCESSED` guard left open under worker
+  // concurrency.
+  const whRow = await drizzle.webhookEventRepo.claimWebhookEvent(db, {
     projectId,
     source: "STRIPE",
     eventType: event.type,
     storeEventId: event.id,
     payload: event as unknown,
-    status: "RECEIVED",
   });
-  if (whRow.status === "PROCESSED") {
+  if (!whRow) {
     return { status: "duplicate" };
   }
 

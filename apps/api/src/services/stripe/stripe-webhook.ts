@@ -110,7 +110,11 @@ export async function processStripeEvent(
 ): Promise<HandleStripeNotificationResult> {
   const { event, projectId, stripe } = opts;
 
-  const webhookEvent = await drizzle.webhookEventRepo.upsertWebhookEvent(
+  // Atomic single-flight claim — exactly one concurrent worker wins.
+  // A null return means another worker already holds (PROCESSING) or
+  // finished (PROCESSED) this (source, storeEventId); FAILED/RECEIVED
+  // rows are re-claimable so BullMQ retries re-process.
+  const webhookEvent = await drizzle.webhookEventRepo.claimWebhookEvent(
     drizzle.db,
     {
       projectId,
@@ -118,11 +122,10 @@ export async function processStripeEvent(
       eventType: event.type,
       storeEventId: event.id,
       payload: JSON.parse(JSON.stringify(event)),
-      status: WebhookEventStatus.PROCESSING,
     },
   );
 
-  if (webhookEvent.status === WebhookEventStatus.PROCESSED) {
+  if (!webhookEvent) {
     log.info("duplicate event, skipping", {
       id: event.id,
       type: event.type,
