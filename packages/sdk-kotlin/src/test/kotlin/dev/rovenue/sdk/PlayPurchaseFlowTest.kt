@@ -1,7 +1,16 @@
 package dev.rovenue.sdk
 
+import android.app.Activity
+import dev.rovenue.sdk.generated.ReceiptResult
+import dev.rovenue.sdk.internal.PlayPurchaseFlow
+import dev.rovenue.sdk.internal.PlayStore
+import dev.rovenue.sdk.internal.StorePurchaseOutcome
+import io.mockk.mockk
+import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -97,5 +106,110 @@ class PurchaseTypesTest {
         assertEquals("later", PurchasePendingException("later").message)
         assertEquals("gone", ProductNotAvailableException("gone").message)
         assertEquals("oops", StoreProblemException("oops").message)
+    }
+}
+
+class PlayPurchaseFlowTest {
+
+    private val activity = mockk<Activity>(relaxed = true)
+
+    /** A PlayStore that always returns the supplied outcome. */
+    private fun storeReturning(outcome: StorePurchaseOutcome) = object : PlayStore {
+        override suspend fun purchase(
+            activity: Activity,
+            productId: String,
+            productType: ProductType,
+            obfuscatedAccountId: String?,
+        ): StorePurchaseOutcome = outcome
+    }
+
+    private fun receipt(balance: Long) =
+        ReceiptResult(subscriberId = "sub_1", appUserId = "anon_1", creditBalance = balance)
+
+    @Test
+    fun `cancelled outcome throws and never validates`() = runTest {
+        var validated = false
+        val flow = PlayPurchaseFlow(
+            store = storeReturning(StorePurchaseOutcome.UserCancelled),
+            validate = { _, _ -> validated = true; receipt(0) },
+            snapshot = { emptyList<dev.rovenue.sdk.generated.Entitlement>() to 0L },
+        )
+        assertFailsWith<PurchaseCancelledException> {
+            flow.run(activity, "pro_monthly", ProductType.SUBSCRIPTION, null)
+        }
+        assertFalse(validated, "validation must not run on a cancelled purchase")
+    }
+
+    @Test
+    fun `pending outcome throws PurchasePendingException`() = runTest {
+        val flow = PlayPurchaseFlow(
+            store = storeReturning(StorePurchaseOutcome.Pending),
+            validate = { _, _ -> error("should not validate") },
+            snapshot = { emptyList<dev.rovenue.sdk.generated.Entitlement>() to 0L },
+        )
+        assertFailsWith<PurchasePendingException> {
+            flow.run(activity, "pro_monthly", ProductType.SUBSCRIPTION, null)
+        }
+    }
+
+    @Test
+    fun `product-not-found outcome throws ProductNotAvailableException`() = runTest {
+        val flow = PlayPurchaseFlow(
+            store = storeReturning(StorePurchaseOutcome.ProductNotFound),
+            validate = { _, _ -> error("should not validate") },
+            snapshot = { emptyList<dev.rovenue.sdk.generated.Entitlement>() to 0L },
+        )
+        assertFailsWith<ProductNotAvailableException> {
+            flow.run(activity, "missing", ProductType.CONSUMABLE, null)
+        }
+    }
+
+    @Test
+    fun `success validates then acknowledges then returns result`() = runTest {
+        val order = mutableListOf<String>()
+        val success = StorePurchaseOutcome.Success(
+            purchaseToken = "tok_abc",
+            orderId = "GPA.9999",
+            acknowledge = { order.add("acknowledge") },
+        )
+        val flow = PlayPurchaseFlow(
+            store = storeReturning(success),
+            validate = { token, pid ->
+                order.add("validate")
+                assertEquals("tok_abc", token)
+                assertEquals("coins_100", pid)
+                receipt(500)
+            },
+            snapshot = { emptyList<dev.rovenue.sdk.generated.Entitlement>() to 500L },
+        )
+
+        val result = flow.run(activity, "coins_100", ProductType.CONSUMABLE, "obf_1")
+
+        // validate must happen strictly before acknowledge.
+        assertEquals(listOf("validate", "acknowledge"), order)
+        assertEquals(500L, result.creditBalance)
+        assertEquals("coins_100", result.productId)
+        assertEquals("GPA.9999", result.storeTransactionId)
+        assertTrue(result.entitlements.isEmpty())
+    }
+
+    @Test
+    fun `validation failure prevents acknowledge`() = runTest {
+        var acknowledged = false
+        val success = StorePurchaseOutcome.Success(
+            purchaseToken = "tok_abc",
+            orderId = "GPA.9999",
+            acknowledge = { acknowledged = true },
+        )
+        val flow = PlayPurchaseFlow(
+            store = storeReturning(success),
+            validate = { _, _ -> throw StoreProblemException("server rejected") },
+            snapshot = { emptyList<dev.rovenue.sdk.generated.Entitlement>() to 0L },
+        )
+
+        assertFailsWith<StoreProblemException> {
+            flow.run(activity, "coins_100", ProductType.CONSUMABLE, null)
+        }
+        assertFalse(acknowledged, "must not acknowledge when validation fails")
     }
 }
