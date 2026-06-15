@@ -4,6 +4,13 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { drizzle } from "@rovenue/db";
 import {
+  attributesBodySchema,
+  normalizeStored,
+  applyMutations,
+  flattenAttributes,
+  validateAttributeInput,
+} from "@rovenue/shared";
+import {
   getBalance,
   InsufficientCreditsError,
   spendCredits,
@@ -13,6 +20,7 @@ import { idempotency } from "../../middleware/idempotency";
 import { endpointRateLimit } from "../../middleware/rate-limit";
 import { buildAccessResponse } from "../../lib/access-response";
 import { ok } from "../../lib/response";
+import { InvalidArgumentError } from "../../lib/invalid-argument-error";
 
 // =============================================================
 // /v1/me — subscriber-scoped routes
@@ -25,9 +33,7 @@ import { ok } from "../../lib/response";
 // equivalent `/v1/subscribers/:appUserId/*` family remains for
 // server-to-server callers operating on behalf of a different user.
 
-export const meAttributesBodySchema = z.object({
-  attributes: z.record(z.unknown()),
-});
+export const meAttributesBodySchema = attributesBodySchema;
 
 export const meSpendBodySchema = z.object({
   amount: z.number().int().positive(),
@@ -65,7 +71,7 @@ export const meRoute = new Hono()
         subscriber: {
           id: subscriber.id,
           appUserId: subscriber.appUserId,
-          attributes: subscriber.attributes,
+          attributes: flattenAttributes(subscriber.attributes),
         },
         access,
         credits: { balance },
@@ -144,12 +150,16 @@ export const meRoute = new Hono()
       const subscriber = c.get("subscriber");
       const body = c.req.valid("json");
 
-      const currentAttributes =
-        (subscriber.attributes as Record<string, unknown> | null) ?? {};
-      const merged: Record<string, unknown> = {
-        ...currentAttributes,
-        ...body.attributes,
-      };
+      const current = normalizeStored(subscriber.attributes);
+      const errors = validateAttributeInput(body.attributes, current);
+      if (errors.length > 0) {
+        throw new InvalidArgumentError(
+          errors.map((e) => `${e.key}: ${e.reason}`).join("; "),
+        );
+      }
+
+      const now = new Date().toISOString();
+      const merged = applyMutations(current, body.attributes, "sdk", now);
 
       const updated = await drizzle.subscriberRepo.upsertSubscriber(
         drizzle.db,
@@ -166,7 +176,7 @@ export const meRoute = new Hono()
           subscriber: {
             id: updated.id,
             appUserId: updated.rovenueId,
-            attributes: updated.attributes,
+            attributes: flattenAttributes(updated.attributes),
           },
         }),
       );

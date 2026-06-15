@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import { ERROR_CODE, type ErrorCode } from "@rovenue/shared";
 import { fail } from "../lib/response";
 import { logger } from "../lib/logger";
+import { InvalidArgumentError } from "../lib/invalid-argument-error";
 
 const log = logger.child("error-handler");
 
@@ -27,6 +28,13 @@ function mapHttpStatus(status: number): ErrorCode {
 }
 
 export const errorHandler: ErrorHandler = (err, c) => {
+  if (err instanceof InvalidArgumentError) {
+    return c.json(
+      { error: { code: "INVALID_ARGUMENT", message: err.message } },
+      400,
+    );
+  }
+
   if (err instanceof HTTPException) {
     const code = mapHttpStatus(err.status);
     return c.json(fail(code, err.message), err.status);
