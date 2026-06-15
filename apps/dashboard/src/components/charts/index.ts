@@ -6,6 +6,7 @@ export { FiltersCard, type FilterDimension, type FilterSelection } from "./filte
 export { FunnelCard } from "./funnel-card";
 export { GroupByCard } from "./group-by-card";
 export { HourDayHeatmap } from "./hour-day-heatmap";
+export { LtvDistributionCard } from "./ltv-distribution-card";
 export { MrrChartPanel } from "./mrr-chart-panel";
 export { RevenueKpisCard } from "./revenue-kpis-card";
 export { NewAnnotationDialog } from "./new-annotation-dialog";
