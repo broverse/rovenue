@@ -63,6 +63,12 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
     create: vi.fn(),
   };
 
+  const offering = {
+    findMany: vi.fn(),
+    findFirst: vi.fn(),
+    findUnique: vi.fn(),
+  };
+
   const $executeRaw = vi.fn().mockResolvedValue(0);
 
   const $transaction = vi.fn(
@@ -87,6 +93,7 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
     purchase,
     product,
     productGroup,
+    offering,
     subscriberAccess,
     creditLedger,
     $executeRaw,
@@ -129,6 +136,19 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
     },
     subscriberRepo: {
       findSubscriberAttributes: vi.fn(async () => null),
+      findSubscriberAttributesByRovenueId: vi.fn(
+        async (_db: unknown, args: { projectId: string; rovenueId: string }) =>
+          subscriber.findUnique({
+            where: { id: args.rovenueId, projectId: args.projectId },
+            select: { attributes: true },
+          }),
+      ),
+      resolveSubscriberByRovenueId: vi.fn(
+        async (_db: unknown, args: { projectId: string; rovenueId: string }) =>
+          subscriber.findUnique({
+            where: { id: args.rovenueId, projectId: args.projectId },
+          }),
+      ),
       findSubscriberByAppUserId: vi.fn(
         async (_db: unknown, args: { projectId: string; appUserId: string }) =>
           subscriber.findUnique({
@@ -151,21 +171,23 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
           _db: unknown,
           input: {
             projectId: string;
-            appUserId: string;
+            rovenueId?: string;
+            appUserId?: string;
             createAttributes?: unknown;
             updateAttributes?: unknown;
           },
         ) =>
           subscriber.upsert({
             where: {
-              projectId_appUserId: {
+              projectId_rovenueId: {
                 projectId: input.projectId,
-                appUserId: input.appUserId,
+                rovenueId: input.rovenueId ?? input.appUserId ?? "",
               },
             },
             create: {
               projectId: input.projectId,
-              appUserId: input.appUserId,
+              rovenueId: input.rovenueId ?? input.appUserId ?? "",
+              appUserId: input.appUserId ?? null,
               attributes: input.createAttributes ?? {},
             },
             update: {
@@ -217,18 +239,25 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
       ),
     },
     offeringRepo: {
-      listProductGroups: vi.fn(async (_db: unknown, projectId: string) =>
+      listOfferings: vi.fn(async (_db: unknown, projectId: string) =>
         offering.findMany({
           where: { projectId },
           orderBy: [{ isDefault: "desc" }, { identifier: "asc" }],
         }),
       ),
-      findDefaultProductGroup: vi.fn(async (_db: unknown, projectId: string) =>
+      listOfferingsByAccess: vi.fn(
+        async (_db: unknown, projectId: string, accessId: string) =>
+          offering.findMany({
+            where: { projectId, accessId },
+            orderBy: [{ isDefault: "desc" }, { identifier: "asc" }],
+          }),
+      ),
+      findDefaultOffering: vi.fn(async (_db: unknown, projectId: string) =>
         offering.findFirst({
           where: { projectId, isDefault: true },
         }),
       ),
-      findProductGroupByIdentifier: vi.fn(
+      findOfferingByIdentifier: vi.fn(
         async (_db: unknown, projectId: string, identifier: string) =>
           offering.findUnique({
             where: { projectId_identifier: { projectId, identifier } },
@@ -248,6 +277,11 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
               where: { id: { in: ids } },
               include: { product: { select: { identifier: true } } },
             }),
+      ),
+    },
+    accessCatalogRepo: {
+      findByIds: vi.fn(async (_db: unknown, ids: string[]) =>
+        ids.map((id) => ({ id, identifier: id })),
       ),
     },
     creditLedgerRepoExt: {
@@ -864,16 +898,17 @@ describe("POST /v1/subscribers/:appUserId/credits/add", () => {
 });
 
 // =============================================================
-// GET /v1/product-groups/:identifier
+// GET /v1/offerings/:identifier
 // =============================================================
 
-describe("GET /v1/product-groups/:identifier", () => {
-  it("returns a sorted product list for the named group", async () => {
+describe("GET /v1/offerings/:identifier", () => {
+  it("returns a sorted product list for the named offering", async () => {
     dbMock.offering.findUnique.mockResolvedValue({
       id: "pg_1",
       projectId: "proj_test",
       identifier: "premium",
       isDefault: false,
+      accessId: null,
       products: [
         {
           productId: "prod_1",
@@ -912,7 +947,7 @@ describe("GET /v1/product-groups/:identifier", () => {
     ]);
 
     const res = await app.request(
-      withPublicAuth("/v1/product-groups/premium"),
+      withPublicAuth("/v1/offerings/premium"),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
@@ -923,61 +958,65 @@ describe("GET /v1/product-groups/:identifier", () => {
     expect(body.data.products[1].identifier).toBe("pro_monthly");
   });
 
-  it("looks up the default group when identifier is 'default'", async () => {
+  it("looks up the default offering when identifier is 'default'", async () => {
     dbMock.offering.findFirst.mockResolvedValue({
       id: "pg_1",
       projectId: "proj_test",
       identifier: "default",
       isDefault: true,
+      accessId: null,
       products: [],
       metadata: {},
     } as any);
     dbMock.product.findMany.mockResolvedValue([]);
 
     const res = await app.request(
-      withPublicAuth("/v1/product-groups/default"),
+      withPublicAuth("/v1/offerings/default"),
     );
     expect(res.status).toBe(200);
   });
 
-  it("returns 404 when the group doesn't exist", async () => {
+  it("returns 404 when the offering doesn't exist", async () => {
     dbMock.offering.findUnique.mockResolvedValue(null);
     const res = await app.request(
-      withPublicAuth("/v1/product-groups/missing"),
+      withPublicAuth("/v1/offerings/missing"),
     );
     expect(res.status).toBe(404);
   });
 });
 
 // =============================================================
-// GET /v1/product-groups
+// GET /v1/offerings
 // =============================================================
 
-describe("GET /v1/product-groups", () => {
-  it("lists groups with product counts", async () => {
+describe("GET /v1/offerings", () => {
+  it("lists offerings with their products", async () => {
     dbMock.offering.findMany.mockResolvedValue([
       {
         identifier: "default",
         isDefault: true,
+        accessId: null,
         products: [{ productId: "p1", order: 1, isPromoted: false }],
       },
       {
         identifier: "experiment_summer",
         isDefault: false,
+        accessId: null,
         products: [
           { productId: "p1", order: 1, isPromoted: true },
           { productId: "p2", order: 2, isPromoted: false },
         ],
       },
     ] as any);
+    dbMock.product.findMany.mockResolvedValue([]);
 
-    const res = await app.request(withPublicAuth("/v1/product-groups"));
+    const res = await app.request(withPublicAuth("/v1/offerings"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
-    expect(body.data.groups).toHaveLength(2);
-    expect(body.data.groups[0].identifier).toBe("default");
-    expect(body.data.groups[0].productCount).toBe(1);
-    expect(body.data.groups[1].productCount).toBe(2);
+    expect(body.data.offerings).toHaveLength(2);
+    expect(body.data.offerings[0].identifier).toBe("default");
+    expect(body.data.offerings[0].products).toHaveLength(0);
+    expect(body.data.offerings[1].products).toHaveLength(0);
   });
 });
 
@@ -1019,8 +1058,8 @@ describe("GET /v1/me", () => {
     const body = (await res.json()) as any;
     expect(body.data.subscriber.appUserId).toBe("user_1");
     expect(body.data.subscriber.attributes.plan).toBe("pro");
-    expect(body.data.entitlements.premium.isActive).toBe(true);
-    expect(body.data.entitlements.premium.productIdentifier).toBe("pro_monthly");
+    expect(body.data.access.premium.isActive).toBe(true);
+    expect(body.data.access.premium.productIdentifier).toBe("pro_monthly");
     expect(body.data.credits.balance).toBe(175);
   });
 
@@ -1036,8 +1075,8 @@ describe("GET /v1/me", () => {
   });
 });
 
-describe("GET /v1/me/entitlements", () => {
-  it("returns only the entitlement map", async () => {
+describe("GET /v1/me/access", () => {
+  it("returns only the access map", async () => {
     dbMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_1",
       projectId: "proj_test",
@@ -1057,10 +1096,10 @@ describe("GET /v1/me/entitlements", () => {
       { id: "pur_2", product: { identifier: "pro_annual" } },
     ]);
 
-    const res = await app.request(withAppUser("/v1/me/entitlements"));
+    const res = await app.request(withAppUser("/v1/me/access"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
-    expect(body.data.entitlements.premium.store).toBe("PLAY_STORE");
+    expect(body.data.access.premium.store).toBe("PLAY_STORE");
   });
 });
 
