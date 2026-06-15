@@ -1,4 +1,5 @@
 export { AnnotationsPanel } from "./annotations-panel";
+export { CreditVolumeCard } from "./credit-volume-card";
 export { ChannelDonut } from "./channel-donut";
 export { ChartCatalog } from "./chart-catalog";
 export { ChartToolbar } from "./chart-toolbar";
