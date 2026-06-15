@@ -11,17 +11,17 @@ package dev.rovenue.sdk
 import android.app.Activity
 import android.content.Context
 import dev.rovenue.sdk.generated.Config
-import dev.rovenue.sdk.generated.CoreOffering
-import dev.rovenue.sdk.generated.CoreOfferingProduct
 import dev.rovenue.sdk.generated.CoreOfferings
 import dev.rovenue.sdk.generated.RovenueCore
 import dev.rovenue.sdk.generated.RovenueException
 import dev.rovenue.sdk.generated.SessionEventKind
 import dev.rovenue.sdk.generated.sdkVersion
 import dev.rovenue.sdk.internal.Dispatcher
+import dev.rovenue.sdk.internal.NoPriceStore
 import dev.rovenue.sdk.internal.ObserverBridge
 import dev.rovenue.sdk.internal.PlayBillingStore
 import dev.rovenue.sdk.internal.PlayPurchaseFlow
+import dev.rovenue.sdk.internal.hydrateOfferings
 import java.util.UUID
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -308,38 +308,35 @@ class Rovenue private constructor(
     // ---------------------------------------------------------------
 
     /** Fetch the project's offerings. The list (and which one is `current`)
-     *  comes from the Rovenue backend. In v1 the price fields are null —
-     *  offerings are configuration-only; localized prices come from Play
-     *  Billing's ProductDetails at purchase time. */
+     *  comes from the Rovenue backend; localized price metadata is hydrated
+     *  live from Play Billing's ProductDetails (parity with the Swift SDK).
+     *
+     *  Resilient: if the price query fails (no Play Billing, offline, no
+     *  Context), the offerings are still returned with null price fields —
+     *  getOfferings never fails just because pricing was unavailable. */
     @Throws(RovenueException::class)
     suspend fun getOfferings(): Offerings {
         emit(LogEntry(level = "info", message = "getOfferings"))
         try {
             val core: CoreOfferings = dispatcher.run { core.getOfferings() }
-            val offerings = core.offerings.map(::mapOffering)
-            val all = offerings.associateBy { it.identifier }
-            val current = core.current?.let { all[it] }
+            val context = appContext
+            val offerings = if (context != null) {
+                runCatching { hydrateOfferings(core, PlayBillingStore(context)) }
+                    .getOrElse {
+                        emit(LogEntry(level = "warn", message = "getOfferings price hydration failed: ${it.message ?: it.javaClass.simpleName}"))
+                        hydrateOfferings(core, NoPriceStore)
+                    }
+            } else {
+                // Pure-JVM / no-Context: config-only offerings, null prices.
+                hydrateOfferings(core, NoPriceStore)
+            }
             emit(LogEntry(level = "info", message = "getOfferings ok"))
-            return Offerings(current = current, all = all)
+            return offerings
         } catch (e: Throwable) {
             emit(LogEntry(level = "error", message = "getOfferings failed: ${e.message ?: e.javaClass.simpleName}"))
             throw e
         }
     }
-
-    private fun mapProduct(p: CoreOfferingProduct): StoreProduct =
-        StoreProduct(
-            id = p.googleProductId ?: p.identifier,
-            type = ProductType.from(p.productType),
-            displayName = p.displayName,
-        )
-
-    private fun mapOffering(o: CoreOffering): Offering =
-        Offering(
-            identifier = o.identifier,
-            isDefault = o.isDefault,
-            packages = o.packages.map { Package(identifier = it.identifier, product = mapProduct(it)) },
-        )
 
     /** Purchase the product backing a [Package]. */
     suspend fun purchase(activity: Activity, pkg: Package): PurchaseResult =

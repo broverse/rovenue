@@ -19,7 +19,9 @@ import com.android.billingclient.api.ProductDetails
 import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
+import com.android.billingclient.api.QueryPurchasesParams
 import com.android.billingclient.api.queryProductDetails
+import com.android.billingclient.api.queryPurchasesAsync
 import dev.rovenue.sdk.ProductType
 import dev.rovenue.sdk.StoreProblemException
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -106,6 +108,118 @@ class PlayBillingStore(private val context: Context) : PlayStore {
                 )
             }
         }
+    }
+
+    override suspend fun queryPrices(
+        productIds: List<String>,
+        subscriptionIds: List<String>,
+    ): Map<String, PriceInfo> {
+        if (productIds.isEmpty() && subscriptionIds.isEmpty()) return emptyMap()
+        val client = connect()
+        val out = mutableMapOf<String, PriceInfo>()
+        if (productIds.isNotEmpty()) {
+            queryDetailsBatch(client, productIds, BillingClient.ProductType.INAPP).forEach { details ->
+                inappPrice(details)?.let { out[details.productId] = it }
+            }
+        }
+        if (subscriptionIds.isNotEmpty()) {
+            queryDetailsBatch(client, subscriptionIds, BillingClient.ProductType.SUBS).forEach { details ->
+                subsPrice(details)?.let { out[details.productId] = it }
+            }
+        }
+        return out
+    }
+
+    private suspend fun queryDetailsBatch(
+        client: BillingClient,
+        productIds: List<String>,
+        type: String,
+    ): List<ProductDetails> {
+        val params = QueryProductDetailsParams.newBuilder()
+            .setProductList(
+                productIds.map {
+                    QueryProductDetailsParams.Product.newBuilder()
+                        .setProductId(it)
+                        .setProductType(type)
+                        .build()
+                },
+            )
+            .build()
+        val outcome = client.queryProductDetails(params)
+        if (outcome.billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
+            throw StoreProblemException(
+                "queryProductDetails failed ${outcome.billingResult.responseCode}: ${outcome.billingResult.debugMessage}",
+            )
+        }
+        return outcome.productDetailsList ?: emptyList()
+    }
+
+    private fun inappPrice(details: ProductDetails): PriceInfo? {
+        val offer = details.oneTimePurchaseOfferDetails ?: return null
+        return PriceInfo(
+            priceString = offer.formattedPrice,
+            price = offer.priceAmountMicros / 1_000_000.0,
+            currencyCode = offer.priceCurrencyCode,
+        )
+    }
+
+    private fun subsPrice(details: ProductDetails): PriceInfo? {
+        // First base-plan offer, first pricing phase — the headline recurring price.
+        val phase = details.subscriptionOfferDetails
+            ?.firstOrNull()
+            ?.pricingPhases
+            ?.pricingPhaseList
+            ?.firstOrNull()
+            ?: return null
+        return PriceInfo(
+            priceString = phase.formattedPrice,
+            price = phase.priceAmountMicros / 1_000_000.0,
+            currencyCode = phase.priceCurrencyCode,
+        )
+    }
+
+    override suspend fun queryUnacknowledgedPurchases(): List<PendingPurchase> {
+        val client = connect()
+        val out = mutableListOf<PendingPurchase>()
+        out += queryOwned(client, BillingClient.ProductType.SUBS, isConsumable = false)
+        out += queryOwned(client, BillingClient.ProductType.INAPP, isConsumable = false)
+        return out
+    }
+
+    private suspend fun queryOwned(
+        client: BillingClient,
+        type: String,
+        @Suppress("UNUSED_PARAMETER") isConsumable: Boolean,
+    ): List<PendingPurchase> {
+        val params = QueryPurchasesParams.newBuilder().setProductType(type).build()
+        val result = client.queryPurchasesAsync(params)
+        if (result.billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
+            throw StoreProblemException(
+                "queryPurchases failed ${result.billingResult.responseCode}: ${result.billingResult.debugMessage}",
+            )
+        }
+        return result.purchasesList
+            .filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
+            .map { purchase ->
+                val productId = purchase.products.firstOrNull() ?: ""
+                // INAPP purchases may be consumables; we can't know the configured
+                // type here, so acknowledge() acknowledges (never consumes) during
+                // reconciliation. Consumables are consumed in the foreground
+                // purchase flow; an unacknowledged consumable left over from a
+                // crashed flow is still validated + acknowledged here, which grants
+                // entitlement and stops the auto-refund — consumption can follow.
+                PendingPurchase(
+                    purchaseToken = purchase.purchaseToken,
+                    productId = productId,
+                    productType = if (type == BillingClient.ProductType.SUBS) {
+                        ProductType.SUBSCRIPTION
+                    } else {
+                        ProductType.NON_CONSUMABLE
+                    },
+                    isAcknowledged = purchase.isAcknowledged,
+                    acknowledge = { acknowledge(client, purchase.purchaseToken) },
+                )
+            }
     }
 
     private fun successFor(purchase: Purchase): StorePurchaseOutcome.Success {
