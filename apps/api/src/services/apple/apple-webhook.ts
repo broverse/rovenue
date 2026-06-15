@@ -372,14 +372,18 @@ async function applyRenewalStatusChange(ctx: DispatchContext): Promise<void> {
 }
 
 async function applyFailedRenewal(ctx: DispatchContext): Promise<void> {
-  const inGrace =
-    ctx.notification.subtype === APPLE_NOTIFICATION_SUBTYPE.GRACE_PERIOD;
+  // OD-1: a failed renewal is billing-retry limbo, not active revenue —
+  // keep access during Apple's retry window. This holds whether or not
+  // the GRACE_PERIOD subtype is present: the non-grace variant is the
+  // same retry limbo, so it must NOT map to ACTIVE (which would treat a
+  // non-renewing subscription as a healthy paid one). Mirrors
+  // normalizeAppleStatus(DID_FAIL_TO_RENEW) -> GRACE_PERIOD.
   const gracePeriodExpires = ctx.renewalInfo?.gracePeriodExpiresDate
     ? new Date(ctx.renewalInfo.gracePeriodExpiresDate)
     : null;
 
   await guardedChainStatusWrite(ctx, {
-    status: inGrace ? PurchaseStatus.GRACE_PERIOD : PurchaseStatus.ACTIVE,
+    status: PurchaseStatus.GRACE_PERIOD,
     gracePeriodExpires,
   });
 }
