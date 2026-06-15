@@ -20,7 +20,6 @@ import { idempotency } from "../../middleware/idempotency";
 import { endpointRateLimit } from "../../middleware/rate-limit";
 import { buildAccessResponse } from "../../lib/access-response";
 import { ok } from "../../lib/response";
-import { InvalidArgumentError } from "../../lib/invalid-argument-error";
 
 // =============================================================
 // /v1/me — subscriber-scoped routes
@@ -153,9 +152,9 @@ export const meRoute = new Hono()
       const current = normalizeStored(subscriber.attributes);
       const errors = validateAttributeInput(body.attributes, current);
       if (errors.length > 0) {
-        throw new InvalidArgumentError(
-          errors.map((e) => `${e.key}: ${e.reason}`).join("; "),
-        );
+        throw new HTTPException(400, {
+          message: errors.map((e) => `${e.key}: ${e.reason}`).join("; "),
+        });
       }
 
       const now = new Date().toISOString();

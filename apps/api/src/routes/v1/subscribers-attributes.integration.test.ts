@@ -8,7 +8,7 @@
 // Scenarios:
 //   1. Merge reserved + custom attributes → 200 flat map response
 //   2. Null-delete removes a key and preserves others
-//   3. Unknown reserved key ($nope) → 400 INVALID_ARGUMENT
+//   3. Unknown reserved key ($nope) → 400 VALIDATION_ERROR
 //   4. Stores nested shape with server-set updatedAt + source
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -129,11 +129,11 @@ describe("POST /v1/subscribers/:appUserId/attributes", () => {
     expect(body.data.subscriber.attributes.teamName).toBeUndefined();
   });
 
-  it("rejects an unknown reserved key with 400 INVALID_ARGUMENT", async () => {
+  it("rejects an unknown reserved key with 400 VALIDATION_ERROR", async () => {
     const res = await post({ $nope: "x" });
     expect(res.status).toBe(400);
     const body = await res.json() as any;
-    expect(body.error.code).toBe("INVALID_ARGUMENT");
+    expect(body.error.code).toBe("VALIDATION_ERROR");
   });
 
   it("stores nested shape with server-set updatedAt + source", async () => {

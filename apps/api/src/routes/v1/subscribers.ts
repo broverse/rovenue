@@ -26,7 +26,6 @@ import { buildAccessResponse } from "../../lib/access-response";
 import { resolveSubscriber } from "../../lib/resolve-subscriber";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
-import { InvalidArgumentError } from "../../lib/invalid-argument-error";
 
 // =============================================================
 // /v1/subscribers — SDK + server-side subscriber operations
@@ -188,9 +187,9 @@ export const subscribersRoute = new Hono()
       const current = normalizeStored(existing?.attributes);
       const errors = validateAttributeInput(body.attributes, current);
       if (errors.length > 0) {
-        throw new InvalidArgumentError(
-          errors.map((e) => `${e.key}: ${e.reason}`).join("; "),
-        );
+        throw new HTTPException(400, {
+          message: errors.map((e) => `${e.key}: ${e.reason}`).join("; "),
+        });
       }
 
       const now = new Date().toISOString();
