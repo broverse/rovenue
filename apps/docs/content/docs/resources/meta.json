@@ -1,4 +1,5 @@
 {
   "title": "Resources",
+  "icon": "Library",
   "pages": ["versioning", "migrating-from-revenuecat", "using-with-ai"]
 }

@@ -1,4 +1,5 @@
 {
   "title": "Platforms",
+  "icon": "Smartphone",
   "pages": ["react-native", "ios-swift", "android-kotlin"]
 }
