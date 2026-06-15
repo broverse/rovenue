@@ -28,7 +28,7 @@ vi.mock("../src/lib/audit", () => auditMock);
 //   2. project access enforcement (non-member → 403)
 //   3. default window (30 days when no query params)
 //   4. explicit from/to passthrough
-//   5. window cap (>365 days → 400)
+//   5. window cap (>800 days → 400)
 //   6. from > to (→ 400)
 
 const { mrrMock } = vi.hoisted(() => ({
@@ -197,7 +197,7 @@ describe("GET /dashboard/projects/:projectId/metrics/mrr", () => {
       role: "VIEWER",
     });
     const res = await app.request(
-      "/dashboard/projects/proj_1/metrics/mrr?from=2024-01-01T00:00:00Z&to=2026-01-01T00:00:00Z",
+      "/dashboard/projects/proj_1/metrics/mrr?from=2023-01-01T00:00:00Z&to=2026-01-01T00:00:00Z",
       { headers: authedHeaders },
     );
     expect(res.status).toBe(400);
