@@ -9,7 +9,7 @@ use crate::entitlements::{Entitlement, EntitlementReader};
 use crate::error::{RovenueError, RovenueResult};
 use crate::identity::{IdentityManager, User};
 use crate::observer::{Observer, ObserverBus};
-use crate::offerings::{Offerings, OfferingsClient};
+use crate::offerings::{CoreOfferings, OfferingsClient};
 use crate::polling::PollingScheduler;
 use crate::receipts::{ReceiptClient, ReceiptResult};
 use crate::sessions::{AccountTokenStore, SessionBuffer, SessionDispatcher, SessionEventKind};
@@ -248,7 +248,7 @@ impl RovenueCore {
         self.account_tokens.get_or_create(&scope)
     }
 
-    pub fn get_offerings(&self) -> RovenueResult<Offerings> {
+    pub fn get_offerings(&self) -> RovenueResult<CoreOfferings> {
         self.offerings.get_offerings()
     }
 }

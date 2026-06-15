@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct OfferingProduct {
+pub struct CoreOfferingProduct {
     pub identifier: String,
     pub product_type: String,
     pub display_name: String,
@@ -9,15 +9,15 @@ pub struct OfferingProduct {
     pub google_product_id: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq)]
-pub struct Offering {
+pub struct CoreOffering {
     pub identifier: String,
     pub is_default: bool,
-    pub packages: Vec<OfferingProduct>,
+    pub packages: Vec<CoreOfferingProduct>,
 }
 #[derive(Debug, Clone, PartialEq)]
-pub struct Offerings {
+pub struct CoreOfferings {
     pub current: Option<String>,
-    pub offerings: Vec<Offering>,
+    pub offerings: Vec<CoreOffering>,
 }
 
 #[derive(Debug, Deserialize)]

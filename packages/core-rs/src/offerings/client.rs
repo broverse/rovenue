@@ -5,7 +5,7 @@ use crate::transport::api::ApiEnvelope;
 use crate::transport::http_client::HttpClient;
 use crate::transport::types::HttpRequest;
 
-use super::types::{Offering, OfferingProduct, Offerings, OfferingsResponse};
+use super::types::{CoreOffering, CoreOfferingProduct, CoreOfferings, OfferingsResponse};
 
 pub struct OfferingsClient {
     http: Arc<HttpClient>,
@@ -14,22 +14,22 @@ impl OfferingsClient {
     pub fn new(http: Arc<HttpClient>) -> Self {
         Self { http }
     }
-    pub fn get_offerings(&self) -> RovenueResult<Offerings> {
+    pub fn get_offerings(&self) -> RovenueResult<CoreOfferings> {
         let resp = self
             .http
             .get_json::<ApiEnvelope<OfferingsResponse>>(HttpRequest::new("/v1/offerings"))?;
         let body = resp.body.ok_or(RovenueError::Internal)?;
-        let offerings: Vec<Offering> = body
+        let offerings: Vec<CoreOffering> = body
             .data
             .offerings
             .into_iter()
-            .map(|o| Offering {
+            .map(|o| CoreOffering {
                 identifier: o.identifier,
                 is_default: o.is_default,
                 packages: o
                     .products
                     .into_iter()
-                    .map(|p| OfferingProduct {
+                    .map(|p| CoreOfferingProduct {
                         identifier: p.identifier,
                         product_type: p.product_type,
                         display_name: p.display_name,
@@ -43,6 +43,6 @@ impl OfferingsClient {
             .iter()
             .find(|o| o.is_default)
             .map(|o| o.identifier.clone());
-        Ok(Offerings { current, offerings })
+        Ok(CoreOfferings { current, offerings })
     }
 }

@@ -55,7 +55,7 @@ dictionary ReceiptResult {
     i64 credit_balance;
 };
 
-dictionary OfferingProduct {
+dictionary CoreOfferingProduct {
     string identifier;
     string product_type;
     string display_name;
@@ -63,15 +63,15 @@ dictionary OfferingProduct {
     string? google_product_id;
 };
 
-dictionary Offering {
+dictionary CoreOffering {
     string identifier;
     boolean is_default;
-    sequence<OfferingProduct> packages;
+    sequence<CoreOfferingProduct> packages;
 };
 
-dictionary Offerings {
+dictionary CoreOfferings {
     string? current;
-    sequence<Offering> offerings;
+    sequence<CoreOffering> offerings;
 };
 
 enum SessionEventKind {
@@ -121,7 +121,7 @@ interface RovenueCore {
     );
 
     [Throws=RovenueError]
-    Offerings get_offerings();
+    CoreOfferings get_offerings();
 
     [Throws=RovenueError]
     void record_session_event(

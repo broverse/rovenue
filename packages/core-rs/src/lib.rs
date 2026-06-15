@@ -25,7 +25,7 @@ pub use error::{RovenueError, RovenueResult};
 pub use events::{EventEnvelope, IdentityContext, EVENT_WIRE_VERSION};
 pub use identity::User;
 pub use observer::{ChangeEvent, Observer};
-pub use offerings::{Offering, OfferingProduct, Offerings};
+pub use offerings::{CoreOffering, CoreOfferingProduct, CoreOfferings};
 pub use receipts::ReceiptResult;
 pub use sessions::SessionEventKind;
 pub use version::SDK_VERSION;
