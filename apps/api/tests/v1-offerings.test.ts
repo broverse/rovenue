@@ -563,3 +563,135 @@ describe("GET /v1/offerings", () => {
     expect(body.data.offerings[0].products[0].identifier).toBe("active_monthly");
   });
 });
+
+// =============================================================
+// GET /v1/offerings/:identifier — experiment resolution
+// =============================================================
+
+describe("GET /v1/offerings/:identifier — rovenueId-first experiment resolution", () => {
+  const OFFERING_BASE = {
+    id: "off_base",
+    identifier: "default",
+    accessId: null,
+    isDefault: true,
+    products: [],
+    metadata: {},
+  };
+  const OFFERING_OVERRIDE = {
+    id: "off_exp",
+    identifier: "premium",
+    accessId: null,
+    isDefault: false,
+    products: [],
+    metadata: {},
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    evaluateExperimentsMock.mockResolvedValue({});
+    dbMock.apiKey.findUnique.mockImplementation(async (args: any) => {
+      if (args?.where?.keyPublic === PUBLIC_KEY) return apiKeyRecord;
+      if (args?.where?.id === "testapikeyid") return apiKeyRecord;
+      return null;
+    });
+    // Default: offering repo resolves the base offering
+    vi.mocked(drizzleMock.offeringRepo.findOfferingByIdentifier).mockResolvedValue(
+      OFFERING_BASE as any,
+    );
+    vi.mocked(drizzleMock.offeringRepo.findDefaultOffering).mockResolvedValue(
+      OFFERING_BASE as any,
+    );
+    vi.mocked(drizzleMock.offeringRepo.findProductsByIds).mockResolvedValue([]);
+  });
+
+  it("calls resolveSubscriberByRovenueIdOrLegacy (not findSubscriberByAppUserId) when subscriberId is provided", async () => {
+    vi.mocked(drizzleMock.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy).mockResolvedValue(
+      null,
+    );
+
+    const res = await app.request(
+      withPublicAuth("/v1/offerings/default?subscriberId=rov_x"),
+    );
+    expect(res.status).toBe(200);
+    expect(
+      drizzleMock.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy,
+    ).toHaveBeenCalledWith(
+      drizzleMock.db,
+      expect.objectContaining({ key: "rov_x" }),
+    );
+    // The old function must NOT have been called
+    expect(drizzleMock.subscriberRepo.findSubscriberByAppUserId).not.toHaveBeenCalled();
+  });
+
+  it("applies OFFERING experiment override when subscriber resolves via rovenueId", async () => {
+    const fakeSubscriber = {
+      id: "sub_abc",
+      projectId: "proj_test",
+      rovenueId: "rov_x",
+      appUserId: null,
+      attributes: { plan: "free" },
+      deletedAt: null,
+      mergedInto: null,
+    };
+
+    vi.mocked(drizzleMock.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy).mockResolvedValue(
+      fakeSubscriber as any,
+    );
+
+    // Experiment engine returns an OFFERING override pointing at "premium"
+    evaluateExperimentsMock.mockResolvedValue({
+      exp_1: {
+        key: "exp_1",
+        variantId: "variant_premium",
+        type: "OFFERING",
+        value: "premium",
+      },
+    });
+
+    // The repo must serve the overridden offering
+    vi.mocked(drizzleMock.offeringRepo.findOfferingByIdentifier).mockImplementation(
+      async (_db, _projectId, identifier) =>
+        identifier === "premium" ? (OFFERING_OVERRIDE as any) : null,
+    );
+
+    const res = await app.request(
+      withPublicAuth("/v1/offerings/default?subscriberId=rov_x"),
+    );
+    expect(res.status).toBe(200);
+
+    // Response header carries the experiment annotation
+    expect(res.headers.get("x-rovenue-experiment")).toBe("exp_1:variant_premium");
+
+    // Body reflects the overridden offering identifier
+    const body = await res.json();
+    expect(body.data.identifier).toBe("premium");
+  });
+
+  it("skips experiments and returns the offering normally when subscriber resolves to null", async () => {
+    vi.mocked(drizzleMock.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy).mockResolvedValue(
+      null,
+    );
+
+    const res = await app.request(
+      withPublicAuth("/v1/offerings/default?subscriberId=rov_unknown"),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-rovenue-experiment")).toBeNull();
+    expect(evaluateExperimentsMock).not.toHaveBeenCalled();
+
+    const body = await res.json();
+    expect(body.data.identifier).toBe("default");
+  });
+
+  it("returns 404 for unknown offering when no experiment overrides it", async () => {
+    vi.mocked(drizzleMock.offeringRepo.findOfferingByIdentifier).mockResolvedValue(
+      null as any,
+    );
+    vi.mocked(drizzleMock.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy).mockResolvedValue(
+      null,
+    );
+
+    const res = await app.request(withPublicAuth("/v1/offerings/nonexistent"));
+    expect(res.status).toBe(404);
+  });
+});
