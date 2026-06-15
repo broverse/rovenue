@@ -562,6 +562,20 @@ export interface RevenueSummaryResponse {
   p90LtvUsd: string;
   /** Subscribers contributing to the LTV aggregate. */
   ltvSubscribers: number;
+  /** Distinct subscribers with an ACTIVE purchase right now (ARPU denominator). */
+  activeSubscriberBase: number;
+  /** netUsd / activeSubscriberBase; null when base is 0. */
+  arpu: string | null;
+  /** Distinct subscribers whose subscription went terminal within the window. */
+  churnedInWindow: number;
+  /** churnedInWindow / (activeSubscriberBase + churnedInWindow); null when both 0. */
+  churnRate: number | null;
+  /** Distinct subscribers who started a trial within the window. */
+  trialStarts: number;
+  /** Distinct subscribers who converted a trial to paid within the window. */
+  trialConversions: number;
+  /** trialConversions / trialStarts; null when trialStarts is 0. */
+  trialConversionRate: number | null;
 }
 
 // =============================================================
