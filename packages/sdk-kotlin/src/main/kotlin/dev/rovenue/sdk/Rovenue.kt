@@ -21,7 +21,13 @@ import dev.rovenue.sdk.internal.NoPriceStore
 import dev.rovenue.sdk.internal.ObserverBridge
 import dev.rovenue.sdk.internal.PlayBillingStore
 import dev.rovenue.sdk.internal.PlayPurchaseFlow
+import dev.rovenue.sdk.internal.PurchaseReconciler
 import dev.rovenue.sdk.internal.hydrateOfferings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.util.UUID
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -52,6 +58,11 @@ class Rovenue private constructor(
      * without scraping the actual session-event request body.
      */
     internal val resolvedAppVersionForTesting: String? get() = appVersion
+
+    // Background scope for best-effort work that must not block the caller
+    // (e.g. the post-configure purchase reconciliation). SupervisorJob so one
+    // failed child never tears the scope down; cancelled on shutdown.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     companion object {
         // Guarded by `lock`. Configure-twice replaces the instance
@@ -109,6 +120,13 @@ class Rovenue private constructor(
                 _shared?.shutdownInternal()
                 _shared = instance
             }
+
+            // Best-effort: reconcile any unfinished purchases in the background.
+            // Must NOT block configure() and must never surface errors — a
+            // device with no Play Billing / offline simply skips reconciliation.
+            instance.scope.launch {
+                runCatching { instance.reconcilePurchases() }
+            }
         }
 
         val shared: Rovenue
@@ -151,6 +169,7 @@ class Rovenue private constructor(
     // ---------------------------------------------------------------
 
     private fun shutdownInternal() {
+        scope.cancel()
         core.shutdown()
     }
 
@@ -363,6 +382,38 @@ class Rovenue private constructor(
             return result
         } catch (e: Throwable) {
             emit(LogEntry(level = "error", message = "purchase failed: ${e.message ?: e.javaClass.simpleName}"))
+            throw e
+        }
+    }
+
+    /** Reconcile unfinished Play Billing purchases (parity with the Swift SDK's
+     *  always-on Transaction.updates listener).
+     *
+     *  Queries Play Billing for purchases the user owns that are not yet
+     *  acknowledged/consumed — e.g. the app died mid-flow, a promo was redeemed,
+     *  or a purchase happened on another device — then for each one validates
+     *  the token server-side and, only on success, acknowledges/consumes it. A
+     *  validation failure leaves the purchase untouched to be retried on the
+     *  next reconcile (Play auto-refunds anything left unacknowledged).
+     *
+     *  Best-effort: also invoked automatically (off-thread, errors swallowed)
+     *  after [configure]. Safe to call manually, e.g. on app foreground. */
+    suspend fun reconcilePurchases() {
+        emit(LogEntry(level = "info", message = "reconcilePurchases"))
+        val context = appContext
+            ?: throw StoreProblemException("Rovenue.configure(...) must be called with a Context before reconciling")
+        val token = runCatching { getAppAccountToken() }.getOrNull()
+        val reconciler = PurchaseReconciler(
+            store = PlayBillingStore(context),
+            validate = { receiptToken, pid ->
+                dispatcher.run { core.postGoogleReceipt(receiptToken, pid, token, null) }
+            },
+        )
+        try {
+            reconciler.reconcile()
+            emit(LogEntry(level = "info", message = "reconcilePurchases ok"))
+        } catch (e: Throwable) {
+            emit(LogEntry(level = "error", message = "reconcilePurchases failed: ${e.message ?: e.javaClass.simpleName}"))
             throw e
         }
     }
