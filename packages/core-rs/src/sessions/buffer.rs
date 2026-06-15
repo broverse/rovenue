@@ -31,6 +31,12 @@ impl SessionBuffer {
         self.store.delete_session_events(&ids)?;
         Ok(rows)
     }
+
+    /// Discards every buffered event. Called on log_out so undispatched events do
+    /// not flush under the next identity scope.
+    pub fn clear(&self) -> RovenueResult<()> {
+        self.store.clear_session_events()
+    }
 }
 
 #[cfg(test)]
@@ -56,6 +62,19 @@ mod tests {
         assert_eq!(rows[0].kind, "open");
         assert_eq!(rows[1].kind, "background");
         assert_eq!(rows[1].duration_ms, Some(300_000));
+    }
+
+    #[test]
+    fn clear_discards_all_events() {
+        let store = Arc::new(CacheStore::open_in_memory().unwrap());
+        let buf = SessionBuffer::new(Arc::clone(&store));
+        buf.record(SessionEventKind::Open, "2026-05-28T10:00:00Z", None)
+            .unwrap();
+        buf.record(SessionEventKind::Close, "2026-05-28T10:05:00Z", None)
+            .unwrap();
+        assert_eq!(store.list_session_events(10).unwrap().len(), 2);
+        buf.clear().unwrap();
+        assert_eq!(store.list_session_events(10).unwrap().len(), 0);
     }
 
     #[test]

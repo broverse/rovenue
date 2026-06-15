@@ -31,6 +31,12 @@ impl AccountTokenStore {
             .get_app_account_token(scope)?
             .ok_or(RovenueError::Storage)
     }
+
+    /// Drops every stored token. Called on log_out so the next identity does not
+    /// reuse the previous user's account token.
+    pub fn clear(&self) -> RovenueResult<()> {
+        self.store.clear_app_account_tokens()
+    }
 }
 
 #[cfg(test)]
@@ -63,6 +69,17 @@ mod tests {
         let t = svc.get_or_create("user-a").unwrap();
         let parsed = Uuid::parse_str(&t).expect("valid UUID");
         assert_eq!(parsed.get_version_num(), 4);
+    }
+
+    #[test]
+    fn clear_removes_all_tokens() {
+        let store = Arc::new(CacheStore::open_in_memory().unwrap());
+        let svc = AccountTokenStore::new(Arc::clone(&store));
+        svc.get_or_create("user-a").unwrap();
+        svc.get_or_create("user-b").unwrap();
+        assert_eq!(store.count_app_account_tokens().unwrap(), 2);
+        svc.clear().unwrap();
+        assert_eq!(store.count_app_account_tokens().unwrap(), 0);
     }
 
     #[test]

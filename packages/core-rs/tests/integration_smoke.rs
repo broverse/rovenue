@@ -105,6 +105,32 @@ impl Observer for BoxedRelay {
 }
 
 #[test]
+fn log_out_resets_identity_and_clears_scope_bound_caches() {
+    use rovenue::sessions::SessionEventKind;
+
+    let core = test_core();
+    let before = core.current_user().rovenue_id;
+
+    // Seed scope-bound state: an app account token and a buffered session event.
+    core.get_or_create_app_account_token().unwrap();
+    core.record_session_event(SessionEventKind::Open, "2026-06-15T10:00:00Z".into(), None)
+        .unwrap();
+    core.identify("user_1".into()).unwrap();
+
+    assert!(core.test_app_account_token_count() > 0);
+    assert!(core.test_session_event_count() > 0);
+
+    core.log_out().unwrap();
+
+    let after = core.current_user();
+    assert_ne!(after.rovenue_id, before);
+    assert!(after.rovenue_id.starts_with("rov_"));
+    assert_eq!(after.app_user_id, None);
+    assert_eq!(core.test_app_account_token_count(), 0);
+    assert_eq!(core.test_session_event_count(), 0);
+}
+
+#[test]
 fn entitlement_returns_none_when_empty() {
     let core = test_core();
     assert!(core.entitlement("pro".into()).is_none());

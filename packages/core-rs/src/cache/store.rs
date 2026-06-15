@@ -116,6 +116,23 @@ impl CacheStore {
         Ok(())
     }
 
+    /// Wipes every app account token. Used on log_out — tokens are bound to the
+    /// previous identity scope and must not carry over to the next user.
+    pub fn clear_app_account_tokens(&self) -> RovenueResult<()> {
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        guard
+            .execute("DELETE FROM app_account_tokens", [])
+            .map_err(|_| RovenueError::Storage)?;
+        Ok(())
+    }
+
+    pub fn count_app_account_tokens(&self) -> RovenueResult<i64> {
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        guard
+            .query_row("SELECT COUNT(*) FROM app_account_tokens", [], |r| r.get(0))
+            .map_err(|_| RovenueError::Storage)
+    }
+
     pub fn append_session_event(
         &self,
         kind: &str,
@@ -137,6 +154,16 @@ impl CacheStore {
                  (SELECT id FROM session_events ORDER BY id DESC LIMIT 1000)",
                 [],
             )
+            .map_err(|_| RovenueError::Storage)?;
+        Ok(())
+    }
+
+    /// Wipes every buffered session event. Used on log_out — undispatched events
+    /// belong to the previous identity scope and must not flush under the next user.
+    pub fn clear_session_events(&self) -> RovenueResult<()> {
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        guard
+            .execute("DELETE FROM session_events", [])
             .map_err(|_| RovenueError::Storage)?;
         Ok(())
     }

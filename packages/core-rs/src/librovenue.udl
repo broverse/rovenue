@@ -91,6 +91,9 @@ interface RovenueCore {
     [Throws=RovenueError]
     void identify(string app_user_id);
 
+    [Throws=RovenueError]
+    void log_out();
+
     Entitlement? entitlement(string id);
     sequence<Entitlement> entitlements_all();
 

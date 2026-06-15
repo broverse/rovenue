@@ -32,6 +32,7 @@ pub struct RovenueCore {
     sessions: Arc<SessionBuffer>,
     session_dispatcher: Arc<SessionDispatcher>,
     scheduler: PollingScheduler,
+    store: Arc<CacheStore>,
 }
 
 impl RovenueCore {
@@ -46,6 +47,7 @@ impl RovenueCore {
     fn from_store(config: Config, store: Arc<CacheStore>) -> RovenueResult<Self> {
         let bus = Arc::new(ObserverBus::default());
         let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+        let store_for_self = Arc::clone(&store);
         let identity = Arc::new(IdentityManager::new(
             Arc::clone(&store),
             Arc::clone(&bus),
@@ -115,6 +117,7 @@ impl RovenueCore {
             sessions,
             session_dispatcher,
             scheduler,
+            store: store_for_self,
         })
     }
 
@@ -139,6 +142,31 @@ impl RovenueCore {
 
     pub fn identify(&self, app_user_id: String) -> RovenueResult<()> {
         self.identity.identify(app_user_id)
+    }
+
+    /// Logs out the current user: mints a fresh anonymous `rovenue_id`, drops the
+    /// `app_user_id`, and clears scope-bound caches so the next user starts clean.
+    pub fn log_out(&self) -> RovenueResult<()> {
+        self.identity.log_out()?;
+        // Clear scope-bound state so the new identity starts clean. The account
+        // token and buffered session events are tied to the previous scope.
+        self.account_tokens.clear()?;
+        self.sessions.clear()?;
+        // Entitlements and credits are stateless scope-keyed readers (no in-memory
+        // cache); the new rovenue_id scope naturally reads empty, so no clear call.
+        Ok(())
+    }
+
+    /// Test-only: number of stored app account tokens.
+    #[doc(hidden)]
+    pub fn test_app_account_token_count(&self) -> i64 {
+        self.store.count_app_account_tokens().unwrap_or(0)
+    }
+
+    /// Test-only: number of buffered session events.
+    #[doc(hidden)]
+    pub fn test_session_event_count(&self) -> i64 {
+        self.store.list_session_events(usize::MAX).map(|r| r.len() as i64).unwrap_or(0)
     }
 
     pub fn entitlement(&self, id: String) -> Option<Entitlement> {
