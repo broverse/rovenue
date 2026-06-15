@@ -42,6 +42,13 @@ const { summaryMock } = vi.hoisted(() => ({
       medianLtvUsd: "30.0000",
       p90LtvUsd: "120.0000",
       ltvSubscribers: 50,
+      activeSubscriberBase: 120,
+      arpu: "7.5000",
+      churnedInWindow: 8,
+      churnRate: 0.0625,
+      trialStarts: 40,
+      trialConversions: 26,
+      trialConversionRate: 0.65,
     })),
   },
 }));
@@ -115,6 +122,13 @@ beforeEach(() => {
     medianLtvUsd: "30.0000",
     p90LtvUsd: "120.0000",
     ltvSubscribers: 50,
+    activeSubscriberBase: 120,
+    arpu: "7.5000",
+    churnedInWindow: 8,
+    churnRate: 0.0625,
+    trialStarts: 40,
+    trialConversions: 26,
+    trialConversionRate: 0.65,
   });
 });
 
@@ -162,6 +176,10 @@ describe("GET /dashboard/projects/:projectId/metrics/summary", () => {
       arppu: "100.0000",
       avgLtvUsd: "42.5000",
       p90LtvUsd: "120.0000",
+      arpu: "7.5000",
+      churnRate: 0.0625,
+      trialConversionRate: 0.65,
+      activeSubscriberBase: 120,
     });
     expect(typeof body.data.from).toBe("string");
     expect(typeof body.data.to).toBe("string");
