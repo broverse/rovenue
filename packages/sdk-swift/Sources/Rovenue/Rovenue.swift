@@ -502,10 +502,6 @@ public final class Rovenue: @unchecked Sendable {
                         throw mapError(err)
                     }
                 }
-            },
-            snapshot: { [weak self] in
-                guard let self else { return ([], 0) }
-                return (await self.entitlementsAll(), await self.creditBalance())
             }
         )
         do {

@@ -1,9 +1,10 @@
 // PlayPurchaseFlow.kt — store-agnostic orchestration of a single purchase.
 //
 // The flow launches the store purchase, then (only on success) validates the
-// purchase token server-side, acknowledges it with Play Billing, and snapshots
-// the resulting entitlements + credit balance. All store / network / core
-// interactions are injected so this logic is unit-testable with fakes.
+// purchase token server-side, acknowledges it with Play Billing, and returns
+// the entitlements already hydrated into ReceiptResult by the core (no
+// separate cache read needed). All store / network / core interactions are
+// injected so this logic is unit-testable with fakes.
 
 package dev.rovenue.sdk.internal
 
@@ -13,13 +14,11 @@ import dev.rovenue.sdk.ProductType
 import dev.rovenue.sdk.PurchaseCancelledException
 import dev.rovenue.sdk.PurchasePendingException
 import dev.rovenue.sdk.PurchaseResult
-import dev.rovenue.sdk.generated.Entitlement
 import dev.rovenue.sdk.generated.ReceiptResult
 
 class PlayPurchaseFlow(
     private val store: PlayStore,
     private val validate: suspend (token: String, productId: String) -> ReceiptResult,
-    private val snapshot: suspend () -> Pair<List<Entitlement>, Long>,
 ) {
     suspend fun run(
         activity: Activity,
@@ -40,9 +39,8 @@ class PlayPurchaseFlow(
                 // purchase, which is the correct fail-safe.
                 val receipt = validate(outcome.purchaseToken, productId)
                 outcome.acknowledge()
-                val (entitlements, _) = snapshot()
                 return PurchaseResult(
-                    entitlements = entitlements,
+                    entitlements = receipt.entitlements,
                     creditBalance = receipt.creditBalance,
                     productId = productId,
                     storeTransactionId = outcome.orderId,

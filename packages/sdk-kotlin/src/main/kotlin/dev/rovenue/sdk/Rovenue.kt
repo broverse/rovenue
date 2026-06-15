@@ -422,7 +422,6 @@ class Rovenue private constructor(
             validate = { receiptToken, pid ->
                 dispatcher.run { core.postGoogleReceipt(receiptToken, pid, token, null) }
             },
-            snapshot = { entitlementsAll() to creditBalance() },
         )
         try {
             val result = flow.run(activity, product.id, product.type, token)
