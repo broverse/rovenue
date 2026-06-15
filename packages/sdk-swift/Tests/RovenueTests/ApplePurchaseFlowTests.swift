@@ -68,6 +68,133 @@ final class PurchaseTypesTests: XCTestCase {
     }
 }
 
+// A fake AppleStore that returns a scripted outcome and records whether
+// `finish()` was invoked (via an actor-backed flag the success closure flips).
+private actor FinishFlag {
+    private(set) var finished = false
+    func mark() { finished = true }
+}
+
+private struct FakeStore: AppleStore {
+    let outcome: StorePurchaseOutcome
+    func purchase(productId: String, appAccountToken: String?) async throws -> StorePurchaseOutcome {
+        outcome
+    }
+}
+
+final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
+    private func sampleEntitlement() -> Entitlement {
+        Entitlement(id: "ent_1", isActive: true, productIdentifier: "premium_monthly", store: "APP_STORE", expiresIso: nil)
+    }
+
+    func test_userCancelled_throws_purchaseCancelled_and_does_not_validate() async {
+        let validated = FinishFlag()
+        let flow = ApplePurchaseFlow(
+            store: FakeStore(outcome: .userCancelled),
+            validate: { _, _ in
+                await validated.mark()
+                return ReceiptResult(subscriberId: "s", appUserId: "u", creditBalance: 0)
+            },
+            snapshot: { ([], 0) }
+        )
+        do {
+            _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
+            XCTFail("expected purchaseCancelled")
+        } catch let e as Rovenue.Error {
+            XCTAssertEqual(e, .purchaseCancelled)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        let didValidate = await validated.finished
+        XCTAssertFalse(didValidate, "validate must not run on cancel")
+    }
+
+    func test_pending_throws_purchasePending() async {
+        let flow = ApplePurchaseFlow(
+            store: FakeStore(outcome: .pending),
+            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", creditBalance: 0) },
+            snapshot: { ([], 0) }
+        )
+        do {
+            _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
+            XCTFail("expected purchasePending")
+        } catch let e as Rovenue.Error {
+            XCTAssertEqual(e, .purchasePending)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func test_productNotFound_throws_productNotAvailable() async {
+        let flow = ApplePurchaseFlow(
+            store: FakeStore(outcome: .productNotFound),
+            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", creditBalance: 0) },
+            snapshot: { ([], 0) }
+        )
+        do {
+            _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
+            XCTFail("expected productNotAvailable")
+        } catch let e as Rovenue.Error {
+            XCTAssertEqual(e, .productNotAvailable)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func test_success_validates_then_finishes_then_returns_result() async throws {
+        let finished = FinishFlag()
+        var capturedJws: String?
+        var capturedProductId: String?
+        let flow = ApplePurchaseFlow(
+            store: FakeStore(outcome: .success(jws: "jws-blob", transactionId: "txn-42", finish: {
+                await finished.mark()
+            })),
+            validate: { jws, pid in
+                capturedJws = jws
+                capturedProductId = pid
+                // finish must NOT have run before validation succeeds.
+                let wasFinished = await finished.finished
+                XCTAssertFalse(wasFinished, "finish() must run after validate, not before")
+                return ReceiptResult(subscriberId: "sub_1", appUserId: "user_1", creditBalance: 250)
+            },
+            snapshot: { ([self.sampleEntitlement()], 250) }
+        )
+
+        let result = try await flow.run(productId: "premium_monthly", appAccountToken: "tok")
+
+        XCTAssertEqual(capturedJws, "jws-blob")
+        XCTAssertEqual(capturedProductId, "premium_monthly")
+        let didFinish = await finished.finished
+        XCTAssertTrue(didFinish, "finish() must run after successful validation")
+        XCTAssertEqual(result.creditBalance, 250)
+        XCTAssertEqual(result.productId, "premium_monthly")
+        XCTAssertEqual(result.storeTransactionId, "txn-42")
+        XCTAssertEqual(result.entitlements, [sampleEntitlement()])
+    }
+
+    func test_validation_throws_then_finish_not_called_and_error_propagates() async {
+        let finished = FinishFlag()
+        struct ValidationError: Swift.Error {}
+        let flow = ApplePurchaseFlow(
+            store: FakeStore(outcome: .success(jws: "jws-blob", transactionId: "txn-99", finish: {
+                await finished.mark()
+            })),
+            validate: { _, _ in throw Rovenue.Error.receiptInvalid },
+            snapshot: { ([], 0) }
+        )
+        do {
+            _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
+            XCTFail("expected validation error to propagate")
+        } catch let e as Rovenue.Error {
+            XCTAssertEqual(e, .receiptInvalid)
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        let didFinish = await finished.finished
+        XCTAssertFalse(didFinish, "finish() must NOT run when validation throws")
+    }
+}
+
 final class PurchaseErrorTests: XCTestCase {
     func test_purchase_error_cases_exist() {
         // These are Swift-origin (not mapped from RovenueError) — they describe
