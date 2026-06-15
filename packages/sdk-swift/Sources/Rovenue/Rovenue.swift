@@ -363,6 +363,48 @@ public final class Rovenue: @unchecked Sendable {
         }
     }
 
+    // MARK: - Subscriber attributes
+
+    /// Queue a batch of subscriber-attribute mutations. A `nil` value deletes
+    /// the key. Written locally immediately; flushed to the server in the
+    /// background (30s tick / foreground / manual `flushAttributes`).
+    public func setAttributes(_ attributes: [String: String?]) async throws {
+        Self.emit(LogEntry(level: "info", message: "setAttributes"))
+        do {
+            try await dispatcher.run { [core] in
+                do {
+                    try core.setAttributes(attributes: attributes)
+                } catch let err as RovenueError {
+                    throw mapError(err)
+                }
+            }
+            Self.emit(LogEntry(level: "info", message: "setAttributes ok"))
+        } catch {
+            Self.emit(LogEntry(level: "error", message: "setAttributes failed: \(error.localizedDescription)"))
+            throw error
+        }
+    }
+
+    /// Set (or, with `nil`, clear) the reserved `$email` attribute.
+    public func setEmail(_ email: String?) async throws { try await setAttributes(["$email": email]) }
+    /// Set (or, with `nil`, clear) the reserved `$displayName` attribute.
+    public func setDisplayName(_ name: String?) async throws { try await setAttributes(["$displayName": name]) }
+    /// Set (or, with `nil`, clear) the reserved `$phoneNumber` attribute.
+    public func setPhoneNumber(_ phone: String?) async throws { try await setAttributes(["$phoneNumber": phone]) }
+    /// iOS push token → the `$apnsTokens` reserved attribute.
+    public func setPushToken(_ token: String?) async throws { try await setAttributes(["$apnsTokens": token]) }
+
+    /// Force an immediate flush of queued attribute mutations. Returns the
+    /// number of mutations sent. Normally callers don't invoke this — the
+    /// Rust core's 30s poll covers it.
+    @discardableResult
+    public func flushAttributes() async throws -> UInt32 {
+        try await dispatcher.run { [core] in
+            do { return try core.flushAttributes() }
+            catch let err as RovenueError { throw mapError(err) }
+        }
+    }
+
     // MARK: - Lifecycle hooks
 
     /// Tell the SDK whether the app is in the foreground. While foreground,
