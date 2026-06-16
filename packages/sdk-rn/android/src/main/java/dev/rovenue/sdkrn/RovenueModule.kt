@@ -52,7 +52,7 @@ class RovenueModule : Module() {
         // For Expo apps that's the value baked from app.json's
         // `expo.version` at prebuild time (into android/app/build.gradle
         // versionName); for bare RN it's the host project's gradle config.
-        Function("configure") { apiKey: String, baseUrl: String, debug: Boolean, appVersion: String? ->
+        Function("configure") { apiKey: String, baseUrl: String?, debug: Boolean, appVersion: String? ->
             val resolved = appVersion ?: readPackageVersionName()
             // The M4 Kotlin façade needs a Context to drive Play Billing.
             Rovenue.configure(

@@ -38,9 +38,19 @@ describe("Rovenue imperative API", () => {
       .toThrow(InvalidApiKeyError);
   });
 
-  it("configure rejects non-http baseUrl", () => {
+  it("configure rejects malformed baseUrl when provided", () => {
     expect(() => configure({ apiKey: "pk_test", baseUrl: "not-a-url" }))
       .toThrow(/baseUrl/);
+  });
+
+  it("configure omits baseUrl when not provided", () => {
+    configure({ apiKey: "pk_test" });
+    expect(native.configure).toHaveBeenCalledWith(
+      "pk_test",
+      undefined,
+      false,
+      undefined,
+    );
   });
 
   it("configure forwards to native + starts event bridge", () => {

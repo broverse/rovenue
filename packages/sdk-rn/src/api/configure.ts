@@ -5,7 +5,13 @@ import { startSessionTracker } from "./sessionTracker";
 
 export type RovenueConfig = {
   apiKey: string;
-  baseUrl: string;
+  /**
+   * API host. Optional — defaults to the hosted endpoint
+   * `https://api.rovenue.io`. Self-hosters pass their own origin
+   * (e.g. `https://api.acme.com`). The Rust core enforces https://
+   * (http:// is accepted only for localhost during local dev).
+   */
+  baseUrl?: string;
   debug?: boolean;
   /**
    * Optional override for the host app's user-facing version. When
@@ -23,7 +29,7 @@ export function configure(opts: RovenueConfig): void {
   if (!opts.apiKey || opts.apiKey.trim() === "") {
     throw new InvalidApiKeyError("apiKey is blank");
   }
-  if (!/^https?:\/\//.test(opts.baseUrl)) {
+  if (opts.baseUrl !== undefined && !/^https?:\/\//.test(opts.baseUrl)) {
     throw new InvalidApiKeyError("baseUrl must start with http:// or https://");
   }
   const native = getNative();

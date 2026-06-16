@@ -63,7 +63,7 @@ export interface RovenueModuleSpec {
   // boundary before calling into the Rust core.
   configure(
     apiKey: string,
-    baseUrl: string,
+    baseUrl: string | undefined,
     debug: boolean,
     appVersion?: string,
   ): void;

@@ -52,7 +52,7 @@ public class RovenueModule: Module {
         // façade falls back to Bundle.main.infoDictionary[CFBundleShortVersionString].
         // For Expo apps that's the value baked from app.json's `expo.version`
         // at prebuild time; for bare RN it's the host project's plist.
-        Function("configure") { (apiKey: String, baseUrl: String, debug: Bool, appVersion: String?) in
+        Function("configure") { (apiKey: String, baseUrl: String?, debug: Bool, appVersion: String?) in
             try Rovenue.configure(
                 apiKey: apiKey,
                 baseUrl: baseUrl,
