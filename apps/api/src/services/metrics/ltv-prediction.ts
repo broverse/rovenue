@@ -62,7 +62,7 @@ export async function getLtvPrediction(input: GetLtvPredictionInput) {
           toInt32(dateDiff('month', j.cohort_month, toStartOfMonth(e.eventDate))) AS age_month,
           toString(
             sumIf(e.amountUsd, e.type NOT IN ('REFUND','CHARGEBACK'))
-              - sumIf(e.amountUsd, e.type IN ('REFUND','CHARGEBACK'))
+              - sumIf(abs(e.amountUsd), e.type IN ('REFUND','CHARGEBACK'))
           )                                                                  AS net_usd
         FROM rovenue.raw_revenue_events AS e FINAL
         INNER JOIN joins AS j ON e.subscriberId = j.subscriberId

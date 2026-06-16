@@ -71,7 +71,7 @@ export async function getRevenueSummary(
       `
         SELECT
           toString(sumIf(amountUsd, type NOT IN ('REFUND','CHARGEBACK')))          AS gross_usd,
-          toString(sumIf(amountUsd, type IN ('REFUND','CHARGEBACK')))              AS refunds_usd,
+          toString(sumIf(abs(amountUsd), type IN ('REFUND','CHARGEBACK')))         AS refunds_usd,
           toString(uniqExactIf(subscriberId, type NOT IN ('REFUND','CHARGEBACK'))) AS paying_subs,
           toString(uniqExactIf(subscriberId, type = 'TRIAL_CONVERSION'))           AS trial_conversions
         FROM rovenue.raw_revenue_events FINAL

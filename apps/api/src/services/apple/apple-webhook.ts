@@ -482,7 +482,6 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
     purchaseId: purchase.id,
     productId: purchase.productId,
     type: RevenueEventType.REFUND,
-    negative: true,
   });
 }
 
@@ -885,11 +884,10 @@ interface EmitRevenueArgs {
   purchaseId: string;
   productId: string;
   type: RevenueEventType;
-  negative?: boolean;
 }
 
 async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
-  const { ctx, subscriberId, purchaseId, productId, type, negative } = args;
+  const { ctx, subscriberId, purchaseId, productId, type } = args;
   const tx = ctx.transaction;
 
   if (tx.price == null || !tx.currency) {
@@ -900,9 +898,15 @@ async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
     return;
   }
 
+  // Store the unsigned magnitude for ALL event types, including
+  // REFUND/CHARGEBACK. The platform convention is positive `amountUsd`
+  // for refunds (matching Google + every analytics query, which net via
+  // `gross - sumIf(amountUsd, refund)`); a negative value both overflowed
+  // the unsigned cast in v_revenue_lifetime_subscriber and inflated net
+  // MRR/LTV. A REFUND_REVERSED emits a positive REACTIVATION counterpart
+  // that cancels the refund correctly under this positive convention.
   const amount = tx.price / 1_000_000;
-  const signed = negative ? -amount : amount;
-  const amountUsd = await convertToUsd(signed, tx.currency);
+  const amountUsd = await convertToUsd(amount, tx.currency);
 
   await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
     projectId: ctx.projectId,
@@ -910,7 +914,7 @@ async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
     purchaseId,
     productId,
     type,
-    amount: signed.toString(),
+    amount: amount.toString(),
     currency: tx.currency,
     amountUsd: amountUsd.toString(),
     store: Store.APP_STORE,

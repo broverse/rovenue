@@ -220,4 +220,68 @@ describe("revenue/credit aggregate idempotency", () => {
     // CHARGEBACK is treated as a refund -> $5.00 = 500 cents.
     expect(Number(life.refunded)).toBe(500);
   }, 120_000);
+
+  // 0014: a REFUND row stored with a NEGATIVE amountUsd (the pre-fix Apple/
+  // Stripe sign that still exists in historical data) must NOT overflow the
+  // unsigned toUInt64 cast in v_revenue_lifetime_subscriber, and must count
+  // as a positive refund magnitude in both views (abs()-hardened).
+  it("handles a negative-amountUsd refund without overflow", async () => {
+    const RUN = Date.now();
+    const projectId = `prj_neg_${RUN}`;
+    const subscriberId = `sub_neg_${RUN}`;
+
+    const initialRow = {
+      eventId: `evt_neg_init_${RUN}`,
+      revenueEventId: `rev_neg_init_${RUN}`,
+      projectId, subscriberId,
+      purchaseId: `pur_${RUN}`, productId: `prod_${RUN}`,
+      type: "INITIAL", store: "APP_STORE",
+      amount: "9.9900", amountUsd: "9.9900", currency: "USD",
+      eventDate: "2026-06-01 00:00:00.000",
+      ingestedAt: "2026-06-01 00:00:00.000",
+      _version: 1,
+    };
+    // Negative amountUsd — the exact shape that produced DB::Exception
+    // "Convert overflow" before 0014 wrapped the cast in abs().
+    const negRefundRow = {
+      eventId: `evt_neg_ref_${RUN}`,
+      revenueEventId: `rev_neg_ref_${RUN}`,
+      projectId, subscriberId,
+      purchaseId: `pur_${RUN}`, productId: `prod_${RUN}`,
+      type: "REFUND", store: "APP_STORE",
+      amount: "-9.9900", amountUsd: "-9.9900", currency: "USD",
+      eventDate: "2026-06-02 00:00:00.000",
+      ingestedAt: "2026-06-02 00:00:00.000",
+      _version: 1,
+    };
+    await ch.insert({ table: "raw_revenue_events", values: [initialRow], format: "JSONEachRow" });
+    await ch.insert({ table: "raw_revenue_events", values: [negRefundRow], format: "JSONEachRow" });
+
+    // Lifetime view: must return (not overflow); refund counted as +999 cents.
+    const lifeRes = await ch.query({
+      query: `SELECT toString(lifetime_dollars_purchased_cents) AS purchased,
+                     toString(lifetime_dollars_refunded_cents)  AS refunded
+              FROM rovenue.v_revenue_lifetime_subscriber
+              WHERE projectId = {pid:String} AND subscriberId = {sid:String}`,
+      query_params: { pid: projectId, sid: subscriberId },
+      format: "JSONEachRow",
+    });
+    const life = ((await lifeRes.json()) as Array<Record<string, string>>)[0] ?? {};
+    expect(Number(life.purchased)).toBe(999);
+    expect(Number(life.refunded)).toBe(999);
+
+    // MRR view: refunds_usd is the positive magnitude; net = gross - refund.
+    const mrrRes = await ch.query({
+      query: `SELECT toString(round(sum(gross_usd), 2))   AS gross,
+                     toString(round(sum(refunds_usd), 2)) AS refunds,
+                     toString(round(sum(net_usd), 2))     AS net
+              FROM rovenue.v_mrr_daily WHERE projectId = {pid:String}`,
+      query_params: { pid: projectId },
+      format: "JSONEachRow",
+    });
+    const mrr = ((await mrrRes.json()) as Array<Record<string, string>>)[0] ?? {};
+    expect(Number(mrr.gross)).toBeCloseTo(9.99, 2);
+    expect(Number(mrr.refunds)).toBeCloseTo(9.99, 2);
+    expect(Number(mrr.net)).toBeCloseTo(0, 2);
+  }, 120_000);
 });

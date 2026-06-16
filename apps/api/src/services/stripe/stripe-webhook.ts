@@ -462,7 +462,9 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
   const amount = (charge.amount_refunded ?? 0) / 100;
   const currency =
     charge.currency?.toUpperCase() ?? purchase.priceCurrency ?? "USD";
-  const amountUsd = await convertToUsd(-amount, currency);
+  // Positive magnitude: refunds are stored as positive `amountUsd` (the
+  // platform convention every analytics query nets via `gross - refunds`).
+  const amountUsd = await convertToUsd(amount, currency);
 
   await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
     projectId: ctx.projectId,
@@ -470,7 +472,7 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
     purchaseId: purchase.id,
     productId: purchase.productId,
     type: RevenueEventType.REFUND,
-    amount: (-amount).toString(),
+    amount: amount.toString(),
     currency,
     amountUsd: amountUsd.toString(),
     store: Store.STRIPE,

@@ -73,7 +73,7 @@ export async function fetchDailyKPIs(
       toString(sumIf(amountUsd, type != 'REFUND' AND toDate(eventDate) = targetDay)) AS net_usd,
       toString(sumIf(amountUsd, type != 'REFUND' AND toDate(eventDate) = priorDay))  AS net_usd_prior,
       toString(countIf(type = 'REFUND' AND toDate(eventDate) = targetDay))           AS refund_count,
-      toString(sumIf(amountUsd, type = 'REFUND' AND toDate(eventDate) = targetDay))  AS refund_total_usd,
+      toString(sumIf(abs(amountUsd), type = 'REFUND' AND toDate(eventDate) = targetDay))  AS refund_total_usd,
       toString(uniqExactIf(subscriberId, type = 'INITIAL' AND toDate(eventDate) = targetDay))      AS new_subs,
       toString(uniqExactIf(subscriberId, type = 'CANCELLATION' AND toDate(eventDate) = targetDay)) AS churned_subs
     FROM rovenue.raw_revenue_events FINAL

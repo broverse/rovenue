@@ -58,7 +58,7 @@ export async function getMrrDecomposition(
         toString(sumIf(amountUsd, type IN ('INITIAL','TRIAL_CONVERSION'))) AS new_usd,
         toString(sumIf(amountUsd, type = 'RENEWAL'))                       AS retained_usd,
         toString(sumIf(amountUsd, type = 'REACTIVATION'))                  AS reactivation_usd,
-        toString(sumIf(amountUsd, type IN ('REFUND','CHARGEBACK')))        AS churned_usd
+        toString(sumIf(abs(amountUsd), type IN ('REFUND','CHARGEBACK')))   AS churned_usd
       FROM rovenue.raw_revenue_events FINAL
       WHERE projectId = {projectId:String}
         AND toDate(eventDate) >= {from:Date}

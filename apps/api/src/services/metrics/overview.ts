@@ -109,7 +109,7 @@ async function readDailyRollup(
       SELECT
         toString(toDate(eventDate))                                       AS day,
         toString(sumIf(amountUsd, type NOT IN ('REFUND','CHARGEBACK')))   AS gross_usd,
-        toString(sumIf(amountUsd, type IN ('REFUND','CHARGEBACK')))       AS refunds_usd,
+        toString(sumIf(abs(amountUsd), type IN ('REFUND','CHARGEBACK')))  AS refunds_usd,
         toString(uniqExact(subscriberId))                                  AS active_subs,
         toString(countIf(type = 'TRIAL_CONVERSION'))                       AS trial_conversions,
         toString(countIf(type = 'CANCELLATION'))                           AS cancellations
