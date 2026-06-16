@@ -602,20 +602,27 @@
   "liveEvents": {
     "title": "Live events",
     "subtitle": "Real-time event stream",
-    "eventsToday": "events today",
-    "websocketConnected": "WebSocket connected ·",
+    "eventsThisSession": "events this session",
     "showing": "Showing",
     "of": "of",
     "status": {
       "streaming": "Streaming",
-      "paused": "Paused"
+      "paused": "Paused",
+      "connecting": "Connecting",
+      "disconnected": "Disconnected"
+    },
+    "conn": {
+      "connected": "stream connected",
+      "connecting": "connecting…",
+      "disconnected": "stream disconnected",
+      "paused": "stream paused"
     },
     "categories": {
       "all": "All",
       "subscription": "Subscriptions",
       "billing": "Billing",
-      "entitlement": "Access",
-      "ledger": "Ledger"
+      "ledger": "Ledger",
+      "experiment": "Experiments"
     },
     "platforms": {
       "all": "All platforms"
@@ -630,7 +637,7 @@
       "clear": "Clear"
     },
     "search": {
-      "placeholder": "Search by user, event type, product, country, txn id…"
+      "placeholder": "Search by user, event type, product, country…"
     },
     "cols": {
       "time": "Time",
@@ -649,8 +656,6 @@
     "rate": {
       "throughput": "throughput:",
       "lastEvent": "last event:",
-      "ingestLag": "ingest lag:",
-      "retention": "retention:",
       "kbdHint": {
         "before": "Press",
         "middle": "to pause ·",
@@ -659,7 +664,7 @@
     },
     "detail": {
       "emptyTitle": "Select an event",
-      "emptyBody": "Click any row in the stream to inspect its full payload, timeline and related records.",
+      "emptyBody": "Click any row in the stream to inspect its full payload and related records.",
       "copyId": "Copy ID",
       "close": "Close",
       "copy": "Copy",
@@ -668,15 +673,8 @@
       "replayWebhook": "Replay webhook",
       "tabs": {
         "overview": "Overview",
-        "payload": "Payload",
-        "timeline": "Timeline"
+        "payload": "Payload"
       }
-    },
-    "timeline": {
-      "normalized": "+12ms · schema v2026-03",
-      "entitlements": "+34ms · 1 access granted",
-      "webhook": "+128ms · 2 endpoints · 200 OK",
-      "persisted": "+162ms · stored in events_2026_04"
     }
   },
   "products": {

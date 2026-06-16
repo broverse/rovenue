@@ -19,15 +19,6 @@ export function RateStrip({ throughput, lastEvent }: Props) {
         {t("liveEvents.rate.lastEvent")}{" "}
         <span className="text-foreground">{lastEvent}</span>
       </span>
-      {sep}
-      <span>
-        {t("liveEvents.rate.ingestLag")}{" "}
-        <span className="text-rv-success">&lt; 50ms</span>
-      </span>
-      {sep}
-      <span>
-        {t("liveEvents.rate.retention")} <span className="text-foreground">90d</span>
-      </span>
       <span className="ml-auto">
         {t("liveEvents.rate.kbdHint.before")}{" "}
         <Kbd>␣</Kbd> {t("liveEvents.rate.kbdHint.middle")} <Kbd>↵</Kbd>{" "}

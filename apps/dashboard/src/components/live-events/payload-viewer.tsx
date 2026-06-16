@@ -28,28 +28,14 @@ const highlightJson = (value: unknown): string => {
   });
 };
 
+// The detail panel shows the actual outbox envelope as it arrived over the
+// SSE channel — `payload` is the verbatim outbox row payload, no synthesis.
 export const buildEventPayload = (event: LiveEvent) => ({
-  id: event.id,
-  type: event.type,
-  api_version: "2026-03-14",
-  created_at: event.receivedAt.toISOString(),
-  environment: event.environment,
-  data: {
-    app_user_id: event.user,
-    transaction_id: event.txnId,
-    product: {
-      id: event.productId,
-      identifier: event.productSku,
-      display_name: event.product,
-      price: event.amount == null ? null : Math.abs(event.amount),
-      currency: event.currency,
-    },
-    platform: event.platform,
-    store: event.store,
-    country_code: event.country,
-    app_version: event.appVersion,
-    sdk_version: event.sdkVersion,
-  },
+  event_id: event.id,
+  event_type: event.eventType,
+  aggregate_type: event.aggregateType,
+  occurred_at: event.receivedAt.toISOString(),
+  payload: event.payload,
 });
 
 type Props = {

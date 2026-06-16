@@ -1588,12 +1588,17 @@ export interface AppConnectionsResponse {
 //
 // Wire shape for each `event: live` SSE message. The outbox
 // dispatcher fans every published row into a per-project Redis
-// channel; the SSE endpoint replays them as JSON.
+// channel — regardless of aggregate type — so this union must cover
+// every aggregate the dispatcher emits, not just the analytics ones.
+// The SSE endpoint replays them as JSON.
 
 export type LiveEventAggregateType =
   | "EXPOSURE"
   | "REVENUE_EVENT"
-  | "CREDIT_LEDGER";
+  | "CREDIT_LEDGER"
+  | "BILLING"
+  | "NOTIFICATION"
+  | "FUNNEL";
 
 export interface LiveEventMessage {
   eventId: string;

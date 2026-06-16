@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../../../ui/button";
@@ -17,12 +17,15 @@ import {
   EventDetailPanel,
   EventFilterPill,
   EventStream,
+  messageToLiveEvent,
   RateStrip,
   formatRelative,
-  generateLiveEvent,
-  seedLiveEvents,
 } from "../../../../components/live-events";
 import { useProject } from "../../../../lib/hooks/useProject";
+import {
+  useLiveEventsStream,
+  type LiveEventsStatus,
+} from "../../../../lib/hooks/useLiveEventsStream";
 import { cn } from "../../../../lib/cn";
 import type {
   EventCategoryKey,
@@ -37,9 +40,10 @@ export const Route = createFileRoute(
   component: LiveEventsRoute,
 });
 
-const STREAM_INTERVAL_MS = 1000;
 const MAX_EVENTS = 200;
 const SPARK_LEN = 30;
+// Rolling window (seconds) the per-second rate is averaged over.
+const RATE_WINDOW_S = 5;
 
 type PlatformFilter = "all" | EventPlatform;
 
@@ -49,12 +53,11 @@ function LiveEventsRoute() {
   });
   const { data: project } = useProject(projectId);
   if (!project) return null;
-  return <LiveEventsPage projectName={project.name} />;
+  return <LiveEventsPage projectId={projectId} />;
 }
 
-function LiveEventsPage({ projectName }: { projectName: string }) {
+function LiveEventsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
-  const [events, setEvents] = useState<LiveEvent[]>(() => seedLiveEvents(40));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [category, setCategory] = useState<EventCategoryKey>("all");
@@ -64,34 +67,58 @@ function LiveEventsPage({ projectName }: { projectName: string }) {
   );
   const [search, setSearch] = useState("");
   const [now, setNow] = useState(() => new Date());
-  const [counter, setCounter] = useState({ total: 2147, perSec: 1.3 });
-  const [sparkData, setSparkData] = useState<number[]>(() =>
-    Array.from({ length: SPARK_LEN }, () => 0.8 + Math.random() * 0.8),
-  );
 
-  // Tick the relative-time clock once per second.
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(id);
+  // Session-derived header stats — every value here is real, computed from
+  // the events that have actually arrived over the stream this session.
+  const [total, setTotal] = useState(0);
+  const [perSec, setPerSec] = useState(0);
+  const [sparkData, setSparkData] = useState<number[]>(() =>
+    Array.from({ length: SPARK_LEN }, () => 0),
+  );
+  const arrivalsRef = useRef<number[]>([]);
+
+  const onEvent = useCallback(() => {
+    arrivalsRef.current.push(Date.now());
+    setTotal((n) => n + 1);
   }, []);
 
-  // Drive the live event simulator.
+  const { status, events: raw } = useLiveEventsStream({
+    projectId,
+    paused,
+    maxEvents: MAX_EVENTS,
+    onEvent,
+  });
+
+  // Map the raw wire buffer to render-ready events. `isNew` is true for any
+  // event id we hadn't seen on the previous render, which drives the
+  // one-shot fade-in animation.
+  const seenRef = useRef<Set<string>>(new Set());
+  const events = useMemo<LiveEvent[]>(
+    () =>
+      raw.map((m) =>
+        messageToLiveEvent(m, { isNew: !seenRef.current.has(m.eventId) }),
+      ),
+    [raw],
+  );
   useEffect(() => {
-    if (paused) return;
+    seenRef.current = new Set(raw.map((m) => m.eventId));
+  }, [raw]);
+
+  // One-second tick drives the relative clock, the rolling rate and the
+  // sparkline bucket — all off the real arrival timestamps.
+  useEffect(() => {
     const id = window.setInterval(() => {
-      setEvents((prev) => {
-        const aged = prev.map((e) => (e.isNew ? { ...e, isNew: false } : e));
-        const fresh = generateLiveEvent({ isNew: true });
-        return [fresh, ...aged].slice(0, MAX_EVENTS);
-      });
-      setCounter((c) => ({
-        total: c.total + 1,
-        perSec: +(0.9 + Math.random() * 0.4).toFixed(1),
-      }));
-      setSparkData((data) => [...data.slice(1), 0.6 + Math.random() * 1.2]);
-    }, STREAM_INTERVAL_MS);
+      const t0 = Date.now();
+      setNow(new Date(t0));
+      const arr = arrivalsRef.current;
+      const cutoff = t0 - RATE_WINDOW_S * 1000;
+      while (arr.length && (arr[0] ?? 0) < cutoff) arr.shift();
+      setPerSec(arr.length / RATE_WINDOW_S);
+      const lastSecond = arr.filter((ts) => ts >= t0 - 1000).length;
+      setSparkData((d) => [...d.slice(1), lastSecond]);
+    }, 1000);
     return () => window.clearInterval(id);
-  }, [paused]);
+  }, []);
 
   // Space toggles pause; Enter inspects the top row when none selected.
   const eventsRef = useRef(events);
@@ -114,13 +141,8 @@ function LiveEventsPage({ projectName }: { projectName: string }) {
   }, [selectedId]);
 
   const counts = useMemo(() => {
-    const m: Record<EventCategoryKey, number> = {
-      all: events.length,
-      subscription: 0,
-      billing: 0,
-      entitlement: 0,
-      ledger: 0,
-    };
+    const m: Record<string, number> = { all: events.length };
+    for (const cat of EVENT_CATEGORIES) if (cat.key !== "all") m[cat.key] = 0;
     for (const event of events) {
       const cat = event.typeMeta.category;
       m[cat] = (m[cat] ?? 0) + 1;
@@ -139,12 +161,16 @@ function LiveEventsPage({ projectName }: { projectName: string }) {
         const haystack = [
           e.user,
           e.type,
-          e.product.toLowerCase(),
+          e.eventType,
+          e.product,
           e.id,
-          e.productSku,
-          e.country.toLowerCase(),
+          e.country,
         ];
-        if (!haystack.some((s) => s.includes(search_))) return false;
+        if (
+          !haystack.some((s) => s != null && s.toLowerCase().includes(search_))
+        ) {
+          return false;
+        }
       }
       return true;
     });
@@ -176,6 +202,7 @@ function LiveEventsPage({ projectName }: { projectName: string }) {
 
   const lastEventLabel = events[0] ? formatRelative(events[0].receivedAt, now) : "—";
   const showDetail = !!selectedEvent;
+  const conn = connectionState(paused, status);
 
   return (
     <>
@@ -186,31 +213,26 @@ function LiveEventsPage({ projectName }: { projectName: string }) {
             <span
               className={cn(
                 "inline-flex h-[22px] items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium",
-                paused
-                  ? "border-rv-divider bg-rv-c2 text-rv-mute-500"
-                  : "border-rv-success/25 bg-rv-success/10 text-rv-success",
+                conn.pillClass,
               )}
             >
-              {!paused && (
+              {conn.live && (
                 <span className="relative inline-block size-1.5 rounded-full bg-rv-success">
                   <span className="absolute -inset-0.5 rounded-full bg-rv-success/40 animate-rv-pulse" />
                 </span>
               )}
-              <span>
-                {paused ? t("liveEvents.status.paused") : t("liveEvents.status.streaming")}
-              </span>
+              <span>{t(conn.labelKey)}</span>
             </span>
           </h1>
           <p className="mt-1 text-[13px] text-rv-mute-500">
             {t("liveEvents.subtitle")} ·{" "}
-            <span className="font-rv-mono">{counter.total.toLocaleString()}</span>{" "}
-            {t("liveEvents.eventsToday")} ·{" "}
-            <span className="font-rv-mono">{counter.perSec.toFixed(1)}</span>/s
+            <span className="font-rv-mono">{total.toLocaleString()}</span>{" "}
+            {t("liveEvents.eventsThisSession")} ·{" "}
+            <span className="font-rv-mono">{perSec.toFixed(1)}</span>/s
             <span className="mx-2 text-rv-mute-500">·</span>
             <span className="inline-flex items-center gap-1.5 font-rv-mono text-[11px] text-rv-mute-500">
-              <span className="size-1.5 rounded-full bg-rv-success ring-2 ring-rv-success/15" />
-              {t("liveEvents.websocketConnected")}{" "}
-              <span className="opacity-70">wss://ingest.{projectName.toLowerCase()}.io</span>
+              <span className={cn("size-1.5 rounded-full", conn.dotClass)} />
+              {t(conn.connKey)}
             </span>
           </p>
         </div>
@@ -317,7 +339,7 @@ function LiveEventsPage({ projectName }: { projectName: string }) {
             onResetFilters={resetFilters}
           />
 
-          <RateStrip throughput={counter.perSec} lastEvent={lastEventLabel} />
+          <RateStrip throughput={perSec} lastEvent={lastEventLabel} />
         </div>
 
         {showDetail && (
@@ -326,6 +348,44 @@ function LiveEventsPage({ projectName }: { projectName: string }) {
       </div>
     </>
   );
+}
+
+// Resolve the header connection pill + inline status from the stream state.
+function connectionState(paused: boolean, status: LiveEventsStatus) {
+  if (paused) {
+    return {
+      live: false,
+      labelKey: "liveEvents.status.paused",
+      connKey: "liveEvents.conn.paused",
+      pillClass: "border-rv-divider bg-rv-c2 text-rv-mute-500",
+      dotClass: "bg-rv-mute-500",
+    } as const;
+  }
+  if (status === "open") {
+    return {
+      live: true,
+      labelKey: "liveEvents.status.streaming",
+      connKey: "liveEvents.conn.connected",
+      pillClass: "border-rv-success/25 bg-rv-success/10 text-rv-success",
+      dotClass: "bg-rv-success ring-2 ring-rv-success/15",
+    } as const;
+  }
+  if (status === "error") {
+    return {
+      live: false,
+      labelKey: "liveEvents.status.disconnected",
+      connKey: "liveEvents.conn.disconnected",
+      pillClass: "border-rv-danger/25 bg-rv-danger/10 text-rv-danger",
+      dotClass: "bg-rv-danger",
+    } as const;
+  }
+  return {
+    live: false,
+    labelKey: "liveEvents.status.connecting",
+    connKey: "liveEvents.conn.connecting",
+    pillClass: "border-rv-warning/25 bg-rv-warning/10 text-rv-warning",
+    dotClass: "bg-rv-warning",
+  } as const;
 }
 
 function SearchInput({

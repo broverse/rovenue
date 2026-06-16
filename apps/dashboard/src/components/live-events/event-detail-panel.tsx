@@ -8,7 +8,7 @@ import { buildEventPayload, PayloadViewer } from "./payload-viewer";
 import { PlatformBadge } from "./platform-badge";
 import type { LiveEvent } from "./types";
 
-const TABS = ["overview", "payload", "timeline"] as const;
+const TABS = ["overview", "payload"] as const;
 type Tab = (typeof TABS)[number];
 
 type Props = {
@@ -122,8 +122,6 @@ export function EventDetailPanel({ event, onClose }: Props) {
             <PayloadViewer payload={payload} />
           </div>
         )}
-
-        {tab === "timeline" && <TimelineTab receivedAt={event.receivedAt} />}
       </div>
     </aside>
   );
@@ -135,26 +133,29 @@ function OverviewTab({ event }: { event: LiveEvent }) {
   const amountText =
     event.amount == null
       ? "—"
-      : `${formatAmount(event.amount)} ${event.currency}`;
+      : `${formatAmount(event.amount)}${event.currency ? ` ${event.currency}` : ""}`;
+
+  const dash = (v: string | null) => v ?? "—";
 
   const rows: ReadonlyArray<{ key: string; value: React.ReactNode; danger?: boolean }> = [
+    { key: "event_type", value: event.eventType },
+    { key: "aggregate", value: event.aggregateType },
     { key: "type", value: event.type },
-    { key: "user", value: event.user },
-    { key: "product", value: event.product },
-    { key: "sku", value: event.productSku },
-    { key: "txn_id", value: event.txnId },
+    { key: "user", value: dash(event.user) },
+    { key: "product", value: dash(event.product) },
     { key: "amount", value: amountText, danger: refund },
     {
       key: "platform",
-      value: (
+      value: event.platform ? (
         <span className="flex items-center gap-1.5">
-          <PlatformBadge platform={event.platform} /> · {event.store}
+          <PlatformBadge platform={event.platform} />
+          {event.store ? <> · {event.store}</> : null}
         </span>
+      ) : (
+        dash(event.store)
       ),
     },
-    { key: "country", value: event.country },
-    { key: "app_version", value: event.appVersion },
-    { key: "sdk_version", value: event.sdkVersion },
+    { key: "country", value: dash(event.country) },
     { key: "received_at", value: event.receivedAt.toISOString() },
   ];
 
@@ -189,43 +190,5 @@ function OverviewTab({ event }: { event: LiveEvent }) {
         </Button>
       </div>
     </div>
-  );
-}
-
-function TimelineTab({ receivedAt }: { receivedAt: Date }) {
-  const { t } = useTranslation();
-  const items = [
-    { label: "ingested", time: receivedAt.toISOString(), active: true },
-    { label: "normalized", time: t("liveEvents.timeline.normalized"), active: true },
-    {
-      label: "entitlements_updated",
-      time: t("liveEvents.timeline.entitlements"),
-      active: true,
-    },
-    {
-      label: "webhook_dispatched",
-      time: t("liveEvents.timeline.webhook"),
-      active: true,
-    },
-    { label: "persisted", time: t("liveEvents.timeline.persisted"), active: false },
-  ];
-  return (
-    <ol className="relative m-0 list-none p-0 pl-5 before:absolute before:left-[5px] before:top-1 before:bottom-1 before:w-px before:bg-rv-divider">
-      {items.map((item) => (
-        <li
-          key={item.label}
-          className={cn(
-            "relative py-1.5 pb-2.5 pl-0 text-[12px]",
-            "before:absolute before:-left-[16px] before:top-2.5 before:size-2 before:rounded-full before:border-2 before:border-rv-c1 before:shadow-[0_0_0_1px_var(--color-rv-divider)]",
-            item.active
-              ? "before:bg-rv-accent-500 before:shadow-[0_0_0_1px_var(--color-rv-accent-500)]"
-              : "before:bg-rv-c4",
-          )}
-        >
-          <div className="font-rv-mono text-[12px] text-rv-mute-800">{item.label}</div>
-          <div className="mt-0.5 font-rv-mono text-[11px] text-rv-mute-500">{item.time}</div>
-        </li>
-      ))}
-    </ol>
   );
 }

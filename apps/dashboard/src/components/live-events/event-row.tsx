@@ -50,13 +50,17 @@ export function EventRow({ event, selected, onClick }: Props) {
         </span>
       </span>
       <span className="truncate font-rv-mono text-[11px] text-rv-mute-600">
-        {event.user}
+        {event.user ?? "—"}
       </span>
       <span className="truncate text-[12px] text-rv-mute-700 max-[1280px]:hidden">
-        {event.product}
+        {event.product ?? "—"}
       </span>
       <span className="max-[1280px]:hidden">
-        <PlatformBadge platform={event.platform} />
+        {event.platform ? (
+          <PlatformBadge platform={event.platform} />
+        ) : (
+          <span className="font-rv-mono text-[11px] text-rv-mute-500">—</span>
+        )}
       </span>
       <span
         className={cn(
@@ -67,7 +71,7 @@ export function EventRow({ event, selected, onClick }: Props) {
         {formatAmount(event.amount)}
       </span>
       <span className="text-right font-rv-mono text-[11px] text-rv-mute-500">
-        {event.country}
+        {event.country ?? "—"}
       </span>
     </button>
   );
