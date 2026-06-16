@@ -41,6 +41,13 @@ const envSchema = z
       .enum(["true", "false"])
       .default("true")
       .transform((v) => v === "true"),
+    // Optional global edge cache (Cloudflare edge-cache Worker, see
+    // deploy/cloudflare/edge-cache). When both are set, catalog
+    // mutations POST a per-project purge so cached /v1/offerings
+    // responses are invalidated worldwide. Unset → purge is a no-op
+    // (self-host without a CDN keeps working unchanged).
+    EDGE_CACHE_PURGE_URL: z.string().url().optional(),
+    EDGE_CACHE_PURGE_SECRET: z.string().min(1).optional(),
     BETTER_AUTH_SECRET: z.string().min(1).optional(),
     BETTER_AUTH_URL: z.string().url().default("http://localhost:3000"),
     DASHBOARD_URL: z.string().url().default("http://localhost:5173"),

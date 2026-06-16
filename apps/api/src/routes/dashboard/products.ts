@@ -6,6 +6,7 @@ import { MemberRole, accessIdSchema, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
+import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { ok } from "../../lib/response";
 import type {
   DashboardProductImportResponse,
@@ -269,6 +270,7 @@ export const productsDashboardRoute = new Hono()
       isActive: body.isActive ?? true,
       metadata: body.metadata ?? {},
     });
+    purgeProjectCatalogCache(projectId);
     return c.json(ok({ product: toWire(row) }));
   })
   .post("/import", zValidator("json", importBodySchema), async (c) => {
@@ -319,6 +321,9 @@ export const productsDashboardRoute = new Hono()
       skipped: skipped.length,
       results,
     };
+    // Only the created products change the catalog; a skip-only import
+    // is a no-op for cached offerings.
+    if (created.length > 0) purgeProjectCatalogCache(projectId);
     return c.json(ok(payload));
   })
   .get("/:id", async (c) => {
@@ -376,6 +381,7 @@ export const productsDashboardRoute = new Hono()
     if (!row) {
       throw new HTTPException(404, { message: "Product not found" });
     }
+    purgeProjectCatalogCache(projectId);
     return c.json(ok({ product: toWire(row) }));
   })
   .delete("/:id", async (c) => {
@@ -396,6 +402,7 @@ export const productsDashboardRoute = new Hono()
       if (!removed) {
         throw new HTTPException(404, { message: "Product not found" });
       }
+      purgeProjectCatalogCache(projectId);
       return c.json(ok({ deleted: true }));
     } catch (err) {
       // FK violation when historical purchases still reference

@@ -54,6 +54,11 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READER_PASSWORD:-rovenue}
       KAFKA_BROKERS: redpanda:9092
       APPLE_ROOT_CERTS_DIR: /etc/rovenue/apple-certs
+      # Single-dispatcher contract: the dedicated `dispatcher` service
+      # is the only outbox→Kafka publisher. The API MUST keep this
+      # false so it can scale to N replicas without double-dispatching.
+      # See docs/architecture/outbox-dispatcher.md.
+      OUTBOX_DISPATCHER_ENABLED: "false"
     volumes:
       - ${APPLE_ROOT_CERTS_HOST_DIR:-./deploy/apple-certs}:/etc/rovenue/apple-certs:ro
     ports:
@@ -72,9 +77,43 @@ services:
       redpanda:
         condition: service_healthy
     restart: unless-stopped
-    # The outbox dispatcher runs in-process here (OUTBOX_DISPATCHER_ENABLED
-    # from .env). It MUST be a single instance — do not raise replicas
-    # without first moving the dispatcher to a dedicated 1-replica worker.
+    # The dispatcher no longer runs in-process here, so the API is now
+    # stateless and horizontally scalable — raise this to fan out behind
+    # the edge Caddy. The remaining in-process workers are all BullMQ
+    # jobId-idempotent (or FOR UPDATE SKIP LOCKED), safe across replicas.
+    deploy:
+      replicas: ${API_REPLICAS:-1}
+
+  # The single outbox→Kafka publisher. MUST stay at one replica:
+  # delivery is at-least-once, so a second dispatcher would merely
+  # re-publish (collapsed downstream by the 0012 idempotent CH views)
+  # and waste load. Runs the same image as `api` with a dispatcher-only
+  # entrypoint; no HTTP server, no public ports.
+  dispatcher:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["pnpm", "--filter", "@rovenue/api", "exec", "tsx", "src/workers/outbox-dispatcher-process.ts"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: redpanda:9092
+      # The dispatcher service IS the publisher. The flag is irrelevant
+      # to its entrypoint (which calls runOutboxDispatcher directly) but
+      # we set it true to document intent and satisfy the guard test.
+      OUTBOX_DISPATCHER_ENABLED: "true"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
     deploy:
       replicas: 1
 

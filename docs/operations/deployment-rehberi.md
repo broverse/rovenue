@@ -16,7 +16,8 @@ Tek bir `docker-compose.yml` aşağıdaki servisleri ayağa kaldırır:
 | Servis | Görevi | Port (host) |
 |---|---|---|
 | `caddy` | TLS termination + edge reverse proxy (ACME/Let's Encrypt) | 80, 443 |
-| `api` | Hono API + **in-process outbox dispatcher** (tek instance) | 3000 |
+| `api` | Hono API (**stateless, yatay ölçeklenebilir** — `API_REPLICAS`) | 3000 |
+| `dispatcher` | **Tek** outbox→Kafka yayıncısı (ayrı servis, `replicas: 1`) | — |
 | `dashboard` | React SPA (statik, image içinde Caddy ile servis edilir) | — (sadece edge) |
 | `docs` | Fumadocs statik dokümantasyon | — (sadece edge) |
 | `migrate` | Tek seferlik: Drizzle + ClickHouse migration'larını çalıştırıp çıkar | — |
@@ -28,8 +29,15 @@ Tek bir `docker-compose.yml` aşağıdaki servisleri ayağa kaldırır:
 | `notifier-worker` / `digest-scheduler` / `send-email-worker` / `send-push-worker` | Bildirim hattı worker'ları | — |
 
 **Veri akışı:** App, OLTP yazımıyla aynı transaction'da `outbox_events`
-satırı yazar → `api` içindeki outbox dispatcher bunu Redpanda'ya iter →
+satırı yazar → ayrı **`dispatcher`** servisi bunu Redpanda'ya iter →
 ClickHouse Kafka Engine topic'i tüketir. CDC yok, dual-write yok.
+
+> Dispatcher neden ayrı servis? Yayın **at-least-once**. İkinci bir
+> dispatcher satırları tekrar yayınlar ve ClickHouse gelir agregatlarını
+> şişirir. Dispatcher'ı `api`'den ayırıp `replicas: 1`'e sabitlemek,
+> `api`'yi serbestçe yatay ölçeklenebilir kılan şeydir (bkz. §11).
+> `api` içindeki diğer worker'lar BullMQ jobId-idempotent (veya
+> `FOR UPDATE SKIP LOCKED`) olduğundan birden çok replikada güvenlidir.
 
 ---
 
@@ -96,10 +104,21 @@ DASHBOARD_URL=https://app.rovenue.io
 VITE_API_URL=https://rovenue.io          # ⚠️ build-time! (bkz. 6. Değişmezler)
 CANONICAL_HOSTS=rovenue.io,edge.rovenue.io,app.rovenue.io
 TLS_EMAIL=ops@rovenue.io                  # gerçek operatör e-postası
-OUTBOX_DISPATCHER_ENABLED=true            # sadece api'de true
 TRUSTED_PROXY_COUNT=1                      # Caddy = 1 proxy
 VITE_SELF_HOSTED=true                      # self-host'ta GitHub linkini gösterir
 ```
+
+> **`OUTBOX_DISPATCHER_ENABLED`'ı `.env`'de ayarlamanıza gerek yok.**
+> `docker-compose.yml` bu değeri servis bazında açıkça override eder:
+> yalnızca `dispatcher` servisi `true`, `api` ve tüm worker'lar `false`.
+> `.env`'deki değer bu override'lar tarafından gölgelenir.
+
+> **Global edge cache (opsiyonel, §10):** Cloudflare edge-cache Worker'ı
+> kullanacaksanız `.env`'e şunları ekleyin — boşsa purge no-op olur:
+> ```bash
+> EDGE_CACHE_PURGE_URL=https://edge.rovenue.io/__edge/purge
+> EDGE_CACHE_PURGE_SECRET=<Worker'ın PURGE_SECRET'ı ile aynı değer>
+> ```
 
 ClickHouse şifreleri SHA256 hash olarak verilir (`CLICKHOUSE_PASSWORD_SHA256`,
 `CLICKHOUSE_READER_PASSWORD_SHA256`). Default'ları **mutlaka** değiştirin:
@@ -189,11 +208,12 @@ docker compose logs migrate                # migration'lar başarılı mı?
 
 ## 7. Değişmezler (KIRMA!)
 
-- **Tek dispatcher:** Yalnızca `api` servisinde `OUTBOX_DISPATCHER_ENABLED=true`
-  ve `replicas: 1`. Tüm worker'lar bunu `false` zorlar. İki dispatcher
-  ClickHouse gelir agregatlarını **çift sayar**. `api`'yi yatay
-  ölçeklemeden önce dispatcher'ı ayrı tek-replika bir worker'a taşıyın.
-  Bkz. `docs/architecture/outbox-dispatcher.md`.
+- **Tek dispatcher:** Outbox→Kafka yayını yalnızca ayrı **`dispatcher`**
+  servisinde, `replicas: 1` ile çalışır. `api` ve tüm worker'lar
+  `OUTBOX_DISPATCHER_ENABLED=false` zorlar (`dispatcher-guard.test.ts`
+  bunu CI'da doğrular). İkinci bir dispatcher ClickHouse gelir
+  agregatlarını **çift sayar** — `dispatcher`'ı asla 1'in üstüne
+  çıkarmayın. Bkz. `docs/architecture/outbox-dispatcher.md`.
 - **`caddy-data` volume'u kalıcı olmalı:** Kaybolursa her redeploy'da tüm
   TLS sertifikaları yeniden istenir ve Let's Encrypt rate-limit'e takılır.
 - **`VITE_API_URL` build-time:** api origin'i değişirse `dashboard` image'ını
@@ -230,15 +250,83 @@ Migration'lar **ileri-yönlü**dür: şemayı değil, kodu geri alın.
 
 ---
 
+## 10. Global edge cache (dünya çapında hız)
+
+Origin tek bölgede (örn. Frankfurt) çalışır. Asya/Amerika'daki bir SDK
+açılışı origin'e ~250-300ms eder. Çözüm: SDK'nın her açılışta vurduğu
+**katalog okuma yolu**nu Cloudflare'ın edge'inde cache'lemek. Yazma yolu
+(satın alma, webhook) ve abone-özel okumalar origin'e dokunulmadan geçer.
+
+**Topoloji:** `SDK → Cloudflare edge-cache Worker → origin (edge Caddy)`.
+Worker `deploy/cloudflare/edge-cache/` altında; tam kurulum için oradaki
+`README.md`'ye bakın. Özet:
+
+| Konu | Davranış |
+|---|---|
+| Cache'lenen | `GET /v1/offerings*` (sadece). `/v1/config` cache'lenmez — per-subscriber + GET'te subscriber upsert eder |
+| Proje izolasyonu | Cache key = `SHA-256(public Bearer key)` + `accessId` |
+| Bypass | `x-rovenue-user-id` / `?subscriberId=` (abone-özel) veya yanıtta `X-Rovenue-Experiment` |
+| TTL | `s-maxage=60`, `stale-while-revalidate=300` |
+| Invalidation | Workers KV'de proje bazlı sürüm; katalog değişiminde `POST /__edge/purge` (KV eventual-consistent → asıl garanti 60s TTL, purge hızlandırıcı) |
+
+**Purge bağlı (implemented):** Katalog değişiklikleri (offering/product)
+outbox'tan **akmadığı** için purge dashboard mutation handler'larından
+tetiklenir. `apps/api/src/lib/edge-cache.ts` → `purgeProjectCatalogCache(projectId)`
+helper'ı projenin aktif public key'lerini bulup her biri için purge atar;
+`dashboard/offerings.ts` (create/update/delete) ve `dashboard/products.ts`
+(create/import/update/delete) içine bağlandı. Best-effort + env boşsa no-op.
+**Flag'ler bağlı değil** — yalnızca cache'lenmeyen `/v1/config`'ten servis
+edilir. Bağlı değilse bile 60s TTL eski katalogun ömrünü sınırlar.
+
+**Hızlı kurulum:**
+
+```bash
+cd deploy/cloudflare/edge-cache && pnpm install
+wrangler kv namespace create CACHE_VERSIONS --env production   # id'yi wrangler.jsonc'ye yapıştır
+wrangler secret put PURGE_SECRET --env production              # .env'deki EDGE_CACHE_PURGE_SECRET ile aynı
+wrangler types && pnpm typecheck && pnpm deploy
+```
+
+DNS: edge hostname (`edge.rovenue.io`) Worker route'una, origin **farklı**
+bir hostname'e (`origin.rovenue.io`) işaret etmeli — yoksa Worker kendine
+proxy yapar. SDK'yı edge hostname'e yöneltin.
+
+---
+
+## 11. Yatay ölçekleme (api)
+
+Dispatcher ayrı servise alındığı için `api` artık **stateless** ve
+güvenle çoğaltılabilir. Replika sayısını `.env` (veya Coolify) üzerinden
+ayarlayın:
+
+```bash
+API_REPLICAS=3 docker compose up -d api
+```
+
+- Diğer in-process worker'lar (expiry, fx, webhook delivery, retention,
+  cleanup, partition-maintenance, scheduled-actions, funnel, custom-domain,
+  rovi, refund-shield) BullMQ jobId-idempotent veya `FOR UPDATE SKIP LOCKED`
+  olduğundan N replikada güvenlidir.
+- **`dispatcher` ve `digest-scheduler` asla 1'in üstüne çıkmaz.**
+- Caddy `api`'nin önünde durur; çoklu replikaya docker DNS round-robin ile
+  dağıtır. Managed bir yük dengeleyici de aynı şekilde çalışır.
+
+> Gerçekten kıtalararası yazma gecikmesi sorun olursa (ki §10 edge cache
+> okuma yükünün çoğunu emer) bir sonraki adım bölgesel Postgres
+> read-replica'dır — **önce değil**; gereksiz operasyonel karmaşa.
+
+---
+
 ## Hızlı kontrol listesi
 
 ```
 [ ] Docker + Compose v2, DNS A kayıtları, Apple .cer dosyaları
 [ ] .env: prod-zorunlu anahtarlar (PUBSUB_PUSH_AUDIENCE dahil!) + OAuth + SHA256 CH şifreleri
-[ ] NODE_ENV=production, *_URL'ler https://, OUTBOX_DISPATCHER_ENABLED=true
+[ ] NODE_ENV=production, *_URL'ler https:// (OUTBOX_DISPATCHER_ENABLED compose'da otomatik)
 [ ] docker compose build
 [ ] docker compose run --rm migrate
-[ ] docker compose up -d
+[ ] docker compose up -d   (dispatcher servisi dahil ayağa kalkar)
 [ ] /health, app, docs smoke test 200
 [ ] caddy-data volume kalıcı + redpanda-console auth arkasında
+[ ] (opsiyonel) §10 edge cache deploy + purge bağlandı; §11 API_REPLICAS ayarlandı
 ```

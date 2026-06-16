@@ -1,0 +1,51 @@
+{
+  // Rovenue edge-cache Worker — a thin reverse proxy in front of the
+  // origin API that caches the SDK's hot read endpoints (offerings,
+  // config) at Cloudflare's 300+ PoPs so subscribers worldwide get
+  // <50ms catalog reads, while writes/webhooks fall through to the
+  // single-region origin untouched. See README.md.
+  "name": "rovenue-edge-cache",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-16",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": {
+    "enabled": true,
+    "logs": {
+      // 100% of logs in dev; lower for high-traffic production zones.
+      "head_sampling_rate": 1
+    }
+  },
+
+  // Per-project cache version. The cache key embeds the value stored
+  // here; a catalog mutation bumps it (via POST /__edge/purge), which
+  // invalidates every cached response for that project globally and
+  // instantly — no Cloudflare purge-API quota, works on any plan.
+  "kv_namespaces": [
+    { "binding": "CACHE_VERSIONS", "id": "REPLACE_WITH_KV_ID" }
+  ],
+
+  // Non-secret vars. ORIGIN_URL is the public origin the Worker proxies
+  // to (the edge Caddy / api). PURGE_SECRET is NOT here — set it with
+  // `wrangler secret put PURGE_SECRET`.
+  "vars": {
+    "ORIGIN_URL": "https://origin.rovenue.io"
+  },
+
+  "env": {
+    "production": {
+      "kv_namespaces": [
+        { "binding": "CACHE_VERSIONS", "id": "REPLACE_WITH_PROD_KV_ID" }
+      ],
+      "vars": {
+        "ORIGIN_URL": "https://origin.rovenue.io"
+      },
+      // Put the Worker in front of the SDK-facing hostname. The origin
+      // (edge Caddy) must answer on ORIGIN_URL, a DIFFERENT hostname,
+      // so the Worker doesn't proxy to itself.
+      "routes": [
+        { "pattern": "edge.rovenue.io/*", "zone_name": "rovenue.io" }
+      ]
+    }
+  }
+}

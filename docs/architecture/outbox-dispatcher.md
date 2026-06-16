@@ -46,28 +46,34 @@ eventId via ReplacingMergeTree" — true at the raw layer, and as of migration
 `0012` the money/credit aggregates also collapse duplicates before summation;
 see §4.)
 
-## 3. Horizontal-scaling hazard
+## 3. Horizontal-scaling hazard — gated by the single-dispatcher contract
 
-The dispatcher is started **unconditionally in every API instance**:
+The dispatcher run is **gated by `OUTBOX_DISPATCHER_ENABLED`** (default
+`true`):
 
 ```
-apps/api/src/index.ts:253   void runOutboxDispatcher();
+apps/api/src/index.ts:255   if (env.OUTBOX_DISPATCHER_ENABLED) void runOutboxDispatcher();
 ```
 
-There is **no leader election and no single-instance guard**. The repository
-comment at `outbox.ts:18-20` and the worker comment at
-`outbox-dispatcher.ts:80-81` both explicitly state the design is
-**single-instance** and that `SKIP LOCKED` is only "future-proofing".
+In `docker-compose.yml` exactly one service runs it: a **dedicated
+`dispatcher` service** pinned to `replicas: 1` whose entrypoint is
+`apps/api/src/workers/outbox-dispatcher-process.ts`. Every other service —
+`api` and all auxiliary workers — sets `OUTBOX_DISPATCHER_ENABLED=false`.
+`dispatcher-guard.test.ts` asserts this contract in CI (api + workers `false`,
+a dedicated `dispatcher` service `true` at one replica).
 
-If the API is scaled to **more than one instance**, every instance runs its
-own dispatcher loop. `SKIP LOCKED` prevents two dispatchers from claiming the
-*same* row in the *same instant*, but because the claim tx commits before
-publish, a row published by instance A but not yet `markPublished` is fully
-claimable by instance B — so the same `eventId` is **published to Kafka more
-than once, concurrently**. Combined with §2 this multiplies the duplicate
-*rate*. Since migration `0012` (§4) this no longer corrupts any aggregate — it
-only adds redundant collapsed rows and wasted ingest work — so it is an
-efficiency hazard, not a correctness one.
+The *hazard* this guards against: if the dispatcher ran in **more than one
+instance**, every instance would run its own loop. `SKIP LOCKED` prevents two
+dispatchers from claiming the *same* row in the *same instant*, but because the
+claim tx commits before publish, a row published by instance A but not yet
+`markPublished` is fully claimable by instance B — so the same `eventId` is
+**published to Kafka more than once, concurrently**. Combined with §2 this
+multiplies the duplicate *rate*. Since migration `0012` (§4) this no longer
+corrupts any aggregate — it only adds redundant collapsed rows and wasted
+ingest work — so it is an efficiency hazard, not a correctness one. Extracting
+the dispatcher into its own one-replica service is what lets `api` scale
+horizontally without tripping it (the other in-process API workers are BullMQ
+jobId-idempotent or `FOR UPDATE SKIP LOCKED`, safe across replicas).
 
 ## 4. Why it is safe downstream — raw layer and aggregates
 
@@ -133,29 +139,33 @@ Refund Shield's lifetime-$ signal can no longer be skewed by re-delivery. The
 delivery layer itself is unchanged (still at-least-once, §2), so a duplicate
 still *occurs*; it is simply collapsed before it can affect a total.
 
-## 5. Before horizontal scaling — recommended (no longer a correctness blocker)
+## 5. Horizontal scaling — single-leader gate IMPLEMENTED
 
-Before scaling the API to more than one instance, **one** of the following
-should be put in place (for efficiency, not correctness — see the note below):
+Option 1 below is now **in place**: the dispatcher is gated by
+`OUTBOX_DISPATCHER_ENABLED` and runs only in the dedicated `dispatcher`
+service (§3). The API is therefore free to scale to N replicas
+(`API_REPLICAS`) — see `docs/operations/deployment-rehberi.md` §11.
 
-1. **Exactly one dispatcher.** Run the dispatcher in a single dedicated worker
-   process (not in every API replica), or add leader election so only one
-   instance runs `runOutboxDispatcher()`. Today `apps/api/src/index.ts:253`
-   starts it everywhere — this must be gated. **OR**
+The two designs that were considered:
+
+1. **Exactly one dispatcher.** ✅ Implemented — the dispatcher runs in a single
+   dedicated worker process (`outbox-dispatcher-process.ts`, `replicas: 1`),
+   not in every API replica. `apps/api/src/index.ts:255` gates the in-process
+   start behind `OUTBOX_DISPATCHER_ENABLED`, which compose forces `false`
+   everywhere except the `dispatcher` service.
 2. **Shard claims** by a hash of `aggregateId` so each dispatcher owns a
    disjoint slice (the worker comment at `outbox-dispatcher.ts:80-81` names this
-   as the intended Plan-3 scale path).
+   as the eventual multi-dispatcher scale path). **Not needed yet** — a single
+   dispatcher comfortably handles current volume; revisit only if outbox
+   publish throughput becomes the bottleneck.
 
-This single-leader / sharded-dispatcher gate is **still deferred** — the
-delivery layer is unchanged. The §4 aggregate double-count that previously made
-this a hard correctness blocker is **resolved** by migration `0012`: the
-money/credit aggregates collapse duplicate `eventId`s before summation, so a
-re-delivery (after a crash, §2) or even an accidental multi-dispatcher
-deployment (§3) no longer corrupts revenue/credit totals — it only produces
-**redundant collapsed rows** and wasted Kafka/ingest work. In other words,
-single-instance now bounds the duplicate *rate*; correctness no longer depends
-on it. Gating the dispatcher remains the right thing to do before scaling for
-efficiency and load reasons, but it is no longer a data-correctness prerequisite.
+Note the §4 aggregate double-count that *previously* made single-instance a
+hard correctness blocker is independently **resolved** by migration `0012`:
+the money/credit aggregates collapse duplicate `eventId`s before summation, so
+even an accidental multi-dispatcher deployment (§3) can no longer corrupt
+revenue/credit totals — it only produces redundant collapsed rows and wasted
+ingest work. The single-dispatcher contract now bounds the duplicate *rate*
+for efficiency; correctness no longer depends on it.
 
 ## 6. Outgoing webhooks (lower severity)
 
