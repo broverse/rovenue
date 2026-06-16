@@ -2,7 +2,7 @@ import type { MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { HEADER } from "@rovenue/shared";
 import type { Subscriber } from "@rovenue/db";
-import { resolveSubscriber } from "../lib/resolve-subscriber";
+import { resolveOrCreateSubscriber } from "../lib/resolve-or-create-subscriber";
 
 declare module "hono" {
   interface ContextVariableMap {
@@ -28,7 +28,7 @@ export const appUserContext: MiddlewareHandler = async (c, next) => {
       message: `${HEADER.X_ROVENUE_APP_USER_ID} header is required`,
     });
   }
-  const subscriber = await resolveSubscriber(project.id, key);
+  const subscriber = await resolveOrCreateSubscriber(project.id, key);
   c.set("subscriber", subscriber);
   await next();
 };
