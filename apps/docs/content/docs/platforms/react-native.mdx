@@ -63,7 +63,7 @@ export default function App() {
 ```
 
 <Callout type="info">
-**Self-hosting?** `baseUrl` is optional and defaults to the hosted endpoint `https://edge.rovenue.io`. Override it to point at your own deployment, e.g. `Rovenue.configure({ apiKey: 'rov_pub_YOUR_API_KEY', baseUrl: 'https://api.acme.com' })`. The host must use `https://` — plain `http://` is accepted only for `localhost` during local development.
+**Self-hosting?** `baseUrl` is optional and defaults to the hosted endpoint `https://api.rovenue.io`. Override it to point at your own deployment, e.g. `Rovenue.configure({ apiKey: 'rov_pub_YOUR_API_KEY', baseUrl: 'https://api.acme.com' })`. The host must use `https://` — plain `http://` is accepted only for `localhost` during local development.
 </Callout>
 
 ### Types on this page
@@ -71,7 +71,7 @@ export default function App() {
 ```ts
 type RovenueConfig = {
   apiKey: string;      // public SDK key — prefix rov_pub_
-  baseUrl?: string;    // optional — defaults to https://edge.rovenue.io
+  baseUrl?: string;    // optional — defaults to https://api.rovenue.io
   debug?: boolean;     // verbose SDK logs (dev only)
   appVersion?: string; // override auto-detected version
 };
@@ -80,7 +80,7 @@ type RovenueConfig = {
 | Field | Type | Description |
 |-------|------|-------------|
 | `apiKey` | `string` | Public SDK key from your Rovenue dashboard. Prefix `rov_pub_`. |
-| `baseUrl` | `string?` | Optional. Defaults to `https://edge.rovenue.io`. Override only when self-hosting (`https://`; `http://` allowed for `localhost` only). |
+| `baseUrl` | `string?` | Optional. Defaults to `https://api.rovenue.io`. Override only when self-hosting (`https://`; `http://` allowed for `localhost` only). |
 | `debug` | `boolean` | Enables verbose SDK logs. Do not ship enabled in production. |
 | `appVersion` | `string` | Overrides the version auto-read from the bundle. |
 

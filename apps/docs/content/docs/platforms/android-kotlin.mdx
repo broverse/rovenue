@@ -59,7 +59,7 @@ class App : Application() {
 ```
 
 <Callout type="info">
-**Self-hosting?** `baseUrl` is optional and defaults to the hosted endpoint `https://edge.rovenue.io`. Override it to point at your own deployment, e.g. `Rovenue.configure(apiKey = "rov_pub_YOUR_API_KEY", baseUrl = "https://api.acme.com", appVersion = versionName)`. The host must use `https://` — plain `http://` is accepted only for `localhost` during local development.
+**Self-hosting?** `baseUrl` is optional and defaults to the hosted endpoint `https://api.rovenue.io`. Override it to point at your own deployment, e.g. `Rovenue.configure(apiKey = "rov_pub_YOUR_API_KEY", baseUrl = "https://api.acme.com", appVersion = versionName)`. The host must use `https://` — plain `http://` is accepted only for `localhost` during local development.
 </Callout>
 
 Register `App` in your `AndroidManifest.xml`:
@@ -74,7 +74,7 @@ Register `App` in your `AndroidManifest.xml`:
 // Kotlin mirror of RovenueConfig
 data class RovenueConfig(
   val apiKey: String,          // public SDK key — prefix rov_pub_
-  val baseUrl: String? = null, // optional — defaults to https://edge.rovenue.io
+  val baseUrl: String? = null, // optional — defaults to https://api.rovenue.io
   val debug: Boolean = false,
   val appVersion: String? = null,
 )
@@ -83,7 +83,7 @@ data class RovenueConfig(
 | Field | Type | Description |
 |-------|------|-------------|
 | `apiKey` | `String` | Public SDK key from your Rovenue dashboard. Prefix `rov_pub_`. |
-| `baseUrl` | `String?` | Optional. Defaults to `https://edge.rovenue.io`. Override only when self-hosting (`https://`; `http://` allowed for `localhost` only). |
+| `baseUrl` | `String?` | Optional. Defaults to `https://api.rovenue.io`. Override only when self-hosting (`https://`; `http://` allowed for `localhost` only). |
 | `debug` | `Boolean` | Enables verbose SDK logs. Default `false`. |
 | `appVersion` | `String?` | Overrides the version read from the package manager. |
 

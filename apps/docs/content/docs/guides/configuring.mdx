@@ -23,7 +23,7 @@ Calling any SDK method before `configure` throws `NotConfigured`. Put
 ```ts
 type RovenueConfig = {
   apiKey: string;       // your public SDK key (prefix rov_pub_)
-  baseUrl?: string;     // optional — defaults to https://edge.rovenue.io
+  baseUrl?: string;     // optional — defaults to https://api.rovenue.io
   debug?: boolean;      // verbose logging; default false
   appVersion?: string;  // overrides the platform manifest value
 };
@@ -32,7 +32,7 @@ type RovenueConfig = {
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `apiKey` | `string` | Yes | Your **public** SDK key (`rov_pub_…`). Never use the secret key in the app. |
-| `baseUrl` | `string` | No | Your Rovenue API base URL. Defaults to the hosted endpoint `https://edge.rovenue.io`; override only when self-hosting. |
+| `baseUrl` | `string` | No | Your Rovenue API base URL. Defaults to the hosted endpoint `https://api.rovenue.io`; override only when self-hosting. |
 | `debug` | `boolean` | No | When `true`, routes verbose logs to your log handler. Default `false`. |
 | `appVersion` | `string` | No | App version string. Auto-read from the platform manifest — only override for standalone JVM builds. |
 

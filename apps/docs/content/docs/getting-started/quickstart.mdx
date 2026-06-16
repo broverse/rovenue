@@ -18,7 +18,7 @@ If you have not installed the SDK yet, start with [Installation](/docs/getting-s
 ```ts
 type RovenueConfig = {
   apiKey: string;      // public SDK key — prefix rov_pub_
-  baseUrl?: string;    // edge endpoint — defaults to https://edge.rovenue.io
+  baseUrl?: string;    // API endpoint — defaults to https://api.rovenue.io
   debug?: boolean;
   appVersion?: string;
 };
@@ -85,7 +85,7 @@ type PurchaseResult = {
 <Step>
 ### Configure once at startup
 
-Call `configure()` before any other SDK method — in your app entry point, before the UI renders. Pass your public API key. `baseUrl` is optional and defaults to the hosted endpoint `https://edge.rovenue.io`.
+Call `configure()` before any other SDK method — in your app entry point, before the UI renders. Pass your public API key. `baseUrl` is optional and defaults to the hosted endpoint `https://api.rovenue.io`.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">

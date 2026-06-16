@@ -14,7 +14,7 @@ The Rovenue SDK shares a single Rust core (`librovenue`) across all three platfo
 ```ts
 type RovenueConfig = {
   apiKey: string;      // public SDK key — prefix rov_pub_
-  baseUrl?: string;    // edge endpoint — defaults to https://edge.rovenue.io
+  baseUrl?: string;    // API endpoint — defaults to https://api.rovenue.io
   debug?: boolean;     // verbose log output; default false
   appVersion?: string; // override version reported to the server
 };
@@ -23,7 +23,7 @@ type RovenueConfig = {
 | Field | Type | Description |
 |-------|------|-------------|
 | `apiKey` | `string` | Public SDK key from the Rovenue dashboard. Prefix `rov_pub_`. |
-| `baseUrl` | `string?` | Optional. Edge endpoint; defaults to `https://edge.rovenue.io`. Override only when self-hosting. |
+| `baseUrl` | `string?` | Optional. API endpoint; defaults to `https://api.rovenue.io`. Override only when self-hosting. |
 | `debug` | `boolean?` | Enables verbose SDK logging. Keep `false` in production. |
 | `appVersion` | `string?` | App version string reported to the server. Defaults to the OS-reported value. |
 
