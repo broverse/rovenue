@@ -22,9 +22,9 @@ enum RovenueError {
 
 dictionary Config {
     string api_key;
-    string base_url;
     boolean debug;
     string? app_version;
+    string base_url = "https://api.rovenue.io";
 };
 
 dictionary User {
