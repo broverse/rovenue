@@ -108,7 +108,7 @@ class Rovenue private constructor(
         @Throws(RovenueException::class)
         fun configure(
             apiKey: String,
-            baseUrl: String,
+            baseUrl: String? = null,
             debug: Boolean = false,
             appVersion: String? = null,
             context: Context? = null,
@@ -117,12 +117,13 @@ class Rovenue private constructor(
             if (apiKey.isBlank()) {
                 throw RovenueException.InvalidApiKey("apiKey is blank")
             }
+            // Omit baseUrl → the generated Config default ("https://api.rovenue.io")
+            // applies; the Rust core validates it on construction.
             val config = Config(
                 apiKey = apiKey,
-                baseUrl = baseUrl,
                 debug = debug,
                 appVersion = appVersion,
-            )
+            ).let { if (baseUrl != null) it.copy(baseUrl = baseUrl) else it }
             val core = RovenueCore(config)  // may throw RovenueException
             val bridge = ObserverBridge()
             core.registerObserver(bridge)

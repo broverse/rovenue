@@ -45,4 +45,12 @@ class ConfigurationTest {
         val second = Rovenue.shared
         assertNotSame(first, second)
     }
+
+    @Test
+    fun `configure succeeds without base url`() {
+        // baseUrl omitted → core falls back to the hosted default.
+        Rovenue.configure(apiKey = "pk_test_default")
+        assertNotNull(Rovenue.shared)
+        assertEquals(sdkVersion(), Rovenue.shared.version)
+    }
 }
