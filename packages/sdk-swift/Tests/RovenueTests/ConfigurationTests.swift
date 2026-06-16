@@ -34,4 +34,10 @@ final class ConfigurationTests: XCTestCase {
         let secondInstance = Rovenue.shared
         XCTAssertFalse(firstInstance === secondInstance, "configure() should replace the shared instance")
     }
+
+    func test_configure_succeedsWithoutBaseUrl() throws {
+        // baseUrl omitted → core falls back to the hosted default.
+        try Rovenue.configure(apiKey: "pk_test_default")
+        XCTAssertEqual(Rovenue.shared.version, sdkVersion())
+    }
 }

@@ -58,7 +58,7 @@ public final class Rovenue: @unchecked Sendable {
     /// bundle setups).
     public static func configure(
         apiKey: String,
-        baseUrl: String,
+        baseUrl: String? = nil,
         debug: Bool = false,
         appVersion: String? = nil
     ) throws {
@@ -67,12 +67,16 @@ public final class Rovenue: @unchecked Sendable {
             throw Rovenue.Error.invalidApiKey
         }
         let resolvedVersion = appVersion ?? readBundleAppVersion()
-        let config = Config(
+        // Omit baseUrl → the generated Config default ("https://api.rovenue.io")
+        // applies; the Rust core validates it on construction.
+        var config = Config(
             apiKey: apiKey,
-            baseUrl: baseUrl,
             debug: debug,
             appVersion: resolvedVersion
         )
+        if let baseUrl {
+            config.baseUrl = baseUrl
+        }
         let core: RovenueCore
         do {
             core = try RovenueCore(config: config)
