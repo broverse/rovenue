@@ -46,13 +46,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     Rovenue.configure(
-      apiKey: "rov_pub_YOUR_API_KEY",
-      baseUrl: "https://edge.rovenue.io"
+      apiKey: "rov_pub_YOUR_API_KEY"
     )
     return true
   }
 }
 ```
+
+<Callout type="info">
+**Self-hosting?** `baseUrl` is optional and defaults to the hosted endpoint `https://edge.rovenue.io`. Override it to point at your own deployment, e.g. `Rovenue.configure(apiKey: "rov_pub_YOUR_API_KEY", baseUrl: "https://api.acme.com")`. The host must use `https://` — plain `http://` is accepted only for `localhost` during local development.
+</Callout>
 
 The SDK reads `CFBundleShortVersionString` from the main bundle automatically — you do not need to pass `appVersion` manually.
 
@@ -62,7 +65,7 @@ The SDK reads `CFBundleShortVersionString` from the main bundle automatically �
 // Swift mirror of RovenueConfig
 struct RovenueConfig {
   var apiKey: String       // public SDK key — prefix rov_pub_
-  var baseUrl: String      // always https://edge.rovenue.io
+  var baseUrl: String?     // optional — defaults to https://edge.rovenue.io
   var debug: Bool          // default false
   var appVersion: String?  // override auto-detected version
 }
@@ -71,7 +74,7 @@ struct RovenueConfig {
 | Field | Type | Description |
 |-------|------|-------------|
 | `apiKey` | `String` | Public SDK key from your Rovenue dashboard. Prefix `rov_pub_`. |
-| `baseUrl` | `String` | Always `https://edge.rovenue.io` unless self-hosting. |
+| `baseUrl` | `String?` | Optional. Defaults to `https://edge.rovenue.io`. Override only when self-hosting (`https://`; `http://` allowed for `localhost` only). |
 | `debug` | `Bool` | Enables verbose SDK logs. Do not ship enabled in production. |
 | `appVersion` | `String?` | Overrides the version auto-read from the bundle. |
 

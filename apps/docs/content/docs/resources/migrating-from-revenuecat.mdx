@@ -9,7 +9,7 @@ Rovenue covers the same subscription-management use cases as RevenueCat but runs
 
 | RevenueCat | Rovenue |
 |---|---|
-| `Purchases.configure(apiKey)` | `Rovenue.configure({ apiKey, baseUrl })` |
+| `Purchases.configure(apiKey)` | `Rovenue.configure({ apiKey })` — `baseUrl` is optional (self-hosting only) |
 | `getCustomerInfo().entitlements` | `entitlement(id)` / `entitlementsAll()` |
 | `logIn(appUserID)` | `identify(appUserId)` — server-side bind + auto-transfer of prior installs |
 | `Purchases.getOfferings()` | `Rovenue.getOfferings()` |

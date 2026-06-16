@@ -18,7 +18,7 @@ If you have not installed the SDK yet, start with [Installation](/docs/getting-s
 ```ts
 type RovenueConfig = {
   apiKey: string;      // public SDK key — prefix rov_pub_
-  baseUrl: string;     // edge endpoint
+  baseUrl?: string;    // edge endpoint — defaults to https://edge.rovenue.io
   debug?: boolean;
   appVersion?: string;
 };
@@ -85,7 +85,7 @@ type PurchaseResult = {
 <Step>
 ### Configure once at startup
 
-Call `configure()` before any other SDK method — in your app entry point, before the UI renders. Pass your public API key and the edge base URL.
+Call `configure()` before any other SDK method — in your app entry point, before the UI renders. Pass your public API key. `baseUrl` is optional and defaults to the hosted endpoint `https://edge.rovenue.io`.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -94,7 +94,6 @@ Call `configure()` before any other SDK method — in your app entry point, befo
 
     Rovenue.configure({
       apiKey: 'rov_pub_your_key_here',
-      baseUrl: 'https://edge.rovenue.io',
     });
     ```
 
@@ -105,8 +104,7 @@ Call `configure()` before any other SDK method — in your app entry point, befo
     import Rovenue
 
     Rovenue.configure(
-      apiKey: "rov_pub_your_key_here",
-      baseUrl: "https://edge.rovenue.io"
+      apiKey: "rov_pub_your_key_here"
     )
     ```
 
@@ -118,14 +116,17 @@ Call `configure()` before any other SDK method — in your app entry point, befo
 
     Rovenue.configure(
       context = this,
-      apiKey = "rov_pub_your_key_here",
-      baseUrl = "https://edge.rovenue.io"
+      apiKey = "rov_pub_your_key_here"
     )
     ```
 
     Call from `Application.onCreate()`. See [App lifecycle](/docs/guides/app-lifecycle).
   </Tab>
 </Tabs>
+
+<Callout type="info">
+**Self-hosting?** Pass `baseUrl` to point the SDK at your own deployment, e.g. RN `Rovenue.configure({ apiKey: 'rov_pub_...', baseUrl: 'https://api.acme.com' })`, Swift `Rovenue.configure(apiKey: "rov_pub_...", baseUrl: "https://api.acme.com")`, Kotlin `Rovenue.configure(apiKey = "rov_pub_...", baseUrl = "https://api.acme.com")`. The host must use `https://` — plain `http://` is accepted only for `localhost` during local development.
+</Callout>
 
 <Callout type="warn">
 Call `configure()` exactly **once** per process. Calling it a second time without first calling `shutdown()` is a programmer error. The SDK throws `NotConfiguredError` if any method is called before `configure()`.

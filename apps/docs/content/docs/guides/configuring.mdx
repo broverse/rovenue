@@ -23,7 +23,7 @@ Calling any SDK method before `configure` throws `NotConfigured`. Put
 ```ts
 type RovenueConfig = {
   apiKey: string;       // your public SDK key (prefix rov_pub_)
-  baseUrl: string;      // your Rovenue API base URL
+  baseUrl?: string;     // optional — defaults to https://edge.rovenue.io
   debug?: boolean;      // verbose logging; default false
   appVersion?: string;  // overrides the platform manifest value
 };
@@ -32,7 +32,7 @@ type RovenueConfig = {
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `apiKey` | `string` | Yes | Your **public** SDK key (`rov_pub_…`). Never use the secret key in the app. |
-| `baseUrl` | `string` | Yes | Your Rovenue API base URL (e.g. `https://edge.rovenue.io`). |
+| `baseUrl` | `string` | No | Your Rovenue API base URL. Defaults to the hosted endpoint `https://edge.rovenue.io`; override only when self-hosting. |
 | `debug` | `boolean` | No | When `true`, routes verbose logs to your log handler. Default `false`. |
 | `appVersion` | `string` | No | App version string. Auto-read from the platform manifest — only override for standalone JVM builds. |
 
@@ -70,7 +70,6 @@ Kotlin) at the very first line of your app's lifecycle hook.
 
     Rovenue.configure({
       apiKey: 'rov_pub_...',
-      baseUrl: 'https://edge.rovenue.io',
       debug: true,       // optional — enables verbose logging in dev
       appVersion: '1.2', // optional — inferred from app.json by default
     });
@@ -83,7 +82,6 @@ Kotlin) at the very first line of your app's lifecycle hook.
     // AppDelegate.application(_:didFinishLaunchingWithOptions:)
     Rovenue.configure(
       apiKey: "rov_pub_...",
-      baseUrl: "https://edge.rovenue.io",
       debug: true,        // optional
       appVersion: "1.2"   // optional — inferred from CFBundleShortVersionString
     )
@@ -96,13 +94,16 @@ Kotlin) at the very first line of your app's lifecycle hook.
     // Application.onCreate()
     Rovenue.configure(
       apiKey = "rov_pub_...",
-      baseUrl = "https://edge.rovenue.io",
       debug = true,        // optional
       appVersion = "1.2",  // optional — inferred from versionName
     )
     ```
   </Tab>
 </Tabs>
+
+<Callout type="info">
+**Self-hosting?** Pass `baseUrl` to point the SDK at your own deployment, e.g. RN `Rovenue.configure({ apiKey: 'rov_pub_...', baseUrl: 'https://api.acme.com' })`, Swift `Rovenue.configure(apiKey: "rov_pub_...", baseUrl: "https://api.acme.com")`, Kotlin `Rovenue.configure(apiKey = "rov_pub_...", baseUrl = "https://api.acme.com")`. The host must use `https://` — plain `http://` is accepted only for `localhost` during local development.
+</Callout>
 
 </Step>
 <Step>

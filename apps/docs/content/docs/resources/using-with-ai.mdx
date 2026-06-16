@@ -44,11 +44,15 @@ Paste the following block into any LLM before asking it to write Rovenue integra
 
 ## Configuration
 - Public API key prefix: rov_pub_
-- baseUrl: https://edge.rovenue.io
+- baseUrl: OPTIONAL — defaults to the hosted endpoint https://edge.rovenue.io. Only pass it when self-hosting; the host must use https:// (plain http:// is accepted only for localhost in local dev).
 - Call configure() once at app start, before any other SDK call.
-  RN:     Rovenue.configure({ apiKey: 'rov_pub_...', baseUrl: 'https://edge.rovenue.io' })
-  Swift:  Rovenue.configure(apiKey: "rov_pub_...", baseUrl: "https://edge.rovenue.io")
-  Kotlin: Rovenue.configure(apiKey = "rov_pub_...", baseUrl = "https://edge.rovenue.io", appVersion = ...)
+  RN:     Rovenue.configure({ apiKey: 'rov_pub_...' })
+  Swift:  Rovenue.configure(apiKey: "rov_pub_...")
+  Kotlin: Rovenue.configure(apiKey = "rov_pub_...", appVersion = ...)
+- Self-hosting override:
+  RN:     Rovenue.configure({ apiKey: 'rov_pub_...', baseUrl: 'https://api.acme.com' })
+  Swift:  Rovenue.configure(apiKey: "rov_pub_...", baseUrl: "https://api.acme.com")
+  Kotlin: Rovenue.configure(apiKey = "rov_pub_...", baseUrl = "https://api.acme.com", appVersion = ...)
 
 ## Core methods (TypeScript names; Swift/Kotlin mirror with idiomatic casing)
 configure(config)         — initialise SDK (call once)
@@ -79,7 +83,7 @@ useEntitlements()    — Entitlement[]
 useCreditBalance()   — number
 
 ## Key types
-type RovenueConfig  = { apiKey: string; baseUrl: string; debug?: boolean; appVersion?: string }
+type RovenueConfig  = { apiKey: string; baseUrl?: string; debug?: boolean; appVersion?: string }
 type User           = { rovenueId: string; appUserId: string | null }
 type Entitlement    = { id: string; isActive: boolean; productIdentifier: string; store: string; expiresIso?: string }
 type Offerings      = { current: Offering | null; all: Record<string, Offering> }

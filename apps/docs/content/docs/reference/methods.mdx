@@ -21,7 +21,7 @@ Initialise the SDK. Call this **once at app startup**, before any other Rovenue 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `apiKey` | `string` | Yes | Your project's public API key. Prefix `rov_pub_`. |
-| `baseUrl` | `string` | Yes | Edge endpoint. Use `https://edge.rovenue.io` for production. |
+| `baseUrl` | `string` | No | Edge endpoint. Defaults to the hosted endpoint `https://edge.rovenue.io`; override only when self-hosting (`https://`; `http://` allowed for `localhost` only). |
 | `debug` | `boolean` | No | Enable verbose SDK logging. Defaults to `false`. |
 | `appVersion` | `string` | No | App version string forwarded to the server for analytics. Defaults to the value reported by the OS. |
 
@@ -36,9 +36,9 @@ Initialise the SDK. Call this **once at app startup**, before any other Rovenue 
 
     Rovenue.configure({
       apiKey: 'rov_pub_…',
-      baseUrl: 'https://edge.rovenue.io',
       debug: __DEV__,
       appVersion: '3.1.0',
+      // baseUrl: 'https://api.acme.com', // optional — only when self-hosting
     });
     ```
   </Tab>
@@ -48,9 +48,9 @@ Initialise the SDK. Call this **once at app startup**, before any other Rovenue 
 
     Rovenue.configure(
         apiKey: "rov_pub_…",
-        baseUrl: "https://edge.rovenue.io",
         debug: true,
         appVersion: "3.1.0"
+        // baseUrl: "https://api.acme.com"  // optional — only when self-hosting
     )
     ```
   </Tab>
@@ -60,9 +60,9 @@ Initialise the SDK. Call this **once at app startup**, before any other Rovenue 
 
     Rovenue.configure(
         apiKey = "rov_pub_…",
-        baseUrl = "https://edge.rovenue.io",
         debug = BuildConfig.DEBUG,
         appVersion = BuildConfig.VERSION_NAME
+        // baseUrl = "https://api.acme.com"  // optional — only when self-hosting
     )
     ```
   </Tab>

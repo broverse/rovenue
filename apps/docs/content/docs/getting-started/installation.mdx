@@ -14,7 +14,7 @@ The Rovenue SDK shares a single Rust core (`librovenue`) across all three platfo
 ```ts
 type RovenueConfig = {
   apiKey: string;      // public SDK key — prefix rov_pub_
-  baseUrl: string;     // edge endpoint — https://edge.rovenue.io
+  baseUrl?: string;    // edge endpoint — defaults to https://edge.rovenue.io
   debug?: boolean;     // verbose log output; default false
   appVersion?: string; // override version reported to the server
 };
@@ -23,7 +23,7 @@ type RovenueConfig = {
 | Field | Type | Description |
 |-------|------|-------------|
 | `apiKey` | `string` | Public SDK key from the Rovenue dashboard. Prefix `rov_pub_`. |
-| `baseUrl` | `string` | Edge endpoint. Use `https://edge.rovenue.io` unless self-hosting. |
+| `baseUrl` | `string?` | Optional. Edge endpoint; defaults to `https://edge.rovenue.io`. Override only when self-hosting. |
 | `debug` | `boolean?` | Enables verbose SDK logging. Keep `false` in production. |
 | `appVersion` | `string?` | App version string reported to the server. Defaults to the OS-reported value. |
 
@@ -154,7 +154,6 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
 
     Rovenue.configure({
       apiKey: 'rov_pub_your_key_here',
-      baseUrl: 'https://edge.rovenue.io',
     });
     ```
 
@@ -173,8 +172,7 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
       ) -> Bool {
         Rovenue.configure(
-          apiKey: "rov_pub_your_key_here",
-          baseUrl: "https://edge.rovenue.io"
+          apiKey: "rov_pub_your_key_here"
         )
         return true
       }
@@ -191,8 +189,7 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
     struct YourApp: App {
       init() {
         Rovenue.configure(
-          apiKey: "rov_pub_your_key_here",
-          baseUrl: "https://edge.rovenue.io"
+          apiKey: "rov_pub_your_key_here"
         )
       }
 
@@ -214,8 +211,7 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
         super.onCreate()
         Rovenue.configure(
           context = this,
-          apiKey = "rov_pub_your_key_here",
-          baseUrl = "https://edge.rovenue.io"
+          apiKey = "rov_pub_your_key_here"
         )
       }
     }
@@ -228,6 +224,10 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
     ```
   </Tab>
 </Tabs>
+
+<Callout type="info">
+**Self-hosting?** Pass `baseUrl` to point the SDK at your own deployment, e.g. RN `Rovenue.configure({ apiKey: 'rov_pub_...', baseUrl: 'https://api.acme.com' })`, Swift `Rovenue.configure(apiKey: "rov_pub_...", baseUrl: "https://api.acme.com")`, Kotlin `Rovenue.configure(apiKey = "rov_pub_...", baseUrl = "https://api.acme.com")`. The host must use `https://` — plain `http://` is accepted only for `localhost` during local development.
+</Callout>
 
 <Callout type="warn">
 Call `configure()` exactly once per process. Calling it again after initialisation throws `NotConfiguredError` on iOS/Android and a `console.error` on React Native. If you need to change the key (e.g. in a multi-tenant app), call `shutdown()` first.
