@@ -84,3 +84,20 @@ describe("GET /v1/me/access (auto-provision)", () => {
     expect(rows).toHaveLength(1);
   });
 });
+
+function getEntitlements(userId: string) {
+  return buildApp().request("/v1/me/entitlements", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${PUBLIC_KEY}`, "X-Rovenue-App-User-Id": userId },
+  });
+}
+
+describe("GET /v1/me/entitlements", () => {
+  it("returns { data: { entitlements: {} } } for a fresh user (SDK contract shape)", async () => {
+    const res = await getEntitlements(`ent-${createId().slice(0, 8)}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.data).toHaveProperty("entitlements");
+    expect(body.data.entitlements).toEqual({});
+  });
+});

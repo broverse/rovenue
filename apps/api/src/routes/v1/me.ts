@@ -86,6 +86,17 @@ export const meRoute = new Hono()
     return c.json(ok({ access }));
   })
   // -------------------------------------------------------------
+  // GET /me/entitlements — SDK entitlements contract
+  // -------------------------------------------------------------
+  // Same data as /me/access; reshaped to { data: { entitlements } } so the
+  // SDK core (entitlements/reader.rs) deserializes it. AccessResponseEntry
+  // is byte-identical to the SDK's EntitlementWire.
+  .get("/entitlements", async (c) => {
+    const subscriber = c.get("subscriber");
+    const entitlements = await buildAccessResponse(subscriber.id);
+    return c.json(ok({ entitlements }));
+  })
+  // -------------------------------------------------------------
   // GET /me/credits
   // -------------------------------------------------------------
   .get("/credits", async (c) => {
