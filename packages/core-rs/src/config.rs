@@ -65,7 +65,9 @@ pub fn resolve_base_url(input: &str) -> RovenueResult<String> {
         let is_local = host == "localhost"
             || host.starts_with("localhost:")
             || host.starts_with("localhost/")
-            || host.starts_with("127.0.0.1")
+            || host == "127.0.0.1"
+            || host.starts_with("127.0.0.1:")
+            || host.starts_with("127.0.0.1/")
             || host.starts_with("[::1]");
         if is_local {
             return Ok(url.to_string());

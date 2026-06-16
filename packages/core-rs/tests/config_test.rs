@@ -40,7 +40,20 @@ fn http_localhost_is_allowed() {
     assert!(resolve_base_url("http://localhost:3000").is_ok());
     assert!(resolve_base_url("http://127.0.0.1:3000/v1").is_ok());
     assert!(resolve_base_url("http://[::1]:3000").is_ok());
+    assert!(resolve_base_url("http://[::1]").is_ok());
     assert!(resolve_base_url("http://localhostevil.com").is_err());
+}
+
+#[test]
+fn http_non_loopback_127_address_is_rejected() {
+    // 127.0.0.100 is NOT loopback-localhost; must not slip through the http gate.
+    assert!(resolve_base_url("http://127.0.0.100:3000").is_err());
+}
+
+#[test]
+fn udl_default_matches_const() {
+    // If this literal changes, update the `base_url` default in librovenue.udl too.
+    assert_eq!(DEFAULT_BASE_URL, "https://api.rovenue.io");
 }
 
 #[test]

@@ -177,6 +177,7 @@ impl RovenueCore {
         if config.api_key.trim().is_empty() {
             return Err(RovenueError::InvalidApiKey);
         }
+        let config = config.normalized()?;
         let store = Arc::new(CacheStore::open_in_memory()?);
         Self::from_store(config, store)
     }
