@@ -110,9 +110,13 @@ export interface RovenueModuleSpec {
   setPushToken(token: string | null): Promise<void>;
   flushAttributes(): Promise<number>;
 
-  // Required by `new EventEmitter(nativeModule)` — Expo's runtime checks
-  // these exist; our mock implements them as no-ops because emit routing
-  // happens through __addChangeListener / __emit on the mock state.
+  // NativeEventEmitter bookkeeping hooks. On Expo SDK 51 (expo-modules-core
+  // 1.x) the legacy `new EventEmitter(nativeModule)` wrapper calls these on
+  // subscribe/unsubscribe — Expo's runtime checks they exist. On SDK 52+
+  // the module itself is the emitter and exposes a real 2-arg
+  // `addListener(name, listener)`; see core/native.ts for how getEmitter()
+  // picks the right path. Our mock implements them as no-ops because emit
+  // routing happens through __addChangeListener / __emit on the mock state.
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }
