@@ -27,19 +27,6 @@ export async function listOfferings(
     .orderBy(desc(offerings.isDefault), asc(offerings.identifier));
 }
 
-export async function listOfferingsByAccess(
-  db: Db,
-  projectId: string,
-  accessId: string,
-): Promise<Offering[]> {
-  return db
-    .select()
-    .from(offerings)
-    .where(
-      and(eq(offerings.projectId, projectId), eq(offerings.accessId, accessId)),
-    )
-    .orderBy(desc(offerings.isDefault), asc(offerings.identifier));
-}
 
 export async function findDefaultOffering(
   db: Db,
@@ -165,9 +152,8 @@ export async function createOffering(
 
 export interface UpdateOfferingInput {
   identifier?: string;
-  accessId?: string;
   isDefault?: boolean;
-  products?: unknown;
+  packages?: unknown;
   metadata?: Record<string, unknown>;
 }
 

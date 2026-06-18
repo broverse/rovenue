@@ -519,6 +519,13 @@
       "when": 1781561600000,
       "tag": "0073_notification_delivery_sending",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1781800000000,
+      "tag": "0074_offerings_decouple_packages",
+      "breakpoints": true
     }
   ]
 }

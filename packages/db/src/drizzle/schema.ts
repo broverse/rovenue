@@ -615,9 +615,12 @@ export const products = pgTable(
 );
 
 // =============================================================
-// offerings (paywall configurations — was product_groups)
+// offerings (paywall configurations — RevenueCat-style)
 //
-// Each offering is scoped to one Access; A/B variants land here.
+// Decoupled from access levels: an offering is a project-scoped
+// collection of packages. The entitlement a purchase grants comes
+// from the purchased product's accessIds[], not the offering.
+// At most one offering per project is the default ("current").
 // =============================================================
 
 export const offerings = pgTable(
@@ -627,13 +630,10 @@ export const offerings = pgTable(
     projectId: text("projectId")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    accessId: text("accessId")
-      .notNull()
-      .references(() => access.id, { onDelete: "cascade" }),
     identifier: text("identifier").notNull(),
     isDefault: boolean("isDefault").notNull().default(false),
-    // Array of product references with order/promoted flags.
-    products: jsonb("products").notNull().default(sql`'[]'::jsonb`),
+    // Array of packages: { identifier, productId, order, isPromoted, metadata? }
+    packages: jsonb("packages").notNull().default(sql`'[]'::jsonb`),
     metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
     createdAt: timestamp("createdAt", { withTimezone: true })
       .notNull()
@@ -646,9 +646,11 @@ export const offerings = pgTable(
     projectIdIdentifierKey: uniqueIndex(
       "offerings_projectId_identifier_key",
     ).on(t.projectId, t.identifier),
-    accessIdIsDefaultIdx: index(
-      "offerings_accessId_isDefault_idx",
-    ).on(t.accessId, t.isDefault),
+    // Hardening: at most one default offering per project, enforced
+    // at the DB level in addition to the transactional clear in the repo.
+    projectIdDefaultKey: uniqueIndex("offerings_projectId_default_key")
+      .on(t.projectId)
+      .where(sql`${t.isDefault}`),
   }),
 );
 
