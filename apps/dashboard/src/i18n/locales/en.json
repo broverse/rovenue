@@ -213,6 +213,7 @@
     "sections": {
       "overview": "OVERVIEW",
       "catalog": "CATALOG",
+      "products": "Products",
       "customers": "CUSTOMERS",
       "growth": "GROWTH",
       "ledger": "LEDGER",
@@ -225,7 +226,8 @@
       "live": "Live events",
       "products": "Products",
       "groups": "Product groups",
-      "access": "Access",
+      "offerings": "Offerings",
+      "access": "Access Levels",
       "subscribers": "Customers",
       "subscriptions": "Subscriptions",
       "transactions": "Transactions",
@@ -862,6 +864,24 @@
       "products": "products",
       "perMonth": "/mo",
       "default": "Default"
+    },
+    "selectPrompt": "Select an offering to view its details.",
+    "packages": {
+      "heading": "Packages",
+      "subtitle": "SDK package identifiers and their bound products.",
+      "setDefault": "Set as current",
+      "unsetDefault": "Remove as default",
+      "empty": "No packages yet. Link a product to create one.",
+      "accessHeading": "Access levels granted",
+      "unknownProduct": "Unknown product",
+      "promoted": "Yes",
+      "notPromoted": "No",
+      "col": {
+        "identifier": "Identifier",
+        "product": "Product",
+        "order": "Order",
+        "promoted": "Promoted"
+      }
     },
     "kpi": {
       "mrr": "MRR",
