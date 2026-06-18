@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { MemberRole, accessIdSchema, drizzle } from "@rovenue/db";
+import { MemberRole, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
@@ -11,14 +11,18 @@ import { ok } from "../../lib/response";
 import type {
   DashboardOfferingRow,
   DashboardOfferingsListResponse,
-  OfferingMembership,
+  OfferingPackage,
 } from "@rovenue/shared";
 
 // =============================================================
 // Dashboard: Offerings CRUD (renamed from product-groups)
 // =============================================================
 
-const membershipSchema = z.object({
+const PACKAGE_ID_RE =
+  /^(\$rc_(weekly|monthly|annual|lifetime)|[a-z0-9][a-z0-9_-]*)$/;
+
+const packageSchema = z.object({
+  identifier: z.string().trim().min(1).max(160).regex(PACKAGE_ID_RE),
   productId: z.string().min(1),
   order: z.number().int().min(0).max(10_000),
   isPromoted: z.boolean().default(false),
@@ -27,42 +31,37 @@ const membershipSchema = z.object({
 
 const createBodySchema = z.object({
   identifier: z.string().trim().min(1).max(160),
-  accessId: accessIdSchema,
   isDefault: z.boolean().optional(),
-  products: z.array(membershipSchema).optional(),
+  packages: z.array(packageSchema).optional(),
   metadata: z.record(z.unknown()).optional(),
 });
 
 const updateBodySchema = z
   .object({
     identifier: z.string().trim().min(1).max(160).optional(),
-    accessId: accessIdSchema.optional(),
     isDefault: z.boolean().optional(),
-    products: z.array(membershipSchema).optional(),
+    packages: z.array(packageSchema).optional(),
     metadata: z.record(z.unknown()).optional(),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), {
     message: "At least one field is required",
   });
 
-function parseMemberships(raw: unknown): OfferingMembership[] {
+function parsePackages(raw: unknown): OfferingPackage[] {
   if (!Array.isArray(raw)) return [];
-  const out: OfferingMembership[] = [];
+  const out: OfferingPackage[] = [];
   for (const item of raw) {
     if (
       typeof item === "object" &&
       item !== null &&
+      typeof (item as { identifier?: unknown }).identifier === "string" &&
       typeof (item as { productId?: unknown }).productId === "string" &&
       typeof (item as { order?: unknown }).order === "number" &&
       typeof (item as { isPromoted?: unknown }).isPromoted === "boolean"
     ) {
-      const m = item as {
-        productId: string;
-        order: number;
-        isPromoted: boolean;
-        metadata?: Record<string, unknown>;
-      };
+      const m = item as OfferingPackage;
       out.push({
+        identifier: m.identifier,
         productId: m.productId,
         order: m.order,
         isPromoted: m.isPromoted,
@@ -76,9 +75,8 @@ function parseMemberships(raw: unknown): OfferingMembership[] {
 function toWire(row: {
   id: string;
   identifier: string;
-  accessId: string;
   isDefault: boolean;
-  products: unknown;
+  packages: unknown;
   metadata: unknown;
   createdAt: Date;
   updatedAt: Date;
@@ -86,9 +84,8 @@ function toWire(row: {
   return {
     id: row.id,
     identifier: row.identifier,
-    accessId: row.accessId,
     isDefault: row.isDefault,
-    products: parseMemberships(row.products),
+    packages: parsePackages(row.packages),
     metadata: (row.metadata as Record<string, unknown> | null) ?? {},
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -110,18 +107,6 @@ async function assertProductsExist(
   if (missing.length > 0) {
     throw new HTTPException(400, {
       message: `Unknown product ids: ${missing.join(", ")}`,
-    });
-  }
-}
-
-async function assertAccessIdExists(
-  projectId: string,
-  accessId: string,
-): Promise<void> {
-  const row = await drizzle.accessCatalogRepo.findById(drizzle.db, accessId);
-  if (!row || row.projectId !== projectId) {
-    throw new HTTPException(400, {
-      message: `Unknown access id: ${accessId}`,
     });
   }
 }
@@ -161,20 +146,18 @@ export const offeringsDashboardRoute = new Hono()
         message: `Offering identifier already in use: ${body.identifier}`,
       });
     }
-    await assertAccessIdExists(projectId, body.accessId);
-    if (body.products) {
+    if (body.packages) {
       await assertProductsExist(
         projectId,
-        body.products.map((p) => p.productId),
+        body.packages.map((p) => p.productId),
       );
     }
 
     const row = await drizzle.offeringRepo.createOffering(drizzle.db, {
       projectId,
-      accessId: body.accessId,
       identifier: body.identifier,
       isDefault: body.isDefault ?? false,
-      products: body.products ?? [],
+      packages: body.packages ?? [],
       metadata: body.metadata ?? {},
     });
     purgeProjectCatalogCache(projectId);
@@ -221,13 +204,10 @@ export const offeringsDashboardRoute = new Hono()
         });
       }
     }
-    if (body.accessId) {
-      await assertAccessIdExists(projectId, body.accessId);
-    }
-    if (body.products) {
+    if (body.packages) {
       await assertProductsExist(
         projectId,
-        body.products.map((p) => p.productId),
+        body.packages.map((p) => p.productId),
       );
     }
 
