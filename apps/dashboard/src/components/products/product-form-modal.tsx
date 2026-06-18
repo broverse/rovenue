@@ -1,31 +1,23 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
 import { Dialog } from "@base-ui-components/react/dialog";
-import { Popover } from "@base-ui-components/react/popover";
-import { Check, ChevronDown, Plus, X } from "lucide-react";
+import { X } from "lucide-react";
 import type {
-  DashboardOfferingRow,
-  DashboardOfferingUpdateInput,
   DashboardProductCreateInput,
   DashboardProductRow,
   DashboardProductUpdateInput,
-  OfferingMembership,
   ProductTypeName,
 } from "@rovenue/shared";
-import { Button, buttonVariants } from "../../ui/button";
-import { Checkbox } from "../../ui/checkbox";
+import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { Select } from "../../ui/select";
 import { Switch } from "../../ui/switch";
 import { cn } from "../../lib/cn";
-import { api } from "../../lib/api";
 import {
   useCreateProduct,
   useProductById,
   useUpdateProduct,
 } from "../../lib/hooks/useProjectProducts";
-import { useProjectOfferings } from "../../lib/hooks/useProjectOfferings";
 import { useProjectAccess } from "../../lib/hooks/useProjectAccess";
 
 type Props = {
@@ -86,20 +78,6 @@ function rowToForm(row: DashboardProductRow): FormState {
   };
 }
 
-/** Set of offering ids that currently include the given product. */
-function membershipsFor(
-  offerings: ReadonlyArray<DashboardOfferingRow>,
-  productId: string | null,
-): Set<string> {
-  const out = new Set<string>();
-  if (!productId) return out;
-  for (const g of offerings) {
-    if (g.packages.some((m: OfferingMembership) => m.productId === productId))
-      out.add(g.id);
-  }
-  return out;
-}
-
 export function ProductFormModal({
   projectId,
   open,
@@ -110,68 +88,31 @@ export function ProductFormModal({
   const { t } = useTranslation();
   const mode: "create" | "edit" = editProductId ? "edit" : "create";
 
-  const qc = useQueryClient();
   const create = useCreateProduct(projectId);
   const update = useUpdateProduct(projectId);
   const existing = useProductById(projectId, mode === "edit" ? editProductId! : null);
-  const groupsQuery = useProjectOfferings(projectId);
   const accessQuery = useProjectAccess(projectId);
 
-  const allGroups = useMemo(
-    () => groupsQuery.data?.offerings ?? [],
-    [groupsQuery.data],
-  );
   const accessRows = accessQuery.data?.rows ?? [];
 
   const [form, setForm] = useState<FormState>(EMPTY);
-  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const [initialGroupIds, setInitialGroupIds] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const [syncingOfferings, setSyncingOfferings] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset whenever the modal re-opens or the target product changes. In edit
-  // mode we wait until both the product row and the group list arrive before
-  // hydrating so the checkbox state doesn't flash empty.
+  // Reset whenever the modal re-opens or the target product changes.
   useEffect(() => {
     if (!open) return;
     setError(null);
     if (mode === "create") {
       setForm(EMPTY);
-      setSelectedGroupIds(new Set());
-      setInitialGroupIds(new Set());
-    } else if (existing.data?.product && groupsQuery.data) {
+    } else if (existing.data?.product) {
       setForm(rowToForm(existing.data.product));
-      const current = membershipsFor(allGroups, editProductId ?? null);
-      setSelectedGroupIds(current);
-      setInitialGroupIds(current);
     }
-  }, [
-    open,
-    mode,
-    editProductId,
-    existing.data?.product,
-    groupsQuery.data,
-    allGroups,
-  ]);
+  }, [open, mode, editProductId, existing.data?.product]);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
-  const toggleGroup = (id: string) =>
-    setSelectedGroupIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-
-  const loadingExisting =
-    (mode === "edit" && existing.isPending) ||
-    (mode === "edit" && groupsQuery.isPending);
+  const loadingExisting = mode === "edit" && existing.isPending;
 
   const validation = useMemo(() => {
     if (loadingExisting) return null;
@@ -189,70 +130,7 @@ export function ProductFormModal({
     return null;
   }, [form, loadingExisting]);
 
-  const submitting =
-    create.isPending || update.isPending || syncingOfferings;
-
-  /**
-   * Apply the form's selected-offering set to the project: for each offering
-   * that gained the product, PATCH with the product appended; for each that
-   * lost it, PATCH with the product removed. Runs sequentially so the React
-   * Query cache stays consistent — our `allGroups` snapshot already encodes
-   * what needs to change so we don't need to re-read between calls.
-   *
-   * Implemented as a raw `api()` PATCH per offering because
-   * `useUpdateOffering(projectId, id)` is per-id-bound and hooks can't be
-   * called inside a loop. We invalidate the offerings cache once at the end.
-   */
-  const syncGroupMemberships = async (productId: string) => {
-    const wantedIn = selectedGroupIds;
-    const wasIn =
-      mode === "edit"
-        ? initialGroupIds
-        : new Set<string>(); // brand-new products start with no memberships
-
-    const pending: Array<{ offeringId: string; body: DashboardOfferingUpdateInput }> = [];
-    for (const g of allGroups) {
-      const want = wantedIn.has(g.id);
-      const have = wasIn.has(g.id);
-      if (want === have) continue;
-
-      let packages: OfferingMembership[];
-      if (want) {
-        const nextOrder =
-          g.packages.length === 0
-            ? 0
-            : Math.max(
-                ...g.packages.map((m: OfferingMembership) => m.order ?? 0),
-              ) + 1;
-        packages = [
-          ...g.packages,
-          { identifier: `custom_${productId.slice(0, 8)}`, productId, order: nextOrder, isPromoted: false },
-        ];
-      } else {
-        packages = g.packages.filter(
-          (m: OfferingMembership) => m.productId !== productId,
-        );
-      }
-
-      pending.push({ offeringId: g.id, body: { packages } });
-    }
-
-    if (pending.length === 0) return;
-    setSyncingOfferings(true);
-    try {
-      // Sequential to keep server-side ordering deterministic and avoid
-      // racing PATCHes against overlapping offerings.
-      for (const { offeringId, body } of pending) {
-        await api(`/dashboard/projects/${projectId}/offerings/${offeringId}`, {
-          method: "PATCH",
-          body: JSON.stringify(body),
-        });
-      }
-    } finally {
-      setSyncingOfferings(false);
-      await qc.invalidateQueries({ queryKey: ["offerings"] });
-    }
-  };
+  const submitting = create.isPending || update.isPending;
 
   const submit = async () => {
     if (validation || submitting || loadingExisting) return;
@@ -309,7 +187,6 @@ export function ProductFormModal({
         savedId = res.product.id;
       }
 
-      await syncGroupMemberships(savedId);
       onSaved?.(savedId);
       onClose();
     } catch (e) {
@@ -366,10 +243,7 @@ export function ProductFormModal({
                 form={form}
                 setForm={setForm}
                 set={set}
-                groups={allGroups}
                 accessRows={accessRows}
-                selectedGroupIds={selectedGroupIds}
-                onToggleGroup={toggleGroup}
                 lockIdentifier={mode === "edit"}
               />
             )}
@@ -411,19 +285,13 @@ function FormBody({
   form,
   setForm,
   set,
-  groups,
   accessRows,
-  selectedGroupIds,
-  onToggleGroup,
   lockIdentifier,
 }: {
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
   set: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
-  groups: ReadonlyArray<DashboardOfferingRow>;
   accessRows: ReadonlyArray<{ id: string; identifier: string; displayName: string }>;
-  selectedGroupIds: ReadonlySet<string>;
-  onToggleGroup: (id: string) => void;
   lockIdentifier: boolean;
 }) {
   const { t } = useTranslation();
@@ -576,12 +444,6 @@ function FormBody({
         </p>
       </div>
 
-      <ProductGroupsField
-        groups={groups}
-        selectedGroupIds={selectedGroupIds}
-        onToggle={onToggleGroup}
-      />
-
       <label className="flex items-center justify-between rounded-md border border-rv-divider bg-rv-c2/50 px-3 py-2.5">
         <span className="text-[13px]">{t("products.form.fields.isActive")}</span>
         <Switch
@@ -590,112 +452,6 @@ function FormBody({
           ariaLabel={t("products.form.fields.isActive")}
         />
       </label>
-    </div>
-  );
-}
-
-function ProductGroupsField({
-  groups,
-  selectedGroupIds,
-  onToggle,
-}: {
-  groups: ReadonlyArray<DashboardOfferingRow>;
-  selectedGroupIds: ReadonlySet<string>;
-  onToggle: (id: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const selected = useMemo(
-    () => groups.filter((g) => selectedGroupIds.has(g.id)),
-    [groups, selectedGroupIds],
-  );
-
-  return (
-    <div>
-      <div className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-rv-mute-500">
-        {t("products.form.fields.groups")}
-      </div>
-
-      <Popover.Root open={open} onOpenChange={setOpen}>
-        <Popover.Trigger
-          className={cn(
-            buttonVariants({ variant: "flat", size: "md" }),
-            "h-auto w-full justify-between rounded-md border-rv-divider bg-rv-c2 px-3 py-2 text-[13px] font-normal",
-          )}
-        >
-          <span className="min-w-0 flex-1 truncate text-left">
-            {selected.length === 0 ? (
-              <span className="text-rv-mute-500">
-                {groups.length === 0
-                  ? t("products.form.fields.groupsEmptyPlaceholder")
-                  : t("products.form.fields.groupsPlaceholder")}
-              </span>
-            ) : (
-              <span className="flex flex-wrap gap-1">
-                {selected.slice(0, 3).map((g) => (
-                  <span
-                    key={g.id}
-                    className="rounded-md border border-rv-divider bg-rv-c1 px-1.5 py-0.5 font-rv-mono text-[11px] text-rv-mute-800"
-                  >
-                    {g.identifier}
-                  </span>
-                ))}
-                {selected.length > 3 && (
-                  <span className="rounded-md border border-rv-divider bg-rv-c1 px-1.5 py-0.5 font-rv-mono text-[11px] text-rv-mute-500">
-                    +{selected.length - 3}
-                  </span>
-                )}
-              </span>
-            )}
-          </span>
-          <ChevronDown size={13} className="shrink-0 text-rv-mute-500" />
-        </Popover.Trigger>
-        <Popover.Portal>
-          <Popover.Positioner sideOffset={6} align="start" className="z-[60] w-[var(--anchor-width)]">
-            <Popover.Popup className="max-h-[260px] w-full overflow-y-auto rounded-lg border border-rv-divider-strong bg-rv-c3 p-1 shadow-[0_10px_30px_rgba(0,0,0,0.5)] focus:outline-none animate-rv-menu-in">
-              {groups.length === 0 ? (
-                <div className="px-3 py-3 text-center text-[12px] text-rv-mute-500">
-                  {t("products.form.fields.groupsEmpty")}
-                </div>
-              ) : (
-                groups.map((g) => {
-                  const checked = selectedGroupIds.has(g.id);
-                  return (
-                    <button
-                      key={g.id}
-                      type="button"
-                      onClick={() => onToggle(g.id)}
-                      className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-rv-mute-700 outline-none hover:bg-rv-c4 hover:text-foreground"
-                    >
-                      <Checkbox
-                        checked={checked}
-                        onChange={() => onToggle(g.id)}
-                        ariaLabel={g.identifier}
-                      />
-                      <span className="min-w-0 flex-1 truncate font-rv-mono text-[12px]">
-                        {g.identifier}
-                      </span>
-                      {g.isDefault && (
-                        <span className="rounded bg-rv-accent-500/[0.15] px-1 py-0.5 text-[10px] text-rv-accent-500">
-                          {t("products.form.fields.groupsDefaultBadge")}
-                        </span>
-                      )}
-                      {checked && !g.isDefault && (
-                        <Check size={12} className="text-rv-accent-500" />
-                      )}
-                    </button>
-                  );
-                })
-              )}
-            </Popover.Popup>
-          </Popover.Positioner>
-        </Popover.Portal>
-      </Popover.Root>
-
-      <p className="mt-1 flex items-center gap-1 text-[11px] text-rv-mute-500">
-        <Plus size={11} />
-        {t("products.form.fields.groupsHint")}
-      </p>
     </div>
   );
 }
