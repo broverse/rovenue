@@ -226,7 +226,7 @@
       "products": "Products",
       "groups": "Product groups",
       "access": "Access",
-      "subscribers": "Subscribers",
+      "subscribers": "Customers",
       "subscriptions": "Subscriptions",
       "transactions": "Transactions",
       "funnels": "Funnels",
@@ -274,8 +274,8 @@
     "newProject": "New project"
   },
   "breadcrumb": {
-    "subscriber": "Subscriber",
-    "subscribers": "Subscribers",
+    "subscriber": "Customer",
+    "subscribers": "Customers",
     "subscriptions": "Subscriptions",
     "settings": "Settings",
     "overview": "Overview",
@@ -757,10 +757,91 @@
       "search": "to focus search"
     },
     "form": {
+      "createTitle": "Create product",
+      "createSubtitle": "Define a product and map it to your store identifiers.",
+      "createSubmit": "Create product",
+      "editTitle": "Edit product",
+      "editSubtitle": "Update this product's details and store mapping.",
+      "editSubmit": "Save changes",
+      "submitting": "Saving…",
+      "types": {
+        "subscription": "Subscription",
+        "consumable": "Consumable",
+        "nonConsumable": "Non-consumable"
+      },
+      "periods": {
+        "weekly": "Weekly",
+        "monthly": "Monthly",
+        "yearly": "Yearly"
+      },
+      "fields": {
+        "identifier": "Identifier",
+        "identifierHint": "A unique slug for this product (lowercase letters, numbers, underscores).",
+        "identifierLockedHint": "The identifier can't be changed after a product is created.",
+        "displayName": "Display name",
+        "displayNamePlaceholder": "Pro Monthly",
+        "type": "Type",
+        "period": "Billing period",
+        "creditAmount": "Credit amount",
+        "storeIds": "Store identifiers",
+        "groups": "Offerings",
+        "groupsHint": "Add this product to one or more offerings.",
+        "groupsPlaceholder": "Select offerings…",
+        "groupsEmptyPlaceholder": "No offerings available",
+        "groupsEmpty": "No offerings yet. Create one from the Offerings page first.",
+        "groupsDefaultBadge": "Default",
+        "isActive": "Active"
+      },
+      "errors": {
+        "identifier-required": "Identifier is required.",
+        "identifier-invalid": "Use only lowercase letters, numbers and underscores.",
+        "name-required": "Display name is required.",
+        "credit-invalid": "Enter a valid credit amount.",
+        "store-required": "Add at least one store identifier.",
+        "unknown": "Something went wrong. Please try again."
+      },
       "access": {
         "label": "Access granted",
         "hint": "Pick one or more access rows from the catalog. Subscribers see these as access.identifier in the SDK.",
         "empty": "No access defined yet. Create one from the Access page first."
+      }
+    },
+    "import": {
+      "title": "Import from store",
+      "subtitle": "Paste store identifiers to bulk-create products. Anything that already exists is skipped.",
+      "resultsSubtitle": "Here's what was created and skipped.",
+      "fields": {
+        "store": "Store",
+        "type": "Product type",
+        "storeIds": "Store identifiers",
+        "storeIdsHint": "One identifier per line, or comma-separated. Duplicates are removed automatically."
+      },
+      "stores": {
+        "ios": "App Store (iOS)",
+        "android": "Google Play (Android)",
+        "web": "Web (Stripe)"
+      },
+      "preview_one": "{{count}} identifier ready to import",
+      "preview_other": "{{count}} identifiers ready to import",
+      "submit_one": "Import {{count}} product",
+      "submit_other": "Import {{count}} products",
+      "submitting": "Importing…",
+      "errors": {
+        "unknown": "Something went wrong during import. Please try again."
+      },
+      "results": {
+        "created_one": "{{count}} created",
+        "created_other": "{{count}} created",
+        "skipped_one": "{{count}} skipped",
+        "skipped_other": "{{count}} skipped",
+        "storeId": "Store ID",
+        "identifier": "Identifier",
+        "status": "Status"
+      },
+      "skipReasons": {
+        "duplicate-identifier": "Identifier already exists",
+        "duplicate-store-id": "Store ID already exists",
+        "invalid": "Invalid identifier"
       }
     }
   },
@@ -916,16 +997,16 @@
     }
   },
   "subscribers": {
-    "title": "Subscribers",
+    "title": "Customers",
     "subtitle": "End users with at least one purchase, trial, or granted access on {{project}} · Production.",
     "searchAria": "Search",
     "searchPlaceholder": "Search by app user id...",
-    "empty": "No subscribers",
+    "empty": "No customers",
     "actions": {
       "findById": "Find by ID"
     },
     "kpi": {
-      "total": "Total subscribers",
+      "total": "Total customers",
       "totalDelta": "▲ +382 · last 28d",
       "active": "Active",
       "activeBreakdown": "{{percent}}% of total · ",
@@ -947,7 +1028,8 @@
     "toolbar": {
       "lastRange": "Last 28d",
       "sortByActivity": "Sort: Last activity",
-      "of": "of"
+      "of": "of",
+      "customers": "customers"
     },
     "filters": {
       "search": "Search by user_id, email, country…",
@@ -1008,13 +1090,15 @@
       "plan": "Plan",
       "status": "Status",
       "access": "Access",
+      "entitlements": "Entitlements",
       "country": "Country",
       "platform": "Platform",
       "ltv": "LTV",
       "mrr": "MRR",
       "risk": "Churn risk",
       "lastActivity": "Last activity",
-      "selectAllAria": "Select all visible subscribers",
+      "selectAllAria": "Select all visible customers",
+      "rovenueId": "Rovenue ID",
       "renewsIn": "renews in {{value}}",
       "billing": "billing"
     },
@@ -1054,8 +1138,10 @@
       },
       "actions": {
         "grant": "Grant",
-        "refund": "Refund",
-        "more": "More"
+        "more": "More",
+        "export": "Export data",
+        "anonymize": "Anonymize (GDPR)",
+        "anonymizeConfirm": "Anonymize this customer? This permanently scrubs their personal data and cannot be undone."
       }
     },
     "timeline": {
