@@ -39,12 +39,18 @@ describe("listAppStoreCatalog", () => {
           links: {},
         });
       }
+      // New shape: first list groups, then list subscriptions per group
+      if (u.includes("/subscriptionGroups/grp1/subscriptions")) {
+        return jsonResponse({
+          data: [
+            { attributes: { productId: "pro_monthly", name: "Pro Monthly" } },
+          ],
+          links: {},
+        });
+      }
       if (u.includes("/subscriptionGroups")) {
         return jsonResponse({
           data: [{ id: "grp1" }],
-          included: [
-            { type: "subscriptions", attributes: { productId: "pro_monthly", name: "Pro Monthly" } },
-          ],
           links: {},
         });
       }
@@ -68,5 +74,72 @@ describe("listAppStoreCatalog", () => {
     await expect(
       listAppStoreCatalog(config, fetchImpl as unknown as typeof fetch),
     ).rejects.toThrow(/403|Forbidden/);
+  });
+
+  it("paginates subscriptions and IAPs across multiple pages", async () => {
+    const BASE = "https://api.appstoreconnect.apple.com";
+    const fetchImpl = vi.fn(async (url: string | URL) => {
+      const u = String(url);
+
+      // IAP page 1 — has next
+      if (u === `${BASE}/v1/apps/1234567890/inAppPurchasesV2?limit=200`) {
+        return jsonResponse({
+          data: [
+            { attributes: { productId: "coins_100", name: "100 Coins", inAppPurchaseType: "CONSUMABLE" } },
+          ],
+          links: { next: `${BASE}/v1/apps/1234567890/inAppPurchasesV2?limit=200&cursor=page2` },
+        });
+      }
+      // IAP page 2 — no next
+      if (u === `${BASE}/v1/apps/1234567890/inAppPurchasesV2?limit=200&cursor=page2`) {
+        return jsonResponse({
+          data: [
+            { attributes: { productId: "remove_ads", name: "Remove Ads", inAppPurchaseType: "NON_CONSUMABLE" } },
+          ],
+          links: {},
+        });
+      }
+
+      // Subscription groups (single page, one group)
+      if (u === `${BASE}/v1/apps/1234567890/subscriptionGroups?limit=200`) {
+        return jsonResponse({
+          data: [{ id: "grp1" }],
+          links: {},
+        });
+      }
+
+      // Subscriptions for grp1, page 1 — has next
+      if (u === `${BASE}/v1/subscriptionGroups/grp1/subscriptions?limit=200`) {
+        return jsonResponse({
+          data: [
+            { attributes: { productId: "pro_monthly", name: "Pro Monthly" } },
+          ],
+          links: { next: `${BASE}/v1/subscriptionGroups/grp1/subscriptions?limit=200&cursor=page2` },
+        });
+      }
+      // Subscriptions for grp1, page 2 — no next
+      if (u === `${BASE}/v1/subscriptionGroups/grp1/subscriptions?limit=200&cursor=page2`) {
+        return jsonResponse({
+          data: [
+            { attributes: { productId: "pro_annual", name: "Pro Annual" } },
+          ],
+          links: {},
+        });
+      }
+
+      throw new Error(`unexpected url ${u}`);
+    });
+
+    const items = await listAppStoreCatalog(config, fetchImpl as unknown as typeof fetch);
+
+    expect(items).toEqual(
+      expect.arrayContaining([
+        { storeId: "coins_100", type: "CONSUMABLE", name: "100 Coins" },
+        { storeId: "remove_ads", type: "NON_CONSUMABLE", name: "Remove Ads" },
+        { storeId: "pro_monthly", type: "SUBSCRIPTION", name: "Pro Monthly" },
+        { storeId: "pro_annual", type: "SUBSCRIPTION", name: "Pro Annual" },
+      ]),
+    );
+    expect(items).toHaveLength(4);
   });
 });

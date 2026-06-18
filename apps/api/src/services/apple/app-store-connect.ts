@@ -113,6 +113,7 @@ function mapIapType(raw: string): RawCatalogType {
     case "NON_RENEWING_SUBSCRIPTION":
       return "NON_CONSUMABLE";
     default:
+      log.warn("unknown App Store IAP type", { inAppPurchaseType: raw });
       return "NON_CONSUMABLE";
   }
 }
@@ -129,11 +130,27 @@ export async function listAppStoreCatalog(
     token,
     fetchImpl,
   );
-  const subs = await ascList(
-    `${BASE_URL}/v1/apps/${appId}/subscriptionGroups?include=subscriptions&limit=200`,
+
+  // Step 1: list all subscription groups (paginated).
+  const groups = await ascList(
+    `${BASE_URL}/v1/apps/${appId}/subscriptionGroups?limit=200`,
     token,
     fetchImpl,
   );
+
+  // Step 2: for each group, list its subscriptions with full pagination.
+  // Apple caps the number of included side-loaded resources per response, so
+  // relying on `include=subscriptions` silently drops SKUs for large groups.
+  const allSubData: any[] = [];
+  for (const group of groups.data) {
+    const groupId = group.id;
+    const groupSubs = await ascList(
+      `${BASE_URL}/v1/subscriptionGroups/${groupId}/subscriptions?limit=200`,
+      token,
+      fetchImpl,
+    );
+    allSubData.push(...groupSubs.data);
+  }
 
   const items: RawCatalogItem[] = [];
 
@@ -147,9 +164,8 @@ export async function listAppStoreCatalog(
     });
   }
 
-  for (const inc of subs.included) {
-    if (inc.type !== "subscriptions") continue;
-    const a = inc.attributes ?? {};
+  for (const sub of allSubData) {
+    const a = sub.attributes ?? {};
     if (!a.productId) continue;
     items.push({ storeId: a.productId, type: "SUBSCRIPTION", name: a.name ?? a.productId });
   }
