@@ -267,7 +267,7 @@ export function FeatureFlagsPage({ projectId }: { projectId: string }) {
           />
         ) : (
           <div className="flex h-[200px] items-center justify-center rounded-lg border border-rv-divider bg-rv-c1 text-[13px] text-rv-mute-500">
-            {t("featureFlags.empty", "No feature flags yet.")}
+            {t("featureFlags.empty", "No flags yet.")}
           </div>
         )}
       </div>

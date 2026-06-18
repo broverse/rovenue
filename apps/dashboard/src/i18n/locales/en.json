@@ -231,7 +231,7 @@
       "transactions": "Transactions",
       "funnels": "Funnels",
       "experiments": "Experiments",
-      "flags": "Feature flags",
+      "flags": "Remote Config",
       "audiences": "Audiences",
       "cohorts": "Cohorts",
       "credits": "Credits",
@@ -263,7 +263,7 @@
       "trigger": "New",
       "product": "Product",
       "experiment": "Experiment",
-      "featureFlag": "Feature flag",
+      "featureFlag": "Flag",
       "webhook": "Webhook",
       "apiKey": "API key"
     }
@@ -285,7 +285,7 @@
     "offerings": "Offerings",
     "access": "Access",
     "transactions": "Transactions",
-    "featureFlags": "Feature flags",
+    "featureFlags": "Remote Config",
     "experiments": "Experiments",
     "credits": "Credits",
     "apps": "Apps & integrations",
@@ -1617,7 +1617,7 @@
     }
   },
   "featureFlags": {
-    "title": "Feature flags",
+    "title": "Remote Config",
     "subtitle": "Remote-configure behavior without shipping an update. Rules evaluate top-down on each SDK check; changes propagate in under 30 seconds via the edge cache.",
     "actions": {
       "sdkDocs": "SDK docs",
@@ -1695,8 +1695,8 @@
       "reenable": "Re-enable"
     },
     "new": {
-      "back": "Back to feature flags",
-      "title": "New feature flag",
+      "back": "Back to Remote Config",
+      "title": "New flag",
       "subtitle": "Pick a stable key the SDK checks against. Rules evaluate top-down; the default value is returned when no rule matches.",
       "submit": "Create flag",
       "submitting": "Creating…",
@@ -1768,12 +1768,12 @@
       }
     },
     "edit": {
-      "title": "Edit feature flag",
+      "title": "Edit flag",
       "subtitle": "Update the default value, targeting rules, or description. The key and type are locked once a flag exists.",
       "submit": "Save changes",
       "submitting": "Saving…",
       "loading": "Loading flag…",
-      "notFound": "We couldn't find that feature flag.",
+      "notFound": "We couldn't find that flag.",
       "keyLocked": "Key is permanent — create a new flag to rename.",
       "typeLocked": "Type is permanent — create a new flag to switch."
     }
@@ -1842,7 +1842,7 @@
   },
   "audiences": {
     "title": "Audiences",
-    "subtitle": "Targeting groups shared between feature flags and experiments. Editing rules invalidates both engines' caches.",
+    "subtitle": "Targeting groups shared between Remote Config and experiments. Editing rules invalidates both engines' caches.",
     "empty": "No audiences yet — defaults are created automatically when needed.",
     "allUsers": "all users",
     "ruleCount": "{{count}} rule(s)",
@@ -2141,7 +2141,7 @@
         "variantValue": "JSON value the SDK should return"
       },
       "types": {
-        "flag": "Feature flag",
+        "flag": "Remote Config",
         "offering": "Offering",
         "paywall": "Paywall config",
         "element": "Element"

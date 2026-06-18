@@ -68,7 +68,7 @@ export function AudiencesPage({ projectId }: { projectId: string }) {
           <p className="mt-1 text-[13px] text-rv-mute-500">
             {t(
               "audiences.subtitle",
-              "Targeting groups shared between feature flags and experiments. Editing rules invalidates both engines' caches.",
+              "Targeting groups shared between Remote Config and experiments. Editing rules invalidates both engines' caches.",
             )}
           </p>
         </div>

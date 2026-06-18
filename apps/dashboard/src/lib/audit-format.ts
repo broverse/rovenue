@@ -16,7 +16,7 @@ interface FormatInput {
 
 const RESOURCE_LABEL: Record<string, string> = {
   audience: "audience",
-  feature_flag: "feature flag",
+  feature_flag: "flag",
   experiment: "experiment",
   credential: "credentials",
   project: "project",
@@ -93,11 +93,11 @@ export function formatAuditEvent({
     // -- feature_flag --
     case "feature_flag:create": {
       const flagKey = str(a, "key");
-      return flagKey ? `Created feature flag "${flagKey}"` : "Created feature flag";
+      return flagKey ? `Created flag "${flagKey}"` : "Created flag";
     }
     case "feature_flag:update": {
       const flagKey = str(a, "key") ?? str(b, "key");
-      return flagKey ? `Updated feature flag "${flagKey}"` : "Updated feature flag";
+      return flagKey ? `Updated flag "${flagKey}"` : "Updated flag";
     }
     case "feature_flag:toggle": {
       const beforeOn = bool(b, "isEnabled");
@@ -106,11 +106,11 @@ export function formatAuditEvent({
         beforeOn !== null && afterOn !== null
           ? ` (${beforeOn ? "on" : "off"} → ${afterOn ? "on" : "off"})`
           : "";
-      return `Toggled feature flag${transition}`;
+      return `Toggled flag${transition}`;
     }
     case "feature_flag:delete": {
       const flagKey = str(b, "key");
-      return flagKey ? `Deleted feature flag "${flagKey}"` : "Deleted feature flag";
+      return flagKey ? `Deleted flag "${flagKey}"` : "Deleted flag";
     }
 
     // -- experiment --
