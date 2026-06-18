@@ -6,6 +6,7 @@ import type {
   DashboardProductRow,
   DashboardProductUpdateInput,
   DashboardProductsListResponse,
+  DashboardStoreCatalogResponse,
   ProductTypeName,
 } from "@rovenue/shared";
 import { api } from "../api";
@@ -128,5 +129,22 @@ export function useDeleteProduct(projectId: string) {
       ),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: ["products", "list", projectId] }),
+  });
+}
+
+export function useStoreCatalog(
+  projectId: string,
+  store: "ios" | "android",
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: ["products", "store-catalog", projectId, store],
+    enabled: enabled && Boolean(projectId),
+    retry: false,
+    staleTime: 60_000,
+    queryFn: () =>
+      api<DashboardStoreCatalogResponse>(
+        `/dashboard/projects/${projectId}/products/store-catalog?store=${store}`,
+      ),
   });
 }
