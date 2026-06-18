@@ -297,10 +297,19 @@ function ProjectOverview() {
   const { projectId } = useParams({ from: "/_authed/projects/$projectId/" });
   const { data: project } = useProject(projectId);
   const { data: mrr } = useProjectMrr({ projectId });
-  const { data: overview, refetch: refetchOverview } = useProjectOverview({ projectId });
-  const { data: experiments, refetch: refetchExperiments } = useExperiments({
+  const {
+    data: overview,
+    refetch: refetchOverview,
+    isFetching: isFetchingOverview,
+  } = useProjectOverview({ projectId });
+  const {
+    data: experiments,
+    refetch: refetchExperiments,
+    isFetching: isFetchingExperiments,
+  } = useExperiments({
     projectId,
   });
+  const isRefreshing = isFetchingOverview || isFetchingExperiments;
   const [now, setNow] = useState<number>(() => Date.now());
 
   // Re-render every few seconds so the "Xm ago" labels stay
@@ -466,12 +475,13 @@ function ProjectOverview() {
         <div className="flex gap-2">
           <Button
             variant="flat"
+            disabled={isRefreshing}
             onClick={() => {
               void refetchOverview();
               void refetchExperiments();
             }}
           >
-            <RefreshCw size={13} />
+            <RefreshCw size={13} className={isRefreshing ? "animate-spin" : undefined} />
             {t("common.refresh")}
           </Button>
           <Button variant="flat">{t("common.export")}</Button>

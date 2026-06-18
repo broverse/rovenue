@@ -42,7 +42,7 @@ export function KpiCard({ label, value, currency, unit, delta, deltaKind = "succ
           </Chip>
         )}
       </div>
-      <div className="mt-3">
+      <div className="mt-3 h-10">
         <Sparkline data={sparkData} color={sparkColor} />
       </div>
     </Card>
