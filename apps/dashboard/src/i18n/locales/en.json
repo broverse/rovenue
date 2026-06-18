@@ -605,6 +605,7 @@
   "liveEvents": {
     "title": "Live events",
     "subtitle": "Real-time event stream",
+    "sessionHint": "Session-only — events appear live from when you open this page and clear on refresh. For history, see Revenue.",
     "eventsThisSession": "events this session",
     "showing": "Showing",
     "of": "of",
@@ -654,7 +655,9 @@
     "empty": {
       "title": "No events match",
       "body": "Try clearing filters or widening your search.",
-      "reset": "Reset filters"
+      "reset": "Reset filters",
+      "waitingTitle": "Waiting for live events",
+      "waitingBody": "Events stream in real time from the moment this page opens. The list is session-only — refreshing or leaving clears it. For past events, see Revenue."
     },
     "rate": {
       "throughput": "throughput:",
@@ -1071,6 +1074,8 @@
       "refineHeading": "Refine",
       "accessLabel": "Access key",
       "accessPlaceholder": "e.g. premium",
+      "entitlementLabel": "Entitlement",
+      "entitlementPlaceholder": "e.g. premium",
       "countryLabel": "Country (ISO-3166)",
       "countryPlaceholder": "e.g. US",
       "ltvMinLabel": "Min LTV (USD)",

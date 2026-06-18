@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Search } from "lucide-react";
+import { Radio, Search } from "lucide-react";
 import { Button } from "../../ui/button";
 import { EventRow } from "./event-row";
 import type { LiveEvent } from "./types";
@@ -9,13 +9,25 @@ type Props = {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onResetFilters: () => void;
+  /**
+   * Whether any events have streamed in this session at all. Distinguishes the
+   * "filters hid everything" empty state from the "nothing has arrived yet"
+   * one — the latter explains the session-only, refresh-clears behaviour.
+   */
+  streamHasEvents: boolean;
 };
 
 const headerCellBase = "min-w-0";
 const headerGrid =
   "grid grid-cols-[90px_minmax(0,1fr)_110px_minmax(0,1fr)_80px_100px_90px] gap-3 border border-rv-divider border-t-0 bg-rv-c1 px-3.5 py-2 text-[10px] font-medium uppercase tracking-wider text-rv-mute-500 max-[1280px]:grid-cols-[80px_minmax(0,1fr)_90px_70px_90px]";
 
-export function EventStream({ events, selectedId, onSelect, onResetFilters }: Props) {
+export function EventStream({
+  events,
+  selectedId,
+  onSelect,
+  onResetFilters,
+  streamHasEvents,
+}: Props) {
   const { t } = useTranslation();
   return (
     <>
@@ -37,7 +49,19 @@ export function EventStream({ events, selectedId, onSelect, onResetFilters }: Pr
         role="list"
         className="min-h-[520px] max-h-[calc(100vh-280px)] overflow-y-auto rounded-b-lg border border-t-0 border-rv-divider bg-rv-c1 [scrollbar-color:var(--color-rv-c4)_transparent] [scrollbar-width:thin]"
       >
-        {events.length === 0 ? (
+        {events.length === 0 && !streamHasEvents ? (
+          <div className="flex flex-col items-center justify-center px-5 py-16 text-center">
+            <div className="mb-3 flex size-10 items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-500">
+              <Radio size={18} className="animate-rv-pulse" />
+            </div>
+            <h3 className="m-0 mb-1 text-[13px] font-semibold">
+              {t("liveEvents.empty.waitingTitle")}
+            </h3>
+            <p className="m-0 max-w-[320px] text-[12px] text-rv-mute-500">
+              {t("liveEvents.empty.waitingBody")}
+            </p>
+          </div>
+        ) : events.length === 0 ? (
           <div className="flex flex-col items-center justify-center px-5 py-16 text-center">
             <div className="mb-3 flex size-10 items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-500">
               <Search size={18} />

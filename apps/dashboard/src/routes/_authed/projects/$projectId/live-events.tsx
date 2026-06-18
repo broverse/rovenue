@@ -5,6 +5,7 @@ import { Button } from "../../../../ui/button";
 import { Sparkline } from "../../../../components/dashboard/sparkline";
 import {
   ChevronsUpDown,
+  Info,
   Layers,
   Search,
   Terminal,
@@ -234,6 +235,13 @@ function LiveEventsPage({ projectId }: { projectId: string }) {
               <span className={cn("size-1.5 rounded-full", conn.dotClass)} />
               {t(conn.connKey)}
             </span>
+            <Info
+              size={12}
+              className="ml-1.5 inline-block align-middle text-rv-mute-500 cursor-help"
+              aria-label={t("liveEvents.sessionHint")}
+            >
+              <title>{t("liveEvents.sessionHint")}</title>
+            </Info>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -337,6 +345,7 @@ function LiveEventsPage({ projectId }: { projectId: string }) {
             selectedId={selectedId}
             onSelect={setSelectedId}
             onResetFilters={resetFilters}
+            streamHasEvents={events.length > 0}
           />
 
           <RateStrip throughput={perSec} lastEvent={lastEventLabel} />
