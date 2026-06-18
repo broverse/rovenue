@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import { BookOpen, Plus, Webhook } from "lucide-react";
+import { BookOpen, Webhook } from "lucide-react";
 import { Button } from "../../../../ui/button";
 import {
   APPS,
@@ -24,6 +24,7 @@ import {
   type RailEntryId,
 } from "../../../../components/apps";
 import { IntegrationDrawer } from "../../../../components/apps/integration-drawer/integration-drawer";
+import { CustomWebhookModal } from "../../../../components/apps/custom-webhook-modal";
 import { useProject } from "../../../../lib/hooks/useProject";
 import { useProjectAppConnections } from "../../../../lib/hooks/useProjectAppConnections";
 import { useProjectIntegrations } from "../../../../lib/hooks/useProjectIntegrations";
@@ -76,6 +77,7 @@ function AppsPage({ projectId }: { projectId: string }) {
   const [view, setView] = useState<AppView>("grid");
   const [tier, setTier] = useState<AppTier>("all");
   const [drawerProviderId, setDrawerProviderId] = useState<"META_CAPI" | "TIKTOK_EVENTS" | null>(null);
+  const [webhookModalOpen, setWebhookModalOpen] = useState(false);
   const connections = useProjectAppConnections(projectId);
   const integrations = useProjectIntegrations(projectId);
 
@@ -134,13 +136,9 @@ function AppsPage({ projectId }: { projectId: string }) {
             <BookOpen size={13} />
             {t("apps.actions.docs")}
           </Button>
-          <Button variant="flat" size="sm">
+          <Button variant="flat" size="sm" onClick={() => setWebhookModalOpen(true)}>
             <Webhook size={13} />
             {t("apps.actions.customWebhook")}
-          </Button>
-          <Button variant="solid-primary" size="sm">
-            <Plus size={13} />
-            {t("apps.actions.request")}
           </Button>
         </div>
       </header>
@@ -215,6 +213,13 @@ function AppsPage({ projectId }: { projectId: string }) {
           projectId={projectId}
           providerId={drawerProviderId}
           existingConnection={existingConnection}
+        />
+      )}
+      {webhookModalOpen && (
+        <CustomWebhookModal
+          open={true}
+          onClose={() => setWebhookModalOpen(false)}
+          projectId={projectId}
         />
       )}
     </>
