@@ -9,11 +9,11 @@ import {
   useProjectAccess,
   useUpdateAccess,
 } from "../../../../lib/hooks/useProjectAccess";
+import { useProjectProducts } from "../../../../lib/hooks/useProjectProducts";
 import {
   AccessFormDialog,
   AccessHeader,
   AccessList,
-  AccessOfferingsSection,
   DeleteAccessDialog,
 } from "../../../../components/access";
 
@@ -47,6 +47,19 @@ function AccessPage({ projectId }: { projectId: string }) {
   const selected = useMemo(
     () => rows.find((r) => r.id === selectedId) ?? null,
     [rows, selectedId],
+  );
+
+  const productsQuery = useProjectProducts({ projectId, limit: 200 });
+  const allProducts = useMemo(
+    () => productsQuery.data?.pages.flatMap((p) => p.products) ?? [],
+    [productsQuery.data],
+  );
+  const grantingProducts = useMemo(
+    () =>
+      selected
+        ? allProducts.filter((p) => p.accessIds.includes(selected.id))
+        : [],
+    [allProducts, selected],
   );
 
   const [search, setSearch] = useState("");
@@ -110,10 +123,38 @@ function AccessPage({ projectId }: { projectId: string }) {
             onDelete={() => setDeleteOpen(true)}
           />
 
-          <AccessOfferingsSection
-            projectId={projectId}
-            accessId={selected?.id ?? null}
-          />
+          {selected && (
+            <section className="border-t border-rv-divider mt-2 pt-4">
+              <h3 className="text-sm font-semibold mb-3">
+                {t(
+                  "access.grantingProducts.heading",
+                  "Products granting this access level",
+                )}
+              </h3>
+              {grantingProducts.length === 0 ? (
+                <p className="text-xs text-rv-mute-500">
+                  {t(
+                    "access.grantingProducts.empty",
+                    "No products linked to this access level yet.",
+                  )}
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-1">
+                  {grantingProducts.map((p) => (
+                    <li
+                      key={p.id}
+                      className="text-xs px-2 py-1.5 rounded-sm bg-rv-c4/50"
+                    >
+                      <span className="font-medium">{p.displayName}</span>
+                      <span className="ml-2 text-rv-mute-500">
+                        {p.identifier}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
         </div>
       </div>
 
