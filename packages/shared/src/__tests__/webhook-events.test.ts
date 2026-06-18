@@ -27,6 +27,7 @@ describe("toWebhookEventCategory", () => {
   it("maps Stripe event types", () => {
     expect(toWebhookEventCategory("customer.subscription.created")).toBe("purchase");
     expect(toWebhookEventCategory("invoice.payment_succeeded")).toBe("renewal");
+    expect(toWebhookEventCategory("invoice.paid")).toBe("renewal");
     expect(toWebhookEventCategory("customer.subscription.deleted")).toBe("cancellation");
     expect(toWebhookEventCategory("charge.refunded")).toBe("refund");
     expect(toWebhookEventCategory("invoice.payment_failed")).toBe("billing_issue");
