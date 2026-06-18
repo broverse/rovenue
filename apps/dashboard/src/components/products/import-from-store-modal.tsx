@@ -271,7 +271,7 @@ function CatalogList({
         </p>
         <p className="mt-0.5 text-rv-mute-500">{msg}</p>
         <Link
-          to="/projects/$projectId/settings/payment-methods"
+          to="/projects/$projectId/apps"
           params={{ projectId }}
           className="mt-2 inline-block text-rv-accent-500 underline-offset-2 hover:underline"
         >
