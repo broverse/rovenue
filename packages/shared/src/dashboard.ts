@@ -1482,6 +1482,24 @@ export interface DashboardProductImportResponse {
   results: DashboardProductImportResultRow[];
 }
 
+/** One product as listed by a store's catalog API. */
+export interface StoreCatalogItem {
+  /** Per-store SKU / product id (e.g. App Store Connect `productId`). */
+  storeId: string;
+  /** Mapped product type. */
+  type: ProductTypeName;
+  /** Human-readable reference name from the store. */
+  name: string;
+  /** Optional formatted price, when the store API surfaces one. */
+  priceLabel?: string;
+  /** True when a product with this `storeId` already exists for the store. */
+  alreadyImported: boolean;
+}
+
+export interface DashboardStoreCatalogResponse {
+  items: StoreCatalogItem[];
+}
+
 // =============================================================
 // Dashboard: Access catalog
 // =============================================================

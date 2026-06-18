@@ -17,6 +17,8 @@ export const ERROR_CODE = {
   INVALID_API_KEY: "INVALID_API_KEY",
   INVALID_API_KEY_FORMAT: "INVALID_API_KEY_FORMAT",
   API_KEY_KIND_MISMATCH: "API_KEY_KIND_MISMATCH",
+  STORE_NOT_CONFIGURED: "STORE_NOT_CONFIGURED",
+  STORE_API_ERROR: "STORE_API_ERROR",
 } as const;
 export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE];
 
@@ -50,8 +52,26 @@ export const HEADER = {
   X_RATE_LIMIT_LIMIT: "X-RateLimit-Limit",
   X_RATE_LIMIT_REMAINING: "X-RateLimit-Remaining",
   X_ROVENUE_APP_USER_ID: "x-rovenue-app-user-id",
+  // First-install platform reported by the SDK on the create-triggering
+  // request. Persisted once (create-only) as the `platform` attribute.
+  X_ROVENUE_PLATFORM: "x-rovenue-platform",
 } as const;
 export type HeaderName = (typeof HEADER)[keyof typeof HEADER];
+
+/** Platforms the SDK may report via {@link HEADER.X_ROVENUE_PLATFORM}. */
+export const SDK_PLATFORMS = ["ios", "android", "web"] as const;
+export type SdkPlatform = (typeof SDK_PLATFORMS)[number];
+
+/** Narrows an arbitrary header value to a known {@link SdkPlatform}. */
+export function parseSdkPlatform(
+  raw: string | undefined | null,
+): SdkPlatform | undefined {
+  if (!raw) return undefined;
+  const v = raw.trim().toLowerCase();
+  return (SDK_PLATFORMS as ReadonlyArray<string>).includes(v)
+    ? (v as SdkPlatform)
+    : undefined;
+}
 
 export const BEARER_SCHEME = "Bearer";
 
