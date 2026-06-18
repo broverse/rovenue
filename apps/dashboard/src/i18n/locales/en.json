@@ -850,6 +850,16 @@
         "duplicate-identifier": "Identifier already exists",
         "duplicate-store-id": "Store ID already exists",
         "invalid": "Invalid identifier"
+      },
+      "catalog": {
+        "loading": "Fetching products from the store…",
+        "empty": "No products found in this store.",
+        "errorTitle": "Couldn't fetch products",
+        "credentialsLink": "Check store credentials",
+        "selectAll": "Select all",
+        "imported": "Already imported",
+        "webHint": "Web (Stripe) products are added by pasting price IDs.",
+        "fetchedSubtitle": "Select the products to import. Already-imported products are disabled."
       }
     }
   },
@@ -1074,6 +1084,8 @@
       "refineHeading": "Refine",
       "accessLabel": "Access key",
       "accessPlaceholder": "e.g. premium",
+      "entitlementLabel": "Entitlement",
+      "entitlementPlaceholder": "e.g. premium",
       "countryLabel": "Country (ISO-3166)",
       "countryPlaceholder": "e.g. US",
       "ltvMinLabel": "Min LTV (USD)",
@@ -3388,6 +3400,33 @@
       "docs": "Integration docs",
       "customWebhook": "Custom webhook",
       "request": "Request integration"
+    },
+    "customWebhook": {
+      "title": "Custom webhook",
+      "subtitle": "Send Rovenue subscription events to your own HTTPS endpoint.",
+      "urlLabel": "Endpoint URL",
+      "urlPlaceholder": "https://api.yourapp.com/webhooks/rovenue",
+      "urlInvalid": "Enter a valid https:// URL.",
+      "eventsLabel": "Events",
+      "eventsHint": "No selection = receive all events.",
+      "categories": {
+        "purchase": "Purchase",
+        "renewal": "Renewal",
+        "cancellation": "Cancellation",
+        "refund": "Refund",
+        "billing_issue": "Billing issue",
+        "expiration": "Expiration",
+        "product_change": "Product change"
+      },
+      "secretLabel": "Signing secret",
+      "secretConfigured": "Configured",
+      "secretMissing": "Not set",
+      "rotate": "Rotate secret",
+      "rotating": "Rotating…",
+      "secretRevealWarning": "Copy this now — it won't be shown again.",
+      "save": "Save",
+      "saving": "Saving…",
+      "saveError": "Could not save. Check the URL and try again."
     },
     "hero": {
       "title": "Stream every revenue event, everywhere it matters.",
