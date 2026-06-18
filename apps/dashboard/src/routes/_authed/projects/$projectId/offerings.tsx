@@ -499,7 +499,9 @@ function PackageRow({
       setCustomError(null);
       return;
     }
-    if (customError) return; // don't persist invalid
+    // Synchronous re-validation: customError state may be stale if the user
+    // types an invalid character and immediately blurs before React re-renders.
+    if (trimmed.length > MAX_IDENTIFIER_LENGTH || !CUSTOM_ID_RE.test(trimmed)) return;
     persistIdentifier(trimmed);
   };
 
