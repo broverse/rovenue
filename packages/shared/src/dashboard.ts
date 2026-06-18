@@ -8,6 +8,7 @@
 import { z } from "zod";
 
 import type { AttributeMap, SubscriberAttributes } from "./attributes";
+import type { WebhookEventCategory } from "./webhook-events";
 
 export type MemberRoleName =
   | "OWNER"
@@ -48,7 +49,7 @@ export interface ProjectDetail {
   description: string | null;
   webhookUrl: string | null;
   hasWebhookSecret: boolean;
-  webhookEventCategories: string[];
+  webhookEventCategories: WebhookEventCategory[];
   settings: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -104,7 +105,7 @@ export interface UpdateProjectRequest {
   name?: string;
   description?: string | null;
   webhookUrl?: string | null;
-  webhookEventCategories?: string[];
+  webhookEventCategories?: WebhookEventCategory[];
   settings?: Record<string, unknown>;
 }
 

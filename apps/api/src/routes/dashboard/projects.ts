@@ -14,6 +14,7 @@ import {
   type ProjectDetail,
   type ProjectSummary,
   type RotateWebhookSecretResponse,
+  type WebhookEventCategory,
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
@@ -151,7 +152,7 @@ function toProjectDetail(
     webhookUrl: project.webhookUrl,
     hasWebhookSecret: Boolean(project.webhookSecret),
     webhookEventCategories: Array.isArray(project.webhookEventCategories)
-      ? (project.webhookEventCategories as string[])
+      ? (project.webhookEventCategories as WebhookEventCategory[])
       : [],
     settings: sanitizeSettings(project.settings),
     createdAt: project.createdAt.toISOString(),
