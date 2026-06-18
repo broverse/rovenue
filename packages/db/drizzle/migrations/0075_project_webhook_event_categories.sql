@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "webhookEventCategories" jsonb DEFAULT '[]'::jsonb NOT NULL;

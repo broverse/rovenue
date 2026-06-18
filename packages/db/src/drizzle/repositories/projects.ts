@@ -48,6 +48,27 @@ export async function findProjectWebhookUrl(
   return rows[0]?.webhookUrl ?? null;
 }
 
+/** Scoped read for webhook-processor — endpoint URL + category filter. */
+export async function findProjectWebhookConfig(
+  db: DbOrTx,
+  projectId: string,
+): Promise<{ url: string | null; eventCategories: string[] } | null> {
+  const rows = await db
+    .select({
+      webhookUrl: projects.webhookUrl,
+      webhookEventCategories: projects.webhookEventCategories,
+    })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    url: row.webhookUrl ?? null,
+    eventCategories: row.webhookEventCategories ?? [],
+  };
+}
+
 export interface ProjectCredentialsFields {
   appleCredentials: unknown;
   googleCredentials: unknown;
@@ -218,6 +239,7 @@ export interface UpdateProjectInput {
   name?: string;
   description?: string | null;
   webhookUrl?: string | null;
+  webhookEventCategories?: string[];
   settings?: unknown;
 }
 
@@ -236,6 +258,9 @@ export async function updateProject(
   if (input.description !== undefined) patch.description = input.description;
   if (input.webhookUrl !== undefined) {
     patch.webhookUrl = input.webhookUrl;
+  }
+  if (input.webhookEventCategories !== undefined) {
+    patch.webhookEventCategories = input.webhookEventCategories;
   }
   if (input.settings !== undefined) {
     patch.settings = input.settings as typeof projects.$inferInsert.settings;

@@ -526,6 +526,13 @@
       "when": 1781800000000,
       "tag": "0074_offerings_decouple_packages",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1781817732718,
+      "tag": "0075_project_webhook_event_categories",
+      "breakpoints": true
     }
   ]
 }

@@ -267,6 +267,10 @@ export const projects = pgTable("projects", {
   stripeCredentials: jsonb("stripeCredentials"),
   webhookUrl: text("webhookUrl"),
   webhookSecret: text("webhookSecret"),
+  webhookEventCategories: jsonb("webhookEventCategories")
+    .notNull()
+    .$type<string[]>()
+    .default(sql`'[]'::jsonb`),
   settings: jsonb("settings").notNull().default(sql`'{}'::jsonb`),
   refundShieldEnabled: boolean("refund_shield_enabled").notNull().default(false),
   refundShieldConsentAcknowledgedAt: timestamp("refund_shield_consent_acknowledged_at", { withTimezone: true }),
