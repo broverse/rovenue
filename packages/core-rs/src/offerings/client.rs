@@ -85,9 +85,10 @@ fn map_response(resp: OfferingsResponse) -> CoreOfferings {
             identifier: o.identifier,
             is_default: o.is_default,
             packages: o
-                .products
+                .packages
                 .into_iter()
                 .map(|p| CoreOfferingProduct {
+                    package_identifier: p.package_identifier,
                     identifier: p.identifier,
                     product_type: p.product_type,
                     display_name: p.display_name,

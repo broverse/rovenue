@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoreOfferingProduct {
+    /// The package slot identifier (e.g. `$rc_monthly`), which is what the
+    /// SDK surfaces as `Package.identifier` on the façade side.
+    pub package_identifier: String,
+    /// The product's own identifier (the internal product catalog id).
     pub identifier: String,
     pub product_type: String,
     pub display_name: String,
@@ -27,6 +31,10 @@ pub struct StoreIdsWire {
 }
 #[derive(Debug, Deserialize, Serialize)]
 pub struct OfferingProductWire {
+    /// The package slot identifier (e.g. `$rc_monthly`).
+    #[serde(rename = "packageIdentifier")]
+    pub package_identifier: String,
+    /// The product's own identifier.
     pub identifier: String,
     #[serde(rename = "type")]
     pub product_type: String,
@@ -40,7 +48,8 @@ pub struct OfferingWire {
     pub identifier: String,
     #[serde(rename = "isDefault")]
     pub is_default: bool,
-    pub products: Vec<OfferingProductWire>,
+    /// The server now returns `packages` (was `products` in the v0 format).
+    pub packages: Vec<OfferingProductWire>,
 }
 #[derive(Debug, Deserialize, Serialize)]
 pub struct OfferingsResponse {

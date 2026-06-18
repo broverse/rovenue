@@ -39,7 +39,10 @@ fn get_offerings_maps_wire_to_ffi_and_sets_current() {
     assert_eq!(first.identifier, "default");
     assert!(first.is_default);
     let pkg = &first.packages[0];
-    assert_eq!(pkg.identifier, "monthly");
+    // package_identifier is the slot id the SDK surfaces as Package.identifier
+    assert_eq!(pkg.package_identifier, "$rc_monthly");
+    // identifier is the product's own catalog id
+    assert_eq!(pkg.identifier, "pro_monthly");
     assert_eq!(pkg.product_type, "SUBSCRIPTION");
     assert_eq!(pkg.apple_product_id.as_deref(), Some("com.x.pro.monthly"));
     assert_eq!(pkg.google_product_id.as_deref(), Some("pro_monthly"));
@@ -47,6 +50,7 @@ fn get_offerings_maps_wire_to_ffi_and_sets_current() {
     let second = &offerings.offerings[1];
     assert_eq!(second.identifier, "promo");
     assert!(!second.is_default);
+    assert_eq!(second.packages[0].package_identifier, "$rc_lifetime");
     assert_eq!(second.packages[0].google_product_id, None);
 }
 
@@ -105,7 +109,7 @@ fn serves_cache_on_network_failure() {
     assert_eq!(cached.current.as_deref(), Some("default"));
     assert_eq!(cached.offerings.len(), 2);
     assert_eq!(cached.offerings[0].identifier, "default");
-    assert_eq!(cached.offerings[0].packages[0].identifier, "monthly");
+    assert_eq!(cached.offerings[0].packages[0].package_identifier, "$rc_monthly");
     assert_eq!(cached.offerings[1].packages[0].google_product_id, None);
 }
 

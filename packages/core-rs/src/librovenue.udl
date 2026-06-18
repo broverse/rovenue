@@ -58,6 +58,7 @@ dictionary ReceiptResult {
 };
 
 dictionary CoreOfferingProduct {
+    string package_identifier;
     string identifier;
     string product_type;
     string display_name;

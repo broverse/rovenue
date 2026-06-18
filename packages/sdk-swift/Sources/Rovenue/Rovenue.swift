@@ -473,7 +473,11 @@ public final class Rovenue: @unchecked Sendable {
             Offering(
                 identifier: o.identifier,
                 isDefault: o.isDefault,
-                packages: o.packages.map { Package(identifier: $0.identifier, product: buildProduct($0)) }
+                // Use packageIdentifier (the slot id, e.g. $rc_monthly) as
+                // Package.identifier — that is the value the SDK contract
+                // exposes to callers. The product's own catalog identifier
+                // is available via pkg.product.id.
+                packages: o.packages.map { Package(identifier: $0.packageIdentifier, product: buildProduct($0)) }
             )
         }
 
