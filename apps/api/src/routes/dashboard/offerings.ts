@@ -192,19 +192,37 @@ export const offeringsDashboardRoute = new Hono()
     await assertProjectCapability(projectId, user.id, "products:write");
     const body = c.req.valid("json");
 
-    if (body.identifier) {
-      const clash = await drizzle.offeringRepo.findOfferingByIdentifier(
-        drizzle.db,
-        projectId,
-        body.identifier,
-      );
-      if (clash && clash.id !== id) {
-        throw new HTTPException(409, {
-          message: `Offering identifier already in use: ${body.identifier}`,
-        });
-      }
+    const existingOffering = await drizzle.offeringRepo.findOfferingById(
+      drizzle.db,
+      projectId,
+      id,
+    );
+    if (!existingOffering) {
+      throw new HTTPException(404, { message: "Offering not found" });
+    }
+    if (body.identifier && body.identifier !== existingOffering.identifier) {
+      throw new HTTPException(400, {
+        message: "identifier is immutable once set",
+      });
     }
     if (body.packages) {
+      // Check package identifier immutability: for any productId present in
+      // both the existing and new packages, the identifier must not change.
+      const existingPackages = parsePackages(existingOffering.packages);
+      const existingByProductId = new Map(
+        existingPackages.map((p) => [p.productId, p.identifier]),
+      );
+      for (const pkg of body.packages) {
+        const existingPkgIdentifier = existingByProductId.get(pkg.productId);
+        if (
+          existingPkgIdentifier !== undefined &&
+          pkg.identifier !== existingPkgIdentifier
+        ) {
+          throw new HTTPException(400, {
+            message: "package identifier is immutable once set",
+          });
+        }
+      }
       await assertProductsExist(
         projectId,
         body.packages.map((p) => p.productId),

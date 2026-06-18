@@ -12,15 +12,15 @@ import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { getDb, projects, drizzle } from "@rovenue/db";
 import { auth } from "../../lib/auth";
+import { errorHandler } from "../../middleware/error";
 import { offeringsDashboardRoute } from "./offerings";
 
 const RUN_ID = Date.now();
 
 function buildApp() {
-  return new Hono().route(
-    "/projects/:projectId/offerings",
-    offeringsDashboardRoute,
-  );
+  const app = new Hono();
+  app.onError(errorHandler);
+  return app.route("/projects/:projectId/offerings", offeringsDashboardRoute);
 }
 
 async function createUserAndSession(
@@ -212,7 +212,9 @@ describe("PATCH /projects/:projectId/offerings/:id — update offering", () => {
     const project = await seedProject("patch");
     trackProject(project.id);
     await seedMember({ projectId: project.id, userId, role: "ADMIN" });
-    const product = await seedProduct(project.id, "patch");
+    // Use separate products so each package slot has a unique productId
+    const product1 = await seedProduct(project.id, "patch-p1");
+    const product2 = await seedProduct(project.id, "patch-p2");
 
     const app = buildApp();
     const createRes = await app.request(`/projects/${project.id}/offerings`, {
@@ -220,7 +222,7 @@ describe("PATCH /projects/:projectId/offerings/:id — update offering", () => {
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
         identifier: "patch-test",
-        packages: [{ identifier: "$rov_monthly", productId: product.id, order: 0, isPromoted: false }],
+        packages: [{ identifier: "$rov_monthly", productId: product1.id, order: 0, isPromoted: false }],
       }),
     });
     const { data: createData } = await createRes.json() as { data: { offering: { id: string } } };
@@ -231,8 +233,8 @@ describe("PATCH /projects/:projectId/offerings/:id — update offering", () => {
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
         packages: [
-          { identifier: "$rov_monthly", productId: product.id, order: 0, isPromoted: true },
-          { identifier: "$rov_annual", productId: product.id, order: 1, isPromoted: false },
+          { identifier: "$rov_monthly", productId: product1.id, order: 0, isPromoted: true },
+          { identifier: "$rov_annual", productId: product2.id, order: 1, isPromoted: false },
         ],
       }),
     });
@@ -240,5 +242,135 @@ describe("PATCH /projects/:projectId/offerings/:id — update offering", () => {
     const { data } = await patchRes.json() as { data: { offering: Record<string, unknown> } };
     expect((data.offering.packages as Array<{ isPromoted: boolean }>)[0]?.isPromoted).toBe(true);
     expect(data.offering.accessId).toBeUndefined();
+  });
+
+  // ------------------------------------------------------------------
+  // Identifier immutability
+  // ------------------------------------------------------------------
+
+  it("400s when PATCH tries to change the offering identifier", async () => {
+    const { userId, cookie } = await createUserAndSession("immut-off");
+    const project = await seedProject("immut-off");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const product = await seedProduct(project.id, "immut-off");
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/offerings`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "immutable-offering",
+        packages: [{ identifier: "$rov_monthly", productId: product.id, order: 0, isPromoted: false }],
+      }),
+    });
+    expect(createRes.status).toBe(200);
+    const { data: createData } = await createRes.json() as { data: { offering: { id: string } } };
+    const offeringId = createData.offering.id;
+
+    const patchRes = await app.request(`/projects/${project.id}/offerings/${offeringId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ identifier: "renamed-offering" }),
+    });
+    expect(patchRes.status).toBe(400);
+    const body = await patchRes.json() as { error: { message: string } };
+    expect(body.error.message).toContain("immutable");
+  });
+
+  it("200 when PATCH sends the SAME offering identifier (no-op)", async () => {
+    const { userId, cookie } = await createUserAndSession("immut-same-off");
+    const project = await seedProject("immut-same-off");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const product = await seedProduct(project.id, "immut-same-off");
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/offerings`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "same-identifier-offering",
+        packages: [{ identifier: "$rov_monthly", productId: product.id, order: 0, isPromoted: false }],
+      }),
+    });
+    expect(createRes.status).toBe(200);
+    const { data: createData } = await createRes.json() as { data: { offering: { id: string } } };
+    const offeringId = createData.offering.id;
+
+    const patchRes = await app.request(`/projects/${project.id}/offerings/${offeringId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ identifier: "same-identifier-offering", isDefault: true }),
+    });
+    expect(patchRes.status).toBe(200);
+  });
+
+  it("400s when PATCH renames an existing package identifier (same productId)", async () => {
+    const { userId, cookie } = await createUserAndSession("immut-pkg");
+    const project = await seedProject("immut-pkg");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const product = await seedProduct(project.id, "immut-pkg");
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/offerings`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "pkg-immut-offering",
+        packages: [{ identifier: "$rov_monthly", productId: product.id, order: 0, isPromoted: false }],
+      }),
+    });
+    expect(createRes.status).toBe(200);
+    const { data: createData } = await createRes.json() as { data: { offering: { id: string } } };
+    const offeringId = createData.offering.id;
+
+    // Attempt to rename the package identifier for the same productId
+    const patchRes = await app.request(`/projects/${project.id}/offerings/${offeringId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        packages: [{ identifier: "$rov_annual", productId: product.id, order: 0, isPromoted: false }],
+      }),
+    });
+    expect(patchRes.status).toBe(400);
+    const body = await patchRes.json() as { error: { message: string } };
+    expect(body.error.message).toContain("immutable");
+  });
+
+  it("200 when PATCH adds a new package (new productId) — allowed", async () => {
+    const { userId, cookie } = await createUserAndSession("immut-add");
+    const project = await seedProject("immut-add");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const product1 = await seedProduct(project.id, "immut-add-p1");
+    const product2 = await seedProduct(project.id, "immut-add-p2");
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/offerings`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "add-pkg-offering",
+        packages: [{ identifier: "$rov_monthly", productId: product1.id, order: 0, isPromoted: false }],
+      }),
+    });
+    expect(createRes.status).toBe(200);
+    const { data: createData } = await createRes.json() as { data: { offering: { id: string } } };
+    const offeringId = createData.offering.id;
+
+    // Add a brand-new package slot (product2 is new, so no existing identifier constraint)
+    const patchRes = await app.request(`/projects/${project.id}/offerings/${offeringId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        packages: [
+          { identifier: "$rov_monthly", productId: product1.id, order: 0, isPromoted: false },
+          { identifier: "$rov_annual", productId: product2.id, order: 1, isPromoted: false },
+        ],
+      }),
+    });
+    expect(patchRes.status).toBe(200);
   });
 });

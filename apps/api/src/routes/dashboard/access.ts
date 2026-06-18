@@ -126,16 +126,9 @@ export const accessRoute = new Hono()
       throw new HTTPException(404, { message: "Access not found" });
     }
     if (body.identifier && body.identifier !== existing.identifier) {
-      const clash = await drizzle.accessCatalogRepo.findByIdentifier(
-        drizzle.db,
-        projectId,
-        body.identifier,
-      );
-      if (clash && clash.id !== id) {
-        throw new HTTPException(409, {
-          message: `Access identifier '${body.identifier}' already exists`,
-        });
-      }
+      throw new HTTPException(400, {
+        message: "identifier is immutable once set",
+      });
     }
     await drizzle.accessCatalogRepo.update(drizzle.db, id, body);
     const refetched = await drizzle.accessCatalogRepo.findById(drizzle.db, id);

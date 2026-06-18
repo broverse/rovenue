@@ -356,14 +356,14 @@ export const productsDashboardRoute = new Hono()
     const body = c.req.valid("json");
 
     if (body.identifier) {
-      const clash = await drizzle.productRepo.findProductByIdentifier(
+      const existingProduct = await drizzle.productRepo.findProductById(
         drizzle.db,
         projectId,
-        body.identifier,
+        id,
       );
-      if (clash && clash.id !== id) {
-        throw new HTTPException(409, {
-          message: `Product identifier already in use: ${body.identifier}`,
+      if (existingProduct && body.identifier !== existingProduct.identifier) {
+        throw new HTTPException(400, {
+          message: "identifier is immutable once set",
         });
       }
     }
