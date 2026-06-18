@@ -11,26 +11,26 @@ import { ok } from "../../lib/response";
 // =============================================================
 //
 // Catalog surface for the SDK's paywall rendering path. Callers
-// hit GET / to list every offering the project exposes (optionally
-// filtered by `accessId`), then GET /:identifier to hydrate the
-// full product list for the paywall they're about to render. The
-// per-identifier path also runs the experiment engine so OFFERING
-// experiments can override the requested identifier — the
-// substitution is annotated on the response via
-// `X-Rovenue-Experiment: <key>:<variantId>` so the SDK can log
-// the exposure back.
+// hit GET / to list every offering the project exposes, then
+// GET /:identifier to hydrate the full product list for the
+// paywall they're about to render. The per-identifier path also
+// runs the experiment engine so OFFERING experiments can override
+// the requested identifier — the substitution is annotated on
+// the response via `X-Rovenue-Experiment: <key>:<variantId>` so
+// the SDK can log the exposure back.
 
 const SUBSCRIBER_HEADER = "x-rovenue-user-id";
 const EXPERIMENT_HEADER = "x-rovenue-experiment";
 
-// Shape of each item in Offering.products JSON array
-const productMembershipSchema = z.object({
+// Shape of each item in Offering.packages JSON array
+const packageSchema = z.object({
+  identifier: z.string(),
   productId: z.string(),
   order: z.number().int().nonnegative().default(0),
   isPromoted: z.boolean().default(false),
   metadata: z.record(z.unknown()).optional(),
 });
-const productMembershipsSchema = z.array(productMembershipSchema);
+const packagesSchema = z.array(packageSchema);
 
 const storeIdsSchema = z.object({
   apple: z.string().optional(),
@@ -44,7 +44,8 @@ function parseStoreIds(raw: unknown): Record<string, string> {
 }
 
 interface OfferingProductEntry {
-  identifier: string;
+  packageIdentifier: string; // the package slot id ($rc_monthly…) from the offering
+  identifier: string;        // the product's own identifier (unchanged, additive)
   type: string;
   displayName: string;
   order: number;
@@ -55,10 +56,10 @@ interface OfferingProductEntry {
   metadata: unknown;
 }
 
-type Membership = z.infer<typeof productMembershipSchema>;
+type PackageSlot = z.infer<typeof packageSchema>;
 
 function hydrateProducts(
-  memberships: Membership[],
+  memberships: PackageSlot[],
   productById: Map<string, {
     identifier: string;
     type: string;
@@ -75,6 +76,7 @@ function hydrateProducts(
       const product = productById.get(entry.productId);
       if (!product || !product.isActive) return null;
       return {
+        packageIdentifier: entry.identifier,
         identifier: product.identifier,
         type: product.type,
         displayName: product.displayName,
@@ -91,31 +93,24 @@ function hydrateProducts(
 
 export const offeringsRoute = new Hono()
   // =============================================================
-  // GET /v1/offerings[?accessId=...]
+  // GET /v1/offerings
   // =============================================================
   .get("/", async (c) => {
     const project = c.get("project");
-    const accessId = c.req.query("accessId");
 
-    const offerings = accessId
-      ? await drizzle.offeringRepo.listOfferingsByAccess(
-          drizzle.db,
-          project.id,
-          accessId,
-        )
-      : await drizzle.offeringRepo.listOfferings(drizzle.db, project.id);
+    const offerings = await drizzle.offeringRepo.listOfferings(drizzle.db, project.id);
 
-    // Parse memberships for all offerings up-front so we can batch-fetch products
+    // Parse packages for all offerings up-front so we can batch-fetch products
     const parsedByOffering = offerings.map((o) => ({
       offering: o,
-      memberships: productMembershipsSchema.safeParse(o.products),
+      packageSlots: packagesSchema.safeParse(o.packages),
     }));
 
     // Collect unique product ids across all offerings for a single DB round-trip
     const allIds = Array.from(
       new Set(
         parsedByOffering.flatMap((p) =>
-          p.memberships.success ? p.memberships.data.map((m) => m.productId) : [],
+          p.packageSlots.success ? p.packageSlots.data.map((m) => m.productId) : [],
         ),
       ),
     );
@@ -129,12 +124,11 @@ export const offeringsRoute = new Hono()
 
     return c.json(
       ok({
-        offerings: parsedByOffering.map(({ offering, memberships }) => ({
+        offerings: parsedByOffering.map(({ offering, packageSlots }) => ({
           identifier: offering.identifier,
-          accessId: offering.accessId,
           isDefault: offering.isDefault,
-          products: memberships.success
-            ? hydrateProducts(memberships.data, productById as any)
+          packages: packageSlots.success
+            ? hydrateProducts(packageSlots.data, productById as any)
             : [],
           metadata: offering.metadata,
         })),
@@ -206,34 +200,32 @@ export const offeringsRoute = new Hono()
       );
     }
 
-    const memberships = productMembershipsSchema.safeParse(offering.products);
-    if (!memberships.success) {
+    const packageSlots = packagesSchema.safeParse(offering.packages);
+    if (!packageSlots.success) {
       return c.json(
         ok({
           identifier: offering.identifier,
-          accessId: offering.accessId,
           isDefault: offering.isDefault,
-          products: [] as OfferingProductEntry[],
+          packages: [] as OfferingProductEntry[],
           metadata: offering.metadata,
         }),
       );
     }
 
-    const productIds = memberships.data.map((m) => m.productId);
+    const productIds = packageSlots.data.map((m) => m.productId);
     const products = await drizzle.offeringRepo.findProductsByIds(
       drizzle.db,
       project.id,
       productIds,
     );
     const productById = new Map(products.map((p) => [p.id, p] as const));
-    const payload: OfferingProductEntry[] = hydrateProducts(memberships.data, productById as any);
+    const payload: OfferingProductEntry[] = hydrateProducts(packageSlots.data, productById as any);
 
     return c.json(
       ok({
         identifier: offering.identifier,
-        accessId: offering.accessId,
         isDefault: offering.isDefault,
-        products: payload,
+        packages: payload,
         metadata: offering.metadata,
       }),
     );
