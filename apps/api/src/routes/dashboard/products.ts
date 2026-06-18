@@ -8,7 +8,6 @@ import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { ok, fail } from "../../lib/response";
-import { ERROR_CODE } from "@rovenue/shared";
 import { getStoreCatalog, StoreCatalogError } from "../../services/store-catalog";
 import type {
   DashboardProductImportResponse,
