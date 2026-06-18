@@ -101,8 +101,9 @@ No ClickHouse impact (offerings not mirrored), but run `db:verify:clickhouse` to
 - `GET /:id` — single offering hydrated with package products.
 - `PATCH /:id` — update metadata + packages.
 - `DELETE /:id`.
-- `PATCH /:id/default` (or a field on PATCH) — set as the project's current offering
-  (atomically clears any prior default).
+- `PATCH /:id/default` — set as the project's current offering; a dedicated endpoint so
+  the "clear any prior default + set this one" runs atomically in one tx (kept off the
+  general `PATCH /:id` to avoid accidental default flips on unrelated edits).
 - Capability gate: `products:write`. Reuse `repositories/offerings.ts` after removing
   `accessId` from its signatures (`listOfferingsByAccess`/`findDefaultOffering` become
   project-scoped; drop access filtering).
