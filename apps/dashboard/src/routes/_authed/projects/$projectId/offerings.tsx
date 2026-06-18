@@ -1,14 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { BookOpen, Package, Plus, Star, StarOff } from "lucide-react";
 import type { DashboardProductRow } from "@rovenue/shared";
 import { Button } from "../../../../ui/button";
-import { Input } from "../../../../ui/input";
-import { Select } from "../../../../ui/select";
 import { cn } from "../../../../lib/cn";
 import { useProject } from "../../../../lib/hooks/useProject";
 import { useProjectOfferings, useUpdateOffering } from "../../../../lib/hooks/useProjectOfferings";
+import { isStandardId } from "../../../../components/offerings/package-identifier-constants";
 import { useProjectProducts } from "../../../../lib/hooks/useProjectProducts";
 import { useProjectAccess } from "../../../../lib/hooks/useProjectAccess";
 import { rowToUiOffering } from "../../../../lib/dashboard-mappers";
@@ -352,8 +351,6 @@ function PackagesSection({
               <PackageRow
                 key={pkg.productId}
                 pkg={pkg}
-                offering={offering}
-                update={update}
               />
             ))}
           </ul>
@@ -381,189 +378,26 @@ function PackagesSection({
   );
 }
 
-// Standard RevenueCat-style package slot identifiers
-const RC_STANDARD_IDS = [
-  "$rov_weekly",
-  "$rov_monthly",
-  "$rov_annual",
-  "$rov_lifetime",
-] as const;
-
-// A slug is valid if it is one of the standard $rov_* ids or matches the custom pattern
-const CUSTOM_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
-const MAX_IDENTIFIER_LENGTH = 160;
-
-function isStandardId(id: string): id is (typeof RC_STANDARD_IDS)[number] {
-  return (RC_STANDARD_IDS as readonly string[]).includes(id);
-}
-
 function PackageRow({
   pkg,
-  offering,
-  update,
 }: {
   pkg: Offering["packages"][number];
-  offering: Offering;
-  update: ReturnType<typeof useUpdateOffering>;
 }) {
   const { t } = useTranslation();
   const { identifier, productName, productSku, order, isPromoted } = pkg;
 
-  // Determine initial mode: standard or custom
-  const initIsStandard = isStandardId(identifier);
-  const [mode, setMode] = useState<"standard" | "custom">(
-    initIsStandard ? "standard" : "custom",
-  );
-  // For the select value when mode=standard, or the sentinel "custom" option
-  const [selectValue, setSelectValue] = useState<string>(
-    initIsStandard ? identifier : "custom",
-  );
-  // The actual custom slug text
-  const [customValue, setCustomValue] = useState(
-    initIsStandard ? "" : identifier,
-  );
-  const [customError, setCustomError] = useState<string | null>(null);
-  const customInputRef = useRef<HTMLInputElement>(null);
-
-  // Keep local state in sync when the offering's package identifier changes externally
-  const prevIdentifier = useRef(identifier);
-  useEffect(() => {
-    if (prevIdentifier.current === identifier) return;
-    prevIdentifier.current = identifier;
-    const std = isStandardId(identifier);
-    setMode(std ? "standard" : "custom");
-    setSelectValue(std ? identifier : "custom");
-    setCustomValue(std ? "" : identifier);
-    setCustomError(null);
-  }, [identifier]);
-
-  const buildNewPackages = (newIdentifier: string) =>
-    offering.packages.map((p) =>
-      p.productId === pkg.productId ? { ...p, identifier: newIdentifier } : p,
-    ).map((p, i) => ({
-      identifier: p.identifier,
-      productId: p.productId,
-      order: i,
-      isPromoted: p.isPromoted,
-      metadata: p.metadata,
-    }));
-
-  const persistIdentifier = (newId: string) => {
-    if (newId === identifier) return; // no-op
-    update.mutate({ packages: buildNewPackages(newId) });
-  };
-
-  const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = e.target.value;
-    setSelectValue(val);
-    if (val === "custom") {
-      setMode("custom");
-      // Focus the custom input on next tick
-      setTimeout(() => customInputRef.current?.focus(), 0);
-    } else {
-      setMode("standard");
-      setCustomValue("");
-      setCustomError(null);
-      persistIdentifier(val);
-    }
-  };
-
-  const handleCustomChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setCustomValue(val);
-    // Validate live
-    if (val.length > MAX_IDENTIFIER_LENGTH) {
-      setCustomError(
-        t("offerings.packages.identifier.tooLong", "Max 160 characters"),
-      );
-    } else if (val.length > 0 && !CUSTOM_ID_RE.test(val)) {
-      setCustomError(
-        t(
-          "offerings.packages.identifier.invalidSlug",
-          "Lowercase letters, digits, hyphens, underscores only",
-        ),
-      );
-    } else {
-      setCustomError(null);
-    }
-  };
-
-  const handleCustomBlur = () => {
-    const trimmed = customValue.trim();
-    if (!trimmed) {
-      // Revert to previous identifier
-      const prevIsStd = isStandardId(identifier);
-      setMode(prevIsStd ? "standard" : "custom");
-      setSelectValue(prevIsStd ? identifier : "custom");
-      setCustomValue(prevIsStd ? "" : identifier);
-      setCustomError(null);
-      return;
-    }
-    // Synchronous re-validation: customError state may be stale if the user
-    // types an invalid character and immediately blurs before React re-renders.
-    if (trimmed.length > MAX_IDENTIFIER_LENGTH || !CUSTOM_ID_RE.test(trimmed)) return;
-    persistIdentifier(trimmed);
-  };
-
-  const handleCustomKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      (e.target as HTMLInputElement).blur();
-    } else if (e.key === "Escape") {
-      // Revert
-      const prevIsStd = isStandardId(identifier);
-      setMode(prevIsStd ? "standard" : "custom");
-      setSelectValue(prevIsStd ? identifier : "custom");
-      setCustomValue(prevIsStd ? "" : identifier);
-      setCustomError(null);
-      (e.target as HTMLInputElement).blur();
-    }
-  };
-
   return (
     <li className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_60px_80px] items-start gap-3 border-t border-rv-divider px-5 py-2.5 text-[13px]">
-      {/* Identifier editor */}
-      <div className="min-w-0 flex flex-col gap-1">
-        <Select
-          value={selectValue}
-          onChange={handleSelectChange}
-          disabled={update.isPending}
-          aria-label={t("offerings.packages.identifier.label", "Package identifier")}
+      {/* Identifier — read-only; set at link time */}
+      <div className="min-w-0 pt-1.5">
+        <span
+          className={cn(
+            "inline-block font-rv-mono text-[12px]",
+            isStandardId(identifier) ? "text-rv-accent-400" : "text-foreground",
+          )}
         >
-          {RC_STANDARD_IDS.map((id) => (
-            <option key={id} value={id}>
-              {id}
-            </option>
-          ))}
-          <option value="custom">
-            {t("offerings.packages.identifier.customOption", "Custom…")}
-          </option>
-        </Select>
-        {mode === "custom" && (
-          <Input
-            ref={customInputRef}
-            mono
-            value={customValue}
-            onChange={handleCustomChange}
-            onBlur={handleCustomBlur}
-            onKeyDown={handleCustomKeyDown}
-            placeholder={t(
-              "offerings.packages.identifier.customPlaceholder",
-              "e.g. pro_monthly",
-            )}
-            maxLength={MAX_IDENTIFIER_LENGTH}
-            disabled={update.isPending}
-            aria-label={t(
-              "offerings.packages.identifier.customLabel",
-              "Custom identifier slug",
-            )}
-            className={cn(
-              customError && "border-rv-danger focus:ring-rv-danger/30",
-            )}
-          />
-        )}
-        {customError && (
-          <p className="text-[11px] text-rv-danger">{customError}</p>
-        )}
+          {identifier}
+        </span>
       </div>
 
       {/* Bound product */}

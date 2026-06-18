@@ -130,7 +130,6 @@ function DialogBody(props: Props) {
   const trimmedDescription = description.trim();
   const isDirty = editing
     ? trimmedName !== (initialOffering?.name ?? "") ||
-      trimmedIdentifier !== (initialOffering?.key ?? "") ||
       trimmedDescription !== (initialOffering?.description ?? "") ||
       isDefault !== (initialOffering?.isDefault ?? false)
     : true;
@@ -138,9 +137,7 @@ function DialogBody(props: Props) {
   const pending = create.isPending || update.isPending;
   const canSubmit =
     trimmedName.length > 0 &&
-    trimmedIdentifier.length > 0 &&
-    identifierValid &&
-    !identifierTaken &&
+    (editing || (trimmedIdentifier.length > 0 && identifierValid && !identifierTaken)) &&
     !pending &&
     isDirty;
 
@@ -161,7 +158,6 @@ function DialogBody(props: Props) {
         props.onCreated?.(res.offering.id);
       } else {
         await update.mutateAsync({
-          identifier: trimmedIdentifier,
           isDefault,
           metadata,
         });
@@ -181,22 +177,27 @@ function DialogBody(props: Props) {
     }
   };
 
-  const identifierHint = identifierTaken
+  const identifierHint = editing
     ? t(
-        "offerings.form.identifier.taken",
-        "An existing offering already uses this identifier.",
+        "offerings.form.identifier.locked",
+        "Can't be changed after creation.",
       )
-    : trimmedIdentifier.length > 0 && !identifierValid
+    : identifierTaken
       ? t(
-          "offerings.form.identifier.invalid",
-          "Use lowercase letters, numbers, hyphens or underscores.",
+          "offerings.form.identifier.taken",
+          "An existing offering already uses this identifier.",
         )
-      : t(
-          "offerings.form.identifier.hint",
-          "Stable key referenced by the SDK and webhooks. Changing it will break existing client integrations.",
-        );
+      : trimmedIdentifier.length > 0 && !identifierValid
+        ? t(
+            "offerings.form.identifier.invalid",
+            "Use lowercase letters, numbers, hyphens or underscores.",
+          )
+        : t(
+            "offerings.form.identifier.hint",
+            "Stable key referenced by the SDK and webhooks. Changing it will break existing client integrations.",
+          );
   const identifierTone =
-    identifierTaken || (trimmedIdentifier.length > 0 && !identifierValid)
+    !editing && (identifierTaken || (trimmedIdentifier.length > 0 && !identifierValid))
       ? "text-rv-danger"
       : "text-rv-mute-500";
 
@@ -274,13 +275,15 @@ function DialogBody(props: Props) {
             mono
             value={identifier}
             onChange={(e) => {
+              if (editing) return;
               setIdentifierTouched(true);
               setIdentifier(e.target.value);
             }}
             placeholder="pro-subscriptions"
             autoComplete="off"
             spellCheck={false}
-            aria-invalid={identifierTaken || (trimmedIdentifier.length > 0 && !identifierValid)}
+            disabled={editing}
+            aria-invalid={!editing && (identifierTaken || (trimmedIdentifier.length > 0 && !identifierValid))}
           />
         </Field>
 

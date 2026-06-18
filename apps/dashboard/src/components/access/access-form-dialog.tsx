@@ -77,13 +77,17 @@ function DialogBody(props: Props) {
   );
   const [error, setError] = useState<string | null>(null);
 
+  const editing = props.mode === "edit";
+
   useEffect(() => {
-    identifierRef.current?.focus();
-  }, []);
+    // In edit mode focus moves to display name since identifier is locked.
+    if (!editing) identifierRef.current?.focus();
+  }, [editing]);
 
   function submit() {
     setError(null);
-    if (!SLUG_RE.test(identifier)) {
+    // Identifier is locked in edit mode — skip validation for it.
+    if (!editing && !SLUG_RE.test(identifier)) {
       setError(
         t(
           "access.form.errors.slug",
@@ -104,8 +108,6 @@ function DialogBody(props: Props) {
       description: description.trim() ? description.trim() : null,
     });
   }
-
-  const editing = props.mode === "edit";
   const title = editing
     ? t("access.form.editTitle", "Edit access")
     : t("access.form.createTitle", "New access");
@@ -156,16 +158,19 @@ function DialogBody(props: Props) {
             aria-label="identifier"
             mono
             value={identifier}
-            onChange={(e) => setIdentifier(e.target.value)}
+            onChange={(e) => { if (!editing) setIdentifier(e.target.value); }}
             placeholder="premium"
             autoComplete="off"
             spellCheck={false}
+            disabled={editing}
           />
           <p className="text-[11px] leading-snug text-rv-mute-500">
-            {t(
-              "access.form.identifier.hint",
-              "Stable slug used by the SDK and webhooks. Use lowercase letters, numbers, hyphens or underscores.",
-            )}
+            {editing
+              ? t("access.form.identifier.locked", "Can't be changed after creation.")
+              : t(
+                  "access.form.identifier.hint",
+                  "Stable slug used by the SDK and webhooks. Use lowercase letters, numbers, hyphens or underscores.",
+                )}
           </p>
         </div>
 
@@ -183,6 +188,7 @@ function DialogBody(props: Props) {
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder="Premium"
             autoComplete="off"
+            autoFocus={editing}
           />
         </div>
 
