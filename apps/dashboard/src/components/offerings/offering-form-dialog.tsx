@@ -21,7 +21,6 @@ type CreateProps = {
   open: boolean;
   onClose: () => void;
   onCreated?: (id: string) => void;
-  initial?: Record<string, never>;
 };
 
 type EditProps = {
