@@ -52,13 +52,19 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
     ],
   },
   {
-    sectionKey: "catalog",
+    sectionKey: "products",
     items: [
       {
         id: "products",
         labelKey: "sidebar.items.products",
         icon: Box,
         to: "/projects/$projectId/products",
+      },
+      {
+        id: "offerings",
+        labelKey: "sidebar.items.offerings",
+        icon: LayoutGrid,
+        to: "/projects/$projectId/offerings",
       },
       {
         id: "access",
