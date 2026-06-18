@@ -4,6 +4,10 @@ import { Button } from "../../ui/button";
 
 type Props = {
   selectedCount: number;
+  /** Disables the action buttons while a bulk mutation is in flight. */
+  busy?: boolean;
+  onArchive: () => void;
+  onDelete: () => void;
   onClear: () => void;
 };
 
@@ -11,7 +15,7 @@ type Props = {
  * Sticky action bar shown when one or more rows are selected. Slides in from
  * the top via `animate-rv-bulk-in` (defined in `index.css`).
  */
-export function BulkBar({ selectedCount, onClear }: Props) {
+export function BulkBar({ selectedCount, busy, onArchive, onDelete, onClear }: Props) {
   const { t } = useTranslation();
   return (
     <div className="sticky top-16 z-10 mb-3 flex items-center gap-3 rounded-lg border border-rv-divider-strong bg-rv-c3 px-3 py-2 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.5)] animate-rv-bulk-in">
@@ -19,16 +23,22 @@ export function BulkBar({ selectedCount, onClear }: Props) {
         {selectedCount} {t("products.bulk.selected")}
       </span>
       <span className="h-4 w-px bg-rv-divider" />
-      <Button variant="light" size="sm" className="h-[26px] text-[12px]">
-        {t("products.bulk.changeGroup")}
-      </Button>
-      <Button variant="light" size="sm" className="h-[26px] text-[12px]">
-        {t("products.bulk.linkAccess")}
-      </Button>
-      <Button variant="light" size="sm" className="h-[26px] text-[12px]">
+      <Button
+        variant="light"
+        size="sm"
+        className="h-[26px] text-[12px]"
+        disabled={busy}
+        onClick={onArchive}
+      >
         {t("products.bulk.archive")}
       </Button>
-      <Button variant="light" size="sm" className="h-[26px] text-[12px] text-rv-danger hover:text-rv-danger">
+      <Button
+        variant="light"
+        size="sm"
+        className="h-[26px] text-[12px] text-rv-danger hover:text-rv-danger"
+        disabled={busy}
+        onClick={onDelete}
+      >
         {t("products.bulk.delete")}
       </Button>
       <Button

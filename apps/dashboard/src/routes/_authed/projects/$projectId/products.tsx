@@ -4,10 +4,13 @@ import { useTranslation } from "react-i18next";
 import { Layers, Plus, Terminal } from "lucide-react";
 import type { ProductTypeName } from "@rovenue/shared";
 import { Button } from "../../../../ui/button";
+import { ConfirmDialog } from "../../../../ui/confirm-dialog";
 import { StatCard } from "../../../../ui/stat-card";
 import { useProject } from "../../../../lib/hooks/useProject";
 import {
+  useDeleteProduct,
   useProjectProducts,
+  useUpdateProduct,
   type ProductStoreFilter,
 } from "../../../../lib/hooks/useProjectProducts";
 import { useProjectAccess } from "../../../../lib/hooks/useProjectAccess";
@@ -268,6 +271,24 @@ function ProductsPage({ projectId }: { projectId: string }) {
     }
   };
 
+  const updateProduct = useUpdateProduct(projectId);
+  const deleteProduct = useDeleteProduct(projectId);
+  const bulkBusy = updateProduct.isPending || deleteProduct.isPending;
+  const [bulkAction, setBulkAction] = useState<"archive" | "delete" | null>(null);
+
+  const runBulkAction = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    if (bulkAction === "archive") {
+      await Promise.all(
+        ids.map((id) => updateProduct.mutateAsync({ id, isActive: false })),
+      );
+    } else if (bulkAction === "delete") {
+      await Promise.all(ids.map((id) => deleteProduct.mutateAsync(id)));
+    }
+    setSelectedIds(new Set());
+  }, [bulkAction, selectedIds, updateProduct, deleteProduct]);
+
   const clearFilters = () => {
     updateSearch({
       group: undefined,
@@ -415,7 +436,13 @@ function ProductsPage({ projectId }: { projectId: string }) {
           </div>
 
           {selectedIds.size > 0 && (
-            <BulkBar selectedCount={selectedIds.size} onClear={() => setSelectedIds(new Set())} />
+            <BulkBar
+              selectedCount={selectedIds.size}
+              busy={bulkBusy}
+              onArchive={() => setBulkAction("archive")}
+              onDelete={() => setBulkAction("delete")}
+              onClear={() => setSelectedIds(new Set())}
+            />
           )}
 
           <ProductsTable
@@ -463,6 +490,29 @@ function ProductsPage({ projectId }: { projectId: string }) {
         projectId={projectId}
         open={importOpen}
         onClose={() => setImportOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={bulkAction !== null}
+        tone={bulkAction === "delete" ? "danger" : "default"}
+        title={
+          bulkAction === "delete"
+            ? t("products.bulk.deleteTitle")
+            : t("products.bulk.archiveTitle")
+        }
+        description={t(
+          bulkAction === "delete"
+            ? "products.bulk.deleteConfirm"
+            : "products.bulk.archiveConfirm",
+          { count: selectedIds.size },
+        )}
+        confirmLabel={
+          bulkAction === "delete"
+            ? t("products.bulk.delete")
+            : t("products.bulk.archive")
+        }
+        onConfirm={runBulkAction}
+        onClose={() => setBulkAction(null)}
       />
     </>
   );

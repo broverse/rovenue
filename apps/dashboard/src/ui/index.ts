@@ -3,6 +3,11 @@ export { Card, CardHeader, CardFooter, cardVariants, type CardProps } from "./ca
 export { Checkbox, checkboxVariants, type CheckboxProps } from "./checkbox";
 export { Chip, chipVariants, type ChipProps } from "./chip";
 export { CodeBlock } from "./code-block";
+export {
+  ConfirmDialog,
+  type ConfirmDialogProps,
+  type ConfirmTone,
+} from "./confirm-dialog";
 export { CopyButton, type CopyButtonProps } from "./copy-button";
 export { Input, inputVariants, type InputProps } from "./input";
 export { Kbd, kbdVariants, type KbdProps } from "./kbd";

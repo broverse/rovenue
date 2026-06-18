@@ -14,6 +14,7 @@
     "save": "Save",
     "saveChanges": "Save changes",
     "cancel": "Cancel",
+    "confirm": "Confirm",
     "delete": "Delete",
     "loading": "Loading...",
     "loadingProject": "Loading project...",
@@ -710,10 +711,12 @@
     },
     "bulk": {
       "selected": "selected",
-      "changeGroup": "Change group…",
-      "linkAccess": "Link access…",
       "archive": "Archive",
+      "archiveTitle": "Archive products",
+      "archiveConfirm": "Archive {{count}} product(s)? They'll move out of the active list.",
       "delete": "Delete",
+      "deleteTitle": "Delete products",
+      "deleteConfirm": "Delete {{count}} product(s)? This cannot be undone.",
       "clearSelection": "Clear selection"
     },
     "table": {
