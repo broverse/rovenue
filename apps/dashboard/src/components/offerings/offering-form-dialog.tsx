@@ -194,7 +194,7 @@ function DialogBody(props: Props) {
           )
         : t(
             "offerings.form.identifier.hint",
-            "Stable key referenced by the SDK and webhooks. Changing it will break existing client integrations.",
+            "Stable key referenced by the SDK and webhooks. Set once and can't be changed after creation, since that would break existing client integrations.",
           );
   const identifierTone =
     !editing && (identifierTaken || (trimmedIdentifier.length > 0 && !identifierValid))

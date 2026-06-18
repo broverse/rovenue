@@ -169,7 +169,7 @@ function DialogBody(props: Props) {
               ? t("access.form.identifier.locked", "Can't be changed after creation.")
               : t(
                   "access.form.identifier.hint",
-                  "Stable slug used by the SDK and webhooks. Use lowercase letters, numbers, hyphens or underscores.",
+                  "Stable slug used by the SDK and webhooks. Set once and can't be changed after creation. Use lowercase letters, numbers, hyphens or underscores.",
                 )}
           </p>
         </div>

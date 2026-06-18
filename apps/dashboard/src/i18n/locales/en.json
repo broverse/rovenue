@@ -784,7 +784,7 @@
       },
       "fields": {
         "identifier": "Identifier",
-        "identifierHint": "A unique slug for this product (lowercase letters, numbers, underscores).",
+        "identifierHint": "A unique slug for this product. Set once and can't be changed after creation. Lowercase letters, numbers, underscores.",
         "identifierLockedHint": "The identifier can't be changed after a product is created.",
         "displayName": "Display name",
         "displayNamePlaceholder": "Pro Monthly",
@@ -977,7 +977,7 @@
       },
       "identifier": {
         "label": "Identifier",
-        "hint": "Stable key referenced by the SDK and webhooks. Changing it will break existing client integrations.",
+        "hint": "Stable key referenced by the SDK and webhooks. Set once and can't be changed after creation, since that would break existing client integrations.",
         "invalid": "Use lowercase letters, numbers, hyphens or underscores.",
         "taken": "An existing offering already uses this identifier."
       },
@@ -1074,8 +1074,6 @@
       "refineHeading": "Refine",
       "accessLabel": "Access key",
       "accessPlaceholder": "e.g. premium",
-      "entitlementLabel": "Entitlement",
-      "entitlementPlaceholder": "e.g. premium",
       "countryLabel": "Country (ISO-3166)",
       "countryPlaceholder": "e.g. US",
       "ltvMinLabel": "Min LTV (USD)",
@@ -1840,7 +1838,7 @@
       "editTitle": "Edit access",
       "identifier": {
         "label": "Identifier",
-        "hint": "Slug shown to the SDK. Lowercase letters, digits, dashes or underscores."
+        "hint": "Stable slug used by the SDK and webhooks. Set once and can't be changed after creation. Use lowercase letters, numbers, hyphens or underscores."
       },
       "displayName": {
         "label": "Display name"
