@@ -78,11 +78,10 @@ export function StepperRail({
           const isActive = step === entry.id;
           const isDone =
             entry.id < step || (isUpdate && isStepDone(entry.id) && !isActive);
-          const isLocked =
-            !isUpdate &&
-            entry.id > step &&
-            entry.id > 1 &&
-            !isStepDone(entry.id - 1);
+          const allPreviousDone = STEPS.slice(0, index).every((prev) =>
+            isStepDone(prev.id),
+          );
+          const isLocked = !isUpdate && entry.id > step && !allPreviousDone;
           const showLine = index < STEPS.length - 1;
 
           return (
