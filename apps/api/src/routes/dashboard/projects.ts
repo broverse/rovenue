@@ -8,6 +8,7 @@ import { Environment, MemberRole, drizzle } from "@rovenue/db";
 import {
   API_KEY_KIND,
   API_KEY_PREFIX,
+  WEBHOOK_EVENT_CATEGORIES,
   type CreateProjectResponse,
   type ProjectApiKey,
   type ProjectDetail,
@@ -80,6 +81,7 @@ type ProjectRow = {
   description: string | null;
   webhookUrl: string | null;
   webhookSecret: string | null;
+  webhookEventCategories: unknown;
   settings: unknown;
   createdAt: Date;
   updatedAt: Date;
@@ -148,6 +150,9 @@ function toProjectDetail(
     description: project.description,
     webhookUrl: project.webhookUrl,
     hasWebhookSecret: Boolean(project.webhookSecret),
+    webhookEventCategories: Array.isArray(project.webhookEventCategories)
+      ? (project.webhookEventCategories as string[])
+      : [],
     settings: sanitizeSettings(project.settings),
     createdAt: project.createdAt.toISOString(),
     updatedAt: project.updatedAt.toISOString(),
@@ -205,6 +210,7 @@ export const updateProjectBodySchema = z
     name: z.string().trim().min(2).max(80).optional(),
     description: descriptionSchema.optional(),
     webhookUrl: z.string().url().nullable().optional(),
+    webhookEventCategories: z.array(z.enum(WEBHOOK_EVENT_CATEGORIES)).optional(),
     settings: z.record(z.unknown()).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, {
@@ -348,6 +354,9 @@ export const projectsRoute = new Hono()
       ...(body.name !== undefined && { name: body.name }),
       ...(body.description !== undefined && { description: body.description }),
       ...(body.webhookUrl !== undefined && { webhookUrl: body.webhookUrl }),
+      ...(body.webhookEventCategories !== undefined && {
+        webhookEventCategories: body.webhookEventCategories,
+      }),
       ...(body.settings !== undefined && { settings: body.settings }),
     });
     if (!updated) {

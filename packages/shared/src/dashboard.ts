@@ -48,6 +48,7 @@ export interface ProjectDetail {
   description: string | null;
   webhookUrl: string | null;
   hasWebhookSecret: boolean;
+  webhookEventCategories: string[];
   settings: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -103,6 +104,7 @@ export interface UpdateProjectRequest {
   name?: string;
   description?: string | null;
   webhookUrl?: string | null;
+  webhookEventCategories?: string[];
   settings?: Record<string, unknown>;
 }
 
