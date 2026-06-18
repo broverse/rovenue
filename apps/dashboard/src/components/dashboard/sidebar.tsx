@@ -63,7 +63,7 @@ export function Sidebar({ projectId, projectName, envLabel, open = false, onClos
         className="flex-1 overflow-y-auto px-2 pb-2 pt-3 [scrollbar-color:var(--color-rv-c4)_transparent] [scrollbar-width:thin]"
       >
         <div className="mb-3 px-1">
-          <SidebarNewButton />
+          <SidebarNewButton projectId={projectId} />
         </div>
         {NAV_SECTIONS.map((group, groupIdx) => (
           <div key={group.sectionKey}>

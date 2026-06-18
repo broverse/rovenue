@@ -44,6 +44,8 @@ type ProductsSearch = {
   q?: string;
   type?: ReadonlyArray<ProductTypeName>;
   store?: ReadonlyArray<ProductStoreFilter>;
+  /** When truthy, auto-opens the create modal (set by the sidebar "New" menu). */
+  new?: boolean;
 };
 
 /** Parse `?type=A,B` or `?type=A&type=B` into a typed array. */
@@ -78,6 +80,7 @@ export const Route = createFileRoute("/_authed/projects/$projectId/products")({
       q,
       type: parseList(raw.type, VALID_TYPES),
       store: parseList(raw.store, VALID_STORES),
+      new: raw.new === true || raw.new === "true" || raw.new === "1" || undefined,
     };
   },
 });
@@ -151,6 +154,15 @@ function ProductsPage({ projectId }: { projectId: string }) {
     setFormOpen(false);
     setEditProductId(null);
   };
+
+  // Arrived via the sidebar "New → Product" entry (`?new=1`): open the create
+  // modal, then strip the flag so reload/back doesn't reopen it.
+  useEffect(() => {
+    if (!search.new) return;
+    openCreate();
+    void navigate({ search: (prev) => ({ ...prev, new: undefined }), replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.new]);
 
   const productsQuery = useProjectProducts({
     projectId,
