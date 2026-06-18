@@ -7,12 +7,15 @@ import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
-import { ok } from "../../lib/response";
+import { ok, fail } from "../../lib/response";
+import { ERROR_CODE } from "@rovenue/shared";
+import { getStoreCatalog, StoreCatalogError } from "../../services/store-catalog";
 import type {
   DashboardProductImportResponse,
   DashboardProductImportResultRow,
   DashboardProductRow,
   DashboardProductsListResponse,
+  DashboardStoreCatalogResponse,
   ProductTypeName,
 } from "@rovenue/shared";
 
@@ -96,6 +99,10 @@ const listQuerySchema = z.object({
     .max(PAGE_LIMIT_MAX)
     .default(PAGE_LIMIT_DEFAULT),
   cursor: z.string().min(1).optional(),
+});
+
+const storeCatalogQuerySchema = z.object({
+  store: z.enum(["ios", "android"] as const),
 });
 
 const createBodySchema = z.object({
@@ -326,6 +333,31 @@ export const productsDashboardRoute = new Hono()
     if (created.length > 0) purgeProjectCatalogCache(projectId);
     return c.json(ok(payload));
   })
+  .get(
+    "/store-catalog",
+    zValidator("query", storeCatalogQuerySchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      if (!projectId) {
+        throw new HTTPException(400, { message: "Missing projectId" });
+      }
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+      const { store } = c.req.valid("query");
+
+      try {
+        const items = await getStoreCatalog(projectId, store);
+        const payload: DashboardStoreCatalogResponse = { items };
+        return c.json(ok(payload));
+      } catch (err) {
+        if (err instanceof StoreCatalogError || (err as any)?.name === "StoreCatalogError") {
+          const e = err as StoreCatalogError;
+          return c.json(fail(e.code, e.message), e.status as 400 | 502);
+        }
+        throw err;
+      }
+    },
+  )
   .get("/:id", async (c) => {
     const projectId = c.req.param("projectId");
     const id = c.req.param("id");
