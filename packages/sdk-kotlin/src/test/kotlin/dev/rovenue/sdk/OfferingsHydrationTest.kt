@@ -46,11 +46,13 @@ class OfferingsHydrationTest {
     }
 
     private fun product(
+        packageIdentifier: String,
         identifier: String,
         type: String,
         google: String?,
         display: String = identifier,
     ) = CoreOfferingProduct(
+        packageIdentifier = packageIdentifier,
         identifier = identifier,
         productType = type,
         displayName = display,
@@ -67,9 +69,9 @@ class OfferingsHydrationTest {
                     identifier = "default",
                     isDefault = true,
                     packages = listOf(
-                        product("monthly", "SUBSCRIPTION", google = "pro_monthly"),
-                        product("coins", "CONSUMABLE", google = "coins_100"),
-                        product("lifetime", "NON_CONSUMABLE", google = "lifetime_unlock"),
+                        product("\$rc_monthly", "monthly", "SUBSCRIPTION", google = "pro_monthly"),
+                        product("\$rc_coins", "coins", "CONSUMABLE", google = "coins_100"),
+                        product("\$rc_lifetime", "lifetime", "NON_CONSUMABLE", google = "lifetime_unlock"),
                     ),
                 ),
             ),
@@ -116,7 +118,7 @@ class OfferingsHydrationTest {
                 CoreOffering(
                     identifier = "o1",
                     isDefault = false,
-                    packages = listOf(product("weekly", "SUBSCRIPTION", google = null)),
+                    packages = listOf(product("\$rc_weekly", "weekly", "SUBSCRIPTION", google = null)),
                 ),
             ),
         )
@@ -128,5 +130,38 @@ class OfferingsHydrationTest {
         assertEquals("weekly", weekly.id)
         assertEquals("$1.99", weekly.priceString)
         assertNull(offerings.current)
+    }
+
+    @Test
+    fun `Package identifier is the slot id not the product catalog id`() = runTest {
+        // packageIdentifier ($rc_monthly) is the package slot from the server;
+        // identifier (pro_monthly_catalog) is the product catalog id — they must
+        // not be confused or a swap bug silently passes.
+        val core = CoreOfferings(
+            current = "default",
+            offerings = listOf(
+                CoreOffering(
+                    identifier = "default",
+                    isDefault = true,
+                    packages = listOf(
+                        product(
+                            packageIdentifier = "\$rc_monthly",
+                            identifier = "pro_monthly_catalog",
+                            type = "SUBSCRIPTION",
+                            google = "pro_monthly_catalog",
+                        ),
+                    ),
+                ),
+            ),
+        )
+        val store = FakePriceStore(mapOf("pro_monthly_catalog" to PriceInfo("$9.99", 9.99, "USD")))
+
+        val offerings = hydrateOfferings(core, store)
+
+        val pkg = offerings.all.getValue("default").packages.single()
+        // Package.identifier must be the slot id, not the product catalog id.
+        assertEquals("\$rc_monthly", pkg.identifier)
+        // The product's own store id is separately accessible and distinct.
+        assertEquals("pro_monthly_catalog", pkg.product.id)
     }
 }

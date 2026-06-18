@@ -74,7 +74,11 @@ private fun mapOffering(o: CoreOffering, prices: Map<String, PriceInfo>): Offeri
     Offering(
         identifier = o.identifier,
         isDefault = o.isDefault,
-        packages = o.packages.map { Package(identifier = it.identifier, product = mapProduct(it, prices)) },
+        // Use packageIdentifier (the slot id, e.g. $rc_monthly) as
+        // Package.identifier — that is the value the SDK contract exposes to
+        // callers. The product's own catalog identifier is available via
+        // pkg.product.id.
+        packages = o.packages.map { Package(identifier = it.packageIdentifier, product = mapProduct(it, prices)) },
     )
 
 /**
