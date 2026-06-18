@@ -32,7 +32,7 @@ export interface GroupProduct {
  * resolved product details so the offerings detail pane can display both.
  */
 export interface OfferingPackageUi {
-  /** Standard ($rc_monthly/$rc_annual/etc.) or custom slug. */
+  /** Standard ($rov_monthly/$rov_annual/etc.) or custom slug. */
   identifier: string;
   productId: string;
   order: number;
@@ -57,7 +57,7 @@ export interface Offering {
   isDefault: boolean;
   /**
    * Packages in this offering, sorted by order. Each package carries its
-   * SDK identifier (e.g. `$rc_monthly`) plus the bound product.
+   * SDK identifier (e.g. `$rov_monthly`) plus the bound product.
    */
   packages: ReadonlyArray<OfferingPackageUi>;
   /**

@@ -19,7 +19,7 @@ import type {
 // =============================================================
 
 const PACKAGE_ID_RE =
-  /^(\$rc_(weekly|monthly|annual|lifetime)|[a-z0-9][a-z0-9_-]*)$/;
+  /^(\$rov_(weekly|monthly|annual|lifetime)|[a-z0-9][a-z0-9_-]*)$/;
 
 const packageSchema = z.object({
   identifier: z.string().trim().min(1).max(160).regex(PACKAGE_ID_RE),

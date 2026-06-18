@@ -67,7 +67,7 @@ artifact that this work removes.
   this single default is the project-wide "current offering". Keep as a partial unique index.
 - Replace `products` jsonb with **`packages`** jsonb:
   `[{ identifier, productId, order, isPromoted, metadata? }]`.
-  - `identifier`: standard (`$rc_monthly`, `$rc_annual`, `$rc_weekly`, `$rc_lifetime`) or
+  - `identifier`: standard (`$rov_monthly`, `$rov_annual`, `$rov_weekly`, `$rov_lifetime`) or
     custom slug (alphanumeric, `-`, `_`); **unique within the offering**.
 
 ### `products` table

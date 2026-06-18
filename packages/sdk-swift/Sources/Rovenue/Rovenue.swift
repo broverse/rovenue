@@ -72,7 +72,8 @@ public final class Rovenue: @unchecked Sendable {
         var config = Config(
             apiKey: apiKey,
             debug: debug,
-            appVersion: resolvedVersion
+            appVersion: resolvedVersion,
+            platform: "ios"
         )
         if let baseUrl {
             config.baseUrl = baseUrl
@@ -473,7 +474,7 @@ public final class Rovenue: @unchecked Sendable {
             Offering(
                 identifier: o.identifier,
                 isDefault: o.isDefault,
-                // Use packageIdentifier (the slot id, e.g. $rc_monthly) as
+                // Use packageIdentifier (the slot id, e.g. $rov_monthly) as
                 // Package.identifier — that is the value the SDK contract
                 // exposes to callers. The product's own catalog identifier
                 // is available via pkg.product.id.

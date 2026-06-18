@@ -182,7 +182,7 @@ describe("Rovenue imperative API", () => {
 
   it("getOfferings sets Package.identifier from the native DTO identifier (package slot id)", async () => {
     // The native layer (Rust→Swift façade) now populates PackageDTO.identifier
-    // with the package slot id (e.g. $rc_monthly), NOT the product catalog id.
+    // with the package slot id (e.g. $rov_monthly), NOT the product catalog id.
     // This test asserts that getOfferings() surfaces that slot id unchanged as
     // Package.identifier, while the product's catalog id lives in Package.product.id.
     native.getOfferings = vi.fn(async () => ({
@@ -191,7 +191,7 @@ describe("Rovenue imperative API", () => {
         identifier: "default",
         isDefault: true,
         packages: [{
-          identifier: "$rc_monthly",
+          identifier: "$rov_monthly",
           product: {
             id: "pro_monthly",
             type: "subscription" as const,
@@ -205,7 +205,7 @@ describe("Rovenue imperative API", () => {
     }));
     const offerings = await getOfferings();
     const pkg = offerings.all["default"].packages[0];
-    expect(pkg.identifier).toBe("$rc_monthly");
+    expect(pkg.identifier).toBe("$rov_monthly");
     expect(pkg.product.id).toBe("pro_monthly");
   });
 

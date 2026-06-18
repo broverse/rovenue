@@ -16,7 +16,7 @@
 - Conventional commit messages (`feat:`, `fix:`, `chore:`, `docs:`, `test:`).
 - Commit trailer on every commit: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
 - Stay on the current branch (`main`); do not create or switch branches. Commit only files this plan changes.
-- Standard package-identifier values: `$rc_weekly`, `$rc_monthly`, `$rc_annual`, `$rc_lifetime`, or a custom slug (`^[a-z0-9][a-z0-9_-]*$` or the `$rc_` prefixed standards). Max length 160.
+- Standard package-identifier values: `$rov_weekly`, `$rov_monthly`, `$rov_annual`, `$rov_lifetime`, or a custom slug (`^[a-z0-9][a-z0-9_-]*$` or the `$rov_` prefixed standards). Max length 160.
 - Integration tests live in `*.integration.test.ts` and use testcontainers (real Postgres). Run with the repo's existing test command.
 
 ## Deviations from the approved spec (discovered while reading code — all reduce scope)
@@ -146,11 +146,11 @@ describe("offerings schema (decoupled + packages)", () => {
       identifier: "default",
       isDefault: true,
       packages: [
-        { identifier: "$rc_monthly", productId: prodId, order: 0, isPromoted: false },
+        { identifier: "$rov_monthly", productId: prodId, order: 0, isPromoted: false },
       ],
     }).returning();
     expect(row.packages).toHaveLength(1);
-    expect((row.packages as any)[0].identifier).toBe("$rc_monthly");
+    expect((row.packages as any)[0].identifier).toBe("$rov_monthly");
     expect("accessId" in row).toBe(false);
   });
 
@@ -190,7 +190,7 @@ git commit -m "feat(db): decouple offerings from access; rename products JSONB t
 ```ts
 /** A package inside an offering's `packages` JSONB column. */
 export interface OfferingPackage {
-  /** Standard ($rc_monthly/$rc_annual/...) or custom slug, unique within the offering. */
+  /** Standard ($rov_monthly/$rov_annual/...) or custom slug, unique within the offering. */
   identifier: string;
   productId: string;
   order: number;
@@ -309,12 +309,12 @@ it("creates an offering with packages and no accessId", async () => {
     body: JSON.stringify({
       identifier: "default",
       isDefault: true,
-      packages: [{ identifier: "$rc_monthly", productId, order: 0, isPromoted: false }],
+      packages: [{ identifier: "$rov_monthly", productId, order: 0, isPromoted: false }],
     }),
   });
   expect(res.status).toBe(200);
   const { data } = await res.json();
-  expect(data.offering.packages[0].identifier).toBe("$rc_monthly");
+  expect(data.offering.packages[0].identifier).toBe("$rov_monthly");
   expect(data.offering.accessId).toBeUndefined();
 });
 ```
@@ -330,7 +330,7 @@ Expected: FAIL (body still requires `accessId`; response still has it).
   - Replace `membershipSchema` (lines 21-26) with a package schema:
 
 ```ts
-const PACKAGE_ID_RE = /^(\$rc_(weekly|monthly|annual|lifetime)|[a-z0-9][a-z0-9_-]*)$/;
+const PACKAGE_ID_RE = /^(\$rov_(weekly|monthly|annual|lifetime)|[a-z0-9][a-z0-9_-]*)$/;
 const packageSchema = z.object({
   identifier: z.string().trim().min(1).max(160).regex(PACKAGE_ID_RE),
   productId: z.string().min(1),
@@ -391,7 +391,7 @@ git commit -m "feat(api): dashboard offerings use packages with identifier; drop
 
 **Interfaces:**
 - Consumes: Task 3 repo (`listOfferings` only; `listOfferingsByAccess` gone).
-- Produces: response items `{ identifier, isDefault, packages: [{ packageIdentifier, identifier, type, displayName, order, isPromoted, creditAmount, accessIds, storeIds, metadata }], metadata }` where `packageIdentifier` is the package slot id ($rc_monthly...) and `identifier` is the product's own identifier (unchanged). Consumed by the SDK (Task 6).
+- Produces: response items `{ identifier, isDefault, packages: [{ packageIdentifier, identifier, type, displayName, order, isPromoted, creditAmount, accessIds, storeIds, metadata }], metadata }` where `packageIdentifier` is the package slot id ($rov_monthly...) and `identifier` is the product's own identifier (unchanged). Consumed by the SDK (Task 6).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -401,9 +401,9 @@ it("hydrates packages with their package identifier and omits accessId", async (
   const { data } = await res.json();
   const o = data.offerings.find((x: any) => x.identifier === "default");
   expect(o.accessId).toBeUndefined();
-  // packageIdentifier is the RevenueCat-style slot id ($rc_monthly);
+  // packageIdentifier is the RevenueCat-style slot id ($rov_monthly);
   // identifier remains the product's own identifier (additive, non-breaking).
-  expect(o.packages[0].packageIdentifier).toBe("$rc_monthly");
+  expect(o.packages[0].packageIdentifier).toBe("$rov_monthly");
   expect(o.packages[0].identifier).toBeTruthy();
 });
 ```
@@ -429,7 +429,7 @@ const packagesSchema = z.array(packageSchema);
 
 ```ts
 interface OfferingProductEntry {
-  packageIdentifier: string;   // the package slot id ($rc_monthly...) → PackageDTO.identifier
+  packageIdentifier: string;   // the package slot id ($rov_monthly...) → PackageDTO.identifier
   identifier: string;          // the product's own identifier (unchanged)
   type: string;
   displayName: string;
@@ -471,7 +471,7 @@ git commit -m "feat(api): v1 offerings expose package identifier, drop accessId 
 
 - [ ] **Step 1: Read the three files** to find where the offerings HTTP response is mapped to `OfferingDTO`/`PackageDTO`. Confirm whether the RN bridge or the native (Swift/Kotlin) core consumes `/v1/offerings`.
 
-- [ ] **Step 2: Write/adjust the failing test** — a mapping test asserting that given a server payload with `packages: [{ packageIdentifier: "$rc_monthly", identifier: "<productId>", ... }]`, the resulting `Package.identifier === "$rc_monthly"`. Place it next to the existing offerings mapping test.
+- [ ] **Step 2: Write/adjust the failing test** — a mapping test asserting that given a server payload with `packages: [{ packageIdentifier: "$rov_monthly", identifier: "<productId>", ... }]`, the resulting `Package.identifier === "$rov_monthly"`. Place it next to the existing offerings mapping test.
 
 - [ ] **Step 3: Run to confirm failure** (the mapper currently derives/ignores the package identifier).
 
@@ -568,7 +568,7 @@ git commit -m "feat(dashboard): Products nav group with Products/Offerings/Acces
 Run: `pnpm --filter @rovenue/dashboard build`
 Expected: PASS; the new route is picked up by TanStack Router's file-based routing (regenerate the route tree if the project uses a generated `routeTree.gen.ts` — run the dashboard dev/build which regenerates it).
 
-- [ ] **Step 5: Manual smoke check** — `pnpm dev`, open `/projects/<id>/offerings`, create an offering with a `$rc_monthly` package, set it as current, confirm it persists on reload.
+- [ ] **Step 5: Manual smoke check** — `pnpm dev`, open `/projects/<id>/offerings`, create an offering with a `$rov_monthly` package, set it as current, confirm it persists on reload.
 
 - [ ] **Step 6: Commit**
 

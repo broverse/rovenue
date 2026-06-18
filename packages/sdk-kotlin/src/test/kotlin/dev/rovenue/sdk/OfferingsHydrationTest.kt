@@ -69,9 +69,9 @@ class OfferingsHydrationTest {
                     identifier = "default",
                     isDefault = true,
                     packages = listOf(
-                        product("\$rc_monthly", "monthly", "SUBSCRIPTION", google = "pro_monthly"),
-                        product("\$rc_coins", "coins", "CONSUMABLE", google = "coins_100"),
-                        product("\$rc_lifetime", "lifetime", "NON_CONSUMABLE", google = "lifetime_unlock"),
+                        product("\$rov_monthly", "monthly", "SUBSCRIPTION", google = "pro_monthly"),
+                        product("\$rov_coins", "coins", "CONSUMABLE", google = "coins_100"),
+                        product("\$rov_lifetime", "lifetime", "NON_CONSUMABLE", google = "lifetime_unlock"),
                     ),
                 ),
             ),
@@ -118,7 +118,7 @@ class OfferingsHydrationTest {
                 CoreOffering(
                     identifier = "o1",
                     isDefault = false,
-                    packages = listOf(product("\$rc_weekly", "weekly", "SUBSCRIPTION", google = null)),
+                    packages = listOf(product("\$rov_weekly", "weekly", "SUBSCRIPTION", google = null)),
                 ),
             ),
         )
@@ -134,7 +134,7 @@ class OfferingsHydrationTest {
 
     @Test
     fun `Package identifier is the slot id not the product catalog id`() = runTest {
-        // packageIdentifier ($rc_monthly) is the package slot from the server;
+        // packageIdentifier ($rov_monthly) is the package slot from the server;
         // identifier (pro_monthly_catalog) is the product catalog id — they must
         // not be confused or a swap bug silently passes.
         val core = CoreOfferings(
@@ -145,7 +145,7 @@ class OfferingsHydrationTest {
                     isDefault = true,
                     packages = listOf(
                         product(
-                            packageIdentifier = "\$rc_monthly",
+                            packageIdentifier = "\$rov_monthly",
                             identifier = "pro_monthly_catalog",
                             type = "SUBSCRIPTION",
                             google = "pro_monthly_catalog",
@@ -160,7 +160,7 @@ class OfferingsHydrationTest {
 
         val pkg = offerings.all.getValue("default").packages.single()
         // Package.identifier must be the slot id, not the product catalog id.
-        assertEquals("\$rc_monthly", pkg.identifier)
+        assertEquals("\$rov_monthly", pkg.identifier)
         // The product's own store id is separately accessible and distinct.
         assertEquals("pro_monthly_catalog", pkg.product.id)
     }

@@ -1512,7 +1512,7 @@ export interface DashboardAccessListResponse {
 
 /** A package inside an offering's `packages` JSONB column. */
 export interface OfferingPackage {
-  /** Standard ($rc_monthly/$rc_annual/...) or custom slug, unique within the offering. */
+  /** Standard ($rov_monthly/$rov_annual/...) or custom slug, unique within the offering. */
   identifier: string;
   productId: string;
   order: number;

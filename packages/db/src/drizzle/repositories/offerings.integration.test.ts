@@ -45,7 +45,7 @@ describe("offerings schema (decoupled + packages)", () => {
         isDefault: true,
         packages: [
           {
-            identifier: "$rc_monthly",
+            identifier: "$rov_monthly",
             productId: `prod_${RUN_ID}`,
             order: 0,
             isPromoted: false,
@@ -58,7 +58,7 @@ describe("offerings schema (decoupled + packages)", () => {
     expect(Array.isArray(row!.packages)).toBe(true);
     expect((row!.packages as unknown[]).length).toBe(1);
     expect((row!.packages as Array<{ identifier: string }>)[0]!.identifier).toBe(
-      "$rc_monthly",
+      "$rov_monthly",
     );
     // Confirm the Drizzle type has no accessId property
     expect("accessId" in row!).toBe(false);

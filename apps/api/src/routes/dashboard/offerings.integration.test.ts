@@ -118,7 +118,7 @@ describe("POST /projects/:projectId/offerings — create offering", () => {
           isDefault: true,
           packages: [
             {
-              identifier: "$rc_monthly",
+              identifier: "$rov_monthly",
               productId: product.id,
               order: 0,
               isPromoted: false,
@@ -131,7 +131,7 @@ describe("POST /projects/:projectId/offerings — create offering", () => {
     expect(res.status).toBe(200);
     const { data } = await res.json() as { data: { offering: Record<string, unknown> } };
     expect(data.offering.packages).toBeInstanceOf(Array);
-    expect((data.offering.packages as Array<{ identifier: string }>)[0]?.identifier).toBe("$rc_monthly");
+    expect((data.offering.packages as Array<{ identifier: string }>)[0]?.identifier).toBe("$rov_monthly");
     expect(data.offering.accessId).toBeUndefined();
   });
 
@@ -188,7 +188,7 @@ describe("GET /projects/:projectId/offerings — list offerings", () => {
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
         identifier: "list-test",
-        packages: [{ identifier: "$rc_annual", productId: product.id, order: 0, isPromoted: false }],
+        packages: [{ identifier: "$rov_annual", productId: product.id, order: 0, isPromoted: false }],
       }),
     });
 
@@ -220,7 +220,7 @@ describe("PATCH /projects/:projectId/offerings/:id — update offering", () => {
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
         identifier: "patch-test",
-        packages: [{ identifier: "$rc_monthly", productId: product.id, order: 0, isPromoted: false }],
+        packages: [{ identifier: "$rov_monthly", productId: product.id, order: 0, isPromoted: false }],
       }),
     });
     const { data: createData } = await createRes.json() as { data: { offering: { id: string } } };
@@ -231,8 +231,8 @@ describe("PATCH /projects/:projectId/offerings/:id — update offering", () => {
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
         packages: [
-          { identifier: "$rc_monthly", productId: product.id, order: 0, isPromoted: true },
-          { identifier: "$rc_annual", productId: product.id, order: 1, isPromoted: false },
+          { identifier: "$rov_monthly", productId: product.id, order: 0, isPromoted: true },
+          { identifier: "$rov_annual", productId: product.id, order: 1, isPromoted: false },
         ],
       }),
     });

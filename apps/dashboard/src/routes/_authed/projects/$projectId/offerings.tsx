@@ -383,13 +383,13 @@ function PackagesSection({
 
 // Standard RevenueCat-style package slot identifiers
 const RC_STANDARD_IDS = [
-  "$rc_weekly",
-  "$rc_monthly",
-  "$rc_annual",
-  "$rc_lifetime",
+  "$rov_weekly",
+  "$rov_monthly",
+  "$rov_annual",
+  "$rov_lifetime",
 ] as const;
 
-// A slug is valid if it is one of the standard $rc_* ids or matches the custom pattern
+// A slug is valid if it is one of the standard $rov_* ids or matches the custom pattern
 const CUSTOM_ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
 const MAX_IDENTIFIER_LENGTH = 160;
 

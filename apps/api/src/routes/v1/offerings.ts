@@ -44,7 +44,7 @@ function parseStoreIds(raw: unknown): Record<string, string> {
 }
 
 interface OfferingProductEntry {
-  packageIdentifier: string; // the package slot id ($rc_monthly…) from the offering
+  packageIdentifier: string; // the package slot id ($rov_monthly…) from the offering
   identifier: string;        // the product's own identifier (unchanged, additive)
   type: string;
   displayName: string;

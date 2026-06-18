@@ -41,7 +41,7 @@ let PRODUCT_ID: string;
 let OFFERING_ID: string;
 
 const OFFERING_IDENTIFIER = `test-offering-${createId().slice(0, 8)}`;
-const PACKAGE_IDENTIFIER = "$rc_monthly";
+const PACKAGE_IDENTIFIER = "$rov_monthly";
 const PRODUCT_IDENTIFIER = `prod_monthly_${createId().slice(0, 8)}`;
 
 // ---------------------------------------------------------------------------
@@ -154,7 +154,7 @@ describe("GET /v1/offerings", () => {
     expect(o.packages).toHaveLength(1);
 
     const pkg = o.packages[0];
-    // packageIdentifier is the RevenueCat-style slot id ($rc_monthly)
+    // packageIdentifier is the RevenueCat-style slot id ($rov_monthly)
     expect(pkg.packageIdentifier).toBe(PACKAGE_IDENTIFIER);
     // identifier is the product's own identifier (additive, non-breaking)
     expect(pkg.identifier).toBe(PRODUCT_IDENTIFIER);

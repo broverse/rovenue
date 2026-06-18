@@ -1,7 +1,7 @@
 { "data": { "offerings": [
   { "identifier": "default", "isDefault": true, "packages": [
-    { "packageIdentifier": "$rc_monthly", "identifier": "pro_monthly", "type": "SUBSCRIPTION", "displayName": "Pro Monthly",
+    { "packageIdentifier": "$rov_monthly", "identifier": "pro_monthly", "type": "SUBSCRIPTION", "displayName": "Pro Monthly",
       "storeIds": { "apple": "com.x.pro.monthly", "google": "pro_monthly" } } ] },
   { "identifier": "promo", "isDefault": false, "packages": [
-    { "packageIdentifier": "$rc_lifetime", "identifier": "pro_lifetime", "type": "NON_CONSUMABLE", "displayName": "Lifetime",
+    { "packageIdentifier": "$rov_lifetime", "identifier": "pro_lifetime", "type": "NON_CONSUMABLE", "displayName": "Lifetime",
       "storeIds": { "apple": "com.x.lifetime", "google": null } } ] } ] } }

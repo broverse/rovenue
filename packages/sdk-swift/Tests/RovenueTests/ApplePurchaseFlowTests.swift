@@ -41,8 +41,8 @@ final class PurchaseTypesTests: XCTestCase {
 
     func test_package_and_offering_shape() {
         let prod = StoreProduct(id: "premium_monthly", type: .subscription, displayName: "Premium")
-        let pkg = Package(identifier: "$rc_monthly", product: prod)
-        XCTAssertEqual(pkg.identifier, "$rc_monthly")
+        let pkg = Package(identifier: "$rov_monthly", product: prod)
+        XCTAssertEqual(pkg.identifier, "$rov_monthly")
         XCTAssertEqual(pkg.product, prod)
 
         let off = Offering(identifier: "default", isDefault: true, packages: [pkg])
@@ -53,7 +53,7 @@ final class PurchaseTypesTests: XCTestCase {
 
     func test_offerings_shape() {
         let prod = StoreProduct(id: "premium_monthly", type: .subscription, displayName: "Premium")
-        let pkg = Package(identifier: "$rc_monthly", product: prod)
+        let pkg = Package(identifier: "$rov_monthly", product: prod)
         let off = Offering(identifier: "default", isDefault: true, packages: [pkg])
         let offerings = Offerings(current: off, all: ["default": off])
         XCTAssertEqual(offerings.current, off)
