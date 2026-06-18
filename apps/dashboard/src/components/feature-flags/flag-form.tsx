@@ -32,7 +32,7 @@ import type {
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { Segmented } from "../../ui/segmented";
-import { Select } from "../../ui/select";
+import { NativeSelect } from "../../ui/native-select";
 import { Switch } from "../../ui/switch";
 import { Textarea } from "../../ui/textarea";
 import { cn } from "../../lib/cn";
@@ -438,7 +438,7 @@ export function FlagForm({ projectId, initialFlag }: FlagFormProps) {
               `featureFlags.new.typeDescriptions.${type.toLowerCase()}`,
             )}
           >
-            <Select
+            <NativeSelect
               value={type}
               onChange={(e) => setType(e.target.value as DashboardFlagType)}
               disabled={isEdit}
@@ -448,7 +448,7 @@ export function FlagForm({ projectId, initialFlag }: FlagFormProps) {
                   {t(opt.labelKey)}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
             {isEdit && (
               <span className="mt-1 text-[10px] text-rv-mute-500">
                 {t("featureFlags.edit.typeLocked")}

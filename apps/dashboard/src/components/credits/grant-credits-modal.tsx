@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import type { GrantCreditsRequest } from "@rovenue/shared";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
-import { Select } from "../../ui/select";
+import { NativeSelect } from "../../ui/native-select";
 import { Segmented } from "../../ui/segmented";
 import { Textarea } from "../../ui/textarea";
 import { cn } from "../../lib/cn";
@@ -149,7 +149,7 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
                   onChange={(e) => handleSearchChange(e.target.value)}
                   className="mb-1"
                 />
-                <Select
+                <NativeSelect
                   id={idSubscriber}
                   value={subscriberId}
                   onChange={(e) => setSubscriberId(e.target.value)}
@@ -164,7 +164,7 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
                       {s.appUserId}
                     </option>
                   ))}
-                </Select>
+                </NativeSelect>
               </Field>
 
               <div>

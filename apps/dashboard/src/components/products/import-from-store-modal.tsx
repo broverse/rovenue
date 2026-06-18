@@ -8,7 +8,7 @@ import type {
   ProductTypeName,
 } from "@rovenue/shared";
 import { Button } from "../../ui/button";
-import { Select } from "../../ui/select";
+import { NativeSelect } from "../../ui/native-select";
 import { Textarea } from "../../ui/textarea";
 import { cn } from "../../lib/cn";
 import { useImportProducts } from "../../lib/hooks/useProjectProducts";
@@ -112,7 +112,7 @@ export function ImportFromStoreModal({ projectId, open, onClose }: Props) {
               <div className="grid grid-cols-1 gap-4">
                 <div className="grid grid-cols-2 gap-3">
                   <Field label={t("products.import.fields.store")} htmlFor={idStore}>
-                    <Select
+                    <NativeSelect
                       id={idStore}
                       value={store}
                       onChange={(e) => setStore(e.target.value as Store)}
@@ -120,10 +120,10 @@ export function ImportFromStoreModal({ projectId, open, onClose }: Props) {
                       <option value="ios">{t("products.import.stores.ios")}</option>
                       <option value="android">{t("products.import.stores.android")}</option>
                       <option value="web">{t("products.import.stores.web")}</option>
-                    </Select>
+                    </NativeSelect>
                   </Field>
                   <Field label={t("products.import.fields.type")} htmlFor={idType}>
-                    <Select
+                    <NativeSelect
                       id={idType}
                       value={type}
                       onChange={(e) => setType(e.target.value as ProductTypeName)}
@@ -131,7 +131,7 @@ export function ImportFromStoreModal({ projectId, open, onClose }: Props) {
                       <option value="SUBSCRIPTION">{t("products.form.types.subscription")}</option>
                       <option value="CONSUMABLE">{t("products.form.types.consumable")}</option>
                       <option value="NON_CONSUMABLE">{t("products.form.types.nonConsumable")}</option>
-                    </Select>
+                    </NativeSelect>
                   </Field>
                 </div>
 

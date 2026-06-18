@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Select } from "../../ui/select";
+import { NativeSelect } from "../../ui/native-select";
 import { Field } from "./field";
 import { StepHead } from "./step-head";
 import {
@@ -40,7 +40,7 @@ export function StepCurrency({ form, onUpdate }: StepCurrencyProps) {
         optional={t("projectSetup.basics.required")}
         hint={t("projectSetup.currency.reportingCurrencyHint")}
       >
-        <Select
+        <NativeSelect
           value={form.currency}
           onChange={(event) => onUpdate("currency", event.target.value)}
         >
@@ -49,7 +49,7 @@ export function StepCurrency({ form, onUpdate }: StepCurrencyProps) {
               {currency}
             </option>
           ))}
-        </Select>
+        </NativeSelect>
       </Field>
 
       <Field
@@ -78,7 +78,7 @@ export function StepCurrency({ form, onUpdate }: StepCurrencyProps) {
           optional={t("projectSetup.basics.required")}
           hint={t("projectSetup.currency.timezoneHint")}
         >
-          <Select
+          <NativeSelect
             value={form.timezone}
             onChange={(event) => onUpdate("timezone", event.target.value)}
           >
@@ -87,10 +87,10 @@ export function StepCurrency({ form, onUpdate }: StepCurrencyProps) {
                 {zone}
               </option>
             ))}
-          </Select>
+          </NativeSelect>
         </Field>
         <Field className="mb-0" label={t("projectSetup.currency.weekStart")}>
-          <Select
+          <NativeSelect
             value={form.weekStart}
             onChange={(event) =>
               onUpdate("weekStart", event.target.value as WeekStart)
@@ -101,7 +101,7 @@ export function StepCurrency({ form, onUpdate }: StepCurrencyProps) {
                 {t(`projectSetup.currency.weekOptions.${option}`)}
               </option>
             ))}
-          </Select>
+          </NativeSelect>
         </Field>
       </div>
 
@@ -110,7 +110,7 @@ export function StepCurrency({ form, onUpdate }: StepCurrencyProps) {
         label={t("projectSetup.currency.fiscalYear")}
         optional={t("projectSetup.currency.fiscalYearOptional")}
       >
-        <Select
+        <NativeSelect
           value={form.fiscalMonth}
           onChange={(event) =>
             onUpdate("fiscalMonth", event.target.value as FiscalMonth)
@@ -121,7 +121,7 @@ export function StepCurrency({ form, onUpdate }: StepCurrencyProps) {
               {t(`projectSetup.currency.months.${month}`)}
             </option>
           ))}
-        </Select>
+        </NativeSelect>
       </Field>
     </>
   );

@@ -11,7 +11,7 @@ import {
 } from "../../../components/account";
 import { Button } from "../../../ui/button";
 import { Input } from "../../../ui/input";
-import { Select } from "../../../ui/select";
+import { NativeSelect } from "../../../ui/native-select";
 import { Textarea } from "../../../ui/textarea";
 import { Segmented } from "../../../ui/segmented";
 import { useMe, useUpdateMe } from "../../../lib/hooks/useMe";
@@ -283,7 +283,7 @@ function ProfilePage() {
       >
         <FieldRow>
           <Field label={t("account.profile.locale.language")}>
-            <Select
+            <NativeSelect
               value={profile.locale}
               onChange={(e) => update("locale", e.target.value)}
             >
@@ -292,10 +292,10 @@ function ProfilePage() {
                   {l.label}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           </Field>
           <Field label={t("account.profile.locale.timezone")}>
-            <Select
+            <NativeSelect
               value={profile.timezone}
               onChange={(e) => update("timezone", e.target.value)}
             >
@@ -304,7 +304,7 @@ function ProfilePage() {
                   {tz}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           </Field>
         </FieldRow>
         <Field label={t("account.profile.locale.dateFormat")}>

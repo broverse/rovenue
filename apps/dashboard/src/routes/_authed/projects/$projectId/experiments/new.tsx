@@ -37,7 +37,7 @@ import type {
 } from "@rovenue/shared";
 import { Button } from "../../../../../ui/button";
 import { Input } from "../../../../../ui/input";
-import { Select } from "../../../../../ui/select";
+import { NativeSelect } from "../../../../../ui/native-select";
 import { Switch } from "../../../../../ui/switch";
 import { Textarea } from "../../../../../ui/textarea";
 import { cn } from "../../../../../lib/cn";
@@ -681,7 +681,7 @@ export function NewExperimentPage({
               `experiments.new.typeDescriptions.${type.toLowerCase()}`,
             )}
           >
-            <Select
+            <NativeSelect
               value={type}
               onChange={(e) =>
                 setType(e.target.value as DashboardExperimentType)
@@ -692,7 +692,7 @@ export function NewExperimentPage({
                   {t(opt.labelKey)}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           </Field>
 
           {type === "FLAG" && (
@@ -703,7 +703,7 @@ export function NewExperimentPage({
                 `experiments.new.flag.subtypeDescriptions.${flagSubtype}`,
               )}
             >
-              <Select
+              <NativeSelect
                 value={flagSubtype}
                 onChange={(e) =>
                   setFlagSubtype(e.target.value as FlagSubtype)
@@ -714,7 +714,7 @@ export function NewExperimentPage({
                     {t(opt.labelKey)}
                   </option>
                 ))}
-              </Select>
+              </NativeSelect>
             </Field>
           )}
 
@@ -741,7 +741,7 @@ export function NewExperimentPage({
             label={t("experiments.new.fields.audience")}
             description={t("experiments.new.descriptions.audience")}
           >
-            <Select
+            <NativeSelect
               value={resolvedAudienceId}
               onChange={(e) => setAudienceId(e.target.value)}
               disabled={audiencesLoading || audiences.length === 0}
@@ -758,7 +758,7 @@ export function NewExperimentPage({
                   </option>
                 ))
               )}
-            </Select>
+            </NativeSelect>
           </Field>
         </Section>
 
@@ -1201,7 +1201,7 @@ function OfferingValueEditor({
       description={t("experiments.new.descriptions.offering")}
       dense
     >
-      <Select
+      <NativeSelect
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={loading || offerings.length === 0}
@@ -1216,7 +1216,7 @@ function OfferingValueEditor({
             {g.identifier}
           </option>
         ))}
-      </Select>
+      </NativeSelect>
     </Field>
   );
 }
@@ -1280,7 +1280,7 @@ function PaywallValueEditor({
           </div>
         </Field>
         <Field label={t("experiments.new.paywall.layout")} dense>
-          <Select
+          <NativeSelect
             value={value.layout}
             onChange={(e) =>
               onChange({
@@ -1294,7 +1294,7 @@ function PaywallValueEditor({
             <option value="horizontal">
               {t("experiments.new.paywall.layoutOptions.horizontal")}
             </option>
-          </Select>
+          </NativeSelect>
         </Field>
         <Field label={t("experiments.new.paywall.backgroundImage")} dense optional>
           <Input

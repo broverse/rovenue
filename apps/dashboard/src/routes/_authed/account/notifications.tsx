@@ -7,7 +7,7 @@ import {
   AccountToggleRow,
   SectionCard,
 } from "../../../components/account";
-import { Select } from "../../../ui/select";
+import { NativeSelect } from "../../../ui/native-select";
 import { DeviceList } from "../../../components/notifications/device-list";
 import { EventToggleList } from "../../../components/notifications/event-toggle-list";
 import { useProjects } from "../../../lib/hooks/useProjects";
@@ -135,7 +135,7 @@ function NotificationsPage() {
           ) : (
             <>
               <div className="mb-4">
-                <Select
+                <NativeSelect
                   value={effectiveProjectId ?? ""}
                   onChange={(e) => setProjectId(e.target.value)}
                   aria-label={t(
@@ -148,7 +148,7 @@ function NotificationsPage() {
                       {opt.label}
                     </option>
                   ))}
-                </Select>
+                </NativeSelect>
               </div>
               <EventToggleList
                 mode="user"

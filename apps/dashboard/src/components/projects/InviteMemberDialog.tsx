@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { ASSIGNABLE_ROLES, type AssignableRole } from "@rovenue/shared";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
-import { Select } from "../../ui/select";
+import { NativeSelect } from "../../ui/native-select";
 import { cn } from "../../lib/cn";
 import { useCreateInvitation } from "../../lib/hooks/useProjectAdmin";
 
@@ -162,7 +162,7 @@ export function InviteMemberDialog({ projectId, open, onClose }: Props) {
                 >
                   {t("members.invite.roleLabel")}
                 </label>
-                <Select
+                <NativeSelect
                   id={idRole}
                   value={role}
                   onChange={(e) =>
@@ -174,7 +174,7 @@ export function InviteMemberDialog({ projectId, open, onClose }: Props) {
                       {t(`members.role.${r.toLowerCase()}`)}
                     </option>
                   ))}
-                </Select>
+                </NativeSelect>
               </div>
               {error && (
                 <div className="text-[12px] text-rv-danger">{error}</div>

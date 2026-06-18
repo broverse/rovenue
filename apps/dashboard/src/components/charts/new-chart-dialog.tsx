@@ -9,7 +9,7 @@ import type {
 } from "@rovenue/shared";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
-import { Select } from "../../ui/select";
+import { NativeSelect } from "../../ui/native-select";
 import { Textarea } from "../../ui/textarea";
 import { cn } from "../../lib/cn";
 import { ApiError } from "../../lib/api";
@@ -178,7 +178,7 @@ function DialogBody({ projectId, onClose, onCreated }: Props) {
             id={categoryId}
             label={t("charts.newChart.category.label", "Category")}
           >
-            <Select
+            <NativeSelect
               id={categoryId}
               value={category}
               onChange={(e) =>
@@ -190,14 +190,14 @@ function DialogBody({ projectId, onClose, onCreated }: Props) {
                   {t(`charts.categories.${c}`)}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           </Field>
 
           <Field
             id={chartTypeId}
             label={t("charts.newChart.chartType.label", "Default chart type")}
           >
-            <Select
+            <NativeSelect
               id={chartTypeId}
               value={chartType}
               onChange={(e) => setChartType(e.target.value as ChartType)}
@@ -207,7 +207,7 @@ function DialogBody({ projectId, onClose, onCreated }: Props) {
                   {c}
                 </option>
               ))}
-            </Select>
+            </NativeSelect>
           </Field>
         </div>
 
@@ -215,7 +215,7 @@ function DialogBody({ projectId, onClose, onCreated }: Props) {
           id={rangeId}
           label={t("charts.newChart.range.label", "Default range")}
         >
-          <Select
+          <NativeSelect
             id={rangeId}
             value={range}
             onChange={(e) => setRange(e.target.value as ChartRangeOption)}
@@ -225,7 +225,7 @@ function DialogBody({ projectId, onClose, onCreated }: Props) {
                 {r}
               </option>
             ))}
-          </Select>
+          </NativeSelect>
         </Field>
 
         <Field

@@ -10,7 +10,7 @@ import type {
 } from "@rovenue/shared";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
-import { Select } from "../../ui/select";
+import { NativeSelect } from "../../ui/native-select";
 import { Switch } from "../../ui/switch";
 import { cn } from "../../lib/cn";
 import {
@@ -335,7 +335,7 @@ function FormBody({
 
       <div className="grid grid-cols-2 gap-3">
         <Field label={t("products.form.fields.type")} htmlFor={idType}>
-          <Select
+          <NativeSelect
             id={idType}
             value={form.type}
             onChange={(e) => set("type", e.target.value as FormState["type"])}
@@ -343,12 +343,12 @@ function FormBody({
             <option value="SUBSCRIPTION">{t("products.form.types.subscription")}</option>
             <option value="CONSUMABLE">{t("products.form.types.consumable")}</option>
             <option value="NON_CONSUMABLE">{t("products.form.types.nonConsumable")}</option>
-          </Select>
+          </NativeSelect>
         </Field>
 
         {form.type === "SUBSCRIPTION" ? (
           <Field label={t("products.form.fields.period")} htmlFor={idPeriod}>
-            <Select
+            <NativeSelect
               id={idPeriod}
               value={form.period}
               onChange={(e) => set("period", e.target.value as FormState["period"])}
@@ -356,7 +356,7 @@ function FormBody({
               <option value="P1W">{t("products.form.periods.weekly")}</option>
               <option value="P1M">{t("products.form.periods.monthly")}</option>
               <option value="P1Y">{t("products.form.periods.yearly")}</option>
-            </Select>
+            </NativeSelect>
           </Field>
         ) : form.type === "CONSUMABLE" ? (
           <Field label={t("products.form.fields.creditAmount")} htmlFor={idCredit}>

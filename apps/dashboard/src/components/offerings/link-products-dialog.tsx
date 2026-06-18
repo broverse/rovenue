@@ -6,7 +6,7 @@ import type { DashboardProductRow } from "@rovenue/shared";
 import { Button } from "../../ui/button";
 import { Checkbox } from "../../ui/checkbox";
 import { Input } from "../../ui/input";
-import { Select } from "../../ui/select";
+import { NativeSelect } from "../../ui/native-select";
 import { SearchInput } from "../../ui/search-input";
 import { cn } from "../../lib/cn";
 import { useUpdateOffering } from "../../lib/hooks/useProjectOfferings";
@@ -414,7 +414,7 @@ function PackageIdentifierPicker({
       >
         {t("offerings.linkProducts.identifier.label", "Package identifier")}
       </label>
-      <Select
+      <NativeSelect
         id={`${customInputId}-select`}
         value={state.selectValue}
         onChange={handleSelectChange}
@@ -428,7 +428,7 @@ function PackageIdentifierPicker({
         <option value="custom">
           {t("offerings.linkProducts.identifier.customOption", "Custom…")}
         </option>
-      </Select>
+      </NativeSelect>
       {state.mode === "custom" && (
         <Input
           ref={customInputRef}

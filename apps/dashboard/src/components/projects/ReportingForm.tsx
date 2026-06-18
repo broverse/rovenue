@@ -5,7 +5,7 @@ import type {
   ProjectDetail,
   ProjectReportingSettings,
 } from "@rovenue/shared";
-import { Select } from "../../ui/select";
+import { NativeSelect } from "../../ui/native-select";
 import { Field } from "../project-setup/field";
 import {
   CURRENCIES,
@@ -79,7 +79,7 @@ export function ReportingForm({ project }: Props) {
         optional={t("projectSetup.basics.required")}
         hint={t("projectSetup.currency.reportingCurrencyHint")}
       >
-        <Select
+        <NativeSelect
           value={form.reportingCurrency}
           onChange={(event) => update("reportingCurrency", event.target.value)}
         >
@@ -88,7 +88,7 @@ export function ReportingForm({ project }: Props) {
               {currency}
             </option>
           ))}
-        </Select>
+        </NativeSelect>
       </Field>
 
       <Field
@@ -117,7 +117,7 @@ export function ReportingForm({ project }: Props) {
           optional={t("projectSetup.basics.required")}
           hint={t("projectSetup.currency.timezoneHint")}
         >
-          <Select
+          <NativeSelect
             value={form.timezone}
             onChange={(event) => update("timezone", event.target.value)}
           >
@@ -126,10 +126,10 @@ export function ReportingForm({ project }: Props) {
                 {zone}
               </option>
             ))}
-          </Select>
+          </NativeSelect>
         </Field>
         <Field className="mb-5" label={t("projectSetup.currency.weekStart")}>
-          <Select
+          <NativeSelect
             value={form.weekStart}
             onChange={(event) =>
               update("weekStart", event.target.value as WeekStart)
@@ -140,7 +140,7 @@ export function ReportingForm({ project }: Props) {
                 {t(`projectSetup.currency.weekOptions.${option}`)}
               </option>
             ))}
-          </Select>
+          </NativeSelect>
         </Field>
       </div>
 
@@ -148,7 +148,7 @@ export function ReportingForm({ project }: Props) {
         label={t("projectSetup.currency.fiscalYear")}
         optional={t("projectSetup.currency.fiscalYearOptional")}
       >
-        <Select
+        <NativeSelect
           value={form.fiscalMonth}
           onChange={(event) =>
             update("fiscalMonth", event.target.value as FiscalMonth)
@@ -159,7 +159,7 @@ export function ReportingForm({ project }: Props) {
               {t(`projectSetup.currency.months.${month}`)}
             </option>
           ))}
-        </Select>
+        </NativeSelect>
       </Field>
 
       {error && (

@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Select } from "../../ui/select";
+import { NativeSelect } from "../../ui/native-select";
 import type {
   RefundShieldOutcome,
   RefundShieldStatus,
@@ -38,7 +38,7 @@ export function ResponsesFilterBar({
     <div className="mb-3 flex flex-wrap items-end gap-3">
       <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-rv-mute-500">
         {t("refundShield.responses.filters.status")}
-        <Select
+        <NativeSelect
           aria-label={t("refundShield.responses.filters.status")}
           value={value.status ?? ""}
           onChange={(e) =>
@@ -57,12 +57,12 @@ export function ResponsesFilterBar({
               {t(`refundShield.status.${s}`)}
             </option>
           ))}
-        </Select>
+        </NativeSelect>
       </label>
 
       <label className="flex flex-col gap-1 text-[11px] uppercase tracking-wider text-rv-mute-500">
         {t("refundShield.responses.filters.outcome")}
-        <Select
+        <NativeSelect
           aria-label={t("refundShield.responses.filters.outcome")}
           value={value.outcome ?? ""}
           onChange={(e) =>
@@ -81,7 +81,7 @@ export function ResponsesFilterBar({
               {t(`refundShield.outcome.${o}`)}
             </option>
           ))}
-        </Select>
+        </NativeSelect>
       </label>
     </div>
   );

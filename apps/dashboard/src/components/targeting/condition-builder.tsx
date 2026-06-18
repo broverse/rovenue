@@ -13,7 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Input } from "../../ui/input";
-import { Select } from "../../ui/select";
+import { NativeSelect } from "../../ui/native-select";
 import { cn } from "../../lib/cn";
 import {
   makeCondition,
@@ -201,7 +201,7 @@ function ConditionRow({
             placeholder="user_level"
             className="h-7 flex-1 min-w-[120px] max-w-[180px] text-[12px]"
           />
-          <Select
+          <NativeSelect
             disabled={disabled}
             value={condition.scalarOp}
             onChange={(e) =>
@@ -214,7 +214,7 @@ function ConditionRow({
                 {t(op.labelKey)}
               </option>
             ))}
-          </Select>
+          </NativeSelect>
           <Input
             mono
             disabled={disabled}
@@ -230,7 +230,7 @@ function ConditionRow({
         condition.kind === "app" ||
         condition.kind === "platform") && (
         <>
-          <Select
+          <NativeSelect
             disabled={disabled}
             value={condition.listOp}
             onChange={(e) => onChange({ listOp: e.target.value as ListOp })}
@@ -241,7 +241,7 @@ function ConditionRow({
                 {t(op.labelKey)}
               </option>
             ))}
-          </Select>
+          </NativeSelect>
           {condition.kind === "platform" ? (
             <PlatformChips
               disabled={disabled}
@@ -266,7 +266,7 @@ function ConditionRow({
       {(condition.kind === "appVersion" ||
         condition.kind === "sdkVersion") && (
         <>
-          <Select
+          <NativeSelect
             disabled={disabled}
             value={condition.scalarOp}
             onChange={(e) =>
@@ -279,7 +279,7 @@ function ConditionRow({
                 {t(op.labelKey)}
               </option>
             ))}
-          </Select>
+          </NativeSelect>
           <Input
             mono
             disabled={disabled}

@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import type { GrantSubscriptionRequest } from "@rovenue/shared";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
-import { Select } from "../../ui/select";
+import { NativeSelect } from "../../ui/native-select";
 import { Segmented } from "../../ui/segmented";
 import { Textarea } from "../../ui/textarea";
 import { cn } from "../../lib/cn";
@@ -42,6 +42,14 @@ type Props = {
   projectId: string;
   open: boolean;
   onClose: () => void;
+  /**
+   * Pre-select a subscriber (internal Rovenue id). When set, the subscriber
+   * search/picker is replaced by a read-only field — used when the modal is
+   * launched from a specific customer's detail panel.
+   */
+  initialSubscriberId?: string;
+  /** Human-readable label for the pre-selected subscriber (e.g. app user id). */
+  initialSubscriberLabel?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -67,8 +75,15 @@ function isExpiredOrToday(dateStr: string): boolean {
 // GrantSubscriptionModal
 // ---------------------------------------------------------------------------
 
-export function GrantSubscriptionModal({ projectId, open, onClose }: Props) {
+export function GrantSubscriptionModal({
+  projectId,
+  open,
+  onClose,
+  initialSubscriberId,
+  initialSubscriberLabel,
+}: Props) {
   const { t } = useTranslation();
+  const lockedSubscriber = Boolean(initialSubscriberId);
 
   // ── form state ────────────────────────────────────────────────────────────
   const [subscriberSearch, setSubscriberSearch] = useState("");
@@ -93,13 +108,13 @@ export function GrantSubscriptionModal({ projectId, open, onClose }: Props) {
     if (!open) return;
     setSubscriberSearch("");
     setDebouncedSearch("");
-    setSubscriberId("");
+    setSubscriberId(initialSubscriberId ?? "");
     setProductId("");
     setPreset("1mo");
     setCustomDate("");
     setNote("");
     setError(null);
-  }, [open]);
+  }, [open, initialSubscriberId]);
 
   // ── data queries ──────────────────────────────────────────────────────────
   const subscribersQuery = useSubscribers({
@@ -212,34 +227,45 @@ export function GrantSubscriptionModal({ projectId, open, onClose }: Props) {
                 label={t("subscriptions.grant.fields.subscriber", "Subscriber")}
                 htmlFor={idSubscriber}
               >
-                <Input
-                  placeholder={t(
-                    "subscriptions.grant.fields.subscriberSearch",
-                    "Search by user ID…",
-                  )}
-                  value={subscriberSearch}
-                  onChange={(e) => handleSearchChange(e.target.value)}
-                  className="mb-1"
-                />
-                <Select
-                  id={idSubscriber}
-                  value={subscriberId}
-                  onChange={(e) => setSubscriberId(e.target.value)}
-                >
-                  <option value="">
-                    {subscribersQuery.isPending
-                      ? t("common.loading")
-                      : t(
-                          "subscriptions.grant.fields.subscriberPlaceholder",
-                          "— select subscriber —",
-                        )}
-                  </option>
-                  {subscriberRows.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.appUserId}
-                    </option>
-                  ))}
-                </Select>
+                {lockedSubscriber ? (
+                  <Input
+                    id={idSubscriber}
+                    value={initialSubscriberLabel ?? initialSubscriberId ?? ""}
+                    readOnly
+                    disabled
+                  />
+                ) : (
+                  <>
+                    <Input
+                      placeholder={t(
+                        "subscriptions.grant.fields.subscriberSearch",
+                        "Search by user ID…",
+                      )}
+                      value={subscriberSearch}
+                      onChange={(e) => handleSearchChange(e.target.value)}
+                      className="mb-1"
+                    />
+                    <NativeSelect
+                      id={idSubscriber}
+                      value={subscriberId}
+                      onChange={(e) => setSubscriberId(e.target.value)}
+                    >
+                      <option value="">
+                        {subscribersQuery.isPending
+                          ? t("common.loading")
+                          : t(
+                              "subscriptions.grant.fields.subscriberPlaceholder",
+                              "— select subscriber —",
+                            )}
+                      </option>
+                      {subscriberRows.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.appUserId}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </>
+                )}
               </Field>
 
               {/* Product */}
@@ -247,7 +273,7 @@ export function GrantSubscriptionModal({ projectId, open, onClose }: Props) {
                 label={t("subscriptions.grant.fields.product", "Product")}
                 htmlFor={idProduct}
               >
-                <Select
+                <NativeSelect
                   id={idProduct}
                   value={productId}
                   onChange={(e) => setProductId(e.target.value)}
@@ -265,7 +291,7 @@ export function GrantSubscriptionModal({ projectId, open, onClose }: Props) {
                       {p.displayName} ({p.identifier})
                     </option>
                   ))}
-                </Select>
+                </NativeSelect>
               </Field>
 
               {/* Duration */}
