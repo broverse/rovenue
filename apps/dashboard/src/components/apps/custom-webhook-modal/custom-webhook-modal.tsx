@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog } from "@base-ui-components/react/dialog";
 import { X } from "lucide-react";
@@ -23,7 +23,7 @@ function isValidUrl(value: string): boolean {
   if (value.trim() === "") return true; // empty clears the endpoint
   try {
     const u = new URL(value);
-    return u.protocol === "https:" || u.protocol === "http:";
+    return u.protocol === "https:";
   } catch {
     return false;
   }
@@ -40,6 +40,16 @@ export function CustomWebhookModal({ open, onClose, projectId }: Props) {
     project?.webhookEventCategories ?? [],
   );
   const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setUrl(project?.webhookUrl ?? "");
+      setCategories(project?.webhookEventCategories ?? []);
+      setRevealedSecret(null);
+    }
+    // Re-seed on open; project may still be loading on first open and will
+    // be in cache by the time the user can trigger this modal.
+  }, [open]);
 
   const urlValid = isValidUrl(url);
   const canSave = urlValid && !update.isPending;
@@ -58,8 +68,12 @@ export function CustomWebhookModal({ open, onClose, projectId }: Props) {
   };
 
   const handleRotate = async () => {
-    const res = await rotate.mutateAsync();
-    setRevealedSecret(res.webhookSecret);
+    try {
+      const res = await rotate.mutateAsync();
+      setRevealedSecret(res.webhookSecret);
+    } catch {
+      // error surfaced via rotate.isError below
+    }
   };
 
   return (
@@ -156,17 +170,24 @@ export function CustomWebhookModal({ open, onClose, projectId }: Props) {
                     </p>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2">
-                    <Chip tone={project?.hasWebhookSecret ? "success" : "warning"}>
-                      {project?.hasWebhookSecret
-                        ? t("apps.customWebhook.secretConfigured")
-                        : t("apps.customWebhook.secretMissing")}
-                    </Chip>
-                    <Button variant="flat" size="sm" onClick={handleRotate} disabled={rotate.isPending} type="button">
-                      {rotate.isPending
-                        ? t("apps.customWebhook.rotating")
-                        : t("apps.customWebhook.rotate")}
-                    </Button>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Chip tone={project?.hasWebhookSecret ? "success" : "warning"}>
+                        {project?.hasWebhookSecret
+                          ? t("apps.customWebhook.secretConfigured")
+                          : t("apps.customWebhook.secretMissing")}
+                      </Chip>
+                      <Button variant="flat" size="sm" onClick={handleRotate} disabled={rotate.isPending} type="button">
+                        {rotate.isPending
+                          ? t("apps.customWebhook.rotating")
+                          : t("apps.customWebhook.rotate")}
+                      </Button>
+                    </div>
+                    {rotate.isError && (
+                      <p className="mt-1 text-[11px] text-rv-danger" role="alert">
+                        {t("apps.customWebhook.rotateError")}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

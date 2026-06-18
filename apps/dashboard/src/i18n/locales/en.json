@@ -3424,6 +3424,7 @@
       "rotate": "Rotate secret",
       "rotating": "Rotating…",
       "secretRevealWarning": "Copy this now — it won't be shown again.",
+      "rotateError": "Could not rotate the secret. Try again.",
       "save": "Save",
       "saving": "Saving…",
       "saveError": "Could not save. Check the URL and try again."
