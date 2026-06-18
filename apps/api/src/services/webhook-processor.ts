@@ -6,6 +6,7 @@ import {
   ProductType,
   drizzle,
 } from "@rovenue/db";
+import { toWebhookEventCategory } from "@rovenue/shared";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import {
@@ -276,11 +277,21 @@ interface EnqueueOutgoingWebhookArgs {
 async function enqueueOutgoingWebhook(
   args: EnqueueOutgoingWebhookArgs,
 ): Promise<void> {
-  const webhookUrl = await drizzle.projectRepo.findProjectWebhookUrl(
+  const config = await drizzle.projectRepo.findProjectWebhookConfig(
     drizzle.db,
     args.projectId,
   );
-  if (!webhookUrl) return;
+  if (!config?.url) return;
+
+  // Category filter — empty list means "all events". For a non-empty
+  // list, drop events whose category isn't subscribed. Unmapped events
+  // (category === null) fail open so unknown/new types aren't lost.
+  if (config.eventCategories.length > 0) {
+    const category = toWebhookEventCategory(args.eventType);
+    if (category !== null && !config.eventCategories.includes(category)) {
+      return;
+    }
+  }
 
   if (args.purchaseId) {
     const existing =
@@ -307,7 +318,7 @@ async function enqueueOutgoingWebhook(
     subscriberId: args.subscriberId,
     purchaseId: args.purchaseId ?? null,
     payload,
-    url: webhookUrl,
+    url: config.url,
   });
 }
 
@@ -347,3 +358,5 @@ export function createWebhookWorker(): Worker<
   log.info("webhook worker started", { queue: WEBHOOK_QUEUE_NAME });
   return cachedWorker;
 }
+
+export { enqueueOutgoingWebhook as __test_enqueueOutgoingWebhook };
