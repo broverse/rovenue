@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { BookOpen, Package, Plus, Star, StarOff } from "lucide-react";
@@ -93,13 +93,14 @@ function OfferingsPage({ projectId }: { projectId: string }) {
     });
   }
 
-  // Auto-select first offering when none is selected
-  useMemo(() => {
+  // Auto-select first offering when none is selected and data arrives
+  useEffect(() => {
     if (!selectedId && offerings.length > 0) {
       select(offerings[0].id);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offerings.length, selectedId]);
+    // `select` is stable (uses navigate which is stable); include only primitives to avoid loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offerings.length === 0, selectedId]);
 
   // ─── local UI state ────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
