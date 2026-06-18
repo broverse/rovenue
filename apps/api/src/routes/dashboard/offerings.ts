@@ -29,12 +29,29 @@ const packageSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 });
 
-const createBodySchema = z.object({
-  identifier: z.string().trim().min(1).max(160),
-  isDefault: z.boolean().optional(),
-  packages: z.array(packageSchema).optional(),
-  metadata: z.record(z.unknown()).optional(),
-});
+function hasDuplicateProductIds(
+  packages: Array<{ productId: string }> | undefined,
+): boolean {
+  if (!packages || packages.length === 0) return false;
+  const seen = new Set<string>();
+  for (const pkg of packages) {
+    if (seen.has(pkg.productId)) return true;
+    seen.add(pkg.productId);
+  }
+  return false;
+}
+
+const createBodySchema = z
+  .object({
+    identifier: z.string().trim().min(1).max(160),
+    isDefault: z.boolean().optional(),
+    packages: z.array(packageSchema).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  })
+  .refine((v) => !hasDuplicateProductIds(v.packages), {
+    message: "a product can appear in at most one package per offering",
+    path: ["packages"],
+  });
 
 const updateBodySchema = z
   .object({
@@ -45,6 +62,10 @@ const updateBodySchema = z
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), {
     message: "At least one field is required",
+  })
+  .refine((v) => !hasDuplicateProductIds(v.packages), {
+    message: "a product can appear in at most one package per offering",
+    path: ["packages"],
   });
 
 function parsePackages(raw: unknown): OfferingPackage[] {

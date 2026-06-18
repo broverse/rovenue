@@ -154,6 +154,31 @@ describe("POST /projects/:projectId/offerings — create offering", () => {
     expect(res2.status).toBe(409);
   });
 
+  it("400s when two packages share the same productId (POST)", async () => {
+    const { userId, cookie } = await createUserAndSession("dupproduct-post");
+    const project = await seedProject("dupproduct-post");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const product = await seedProduct(project.id, "dupproduct-post");
+
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${project.id}/offerings`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({
+          identifier: "dup-product-offering",
+          packages: [
+            { identifier: "$rov_monthly", productId: product.id, order: 0, isPromoted: false },
+            { identifier: "$rov_annual", productId: product.id, order: 1, isPromoted: false },
+          ],
+        }),
+      },
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("403s when caller has CUSTOMER_SUPPORT role (no products:write)", async () => {
     const { userId, cookie } = await createUserAndSession("403");
     const project = await seedProject("403");
@@ -337,6 +362,39 @@ describe("PATCH /projects/:projectId/offerings/:id — update offering", () => {
     expect(patchRes.status).toBe(400);
     const body = await patchRes.json() as { error: { message: string } };
     expect(body.error.message).toContain("immutable");
+  });
+
+  it("400s when two packages share the same productId (PATCH)", async () => {
+    const { userId, cookie } = await createUserAndSession("dupproduct-patch");
+    const project = await seedProject("dupproduct-patch");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const product = await seedProduct(project.id, "dupproduct-patch");
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/offerings`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "dup-product-patch-offering",
+        packages: [{ identifier: "$rov_monthly", productId: product.id, order: 0, isPromoted: false }],
+      }),
+    });
+    expect(createRes.status).toBe(200);
+    const { data: createData } = await createRes.json() as { data: { offering: { id: string } } };
+    const offeringId = createData.offering.id;
+
+    const patchRes = await app.request(`/projects/${project.id}/offerings/${offeringId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        packages: [
+          { identifier: "$rov_monthly", productId: product.id, order: 0, isPromoted: false },
+          { identifier: "$rov_annual", productId: product.id, order: 1, isPromoted: false },
+        ],
+      }),
+    });
+    expect(patchRes.status).toBe(400);
   });
 
   it("200 when PATCH adds a new package (new productId) — allowed", async () => {
