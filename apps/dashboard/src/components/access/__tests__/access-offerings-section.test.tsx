@@ -4,14 +4,12 @@ import { describe, it, expect, vi } from "vitest";
 import { AccessOfferingsSection } from "../access-offerings-section";
 
 vi.mock("../../../lib/hooks/useProjectOfferings", () => ({
-  useOfferingsByAccess: (_p: string, accessId: string | null) => ({
-    data: accessId
-      ? {
-          offerings: [
-            { id: "ofr_1", identifier: "default", isDefault: true, accessId },
-          ],
-        }
-      : undefined,
+  useProjectOfferings: (_p: string) => ({
+    data: {
+      offerings: [
+        { id: "ofr_1", identifier: "default", isDefault: true, packages: [], metadata: {} },
+      ],
+    },
     isLoading: false,
   }),
 }));

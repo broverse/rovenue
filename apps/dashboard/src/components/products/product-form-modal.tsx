@@ -94,7 +94,7 @@ function membershipsFor(
   const out = new Set<string>();
   if (!productId) return out;
   for (const g of offerings) {
-    if (g.products.some((m: OfferingMembership) => m.productId === productId))
+    if (g.packages.some((m: OfferingMembership) => m.productId === productId))
       out.add(g.id);
   }
   return out;
@@ -216,25 +216,25 @@ export function ProductFormModal({
       const have = wasIn.has(g.id);
       if (want === have) continue;
 
-      let products: OfferingMembership[];
+      let packages: OfferingMembership[];
       if (want) {
         const nextOrder =
-          g.products.length === 0
+          g.packages.length === 0
             ? 0
             : Math.max(
-                ...g.products.map((m: OfferingMembership) => m.order ?? 0),
+                ...g.packages.map((m: OfferingMembership) => m.order ?? 0),
               ) + 1;
-        products = [
-          ...g.products,
-          { productId, order: nextOrder, isPromoted: false },
+        packages = [
+          ...g.packages,
+          { identifier: `custom_${productId.slice(0, 8)}`, productId, order: nextOrder, isPromoted: false },
         ];
       } else {
-        products = g.products.filter(
+        packages = g.packages.filter(
           (m: OfferingMembership) => m.productId !== productId,
         );
       }
 
-      pending.push({ offeringId: g.id, body: { products } });
+      pending.push({ offeringId: g.id, body: { packages } });
     }
 
     if (pending.length === 0) return;

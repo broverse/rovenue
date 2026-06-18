@@ -12,7 +12,6 @@ import {
   useProjectOfferings,
   useUpdateOffering,
 } from "../../lib/hooks/useProjectOfferings";
-import { useProjectAccess } from "../../lib/hooks/useProjectAccess";
 import { ApiError } from "../../lib/api";
 import type { Offering } from "./types";
 
@@ -22,7 +21,7 @@ type CreateProps = {
   open: boolean;
   onClose: () => void;
   onCreated?: (id: string) => void;
-  initial?: { accessId?: string };
+  initial?: Record<string, never>;
 };
 
 type EditProps = {
@@ -77,14 +76,12 @@ function DialogBody(props: Props) {
   const { t } = useTranslation();
   const nameId = useId();
   const identifierId = useId();
-  const accessId = useId();
   const descriptionId = useId();
   const defaultId = useId();
   const nameRef = useRef<HTMLInputElement>(null);
 
   const editing = props.mode === "edit";
   const initialOffering = editing ? props.offering : null;
-  const initialPrefill = !editing ? props.initial : undefined;
 
   const [name, setName] = useState(initialOffering?.name ?? "");
   const [identifier, setIdentifier] = useState(initialOffering?.key ?? "");
@@ -93,9 +90,6 @@ function DialogBody(props: Props) {
   const [identifierTouched, setIdentifierTouched] = useState(editing);
   const [description, setDescription] = useState(initialOffering?.description ?? "");
   const [isDefault, setIsDefault] = useState(initialOffering?.isDefault ?? false);
-  const [accessIdValue, setAccessIdValue] = useState(
-    (editing ? (initialOffering as Offering | null)?.accessId : initialPrefill?.accessId) ?? "",
-  );
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const create = useCreateOffering(props.projectId);
@@ -104,8 +98,6 @@ function DialogBody(props: Props) {
     props.mode === "edit" ? props.offering.id : "",
   );
   const offeringsQuery = useProjectOfferings(props.projectId);
-  const accessQuery = useProjectAccess(props.projectId);
-  const accessRows = accessQuery.data?.rows ?? [];
 
   const editingId = initialOffering?.id ?? null;
   const existingIdentifiers = useMemo(() => {
@@ -141,8 +133,7 @@ function DialogBody(props: Props) {
     ? trimmedName !== (initialOffering?.name ?? "") ||
       trimmedIdentifier !== (initialOffering?.key ?? "") ||
       trimmedDescription !== (initialOffering?.description ?? "") ||
-      isDefault !== (initialOffering?.isDefault ?? false) ||
-      accessIdValue !== ((initialOffering as Offering | null)?.accessId ?? "")
+      isDefault !== (initialOffering?.isDefault ?? false)
     : true;
 
   const pending = create.isPending || update.isPending;
@@ -165,7 +156,6 @@ function DialogBody(props: Props) {
       if (props.mode === "create") {
         const res = await create.mutateAsync({
           identifier: trimmedIdentifier,
-          accessId: accessIdValue,
           isDefault,
           metadata,
         });
@@ -173,7 +163,6 @@ function DialogBody(props: Props) {
       } else {
         await update.mutateAsync({
           identifier: trimmedIdentifier,
-          accessId: accessIdValue,
           isDefault,
           metadata,
         });
@@ -294,31 +283,6 @@ function DialogBody(props: Props) {
             spellCheck={false}
             aria-invalid={identifierTaken || (trimmedIdentifier.length > 0 && !identifierValid)}
           />
-        </Field>
-
-        <Field
-          id={accessId}
-          label={t("offerings.form.access.label", "Access")}
-          hint={t(
-            "offerings.form.access.hint",
-            "The access this offering grants to subscribers.",
-          )}
-        >
-          <select
-            id={accessId}
-            value={accessIdValue}
-            onChange={(e) => setAccessIdValue(e.target.value)}
-            className="h-9 w-full rounded-md border border-rv-divider bg-rv-c2 px-2.5 font-rv-mono text-[12px] text-foreground transition focus:border-rv-accent-500 focus:outline-none focus:ring-2 focus:ring-rv-accent-500/30"
-          >
-            <option value="">
-              {t("offerings.form.access.placeholder", "Select access…")}
-            </option>
-            {accessRows.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.displayName} ({row.identifier})
-              </option>
-            ))}
-          </select>
         </Field>
 
         <Field

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { Button } from "../../ui/button";
-import { useOfferingsByAccess } from "../../lib/hooks/useProjectOfferings";
+import { useProjectOfferings } from "../../lib/hooks/useProjectOfferings";
 import { OfferingFormDialog } from "../offerings";
 
 interface Props {
@@ -11,18 +11,18 @@ interface Props {
 }
 
 /**
- * Sidebar/inset section that lists the offerings attached to a single access
- * bundle and lets the user spin up a new one with the access pre-selected.
+ * Sidebar/inset section that lists all project offerings. The access-to-offering
+ * relationship was removed in the decoupled model — access rights now live on
+ * individual products via `accessIds`. This component lists all offerings and
+ * lets the user create a new one; the dedicated /offerings route provides richer
+ * package management.
  *
- * Note: a richer detail pane (linked products + revenue) lives on the
- * dedicated offerings route — this component intentionally stays terse so
- * it can live inside the access detail rail without doubling the page
- * height. Selecting an offering here just highlights the row; deep dives
- * happen via navigation in Task 11+.
+ * Note: selecting an offering here just highlights the row; deep dives
+ * happen via navigation on the dedicated offerings route.
  */
 export function AccessOfferingsSection({ projectId, accessId }: Props) {
   const { t } = useTranslation();
-  const offerings = useOfferingsByAccess(projectId, accessId);
+  const offeringsQuery = useProjectOfferings(projectId);
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedOfferingId, setSelectedOfferingId] = useState<string | null>(
     null,
@@ -39,7 +39,7 @@ export function AccessOfferingsSection({ projectId, accessId }: Props) {
     );
   }
 
-  const rows = offerings.data?.offerings ?? [];
+  const rows = offeringsQuery.data?.offerings ?? [];
 
   return (
     <section className="border-t border-rv-divider mt-6 pt-4">
@@ -88,7 +88,6 @@ export function AccessOfferingsSection({ projectId, accessId }: Props) {
         open={createOpen}
         mode="create"
         projectId={projectId}
-        initial={{ accessId }}
         onClose={() => setCreateOpen(false)}
         onCreated={() => setCreateOpen(false)}
       />

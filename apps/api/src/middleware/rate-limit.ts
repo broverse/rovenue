@@ -7,7 +7,6 @@ import { logger } from "../lib/logger";
 const log = logger.child("rate-limit");
 
 const DEFAULT_PREFIX = "rl";
-const ANONYMOUS_ID = "anonymous";
 const RESET_HEADER = "X-RateLimit-Reset";
 const RETRY_AFTER_HEADER = "Retry-After";
 

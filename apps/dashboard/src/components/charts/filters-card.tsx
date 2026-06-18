@@ -114,7 +114,7 @@ function FilterRow({
       <div className="flex items-center gap-1.5 rounded border border-rv-divider bg-rv-c2 px-2 py-1.5 font-rv-mono text-[11px]">
         <span className="text-rv-mute-500">{label}</span>
         <Menu.Trigger
-          render={(props) => (
+          render={({ ref: _ref, ...props }) => (
             <button
               {...props}
               type="button"

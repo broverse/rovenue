@@ -83,15 +83,16 @@ function Body({
 
   const onConfirm = async () => {
     setSubmitError(null);
-    const next = offering.products
-      .filter((p) => p.id !== product.id)
-      .map((p, index) => ({
-        productId: p.id,
+    const next = offering.packages
+      .filter((pkg) => pkg.productId !== product.id)
+      .map((pkg, index) => ({
+        identifier: pkg.identifier,
+        productId: pkg.productId,
         order: index,
-        isPromoted: false,
+        isPromoted: pkg.isPromoted,
       }));
     try {
-      await update.mutateAsync({ products: next });
+      await update.mutateAsync({ packages: next });
       onClose();
     } catch (err) {
       setSubmitError(

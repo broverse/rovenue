@@ -79,7 +79,7 @@ function Body({
   }, [offering.id]);
 
   const matches = confirm.trim() === offering.key;
-  const productCount = offering.products.length;
+  const productCount = offering.packages.length;
 
   const onConfirm = async () => {
     if (!matches) return;

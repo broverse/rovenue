@@ -251,7 +251,7 @@ function GroupsTab({ projectId, product }: { projectId: string; product: Product
   const memberOf = useMemo(
     () =>
       allGroups.filter((g: DashboardOfferingRow) =>
-        g.products.some((m: OfferingMembership) => m.productId === product.id),
+        g.packages.some((m: OfferingMembership) => m.productId === product.id),
       ),
     [allGroups, product.id],
   );
@@ -259,7 +259,7 @@ function GroupsTab({ projectId, product }: { projectId: string; product: Product
     () =>
       allGroups.filter(
         (g: DashboardOfferingRow) =>
-          !g.products.some((m: OfferingMembership) => m.productId === product.id),
+          !g.packages.some((m: OfferingMembership) => m.productId === product.id),
       ),
     [allGroups, product.id],
   );
@@ -288,23 +288,23 @@ function GroupsTab({ projectId, product }: { projectId: string; product: Product
 
   const link = (group: DashboardOfferingRow) => {
     const nextOrder =
-      group.products.length === 0
+      group.packages.length === 0
         ? 0
         : Math.max(
-            ...group.products.map((m: OfferingMembership) => m.order ?? 0),
+            ...group.packages.map((m: OfferingMembership) => m.order ?? 0),
           ) + 1;
-    const nextProducts: OfferingMembership[] = [
-      ...group.products,
-      { productId: product.id, order: nextOrder, isPromoted: false },
+    const nextPackages: OfferingMembership[] = [
+      ...group.packages,
+      { identifier: `custom_${product.id.slice(0, 8)}`, productId: product.id, order: nextOrder, isPromoted: false },
     ];
-    void patchOffering(group.id, { products: nextProducts });
+    void patchOffering(group.id, { packages: nextPackages });
   };
 
   const unlink = (group: DashboardOfferingRow) => {
-    const nextProducts = group.products.filter(
+    const nextPackages = group.packages.filter(
       (m: OfferingMembership) => m.productId !== product.id,
     );
-    void patchOffering(group.id, { products: nextProducts });
+    void patchOffering(group.id, { packages: nextPackages });
   };
 
   return (
@@ -327,7 +327,7 @@ function GroupsTab({ projectId, product }: { projectId: string; product: Product
       ) : (
         <ul className="m-0 list-none p-0">
           {memberOf.map((g) => {
-            const membership = g.products.find((m) => m.productId === product.id);
+            const membership = g.packages.find((m: OfferingMembership) => m.productId === product.id);
             return (
               <li
                 key={g.id}
@@ -342,7 +342,7 @@ function GroupsTab({ projectId, product }: { projectId: string; product: Product
                     {g.isDefault
                       ? t("products.drawer.groups.defaultBadge")
                       : t("products.drawer.groups.memberCount", {
-                          count: g.products.length,
+                          count: g.packages.length,
                         })}
                     {membership?.isPromoted && (
                       <>

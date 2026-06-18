@@ -27,6 +27,23 @@ export interface GroupProduct {
   status: GroupProductStatus;
 }
 
+/**
+ * UI-side package entry. Carries the raw API package identifier alongside the
+ * resolved product details so the offerings detail pane can display both.
+ */
+export interface OfferingPackageUi {
+  /** Standard ($rc_monthly/$rc_annual/etc.) or custom slug. */
+  identifier: string;
+  productId: string;
+  order: number;
+  isPromoted: boolean;
+  /** Resolved product display name; undefined when product ID is unknown. */
+  productName?: string;
+  /** Resolved product SKU (identifier). */
+  productSku?: string;
+  metadata?: Record<string, unknown>;
+}
+
 export interface Offering {
   id: string;
   /** Stable slug; what we show as the secondary line under the name. */
@@ -38,8 +55,15 @@ export interface Offering {
   tint: string;
   description: string;
   isDefault: boolean;
-  /** Which access bundle this offering grants. */
-  accessId: string;
+  /**
+   * Packages in this offering, sorted by order. Each package carries its
+   * SDK identifier (e.g. `$rc_monthly`) plus the bound product.
+   */
+  packages: ReadonlyArray<OfferingPackageUi>;
+  /**
+   * Resolved product members, same set as packages but projected to the
+   * GroupProduct shape for backwards-compat with OfferingProductsSection.
+   */
   products: ReadonlyArray<GroupProduct>;
   /** Aggregate MRR across products; `0` until analytics wires. */
   mrr: number;

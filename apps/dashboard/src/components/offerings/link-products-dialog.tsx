@@ -86,9 +86,9 @@ function Body({
 
   const memberIds = useMemo(() => {
     const s = new Set<string>();
-    for (const p of offering.products) s.add(p.id);
+    for (const pkg of offering.packages) s.add(pkg.productId);
     return s;
-  }, [offering.products]);
+  }, [offering.packages]);
 
   const candidates = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -115,19 +115,22 @@ function Body({
   const onSubmit = async () => {
     if (selectedIds.size === 0) return;
     setSubmitError(null);
-    const existing = offering.products.map((p, index) => ({
-      productId: p.id,
+    const existing = offering.packages.map((pkg, index) => ({
+      identifier: pkg.identifier,
+      productId: pkg.productId,
       order: index,
-      isPromoted: false,
+      isPromoted: pkg.isPromoted,
     }));
     const toAdd = Array.from(selectedIds).map((productId, index) => ({
+      // Default identifier uses the product SKU; user can rename via the detail pane.
+      identifier: `custom_${productId.slice(0, 8)}`,
       productId,
       order: existing.length + index,
       isPromoted: false,
     }));
     try {
       await update.mutateAsync({
-        products: [...existing, ...toAdd],
+        packages: [...existing, ...toAdd],
       });
       onClose();
     } catch (err) {

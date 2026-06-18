@@ -15,6 +15,7 @@ import type {
   GroupProduct,
   GroupProductStatus,
   Offering,
+  OfferingPackageUi,
 } from "../components/offerings/types";
 
 // Backend rows only carry identity + state. Pricing, MRR, and subscriber
@@ -165,10 +166,23 @@ export function rowToUiOffering(
   row: DashboardOfferingRow,
   productById: ReadonlyMap<string, DashboardProductRow>,
 ): Offering {
-  const members = row.products
-    .slice()
-    .sort((a, b) => a.order - b.order)
-    .map((m) => productById.get(m.productId))
+  const sortedPackages = (row.packages ?? []).slice().sort((a, b) => a.order - b.order);
+
+  const packages: OfferingPackageUi[] = sortedPackages.map((pkg) => {
+    const productRow = productById.get(pkg.productId);
+    return {
+      identifier: pkg.identifier,
+      productId: pkg.productId,
+      order: pkg.order,
+      isPromoted: pkg.isPromoted,
+      productName: productRow?.displayName || productRow?.identifier,
+      productSku: productRow?.identifier,
+      metadata: pkg.metadata,
+    };
+  });
+
+  const members = sortedPackages
+    .map((pkg) => productById.get(pkg.productId))
     .filter((r): r is DashboardProductRow => Boolean(r));
 
   const offeringProducts = members.map(rowToGroupProduct);
@@ -185,7 +199,7 @@ export function rowToUiOffering(
     tint: pickTint(row.identifier),
     description,
     isDefault: row.isDefault,
-    accessId: row.accessId,
+    packages,
     products: offeringProducts,
     mrr: 0,
     subs: offeringProducts.some((p) => p.subs !== null) ? 0 : null,
