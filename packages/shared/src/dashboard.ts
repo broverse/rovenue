@@ -1510,8 +1510,10 @@ export interface DashboardAccessListResponse {
   rows: DashboardAccessRow[];
 }
 
-/** Membership entry inside an `Offering.products` JSONB column. */
-export interface OfferingMembership {
+/** A package inside an offering's `packages` JSONB column. */
+export interface OfferingPackage {
+  /** Standard ($rc_monthly/$rc_annual/...) or custom slug, unique within the offering. */
+  identifier: string;
   productId: string;
   order: number;
   isPromoted: boolean;
@@ -1521,9 +1523,8 @@ export interface OfferingMembership {
 export interface DashboardOfferingRow {
   id: string;
   identifier: string;
-  accessId: string;
   isDefault: boolean;
-  products: OfferingMembership[];
+  packages: OfferingPackage[];
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -1535,19 +1536,20 @@ export interface DashboardOfferingsListResponse {
 
 export interface DashboardOfferingCreateInput {
   identifier: string;
-  accessId: string;
   isDefault?: boolean;
-  products?: OfferingMembership[];
+  packages?: OfferingPackage[];
   metadata?: Record<string, unknown>;
 }
 
 export interface DashboardOfferingUpdateInput {
   identifier?: string;
-  accessId?: string;
   isDefault?: boolean;
-  products?: OfferingMembership[];
+  packages?: OfferingPackage[];
   metadata?: Record<string, unknown>;
 }
+
+/** @deprecated use OfferingPackage */
+export type OfferingMembership = OfferingPackage;
 
 // =============================================================
 // Apps catalog connections overlay (Phase 4.2)
