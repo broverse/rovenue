@@ -57,10 +57,8 @@ export const createExperimentBodySchema = z.object({
     EXPERIMENT_TYPE.PAYWALL,
     EXPERIMENT_TYPE.ELEMENT,
   ]),
-  key: z
-    .string()
-    .min(1)
-    .regex(/^[a-z0-9-_]+$/i, "slug format: letters, digits, - or _"),
+  // `key` is intentionally NOT accepted from the client — it is
+  // backend-assigned (generateExperimentKey) and immutable thereafter.
   audienceId: z.string().min(1),
   variants: experimentObjectSchema.shape.variants,
   metrics: z.array(z.string()).optional(),
@@ -78,11 +76,7 @@ export const updateDraftExperimentBodySchema = z.object({
       EXPERIMENT_TYPE.ELEMENT,
     ])
     .optional(),
-  key: z
-    .string()
-    .min(1)
-    .regex(/^[a-z0-9-_]+$/i)
-    .optional(),
+  // `key` is immutable — see createExperimentBodySchema. Not editable.
   audienceId: z.string().min(1).optional(),
   variants: experimentObjectSchema.shape.variants.optional(),
   metrics: z.array(z.string()).nullable().optional(),
@@ -115,10 +109,12 @@ export const experimentsRoute = new Hono()
   .post("/", zValidator("json", createExperimentBodySchema), async (c) => {
     const body = c.req.valid("json");
 
-    // Revalidate variant weight sum + uniqueness via the shared schema.
+    // The key is backend-assigned below; validate the variant weight sum
+    // + id-uniqueness via the shared schema with a throwaway placeholder
+    // (the refinements never inspect the key itself).
     variantsAndTypeSchema.parse({
       type: body.type,
-      key: body.key,
+      key: "_",
       variants: body.variants,
     });
 
@@ -136,21 +132,35 @@ export const experimentsRoute = new Hono()
       });
     }
 
-    const experiment = await drizzle.experimentRepo.createExperiment(
-      drizzle.db,
-      {
-        projectId: body.projectId,
-        name: body.name,
-        description: body.description,
-        type: body.type as ExperimentType,
-        key: body.key,
-        audienceId: body.audienceId,
-        status: ExperimentStatus.DRAFT,
-        variants: body.variants,
-        metrics: body.metrics,
-        mutualExclusionGroup: body.mutualExclusionGroup,
-      },
-    );
+    // Backend-assigned, immutable key. Retry on the (projectId, key)
+    // unique index in the astronomically-unlikely event of a cuid2 clash.
+    let experiment;
+    for (let attempt = 0; ; attempt += 1) {
+      const key = drizzle.experimentRepo.generateExperimentKey();
+      try {
+        experiment = await drizzle.experimentRepo.createExperiment(
+          drizzle.db,
+          {
+            projectId: body.projectId,
+            name: body.name,
+            description: body.description,
+            type: body.type as ExperimentType,
+            key,
+            audienceId: body.audienceId,
+            status: ExperimentStatus.DRAFT,
+            variants: body.variants,
+            metrics: body.metrics,
+            mutualExclusionGroup: body.mutualExclusionGroup,
+          },
+        );
+        break;
+      } catch (err) {
+        if ((err as { code?: string })?.code === "23505" && attempt < 4) {
+          continue;
+        }
+        throw err;
+      }
+    }
 
     await invalidateExperimentCache(body.projectId);
     await audit({
@@ -159,7 +169,7 @@ export const experimentsRoute = new Hono()
       action: "create",
       resource: "experiment",
       resourceId: experiment.id,
-      after: { key: body.key, type: body.type },
+      after: { key: experiment.key, type: body.type },
       ...extractRequestContext(c),
     });
 
@@ -272,13 +282,13 @@ export const experimentsRoute = new Hono()
       if (body.variants && body.type) {
         variantsAndTypeSchema.parse({
           type: body.type,
-          key: body.key ?? existing.key,
+          key: existing.key,
           variants: body.variants,
         });
       } else if (body.variants) {
         variantsAndTypeSchema.parse({
           type: existing.type,
-          key: body.key ?? existing.key,
+          key: existing.key,
           variants: body.variants,
         });
       }
@@ -287,7 +297,6 @@ export const experimentsRoute = new Hono()
         ...(body.name !== undefined && { name: body.name }),
         ...(body.description !== undefined && { description: body.description }),
         ...(body.type !== undefined && { type: body.type as ExperimentType }),
-        ...(body.key !== undefined && { key: body.key }),
         ...(body.audienceId !== undefined && { audienceId: body.audienceId }),
         ...(body.variants !== undefined && { variants: body.variants }),
         ...(body.metrics !== undefined && {
@@ -654,9 +663,8 @@ export const experimentsRoute = new Hono()
   // ----- POST /dashboard/experiments/:id/duplicate -----
   //
   // Clones an experiment as a new DRAFT, regardless of source status.
-  // Generates a unique key by appending `-copy` (and a numeric suffix
-  // if needed) so the new draft does not collide on the
-  // (projectId, key) constraint. Name is suffixed with "(copy)" for
+  // The clone gets its own backend-assigned opaque key (keys are
+  // immutable and never copied). Name is suffixed with "(copy)" for
   // visual disambiguation in the list.
   .post("/:id/duplicate", async (c) => {
     const id = c.req.param("id");
@@ -670,33 +678,33 @@ export const experimentsRoute = new Hono()
     const user = c.get("user");
     await assertProjectCapability(source.projectId, user.id, "experiments:write");
 
-    const siblings = await drizzle.experimentRepo.findExperimentsByProject(
-      drizzle.db,
-      { projectId: source.projectId },
-    );
-    const takenKeys = new Set(siblings.map((e) => e.key));
-    const base = `${source.key}-copy`.replace(/[^a-z0-9-_]/gi, "-");
-    let nextKey = base;
-    let suffix = 2;
-    while (takenKeys.has(nextKey)) {
-      nextKey = `${base}-${suffix++}`;
+    let duplicated;
+    for (let attempt = 0; ; attempt += 1) {
+      const key = drizzle.experimentRepo.generateExperimentKey();
+      try {
+        duplicated = await drizzle.experimentRepo.createExperiment(
+          drizzle.db,
+          {
+            projectId: source.projectId,
+            name: `${source.name} (copy)`,
+            description: source.description,
+            type: source.type,
+            key,
+            audienceId: source.audienceId,
+            status: ExperimentStatus.DRAFT,
+            variants: source.variants,
+            metrics: source.metrics,
+            mutualExclusionGroup: source.mutualExclusionGroup,
+          },
+        );
+        break;
+      } catch (err) {
+        if ((err as { code?: string })?.code === "23505" && attempt < 4) {
+          continue;
+        }
+        throw err;
+      }
     }
-
-    const duplicated = await drizzle.experimentRepo.createExperiment(
-      drizzle.db,
-      {
-        projectId: source.projectId,
-        name: `${source.name} (copy)`,
-        description: source.description,
-        type: source.type,
-        key: nextKey,
-        audienceId: source.audienceId,
-        status: ExperimentStatus.DRAFT,
-        variants: source.variants,
-        metrics: source.metrics,
-        mutualExclusionGroup: source.mutualExclusionGroup,
-      },
-    );
 
     await invalidateExperimentCache(source.projectId);
     await audit({
@@ -705,7 +713,7 @@ export const experimentsRoute = new Hono()
       action: "duplicate",
       resource: "experiment",
       resourceId: duplicated.id,
-      after: { sourceId: id, key: nextKey },
+      after: { sourceId: id, key: duplicated.key },
       ...extractRequestContext(c),
     });
 

@@ -1,3 +1,4 @@
+import { init } from "@paralleldrive/cuid2";
 import { and, count, eq } from "drizzle-orm";
 import type { Db } from "../client";
 import {
@@ -7,6 +8,16 @@ import {
 import { experimentStatus, experimentType } from "../enums";
 
 type DbOrTx = Db;
+
+// Experiment keys are backend-assigned and immutable. They are opaque
+// `exp_<8-char cuid2>` identifiers — the SDK looks experiments up by this
+// key, so it must never change once issued. Uniqueness is enforced by the
+// (projectId, key) index; callers retry on a 23505 collision.
+const shortExperimentId = init({ length: 8 });
+
+export function generateExperimentKey(): string {
+  return `exp_${shortExperimentId()}`;
+}
 type ExperimentStatus = (typeof experimentStatus.enumValues)[number];
 type ExperimentType = (typeof experimentType.enumValues)[number];
 
@@ -150,7 +161,8 @@ export interface UpdateExperimentInput {
   name?: string;
   description?: string | null;
   type?: ExperimentType;
-  key?: string;
+  // `key` is intentionally absent — experiment keys are immutable once
+  // assigned (see generateExperimentKey). Updates can never change it.
   audienceId?: string;
   status?: ExperimentStatus;
   variants?: unknown;
@@ -174,7 +186,6 @@ export async function updateExperiment(
   if (patch.name !== undefined) data.name = patch.name;
   if (patch.description !== undefined) data.description = patch.description;
   if (patch.type !== undefined) data.type = patch.type;
-  if (patch.key !== undefined) data.key = patch.key;
   if (patch.audienceId !== undefined) data.audienceId = patch.audienceId;
   if (patch.status !== undefined) data.status = patch.status;
   if (patch.variants !== undefined) {

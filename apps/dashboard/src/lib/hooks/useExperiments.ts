@@ -17,7 +17,7 @@ export interface CreateExperimentVars {
   name: string;
   description?: string;
   type: DashboardExperimentType;
-  key: string;
+  // key is backend-assigned and immutable — never sent by the client.
   audienceId: string;
   variants: ReadonlyArray<{
     id: string;
@@ -120,7 +120,6 @@ export interface UpdateDraftExperimentVars {
   name?: string;
   description?: string | null;
   type?: DashboardExperimentType;
-  key?: string;
   audienceId?: string;
   variants?: ReadonlyArray<{
     id: string;
@@ -138,7 +137,6 @@ export function useUpdateExperiment() {
       if (patch.name !== undefined) body.name = patch.name;
       if (patch.description !== undefined) body.description = patch.description;
       if (patch.type !== undefined) body.type = patch.type;
-      if (patch.key !== undefined) body.key = patch.key;
       if (patch.audienceId !== undefined) body.audienceId = patch.audienceId;
       if (patch.variants !== undefined) {
         body.variants = patch.variants.map((v) => ({ ...v }));

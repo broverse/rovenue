@@ -312,7 +312,6 @@ export function NewExperimentPage({
       : "boolean";
 
   const [name, setName] = useState(initialExperiment?.name ?? "");
-  const [key, setKey] = useState(initialExperiment?.key ?? "");
   const [description, setDescription] = useState(
     initialExperiment?.description ?? "",
   );
@@ -436,12 +435,8 @@ export function NewExperimentPage({
     e.preventDefault();
     setFormError(null);
 
-    if (!name.trim() || !key.trim()) {
+    if (!name.trim()) {
       setFormError(t("experiments.new.errors.required"));
-      return;
-    }
-    if (!/^[a-z0-9-_]+$/i.test(key.trim())) {
-      setFormError(t("experiments.new.errors.invalidKey"));
       return;
     }
     if (!resolvedAudienceId) {
@@ -489,31 +484,34 @@ export function NewExperimentPage({
     }
 
     try {
+      // The key is backend-assigned — read it back from the response so
+      // we can deep-link to the experiment after create/update.
+      let selectedKey: string;
       if (initialExperiment) {
         await update.mutateAsync({
           id: initialExperiment.id,
           name: name.trim(),
           description: description.trim() ? description.trim() : null,
           type,
-          key: key.trim(),
           audienceId: resolvedAudienceId,
           variants: parsedVariants,
         });
+        selectedKey = initialExperiment.key;
       } else {
-        await create.mutateAsync({
+        const created = await create.mutateAsync({
           projectId,
           name: name.trim(),
           ...(description.trim() ? { description: description.trim() } : {}),
           type,
-          key: key.trim(),
           audienceId: resolvedAudienceId,
           variants: parsedVariants,
         });
+        selectedKey = created.experiment.key;
       }
       void navigate({
         to: "/projects/$projectId/experiments",
         params: { projectId },
-        search: { selected: key.trim() },
+        search: { selected: selectedKey },
       });
     } catch (err) {
       setFormError(
@@ -641,19 +639,15 @@ export function NewExperimentPage({
               required
             />
           </Field>
-          <Field
-            icon={<KeyRound size={11} />}
-            label={t("experiments.new.fields.key")}
-            description={t("experiments.new.descriptions.key")}
-          >
-            <Input
-              value={key}
-              mono
-              onChange={(e) => setKey(e.target.value)}
-              placeholder="paywall_v2_pricing"
-              required
-            />
-          </Field>
+          {isEdit && initialExperiment ? (
+            <Field
+              icon={<KeyRound size={11} />}
+              label={t("experiments.new.fields.key")}
+              description={t("experiments.new.descriptions.key")}
+            >
+              <Input value={initialExperiment.key} mono readOnly />
+            </Field>
+          ) : null}
           <Field
             icon={<FileText size={11} />}
             label={t("experiments.new.fields.description")}

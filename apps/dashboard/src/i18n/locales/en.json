@@ -2201,7 +2201,7 @@
       },
       "descriptions": {
         "name": "Shown in the experiments list and reports. Keep it short.",
-        "key": "Lowercase letters, digits, dashes or underscores. The SDK uses this to look up the experiment — change it later and existing assignments are lost.",
+        "key": "Assigned by Rovenue when the experiment is created. The SDK uses this to look it up — it can't be changed.",
         "description": "Why you're running it and what success looks like.",
         "audience": "Defaults to the project's default audience. Pick a narrower segment to restrict who is enrolled.",
         "variantId": "Stable id used in code and analytics — don't change after launch.",
@@ -2240,7 +2240,7 @@
       "submitting": "Creating…",
       "cancel": "Cancel",
       "errors": {
-        "required": "Name and key are required.",
+        "required": "Name is required.",
         "invalidKey": "Key must contain only letters, digits, - or _.",
         "noAudience": "Pick an audience to target.",
         "weightSum": "Variant weights must sum to 1 (got {{sum}}).",
