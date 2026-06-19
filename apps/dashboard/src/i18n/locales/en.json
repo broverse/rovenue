@@ -3446,6 +3446,39 @@
       "saving": "Saving…",
       "saveError": "Could not save. Check the URL and try again."
     },
+    "webhookDetail": {
+      "back": "Apps & integrations",
+      "title": "Custom webhook",
+      "subtitle": "Outgoing webhook endpoint, signing secret, and recent deliveries.",
+      "edit": "Edit",
+      "endpointLabel": "Endpoint",
+      "eventsLabel": "Subscribed events",
+      "allEvents": "All events",
+      "secretLabel": "Signing secret",
+      "secretConfigured": "Configured",
+      "secretMissing": "Not set",
+      "rotate": "Rotate secret",
+      "rotating": "Rotating…",
+      "secretRevealWarning": "Copy this now — it is shown only once.",
+      "deliveries": {
+        "title": "Recent deliveries",
+        "empty": "No deliveries yet",
+        "emptyHint": "Deliveries appear here once subscription events start firing.",
+        "colStatus": "Status",
+        "colEvent": "Event",
+        "colAttempts": "Attempts",
+        "colCreated": "Created",
+        "colSent": "Sent",
+        "colError": "Last error",
+        "prev": "Previous",
+        "next": "Next"
+      },
+      "noWebhook": {
+        "title": "No webhook configured",
+        "description": "Create a custom webhook to receive subscription events on your server.",
+        "cta": "New webhook"
+      }
+    },
     "hero": {
       "title": "Stream every revenue event, everywhere it matters.",
       "description": "{{count}} prebuilt server-side integrations. All deliveries are HMAC-signed, retried automatically for 24h, and replayable from the dashboard.",
@@ -3872,16 +3905,6 @@
         "generateKey": "Generate API key",
         "openDocs": "API reference"
       },
-      "stats": {
-        "calls": "API calls / 24h",
-        "success": "Success rate",
-        "latency": "p95 latency",
-        "installs": "Active SDKs",
-        "callsDescription": "{{delta}} vs. last week",
-        "successDescription": "Across all platforms",
-        "latencyDescription": "Edge → origin · 7d",
-        "installsDescription": "Pinged in the last hour"
-      },
       "healthcheckLabel": "Live healthcheck",
       "healthcheckFile": "terminal",
       "healthcheckCaption": "Returns 200 + region routing metadata. Use this in CI to gate deploys."
@@ -3894,7 +3917,6 @@
         "reactNative": "React Native",
         "ios": "iOS · Swift",
         "android": "Android · Kotlin",
-        "web": "Web",
         "rest": "REST"
       },
       "installLabel": "Install",
@@ -3920,16 +3942,6 @@
       "environments": {
         "production": "Production",
         "sandbox": "Sandbox"
-      },
-      "items": {
-        "publishableProd": "Publishable key",
-        "publishableSandbox": "Publishable key",
-        "secretProd": "Secret key",
-        "webhookSigning": "Webhook signing secret"
-      },
-      "created": {
-        "createdAtProd": "Created Apr 12, 2026 · last used 2m ago",
-        "createdAtSandbox": "Created Apr 12, 2026 · last used 1h ago"
       },
       "footer": {
         "note": "All key activity is hash-chained to the audit log.",
@@ -3959,17 +3971,12 @@
       "items": {
         "reactNative": "@rovenue/react-native",
         "ios": "rovenue-ios",
-        "android": "rovenue-android",
-        "web": "@rovenue/web",
-        "node": "@rovenue/node",
-        "go": "rovenue-go"
+        "android": "rovenue-android"
       },
       "targets": {
         "reactNative": "Expo & bare React Native · iOS + Android",
         "ios": "iOS 15+ · Swift 5.9 · StoreKit 2",
-        "android": "Android 8+ · Kotlin · Play Billing 6",
-        "web": "Browsers · Stripe Checkout adapter",
-        "server": "Server-side · Node 20+ / Go 1.22+"
+        "android": "Android 8+ · Kotlin · Play Billing 6"
       },
       "status": {
         "stable": "Stable",
@@ -3977,18 +3984,10 @@
         "preview": "Preview",
         "planned": "Planned"
       },
-      "published": {
-        "publishedDays": "3 days ago",
-        "publishedWeeks": "2 weeks ago",
-        "publishedNew": "fresh from the oven"
-      },
       "docsLinks": {
         "rnDocs": "RN guide",
         "iosDocs": "iOS guide",
-        "androidDocs": "Android guide",
-        "webDocs": "Web guide",
-        "nodeDocs": "Node guide",
-        "goDocs": "Go guide"
+        "androidDocs": "Android guide"
       }
     },
     "endpoints": {
@@ -4004,14 +4003,16 @@
         "admin": "Admin"
       },
       "items": {
-        "subscribersGet": "Read subscriber profile + access",
+        "meGet": "Read the current subscriber profile + access",
+        "meEntitlements": "List the subscriber's active entitlements",
+        "meCredits": "Read the subscriber's credit balance",
+        "offerings": "List available offerings & packages",
+        "receiptsApple": "Validate an Apple StoreKit receipt",
+        "receiptsGoogle": "Validate a Google Play receipt",
         "subscribersAttrs": "Set subscriber attributes",
-        "receipts": "Validate Apple / Google / Stripe receipt",
-        "creditsGrant": "Grant credits with idempotency key",
-        "creditsBalance": "Read current credit balance",
-        "entitlementsGet": "List active access",
-        "experimentsAssign": "Record an experiment assignment",
-        "subscribersDelete": "GDPR / KVKK anonymise + export"
+        "creditsAdd": "Grant credits to a subscriber",
+        "experimentsTrack": "Record an experiment exposure",
+        "subscribersTransfer": "Merge / transfer subscriber identity"
       },
       "empty": {
         "title": "No endpoints match",
@@ -4022,33 +4023,7 @@
       "title": "Webhooks",
       "subtitle": "Server → server delivery with HMAC signing, automatic retries for 24h, and replay from the dashboard.",
       "endpoint": "Endpoint URL",
-      "signingSecret": "Signing secret",
-      "actions": {
-        "test": "Send test event"
-      },
-      "recent": {
-        "title": "Recent deliveries",
-        "viewAll": "All deliveries"
-      },
-      "events": {
-        "subscriptionRenewed": "subscription.renewed",
-        "trialStarted": "trial.started",
-        "subscriptionExpired": "subscription.expired",
-        "creditsGranted": "credits.granted",
-        "purchaseRefunded": "purchase.refunded"
-      },
-      "status": {
-        "ok": "200",
-        "retry": "Retrying",
-        "failed": "Failed"
-      },
-      "age": {
-        "secondsAgo": "8s ago",
-        "secondsAgoLong": "42s ago",
-        "minutesAgo": "3m ago",
-        "minutesAgoLong": "12m ago",
-        "hoursAgo": "1h ago"
-      }
+      "signingSecret": "Signing secret"
     },
     "resources": {
       "title": "Resources",
