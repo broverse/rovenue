@@ -19,6 +19,14 @@ import {
 import { auth } from "../../lib/auth";
 import { creditsRoute } from "./credits";
 
+async function seedCurrency(projectId: string, suffix = "") {
+  return drizzle.virtualCurrencyRepo.createVirtualCurrency(drizzle.db, {
+    projectId,
+    code: `GLD${suffix.toUpperCase().replace(/\W/g, "").slice(0, 2)}`,
+    name: `Gold${suffix}`,
+  });
+}
+
 const RUN_ID = Date.now();
 
 function buildApp() {
@@ -64,7 +72,7 @@ async function seedMember({
 }: {
   projectId: string;
   userId: string;
-  role: "OWNER" | "ADMIN" | "CUSTOMER_SUPPORT";
+  role: "OWNER" | "ADMIN" | "DEVELOPER" | "GROWTH" | "CUSTOMER_SUPPORT";
 }) {
   await getDb().insert(drizzle.schema.projectMembers).values({
     projectId,
@@ -111,6 +119,7 @@ describe("POST /projects/:projectId/credits — manual grant", () => {
     trackProject(project.id);
     await seedMember({ projectId: project.id, userId, role: "ADMIN" });
     const sub = await seedSubscriber({ projectId: project.id });
+    const currency = await seedCurrency(project.id);
 
     const app = buildApp();
     const res = await app.request(
@@ -120,6 +129,7 @@ describe("POST /projects/:projectId/credits — manual grant", () => {
         headers: { "content-type": "application/json", cookie },
         body: JSON.stringify({
           subscriberId: sub.id,
+          currencyId: currency.id,
           amount: 500,
           description: "support comp",
         }),
@@ -128,11 +138,12 @@ describe("POST /projects/:projectId/credits — manual grant", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      data: { balance: number; entry: { type: string; amount: number } };
+      data: { balance: number; entry: { type: string; amount: number; currencyId: string } };
     };
     expect(body.data.balance).toBe(500);
     expect(body.data.entry.type).toBe("BONUS");
     expect(body.data.entry.amount).toBe(500);
+    expect(body.data.entry.currencyId).toBe(currency.id);
 
     // ledger row exists in PG
     const cl = drizzle.schema.creditLedger;
@@ -143,14 +154,16 @@ describe("POST /projects/:projectId/credits — manual grant", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.type).toBe("BONUS");
     expect(rows[0]?.balance).toBe(500);
+    expect(rows[0]?.currencyId).toBe(currency.id);
   });
 
-  it("403s when caller has VIEWER role", async () => {
+  it("403s when caller lacks credits:write capability (GROWTH role)", async () => {
     const { userId, cookie } = await createUserAndSession("viewer");
     const project = await seedProject("viewer");
     trackProject(project.id);
-    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
+    await seedMember({ projectId: project.id, userId, role: "GROWTH" });
     const sub = await seedSubscriber({ projectId: project.id, suffix: "v" });
+    const currency = await seedCurrency(project.id, "v");
 
     const app = buildApp();
     const res = await app.request(
@@ -158,7 +171,7 @@ describe("POST /projects/:projectId/credits — manual grant", () => {
       {
         method: "POST",
         headers: { "content-type": "application/json", cookie },
-        body: JSON.stringify({ subscriberId: sub.id, amount: 100 }),
+        body: JSON.stringify({ subscriberId: sub.id, currencyId: currency.id, amount: 100 }),
       },
     );
 
@@ -173,6 +186,7 @@ describe("POST /projects/:projectId/credits — manual grant", () => {
     trackProject(projectB.id);
     await seedMember({ projectId: projectA.id, userId, role: "ADMIN" });
     const subB = await seedSubscriber({ projectId: projectB.id, suffix: "B" });
+    const currency = await seedCurrency(projectA.id, "cp");
 
     const app = buildApp();
     const res = await app.request(
@@ -180,7 +194,7 @@ describe("POST /projects/:projectId/credits — manual grant", () => {
       {
         method: "POST",
         headers: { "content-type": "application/json", cookie },
-        body: JSON.stringify({ subscriberId: subB.id, amount: 50 }),
+        body: JSON.stringify({ subscriberId: subB.id, currencyId: currency.id, amount: 50 }),
       },
     );
 

@@ -87,8 +87,18 @@ export const creditsRoute = new Hono()
         throw new HTTPException(404, { message: "subscriber not found" });
       }
 
+      const currency = await drizzle.virtualCurrencyRepo.findVirtualCurrencyById(
+        drizzle.db,
+        projectId,
+        input.currencyId,
+      );
+      if (!currency) {
+        throw new HTTPException(404, { message: "currency not found" });
+      }
+
       const entry = await addCredits({
         subscriberId: sub.id,
+        currencyId: input.currencyId,
         amount: input.amount,
         type: input.type as CreditLedgerType,
         referenceType: input.referenceType,
@@ -106,6 +116,7 @@ export const creditsRoute = new Hono()
         before: null,
         after: {
           ledgerId: entry.id,
+          currencyId: entry.currencyId,
           type: entry.type,
           amount: entry.amount,
           balance: entry.balance,
@@ -120,6 +131,7 @@ export const creditsRoute = new Hono()
         entry: {
           id: entry.id,
           subscriberId: entry.subscriberId,
+          currencyId: entry.currencyId,
           type: entry.type,
           amount: entry.amount,
           balance: entry.balance,

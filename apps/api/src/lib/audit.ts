@@ -113,7 +113,11 @@ export type AuditAction =
   | "refund_shield.response.failed"
   // --- merchant-initiated refunds ---
   | "transaction.refunded"
-  | "subscription.refunded";
+  | "subscription.refunded"
+  // --- virtual currencies ---
+  | "virtual_currency.created"
+  | "virtual_currency.renamed"
+  | "virtual_currency.archived";
 
 export type AuditResource =
   | "audience"
@@ -133,7 +137,8 @@ export type AuditResource =
   | "custom_domain"
   | "integration_connection"
   | "refund_shield_response"
-  | "transaction";
+  | "transaction"
+  | "virtual_currency";
 
 export interface AuditEntry {
   projectId: string;
