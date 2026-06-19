@@ -1,14 +1,18 @@
 import { BookOpen, MoreHorizontal, RotateCw, Webhook } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../ui/button";
 import { cn } from "../../lib/cn";
 import { formatAbsMoney, formatExactMoney } from "./format";
+import { RefundConfirmDialog } from "./refund-confirm-dialog";
+import { TransactionActionsMenu } from "./transaction-actions-menu";
 import { TxIcon } from "./tx-icon";
 import { TxStatusChip } from "./tx-status-chip";
 import type { Transaction } from "./types";
 
 type Props = {
   tx: Transaction;
+  projectId: string;
 };
 
 const escapeHtml = (s: string) => s.replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -41,8 +45,9 @@ function highlightJson(value: unknown): string {
  * receipt math, references, and the raw webhook payload, all sticky to
  * the top of the viewport while the table scrolls underneath.
  */
-export function TransactionInspector({ tx }: Props) {
+export function TransactionInspector({ tx, projectId }: Props) {
   const { t } = useTranslation();
+  const [refundOpen, setRefundOpen] = useState(false);
   const payload = {
     id: tx.id,
     type: tx.type,
@@ -143,9 +148,8 @@ export function TransactionInspector({ tx }: Props) {
       </Section>
 
       <div className="flex gap-1.5 px-3 py-3">
-        {/* Apple processes App Store refunds itself — no merchant-initiated refund, so hide it for iOS. */}
         {tx.store !== "ios" && (
-          <Button variant="flat" size="sm" className="flex-1">
+          <Button variant="flat" size="sm" className="flex-1" onClick={() => setRefundOpen(true)}>
             <RotateCw size={13} />
             {t("transactions.inspector.footer.refund")}
           </Button>
@@ -154,10 +158,9 @@ export function TransactionInspector({ tx }: Props) {
           <Webhook size={13} />
           {t("transactions.inspector.footer.redeliver")}
         </Button>
-        <Button variant="light" size="icon" aria-label={t("transactions.inspector.more")}>
-          <MoreHorizontal size={14} />
-        </Button>
+        <TransactionActionsMenu projectId={projectId} tx={tx} payload={payload} />
       </div>
+      <RefundConfirmDialog projectId={projectId} tx={tx} open={refundOpen} onClose={() => setRefundOpen(false)} />
     </aside>
   );
 }
