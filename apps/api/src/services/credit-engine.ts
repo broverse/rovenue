@@ -19,19 +19,31 @@ export class InsufficientCreditsError extends Error {
 }
 
 /**
- * Return the subscriber's current credit balance — the `balance` field of
- * the most recent CreditLedger entry. Append-only; no aggregation.
+ * Return the subscriber's current credit balance for a specific currency —
+ * the `balance` field of the most recent CreditLedger entry for that
+ * (subscriber, currency) pair. Append-only; no aggregation.
  */
-export async function getBalance(subscriberId: string): Promise<number> {
+export async function getBalance(
+  subscriberId: string,
+  currencyId: string,
+): Promise<number> {
   const last = await drizzle.creditLedgerRepo.findLatestBalance(
     drizzle.db,
     subscriberId,
+    currencyId,
   );
   return last?.balance ?? 0;
 }
 
+export async function getAllBalances(
+  subscriberId: string,
+): Promise<Array<{ currencyId: string; balance: number }>> {
+  return drizzle.creditLedgerRepo.findAllBalances(drizzle.db, subscriberId);
+}
+
 export interface AddCreditsArgs {
   subscriberId: string;
+  currencyId: string;
   amount: number;
   type?: CreditLedgerType;
   referenceType?: string;
@@ -51,8 +63,8 @@ export interface AddCreditsArgs {
 
 /**
  * Append a PURCHASE / BONUS / REFUND ledger entry. A per-subscriber
- * Postgres advisory lock serialises concurrent writers on the same
- * subscriber without the cost of Serializable isolation.
+ * per-currency Postgres advisory lock serialises concurrent writers on the
+ * same (subscriber, currency) without the cost of Serializable isolation.
  */
 export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
   if (!Number.isInteger(args.amount) || args.amount <= 0) {
@@ -61,7 +73,10 @@ export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
   const type = args.type ?? CreditLedgerType.PURCHASE;
 
   return drizzle.db.transaction(async (tx) => {
-    await drizzle.lockRepo.advisoryXactLock(tx, args.subscriberId);
+    await drizzle.lockRepo.advisoryXactLock(
+      tx,
+      `${args.subscriberId}:${args.currencyId}`,
+    );
 
     const subscriber = await drizzle.subscriberRepo.findSubscriberProjectId(
       tx,
@@ -76,10 +91,12 @@ export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
         tx,
         args.subscriberId,
         args.referenceId,
+        args.currencyId,
       );
       if (existing) {
         log.debug("credit already granted for reference, skipping", {
           subscriberId: args.subscriberId,
+          currencyId: args.currencyId,
           referenceId: args.referenceId,
         });
         const rows = await tx
@@ -90,6 +107,7 @@ export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
               eq(drizzle.schema.creditLedger.subscriberId, args.subscriberId),
               eq(drizzle.schema.creditLedger.referenceType, "purchase"),
               eq(drizzle.schema.creditLedger.referenceId, args.referenceId),
+              eq(drizzle.schema.creditLedger.currencyId, args.currencyId),
             ),
           )
           .limit(1);
@@ -100,11 +118,13 @@ export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
     const last = await drizzle.creditLedgerRepo.findLatestBalance(
       tx,
       args.subscriberId,
+      args.currencyId,
     );
     const balance = (last?.balance ?? 0) + args.amount;
 
     log.debug("adding credits", {
       subscriberId: args.subscriberId,
+      currencyId: args.currencyId,
       amount: args.amount,
       newBalance: balance,
     });
@@ -112,6 +132,7 @@ export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
     const row = await drizzle.creditLedgerRepo.insertCreditLedger(tx, {
       projectId: subscriber.projectId,
       subscriberId: args.subscriberId,
+      currencyId: args.currencyId,
       type,
       amount: args.amount,
       balance,
@@ -126,6 +147,7 @@ export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
 
 export interface SpendCreditsArgs {
   subscriberId: string;
+  currencyId: string;
   amount: number;
   referenceType?: string;
   referenceId?: string;
@@ -135,8 +157,8 @@ export interface SpendCreditsArgs {
 
 /**
  * Append a SPEND ledger entry; throws {@link InsufficientCreditsError}
- * when the balance is below `amount`. Per-subscriber advisory lock keeps
- * concurrent spends from overdrafting.
+ * when the balance is below `amount`. Per-subscriber per-currency advisory
+ * lock keeps concurrent spends from overdrafting.
  */
 export async function spendCredits(
   args: SpendCreditsArgs,
@@ -146,7 +168,10 @@ export async function spendCredits(
   }
 
   return drizzle.db.transaction(async (tx) => {
-    await drizzle.lockRepo.advisoryXactLock(tx, args.subscriberId);
+    await drizzle.lockRepo.advisoryXactLock(
+      tx,
+      `${args.subscriberId}:${args.currencyId}`,
+    );
 
     const subscriber = await drizzle.subscriberRepo.findSubscriberProjectId(
       tx,
@@ -159,6 +184,7 @@ export async function spendCredits(
     const last = await drizzle.creditLedgerRepo.findLatestBalance(
       tx,
       args.subscriberId,
+      args.currencyId,
     );
     const prevBalance = last?.balance ?? 0;
 
@@ -170,6 +196,7 @@ export async function spendCredits(
 
     log.debug("spending credits", {
       subscriberId: args.subscriberId,
+      currencyId: args.currencyId,
       amount: args.amount,
       newBalance: balance,
     });
@@ -177,6 +204,7 @@ export async function spendCredits(
     const row = await drizzle.creditLedgerRepo.insertCreditLedger(tx, {
       projectId: subscriber.projectId,
       subscriberId: args.subscriberId,
+      currencyId: args.currencyId,
       type: CreditLedgerType.SPEND,
       amount: -args.amount,
       balance,
@@ -191,6 +219,7 @@ export async function spendCredits(
 
 export interface RefundCreditsArgs {
   subscriberId: string;
+  currencyId: string;
   amount: number;
   referenceId: string;
   referenceType?: string;
@@ -203,6 +232,7 @@ export async function refundCredits(
 ): Promise<CreditLedger> {
   return addCredits({
     subscriberId: args.subscriberId,
+    currencyId: args.currencyId,
     amount: args.amount,
     type: CreditLedgerType.REFUND,
     referenceType: args.referenceType ?? "refund",
