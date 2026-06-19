@@ -345,7 +345,8 @@ export function FlagForm({ projectId, initialFlag }: FlagFormProps) {
   };
 
   const pending = create.isPending || update.isPending;
-  const keyBlocksSubmit = !isEdit && keyStatus !== "available";
+  const keyBlocksSubmit =
+    !isEdit && (keyStatus !== "available" || keyChecking);
   const submitDisabled =
     pending || !defaultValid || !rulesValid || keyBlocksSubmit;
 
