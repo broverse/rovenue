@@ -29,7 +29,9 @@ export function TransactionActionsMenu({
   const { t } = useTranslation();
   const navigate = useNavigate();
 
-  const copy = (text: string) => void navigator.clipboard?.writeText(text);
+  // Swallow rejections (permission denied / non-secure context) — a failed
+  // copy is a no-op, not an unhandled promise rejection.
+  const copy = (text: string) => void navigator.clipboard?.writeText(text).catch(() => {});
 
   const goToSubscriber = () =>
     void navigate({
