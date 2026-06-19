@@ -95,14 +95,15 @@ export const publicFunnelUniversalRoute = new Hono().get(
         c.req.header("x-forwarded-for") ??
         c.req.header("cf-connecting-ip") ??
         "";
-      // server-side has no screen size; SDK sends real dims on
-      // /sdk/claim-install. The `0x0` sentinel makes
-      // fingerprintsMatch ignore the dim axis on either side.
+      // server-side has neither screen size nor device timezone; the SDK
+      // sends real values on /sdk/claim-install. The `0x0` (dims) and ``
+      // (timezone) sentinels make fingerprintsMatch ignore those axes on
+      // either side — otherwise a non-UTC device never matched.
       const fp = normalizeFingerprint({
         ip: ipHeader,
         userAgent: ua,
         locale: c.req.header("accept-language")?.split(",")[0] ?? "en",
-        timezone: "UTC",
+        timezone: "",
         screenDims: "0x0",
       });
       await drizzle.funnelDeferredClaimRepo.insert(drizzle.db, {

@@ -59,7 +59,10 @@ export async function findLatestBalance(
         eq(creditLedger.currencyId, currencyId),
       ),
     )
-    .orderBy(desc(creditLedger.createdAt))
+    // desc(id) tie-breaks rows sharing an identical createdAt (sub-millisecond
+    // inserts) so "latest balance" is deterministic — otherwise the running
+    // balance can be read off the wrong prior row.
+    .orderBy(desc(creditLedger.createdAt), desc(creditLedger.id))
     .limit(1);
   return rows[0] ?? null;
 }
@@ -75,7 +78,13 @@ export async function findAllBalances(
     })
     .from(creditLedger)
     .where(eq(creditLedger.subscriberId, subscriberId))
-    .orderBy(creditLedger.currencyId, desc(creditLedger.createdAt));
+    // desc(id) tie-break keeps the DISTINCT ON pick deterministic when two
+    // rows for a currency share a createdAt.
+    .orderBy(
+      creditLedger.currencyId,
+      desc(creditLedger.createdAt),
+      desc(creditLedger.id),
+    );
 }
 
 // =============================================================

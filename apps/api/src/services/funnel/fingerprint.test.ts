@@ -11,7 +11,8 @@ describe("fingerprint", () => {
       screenDims: "390 x 844",
       deviceModel: " iPhone15,2 ",
     });
-    expect(f.locale).toBe("en-US");
+    // Normalized lowercase (so en-US / en_US compare equal across sources).
+    expect(f.locale).toBe("en-us");
     expect(f.timezone).toBe("Europe/Istanbul");
     expect(f.screenDims).toBe("390x844");
     expect(f.deviceModel).toBe("iPhone15,2");

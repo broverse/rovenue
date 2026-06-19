@@ -126,7 +126,10 @@ const importItemSchema = z.object({
   displayName: z.string().trim().min(1).max(200).optional(),
   type: productType,
   accessIds: z.array(accessIdSchema).optional(),
-  creditAmount: z.number().int().nullable().optional(),
+  // `creditAmount` removed: it never granted anything (the purchase grant
+  // path reads product_currency_grants, not products.creditAmount). Accepting
+  // it implied imported consumables would grant credits — a config trap.
+  // Configure currencyGrants on the product instead.
   metadata: z.record(z.unknown()).optional(),
 });
 
@@ -328,7 +331,6 @@ export const productsDashboardRoute = new Hono()
         type: item.type,
         storeId: item.storeId,
         accessIds: item.accessIds ?? [],
-        creditAmount: item.creditAmount ?? null,
         metadata: item.metadata ?? {},
       };
     });

@@ -75,10 +75,10 @@ export async function runDailyTick(
   const log = deps.logger.child("digest.daily");
   const now = deps.now?.() ?? new Date();
   const targetTimezones = timezonesAtLocalHour(now, DIGEST_LOCAL_HOUR);
-  const targetDay = priorDayInTimezone(now, targetTimezones[0] ?? "UTC");
-  // Use UTC for the CH bucket; targetTimezones share the same
-  // local 09:00 so picking the first to compute "yesterday" is
-  // safe — they all crossed the same midnight in absolute terms.
+  // `targetDay` is computed PER USER from their own timezone (below), not
+  // once from targetTimezones[0]: zones at local 09:00 can straddle the UTC
+  // date line, so a single shared day gave some users the wrong calendar
+  // day (and, because the day is in the dedup eventId, a possible double-send).
 
   const outcome: TickOutcome = {
     targetTimezones,
@@ -103,6 +103,8 @@ export async function runDailyTick(
         outcome.usersSkipped += 1;
         continue;
       }
+      // The user's own "yesterday" in their own timezone.
+      const targetDay = priorDayInTimezone(now, u.timezone);
       const projectIds = memberships.map((m) => m.projectId);
       const kpis = await fetchDailyKPIs(deps.ch, projectIds, targetDay);
 
@@ -174,11 +176,9 @@ export async function runWeeklyTick(
     return outcome;
   }
 
-  // Weekly = last 7 finished days. weekEnd = yesterday, weekStart = -6d.
-  const tz = targetTimezones[0] ?? "UTC";
-  const weekEnd = priorDayInTimezone(now, tz);
-  const weekStart = shiftDay(weekEnd, -6);
-
+  // Weekly = last 7 finished days, computed PER USER from their timezone
+  // (see the daily-tick note) so the week window + dedup eventId are correct
+  // across the UTC date line.
   for await (const batch of streamUsersInTimezones(
     deps.db,
     targetTimezones,
@@ -190,6 +190,9 @@ export async function runWeeklyTick(
         outcome.usersSkipped += 1;
         continue;
       }
+      // weekEnd = the user's yesterday; weekStart = 6 days before that.
+      const weekEnd = priorDayInTimezone(now, u.timezone);
+      const weekStart = shiftDay(weekEnd, -6);
       const projectIds = memberships.map((m) => m.projectId);
 
       // Aggregate across the week by fetching each day and

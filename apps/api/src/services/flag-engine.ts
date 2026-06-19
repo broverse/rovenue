@@ -178,7 +178,7 @@ function evaluate(
   if (!flag.isEnabled) return flag.defaultValue;
 
   // 2. First matching rule (with a satisfied rollout) wins.
-  for (const rule of flag.rules) {
+  for (const [ruleIndex, rule] of flag.rules.entries()) {
     // Audience match: only evaluated when the rule explicitly
     // references an audience. A missing/deleted audience skips
     // the rule rather than crashing.
@@ -198,7 +198,16 @@ function evaluate(
       return rule.value;
     }
 
-    if (isInRollout(subscriberId, flag.key, rule.rolloutPercentage)) {
+    // Salt the rollout bucket per rule so two rules in the same flag (e.g. a
+    // 30% and a 60% staged rollout) target independent cohorts instead of the
+    // identical subscriber set a shared `flag.key` seed produced.
+    if (
+      isInRollout(
+        subscriberId,
+        `${flag.key}:${ruleIndex}`,
+        rule.rolloutPercentage,
+      )
+    ) {
       return rule.value;
     }
 

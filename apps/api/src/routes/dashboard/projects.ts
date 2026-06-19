@@ -352,6 +352,21 @@ export const projectsRoute = new Hono()
 
     if (body.settings !== undefined) assertSettingsSafe(body.settings);
 
+    // A webhook URL must not be configured without a signing secret —
+    // otherwise outgoing webhooks are delivered unsigned and a receiver can't
+    // distinguish a legitimate payload from a forged one. The secret is set
+    // via the rotate-secret endpoint; require it first.
+    if (
+      body.webhookUrl != null &&
+      body.webhookUrl.length > 0 &&
+      !before.webhookSecret
+    ) {
+      throw new HTTPException(400, {
+        message:
+          "Configure a webhook signing secret (rotate the secret) before setting a webhook URL",
+      });
+    }
+
   // Atomic: a crash between update and audit would otherwise produce
   // a silent mutation. Running both in one $transaction means the
   // audit row is a guaranteed side-effect of the project change.
