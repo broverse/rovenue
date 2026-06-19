@@ -3,6 +3,7 @@ import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { Button } from "../../../../ui/button";
+import { NativeSelect } from "../../../../ui/native-select";
 import {
   CreditFlow,
   LedgerTable,
@@ -21,6 +22,7 @@ import {
 import { GrantCreditsModal } from "../../../../components/credits/grant-credits-modal";
 import { useProject } from "../../../../lib/hooks/useProject";
 import { useProjectCreditsRollup } from "../../../../lib/hooks/useProjectCredits";
+import { useVirtualCurrencies } from "../../../../lib/hooks/useVirtualCurrencies";
 import type {
   CreditLedgerType,
   CreditsLedgerRow,
@@ -87,7 +89,10 @@ const TIME_FMT = new Intl.DateTimeFormat("en-US", {
   minute: "2-digit",
 });
 
-function toUiLedgerEntry(row: CreditsLedgerRow): LedgerEntry {
+function toUiLedgerEntry(
+  row: CreditsLedgerRow,
+  currencyById: Map<string, { code: string }>,
+): LedgerEntry {
   return {
     id: row.id,
     ts: TIME_FMT.format(new Date(row.createdAt)),
@@ -101,6 +106,7 @@ function toUiLedgerEntry(row: CreditsLedgerRow): LedgerEntry {
       row.description ??
       [row.referenceType, row.referenceId].filter(Boolean).join(" · ") ??
       "",
+    currencyCode: currencyById.get(row.currencyId)?.code ?? "—",
     extId: row.referenceId ?? undefined,
   };
 }
@@ -187,7 +193,22 @@ function CreditsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [scope, setScope] = useState<LedgerScope>("all");
   const [grantOpen, setGrantOpen] = useState(false);
-  const { data } = useProjectCreditsRollup({ projectId });
+  const [currencyCode, setCurrencyCode] = useState<string | undefined>(undefined);
+
+  // Fetch all currencies (hook returns archived too; comment in hook confirms).
+  // Active-only subset is shown in the selector; full set used for ledger resolution.
+  const { data: currencies = [] } = useVirtualCurrencies(projectId);
+  const activeCurrencies = useMemo(
+    () => currencies.filter((c) => c.archivedAt == null),
+    [currencies],
+  );
+  // Build id→currency map over the FULL set (incl. archived) for ledger resolution.
+  const currencyById = useMemo(
+    () => new Map(currencies.map((c) => [c.id, c])),
+    [currencies],
+  );
+
+  const { data } = useProjectCreditsRollup({ projectId, currencyCode });
 
   // Derive UI shapes from the wire response. `ui` stays null until
   // the rollup query resolves; cards render their own empty state
@@ -195,13 +216,13 @@ function CreditsPage({ projectId }: { projectId: string }) {
   const ui = useMemo(() => {
     if (!data) return null;
     return {
-      ledger: data.ledger.map(toUiLedgerEntry),
+      ledger: data.ledger.map((row) => toUiLedgerEntry(row, currencyById)),
       packs: toUiPacks(data.packages),
       burners: toUiBurners(data.topBurners),
       volume: toUiVolume(data.volume),
       response: data,
     };
-  }, [data]);
+  }, [data, currencyById]);
 
   const visible = useMemo<ReadonlyArray<LedgerEntry>>(() => {
     const entries = ui?.ledger ?? [];
@@ -246,7 +267,28 @@ function CreditsPage({ projectId }: { projectId: string }) {
             {t("credits.subtitle")}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {activeCurrencies.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[12px] text-rv-mute-500">
+                {t("credits.filters.currency")}
+              </span>
+              <NativeSelect
+                value={currencyCode ?? ""}
+                onChange={(e) =>
+                  setCurrencyCode(e.target.value || undefined)
+                }
+                className="h-7 text-[12px]"
+              >
+                <option value="">{t("credits.filters.allCurrencies")}</option>
+                {activeCurrencies.map((c) => (
+                  <option key={c.id} value={c.code}>
+                    {c.name} ({c.code})
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+          )}
           <Button
             variant="solid-primary"
             size="sm"

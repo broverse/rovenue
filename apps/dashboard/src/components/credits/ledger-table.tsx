@@ -46,6 +46,7 @@ export function LedgerTable({ entries, total, scope, onScopeChange, onSelect }: 
               <Th className="w-[220px]">{t("credits.ledger.cols.user")}</Th>
               <Th className="w-[110px]">{t("credits.ledger.cols.source")}</Th>
               <Th className="min-w-[220px]">{t("credits.ledger.cols.note")}</Th>
+              <Th className="w-[80px]">{t("credits.ledger.cols.currency")}</Th>
               <Th className="w-[100px] text-right">{t("credits.ledger.cols.delta")}</Th>
               <Th className="w-[100px] text-right">{t("credits.ledger.cols.balance")}</Th>
               <Th className="w-[60px]">
@@ -57,7 +58,7 @@ export function LedgerTable({ entries, total, scope, onScopeChange, onSelect }: 
             {entries.length === 0 ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="py-12 text-center font-rv-mono text-[12px] text-rv-mute-500"
                 >
                   {t("credits.ledger.empty")}
@@ -99,6 +100,9 @@ export function LedgerTable({ entries, total, scope, onScopeChange, onSelect }: 
                         {entry.extId}
                       </div>
                     ) : null}
+                  </td>
+                  <td className="px-3 py-3 align-middle font-rv-mono text-[11px] text-rv-mute-300">
+                    {entry.currencyCode}
                   </td>
                   <td
                     className={cn(

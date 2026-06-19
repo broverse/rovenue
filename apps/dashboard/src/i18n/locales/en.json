@@ -2712,6 +2712,10 @@
     "actions": {
       "grantCredits": "Grant credits"
     },
+    "filters": {
+      "currency": "Currency",
+      "allCurrencies": "All currencies"
+    },
     "kpi": {
       "outstandingBalance": "OUTSTANDING BALANCE",
       "outstandingDescription": "across {{wallets}} wallets",
@@ -2773,6 +2777,7 @@
         "user": "User",
         "source": "Source",
         "note": "Note · ref",
+        "currency": "Currency",
         "delta": "Δ credits",
         "balance": "Balance",
         "actions": "Open ledger entry"

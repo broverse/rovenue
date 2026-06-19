@@ -18,6 +18,8 @@ export type LedgerEntry = {
   delta: number;
   balance: number;
   note: string;
+  /** Resolved currency code (e.g. "GEMS"). Falls back to "—" when unknown. */
+  currencyCode: string;
   extId?: string;
 };
 
