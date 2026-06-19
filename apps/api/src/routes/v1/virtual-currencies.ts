@@ -7,6 +7,7 @@ import {
   type VirtualCurrencyBalances,
 } from "@rovenue/shared";
 import { requireSecretKey } from "../../middleware/api-key-auth";
+import { appUserContext } from "../../middleware/app-user-context";
 import { ok } from "../../lib/response";
 import {
   getAllBalances,
@@ -52,7 +53,7 @@ export const virtualCurrenciesV1Route = new Hono()
   // -----------------------------------------------------------
   // GET /me — public or secret key; subscriber from context
   // -----------------------------------------------------------
-  .get("/me", async (c) => {
+  .get("/me", appUserContext, async (c) => {
     const project = c.get("project");
     const subscriber = c.get("subscriber");
     if (!subscriber) {
