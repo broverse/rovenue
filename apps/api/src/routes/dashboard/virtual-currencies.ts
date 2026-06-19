@@ -114,6 +114,12 @@ export const virtualCurrenciesDashboardRoute = new Hono()
       const user = c.get("user");
       await assertProjectCapability(projectId, user.id, "credits:write");
       const body = c.req.valid("json");
+      const existing = await drizzle.virtualCurrencyRepo.findVirtualCurrencyById(
+        drizzle.db,
+        projectId,
+        id,
+      );
+      if (!existing) throw new HTTPException(404, { message: "Currency not found" });
       const row = await drizzle.virtualCurrencyRepo.renameVirtualCurrency(
         drizzle.db,
         projectId,
@@ -121,6 +127,18 @@ export const virtualCurrenciesDashboardRoute = new Hono()
         body.name,
       );
       if (!row) throw new HTTPException(404, { message: "Currency not found" });
+      const ctx = extractRequestContext(c);
+      await audit({
+        projectId,
+        userId: user.id,
+        action: "virtual_currency.renamed",
+        resource: "virtual_currency",
+        resourceId: row.id,
+        before: { name: existing.name },
+        after: { name: row.name },
+        ipAddress: ctx.ipAddress,
+        userAgent: ctx.userAgent,
+      });
       return c.json(ok({ currency: toWire(row) }));
     },
   )
@@ -136,5 +154,17 @@ export const virtualCurrenciesDashboardRoute = new Hono()
       id,
     );
     if (!row) throw new HTTPException(404, { message: "Currency not found" });
+    const ctx = extractRequestContext(c);
+    await audit({
+      projectId,
+      userId: user.id,
+      action: "virtual_currency.archived",
+      resource: "virtual_currency",
+      resourceId: row.id,
+      before: null,
+      after: { archivedAt: row.archivedAt },
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    });
     return c.json(ok({ currency: toWire(row) }));
   });

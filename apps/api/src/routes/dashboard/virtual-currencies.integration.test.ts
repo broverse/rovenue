@@ -197,6 +197,35 @@ describe("POST /projects/:projectId/virtual-currencies", () => {
 
     expect(res.status).toBe(403);
   });
+
+  it("422s when active currency count is at the 50-currency cap", async () => {
+    const { userId, cookie } = await createUserAndSession("cap");
+    const project = await seedProject("cap");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+
+    // Bulk-create 50 active currencies (codes C00..C49, all start with a letter)
+    for (let i = 0; i < 50; i++) {
+      const code = `C${String(i).padStart(2, "0")}`;
+      await drizzle.virtualCurrencyRepo.createVirtualCurrency(drizzle.db, {
+        projectId: project.id,
+        code,
+        name: `Cap Currency ${i}`,
+      });
+    }
+
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${project.id}/virtual-currencies`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ code: "C50", name: "One Too Many" }),
+      },
+    );
+
+    expect(res.status).toBe(422);
+  });
 });
 
 describe("PATCH /projects/:projectId/virtual-currencies/:id", () => {
