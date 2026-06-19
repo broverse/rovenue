@@ -352,6 +352,32 @@ export interface SubscriberOutgoingWebhook {
   lastErrorMessage: string | null;
 }
 
+/**
+ * One outgoing webhook delivery attempt, project-scoped. Mirrors a
+ * row from `outgoing_webhooks` with timestamps serialised to ISO
+ * strings. Returned by GET /dashboard/webhooks/deliveries — covers
+ * ALL statuses (PENDING/DELIVERING/SENT/FAILED/DEAD/DISMISSED), unlike
+ * the dead-letter list.
+ */
+export interface WebhookDelivery {
+  id: string;
+  eventType: string;
+  url: string;
+  /** OutgoingWebhookStatus as a string. */
+  status: string;
+  /** HTTP status of the last attempt; null before the first attempt. */
+  httpStatus: number | null;
+  attempts: number;
+  createdAt: string;
+  sentAt: string | null;
+  lastErrorMessage: string | null;
+}
+
+export interface ListWebhookDeliveriesResponse {
+  webhooks: WebhookDelivery[];
+  pagination: OffsetPagination;
+}
+
 export interface SubscriberDetail {
   id: string;
   appUserId: string | null;
