@@ -68,7 +68,7 @@ function toDateOnly(d: Date): string {
 // =============================================================
 
 interface ChVolumeRow {
-  day: string;
+  bucket: string;
   issued: string;
   burned: string;
   net: string;
@@ -78,11 +78,15 @@ async function readVolume(
   projectId: string,
   window: RollupWindow,
 ): Promise<CreditsVolumePoint[]> {
+  // NB: alias the projected column to `bucket`, not `day`. Aliasing
+  // `toString(day) AS day` shadows the underlying Date column with a
+  // String of the same name, and ClickHouse then binds `WHERE day >=
+  // {from:Date}` to that String alias → NO_COMMON_TYPE (String vs Date).
   const rows = await queryAnalytics<ChVolumeRow>(
     projectId,
     `
       SELECT
-        toString(day)                  AS day,
+        toString(day)                  AS bucket,
         toString(granted_credits)      AS issued,
         toString(debited_credits)      AS burned,
         toString(net_flow)             AS net
@@ -95,7 +99,7 @@ async function readVolume(
     { from: toDateOnly(window.from), to: toDateOnly(window.to) },
   );
 
-  const byDay = new Map<string, ChVolumeRow>(rows.map((r) => [r.day, r]));
+  const byDay = new Map<string, ChVolumeRow>(rows.map((r) => [r.bucket, r]));
   const out: CreditsVolumePoint[] = [];
   for (let i = 0; i < window.days; i++) {
     const d = new Date(window.from.getTime() + i * DAY_MS);
