@@ -234,6 +234,8 @@ function toUiTransaction(row: TransactionRow, nowMs: number): Transaction {
     at: formatRelative(row.eventDate, nowMs),
     status: "paid",
     method: STORE_METHOD[store],
+    subscriberId: row.subscriberId,
+    purchaseId: row.purchaseId,
   };
 }
 

@@ -33,6 +33,10 @@ export type Transaction = {
   status: TxStatus;
   /** Free-form description of the payment method (e.g. "Stripe · visa 4242"). */
   method: string;
+  /** Full subscriber id (un-truncated) for navigation/actions. */
+  subscriberId: string;
+  /** Full purchase id (un-truncated) for navigation/actions. */
+  purchaseId: string;
 };
 
 /** A single bar in the 28-day stacked volume timeline. */
