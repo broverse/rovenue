@@ -105,6 +105,26 @@ CREATE TABLE remote_config_cache (
 UPDATE schema_meta SET version = 7;
 "#;
 
+pub const MIGRATION_V8: &str = r#"
+CREATE TABLE virtual_currency_balance (
+    user_scope    TEXT NOT NULL,
+    code          TEXT NOT NULL,
+    balance       INTEGER NOT NULL,
+    updated_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (user_scope, code)
+);
+
+CREATE TABLE experiment_exposure (
+    user_scope    TEXT NOT NULL,
+    experiment_id TEXT NOT NULL,
+    variant_id    TEXT NOT NULL,
+    exposed_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (user_scope, experiment_id, variant_id)
+);
+
+UPDATE schema_meta SET version = 8;
+"#;
+
 pub const MIGRATIONS: &[&str] = &[
     MIGRATION_V1,
     MIGRATION_V2,
@@ -113,5 +133,6 @@ pub const MIGRATIONS: &[&str] = &[
     MIGRATION_V5,
     MIGRATION_V6,
     MIGRATION_V7,
+    MIGRATION_V8,
 ];
-pub const LATEST: u32 = 7;
+pub const LATEST: u32 = 8;
