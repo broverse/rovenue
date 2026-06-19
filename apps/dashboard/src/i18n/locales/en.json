@@ -1461,6 +1461,20 @@
       "footer": {
         "refund": "Refund",
         "redeliver": "Re-deliver"
+      },
+      "refund": {
+        "title": "Refund this transaction?",
+        "body": "This sends a refund request to {{store}}. The transaction updates here once the store confirms.",
+        "confirm": "Refund",
+        "cancel": "Cancel",
+        "pending": "Requesting refund…",
+        "error": "Refund failed: {{message}}"
+      },
+      "menu": {
+        "copyId": "Copy transaction ID",
+        "copyPayload": "Copy payload JSON",
+        "viewSubscriber": "View subscriber",
+        "viewSubscription": "View subscription"
       }
     }
   },
