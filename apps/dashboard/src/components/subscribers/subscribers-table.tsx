@@ -13,7 +13,6 @@ const COLUMNS = [
   { key: "country", align: "left" as const },
   { key: "platform", align: "left" as const },
   { key: "ltv", align: "right" as const },
-  { key: "mrr", align: "right" as const },
   { key: "risk", align: "left" as const },
   { key: "lastActivity", align: "left" as const },
 ];

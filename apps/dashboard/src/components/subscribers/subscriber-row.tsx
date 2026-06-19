@@ -4,7 +4,7 @@ import { AccessList } from "../products/access-chip";
 import { Chip } from "../../ui/chip";
 import { cn } from "../../lib/cn";
 import { CountryCell } from "./country-cell";
-import { formatLastActivity, formatLtv, formatMoney } from "./format";
+import { formatLastActivity, formatLtv } from "./format";
 import { PlatformTags } from "./platform-tags";
 import { RiskMeter } from "./risk-meter";
 import { SubscriberStatusChip } from "./subscriber-status-chip";
@@ -104,14 +104,6 @@ export function SubscriberRow({
       </td>
       <td className="whitespace-nowrap px-3 py-2.5 text-right font-rv-mono text-[13px] tabular-nums">
         {formatLtv(subscriber.ltv)}
-      </td>
-      <td
-        className={cn(
-          "whitespace-nowrap px-3 py-2.5 text-right font-rv-mono text-[13px] tabular-nums",
-          subscriber.mrr === 0 ? "text-rv-mute-500" : "text-foreground",
-        )}
-      >
-        {formatMoney(subscriber.mrr)}
       </td>
       <td className="px-3 py-2.5">
         <RiskMeter score={subscriber.risk} />
