@@ -14,8 +14,10 @@ import {
   QueryActions,
   QueryTabs,
   ResultsPanel,
+  SaveQueryDialog,
   SchemaSide,
   SqlEditor,
+  VisualBuilder,
   type QueryMode,
   type QueryResultTab,
 } from "../../../../components/queries";
@@ -101,6 +103,7 @@ function QueriesPage({ projectId }: { projectId: string }) {
   const [mode, setMode] = useState<QueryMode>("sql");
   const [resultTab, setResultTab] = useState<QueryResultTab>("table");
   const [mobilePane, setMobilePane] = useState<MobilePane>("editor");
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const seededRef = useRef(false);
 
   // Seed the editor with the first saved query (if any) on first load.
@@ -231,6 +234,13 @@ function QueriesPage({ projectId }: { projectId: string }) {
     [selectedId],
   );
 
+  // Stable so VisualBuilder's emit-SQL effect doesn't refire every render
+  // (an inline arrow would change identity each render → render loop).
+  const setCurrentSql = useCallback(
+    (next: string) => updateCurrent({ sql: next }),
+    [updateCurrent],
+  );
+
   const handleRun = useCallback(async () => {
     if (!current) return;
     const sql = current.sql.trim();
@@ -275,15 +285,17 @@ function QueriesPage({ projectId }: { projectId: string }) {
       }
       return;
     }
-    // Draft → create. Ask for a name once.
-    const proposed = current.name || t("queries.draft.defaultName");
-    const name =
-      typeof window !== "undefined"
-        ? window.prompt(t("queries.editor.namePrompt"), proposed)
-        : proposed;
-    if (!name) return;
-    try {
-      const res = await createMut.mutateAsync({ name: name.trim(), sql });
+    // Draft → create. Collect a name via the modal.
+    setSaveDialogOpen(true);
+  }, [current, updateMut, t, updateCurrent]);
+
+  // Confirm handler for the save-name modal. Rejects so the dialog can keep
+  // itself open and surface the error.
+  const handleConfirmSaveName = useCallback(
+    async (name: string) => {
+      if (!current) return;
+      const sql = current.sql.trim();
+      const res = await createMut.mutateAsync({ name, sql });
       const saved = res.query;
       setTabs((prev) =>
         prev.map((tt) =>
@@ -301,12 +313,9 @@ function QueriesPage({ projectId }: { projectId: string }) {
         ),
       );
       setSelectedId(saved.id);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : t("queries.editor.errorSave");
-      updateCurrent({ error: message });
-    }
-  }, [current, createMut, updateMut, t, updateCurrent]);
+    },
+    [current, createMut],
+  );
 
   // Keyboard ⌘/Ctrl + S → save the current tab.
   useEffect(() => {
@@ -442,11 +451,18 @@ function QueriesPage({ projectId }: { projectId: string }) {
               saveLoading={createMut.isPending || updateMut.isPending}
             />
             {current ? (
-              <SqlEditor
-                value={current.sql}
-                onChange={(next) => updateCurrent({ sql: next })}
-                onSubmit={handleRun}
-              />
+              mode === "visual" ? (
+                <VisualBuilder
+                  projectId={projectId}
+                  onChange={setCurrentSql}
+                />
+              ) : (
+                <SqlEditor
+                  value={current.sql}
+                  onChange={setCurrentSql}
+                  onSubmit={handleRun}
+                />
+              )
             ) : (
               <div className="flex min-h-[280px] items-center justify-center bg-rv-bg px-4 text-center font-rv-mono text-[12px] text-rv-mute-500">
                 <button
@@ -479,6 +495,13 @@ function QueriesPage({ projectId }: { projectId: string }) {
           <SchemaSide />
         </div>
       </div>
+
+      <SaveQueryDialog
+        open={saveDialogOpen}
+        initialName={current?.name || t("queries.draft.defaultName")}
+        onSave={handleConfirmSaveName}
+        onClose={() => setSaveDialogOpen(false)}
+      />
     </>
   );
 }

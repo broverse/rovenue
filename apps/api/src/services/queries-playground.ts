@@ -3,6 +3,7 @@ import type {
   QuerySchemaResponse,
   QuerySchemaTable,
 } from "@rovenue/shared";
+import { SettingsMap } from "@clickhouse/client";
 import {
   ClickHouseUnavailableError,
   getClickHouseClient,
@@ -21,11 +22,14 @@ import {
 //      SELECT/WITH statement. Multi-statement bodies, DML, DDL
 //      and procedural statements are rejected.
 //
-//   2. Project isolation contract: the body MUST reference
-//      `{projectId:String}` at least once. The executor binds
-//      the request's projectId into query_params before sending,
-//      so users physically cannot read another project's data
-//      without explicitly opting out (which we reject up front).
+//   2. Project isolation, enforced server-side: rather than make
+//      users hand-write `WHERE projectId = {projectId:String}`,
+//      the executor injects a row filter into every project-scoped
+//      table via ClickHouse's `additional_table_filters` setting.
+//      ClickHouse ANDs that filter into each table scan, so a query
+//      physically cannot read another project's rows — even one that
+//      writes its own conflicting `projectId` predicate. See
+//      `buildProjectScopeFilters` below.
 //
 //   3. ClickHouse session settings: `readonly = 2` (allow
 //      SELECT/SHOW + session settings, no DDL/DML),
@@ -43,8 +47,14 @@ const MAX_RESULT_BYTES = 32 * 1024 * 1024; // 32 MB
 const VALID_LEAD_RE = /^\s*(?:--[^\n]*\n|\/\*[\s\S]*?\*\/|\s)*(select|with)\s/i;
 const FORBIDDEN_KEYWORD_RE =
   /\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|attach|detach|optimize|kill|system)\b/i;
-const PROJECT_PARAM_RE = /\{projectId:\s*String\}/;
 const MULTI_STATEMENT_RE = /;\s*\S/;
+
+// Project IDs are cuid2 / prefixed identifiers — strictly
+// [A-Za-z0-9_-]. We inline the id into the ClickHouse
+// `additional_table_filters` setting (params are not substituted
+// inside that setting), so reject anything that could break out of
+// the single-quoted literal.
+const PROJECT_ID_RE = /^[A-Za-z0-9_-]+$/;
 
 export class QueryValidationError extends Error {
   constructor(message: string) {
@@ -73,11 +83,72 @@ export function validatePlaygroundSql(sql: string): void {
       "Only a single SQL statement is allowed per request",
     );
   }
-  if (!PROJECT_PARAM_RE.test(sql)) {
-    throw new QueryValidationError(
-      "Query must reference {projectId:String} for project isolation",
-    );
+  // No `{projectId:String}` requirement: project isolation is now
+  // enforced server-side via `additional_table_filters` (see
+  // buildProjectScopeFilters), so users no longer hand-scope queries.
+}
+
+// =============================================================
+// Automatic project scoping
+// =============================================================
+//
+// The set of project-scoped tables (those carrying a `projectId`
+// column) is discovered from system.columns and cached briefly, so
+// new analytics tables are covered automatically without a code
+// change. ClickHouse ignores filter entries for tables that don't
+// appear in a given query, so over-listing is harmless.
+
+const SCOPED_TABLES_TTL_MS = 5 * 60_000;
+let scopedTablesCache: { tables: string[]; at: number } | null = null;
+
+interface ChTableRow {
+  data: Array<[string]>;
+}
+
+async function getProjectScopedTables(): Promise<string[]> {
+  const now = Date.now();
+  if (scopedTablesCache && now - scopedTablesCache.at < SCOPED_TABLES_TTL_MS) {
+    return scopedTablesCache.tables;
   }
+  const client = getClickHouseClient();
+  const res = await client.query({
+    query:
+      "SELECT table FROM system.columns " +
+      "WHERE database = 'rovenue' AND name = 'projectId' GROUP BY table",
+    format: "JSONCompact",
+  });
+  const body = (await res.json()) as ChTableRow;
+  const tables = body.data.map((row) => row[0]);
+  scopedTablesCache = { tables, at: now };
+  return tables;
+}
+
+/**
+ * Builds the `additional_table_filters` map that scopes every
+ * project-bearing table to `projectId`. Exported for tests.
+ *
+ * The id is inlined as a single-quoted SQL literal (params are not
+ * substituted inside this setting). PROJECT_ID_RE guarantees the id
+ * carries no quotes of its own; the `\'` escapes are required by the
+ * ClickHouse Map-literal text format.
+ */
+export function buildProjectScopeFilters(
+  tables: ReadonlyArray<string>,
+  projectId: string,
+): SettingsMap {
+  if (!PROJECT_ID_RE.test(projectId)) {
+    throw new QueryValidationError("Invalid project identifier");
+  }
+  const record: Record<string, string> = {};
+  for (const table of tables) {
+    record[`rovenue.${table}`] = `projectId = \\'${projectId}\\'`;
+  }
+  return SettingsMap.from(record);
+}
+
+/** Test seam: clear the cached scoped-table list. */
+export function __resetScopedTablesCache(): void {
+  scopedTablesCache = null;
 }
 
 // =============================================================
@@ -106,14 +177,20 @@ export async function executePlaygroundQuery(
   validatePlaygroundSql(input.sql);
 
   const client = getClickHouseClient();
+  const scopedTables = await getProjectScopedTables();
+  const projectScope = buildProjectScopeFilters(scopedTables, input.projectId);
   const start = performance.now();
 
   const response = await client.query({
     query: input.sql,
+    // `query_params` keeps older saved queries that still reference
+    // `{projectId:String}` working; new queries are scoped by the
+    // `additional_table_filters` below and need no param.
     query_params: { projectId: input.projectId },
     format: "JSONCompact",
     clickhouse_settings: {
       readonly: "2",
+      additional_table_filters: projectScope,
       max_execution_time: MAX_EXECUTION_SECONDS,
       max_result_rows: String(MAX_RESULT_ROWS),
       max_result_bytes: String(MAX_RESULT_BYTES),

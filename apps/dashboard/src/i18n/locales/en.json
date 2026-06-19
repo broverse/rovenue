@@ -3432,10 +3432,31 @@
       "placeholder": "-- Write SQL against your warehouse, then ⌘⏎ to run.",
       "aria": "SQL editor",
       "startNew": "Start a new query →",
-      "namePrompt": "Name this query",
       "errorEmpty": "Write some SQL before running.",
       "errorRun": "Could not execute the query.",
       "errorSave": "Could not save the query."
+    },
+    "saveDialog": {
+      "title": "Save query",
+      "description": "Give this query a name to save it to your library.",
+      "label": "Name",
+      "placeholder": "e.g. Weekly active subscribers",
+      "save": "Save query",
+      "errorEmpty": "Enter a name for the query."
+    },
+    "builder": {
+      "table": "Table",
+      "tablePlaceholder": "Select a table…",
+      "filters": "Filters",
+      "addFilter": "Add filter",
+      "noFilters": "No filters — the query returns all rows (up to the limit).",
+      "valuePlaceholder": "Value",
+      "removeFilter": "Remove filter",
+      "limit": "Limit",
+      "generated": "Generated SQL",
+      "generatedEmpty": "Select a table to generate SQL.",
+      "loading": "Loading schema…",
+      "noSchema": "No schema available. Switch to SQL mode or check that ClickHouse is configured."
     },
     "library": {
       "title": "Library",
