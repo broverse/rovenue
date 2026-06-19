@@ -1841,6 +1841,12 @@
       "placeholders": {
         "description": "What does this flag control, who owns it, when can it be retired…"
       },
+      "keyStatus": {
+        "checking": "Checking availability…",
+        "available": "Available",
+        "taken": "This ID is already used in {{env}}.",
+        "invalid": "Letters, digits, dashes or underscores only."
+      },
       "types": {
         "boolean": "Boolean",
         "string": "String",

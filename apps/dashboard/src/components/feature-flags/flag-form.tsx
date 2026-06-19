@@ -15,6 +15,7 @@ import {
   Globe2,
   KeyRound,
   Layers,
+  Loader2,
   Plus,
   Power,
   Tag,
@@ -40,8 +41,11 @@ import { ApiError } from "../../lib/api";
 import {
   useCreateFeatureFlag,
   useUpdateFeatureFlag,
+  useFeatureFlags,
 } from "../../lib/hooks/useFeatureFlags";
+import { useDebouncedValue } from "../../lib/hooks/useDebouncedValue";
 import type { FlagEnv } from "./types";
+import { deriveKeyStatus, FLAG_KEY_PATTERN, type KeyStatus } from "./format";
 import {
   conditionsToSift,
   siftToConditions,
@@ -174,6 +178,21 @@ export function FlagForm({ projectId, initialFlag }: FlagFormProps) {
     initialFlag ? DB_TO_UI_ENV[initialFlag.env] : "prod",
   );
 
+  // Live duplicate-ID check (create mode only; edit locks the key).
+  const debouncedKey = useDebouncedValue(key, 400);
+  const flagsQuery = useFeatureFlags(projectId, UI_TO_DB_ENV[env]);
+  const existingKeys = useMemo(
+    () => (flagsQuery.data ?? []).map((f) => f.key),
+    [flagsQuery.data],
+  );
+  const keyStatus: KeyStatus = useMemo(
+    () => (isEdit ? "available" : deriveKeyStatus(debouncedKey, existingKeys)),
+    [isEdit, debouncedKey, existingKeys],
+  );
+  // True while the user has typed something the debounce hasn't caught up to.
+  const keyChecking =
+    !isEdit && key.trim().length > 0 && key !== debouncedKey;
+
   // Default value (per-type cells kept in parallel)
   const seededDefault = initialFlag?.defaultValue;
   const [boolDefault, setBoolDefault] = useState(
@@ -224,7 +243,7 @@ export function FlagForm({ projectId, initialFlag }: FlagFormProps) {
       setFormError(t("featureFlags.new.errors.required"));
       return;
     }
-    if (!/^[a-z0-9_-]+$/i.test(key.trim())) {
+    if (!FLAG_KEY_PATTERN.test(key.trim())) {
       setFormError(t("featureFlags.new.errors.invalidKey"));
       return;
     }
@@ -326,7 +345,9 @@ export function FlagForm({ projectId, initialFlag }: FlagFormProps) {
   };
 
   const pending = create.isPending || update.isPending;
-  const submitDisabled = pending || !defaultValid || !rulesValid;
+  const keyBlocksSubmit = !isEdit && keyStatus !== "available";
+  const submitDisabled =
+    pending || !defaultValid || !rulesValid || keyBlocksSubmit;
 
   return (
     <>
@@ -374,12 +395,33 @@ export function FlagForm({ projectId, initialFlag }: FlagFormProps) {
               placeholder="new_onboarding_flow"
               required
               disabled={isEdit}
+              aria-invalid={keyStatus === "taken" || keyStatus === "invalid"}
             />
-            {isEdit && (
+            {isEdit ? (
               <span className="mt-1 text-[10px] text-rv-mute-500">
                 {t("featureFlags.edit.keyLocked")}
               </span>
-            )}
+            ) : keyChecking ? (
+              <span className="mt-1 inline-flex items-center gap-1 font-rv-mono text-[10px] text-rv-mute-500">
+                <Loader2 size={10} className="animate-spin" />
+                {t("featureFlags.new.keyStatus.checking")}
+              </span>
+            ) : keyStatus === "available" ? (
+              <span className="mt-1 inline-flex items-center gap-1 font-rv-mono text-[10px] text-rv-success">
+                <Check size={10} />
+                {t("featureFlags.new.keyStatus.available")}
+              </span>
+            ) : keyStatus === "taken" ? (
+              <span className="mt-1 inline-flex items-start gap-1 font-rv-mono text-[10px] text-rv-danger">
+                <AlertCircle size={10} className="mt-px flex-shrink-0" />
+                {t("featureFlags.new.keyStatus.taken", { env })}
+              </span>
+            ) : keyStatus === "invalid" ? (
+              <span className="mt-1 inline-flex items-start gap-1 font-rv-mono text-[10px] text-rv-danger">
+                <AlertCircle size={10} className="mt-px flex-shrink-0" />
+                {t("featureFlags.new.keyStatus.invalid")}
+              </span>
+            ) : null}
           </Field>
           <Field
             icon={<Tag size={11} />}
