@@ -65,3 +65,26 @@ export interface UpgradeResponse {
   clientSecret: string;
   publishableKey: string;
 }
+
+// ---------------------------------------------------------------------------
+// Billing usage metering (Task 5 / Phase 2 billing-usage surface)
+// ---------------------------------------------------------------------------
+
+export type UsageMeterKey = "mtr" | "events" | "sql_queries";
+
+export interface UsageMeter {
+  key: UsageMeterKey;
+  current: number | null;
+  limit: number | null;
+  cap: "hard" | "soft";
+  unit: "usd" | "count";
+  available: boolean;
+}
+
+export interface BillingUsage {
+  tier: string;
+  cycle: string;
+  periodStart: string;
+  periodEnd: string;
+  meters: UsageMeter[];
+}
