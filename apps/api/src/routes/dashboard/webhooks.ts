@@ -62,6 +62,55 @@ export const webhooksDashboardRoute = new Hono()
       }),
     );
   })
+  // ----- GET /dashboard/webhooks/deliveries?projectId= -----
+  // List recent outgoing webhook deliveries (ALL statuses), newest
+  // first. Powers the custom-webhook detail page's delivery history.
+  .get("/deliveries", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "projectId query param required" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id);
+
+    const rawLimit = c.req.query("limit");
+    const rawOffset = c.req.query("offset");
+    const limit = Math.min(rawLimit ? parseInt(rawLimit, 10) || 20 : 20, 100);
+    const offset = rawOffset ? parseInt(rawOffset, 10) || 0 : 0;
+
+    const [rows, total] = await Promise.all([
+      drizzle.outgoingWebhookRepo.listRecentOutgoingWebhooks(drizzle.db, {
+        projectId,
+        limit,
+        offset,
+      }),
+      drizzle.outgoingWebhookRepo.countOutgoingWebhooks(drizzle.db, projectId),
+    ]);
+
+    const webhooks = rows.map((w) => ({
+      id: w.id,
+      eventType: w.eventType,
+      url: w.url,
+      status: w.status,
+      httpStatus: w.httpStatus,
+      attempts: w.attempts,
+      createdAt: w.createdAt.toISOString(),
+      sentAt: w.sentAt ? w.sentAt.toISOString() : null,
+      lastErrorMessage: w.lastErrorMessage,
+    }));
+
+    return c.json(
+      ok({
+        webhooks,
+        pagination: {
+          total,
+          limit,
+          offset,
+          hasMore: offset + limit < total,
+        },
+      }),
+    );
+  })
   // ----- POST /dashboard/webhooks/:id/retry -----
   // Reset a DEAD webhook back to PENDING so the delivery worker picks
   // it up again with a fresh attempt counter.
