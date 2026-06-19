@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 
 use crate::cache::ExposureRepo;
 use crate::identity::IdentityManager;
@@ -126,11 +125,4 @@ impl ExposureTracker {
             }
         });
     }
-}
-
-// Compile-time assertion: serde_json::Value implements DeserializeOwned.
-fn _assert_bounds()
-where
-    serde_json::Value: DeserializeOwned,
-{
 }

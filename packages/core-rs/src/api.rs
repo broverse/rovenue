@@ -60,6 +60,17 @@ impl RovenueCore {
     }
 
     fn from_store(config: Config, store: Arc<CacheStore>) -> RovenueResult<Self> {
+        Self::from_store_with_http_max_attempts(config, store, 3)
+    }
+
+    /// Like `from_store` but allows overriding the HTTP client's `max_attempts`.
+    /// Used by `new_for_test` (passes `1`) so that retryable 5xx responses fail
+    /// immediately in tests rather than sleeping through exponential backoff.
+    fn from_store_with_http_max_attempts(
+        config: Config,
+        store: Arc<CacheStore>,
+        http_max_attempts: u32,
+    ) -> RovenueResult<Self> {
         let bus = Arc::new(ObserverBus::default());
         let clock: Arc<dyn Clock> = Arc::new(SystemClock);
         let store_for_self = Arc::clone(&store);
@@ -71,7 +82,8 @@ impl RovenueCore {
         let http = Arc::new(
             HttpClient::new(config.base_url.clone(), config.api_key.clone())
                 .with_platform(config.platform.clone())
-                .with_environment(config.environment.clone()),
+                .with_environment(config.environment.clone())
+                .with_max_attempts(http_max_attempts),
         );
         let reader = Arc::new(
             EntitlementReader::new(Arc::clone(&store), Arc::clone(&identity))
@@ -212,7 +224,7 @@ impl RovenueCore {
         }
         let config = config.normalized()?;
         let store = Arc::new(CacheStore::open_in_memory()?);
-        Self::from_store(config, store)
+        Self::from_store_with_http_max_attempts(config, store, 1)
     }
 
     pub fn get_version(&self) -> String {
