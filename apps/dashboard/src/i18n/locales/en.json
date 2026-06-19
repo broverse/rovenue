@@ -237,6 +237,7 @@
       "flags": "Remote Config",
       "audiences": "Audiences",
       "cohorts": "Cohorts",
+      "currencies": "Currencies",
       "credits": "Credits",
       "charts": "Charts",
       "queries": "Queries",
@@ -2623,6 +2624,55 @@
       "confirm": "Delete cohort '{{name}}'?"
     }
   },
+  "currencies": {
+    "title": "Currencies",
+    "subtitle": "Define the virtual currencies your app grants and spends. Each currency keeps its own balance and ledger per subscriber.",
+    "actions": {
+      "create": "New currency",
+      "rename": "Rename",
+      "archive": "Archive"
+    },
+    "cols": {
+      "code": "Code",
+      "name": "Name",
+      "status": "Status",
+      "created": "Created"
+    },
+    "status": {
+      "active": "Active",
+      "archived": "Archived"
+    },
+    "presets": {
+      "label": "Popular",
+      "COIN": "Coins",
+      "GEM": "Gems",
+      "GOLD": "Gold",
+      "DIAMOND": "Diamonds"
+    },
+    "empty": {
+      "title": "No currencies yet",
+      "body": "Create your first virtual currency to start granting and spending credits."
+    },
+    "errors": {
+      "load": "Couldn't load currencies."
+    },
+    "dialog": {
+      "createTitle": "New currency",
+      "renameTitle": "Rename currency",
+      "codeField": "Code",
+      "codePlaceholder": "e.g. GEM",
+      "codeHint": "2–8 characters, uppercase, starts with a letter. Can't be changed later.",
+      "nameField": "Display name",
+      "namePlaceholder": "e.g. Gems",
+      "createSubmit": "Create currency",
+      "saveRename": "Save"
+    },
+    "archiveConfirm": {
+      "title": "Archive this currency?",
+      "body": "{{code}} will be hidden from new grants. Existing balances and ledger history are kept.",
+      "confirm": "Archive currency"
+    }
+  },
   "credits": {
     "title": "Credits",
     "subtitle": "Virtual-currency ledger. Every grant, purchase, and consumption is double-entry; balances reconcile to the second. Use this view to monitor liability, package mix, and burn-rate per feature.",
@@ -2729,6 +2779,8 @@
         "subscriber": "Subscriber",
         "subscriberSearch": "Search by user ID…",
         "subscriberPlaceholder": "— select subscriber —",
+        "currency": "Currency",
+        "noCurrencies": "No currencies yet — create one under Currencies first.",
         "type": "Type",
         "amount": "Amount",
         "amountPlaceholder": "e.g. 500",

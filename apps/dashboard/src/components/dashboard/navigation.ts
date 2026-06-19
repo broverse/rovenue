@@ -1,6 +1,7 @@
 import {
   Box,
   CirclePlus,
+  Coins,
   Flag,
   FlaskConical,
   // Funnel, // re-enable when Funnels is unhidden from the sidebar
@@ -124,6 +125,12 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
   {
     sectionKey: "ledger",
     items: [
+      {
+        id: "currencies",
+        labelKey: "sidebar.items.currencies",
+        icon: Coins,
+        to: "/projects/$projectId/currencies",
+      },
       {
         id: "credits",
         labelKey: "sidebar.items.credits",

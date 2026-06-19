@@ -1,14 +1,16 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog } from "@base-ui-components/react/dialog";
 import { X } from "lucide-react";
 import type { GrantCreditsRequest } from "@rovenue/shared";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
+import { NativeSelect } from "../../ui/native-select";
 import { Segmented } from "../../ui/segmented";
 import { Textarea } from "../../ui/textarea";
 import { cn } from "../../lib/cn";
 import { useGrantCredits } from "../../lib/hooks/useProjectCredits";
+import { useVirtualCurrencies } from "../../lib/hooks/useVirtualCurrencies";
 import { SubscriberCombobox } from "../subscribers/subscriber-combobox";
 
 type CreditGrantType = "BONUS" | "PURCHASE" | "REFUND";
@@ -25,6 +27,7 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
   const { t } = useTranslation();
 
   const [subscriberId, setSubscriberId] = useState("");
+  const [currencyId, setCurrencyId] = useState("");
   const [type, setType] = useState<CreditGrantType>("BONUS");
   const [amount, setAmount] = useState("");
   const [referenceType, setReferenceType] = useState("");
@@ -32,9 +35,16 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const { data: currencies } = useVirtualCurrencies(projectId);
+  const activeCurrencies = useMemo(
+    () => (currencies ?? []).filter((c) => c.archivedAt === null),
+    [currencies],
+  );
+
   useEffect(() => {
     if (!open) return;
     setSubscriberId("");
+    setCurrencyId("");
     setType("BONUS");
     setAmount("");
     setReferenceType("");
@@ -43,6 +53,17 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
     setError(null);
   }, [open]);
 
+  // Default to the first active currency once the list resolves (and keep a
+  // valid selection if the current one disappears).
+  useEffect(() => {
+    if (!open || activeCurrencies.length === 0) return;
+    setCurrencyId((prev) =>
+      prev && activeCurrencies.some((c) => c.id === prev)
+        ? prev
+        : activeCurrencies[0].id,
+    );
+  }, [open, activeCurrencies]);
+
   const grant = useGrantCredits(projectId);
 
   const parsedAmount = Number(amount);
@@ -50,7 +71,10 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
     amount === "" || !Number.isInteger(parsedAmount) || parsedAmount <= 0;
 
   const canSubmit =
-    Boolean(subscriberId) && !amountInvalid && !grant.isPending;
+    Boolean(subscriberId) &&
+    Boolean(currencyId) &&
+    !amountInvalid &&
+    !grant.isPending;
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -58,6 +82,7 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
 
     const body: GrantCreditsRequest = {
       subscriberId,
+      currencyId,
       amount: parsedAmount,
       type,
       ...(referenceType.trim() ? { referenceType: referenceType.trim() } : {}),
@@ -78,6 +103,7 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
   };
 
   const idSubscriber = useId();
+  const idCurrency = useId();
   const idAmount = useId();
   const idRefType = useId();
   const idRefId = useId();
@@ -125,6 +151,26 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
                   value={subscriberId}
                   onChange={setSubscriberId}
                 />
+              </Field>
+
+              <Field label={t("credits.grant.fields.currency")} htmlFor={idCurrency}>
+                {activeCurrencies.length === 0 ? (
+                  <p className="rounded-md border border-dashed border-rv-divider bg-rv-c2 px-3 py-2 text-[12px] text-rv-mute-500">
+                    {t("credits.grant.fields.noCurrencies")}
+                  </p>
+                ) : (
+                  <NativeSelect
+                    id={idCurrency}
+                    value={currencyId}
+                    onChange={(e) => setCurrencyId(e.target.value)}
+                  >
+                    {activeCurrencies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.code})
+                      </option>
+                    ))}
+                  </NativeSelect>
+                )}
               </Field>
 
               <div>
