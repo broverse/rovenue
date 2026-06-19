@@ -3418,6 +3418,14 @@
       "customWebhook": "Custom webhook",
       "request": "Request integration"
     },
+    "configuredWebhook": {
+      "title": "Custom webhook",
+      "active": "Active",
+      "allEvents": "All events",
+      "secretSet": "Secret configured",
+      "secretMissing": "No signing secret",
+      "viewDetail": "View details"
+    },
     "customWebhook": {
       "title": "Custom webhook",
       "subtitle": "Send Rovenue subscription events to your own HTTPS endpoint.",

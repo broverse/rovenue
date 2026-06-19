@@ -12,6 +12,7 @@ import {
   AppsToolbar,
   BuildYourOwnCard,
   CategoryRail,
+  ConfiguredWebhookCard,
   ConnectedStrip,
   DOCS_URL,
   HOMEPAGE_SECTIONS,
@@ -73,6 +74,7 @@ function AppsPage({ projectId }: { projectId: string }) {
   const [query, setQuery] = useState("");
   const [drawerProviderId, setDrawerProviderId] = useState<"META_CAPI" | "TIKTOK_EVENTS" | null>(null);
   const [webhookModalOpen, setWebhookModalOpen] = useState(false);
+  const { data: project } = useProject(projectId);
   const connections = useProjectAppConnections(projectId);
   const integrations = useProjectIntegrations(projectId);
 
@@ -144,6 +146,15 @@ function AppsPage({ projectId }: { projectId: string }) {
       </header>
 
       <AppsHero totalApps={counts.all} connectedApps={counts.connected} />
+
+      {project?.webhookUrl && (
+        <ConfiguredWebhookCard
+          projectId={projectId}
+          url={project.webhookUrl}
+          categories={project.webhookEventCategories}
+          hasSecret={project.hasWebhookSecret}
+        />
+      )}
 
       <div className="grid items-start gap-4 grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)]">
         <CategoryRail active={active} counts={counts} onSelect={setActive} />

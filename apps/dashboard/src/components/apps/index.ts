@@ -7,6 +7,7 @@ export { AppsEmptyState } from "./apps-empty-state";
 export { BuildYourOwnCard } from "./build-your-own-card";
 export { CategoryRail } from "./category-rail";
 export { ConnectedStrip } from "./connected-strip";
+export { ConfiguredWebhookCard } from "./configured-webhook-card";
 export {
   APPS,
   DOCS_URL,
