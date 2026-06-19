@@ -26,6 +26,7 @@ import dev.rovenue.sdk.StoreProblemException
 import dev.rovenue.sdk.StoreProduct
 import dev.rovenue.sdk.generated.ChangeEvent
 import dev.rovenue.sdk.generated.Entitlement
+import dev.rovenue.sdk.generated.ExperimentAssignment
 import dev.rovenue.sdk.generated.SessionEventKind
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
@@ -52,7 +53,7 @@ class RovenueModule : Module() {
         // For Expo apps that's the value baked from app.json's
         // `expo.version` at prebuild time (into android/app/build.gradle
         // versionName); for bare RN it's the host project's gradle config.
-        Function("configure") { apiKey: String, baseUrl: String?, debug: Boolean, appVersion: String? ->
+        Function("configure") { apiKey: String, baseUrl: String?, debug: Boolean, appVersion: String?, environment: String? ->
             val resolved = appVersion ?: readPackageVersionName()
             // The M4 Kotlin façade needs a Context to drive Play Billing.
             Rovenue.configure(
@@ -61,6 +62,7 @@ class RovenueModule : Module() {
                 debug = debug,
                 appVersion = resolved,
                 context = appContext.reactContext?.applicationContext,
+                environment = environment,
             )
         }
         Function("shutdown") { Rovenue.shared.shutdown() }
@@ -96,6 +98,37 @@ class RovenueModule : Module() {
         AsyncFunction("consumeCredits") Coroutine { amount: Double, description: String? ->
             Rovenue.shared.consumeCredits(amount.toLong(), description).toDouble()
         }
+        // ---------------- Remote Config ----------------
+        AsyncFunction("refreshRemoteConfig") Coroutine { -> Rovenue.shared.refreshRemoteConfig() }
+        AsyncFunction("remoteConfigBool") Coroutine { key: String, fallback: Boolean ->
+            Rovenue.shared.remoteConfigBool(key, fallback)
+        }
+        AsyncFunction("remoteConfigString") Coroutine { key: String, fallback: String ->
+            Rovenue.shared.remoteConfigString(key, fallback)
+        }
+        AsyncFunction("remoteConfigInt") Coroutine { key: String, fallback: Double ->
+            // JS marshals numbers as Double; widen the façade's Long back to Double.
+            Rovenue.shared.remoteConfigInt(key, fallback.toLong()).toDouble()
+        }
+        AsyncFunction("remoteConfigDouble") Coroutine { key: String, fallback: Double ->
+            Rovenue.shared.remoteConfigDouble(key, fallback)
+        }
+        AsyncFunction("remoteConfigJson") Coroutine { key: String ->
+            Rovenue.shared.remoteConfigJson(key)
+        }
+        AsyncFunction("remoteConfigKeys") Coroutine { ->
+            Rovenue.shared.remoteConfigKeys()
+        }
+        AsyncFunction("remoteConfigAllJson") Coroutine { ->
+            Rovenue.shared.remoteConfigAllJson()
+        }
+        AsyncFunction("experiment") Coroutine { key: String ->
+            Rovenue.shared.experiment(key)?.let(::dtoFromExperimentAssignment)
+        }
+        AsyncFunction("experimentsAll") Coroutine { ->
+            Rovenue.shared.experimentsAll().map(::dtoFromExperimentAssignment)
+        }
+
         // ---------------- Purchases ----------------
         AsyncFunction("getOfferings") Coroutine { ->
             try {
@@ -200,6 +233,14 @@ class RovenueModule : Module() {
         "active"    to e.isActive,
         "expiresAt" to e.expiresIso,
         "productId" to e.productIdentifier,
+    )
+
+    private fun dtoFromExperimentAssignment(a: ExperimentAssignment): Map<String, Any?> = mapOf(
+        "experimentId" to a.experimentId,
+        "key"          to a.key,
+        "variantId"    to a.variantId,
+        "variantName"  to a.variantName,
+        "valueJson"    to a.valueJson,
     )
 
     // ---------------- Purchase DTO encoders ----------------

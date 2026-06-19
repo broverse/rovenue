@@ -19,6 +19,11 @@ pub struct Config {
     /// so the backend can record it as the subscriber's first-install platform
     /// on create. `None` omits the header entirely.
     pub platform: Option<String>,
+    /// Remote Config environment (`prod` / `staging` / `development`). Sent as
+    /// the `X-Rovenue-Env` header on the `/v1/config` request so the backend
+    /// serves the matching flag/experiment set. `None` omits the header, which
+    /// the backend treats as `prod`.
+    pub environment: Option<String>,
 }
 
 impl Config {
@@ -32,6 +37,7 @@ impl Config {
             debug: false,
             app_version: None,
             platform: None,
+            environment: None,
         })
     }
 
@@ -44,6 +50,12 @@ impl Config {
     /// Builder-style setter for the runtime platform.
     pub fn with_platform(mut self, platform: Option<String>) -> Self {
         self.platform = platform;
+        self
+    }
+
+    /// Builder-style setter for the Remote Config environment.
+    pub fn with_environment(mut self, environment: Option<String>) -> Self {
+        self.environment = environment;
         self
     }
 

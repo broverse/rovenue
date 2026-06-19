@@ -22,6 +22,10 @@ pub struct HttpClient {
     /// Runtime platform (ios/android/web), sent as `X-Rovenue-Platform` on
     /// every request when set. `None` omits the header.
     platform: Option<String>,
+    /// Remote Config environment (prod/staging/development), sent as
+    /// `X-Rovenue-Env` on every request when set. `None` omits the header so
+    /// the backend falls back to `prod`.
+    environment: Option<String>,
 }
 
 impl HttpClient {
@@ -37,6 +41,7 @@ impl HttpClient {
             min_backoff: Duration::from_millis(50),
             request_timeout: Duration::from_secs(10),
             platform: None,
+            environment: None,
         }
     }
 
@@ -46,6 +51,16 @@ impl HttpClient {
         self.platform = platform
             .map(|p| p.trim().to_string())
             .filter(|p| !p.is_empty());
+        self
+    }
+
+    /// Builder-style setter for the Remote Config environment header. A
+    /// blank/whitespace value is treated as absent so the header is never sent
+    /// empty (the backend then defaults to `prod`).
+    pub fn with_environment(mut self, environment: Option<String>) -> Self {
+        self.environment = environment
+            .map(|e| e.trim().to_string())
+            .filter(|e| !e.is_empty());
         self
     }
 
@@ -84,8 +99,14 @@ impl HttpClient {
             if let Some(scope) = req.user_scope {
                 builder = builder.header("X-Rovenue-App-User-Id", scope);
             }
+            if let Some(subscriber) = req.subscriber_id {
+                builder = builder.header("X-Rovenue-User-Id", subscriber);
+            }
             if let Some(platform) = &self.platform {
                 builder = builder.header("X-Rovenue-Platform", platform);
+            }
+            if let Some(environment) = &self.environment {
+                builder = builder.header("X-Rovenue-Env", environment);
             }
             if let Some(etag) = req.etag {
                 builder = builder.header("If-None-Match", etag);
@@ -227,6 +248,9 @@ impl HttpClient {
             }
             if let Some(platform) = &self.platform {
                 builder = builder.header("X-Rovenue-Platform", platform);
+            }
+            if let Some(environment) = &self.environment {
+                builder = builder.header("X-Rovenue-Env", environment);
             }
             if let Some(key) = req.idempotency_key {
                 builder = builder.header("Idempotency-Key", key);

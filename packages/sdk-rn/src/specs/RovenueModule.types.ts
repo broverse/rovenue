@@ -42,6 +42,15 @@ export type OfferingsDTO = {
   offerings: OfferingDTO[];
 };
 
+export type ExperimentAssignmentDTO = {
+  experimentId: string;
+  key: string;
+  variantId: string;
+  variantName: string;
+  /** Variant payload serialized as a JSON string (parsed on the JS side). */
+  valueJson: string;
+};
+
 export type PurchaseResultDTO = {
   entitlements: EntitlementDTO[];
   creditBalance: number;
@@ -61,11 +70,15 @@ export interface RovenueModuleSpec {
   // appVersion is optional from JS. When undefined the native modules
   // auto-read the host bundle / packageManager value at the bridge
   // boundary before calling into the Rust core.
+  //
+  // environment selects the Remote Config bucket (prod/staging/development);
+  // undefined lets the backend default to prod.
   configure(
     apiKey: string,
     baseUrl: string | undefined,
     debug: boolean,
     appVersion?: string,
+    environment?: string,
   ): void;
   shutdown(): void;
   setForeground(foreground: boolean): void;
@@ -90,6 +103,20 @@ export interface RovenueModuleSpec {
   getOfferings(): Promise<OfferingsDTO>;
   purchase(productId: string, productType: ProductTypeDTO): Promise<PurchaseResultDTO>;
   restorePurchases(): Promise<PurchaseResultDTO>;
+
+  // Remote Config — feature flags + experiment assignments. Typed getters
+  // resolve a single key with a fallback; remoteConfigAllJson returns the whole
+  // `{ flags, experiments }` bundle as a JSON string (backs the reactive hook).
+  refreshRemoteConfig(): Promise<void>;
+  remoteConfigBool(key: string, fallback: boolean): Promise<boolean>;
+  remoteConfigString(key: string, fallback: string): Promise<string>;
+  remoteConfigInt(key: string, fallback: number): Promise<number>;
+  remoteConfigDouble(key: string, fallback: number): Promise<number>;
+  remoteConfigJson(key: string): Promise<string | null>;
+  remoteConfigKeys(): Promise<string[]>;
+  remoteConfigAllJson(): Promise<string>;
+  experiment(key: string): Promise<ExperimentAssignmentDTO | null>;
+  experimentsAll(): Promise<ExperimentAssignmentDTO[]>;
 
   // Refund Shield — stable per-subscriber app-account token (UUID).
   getAppAccountToken(): Promise<string>;

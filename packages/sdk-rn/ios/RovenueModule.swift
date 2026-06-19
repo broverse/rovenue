@@ -52,12 +52,13 @@ public class RovenueModule: Module {
         // façade falls back to Bundle.main.infoDictionary[CFBundleShortVersionString].
         // For Expo apps that's the value baked from app.json's `expo.version`
         // at prebuild time; for bare RN it's the host project's plist.
-        Function("configure") { (apiKey: String, baseUrl: String?, debug: Bool, appVersion: String?) in
+        Function("configure") { (apiKey: String, baseUrl: String?, debug: Bool, appVersion: String?, environment: String?) in
             try Rovenue.configure(
                 apiKey: apiKey,
                 baseUrl: baseUrl,
                 debug: debug,
-                appVersion: appVersion
+                appVersion: appVersion,
+                environment: environment
             )
         }
         Function("shutdown") { Rovenue.shared.shutdown() }
@@ -96,6 +97,38 @@ public class RovenueModule: Module {
             let b = try await Rovenue.shared.consumeCredits(Int64(amount), description: description)
             return Double(b)
         }
+        // ---------------- Remote Config ----------------
+        AsyncFunction("refreshRemoteConfig") { try await Rovenue.shared.refreshRemoteConfig() }
+        AsyncFunction("remoteConfigBool") { (key: String, fallback: Bool) -> Bool in
+            await Rovenue.shared.remoteConfigBool(key, default: fallback)
+        }
+        AsyncFunction("remoteConfigString") { (key: String, fallback: String) -> String in
+            await Rovenue.shared.remoteConfigString(key, default: fallback)
+        }
+        AsyncFunction("remoteConfigInt") { (key: String, fallback: Double) -> Double in
+            // JS marshals numbers as Double; widen the façade's Int64 back to Double.
+            Double(await Rovenue.shared.remoteConfigInt(key, default: Int64(fallback)))
+        }
+        AsyncFunction("remoteConfigDouble") { (key: String, fallback: Double) -> Double in
+            await Rovenue.shared.remoteConfigDouble(key, default: fallback)
+        }
+        AsyncFunction("remoteConfigJson") { (key: String) -> String? in
+            await Rovenue.shared.remoteConfigJSON(key)
+        }
+        AsyncFunction("remoteConfigKeys") { () -> [String] in
+            await Rovenue.shared.remoteConfigKeys()
+        }
+        AsyncFunction("remoteConfigAllJson") { () -> String in
+            await Rovenue.shared.remoteConfigAllJSON()
+        }
+        AsyncFunction("experiment") { (key: String) -> [String: Any?]? in
+            guard let a = await Rovenue.shared.experiment(key) else { return nil }
+            return Self.dtoFromExperimentAssignment(a)
+        }
+        AsyncFunction("experimentsAll") { () -> [[String: Any?]] in
+            await Rovenue.shared.experimentsAll().map(Self.dtoFromExperimentAssignment)
+        }
+
         // ---------------- Purchases ----------------
         //
         // StoreKit-backed, so gated on iOS 15 / macOS 12 to mirror the
@@ -222,6 +255,16 @@ public class RovenueModule: Module {
         ]
     }
 
+    private static func dtoFromExperimentAssignment(_ a: ExperimentAssignment) -> [String: Any?] {
+        [
+            "experimentId": a.experimentId,
+            "key": a.key,
+            "variantId": a.variantId,
+            "variantName": a.variantName,
+            "valueJson": a.valueJson,
+        ]
+    }
+
     // ---------------- Purchase DTO encoders ----------------
 
     /// Façade `ProductType` enum → lowercase DTO string (OUTBOUND).
@@ -304,6 +347,7 @@ public class RovenueModule: Module {
         case .entitlementsChanged: return "ENTITLEMENTS_CHANGED"
         case .identityChanged:     return "IDENTITY_CHANGED"
         case .creditBalanceChanged: return "CREDIT_BALANCE_CHANGED"
+        case .remoteConfigChanged: return "REMOTE_CONFIG_CHANGED"
         }
     }
 }

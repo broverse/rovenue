@@ -39,6 +39,8 @@ fn core(url: String) -> RovenueCore {
         base_url: url,
         debug: true,
         app_version: None,
+        platform: None,
+        environment: None,
     })
     .unwrap()
 }

@@ -50,4 +50,25 @@ export type PurchaseResult = {
 export type ChangeEvent =
   | 'ENTITLEMENTS_CHANGED'
   | 'IDENTITY_CHANGED'
-  | 'CREDIT_BALANCE_CHANGED';
+  | 'CREDIT_BALANCE_CHANGED'
+  | 'REMOTE_CONFIG_CHANGED';
+
+// Remote Config — feature flags + experiment assignments, evaluated
+// server-side for the current subscriber and cached locally so reads are
+// synchronous and survive offline.
+
+export type ExperimentAssignment = {
+  experimentId: string;
+  key: string;
+  variantId: string;
+  variantName: string;
+  /** Variant payload (already JSON-parsed). */
+  value: unknown;
+};
+
+export type RemoteConfig = {
+  /** Flag key → evaluated value (boolean / number / string / object). */
+  flags: Record<string, unknown>;
+  /** Experiment key → the subscriber's assignment. */
+  experiments: Record<string, ExperimentAssignment>;
+};

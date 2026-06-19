@@ -20,6 +20,10 @@ export type MockNative = RovenueModuleSpec & {
     user: UserDTO;
     entitlements: Map<string, EntitlementDTO>;
     creditBalance: number;
+    remoteConfig: {
+      flags: Record<string, unknown>;
+      experiments: Record<string, unknown>;
+    };
     changeListeners: Array<(payload: { event: string }) => void>;
     logListeners: Array<(entry: LogEntryDTO) => void>;
   };
@@ -34,6 +38,10 @@ export function makeMockNative(): MockNative {
     user: { rovenueId: "anon_test", appUserId: null } as UserDTO,
     entitlements: new Map<string, EntitlementDTO>(),
     creditBalance: 0,
+    remoteConfig: {
+      flags: {} as Record<string, unknown>,
+      experiments: {} as Record<string, unknown>,
+    },
     changeListeners: [] as Array<(payload: { event: string }) => void>,
     logListeners: [] as Array<(entry: LogEntryDTO) => void>,
   };
@@ -96,6 +104,52 @@ export function makeMockNative(): MockNative {
     getOfferings: vi.fn(async () => ({ current: null, offerings: [] })),
     purchase: vi.fn(async () => ({ entitlements: [], creditBalance: 0, productId: "", storeTransactionId: "" })),
     restorePurchases: vi.fn(async () => ({ entitlements: [], creditBalance: 0, productId: "", storeTransactionId: "" })),
+    refreshRemoteConfig: vi.fn(async () => {
+      mock.__emit("REMOTE_CONFIG_CHANGED");
+    }),
+    remoteConfigBool: vi.fn(async (key: string, fallback: boolean) => {
+      const v = state.remoteConfig.flags[key];
+      return typeof v === "boolean" ? v : fallback;
+    }),
+    remoteConfigString: vi.fn(async (key: string, fallback: string) => {
+      const v = state.remoteConfig.flags[key];
+      return typeof v === "string" ? v : fallback;
+    }),
+    remoteConfigInt: vi.fn(async (key: string, fallback: number) => {
+      const v = state.remoteConfig.flags[key];
+      return typeof v === "number" ? Math.trunc(v) : fallback;
+    }),
+    remoteConfigDouble: vi.fn(async (key: string, fallback: number) => {
+      const v = state.remoteConfig.flags[key];
+      return typeof v === "number" ? v : fallback;
+    }),
+    remoteConfigJson: vi.fn(async (key: string) => {
+      const v = state.remoteConfig.flags[key];
+      return v === undefined ? null : JSON.stringify(v);
+    }),
+    remoteConfigKeys: vi.fn(async () => Object.keys(state.remoteConfig.flags)),
+    remoteConfigAllJson: vi.fn(async () => {
+      const experiments: Record<string, unknown> = {};
+      for (const [k, dto] of Object.entries(state.remoteConfig.experiments)) {
+        const e = dto as {
+          experimentId: string;
+          key: string;
+          variantId: string;
+          variantName: string;
+          valueJson: string;
+        };
+        experiments[k] = {
+          experimentId: e.experimentId,
+          key: e.key,
+          variantId: e.variantId,
+          variantName: e.variantName,
+          value: JSON.parse(e.valueJson),
+        };
+      }
+      return JSON.stringify({ flags: state.remoteConfig.flags, experiments });
+    }),
+    experiment: vi.fn(async (key: string) => state.remoteConfig.experiments[key] ?? null),
+    experimentsAll: vi.fn(async () => Object.values(state.remoteConfig.experiments)),
     getAppAccountToken: vi.fn(async () => "00000000-0000-0000-0000-000000000001"),
     recordSessionEvent: vi.fn(
       async (

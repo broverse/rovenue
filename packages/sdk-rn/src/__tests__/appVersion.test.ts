@@ -32,6 +32,7 @@ describe("configure forwards appVersion to native", () => {
       "https://api.example.com",
       false,
       undefined,
+      undefined,
     );
   });
 
@@ -46,6 +47,7 @@ describe("configure forwards appVersion to native", () => {
       "https://api.example.com",
       false,
       "2.7.0",
+      undefined,
     );
   });
 });

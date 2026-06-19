@@ -400,6 +400,10 @@ internal interface _UniFFILib : Library {
     ): RustBuffer.ByValue
     fun uniffi_rovenue_fn_method_rovenuecore_entitlements_all(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_rovenue_fn_method_rovenuecore_experiment(`ptr`: Pointer,`key`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_rovenue_fn_method_rovenuecore_experiments_all(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_rovenue_fn_method_rovenuecore_flush_attributes(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Int
     fun uniffi_rovenue_fn_method_rovenuecore_flush_session_events(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
@@ -424,8 +428,24 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_refresh_entitlements(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
+    fun uniffi_rovenue_fn_method_rovenuecore_refresh_remote_config(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_register_observer(`ptr`: Pointer,`obs`: Long,_uniffi_out_err: RustCallStatus, 
     ): Unit
+    fun uniffi_rovenue_fn_method_rovenuecore_remote_config_all_json(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_rovenue_fn_method_rovenuecore_remote_config_bool(`ptr`: Pointer,`key`: RustBuffer.ByValue,`fallback`: Byte,_uniffi_out_err: RustCallStatus, 
+    ): Byte
+    fun uniffi_rovenue_fn_method_rovenuecore_remote_config_double(`ptr`: Pointer,`key`: RustBuffer.ByValue,`fallback`: Double,_uniffi_out_err: RustCallStatus, 
+    ): Double
+    fun uniffi_rovenue_fn_method_rovenuecore_remote_config_int(`ptr`: Pointer,`key`: RustBuffer.ByValue,`fallback`: Long,_uniffi_out_err: RustCallStatus, 
+    ): Long
+    fun uniffi_rovenue_fn_method_rovenuecore_remote_config_json(`ptr`: Pointer,`key`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_rovenue_fn_method_rovenuecore_remote_config_keys(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_rovenue_fn_method_rovenuecore_remote_config_string(`ptr`: Pointer,`key`: RustBuffer.ByValue,`fallback`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_rovenue_fn_method_rovenuecore_set_attributes(`ptr`: Pointer,`attributes`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_set_foreground(`ptr`: Pointer,`foreground`: Byte,_uniffi_out_err: RustCallStatus, 
@@ -562,6 +582,10 @@ internal interface _UniFFILib : Library {
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_entitlements_all(
     ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_experiment(
+    ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_experiments_all(
+    ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_flush_attributes(
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_flush_session_events(
@@ -586,7 +610,23 @@ internal interface _UniFFILib : Library {
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_refresh_entitlements(
     ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_refresh_remote_config(
+    ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_register_observer(
+    ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_remote_config_all_json(
+    ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_remote_config_bool(
+    ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_remote_config_double(
+    ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_remote_config_int(
+    ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_remote_config_json(
+    ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_remote_config_keys(
+    ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_remote_config_string(
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_set_attributes(
     ): Short
@@ -633,6 +673,12 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_entitlements_all() != 65159.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_experiment() != 42335.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_experiments_all() != 37576.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_flush_attributes() != 53555.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -669,7 +715,31 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_refresh_entitlements() != 45868.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_refresh_remote_config() != 63383.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_register_observer() != 60338.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_remote_config_all_json() != 49943.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_remote_config_bool() != 50948.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_remote_config_double() != 13062.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_remote_config_int() != 29570.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_remote_config_json() != 15059.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_remote_config_keys() != 24294.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_remote_config_string() != 48337.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_set_attributes() != 975.toShort()) {
@@ -731,6 +801,26 @@ public object FfiConverterLong: FfiConverter<Long, Long> {
 
     override fun write(value: Long, buf: ByteBuffer) {
         buf.putLong(value)
+    }
+}
+
+public object FfiConverterDouble: FfiConverter<Double, Double> {
+    override fun lift(value: Double): Double {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Double {
+        return buf.getDouble()
+    }
+
+    override fun lower(value: Double): Double {
+        return value
+    }
+
+    override fun allocationSize(value: Double) = 8
+
+    override fun write(value: Double, buf: ByteBuffer) {
+        buf.putDouble(value)
     }
 }
 
@@ -977,7 +1067,9 @@ public interface RovenueCoreInterface {
     fun `creditBalance`(): Long
     fun `currentUser`(): User
     fun `entitlement`(`id`: String): Entitlement?
-    fun `entitlementsAll`(): List<Entitlement>@Throws(RovenueException::class)
+    fun `entitlementsAll`(): List<Entitlement>
+    fun `experiment`(`key`: String): ExperimentAssignment?
+    fun `experimentsAll`(): List<ExperimentAssignment>@Throws(RovenueException::class)
     fun `flushAttributes`(): UInt@Throws(RovenueException::class)
     fun `flushSessionEvents`(): UInt@Throws(RovenueException::class)
     fun `getOfferings`(): CoreOfferings@Throws(RovenueException::class)
@@ -989,8 +1081,16 @@ public interface RovenueCoreInterface {
     fun `postGoogleReceipt`(`receipt`: String, `productId`: String, `obfuscatedAccountId`: String?, `obfuscatedProfileId`: String?): ReceiptResult@Throws(RovenueException::class)
     fun `recordSessionEvent`(`kind`: SessionEventKind, `occurredAt`: String, `durationMs`: UInt?)@Throws(RovenueException::class)
     fun `refreshCredits`()@Throws(RovenueException::class)
-    fun `refreshEntitlements`()
-    fun `registerObserver`(`obs`: Observer)@Throws(RovenueException::class)
+    fun `refreshEntitlements`()@Throws(RovenueException::class)
+    fun `refreshRemoteConfig`()
+    fun `registerObserver`(`obs`: Observer)
+    fun `remoteConfigAllJson`(): String
+    fun `remoteConfigBool`(`key`: String, `fallback`: Boolean): Boolean
+    fun `remoteConfigDouble`(`key`: String, `fallback`: Double): Double
+    fun `remoteConfigInt`(`key`: String, `fallback`: Long): Long
+    fun `remoteConfigJson`(`key`: String): String?
+    fun `remoteConfigKeys`(): List<String>
+    fun `remoteConfigString`(`key`: String, `fallback`: String): String@Throws(RovenueException::class)
     fun `setAttributes`(`attributes`: Map<String, String?>)
     fun `setForeground`(`foreground`: Boolean)
     fun `shutdown`()
@@ -1074,6 +1174,28 @@ class RovenueCore(
 }
         }.let {
             FfiConverterSequenceTypeEntitlement.lift(it)
+        }
+    
+    override fun `experiment`(`key`: String): ExperimentAssignment? =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_experiment(it,
+        FfiConverterString.lower(`key`),
+        _status)
+}
+        }.let {
+            FfiConverterOptionalTypeExperimentAssignment.lift(it)
+        }
+    
+    override fun `experimentsAll`(): List<ExperimentAssignment> =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_experiments_all(it,
+        
+        _status)
+}
+        }.let {
+            FfiConverterSequenceTypeExperimentAssignment.lift(it)
         }
     
     
@@ -1214,6 +1336,17 @@ class RovenueCore(
         }
     
     
+    
+    @Throws(RovenueException::class)override fun `refreshRemoteConfig`() =
+        callWithPointer {
+    rustCallWithError(RovenueException) { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_refresh_remote_config(it,
+        
+        _status)
+}
+        }
+    
+    
     override fun `registerObserver`(`obs`: Observer) =
         callWithPointer {
     rustCall() { _status ->
@@ -1223,6 +1356,83 @@ class RovenueCore(
 }
         }
     
+    
+    override fun `remoteConfigAllJson`(): String =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_remote_config_all_json(it,
+        
+        _status)
+}
+        }.let {
+            FfiConverterString.lift(it)
+        }
+    
+    override fun `remoteConfigBool`(`key`: String, `fallback`: Boolean): Boolean =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_remote_config_bool(it,
+        FfiConverterString.lower(`key`),FfiConverterBoolean.lower(`fallback`),
+        _status)
+}
+        }.let {
+            FfiConverterBoolean.lift(it)
+        }
+    
+    override fun `remoteConfigDouble`(`key`: String, `fallback`: Double): Double =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_remote_config_double(it,
+        FfiConverterString.lower(`key`),FfiConverterDouble.lower(`fallback`),
+        _status)
+}
+        }.let {
+            FfiConverterDouble.lift(it)
+        }
+    
+    override fun `remoteConfigInt`(`key`: String, `fallback`: Long): Long =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_remote_config_int(it,
+        FfiConverterString.lower(`key`),FfiConverterLong.lower(`fallback`),
+        _status)
+}
+        }.let {
+            FfiConverterLong.lift(it)
+        }
+    
+    override fun `remoteConfigJson`(`key`: String): String? =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_remote_config_json(it,
+        FfiConverterString.lower(`key`),
+        _status)
+}
+        }.let {
+            FfiConverterOptionalString.lift(it)
+        }
+    
+    override fun `remoteConfigKeys`(): List<String> =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_remote_config_keys(it,
+        
+        _status)
+}
+        }.let {
+            FfiConverterSequenceString.lift(it)
+        }
+    
+    override fun `remoteConfigString`(`key`: String, `fallback`: String): String =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_remote_config_string(it,
+        FfiConverterString.lower(`key`),FfiConverterString.lower(`fallback`),
+        _status)
+}
+        }.let {
+            FfiConverterString.lift(it)
+        }
     
     
     @Throws(RovenueException::class)override fun `setAttributes`(`attributes`: Map<String, String?>) =
@@ -1292,6 +1502,7 @@ data class Config (
     var `debug`: Boolean, 
     var `appVersion`: String?, 
     var `platform`: String?, 
+    var `environment`: String?, 
     var `baseUrl`: String = "https://api.rovenue.io"
 ) {
     
@@ -1305,6 +1516,7 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
             FfiConverterString.read(buf),
         )
     }
@@ -1314,6 +1526,7 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
             FfiConverterBoolean.allocationSize(value.`debug`) +
             FfiConverterOptionalString.allocationSize(value.`appVersion`) +
             FfiConverterOptionalString.allocationSize(value.`platform`) +
+            FfiConverterOptionalString.allocationSize(value.`environment`) +
             FfiConverterString.allocationSize(value.`baseUrl`)
     )
 
@@ -1322,6 +1535,7 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
             FfiConverterBoolean.write(value.`debug`, buf)
             FfiConverterOptionalString.write(value.`appVersion`, buf)
             FfiConverterOptionalString.write(value.`platform`, buf)
+            FfiConverterOptionalString.write(value.`environment`, buf)
             FfiConverterString.write(value.`baseUrl`, buf)
     }
 }
@@ -1481,6 +1695,48 @@ public object FfiConverterTypeEntitlement: FfiConverterRustBuffer<Entitlement> {
 
 
 
+data class ExperimentAssignment (
+    var `experimentId`: String, 
+    var `key`: String, 
+    var `variantId`: String, 
+    var `variantName`: String, 
+    var `valueJson`: String
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeExperimentAssignment: FfiConverterRustBuffer<ExperimentAssignment> {
+    override fun read(buf: ByteBuffer): ExperimentAssignment {
+        return ExperimentAssignment(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ExperimentAssignment) = (
+            FfiConverterString.allocationSize(value.`experimentId`) +
+            FfiConverterString.allocationSize(value.`key`) +
+            FfiConverterString.allocationSize(value.`variantId`) +
+            FfiConverterString.allocationSize(value.`variantName`) +
+            FfiConverterString.allocationSize(value.`valueJson`)
+    )
+
+    override fun write(value: ExperimentAssignment, buf: ByteBuffer) {
+            FfiConverterString.write(value.`experimentId`, buf)
+            FfiConverterString.write(value.`key`, buf)
+            FfiConverterString.write(value.`variantId`, buf)
+            FfiConverterString.write(value.`variantName`, buf)
+            FfiConverterString.write(value.`valueJson`, buf)
+    }
+}
+
+
+
+
 data class ReceiptResult (
     var `subscriberId`: String, 
     var `appUserId`: String, 
@@ -1550,7 +1806,7 @@ public object FfiConverterTypeUser: FfiConverterRustBuffer<User> {
 
 
 enum class ChangeEvent {
-    ENTITLEMENTS_CHANGED,IDENTITY_CHANGED,CREDIT_BALANCE_CHANGED;
+    ENTITLEMENTS_CHANGED,IDENTITY_CHANGED,CREDIT_BALANCE_CHANGED,REMOTE_CONFIG_CHANGED;
     companion object
 }
 
@@ -1965,6 +2221,60 @@ public object FfiConverterOptionalTypeEntitlement: FfiConverterRustBuffer<Entitl
 
 
 
+public object FfiConverterOptionalTypeExperimentAssignment: FfiConverterRustBuffer<ExperimentAssignment?> {
+    override fun read(buf: ByteBuffer): ExperimentAssignment? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeExperimentAssignment.read(buf)
+    }
+
+    override fun allocationSize(value: ExperimentAssignment?): Int {
+        if (value == null) {
+            return 1
+        } else {
+            return 1 + FfiConverterTypeExperimentAssignment.allocationSize(value)
+        }
+    }
+
+    override fun write(value: ExperimentAssignment?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeExperimentAssignment.write(value, buf)
+        }
+    }
+}
+
+
+
+
+public object FfiConverterSequenceString: FfiConverterRustBuffer<List<String>> {
+    override fun read(buf: ByteBuffer): List<String> {
+        val len = buf.getInt()
+        return List<String>(len) {
+            FfiConverterString.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<String>): Int {
+        val sizeForLength = 4
+        val sizeForItems = value.map { FfiConverterString.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<String>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.forEach {
+            FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
 public object FfiConverterSequenceTypeCoreOffering: FfiConverterRustBuffer<List<CoreOffering>> {
     override fun read(buf: ByteBuffer): List<CoreOffering> {
         val len = buf.getInt()
@@ -2033,6 +2343,31 @@ public object FfiConverterSequenceTypeEntitlement: FfiConverterRustBuffer<List<E
         buf.putInt(value.size)
         value.forEach {
             FfiConverterTypeEntitlement.write(it, buf)
+        }
+    }
+}
+
+
+
+
+public object FfiConverterSequenceTypeExperimentAssignment: FfiConverterRustBuffer<List<ExperimentAssignment>> {
+    override fun read(buf: ByteBuffer): List<ExperimentAssignment> {
+        val len = buf.getInt()
+        return List<ExperimentAssignment>(len) {
+            FfiConverterTypeExperimentAssignment.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ExperimentAssignment>): Int {
+        val sizeForLength = 4
+        val sizeForItems = value.map { FfiConverterTypeExperimentAssignment.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ExperimentAssignment>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.forEach {
+            FfiConverterTypeExperimentAssignment.write(it, buf)
         }
     }
 }

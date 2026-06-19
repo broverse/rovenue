@@ -8,6 +8,7 @@ pub enum ChangeEvent {
     EntitlementsChanged,
     IdentityChanged,
     CreditBalanceChanged,
+    RemoteConfigChanged,
 }
 
 /// Implemented by façades to receive cache-state notifications from the core.

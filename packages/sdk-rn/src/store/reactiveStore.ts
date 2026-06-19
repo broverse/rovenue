@@ -5,15 +5,22 @@
 // Slot keys are flat strings. Per-entitlement slots use the pattern
 // `entitlement:<id>` so we can look up one without scanning a list.
 
-import type { Entitlement, User } from "../types";
+import type { Entitlement, RemoteConfig, User } from "../types";
 
 type StoreSlot =
   | "user"
   | "creditBalance"
   | "entitlementsAll"
+  | "remoteConfig"
   | `entitlement:${string}`;
 
-type StoreValue = User | number | Entitlement | Entitlement[] | null;
+type StoreValue =
+  | User
+  | number
+  | Entitlement
+  | Entitlement[]
+  | RemoteConfig
+  | null;
 
 export class ReactiveStore {
   private values = new Map<StoreSlot, StoreValue>();

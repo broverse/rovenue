@@ -15,6 +15,7 @@ import { makeMockNative, MockNative } from "./_mockNative";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useEntitlement } from "../hooks/useEntitlement";
 import { useEntitlements } from "../hooks/useEntitlements";
+import { useRemoteConfig, useFlag, useExperiment } from "../hooks/useRemoteConfig";
 import { useCreditBalance } from "../hooks/useCreditBalance";
 
 describe("Rovenue hooks", () => {
@@ -125,5 +126,49 @@ describe("Rovenue hooks", () => {
       await new Promise((r) => setTimeout(r, 0));
     });
     expect(screen.getByTestId("b").textContent).toBe("25");
+  });
+
+  it("useFlag warms up on mount then renders the flag value", async () => {
+    native.__state.remoteConfig.flags = { new_paywall: true };
+    function App() {
+      const on = useFlag("new_paywall", false);
+      return <span data-testid="f">{on ? "on" : "off"}</span>;
+    }
+    render(<App />);
+    // Initial render: warm-up in-flight, fallback shown.
+    expect(screen.getByTestId("f").textContent).toBe("off");
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(screen.getByTestId("f").textContent).toBe("on");
+  });
+
+  it("useRemoteConfig + useExperiment update on REMOTE_CONFIG_CHANGED", async () => {
+    function App() {
+      const config = useRemoteConfig();
+      const exp = useExperiment("checkout_test");
+      return (
+        <span data-testid="x">
+          {String(config.flags.max_items ?? "none")}:{exp?.variantName ?? "unassigned"}
+        </span>
+      );
+    }
+    render(<App />);
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(screen.getByTestId("x").textContent).toBe("none:unassigned");
+
+    await act(async () => {
+      native.__state.remoteConfig.flags = { max_items: 7 };
+      native.__state.remoteConfig.experiments = {
+        checkout_test: {
+          experimentId: "exp_1",
+          key: "checkout_test",
+          variantId: "var_b",
+          variantName: "Treatment",
+          valueJson: "{}",
+        },
+      };
+      native.__emit("REMOTE_CONFIG_CHANGED");
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(screen.getByTestId("x").textContent).toBe("7:Treatment");
   });
 });

@@ -23,6 +23,8 @@ export type {
   Offerings,
   PurchaseResult,
   ChangeEvent,
+  RemoteConfig,
+  ExperimentAssignment,
 } from "./types";
 
 export {
@@ -51,12 +53,24 @@ export { useCurrentUser } from "./hooks/useCurrentUser";
 export { useEntitlement } from "./hooks/useEntitlement";
 export { useEntitlements } from "./hooks/useEntitlements";
 export { useCreditBalance } from "./hooks/useCreditBalance";
+export {
+  useRemoteConfig,
+  useFlag,
+  useExperiment,
+} from "./hooks/useRemoteConfig";
 
 import { configure } from "./api/configure";
 import { currentUser, identify, logOut } from "./api/identity";
 import { entitlement, entitlementsAll, refreshEntitlements } from "./api/entitlements";
 import { creditBalance, refreshCredits, consumeCredits } from "./api/credits";
 import { getOfferings, purchase, restorePurchases } from "./api/purchases";
+import {
+  refreshRemoteConfig,
+  getRemoteConfig,
+  getFlag,
+  getExperiment,
+  getExperiments,
+} from "./api/remoteConfig";
 import { setForeground, shutdown } from "./api/lifecycle";
 import { getAppAccountToken } from "./api/accountToken";
 import {
@@ -86,6 +100,11 @@ export const Rovenue = {
   getOfferings,
   purchase,
   restorePurchases,
+  refreshRemoteConfig,
+  getRemoteConfig,
+  getFlag,
+  getExperiment,
+  getExperiments,
   getAppAccountToken,
   setForeground,
   shutdown,

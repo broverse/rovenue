@@ -3,6 +3,7 @@ pub mod entitlements;
 pub mod etag;
 pub mod identity;
 pub mod offerings;
+pub mod remote_config;
 pub mod schema;
 pub mod store;
 

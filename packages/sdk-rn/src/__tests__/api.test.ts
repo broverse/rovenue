@@ -50,6 +50,7 @@ describe("Rovenue imperative API", () => {
       undefined,
       false,
       undefined,
+      undefined,
     );
   });
 
@@ -61,6 +62,7 @@ describe("Rovenue imperative API", () => {
       "pk_test",
       "https://api.example.com",
       true,
+      undefined,
       undefined,
     );
     // Event bridge attached one change listener via the emitter.
@@ -74,6 +76,22 @@ describe("Rovenue imperative API", () => {
       "https://api.example.com",
       false,
       undefined,
+      undefined,
+    );
+  });
+
+  it("configure forwards the environment to native", () => {
+    configure({
+      apiKey: "pk_test",
+      baseUrl: "https://api.example.com",
+      environment: "staging",
+    });
+    expect(native.configure).toHaveBeenCalledWith(
+      "pk_test",
+      "https://api.example.com",
+      false,
+      undefined,
+      "staging",
     );
   });
 

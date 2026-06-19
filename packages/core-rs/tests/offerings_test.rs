@@ -69,6 +69,8 @@ fn core_get_offerings_round_trips() {
         base_url: server.url(),
         debug: true,
         app_version: None,
+        platform: None,
+        environment: None,
     })
     .unwrap();
 

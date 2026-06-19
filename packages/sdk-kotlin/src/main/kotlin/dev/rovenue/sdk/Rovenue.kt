@@ -15,6 +15,7 @@ import android.os.Looper
 import androidx.lifecycle.ProcessLifecycleOwner
 import dev.rovenue.sdk.generated.Config
 import dev.rovenue.sdk.generated.CoreOfferings
+import dev.rovenue.sdk.generated.ExperimentAssignment
 import dev.rovenue.sdk.generated.RovenueCore
 import dev.rovenue.sdk.generated.RovenueException
 import dev.rovenue.sdk.generated.SessionEventKind
@@ -112,6 +113,7 @@ class Rovenue private constructor(
             debug: Boolean = false,
             appVersion: String? = null,
             context: Context? = null,
+            environment: String? = null,
         ) {
             emit(LogEntry(level = "info", message = "configure"))
             if (apiKey.isBlank()) {
@@ -124,6 +126,7 @@ class Rovenue private constructor(
                 debug = debug,
                 appVersion = appVersion,
                 platform = "android",
+                environment = environment,
             ).let { if (baseUrl != null) it.copy(baseUrl = baseUrl) else it }
             val core = RovenueCore(config)  // may throw RovenueException
             val bridge = ObserverBridge()
@@ -365,6 +368,70 @@ class Rovenue private constructor(
             throw e
         }
     }
+
+    // ---------------------------------------------------------------
+    // Remote Config
+    // ---------------------------------------------------------------
+
+    /** Force a refresh of the remote config cache against the server.
+     *  On success (when values changed), emits
+     *  ChangeEvent.REMOTE_CONFIG_CHANGED. */
+    @Throws(RovenueException::class)
+    suspend fun refreshRemoteConfig() {
+        emit(LogEntry(level = "info", message = "refreshRemoteConfig"))
+        try {
+            dispatcher.run { core.refreshRemoteConfig() }
+            emit(LogEntry(level = "info", message = "refreshRemoteConfig ok"))
+        } catch (e: Throwable) {
+            emit(LogEntry(level = "error", message = "refreshRemoteConfig failed: ${e.message ?: e.javaClass.simpleName}"))
+            throw e
+        }
+    }
+
+    /** Read a boolean remote-config value from the local cache, returning
+     *  [fallback] when the key is absent. Does not hit the network. */
+    suspend fun remoteConfigBool(key: String, fallback: Boolean): Boolean =
+        dispatcher.run { core.remoteConfigBool(key, fallback) }
+
+    /** Read a string remote-config value from the local cache, returning
+     *  [fallback] when the key is absent. Does not hit the network. */
+    suspend fun remoteConfigString(key: String, fallback: String): String =
+        dispatcher.run { core.remoteConfigString(key, fallback) }
+
+    /** Read an integer remote-config value from the local cache, returning
+     *  [fallback] when the key is absent. Does not hit the network. */
+    suspend fun remoteConfigInt(key: String, fallback: Long): Long =
+        dispatcher.run { core.remoteConfigInt(key, fallback) }
+
+    /** Read a double remote-config value from the local cache, returning
+     *  [fallback] when the key is absent. Does not hit the network. */
+    suspend fun remoteConfigDouble(key: String, fallback: Double): Double =
+        dispatcher.run { core.remoteConfigDouble(key, fallback) }
+
+    /** Read a raw JSON remote-config value from the local cache. Returns null
+     *  if the key is absent. Does not hit the network. */
+    suspend fun remoteConfigJson(key: String): String? =
+        dispatcher.run { core.remoteConfigJson(key) }
+
+    /** List all cached remote-config keys. Does not hit the network. */
+    suspend fun remoteConfigKeys(): List<String> =
+        dispatcher.run { core.remoteConfigKeys() }
+
+    /** Return the full remote-config payload serialized as a JSON object.
+     *  Does not hit the network. */
+    suspend fun remoteConfigAllJson(): String =
+        dispatcher.run { core.remoteConfigAllJson() }
+
+    /** Fetch the user's assignment for a single experiment from the local
+     *  cache. Returns null if the user is not enrolled. Does not hit the
+     *  network. */
+    suspend fun experiment(key: String): ExperimentAssignment? =
+        dispatcher.run { core.experiment(key) }
+
+    /** List all of the user's experiment assignments from the local cache.
+     *  Does not hit the network. */
+    suspend fun experimentsAll(): List<ExperimentAssignment> =
+        dispatcher.run { core.experimentsAll() }
 
     // ---------------------------------------------------------------
     // Refund Shield — stable per-subscriber token

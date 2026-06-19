@@ -95,6 +95,16 @@ CREATE INDEX idx_attribute_mutations_id ON attribute_mutations(id);\
 UPDATE schema_meta SET version = 6;\
 ";
 
+pub const MIGRATION_V7: &str = r#"
+CREATE TABLE remote_config_cache (
+    resource TEXT PRIMARY KEY,
+    body TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+
+UPDATE schema_meta SET version = 7;
+"#;
+
 pub const MIGRATIONS: &[&str] = &[
     MIGRATION_V1,
     MIGRATION_V2,
@@ -102,5 +112,6 @@ pub const MIGRATIONS: &[&str] = &[
     MIGRATION_V4,
     MIGRATION_V5,
     MIGRATION_V6,
+    MIGRATION_V7,
 ];
-pub const LATEST: u32 = 6;
+pub const LATEST: u32 = 7;

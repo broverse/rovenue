@@ -25,6 +25,7 @@ dictionary Config {
     boolean debug;
     string? app_version;
     string? platform;
+    string? environment;
     string base_url = "https://api.rovenue.io";
 };
 
@@ -49,6 +50,15 @@ enum ChangeEvent {
     "EntitlementsChanged",
     "IdentityChanged",
     "CreditBalanceChanged",
+    "RemoteConfigChanged",
+};
+
+dictionary ExperimentAssignment {
+    string experiment_id;
+    string key;
+    string variant_id;
+    string variant_name;
+    string value_json;
 };
 
 dictionary ReceiptResult {
@@ -129,6 +139,20 @@ interface RovenueCore {
 
     [Throws=RovenueError]
     CoreOfferings get_offerings();
+
+    [Throws=RovenueError]
+    void refresh_remote_config();
+
+    boolean remote_config_bool(string key, boolean fallback);
+    string remote_config_string(string key, string fallback);
+    i64 remote_config_int(string key, i64 fallback);
+    f64 remote_config_double(string key, f64 fallback);
+    string? remote_config_json(string key);
+    sequence<string> remote_config_keys();
+    string remote_config_all_json();
+
+    ExperimentAssignment? experiment(string key);
+    sequence<ExperimentAssignment> experiments_all();
 
     [Throws=RovenueError]
     void record_session_event(

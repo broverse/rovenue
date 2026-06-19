@@ -15,6 +15,7 @@ pub mod observer;
 pub mod offerings;
 pub mod polling;
 pub mod receipts;
+pub mod remote_config;
 pub mod sessions;
 pub mod time;
 pub mod transport;
@@ -30,6 +31,7 @@ pub use identity::User;
 pub use observer::{ChangeEvent, Observer};
 pub use offerings::{CoreOffering, CoreOfferingProduct, CoreOfferings};
 pub use receipts::ReceiptResult;
+pub use remote_config::{ExperimentAssignment, RemoteConfigReader};
 pub use sessions::SessionEventKind;
 pub use version::SDK_VERSION;
 

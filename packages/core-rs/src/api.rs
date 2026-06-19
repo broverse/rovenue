@@ -16,6 +16,7 @@ use crate::offerings::{CoreOfferings, OfferingsClient};
 use crate::polling::PollingScheduler;
 use crate::receipts::{ReceiptClient, ReceiptResult};
 use crate::receipts::types::ReceiptPostOutcome;
+use crate::remote_config::{ExperimentAssignment, RemoteConfigReader};
 use crate::sessions::{AccountTokenStore, SessionBuffer, SessionDispatcher, SessionEventKind};
 use crate::time::{Clock, SystemClock};
 use crate::transport::http_client::HttpClient;
@@ -23,6 +24,7 @@ use crate::transport::idempotency::IdempotencyKey;
 use crate::version::SDK_VERSION;
 
 const ENTITLEMENTS_INTERVAL_MS: u64 = 30_000;
+const REMOTE_CONFIG_INTERVAL_MS: u64 = 60_000;
 const STALENESS_MS: u64 = 60_000;
 
 pub struct RovenueCore {
@@ -33,6 +35,7 @@ pub struct RovenueCore {
     credits: Arc<CreditReader>,
     receipts: Arc<ReceiptClient>,
     offerings: Arc<OfferingsClient>,
+    remote_config: Arc<RemoteConfigReader>,
     identify: Arc<IdentifyClient>,
     account_tokens: Arc<AccountTokenStore>,
     sessions: Arc<SessionBuffer>,
@@ -65,7 +68,8 @@ impl RovenueCore {
         ));
         let http = Arc::new(
             HttpClient::new(config.base_url.clone(), config.api_key.clone())
-                .with_platform(config.platform.clone()),
+                .with_platform(config.platform.clone())
+                .with_environment(config.environment.clone()),
         );
         let reader = Arc::new(
             EntitlementReader::new(Arc::clone(&store), Arc::clone(&identity))
@@ -83,6 +87,15 @@ impl RovenueCore {
         let offerings = Arc::new(
             OfferingsClient::new(Arc::clone(&http), Arc::clone(&store))
                 .with_clock(Arc::clone(&clock)),
+        );
+        let remote_config = Arc::new(
+            RemoteConfigReader::new(
+                Arc::clone(&http),
+                Arc::clone(&store),
+                Arc::clone(&identity),
+            )
+            .with_observer_bus(Arc::clone(&bus))
+            .with_clock(Arc::clone(&clock)),
         );
         let identify = Arc::new(IdentifyClient::new(Arc::clone(&http)));
         let account_tokens = Arc::new(AccountTokenStore::new(Arc::clone(&store)));
@@ -132,6 +145,16 @@ impl RovenueCore {
                 let _ = reader.refresh();
             });
         }
+        {
+            let reader = Arc::clone(&remote_config);
+            scheduler.register(
+                "remote_config",
+                Duration::from_millis(REMOTE_CONFIG_INTERVAL_MS),
+                move || {
+                    let _ = reader.refresh();
+                },
+            );
+        }
         Arc::clone(&session_dispatcher).start(&scheduler);
         Arc::clone(&attribute_dispatcher).start(&scheduler);
         {
@@ -152,6 +175,7 @@ impl RovenueCore {
             credits,
             receipts,
             offerings,
+            remote_config,
             identify,
             account_tokens,
             sessions,
@@ -407,6 +431,71 @@ impl RovenueCore {
 
     pub fn get_offerings(&self) -> RovenueResult<CoreOfferings> {
         self.offerings.get_offerings()
+    }
+
+    // ---- Remote Config (feature flags + experiment assignments) ----
+
+    /// Force an immediate Remote Config fetch from `/v1/config`.
+    pub fn refresh_remote_config(&self) -> RovenueResult<()> {
+        self.remote_config.refresh()
+    }
+
+    pub fn remote_config_bool(&self, key: String, fallback: bool) -> bool {
+        let out = self.remote_config.bool(&key, fallback);
+        self.remote_config.maybe_refresh_async(STALENESS_MS);
+        out
+    }
+
+    pub fn remote_config_string(&self, key: String, fallback: String) -> String {
+        let out = self.remote_config.string(&key, fallback);
+        self.remote_config.maybe_refresh_async(STALENESS_MS);
+        out
+    }
+
+    pub fn remote_config_int(&self, key: String, fallback: i64) -> i64 {
+        let out = self.remote_config.int(&key, fallback);
+        self.remote_config.maybe_refresh_async(STALENESS_MS);
+        out
+    }
+
+    pub fn remote_config_double(&self, key: String, fallback: f64) -> f64 {
+        let out = self.remote_config.double(&key, fallback);
+        self.remote_config.maybe_refresh_async(STALENESS_MS);
+        out
+    }
+
+    /// Raw JSON string for any present flag (object/array/primitive), or `None`
+    /// when the key is absent. Façades parse this for structured flag values.
+    pub fn remote_config_json(&self, key: String) -> Option<String> {
+        let out = self.remote_config.json(&key);
+        self.remote_config.maybe_refresh_async(STALENESS_MS);
+        out
+    }
+
+    pub fn remote_config_keys(&self) -> Vec<String> {
+        let out = self.remote_config.keys();
+        self.remote_config.maybe_refresh_async(STALENESS_MS);
+        out
+    }
+
+    pub fn experiment(&self, key: String) -> Option<ExperimentAssignment> {
+        let out = self.remote_config.experiment(&key);
+        self.remote_config.maybe_refresh_async(STALENESS_MS);
+        out
+    }
+
+    pub fn experiments_all(&self) -> Vec<ExperimentAssignment> {
+        let out = self.remote_config.experiments_all();
+        self.remote_config.maybe_refresh_async(STALENESS_MS);
+        out
+    }
+
+    /// Whole Remote Config payload as a JSON string (`{ flags, experiments }`),
+    /// for façades backing a reactive synchronous hook surface.
+    pub fn remote_config_all_json(&self) -> String {
+        let out = self.remote_config.all_json();
+        self.remote_config.maybe_refresh_async(STALENESS_MS);
+        out
     }
 }
 

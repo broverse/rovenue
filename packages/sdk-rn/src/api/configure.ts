@@ -23,6 +23,13 @@ export type RovenueConfig = {
    * undefined.
    */
   appVersion?: string;
+  /**
+   * Remote Config environment — selects which flag/experiment set the
+   * backend serves: `"prod"` (default), `"staging"`, or `"development"`.
+   * Sent as the `X-Rovenue-Env` header on the `/v1/config` request. Omit
+   * to use production.
+   */
+  environment?: "prod" | "staging" | "development";
 };
 
 export function configure(opts: RovenueConfig): void {
@@ -38,6 +45,7 @@ export function configure(opts: RovenueConfig): void {
     opts.baseUrl,
     opts.debug ?? false,
     opts.appVersion,
+    opts.environment,
   );
   startEventBridge();
   startSessionTracker();

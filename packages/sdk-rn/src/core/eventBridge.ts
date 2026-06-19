@@ -7,6 +7,7 @@
 
 import { getEmitter, getNative } from "./native";
 import { store } from "../store/reactiveStore";
+import { parseRemoteConfig } from "../api/remoteConfig";
 
 let subscription: { remove(): void } | null = null;
 
@@ -32,6 +33,11 @@ export function startEventBridge(): void {
         case "CREDIT_BALANCE_CHANGED": {
           const balance = await native.creditBalance();
           store.set("creditBalance", balance);
+          break;
+        }
+        case "REMOTE_CONFIG_CHANGED": {
+          const json = await native.remoteConfigAllJson();
+          store.set("remoteConfig", parseRemoteConfig(json));
           break;
         }
         default:

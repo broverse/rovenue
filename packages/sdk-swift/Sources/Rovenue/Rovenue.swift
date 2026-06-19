@@ -60,7 +60,8 @@ public final class Rovenue: @unchecked Sendable {
         apiKey: String,
         baseUrl: String? = nil,
         debug: Bool = false,
-        appVersion: String? = nil
+        appVersion: String? = nil,
+        environment: String? = nil
     ) throws {
         emit(LogEntry(level: "info", message: "configure"))
         guard !apiKey.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -73,7 +74,8 @@ public final class Rovenue: @unchecked Sendable {
             apiKey: apiKey,
             debug: debug,
             appVersion: resolvedVersion,
-            platform: "ios"
+            platform: "ios",
+            environment: environment
         )
         if let baseUrl {
             config.baseUrl = baseUrl
@@ -311,6 +313,98 @@ public final class Rovenue: @unchecked Sendable {
         } catch {
             Self.emit(LogEntry(level: "error", message: "consumeCredits failed: \(error.localizedDescription)"))
             throw error
+        }
+    }
+
+    // MARK: - Remote Config
+
+    /// Force a refresh of the remote config cache against the server.
+    /// On success (when values changed), emits `.remoteConfigChanged`.
+    public func refreshRemoteConfig() async throws {
+        Self.emit(LogEntry(level: "info", message: "refreshRemoteConfig"))
+        do {
+            try await dispatcher.run { [core] in
+                do {
+                    try core.refreshRemoteConfig()
+                } catch let err as RovenueError {
+                    throw mapError(err)
+                }
+            }
+            Self.emit(LogEntry(level: "info", message: "refreshRemoteConfig ok"))
+        } catch {
+            Self.emit(LogEntry(level: "error", message: "refreshRemoteConfig failed: \(error.localizedDescription)"))
+            throw error
+        }
+    }
+
+    /// Read a boolean remote-config value from the local cache, returning
+    /// `fallback` when the key is absent. Does not hit the network.
+    public func remoteConfigBool(_ key: String, default fallback: Bool) async -> Bool {
+        await dispatcher.runNonThrowing { [core] in
+            core.remoteConfigBool(key: key, fallback: fallback)
+        }
+    }
+
+    /// Read a string remote-config value from the local cache, returning
+    /// `fallback` when the key is absent. Does not hit the network.
+    public func remoteConfigString(_ key: String, default fallback: String) async -> String {
+        await dispatcher.runNonThrowing { [core] in
+            core.remoteConfigString(key: key, fallback: fallback)
+        }
+    }
+
+    /// Read an integer remote-config value from the local cache, returning
+    /// `fallback` when the key is absent. Does not hit the network.
+    public func remoteConfigInt(_ key: String, default fallback: Int64) async -> Int64 {
+        await dispatcher.runNonThrowing { [core] in
+            core.remoteConfigInt(key: key, fallback: fallback)
+        }
+    }
+
+    /// Read a double remote-config value from the local cache, returning
+    /// `fallback` when the key is absent. Does not hit the network.
+    public func remoteConfigDouble(_ key: String, default fallback: Double) async -> Double {
+        await dispatcher.runNonThrowing { [core] in
+            core.remoteConfigDouble(key: key, fallback: fallback)
+        }
+    }
+
+    /// Read a raw JSON remote-config value from the local cache. Returns nil
+    /// if the key is absent. Does not hit the network.
+    public func remoteConfigJSON(_ key: String) async -> String? {
+        await dispatcher.runNonThrowing { [core] in
+            core.remoteConfigJson(key: key)
+        }
+    }
+
+    /// List all cached remote-config keys. Does not hit the network.
+    public func remoteConfigKeys() async -> [String] {
+        await dispatcher.runNonThrowing { [core] in
+            core.remoteConfigKeys()
+        }
+    }
+
+    /// Return the full remote-config payload serialized as a JSON object.
+    /// Does not hit the network.
+    public func remoteConfigAllJSON() async -> String {
+        await dispatcher.runNonThrowing { [core] in
+            core.remoteConfigAllJson()
+        }
+    }
+
+    /// Fetch the user's assignment for a single experiment from the local
+    /// cache. Returns nil if the user is not enrolled. Does not hit the network.
+    public func experiment(_ key: String) async -> ExperimentAssignment? {
+        await dispatcher.runNonThrowing { [core] in
+            core.experiment(key: key)
+        }
+    }
+
+    /// List all of the user's experiment assignments from the local cache.
+    /// Does not hit the network.
+    public func experimentsAll() async -> [ExperimentAssignment] {
+        await dispatcher.runNonThrowing { [core] in
+            core.experimentsAll()
         }
     }
 

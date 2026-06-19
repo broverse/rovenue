@@ -26,7 +26,7 @@ class RovenueTest {
 
     @Test
     fun `getVersion matches Cargo pkg version`() {
-        val cfg = Config(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.io", debug = false, appVersion = null, platform = null)
+        val cfg = Config(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.io", debug = false, appVersion = null, platform = null, environment = null)
         val core = RovenueCore(cfg)
         // core.getVersion() reports the librovenue crate version (workspace
         // version), which is the same value the namespace sdkVersion() returns.
@@ -35,7 +35,7 @@ class RovenueTest {
 
     @Test
     fun `invalid api key throws at generated layer`() {
-        val cfg = Config(apiKey = "", baseUrl = "https://api.rovenue.io", debug = false, appVersion = null, platform = null)
+        val cfg = Config(apiKey = "", baseUrl = "https://api.rovenue.io", debug = false, appVersion = null, platform = null, environment = null)
         assertFailsWith<RovenueException.InvalidApiKey> {
             RovenueCore(cfg)
         }
