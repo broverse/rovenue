@@ -283,10 +283,17 @@ export const SUBSCRIBERS: ReadonlyArray<Subscriber> = (
     risk: 42,
     plan: "Premium",
   },
-] satisfies ReadonlyArray<Omit<Subscriber, "rovenueId">>).map((s) => ({
+] satisfies ReadonlyArray<Omit<Subscriber, "rovenueId" | "name">>).map((s) => ({
   ...s,
   // Mock fixtures have no real internal id; derive a stable stand-in.
   rovenueId: s.full,
+  // Derive a readable display name from the masked alias (e.g. "emma.w@—" → "Emma W").
+  name: s.alias
+    .split("@")[0]!
+    .split(".")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" "),
 }));
 
 export const TIMELINE_MOCK: ReadonlyArray<TimelineEntry> = [

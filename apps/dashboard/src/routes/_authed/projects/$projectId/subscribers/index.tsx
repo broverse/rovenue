@@ -310,6 +310,7 @@ function SubscribersPage({
             : subUserId,
         rovenueId: detailData.id,
         full: subUserId,
+        name: detailData.attributes["$displayName"]?.value.trim() ?? "",
         alias:
           subUserId.length > 24
             ? `${subUserId.slice(0, 21)}...`
