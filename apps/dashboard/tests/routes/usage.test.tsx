@@ -38,5 +38,13 @@ describe("<UsagePage />", () => {
 
     // The MSW fixture sets sql_queries.available = false → should render "Unavailable"
     expect(screen.getByText("Unavailable")).toBeInTheDocument();
+
+    // Confirm no raw "0" is rendered for the unavailable row (current is null,
+    // so nothing numeric should appear in place of a value).
+    const unavailableLabel = screen.getByText("Unavailable");
+    const unavailableRow = unavailableLabel.closest('[class*="grid"]') ?? unavailableLabel.parentElement!;
+    expect(unavailableRow.querySelector('[data-testid="usage-value"]')).toBeNull();
+    // Broader guard: the "Unavailable" text should be present rather than "0 / …"
+    expect(screen.queryByText(/^0\s*\/\s*/)).toBeNull();
   });
 });

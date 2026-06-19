@@ -39,7 +39,7 @@ export function UsageRow({
   // Compute percentage only when we have both values and a non-zero limit.
   const pct =
     !isUnavailable && !isUnlimited && limit !== null && limit > 0
-      ? Math.min(100, Math.round((current! / limit) * 100))
+      ? Math.min(100, Math.round((current! / limit) * 1000) / 10)
       : null;
 
   const tone =
