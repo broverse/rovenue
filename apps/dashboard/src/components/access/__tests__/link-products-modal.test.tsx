@@ -105,4 +105,14 @@ describe("LinkProductsModal", () => {
     expect(screen.getByText("Beta")).toBeInTheDocument();
     expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
   });
+
+  it("shows an error on save failure", async () => {
+    mutateAsync.mockRejectedValueOnce(new Error("Network error"));
+    wrap(
+      <LinkProductsModal open projectId="p_1" access={access} products={[A, B]} onClose={() => undefined} />,
+    );
+    fireEvent.click(screen.getAllByRole("checkbox")[1]); // toggle Beta to trigger a patch
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Network error");
+  });
 });

@@ -86,7 +86,7 @@ export function LinkProductsModal({ open, projectId, access, products, onClose }
     <Dialog.Root
       open={open}
       onOpenChange={(next) => {
-        if (!next) onClose();
+        if (!next && !pending) onClose();
       }}
     >
       <Dialog.Portal>
