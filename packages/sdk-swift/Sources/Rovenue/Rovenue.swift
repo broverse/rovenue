@@ -266,52 +266,37 @@ public final class Rovenue: @unchecked Sendable {
         }
     }
 
-    // MARK: - Credits
+    // MARK: - Virtual Currencies
 
-    /// Read the cached credit balance. Returns 0 if the cache is empty.
-    public func creditBalance() async -> Int64 {
+    /// Read the cached virtual-currency balances (code → amount). Empty if uncached.
+    public func virtualCurrencyBalances() async -> [String: Int64] {
         await dispatcher.runNonThrowing { [core] in
-            core.creditBalance()
+            core.virtualCurrencyBalances()
         }
     }
 
-    /// Force a refresh of the credit balance against the server.
-    /// On success (when the balance changed), emits `.creditBalanceChanged`.
-    public func refreshCredits() async throws {
-        Self.emit(LogEntry(level: "info", message: "refreshCredits"))
+    /// Read the cached balance for a single virtual currency by code. Returns 0 if uncached.
+    public func virtualCurrency(_ code: String) async -> Int64 {
+        await dispatcher.runNonThrowing { [core] in
+            core.virtualCurrency(code: code)
+        }
+    }
+
+    /// Force a refresh of virtual-currency balances against the server.
+    /// On success (when balances changed), emits `.virtualCurrenciesChanged`.
+    public func refreshVirtualCurrencies() async throws {
+        Self.emit(LogEntry(level: "info", message: "refreshVirtualCurrencies"))
         do {
             try await dispatcher.run { [core] in
                 do {
-                    try core.refreshCredits()
+                    try core.refreshVirtualCurrencies()
                 } catch let err as RovenueError {
                     throw mapError(err)
                 }
             }
-            Self.emit(LogEntry(level: "info", message: "refreshCredits ok"))
+            Self.emit(LogEntry(level: "info", message: "refreshVirtualCurrencies ok"))
         } catch {
-            Self.emit(LogEntry(level: "error", message: "refreshCredits failed: \(error.localizedDescription)"))
-            throw error
-        }
-    }
-
-    /// Spend credits server-side. The SDK generates an Idempotency-Key
-    /// internally — retries of the same call are server-deduped.
-    /// Returns the new balance.
-    /// Throws `.insufficientCredits` if the user lacks the balance.
-    public func consumeCredits(_ amount: Int64, description: String? = nil) async throws -> Int64 {
-        Self.emit(LogEntry(level: "info", message: "consumeCredits"))
-        do {
-            let result = try await dispatcher.run { [core] in
-                do {
-                    return try core.consumeCredits(amount: amount, description: description)
-                } catch let err as RovenueError {
-                    throw mapError(err)
-                }
-            }
-            Self.emit(LogEntry(level: "info", message: "consumeCredits ok"))
-            return result
-        } catch {
-            Self.emit(LogEntry(level: "error", message: "consumeCredits failed: \(error.localizedDescription)"))
+            Self.emit(LogEntry(level: "error", message: "refreshVirtualCurrencies failed: \(error.localizedDescription)"))
             throw error
         }
     }
@@ -637,7 +622,7 @@ public final class Rovenue: @unchecked Sendable {
         try await refreshEntitlements()
         let result = PurchaseResult(
             entitlements: await entitlementsAll(),
-            creditBalance: await creditBalance(),
+            virtualCurrencies: await virtualCurrencyBalances(),
             productId: "",
             storeTransactionId: ""
         )

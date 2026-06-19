@@ -59,10 +59,10 @@ final class RovenueTests: XCTestCase {
         XCTAssertTrue(all.isEmpty)
     }
 
-    func test_facade_creditBalanceZeroByDefault() async throws {
+    func test_facade_virtualCurrencyBalancesEmptyByDefault() async throws {
         try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.io")
-        let balance = await Rovenue.shared.creditBalance()
-        XCTAssertEqual(balance, 0)
+        let balances = await Rovenue.shared.virtualCurrencyBalances()
+        XCTAssertTrue(balances.isEmpty)
     }
 
     func test_facade_identifyEmitsChange() async throws {

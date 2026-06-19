@@ -93,7 +93,7 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
             store: FakeStore(outcome: .userCancelled),
             validate: { _, _ in
                 await validated.mark()
-                return ReceiptResult(subscriberId: "s", appUserId: "u", creditBalance: 0, entitlements: [])
+                return ReceiptResult(subscriberId: "s", appUserId: "u", virtualCurrencies: [:], entitlements: [])
             }
         )
         do {
@@ -111,7 +111,7 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
     func test_pending_throws_purchasePending() async {
         let flow = ApplePurchaseFlow(
             store: FakeStore(outcome: .pending),
-            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", creditBalance: 0, entitlements: []) }
+            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", virtualCurrencies: [:], entitlements: []) }
         )
         do {
             _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
@@ -126,7 +126,7 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
     func test_productNotFound_throws_productNotAvailable() async {
         let flow = ApplePurchaseFlow(
             store: FakeStore(outcome: .productNotFound),
-            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", creditBalance: 0, entitlements: []) }
+            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", virtualCurrencies: [:], entitlements: []) }
         )
         do {
             _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
@@ -152,7 +152,7 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
                 // finish must NOT have run before validation succeeds.
                 let wasFinished = await finished.finished
                 XCTAssertFalse(wasFinished, "finish() must run after validate, not before")
-                return ReceiptResult(subscriberId: "sub_1", appUserId: "user_1", creditBalance: 250, entitlements: [self.sampleEntitlement()])
+                return ReceiptResult(subscriberId: "sub_1", appUserId: "user_1", virtualCurrencies: ["COIN": 250], entitlements: [self.sampleEntitlement()])
             }
         )
 
@@ -162,7 +162,7 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
         XCTAssertEqual(capturedProductId, "premium_monthly")
         let didFinish = await finished.finished
         XCTAssertTrue(didFinish, "finish() must run after successful validation")
-        XCTAssertEqual(result.creditBalance, 250)
+        XCTAssertEqual(result.virtualCurrencies, ["COIN": 250])
         XCTAssertEqual(result.productId, "premium_monthly")
         XCTAssertEqual(result.storeTransactionId, "txn-42")
         XCTAssertEqual(result.entitlements, [sampleEntitlement()])

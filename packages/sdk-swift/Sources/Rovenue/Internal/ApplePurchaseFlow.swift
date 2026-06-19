@@ -32,7 +32,7 @@ internal struct ApplePurchaseFlow {
             await finish()
             return PurchaseResult(
                 entitlements: receipt.entitlements,
-                creditBalance: receipt.creditBalance,
+                virtualCurrencies: receipt.virtualCurrencies,
                 productId: productId,
                 storeTransactionId: transactionId
             )

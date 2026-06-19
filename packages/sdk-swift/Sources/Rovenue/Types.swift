@@ -112,22 +112,22 @@ public struct Offerings: Sendable, Equatable {
     }
 }
 
-/// The result of a completed purchase: refreshed entitlements + credit balance,
+/// The result of a completed purchase: refreshed entitlements + virtual-currency balances,
 /// plus the product / store-transaction identifiers for the purchase that ran.
 public struct PurchaseResult: Sendable, Equatable {
     public let entitlements: [Entitlement]
-    public let creditBalance: Int64
+    public let virtualCurrencies: [String: Int64]
     public let productId: String
     public let storeTransactionId: String
 
     public init(
         entitlements: [Entitlement],
-        creditBalance: Int64,
+        virtualCurrencies: [String: Int64],
         productId: String,
         storeTransactionId: String
     ) {
         self.entitlements = entitlements
-        self.creditBalance = creditBalance
+        self.virtualCurrencies = virtualCurrencies
         self.productId = productId
         self.storeTransactionId = storeTransactionId
     }

@@ -16,7 +16,7 @@ final class ObserverBridgeTests: XCTestCase {
         let bridge = ObserverBridge()
         let stream = bridge.subscribe()
         bridge.onChange(event: .entitlementsChanged)
-        bridge.onChange(event: .creditBalanceChanged)
+        bridge.onChange(event: .virtualCurrenciesChanged)
         bridge.onChange(event: .identityChanged)
 
         var iterator = stream.makeAsyncIterator()
@@ -24,7 +24,7 @@ final class ObserverBridgeTests: XCTestCase {
         let second = await iterator.next()
         let third = await iterator.next()
         XCTAssertEqual(first, .entitlementsChanged)
-        XCTAssertEqual(second, .creditBalanceChanged)
+        XCTAssertEqual(second, .virtualCurrenciesChanged)
         XCTAssertEqual(third, .identityChanged)
     }
 
