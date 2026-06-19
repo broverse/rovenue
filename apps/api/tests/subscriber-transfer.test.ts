@@ -18,6 +18,13 @@ const auditMock = vi.hoisted(() => ({
 }));
 vi.mock("../src/lib/audit", () => auditMock);
 
+// syncAccess is a best-effort post-merge reconcile; stub it so the real
+// access-engine (which reads PurchaseStatus from @rovenue/db at module load)
+// isn't pulled into this mocked-db test.
+vi.mock("../src/services/access-engine", () => ({
+  syncAccess: vi.fn(async () => undefined),
+}));
+
 // =============================================================
 // Hoisted mocks
 // =============================================================

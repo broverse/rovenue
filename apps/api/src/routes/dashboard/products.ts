@@ -340,7 +340,10 @@ export const productsDashboardRoute = new Hono()
 
     const results: DashboardProductImportResultRow[] = [
       ...created.map((row): DashboardProductImportResultRow => ({
-        storeId: (row.storeIds as Record<string, string>)[body.store] ?? "",
+        storeId:
+          (row.storeIds as Record<string, string>)[
+            drizzle.productRepo.canonicalStoreKey(body.store)
+          ] ?? "",
         identifier: row.identifier,
         status: "created" as const,
         productId: row.id,

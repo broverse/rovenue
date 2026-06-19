@@ -756,6 +756,22 @@ export async function reassignExperimentAssignments(
   fromSubscriberId: string,
   toSubscriberId: string,
 ): Promise<void> {
+  // Drop the source's assignments for any experiment the target is already
+  // enrolled in. Without this, moving the source rows onto the target
+  // violates the (experimentId, subscriberId) unique index and rolls back
+  // the entire merge transaction whenever both subscribers were A/B-tested
+  // in the same experiment (the common case). The target keeps its existing
+  // (sticky) assignment; the source's losing duplicate is discarded.
+  await db.delete(experimentAssignments).where(
+    and(
+      eq(experimentAssignments.subscriberId, fromSubscriberId),
+      // Correlated EXISTS against the target's rows. The outer column is
+      // referenced with an explicit qualified name — Drizzle renders
+      // `${table.col}` UNqualified inside sql``, which would break the
+      // correlation.
+      sql`EXISTS (SELECT 1 FROM "experiment_assignments" AS ea2 WHERE ea2."experimentId" = "experiment_assignments"."experimentId" AND ea2."subscriberId" = ${toSubscriberId})`,
+    ),
+  );
   await db
     .update(experimentAssignments)
     .set({ subscriberId: toSubscriberId })

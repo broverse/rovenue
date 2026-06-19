@@ -76,6 +76,11 @@ export async function runExpiryCheck(
         PurchaseStatus.ACTIVE,
         PurchaseStatus.GRACE_PERIOD,
         PurchaseStatus.TRIAL,
+        // PAUSED is included so a paused subscription whose period lapses
+        // reaches the terminal EXPIRED state (and emits a cancellation
+        // event) instead of lingering as PAUSED forever. The state machine
+        // allows PAUSED → EXPIRED.
+        PurchaseStatus.PAUSED,
       ],
     },
   )) as unknown as Candidate[];
@@ -120,6 +125,9 @@ async function processCandidate(
 ): Promise<Outcome> {
   const hasActiveGrace =
     candidate.status !== PurchaseStatus.GRACE_PERIOD &&
+    // A PAUSED subscription must not be promoted into GRACE_PERIOD; it only
+    // resolves to EXPIRED on lapse (or back to ACTIVE via a resume webhook).
+    candidate.status !== PurchaseStatus.PAUSED &&
     candidate.gracePeriodExpires !== null &&
     candidate.gracePeriodExpires > now;
 

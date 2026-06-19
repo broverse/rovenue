@@ -13,6 +13,35 @@ function isAllowedStoreKey(key: string): key is AllowedStoreKey {
   return (ALLOWED_STORE_KEYS as ReadonlyArray<string>).includes(key);
 }
 
+/**
+ * Canonical `storeIds` JSON keys. The dashboard/import surface speaks
+ * platform keys (`ios`/`android`/`web`), but the purchase-time lookup
+ * (`findProductByStoreId`) and the SDK offerings response read store keys
+ * (`apple`/`google`/`stripe`). Everything is PERSISTED under the canonical
+ * store keys so config and fulfillment can never diverge. Map at every write
+ * boundary; unknown keys pass through unchanged (already canonical or custom).
+ */
+const STORE_KEY_TO_CANONICAL: Record<AllowedStoreKey, string> = {
+  ios: "apple",
+  android: "google",
+  web: "stripe",
+};
+
+export function canonicalStoreKey(key: string): string {
+  return STORE_KEY_TO_CANONICAL[key as AllowedStoreKey] ?? key;
+}
+
+/** Rewrite a `storeIds` map so every key is canonical (apple/google/stripe). */
+export function normalizeStoreIds(
+  storeIds: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(storeIds)) {
+    out[canonicalStoreKey(key)] = value;
+  }
+  return out;
+}
+
 // =============================================================
 // products repository (dashboard CRUD)
 // =============================================================
@@ -63,10 +92,12 @@ export async function listProducts(
     // `storeIds ?| ARRAY[...]` — true when any of the supplied store keys
     // is present in the JSONB blob. Keys are constrained to the allowed
     // union above, so the param array is safe to bind.
-    const safeStores = input.stores.filter(isAllowedStoreKey);
+    const safeStores = input.stores
+      .filter(isAllowedStoreKey)
+      .map(canonicalStoreKey);
     if (safeStores.length > 0) {
       where.push(
-        sql`${products.storeIds} ?| ${sql.param(safeStores as string[])}::text[]`,
+        sql`${products.storeIds} ?| ${sql.param(safeStores)}::text[]`,
       );
     }
   }
@@ -139,7 +170,12 @@ export async function createProduct(
   db: Db,
   input: NewProduct,
 ): Promise<Product> {
-  const [row] = await db.insert(products).values(input).returning();
+  // Persist storeIds under canonical store keys so a product created via the
+  // free-form dashboard form is found by the purchase-time lookup.
+  const normalized: NewProduct = input.storeIds
+    ? { ...input, storeIds: normalizeStoreIds(input.storeIds as Record<string, string>) }
+    : input;
+  const [row] = await db.insert(products).values(normalized).returning();
   return row!;
 }
 
@@ -160,9 +196,12 @@ export async function updateProduct(
   id: string,
   patch: UpdateProductInput,
 ): Promise<Product | null> {
+  const normalizedPatch = patch.storeIds
+    ? { ...patch, storeIds: normalizeStoreIds(patch.storeIds) }
+    : patch;
   const [row] = await db
     .update(products)
-    .set({ ...patch, updatedAt: new Date() })
+    .set({ ...normalizedPatch, updatedAt: new Date() })
     .where(and(eq(products.projectId, projectId), eq(products.id, id)))
     .returning();
   return row ?? null;
@@ -258,7 +297,7 @@ export async function bulkCreateProducts(
           .where(
             and(
               eq(products.projectId, input.projectId),
-              sql`${products.storeIds}->>${sql.param(input.store)} = ANY(${sql.param(storeIdValues)}::text[])`,
+              sql`${products.storeIds}->>${sql.param(canonicalStoreKey(input.store))} = ANY(${sql.param(storeIdValues)}::text[])`,
             ),
           )
       : [];
@@ -266,7 +305,7 @@ export async function bulkCreateProducts(
       existingByStoreId
         .map((r) => {
           const map = r.storeIds as Record<string, string> | null;
-          return map?.[input.store];
+          return map?.[canonicalStoreKey(input.store)];
         })
         .filter((s): s is string => typeof s === "string"),
     );
@@ -304,7 +343,7 @@ export async function bulkCreateProducts(
         identifier: item.identifier,
         type: item.type,
         displayName: item.displayName,
-        storeIds: { [input.store]: item.storeId },
+        storeIds: { [canonicalStoreKey(input.store)]: item.storeId },
         accessIds: item.accessIds ? [...item.accessIds] : [],
         creditAmount: item.creditAmount ?? null,
         isActive: true,

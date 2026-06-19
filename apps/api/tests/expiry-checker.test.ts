@@ -231,7 +231,8 @@ describe("runExpiryCheck — query window", () => {
       };
     };
     expect(new Set(args.where.status.in)).toEqual(
-      new Set(["ACTIVE", "GRACE_PERIOD", "TRIAL"]),
+      // PAUSED is included so a lapsed paused subscription reaches EXPIRED.
+      new Set(["ACTIVE", "GRACE_PERIOD", "TRIAL", "PAUSED"]),
     );
     expect(args.where.expiresDate.lt.getTime()).toBe(NOW.getTime());
     expect(args.where.expiresDate.gt.getTime()).toBe(

@@ -11,8 +11,9 @@ const baseOverrides = {
   loadGoogle: async () => ({ packageName: "com.acme.app", serviceAccount: { client_email: "e", private_key: "p" } }),
   listAppStore: async () => raw,
   listGooglePlay: async () => raw,
-  // one product already imported on ios
-  listProducts: async () => [{ storeIds: { ios: "pro_monthly" } }] as any,
+  // one product already imported on ios — products persist storeIds under the
+  // canonical store key (`apple`), which is what getStoreCatalog reconciles.
+  listProducts: async () => [{ storeIds: { apple: "pro_monthly" } }] as any,
 };
 
 describe("getStoreCatalog", () => {

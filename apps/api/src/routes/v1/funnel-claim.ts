@@ -145,12 +145,23 @@ export const funnelClaimRoute = new Hono()
         throw new HTTPException(410, { message: "Token expired" });
       }
 
-      // Resolve / upsert the subscriber so the claim binds to a
-      // stable subscriber row.
-      const subscriber = await drizzle.subscriberRepo.upsertSubscriber(
-        drizzle.db,
-        { projectId: project.id, rovenueId: anon_id },
-      );
+      // Resolve / upsert the subscriber so the claim binds to a stable
+      // subscriber row. Resolve FIRST — `upsertSubscriber` matches on
+      // (projectId, rovenueId) and would happily return a soft-deleted,
+      // merged-away row, stranding the claim on a dead subscriber.
+      // `resolveSubscriberByRovenueId` follows the `mergedInto` chain to the
+      // canonical survivor; only create when there is no row yet.
+      const resolved =
+        await drizzle.subscriberRepo.resolveSubscriberByRovenueId(drizzle.db, {
+          projectId: project.id,
+          rovenueId: anon_id,
+        });
+      const subscriber =
+        resolved ??
+        (await drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
+          projectId: project.id,
+          rovenueId: anon_id,
+        }));
 
       // Idempotent reclaim by SAME subscriber: return the same
       // payload without retrying the UPDATE.

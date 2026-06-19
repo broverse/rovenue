@@ -1,7 +1,10 @@
 import { drizzle } from "@rovenue/db";
 import { logger } from "../lib/logger";
 import { audit } from "../lib/audit";
-import { reassignAllAssets } from "./subscriber-transfer";
+import {
+  reassignAllAssets,
+  safeSyncAccessAfterMerge,
+} from "./subscriber-transfer";
 
 const log = logger.child("identify");
 
@@ -27,7 +30,7 @@ export async function bindAppUserId(
   appUserId: string,
   userId?: string,
 ): Promise<BindResult> {
-  return drizzle.db.transaction(async (tx) => {
+  const result = await drizzle.db.transaction(async (tx) => {
     // Acquire advisory locks in sorted order to avoid deadlocks when two
     // concurrent calls swap the same pair of keys in opposite order.
     // The appUserId key MUST match transferSubscriber's construction
@@ -123,4 +126,11 @@ export async function bindAppUserId(
 
     return { subscriberId: self.id, appUserId, transferred };
   });
+
+  // When a merge happened, reconcile the surviving subscriber's denormalized
+  // access (collapses duplicate accessId rows to a single source of truth).
+  if (result.transferred) {
+    await safeSyncAccessAfterMerge(result.subscriberId);
+  }
+  return result;
 }

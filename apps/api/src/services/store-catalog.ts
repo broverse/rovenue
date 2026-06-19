@@ -104,9 +104,10 @@ export async function getStoreCatalog(
       }));
   const existing = await listProducts(projectId, store);
   const imported = new Set<string>();
+  const canonical = drizzle.productRepo.canonicalStoreKey(store);
   for (const row of existing) {
     const map = row.storeIds as Record<string, string> | null;
-    const sku = map?.[store];
+    const sku = map?.[canonical];
     if (sku) imported.add(sku);
   }
 

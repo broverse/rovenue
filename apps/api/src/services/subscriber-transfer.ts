@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { type Db, CreditLedgerType, drizzle } from "@rovenue/db";
 import { logger } from "../lib/logger";
 import { audit } from "../lib/audit";
+import { syncAccess } from "./access-engine";
 
 // =============================================================
 // Subscriber account lifecycle — merge + anonymize
@@ -18,6 +19,28 @@ import { audit } from "../lib/audit";
 // kept intact for financial compliance.
 
 const log = logger.child("subscriber-transfer");
+
+/**
+ * Recompute the surviving subscriber's denormalized `subscriber_access`
+ * after a merge moved purchases + access rows onto it. Without this, two
+ * purchases (one from each merged subscriber) can leave duplicate active
+ * rows for the same accessId, surfacing the wrong (earlier) expiry.
+ * Best-effort: the merge has already committed, so a transient failure is
+ * logged rather than failing the request — it self-heals on the next
+ * access-changing event for this subscriber.
+ */
+export async function safeSyncAccessAfterMerge(
+  subscriberId: string,
+): Promise<void> {
+  try {
+    await syncAccess(subscriberId);
+  } catch (err) {
+    log.warn("syncAccess after merge failed", {
+      subscriberId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 const ANON_PREFIX = "anon:";
 
@@ -108,7 +131,7 @@ export async function transferSubscriber(
     throw new Error("Cannot transfer a subscriber to the same account");
   }
 
-  return drizzle.db.transaction(async (tx) => {
+  const result = await drizzle.db.transaction(async (tx) => {
     // Advisory lock on BOTH subscribers, project-scoped, in
     // canonical order to prevent deadlocks. Two concurrent
     // transfer(A→B) calls now serialize at the lock, so the credit
@@ -180,6 +203,11 @@ export async function transferSubscriber(
       creditsTransferred,
     };
   });
+
+  // Reconcile the surviving subscriber's denormalized access now that the
+  // merged subscriber's purchases + access rows belong to it.
+  await safeSyncAccessAfterMerge(result.toSubscriberId);
+  return result;
 }
 
 // =============================================================
