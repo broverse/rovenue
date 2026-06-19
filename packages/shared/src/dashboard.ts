@@ -43,6 +43,15 @@ export interface ProjectApiKey {
   createdAt: string;
 }
 
+export interface CreateApiKeyRequest {
+  label: string;
+}
+
+export interface CreateApiKeyResponse {
+  apiKey: ProjectApiKey;
+  secretKey: string; // plaintext — shown once, only in this response
+}
+
 export interface ProjectDetail {
   id: string;
   name: string;
