@@ -143,10 +143,13 @@ export function TransactionInspector({ tx }: Props) {
       </Section>
 
       <div className="flex gap-1.5 px-3 py-3">
-        <Button variant="flat" size="sm" className="flex-1">
-          <RotateCw size={13} />
-          {t("transactions.inspector.footer.refund")}
-        </Button>
+        {/* Apple processes App Store refunds itself — no merchant-initiated refund, so hide it for iOS. */}
+        {tx.store !== "ios" && (
+          <Button variant="flat" size="sm" className="flex-1">
+            <RotateCw size={13} />
+            {t("transactions.inspector.footer.refund")}
+          </Button>
+        )}
         <Button variant="flat" size="sm" className="flex-1">
           <Webhook size={13} />
           {t("transactions.inspector.footer.redeliver")}
