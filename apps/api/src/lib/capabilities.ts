@@ -15,7 +15,8 @@ export type Capability =
   | "audiences:write"
   | "leaderboards:write"
   | "subscribers:write"
-  | "credits:write";
+  | "credits:write"
+  | "refunds:write";
 
 const CAPABILITY_ROLES: Record<Capability, ReadonlyArray<MemberRole>> = {
   "project:read":           ["OWNER", "ADMIN", "DEVELOPER", "GROWTH", "CUSTOMER_SUPPORT"],
@@ -32,6 +33,7 @@ const CAPABILITY_ROLES: Record<Capability, ReadonlyArray<MemberRole>> = {
   "leaderboards:write":     ["OWNER", "ADMIN", "DEVELOPER", "GROWTH"],
   "subscribers:write":      ["OWNER", "ADMIN", "DEVELOPER", "CUSTOMER_SUPPORT"],
   "credits:write":          ["OWNER", "ADMIN", "DEVELOPER", "CUSTOMER_SUPPORT"],
+  "refunds:write":          ["OWNER", "ADMIN"],
 };
 
 export function roleHasCapability(role: MemberRole, cap: Capability): boolean {
