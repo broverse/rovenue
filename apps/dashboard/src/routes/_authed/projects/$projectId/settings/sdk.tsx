@@ -1,9 +1,11 @@
 import { createFileRoute, useParams } from "@tanstack/react-router";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowUpRight, BookOpen, KeyRound } from "lucide-react";
 import type { ProjectDetail } from "@rovenue/shared";
 import { Button } from "../../../../../ui/button";
 import {
+  CreateApiKeyDialog,
   EndpointsCard,
   HERO_STATS,
   KeysCard,
@@ -28,6 +30,8 @@ function SdkRoute() {
 
 function SdkPage({ project }: { project: ProjectDetail }) {
   const { t } = useTranslation();
+  const [createOpen, setCreateOpen] = useState(false);
+  const openCreate = () => setCreateOpen(true);
 
   return (
     <>
@@ -44,16 +48,16 @@ function SdkPage({ project }: { project: ProjectDetail }) {
             {t("sdkApi.actions.docs")}
             <ArrowUpRight size={12} />
           </Button>
-          <Button variant="flat" size="sm">
+          <Button variant="flat" size="sm" onClick={openCreate}>
             <KeyRound size={13} />
             {t("sdkApi.actions.manageKeys")}
           </Button>
         </div>
       </header>
 
-      <SdkHero stats={HERO_STATS} />
+      <SdkHero stats={HERO_STATS} onCreateKey={openCreate} />
       <QuickstartCard />
-      <KeysCard apiKeys={project.apiKeys} />
+      <KeysCard projectId={project.id} apiKeys={project.apiKeys} onCreateKey={openCreate} />
       <SdkPackagesGrid />
 
       <div className="grid items-start gap-4 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
@@ -66,6 +70,12 @@ function SdkPage({ project }: { project: ProjectDetail }) {
           <ResourcesCard />
         </div>
       </div>
+
+      <CreateApiKeyDialog
+        projectId={project.id}
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+      />
     </>
   );
 }

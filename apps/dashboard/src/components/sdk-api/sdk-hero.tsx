@@ -14,9 +14,10 @@ const heroStyle: CSSProperties = {
 
 type Props = {
   stats: SdkHeroStats;
+  onCreateKey?: () => void;
 };
 
-export function SdkHero({ stats }: Props) {
+export function SdkHero({ stats, onCreateKey }: Props) {
   const { t } = useTranslation();
 
   const tiles = [
@@ -67,7 +68,7 @@ export function SdkHero({ stats }: Props) {
           {t("sdkApi.hero.description")}
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button variant="solid-primary" size="sm">
+          <Button variant="solid-primary" size="sm" onClick={onCreateKey}>
             <KeyRound size={13} />
             {t("sdkApi.hero.actions.generateKey")}
           </Button>

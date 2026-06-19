@@ -1,11 +1,16 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import type { ProjectApiKey } from "@rovenue/shared";
 import { Button } from "../../ui/button";
+import { ConfirmDialog } from "../../ui/confirm-dialog";
 import { SecretRow } from "./secret-row";
+import { useRevokeApiKey } from "../../lib/hooks/useRevokeApiKey";
 
 interface Props {
+  projectId: string;
   apiKeys: ReadonlyArray<ProjectApiKey>;
+  onCreateKey?: () => void;
 }
 
 /** Truncate to "pk_live_…last8" so the row preview never shows the full identifier. */
@@ -36,8 +41,10 @@ function formatRelative(iso: string): string {
   })}`;
 }
 
-export function KeysCard({ apiKeys }: Props) {
+export function KeysCard({ projectId, apiKeys, onCreateKey }: Props) {
   const { t } = useTranslation();
+  const revoke = useRevokeApiKey(projectId);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   return (
     <section className="mb-4 rounded-lg border border-rv-divider bg-rv-c1">
@@ -50,7 +57,7 @@ export function KeysCard({ apiKeys }: Props) {
             {t("sdkApi.keys.subtitle")}
           </p>
         </div>
-        <Button variant="solid-primary" size="sm">
+        <Button variant="solid-primary" size="sm" onClick={onCreateKey}>
           <Plus size={13} />
           {t("sdkApi.keys.actions.create")}
         </Button>
@@ -62,18 +69,30 @@ export function KeysCard({ apiKeys }: Props) {
           </div>
         )}
         {apiKeys.map((key) => (
-          <SecretRow
-            key={key.id}
-            label={key.label}
-            created={formatRelative(key.createdAt)}
-            environment={t(
-              `sdkApi.keys.environments.${key.environment === "PRODUCTION" ? "production" : "sandbox"}`,
-            )}
-            kind="publishable"
-            value={key.publicKey}
-            preview={previewKey(key.publicKey)}
-            readOnly
-          />
+          <div key={key.id} className="flex items-stretch gap-2">
+            <div className="min-w-0 flex-1">
+              <SecretRow
+                label={key.label}
+                created={formatRelative(key.createdAt)}
+                environment={t(
+                  `sdkApi.keys.environments.${key.environment === "PRODUCTION" ? "production" : "sandbox"}`,
+                )}
+                kind="publishable"
+                value={key.publicKey}
+                preview={previewKey(key.publicKey)}
+                readOnly
+              />
+            </div>
+            <Button
+              variant="light"
+              size="sm"
+              className="self-center text-rv-danger"
+              onClick={() => setConfirmId(key.id)}
+              aria-label={t("sdkApi.keys.actions.revoke")}
+            >
+              <Trash2 size={13} />
+            </Button>
+          </div>
         ))}
       </div>
       <footer className="flex flex-wrap items-center justify-between gap-2 rounded-b-lg border-t border-rv-divider bg-rv-c2 px-4 py-3 sm:px-5">
@@ -84,6 +103,17 @@ export function KeysCard({ apiKeys }: Props) {
           {t("sdkApi.keys.footer.audit")}
         </Button>
       </footer>
+      <ConfirmDialog
+        open={confirmId !== null}
+        title={t("sdkApi.keys.revokeConfirm.title")}
+        description={t("sdkApi.keys.revokeConfirm.body")}
+        confirmLabel={t("sdkApi.keys.revokeConfirm.confirm")}
+        tone="danger"
+        onConfirm={async () => {
+          if (confirmId) await revoke.mutateAsync(confirmId);
+        }}
+        onClose={() => setConfirmId(null)}
+      />
     </section>
   );
 }
