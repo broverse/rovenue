@@ -3,6 +3,7 @@ import { summaryRoute } from "./summary";
 import { upgradeRoute } from "./upgrade";
 import { paymentMethodsRoute } from "./payment-methods";
 import { invoicesRoute } from "./invoices";
+import { usageRoute } from "./usage";
 
 // =============================================================
 // /dashboard/projects/:projectId/billing sub-router
@@ -16,4 +17,5 @@ export const billingSubRouter = new Hono()
   .route("/", summaryRoute)
   .route("/upgrade", upgradeRoute)
   .route("/payment-methods", paymentMethodsRoute)
-  .route("/invoices", invoicesRoute);
+  .route("/invoices", invoicesRoute)
+  .route("/usage", usageRoute);
