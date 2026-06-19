@@ -11,6 +11,7 @@ import { sdkSessionsRoute } from "./sdk-sessions";
 import { subscribersRoute } from "./subscribers";
 import { identifyRoute } from "./identify";
 import { offeringsRoute } from "./offerings";
+import { virtualCurrenciesV1Route } from "./virtual-currencies";
 
 // =============================================================
 // /v1 route tree
@@ -46,6 +47,7 @@ export const v1Route = new Hono()
   .route("/sdk/sessions", sdkSessionsRoute)
   .route("/subscribers", subscribersRoute)
   .route("/offerings", offeringsRoute)
+  .route("/virtual-currencies", virtualCurrenciesV1Route)
   // funnelClaimRoute owns `/subscribers/claim-funnel-token` and
   // `/sdk/claim-*`; mounted at root so its handler paths apply
   // verbatim under /v1.

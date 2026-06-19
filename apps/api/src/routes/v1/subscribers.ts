@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { CreditLedgerType, drizzle, type Subscriber } from "@rovenue/db";
+import { drizzle, type Subscriber } from "@rovenue/db";
 import {
   attributesBodySchema,
   normalizeStored,
@@ -10,18 +10,10 @@ import {
   flattenAttributes,
   validateAttributeInput,
 } from "@rovenue/shared";
-import {
-  addCredits,
-  getBalance,
-  InsufficientCreditsError,
-  spendCredits,
-} from "../../services/credit-engine";
 import { syncAccess } from "../../services/access-engine";
 import { verifyReceipt } from "../../services/receipt-verify";
 import { transferSubscriber } from "../../services/subscriber-transfer";
 import { requireSecretKey } from "../../middleware/api-key-auth";
-import { idempotency } from "../../middleware/idempotency";
-import { endpointRateLimit } from "../../middleware/rate-limit";
 import { buildAccessResponse } from "../../lib/access-response";
 import { resolveSubscriber } from "../../lib/resolve-subscriber";
 import { ok } from "../../lib/response";
@@ -55,41 +47,9 @@ export const restoreBodySchema = z.object({
     .optional(),
 });
 
-export const spendBodySchema = z.object({
-  amount: z.number().int().positive(),
-  description: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
-});
-
-export const addBodySchema = z.object({
-  amount: z.number().int().positive(),
-  type: z.enum(["PURCHASE", "BONUS", "REFUND"]).optional(),
-  referenceType: z.string().optional(),
-  referenceId: z.string().optional(),
-  description: z.string().optional(),
-  metadata: z.record(z.unknown()).optional(),
-});
-
 export const transferBodySchema = z.object({
   fromAppUserId: z.string().min(1),
   toAppUserId: z.string().min(1),
-});
-
-// =============================================================
-// Helpers
-// =============================================================
-
-// Throttle spend per *subscriber*, not per API key, so one noisy
-// user can't DoS another's credits but multiple users share the
-// ceiling.
-const spendEndpointLimit = endpointRateLimit({
-  name: "credits-spend",
-  max: 60,
-  identify: (c) => {
-    const projectId = c.get("project")?.id ?? "anon";
-    const appUserId = c.req.param("appUserId") ?? "anon";
-    return `${projectId}:${appUserId}`;
-  },
 });
 
 // =============================================================
@@ -211,101 +171,6 @@ export const subscribersRoute = new Hono()
             id: updated.id,
             appUserId: updated.appUserId,
             attributes: flattenAttributes(updated.attributes),
-          },
-        }),
-      );
-    },
-  )
-  // -------------------------------------------------------------
-  // GET /:appUserId/credits
-  // -------------------------------------------------------------
-  .get("/:appUserId/credits", async (c) => {
-    const project = c.get("project");
-    const appUserId = c.req.param("appUserId");
-    const subscriber = await resolveSubscriber(project.id, appUserId);
-    const balance = await getBalance(subscriber.id);
-    return c.json(ok({ balance }));
-  })
-  // -------------------------------------------------------------
-  // POST /:appUserId/credits/spend
-  // -------------------------------------------------------------
-  // Requires a secret key — clients can't debit themselves.
-  .post(
-    "/:appUserId/credits/spend",
-    requireSecretKey,
-    spendEndpointLimit,
-    idempotency,
-    zValidator("json", spendBodySchema),
-    async (c) => {
-      const project = c.get("project");
-      const appUserId = c.req.param("appUserId");
-      const body = c.req.valid("json");
-      const subscriber = await resolveSubscriber(project.id, appUserId);
-
-      try {
-        const entry = await spendCredits({
-          subscriberId: subscriber.id,
-          amount: body.amount,
-          description: body.description,
-          metadata: body.metadata as Record<string, unknown> | undefined,
-        });
-        return c.json(
-          ok({
-            balance: entry.balance,
-            ledgerEntry: {
-              id: entry.id,
-              amount: entry.amount,
-              balance: entry.balance,
-              type: entry.type,
-              createdAt: entry.createdAt.toISOString(),
-            },
-          }),
-        );
-      } catch (err) {
-        if (err instanceof InsufficientCreditsError) {
-          throw new HTTPException(402, {
-            message: `Insufficient credits: ${err.balance} available, ${err.requested} requested`,
-          });
-        }
-        throw err;
-      }
-    },
-  )
-  // -------------------------------------------------------------
-  // POST /:appUserId/credits/add (server-side only)
-  // -------------------------------------------------------------
-  .post(
-    "/:appUserId/credits/add",
-    requireSecretKey,
-    idempotency,
-    zValidator("json", addBodySchema),
-    async (c) => {
-      const project = c.get("project");
-      const appUserId = c.req.param("appUserId");
-      const body = c.req.valid("json");
-      const subscriber = await resolveSubscriber(project.id, appUserId);
-
-      const entry = await addCredits({
-        subscriberId: subscriber.id,
-        amount: body.amount,
-        type: body.type
-          ? (body.type as keyof typeof CreditLedgerType as CreditLedgerType)
-          : undefined,
-        referenceType: body.referenceType,
-        referenceId: body.referenceId,
-        description: body.description,
-        metadata: body.metadata as Record<string, unknown> | undefined,
-      });
-
-      return c.json(
-        ok({
-          balance: entry.balance,
-          ledgerEntry: {
-            id: entry.id,
-            amount: entry.amount,
-            balance: entry.balance,
-            type: entry.type,
-            createdAt: entry.createdAt.toISOString(),
           },
         }),
       );
