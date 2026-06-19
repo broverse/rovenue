@@ -6,13 +6,10 @@ import type {
   ChartCatalogResponse,
   ChartCategory,
   ChartChannelsResponse,
-  ChartFilterOptionsResponse,
   ChartFunnelResponse,
   ChartHeatmapResponse,
   ChartRangeOption,
   ChartType,
-  SavedChartView,
-  SavedChartViewsResponse,
 } from "@rovenue/shared";
 import { api } from "../api";
 
@@ -88,24 +85,6 @@ export function useDeleteCustomChart(projectId: string) {
 }
 
 // =============================================================
-// Filter options
-// =============================================================
-
-export function useChartFilterOptions({
-  projectId,
-  windowDays,
-}: DataParams) {
-  return useQuery({
-    queryKey: ["charts", "filter-options", projectId, { windowDays }],
-    enabled: Boolean(projectId),
-    queryFn: () =>
-      api<ChartFilterOptionsResponse>(
-        `/dashboard/projects/${projectId}/charts/filter-options${buildWindowQs(windowDays)}`,
-      ),
-  });
-}
-
-// =============================================================
 // Read-only chart data
 // =============================================================
 
@@ -148,73 +127,6 @@ export function useChartHeatmap({ projectId, windowDays }: DataParams) {
       api<ChartHeatmapResponse>(
         `/dashboard/projects/${projectId}/charts/heatmap${buildWindowQs(windowDays)}`,
       ),
-  });
-}
-
-// =============================================================
-// Saved views CRUD
-// =============================================================
-
-export function useSavedChartViews(projectId: string) {
-  return useQuery({
-    queryKey: ["charts", "saved-views", projectId],
-    enabled: Boolean(projectId),
-    queryFn: () =>
-      api<SavedChartViewsResponse>(
-        `/dashboard/projects/${projectId}/charts/saved-views`,
-      ),
-  });
-}
-
-export interface CreateSavedViewInput {
-  name: string;
-  description?: string | null;
-  config?: Record<string, unknown>;
-}
-
-export function useCreateSavedView(projectId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: CreateSavedViewInput) =>
-      api<{ view: SavedChartView }>(
-        `/dashboard/projects/${projectId}/charts/saved-views`,
-        { method: "POST", body: JSON.stringify(body) },
-      ),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["charts", "saved-views", projectId] }),
-  });
-}
-
-export interface UpdateSavedViewInput {
-  id: string;
-  name?: string;
-  description?: string | null;
-  config?: Record<string, unknown>;
-}
-
-export function useUpdateSavedView(projectId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, ...patch }: UpdateSavedViewInput) =>
-      api<{ view: SavedChartView }>(
-        `/dashboard/projects/${projectId}/charts/saved-views/${id}`,
-        { method: "PATCH", body: JSON.stringify(patch) },
-      ),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["charts", "saved-views", projectId] }),
-  });
-}
-
-export function useDeleteSavedView(projectId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) =>
-      api<{ deleted: true }>(
-        `/dashboard/projects/${projectId}/charts/saved-views/${id}`,
-        { method: "DELETE" },
-      ),
-    onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["charts", "saved-views", projectId] }),
   });
 }
 

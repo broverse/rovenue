@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { createFileRoute, useParams } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { Plus, Search } from "lucide-react";
 import type { ChartCatalogEntry } from "@rovenue/shared";
@@ -9,22 +9,16 @@ import {
   ChannelDonut,
   ChartCatalog,
   ChartToolbar,
-  FiltersCard,
   FunnelCard,
-  GroupByCard,
   HourDayHeatmap,
   MrrChartPanel,
   NewChartDialog,
-  SavedViewsCard,
   SqlPreviewCard,
   type ChartType,
-  type FilterSelection,
-  type GroupBy,
   type RangeOption,
 } from "../../../../components/charts";
 import {
   useChartCatalog,
-  useChartFilterOptions,
   useDeleteCustomChart,
 } from "../../../../lib/hooks/useProjectCharts";
 import { useProject } from "../../../../lib/hooks/useProject";
@@ -51,15 +45,6 @@ const DEFAULT_STARRED_IDS: ReadonlySet<string> = new Set([
   "churn",
 ]);
 
-const RANGE_TO_WINDOW_DAYS: Record<RangeOption, number> = {
-  "1M": 30,
-  "3M": 90,
-  "6M": 180,
-  "12M": 365,
-  YTD: 180,
-  All: 365,
-};
-
 function entryLabel(
   entry: ChartCatalogEntry,
   t: (key: string) => string,
@@ -67,67 +52,11 @@ function entryLabel(
   return entry.kind === "system" ? t(`charts.items.${entry.id}`) : entry.name;
 }
 
-const EMPTY_FILTERS: FilterSelection = {
-  platform: [],
-  country: [],
-  productGroup: [],
-};
-
-const filtersStorageKey = (projectId: string): string =>
-  `rovenue.charts.filters.${projectId}`;
-
-/**
- * Per-chart filter selection persisted to localStorage. Keyed by
- * project so two projects in adjacent tabs don't bleed selections
- * into each other. We persist on every change — the surface is
- * tiny and the writes only happen when the user actually moves a
- * chip, so the work is negligible.
- */
-function useChartFiltersByChart(
-  projectId: string,
-  chartId: string,
-): [FilterSelection, (next: FilterSelection) => void] {
-  const [byChart, setByChart] = useState<Record<string, FilterSelection>>(
-    () => {
-      if (typeof window === "undefined") return {};
-      try {
-        const raw = window.localStorage.getItem(filtersStorageKey(projectId));
-        if (!raw) return {};
-        const parsed = JSON.parse(raw) as unknown;
-        if (!parsed || typeof parsed !== "object") return {};
-        return parsed as Record<string, FilterSelection>;
-      } catch {
-        return {};
-      }
-    },
-  );
-
-  const current = byChart[chartId] ?? EMPTY_FILTERS;
-
-  const setCurrent = useCallback(
-    (next: FilterSelection) => {
-      setByChart((prev) => {
-        const updated = { ...prev, [chartId]: next };
-        try {
-          window.localStorage.setItem(
-            filtersStorageKey(projectId),
-            JSON.stringify(updated),
-          );
-        } catch {
-          // Storage may be full or disabled; the in-memory state
-          // still updates so the session keeps working.
-        }
-        return updated;
-      });
-    },
-    [chartId, projectId],
-  );
-
-  return [current, setCurrent];
-}
-
 function ChartsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const openInQueries = () =>
+    void navigate({ to: "/projects/$projectId/queries", params: { projectId } });
   const catalogQuery = useChartCatalog(projectId);
   const entries = useMemo(
     () => catalogQuery.data?.entries ?? [],
@@ -138,12 +67,10 @@ function ChartsPage({ projectId }: { projectId: string }) {
   const [chartType, setChartType] = useState<ChartType>("area");
   const [range, setRange] = useState<RangeOption>("12M");
   const [compare, setCompare] = useState(true);
-  const [groupBy, setGroupBy] = useState<GroupBy>("none");
   const [starredIds, setStarredIds] = useState<ReadonlySet<string>>(
     DEFAULT_STARRED_IDS,
   );
   const [newChartOpen, setNewChartOpen] = useState(false);
-  const [filters, setFilters] = useChartFiltersByChart(projectId, chartId);
 
   // The catalog can grow / shrink — if the selected id disappears
   // (e.g. the user just deleted their custom chart), snap back to
@@ -172,10 +99,6 @@ function ChartsPage({ projectId }: { projectId: string }) {
     }
   };
 
-  const filterOptionsQuery = useChartFilterOptions({
-    projectId,
-    windowDays: RANGE_TO_WINDOW_DAYS[range],
-  });
   const deleteChart = useDeleteCustomChart(projectId);
 
   const toggleStar = () => {
@@ -212,7 +135,7 @@ function ChartsPage({ projectId }: { projectId: string }) {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="flat" size="sm">
+          <Button variant="flat" size="sm" onClick={openInQueries}>
             <Search size={13} />
             {t("charts.actions.openInQueries")}
           </Button>
@@ -268,15 +191,7 @@ function ChartsPage({ projectId }: { projectId: string }) {
         </main>
 
         <aside className="sticky top-[76px] hidden max-h-[calc(100vh-96px)] flex-col gap-3 overflow-y-auto min-[1481px]:flex">
-          <FiltersCard
-            value={filters}
-            onChange={setFilters}
-            options={filterOptionsQuery.data}
-            loading={filterOptionsQuery.isLoading}
-          />
-          <GroupByCard value={groupBy} onChange={setGroupBy} />
-          <SavedViewsCard />
-          <SqlPreviewCard />
+          <SqlPreviewCard onOpenInQueries={openInQueries} />
         </aside>
       </div>
 

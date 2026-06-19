@@ -2934,22 +2934,9 @@
         "sub": "Killed at hour 18 — refund spike"
       }
     },
-    "filters": {
-      "title": "Filters",
-      "add": "Add filter",
-      "remove": "Remove filter",
-      "allValues": "all",
-      "loading": "Loading…",
-      "empty": "No values in this window",
-      "dimensions": {
-        "platform": "platform",
-        "country": "country",
-        "productGroup": "product_group"
-      }
-    },
     "newChart": {
       "title": "New chart",
-      "subtitle": "Adds a chart to the project's shared catalog. Pin filters and group-by after it's created.",
+      "subtitle": "Adds a chart to the project's shared catalog.",
       "submit": "Create chart",
       "creating": "Creating…",
       "name": {
@@ -2973,33 +2960,6 @@
       },
       "errors": {
         "generic": "Could not create the chart. Please try again."
-      }
-    },
-    "groupBy": {
-      "title": "Group by",
-      "options": {
-        "none": "none",
-        "platform": "platform",
-        "country": "country",
-        "product": "product",
-        "channel": "channel",
-        "cohort_month": "cohort_month"
-      }
-    },
-    "savedViews": {
-      "title": "Saved views",
-      "saveCurrent": "+ save current view",
-      "iosOnly": {
-        "name": "MRR · iOS only",
-        "meta": "filters: platform=iOS · 12mo"
-      },
-      "annual": {
-        "name": "MRR · annual subs",
-        "meta": "period=year · 6mo"
-      },
-      "topCountries": {
-        "name": "MRR · top 5 countries",
-        "meta": "group_by=country · 6mo"
       }
     },
     "sql": {

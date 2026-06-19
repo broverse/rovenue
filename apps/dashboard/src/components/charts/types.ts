@@ -10,14 +10,6 @@ export type ChartType = "line" | "area" | "bar";
 
 export type RangeOption = "1M" | "3M" | "6M" | "12M" | "YTD" | "All";
 
-export type GroupBy =
-  | "none"
-  | "platform"
-  | "country"
-  | "product"
-  | "channel"
-  | "cohort_month";
-
 export type SeriesPoint = number;
 
 export type MrrSeries = {
@@ -50,10 +42,4 @@ export type Annotation = {
   date: string;
   subKey: string;
   color: string;
-};
-
-export type SavedView = {
-  id: string;
-  nameKey: string;
-  metaKey: string;
 };

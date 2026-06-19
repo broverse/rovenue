@@ -3,7 +3,11 @@ import { Search } from "lucide-react";
 import { Button } from "../../ui/button";
 import { SQL_PREVIEW } from "./mock-data";
 
-export function SqlPreviewCard() {
+type Props = {
+  onOpenInQueries?: () => void;
+};
+
+export function SqlPreviewCard({ onOpenInQueries }: Props) {
   const { t } = useTranslation();
 
   return (
@@ -14,7 +18,12 @@ export function SqlPreviewCard() {
       <pre className="m-0 overflow-x-auto rounded border border-rv-divider bg-[#06060A] px-3 py-2.5 font-rv-mono text-[10px] leading-[1.5] text-rv-mute-700">
         {SQL_PREVIEW}
       </pre>
-      <Button variant="flat" size="sm" className="mt-2 w-full justify-center">
+      <Button
+        variant="flat"
+        size="sm"
+        className="mt-2 w-full justify-center"
+        onClick={onOpenInQueries}
+      >
         <Search size={12} />
         {t("charts.sql.openInQueries")}
       </Button>

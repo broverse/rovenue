@@ -3,9 +3,7 @@ import type {
   Annotation,
   Channel,
   FunnelStage,
-  GroupBy,
   MrrSeries,
-  SavedView,
 } from "./types";
 
 export const CHART_MONTH_LABELS = [
@@ -135,33 +133,6 @@ export const HEATMAP_DAY_KEYS = [
   "charts.days.sat",
   "charts.days.sun",
 ] as const;
-
-export const GROUP_BY_OPTIONS: ReadonlyArray<GroupBy> = [
-  "none",
-  "platform",
-  "country",
-  "product",
-  "channel",
-  "cohort_month",
-];
-
-export const SAVED_VIEWS: ReadonlyArray<SavedView> = [
-  {
-    id: "ios_only",
-    nameKey: "charts.savedViews.iosOnly.name",
-    metaKey: "charts.savedViews.iosOnly.meta",
-  },
-  {
-    id: "annual",
-    nameKey: "charts.savedViews.annual.name",
-    metaKey: "charts.savedViews.annual.meta",
-  },
-  {
-    id: "top_countries",
-    nameKey: "charts.savedViews.topCountries.name",
-    metaKey: "charts.savedViews.topCountries.meta",
-  },
-];
 
 export const SQL_PREVIEW = `SELECT
   date_trunc('month', created_at)
