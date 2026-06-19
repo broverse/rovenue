@@ -97,7 +97,7 @@ export async function refundTransaction(input: {
 
     return {
       ok: false,
-      code: "missing_store_ref",
+      code: "store_error",
       message: `Refund unsupported for store "${purchase.store}".`,
     };
   } catch (err) {

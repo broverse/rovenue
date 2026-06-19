@@ -51,3 +51,28 @@ it("maps store SDK errors to store_error", async () => {
   expect(r.ok).toBe(false);
   if (!r.ok) { expect(r.code).toBe("store_error"); expect(r.message).toContain("already refunded"); }
 });
+
+import { loadStripeCredentials, loadGoogleCredentials } from "../../lib/project-credentials";
+
+it("returns store_error when Stripe credentials are null", async () => {
+  (loadStripeCredentials as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+  const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "STRIPE", storeTransactionId: "ch_1", status: "ACTIVE" } as any });
+  expect(r).toEqual({ ok: false, code: "store_error", message: expect.any(String) });
+});
+
+it("returns store_error when Google credentials are null", async () => {
+  (loadGoogleCredentials as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+  const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "PLAY_STORE", storeTransactionId: "GPA.2", status: "ACTIVE" } as any });
+  expect(r).toEqual({ ok: false, code: "store_error", message: expect.any(String) });
+});
+
+it("returns store_error for an unsupported store", async () => {
+  const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "MANUAL", storeTransactionId: "tx_1", status: "ACTIVE" } as any });
+  expect(r).toEqual({ ok: false, code: "store_error", message: expect.any(String) });
+});
+
+it("rejects REVOKED purchase as already_refunded", async () => {
+  const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "STRIPE", storeTransactionId: "ch_1", status: "REVOKED" } as any });
+  expect(r.ok).toBe(false);
+  if (!r.ok) expect(r.code).toBe("already_refunded");
+});
