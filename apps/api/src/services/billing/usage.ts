@@ -122,8 +122,7 @@ export async function buildUsageReport(
         AND occurredAt >= {start:String} AND occurredAt < {end:String}`,
     { start: isoStart, end: isoEnd },
   );
-  const eventsAvailable = sdkCount !== null;
-  const eventsCurrent = eventsAvailable ? webhookCount + (sdkCount ?? 0) : webhookCount;
+  const eventsCurrent = webhookCount + (sdkCount ?? 0);
 
   // --- sql_queries (PG) ---
   const sqlCurrent = await drizzle.warehouseQueryRunRepo.countQueryRunsInPeriod(
@@ -148,7 +147,7 @@ export async function buildUsageReport(
       limit: eventsLimit,
       cap: CAP.events,
       unit: "count",
-      available: eventsAvailable,
+      available: true,
     },
     {
       key: "sql_queries",

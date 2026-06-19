@@ -85,7 +85,7 @@ describe("buildUsageReport", () => {
     const r = await buildUsageReport(db, "proj_1");
     const byKey = Object.fromEntries(r.meters.map((m) => [m.key, m]));
     expect(byKey.mtr).toMatchObject({ current: null, available: false });
-    expect(byKey.events).toMatchObject({ current: 200, available: false }); // PG webhooks only
+    expect(byKey.events).toMatchObject({ current: 200, available: true }); // PG webhooks only
     expect(byKey.sql_queries).toMatchObject({ current: 5, available: true });
   });
 
@@ -96,6 +96,12 @@ describe("buildUsageReport", () => {
     const r = await buildUsageReport(db, "proj_1");
     expect(r.tier).toBe("free");
     expect(mocks.findLimits).toHaveBeenCalledWith(db, "free", "monthly");
+    // Assert calendar-month period dates match what the service's calendarMonth() helper produces.
+    const now = new Date();
+    const expectedStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const expectedEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    expect(r.periodStart).toBe(expectedStart.toISOString());
+    expect(r.periodEnd).toBe(expectedEnd.toISOString());
   });
 
   it("marks hard cap when events meet the limit", async () => {
