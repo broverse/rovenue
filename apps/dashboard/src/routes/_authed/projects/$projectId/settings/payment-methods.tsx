@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
+import { CreditCard } from "lucide-react";
 import {
   useStartAddCard,
   useSetDefaultPaymentMethod,
   useDetachPaymentMethod,
 } from "../../../../../lib/hooks/useBillingMutations";
 import { useBillingPaymentMethods } from "../../../../../lib/hooks/useBillingPaymentMethods";
+import {
+  EmptyStateCard,
+  LoadingState,
+} from "../../../../../components/dashboard";
 import { PaymentMethodRow, UpgradeModal } from "../../../../../components/billing";
 import { Button } from "../../../../../ui/button";
 
@@ -28,16 +33,51 @@ function PaymentMethodsPage() {
     publishableKey: string;
   } | null>(null);
 
-  if (pms.isLoading) return <div className="p-6">Loading…</div>;
+  if (pms.isLoading) return <LoadingState />;
   const rows = pms.data ?? [];
+
+  const addCardButton = (
+    <Button
+      variant="flat"
+      onClick={async () => {
+        const res = await addCard.mutateAsync();
+        setSetupSecret(res);
+      }}
+      disabled={addCard.isPending}
+    >
+      {addCard.isPending ? "Preparing…" : "Add card"}
+    </Button>
+  );
+
+  const modal = setupSecret && (
+    <UpgradeModal
+      clientSecret={setupSecret.clientSecret}
+      publishableKey={setupSecret.publishableKey}
+      onClose={() => setSetupSecret(null)}
+      onSuccess={() => {
+        setSetupSecret(null);
+        void pms.refetch();
+      }}
+    />
+  );
+
+  if (rows.length === 0) {
+    return (
+      <div className="p-6">
+        <EmptyStateCard
+          icon={CreditCard}
+          iconSize={20}
+          title="No payment methods yet"
+          description="Add a card to keep your subscription active and pay invoices automatically."
+          actions={addCardButton}
+        />
+        {modal}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-3 p-6">
-      {rows.length === 0 && (
-        <p className="text-sm text-rv-mute-500">
-          No payment methods yet. Upgrade your project to add one.
-        </p>
-      )}
       {rows.map((pm) => (
         <PaymentMethodRow
           key={pm.id}
@@ -68,28 +108,8 @@ function PaymentMethodsPage() {
         />
       ))}
 
-      <Button
-        variant="flat"
-        onClick={async () => {
-          const res = await addCard.mutateAsync();
-          setSetupSecret(res);
-        }}
-        disabled={addCard.isPending}
-      >
-        {addCard.isPending ? "Preparing…" : "Add card"}
-      </Button>
-
-      {setupSecret && (
-        <UpgradeModal
-          clientSecret={setupSecret.clientSecret}
-          publishableKey={setupSecret.publishableKey}
-          onClose={() => setSetupSecret(null)}
-          onSuccess={() => {
-            setSetupSecret(null);
-            void pms.refetch();
-          }}
-        />
-      )}
+      {addCardButton}
+      {modal}
     </div>
   );
 }

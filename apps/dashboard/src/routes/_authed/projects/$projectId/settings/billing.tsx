@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
+import { AlertCircle } from "lucide-react";
 import { useBillingSummary } from "../../../../../lib/hooks/useBillingSummary";
 import { useStartUpgrade } from "../../../../../lib/hooks/useBillingMutations";
+import {
+  EmptyStateCard,
+  LoadingState,
+} from "../../../../../components/dashboard";
 import { PlanCard, UpgradeModal } from "../../../../../components/billing";
 import { Button } from "../../../../../ui/button";
 
@@ -20,9 +25,23 @@ function BillingPage() {
     publishableKey: string;
   } | null>(null);
 
-  if (summary.isLoading) return <div className="p-6">Loading…</div>;
+  if (summary.isLoading) return <LoadingState />;
   if (summary.isError || !summary.data) {
-    return <div className="p-6">Failed to load billing</div>;
+    return (
+      <div className="p-6">
+        <EmptyStateCard
+          icon={AlertCircle}
+          iconSize={20}
+          title="Couldn't load billing"
+          description="Something went wrong fetching your billing details. Try again in a moment."
+          actions={
+            <Button variant="flat" onClick={() => void summary.refetch()}>
+              Retry
+            </Button>
+          }
+        />
+      </div>
+    );
   }
   const s = summary.data;
 

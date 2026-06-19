@@ -1,5 +1,10 @@
 import { createFileRoute, useParams } from "@tanstack/react-router";
+import { Receipt } from "lucide-react";
 import { useBillingInvoices } from "../../../../../lib/hooks/useBillingInvoices";
+import {
+  EmptyStateCard,
+  LoadingState,
+} from "../../../../../components/dashboard";
 import {
   InvoiceStatusChip,
   type InvoiceStatus,
@@ -17,14 +22,24 @@ function InvoicesPage() {
   });
   const invoices = useBillingInvoices(projectId);
 
-  if (invoices.isLoading) return <div className="p-6">Loading…</div>;
+  if (invoices.isLoading) return <LoadingState />;
   const rows = invoices.data ?? [];
+
+  if (rows.length === 0) {
+    return (
+      <div className="p-6">
+        <EmptyStateCard
+          icon={Receipt}
+          iconSize={20}
+          title="No invoices yet"
+          description="Invoices will show up here once your project has billing activity."
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-3 p-6">
-      {rows.length === 0 && (
-        <p className="text-sm text-rv-mute-500">No invoices yet.</p>
-      )}
       {rows.map((inv) => {
         const refunded = parseFloat(inv.refundedAmount ?? "0") > 0;
         const chipStatus: InvoiceStatus = refunded

@@ -33,7 +33,7 @@ function AuditLogsPage({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <header className="pb-5">
+      <header className="pb-3">
         <h1 className="text-[24px] font-semibold leading-8 tracking-tight">
           {t("auditLogs.title", "Audit log")}
         </h1>

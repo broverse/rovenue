@@ -66,7 +66,7 @@ function MembersPage({ projectId }: { projectId: string }) {
 
   return (
     <>
-      <header className="flex items-start justify-between pb-5">
+      <header className="flex items-start justify-between pb-3">
         <div>
           <h1 className="text-[24px] font-semibold leading-8 tracking-tight">
             {t("members.title")}

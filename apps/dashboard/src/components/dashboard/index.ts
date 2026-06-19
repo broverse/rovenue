@@ -12,3 +12,4 @@ export { RecentActivityPanel, type ActivityEvent, type ActivityKind } from "./re
 export { ExperimentsPanel, type Experiment } from "./experiments-panel";
 export { SystemHealthPanel, type HealthService, type HealthStatus } from "./system-health-panel";
 export { EmptyStateCard } from "./empty-state-card";
+export { LoadingState } from "./loading-state";
