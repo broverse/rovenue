@@ -17,7 +17,7 @@
   - `POST /v1/experiments/{id}/expose` → body `{ "variantId": string, "subscriberId": string }` (public key; parent `/v1` middleware handles auth + rate limit).
   - `POST /v1/receipts/{apple,google}` → response `data` now carries `virtualCurrencyBalances: { "<code>": <int> }` (and `access`).
   - The removed endpoints `GET /v1/me/credits` and `POST /v1/me/credits/spend` no longer exist.
-- Test commands: core `cargo test` (in `packages/core-rs`); swift `swift test` (in `packages/sdk-swift`); kotlin `./gradlew testDebugUnitTest` (in `packages/sdk-kotlin`); RN `pnpm --filter @rovenue/sdk-rn test` (vitest).
+- Test commands: core `cargo test` (in `packages/core-rs`); swift `swift test` (in `packages/sdk-swift`); kotlin `./gradlew testDebugUnitTest` (in `packages/sdk-kotlin`); RN `pnpm --filter @rovenue/react-native-sdk test` (vitest).
 - Crate/workspace version is `0.7.0`; RN package is `0.3.0`. Bump both in the final task (breaking change).
 - **Deviation note (approved during planning):** the `RovenueError::InsufficientCredits` variant and the JS `InsufficientCreditsError` class are **retained but unused** (no longer thrown by any client path), to avoid rippling an error-enum removal through every binding. The spec's "remove from surface" intent is satisfied behaviourally — nothing throws it.
 - **Open detail to confirm in Task A4:** whether `POST /expose`'s `subscriberId` expects the app_user_id or the internal subscriber id. Default to sending the core's current user scope (app_user_id when identified, else rovenue_id); adjust if the endpoint rejects it.
@@ -80,7 +80,7 @@ Add to `packages/core-rs/tests/cache_migration_test.rs`:
 ```rust
 #[test]
 fn migration_v8_creates_virtual_currency_and_exposure_tables() {
-    let store = rovenue_core::cache::test_open_in_memory();
+    let store = rovenue::cache::test_open_in_memory();
     // schema is migrated to LATEST on open
     let version = store
         .with_conn(|c| {
@@ -112,7 +112,7 @@ fn migration_v8_creates_virtual_currency_and_exposure_tables() {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cargo test -p rovenue-core --test cache_migration_test migration_v8 -- --nocapture`
+Run: `cargo test -p librovenue --test cache_migration_test migration_v8 -- --nocapture`
 Expected: FAIL (version is 7; tables missing).
 
 - [ ] **Step 3: Add the migration and bump LATEST**
@@ -317,11 +317,11 @@ Create `packages/core-rs/tests/cache_virtual_currencies_test.rs`:
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use rovenue_core::cache::{VirtualCurrencyRepo, ExposureRepo};
+use rovenue::cache::{VirtualCurrencyRepo, ExposureRepo};
 
-fn open() -> Arc<rovenue_core::cache::CacheStore> {
+fn open() -> Arc<rovenue::cache::CacheStore> {
     // mirror the helper used by cache_credits_test.rs / cache_migration_test.rs
-    Arc::new(rovenue_core::cache::test_open_in_memory())
+    Arc::new(rovenue::cache::test_open_in_memory())
 }
 
 #[test]
@@ -360,7 +360,7 @@ fn exposure_repo_dedups() {
 
 - [ ] **Step 8: Run the cache tests**
 
-Run: `cargo test -p rovenue-core --test cache_virtual_currencies_test --test cache_migration_test`
+Run: `cargo test -p librovenue --test cache_virtual_currencies_test --test cache_migration_test`
 Expected: PASS.
 
 - [ ] **Step 9: Commit**
@@ -416,7 +416,7 @@ fn refresh_parses_balances_envelope_and_caches_them() {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cargo test -p rovenue-core --test virtual_currencies_test`
+Run: `cargo test -p librovenue --test virtual_currencies_test`
 Expected: FAIL (method/endpoint absent).
 
 - [ ] **Step 3: Rename the module + types**
@@ -600,7 +600,7 @@ fn refresh_virtual_currencies_emits_virtual_currencies_changed() {
 
 - [ ] **Step 9: Run the reader + observer tests**
 
-Run: `cargo test -p rovenue-core --test virtual_currencies_test --test observer_test`
+Run: `cargo test -p librovenue --test virtual_currencies_test --test observer_test`
 Expected: PASS (the crate now compiles — reader + api + observer + UDL are all aligned).
 
 - [ ] **Step 10: Commit the whole virtual-currency reader unit**
@@ -643,7 +643,7 @@ assert_eq!(core.virtual_currency("gold".into()), 12);
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cargo test -p rovenue-core --test receipt_apple_test`
+Run: `cargo test -p librovenue --test receipt_apple_test`
 Expected: FAIL (field `virtual_currencies` missing).
 
 - [ ] **Step 3: Update ReceiptResult + the post outcome**
@@ -732,7 +732,7 @@ dictionary ReceiptResult {
 
 - [ ] **Step 6: Run receipt tests**
 
-Run: `cargo test -p rovenue-core --test receipt_apple_test --test receipt_google_test`
+Run: `cargo test -p librovenue --test receipt_apple_test --test receipt_google_test`
 Expected: PASS. (Apply the same body/assertion swap to `receipt_google_test.rs` if it has a credit assertion.)
 
 - [ ] **Step 7: Commit**
@@ -808,7 +808,7 @@ fn experiments_all_does_not_fire_exposure() {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `cargo test -p rovenue-core --test exposure_test`
+Run: `cargo test -p librovenue --test exposure_test`
 Expected: FAIL (no POST is made).
 
 - [ ] **Step 3: Implement the tracker**
@@ -922,12 +922,12 @@ Leave `experiments_all()` untouched (no exposure).
 
 - [ ] **Step 5: Run the exposure tests**
 
-Run: `cargo test -p rovenue-core --test exposure_test`
+Run: `cargo test -p librovenue --test exposure_test`
 Expected: PASS.
 
 - [ ] **Step 6: Run the full core suite**
 
-Run: `cargo test -p rovenue-core`
+Run: `cargo test -p librovenue`
 Expected: PASS (all suites, including the rewritten cache/credits/receipt tests).
 
 - [ ] **Step 7: Commit**
@@ -1260,7 +1260,7 @@ Replace `creditBalance: number;` in `PurchaseResultDTO` with `virtualCurrencies:
 
 - [ ] **Step 3: Typecheck**
 
-Run: `pnpm --filter @rovenue/sdk-rn exec tsc --noEmit`
+Run: `pnpm --filter @rovenue/react-native-sdk exec tsc --noEmit`
 Expected: errors in `api/credits.ts`, `hooks/useCreditBalance.ts`, `index.ts`, `types.ts` (fixed in D2–D4). The spec file itself must be error-free.
 
 - [ ] **Step 4: Commit**
@@ -1318,7 +1318,7 @@ describe("virtualCurrencies api", () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pnpm --filter @rovenue/sdk-rn test virtualCurrencies`
+Run: `pnpm --filter @rovenue/react-native-sdk test virtualCurrencies`
 Expected: FAIL (module not found).
 
 - [ ] **Step 3: Create the api module**
@@ -1357,7 +1357,7 @@ Delete `packages/sdk-rn/src/api/credits.ts`.
 
 - [ ] **Step 4: Run the test**
 
-Run: `pnpm --filter @rovenue/sdk-rn test virtualCurrencies`
+Run: `pnpm --filter @rovenue/react-native-sdk test virtualCurrencies`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -1405,7 +1405,7 @@ it("useVirtualCurrency returns 0 for an absent code", async () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `pnpm --filter @rovenue/sdk-rn test hooks`
+Run: `pnpm --filter @rovenue/react-native-sdk test hooks`
 Expected: FAIL (module not found).
 
 - [ ] **Step 3: Create the hook module**
@@ -1449,7 +1449,7 @@ Delete `packages/sdk-rn/src/hooks/useCreditBalance.ts`.
 
 - [ ] **Step 4: Run the test**
 
-Run: `pnpm --filter @rovenue/sdk-rn test hooks`
+Run: `pnpm --filter @rovenue/react-native-sdk test hooks`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -1539,7 +1539,7 @@ In `packages/sdk-rn/src/__tests__/eventBridge.test.ts`, replace the `CREDIT_BALA
 
 - [ ] **Step 6: Run the full RN suite + typecheck**
 
-Run: `pnpm --filter @rovenue/sdk-rn exec tsc --noEmit && pnpm --filter @rovenue/sdk-rn test`
+Run: `pnpm --filter @rovenue/react-native-sdk exec tsc --noEmit && pnpm --filter @rovenue/react-native-sdk test`
 Expected: PASS, no type errors.
 
 - [ ] **Step 7: Commit**
@@ -1593,10 +1593,10 @@ git commit -m "docs(sdk): migrate credit docs to virtual currencies; bump SDK ve
 ## Final verification
 
 - [ ] **Run every layer's suite:**
-  - `cargo test -p rovenue-core` → PASS
+  - `cargo test -p librovenue` → PASS
   - `npm run sdk:bindings` → regenerates cleanly
   - `cd packages/sdk-swift && swift test` → PASS
   - `cd packages/sdk-kotlin && ./gradlew testDebugUnitTest` → PASS
-  - `pnpm --filter @rovenue/sdk-rn exec tsc --noEmit && pnpm --filter @rovenue/sdk-rn test` → PASS
+  - `pnpm --filter @rovenue/react-native-sdk exec tsc --noEmit && pnpm --filter @rovenue/react-native-sdk test` → PASS
 - [ ] **Grep for stragglers:** `grep -rn "credit_balance\|creditBalance\|consumeCredits\|me/credits\|CreditBalanceChanged\|CREDIT_BALANCE_CHANGED" packages/ --include=*.rs --include=*.swift --include=*.kt --include=*.ts` → only the retained-but-unused `InsufficientCredits`/`InsufficientCreditsError` identifiers should remain.
 ```
