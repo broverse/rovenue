@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Popover } from "@base-ui-components/react/popover";
 import { Calendar, ChevronDown, X } from "lucide-react";
 import { Button, buttonVariants } from "../../ui/button";
+import { DateField } from "../../ui/date-field";
 import { cn } from "../../lib/cn";
 
 export type DateRangeValue = {
@@ -70,8 +71,8 @@ export function DateRangePopover({ value, onChange }: Props) {
     const from = draftFrom || null;
     const to = draftTo || null;
     if (from && to && from > to) {
-      // UI bound to native HTML constraints below — defensive no-op
-      // here so accidentally inverted inputs don't write garbage.
+      // The DateField min/max props already clamp selection, so this is a
+      // defensive no-op guarding against an inverted range slipping through.
       return;
     }
     onChange({ from, to });
@@ -165,17 +166,17 @@ export function DateRangePopover({ value, onChange }: Props) {
                 {t("subscribers.dateRange.customHeading")}
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <DateInput
+                <DateField
                   label={t("subscribers.dateRange.from")}
-                  value={draftFrom}
+                  value={draftFrom || null}
                   max={draftTo || undefined}
-                  onChange={setDraftFrom}
+                  onChange={(next) => setDraftFrom(next ?? "")}
                 />
-                <DateInput
+                <DateField
                   label={t("subscribers.dateRange.to")}
-                  value={draftTo}
+                  value={draftTo || null}
                   min={draftFrom || undefined}
-                  onChange={setDraftTo}
+                  onChange={(next) => setDraftTo(next ?? "")}
                 />
               </div>
             </div>
@@ -197,35 +198,5 @@ export function DateRangePopover({ value, onChange }: Props) {
         </Popover.Positioner>
       </Popover.Portal>
     </Popover.Root>
-  );
-}
-
-function DateInput({
-  label,
-  value,
-  onChange,
-  min,
-  max,
-}: {
-  label: string;
-  value: string;
-  onChange: (next: string) => void;
-  min?: string;
-  max?: string;
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[11px] uppercase tracking-wider text-rv-mute-500">
-        {label}
-      </span>
-      <input
-        type="date"
-        value={value}
-        min={min}
-        max={max}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-7 w-full rounded-md border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none transition focus:border-rv-accent-500 [color-scheme:dark]"
-      />
-    </label>
   );
 }

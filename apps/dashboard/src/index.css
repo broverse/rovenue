@@ -130,3 +130,40 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
+
+/* Scoped HeroUI token bridge for the date components (`ui/calendar`,
+ * `ui/date-field`, `ui/date-picker`, `ui/date-range-picker`). Repoints
+ * HeroUI's accent + focus tokens at the rv accent so any HeroUI-internal
+ * accent surface (focus rings, react-aria selection states) matches the
+ * app. Scoped to `.rv-date` — global HeroUI usages are untouched. The
+ * components also carry explicit rv classes; this just covers the rest. */
+.rv-date {
+  --accent: var(--color-rv-accent-500);
+  --color-accent: var(--color-rv-accent-500);
+  --accent-foreground: #ffffff;
+  --color-accent-foreground: #ffffff;
+  --focus: var(--color-rv-accent-500);
+  --color-focus: var(--color-rv-accent-500);
+}
+
+/* HeroUI ships `.calendar__grid { grid-template-columns: repeat(7, 1fr) }`,
+ * and `1fr` (= `minmax(auto, 1fr)`) combined with the cells' `aspect-ratio: 1`
+ * forces each track wider than the popover, so the last columns clip. This
+ * two-class selector outranks HeroUI's single-class rule (independent of CSS
+ * source order) and swaps in `minmax(0, 1fr)` so all 7 columns always fit. */
+.rv-date .calendar__grid,
+.rv-date .range-calendar__grid {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  width: 100%;
+}
+
+/* HeroUI clamps the date popover to the trigger field with
+ * `.date-picker__popover { max-width: var(--trigger-width) }` (react-aria sets
+ * `--trigger-width` inline to the field's width). In the cramped filter the
+ * field is ~150px, so the 320px calendar gets clipped. The compound selector
+ * (same element carries both classes) outranks HeroUI's single-class rule and
+ * drops the clamp so the popover's own `w-80` width applies. */
+.rv-date.date-picker__popover,
+.rv-date.date-range-picker__popover {
+  max-width: none;
+}

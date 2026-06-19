@@ -3,6 +3,7 @@ import { Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { SubscriptionStoreCode } from "@rovenue/shared";
 import { FilterPill } from "../subscribers/filter-pill";
+import { DatePicker } from "../../ui/date-picker";
 import { cn } from "../../lib/cn";
 
 // Public value object — owned by the route, passed in.
@@ -144,6 +145,11 @@ function useClickAway(onAway: () => void) {
   useEffect(() => {
     const handle = (e: MouseEvent) => {
       if (!ref.current) return;
+      const target = e.target as Element | null;
+      // The DatePicker calendar portals to <body>, i.e. outside this ref.
+      // Treat clicks inside a `.rv-date` surface as inside, so picking a day
+      // doesn't collapse the whole filter panel.
+      if (target?.closest?.(".rv-date")) return;
       if (!ref.current.contains(e.target as Node)) onAway();
     };
     document.addEventListener("mousedown", handle);
@@ -314,7 +320,7 @@ function MoreFiltersPopover({
         ) : null}
       </FilterPill>
       {open ? (
-        <div className="absolute right-0 top-full z-10 mt-1 w-[320px] rounded-md border border-rv-divider bg-rv-c1 p-3 shadow-lg">
+        <div className="absolute right-0 top-full z-10 mt-1 w-[380px] rounded-md border border-rv-divider bg-rv-c1 p-3 shadow-lg">
           <FlagToggle
             label={t("subscriptions.filters.isTrial")}
             value={value.isTrial}
@@ -407,18 +413,20 @@ function DateRange({
         {label}
       </div>
       <div className="flex items-center gap-1.5">
-        <input
-          type="date"
-          value={from ?? ""}
-          onChange={(e) => onChange(e.target.value || undefined, to)}
-          className="h-7 flex-1 rounded-md border border-rv-divider bg-rv-c2 px-2 text-[12px] outline-none focus:border-rv-accent-500"
+        <DatePicker
+          value={from ?? null}
+          max={to || undefined}
+          onChange={(next) => onChange(next ?? undefined, to)}
+          size="sm"
+          className="min-w-0 flex-1"
         />
-        <span className="text-rv-mute-500">–</span>
-        <input
-          type="date"
-          value={to ?? ""}
-          onChange={(e) => onChange(from, e.target.value || undefined)}
-          className="h-7 flex-1 rounded-md border border-rv-divider bg-rv-c2 px-2 text-[12px] outline-none focus:border-rv-accent-500"
+        <span className="shrink-0 text-rv-mute-500">–</span>
+        <DatePicker
+          value={to ?? null}
+          min={from || undefined}
+          onChange={(next) => onChange(from, next ?? undefined)}
+          size="sm"
+          className="min-w-0 flex-1"
         />
       </div>
     </div>
