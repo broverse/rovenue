@@ -712,6 +712,22 @@
       "filter": "Filter",
       "of": "of"
     },
+    "filter": {
+      "typeHeading": "Type",
+      "types": {
+        "SUBSCRIPTION": "Subscription",
+        "CONSUMABLE": "Consumable",
+        "NON_CONSUMABLE": "Non-consumable"
+      },
+      "storeHeading": "Store",
+      "stores": {
+        "ios": "iOS",
+        "android": "Android",
+        "web": "Web"
+      },
+      "clear": "Clear",
+      "apply": "Apply"
+    },
     "bulk": {
       "selected": "selected",
       "archive": "Archive",
@@ -755,8 +771,13 @@
         "overview": "Overview",
         "pricing": "Pricing",
         "access": "Access",
+        "groups": "Groups",
         "subscribers": "Subscribers",
         "activity": "Activity"
+      },
+      "groups": {
+        "heading": "Product groups",
+        "defaultBadge": "Default"
       }
     },
     "tip": {
