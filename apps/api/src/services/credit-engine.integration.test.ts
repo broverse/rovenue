@@ -9,6 +9,7 @@ import {
   spendCredits,
   getBalance,
   getAllBalances,
+  refundCredits,
   InsufficientCreditsError,
 } from "./credit-engine";
 
@@ -50,6 +51,7 @@ describe("credit-engine multi-currency", () => {
       })
     ).id;
     expect(goldId).toBeTruthy();
+    expect(gemId).toBeTruthy();
   });
 
   it("grants and spends within one currency, isolated from another", async () => {
@@ -73,15 +75,48 @@ describe("credit-engine multi-currency", () => {
   });
 
   it("serializes concurrent spends on the same currency (no overdraft)", async () => {
-    await addCredits({ subscriberId: SUB_ID, currencyId: goldId, amount: 40 }); // -> 100
+    // Use a dedicated currency so this test is fully self-contained and
+    // not affected by balances left by earlier (or reordered) it-blocks.
+    const concId = (
+      await drizzle.virtualCurrencyRepo.createVirtualCurrency(drizzle.db, {
+        projectId: PROJECT_ID,
+        code: "CONC",
+        name: "ConcurrencyCoins",
+      })
+    ).id;
+    expect(concId).toBeTruthy();
+
+    // Start from a deterministic balance of 100.
+    await addCredits({ subscriberId: SUB_ID, currencyId: concId, amount: 100 });
+
+    // Fire two concurrent 70-spends. Only one can succeed; the other must
+    // fail with InsufficientCreditsError (balance would go negative).
     const results = await Promise.allSettled([
-      spendCredits({ subscriberId: SUB_ID, currencyId: goldId, amount: 70 }),
-      spendCredits({ subscriberId: SUB_ID, currencyId: goldId, amount: 70 }),
+      spendCredits({ subscriberId: SUB_ID, currencyId: concId, amount: 70 }),
+      spendCredits({ subscriberId: SUB_ID, currencyId: concId, amount: 70 }),
     ]);
     const ok = results.filter((r) => r.status === "fulfilled");
     const failed = results.filter((r) => r.status === "rejected");
     expect(ok).toHaveLength(1);
     expect(failed).toHaveLength(1);
-    expect(await getBalance(SUB_ID, goldId)).toBe(30);
+    expect(
+      (failed[0] as PromiseRejectedResult).reason,
+    ).toBeInstanceOf(InsufficientCreditsError);
+    // Final balance must be exactly 100 - 70 = 30 (no overdraft).
+    expect(await getBalance(SUB_ID, concId)).toBe(30);
+  });
+
+  it("refundCredits deposits a positive amount (balance increases)", async () => {
+    const balanceBefore = await getBalance(SUB_ID, gemId);
+    const refundAmount = 10;
+    await refundCredits({
+      subscriberId: SUB_ID,
+      currencyId: gemId,
+      amount: refundAmount,
+      referenceId: `ref_test_${RUN_ID}`,
+    });
+    const balanceAfter = await getBalance(SUB_ID, gemId);
+    expect(balanceAfter).toBe(balanceBefore + refundAmount);
+    expect(balanceAfter).toBeGreaterThan(balanceBefore);
   });
 });
