@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
+import { Link } from "@tanstack/react-router";
 import { Check, FlaskConical } from "lucide-react";
-import { Button } from "../../ui/button";
+import { buttonVariants } from "../../ui/button";
 import { Card, CardFooter, CardHeader } from "../../ui/card";
 import { Chip } from "../../ui/chip";
 import { Segmented } from "../../ui/segmented";
@@ -22,9 +23,9 @@ export type Experiment = {
 const FILTER_KEYS = ["running", "completed", "all"] as const;
 type FilterKey = (typeof FILTER_KEYS)[number];
 
-type Props = { experiments: ReadonlyArray<Experiment> };
+type Props = { experiments: ReadonlyArray<Experiment>; projectId: string };
 
-export function ExperimentsPanel({ experiments }: Props) {
+export function ExperimentsPanel({ experiments, projectId }: Props) {
   const { t } = useTranslation();
   const [filter, setFilter] = useState<FilterKey>("running");
 
@@ -105,9 +106,13 @@ export function ExperimentsPanel({ experiments }: Props) {
         )}
       </div>
       <CardFooter>
-        <Button variant="light" className="h-6 p-0 text-xs">
+        <Link
+          to="/projects/$projectId/experiments"
+          params={{ projectId }}
+          className={buttonVariants({ variant: "light", className: "h-6 p-0 text-xs" })}
+        >
           {t("panels.experiments.viewAll")}
-        </Button>
+        </Link>
       </CardFooter>
     </Card>
   );

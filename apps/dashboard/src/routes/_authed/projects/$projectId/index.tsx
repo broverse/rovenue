@@ -484,7 +484,6 @@ function ProjectOverview() {
             <RefreshCw size={13} className={isRefreshing ? "animate-spin" : undefined} />
             {t("common.refresh")}
           </Button>
-          <Button variant="flat">{t("common.export")}</Button>
         </div>
       </header>
 
@@ -547,7 +546,7 @@ function ProjectOverview() {
           />
         </div>
         <div className="col-span-12 lg:col-span-4">
-          <TopProductsPanel products={panelTopProducts} />
+          <TopProductsPanel products={panelTopProducts} projectId={projectId} />
         </div>
       </div>
 
@@ -568,7 +567,7 @@ function ProjectOverview() {
           <RecentActivityPanel events={panelActivity} live />
         </div>
         <div className="col-span-12 lg:col-span-6">
-          <ExperimentsPanel experiments={panelExperiments} />
+          <ExperimentsPanel experiments={panelExperiments} projectId={projectId} />
         </div>
       </div>
 

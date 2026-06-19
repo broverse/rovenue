@@ -1,7 +1,8 @@
 import { useTranslation } from "react-i18next";
+import { Link } from "@tanstack/react-router";
 import { PackageOpen } from "lucide-react";
 import { Card, CardHeader } from "../../ui/card";
-import { Button } from "../../ui/button";
+import { buttonVariants } from "../../ui/button";
 
 export type TopProduct = {
   name: string;
@@ -11,12 +12,12 @@ export type TopProduct = {
   subs: number;
 };
 
-type Props = { products: ReadonlyArray<TopProduct> };
+type Props = { products: ReadonlyArray<TopProduct>; projectId: string };
 
 /**
  * "Top products" panel — revenue contribution as labeled progress rows.
  */
-export function TopProductsPanel({ products }: Props) {
+export function TopProductsPanel({ products, projectId }: Props) {
   const { t } = useTranslation();
   return (
     <Card className="flex h-full flex-col">
@@ -24,9 +25,13 @@ export function TopProductsPanel({ products }: Props) {
         title={t("panels.topProducts.title")}
         subtitle={t("panels.topProducts.subtitle")}
         right={
-          <Button variant="light" className="h-6 px-2 text-xs">
+          <Link
+            to="/projects/$projectId/products"
+            params={{ projectId }}
+            className={buttonVariants({ variant: "light", className: "h-6 px-2 text-xs" })}
+          >
             {t("panels.topProducts.viewAll")}
-          </Button>
+          </Link>
         }
       />
       <div className="flex-1 px-5 pb-4 pt-1">
