@@ -129,15 +129,9 @@ describe("insertCreditLedger", () => {
     const project = await seedProject();
     const currency = await seedCurrency(project.id);
 
-    const nonExistentSubscriberId = "nonexistent-subscriber-id-that-does-not-exist";
-
-    // Snapshot counts BEFORE the failing call.
-    const ledgerCountBefore = await db
-      .select({ count: sql<string>`count(*)` })
-      .from(schema.creditLedger);
-    const outboxCountBefore = await db
-      .select({ count: sql<string>`count(*)` })
-      .from(schema.outboxEvents);
+    // Use a unique-per-run fake subscriber id so scoped counts are
+    // deterministic even when other test workers commit rows concurrently.
+    const nonExistentSubscriberId = `nonexistent-sub-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     await expect(
       insertCreditLedger(db, {
@@ -150,15 +144,25 @@ describe("insertCreditLedger", () => {
       }),
     ).rejects.toThrow();
 
-    // Neither credit_ledger nor outbox_events should have grown.
-    const ledgerCountAfter = await db
+    // Scoped count: rows for THIS subscriber only.
+    // After a rolled-back insert the count must be 0 — no ledger row persisted.
+    const ledgerRows = await db
       .select({ count: sql<string>`count(*)` })
-      .from(schema.creditLedger);
-    const outboxCountAfter = await db
-      .select({ count: sql<string>`count(*)` })
-      .from(schema.outboxEvents);
+      .from(schema.creditLedger)
+      .where(eq(schema.creditLedger.subscriberId, nonExistentSubscriberId));
+    expect(ledgerRows[0]!.count).toBe("0");
 
-    expect(ledgerCountAfter[0]!.count).toBe(ledgerCountBefore[0]!.count);
-    expect(outboxCountAfter[0]!.count).toBe(outboxCountBefore[0]!.count);
+    // Scoped outbox count: CREDIT_LEDGER events whose payload carries this
+    // subscriber id. After rollback the outbox row must not have persisted.
+    const outboxRows = await db
+      .select({ count: sql<string>`count(*)` })
+      .from(schema.outboxEvents)
+      .where(
+        and(
+          eq(schema.outboxEvents.aggregateType, "CREDIT_LEDGER"),
+          sql`${schema.outboxEvents.payload}->>'subscriberId' = ${nonExistentSubscriberId}`,
+        ),
+      );
+    expect(outboxRows[0]!.count).toBe("0");
   });
 });
