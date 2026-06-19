@@ -223,10 +223,14 @@ describe("transferSubscriber", () => {
 
   test("transfers credit balance via TRANSFER_OUT + TRANSFER_IN entries", async () => {
     setupSubscribers({}, {});
-    drizzleMock.creditLedgerRepo.findLatestBalance.mockImplementation(
-      async (_tx: unknown, subscriberId: string) =>
-        subscriberId === "sub_from" ? { balance: 150 } : { balance: 50 },
-    );
+    // FROM subscriber has 150 units of currency "curr_a"
+    drizzleMock.creditLedgerRepo.findAllBalances.mockResolvedValue([
+      { currencyId: "curr_a", balance: 150 },
+    ]);
+    // TO subscriber already has 50 units of "curr_a"
+    drizzleMock.creditLedgerRepo.findLatestBalance.mockResolvedValue({
+      balance: 50,
+    });
 
     await transferSubscriber("proj_a", "old_user", "new_user");
 
@@ -240,20 +244,23 @@ describe("transferSubscriber", () => {
 
     expect(outEntry).toBeDefined();
     expect(outEntry!.subscriberId).toBe("sub_from");
+    expect(outEntry!.currencyId).toBe("curr_a");
     expect(outEntry!.amount).toBe(-150);
     expect(outEntry!.balance).toBe(0);
 
     expect(inEntry).toBeDefined();
     expect(inEntry!.subscriberId).toBe("sub_to");
+    expect(inEntry!.currencyId).toBe("curr_a");
     expect(inEntry!.amount).toBe(150);
     expect(inEntry!.balance).toBe(200); // 50 + 150
   });
 
   test("skips credit transfer when fromSubscriber has zero balance", async () => {
     setupSubscribers({}, {});
-    drizzleMock.creditLedgerRepo.findLatestBalance.mockResolvedValue({
-      balance: 0,
-    });
+    // findAllBalances returns a zero-balance currency — loop skips it
+    drizzleMock.creditLedgerRepo.findAllBalances.mockResolvedValue([
+      { currencyId: "curr_a", balance: 0 },
+    ]);
 
     await transferSubscriber("proj_a", "old_user", "new_user");
 
@@ -318,9 +325,9 @@ describe("transferSubscriber", () => {
 
   test("returns the transfer summary", async () => {
     setupSubscribers({}, {});
-    drizzleMock.creditLedgerRepo.findLatestBalance.mockResolvedValue({
-      balance: 100,
-    });
+    drizzleMock.creditLedgerRepo.findAllBalances.mockResolvedValue([
+      { currencyId: "curr_a", balance: 100 },
+    ]);
 
     const result = await transferSubscriber("proj_a", "old_user", "new_user");
 
