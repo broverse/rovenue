@@ -91,13 +91,13 @@ class RovenueModule : Module() {
         AsyncFunction("refreshEntitlements") Coroutine { ->
             Rovenue.shared.refreshEntitlements()
         }
-        AsyncFunction("creditBalance") Coroutine { ->
-            Rovenue.shared.creditBalance().toDouble()
+        AsyncFunction("virtualCurrencies") Coroutine { ->
+            Rovenue.shared.virtualCurrencyBalances().mapValues { it.value.toDouble() }
         }
-        AsyncFunction("refreshCredits") Coroutine { -> Rovenue.shared.refreshCredits() }
-        AsyncFunction("consumeCredits") Coroutine { amount: Double, description: String? ->
-            Rovenue.shared.consumeCredits(amount.toLong(), description).toDouble()
+        AsyncFunction("virtualCurrency") Coroutine { code: String ->
+            Rovenue.shared.virtualCurrency(code).toDouble()
         }
+        AsyncFunction("refreshVirtualCurrencies") Coroutine { -> Rovenue.shared.refreshVirtualCurrencies() }
         // ---------------- Remote Config ----------------
         AsyncFunction("refreshRemoteConfig") Coroutine { -> Rovenue.shared.refreshRemoteConfig() }
         AsyncFunction("remoteConfigBool") Coroutine { key: String, fallback: Boolean ->
@@ -289,7 +289,7 @@ class RovenueModule : Module() {
 
     private fun dtoFromPurchaseResult(r: PurchaseResult): Map<String, Any?> = mapOf(
         "entitlements"      to r.entitlements.map(::dtoFromEntitlement),
-        "creditBalance"     to r.creditBalance.toDouble(),
+        "virtualCurrencies" to r.virtualCurrencies.mapValues { it.value.toDouble() },
         "productId"         to r.productId,
         "storeTransactionId" to r.storeTransactionId,
     )
