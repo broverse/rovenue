@@ -208,7 +208,7 @@ export function GrantSubscriptionModal({
                 {lockedSubscriber ? (
                   <Input
                     id={idSubscriber}
-                    value={initialSubscriberLabel ?? initialSubscriberId ?? ""}
+                    value={initialSubscriberId || initialSubscriberLabel || ""}
                     readOnly
                     disabled
                   />

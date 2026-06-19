@@ -199,7 +199,7 @@ export function SubscriberDetailPanel({
         open={grantOpen}
         onClose={() => setGrantOpen(false)}
         initialSubscriberId={rovenueId}
-        initialSubscriberLabel={subscriber.full}
+        initialSubscriberLabel={subscriber.full || rovenueId}
       />
       </aside>
     </>
