@@ -10,8 +10,6 @@ type Stat = {
 type Props = {
   totalApps: number;
   connectedApps: number;
-  events: string;
-  successRate: string;
 };
 
 const heroStyle: CSSProperties = {
@@ -19,13 +17,11 @@ const heroStyle: CSSProperties = {
     "linear-gradient(135deg, color-mix(in srgb, var(--color-rv-accent-500) 12%, var(--color-rv-c1)), var(--color-rv-c1) 60%)",
 };
 
-export function AppsHero({ totalApps, connectedApps, events, successRate }: Props) {
+export function AppsHero({ totalApps, connectedApps }: Props) {
   const { t } = useTranslation();
   const stats: ReadonlyArray<Stat> = [
     { labelKey: "apps", value: String(totalApps) },
     { labelKey: "connected", value: String(connectedApps), tone: "success" },
-    { labelKey: "events", value: events },
-    { labelKey: "successRate", value: successRate, tone: "success" },
   ];
 
   return (

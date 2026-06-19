@@ -1,6 +1,5 @@
 import { useTranslation } from "react-i18next";
 import { AppLogo } from "./app-logo";
-import { CONNECTED_LAST_SYNC_LABEL } from "./mock-data";
 import type { AppDescriptor } from "./types";
 
 type Props = {
@@ -16,9 +15,6 @@ export function ConnectedStrip({ apps }: Props) {
         <h3 className="text-[13px] font-semibold text-foreground">
           {t("apps.connected.title", { count: apps.length })}
         </h3>
-        <span className="font-rv-mono text-[11px] text-rv-mute-500">
-          {t("apps.connected.lastSync", { value: CONNECTED_LAST_SYNC_LABEL })}
-        </span>
       </header>
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
         {apps.map((app) => (

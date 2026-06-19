@@ -1,6 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { Terminal } from "lucide-react";
-import { Button } from "../../ui/button";
 import { cn } from "../../lib/cn";
 import { RAIL_ENTRIES } from "./mock-data";
 import type { CategoryCounts, RailEntryId } from "./types";
@@ -50,15 +48,6 @@ export function CategoryRail({ active, counts, onSelect }: Props) {
           </button>
         ),
       )}
-      <div className="mt-1.5 hidden border-t border-rv-divider px-2.5 pb-2 pt-3 lg:block">
-        <p className="mb-2 text-[11px] leading-[1.55] text-rv-mute-500">
-          {t("apps.rail.consoleHelp")}
-        </p>
-        <Button variant="flat" size="sm" className="h-7 w-full text-[11.5px]">
-          <Terminal size={12} />
-          {t("apps.rail.openConsole")}
-        </Button>
-      </div>
     </aside>
   );
 }

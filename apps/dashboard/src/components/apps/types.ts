@@ -17,10 +17,6 @@ export type AppStatus = "connected" | "available" | "error" | "unavailable";
 
 export type AppTag = "new" | "beta" | "partner";
 
-export type AppView = "grid" | "list";
-
-export type AppTier = "all" | "official" | "partner" | "self-hosted";
-
 export type AppLogo = {
   /** CSS background — solid color or gradient string. */
   background: string;
@@ -61,8 +57,3 @@ export type RailItemEntry = {
 export type RailEntry = RailSectionEntry | RailItemEntry;
 
 export type CategoryCounts = Readonly<Record<RailEntryId, number>>;
-
-export type FeaturedRecipe = {
-  id: string;
-  appIds: ReadonlyArray<string>;
-};

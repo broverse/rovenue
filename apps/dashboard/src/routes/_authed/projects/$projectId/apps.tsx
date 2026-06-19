@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { BookOpen, Webhook } from "lucide-react";
-import { Button } from "../../../../ui/button";
+import { Button, buttonVariants } from "../../../../ui/button";
 import {
   APPS,
   AppCard,
@@ -13,14 +13,11 @@ import {
   BuildYourOwnCard,
   CategoryRail,
   ConnectedStrip,
-  FeaturedRecipeBanner,
-  HERO_STATS,
+  DOCS_URL,
   HOMEPAGE_SECTIONS,
   computeCategoryCounts,
   matchesQuery,
   type AppDescriptor,
-  type AppTier,
-  type AppView,
   type RailEntryId,
 } from "../../../../components/apps";
 import { IntegrationDrawer } from "../../../../components/apps/integration-drawer/integration-drawer";
@@ -74,8 +71,6 @@ function AppsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [active, setActive] = useState<RailEntryId>("all");
   const [query, setQuery] = useState("");
-  const [view, setView] = useState<AppView>("grid");
-  const [tier, setTier] = useState<AppTier>("all");
   const [drawerProviderId, setDrawerProviderId] = useState<"META_CAPI" | "TIKTOK_EVENTS" | null>(null);
   const [webhookModalOpen, setWebhookModalOpen] = useState(false);
   const connections = useProjectAppConnections(projectId);
@@ -132,10 +127,15 @@ function AppsPage({ projectId }: { projectId: string }) {
           <p className="mt-1 text-[12.5px] text-rv-mute-500 sm:text-[13px]">{t("apps.subtitle")}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="flat" size="sm">
+          <a
+            href={DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+            className={buttonVariants({ variant: "flat", size: "sm" })}
+          >
             <BookOpen size={13} />
             {t("apps.actions.docs")}
-          </Button>
+          </a>
           <Button variant="flat" size="sm" onClick={() => setWebhookModalOpen(true)}>
             <Webhook size={13} />
             {t("apps.actions.customWebhook")}
@@ -143,29 +143,16 @@ function AppsPage({ projectId }: { projectId: string }) {
         </div>
       </header>
 
-      <AppsHero
-        totalApps={counts.all}
-        connectedApps={counts.connected}
-        events={HERO_STATS.events}
-        successRate={HERO_STATS.successRate}
-      />
+      <AppsHero totalApps={counts.all} connectedApps={counts.connected} />
 
       <div className="grid items-start gap-4 grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)]">
         <CategoryRail active={active} counts={counts} onSelect={setActive} />
 
         <main className="min-w-0">
-          <AppsToolbar
-            query={query}
-            onQueryChange={setQuery}
-            view={view}
-            onViewChange={setView}
-            tier={tier}
-            onTierChange={setTier}
-          />
+          <AppsToolbar query={query} onQueryChange={setQuery} />
 
           {showHomepage ? (
             <>
-              <FeaturedRecipeBanner />
               <ConnectedStrip apps={connected} />
               {HOMEPAGE_SECTIONS.map((category) => (
                 <AppsSection
@@ -202,7 +189,7 @@ function AppsPage({ projectId }: { projectId: string }) {
             </>
           )}
 
-          <BuildYourOwnCard />
+          <BuildYourOwnCard onNewWebhook={() => setWebhookModalOpen(true)} />
         </main>
       </div>
 

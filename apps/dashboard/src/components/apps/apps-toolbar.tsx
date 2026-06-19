@@ -1,28 +1,12 @@
 import { useTranslation } from "react-i18next";
-import { LayoutGrid, List } from "lucide-react";
 import { SearchInput } from "../../ui/search-input";
-import { cn } from "../../lib/cn";
-import type { AppTier, AppView } from "./types";
 
 type Props = {
   query: string;
   onQueryChange: (next: string) => void;
-  view: AppView;
-  onViewChange: (next: AppView) => void;
-  tier: AppTier;
-  onTierChange: (next: AppTier) => void;
 };
 
-const TIERS: ReadonlyArray<AppTier> = ["all", "official", "partner", "self-hosted"];
-
-export function AppsToolbar({
-  query,
-  onQueryChange,
-  view,
-  onViewChange,
-  tier,
-  onTierChange,
-}: Props) {
+export function AppsToolbar({ query, onQueryChange }: Props) {
   const { t } = useTranslation();
   return (
     <div className="mb-3.5 flex flex-wrap items-center gap-2.5 rounded-lg border border-rv-divider bg-rv-c1 px-3 py-2.5 sm:px-3.5">
@@ -34,48 +18,6 @@ export function AppsToolbar({
         size="md"
         rootClassName="w-full min-w-0 flex-1 sm:w-auto sm:min-w-[220px]"
       />
-      <div className="inline-flex items-center gap-0.5 rounded-md border border-rv-divider bg-rv-c2 p-0.5">
-        {(["grid", "list"] as const).map((option) => {
-          const Icon = option === "grid" ? LayoutGrid : List;
-          return (
-            <button
-              key={option}
-              type="button"
-              onClick={() => onViewChange(option)}
-              className={cn(
-                "inline-flex h-[26px] cursor-pointer items-center gap-1.5 rounded px-2.5 text-[11.5px] transition",
-                view === option
-                  ? "bg-rv-c4 text-foreground"
-                  : "text-rv-mute-600 hover:text-foreground",
-              )}
-            >
-              <Icon size={11} />
-              {t(`apps.toolbar.view.${option}`)}
-            </button>
-          );
-        })}
-      </div>
-      <div className="inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-md border border-rv-divider bg-rv-c2 p-0.5">
-        {TIERS.map((option) => (
-          <button
-            key={option}
-            type="button"
-            onClick={() => onTierChange(option)}
-            className={cn(
-              "inline-flex h-[26px] shrink-0 cursor-pointer items-center rounded px-2.5 text-[11.5px] transition",
-              tier === option
-                ? "bg-rv-c4 text-foreground"
-                : "text-rv-mute-600 hover:text-foreground",
-            )}
-          >
-            {t(`apps.toolbar.tiers.${tierKey(option)}`)}
-          </button>
-        ))}
-      </div>
     </div>
   );
-}
-
-function tierKey(tier: AppTier): string {
-  return tier === "self-hosted" ? "selfHosted" : tier;
 }

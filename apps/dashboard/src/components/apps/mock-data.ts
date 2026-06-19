@@ -1,5 +1,5 @@
 import { CircleCheck, LayoutGrid, Megaphone } from "lucide-react";
-import type { AppDescriptor, CategoryId, FeaturedRecipe, RailEntry } from "./types";
+import type { AppDescriptor, CategoryId, RailEntry } from "./types";
 
 /**
  * Static catalog of integrations Rovenue ships with.
@@ -51,20 +51,5 @@ export const RAIL_ENTRIES: ReadonlyArray<RailEntry> = [
 
 export const HOMEPAGE_SECTIONS: ReadonlyArray<CategoryId> = ["ads"];
 
-/**
- * Featured recipe banner — left in place but pointed at the two
- * shipped integrations so the homepage banner has something to
- * render. If the banner is later removed entirely, drop this export
- * and its consumer at the same time.
- */
-export const FEATURED_RECIPE: FeaturedRecipe = {
-  id: "meta-tiktok-ads",
-  appIds: ["meta-capi", "tiktok-events"],
-};
-
-export const HERO_STATS = {
-  events: "8.4M",
-  successRate: "99.94%",
-} as const;
-
-export const CONNECTED_LAST_SYNC_LABEL = "4 sec ago";
+/** Public documentation site — linked from the docs / API-reference CTAs. */
+export const DOCS_URL = "https://docs.rovenue.io";

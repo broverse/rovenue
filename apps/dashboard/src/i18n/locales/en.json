@@ -3412,7 +3412,7 @@
   },
   "apps": {
     "title": "Apps & integrations",
-    "subtitle": "Connect Rovenue to attribution, ad networks, analytics, data warehouses, and lifecycle tools — server-side, signed, and replayable.",
+    "subtitle": "Stream Rovenue subscription events to ad platforms and your own endpoints — server-side, signed, and replayable.",
     "actions": {
       "docs": "Integration docs",
       "customWebhook": "Custom webhook",
@@ -3448,17 +3448,13 @@
     },
     "hero": {
       "title": "Stream every revenue event, everywhere it matters.",
-      "description": "{{count}} prebuilt integrations across attribution, ads, CDPs, warehouses, lifecycle, and automation. All deliveries are HMAC-signed, retried automatically for 24h, and replayable from the dashboard.",
+      "description": "{{count}} prebuilt server-side integrations. All deliveries are HMAC-signed, retried automatically for 24h, and replayable from the dashboard.",
       "stats": {
         "apps": "Apps",
-        "connected": "Connected",
-        "events": "Events / 24h",
-        "successRate": "Success rate"
+        "connected": "Connected"
       }
     },
     "rail": {
-      "consoleHelp": "Don't see your tool? Build a custom integration with our REST API or webhooks.",
-      "openConsole": "Open API console",
       "sections": {
         "byUseCase": "By use case"
       }
@@ -3529,29 +3525,11 @@
       "viewAll": "View all {{count}} →"
     },
     "toolbar": {
-      "searchPlaceholder": "Search 50+ apps by name, category, or vendor…",
-      "searchAria": "Search apps",
-      "view": {
-        "grid": "Grid",
-        "list": "List"
-      },
-      "tiers": {
-        "all": "All",
-        "official": "Official",
-        "partner": "Partner",
-        "selfHosted": "Self-hosted"
-      }
-    },
-    "featured": {
-      "eyebrow": "Featured · Attribution",
-      "title": "Pipe Apple Search Ads + Meta CAPI in two clicks",
-      "description": "Turn-key recipe: AppsFlyer + Meta Ads + Apple Search Ads, pre-mapped with subscription value, trial conversions, and refund clawbacks. Ships with a saved dashboard.",
-      "install": "Install recipe",
-      "guide": "Read guide"
+      "searchPlaceholder": "Search integrations by name, category, or vendor…",
+      "searchAria": "Search apps"
     },
     "connected": {
       "title": "Your connected apps · {{count}}",
-      "lastSync": "Last sync · {{value}}",
       "ok": "OK"
     },
     "card": {
