@@ -117,3 +117,73 @@ describe.sequential("dashboard api-keys — create", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe.sequential("dashboard api-keys — revoke", () => {
+  async function createKey(app: Hono, projectId: string, cookie: string, label: string) {
+    const res = await app.request(`/projects/${projectId}/api-keys`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ label }),
+    });
+    const { data } = (await res.json()) as { data: { apiKey: { id: string } } };
+    return data.apiKey.id;
+  }
+
+  it("ADMIN revokes a key; it leaves no active row and 404s on re-revoke", async () => {
+    const { userId, cookie } = await createUserAndSession("revoke_ok");
+    const projectId = await seedProject("revoke_ok");
+    await addMember(projectId, userId, "ADMIN");
+    const app = buildApp();
+    const keyId = await createKey(app, projectId, cookie, "to-revoke");
+
+    const res = await app.request(`/projects/${projectId}/api-keys/${keyId}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(200);
+
+    const active = await db
+      .select({ id: schema.apiKeys.id })
+      .from(schema.apiKeys)
+      .where(and(eq(schema.apiKeys.id, keyId), isNull(schema.apiKeys.revokedAt)));
+    expect(active).toHaveLength(0);
+
+    const again = await app.request(`/projects/${projectId}/api-keys/${keyId}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    expect(again.status).toBe(404);
+  });
+
+  it("cannot revoke a key belonging to another project (404)", async () => {
+    const { userId, cookie } = await createUserAndSession("revoke_foreign");
+    const projectA = await seedProject("revoke_foreign_a");
+    const projectB = await seedProject("revoke_foreign_b");
+    await addMember(projectA, userId, "ADMIN");
+    await addMember(projectB, userId, "ADMIN");
+    const app = buildApp();
+    const keyInA = await createKey(app, projectA, cookie, "lives-in-a");
+
+    const res = await app.request(`/projects/${projectB}/api-keys/${keyInA}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("forbids a DEVELOPER from revoking (403)", async () => {
+    const owner = await createUserAndSession("revoke_owner");
+    const dev = await createUserAndSession("revoke_dev");
+    const projectId = await seedProject("revoke_role");
+    await addMember(projectId, owner.userId, "ADMIN");
+    await addMember(projectId, dev.userId, "DEVELOPER");
+    const app = buildApp();
+    const keyId = await createKey(app, projectId, owner.cookie, "guarded");
+
+    const res = await app.request(`/projects/${projectId}/api-keys/${keyId}`, {
+      method: "DELETE",
+      headers: { cookie: dev.cookie },
+    });
+    expect(res.status).toBe(403);
+  });
+});

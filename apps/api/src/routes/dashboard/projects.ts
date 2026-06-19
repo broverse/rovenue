@@ -492,6 +492,40 @@ export const projectsRoute = new Hono()
     };
     return c.json(ok(payload));
   })
+  // DELETE /:id/api-keys/:keyId — ADMIN+. Revokes a single key
+  // (sets revokedAt). Scoped to the project in the repo so a foreign
+  // key id 404s. 404 when nothing active matched.
+  .delete("/:id/api-keys/:keyId", async (c) => {
+    const id = c.req.param("id");
+    const keyId = c.req.param("keyId");
+    const user = c.get("user");
+    await assertProjectAccess(id, user.id, MemberRole.ADMIN);
+
+    await drizzle.db.transaction(async (tx) => {
+      const revoked = await drizzle.apiKeyRepo.revokeApiKey(tx, id, keyId);
+      if (!revoked) {
+        throw new HTTPException(404, { message: "API key not found" });
+      }
+      await audit(
+        {
+          projectId: id,
+          userId: user.id,
+          action: "api_key.revoked",
+          resource: "api_key",
+          resourceId: keyId,
+          before: {
+            id: revoked.id,
+            label: revoked.label,
+            publicKey: revoked.keyPublic,
+          },
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
+    });
+
+    return c.json(ok({ id: keyId }));
+  })
   // DELETE /:id — OWNER only. The audit row records who deleted the
   // project; it survives the delete because the FK is ON DELETE SET
   // NULL (audit_logs.projectId becomes null after the cascade, but
