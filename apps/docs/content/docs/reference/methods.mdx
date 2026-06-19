@@ -351,13 +351,13 @@ Force a server round-trip to refresh the entitlement cache. Fires a [`Entitlemen
 
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
-| `virtualCurrencies` | `virtualCurrencies()` | `Record<string, number>` | — |
-| `virtualCurrency` | `virtualCurrency(code)` | `number` | — |
+| `virtualCurrencies` | `virtualCurrencies()` | `Promise<Record<string, number>>` | — |
+| `virtualCurrency` | `virtualCurrency(code)` | `Promise<number>` | — |
 | `refreshVirtualCurrencies` | `refreshVirtualCurrencies()` | `void` | [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
 
 React Native also exposes `useVirtualCurrencies()` and `useVirtualCurrency(code)` hooks. Swift uses `virtualCurrencyBalances() -> [String: Int64]` and `virtualCurrency(_ code:) -> Int64`. Kotlin uses `virtualCurrencyBalances(): Map<String, Long>` and `virtualCurrency(code): Long`.
 
-`virtualCurrencies()` and `virtualCurrency(code)` are **synchronous cache reads** — instant, no network. `refreshVirtualCurrencies()` forces a server round-trip. **Spending virtual currency is server-side only** — call `POST /v1/virtual-currencies/:appUserId/:code/transactions` from your backend using your secret API key.
+`virtualCurrencies()` and `virtualCurrency(code)` resolve immediately from the local cache (no network round-trip), but are async — `await` them. `refreshVirtualCurrencies()` forces a server round-trip. **Spending virtual currency is server-side only** — call `POST /v1/virtual-currencies/:appUserId/:code/transactions` from your backend using your secret API key.
 
 ---
 
@@ -367,14 +367,14 @@ Return the cached virtual-currency balances for the current user as a map of cur
 
 **Params** — none
 
-**Returns** — `Record<string, number>` (empty object if not yet loaded)
+**Returns** — `Promise<Record<string, number>>` (resolves to empty object if not yet loaded)
 
 **Throws** — nothing
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
-    const balances = Rovenue.virtualCurrencies();
+    const balances = await Rovenue.virtualCurrencies();
     console.log('COINS:', balances['COINS'] ?? 0);
     ```
   </Tab>
@@ -404,14 +404,14 @@ Return the cached balance for a single currency code. Returns `0` if the currenc
 |-----------|------|----------|-------------|
 | `code` | `string` | Yes | The currency code as configured in the Rovenue dashboard (e.g. `"COINS"`, `"GEMS"`). |
 
-**Returns** — `number` (`0` if absent or not yet loaded)
+**Returns** — `Promise<number>` (resolves to `0` if absent or not yet loaded)
 
 **Throws** — nothing
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
-    const coins = Rovenue.virtualCurrency('COINS');
+    const coins = await Rovenue.virtualCurrency('COINS');
     console.log(`You have ${coins} coins`);
     ```
   </Tab>

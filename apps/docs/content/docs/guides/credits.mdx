@@ -161,7 +161,7 @@ Content-Type: application/json
 }
 ```
 
-A negative `amount` debits the balance; a positive `amount` grants credits. Always supply an `idempotencyKey` — the server rejects duplicate keys so a retry after a network drop does not double-deduct.
+A negative `amount` debits the balance; a positive `amount` grants currency. Always supply an `idempotencyKey` — the server rejects duplicate keys so a retry after a network drop does not double-deduct.
 
 <Callout type="warn">
 Never put your secret API key (`rov_sec_…`) in the app binary. The transactions endpoint is server-to-server only. Expose a lightweight endpoint in your own backend that verifies the user session and calls Rovenue on their behalf. After the spend completes, call `refreshVirtualCurrencies()` on the client (or wait for the next foreground sync) to update the local cache.

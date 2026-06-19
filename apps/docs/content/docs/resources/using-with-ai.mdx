@@ -81,7 +81,7 @@ Spending a virtual currency is a server-side operation — there is NO client-si
 From your backend: POST /v1/virtual-currencies/:appUserId/:code/transactions
   Authorization: Bearer <rov_sec_...>
   Body: { "amount": -5, "idempotencyKey": "...", "description": "AI generation" }
-Negative amount = debit; positive amount = credit grant.
+Negative amount = debit; positive amount = currency grant.
 
 ## React Native hooks
 useCurrentUser()          — User | null
