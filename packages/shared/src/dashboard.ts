@@ -267,6 +267,8 @@ export interface SubscriberListItem {
   ltvUsd: string;
   /** Distinct platforms across all purchases. */
   platforms: SubscriberListPlatform[];
+  /** Heuristic churn-risk score, 0–100. */
+  churnRisk: number;
 }
 
 export interface SubscriberListFilters {

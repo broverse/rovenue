@@ -7,11 +7,20 @@ import {
   subscribers,
   type Subscriber,
 } from "../schema";
+import { churnRiskScore } from "./churn-risk";
 
 // Accepts both the top-level db and a Drizzle tx handle — the tx
 // shape is the same as the db for CRUD. Callers inside
 // db.transaction(async (tx) => …) pass `tx`.
 type DbOrTx = Db;
+
+// Qualified reference to the OUTER subscribers row, for use inside
+// correlated subqueries. Drizzle renders a column interpolated into a
+// `sql` template UNqualified (just `"id"`), so a bare `subscribers.id`
+// inside `FROM purchases …` / `FROM subscriber_access …` binds to that
+// inner table's own `id` column instead of the outer subscriber — the
+// correlation silently matches nothing. Spelling out the table fixes it.
+const OUTER_SUBSCRIBER_ID = sql`"subscribers"."id"`;
 
 /** Active (non-soft-deleted) subscriber count for a project. */
 export async function countActiveSubscribers(
@@ -425,6 +434,8 @@ export interface ListedSubscriber {
   ltvUsd: string;
   /** Distinct platforms across all purchases (ios/android/web). */
   platforms: SubscriberPlatformFilter[];
+  /** Heuristic churn-risk score 0–100 (see {@link churnRiskScore}). */
+  churnRisk: number;
   /** Cursor boundary value for the page this row appeared on —
    *  format matches `sort`. ISO timestamp for date sorts, decimal
    *  string for ltv, integer string for purchases. */
@@ -467,7 +478,7 @@ export async function listSubscribers(
   if (args.status === "active") {
     whereClauses.push(sql`EXISTS (
       SELECT 1 FROM ${subscriberAccess}
-      WHERE ${subscriberAccess.subscriberId} = ${subscribers.id}
+      WHERE ${subscriberAccess.subscriberId} = ${OUTER_SUBSCRIBER_ID}
         AND ${subscriberAccess.isActive} = TRUE
         AND (${subscriberAccess.expiresDate} IS NULL
              OR ${subscriberAccess.expiresDate} > NOW())
@@ -475,7 +486,7 @@ export async function listSubscribers(
   } else if (args.status === "trial") {
     whereClauses.push(sql`EXISTS (
       SELECT 1 FROM ${purchases}
-      WHERE ${purchases.subscriberId} = ${subscribers.id}
+      WHERE ${purchases.subscriberId} = ${OUTER_SUBSCRIBER_ID}
         AND ${purchases.status} = 'TRIAL'
         AND (${purchases.expiresDate} IS NULL
              OR ${purchases.expiresDate} > NOW())
@@ -483,7 +494,7 @@ export async function listSubscribers(
   } else if (args.status === "grace") {
     whereClauses.push(sql`EXISTS (
       SELECT 1 FROM ${purchases}
-      WHERE ${purchases.subscriberId} = ${subscribers.id}
+      WHERE ${purchases.subscriberId} = ${OUTER_SUBSCRIBER_ID}
         AND ${purchases.status} = 'GRACE_PERIOD'
         AND (${purchases.gracePeriodExpires} IS NULL
              OR ${purchases.gracePeriodExpires} > NOW())
@@ -493,14 +504,14 @@ export async function listSubscribers(
     // greenfield subscribers don't bleed into the "churned" tab).
     whereClauses.push(sql`NOT EXISTS (
       SELECT 1 FROM ${subscriberAccess}
-      WHERE ${subscriberAccess.subscriberId} = ${subscribers.id}
+      WHERE ${subscriberAccess.subscriberId} = ${OUTER_SUBSCRIBER_ID}
         AND ${subscriberAccess.isActive} = TRUE
         AND (${subscriberAccess.expiresDate} IS NULL
              OR ${subscriberAccess.expiresDate} > NOW())
     )`);
     whereClauses.push(sql`EXISTS (
       SELECT 1 FROM ${purchases}
-      WHERE ${purchases.subscriberId} = ${subscribers.id}
+      WHERE ${purchases.subscriberId} = ${OUTER_SUBSCRIBER_ID}
     )`);
   }
 
@@ -508,7 +519,7 @@ export async function listSubscribers(
   if (args.accessId) {
     whereClauses.push(sql`EXISTS (
       SELECT 1 FROM ${subscriberAccess}
-      WHERE ${subscriberAccess.subscriberId} = ${subscribers.id}
+      WHERE ${subscriberAccess.subscriberId} = ${OUTER_SUBSCRIBER_ID}
         AND ${subscriberAccess.accessId} = ${args.accessId}
         AND ${subscriberAccess.isActive} = TRUE
         AND (${subscriberAccess.expiresDate} IS NULL
@@ -540,7 +551,7 @@ export async function listSubscribers(
     whereClauses.push(sql`(
       SELECT COALESCE(SUM(${purchases.priceAmount}), 0)
       FROM ${purchases}
-      WHERE ${purchases.subscriberId} = ${subscribers.id}
+      WHERE ${purchases.subscriberId} = ${OUTER_SUBSCRIBER_ID}
     ) >= ${args.ltvMin}`);
   }
 
@@ -561,12 +572,12 @@ export async function listSubscribers(
   const purchaseCountExpr = sql<number>`(
     SELECT COUNT(*)::int
     FROM ${purchases}
-    WHERE ${purchases.subscriberId} = ${subscribers.id}
+    WHERE ${purchases.subscriberId} = ${OUTER_SUBSCRIBER_ID}
   )`;
   const ltvExpr = sql<string>`(
     SELECT COALESCE(SUM(${purchases.priceAmount}), 0)
     FROM ${purchases}
-    WHERE ${purchases.subscriberId} = ${subscribers.id}
+    WHERE ${purchases.subscriberId} = ${OUTER_SUBSCRIBER_ID}
   )`;
 
   // Sort + keyset construction. `sortExpr` is the column / expression
@@ -606,7 +617,7 @@ export async function listSubscribers(
   if (args.cursor && castedCursorValue) {
     whereClauses.push(sql`(
       ${sortExpr} < ${castedCursorValue}
-      OR (${sortExpr} = ${castedCursorValue} AND ${subscribers.id} < ${args.cursor.id})
+      OR (${sortExpr} = ${castedCursorValue} AND ${OUTER_SUBSCRIBER_ID} < ${args.cursor.id})
     )`);
   }
 
@@ -616,7 +627,7 @@ export async function listSubscribers(
       ARRAY[]::text[]
     )
     FROM ${subscriberAccess}
-    WHERE ${subscriberAccess.subscriberId} = ${subscribers.id}
+    WHERE ${subscriberAccess.subscriberId} = ${OUTER_SUBSCRIBER_ID}
       AND ${subscriberAccess.isActive} = TRUE
       AND (${subscriberAccess.expiresDate} IS NULL
            OR ${subscriberAccess.expiresDate} > NOW())
@@ -635,6 +646,26 @@ export async function listSubscribers(
   // through as ISO strings; numerics as plain decimal strings.
   const sortValueSql = sql<string>`(${sortExpr})::text`;
 
+  // Churn-risk signals — two cheap EXISTS subqueries (same per-row
+  // correlation pattern as the LTV / purchase-count expressions). The
+  // score itself is computed in TS by `churnRiskScore` for transparency
+  // and unit-testability.
+  const inGracePeriodSql = sql<boolean>`EXISTS (
+    SELECT 1 FROM ${purchases}
+    WHERE ${purchases.subscriberId} = ${OUTER_SUBSCRIBER_ID}
+      AND ${purchases.status} = 'GRACE_PERIOD'
+      AND (${purchases.gracePeriodExpires} IS NULL
+           OR ${purchases.gracePeriodExpires} > NOW())
+  )`;
+  const autoRenewOffSql = sql<boolean>`EXISTS (
+    SELECT 1 FROM ${purchases}
+    WHERE ${purchases.subscriberId} = ${OUTER_SUBSCRIBER_ID}
+      AND ${purchases.status} = 'ACTIVE'
+      AND ${purchases.autoRenewStatus} = FALSE
+      AND (${purchases.expiresDate} IS NULL
+           OR ${purchases.expiresDate} > NOW())
+  )`;
+
   const rows = await db
     .select({
       id: subscribers.id,
@@ -647,6 +678,8 @@ export async function listSubscribers(
       activeAccessIds: accessIdsSql,
       ltvUsd: ltvSql,
       platform: platformSql,
+      inGracePeriod: inGracePeriodSql,
+      autoRenewOff: autoRenewOffSql,
       sortValue: sortValueSql,
     })
     .from(subscribers)
@@ -654,18 +687,29 @@ export async function listSubscribers(
     .orderBy(sql`${sortExpr} DESC`, desc(subscribers.id))
     .limit(args.limit);
 
-  return rows.map(({ platform, ...r }) => ({
-    ...r,
-    purchaseCount: Number(r.purchaseCount) || 0,
-    activeAccessIds: r.activeAccessIds ?? [],
-    ltvUsd: typeof r.ltvUsd === "string" ? r.ltvUsd : "0",
-    platforms:
-      platform &&
-      (SUBSCRIBER_PLATFORMS as ReadonlyArray<string>).includes(platform)
-        ? [platform as SubscriberPlatformFilter]
-        : [],
-    sortValue: typeof r.sortValue === "string" ? r.sortValue : "",
-  }));
+  return rows.map(({ platform, inGracePeriod, autoRenewOff, ...r }) => {
+    const purchaseCount = Number(r.purchaseCount) || 0;
+    const activeAccessIds = r.activeAccessIds ?? [];
+    return {
+      ...r,
+      purchaseCount,
+      activeAccessIds,
+      ltvUsd: typeof r.ltvUsd === "string" ? r.ltvUsd : "0",
+      platforms:
+        platform &&
+        (SUBSCRIBER_PLATFORMS as ReadonlyArray<string>).includes(platform)
+          ? [platform as SubscriberPlatformFilter]
+          : [],
+      churnRisk: churnRiskScore({
+        purchaseCount,
+        hasActiveAccess: activeAccessIds.length > 0,
+        inGracePeriod: Boolean(inGracePeriod),
+        autoRenewOff: Boolean(autoRenewOff),
+        lastSeenAt: r.lastSeenAt,
+      }),
+      sortValue: typeof r.sortValue === "string" ? r.sortValue : "",
+    };
+  });
 }
 
 // =============================================================

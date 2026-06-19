@@ -70,7 +70,7 @@ export function mapApiSubscriber(item: SubscriberListItem): Subscriber {
     lastSeenAt: item.lastSeenAt,
     renew: "—",
     platforms: item.platforms,
-    risk: 0,
+    risk: item.churnRisk,
     plan: item.activeAccessIds.length > 0 ? item.activeAccessIds[0]! : "—",
   };
 }

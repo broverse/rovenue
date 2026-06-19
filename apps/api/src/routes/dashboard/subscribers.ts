@@ -275,6 +275,7 @@ export const subscribersRoute = new Hono()
     activeAccessIds: s.activeAccessIds,
     ltvUsd: s.ltvUsd,
     platforms: s.platforms,
+    churnRisk: s.churnRisk,
   }));
 
     const response: SubscriberListResponse = { subscribers, nextCursor };
