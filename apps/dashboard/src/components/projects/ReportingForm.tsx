@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
-import { Button } from "@heroui/react";
 import { useTranslation } from "react-i18next";
+import { Button } from "../../ui/button";
 import type {
   ProjectDetail,
   ProjectReportingSettings,
@@ -163,7 +163,7 @@ export function ReportingForm({ project }: Props) {
       </Field>
 
       {error && (
-        <div role="alert" className="mb-3 text-sm text-danger-500">
+        <div role="alert" className="mb-3 text-sm text-rv-danger">
           {error.message}
         </div>
       )}
@@ -171,14 +171,14 @@ export function ReportingForm({ project }: Props) {
       <div className="flex items-center gap-3">
         <Button
           type="submit"
-          variant="primary"
-          isPending={isPending}
-          isDisabled={!hasChanges}
+          variant="solid-primary"
+          size="md"
+          disabled={!hasChanges || isPending}
         >
           {t("common.saveChanges")}
         </Button>
         {!hasChanges && (
-          <span className="text-xs text-default-500">{t("common.noChanges")}</span>
+          <span className="text-xs text-rv-mute-500">{t("common.noChanges")}</span>
         )}
       </div>
     </form>

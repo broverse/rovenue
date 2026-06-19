@@ -1,6 +1,6 @@
 import { createFileRoute, useParams } from "@tanstack/react-router";
-import { Card } from "@heroui/react";
 import { useTranslation } from "react-i18next";
+import { Card } from "../../../../../ui/card";
 import { useProject } from "../../../../../lib/hooks/useProject";
 import { SettingsForm } from "../../../../../components/projects/SettingsForm";
 import { ReportingForm } from "../../../../../components/projects/ReportingForm";
@@ -39,8 +39,8 @@ function ProjectGeneralSettingsPage() {
         <ReportingForm project={project} />
       </Card>
 
-      <Card className="border border-danger-200 p-6">
-        <h2 className="mb-2 text-lg font-semibold text-danger-500">
+      <Card className="border-rv-danger/30 p-6">
+        <h2 className="mb-2 text-lg font-semibold text-rv-danger">
           {t("projects.settings.dangerZone")}
         </h2>
         <p className="mb-4 text-sm text-default-500">
