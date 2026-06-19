@@ -1966,3 +1966,72 @@ git commit -m "fix(api): align callers with currency-aware credit engine"
 
 - Spec §"Data Model" → Task 1. §"Balance & Ledger Semantics" → Tasks 4–5 (composite lock, per-currency dedup, `findAllBalances`, no-negative). §"Flows / IAP" → Task 6. §"Flows / Manual" → Task 8. §"Flows / Spend" → Task 9. §"SDK read endpoint" (the API half) → Task 9 (`GET /me`); SDK client is Plan 4. §"Dashboard" API → Tasks 8, 10; dashboard UI is Plan 3. §"Analytics" → Plan 2 (out of scope here). §"Migration" → Task 1 + Task 11. §"Testing" → Tasks 2–6, 9, 12.
 - Out of scope for Plan 1 (tracked in the roadmap): ClickHouse MV/raw-table `currencyId` (Plan 2), dashboard React UI (Plan 3), SDK Rust/native/JS + `useVirtualCurrencies` (Plan 4). The receipt response already emits `virtualCurrencyBalances`; the SDK consumes it in Plan 4.
+
+---
+
+## Addendum (2026-06-19) — Call sites discovered during execution
+
+During Task 5 the breaking signature change surfaced credit-engine call sites the original 12 tasks did not enumerate. Added/adjusted tasks below. Execution order: **6 → 5b → 6b → 7 → 8 → 9 → 10 → 11 → 11b → 12**.
+
+### Adjustment to Task 6 — put the grant helper in a service, not the route
+
+To let both `receipts.ts` and `webhook-processor.ts` reuse the bundle-grant logic without a route→service→route import cycle, define `grantPurchaseCurrencies` in a NEW service module `apps/api/src/services/purchase-credits.ts` (not in `receipts.ts`). `receipts.ts` imports it from there. Signature unchanged from the Task 6 brief:
+
+```typescript
+// apps/api/src/services/purchase-credits.ts
+import { drizzle } from "@rovenue/db";
+import { addCredits } from "./credit-engine";
+
+export interface GrantPurchaseCurrenciesArgs {
+  subscriberId: string;
+  productId: string;
+  purchaseId: string;
+  productIdentifier: string;
+}
+
+export async function grantPurchaseCurrencies(
+  args: GrantPurchaseCurrenciesArgs,
+): Promise<void> {
+  const grants = await drizzle.productCurrencyGrantRepo.listProductGrants(
+    drizzle.db,
+    args.productId,
+  );
+  for (const grant of grants) {
+    if (grant.amount <= 0) continue;
+    await addCredits({
+      subscriberId: args.subscriberId,
+      currencyId: grant.currencyId,
+      amount: grant.amount,
+      referenceType: "purchase",
+      referenceId: args.purchaseId,
+      description: `Credits for ${args.productIdentifier}`,
+      dedupeOnReference: true,
+    });
+  }
+}
+```
+
+### Task 5b: Multi-currency subscriber transfer
+
+**Files:** Modify `apps/api/src/services/subscriber-transfer.ts`. **Depends on:** Task 4 (`findAllBalances`).
+
+`reassignAllAssets()` currently reads the single `findLatestBalance(tx, from.id)` and writes one TRANSFER_OUT / TRANSFER_IN pair (both `insertCreditLedger` calls now fail to compile — they lack `currencyId`). Replace the single-balance block with a per-currency loop: read `await drizzle.creditLedgerRepo.findAllBalances(tx, from.id)`; for each `{ currencyId, balance }` with `balance > 0`, write the TRANSFER_OUT row for `from` (`currencyId`, `amount: -balance`, `balance: 0`) and the TRANSFER_IN row for `to` (`currencyId`, `amount: +balance`, `balance: toPrev + balance` where `toPrev = (await findLatestBalance(tx, to.id, currencyId))?.balance ?? 0`). Accumulate `creditsTransferred += balance` and keep returning that total (sum of units moved across all currencies). The existing subscriber-level advisory locks and the surrounding transaction in `transferSubscriber()` are unchanged. No new test file required if a transfer integration test exists — extend it to assert two currencies move; otherwise add a focused integration test that grants two currencies to `from`, transfers, and asserts both balances land on `to` and `from` nets to 0 per currency.
+
+### Task 6b: webhook-processor uses the bundle-grant service
+
+**Files:** Modify `apps/api/src/services/webhook-processor.ts`. **Depends on:** Task 6 (`purchase-credits.ts`).
+
+`maybeCreditConsumablePurchase(subscriberId, purchaseId)` is a parallel consumable-grant path reading `purchase.product.creditAmount` and calling the old `addCredits` + a manual `findExistingPurchaseCredit` pre-check. Replace its body: after loading `purchase` and the `CONSUMABLE` type guard, drop the `creditAmount` check and the manual dedup pre-check and call `grantPurchaseCurrencies({ subscriberId, productId: purchase.product.id, purchaseId, productIdentifier: purchase.product.identifier })` (imported from `../services/purchase-credits`). Dedup is handled inside via `dedupeOnReference` on `(purchaseId, currencyId)`. Keep the surrounding try/catch logging in `runPostProcessing`.
+
+### Task 9 (expanded scope): remove old single-currency v1 credit endpoints
+
+In addition to the planned new `/v1/virtual-currencies` route, the existing single-currency credit endpoints in the v1 SDK surface must be removed (approved design: SDK is read-only, spend is secret-key-only via the new route):
+- `apps/api/src/routes/v1/me.ts`: remove `GET /credits` (balance) and `POST` spend (`spendCredits` at ~line 124); if `getBalance` is used in an aggregate `/me` state response (~line 66), replace that field with the per-currency balances map (or drop it from that response — match whatever the SDK state contract in Plan 4 expects; for Plan 1, removing it is acceptable and the build must stay green).
+- `apps/api/src/routes/v1/subscribers.ts`: remove `GET /:appUserId/credits` (balance), the `spendCredits` endpoint (~line 246), and the `addCredits` endpoint (~line 288) — these are the old single-currency server credit endpoints, superseded by `/v1/virtual-currencies`.
+Remove now-unused imports (`getBalance`, `spendCredits`, `addCredits`) from those two files.
+
+### Task 11b: migrate the existing dedup test
+
+**Files:** Modify `apps/api/tests/credit-dedup.integration.test.ts`. **Depends on:** Task 5.
+
+The test calls `addCredits({...})` (no `currencyId`) and `getBalance(SUB_ID)` (no `currencyId`). Create a currency in setup (`drizzle.virtualCurrencyRepo.createVirtualCurrency(getDb(), { projectId: PROJECT_ID, code: "GLD", name: "Coins" })`), pass its `id` as `currencyId` to both `grant()`'s `addCredits` and to `getBalance(SUB_ID, currencyId)`. The dedup-row count query is unchanged (single currency → still exactly one row). Keep the concurrency assertion intact.
