@@ -536,6 +536,7 @@ async function readRecentLedger(
   return rows.map((r) => ({
     id: r.id,
     subscriberId: r.subscriberId,
+    currencyId: r.currencyId,
     type: isCreditLedgerType(r.type) ? r.type : "SPEND",
     amount: r.amount,
     balance: r.balance,
