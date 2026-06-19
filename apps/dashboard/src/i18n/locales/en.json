@@ -777,7 +777,18 @@
       },
       "groups": {
         "heading": "Connected offerings",
-        "defaultBadge": "Default"
+        "defaultBadge": "Default",
+        "linkButton": "Link offering",
+        "empty": "No offerings linked yet",
+        "memberCount": "{{count}} products",
+        "promoted": "Promoted",
+        "unlink": "Remove from {{name}}",
+        "noCandidates": "No offerings available to link",
+        "error": "Something went wrong. Please try again.",
+        "unlinkTitle": "Remove offering link?",
+        "unlinkSubtitle": "The product stays in your catalog. This only removes it from this offering.",
+        "unlinkConfirm": "Remove",
+        "unlinkPending": "Removing…"
       }
     },
     "tip": {
@@ -1054,6 +1065,11 @@
     }
   },
   "subscribers": {
+    "picker": {
+      "search": "Search by user ID or Rovenue ID…",
+      "empty": "No subscribers found.",
+      "noUserId": "No user ID"
+    },
     "title": "Customers",
     "subtitle": "End users with at least one purchase, trial, or granted access on {{project}} · Production.",
     "searchAria": "Search",

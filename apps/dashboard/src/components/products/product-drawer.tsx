@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { Dialog } from "@base-ui-components/react/dialog";
 import { Popover } from "@base-ui-components/react/popover";
-import { ArrowUp, Check, Layers, Plus, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Check, Layers, Plus, Trash2, X } from "lucide-react";
 import type {
   DashboardOfferingRow,
   DashboardOfferingUpdateInput,
@@ -244,6 +244,7 @@ function GroupsTab({ projectId, product }: { projectId: string; product: Product
   const groupsQuery = useProjectOfferings(projectId);
   const [pending, setPending] = useState(false);
   const [mutationError, setMutationError] = useState<Error | null>(null);
+  const [confirmGroup, setConfirmGroup] = useState<DashboardOfferingRow | null>(null);
 
   const allGroups = groupsQuery.data?.offerings ?? [];
 
@@ -299,11 +300,17 @@ function GroupsTab({ projectId, product }: { projectId: string; product: Product
     void patchOffering(group.id, { packages: nextPackages });
   };
 
-  const unlink = (group: DashboardOfferingRow) => {
+  const unlink = async (group: DashboardOfferingRow) => {
     const nextPackages = group.packages.filter(
       (m: OfferingMembership) => m.productId !== product.id,
     );
-    void patchOffering(group.id, { packages: nextPackages });
+    await patchOffering(group.id, { packages: nextPackages });
+  };
+
+  const confirmUnlink = async () => {
+    if (!confirmGroup) return;
+    await unlink(confirmGroup);
+    setConfirmGroup(null);
   };
 
   return (
@@ -353,13 +360,13 @@ function GroupsTab({ projectId, product }: { projectId: string; product: Product
                 </div>
                 <button
                   type="button"
-                  onClick={() => unlink(g)}
+                  onClick={() => setConfirmGroup(g)}
                   disabled={pending}
                   className="rounded-md p-1 text-rv-mute-500 transition hover:bg-rv-c2 hover:text-rv-danger disabled:opacity-60"
                   aria-label={t("products.drawer.groups.unlink", { name: g.identifier })}
                   title={t("products.drawer.groups.unlink", { name: g.identifier })}
                 >
-                  <X size={13} />
+                  <Trash2 size={13} />
                 </button>
               </li>
             );
@@ -372,7 +379,102 @@ function GroupsTab({ projectId, product }: { projectId: string; product: Product
           {mutationError.message || t("products.drawer.groups.error")}
         </p>
       )}
+
+      <UnlinkOfferingDialog
+        group={confirmGroup}
+        pending={pending}
+        onConfirm={confirmUnlink}
+        onClose={() => setConfirmGroup(null)}
+      />
     </section>
+  );
+}
+
+function UnlinkOfferingDialog({
+  group,
+  pending,
+  onConfirm,
+  onClose,
+}: {
+  group: DashboardOfferingRow | null;
+  pending: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Dialog.Root
+      open={group != null}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
+        <Dialog.Popup
+          className={cn(
+            "fixed left-1/2 top-1/2 z-[60] w-[420px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2",
+            "rounded-xl border border-rv-divider bg-rv-c1 shadow-[0_30px_80px_rgba(0,0,0,0.45)]",
+            "transition-[opacity,transform] duration-200 ease-out",
+            "data-[ending-style]:opacity-0 data-[starting-style]:opacity-0",
+            "data-[ending-style]:-translate-y-[46%] data-[starting-style]:-translate-y-[46%]",
+            "focus:outline-none",
+          )}
+        >
+          {group && (
+            <>
+              <header className="flex items-start justify-between border-b border-rv-divider px-5 pb-3 pt-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-md border border-rv-danger/30 bg-rv-danger/10 text-rv-danger">
+                    <AlertTriangle size={16} />
+                  </div>
+                  <div>
+                    <Dialog.Title className="text-[15px] font-semibold leading-5">
+                      {t("products.drawer.groups.unlinkTitle")}
+                    </Dialog.Title>
+                    <Dialog.Description className="mt-0.5 text-[12px] text-rv-mute-500">
+                      {t("products.drawer.groups.unlinkSubtitle")}
+                    </Dialog.Description>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label={t("common.close")}
+                  className="-mr-1 -mt-1 rounded-md p-1 text-rv-mute-500 transition hover:bg-rv-c2 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-rv-accent-500"
+                >
+                  <X size={14} />
+                </button>
+              </header>
+
+              <div className="px-5 py-4">
+                <div className="rounded-md border border-rv-divider bg-rv-c2 px-3 py-2.5 font-rv-mono text-[12px] text-foreground">
+                  {group.identifier}
+                </div>
+              </div>
+
+              <footer className="flex items-center justify-end gap-2 border-t border-rv-divider px-5 py-3">
+                <Button type="button" variant="flat" size="sm" onClick={onClose} disabled={pending}>
+                  {t("common.cancel")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="solid-primary"
+                  size="sm"
+                  onClick={onConfirm}
+                  disabled={pending}
+                  className="!bg-rv-danger !text-white hover:!bg-rv-danger/90 focus-visible:!ring-rv-danger"
+                >
+                  {pending
+                    ? t("products.drawer.groups.unlinkPending")
+                    : t("products.drawer.groups.unlinkConfirm")}
+                </Button>
+              </footer>
+            </>
+          )}
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
