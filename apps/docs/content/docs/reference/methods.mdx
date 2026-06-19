@@ -6,7 +6,7 @@ description: Every Rovenue SDK method, grouped by capability.
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Quick navigation: [Configuration](#configuration) · [Identity](#identity) · [Entitlements](#entitlements) · [Credits](#credits) · [Purchases](#purchases) · [Account Token](#account-token) · [Lifecycle](#lifecycle) · [Logging](#logging) · [Change Stream](#change-stream)
+Quick navigation: [Configuration](#configuration) · [Identity](#identity) · [Entitlements](#entitlements) · [Virtual Currencies](#virtual-currencies) · [Purchases](#purchases) · [Account Token](#account-token) · [Lifecycle](#lifecycle) · [Logging](#logging) · [Change Stream](#change-stream)
 
 ---
 
@@ -345,56 +345,95 @@ Force a server round-trip to refresh the entitlement cache. Fires a [`Entitlemen
 
 ---
 
-## Credits
+## Virtual Currencies
 
 ### Method summary
 
 | Method | Signature (RN) | Returns | Throws |
 |--------|---------------|---------|--------|
-| `creditBalance` | `creditBalance()` | `number` | — |
-| `refreshCredits` | `refreshCredits()` | `void` | [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
-| `consumeCredits` | `consumeCredits(amount, description?)` | `number` | [`InsufficientCreditsError`](/docs/reference/errors#error-table) |
+| `virtualCurrencies` | `virtualCurrencies()` | `Record<string, number>` | — |
+| `virtualCurrency` | `virtualCurrency(code)` | `number` | — |
+| `refreshVirtualCurrencies` | `refreshVirtualCurrencies()` | `void` | [`NetworkUnavailableError`](/docs/reference/errors#error-table), [`ServerError`](/docs/reference/errors#error-table) |
 
-`creditBalance()` is a **synchronous cache read** — returns `0` if no balance is cached yet. `refreshCredits()` forces a server round-trip. `consumeCredits()` atomically deducts credits server-side.
+React Native also exposes `useVirtualCurrencies()` and `useVirtualCurrency(code)` hooks. Swift uses `virtualCurrencyBalances() -> [String: Int64]` and `virtualCurrency(_ code:) -> Int64`. Kotlin uses `virtualCurrencyBalances(): Map<String, Long>` and `virtualCurrency(code): Long`.
+
+`virtualCurrencies()` and `virtualCurrency(code)` are **synchronous cache reads** — instant, no network. `refreshVirtualCurrencies()` forces a server round-trip. **Spending virtual currency is server-side only** — call `POST /v1/virtual-currencies/:appUserId/:code/transactions` from your backend using your secret API key.
 
 ---
 
-### `creditBalance`
+### `virtualCurrencies`
 
-Return the cached credit balance for the current user.
+Return the cached virtual-currency balances for the current user as a map of currency code to amount.
 
 **Params** — none
 
-**Returns** — `number` (the current balance; `0` if not yet loaded)
+**Returns** — `Record<string, number>` (empty object if not yet loaded)
 
 **Throws** — nothing
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
-    const balance = await Rovenue.creditBalance();
-    console.log(`You have ${balance} credits`);
+    const balances = Rovenue.virtualCurrencies();
+    console.log('COINS:', balances['COINS'] ?? 0);
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
-    let balance = await Rovenue.shared.creditBalance()
-    print("You have \(balance) credits")
+    let balances = await Rovenue.shared.virtualCurrencyBalances()
+    print("COINS:", balances["COINS"] ?? 0)
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    val balance = Rovenue.shared.creditBalance()
-    Log.d("App", "You have $balance credits")
+    val balances = Rovenue.shared.virtualCurrencyBalances()
+    Log.d("App", "COINS: ${balances["COINS"] ?: 0}")
     ```
   </Tab>
 </Tabs>
 
 ---
 
-### `refreshCredits`
+### `virtualCurrency`
 
-Force a server round-trip to refresh the credit balance cache. Fires a [`CreditBalanceChanged`](/docs/reference/types#changeevent) change event when the cache is updated.
+Return the cached balance for a single currency code. Returns `0` if the currency is not present.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `code` | `string` | Yes | The currency code as configured in the Rovenue dashboard (e.g. `"COINS"`, `"GEMS"`). |
+
+**Returns** — `number` (`0` if absent or not yet loaded)
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const coins = Rovenue.virtualCurrency('COINS');
+    console.log(`You have ${coins} coins`);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let coins = await Rovenue.shared.virtualCurrency("COINS")
+    print("You have \(coins) coins")
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val coins = Rovenue.shared.virtualCurrency("COINS")
+    Log.d("App", "You have $coins coins")
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### `refreshVirtualCurrencies`
+
+Force a server round-trip to refresh the virtual-currency balance cache. Fires a [`VirtualCurrenciesChanged`](/docs/reference/types#changeevent) change event when the cache is updated.
 
 **Params** — none
 
@@ -405,88 +444,24 @@ Force a server round-trip to refresh the credit balance cache. Fires a [`CreditB
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
-    await Rovenue.refreshCredits();
+    await Rovenue.refreshVirtualCurrencies();
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
-    try await Rovenue.shared.refreshCredits()
+    try await Rovenue.shared.refreshVirtualCurrencies()
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    Rovenue.shared.refreshCredits() // suspend fun
+    Rovenue.shared.refreshVirtualCurrencies() // suspend fun
     ```
   </Tab>
 </Tabs>
 
 **Errors:** [`NetworkUnavailableError`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
 
----
-
-### `consumeCredits`
-
-Atomically deduct credits from the user's balance. The deduction is applied server-side and the updated balance is returned. If the user has insufficient credits, the call throws without modifying the balance.
-
-**Params**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `amount` | `number` | Yes | Number of credits to deduct. Must be a positive integer. |
-| `description` | `string` | No | Human-readable label for this deduction (e.g. `"AI generation"`). Stored in the credit ledger for audit purposes. |
-
-**Returns** — `number` (the new balance after deduction)
-
-**Throws** — [`InsufficientCreditsError`](/docs/reference/errors#error-table) if the user has fewer credits than `amount`.
-
-<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
-  <Tab value="React Native">
-    ```ts
-    import { Rovenue, InsufficientCreditsError } from '@rovenue/react-native-sdk';
-
-    try {
-      const newBalance = await Rovenue.consumeCredits(10, 'AI generation');
-      console.log(`Balance after: ${newBalance}`);
-    } catch (e) {
-      if (e instanceof InsufficientCreditsError) {
-        // Prompt the user to purchase more credits
-      } else {
-        throw e;
-      }
-    }
-    ```
-  </Tab>
-  <Tab value="Swift">
-    ```swift
-    do {
-      let newBalance = try await Rovenue.shared.consumeCredits(
-          amount: 10,
-          description: "AI generation"
-      )
-      print("Balance after: \(newBalance)")
-    } catch Rovenue.Error.insufficientCredits {
-      // Prompt the user to purchase more credits
-    }
-    ```
-  </Tab>
-  <Tab value="Kotlin">
-    ```kotlin
-    try {
-      val newBalance = Rovenue.shared.consumeCredits(
-          amount = 10,
-          description = "AI generation"
-      )
-      Log.d("App", "Balance after: $newBalance")
-    } catch (e: RovenueException.InsufficientCredits) {
-      // Prompt the user to purchase more credits
-    }
-    ```
-  </Tab>
-</Tabs>
-
-**Errors:** [`InsufficientCreditsError`](/docs/reference/errors#error-table)
-
-**See also:** [Credits guide](/docs/guides/credits)
+**See also:** [Virtual Currencies guide](/docs/guides/credits)
 
 ---
 
@@ -582,10 +557,10 @@ Trigger a native store sheet for the given package. The SDK handles the full pur
 
 ```ts
 type PurchaseResult = {
-  entitlements: Entitlement[];   // full set of active entitlements after the purchase
-  creditBalance: number;         // total credit balance after the purchase
-  productId: string;             // the store product ID purchased
-  storeTransactionId: string;    // StoreKit 2 transaction ID or Play Billing order ID
+  entitlements: Entitlement[];              // full set of active entitlements after the purchase
+  virtualCurrencies: Record<string, number>; // virtual-currency balances after the purchase
+  productId: string;                        // the store product ID purchased
+  storeTransactionId: string;               // StoreKit 2 transaction ID or Play Billing order ID
 };
 ```
 
@@ -620,7 +595,7 @@ type PurchaseResult = {
       try {
         const result = await Rovenue.purchase(pkg);
         console.log('Purchase succeeded:', result.productId);
-        // result.entitlements and result.creditBalance are already up to date
+        // result.entitlements and result.virtualCurrencies are already up to date
       } catch (e) {
         if (e instanceof PurchaseCancelledError) {
           // User dismissed — no action needed
@@ -910,7 +885,7 @@ type LogEntry = {
 
 ## Change Stream
 
-Subscribe to real-time state change notifications from the SDK. The SDK fires an event whenever the entitlement cache, identity, or credit balance is updated. React to these events to keep your UI in sync without polling.
+Subscribe to real-time state change notifications from the SDK. The SDK fires an event whenever the entitlement cache, identity, or virtual-currency balances are updated. React to these events to keep your UI in sync without polling.
 
 | Method / Property | Platform | Description |
 |-------------------|----------|-------------|
@@ -924,7 +899,7 @@ The [`ChangeEvent`](/docs/reference/types#changeevent) values:
 |-------|--------------|
 | `EntitlementsChanged` | After any entitlement cache refresh (purchase, `refreshEntitlements()`, foreground sync). |
 | `IdentityChanged` | After `identify()` succeeds or `logOut()` resets the user. |
-| `CreditBalanceChanged` | After `refreshCredits()` or a successful `consumeCredits()` call. |
+| `VirtualCurrenciesChanged` | After `refreshVirtualCurrencies()` or a server-side grant/spend that updates the cache. |
 
 → Full type reference: [`ChangeEvent`](/docs/reference/types#changeevent)
 
@@ -941,8 +916,8 @@ The [`ChangeEvent`](/docs/reference/types#changeevent) values:
         case 'IdentityChanged':
           // User identity has changed — re-read currentUser()
           break;
-        case 'CreditBalanceChanged':
-          // Re-read creditBalance() and update the balance display
+        case 'VirtualCurrenciesChanged':
+          // Re-read virtualCurrencies() and update the balance display
           break;
       }
     });
@@ -960,8 +935,8 @@ The [`ChangeEvent`](/docs/reference/types#changeevent) values:
             // Re-read entitlements and update gated UI
         case .identityChanged:
             // User identity has changed — re-read currentUser()
-        case .creditBalanceChanged:
-            // Re-read creditBalance() and update the balance display
+        case .virtualCurrenciesChanged:
+            // Re-read virtualCurrencyBalances() and update the balance display
         }
     }
     ```
@@ -972,9 +947,9 @@ The [`ChangeEvent`](/docs/reference/types#changeevent) values:
     Rovenue.shared.changes
         .onEach { event ->
             when (event) {
-                ChangeEvent.ENTITLEMENTS_CHANGED   -> { /* re-read entitlements */ }
-                ChangeEvent.IDENTITY_CHANGED       -> { /* user identity changed */ }
-                ChangeEvent.CREDIT_BALANCE_CHANGED -> { /* re-read balance */ }
+                ChangeEvent.ENTITLEMENTS_CHANGED       -> { /* re-read entitlements */ }
+                ChangeEvent.IDENTITY_CHANGED           -> { /* user identity changed */ }
+                ChangeEvent.VIRTUAL_CURRENCIES_CHANGED -> { /* re-read balances */ }
             }
         }
         .launchIn(viewModelScope)

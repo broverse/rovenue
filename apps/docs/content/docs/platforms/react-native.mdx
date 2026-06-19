@@ -135,7 +135,8 @@ All hooks must be called from components rendered after `configure` has been cal
 | `useCurrentUser()` | `User \| null` — the identified subscriber, or `null` |
 | `useEntitlement(id)` | `Entitlement \| null` — entitlement object for the given ID |
 | `useEntitlements()` | `Entitlement[]` — all active entitlements |
-| `useCreditBalance()` | `number` — current credit balance |
+| `useVirtualCurrencies()` | `Record<string, number>` — all virtual-currency balances |
+| `useVirtualCurrency(code)` | `number` — balance for a single currency code (0 if absent) |
 
 ```ts
 type User = {
@@ -176,26 +177,39 @@ export function ProBadge() {
 }
 ```
 
-### Example — displaying credit balance
+### Example — displaying virtual-currency balances
 
 ```tsx
-import { useCreditBalance } from '@rovenue/react-native-sdk';
+import { useVirtualCurrency, useVirtualCurrencies } from '@rovenue/react-native-sdk';
 
-export function CreditsLabel() {
-  const balance = useCreditBalance();
-  return <Text>{balance} credits</Text>;
+// Show one currency by code
+export function CoinsLabel() {
+  const coins = useVirtualCurrency('COINS');
+  return <Text>{coins} coins</Text>;
+}
+
+// Show all currencies
+export function WalletSummary() {
+  const balances = useVirtualCurrencies(); // Record<string, number>
+  return (
+    <>
+      {Object.entries(balances).map(([code, amount]) => (
+        <Text key={code}>{code}: {amount}</Text>
+      ))}
+    </>
+  );
 }
 ```
 
 <Callout type="info">
-See [Entitlements](/docs/guides/entitlements) and [Credits](/docs/guides/credits) for the full guide on reading and reacting to subscription state.
+See [Entitlements](/docs/guides/entitlements) and [Virtual Currencies](/docs/guides/credits) for the full guide on reading and reacting to subscription state.
 </Callout>
 
 ---
 
 ## Purchases
 
-Use `getOfferings()` to fetch products configured in your Rovenue dashboard, then `purchase(pkg)` to drive the full purchase flow. The SDK triggers the native StoreKit 2 / Play Billing sheet, validates the receipt server-side, and resolves with updated entitlements and credit balance.
+Use `getOfferings()` to fetch products configured in your Rovenue dashboard, then `purchase(pkg)` to drive the full purchase flow. The SDK triggers the native StoreKit 2 / Play Billing sheet, validates the receipt server-side, and resolves with updated entitlements and virtual-currency balances.
 
 ```tsx
 import {
@@ -210,7 +224,7 @@ const pkg = offerings.current?.packages[0];
 if (pkg) {
   try {
     const result = await Rovenue.purchase(pkg);
-    // result.entitlements and result.creditBalance are already up to date
+    // result.entitlements and result.virtualCurrencies are already up to date
   } catch (e) {
     if (e instanceof PurchaseCancelledError) {
       // User dismissed the store sheet — no action needed
@@ -232,7 +246,7 @@ await Rovenue.restorePurchases();
 ```ts
 type PurchaseResult = {
   entitlements: Entitlement[];
-  creditBalance: number;
+  virtualCurrencies: Record<string, number>;
   productId: string;
   storeTransactionId: string;
 };
@@ -241,7 +255,7 @@ type PurchaseResult = {
 | Field | Type | Description |
 |-------|------|-------------|
 | `entitlements` | `Entitlement[]` | Updated entitlement list after the purchase. |
-| `creditBalance` | `number` | Updated credit balance after the purchase. |
+| `virtualCurrencies` | `Record<string, number>` | Updated virtual-currency balances after the purchase (currency code → amount). |
 | `productId` | `string` | The product identifier that was purchased. |
 | `storeTransactionId` | `string` | The store-side transaction ID. |
 
@@ -253,7 +267,7 @@ See [Processing Purchases](/docs/guides/processing-purchases) for the full API r
 
 ## Change listener
 
-Use `Rovenue.addChangeListener` to react to server-pushed entitlement or credit updates. It returns an unsubscribe function — call it on cleanup.
+Use `Rovenue.addChangeListener` to react to server-pushed entitlement or virtual-currency updates. It returns an unsubscribe function — call it on cleanup.
 
 ```tsx
 import { useEffect } from 'react';
@@ -261,7 +275,7 @@ import { Rovenue } from '@rovenue/react-native-sdk';
 
 useEffect(() => {
   const unsub = Rovenue.addChangeListener((event) => {
-    // event: 'EntitlementsChanged' | 'IdentityChanged' | 'CreditBalanceChanged'
+    // event: 'EntitlementsChanged' | 'IdentityChanged' | 'VirtualCurrenciesChanged'
     console.log('Rovenue change:', event);
   });
 
@@ -281,7 +295,7 @@ See [Reacting to Changes](/docs/guides/reacting-to-changes) for a complete guide
 
 - [Identifying Users](/docs/guides/identifying-users) — link your backend user to the Rovenue subscriber.
 - [Entitlements](/docs/guides/entitlements) — read and gate on active subscriptions.
-- [Credits](/docs/guides/credits) — manage consumable credit balances.
+- [Virtual Currencies](/docs/guides/credits) — read virtual-currency balances and grant/spend via server-side APIs.
 - [Processing Purchases](/docs/guides/processing-purchases) — full purchase API and error handling.
 - [App Lifecycle](/docs/guides/app-lifecycle) — foreground/background wiring in depth.
 - [Reference: Methods](/docs/reference/methods) — full method reference.

@@ -9,7 +9,7 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 Every Rovenue install carries two identifiers: a permanent SDK-generated
 `rovenueId` and an optional `appUserId` that you supply when your user signs in.
-Purchases, credits, and entitlements always belong to the `rovenueId`; the
+Purchases, virtual currencies, and entitlements always belong to the `rovenueId`; the
 `appUserId` is a label you attach so your backend can address the same subscriber
 regardless of which device they are on.
 
@@ -93,7 +93,7 @@ In the background, Rovenue fires `POST /v1/identify` to bind the `appUserId` to
 the current `rovenueId`.
 
 If that `appUserId` already exists on another install, Rovenue **automatically
-transfers** that install's purchases and credits to this device. No extra call
+transfers** that install's purchases and virtual-currency balances to this device. No extra call
 is required.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
@@ -147,7 +147,7 @@ on their own device and claim the victim's entitlements.
 When your user signs out, call `logOut()`. This mints a **fresh `rovenueId`**
 for the install and clears `appUserId` and all scope-bound caches. The next user
 on a shared device starts with a clean slate and cannot inherit any prior
-entitlements or credit balance.
+entitlements or virtual-currency balances.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">

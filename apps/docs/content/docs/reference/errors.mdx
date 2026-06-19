@@ -27,7 +27,7 @@ Every Rovenue SDK error originates from the same Rust-core `RovenueError` enum a
 | Too many requests — SDK is being rate-limited; back off and retry | `RateLimitedError` | `.rateLimited` | `RovenueException.RateLimited` |
 | Local persistent storage (MMKV) read/write failure | `StorageError` | `.storage` | `RovenueException.Storage` |
 | Subscriber record not found on the server | `UserNotFoundError` | `.userNotFound` | `RovenueException.UserNotFound` |
-| `consumeCredits()` requested more credits than the user holds | `InsufficientCreditsError` | `.insufficientCredits` | `RovenueException.InsufficientCredits` |
+| Returned by the server when a virtual-currency spend transaction has insufficient balance (server-side API only — no client SDK method throws this) | `InsufficientCreditsError` | `.insufficientCredits` | `RovenueException.InsufficientCredits` |
 | Entitlement exists but is not currently active | `EntitlementInactiveError` | `.entitlementInactive` | `RovenueException.EntitlementInactive` |
 | Receipt was already recorded for this transaction (idempotency deduplication) | `DuplicatePurchaseError` | `.duplicatePurchase` | `RovenueException.DuplicatePurchase` |
 | Receipt could not be validated by the store or server | `ReceiptInvalidError` | `.receiptInvalid` | `RovenueException.ReceiptInvalid` |
@@ -61,7 +61,6 @@ All throwing SDK methods should be wrapped in try/catch. The recommended pattern
       ProductNotAvailableError,
       ReceiptInvalidError,
       NetworkUnavailableError,
-      InsufficientCreditsError,
     } from '@rovenue/react-native-sdk';
 
     // --- Purchase flow ---
@@ -84,18 +83,6 @@ All throwing SDK methods should be wrapped in try/catch. The recommended pattern
         showToast('No internet connection. Please try again.');
       } else {
         throw e; // re-throw unexpected errors
-      }
-    }
-
-    // --- Credits flow ---
-    try {
-      const newBalance = await Rovenue.consumeCredits(10, 'AI generation');
-    } catch (e) {
-      if (e instanceof InsufficientCreditsError) {
-        // Prompt the user to purchase more credits
-        openPaywall();
-      } else {
-        throw e;
       }
     }
     ```
@@ -122,18 +109,6 @@ All throwing SDK methods should be wrapped in try/catch. The recommended pattern
       showToast("No internet connection. Please try again.")
     } catch {
       throw error // re-throw unexpected errors
-    }
-
-    // --- Credits flow ---
-    do {
-      let newBalance = try await Rovenue.shared.consumeCredits(
-          amount: 10,
-          description: "AI generation"
-      )
-    } catch Rovenue.Error.insufficientCredits {
-      openPaywall()
-    } catch {
-      throw error
     }
     ```
   </Tab>
@@ -164,18 +139,6 @@ All throwing SDK methods should be wrapped in try/catch. The recommended pattern
     } catch (e: RovenueException) {
         throw e // re-throw unexpected SDK errors
     }
-
-    // --- Credits flow ---
-    try {
-        val newBalance = Rovenue.shared.consumeCredits(
-            amount = 10,
-            description = "AI generation"
-        )
-    } catch (e: RovenueException.InsufficientCredits) {
-        openPaywall()
-    } catch (e: RovenueException) {
-        throw e
-    }
     ```
   </Tab>
 </Tabs>
@@ -193,8 +156,7 @@ All throwing SDK methods should be wrapped in try/catch. The recommended pattern
 | [`configure()`](/docs/reference/methods#configuration) | `InvalidApiKeyError` |
 | [`identify(appUserId)`](/docs/reference/methods#identify) | `InvalidArgumentError` |
 | [`refreshEntitlements()`](/docs/reference/methods#refreshentitlements) | `NetworkUnavailableError`, `ServerError` |
-| [`refreshCredits()`](/docs/reference/methods#refreshcredits) | `NetworkUnavailableError`, `ServerError` |
-| [`consumeCredits()`](/docs/reference/methods#consumecredits) | `InsufficientCreditsError`, `NetworkUnavailableError`, `ServerError` |
+| [`refreshVirtualCurrencies()`](/docs/reference/methods#refreshvirtualcurrencies) | `NetworkUnavailableError`, `ServerError` |
 | [`getOfferings()`](/docs/reference/methods#getofferings) | `NetworkUnavailableError`, `ServerError` |
 | [`purchase()`](/docs/reference/methods#purchase) | `PurchaseCancelledError`, `PurchasePendingError`, `ProductNotAvailableError`, `StoreProblemError`, `ReceiptInvalidError`, `NetworkUnavailableError` |
 | [`restorePurchases()`](/docs/reference/methods#restorepurchases) | `NetworkUnavailableError`, `ServerError` |

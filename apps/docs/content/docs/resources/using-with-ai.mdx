@@ -55,32 +55,40 @@ Paste the following block into any LLM before asking it to write Rovenue integra
   Kotlin: Rovenue.configure(apiKey = "rov_pub_...", baseUrl = "https://api.acme.com", appVersion = ...)
 
 ## Core methods (TypeScript names; Swift/Kotlin mirror with idiomatic casing)
-configure(config)         — initialise SDK (call once)
-currentUser()             — returns User { rovenueId, appUserId }
-identify(appUserId)       — bind your backend user id (optimistic local + background server bind)
-logOut()                  — mint fresh rovenueId, clear appUserId and caches
-entitlement(id)           — Entitlement | null for a given entitlement id
-entitlementsAll()         — Entitlement[] all active entitlements
-refreshEntitlements()     — force network refresh of entitlements
-creditBalance()           — number — current credit balance
-refreshCredits()          — force network refresh of credit balance
-consumeCredits(amount, description?) — deduct credits; returns new balance
-getOfferings()            — Offerings { current, all } — fetch products from dashboard
-purchase(pkg)             — Promise<PurchaseResult> — native store sheet + server validation
-restorePurchases()        — re-validate all prior transactions (e.g. after reinstall)
-getAppAccountToken()      — opaque token for App Store fraud prevention
-setForeground(bool)       — signal foreground/background to manage polling cadence
-shutdown()                — stop all background work (call only at full app teardown)
-setLogHandler(fn)         — receive structured SDK log entries
-addChangeListener(cb)     — subscribe to ChangeEvent; returns unsubscribe fn (RN/TS)
+configure(config)              — initialise SDK (call once)
+currentUser()                  — returns User { rovenueId, appUserId }
+identify(appUserId)            — bind your backend user id (optimistic local + background server bind)
+logOut()                       — mint fresh rovenueId, clear appUserId and caches
+entitlement(id)                — Entitlement | null for a given entitlement id
+entitlementsAll()              — Entitlement[] all active entitlements
+refreshEntitlements()          — force network refresh of entitlements
+virtualCurrencies()            — Record<string,number> — all virtual-currency balances (cache read)
+virtualCurrency(code)          — number — balance for a single currency code (0 if absent)
+refreshVirtualCurrencies()     — force network refresh of virtual-currency balances
+getOfferings()                 — Offerings { current, all } — fetch products from dashboard
+purchase(pkg)                  — Promise<PurchaseResult> — native store sheet + server validation
+restorePurchases()             — re-validate all prior transactions (e.g. after reinstall)
+getAppAccountToken()           — opaque token for App Store fraud prevention
+setForeground(bool)            — signal foreground/background to manage polling cadence
+shutdown()                     — stop all background work (call only at full app teardown)
+setLogHandler(fn)              — receive structured SDK log entries
+addChangeListener(cb)          — subscribe to ChangeEvent; returns unsubscribe fn (RN/TS)
   Swift:  Rovenue.shared.changes  AsyncStream<ChangeEvent>
   Kotlin: Rovenue.shared.changes  SharedFlow<ChangeEvent>
 
+## Spending virtual currency (SERVER-SIDE ONLY)
+Spending a virtual currency is a server-side operation — there is NO client-side spend method.
+From your backend: POST /v1/virtual-currencies/:appUserId/:code/transactions
+  Authorization: Bearer <rov_sec_...>
+  Body: { "amount": -5, "idempotencyKey": "...", "description": "AI generation" }
+Negative amount = debit; positive amount = credit grant.
+
 ## React Native hooks
-useCurrentUser()     — User | null
-useEntitlement(id)   — Entitlement | null
-useEntitlements()    — Entitlement[]
-useCreditBalance()   — number
+useCurrentUser()          — User | null
+useEntitlement(id)        — Entitlement | null
+useEntitlements()         — Entitlement[]
+useVirtualCurrencies()    — Record<string, number>
+useVirtualCurrency(code)  — number (0 if absent)
 
 ## Key types
 type RovenueConfig  = { apiKey: string; baseUrl?: string; debug?: boolean; appVersion?: string }
@@ -90,8 +98,8 @@ type Offerings      = { current: Offering | null; all: Record<string, Offering> 
 type Offering       = { identifier: string; isDefault: boolean; packages: Package[] }
 type Package        = { identifier: string; product: StoreProduct }
 type StoreProduct   = { id: string; type: ProductType; displayName: string; priceString: string | null; price: number | null; currencyCode: string | null }
-type PurchaseResult = { entitlements: Entitlement[]; creditBalance: number; productId: string; storeTransactionId: string }
-type ChangeEvent    = 'EntitlementsChanged' | 'IdentityChanged' | 'CreditBalanceChanged'
+type PurchaseResult = { entitlements: Entitlement[]; virtualCurrencies: Record<string,number>; productId: string; storeTransactionId: string }
+type ChangeEvent    = 'EntitlementsChanged' | 'IdentityChanged' | 'VirtualCurrenciesChanged'
 type ProductType    = 'subscription' | 'consumable' | 'non_consumable'
 
 ## Identity model

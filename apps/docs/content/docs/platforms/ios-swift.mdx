@@ -122,7 +122,7 @@ let offerings = try await Rovenue.shared.getOfferings()
 if let pkg = offerings.current?.packages.first {
   do {
     let result = try await Rovenue.shared.purchase(pkg)
-    // result.entitlements and result.creditBalance are already up to date
+    // result.entitlements and result.virtualCurrencies are already up to date
   } catch Rovenue.Error.purchaseCancelled {
     // User dismissed the sheet — no action needed
   } catch Rovenue.Error.purchasePending {
@@ -138,7 +138,7 @@ try await Rovenue.shared.restorePurchases()
 // Swift mirror of PurchaseResult
 struct PurchaseResult {
   var entitlements: [Entitlement]
-  var creditBalance: Int
+  var virtualCurrencies: [String: Int64]
   var productId: String
   var storeTransactionId: String
 }
@@ -155,7 +155,7 @@ struct Entitlement {
 | Field | Type | Description |
 |-------|------|-------------|
 | `entitlements` | `[Entitlement]` | Updated entitlement list after the purchase. |
-| `creditBalance` | `Int` | Updated credit balance after the purchase. |
+| `virtualCurrencies` | `[String: Int64]` | Updated virtual-currency balances after the purchase (currency code → amount). |
 | `productId` | `String` | The product identifier that was purchased. |
 | `storeTransactionId` | `String` | The StoreKit transaction ID. |
 
@@ -174,7 +174,7 @@ import Rovenue
 
 Task {
   for await event in Rovenue.shared.changes {
-    // event: ChangeEvent (.entitlementsChanged | .identityChanged | .creditBalanceChanged)
+    // event: ChangeEvent (.entitlementsChanged | .identityChanged | .virtualCurrenciesChanged)
     print("Rovenue change:", event)
     // Update your UI or local state here
   }
@@ -205,7 +205,7 @@ Rovenue.shared.setLogHandler { entry in
 
 - [Identifying Users](/docs/guides/identifying-users) — link your backend user to the Rovenue subscriber.
 - [Entitlements](/docs/guides/entitlements) — read and gate on active subscriptions.
-- [Credits](/docs/guides/credits) — manage consumable credit balances.
+- [Virtual Currencies](/docs/guides/credits) — read virtual-currency balances and grant/spend via server-side APIs.
 - [Processing Purchases](/docs/guides/processing-purchases) — full purchase API and error handling.
 - [App Lifecycle](/docs/guides/app-lifecycle) — foreground/background wiring in depth.
 - [Reference: Methods](/docs/reference/methods) — full method reference.

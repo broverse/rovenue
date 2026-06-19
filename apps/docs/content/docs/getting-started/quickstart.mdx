@@ -62,8 +62,8 @@ type StoreProduct = {
 };
 
 type PurchaseResult = {
-  entitlements: Entitlement[];  // all active entitlements after the purchase
-  creditBalance: number;        // credit balance after the purchase
+  entitlements: Entitlement[];              // all active entitlements after the purchase
+  virtualCurrencies: Record<string, number>; // virtual-currency balances after the purchase
   productId: string;
   storeTransactionId: string;
 };
@@ -207,7 +207,7 @@ The `Entitlement` type and its fields are documented at [`/docs/reference/types#
 
 `getOfferings()` returns the product catalogue configured in your dashboard, with localised pricing from the store. `purchase(pkg)` drives the native purchase sheet (StoreKit 2 on iOS, Play Billing 6 on Android) and validates the receipt server-side — all in one call.
 
-`purchase()` resolves only after server-side validation succeeds. The returned `PurchaseResult` contains up-to-date `entitlements` and `creditBalance` — no polling needed.
+`purchase()` resolves only after server-side validation succeeds. The returned `PurchaseResult` contains up-to-date `entitlements` and `virtualCurrencies` — no polling needed.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -229,7 +229,7 @@ The `Entitlement` type and its fields are documented at [`/docs/reference/types#
         const result = await Rovenue.purchase(pkg);
 
         console.log('Entitlements:', result.entitlements);
-        console.log('Credit balance:', result.creditBalance);
+        console.log('Virtual currencies:', result.virtualCurrencies);
       } catch (e) {
         if (e instanceof PurchaseCancelledError) {
           // User dismissed the sheet — not an error; do nothing
@@ -259,7 +259,7 @@ The `Entitlement` type and its fields are documented at [`/docs/reference/types#
         let result = try await Rovenue.shared.purchase(pkg)
 
         print("Entitlements:", result.entitlements)
-        print("Credit balance:", result.creditBalance)
+        print("Virtual currencies:", result.virtualCurrencies)
       } catch Rovenue.Error.purchaseCancelled {
         // User dismissed — not an error
       } catch Rovenue.Error.purchasePending {
@@ -291,7 +291,7 @@ The `Entitlement` type and its fields are documented at [`/docs/reference/types#
         val result = Rovenue.shared.purchase(activity, pkg)
 
         println("Entitlements: ${result.entitlements}")
-        println("Credit balance: ${result.creditBalance}")
+        println("Virtual currencies: ${result.virtualCurrencies}")
       } catch (e: PurchaseCancelledException) {
         // User dismissed — not an error
       } catch (e: PurchasePendingException) {
@@ -306,7 +306,7 @@ The `Entitlement` type and its fields are documented at [`/docs/reference/types#
 </Tabs>
 
 <Callout type="info">
-On purchase success, the SDK automatically refreshes entitlements and credits and emits a `ChangeEvent`. Any `useEntitlement()` hook or change listener updates without extra code. See [Reacting to changes](/docs/guides/reacting-to-changes) and [Processing purchases](/docs/guides/processing-purchases).
+On purchase success, the SDK automatically refreshes entitlements and virtual-currency balances and emits a `ChangeEvent`. Any `useEntitlement()` hook or change listener updates without extra code. See [Reacting to changes](/docs/guides/reacting-to-changes) and [Processing purchases](/docs/guides/processing-purchases).
 </Callout>
 
 Method references: [`getOfferings`](/docs/reference/methods#getofferings), [`purchase`](/docs/reference/methods#purchase), [`restorePurchases`](/docs/reference/methods#restorepurchases). Type references: [`Offerings`](/docs/reference/types#offerings), [`Package`](/docs/reference/types#package), [`PurchaseResult`](/docs/reference/types#purchaseresult).

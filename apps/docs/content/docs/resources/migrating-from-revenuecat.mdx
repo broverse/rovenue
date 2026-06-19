@@ -31,7 +31,7 @@ const pkg = offerings.current?.packages[0];
 if (pkg) {
   try {
     const result = await Rovenue.purchase(pkg);
-    // result.entitlements / result.creditBalance are already up to date
+    // result.entitlements / result.virtualCurrencies are already up to date
   } catch (e) {
     if (e instanceof PurchaseCancelledError) { /* user dismissed — ignore */ }
     else if (e instanceof PurchasePendingError) { /* Ask-to-Buy / deferred */ }
@@ -46,7 +46,6 @@ await Rovenue.restorePurchases();
 
 - **Self-hosted.** Rovenue runs on your own infrastructure — no revenue share,
   no third-party data processing. You own the database and control retention.
-- **Credits built-in.** Rovenue ships a first-class append-only credit ledger
-  for consumable products, loyalty systems, and metered billing.
+- **Virtual currencies built-in.** Rovenue ships a first-class multi-currency ledger for consumable products, loyalty systems, and metered billing. Balances are read client-side; spending is a server-side operation via `POST /v1/virtual-currencies/:appUserId/:code/transactions`.
 - **Identity model.** `identify(appUserId)` performs a server-side bind and automatically transfers any prior install's purchases and credits to the current device (similar to RevenueCat's "transfer to new ID" behaviour). Call `logOut()` on sign-out to mint a fresh `rovenueId`. Bulk or programmatic merges are available via the secret-key backend API.
 - **Open source (AGPLv3).** You can read, audit, and fork the full stack.

@@ -8,6 +8,10 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 Type gallery: [RovenueConfig](#rovenueconfig) · [User](#user) · [Entitlement](#entitlement) · [ProductType](#producttype) · [StoreProduct](#storeproduct) · [Package](#package) · [Offering](#offering) · [Offerings](#offerings) · [PurchaseResult](#purchaseresult) · [ChangeEvent](#changeevent) · [LogEntry](#logentry)
 
+<Callout type="info">
+`consumable` products in `ProductType` add virtual-currency balances — configured in the Rovenue dashboard — to the subscriber's account on purchase.
+</Callout>
+
 ---
 
 ## RovenueConfig
@@ -367,7 +371,7 @@ Returned by [`purchase()`](/docs/reference/methods#purchase) after the store tra
 ```ts
 type PurchaseResult = {
   entitlements: Entitlement[];
-  creditBalance: number;
+  virtualCurrencies: Record<string, number>;
   productId: string;
   storeTransactionId: string;
 };
@@ -378,7 +382,7 @@ type PurchaseResult = {
 | Field | Type | Description |
 |-------|------|-------------|
 | `entitlements` | [`Entitlement[]`](#entitlement) | The user's full set of active entitlements after the purchase. Use this to update gated UI immediately. |
-| `creditBalance` | `number` | The user's total credit balance after the purchase was applied. Reflects any credits added by a consumable product. |
+| `virtualCurrencies` | `Record<string, number>` | The user's virtual-currency balances after the purchase (currency code → amount). Reflects any balances added by a currency-pack product. |
 | `productId` | `string` | The store product ID that was purchased (e.g. `"com.example.pro_monthly"`). |
 | `storeTransactionId` | `string` | The platform transaction ID: StoreKit 2 transaction ID on iOS, Play Billing order ID on Android. |
 
@@ -391,7 +395,7 @@ const result = await Rovenue.purchase(pkg);
 
 // Grant access based on updated entitlements:
 const hasPro = result.entitlements.some(e => e.id === 'pro' && e.isActive);
-console.log(`Pro: ${hasPro}, Credits: ${result.creditBalance}`);
+console.log(`Pro: ${hasPro}, COINS: ${result.virtualCurrencies['COINS'] ?? 0}`);
 console.log(`Transaction: ${result.storeTransactionId}`);
 ```
 
@@ -406,12 +410,12 @@ Emitted by the [change stream](/docs/reference/methods#change-stream) whenever i
 type ChangeEvent =
   | 'EntitlementsChanged'
   | 'IdentityChanged'
-  | 'CreditBalanceChanged';
+  | 'VirtualCurrenciesChanged';
 ```
 
-On Swift, `ChangeEvent` is a Swift enum with cases `.entitlementsChanged`, `.identityChanged`, and `.creditBalanceChanged`, delivered as `AsyncStream<ChangeEvent>` via `Rovenue.shared.changes`.
+On Swift, `ChangeEvent` is a Swift enum with cases `.entitlementsChanged`, `.identityChanged`, and `.virtualCurrenciesChanged`, delivered as `AsyncStream<ChangeEvent>` via `Rovenue.shared.changes`.
 
-On Kotlin, `ChangeEvent` is a Kotlin enum with constants `ENTITLEMENTS_CHANGED`, `IDENTITY_CHANGED`, and `CREDIT_BALANCE_CHANGED`, delivered as `SharedFlow<ChangeEvent>` via `Rovenue.shared.changes`.
+On Kotlin, `ChangeEvent` is a Kotlin enum with constants `ENTITLEMENTS_CHANGED`, `IDENTITY_CHANGED`, and `VIRTUAL_CURRENCIES_CHANGED`, delivered as `SharedFlow<ChangeEvent>` via `Rovenue.shared.changes`.
 
 **Values**
 
@@ -419,7 +423,7 @@ On Kotlin, `ChangeEvent` is a Kotlin enum with constants `ENTITLEMENTS_CHANGED`,
 |------------|------------|-----------------|---------------|
 | `'EntitlementsChanged'` | `.entitlementsChanged` | `ENTITLEMENTS_CHANGED` | After the entitlement cache is refreshed — e.g. after a successful purchase, `refreshEntitlements()`, or a foreground transition that triggers a background sync. |
 | `'IdentityChanged'` | `.identityChanged` | `IDENTITY_CHANGED` | After `identify()` succeeds or `logOut()` resets the user. |
-| `'CreditBalanceChanged'` | `.creditBalanceChanged` | `CREDIT_BALANCE_CHANGED` | After `refreshCredits()` or a successful `consumeCredits()` call. |
+| `'VirtualCurrenciesChanged'` | `.virtualCurrenciesChanged` | `VIRTUAL_CURRENCIES_CHANGED` | After `refreshVirtualCurrencies()` or a server-side grant/spend that updates the cache. |
 
 **Emitted by:** [`addChangeListener()`](/docs/reference/methods#change-stream) (RN), `Rovenue.shared.changes` (Swift/Kotlin)
 
@@ -433,9 +437,9 @@ On Kotlin, `ChangeEvent` is a Kotlin enum with constants `ENTITLEMENTS_CHANGED`,
         const ent = await Rovenue.entitlement('pro');
         setHasPro(ent?.isActive ?? false);
       }
-      if (event === 'CreditBalanceChanged') {
-        const balance = await Rovenue.creditBalance();
-        setBalance(balance);
+      if (event === 'VirtualCurrenciesChanged') {
+        const balances = Rovenue.virtualCurrencies();
+        setCoins(balances['COINS'] ?? 0);
       }
     });
 
@@ -450,9 +454,9 @@ On Kotlin, `ChangeEvent` is a Kotlin enum with constants `ENTITLEMENTS_CHANGED`,
         case .entitlementsChanged:
           let ent = await Rovenue.shared.entitlement(id: "pro")
           await MainActor.run { hasPro = ent?.isActive ?? false }
-        case .creditBalanceChanged:
-          let balance = await Rovenue.shared.creditBalance()
-          await MainActor.run { self.balance = balance }
+        case .virtualCurrenciesChanged:
+          let balances = await Rovenue.shared.virtualCurrencyBalances()
+          await MainActor.run { self.coins = balances["COINS"] ?? 0 }
         case .identityChanged:
           break
         }
@@ -469,8 +473,9 @@ On Kotlin, `ChangeEvent` is a Kotlin enum with constants `ENTITLEMENTS_CHANGED`,
                     val ent = Rovenue.shared.entitlement(id = "pro")
                     _hasPro.value = ent?.isActive == true
                 }
-                ChangeEvent.CREDIT_BALANCE_CHANGED -> {
-                    _balance.value = Rovenue.shared.creditBalance()
+                ChangeEvent.VIRTUAL_CURRENCIES_CHANGED -> {
+                    val balances = Rovenue.shared.virtualCurrencyBalances()
+                    _coins.value = balances["COINS"] ?: 0
                 }
                 ChangeEvent.IDENTITY_CHANGED -> { /* re-read user if needed */ }
             }

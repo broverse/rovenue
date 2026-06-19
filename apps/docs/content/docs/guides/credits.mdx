@@ -1,70 +1,88 @@
 ---
-title: Working with Credits
-description: Read, refresh, and consume a user's credit balance across React Native, Swift, and Kotlin.
+title: Virtual Currencies
+description: Read virtual-currency balances in your app and understand how granting and spending work server-side.
 ---
 
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { Steps, Step } from 'fumadocs-ui/components/steps';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Credits let you grant and deduct a consumable balance — useful for AI generations, messages, or any metered feature. The balance is **server-authoritative**: the SDK caches the last-known value locally and syncs with the server on demand.
+Virtual currencies let you define any number of named balances per subscriber — for example `COINS`, `GEMS`, or `ENERGY` — useful for AI generations, messages, or any metered feature. Balances are **server-authoritative**: the SDK caches the last-known values locally and syncs with the server automatically.
 
 <Callout type="info">
-The credit balance is managed entirely on the Rovenue server. Local reads return the cached value; call `refreshCredits()` whenever you need a guaranteed-fresh number before gating access.
+**Granting** virtual currency happens automatically when a user purchases a currency-pack product configured in the Rovenue dashboard. **Spending** (debiting) is a server-side operation — call `POST /v1/virtual-currencies/:appUserId/:code/transactions` from your backend using your secret API key. There is no client-side spend method.
 </Callout>
 
 ### Types on this page
 
-Credit operations do not introduce a dedicated data type — the balance is always a plain `number` (integer, credits remaining). The methods below are defined in the [Methods reference](/docs/reference/methods#credits).
+Virtual-currency balances are represented as a map of currency code to integer amount. The methods below are defined in the [Methods reference](/docs/reference/methods#virtual-currencies).
 
-| Method | Returns | Throws | Notes |
-|--------|---------|--------|-------|
-| `creditBalance()` | `number` | — | Cache read; returns `0` if no balance is cached |
-| `refreshCredits()` | `void` | — | Network call; updates the local cache |
-| `consumeCredits(amount, description?)` | `number` (new balance) | `InsufficientCreditsError` | Server-deduped via Idempotency-Key |
+| Method / Hook | Returns | Notes |
+|--------|---------|-------|
+| `virtualCurrencies()` | `Record<string, number>` | Cache read; returns `{}` if no balances are cached |
+| `virtualCurrency(code)` | `number` | Cache read; returns `0` if the code is absent |
+| `refreshVirtualCurrencies()` | `void` | Network call; updates the local cache |
+| `useVirtualCurrencies()` (RN) | `Record<string, number>` | Reactive hook; re-renders on `VirtualCurrenciesChanged` |
+| `useVirtualCurrency(code)` (RN) | `number` | Reactive hook; re-renders on `VirtualCurrenciesChanged` |
 
-React Native also ships the `useCreditBalance()` hook, which subscribes to the local cache and re-renders when the balance changes — no listener wiring required.
+Swift uses `virtualCurrencyBalances() -> [String: Int64]` and `virtualCurrency(_ code: String) -> Int64`.
+Kotlin uses `virtualCurrencyBalances(): Map<String, Long>` and `virtualCurrency(code: String): Long`.
 
 ---
 
 <Steps>
 <Step>
 
-### Read the current balance
+### Read balances
 
-Use the reactive hook in React components, or the imperative method elsewhere.
+Use the reactive hooks in React Native components, or the imperative methods elsewhere.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```tsx
-    import { Rovenue, useCreditBalance } from '@rovenue/react-native-sdk';
+    import { Rovenue, useVirtualCurrencies, useVirtualCurrency } from '@rovenue/react-native-sdk';
 
-    // Reactive hook — re-renders automatically when the balance changes
-    function BalanceBadge() {
-      const balance = useCreditBalance(); // returns 0 if the cache is empty
-      return <Text>{balance} credits</Text>;
+    // Reactive hook — re-renders automatically when any balance changes
+    function WalletSummary() {
+      const balances = useVirtualCurrencies(); // Record<string, number>
+      return (
+        <>
+          {Object.entries(balances).map(([code, amount]) => (
+            <Text key={code}>{code}: {amount}</Text>
+          ))}
+        </>
+      );
     }
 
-    // Imperative cache read (outside a component)
-    const balance = await Rovenue.creditBalance(); // instant, no network
+    // Single-currency reactive hook
+    function CoinsLabel() {
+      const coins = useVirtualCurrency('COINS'); // 0 if absent
+      return <Text>{coins} coins</Text>;
+    }
+
+    // Imperative cache reads (outside a component)
+    const all = Rovenue.virtualCurrencies();   // instant, no network
+    const coins = Rovenue.virtualCurrency('COINS'); // 0 if absent
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
     // Cache read — instant, no network
-    let balance = await Rovenue.shared.creditBalance() // 0 if cache is empty
+    let balances = await Rovenue.shared.virtualCurrencyBalances() // [String: Int64]
+    let coins = await Rovenue.shared.virtualCurrency("COINS")     // 0 if absent
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
     // Cache read — instant, no network
-    val balance = Rovenue.shared.creditBalance() // 0 if cache is empty
+    val balances = Rovenue.shared.virtualCurrencyBalances() // Map<String, Long>
+    val coins = Rovenue.shared.virtualCurrency("COINS")     // 0 if absent
     ```
   </Tab>
 </Tabs>
 
 <Callout type="info">
-`creditBalance()` never hits the network. It is safe to call on the main thread and will return instantly even in offline scenarios. The value reflects the last successful sync with the server.
+`virtualCurrencies()` and `virtualCurrency(code)` never hit the network. They are safe to call on the main thread and return instantly even in offline scenarios. Values reflect the last successful sync with the server.
 </Callout>
 
 </Step>
@@ -72,106 +90,81 @@ Use the reactive hook in React components, or the imperative method elsewhere.
 
 ### Refresh from the server
 
-Call `refreshCredits()` when you need a guaranteed-fresh balance — for example, after a purchase or before gating access to a metered feature.
+Call `refreshVirtualCurrencies()` when you need a guaranteed-fresh set of balances — for example, after a server-side spend/grant that your app triggered.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
     ```ts
     import { Rovenue } from '@rovenue/react-native-sdk';
 
-    // Pull latest balance from server and update the local cache
-    await Rovenue.refreshCredits();
+    // Pull latest balances from server and update the local cache
+    await Rovenue.refreshVirtualCurrencies();
 
-    // Now creditBalance() and useCreditBalance() reflect the server value
-    const fresh = await Rovenue.creditBalance();
+    // Now virtualCurrencies() and useVirtualCurrencies() reflect the server values
+    const fresh = Rovenue.virtualCurrencies();
     ```
   </Tab>
   <Tab value="Swift">
     ```swift
-    // Pull latest balance from server and update the local cache
-    try await Rovenue.shared.refreshCredits()
+    // Pull latest balances from server and update the local cache
+    try await Rovenue.shared.refreshVirtualCurrencies()
 
-    // Now creditBalance() reflects the server value
-    let fresh = await Rovenue.shared.creditBalance()
+    // Now virtualCurrencyBalances() reflects the server values
+    let fresh = await Rovenue.shared.virtualCurrencyBalances()
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
-    // Pull latest balance from server and update the local cache
-    Rovenue.shared.refreshCredits()
+    // Pull latest balances from server and update the local cache
+    Rovenue.shared.refreshVirtualCurrencies()
 
-    // Now creditBalance() reflects the server value
-    val fresh = Rovenue.shared.creditBalance()
+    // Now virtualCurrencyBalances() reflects the server values
+    val fresh = Rovenue.shared.virtualCurrencyBalances()
     ```
   </Tab>
 </Tabs>
 
 <Callout type="info">
-Credits also refresh automatically while the app is in the foreground. See [App lifecycle](/docs/guides/app-lifecycle) for the polling behaviour. Manual `refreshCredits()` is only needed when you require immediate consistency.
+Balances also refresh automatically while the app is in the foreground. See [App lifecycle](/docs/guides/app-lifecycle) for the polling behaviour. Manual `refreshVirtualCurrencies()` is only needed when you require immediate consistency after a server-side operation.
 </Callout>
 
 </Step>
 <Step>
 
-### Consume credits
+### Grant virtual currency (server-side)
 
-`consumeCredits(amount, description?)` deducts the given integer amount from the server balance and returns the new balance. Pass an optional human-readable `description` for audit trail entries.
+Virtual currency is granted when a user purchases a currency-pack product. Product-to-currency mapping is configured in the Rovenue dashboard — no client code is required.
 
-<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
-  <Tab value="React Native">
-    ```ts
-    import { Rovenue, InsufficientCreditsError } from '@rovenue/react-native-sdk';
+After a successful purchase, `PurchaseResult.virtualCurrencies` already reflects the updated balances:
 
-    try {
-      const newBalance = await Rovenue.consumeCredits(5, 'image-generation');
-      console.log('Remaining credits:', newBalance);
-    } catch (e) {
-      if (e instanceof InsufficientCreditsError) {
-        // User does not have enough credits — show an upgrade prompt
-        showUpgradeSheet();
-      } else {
-        throw e;
-      }
-    }
-    ```
-  </Tab>
-  <Tab value="Swift">
-    ```swift
-    import Rovenue
+```ts
+const result = await Rovenue.purchase(pkg);
+console.log('COINS after purchase:', result.virtualCurrencies['COINS']);
+```
 
-    do {
-      let newBalance = try await Rovenue.shared.consumeCredits(
-        amount: 5,
-        description: "image-generation"
-      )
-      print("Remaining credits: \(newBalance)")
-    } catch Rovenue.Error.insufficientCredits {
-      // User does not have enough credits — show an upgrade prompt
-      showUpgradeSheet()
-    }
-    ```
-  </Tab>
-  <Tab value="Kotlin">
-    ```kotlin
-    import dev.rovenue.sdk.Rovenue
-    import dev.rovenue.sdk.generated.RovenueException
+</Step>
+<Step>
 
-    try {
-      val newBalance = Rovenue.shared.consumeCredits(
-        amount = 5,
-        description = "image-generation"
-      )
-      println("Remaining credits: $newBalance")
-    } catch (e: RovenueException.InsufficientCredits) {
-      // User does not have enough credits — show an upgrade prompt
-      showUpgradeSheet()
-    }
-    ```
-  </Tab>
-</Tabs>
+### Spend virtual currency (server-side only)
 
-<Callout type="info">
-`consumeCredits` is **server-deduped** via an internal Idempotency-Key. Retrying a failed network call will not double-deduct. A `CreditBalanceChanged` event is emitted on success — see [Reacting to changes](/docs/guides/reacting-to-changes) if you need to react to the new balance elsewhere in your app.
+Spending a virtual currency is a **server-side operation**. From your backend, call the secret-key transactions endpoint:
+
+```http
+POST /v1/virtual-currencies/:appUserId/:code/transactions
+Authorization: Bearer <rov_sec_…>
+Content-Type: application/json
+
+{
+  "amount": -5,
+  "idempotencyKey": "<unique-key-per-spend>",
+  "description": "AI image generation"
+}
+```
+
+A negative `amount` debits the balance; a positive `amount` grants credits. Always supply an `idempotencyKey` — the server rejects duplicate keys so a retry after a network drop does not double-deduct.
+
+<Callout type="warn">
+Never put your secret API key (`rov_sec_…`) in the app binary. The transactions endpoint is server-to-server only. Expose a lightweight endpoint in your own backend that verifies the user session and calls Rovenue on their behalf. After the spend completes, call `refreshVirtualCurrencies()` on the client (or wait for the next foreground sync) to update the local cache.
 </Callout>
 
 </Step>

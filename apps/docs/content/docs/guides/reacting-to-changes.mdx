@@ -7,10 +7,10 @@ import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { Steps, Step } from 'fumadocs-ui/components/steps';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-The SDK emits a `ChangeEvent` whenever its internal state changes — after a purchase, an identity update, or a credit deduction. Subscribe to drive UI updates without polling.
+The SDK emits a `ChangeEvent` whenever its internal state changes — after a purchase, an identity update, or a virtual-currency balance change. Subscribe to drive UI updates without polling.
 
 <Callout type="info">
-In React Native you rarely need the imperative listener directly — the hooks (`useEntitlement`, `useEntitlements`, `useCurrentUser`, `useCreditBalance`) subscribe and unsubscribe automatically. Use the imperative API for non-component code or for Swift/Kotlin.
+In React Native you rarely need the imperative listener directly — the hooks (`useEntitlement`, `useEntitlements`, `useCurrentUser`, `useVirtualCurrencies`, `useVirtualCurrency`) subscribe and unsubscribe automatically. Use the imperative API for non-component code or for Swift/Kotlin.
 </Callout>
 
 ### Types on this page
@@ -22,18 +22,18 @@ In React Native you rarely need the imperative listener directly — the hooks (
 type ChangeEvent =
   | 'EntitlementsChanged'
   | 'IdentityChanged'
-  | 'CreditBalanceChanged';
+  | 'VirtualCurrenciesChanged';
 ```
 
-On **Swift** the change stream is `AsyncStream<ChangeEvent>` and the cases are `.entitlementsChanged`, `.identityChanged`, `.creditBalanceChanged`.
+On **Swift** the change stream is `AsyncStream<ChangeEvent>` and the cases are `.entitlementsChanged`, `.identityChanged`, `.virtualCurrenciesChanged`.
 
-On **Kotlin** the change stream is `SharedFlow<ChangeEvent>` and the constants are `ChangeEvent.ENTITLEMENTS_CHANGED`, `ChangeEvent.IDENTITY_CHANGED`, `ChangeEvent.CREDIT_BALANCE_CHANGED`.
+On **Kotlin** the change stream is `SharedFlow<ChangeEvent>` and the constants are `ChangeEvent.ENTITLEMENTS_CHANGED`, `ChangeEvent.IDENTITY_CHANGED`, `ChangeEvent.VIRTUAL_CURRENCIES_CHANGED`.
 
 | Event value | When it fires |
 |-------------|--------------|
 | `EntitlementsChanged` | After the entitlement cache is refreshed — e.g. after a purchase, `refreshEntitlements()`, or a foreground sync. |
 | `IdentityChanged` | After `identify()` succeeds or `logOut()` resets the user. |
-| `CreditBalanceChanged` | After `refreshCredits()` or a successful `consumeCredits()` call. |
+| `VirtualCurrenciesChanged` | After `refreshVirtualCurrencies()` or a server-side grant/spend that updates the cache. |
 
 ---
 
@@ -56,8 +56,8 @@ On **Kotlin** the change stream is `SharedFlow<ChangeEvent>` and the constants a
         case 'IdentityChanged':
           console.log('Identity changed — re-read current user');
           break;
-        case 'CreditBalanceChanged':
-          console.log('Credit balance changed — re-read balance');
+        case 'VirtualCurrenciesChanged':
+          console.log('Virtual-currency balances changed — re-read balances');
           break;
       }
     });
@@ -70,7 +70,8 @@ On **Kotlin** the change stream is `SharedFlow<ChangeEvent>` and the constants a
       useEntitlement,
       useEntitlements,
       useCurrentUser,
-      useCreditBalance,
+      useVirtualCurrencies,
+      useVirtualCurrency,
     } from '@rovenue/react-native-sdk';
 
     function ProBadge() {
@@ -92,8 +93,8 @@ On **Kotlin** the change stream is `SharedFlow<ChangeEvent>` and the constants a
           print("Entitlements updated — re-check access")
         case .identityChanged:
           print("Identity changed — re-read current user")
-        case .creditBalanceChanged:
-          print("Credit balance changed — re-read balance")
+        case .virtualCurrenciesChanged:
+          print("Virtual-currency balances changed — re-read balances")
         }
       }
     }
@@ -109,9 +110,9 @@ On **Kotlin** the change stream is `SharedFlow<ChangeEvent>` and the constants a
     viewModelScope.launch {
       Rovenue.shared.changes.collect { event ->
         when (event) {
-          ChangeEvent.ENTITLEMENTS_CHANGED  -> println("Entitlements updated")
-          ChangeEvent.IDENTITY_CHANGED      -> println("Identity changed")
-          ChangeEvent.CREDIT_BALANCE_CHANGED -> println("Credit balance changed")
+          ChangeEvent.ENTITLEMENTS_CHANGED       -> println("Entitlements updated")
+          ChangeEvent.IDENTITY_CHANGED           -> println("Identity changed")
+          ChangeEvent.VIRTUAL_CURRENCIES_CHANGED -> println("Virtual-currency balances changed")
         }
       }
     }
@@ -193,9 +194,9 @@ A `ChangeEvent` is a signal to re-read — the event itself does not carry the n
           console.log('Current user:', user.rovenueId, user.appUserId);
           break;
         }
-        case 'CreditBalanceChanged': {
-          const balance = await Rovenue.creditBalance();
-          console.log('New balance:', balance);
+        case 'VirtualCurrenciesChanged': {
+          const balances = Rovenue.virtualCurrencies();
+          console.log('New balances:', balances);
           break;
         }
       }
@@ -213,9 +214,9 @@ A `ChangeEvent` is a signal to re-read — the event itself does not carry the n
         case .identityChanged:
           let user = await Rovenue.shared.currentUser()
           print("Current user:", user.rovenueId, user.appUserId ?? "anonymous")
-        case .creditBalanceChanged:
-          let balance = await Rovenue.shared.creditBalance()
-          print("New balance:", balance)
+        case .virtualCurrenciesChanged:
+          let balances = await Rovenue.shared.virtualCurrencyBalances()
+          print("New balances:", balances)
         }
       }
     }
@@ -234,9 +235,9 @@ A `ChangeEvent` is a signal to re-read — the event itself does not carry the n
             val user = Rovenue.shared.currentUser()
             println("Current user: ${user.rovenueId} / ${user.appUserId}")
           }
-          ChangeEvent.CREDIT_BALANCE_CHANGED -> {
-            val balance = Rovenue.shared.creditBalance()
-            println("New balance: $balance")
+          ChangeEvent.VIRTUAL_CURRENCIES_CHANGED -> {
+            val balances = Rovenue.shared.virtualCurrencyBalances()
+            println("New balances: $balances")
           }
         }
       }
@@ -246,7 +247,7 @@ A `ChangeEvent` is a signal to re-read — the event itself does not carry the n
 </Tabs>
 
 <Callout type="info">
-Related reads: [Checking entitlements](/docs/guides/entitlements) · [Identifying users](/docs/guides/identifying-users) · [Working with credits](/docs/guides/credits).
+Related reads: [Checking entitlements](/docs/guides/entitlements) · [Identifying users](/docs/guides/identifying-users) · [Virtual Currencies](/docs/guides/credits).
 </Callout>
 
 </Step>

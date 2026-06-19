@@ -14,7 +14,7 @@ app only decides which package to present.
 
 <Callout type="info">
 Rovenue handles receipt validation server-side before resolving the purchase
-promise. Your app receives verified entitlements and an updated credit balance
+promise. Your app receives verified entitlements and updated virtual-currency balances
 in the result — no additional polling or webhook listener is needed on the
 client. See [Methods — Purchases](/docs/reference/methods#purchases).
 </Callout>
@@ -50,10 +50,10 @@ type StoreProduct = {
 type ProductType = 'subscription' | 'consumable' | 'non_consumable';
 
 type PurchaseResult = {
-  entitlements: Entitlement[];  // verified entitlements after the purchase
-  creditBalance: number;        // updated credit balance (for consumables)
-  productId: string;            // store product ID that was purchased
-  storeTransactionId: string;   // store-issued transaction identifier
+  entitlements: Entitlement[];              // verified entitlements after the purchase
+  virtualCurrencies: Record<string, number>; // updated virtual-currency balances (code → amount)
+  productId: string;                        // store product ID that was purchased
+  storeTransactionId: string;               // store-issued transaction identifier
 };
 ```
 
@@ -63,7 +63,7 @@ type PurchaseResult = {
 | `Offering` | `identifier`, `packages` | A named group of packages configured in the dashboard. |
 | `Package` | `identifier`, `product` | A purchasable unit wrapping a `StoreProduct`. |
 | `StoreProduct` | `type`, `priceString`, `price` | Live pricing data from the store; localised automatically. |
-| `PurchaseResult` | `entitlements`, `creditBalance` | Returned after server-validated purchase. |
+| `PurchaseResult` | `entitlements`, `virtualCurrencies` | Returned after server-validated purchase. |
 
 > See [Types](/docs/reference/types) for the full `Entitlement` shape included in `PurchaseResult`.
 
@@ -172,7 +172,7 @@ reflect the user's locale and currency without any extra work on your part.
 Pass the chosen `Package` to `Rovenue.purchase()`. The SDK presents the native
 store sheet (StoreKit 2 on iOS, Play Billing on Android), waits for the
 transaction to complete, and validates the receipt server-side before resolving.
-The resolved `PurchaseResult` carries verified entitlements and credit balance —
+The resolved `PurchaseResult` carries verified entitlements and updated virtual-currency balances —
 no additional polling needed.
 
 Rovenue decides server-side — based on your product configuration in the
@@ -196,7 +196,7 @@ unlocks) or adds credits (consumables). Both product types go through the same
         const result = await Rovenue.purchase(pkg);
 
         // result.entitlements — verified, up-to-date array
-        // result.creditBalance — updated balance (for consumables)
+        // result.virtualCurrencies — updated balances (for currency-pack products)
         console.log('Purchase succeeded:', result.productId);
         console.log('Transaction ID:', result.storeTransactionId);
 
@@ -228,7 +228,7 @@ unlocks) or adds credits (consumables). Both product types go through the same
         let result = try await Rovenue.shared.purchase(pkg)
 
         // result.entitlements — verified, up-to-date array
-        // result.creditBalance — updated balance (for consumables)
+        // result.virtualCurrencies — updated balances (for currency-pack products)
         print("Purchase succeeded: \(result.productId)")
         print("Transaction ID: \(result.storeTransactionId)")
 
@@ -254,7 +254,7 @@ unlocks) or adds credits (consumables). Both product types go through the same
         val result = Rovenue.shared.purchase(activity, pkg)
 
         // result.entitlements — verified, up-to-date list
-        // result.creditBalance — updated balance (for consumables)
+        // result.virtualCurrencies — updated balances (for currency-pack products)
         println("Purchase succeeded: ${result.productId}")
         println("Transaction ID: ${result.storeTransactionId}")
 

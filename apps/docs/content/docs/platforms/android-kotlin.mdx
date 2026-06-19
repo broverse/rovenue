@@ -157,7 +157,7 @@ if (pkg != null) {
   try {
     // `activity` is your current Activity — Play Billing requires it.
     val result = Rovenue.shared.purchase(activity, pkg)
-    // result.entitlements and result.creditBalance are already up to date
+    // result.entitlements and result.virtualCurrencies are already up to date
   } catch (e: PurchaseCancelledException) {
     // User dismissed the store sheet — no action needed
   } catch (e: PurchasePendingException) {
@@ -173,7 +173,7 @@ Rovenue.shared.restorePurchases(activity)
 // Kotlin mirror of PurchaseResult
 data class PurchaseResult(
   val entitlements: List<Entitlement>,
-  val creditBalance: Int,
+  val virtualCurrencies: Map<String, Long>,
   val productId: String,
   val storeTransactionId: String,
 )
@@ -190,7 +190,7 @@ data class Entitlement(
 | Field | Type | Description |
 |-------|------|-------------|
 | `entitlements` | `List<Entitlement>` | Updated entitlement list after the purchase. |
-| `creditBalance` | `Int` | Updated credit balance after the purchase. |
+| `virtualCurrencies` | `Map<String, Long>` | Updated virtual-currency balances after the purchase (currency code → amount). |
 | `productId` | `String` | The product identifier that was purchased. |
 | `storeTransactionId` | `String` | The Play Store transaction ID. |
 
@@ -214,7 +214,7 @@ import dev.rovenue.sdk.Rovenue
 lifecycleScope.launch {
   repeatOnLifecycle(Lifecycle.State.STARTED) {
     Rovenue.shared.changes.collect { event ->
-      // event: ChangeEvent (ENTITLEMENTS_CHANGED | IDENTITY_CHANGED | CREDIT_BALANCE_CHANGED)
+      // event: ChangeEvent (ENTITLEMENTS_CHANGED | IDENTITY_CHANGED | VIRTUAL_CURRENCIES_CHANGED)
       println("Rovenue change: $event")
     }
   }
@@ -229,7 +229,7 @@ Collect `Rovenue.shared.changes` from an `Activity` or `ViewModel` scope — not
 
 ## Suspend functions
 
-SDK methods such as `identify`, `logOut`, `refreshEntitlements`, and `consumeCredits` are suspend functions. Call them from a coroutine:
+SDK methods such as `identify`, `logOut`, `refreshEntitlements`, and `refreshVirtualCurrencies` are suspend functions. Call them from a coroutine:
 
 ```kotlin
 lifecycleScope.launch {
@@ -253,7 +253,7 @@ See [Identifying Users](/docs/guides/identifying-users) for the full identity mo
 
 - [Identifying Users](/docs/guides/identifying-users) — link your backend user to the Rovenue subscriber.
 - [Entitlements](/docs/guides/entitlements) — read and gate on active subscriptions.
-- [Credits](/docs/guides/credits) — manage consumable credit balances.
+- [Virtual Currencies](/docs/guides/credits) — read virtual-currency balances and grant/spend via server-side APIs.
 - [Processing Purchases](/docs/guides/processing-purchases) — full purchase API and error handling.
 - [App Lifecycle](/docs/guides/app-lifecycle) — foreground/background wiring in depth.
 - [Reference: Methods](/docs/reference/methods) — full method reference.
