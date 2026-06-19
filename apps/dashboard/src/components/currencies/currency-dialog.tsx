@@ -113,7 +113,7 @@ export function CurrencyDialog({ projectId, open, currency, onClose }: Props) {
 
             <ModalBody className="gap-6 py-2">
               {!isRename && (
-                <div>
+                <div className="mb-2">
                   <div className="mb-2.5 text-[11px] font-medium uppercase tracking-wider text-default-500">
                     {t("currencies.presets.label")}
                   </div>
