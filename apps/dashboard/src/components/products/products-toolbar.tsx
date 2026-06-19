@@ -1,6 +1,4 @@
 import { useTranslation } from "react-i18next";
-import { Layers } from "lucide-react";
-import { Button } from "../../ui/button";
 import { SearchInput } from "../../ui/search-input";
 import { FilterPopover, type FilterValue } from "./filter-popover";
 
@@ -16,7 +14,7 @@ type Props = {
 };
 
 /**
- * Inline toolbar above the table — search field, column / filter buttons,
+ * Inline toolbar above the table — search field, filter button,
  * and a right-aligned "X of Y" counter.
  */
 export function ProductsToolbar({
@@ -37,10 +35,6 @@ export function ProductsToolbar({
         rootClassName="max-w-[320px] flex-1"
         showSlashHint
       />
-      <Button variant="flat" size="sm">
-        <Layers size={13} />
-        {t("products.toolbar.columns")}
-      </Button>
       <FilterPopover value={filter} onChange={onFilterChange} />
       <span className="ml-auto font-rv-mono text-[11px] text-rv-mute-500">
         {visible} {t("products.toolbar.of")} {total}

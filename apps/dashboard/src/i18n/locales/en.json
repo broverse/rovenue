@@ -771,12 +771,12 @@
         "overview": "Overview",
         "pricing": "Pricing",
         "access": "Access",
-        "groups": "Groups",
+        "groups": "Connected Offerings",
         "subscribers": "Subscribers",
         "activity": "Activity"
       },
       "groups": {
-        "heading": "Product groups",
+        "heading": "Connected offerings",
         "defaultBadge": "Default"
       }
     },

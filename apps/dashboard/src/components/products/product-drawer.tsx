@@ -21,7 +21,7 @@ import { StatusChip } from "./status-chip";
 import { StoreBadges } from "./store-badge";
 import type { Product } from "./types";
 
-const TABS = ["overview", "pricing", "groups", "subscribers", "activity"] as const;
+const TABS = ["overview", "pricing", "groups", "activity"] as const;
 type Tab = (typeof TABS)[number];
 
 type Props = {
@@ -152,7 +152,6 @@ function DrawerContent({
         {tab === "overview" && <OverviewTab product={product} series={series} />}
         {tab === "pricing" && <PricingTab product={product} />}
         {tab === "groups" && <GroupsTab projectId={projectId} product={product} />}
-        {tab === "subscribers" && <SubscribersTab product={product} />}
         {tab === "activity" && <ActivityTab product={product} />}
       </div>
     </>
@@ -456,22 +455,6 @@ function LinkGroupMenu({
         </Popover.Positioner>
       </Popover.Portal>
     </Popover.Root>
-  );
-}
-
-function SubscribersTab({ product }: { product: Product }) {
-  const { t } = useTranslation();
-  return (
-    <section>
-      <SectionHeading>
-        {product.subs == null
-          ? t("products.drawer.noSubscribersConsumable")
-          : t("products.drawer.activeSubscribersCount", { count: product.subs })}
-      </SectionHeading>
-      {product.subs != null && (
-        <p className="text-[12px] text-rv-mute-700">{t("products.drawer.openFullList")}</p>
-      )}
-    </section>
   );
 }
 
