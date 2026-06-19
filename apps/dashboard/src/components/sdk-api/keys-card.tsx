@@ -121,7 +121,21 @@ export function KeysCard({ projectId, apiKeys, onCreateKey }: Props) {
         confirmLabel={t("sdkApi.keys.revokeConfirm.confirm")}
         tone="danger"
         onConfirm={async () => {
-          if (confirmId) await revoke.mutateAsync(confirmId);
+          if (!confirmId) return;
+          try {
+            await revoke.mutateAsync(confirmId);
+          } catch (err) {
+            // Surface via window.alert — matches the project's existing
+            // approach for destructive errors (no toast system).
+            window.alert(
+              err instanceof Error
+                ? err.message
+                : t(
+                    "sdkApi.keys.revokeConfirm.failed",
+                    "Couldn't revoke the key. Please try again.",
+                  ),
+            );
+          }
         }}
         onClose={() => setConfirmId(null)}
       />
