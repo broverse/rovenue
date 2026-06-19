@@ -170,22 +170,9 @@ fn set_foreground_runs_without_panic() {
 }
 
 #[test]
-fn credit_balance_starts_zero() {
+fn virtual_currency_starts_zero() {
     let cfg = Config::new("pk_test_xyz".into(), "https://api.rovenue.io".into()).unwrap();
     let core = RovenueCore::new_for_test(cfg).unwrap();
-    assert_eq!(core.credit_balance(), 0);
-}
-
-#[test]
-fn consume_credits_rejects_zero_or_negative() {
-    let cfg = Config::new("pk_test_xyz".into(), "https://api.rovenue.io".into()).unwrap();
-    let core = RovenueCore::new_for_test(cfg).unwrap();
-    assert!(matches!(
-        core.consume_credits(0, None),
-        Err(rovenue::RovenueError::Internal)
-    ));
-    assert!(matches!(
-        core.consume_credits(-5, None),
-        Err(rovenue::RovenueError::Internal)
-    ));
+    assert_eq!(core.virtual_currency("gold".into()), 0);
+    assert!(core.virtual_currency_balances().is_empty());
 }

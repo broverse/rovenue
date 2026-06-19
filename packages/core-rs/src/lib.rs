@@ -5,7 +5,6 @@ pub mod api;
 pub mod attributes;
 pub mod cache;
 pub mod config;
-pub mod credits;
 pub mod entitlements;
 pub mod error;
 pub mod events;
@@ -20,6 +19,7 @@ pub mod sessions;
 pub mod time;
 pub mod transport;
 pub mod version;
+pub mod virtual_currencies;
 
 pub use api::RovenueCore;
 pub use config::Config;

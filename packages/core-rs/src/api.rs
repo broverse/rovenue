@@ -6,7 +6,7 @@ use crate::attributes::buffer::AttributeBuffer;
 use crate::attributes::dispatcher::AttributeDispatcher;
 use crate::cache::CacheStore;
 use crate::config::Config;
-use crate::credits::CreditReader;
+use crate::virtual_currencies::VirtualCurrencyReader;
 use crate::entitlements::{Entitlement, EntitlementReader};
 use crate::error::{RovenueError, RovenueResult};
 use crate::identify::IdentifyClient;
@@ -32,7 +32,7 @@ pub struct RovenueCore {
     bus: Arc<ObserverBus>,
     identity: Arc<IdentityManager>,
     entitlements: Arc<EntitlementReader>,
-    credits: Arc<CreditReader>,
+    virtual_currencies: Arc<VirtualCurrencyReader>,
     receipts: Arc<ReceiptClient>,
     offerings: Arc<OfferingsClient>,
     remote_config: Arc<RemoteConfigReader>,
@@ -77,8 +77,8 @@ impl RovenueCore {
                 .with_observer_bus(Arc::clone(&bus))
                 .with_clock(Arc::clone(&clock)),
         );
-        let credits = Arc::new(
-            CreditReader::new(Arc::clone(&store), Arc::clone(&identity))
+        let virtual_currencies = Arc::new(
+            VirtualCurrencyReader::new(Arc::clone(&store), Arc::clone(&identity))
                 .with_http(Arc::clone(&http))
                 .with_observer_bus(Arc::clone(&bus))
                 .with_clock(Arc::clone(&clock)),
@@ -140,8 +140,8 @@ impl RovenueCore {
             );
         }
         {
-            let reader = Arc::clone(&credits);
-            scheduler.register("credits", Duration::from_secs(60), move || {
+            let reader = Arc::clone(&virtual_currencies);
+            scheduler.register("virtual_currencies", Duration::from_secs(60), move || {
                 let _ = reader.refresh();
             });
         }
@@ -172,7 +172,7 @@ impl RovenueCore {
             bus,
             identity,
             entitlements: reader,
-            credits,
+            virtual_currencies,
             receipts,
             offerings,
             remote_config,
@@ -305,23 +305,20 @@ impl RovenueCore {
         self.scheduler.shutdown();
     }
 
-    pub fn credit_balance(&self) -> i64 {
-        let out = self.credits.balance().unwrap_or(0);
-        self.credits.maybe_refresh_async(STALENESS_MS);
+    pub fn virtual_currency_balances(&self) -> std::collections::HashMap<String, i64> {
+        let out = self.virtual_currencies.balances().into_iter().collect();
+        self.virtual_currencies.maybe_refresh_async(STALENESS_MS);
         out
     }
 
-    pub fn refresh_credits(&self) -> RovenueResult<()> {
-        self.credits.refresh()
+    pub fn virtual_currency(&self, code: String) -> i64 {
+        let out = self.virtual_currencies.balance(&code);
+        self.virtual_currencies.maybe_refresh_async(STALENESS_MS);
+        out
     }
 
-    pub fn consume_credits(&self, amount: i64, description: Option<String>) -> RovenueResult<i64> {
-        if amount <= 0 {
-            return Err(RovenueError::Internal);
-        }
-        let key = IdempotencyKey::new();
-        self.credits
-            .consume(amount, description.as_deref(), key.as_str())
+    pub fn refresh_virtual_currencies(&self) -> RovenueResult<()> {
+        self.virtual_currencies.refresh()
     }
 
     pub fn post_apple_receipt(
@@ -375,7 +372,6 @@ impl RovenueCore {
                 let _ = self.entitlements.refresh();
             }
         }
-        let _ = self.credits.set_balance(scope, outcome.credit_balance, now);
         ReceiptResult {
             subscriber_id: outcome.subscriber_id,
             app_user_id: outcome.app_user_id,

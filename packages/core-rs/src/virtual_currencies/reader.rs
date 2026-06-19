@@ -1,19 +1,19 @@
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::cache::credits::{CreditBalanceRepo, CreditBalanceRow};
-use crate::cache::CacheStore;
+use crate::cache::{CacheStore, VirtualCurrencyRepo};
 use crate::error::{RovenueError, RovenueResult};
 use crate::identity::IdentityManager;
 use crate::observer::{ChangeEvent, ObserverBus};
 use crate::time::Clock;
 use crate::transport::api::ApiEnvelope;
 use crate::transport::http_client::HttpClient;
-use crate::transport::types::{HttpPostRequest, HttpRequest};
+use crate::transport::types::HttpRequest;
 
-use super::types::{CreditBalanceWire, SpendBody, SpendResponse};
+use super::types::VcBalancesWire;
 
-pub struct CreditReader {
+pub struct VirtualCurrencyReader {
     store: Arc<CacheStore>,
     identity: Arc<IdentityManager>,
     http: Option<Arc<HttpClient>>,
@@ -23,7 +23,7 @@ pub struct CreditReader {
     refreshing: AtomicBool,
 }
 
-impl CreditReader {
+impl VirtualCurrencyReader {
     pub fn new(store: Arc<CacheStore>, identity: Arc<IdentityManager>) -> Self {
         Self {
             store,
@@ -48,47 +48,54 @@ impl CreditReader {
         self
     }
 
-    pub fn balance(&self) -> RovenueResult<i64> {
-        let scope = self.identity.current_user_scope();
-        let repo = CreditBalanceRepo::new(&self.store);
-        Ok(repo.get(&scope)?.map(|r| r.balance).unwrap_or(0))
+    fn repo(&self) -> VirtualCurrencyRepo {
+        VirtualCurrencyRepo::new(Arc::clone(&self.store))
     }
 
+    /// All cached balances for the current user scope (code → balance).
+    pub fn balances(&self) -> BTreeMap<String, i64> {
+        let scope = self.identity.current_user_scope();
+        self.repo().get_all(&scope).unwrap_or_default()
+    }
+
+    /// One currency's cached balance, or 0 when absent.
+    pub fn balance(&self, code: &str) -> i64 {
+        let scope = self.identity.current_user_scope();
+        self.repo().get(&scope, code).ok().flatten().unwrap_or(0)
+    }
+
+    /// GET /v1/virtual-currencies/me → replace the cached balance set.
     pub fn refresh(&self) -> RovenueResult<()> {
         let http = self.http.as_ref().ok_or(RovenueError::Internal)?;
         let clock = self.clock.as_ref().ok_or(RovenueError::Internal)?;
         let scope = self.identity.current_user_scope();
 
-        let resp = http.get_json::<ApiEnvelope<CreditBalanceWire>>(
-            HttpRequest::new("/v1/me/credits").user_scope(&scope),
+        let resp = http.get_json::<ApiEnvelope<VcBalancesWire>>(
+            HttpRequest::new("/v1/virtual-currencies/me").user_scope(&scope),
         )?;
         let body = resp.body.ok_or(RovenueError::Internal)?;
-        self.set_balance(&scope, body.data.balance, clock.now_unix_ms())
+        let balances: BTreeMap<String, i64> = body.data.balances.into_iter().collect();
+        self.set_balances(&scope, &balances, clock.now_unix_ms())
     }
 
-    pub fn consume(
+    /// Persist a balance set and emit `VirtualCurrenciesChanged` if it changed.
+    /// Stamps freshness so background coalescing (`maybe_refresh_async`) settles.
+    pub fn set_balances(
         &self,
-        amount: i64,
-        description: Option<&str>,
-        idempotency_key: &str,
-    ) -> RovenueResult<i64> {
-        let http = self.http.as_ref().ok_or(RovenueError::Internal)?;
-        let clock = self.clock.as_ref().ok_or(RovenueError::Internal)?;
-        let scope = self.identity.current_user_scope();
-
-        let resp = http.post_json::<SpendBody, ApiEnvelope<SpendResponse>>(
-            HttpPostRequest::new("/v1/me/credits/spend")
-                .user_scope(&scope)
-                .idempotency_key(idempotency_key),
-            &SpendBody {
-                amount,
-                description,
-            },
-        )?;
-        let body = resp.body.ok_or(RovenueError::Internal)?;
-        let new_balance = body.data.balance;
-        self.store_and_emit(&scope, new_balance, clock.now_unix_ms())?;
-        Ok(new_balance)
+        scope: &str,
+        balances: &BTreeMap<String, i64>,
+        now_ms: u64,
+    ) -> RovenueResult<()> {
+        let repo = self.repo();
+        let changed = repo.get_all(scope).map(|prev| &prev != balances).unwrap_or(true);
+        repo.upsert_all(scope, balances, now_ms)?;
+        if changed {
+            if let Some(bus) = &self.bus {
+                bus.emit(ChangeEvent::VirtualCurrenciesChanged);
+            }
+        }
+        self.last_refresh_ms.store(now_ms, Ordering::Relaxed);
+        Ok(())
     }
 
     fn is_stale(&self, now: u64, staleness_ms: u64) -> bool {
@@ -123,29 +130,5 @@ impl CreditReader {
             let _guard = ClearOnDrop(&this.refreshing);
             let _ = this.refresh();
         });
-    }
-
-    /// Set the balance straight from a known value (e.g. a receipt POST
-    /// response) — no network. Stamps freshness and emits on change.
-    pub fn set_balance(&self, scope: &str, balance: i64, now: u64) -> RovenueResult<()> {
-        self.store_and_emit(scope, balance, now)?;
-        self.last_refresh_ms.store(now, Ordering::Relaxed);
-        Ok(())
-    }
-
-    fn store_and_emit(&self, scope: &str, balance: i64, now: u64) -> RovenueResult<()> {
-        let repo = CreditBalanceRepo::new(&self.store);
-        let prior = repo.get(scope)?.map(|r| r.balance);
-        repo.upsert(&CreditBalanceRow {
-            user_scope: scope.to_string(),
-            balance,
-            updated_at_ms: now,
-        })?;
-        if prior != Some(balance) {
-            if let Some(bus) = &self.bus {
-                bus.emit(ChangeEvent::CreditBalanceChanged);
-            }
-        }
-        Ok(())
     }
 }

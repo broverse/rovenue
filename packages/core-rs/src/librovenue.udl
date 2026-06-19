@@ -49,7 +49,7 @@ callback interface Observer {
 enum ChangeEvent {
     "EntitlementsChanged",
     "IdentityChanged",
-    "CreditBalanceChanged",
+    "VirtualCurrenciesChanged",
     "RemoteConfigChanged",
 };
 
@@ -114,13 +114,12 @@ interface RovenueCore {
     [Throws=RovenueError]
     void refresh_entitlements();
 
-    i64 credit_balance();
+    record<string, i64> virtual_currency_balances();
+
+    i64 virtual_currency(string code);
 
     [Throws=RovenueError]
-    void refresh_credits();
-
-    [Throws=RovenueError]
-    i64 consume_credits(i64 amount, string? description);
+    void refresh_virtual_currencies();
 
     [Throws=RovenueError]
     ReceiptResult post_apple_receipt(

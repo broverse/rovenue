@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 pub enum ChangeEvent {
     EntitlementsChanged,
     IdentityChanged,
-    CreditBalanceChanged,
+    VirtualCurrenciesChanged,
     RemoteConfigChanged,
 }
 
