@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { ProductType, drizzle } from "@rovenue/db";
-import { addCredits } from "../../services/credit-engine";
+import { getAllBalances } from "../../services/credit-engine";
+import { grantPurchaseCurrencies } from "../../services/purchase-credits";
 import { syncAccess } from "../../services/access-engine";
 import { recordEvent } from "../../services/experiment-engine";
 import {
@@ -59,25 +60,31 @@ async function handleReceipt(
 
   await syncAccess(subscriber.id);
 
-  if (
-    product.type === ProductType.CONSUMABLE &&
-    product.creditAmount &&
-    product.creditAmount > 0
-  ) {
-    await addCredits({
+  if (product.type === ProductType.CONSUMABLE) {
+    await grantPurchaseCurrencies({
       subscriberId: subscriber.id,
-      amount: product.creditAmount,
-      referenceType: "purchase",
-      referenceId: purchase.id,
-      description: `Credits for ${product.identifier}`,
-      dedupeOnReference: true,
+      productId: product.id,
+      purchaseId: purchase.id,
+      productIdentifier: product.identifier,
     });
   }
 
-  const [access, balance] = await Promise.all([
+  const [access, rawBalances, currencies] = await Promise.all([
     buildAccessResponse(subscriber.id),
-    currentBalance(subscriber.id),
+    getAllBalances(subscriber.id),
+    drizzle.virtualCurrencyRepo.listVirtualCurrencies(
+      drizzle.db,
+      subscriber.projectId,
+      { includeArchived: true },
+    ),
   ]);
+
+  const codeById = new Map(currencies.map((vc) => [vc.id, vc.code]));
+  const virtualCurrencyBalances: Record<string, number> = {};
+  for (const b of rawBalances) {
+    const code = codeById.get(b.currencyId);
+    if (code) virtualCurrencyBalances[code] = b.balance;
+  }
 
   // Auto-conversion: tag every active experiment assignment the
   // subscriber is in with a "purchase" event. Any experiment whose
@@ -115,7 +122,7 @@ async function handleReceipt(
       attributes: subscriber.attributes,
     },
     access,
-    credits: { balance },
+    virtualCurrencyBalances,
   };
 }
 
@@ -145,10 +152,3 @@ export const receiptsRoute = new Hono()
     },
   );
 
-async function currentBalance(subscriberId: string): Promise<number> {
-  const last = await drizzle.creditLedgerRepo.findLatestBalance(
-    drizzle.db,
-    subscriberId,
-  );
-  return last?.balance ?? 0;
-}
