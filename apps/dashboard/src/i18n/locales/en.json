@@ -3936,15 +3936,20 @@
         "audit": "Open audit log →"
       },
       "dialog": {
-        "title": "Revoke API key",
-        "description": "This API key will be immediately disabled. Any requests using this key will fail.",
-        "warning": "This action cannot be undone."
+        "title": "New API key",
+        "labelField": "Key name",
+        "labelPlaceholder": "Production backend",
+        "create": "Create key",
+        "createdTitle": "Key created",
+        "secretWarning": "Copy your secret key now. For security it won't be shown again.",
+        "publishableLabel": "Publishable key",
+        "secretLabel": "Secret key",
+        "done": "Done"
       },
       "revokeConfirm": {
-        "title": "Revoke API key?",
-        "description": "This will immediately disable the key. Any in-flight requests may fail.",
-        "confirm": "Revoke",
-        "cancel": "Cancel"
+        "title": "Revoke this key?",
+        "body": "Apps and servers using this key will immediately lose access. This cannot be undone.",
+        "confirm": "Revoke key"
       }
     },
     "packages": {

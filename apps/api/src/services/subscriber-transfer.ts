@@ -49,28 +49,34 @@ export async function reassignAllAssets(
   await drizzle.subscriberRepo.reassignExperimentAssignments(tx, from.id, to.id);
 
   let creditsTransferred = 0;
-  const fromBalance = await drizzle.creditLedgerRepo.findLatestBalance(tx, from.id);
-  const fromBal = fromBalance?.balance ?? 0;
-  if (fromBal > 0) {
-    creditsTransferred = fromBal;
+  const fromBalances = await drizzle.creditLedgerRepo.findAllBalances(tx, from.id);
+  for (const { currencyId, balance } of fromBalances) {
+    if (balance <= 0) continue;
+    creditsTransferred += balance;
     await drizzle.creditLedgerRepo.insertCreditLedger(tx, {
       projectId,
       subscriberId: from.id,
+      currencyId,
       type: CreditLedgerType.TRANSFER_OUT,
-      amount: -fromBal,
+      amount: -balance,
       balance: 0,
       referenceType: "transfer",
       referenceId: to.id,
       description: `Credits transferred to ${to.label}`,
     });
-    const toBalance = await drizzle.creditLedgerRepo.findLatestBalance(tx, to.id);
+    const toBalance = await drizzle.creditLedgerRepo.findLatestBalance(
+      tx,
+      to.id,
+      currencyId,
+    );
     const toBal = toBalance?.balance ?? 0;
     await drizzle.creditLedgerRepo.insertCreditLedger(tx, {
       projectId,
       subscriberId: to.id,
+      currencyId,
       type: CreditLedgerType.TRANSFER_IN,
-      amount: fromBal,
-      balance: toBal + fromBal,
+      amount: balance,
+      balance: toBal + balance,
       referenceType: "transfer",
       referenceId: from.id,
       description: `Credits received from ${from.label}`,

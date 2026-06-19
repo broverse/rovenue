@@ -96,8 +96,13 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
       args: { projectId: string; rovenueId: string },
     ) => findByRovenueId(args.projectId, args.rovenueId),
   );
+  const findAllBalances = vi.fn(
+    async (_tx: unknown, _subscriberId: string) =>
+      [] as Array<{ currencyId: string; balance: number }>,
+  );
   const findLatestBalance = vi.fn(
-    async (_tx: unknown, _subscriberId: string) => null as null | { balance: number },
+    async (_tx: unknown, _subscriberId: string, _currencyId: string) =>
+      null as null | { balance: number },
   );
   const insertCreditLedger = vi.fn(async () => undefined);
   const advisoryXactLock = vi.fn(async () => undefined);
@@ -116,6 +121,7 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
         anonymizeSubscriberRow,
       },
       creditLedgerRepo: {
+        findAllBalances,
         findLatestBalance,
         insertCreditLedger,
       },
@@ -157,7 +163,9 @@ beforeEach(() => {
   for (const key of Object.keys(subscriberStore)) {
     delete subscriberStore[key];
   }
-  // Default: no credits.
+  // Default: no credits (empty balances for all currencies).
+  drizzleMock.creditLedgerRepo.findAllBalances.mockReset();
+  drizzleMock.creditLedgerRepo.findAllBalances.mockResolvedValue([]);
   drizzleMock.creditLedgerRepo.findLatestBalance.mockReset();
   drizzleMock.creditLedgerRepo.findLatestBalance.mockResolvedValue(null);
 });
