@@ -73,14 +73,24 @@ function AccessPage({ projectId }: { projectId: string }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const [linkOpen, setLinkOpen] = useState(false);
+  const [unlinkError, setUnlinkError] = useState<string | null>(null);
   const updateProduct = useUpdateProduct(projectId);
 
   async function unlinkProduct(product: DashboardProductRow) {
     if (!selected) return;
-    await updateProduct.mutateAsync({
-      id: product.id,
-      accessIds: product.accessIds.filter((id) => id !== selected.id),
-    });
+    setUnlinkError(null);
+    try {
+      await updateProduct.mutateAsync({
+        id: product.id,
+        accessIds: product.accessIds.filter((id) => id !== selected.id),
+      });
+    } catch (e) {
+      setUnlinkError(
+        e instanceof Error
+          ? e.message
+          : t("access.grantingProducts.unlinkError", "Could not unlink the product. Please try again."),
+      );
+    }
   }
 
   const create = useCreateAccess(projectId);
@@ -141,6 +151,7 @@ function AccessPage({ projectId }: { projectId: string }) {
           onCreate={() => setCreateOpen(true)}
           onLinkProducts={() => setLinkOpen(true)}
           onUnlinkProduct={(product) => void unlinkProduct(product)}
+          unlinkError={unlinkError}
         />
       </div>
 

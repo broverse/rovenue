@@ -59,4 +59,9 @@ describe("AccessDetail granting products", () => {
     fireEvent.click(screen.getByRole("button", { name: /link products/i }));
     expect(props.onLinkProducts).toHaveBeenCalledTimes(1);
   });
+
+  it("renders an unlink error when provided", () => {
+    renderDetail({ unlinkError: "Could not unlink" });
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not unlink");
+  });
 });

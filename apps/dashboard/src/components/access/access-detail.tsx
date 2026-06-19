@@ -29,6 +29,7 @@ type Props = {
   onCreate: () => void;
   onLinkProducts: () => void;
   onUnlinkProduct: (product: DashboardProductRow) => void;
+  unlinkError?: string | null;
 };
 
 const STORE_KEYS: StoreId[] = ["ios", "android", "web"];
@@ -54,6 +55,7 @@ export function AccessDetail({
   onCreate,
   onLinkProducts,
   onUnlinkProduct,
+  unlinkError,
 }: Props) {
   if (!accessRow) {
     return <ConceptEmptyState hasAnyAccess={hasAnyAccess} onCreate={onCreate} />;
@@ -74,6 +76,7 @@ export function AccessDetail({
         products={grantingProducts}
         onLinkProducts={onLinkProducts}
         onUnlinkProduct={onUnlinkProduct}
+        unlinkError={unlinkError}
       />
     </div>
   );
@@ -164,10 +167,12 @@ function GrantingProducts({
   products,
   onLinkProducts,
   onUnlinkProduct,
+  unlinkError,
 }: {
   products: ReadonlyArray<DashboardProductRow>;
   onLinkProducts: () => void;
   onUnlinkProduct: (product: DashboardProductRow) => void;
+  unlinkError?: string | null;
 }) {
   const { t } = useTranslation();
 
@@ -213,6 +218,11 @@ function GrantingProducts({
           ))}
         </ul>
       )}
+      {unlinkError && (
+        <p className="mt-2 text-[11px] text-rv-danger" role="alert">
+          {unlinkError}
+        </p>
+      )}
     </section>
   );
 }
@@ -227,6 +237,10 @@ function ProductRow({
   const { t } = useTranslation();
   const stores = STORE_KEYS.filter((s) => Boolean(product.storeIds?.[s]));
   const typeLabel = TYPE_LABEL[product.type] ?? product.type;
+  const unlinkLabel = t("access.grantingProducts.unlink", {
+    defaultValue: "Unlink {{name}}",
+    name: product.displayName,
+  });
 
   return (
     <li className="flex items-center gap-3 rounded-md border border-rv-divider bg-rv-c2/40 px-3 py-2.5 transition hover:border-rv-divider-strong hover:bg-rv-c2/70">
@@ -257,14 +271,8 @@ function ProductRow({
       <button
         type="button"
         onClick={onUnlink}
-        aria-label={t("access.grantingProducts.unlink", {
-          defaultValue: "Unlink {{name}}",
-          name: product.displayName,
-        })}
-        title={t("access.grantingProducts.unlink", {
-          defaultValue: "Unlink {{name}}",
-          name: product.displayName,
-        })}
+        aria-label={unlinkLabel}
+        title={unlinkLabel}
         className="rounded-md p-1 text-rv-mute-500 transition hover:bg-rv-c2 hover:text-rv-danger"
       >
         <X size={13} />

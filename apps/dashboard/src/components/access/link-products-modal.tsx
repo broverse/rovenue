@@ -66,6 +66,8 @@ export function LinkProductsModal({ open, projectId, access, products, onClose }
       const changed = products.filter(
         (p) => p.accessIds.includes(access.id) !== checked.has(p.id),
       );
+      // Each PATCH replaces the product's full accessIds set, so if one fails
+      // mid-batch a retry safely re-sends the others — no partial-write drift.
       await Promise.all(
         changed.map((p) => {
           const accessIds = checked.has(p.id)
