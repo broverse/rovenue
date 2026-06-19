@@ -507,6 +507,34 @@ async function processVoidedPurchase(
       });
     });
     await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);
+
+    // Record the refund financially and fire the refund-detected signal,
+    // mirroring the Stripe/Apple inbound-refund handlers. The VOIDED_PURCHASE
+    // RTDN carries no amount, so derive it from the stored purchase price.
+    // Positive magnitude: refunds are stored as positive `amountUsd` (the
+    // platform convention every analytics query nets via `gross - refunds`).
+    const amount = purchase.priceAmount != null ? Number(purchase.priceAmount) : 0;
+    const currency = purchase.priceCurrency ?? "USD";
+    const amountUsd = await convertToUsd(amount, currency);
+    await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+      projectId: args.projectId,
+      subscriberId: purchase.subscriberId,
+      purchaseId: purchase.id,
+      productId: purchase.productId,
+      type: RevenueEventType.REFUND,
+      amount: amount.toString(),
+      currency,
+      amountUsd: amountUsd.toString(),
+      store: Store.PLAY_STORE,
+      eventDate: new Date(),
+    });
+    await maybeEmitRefundDetected(drizzle.db, {
+      projectId: args.projectId,
+      purchaseId: purchase.id,
+      productId: purchase.productId,
+      amountUsdCents: Math.round(Math.abs(amountUsd) * 100),
+      currency,
+    });
   }
 
   return purchase
