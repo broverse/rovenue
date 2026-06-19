@@ -1,6 +1,24 @@
 import type { SubscriberListItem } from "@rovenue/shared";
 import { AVATAR_GRADIENTS } from "./mock-data";
-import type { CountryCode, Subscriber } from "./types";
+import type { CountryCode, Subscriber, SubscriberStatus } from "./types";
+
+/**
+ * Derives the displayed status from access + purchase history.
+ * - `active`  — currently holds an active entitlement
+ * - `churned` — no active access, but has purchased at least once before
+ * - `free`    — never purchased (e.g. SDK first-install with no subscription)
+ *
+ * Mirrors the backend's "churned" definition, which also requires a prior
+ * purchase (see `listSubscribers` in `packages/db`). A never-subscribed user
+ * is not churned — they simply haven't converted yet.
+ */
+export function deriveSubscriberStatus(
+  hasActiveAccess: boolean,
+  purchaseCount: number,
+): SubscriberStatus {
+  if (hasActiveAccess) return "active";
+  return purchaseCount > 0 ? "churned" : "free";
+}
 
 const VALID_COUNTRY_CODES = new Set<string>([
   "US", "DE", "TR", "JP", "BR", "GB", "FR", "IN", "CA", "AU", "NL", "KR",
@@ -22,7 +40,10 @@ export function mapApiSubscriber(item: SubscriberListItem): Subscriber {
   const full = item.appUserId ?? "";
   const truncated = full.length > 20 ? `${full.slice(0, 17)}...` : full;
   const alias = full.length > 24 ? `${full.slice(0, 21)}...` : full;
-  const status = item.activeAccessIds.length > 0 ? "active" : "churned";
+  const status = deriveSubscriberStatus(
+    item.activeAccessIds.length > 0,
+    item.purchaseCount,
+  );
   const country = toCountryCode(item.attributes["country"]);
 
   return {

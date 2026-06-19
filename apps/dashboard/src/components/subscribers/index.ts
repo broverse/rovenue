@@ -4,6 +4,7 @@ export { DateRangePopover, type DateRangeValue } from "./date-range-popover";
 export { FilterPill } from "./filter-pill";
 export {
   avatarFor,
+  deriveSubscriberStatus,
   formatLtv,
   formatMoney,
   initialsFor,

@@ -1191,7 +1191,8 @@
       "trial": "Trial",
       "grace": "Grace",
       "churned": "Churned",
-      "canceled": "Canceled"
+      "canceled": "Canceled",
+      "free": "Free"
     },
     "paginator": {
       "showing": "Showing {{from}}–{{to}} of <0>{{total}}</0>",

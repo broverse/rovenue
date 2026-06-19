@@ -8,6 +8,7 @@ const STATUS_TONE: Record<SubscriberStatus, NonNullable<ChipProps["tone"]>> = {
   grace: "warning",
   churned: "default",
   canceled: "danger",
+  free: "primary",
 };
 
 type Props = { status: SubscriberStatus; className?: string };

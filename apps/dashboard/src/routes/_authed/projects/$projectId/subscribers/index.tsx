@@ -20,6 +20,7 @@ import {
   SubscriberDetailPanel,
   SubscriberFilterPopover,
   SubscribersTable,
+  deriveSubscriberStatus,
   mapApiSubscriber,
   type Subscriber,
   type SubscriberScope,
@@ -297,9 +298,10 @@ function SubscribersPage({
 
   const selectedSubscriber = useMemo<Subscriber | null>(() => {
     if (detailData) {
-      const status = detailData.access.some((a) => a.isActive)
-        ? "active"
-        : "churned";
+      const status = deriveSubscriberStatus(
+        detailData.access.some((a) => a.isActive),
+        detailData.purchases.length,
+      );
       const subUserId = detailData.appUserId ?? "";
       return {
         id:

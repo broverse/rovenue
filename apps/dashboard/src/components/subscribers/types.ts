@@ -3,7 +3,8 @@ export type SubscriberStatus =
   | "trial"
   | "grace"
   | "churned"
-  | "canceled";
+  | "canceled"
+  | "free";
 
 export type SubscriberPlatform = "ios" | "android" | "web";
 
