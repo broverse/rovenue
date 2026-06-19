@@ -11,6 +11,7 @@ import {
   featureFlags,
   offerings,
   outgoingWebhooks,
+  productCurrencyGrants,
   products,
   projectMembers,
   projects,
@@ -19,6 +20,7 @@ import {
   subscriberAccess,
   subscribers,
   user as userTable,
+  virtualCurrencies,
   webhookEvents,
 } from "./src/drizzle/schema";
 import { getPool } from "./src/drizzle/pool";
@@ -50,6 +52,8 @@ const DEMO_AUDIENCE_ALL_ID = "aud_demo_all";
 const DEMO_AUDIENCE_TR_ID = "aud_demo_tr";
 const DEMO_FLAG_ID = "ff_demo_onboarding";
 const DEMO_EXPERIMENT_ID = "exp_demo_paywall";
+const DEMO_CURRENCY_GOLD_ID = "vc_demo_gold";
+const DEMO_CURRENCY_GEM_ID = "vc_demo_gem";
 const DEFAULT_OFFERING = "default";
 const SUBSCRIBER_COUNT = 20;
 const COUNTRIES = ["TR", "US", "DE", "GB", "BR", "JP", "IN", "FR"];
@@ -214,6 +218,23 @@ async function main() {
     })
     .onConflictDoNothing();
 
+  // -------- Virtual currencies --------
+  await db
+    .insert(virtualCurrencies)
+    .values([
+      { id: DEMO_CURRENCY_GOLD_ID, projectId: DEMO_PROJECT_ID, code: "GLD", name: "Coins" },
+      { id: DEMO_CURRENCY_GEM_ID, projectId: DEMO_PROJECT_ID, code: "GEM", name: "Gems" },
+    ])
+    .onConflictDoNothing();
+
+  await db
+    .insert(productCurrencyGrants)
+    .values([
+      { productId: DEMO_PRODUCT_CREDITS_ID, currencyId: DEMO_CURRENCY_GOLD_ID, amount: 1000 },
+      { productId: DEMO_PRODUCT_CREDITS_ID, currencyId: DEMO_CURRENCY_GEM_ID, amount: 5 },
+    ])
+    .onConflictDoNothing();
+
   await db
     .insert(offerings)
     .values({
@@ -289,6 +310,7 @@ async function main() {
       .values({
         id: subId,
         projectId: DEMO_PROJECT_ID,
+        rovenueId: appUserId,
         appUserId,
         attributes: {
           country: { value: country, updatedAt: "2026-01-01T00:00:00.000Z", source: "legacy" },
@@ -398,7 +420,7 @@ async function main() {
 
     // Credit ledger: every 3rd subscriber gets a 100-credit grant.
     // Append-only with no natural dedup key; idempotency comes from
-    // checking for any existing BONUS entry for this subscriber.
+    // checking for any existing BONUS entry for this subscriber + currency.
     if (i % 3 === 0) {
       const existingCredit = await db
         .select({ id: creditLedger.id })
@@ -407,6 +429,7 @@ async function main() {
           and(
             eq(creditLedger.subscriberId, subId),
             eq(creditLedger.type, "BONUS"),
+            eq(creditLedger.currencyId, DEMO_CURRENCY_GOLD_ID),
           ),
         )
         .limit(1);
@@ -416,6 +439,7 @@ async function main() {
         await db.insert(creditLedger).values({
           projectId: DEMO_PROJECT_ID,
           subscriberId: subId,
+          currencyId: DEMO_CURRENCY_GOLD_ID,
           type: "BONUS",
           amount: 100,
           balance: 100,
