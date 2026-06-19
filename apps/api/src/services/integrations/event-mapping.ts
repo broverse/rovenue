@@ -1,5 +1,13 @@
 import type { RovenueEventKey, IntegrationProviderId } from "@rovenue/shared";
 
+// INTENTIONAL OMISSION — `revenue.REFUND` and `revenue.CANCELLATION` are
+// deliberately NOT mapped for either provider. Meta CAPI and TikTok Events
+// API have no standard refund/cancellation conversion event; forwarding them
+// as a conversion would corrupt the ad platforms' optimization and reported
+// ROAS. They therefore resolve to `{ kind: "skip", reason: "no_mapping" }`,
+// which is the desired behavior — not a gap. Refund handling on ad platforms
+// (e.g. value-based deletion of a prior Purchase) is a separate, provider-
+// specific feature, not a default conversion mapping.
 export const DEFAULT_EVENT_MAPPING: Record<
   IntegrationProviderId,
   Partial<Record<RovenueEventKey, string>>
@@ -11,6 +19,7 @@ export const DEFAULT_EVENT_MAPPING: Record<
     "revenue.CREDIT_PURCHASE": "Purchase",
     "subscription.trial.started": "StartTrial",
     "subscriber.identified": "CompleteRegistration",
+    // revenue.REFUND / revenue.CANCELLATION: intentionally unmapped (see above).
   },
   TIKTOK_EVENTS: {
     "revenue.INITIAL": "Subscribe",
@@ -19,6 +28,7 @@ export const DEFAULT_EVENT_MAPPING: Record<
     "revenue.CREDIT_PURCHASE": "CompletePayment",
     "subscription.trial.started": "StartTrial",
     "subscriber.identified": "CompleteRegistration",
+    // revenue.REFUND / revenue.CANCELLATION: intentionally unmapped (see above).
   },
 };
 

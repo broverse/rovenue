@@ -23,7 +23,13 @@ export function liveEventsChannelFor(projectId: string): string {
 }
 
 function projectIdOf(row: OutboxEvent): string | null {
-  const p = (row.payload as { projectId?: unknown } | null)?.projectId;
+  // Most emitters write camelCase `projectId`; the funnel domain's payloads
+  // use snake_case `project_id`. Accept both so funnel lifecycle events also
+  // reach the dashboard live-events stream.
+  const payload = row.payload as
+    | { projectId?: unknown; project_id?: unknown }
+    | null;
+  const p = payload?.projectId ?? payload?.project_id;
   return typeof p === "string" && p.length > 0 ? p : null;
 }
 

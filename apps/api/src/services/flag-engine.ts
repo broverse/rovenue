@@ -1,6 +1,7 @@
 import { FeatureFlagEnv, drizzle } from "@rovenue/db";
 import { logger } from "../lib/logger";
 import { redis } from "../lib/redis";
+import { publishConfigInvalidation } from "../lib/config-invalidation";
 import { isInRollout, matchesAudience } from "@rovenue/shared/experiments";
 
 // =============================================================
@@ -159,6 +160,8 @@ export async function invalidateFlagCache(
       err: err instanceof Error ? err.message : String(err),
     });
   }
+  // Push the change to any connected SSE config streams.
+  await publishConfigInvalidation(projectId);
 }
 
 // =============================================================

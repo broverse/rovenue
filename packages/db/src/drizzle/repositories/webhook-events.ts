@@ -47,7 +47,7 @@ export async function findWebhookEventById(
 export async function findLastProcessedWebhookAt(
   db: Db,
   projectId: string,
-  source: "APPLE" | "GOOGLE" | "STRIPE",
+  source: WebhookSource,
 ): Promise<Date | null> {
   const rows = await db
     .select({ processedAt: webhookEvents.processedAt })

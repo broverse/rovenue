@@ -4,28 +4,27 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 // SSE /v1/config/stream integration test
 // =============================================================
 //
-// Source: superseded plan Task 7.2 (2026-04-23-clickhouse-
-// foundation-and-experiments.md). Adapted for this repo:
-// `apiKeyAuth` is a factory middleware, so its mock returns a
-// function. Project context goes under `c.get("project")`.
+// Covers audit CS1: the stream now requires a subscriberId and emits the
+// same evaluated `{ flags, experiments }` config as /v1/config, then listens
+// on the invalidation channel that the flag/experiment cache paths publish to.
 
-const mockSubscriber = {
-  subscribe: vi.fn(async () => undefined),
-  on: vi.fn(),
-  unsubscribe: vi.fn(async () => undefined),
-  quit: vi.fn(async () => undefined),
-};
+const { mockSubscriber } = vi.hoisted(() => ({
+  mockSubscriber: {
+    subscribe: vi.fn(async () => undefined),
+    on: vi.fn(),
+    unsubscribe: vi.fn(async () => undefined),
+    quit: vi.fn(async () => undefined),
+  },
+}));
 
 vi.mock("ioredis", () => ({
   Redis: vi.fn(() => mockSubscriber),
 }));
 
-vi.mock("../src/services/experiment-engine", () => ({
-  loadBundleFromCache: vi.fn(async (projectId: string) => ({
-    schemaVersion: 1,
-    projectId,
+vi.mock("../src/services/subscriber-config", () => ({
+  evaluateSubscriberConfig: vi.fn(async () => ({
+    flags: { feature_x: true },
     experiments: [],
-    audiences: {},
   })),
 }));
 
@@ -56,13 +55,17 @@ beforeAll(() => {
 });
 
 describe("GET /v1/config/stream", () => {
-  it("sends an initial bundle frame", async () => {
+  it("requires a subscriberId", async () => {
+    const res = await app.request("/v1/config/stream", { method: "GET" });
+    expect(res.status).toBe(400);
+  });
+
+  it("sends an initial evaluated config frame", async () => {
     const controller = new AbortController();
-    const promise = app.request("/v1/config/stream", {
+    const res = await app.request("/v1/config/stream?subscriberId=user1", {
       method: "GET",
       signal: controller.signal,
     });
-    const res = await promise;
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/event-stream");
 
@@ -71,6 +74,7 @@ describe("GET /v1/config/stream", () => {
     const text = new TextDecoder().decode(value);
     expect(text).toContain("event: initial");
     expect(text).toContain('"projectId":"proj_test"');
+    expect(text).toContain('"flags"');
 
     controller.abort();
     await reader.cancel();
@@ -78,7 +82,7 @@ describe("GET /v1/config/stream", () => {
 
   it("subscribes to the invalidation channel", async () => {
     await app
-      .request("/v1/config/stream", { method: "GET" })
+      .request("/v1/config/stream?subscriberId=user1", { method: "GET" })
       .catch(() => undefined);
     expect(mockSubscriber.subscribe).toHaveBeenCalledWith(
       "rovenue:experiments:invalidate",

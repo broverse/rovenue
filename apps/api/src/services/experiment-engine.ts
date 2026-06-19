@@ -16,6 +16,7 @@ import {
 } from "../lib/experiment-stats";
 import { logger } from "../lib/logger";
 import { redis } from "../lib/redis";
+import { publishConfigInvalidation } from "../lib/config-invalidation";
 import {
   assignBucket,
   matchesAudience,
@@ -184,6 +185,8 @@ export async function invalidateExperimentCache(
       err: err instanceof Error ? err.message : String(err),
     });
   }
+  // Push the change to any connected SSE config streams.
+  await publishConfigInvalidation(projectId);
 }
 
 // =============================================================

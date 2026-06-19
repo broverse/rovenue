@@ -39,6 +39,18 @@ export async function claimBatch(
   // FOR UPDATE SKIP LOCKED on the unpublished partial index.
   // Drizzle's .for() is not typed for SKIP LOCKED in 0.45, so we
   // drop to a raw SQL fragment in the final clause.
+  //
+  // SINGLE-DISPATCHER CONTRACT: the claim lock is released when this tx
+  // commits — before the relay publishes to Kafka and marks `publishedAt`
+  // in a later tx. That is only safe because exactly one dispatcher runs
+  // (gated by OUTBOX_DISPATCHER_ENABLED — the dedicated dispatcher service
+  // sets it true; horizontally-scaled API replicas set it false). If that
+  // contract is ever relaxed to multiple concurrent dispatchers, add a
+  // leased `claimedAt` marker set INSIDE this tx (re-claimable after a
+  // staleness window) so two dispatchers can't both publish the same row.
+  // Accidental double-publish is still idempotent downstream: fanout dedups
+  // on the BullMQ jobId (connectionId:outboxEventId) and ClickHouse uses
+  // query-time idempotent revenue views.
   return db
     .select()
     .from(outboxEvents)
