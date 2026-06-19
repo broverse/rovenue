@@ -3909,7 +3909,8 @@
         "create": "New key",
         "reveal": "Reveal",
         "hide": "Hide",
-        "rotate": "Rotate"
+        "rotate": "Rotate",
+        "revoke": "Revoke"
       },
       "kinds": {
         "publishable": "Publishable",
@@ -3933,6 +3934,17 @@
       "footer": {
         "note": "All key activity is hash-chained to the audit log.",
         "audit": "Open audit log →"
+      },
+      "dialog": {
+        "title": "Revoke API key",
+        "description": "This API key will be immediately disabled. Any requests using this key will fail.",
+        "warning": "This action cannot be undone."
+      },
+      "revokeConfirm": {
+        "title": "Revoke API key?",
+        "description": "This will immediately disable the key. Any in-flight requests may fail.",
+        "confirm": "Revoke",
+        "cancel": "Cancel"
       }
     },
     "packages": {
