@@ -159,6 +159,7 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
     sectionKey: "integrations",
     items: [
       { id: "apps", labelKey: "sidebar.items.apps", icon: Plug, to: "/projects/$projectId/apps" },
+      { id: "sdk", labelKey: "sidebar.items.sdk", icon: KeyRound, to: "/projects/$projectId/sdk" },
     ],
   },
   {

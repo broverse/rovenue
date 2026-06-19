@@ -34,9 +34,9 @@ export function SidebarNewButton({ projectId }: { projectId: string }) {
     void navigate({ to: "/projects/$projectId/experiments/new", params: { projectId } });
   const createFlag = () =>
     void navigate({ to: "/projects/$projectId/feature-flags/new", params: { projectId } });
-  // Webhooks and API keys are managed inline on the SDK settings page.
+  // Webhooks and API keys are managed inline on the SDK & API page.
   const goSdkSettings = () =>
-    void navigate({ to: "/projects/$projectId/settings/sdk", params: { projectId } });
+    void navigate({ to: "/projects/$projectId/sdk", params: { projectId } });
 
   // Global "c <key>" chord shortcuts (c p / c e / c f), mirroring the chips
   // shown on the menu items. Skipped while typing in a field or when a

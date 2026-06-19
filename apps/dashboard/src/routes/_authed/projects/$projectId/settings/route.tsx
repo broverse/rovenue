@@ -10,7 +10,6 @@ import {
   CreditCard,
   FileText,
   History,
-  KeyRound,
   Receipt,
   Settings as SettingsIcon,
   Sparkles,
@@ -36,13 +35,6 @@ const TABS = [
     icon: Sparkles,
     to: "/projects/$projectId/settings/rovi" as const,
     match: (id: string) => id.endsWith("/settings/rovi"),
-  },
-  {
-    id: "sdk",
-    labelKey: "settings.tabs.sdk",
-    icon: KeyRound,
-    to: "/projects/$projectId/settings/sdk" as const,
-    match: (id: string) => id.endsWith("/settings/sdk"),
   },
   {
     id: "billing",

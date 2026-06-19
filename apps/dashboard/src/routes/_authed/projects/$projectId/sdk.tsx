@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowUpRight, BookOpen, KeyRound } from "lucide-react";
 import type { ProjectDetail } from "@rovenue/shared";
-import { Button } from "../../../../../ui/button";
+import { Button } from "../../../../ui/button";
 import {
   CreateApiKeyDialog,
   DOCS_URL,
@@ -14,15 +14,15 @@ import {
   SdkHero,
   SdkPackagesGrid,
   WebhookCard,
-} from "../../../../../components/sdk-api";
-import { useProject } from "../../../../../lib/hooks/useProject";
+} from "../../../../components/sdk-api";
+import { useProject } from "../../../../lib/hooks/useProject";
 
-export const Route = createFileRoute("/_authed/projects/$projectId/settings/sdk")({
+export const Route = createFileRoute("/_authed/projects/$projectId/sdk")({
   component: SdkRoute,
 });
 
 function SdkRoute() {
-  const { projectId } = useParams({ from: "/_authed/projects/$projectId/settings/sdk" });
+  const { projectId } = useParams({ from: "/_authed/projects/$projectId/sdk" });
   const { data: project } = useProject(projectId);
   if (!project) return null;
   return <SdkPage project={project} />;
