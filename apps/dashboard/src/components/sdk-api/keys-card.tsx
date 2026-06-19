@@ -47,6 +47,7 @@ export function KeysCard({ projectId, apiKeys, onCreateKey }: Props) {
   const navigate = useNavigate();
   const revoke = useRevokeApiKey(projectId);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
 
   return (
     <section className="mb-4 rounded-lg border border-rv-divider bg-rv-c1">
@@ -125,9 +126,9 @@ export function KeysCard({ projectId, apiKeys, onCreateKey }: Props) {
           try {
             await revoke.mutateAsync(confirmId);
           } catch (err) {
-            // Surface via window.alert — matches the project's existing
-            // approach for destructive errors (no toast system).
-            window.alert(
+            // Surface the failure in our own confirm-modal chrome (the
+            // confirm dialog closes; the error dialog below opens).
+            setRevokeError(
               err instanceof Error
                 ? err.message
                 : t(
@@ -138,6 +139,16 @@ export function KeysCard({ projectId, apiKeys, onCreateKey }: Props) {
           }
         }}
         onClose={() => setConfirmId(null)}
+      />
+      <ConfirmDialog
+        open={revokeError !== null}
+        tone="danger"
+        hideCancel
+        title={t("sdkApi.keys.revokeConfirm.failedTitle", "Couldn't revoke key")}
+        description={revokeError}
+        confirmLabel={t("common.dismiss", "Dismiss")}
+        onConfirm={() => setRevokeError(null)}
+        onClose={() => setRevokeError(null)}
       />
     </section>
   );

@@ -17,6 +17,11 @@ export type ConfirmDialogProps = {
   confirmLabel?: ReactNode;
   /** Cancel button label. Defaults to a translated "Cancel". */
   cancelLabel?: ReactNode;
+  /**
+   * Hide the cancel button — turns the dialog into a single-action
+   * acknowledge prompt (e.g. surfacing an error the user can only dismiss).
+   */
+  hideCancel?: boolean;
   /** `danger` shows the warning icon + red confirm button. */
   tone?: ConfirmTone;
   /**
@@ -40,6 +45,7 @@ export function ConfirmDialog({
   description,
   confirmLabel,
   cancelLabel,
+  hideCancel = false,
   tone = "default",
   onConfirm,
   onClose,
@@ -97,15 +103,17 @@ export function ConfirmDialog({
           </div>
 
           <footer className="flex items-center justify-end gap-2 border-t border-rv-divider px-5 py-3">
-            <Button
-              type="button"
-              variant="flat"
-              size="sm"
-              onClick={onClose}
-              disabled={busy}
-            >
-              {cancelLabel ?? t("common.cancel", "Cancel")}
-            </Button>
+            {!hideCancel && (
+              <Button
+                type="button"
+                variant="flat"
+                size="sm"
+                onClick={onClose}
+                disabled={busy}
+              >
+                {cancelLabel ?? t("common.cancel", "Cancel")}
+              </Button>
+            )}
             <Button
               type="button"
               variant="solid-primary"
