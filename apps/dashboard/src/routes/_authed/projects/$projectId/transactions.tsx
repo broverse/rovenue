@@ -686,7 +686,9 @@ function TransactionsPage({ projectId }: { projectId: string }) {
             />
           )}
         </div>
-        {selected ? <TransactionInspector tx={selected} projectId={projectId} /> : null}
+        {selected ? (
+          <TransactionInspector key={selected.id} tx={selected} projectId={projectId} />
+        ) : null}
       </div>
     </>
   );
