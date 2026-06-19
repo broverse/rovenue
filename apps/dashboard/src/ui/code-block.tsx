@@ -1,6 +1,7 @@
-import type { HTMLAttributes, ReactNode } from "react";
+import { useEffect, useState, type HTMLAttributes, type ReactNode } from "react";
 import { cn } from "../lib/cn";
 import { CopyButton } from "./copy-button";
+import { highlightCode } from "../lib/shiki";
 
 type CodeBlockProps = Omit<HTMLAttributes<HTMLDivElement>, "title"> & {
   /** Source to copy AND render. Use `children` instead if you want to */
@@ -39,6 +40,30 @@ export function CodeBlock({
   const value = copyValue ?? code ?? "";
   const showHeader = Boolean(filename || language);
 
+  // Syntax-highlight string snippets (not custom `children`) when a language
+  // is known. Highlighting is async (the Shiki highlighter loads grammars on
+  // first use), so we render the plain monospace `<pre>` until — and if —
+  // highlighted markup is ready, which also covers the load-failure path.
+  const shouldHighlight = Boolean(code && language && !children && !inline);
+  const [highlighted, setHighlighted] = useState<string | null>(null);
+  useEffect(() => {
+    if (!shouldHighlight) {
+      setHighlighted(null);
+      return;
+    }
+    let active = true;
+    highlightCode(code!, language!)
+      .then((html) => {
+        if (active) setHighlighted(html);
+      })
+      .catch(() => {
+        if (active) setHighlighted(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [shouldHighlight, code, language]);
+
   return (
     <div className={cn("flex flex-col gap-1.5", className)} {...rest}>
       <div className="relative overflow-hidden rounded-md border border-rv-divider bg-rv-c2">
@@ -69,14 +94,23 @@ export function CodeBlock({
             />
           </div>
         )}
-        <pre
-          className={cn(
-            "px-3.5 py-3 font-rv-mono text-[12px] leading-relaxed text-foreground",
-            inline ? "overflow-x-auto whitespace-nowrap" : "overflow-x-auto whitespace-pre",
-          )}
-        >
-          {children ?? code}
-        </pre>
+        {highlighted ? (
+          <div
+            className="rv-shiki overflow-x-auto px-3.5 py-3 font-rv-mono text-[12px] leading-relaxed"
+            // Shiki escapes the source; inputs are our own static snippets,
+            // never user-provided. See src/lib/shiki.ts.
+            dangerouslySetInnerHTML={{ __html: highlighted }}
+          />
+        ) : (
+          <pre
+            className={cn(
+              "px-3.5 py-3 font-rv-mono text-[12px] leading-relaxed text-foreground",
+              inline ? "overflow-x-auto whitespace-nowrap" : "overflow-x-auto whitespace-pre",
+            )}
+          >
+            {children ?? code}
+          </pre>
+        )}
       </div>
       {caption ? <div className="text-[11px] text-rv-mute-500">{caption}</div> : null}
     </div>

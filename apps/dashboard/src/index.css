@@ -167,3 +167,24 @@ body {
 .rv-date.date-range-picker__popover {
   max-width: none;
 }
+
+/* Shiki syntax highlighting inside CodeBlock (see src/lib/shiki.ts).
+ * Highlighting runs with `defaultColor: false`, so tokens carry
+ * `--shiki-light` / `--shiki-dark` CSS variables instead of fixed colors.
+ * We pick the variable per mode via the `.dark` class next-themes sets on
+ * <html>. The block sits on the surrounding rv-c2 surface, so Shiki's own
+ * background is dropped and the mono font is inherited from the wrapper. */
+.rv-shiki .shiki {
+  margin: 0;
+  padding: 0;
+  background-color: transparent !important;
+  font-family: inherit;
+}
+.rv-shiki .shiki,
+.rv-shiki .shiki span {
+  color: var(--shiki-light);
+}
+.dark .rv-shiki .shiki,
+.dark .rv-shiki .shiki span {
+  color: var(--shiki-dark);
+}
