@@ -618,6 +618,7 @@ async function readRecentLedger(
 async function fetchProductDisplay(
   projectId: string,
   productIds: ReadonlyArray<string>,
+  currencyId?: string,
 ): Promise<
   Map<
     string,
@@ -625,27 +626,50 @@ async function fetchProductDisplay(
   >
 > {
   if (productIds.length === 0) return new Map();
+  const ids = [...productIds];
   const rows = await drizzle.db
     .select({
       id: drizzle.schema.products.id,
       identifier: drizzle.schema.products.identifier,
       displayName: drizzle.schema.products.displayName,
-      creditAmount: drizzle.schema.products.creditAmount,
     })
     .from(drizzle.schema.products)
     .where(
       and(
         eq(drizzle.schema.products.projectId, projectId),
-        inArray(drizzle.schema.products.id, [...productIds]),
+        inArray(drizzle.schema.products.id, ids),
       ),
     );
+
+  // The granted amount comes from product_currency_grants (the actual grant
+  // source) for the rollup's currency. With no currency filter a product can
+  // grant several currencies, so a single number is ambiguous → null. (The
+  // old code read the dead products.creditAmount column, which the purchase
+  // grant path never reads.)
+  const grantByProduct = new Map<string, number>();
+  if (currencyId) {
+    const grants = await drizzle.db
+      .select({
+        productId: drizzle.schema.productCurrencyGrants.productId,
+        amount: drizzle.schema.productCurrencyGrants.amount,
+      })
+      .from(drizzle.schema.productCurrencyGrants)
+      .where(
+        and(
+          inArray(drizzle.schema.productCurrencyGrants.productId, ids),
+          eq(drizzle.schema.productCurrencyGrants.currencyId, currencyId),
+        ),
+      );
+    for (const g of grants) grantByProduct.set(g.productId, g.amount);
+  }
+
   return new Map(
     rows.map((r) => [
       r.id,
       {
         identifier: r.identifier,
         displayName: r.displayName,
-        creditAmount: r.creditAmount,
+        creditAmount: currencyId ? (grantByProduct.get(r.id) ?? null) : null,
       },
     ]),
   );
@@ -725,6 +749,7 @@ export async function getCreditsRollup(
   const productDisplay = await fetchProductDisplay(
     input.projectId,
     packagesRaw.map((p) => p.productId),
+    input.currencyId,
   );
 
   const totalPackRevenue = packagesRaw.reduce(
