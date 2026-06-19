@@ -3392,31 +3392,20 @@
         "soft": "soft cap"
       },
       "items": {
-        "subscribers": {
-          "name": "Tracked subscribers",
-          "desc": "Unique paying users"
+        "mtr": {
+          "name": "Monthly tracked revenue",
+          "desc": "Net revenue this period"
         },
         "events": {
           "name": "Events ingested",
-          "desc": "Webhooks + SDK calls"
-        },
-        "charts": {
-          "name": "Saved charts",
-          "desc": "Pinned + dashboard widgets"
-        },
-        "seats": {
-          "name": "Team seats",
-          "desc": "Active members"
-        },
-        "api": {
-          "name": "API requests",
-          "desc": "REST + GraphQL · last 24h"
+          "desc": "Store webhooks + SDK events"
         },
         "sql": {
-          "name": "SQL credits",
+          "name": "SQL queries",
           "desc": "Ad-hoc warehouse queries"
         }
-      }
+      },
+      "unavailable": "Unavailable"
     }
   },
   "queries": {

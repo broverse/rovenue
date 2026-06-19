@@ -725,4 +725,47 @@ export const handlers = [
         },
       }),
   ),
+
+  // -------------------------------------------------------------
+  // Billing usage metering
+  // -------------------------------------------------------------
+
+  http.get(
+    `${BASE}/dashboard/projects/:projectId/billing/usage`,
+    () =>
+      HttpResponse.json({
+        data: {
+          tier: "indie",
+          cycle: "monthly",
+          periodStart: "2026-06-01T00:00:00Z",
+          periodEnd: "2026-06-30T23:59:59Z",
+          meters: [
+            {
+              key: "mtr",
+              current: 12500,
+              limit: 50000,
+              cap: "hard",
+              unit: "usd",
+              available: true,
+            },
+            {
+              key: "events",
+              current: 3_200_000,
+              limit: 10_000_000,
+              cap: "hard",
+              unit: "count",
+              available: true,
+            },
+            {
+              key: "sql_queries",
+              current: null,
+              limit: null,
+              cap: "soft",
+              unit: "count",
+              available: false,
+            },
+          ],
+        },
+      }),
+  ),
 ];

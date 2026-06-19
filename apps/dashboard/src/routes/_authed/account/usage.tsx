@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -7,31 +8,34 @@ import {
   UsageRow,
 } from "../../../components/account";
 import { Button } from "../../../ui/button";
+import { useBillingUsage, type UsageMeter } from "../../../lib/hooks/useBillingUsage";
+import { useProjects } from "../../../lib/hooks/useProjects";
 
 export const Route = createFileRoute("/_authed/account/usage")({
   component: UsagePage,
 });
 
-type CapType = "hard" | "soft";
-
-type UsageItem = {
-  key: string;
-  current: number;
-  limit: number;
-  cap: CapType;
+// meter key → i18n key under account.usage.items
+const I18N_KEY: Record<UsageMeter["key"], string> = {
+  mtr: "mtr",
+  events: "events",
+  sql_queries: "sql",
 };
 
-const ITEMS: ReadonlyArray<UsageItem> = [
-  { key: "subscribers", current: 38420, limit: 50000, cap: "hard" },
-  { key: "events", current: 6_842_000, limit: 10_000_000, cap: "hard" },
-  { key: "charts", current: 142, limit: 500, cap: "soft" },
-  { key: "seats", current: 12, limit: 25, cap: "hard" },
-  { key: "api", current: 184_200, limit: 500_000, cap: "soft" },
-  { key: "sql", current: 92, limit: 100, cap: "hard" },
-];
+function daysRemaining(periodEnd: string): number {
+  const ms = new Date(periodEnd).getTime() - Date.now();
+  return Math.max(0, Math.ceil(ms / 86_400_000));
+}
 
-function UsagePage() {
+export function UsagePage() {
   const { t } = useTranslation();
+  const projects = useProjects();
+  const projectId = useMemo(
+    () => (projects.data ?? [])[0]?.id ?? "",
+    [projects.data],
+  );
+
+  const { data, isLoading } = useBillingUsage(projectId);
 
   return (
     <AccountShell active="usage">
@@ -43,19 +47,32 @@ function UsagePage() {
       <SectionCard
         title={t("account.usage.limits.title")}
         description={t("account.usage.limits.subtitle")}
-        meta={t("account.usage.limits.resets", { remaining: 24 })}
+        meta={
+          data
+            ? t("account.usage.limits.resets", { remaining: daysRemaining(data.periodEnd) })
+            : undefined
+        }
         footer={<Button variant="solid-primary">{t("account.billing.plan.upgrade")}</Button>}
       >
-        {ITEMS.map((u) => (
-          <UsageRow
-            key={u.key}
-            name={t(`account.usage.items.${u.key}.name`)}
-            description={t(`account.usage.items.${u.key}.desc`)}
-            capLabel={t(`account.usage.cap.${u.cap}`)}
-            current={u.current}
-            limit={u.limit}
-          />
-        ))}
+        {isLoading || !data ? (
+          <div className="py-3 text-[12px] text-rv-mute-500">
+            {t("common.loading", "Loading…")}
+          </div>
+        ) : (
+          data.meters.map((m) => (
+            <UsageRow
+              key={m.key}
+              name={t(`account.usage.items.${I18N_KEY[m.key]}.name`)}
+              description={t(`account.usage.items.${I18N_KEY[m.key]}.desc`)}
+              capLabel={t(`account.usage.cap.${m.cap}`)}
+              current={m.current}
+              limit={m.limit}
+              unit={m.unit}
+              unavailable={!m.available}
+              unavailableLabel={t("account.usage.unavailable")}
+            />
+          ))
+        )}
       </SectionCard>
     </AccountShell>
   );
