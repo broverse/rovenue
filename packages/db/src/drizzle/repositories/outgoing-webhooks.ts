@@ -99,6 +99,35 @@ export async function countRecentDeadWebhooks(
   return Number(rows[0]?.total ?? 0);
 }
 
+/**
+ * Recent outgoing webhook deliveries for a project — ALL statuses,
+ * newest first. Powers the dashboard webhook-detail delivery history.
+ * (listDeadWebhooks is the dead-letter-only counterpart.)
+ */
+export async function listRecentOutgoingWebhooks(
+  db: Db,
+  args: ListFailedArgs,
+): Promise<OutgoingWebhook[]> {
+  return db
+    .select()
+    .from(outgoingWebhooks)
+    .where(eq(outgoingWebhooks.projectId, args.projectId))
+    .orderBy(desc(outgoingWebhooks.createdAt))
+    .limit(args.limit)
+    .offset(args.offset);
+}
+
+export async function countOutgoingWebhooks(
+  db: Db,
+  projectId: string,
+): Promise<number> {
+  const rows = await db
+    .select({ total: count() })
+    .from(outgoingWebhooks)
+    .where(eq(outgoingWebhooks.projectId, projectId));
+  return Number(rows[0]?.total ?? 0);
+}
+
 export async function findOutgoingWebhookById(
   db: Db,
   id: string,
