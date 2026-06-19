@@ -390,10 +390,6 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun uniffi_rovenue_fn_constructor_rovenuecore_new(`config`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Pointer
-    fun uniffi_rovenue_fn_method_rovenuecore_consume_credits(`ptr`: Pointer,`amount`: Long,`description`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
-    ): Long
-    fun uniffi_rovenue_fn_method_rovenuecore_credit_balance(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
-    ): Long
     fun uniffi_rovenue_fn_method_rovenuecore_current_user(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_rovenue_fn_method_rovenuecore_entitlement(`ptr`: Pointer,`id`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
@@ -424,11 +420,11 @@ internal interface _UniFFILib : Library {
     ): RustBuffer.ByValue
     fun uniffi_rovenue_fn_method_rovenuecore_record_session_event(`ptr`: Pointer,`kind`: RustBuffer.ByValue,`occurredAt`: RustBuffer.ByValue,`durationMs`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Unit
-    fun uniffi_rovenue_fn_method_rovenuecore_refresh_credits(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
-    ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_refresh_entitlements(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_refresh_remote_config(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): Unit
+    fun uniffi_rovenue_fn_method_rovenuecore_refresh_virtual_currencies(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_register_observer(`ptr`: Pointer,`obs`: Long,_uniffi_out_err: RustCallStatus, 
     ): Unit
@@ -452,6 +448,10 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_shutdown(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
+    fun uniffi_rovenue_fn_method_rovenuecore_virtual_currency(`ptr`: Pointer,`code`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): Long
+    fun uniffi_rovenue_fn_method_rovenuecore_virtual_currency_balances(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_rovenue_fn_init_callback_observer(`callbackStub`: ForeignCallback,_uniffi_out_err: RustCallStatus, 
     ): Unit
     fun uniffi_rovenue_fn_func_sdk_version(_uniffi_out_err: RustCallStatus, 
@@ -572,10 +572,6 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun uniffi_rovenue_checksum_func_sdk_version(
     ): Short
-    fun uniffi_rovenue_checksum_method_rovenuecore_consume_credits(
-    ): Short
-    fun uniffi_rovenue_checksum_method_rovenuecore_credit_balance(
-    ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_current_user(
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_entitlement(
@@ -606,11 +602,11 @@ internal interface _UniFFILib : Library {
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_record_session_event(
     ): Short
-    fun uniffi_rovenue_checksum_method_rovenuecore_refresh_credits(
-    ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_refresh_entitlements(
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_refresh_remote_config(
+    ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_refresh_virtual_currencies(
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_register_observer(
     ): Short
@@ -634,6 +630,10 @@ internal interface _UniFFILib : Library {
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_shutdown(
     ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_virtual_currency(
+    ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_virtual_currency_balances(
+    ): Short
     fun uniffi_rovenue_checksum_constructor_rovenuecore_new(
     ): Short
     fun uniffi_rovenue_checksum_method_observer_on_change(
@@ -656,12 +656,6 @@ private fun uniffiCheckContractApiVersion(lib: _UniFFILib) {
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
     if (lib.uniffi_rovenue_checksum_func_sdk_version() != 59903.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_rovenue_checksum_method_rovenuecore_consume_credits() != 48150.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_rovenue_checksum_method_rovenuecore_credit_balance() != 51676.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_current_user() != 2988.toShort()) {
@@ -709,13 +703,13 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_record_session_event() != 37798.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_rovenue_checksum_method_rovenuecore_refresh_credits() != 46019.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_refresh_entitlements() != 45868.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_refresh_remote_config() != 63383.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_refresh_virtual_currencies() != 19129.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_register_observer() != 60338.toShort()) {
@@ -749,6 +743,12 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_shutdown() != 54828.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_virtual_currency() != 48924.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_virtual_currency_balances() != 54376.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_constructor_rovenuecore_new() != 47369.toShort()) {
@@ -1062,9 +1062,7 @@ abstract class FFIObject(
 }
 
 public interface RovenueCoreInterface {
-    @Throws(RovenueException::class)
-    fun `consumeCredits`(`amount`: Long, `description`: String?): Long
-    fun `creditBalance`(): Long
+    
     fun `currentUser`(): User
     fun `entitlement`(`id`: String): Entitlement?
     fun `entitlementsAll`(): List<Entitlement>
@@ -1080,9 +1078,9 @@ public interface RovenueCoreInterface {
     fun `postAppleReceipt`(`receipt`: String, `productId`: String, `appAccountToken`: String?): ReceiptResult@Throws(RovenueException::class)
     fun `postGoogleReceipt`(`receipt`: String, `productId`: String, `obfuscatedAccountId`: String?, `obfuscatedProfileId`: String?): ReceiptResult@Throws(RovenueException::class)
     fun `recordSessionEvent`(`kind`: SessionEventKind, `occurredAt`: String, `durationMs`: UInt?)@Throws(RovenueException::class)
-    fun `refreshCredits`()@Throws(RovenueException::class)
     fun `refreshEntitlements`()@Throws(RovenueException::class)
-    fun `refreshRemoteConfig`()
+    fun `refreshRemoteConfig`()@Throws(RovenueException::class)
+    fun `refreshVirtualCurrencies`()
     fun `registerObserver`(`obs`: Observer)
     fun `remoteConfigAllJson`(): String
     fun `remoteConfigBool`(`key`: String, `fallback`: Boolean): Boolean
@@ -1094,6 +1092,8 @@ public interface RovenueCoreInterface {
     fun `setAttributes`(`attributes`: Map<String, String?>)
     fun `setForeground`(`foreground`: Boolean)
     fun `shutdown`()
+    fun `virtualCurrency`(`code`: String): Long
+    fun `virtualCurrencyBalances`(): Map<String, Long>
     companion object
 }
 
@@ -1120,29 +1120,6 @@ class RovenueCore(
         }
     }
 
-    
-    @Throws(RovenueException::class)override fun `consumeCredits`(`amount`: Long, `description`: String?): Long =
-        callWithPointer {
-    rustCallWithError(RovenueException) { _status ->
-    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_consume_credits(it,
-        FfiConverterLong.lower(`amount`),FfiConverterOptionalString.lower(`description`),
-        _status)
-}
-        }.let {
-            FfiConverterLong.lift(it)
-        }
-    
-    override fun `creditBalance`(): Long =
-        callWithPointer {
-    rustCall() { _status ->
-    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_credit_balance(it,
-        
-        _status)
-}
-        }.let {
-            FfiConverterLong.lift(it)
-        }
-    
     override fun `currentUser`(): User =
         callWithPointer {
     rustCall() { _status ->
@@ -1315,17 +1292,6 @@ class RovenueCore(
     
     
     
-    @Throws(RovenueException::class)override fun `refreshCredits`() =
-        callWithPointer {
-    rustCallWithError(RovenueException) { _status ->
-    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_refresh_credits(it,
-        
-        _status)
-}
-        }
-    
-    
-    
     @Throws(RovenueException::class)override fun `refreshEntitlements`() =
         callWithPointer {
     rustCallWithError(RovenueException) { _status ->
@@ -1341,6 +1307,17 @@ class RovenueCore(
         callWithPointer {
     rustCallWithError(RovenueException) { _status ->
     _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_refresh_remote_config(it,
+        
+        _status)
+}
+        }
+    
+    
+    
+    @Throws(RovenueException::class)override fun `refreshVirtualCurrencies`() =
+        callWithPointer {
+    rustCallWithError(RovenueException) { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_refresh_virtual_currencies(it,
         
         _status)
 }
@@ -1464,6 +1441,28 @@ class RovenueCore(
 }
         }
     
+    
+    override fun `virtualCurrency`(`code`: String): Long =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_virtual_currency(it,
+        FfiConverterString.lower(`code`),
+        _status)
+}
+        }.let {
+            FfiConverterLong.lift(it)
+        }
+    
+    override fun `virtualCurrencyBalances`(): Map<String, Long> =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_virtual_currency_balances(it,
+        
+        _status)
+}
+        }.let {
+            FfiConverterMapStringLong.lift(it)
+        }
     
     
 
@@ -1740,7 +1739,7 @@ public object FfiConverterTypeExperimentAssignment: FfiConverterRustBuffer<Exper
 data class ReceiptResult (
     var `subscriberId`: String, 
     var `appUserId`: String, 
-    var `creditBalance`: Long, 
+    var `virtualCurrencies`: Map<String, Long>, 
     var `entitlements`: List<Entitlement>
 ) {
     
@@ -1752,7 +1751,7 @@ public object FfiConverterTypeReceiptResult: FfiConverterRustBuffer<ReceiptResul
         return ReceiptResult(
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
-            FfiConverterLong.read(buf),
+            FfiConverterMapStringLong.read(buf),
             FfiConverterSequenceTypeEntitlement.read(buf),
         )
     }
@@ -1760,14 +1759,14 @@ public object FfiConverterTypeReceiptResult: FfiConverterRustBuffer<ReceiptResul
     override fun allocationSize(value: ReceiptResult) = (
             FfiConverterString.allocationSize(value.`subscriberId`) +
             FfiConverterString.allocationSize(value.`appUserId`) +
-            FfiConverterLong.allocationSize(value.`creditBalance`) +
+            FfiConverterMapStringLong.allocationSize(value.`virtualCurrencies`) +
             FfiConverterSequenceTypeEntitlement.allocationSize(value.`entitlements`)
     )
 
     override fun write(value: ReceiptResult, buf: ByteBuffer) {
             FfiConverterString.write(value.`subscriberId`, buf)
             FfiConverterString.write(value.`appUserId`, buf)
-            FfiConverterLong.write(value.`creditBalance`, buf)
+            FfiConverterMapStringLong.write(value.`virtualCurrencies`, buf)
             FfiConverterSequenceTypeEntitlement.write(value.`entitlements`, buf)
     }
 }
@@ -1806,7 +1805,7 @@ public object FfiConverterTypeUser: FfiConverterRustBuffer<User> {
 
 
 enum class ChangeEvent {
-    ENTITLEMENTS_CHANGED,IDENTITY_CHANGED,CREDIT_BALANCE_CHANGED,REMOTE_CONFIG_CHANGED;
+    ENTITLEMENTS_CHANGED,IDENTITY_CHANGED,VIRTUAL_CURRENCIES_CHANGED,REMOTE_CONFIG_CHANGED;
     companion object
 }
 
@@ -2368,6 +2367,41 @@ public object FfiConverterSequenceTypeExperimentAssignment: FfiConverterRustBuff
         buf.putInt(value.size)
         value.forEach {
             FfiConverterTypeExperimentAssignment.write(it, buf)
+        }
+    }
+}
+
+
+
+public object FfiConverterMapStringLong: FfiConverterRustBuffer<Map<String, Long>> {
+    override fun read(buf: ByteBuffer): Map<String, Long> {
+        val len = buf.getInt()
+        return buildMap<String, Long>(len) {
+            repeat(len) {
+                val k = FfiConverterString.read(buf)
+                val v = FfiConverterLong.read(buf)
+                this[k] = v
+            }
+        }
+    }
+
+    override fun allocationSize(value: Map<String, Long>): Int {
+        val spaceForMapSize = 4
+        val spaceForChildren = value.map { (k, v) ->
+            FfiConverterString.allocationSize(k) +
+            FfiConverterLong.allocationSize(v)
+        }.sum()
+        return spaceForMapSize + spaceForChildren
+    }
+
+    override fun write(value: Map<String, Long>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        // The parens on `(k, v)` here ensure we're calling the right method,
+        // which is important for compatibility with older android devices.
+        // Ref https://blog.danlew.net/2017/03/16/kotlin-puzzler-whose-line-is-it-anyways/
+        value.forEach { (k, v) ->
+            FfiConverterString.write(k, buf)
+            FfiConverterLong.write(v, buf)
         }
     }
 }
