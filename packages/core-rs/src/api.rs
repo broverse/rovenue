@@ -63,10 +63,10 @@ impl RovenueCore {
             Arc::clone(&bus),
             Arc::clone(&clock),
         ));
-        let http = Arc::new(HttpClient::new(
-            config.base_url.clone(),
-            config.api_key.clone(),
-        ));
+        let http = Arc::new(
+            HttpClient::new(config.base_url.clone(), config.api_key.clone())
+                .with_platform(config.platform.clone()),
+        );
         let reader = Arc::new(
             EntitlementReader::new(Arc::clone(&store), Arc::clone(&identity))
                 .with_http(Arc::clone(&http))

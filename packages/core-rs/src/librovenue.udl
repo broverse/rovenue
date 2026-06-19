@@ -24,6 +24,7 @@ dictionary Config {
     string api_key;
     boolean debug;
     string? app_version;
+    string? platform;
     string base_url = "https://api.rovenue.io";
 };
 

@@ -9,16 +9,29 @@ type Props = {
   className?: string;
 };
 
-/** Compact CSS-flag + ISO code cell. */
+/**
+ * Converts a 2-letter ISO-3166 country code to its flag emoji by mapping
+ * each letter to its Regional Indicator Symbol. Renders accurate flags
+ * without shipping an image set or crude CSS gradients.
+ */
+export function flagEmoji(code: string): string {
+  if (!/^[A-Za-z]{2}$/.test(code)) return "🏳️";
+  const OFFSET = 0x1f1e6 - "A".charCodeAt(0);
+  const upper = code.toUpperCase();
+  return String.fromCodePoint(
+    upper.charCodeAt(0) + OFFSET,
+    upper.charCodeAt(1) + OFFSET,
+  );
+}
+
+/** Compact flag + ISO code cell. */
 export function CountryCell({ country, showName, className }: Props) {
   const meta = COUNTRIES[country];
   return (
     <div className={cn("flex items-center gap-1.5 text-[12px] text-rv-mute-700", className)}>
-      <span
-        aria-hidden="true"
-        className="inline-block h-2.5 w-3.5 shrink-0 rounded-[1px] border border-white/10"
-        style={{ background: meta.flag }}
-      />
+      <span aria-hidden="true" className="text-[14px] leading-none">
+        {flagEmoji(country)}
+      </span>
       <span>{showName ? meta.name : country}</span>
     </div>
   );

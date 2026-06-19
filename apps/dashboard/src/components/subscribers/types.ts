@@ -33,6 +33,11 @@ export type SubscriberScope =
 export type Subscriber = {
   /** Truncated id displayed in the table cell. */
   id: string;
+  /**
+   * Internal Rovenue subscriber id (cuid2) — the canonical identifier for
+   * selection + grant/export/anonymize API calls.
+   */
+  rovenueId: string;
   /** Full canonical user id (used for avatar + detail). */
   full: string;
   /** Display alias (e.g. masked email). */

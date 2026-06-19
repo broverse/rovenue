@@ -27,6 +27,7 @@ export function mapApiSubscriber(item: SubscriberListItem): Subscriber {
 
   return {
     id: truncated,
+    rovenueId: item.id,
     full,
     alias,
     country,
@@ -37,7 +38,7 @@ export function mapApiSubscriber(item: SubscriberListItem): Subscriber {
     mrr: 0,
     created: item.firstSeenAt,
     renew: "—",
-    platforms: [],
+    platforms: item.platforms,
     risk: 0,
     plan: item.activeAccessIds.length > 0 ? item.activeAccessIds[0]! : "—",
   };

@@ -1,6 +1,6 @@
 import type { MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { HEADER } from "@rovenue/shared";
+import { HEADER, parseSdkPlatform } from "@rovenue/shared";
 import type { Subscriber } from "@rovenue/db";
 import { resolveOrCreateSubscriber } from "../lib/resolve-or-create-subscriber";
 
@@ -28,7 +28,10 @@ export const appUserContext: MiddlewareHandler = async (c, next) => {
       message: `${HEADER.X_ROVENUE_APP_USER_ID} header is required`,
     });
   }
-  const subscriber = await resolveOrCreateSubscriber(project.id, key);
+  // First-install platform (ios/android/web). Only persisted when the
+  // subscriber is created on this call; ignored for existing subscribers.
+  const platform = parseSdkPlatform(c.req.header(HEADER.X_ROVENUE_PLATFORM));
+  const subscriber = await resolveOrCreateSubscriber(project.id, key, platform);
   c.set("subscriber", subscriber);
   await next();
 };

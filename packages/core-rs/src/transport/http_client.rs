@@ -19,6 +19,9 @@ pub struct HttpClient {
     max_attempts: u32,
     min_backoff: Duration,
     request_timeout: Duration,
+    /// Runtime platform (ios/android/web), sent as `X-Rovenue-Platform` on
+    /// every request when set. `None` omits the header.
+    platform: Option<String>,
 }
 
 impl HttpClient {
@@ -33,7 +36,17 @@ impl HttpClient {
             max_attempts: 3,
             min_backoff: Duration::from_millis(50),
             request_timeout: Duration::from_secs(10),
+            platform: None,
         }
+    }
+
+    /// Builder-style setter for the runtime platform header. A blank/whitespace
+    /// value is treated as absent so the header is never sent empty.
+    pub fn with_platform(mut self, platform: Option<String>) -> Self {
+        self.platform = platform
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty());
+        self
     }
 
     pub fn with_max_attempts(mut self, n: u32) -> Self {
@@ -70,6 +83,9 @@ impl HttpClient {
                 .header("Authorization", format!("Bearer {}", self.api_key));
             if let Some(scope) = req.user_scope {
                 builder = builder.header("X-Rovenue-App-User-Id", scope);
+            }
+            if let Some(platform) = &self.platform {
+                builder = builder.header("X-Rovenue-Platform", platform);
             }
             if let Some(etag) = req.etag {
                 builder = builder.header("If-None-Match", etag);
@@ -208,6 +224,9 @@ impl HttpClient {
                 .header("Content-Type", "application/json");
             if let Some(scope) = req.user_scope {
                 builder = builder.header("X-Rovenue-App-User-Id", scope);
+            }
+            if let Some(platform) = &self.platform {
+                builder = builder.header("X-Rovenue-Platform", platform);
             }
             if let Some(key) = req.idempotency_key {
                 builder = builder.header("Idempotency-Key", key);

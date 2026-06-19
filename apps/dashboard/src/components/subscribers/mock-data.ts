@@ -52,7 +52,8 @@ export const AVATAR_GRADIENTS: ReadonlyArray<string> = [
   "linear-gradient(135deg, #84CC16, #4D7C0F)",
 ];
 
-export const SUBSCRIBERS: ReadonlyArray<Subscriber> = [
+export const SUBSCRIBERS: ReadonlyArray<Subscriber> = (
+  [
   {
     id: "user_9f2a7b...",
     full: "user_9f2a7b31e8",
@@ -282,7 +283,11 @@ export const SUBSCRIBERS: ReadonlyArray<Subscriber> = [
     risk: 42,
     plan: "Premium",
   },
-];
+] satisfies ReadonlyArray<Omit<Subscriber, "rovenueId">>).map((s) => ({
+  ...s,
+  // Mock fixtures have no real internal id; derive a stable stand-in.
+  rovenueId: s.full,
+}));
 
 export const TIMELINE_MOCK: ReadonlyArray<TimelineEntry> = [
   {

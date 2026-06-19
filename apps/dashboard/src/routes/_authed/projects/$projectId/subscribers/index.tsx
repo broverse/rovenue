@@ -87,10 +87,18 @@ function parseScope(raw: unknown): SubscriberScope {
 }
 
 function parsePlatforms(raw: unknown): SubscriberListPlatform[] | undefined {
-  if (typeof raw !== "string" || !raw) return undefined;
-  const parts = raw
-    .split(",")
-    .map((p) => p.trim().toLowerCase())
+  // `validateSearch` runs on every navigation, including programmatic
+  // updates from the filter popover that pass an array. Accept both the
+  // comma-joined string (deep links) and an array (in-app nav), otherwise
+  // an array silently fails the `typeof === "string"` check and the
+  // platform filter is dropped on apply.
+  const raw0: unknown[] = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string" && raw
+      ? raw.split(",")
+      : [];
+  const parts = raw0
+    .map((p) => String(p).trim().toLowerCase())
     .filter((p): p is SubscriberListPlatform =>
       (PLATFORM_VALUES as ReadonlyArray<string>).includes(p),
     );
@@ -298,6 +306,7 @@ function SubscribersPage({
           subUserId.length > 20
             ? `${subUserId.slice(0, 17)}...`
             : subUserId,
+        rovenueId: detailData.id,
         full: subUserId,
         alias:
           subUserId.length > 24
@@ -321,7 +330,7 @@ function SubscribersPage({
       };
     }
     if (activeId) {
-      return flat.find((s) => s.full === activeId) ?? null;
+      return flat.find((s) => s.rovenueId === activeId) ?? null;
     }
     return null;
   }, [detailData, activeId, flat]);
@@ -335,10 +344,10 @@ function SubscribersPage({
     });
 
   const toggleAll = () => {
-    if (filtered.every((s) => selectedIds.has(s.id))) {
+    if (filtered.every((s) => selectedIds.has(s.rovenueId))) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(filtered.map((s) => s.id)));
+      setSelectedIds(new Set(filtered.map((s) => s.rovenueId)));
     }
   };
 
@@ -504,43 +513,46 @@ function SubscribersPage({
         </span>
       </div>
 
-      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="min-w-0">
-          <SubscribersTable
-            subscribers={filtered}
-            selectedIds={selectedIds}
-            activeId={activeId}
-            onToggleSelect={toggleOne}
-            onToggleSelectAll={toggleAll}
-            onOpen={setActiveId}
-          />
+      <div className="min-w-0">
+        <SubscribersTable
+          subscribers={filtered}
+          selectedIds={selectedIds}
+          activeId={activeId}
+          onToggleSelect={toggleOne}
+          onToggleSelectAll={toggleAll}
+          onOpen={setActiveId}
+        />
 
-          {/* Load more / end-of-list indicator */}
-          <div className="flex items-center justify-between border-t border-rv-divider px-3.5 py-2.5 text-[12px] text-rv-mute-600">
-            <span className="font-rv-mono">
-              {isLoading
+        {/* Load more / end-of-list indicator */}
+        <div className="flex items-center justify-between border-t border-rv-divider px-3.5 py-2.5 text-[12px] text-rv-mute-600">
+          <span className="font-rv-mono">
+            {isLoading
+              ? t("subscribers.paginator.loading", "Loading…")
+              : `${totalLoaded.toLocaleString()}${hasNextPage ? "+" : ""} ${t("subscribers.toolbar.customers", "customers")}`}
+          </span>
+          {hasNextPage && (
+            <Button
+              variant="flat"
+              size="sm"
+              onClick={() => fetchNextPage()}
+              disabled={isFetchingNextPage}
+            >
+              {isFetchingNextPage
                 ? t("subscribers.paginator.loading", "Loading…")
-                : `${totalLoaded.toLocaleString()}${hasNextPage ? "+" : ""} ${t("subscribers.toolbar.subscribers", "subscribers")}`}
-            </span>
-            {hasNextPage && (
-              <Button
-                variant="flat"
-                size="sm"
-                onClick={() => fetchNextPage()}
-                disabled={isFetchingNextPage}
-              >
-                {isFetchingNextPage
-                  ? t("subscribers.paginator.loading", "Loading…")
-                  : t("subscribers.paginator.loadMore", "Load more")}
-              </Button>
-            )}
-          </div>
+                : t("subscribers.paginator.loadMore", "Load more")}
+            </Button>
+          )}
         </div>
-
-        {selectedSubscriber && (
-          <SubscriberDetailPanel subscriber={selectedSubscriber} timeline={[]} />
-        )}
       </div>
+
+      {selectedSubscriber && (
+        <SubscriberDetailPanel
+          projectId={projectId}
+          subscriber={selectedSubscriber}
+          timeline={[]}
+          onClose={() => setActiveId(null)}
+        />
+      )}
     </>
   );
 }

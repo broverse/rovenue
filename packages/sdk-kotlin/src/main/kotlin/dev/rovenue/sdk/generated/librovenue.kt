@@ -1291,6 +1291,7 @@ data class Config (
     var `apiKey`: String, 
     var `debug`: Boolean, 
     var `appVersion`: String?, 
+    var `platform`: String?, 
     var `baseUrl`: String = "https://api.rovenue.io"
 ) {
     
@@ -1303,6 +1304,7 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
             FfiConverterString.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
             FfiConverterString.read(buf),
         )
     }
@@ -1311,6 +1313,7 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
             FfiConverterString.allocationSize(value.`apiKey`) +
             FfiConverterBoolean.allocationSize(value.`debug`) +
             FfiConverterOptionalString.allocationSize(value.`appVersion`) +
+            FfiConverterOptionalString.allocationSize(value.`platform`) +
             FfiConverterString.allocationSize(value.`baseUrl`)
     )
 
@@ -1318,6 +1321,7 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
             FfiConverterString.write(value.`apiKey`, buf)
             FfiConverterBoolean.write(value.`debug`, buf)
             FfiConverterOptionalString.write(value.`appVersion`, buf)
+            FfiConverterOptionalString.write(value.`platform`, buf)
             FfiConverterString.write(value.`baseUrl`, buf)
     }
 }
@@ -1360,14 +1364,14 @@ public object FfiConverterTypeCoreOffering: FfiConverterRustBuffer<CoreOffering>
 
 
 data class CoreOfferingProduct (
-    var `packageIdentifier`: String,
-    var `identifier`: String,
-    var `productType`: String,
-    var `displayName`: String,
-    var `appleProductId`: String?,
+    var `packageIdentifier`: String, 
+    var `identifier`: String, 
+    var `productType`: String, 
+    var `displayName`: String, 
+    var `appleProductId`: String?, 
     var `googleProductId`: String?
 ) {
-
+    
     companion object
 }
 

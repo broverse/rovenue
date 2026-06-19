@@ -375,12 +375,12 @@ export type SubscriberSortMode =
   | "ltv"
   | "purchases";
 
-/** Friendly platform alias → on-disk `Store` enum variant. */
-const PLATFORM_TO_STORE: Record<SubscriberPlatformFilter, string> = {
-  ios: "APP_STORE",
-  android: "PLAY_STORE",
-  web: "STRIPE",
-};
+/** Platforms a subscriber may report via the SDK first-install attribute. */
+const SUBSCRIBER_PLATFORMS: ReadonlyArray<SubscriberPlatformFilter> = [
+  "ios",
+  "android",
+  "web",
+];
 
 export interface ListSubscribersArgs {
   projectId: string;
@@ -429,12 +429,6 @@ export interface ListedSubscriber {
    *  string for ltv, integer string for purchases. */
   sortValue: string;
 }
-
-const STORE_TO_PLATFORM: Record<string, SubscriberPlatformFilter> = {
-  APP_STORE: "ios",
-  PLAY_STORE: "android",
-  STRIPE: "web",
-};
 
 /**
  * Dashboard list query: keyset pagination on (createdAt, id),
@@ -518,14 +512,16 @@ export async function listSubscribers(
     )`);
   }
 
-  // --- platform (any-of) --------------------------------------
+  // --- platform (any-of; SDK first-install attribute) ---------
+  // Matches the `platform` attribute the SDK reports at create time
+  // (ios/android/web), NOT the purchase store, so a customer with no
+  // purchase still filters by where they installed.
   if (args.platforms && args.platforms.length > 0) {
-    const stores = args.platforms.map((p) => PLATFORM_TO_STORE[p]);
-    whereClauses.push(sql`EXISTS (
-      SELECT 1 FROM ${purchases}
-      WHERE ${purchases.subscriberId} = ${subscribers.id}
-        AND ${purchases.store}::text = ANY(${stores})
-    )`);
+    whereClauses.push(
+      sql`${subscribers.attributes}->'platform'->>'value' = ANY(${[
+        ...args.platforms,
+      ]})`,
+    );
   }
 
   // --- country (nested attribute value) -----------------------
@@ -625,14 +621,11 @@ export async function listSubscribers(
   // but cast to text so the value round-trips through the wire
   // unambiguously.
   const ltvSql = sql<string>`(${ltvExpr})::text`;
-  const platformsSql = sql<string[]>`(
-    SELECT COALESCE(
-      ARRAY_AGG(DISTINCT ${purchases.store}::text),
-      ARRAY[]::text[]
-    )
-    FROM ${purchases}
-    WHERE ${purchases.subscriberId} = ${subscribers.id}
-  )`;
+  // First-install platform reported by the SDK at create time, read
+  // from the `platform` attribute (ios/android/web). Replaces the old
+  // purchase-store derivation so platform reflects where the customer
+  // installed, not which store processed a purchase.
+  const platformSql = sql<string | null>`(${subscribers.attributes}->'platform'->>'value')`;
   // Surface the sort boundary as a string the route can re-encode
   // into the next cursor without re-deriving it. Timestamps come
   // through as ISO strings; numerics as plain decimal strings.
@@ -649,7 +642,7 @@ export async function listSubscribers(
       purchaseCount: purchaseCountExpr,
       activeAccessIds: accessIdsSql,
       ltvUsd: ltvSql,
-      platforms: platformsSql,
+      platform: platformSql,
       sortValue: sortValueSql,
     })
     .from(subscribers)
@@ -657,14 +650,16 @@ export async function listSubscribers(
     .orderBy(sql`${sortExpr} DESC`, desc(subscribers.id))
     .limit(args.limit);
 
-  return rows.map((r) => ({
+  return rows.map(({ platform, ...r }) => ({
     ...r,
     purchaseCount: Number(r.purchaseCount) || 0,
     activeAccessIds: r.activeAccessIds ?? [],
     ltvUsd: typeof r.ltvUsd === "string" ? r.ltvUsd : "0",
-    platforms: (r.platforms ?? [])
-      .map((s) => STORE_TO_PLATFORM[s])
-      .filter((p): p is SubscriberPlatformFilter => Boolean(p)),
+    platforms:
+      platform &&
+      (SUBSCRIBER_PLATFORMS as ReadonlyArray<string>).includes(platform)
+        ? [platform as SubscriberPlatformFilter]
+        : [],
     sortValue: typeof r.sortValue === "string" ? r.sortValue : "",
   }));
 }

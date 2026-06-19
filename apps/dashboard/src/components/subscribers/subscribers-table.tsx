@@ -5,6 +5,7 @@ import type { Subscriber } from "./types";
 
 const COLUMNS = [
   { key: "user", align: "left" as const },
+  { key: "rovenueId", align: "left" as const },
   { key: "plan", align: "left" as const },
   { key: "status", align: "left" as const },
   { key: "entitlements", align: "left" as const },
@@ -35,8 +36,10 @@ export function SubscribersTable({
 }: Props) {
   const { t } = useTranslation();
   const allChecked =
-    subscribers.length > 0 && subscribers.every((s) => selectedIds.has(s.id));
-  const someChecked = !allChecked && subscribers.some((s) => selectedIds.has(s.id));
+    subscribers.length > 0 &&
+    subscribers.every((s) => selectedIds.has(s.rovenueId));
+  const someChecked =
+    !allChecked && subscribers.some((s) => selectedIds.has(s.rovenueId));
 
   return (
     <div className="overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">
@@ -65,13 +68,13 @@ export function SubscribersTable({
           <tbody>
             {subscribers.map((s, idx) => (
               <SubscriberRow
-                key={s.id}
+                key={s.rovenueId}
                 subscriber={s}
                 index={idx}
-                selected={selectedIds.has(s.id)}
-                active={activeId === s.id}
-                onToggleSelected={() => onToggleSelect(s.id)}
-                onOpen={() => onOpen(s.id)}
+                selected={selectedIds.has(s.rovenueId)}
+                active={activeId === s.rovenueId}
+                onToggleSelected={() => onToggleSelect(s.rovenueId)}
+                onOpen={() => onOpen(s.rovenueId)}
               />
             ))}
           </tbody>

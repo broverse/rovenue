@@ -57,13 +57,18 @@ export function SubscriberRow({
           <UserAvatar fullId={subscriber.full} vip={subscriber.vip} />
           <div className="min-w-0">
             <div className="truncate font-rv-mono text-[13px] text-foreground">
-              {subscriber.id}
-            </div>
-            <div className="mt-px truncate text-[11px] text-rv-mute-500">
-              {subscriber.alias}
+              {subscriber.id || "—"}
             </div>
           </div>
         </div>
+      </td>
+      <td className="px-3 py-2.5">
+        <span
+          className="truncate font-rv-mono text-[12px] text-rv-mute-500"
+          title={subscriber.rovenueId}
+        >
+          {subscriber.rovenueId}
+        </span>
       </td>
       <td className={cn("px-3 py-2.5 text-[12px]", subscriber.plan === "—" ? "text-rv-mute-500" : "text-foreground")}>
         {subscriber.plan}

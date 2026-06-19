@@ -123,6 +123,7 @@ class Rovenue private constructor(
                 apiKey = apiKey,
                 debug = debug,
                 appVersion = appVersion,
+                platform = "android",
             ).let { if (baseUrl != null) it.copy(baseUrl = baseUrl) else it }
             val core = RovenueCore(config)  // may throw RovenueException
             val bridge = ObserverBridge()

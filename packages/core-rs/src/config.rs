@@ -14,6 +14,11 @@ pub struct Config {
     /// telemetry payloads. `None` is serialized as `""` to preserve the
     /// pre-0.7 wire format.
     pub app_version: Option<String>,
+    /// Runtime platform the SDK is running on (`ios` / `android` / `web`),
+    /// supplied by the native façade. Sent as the `X-Rovenue-Platform` header
+    /// so the backend can record it as the subscriber's first-install platform
+    /// on create. `None` omits the header entirely.
+    pub platform: Option<String>,
 }
 
 impl Config {
@@ -26,12 +31,19 @@ impl Config {
             base_url: resolve_base_url(&base_url)?,
             debug: false,
             app_version: None,
+            platform: None,
         })
     }
 
     /// Builder-style setter for the host app version.
     pub fn with_app_version(mut self, app_version: Option<String>) -> Self {
         self.app_version = app_version;
+        self
+    }
+
+    /// Builder-style setter for the runtime platform.
+    pub fn with_platform(mut self, platform: Option<String>) -> Self {
+        self.platform = platform;
         self
     }
 
