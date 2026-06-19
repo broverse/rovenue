@@ -10,16 +10,8 @@ import { Button, buttonVariants } from "../../../../../ui/button";
 import { cn } from "../../../../../lib/cn";
 import { StatCard } from "../../../../../ui/stat-card";
 import {
-  AllocationCard,
-  CUMULATIVE_TREND,
-  ConfigurationCard,
-  ConversionFunnel,
-  CumulativeChart,
-  EXPERIMENT_DETAILS,
-  ExperimentHero,
-  ExperimentTimeline,
+  ExperimentDetailPanel,
   ExperimentsList,
-  VariantsTable,
   mapApiExperiment,
   type ExperimentScope,
   type ExperimentSummary,
@@ -131,11 +123,6 @@ export function ExperimentsPage({ projectId }: { projectId: string }) {
     return summaries.find((e) => e.key === selectedId) ?? null;
   }, [selectedId, summaries]);
 
-  // Only show the full mock-driven detail rollup when the selected
-  // experiment matches a seeded demo key. Real experiments render
-  // the hero (real data) plus an analytics-placeholder.
-  const detail = selected ? EXPERIMENT_DETAILS[selected.key] : undefined;
-
   return (
     <>
       <header className="flex items-start justify-between gap-4 pb-5">
@@ -199,41 +186,17 @@ export function ExperimentsPage({ projectId }: { projectId: string }) {
           scopeCounts={scopeCounts}
         />
 
-        <div className="flex min-w-0 flex-col gap-4">
-          {selected ? (
-            <>
-              <ExperimentHero experiment={selected} projectId={projectId} />
-              {detail ? (
-                <>
-                  <VariantsTable
-                    variants={detail.variants}
-                    metricNameKey={detail.metricNameKey}
-                  />
-                  <CumulativeChart
-                    points={CUMULATIVE_TREND}
-                    metricNameKey={detail.metricNameKey}
-                  />
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    <ConversionFunnel stages={detail.funnel} />
-                    <ExperimentTimeline entries={detail.timeline} />
-                  </div>
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    <AllocationCard variants={detail.variants} />
-                    <ConfigurationCard experiment={selected} detail={detail} />
-                  </div>
-                </>
-              ) : (
-                <div className="flex h-[180px] items-center justify-center rounded-lg border border-dashed border-rv-divider bg-rv-c1 px-6 text-center text-[12px] text-rv-mute-500">
-                  {t("experiments.detail.comingSoon")}
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="flex h-[200px] items-center justify-center rounded-lg border border-rv-divider bg-rv-c1 text-[13px] text-rv-mute-500">
-              {t("experiments.list.empty")}
-            </div>
-          )}
-        </div>
+        {selected ? (
+          <ExperimentDetailPanel
+            experiment={selected}
+            projectId={projectId}
+            showDetailsLink
+          />
+        ) : (
+          <div className="flex h-[200px] min-w-0 items-center justify-center rounded-lg border border-rv-divider bg-rv-c1 text-[13px] text-rv-mute-500">
+            {t("experiments.list.empty")}
+          </div>
+        )}
       </div>
     </>
   );

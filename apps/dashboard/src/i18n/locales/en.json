@@ -2194,6 +2194,7 @@
     "actions": {
       "runbook": "Runbook",
       "newExperiment": "New experiment",
+      "viewDetails": "View details",
       "edit": "Edit",
       "duplicate": "Duplicate",
       "delete": "Delete",
@@ -2212,7 +2213,9 @@
       "total": "TOTAL"
     },
     "detail": {
-      "comingSoon": "Detailed analytics (variants, funnel, timeline) ship in Phase 3 — once results are aggregated for this experiment they'll appear here."
+      "comingSoon": "Detailed analytics (variants, funnel, timeline) ship in Phase 3 — once results are aggregated for this experiment they'll appear here.",
+      "back": "Back to experiments",
+      "notFound": "Experiment not found, or you don't have access to it."
     },
     "new": {
       "back": "Back to experiments",
@@ -2418,7 +2421,8 @@
         "message": "<0>{{variant}}</0> is the leader at <1>{{confidence}}% confidence</1>",
         "sub": "Est. +{{lift}}% lift on {{metric}}. CI excludes zero. Safe to ship.",
         "cta": "Ship {{variant}}"
-      }
+      },
+      "shipConfirm": "Ship variant \"{{variant}}\" as the winner? This completes the experiment and promotes the variant to a feature flag."
     },
     "variants": {
       "title": "Variants",

@@ -2,6 +2,7 @@ export { AllocationCard } from "./allocation-card";
 export { ConfigurationCard } from "./configuration-card";
 export { ConversionFunnel } from "./conversion-funnel";
 export { CumulativeChart } from "./cumulative-chart";
+export { ExperimentDetailPanel } from "./experiment-detail-panel";
 export { ExperimentHero } from "./experiment-hero";
 export { ExperimentStatusChip } from "./experiment-status-chip";
 export { ExperimentStatusDot } from "./experiment-status-dot";

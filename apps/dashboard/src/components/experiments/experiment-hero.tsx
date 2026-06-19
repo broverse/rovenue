@@ -1,11 +1,14 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Trans, useTranslation } from "react-i18next";
 import {
-  AlertTriangle,
   Check,
+  CircleStop,
   Copy,
+  LineChart,
   MoreHorizontal,
+  Pause,
   Pencil,
+  Play,
   RotateCcw,
   Trash2,
 } from "lucide-react";
@@ -20,6 +23,9 @@ import { cn } from "../../lib/cn";
 import {
   useDeleteExperiment,
   useDuplicateExperiment,
+  usePauseExperiment,
+  useResumeExperiment,
+  useStopExperiment,
 } from "../../lib/hooks/useExperiments";
 import { ExperimentStatusChip } from "./experiment-status-chip";
 import { ExperimentStatusDot } from "./experiment-status-dot";
@@ -28,6 +34,13 @@ import type { ExperimentSummary } from "./types";
 type Props = {
   experiment: ExperimentSummary;
   projectId: string;
+  /**
+   * Render the "View details" link in the action row. Set on the inline
+   * experiments-list panel so paused/stopped experiments (which have no
+   * primary lifecycle button) still have a way into the focused detail
+   * page. Omitted on the detail page itself — it would self-link.
+   */
+  showDetailsLink?: boolean;
 };
 
 /**
@@ -35,17 +48,26 @@ type Props = {
  * action buttons, 5-up KPI strip, and an optional "ship winner" banner
  * when confidence ≥ 80% and no winner has been shipped yet.
  *
- * Action layout (by status):
+ * Action layout (by status) — lifecycle verbs mirror the edit-page
+ * LifecycleBar state machine (RUNNING → Pause/Complete, PAUSED →
+ * Resume/Complete) so both surfaces drive the same transitions:
  *   draft     → Edit primary · ⋯ menu (Duplicate, Delete)
- *   running   → Stop · Ship Winner · ⋯ menu (Duplicate)
+ *   running   → Pause · Complete · (Ship winner when a leader exists) · ⋯
+ *   paused    → Resume · Complete · ⋯ menu (Duplicate)
  *   completed → Re-run · ⋯ menu (Duplicate)
- *   stopped   → ⋯ menu (Duplicate, Delete unavailable — server gates it)
  */
-export function ExperimentHero({ experiment, projectId }: Props) {
+export function ExperimentHero({
+  experiment,
+  projectId,
+  showDetailsLink = false,
+}: Props) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const duplicate = useDuplicateExperiment();
   const remove = useDeleteExperiment();
+  const pause = usePauseExperiment();
+  const resume = useResumeExperiment();
+  const stop = useStopExperiment();
 
   const ageLabel = experiment.ageLabelValues
     ? t(experiment.ageLabelKey, experiment.ageLabelValues)
@@ -53,6 +75,15 @@ export function ExperimentHero({ experiment, projectId }: Props) {
   const isRunning = experiment.status === "running";
   const isCompleted = experiment.status === "completed";
   const isDraft = experiment.status === "draft";
+  const isPaused = experiment.status === "paused";
+  // Any in-flight lifecycle mutation locks the whole action row so the
+  // experiment can't be driven through two transitions at once.
+  const lifecycleBusy =
+    pause.isPending || resume.isPending || stop.isPending;
+  // "Ship winner" can only promote a concrete variant; until the results
+  // endpoint hydrates a leader (Phase 3) there's nothing to ship.
+  const canShipWinner =
+    isRunning && !experiment.winner && experiment.leadingVariant !== null;
   const showWinner =
     experiment.confidence >= 0.8 &&
     !experiment.winner &&
@@ -64,6 +95,74 @@ export function ExperimentHero({ experiment, projectId }: Props) {
       to: "/projects/$projectId/experiments/$experimentId/edit",
       params: { projectId, experimentId: experiment.id },
     });
+  };
+
+  const handleViewDetails = () => {
+    void navigate({
+      to: "/projects/$projectId/experiments/$experimentId",
+      params: { projectId, experimentId: experiment.id },
+    });
+  };
+
+  const handlePause = async () => {
+    try {
+      await pause.mutateAsync(experiment.id);
+    } catch (err) {
+      window.alert(
+        err instanceof Error
+          ? err.message
+          : t("experiments.lifecycle.pauseFailed"),
+      );
+    }
+  };
+
+  const handleResume = async () => {
+    try {
+      await resume.mutateAsync(experiment.id);
+    } catch (err) {
+      window.alert(
+        err instanceof Error
+          ? err.message
+          : t("experiments.lifecycle.resumeFailed"),
+      );
+    }
+  };
+
+  const handleComplete = async () => {
+    const confirmed = window.confirm(
+      t("experiments.lifecycle.stopConfirm", { name: experiment.key }),
+    );
+    if (!confirmed) return;
+    try {
+      await stop.mutateAsync({ id: experiment.id });
+    } catch (err) {
+      window.alert(
+        err instanceof Error
+          ? err.message
+          : t("experiments.lifecycle.stopFailed"),
+      );
+    }
+  };
+
+  const handleShipWinner = async () => {
+    const winner = experiment.leadingVariant;
+    if (!winner) return;
+    const confirmed = window.confirm(
+      t("experiments.hero.shipConfirm", { variant: winner }),
+    );
+    if (!confirmed) return;
+    try {
+      await stop.mutateAsync({
+        id: experiment.id,
+        body: { winnerVariantId: winner, promoteToFlag: true },
+      });
+    } catch (err) {
+      window.alert(
+        err instanceof Error
+          ? err.message
+          : t("experiments.lifecycle.stopFailed"),
+      );
+    }
   };
 
   const handleDuplicate = async () => {
@@ -130,6 +229,12 @@ export function ExperimentHero({ experiment, projectId }: Props) {
           </p>
         </div>
         <div className="flex flex-shrink-0 gap-1.5">
+          {showDetailsLink && !isRunning && (
+            <Button variant="flat" onClick={handleViewDetails}>
+              <LineChart size={13} />
+              {t("experiments.actions.viewDetails")}
+            </Button>
+          )}
           {isDraft && (
             <Button variant="solid-primary" onClick={handleEdit}>
               <Pencil size={13} />
@@ -138,18 +243,60 @@ export function ExperimentHero({ experiment, projectId }: Props) {
           )}
           {isRunning && (
             <>
-              <Button variant="flat">
-                <AlertTriangle size={13} />
-                {t("experiments.actions.stop")}
+              <Button
+                variant="flat"
+                onClick={handlePause}
+                disabled={lifecycleBusy}
+              >
+                <Pause size={13} />
+                {t("experiments.lifecycle.pause")}
               </Button>
-              <Button variant="solid-primary">
-                <Check size={13} />
-                {t("experiments.actions.shipWinner")}
+              <Button
+                variant="flat"
+                onClick={handleComplete}
+                disabled={lifecycleBusy}
+              >
+                <CircleStop size={13} />
+                {t("experiments.lifecycle.complete")}
+              </Button>
+              {canShipWinner && (
+                <Button
+                  variant="solid-primary"
+                  onClick={handleShipWinner}
+                  disabled={lifecycleBusy}
+                >
+                  <Check size={13} />
+                  {t("experiments.actions.shipWinner")}
+                </Button>
+              )}
+            </>
+          )}
+          {isPaused && (
+            <>
+              <Button
+                variant="solid-primary"
+                onClick={handleResume}
+                disabled={lifecycleBusy}
+              >
+                <Play size={13} />
+                {t("experiments.lifecycle.resume")}
+              </Button>
+              <Button
+                variant="flat"
+                onClick={handleComplete}
+                disabled={lifecycleBusy}
+              >
+                <CircleStop size={13} />
+                {t("experiments.lifecycle.complete")}
               </Button>
             </>
           )}
           {isCompleted && (
-            <Button variant="solid-primary">
+            <Button
+              variant="solid-primary"
+              onClick={handleDuplicate}
+              disabled={duplicate.isPending}
+            >
               <RotateCcw size={13} />
               {t("experiments.actions.rerun")}
             </Button>
@@ -263,7 +410,11 @@ export function ExperimentHero({ experiment, projectId }: Props) {
               })}
             </div>
           </div>
-          <Button variant="solid-primary">
+          <Button
+            variant="solid-primary"
+            onClick={handleShipWinner}
+            disabled={lifecycleBusy}
+          >
             <Check size={13} />
             {t("experiments.hero.winnerBanner.cta", {
               variant: experiment.leadingVariant ?? "",
