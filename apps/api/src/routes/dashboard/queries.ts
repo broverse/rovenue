@@ -5,6 +5,7 @@ import { z } from "zod";
 import { MemberRole, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
+import { logger } from "../../lib/logger";
 import { ok } from "../../lib/response";
 import {
   QueryValidationError,
@@ -15,6 +16,8 @@ import type {
   DashboardSavedQueriesListResponse,
   DashboardSavedQuery,
 } from "@rovenue/shared";
+
+const log = logger.child("dashboard.queries");
 
 // =============================================================
 // Dashboard: Queries playground (Phase 4.5)
@@ -209,6 +212,17 @@ export const queriesRoute = new Hono()
         projectId,
         sql: c.req.valid("json").sql,
       });
+      // Best-effort usage metering. Never let a logging failure break the query.
+      try {
+        await drizzle.warehouseQueryRunRepo.recordQueryRun(drizzle.db, {
+          projectId,
+          userId: user.id,
+          durationMs: payload.durationMs ?? null,
+          rowCount: payload.rows?.length ?? null,
+        });
+      } catch (err) {
+        log.warn("failed to record warehouse query run", { err });
+      }
       return c.json(ok(payload));
     } catch (err) {
       if (err instanceof QueryValidationError) {
