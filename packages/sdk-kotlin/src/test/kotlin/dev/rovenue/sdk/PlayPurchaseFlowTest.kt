@@ -90,12 +90,12 @@ class PurchaseTypesTest {
     fun `PurchaseResult carries entitlements balance and ids`() {
         val result = PurchaseResult(
             entitlements = emptyList(),
-            creditBalance = 250L,
+            virtualCurrencies = mapOf("coins" to 250L),
             productId = "coins_100",
             storeTransactionId = "GPA.1234",
         )
         assertTrue(result.entitlements.isEmpty())
-        assertEquals(250L, result.creditBalance)
+        assertEquals(mapOf("coins" to 250L), result.virtualCurrencies)
         assertEquals("coins_100", result.productId)
         assertEquals("GPA.1234", result.storeTransactionId)
     }
@@ -130,15 +130,15 @@ class PlayPurchaseFlowTest {
         override suspend fun queryUnacknowledgedPurchases(): List<dev.rovenue.sdk.internal.PendingPurchase> = emptyList()
     }
 
-    private fun receipt(balance: Long) =
-        ReceiptResult(subscriberId = "sub_1", appUserId = "anon_1", creditBalance = balance, entitlements = emptyList())
+    private fun receipt(virtualCurrencies: Map<String, Long>) =
+        ReceiptResult(subscriberId = "sub_1", appUserId = "anon_1", virtualCurrencies = virtualCurrencies, entitlements = emptyList())
 
     @Test
     fun `cancelled outcome throws and never validates`() = runTest {
         var validated = false
         val flow = PlayPurchaseFlow(
             store = storeReturning(StorePurchaseOutcome.UserCancelled),
-            validate = { _, _ -> validated = true; receipt(0) },
+            validate = { _, _ -> validated = true; receipt(emptyMap()) },
         )
         assertFailsWith<PurchaseCancelledException> {
             flow.run(activity, "pro_monthly", ProductType.SUBSCRIPTION, null)
@@ -182,7 +182,7 @@ class PlayPurchaseFlowTest {
                 order.add("validate")
                 assertEquals("tok_abc", token)
                 assertEquals("coins_100", pid)
-                receipt(500)
+                receipt(mapOf("coins" to 500L))
             },
         )
 
@@ -190,7 +190,7 @@ class PlayPurchaseFlowTest {
 
         // validate must happen strictly before acknowledge.
         assertEquals(listOf("validate", "acknowledge"), order)
-        assertEquals(500L, result.creditBalance)
+        assertEquals(mapOf("coins" to 500L), result.virtualCurrencies)
         assertEquals("coins_100", result.productId)
         assertEquals("GPA.9999", result.storeTransactionId)
         assertTrue(result.entitlements.isEmpty())

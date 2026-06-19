@@ -39,13 +39,13 @@ class ObserverBridgeTest {
         }
         kotlinx.coroutines.yield()
         bridge.onChange(ChangeEvent.ENTITLEMENTS_CHANGED)
-        bridge.onChange(ChangeEvent.CREDIT_BALANCE_CHANGED)
+        bridge.onChange(ChangeEvent.VIRTUAL_CURRENCIES_CHANGED)
         bridge.onChange(ChangeEvent.IDENTITY_CHANGED)
         job.join()
         assertEquals(
             listOf(
                 ChangeEvent.ENTITLEMENTS_CHANGED,
-                ChangeEvent.CREDIT_BALANCE_CHANGED,
+                ChangeEvent.VIRTUAL_CURRENCIES_CHANGED,
                 ChangeEvent.IDENTITY_CHANGED,
             ),
             collected,

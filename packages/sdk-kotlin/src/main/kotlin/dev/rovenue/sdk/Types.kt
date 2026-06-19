@@ -66,7 +66,7 @@ data class Offerings(
 /** The outcome of a successful, validated purchase. */
 data class PurchaseResult(
     val entitlements: List<Entitlement>,
-    val creditBalance: Long,
+    val virtualCurrencies: Map<String, Long>,
     val productId: String,
     val storeTransactionId: String,
 )

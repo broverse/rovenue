@@ -78,9 +78,9 @@ class RovenueTest {
     }
 
     @Test
-    fun `facade credit balance is zero by default`() = runTest {
+    fun `facade virtual currency balances are empty by default`() = runTest {
         Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://api.rovenue.io")
-        assertEquals(0L, Rovenue.shared.creditBalance())
+        assertTrue(Rovenue.shared.virtualCurrencyBalances().isEmpty())
     }
 
     // NOTE: This test uses runBlocking instead of runTest. The Rust observer

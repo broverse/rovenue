@@ -330,41 +330,27 @@ class Rovenue private constructor(
     }
 
     // ---------------------------------------------------------------
-    // Credits
+    // Virtual Currencies
     // ---------------------------------------------------------------
 
-    /** Read the cached credit balance. Returns 0 if the cache is empty. */
-    suspend fun creditBalance(): Long =
-        dispatcher.run { core.creditBalance() }
+    /** Cached virtual-currency balances (code → amount). Empty if uncached. */
+    suspend fun virtualCurrencyBalances(): Map<String, Long> =
+        dispatcher.run { core.virtualCurrencyBalances() }
 
-    /** Force a refresh of the credit balance against the server.
-     *  On success (when the balance changed), emits
-     *  ChangeEvent.CREDIT_BALANCE_CHANGED. */
-    @Throws(RovenueException::class)
-    suspend fun refreshCredits() {
-        emit(LogEntry(level = "info", message = "refreshCredits"))
-        try {
-            dispatcher.run { core.refreshCredits() }
-            emit(LogEntry(level = "info", message = "refreshCredits ok"))
-        } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "refreshCredits failed: ${e.message ?: e.javaClass.simpleName}"))
-            throw e
-        }
-    }
+    /** One currency's cached balance, or 0 if absent. */
+    suspend fun virtualCurrency(code: String): Long =
+        dispatcher.run { core.virtualCurrency(code) }
 
-    /** Spend credits server-side. The SDK generates an Idempotency-Key
-     *  internally — retries of the same call are server-deduped. Returns
-     *  the new balance. Throws RovenueException.InsufficientCredits if
-     *  the user lacks the balance. */
+    /** Force a refresh of virtual-currency balances against the server.
+     *  On change, emits ChangeEvent.VIRTUAL_CURRENCIES_CHANGED. */
     @Throws(RovenueException::class)
-    suspend fun consumeCredits(amount: Long, description: String? = null): Long {
-        emit(LogEntry(level = "info", message = "consumeCredits"))
+    suspend fun refreshVirtualCurrencies() {
+        emit(LogEntry(level = "info", message = "refreshVirtualCurrencies"))
         try {
-            val result = dispatcher.run { core.consumeCredits(amount, description) }
-            emit(LogEntry(level = "info", message = "consumeCredits ok"))
-            return result
+            dispatcher.run { core.refreshVirtualCurrencies() }
+            emit(LogEntry(level = "info", message = "refreshVirtualCurrencies ok"))
         } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "consumeCredits failed: ${e.message ?: e.javaClass.simpleName}"))
+            emit(LogEntry(level = "error", message = "refreshVirtualCurrencies failed: ${e.message ?: e.javaClass.simpleName}"))
             throw e
         }
     }
@@ -583,7 +569,7 @@ class Rovenue private constructor(
         refreshEntitlements()
         return PurchaseResult(
             entitlements = entitlementsAll(),
-            creditBalance = creditBalance(),
+            virtualCurrencies = virtualCurrencyBalances(),
             productId = "",
             storeTransactionId = "",
         )
