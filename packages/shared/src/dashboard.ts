@@ -1495,6 +1495,7 @@ export interface DashboardProductCreateInput {
   creditAmount?: number | null;
   isActive?: boolean;
   metadata?: Record<string, unknown>;
+  currencyGrants?: DashboardProductCurrencyGrant[];
 }
 
 export interface DashboardProductUpdateInput {
@@ -1506,6 +1507,7 @@ export interface DashboardProductUpdateInput {
   creditAmount?: number | null;
   isActive?: boolean;
   metadata?: Record<string, unknown>;
+  currencyGrants?: DashboardProductCurrencyGrant[];
 }
 
 /** Per-row input for bulk import from a store. */
