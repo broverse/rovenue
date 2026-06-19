@@ -71,7 +71,7 @@ rovenue/
 - Hot tables (`revenue_events`, `credit_ledger`, `outgoing_webhooks`) are declarative range partitions; `pg_partman` manages premake/retention for the first two, the partition-maintenance worker handles `outgoing_webhooks`
 - ClickHouse mirrors Postgres via Kafka Engine + materialized views (`packages/db/clickhouse/migrations/`) for MRR / credit balance / consumption / leaderboards
 - **Auth tables (managed by Better Auth):** user, session, account, verification
-- **App tables:** projects, project_members, api_keys, subscribers, products, product_groups, purchases, subscriber_access, credit_ledger, webhook_events, outgoing_webhooks, revenue_events, audiences, experiments, experiment_assignments, feature_flags, audit_logs, outbox_events
+- **App tables:** projects, project_members, api_keys, subscribers, products, purchases, subscriber_access, credit_ledger, webhook_events, outgoing_webhooks, revenue_events, audiences, experiments, experiment_assignments, feature_flags, audit_logs, outbox_events
 - All IDs are UUIDs (cuid2 generated); all timestamps UTC with timezone
 - Encrypted store credentials use AES-256-GCM
 - `credit_ledger` is append-only; `audit_logs` are append-only with a per-project SHA-256 hash chain
