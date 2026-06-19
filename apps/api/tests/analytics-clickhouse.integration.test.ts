@@ -2,6 +2,10 @@
 // Analytics endpoints — ClickHouse integration test
 // =============================================================
 //
+// Extended by 0015_credit_currency_dimension: adds a test that inserts
+// raw_credit_ledger rows for two currencies and asserts v_credit_consumption_daily
+// and v_credit_balance split by currencyId.
+//
 // Phase 1-3 + predictive-LTV shipped several new ClickHouse-backed
 // services whose SQL had only ever run against MOCKED services in
 // unit tests. This test executes that SQL against a real ClickHouse
@@ -338,6 +342,49 @@ const WINDOW = {
   to: new Date("2026-12-31T00:00:00Z"),
 };
 
+// ---------------------------------------------------------------------------
+// Helpers for credit currency-dimension tests (migration 0015)
+// ---------------------------------------------------------------------------
+
+/** Insert one row directly into raw_credit_ledger, bypassing Kafka. */
+async function chInsertRawCredit(
+  projectId: string,
+  subscriberId: string,
+  currencyId: string,
+  amount: number,
+  balance: number,
+  createdAt: string,
+  eventSuffix: string,
+): Promise<void> {
+  await ch.insert({
+    table: "rovenue.raw_credit_ledger",
+    values: [
+      {
+        eventId: `cred_${projectId}_${subscriberId}_${currencyId}_${eventSuffix}`,
+        creditLedgerId: `ledger_${projectId}_${subscriberId}_${currencyId}_${eventSuffix}`,
+        projectId,
+        subscriberId,
+        currencyId,
+        type: amount > 0 ? "GRANT" : "DEBIT",
+        amount,
+        balance,
+        referenceType: null,
+        referenceId: null,
+        createdAt,
+        ingestedAt: createdAt,
+        _version: Date.now(),
+      },
+    ],
+    format: "JSONEachRow",
+  });
+}
+
+/** Run a SELECT against the test ClickHouse (used in credit currency tests). */
+async function chSelect<T>(query: string): Promise<T[]> {
+  const res = await ch.query({ query, format: "JSONEachRow" });
+  return res.json() as Promise<T[]>;
+}
+
 describe("analytics CH services (real ClickHouse)", () => {
   it("getMrrDecomposition splits new / retained / reactivation / churned", async () => {
     const d = await getMrrDecomposition({ projectId: PROJECT, ...WINDOW });
@@ -493,5 +540,62 @@ describe("analytics CH services (real ClickHouse)", () => {
     expect(revRows.length).toBeGreaterThan(0);
     // age offsets must be non-negative integers
     for (const r of revRows) expect(Number(r.age_month)).toBeGreaterThanOrEqual(0);
+  });
+
+  // --- credit currency dimension (migration 0015) ---
+
+  it("v_credit_consumption_daily and v_credit_balance split by currencyId", async () => {
+    const projectId = `prj_ccdim_${RUN_ID}`;
+    const sub = `sub_ccdim_${RUN_ID}`;
+
+    // Insert directly into raw_credit_ledger (bypassing Kafka) with two currencies.
+    // Use distinct eventId + createdAt per row so argMax picks the true latest balance.
+    await chInsertRawCredit(projectId, sub, "cur_gold", 100, 100, "2026-04-01 10:00:00.000", "1");
+    await chInsertRawCredit(projectId, sub, "cur_gold", -40, 60,  "2026-04-01 11:00:00.000", "2");
+    await chInsertRawCredit(projectId, sub, "cur_gem",  5,   5,   "2026-04-01 10:00:00.000", "3");
+
+    // Give ReplacingMergeTree a moment to settle (inserts are synchronous for
+    // query-time views but FINAL needs the part to be visible).
+    await new Promise((r) => setTimeout(r, 500));
+
+    const flow = await chSelect<{
+      currencyId: string;
+      granted_credits: string;
+      debited_credits: string;
+      net_flow: string;
+    }>(
+      `SELECT currencyId, granted_credits, debited_credits, net_flow
+       FROM rovenue.v_credit_consumption_daily
+       WHERE projectId = '${projectId}'
+       ORDER BY currencyId`,
+    );
+
+    expect(flow).toEqual([
+      expect.objectContaining({
+        currencyId: "cur_gem",
+        granted_credits: "5",
+        debited_credits: "0",
+      }),
+      expect.objectContaining({
+        currencyId: "cur_gold",
+        granted_credits: "100",
+        debited_credits: "40",
+      }),
+    ]);
+
+    const bal = await chSelect<{
+      currencyId: string;
+      latest_balance: string;
+    }>(
+      `SELECT currencyId, latest_balance
+       FROM rovenue.v_credit_balance
+       WHERE projectId = '${projectId}' AND subscriberId = '${sub}'
+       ORDER BY currencyId`,
+    );
+
+    expect(bal).toEqual([
+      expect.objectContaining({ currencyId: "cur_gem",  latest_balance: "5"  }),
+      expect.objectContaining({ currencyId: "cur_gold", latest_balance: "60" }),
+    ]);
   });
 });
