@@ -1455,6 +1455,11 @@ export interface ChartFilterOptionsResponse {
 
 export type ProductTypeName = "SUBSCRIPTION" | "CONSUMABLE" | "NON_CONSUMABLE";
 
+export interface DashboardProductCurrencyGrant {
+  currencyId: string;
+  amount: number;
+}
+
 export interface DashboardProductRow {
   id: string;
   identifier: string;
@@ -1463,6 +1468,7 @@ export interface DashboardProductRow {
   storeIds: Record<string, string>;
   accessIds: string[];
   creditAmount: number | null;
+  currencyGrants: DashboardProductCurrencyGrant[];
   isActive: boolean;
   metadata: Record<string, unknown>;
   createdAt: string;

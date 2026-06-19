@@ -12,7 +12,7 @@ import { eq } from "drizzle-orm";
 import { getDb, projects, drizzle } from "@rovenue/db";
 import { auth } from "../../lib/auth";
 import { errorHandler } from "../../middleware/error";
-import { productsDashboardRoute } from "./products";
+import { productsDashboardRoute, createBodySchema } from "./products";
 
 const RUN_ID = Date.now();
 
@@ -148,5 +148,40 @@ describe("PATCH /projects/:projectId/products/:id — identifier immutability", 
     expect(patchRes.status).toBe(200);
     const { data } = await patchRes.json() as { data: { product: { displayName: string } } };
     expect(data.product.displayName).toBe("Updated Name");
+  });
+});
+
+describe("createBodySchema — currencyGrants validation", () => {
+  it("accepts currencyGrants in the create schema", () => {
+    const r = createBodySchema.safeParse({
+      identifier: "pack.1",
+      type: "CONSUMABLE",
+      displayName: "Pack",
+      currencyGrants: [{ currencyId: "vc1", amount: 1000 }],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("rejects currencyGrants with non-positive amount", () => {
+    const r = createBodySchema.safeParse({
+      identifier: "pack.1",
+      type: "CONSUMABLE",
+      displayName: "Pack",
+      currencyGrants: [{ currencyId: "vc1", amount: 0 }],
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects currencyGrants exceeding 20 entries", () => {
+    const r = createBodySchema.safeParse({
+      identifier: "pack.1",
+      type: "CONSUMABLE",
+      displayName: "Pack",
+      currencyGrants: Array.from({ length: 21 }, (_, i) => ({
+        currencyId: `vc${i}`,
+        amount: 100,
+      })),
+    });
+    expect(r.success).toBe(false);
   });
 });

@@ -104,13 +104,18 @@ const storeCatalogQuerySchema = z.object({
   store: z.enum(["ios", "android"] as const),
 });
 
-const createBodySchema = z.object({
+const currencyGrantSchema = z.object({
+  currencyId: z.string().min(1),
+  amount: z.number().int().positive(),
+});
+
+export const createBodySchema = z.object({
   identifier: z.string().trim().min(1).max(160),
   type: productType,
   displayName: z.string().trim().min(1).max(200),
   storeIds: storeIdsSchema.optional(),
   accessIds: z.array(accessIdSchema).optional(),
-  creditAmount: z.number().int().nullable().optional(),
+  currencyGrants: z.array(currencyGrantSchema).max(20).optional(),
   isActive: z.boolean().optional(),
   metadata: z.record(z.unknown()).optional(),
 });
@@ -130,14 +135,14 @@ const importBodySchema = z.object({
   items: z.array(importItemSchema).min(1).max(500),
 });
 
-const updateBodySchema = z
+export const updateBodySchema = z
   .object({
     identifier: z.string().trim().min(1).max(160).optional(),
     type: productType.optional(),
     displayName: z.string().trim().min(1).max(200).optional(),
     storeIds: storeIdsSchema.optional(),
     accessIds: z.array(accessIdSchema).optional(),
-    creditAmount: z.number().int().nullable().optional(),
+    currencyGrants: z.array(currencyGrantSchema).max(20).optional(),
     isActive: z.boolean().optional(),
     metadata: z.record(z.unknown()).optional(),
   })
@@ -169,19 +174,22 @@ async function assertAccessIdsExist(
   }
 }
 
-function toWire(row: {
-  id: string;
-  identifier: string;
-  type: string;
-  displayName: string;
-  storeIds: unknown;
-  accessIds: string[];
-  creditAmount: number | null;
-  isActive: boolean;
-  metadata: unknown;
-  createdAt: Date;
-  updatedAt: Date;
-}): DashboardProductRow {
+function toWire(
+  row: {
+    id: string;
+    identifier: string;
+    type: string;
+    displayName: string;
+    storeIds: unknown;
+    accessIds: string[];
+    creditAmount: number | null;
+    isActive: boolean;
+    metadata: unknown;
+    createdAt: Date;
+    updatedAt: Date;
+  },
+  currencyGrants: Array<{ currencyId: string; amount: number }> = [],
+): DashboardProductRow {
   return {
     id: row.id,
     identifier: row.identifier,
@@ -190,6 +198,7 @@ function toWire(row: {
     storeIds: (row.storeIds as Record<string, string> | null) ?? {},
     accessIds: row.accessIds,
     creditAmount: row.creditAmount,
+    currencyGrants,
     isActive: row.isActive,
     metadata: (row.metadata as Record<string, unknown> | null) ?? {},
     createdAt: row.createdAt.toISOString(),
@@ -238,7 +247,7 @@ export const productsDashboardRoute = new Hono()
         : null;
 
     const payload: DashboardProductsListResponse = {
-      products: page.map(toWire),
+      products: page.map((r) => toWire(r)),
       nextCursor,
     };
     return c.json(ok(payload));
@@ -272,12 +281,34 @@ export const productsDashboardRoute = new Hono()
       displayName: body.displayName,
       storeIds: body.storeIds ?? {},
       accessIds: body.accessIds ?? [],
-      creditAmount: body.creditAmount ?? null,
       isActive: body.isActive ?? true,
       metadata: body.metadata ?? {},
     });
+
+    let grants: Array<{ currencyId: string; amount: number }> = [];
+    if (body.currencyGrants && body.currencyGrants.length > 0) {
+      for (const g of body.currencyGrants) {
+        const vc = await drizzle.virtualCurrencyRepo.findVirtualCurrencyById(
+          drizzle.db,
+          projectId,
+          g.currencyId,
+        );
+        if (!vc) {
+          throw new HTTPException(404, {
+            message: `currency not found: ${g.currencyId}`,
+          });
+        }
+      }
+      await drizzle.productCurrencyGrantRepo.setProductGrants(
+        drizzle.db,
+        row.id,
+        body.currencyGrants,
+      );
+      grants = body.currencyGrants;
+    }
+
     purgeProjectCatalogCache(projectId);
-    return c.json(ok({ product: toWire(row) }));
+    return c.json(ok({ product: toWire(row, grants) }));
   })
   .post("/import", zValidator("json", importBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
@@ -374,7 +405,11 @@ export const productsDashboardRoute = new Hono()
     if (!row) {
       throw new HTTPException(404, { message: "Product not found" });
     }
-    return c.json(ok({ product: toWire(row) }));
+    const grants = await drizzle.productCurrencyGrantRepo.listProductGrants(
+      drizzle.db,
+      row.id,
+    );
+    return c.json(ok({ product: toWire(row, grants) }));
   })
   .patch("/:id", zValidator("json", updateBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
@@ -403,17 +438,47 @@ export const productsDashboardRoute = new Hono()
       await assertAccessIdsExist(projectId, body.accessIds);
     }
 
+    const { currencyGrants: bodyGrants, ...productUpdateFields } = body;
+
     const row = await drizzle.productRepo.updateProduct(
       drizzle.db,
       projectId,
       id,
-      body,
+      productUpdateFields,
     );
     if (!row) {
       throw new HTTPException(404, { message: "Product not found" });
     }
+
+    let grants: Array<{ currencyId: string; amount: number }> = [];
+    if (bodyGrants && bodyGrants.length > 0) {
+      for (const g of bodyGrants) {
+        const vc = await drizzle.virtualCurrencyRepo.findVirtualCurrencyById(
+          drizzle.db,
+          projectId,
+          g.currencyId,
+        );
+        if (!vc) {
+          throw new HTTPException(404, {
+            message: `currency not found: ${g.currencyId}`,
+          });
+        }
+      }
+      await drizzle.productCurrencyGrantRepo.setProductGrants(
+        drizzle.db,
+        row.id,
+        bodyGrants,
+      );
+      grants = bodyGrants;
+    } else {
+      grants = await drizzle.productCurrencyGrantRepo.listProductGrants(
+        drizzle.db,
+        row.id,
+      );
+    }
+
     purgeProjectCatalogCache(projectId);
-    return c.json(ok({ product: toWire(row) }));
+    return c.json(ok({ product: toWire(row, grants) }));
   })
   .delete("/:id", async (c) => {
     const projectId = c.req.param("projectId");
