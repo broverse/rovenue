@@ -153,6 +153,13 @@ export interface SpendCreditsArgs {
   referenceId?: string;
   description?: string;
   metadata?: unknown;
+  /**
+   * When set with a `referenceId`, a retried spend with the same reference is
+   * a no-op (returns the original SPEND row) instead of double-debiting the
+   * wallet. Mirrors `addCredits`'s grant dedup so spends are equally
+   * idempotent under client/network retries.
+   */
+  dedupeOnReference?: boolean;
 }
 
 /**
@@ -179,6 +186,33 @@ export async function spendCredits(
     );
     if (!subscriber) {
       throw new Error(`Subscriber ${args.subscriberId} not found`);
+    }
+
+    // Idempotency: a retried spend with the same reference returns the
+    // original SPEND row instead of debiting twice. Runs inside the per-wallet
+    // advisory lock, so concurrent retries serialize and the second sees the
+    // first's row.
+    if (args.dedupeOnReference && args.referenceId) {
+      const existing = await tx
+        .select()
+        .from(drizzle.schema.creditLedger)
+        .where(
+          and(
+            eq(drizzle.schema.creditLedger.subscriberId, args.subscriberId),
+            eq(drizzle.schema.creditLedger.currencyId, args.currencyId),
+            eq(drizzle.schema.creditLedger.type, CreditLedgerType.SPEND),
+            eq(drizzle.schema.creditLedger.referenceId, args.referenceId),
+          ),
+        )
+        .limit(1);
+      if (existing[0]) {
+        log.debug("spend already recorded for reference, skipping", {
+          subscriberId: args.subscriberId,
+          currencyId: args.currencyId,
+          referenceId: args.referenceId,
+        });
+        return existing[0] as CreditLedger;
+      }
     }
 
     const last = await drizzle.creditLedgerRepo.findLatestBalance(

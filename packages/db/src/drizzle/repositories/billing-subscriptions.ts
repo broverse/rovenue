@@ -178,3 +178,28 @@ export async function updateAfterStripeUpdated(
       ),
     );
 }
+
+/**
+ * Downgrade a project back to the free plan when its Stripe subscription is
+ * deleted (canceled / ended). Without this, a project whose paid plan lapsed
+ * would keep its elevated tier + capabilities indefinitely. Returns the
+ * project to the same shape as `createFreeBillingSubscription`.
+ */
+export async function downgradeToFreeOnDeleted(
+  db: Db,
+  stripeSubscriptionId: string,
+): Promise<void> {
+  await db
+    .update(billingSubscriptions)
+    .set({
+      state: "free",
+      tier: "free",
+      updatedAt: sql`now()`,
+    })
+    .where(
+      and(
+        eq(billingSubscriptions.stripeSubscriptionId, stripeSubscriptionId),
+        ne(billingSubscriptions.state, "deleted"),
+      ),
+    );
+}

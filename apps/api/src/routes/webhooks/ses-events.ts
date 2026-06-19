@@ -43,7 +43,15 @@ function recipientsFor(evt: SesNotificationEnvelope): string[] {
 export const sesEventsRoute = new Hono().post("/", async (c) => {
   const payload = (await c.req.json()) as SnsPayload;
 
-  if (env.AWS_SES_EVENTS_VERIFY_SIGNATURE) {
+  // Fail closed: SNS signature verification is MANDATORY in production. The
+  // flag can only RELAX it in non-production (local testing without real SNS
+  // signatures). Skipping verification would let an unauthenticated caller
+  // poison the suppression list (permanent denial-of-email for a victim),
+  // flip a user's email master switch, or trigger an SSRF via SubscribeURL —
+  // all of which are gated behind this check.
+  const mustVerify =
+    env.NODE_ENV === "production" || env.AWS_SES_EVENTS_VERIFY_SIGNATURE;
+  if (mustVerify) {
     try {
       await verifySnsSignature(payload);
     } catch (e) {

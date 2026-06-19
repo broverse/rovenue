@@ -4,6 +4,7 @@ import { logger } from "../../../lib/logger";
 import { handleSetupIntentSucceeded } from "./handle-setup-intent-succeeded";
 import { handleSubscriptionCreated } from "./handle-subscription-created";
 import { handleSubscriptionUpdated } from "./handle-subscription-updated";
+import { handleSubscriptionDeleted } from "./handle-subscription-deleted";
 import { handleInvoiceUpsert } from "./handle-invoice-upsert";
 import { handleInvoicePaymentSucceeded } from "./handle-invoice-payment-succeeded";
 import { handleChargeRefunded } from "./handle-charge-refunded";
@@ -49,6 +50,7 @@ const handlers: Record<string, (ctx: Ctx) => Promise<HandlerResult>> = {
   "setup_intent.succeeded": (ctx) => handleSetupIntentSucceeded(ctx),
   "customer.subscription.created": (ctx) => handleSubscriptionCreated(ctx),
   "customer.subscription.updated": (ctx) => handleSubscriptionUpdated(ctx),
+  "customer.subscription.deleted": (ctx) => handleSubscriptionDeleted(ctx),
   "invoice.created": (ctx) => handleInvoiceUpsert(ctx),
   "invoice.finalized": (ctx) => handleInvoiceUpsert(ctx),
   "invoice.updated": (ctx) => handleInvoiceUpsert(ctx),
@@ -107,7 +109,10 @@ export async function dispatchStripeBillingEvent(
   // concurrency.
   const whRow = await drizzle.webhookEventRepo.claimWebhookEvent(db, {
     projectId,
-    source: "STRIPE",
+    // Distinct from the per-project store "STRIPE" source: this is the
+    // platform billing account, whose Stripe event-id space is independent.
+    // Sharing the source risked a silent cross-account dedup collision.
+    source: "STRIPE_BILLING",
     eventType: event.type,
     storeEventId: event.id,
     payload: event as unknown,

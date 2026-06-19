@@ -108,6 +108,9 @@ export const virtualCurrenciesV1Route = new Hono()
           referenceType: body.referenceType,
           referenceId: body.referenceId,
           description: body.description,
+          // A client-supplied referenceId makes the spend idempotent, so a
+          // network retry can't double-debit the wallet.
+          dedupeOnReference: body.referenceId != null,
         });
         return c.json(ok({ code: currency.code, balance: entry.balance }));
       } catch (err) {

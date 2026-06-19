@@ -175,7 +175,9 @@ describe("dispatchStripeBillingEvent", () => {
       expect.anything(),
       expect.objectContaining({
         projectId: "proj_42",
-        source: "STRIPE",
+        // SaaS billing dedups under a distinct source from the per-project
+        // store STRIPE events (audit WE1).
+        source: "STRIPE_BILLING",
         eventType: "customer.subscription.updated",
         storeEventId: "evt_happy",
       }),
