@@ -30,12 +30,20 @@ describe("addCredits dedupeOnReference", () => {
     await db.insert(subscribers).values({
       id: SUB_ID,
       projectId: PROJECT_ID,
+      rovenueId: `rov_${RUN_ID}`,
       appUserId: `app_${RUN_ID}`,
+    });
+
+    const currency = await drizzle.virtualCurrencyRepo.createVirtualCurrency(db, {
+      projectId: PROJECT_ID,
+      code: "GLD",
+      name: "Coins",
     });
 
     const grant = () =>
       addCredits({
         subscriberId: SUB_ID,
+        currencyId: currency.id,
         amount: 100,
         referenceType: "purchase",
         referenceId: PURCHASE_ID,
@@ -57,6 +65,6 @@ describe("addCredits dedupeOnReference", () => {
       );
 
     expect(rows).toHaveLength(1);
-    expect(await getBalance(SUB_ID)).toBe(100);
+    expect(await getBalance(SUB_ID, currency.id)).toBe(100);
   });
 });
