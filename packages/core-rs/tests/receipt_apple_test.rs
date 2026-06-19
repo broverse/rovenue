@@ -22,7 +22,7 @@ fn post_apple_success() {
         .match_header("idempotency-key", "idem_apple_001")
         .match_body(r#"{"receipt":"<jws>","appUserId":"anon_99","productId":"pro_monthly"}"#)
         .with_status(200)
-        .with_body(r#"{"data":{"subscriber":{"id":"sub_1","appUserId":"anon_99"},"access":{},"credits":{"balance":120}}}"#)
+        .with_body(r#"{"data":{"subscriber":{"id":"sub_1","appUserId":"anon_99"},"access":{},"virtualCurrencyBalances":{"gold":12}}}"#)
         .create();
 
     let c = ReceiptClient::new(http(&server.url()));
@@ -31,7 +31,7 @@ fn post_apple_success() {
         .unwrap();
     assert_eq!(result.subscriber_id, "sub_1");
     assert_eq!(result.app_user_id, "anon_99");
-    assert_eq!(result.credit_balance, 120);
+    assert_eq!(result.virtual_currencies.get("gold"), Some(&12));
     m.assert();
 }
 

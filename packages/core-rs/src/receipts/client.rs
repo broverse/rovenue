@@ -89,7 +89,7 @@ impl ReceiptClient {
         Ok(ReceiptPostOutcome {
             subscriber_id: data.subscriber.id,
             app_user_id: data.subscriber.app_user_id,
-            credit_balance: data.credits.balance,
+            virtual_currencies: data.virtual_currency_balances,
             access: data.access,
         })
     }
@@ -110,7 +110,7 @@ mod tests {
             .with_header("content-type", "application/json")
             .with_body(
                 r#"{"data":{"subscriber":{"id":"sub_1","appUserId":"u1"},
-                    "credits":{"balance":42},
+                    "virtualCurrencyBalances":{"gems":42},
                     "access":{"pro":{"isActive":true,"expiresDate":null,
                               "store":"APP_STORE","productIdentifier":"pro_monthly"}}}}"#,
             )
@@ -126,7 +126,6 @@ mod tests {
             .post_apple("rcpt", "u1", "pro_monthly", "idem_rcpt_x", None)
             .expect("post ok");
         assert_eq!(outcome.subscriber_id, "sub_1");
-        assert_eq!(outcome.credit_balance, 42);
         let access = outcome.access.expect("access present");
         assert!(access.get("pro").unwrap().is_active);
     }

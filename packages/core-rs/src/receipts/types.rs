@@ -35,7 +35,9 @@ pub struct ReceiptBody<'a> {
 #[derive(Debug, Deserialize)]
 pub struct ReceiptResponse {
     pub subscriber: ReceiptSubscriber,
-    pub credits: ReceiptCredits,
+    /// Virtual currency balances. `None` / absent → treated as empty map.
+    #[serde(rename = "virtualCurrencyBalances", default)]
+    pub virtual_currency_balances: HashMap<String, i64>,
     /// Entitlement access map. `None` when the server omits the field entirely
     /// (pre-0.7 API); `Some({})` means the subscriber genuinely has none.
     #[serde(default)]
@@ -49,28 +51,23 @@ pub struct ReceiptSubscriber {
     pub app_user_id: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ReceiptCredits {
-    pub balance: i64,
-}
-
 /// Internal result of a receipt POST, carrying the raw access map so the core
 /// can hydrate the cache without a follow-up GET. Not exposed across FFI.
 #[derive(Debug)]
 pub struct ReceiptPostOutcome {
     pub subscriber_id: String,
     pub app_user_id: String,
-    pub credit_balance: i64,
+    pub virtual_currencies: HashMap<String, i64>,
     pub access: Option<HashMap<String, EntitlementWire>>,
 }
 
-/// FFI-visible result of a successful receipt post. Entitlements + balance are
-/// taken from the POST response (the core hydrates the cache from it), so the
-/// façade builds its public PurchaseResult without any follow-up GET.
+/// FFI-visible result of a successful receipt post. Entitlements + VC balances
+/// are taken from the POST response (the core hydrates the cache from it), so
+/// the façade builds its public PurchaseResult without any follow-up GET.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReceiptResult {
     pub subscriber_id: String,
     pub app_user_id: String,
-    pub credit_balance: i64,
+    pub virtual_currencies: HashMap<String, i64>,
     pub entitlements: Vec<Entitlement>,
 }

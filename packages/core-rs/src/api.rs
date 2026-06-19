@@ -359,7 +359,7 @@ impl RovenueCore {
         Ok(self.finish_receipt(&scope, outcome))
     }
 
-    /// Hydrate entitlement + credit caches from a receipt POST response and
+    /// Hydrate entitlement + VC caches from a receipt POST response and
     /// build the FFI result — no follow-up GETs. Falls back to a GET refresh
     /// only when an older server omitted `access` entirely.
     fn finish_receipt(&self, scope: &str, outcome: ReceiptPostOutcome) -> ReceiptResult {
@@ -372,10 +372,13 @@ impl RovenueCore {
                 let _ = self.entitlements.refresh();
             }
         }
+        let balances: std::collections::BTreeMap<String, i64> =
+            outcome.virtual_currencies.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let _ = self.virtual_currencies.set_balances(scope, &balances, now);
         ReceiptResult {
             subscriber_id: outcome.subscriber_id,
             app_user_id: outcome.app_user_id,
-            credit_balance: outcome.credit_balance,
+            virtual_currencies: outcome.virtual_currencies,
             entitlements: self.entitlements.list_all().unwrap_or_default(),
         }
     }
@@ -572,14 +575,14 @@ mod tests {
     fn post_apple_receipt_hydrates_without_followup_get() {
         let mut server = mockito::Server::new();
 
-        // The receipt POST — returns subscriber + credits + access map
+        // The receipt POST — returns subscriber + VC balances + access map
         let _m_receipt = server
             .mock("POST", "/v1/receipts/apple")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(
                 r#"{"data":{"subscriber":{"id":"sub_1","appUserId":"u1"},
-                    "credits":{"balance":7},
+                    "virtualCurrencyBalances":{"gold":7},
                     "access":{"pro":{"isActive":true,"expiresDate":null,
                               "store":"APP_STORE","productIdentifier":"pro_monthly"}}}}"#,
             )
@@ -600,7 +603,8 @@ mod tests {
             .post_apple_receipt("jws_token".into(), "pro_monthly".into(), None)
             .expect("receipt ok");
 
-        assert_eq!(result.credit_balance, 7);
+        assert_eq!(result.virtual_currencies.get("gold"), Some(&7));
+        assert_eq!(core.virtual_currency("gold".into()), 7);
         assert_eq!(result.entitlements.len(), 1);
         assert_eq!(result.entitlements[0].id, "pro");
         assert!(result.entitlements[0].is_active);
@@ -620,8 +624,7 @@ mod tests {
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(
-                r#"{"data":{"subscriber":{"id":"sub_2","appUserId":"u2"},
-                    "credits":{"balance":0}}}"#,
+                r#"{"data":{"subscriber":{"id":"sub_2","appUserId":"u2"}}}"#,
             )
             .create();
 

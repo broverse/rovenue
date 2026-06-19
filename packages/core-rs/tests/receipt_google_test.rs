@@ -22,7 +22,7 @@ fn post_google_success() {
         .match_header("idempotency-key", "idem_google_001")
         .match_body(r#"{"receipt":"play.purchase.token","appUserId":"anon_99","productId":"pro_monthly_v2"}"#)
         .with_status(200)
-        .with_body(r#"{"data":{"subscriber":{"id":"sub_2","appUserId":"anon_99"},"access":{},"credits":{"balance":0}}}"#)
+        .with_body(r#"{"data":{"subscriber":{"id":"sub_2","appUserId":"anon_99"},"access":{},"virtualCurrencyBalances":{"gold":5}}}"#)
         .create();
 
     let c = ReceiptClient::new(http(&server.url()));
@@ -37,6 +37,6 @@ fn post_google_success() {
         )
         .unwrap();
     assert_eq!(result.subscriber_id, "sub_2");
-    assert_eq!(result.credit_balance, 0);
+    assert_eq!(result.virtual_currencies.get("gold"), Some(&5));
     m.assert();
 }

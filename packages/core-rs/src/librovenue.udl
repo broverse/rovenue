@@ -64,7 +64,7 @@ dictionary ExperimentAssignment {
 dictionary ReceiptResult {
     string subscriber_id;
     string app_user_id;
-    i64 credit_balance;
+    record<string, i64> virtual_currencies;
     sequence<Entitlement> entitlements;
 };
 
