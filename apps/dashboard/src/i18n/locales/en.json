@@ -844,6 +844,15 @@
         "label": "Access granted",
         "hint": "Pick one or more access rows from the catalog. Subscribers see these as access.identifier in the SDK.",
         "empty": "No access defined yet. Create one from the Access page first."
+      },
+      "storeIds": {
+        "connect": "Connect store",
+        "fetching": "Fetching products…",
+        "catalogError": "Couldn't load store products — check credentials",
+        "searchPlaceholder": "Select a store product…",
+        "empty": "No products in the store catalog.",
+        "noMatch": "No matching products.",
+        "imported": "Imported"
       }
     },
     "import": {

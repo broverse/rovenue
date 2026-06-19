@@ -19,6 +19,7 @@ import {
   useUpdateProduct,
 } from "../../lib/hooks/useProjectProducts";
 import { useProjectAccess } from "../../lib/hooks/useProjectAccess";
+import { StoreIdentifiersFieldset } from "./store-identifier-fields";
 
 type Props = {
   projectId: string;
@@ -240,6 +241,7 @@ export function ProductFormModal({
               </div>
             ) : (
               <FormBody
+                projectId={projectId}
                 form={form}
                 setForm={setForm}
                 set={set}
@@ -282,12 +284,14 @@ export function ProductFormModal({
 }
 
 function FormBody({
+  projectId,
   form,
   setForm,
   set,
   accessRows,
   lockIdentifier,
 }: {
+  projectId: string;
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
   set: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
@@ -374,29 +378,18 @@ function FormBody({
         )}
       </div>
 
-      <fieldset className="grid grid-cols-1 gap-2 rounded-md border border-rv-divider bg-rv-c2/50 p-3">
-        <legend className="px-1 text-[11px] uppercase tracking-wider text-rv-mute-500">
-          {t("products.form.fields.storeIds")}
-        </legend>
-        <StoreField
-          label="iOS"
-          placeholder="com.acme.app.pro_monthly"
-          value={form.iosId}
-          onChange={(v) => set("iosId", v)}
-        />
-        <StoreField
-          label="Android"
-          placeholder="pro_monthly"
-          value={form.androidId}
-          onChange={(v) => set("androidId", v)}
-        />
-        <StoreField
-          label="Web"
-          placeholder="price_xxx"
-          value={form.webId}
-          onChange={(v) => set("webId", v)}
-        />
-      </fieldset>
+      <StoreIdentifiersFieldset
+        projectId={projectId}
+        iosId={form.iosId}
+        androidId={form.androidId}
+        webId={form.webId}
+        onChange={(store, v) =>
+          set(
+            store === "ios" ? "iosId" : store === "android" ? "androidId" : "webId",
+            v,
+          )
+        }
+      />
 
       <div>
         <div className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-rv-mute-500">
@@ -481,28 +474,3 @@ function Field({
   );
 }
 
-function StoreField({
-  label,
-  placeholder,
-  value,
-  onChange,
-}: {
-  label: string;
-  placeholder: string;
-  value: string;
-  onChange: (next: string) => void;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="w-16 shrink-0 text-[11px] font-medium uppercase tracking-wider text-rv-mute-500">
-        {label}
-      </span>
-      <Input
-        mono
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-      />
-    </div>
-  );
-}
