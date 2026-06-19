@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { ListBox } from "@heroui/react";
 import {
   Check,
   ChevronDown,
@@ -13,7 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Input } from "../../ui/input";
-import { NativeSelect } from "../../ui/native-select";
+import { Select } from "../../ui/select";
 import { cn } from "../../lib/cn";
 import {
   makeCondition,
@@ -170,6 +171,55 @@ function ConditionMenu({ onPick }: { onPick: (kind: ConditionKind) => void }) {
   );
 }
 
+function OpSelect({
+  value,
+  onChange,
+  options,
+  ariaLabel,
+  disabled,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: ReadonlyArray<{ value: string; labelKey: string }>;
+  ariaLabel: string;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Select
+      aria-label={ariaLabel}
+      isDisabled={disabled}
+      selectedKey={value}
+      onSelectionChange={(key) => onChange(String(key))}
+    >
+      <Select.Trigger className="inline-flex h-7 w-auto min-w-[52px] cursor-pointer items-center justify-between gap-1.5 rounded-md border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none transition hover:bg-rv-c3 data-[focus-visible=true]:ring-2 data-[focus-visible=true]:ring-rv-accent-500 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-60">
+        <Select.Value className="truncate" />
+        <ChevronDown size={12} className="text-rv-mute-500" aria-hidden />
+      </Select.Trigger>
+      <Select.Popover
+        placement="bottom start"
+        className="min-w-[var(--trigger-width)] rounded-lg border border-rv-divider-strong bg-rv-c1 p-1 shadow-[0_18px_44px_rgba(0,0,0,0.5)]"
+      >
+        <ListBox
+          aria-label={ariaLabel}
+          className="flex max-h-[240px] flex-col gap-0.5 overflow-auto outline-none"
+        >
+          {options.map((op) => (
+            <ListBox.Item
+              key={op.value}
+              id={op.value}
+              textValue={t(op.labelKey)}
+              className="flex cursor-pointer items-center whitespace-nowrap rounded px-2 py-1.5 text-[12px] text-foreground outline-none data-[hovered=true]:bg-rv-c2 data-[focused=true]:bg-rv-c2 data-[selected=true]:bg-rv-c2"
+            >
+              {t(op.labelKey)}
+            </ListBox.Item>
+          ))}
+        </ListBox>
+      </Select.Popover>
+    </Select>
+  );
+}
+
 function ConditionRow({
   condition,
   onChange,
@@ -201,20 +251,13 @@ function ConditionRow({
             placeholder="user_level"
             className="h-7 flex-1 min-w-[120px] max-w-[180px] text-[12px]"
           />
-          <NativeSelect
+          <OpSelect
             disabled={disabled}
+            ariaLabel={t(meta.labelKey)}
             value={condition.scalarOp}
-            onChange={(e) =>
-              onChange({ scalarOp: e.target.value as CompareOp })
-            }
-            className="h-7 w-[80px] text-[12px]"
-          >
-            {COMPARE_OPS.map((op) => (
-              <option key={op.value} value={op.value}>
-                {t(op.labelKey)}
-              </option>
-            ))}
-          </NativeSelect>
+            onChange={(v) => onChange({ scalarOp: v as CompareOp })}
+            options={COMPARE_OPS}
+          />
           <Input
             mono
             disabled={disabled}
@@ -230,18 +273,13 @@ function ConditionRow({
         condition.kind === "app" ||
         condition.kind === "platform") && (
         <>
-          <NativeSelect
+          <OpSelect
             disabled={disabled}
+            ariaLabel={t(meta.labelKey)}
             value={condition.listOp}
-            onChange={(e) => onChange({ listOp: e.target.value as ListOp })}
-            className="h-7 w-[80px] text-[12px]"
-          >
-            {LIST_OPS.map((op) => (
-              <option key={op.value} value={op.value}>
-                {t(op.labelKey)}
-              </option>
-            ))}
-          </NativeSelect>
+            onChange={(v) => onChange({ listOp: v as ListOp })}
+            options={LIST_OPS}
+          />
           {condition.kind === "platform" ? (
             <PlatformChips
               disabled={disabled}
@@ -266,20 +304,13 @@ function ConditionRow({
       {(condition.kind === "appVersion" ||
         condition.kind === "sdkVersion") && (
         <>
-          <NativeSelect
+          <OpSelect
             disabled={disabled}
+            ariaLabel={t(meta.labelKey)}
             value={condition.scalarOp}
-            onChange={(e) =>
-              onChange({ scalarOp: e.target.value as CompareOp })
-            }
-            className="h-7 w-[80px] text-[12px]"
-          >
-            {COMPARE_OPS.map((op) => (
-              <option key={op.value} value={op.value}>
-                {t(op.labelKey)}
-              </option>
-            ))}
-          </NativeSelect>
+            onChange={(v) => onChange({ scalarOp: v as CompareOp })}
+            options={COMPARE_OPS}
+          />
           <Input
             mono
             disabled={disabled}
