@@ -14,6 +14,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Store,
   Target,
   Trophy,
   Users,
@@ -167,6 +168,7 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
     items: [
       { id: "apps", labelKey: "sidebar.items.apps", icon: Plug, to: "/projects/$projectId/apps" },
       { id: "sdk", labelKey: "sidebar.items.sdk", icon: KeyRound, to: "/projects/$projectId/sdk" },
+      { id: "stores", labelKey: "sidebar.items.stores", icon: Store, to: "/projects/$projectId/stores" },
     ],
   },
   {
