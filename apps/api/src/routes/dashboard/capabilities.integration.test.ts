@@ -204,6 +204,7 @@ describe("GROWTH — flags:write allowed, credits:write denied", () => {
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({
         subscriberId: sub.id,
+        currencyId: "currency-placeholder-id",
         amount: 50,
         description: "growth attempt",
       }),

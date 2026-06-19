@@ -223,6 +223,7 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
           select: { balance: true },
         }),
       ),
+      findAllBalances: vi.fn(async () => []),
       findExistingPurchaseCredit: vi.fn(
         async (_db: unknown, subscriberId: string, purchaseId: string) =>
           creditLedger.findFirst({
@@ -314,6 +315,9 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
       findMembership: vi.fn(async () => null),
       findProjectById: vi.fn(async () => null),
       findProjectCredentials: vi.fn(async () => null),
+    },
+    virtualCurrencyRepo: {
+      listVirtualCurrencies: vi.fn(async () => []),
     },
     shadowRead: vi.fn(
       async <T>(primary: () => Promise<T>, _shadow: () => Promise<T>): Promise<T> =>
@@ -550,7 +554,7 @@ describe("POST /v1/receipts/apple", () => {
     expect(body.data.subscriber.appUserId).toBe("user_1");
     expect(body.data.access.premium).toBeDefined();
     expect(body.data.access.premium.productIdentifier).toBe("pro_monthly");
-    expect(body.data.credits.balance).toBe(0);
+    expect(body.data.virtualCurrencyBalances).toEqual({});
     expect(verifyReceipt).toHaveBeenCalledOnce();
     expect(vi.mocked(verifyReceipt).mock.calls[0][0].store).toBe("APP_STORE");
   });
@@ -746,158 +750,6 @@ describe("POST /v1/subscribers/:appUserId/attributes", () => {
 });
 
 // =============================================================
-// GET /v1/subscribers/:appUserId/credits
-// =============================================================
-
-describe("GET /v1/subscribers/:appUserId/credits", () => {
-  it("returns current ledger balance", async () => {
-    dbMock.subscriber.findUnique.mockResolvedValue({
-      id: "sub_1",
-      projectId: "proj_test",
-      appUserId: "user_1",
-    } as any);
-    dbMock.creditLedger.findFirst.mockResolvedValue({
-      balance: 290,
-    } as any);
-
-    const res = await app.request(
-      withPublicAuth("/v1/subscribers/user_1/credits"),
-    );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as any;
-    expect(body.data.balance).toBe(290);
-  });
-});
-
-// =============================================================
-// POST /v1/subscribers/:appUserId/credits/spend
-// =============================================================
-
-describe("POST /v1/subscribers/:appUserId/credits/spend", () => {
-  it("records a spend and returns the new balance", async () => {
-    dbMock.subscriber.findUnique.mockResolvedValue({
-      id: "sub_1",
-      projectId: "proj_test",
-      appUserId: "user_1",
-    } as any);
-    // credit-engine.spendCredits → tx.subscriber.findUnique + tx.creditLedger.findFirst/create
-    dbMock.subscriber.findUnique.mockResolvedValue({
-      id: "sub_1",
-      projectId: "proj_test",
-      appUserId: "user_1",
-    } as any);
-    dbMock.creditLedger.findFirst.mockResolvedValue({
-      balance: 290,
-    } as any);
-    dbMock.creditLedger.create.mockResolvedValue({
-      id: "led_1",
-      amount: -10,
-      balance: 280,
-      type: "SPEND",
-      createdAt: new Date("2026-05-01T00:00:00Z"),
-    } as any);
-
-    const res = await app.request(
-      withSecretAuth("/v1/subscribers/user_1/credits/spend", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          amount: 10,
-          description: "Photo generation",
-        }),
-      }),
-    );
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as any;
-    expect(body.data.balance).toBe(280);
-    expect(body.data.ledgerEntry.amount).toBe(-10);
-  });
-
-  it("returns 402 when balance is insufficient", async () => {
-    dbMock.subscriber.findUnique.mockResolvedValue({
-      id: "sub_1",
-      projectId: "proj_test",
-      appUserId: "user_1",
-    } as any);
-    dbMock.creditLedger.findFirst.mockResolvedValue({
-      balance: 5,
-    } as any);
-
-    const res = await app.request(
-      withSecretAuth("/v1/subscribers/user_1/credits/spend", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ amount: 10 }),
-      }),
-    );
-
-    expect(res.status).toBe(402);
-  });
-
-  it("rejects a public key with 403", async () => {
-    const res = await app.request(
-      withPublicAuth("/v1/subscribers/user_1/credits/spend", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ amount: 10 }),
-      }),
-    );
-    expect(res.status).toBe(403);
-  });
-});
-
-// =============================================================
-// POST /v1/subscribers/:appUserId/credits/add  (secret key only)
-// =============================================================
-
-describe("POST /v1/subscribers/:appUserId/credits/add", () => {
-  it("accepts a secret key and records the grant", async () => {
-    dbMock.subscriber.findUnique.mockResolvedValue({
-      id: "sub_1",
-      projectId: "proj_test",
-      appUserId: "user_1",
-    } as any);
-    dbMock.creditLedger.findFirst.mockResolvedValue(null);
-    dbMock.creditLedger.create.mockResolvedValue({
-      id: "led_2",
-      amount: 50,
-      balance: 330,
-      type: "BONUS",
-      createdAt: new Date("2026-05-01T00:00:00Z"),
-    } as any);
-
-    const res = await app.request(
-      withSecretAuth("/v1/subscribers/user_1/credits/add", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          amount: 50,
-          type: "BONUS",
-          description: "Welcome bonus",
-        }),
-      }),
-    );
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as any;
-    expect(body.data.balance).toBe(330);
-    expect(body.data.ledgerEntry.amount).toBe(50);
-  });
-
-  it("rejects a public key with 403", async () => {
-    const res = await app.request(
-      withPublicAuth("/v1/subscribers/user_1/credits/add", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ amount: 50 }),
-      }),
-    );
-    expect(res.status).toBe(403);
-  });
-});
-
-// =============================================================
 // GET /v1/offerings/:identifier
 // =============================================================
 
@@ -1032,7 +884,7 @@ function withAppUser(url: string, init: RequestInit = {}): Request {
 }
 
 describe("GET /v1/me", () => {
-  it("returns subscriber profile + entitlements + credit balance", async () => {
+  it("returns subscriber profile + entitlements", async () => {
     dbMock.subscriber.findUnique.mockResolvedValue({
       id: "sub_1",
       projectId: "proj_test",
@@ -1051,7 +903,6 @@ describe("GET /v1/me", () => {
     dbMock.purchase.findMany.mockResolvedValue([
       { id: "pur_1", product: { identifier: "pro_monthly" } },
     ]);
-    dbMock.creditLedger.findFirst.mockResolvedValue({ balance: 175 } as any);
 
     const res = await app.request(withAppUser("/v1/me"));
     expect(res.status).toBe(200);
@@ -1060,7 +911,6 @@ describe("GET /v1/me", () => {
     expect(body.data.subscriber.attributes.plan).toBe("pro");
     expect(body.data.access.premium.isActive).toBe(true);
     expect(body.data.access.premium.productIdentifier).toBe("pro_monthly");
-    expect(body.data.credits.balance).toBe(175);
   });
 
   it("rejects when X-Rovenue-App-User-Id header is missing", async () => {
@@ -1100,80 +950,6 @@ describe("GET /v1/me/access", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
     expect(body.data.access.premium.store).toBe("PLAY_STORE");
-  });
-});
-
-describe("GET /v1/me/credits", () => {
-  it("returns the balance", async () => {
-    dbMock.subscriber.findUnique.mockResolvedValue({
-      id: "sub_1",
-      projectId: "proj_test",
-      appUserId: "user_1",
-      attributes: {},
-    } as any);
-    dbMock.creditLedger.findFirst.mockResolvedValue({ balance: 42 } as any);
-
-    const res = await app.request(withAppUser("/v1/me/credits"));
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as any;
-    expect(body.data.balance).toBe(42);
-  });
-});
-
-describe("POST /v1/me/credits/spend", () => {
-  it("accepts a public key + idempotency key and records spend", async () => {
-    dbMock.subscriber.findUnique.mockResolvedValue({
-      id: "sub_1",
-      projectId: "proj_test",
-      appUserId: "user_1",
-      attributes: {},
-    } as any);
-    dbMock.creditLedger.findFirst.mockResolvedValue({ balance: 100 } as any);
-    dbMock.creditLedger.create.mockResolvedValue({
-      id: "led_1",
-      amount: -25,
-      balance: 75,
-      type: "SPEND",
-      createdAt: new Date("2026-05-01T00:00:00Z"),
-    } as any);
-
-    const res = await app.request(
-      withAppUser("/v1/me/credits/spend", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": "spend-001",
-        },
-        body: JSON.stringify({ amount: 25, description: "image gen" }),
-      }),
-    );
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as any;
-    expect(body.data.balance).toBe(75);
-    expect(body.data.ledgerEntry.amount).toBe(-25);
-  });
-
-  it("returns 402 when balance is insufficient", async () => {
-    dbMock.subscriber.findUnique.mockResolvedValue({
-      id: "sub_1",
-      projectId: "proj_test",
-      appUserId: "user_1",
-      attributes: {},
-    } as any);
-    dbMock.creditLedger.findFirst.mockResolvedValue({ balance: 5 } as any);
-
-    const res = await app.request(
-      withAppUser("/v1/me/credits/spend", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": "spend-002",
-        },
-        body: JSON.stringify({ amount: 10 }),
-      }),
-    );
-    expect(res.status).toBe(402);
   });
 });
 

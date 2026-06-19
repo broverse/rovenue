@@ -15,11 +15,19 @@ import { bindAppUserId } from "../src/services/identify";
 const RUN_ID = Date.now();
 const PROJECT_ID = `prj_identify_${RUN_ID}`;
 
+let SEED_CURRENCY_ID: string;
+
 describe("bindAppUserId", () => {
   beforeAll(async () => {
     await getDb()
       .insert(projects)
       .values({ id: PROJECT_ID, name: `Identify Test ${RUN_ID}` });
+    const currency = await drizzle.virtualCurrencyRepo.createVirtualCurrency(getDb(), {
+      projectId: PROJECT_ID,
+      code: "GLD",
+      name: "Coins",
+    });
+    SEED_CURRENCY_ID = currency.id;
   });
 
   afterAll(async () => {
@@ -69,6 +77,7 @@ describe("bindAppUserId", () => {
     await drizzle.creditLedgerRepo.insertCreditLedger(getDb(), {
       projectId: PROJECT_ID,
       subscriberId: other.id,
+      currencyId: SEED_CURRENCY_ID,
       type: CreditLedgerType.BONUS,
       amount: 50,
       balance: 50,
@@ -98,6 +107,7 @@ describe("bindAppUserId", () => {
     const bal = await drizzle.creditLedgerRepo.findLatestBalance(
       getDb(),
       self.id,
+      SEED_CURRENCY_ID,
     );
     expect(bal?.balance).toBe(50);
   });
