@@ -6,6 +6,7 @@ import type { Subscriber } from "./types";
 const COLUMNS = [
   { key: "user", align: "left" as const },
   { key: "rovenueId", align: "left" as const },
+  { key: "appUserId", align: "left" as const },
   { key: "plan", align: "left" as const },
   { key: "status", align: "left" as const },
   { key: "entitlements", align: "left" as const },
@@ -66,11 +67,10 @@ export function SubscribersTable({
             </tr>
           </thead>
           <tbody>
-            {subscribers.map((s, idx) => (
+            {subscribers.map((s) => (
               <SubscriberRow
                 key={s.rovenueId}
                 subscriber={s}
-                index={idx}
                 selected={selectedIds.has(s.rovenueId)}
                 active={activeId === s.rovenueId}
                 onToggleSelected={() => onToggleSelect(s.rovenueId)}

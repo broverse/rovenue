@@ -31,6 +31,11 @@ function toCountryCode(value: unknown): CountryCode {
   return "US";
 }
 
+/** Coerces a `$displayName` attribute value to a trimmed string; "" when absent. */
+function toName(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 /**
  * Maps a `SubscriberListItem` from the API to the richer `Subscriber` shape
  * used by the dashboard table. Fields not returned by the API are filled with
@@ -45,19 +50,24 @@ export function mapApiSubscriber(item: SubscriberListItem): Subscriber {
     item.purchaseCount,
   );
   const country = toCountryCode(item.attributes["country"]);
+  const name = toName(item.attributes["$displayName"]);
+
+  const ltv = Number(item.ltvUsd);
 
   return {
     id: truncated,
     rovenueId: item.id,
     full,
+    name,
     alias,
     country,
     access: item.activeAccessIds,
     product: "—",
     status,
-    ltv: 0,
+    ltv: Number.isFinite(ltv) ? ltv : 0,
     mrr: 0,
     created: item.firstSeenAt,
+    lastSeenAt: item.lastSeenAt,
     renew: "—",
     platforms: item.platforms,
     risk: 0,
@@ -90,6 +100,24 @@ export function formatMoney(value: number): string {
 /** LTV always shows two decimals, even at zero. */
 export function formatLtv(value: number): string {
   return `$${value.toFixed(2)}`;
+}
+
+/**
+ * Relative "time ago" label for a subscriber's last-seen timestamp.
+ * Falls back to `—` for an unparseable date.
+ */
+export function formatLastActivity(iso: string | undefined): string {
+  if (!iso) return "—";
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return "—";
+  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 /** Maps a risk score (0–100) to a CSS color token. */

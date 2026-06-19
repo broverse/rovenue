@@ -41,6 +41,8 @@ export type Subscriber = {
   rovenueId: string;
   /** Full canonical user id (used for avatar + detail). */
   full: string;
+  /** Display name from the `$displayName` attribute; empty when unset. */
+  name: string;
   /** Display alias (e.g. masked email). */
   alias: string;
   country: CountryCode;
@@ -55,6 +57,8 @@ export type Subscriber = {
   mrr: number;
   /** Date the subscriber first purchased / started a trial. */
   created: string;
+  /** ISO timestamp the subscriber was last seen — drives the Last Activity column. */
+  lastSeenAt?: string;
   /** Next renewal date, or `—` for non-renewing. */
   renew: string;
   platforms: ReadonlyArray<SubscriberPlatform>;

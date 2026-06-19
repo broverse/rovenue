@@ -4,7 +4,7 @@ import { AccessList } from "../products/access-chip";
 import { Chip } from "../../ui/chip";
 import { cn } from "../../lib/cn";
 import { CountryCell } from "./country-cell";
-import { formatLtv, formatMoney } from "./format";
+import { formatLastActivity, formatLtv, formatMoney } from "./format";
 import { PlatformTags } from "./platform-tags";
 import { RiskMeter } from "./risk-meter";
 import { SubscriberStatusChip } from "./subscriber-status-chip";
@@ -13,8 +13,6 @@ import type { Subscriber } from "./types";
 
 type Props = {
   subscriber: Subscriber;
-  /** Index of the row — used to roll fake "last activity" labels. */
-  index: number;
   selected: boolean;
   active: boolean;
   onToggleSelected: () => void;
@@ -23,7 +21,6 @@ type Props = {
 
 export function SubscriberRow({
   subscriber,
-  index,
   selected,
   active,
   onToggleSelected,
@@ -32,9 +29,7 @@ export function SubscriberRow({
   const { t } = useTranslation();
   const lastActivity = subscriber.renewsIn
     ? t("subscribers.table.renewsIn", { value: subscriber.renewsIn })
-    : [2, 4, 7, 9, 11].includes(index)
-      ? "2h ago"
-      : `${index}d ago`;
+    : formatLastActivity(subscriber.lastSeenAt);
 
   return (
     <tr
@@ -56,8 +51,8 @@ export function SubscriberRow({
         <div className="flex min-w-0 items-center gap-2.5">
           <UserAvatar fullId={subscriber.full} vip={subscriber.vip} />
           <div className="min-w-0">
-            <div className="truncate font-rv-mono text-[13px] text-foreground">
-              {subscriber.id || "—"}
+            <div className="truncate text-[13px] text-foreground" title={subscriber.name || undefined}>
+              {subscriber.name}
             </div>
           </div>
         </div>
@@ -68,6 +63,17 @@ export function SubscriberRow({
           title={subscriber.rovenueId}
         >
           {subscriber.rovenueId}
+        </span>
+      </td>
+      <td className="px-3 py-2.5">
+        <span
+          className={cn(
+            "truncate font-rv-mono text-[12px]",
+            subscriber.full ? "text-foreground" : "text-rv-mute-500",
+          )}
+          title={subscriber.full || undefined}
+        >
+          {subscriber.full || "—"}
         </span>
       </td>
       <td className={cn("px-3 py-2.5 text-[12px]", subscriber.plan === "—" ? "text-rv-mute-500" : "text-foreground")}>
