@@ -80,6 +80,7 @@ export const WebhookSource = {
   APPLE: "APPLE",
   GOOGLE: "GOOGLE",
   STRIPE: "STRIPE",
+  STRIPE_BILLING: "STRIPE_BILLING",
 } as const;
 export type WebhookSource = (typeof WebhookSource)[keyof typeof WebhookSource];
 
@@ -205,6 +206,10 @@ export { accessIdSchema } from "./drizzle/validators";
 export const drizzle = drizzleNamespace;
 export type { Db } from "./drizzle";
 export { getDb, createDb, db } from "./drizzle";
+// Pure helper: classify a RevenueEventType into a coarse dedup-key segment.
+// Exported top-level so webhook/receipt callers import it directly rather
+// than through the (test-mocked) `drizzle.revenueEventRepo` namespace.
+export { revenueDedupeKind } from "./drizzle";
 
 // =============================================================
 // Schema table objects — convenience re-exports so integration

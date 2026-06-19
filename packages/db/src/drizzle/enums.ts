@@ -67,6 +67,10 @@ export const webhookSource = pgEnum("WebhookSource", [
   "APPLE",
   "GOOGLE",
   "STRIPE",
+  // Platform SaaS-billing Stripe account — kept distinct from the per-project
+  // store "STRIPE" so the (source, storeEventId) dedup can't collide across
+  // the two independent Stripe accounts' event-id spaces.
+  "STRIPE_BILLING",
 ]);
 
 export const webhookEventStatus = pgEnum("WebhookEventStatus", [

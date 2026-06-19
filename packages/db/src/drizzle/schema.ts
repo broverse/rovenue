@@ -994,6 +994,15 @@ export const revenueEvents = pgTable(
       .notNull()
       .references(() => products.id),
     eventDate: timestamp("eventDate", { withTimezone: true }).notNull(),
+    // Deterministic idempotency key for the originating economic event
+    // (e.g. `apple:<transactionId>:REFUND`), denormalized here for tracing.
+    // Uniqueness is enforced in the separate, non-partitioned
+    // `revenue_event_dedupe` table — a UNIQUE index on this partitioned
+    // table would have to include `eventDate`, which breaks cross-path
+    // convergence (a receipt-verify emit and the later store webhook see
+    // different timestamps for the same transaction). NULL when the caller
+    // opts out of dedup.
+    dedupeKey: text("dedupeKey"),
     createdAt: timestamp("createdAt", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -1007,6 +1016,37 @@ export const revenueEvents = pgTable(
     subscriberIdTypeIdx: index(
       "revenue_events_subscriberId_type_idx",
     ).on(t.subscriberId, t.type),
+  }),
+);
+
+// =============================================================
+// revenue_event_dedupe — idempotency gate for revenue_events
+// =============================================================
+//
+// A small, NON-partitioned table whose `(projectId, dedupeKey)` primary key
+// is the single source of truth for "has this economic event already been
+// recorded?". Timestamp-independent on purpose: the same transaction can be
+// observed by the client receipt-verify path and the store's server
+// notification at different wall-clock times (and thus different
+// `revenue_events.eventDate`), but both derive the same `dedupeKey`
+// (e.g. `apple:<transactionId>:INITIAL`), so whichever lands first claims
+// the row and the other is a no-op. This mirrors how RevenueCat/Adapty
+// dedup by transaction id across the receipt + webhook paths.
+export const revenueEventDedupe = pgTable(
+  "revenue_event_dedupe",
+  {
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    dedupeKey: text("dedupeKey").notNull(),
+    // The revenue_events row this key first recorded (for tracing/joins).
+    revenueEventId: text("revenueEventId").notNull(),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.projectId, t.dedupeKey] }),
   }),
 );
 
@@ -1826,6 +1866,7 @@ export type NewOutgoingWebhook = typeof outgoingWebhooks.$inferInsert;
 
 export type RevenueEvent = typeof revenueEvents.$inferSelect;
 export type NewRevenueEvent = typeof revenueEvents.$inferInsert;
+export type RevenueEventDedupe = typeof revenueEventDedupe.$inferSelect;
 
 export type Audience = typeof audiences.$inferSelect;
 export type NewAudience = typeof audiences.$inferInsert;

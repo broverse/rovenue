@@ -1,0 +1,1 @@
+ALTER TYPE "public"."WebhookSource" ADD VALUE 'STRIPE_BILLING';

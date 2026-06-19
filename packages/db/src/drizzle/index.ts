@@ -43,6 +43,10 @@ export * as webhookEventRepo from "./repositories/webhook-events";
 export * as subscriberDetailRepo from "./repositories/subscriber-detail";
 export * as purchaseExtRepo from "./repositories/purchases-ext";
 export * as revenueEventRepo from "./repositories/revenue-events";
+// Pure helper re-exported at top level so callers can import it directly
+// (it is not a DB operation and must not be coupled to the mockable repo
+// namespace in tests).
+export { revenueDedupeKind } from "./repositories/revenue-events";
 export * as lockRepo from "./repositories/locks";
 export * as savedChartViewRepo from "./repositories/saved-chart-views";
 export * as chartAnnotationRepo from "./repositories/chart-annotations";
