@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { DashboardProductRow } from "@rovenue/shared";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { BookOpen, Plus } from "lucide-react";
@@ -9,12 +10,16 @@ import {
   useProjectAccess,
   useUpdateAccess,
 } from "../../../../lib/hooks/useProjectAccess";
-import { useProjectProducts } from "../../../../lib/hooks/useProjectProducts";
+import {
+  useProjectProducts,
+  useUpdateProduct,
+} from "../../../../lib/hooks/useProjectProducts";
 import {
   AccessDetail,
   AccessFormDialog,
   AccessList,
   DeleteAccessDialog,
+  LinkProductsModal,
 } from "../../../../components/access";
 
 interface Search {
@@ -66,6 +71,17 @@ function AccessPage({ projectId }: { projectId: string }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const [linkOpen, setLinkOpen] = useState(false);
+  const updateProduct = useUpdateProduct(projectId);
+
+  async function unlinkProduct(product: DashboardProductRow) {
+    if (!selected) return;
+    await updateProduct.mutateAsync({
+      id: product.id,
+      accessIds: product.accessIds.filter((id) => id !== selected.id),
+    });
+  }
 
   const create = useCreateAccess(projectId);
   const update = useUpdateAccess(projectId, selected?.id ?? "");
@@ -123,6 +139,8 @@ function AccessPage({ projectId }: { projectId: string }) {
           onEdit={() => setEditOpen(true)}
           onDelete={() => setDeleteOpen(true)}
           onCreate={() => setCreateOpen(true)}
+          onLinkProducts={() => setLinkOpen(true)}
+          onUnlinkProduct={(product) => void unlinkProduct(product)}
         />
       </div>
 
@@ -162,6 +180,14 @@ function AccessPage({ projectId }: { projectId: string }) {
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
         onDeleted={() => select(null)}
+      />
+
+      <LinkProductsModal
+        open={linkOpen}
+        projectId={projectId}
+        access={selected}
+        products={allProducts}
+        onClose={() => setLinkOpen(false)}
       />
     </>
   );
