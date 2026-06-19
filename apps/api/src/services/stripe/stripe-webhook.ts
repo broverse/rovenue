@@ -9,6 +9,7 @@ import {
   WebhookEventStatus,
   WebhookSource,
   drizzle,
+  revenueDedupeKind,
 } from "@rovenue/db";
 import { logger } from "../../lib/logger";
 import { convertToUsd } from "../fx";
@@ -311,7 +312,8 @@ async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
     currency: purchase.priceCurrency ?? "USD",
     amountUsd: "0",
     store: Store.STRIPE,
-    eventDate: new Date(),
+    eventDate: ctx.event.created ? new Date(ctx.event.created * 1000) : new Date(),
+    dedupeKey: `stripe:${ctx.event.id}:cancel`,
   });
 }
 
@@ -376,6 +378,8 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
     amountUsd: amountUsd.toString(),
     store: Store.STRIPE,
     eventDate,
+    // One paid invoice → one purchase-class revenue event; dedups replay.
+    dedupeKey: `stripe:${invoice.id}:${revenueDedupeKind(type)}`,
   });
 }
 
@@ -443,23 +447,41 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
   ctx.outcome.subscriberId = purchase.subscriberId;
   ctx.outcome.purchaseId = purchase.id;
 
-  const guard = await guardStatusWrite({
-    db: drizzle.db,
-    projectId: ctx.projectId,
-    store: Store.STRIPE,
-    storeTransactionId: subscriptionId,
-    to: PurchaseStatus.REFUNDED,
-    source: `stripe:${ctx.event.type}`,
-  });
+  const captured = charge.amount_captured ?? charge.amount ?? 0;
+  const refunded = charge.amount_refunded ?? 0;
+  const isFullRefund = captured > 0 && refunded >= captured;
 
-  await drizzle.purchaseRepo.updatePurchase(drizzle.db, purchase.id, {
-    ...(guard.apply ? { status: PurchaseStatus.REFUNDED } : {}),
-    refundDate: new Date(),
-  });
+  const eventDate = ctx.event.created
+    ? new Date(ctx.event.created * 1000)
+    : new Date();
 
-  await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);
+  // Only flip to REFUNDED + revoke entitlement on a FULL refund. A partial
+  // refund still records the refunded amount below but must not strip the
+  // subscriber's access or mark the purchase terminal.
+  if (isFullRefund) {
+    const guard = await guardStatusWrite({
+      db: drizzle.db,
+      projectId: ctx.projectId,
+      store: Store.STRIPE,
+      storeTransactionId: subscriptionId,
+      to: PurchaseStatus.REFUNDED,
+      source: `stripe:${ctx.event.type}`,
+    });
 
-  const amount = (charge.amount_refunded ?? 0) / 100;
+    await drizzle.purchaseRepo.updatePurchase(drizzle.db, purchase.id, {
+      ...(guard.apply
+        ? { status: PurchaseStatus.REFUNDED, refundDate: eventDate }
+        : {}),
+    });
+
+    if (guard.apply) {
+      await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);
+    }
+  }
+
+  // `amount_refunded` is the charge's cumulative refunded total; for a single
+  // (full or one-shot partial) refund this equals the refund amount.
+  const amount = refunded / 100;
   const currency =
     charge.currency?.toUpperCase() ?? purchase.priceCurrency ?? "USD";
   // Positive magnitude: refunds are stored as positive `amountUsd` (the
@@ -476,7 +498,10 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
     currency,
     amountUsd: amountUsd.toString(),
     store: Store.STRIPE,
-    eventDate: new Date(),
+    eventDate,
+    // Stripe redelivers the same event id; this dedups replay while letting
+    // distinct refund events (each a new event id) record independently.
+    dedupeKey: `stripe:${ctx.event.id}:refund`,
   });
 
   await maybeEmitRefundDetected(drizzle.db, {

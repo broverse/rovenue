@@ -68,6 +68,14 @@ export function mapStatus(
   state: GoogleSubscriptionState,
   type: GoogleSubscriptionNotificationType,
 ): PurchaseStatus {
+  // A revoke is a distinct terminal state from a natural expiry. Google's
+  // subscriptionsv2.get usually returns state=EXPIRED for a revoked
+  // subscription, which would otherwise collapse REVOKED into EXPIRED and
+  // lose the chargeback/policy distinction in analytics. Honor the
+  // notification type first.
+  if (type === GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_REVOKED) {
+    return PURCHASE_STATUS.REVOKED;
+  }
   switch (state) {
     case GOOGLE_SUBSCRIPTION_STATE.ACTIVE:
     case GOOGLE_SUBSCRIPTION_STATE.CANCELED:
@@ -84,9 +92,8 @@ export function mapStatus(
     case GOOGLE_SUBSCRIPTION_STATE.PENDING_PURCHASE_CANCELED:
       return PURCHASE_STATUS.TRIAL;
     default:
-      if (type === GOOGLE_SUBSCRIPTION_NOTIFICATION_TYPE.SUBSCRIPTION_REVOKED) {
-        return PURCHASE_STATUS.REVOKED;
-      }
+      // SUBSCRIPTION_REVOKED is handled up-front (it can surface with an
+      // EXPIRED state); any other unrecognized state defaults to ACTIVE.
       return PURCHASE_STATUS.ACTIVE;
   }
 }

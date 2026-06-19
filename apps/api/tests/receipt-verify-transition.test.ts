@@ -31,6 +31,10 @@ const { drizzleMock, auditMock } = vi.hoisted(() => {
       lockPurchaseStatusByStoreTransaction: vi.fn(),
       upsertPurchase: vi.fn(async () => ({ id: "pur_1" })),
     },
+    // R6: the receipt path now records revenue idempotently.
+    revenueEventRepo: {
+      createRevenueEvent: vi.fn(async () => ({ id: "rev_1" })),
+    },
   };
   return { drizzleMock, auditMock };
 });

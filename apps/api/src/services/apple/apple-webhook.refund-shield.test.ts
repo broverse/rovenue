@@ -53,6 +53,7 @@ const { drizzleMock } = vi.hoisted(() => {
       setAccessActiveAndExpiry: vi.fn(async () => undefined),
       createAccess: vi.fn(async () => undefined),
       revokeAccessByOriginalTransaction: vi.fn(async () => undefined),
+      revokeAccessByPurchaseId: vi.fn(async () => undefined),
     },
     revenueEventRepo: {
       createRevenueEvent: vi.fn(async () => undefined),

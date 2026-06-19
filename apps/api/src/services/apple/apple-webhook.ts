@@ -6,6 +6,7 @@ import {
   WebhookEventStatus,
   WebhookSource,
   drizzle,
+  revenueDedupeKind,
 } from "@rovenue/db";
 import { env } from "../../lib/env";
 import { logger } from "../../lib/logger";
@@ -457,8 +458,13 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
         refundDate,
       });
     });
+    // Scope the access revoke to the refunded transaction only. The status
+    // write above touches just this (store, transactionId) row, so revoking
+    // the whole originalTransactionId chain would strip entitlement from
+    // sibling still-active purchases — leaving an ACTIVE purchase with no
+    // access. REVOKE/EXPIRE remain chain-wide (handled in their own paths).
+    await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, found.id);
   }
-  await revokeAccessForTransaction(ctx);
 
   const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
     drizzle.db,
@@ -919,6 +925,10 @@ async function emitRevenueEvent(args: EmitRevenueArgs): Promise<void> {
     amountUsd: amountUsd.toString(),
     store: Store.APP_STORE,
     eventDate: new Date(tx.purchaseDate),
+    // transactionId is unique per Apple transaction (renewals get a new
+    // one); the coarse kind lets the receipt-verify path converge on the
+    // same key for this transaction. Idempotent across replays.
+    dedupeKey: `apple:${tx.transactionId}:${revenueDedupeKind(type)}`,
   });
 
   if (type === RevenueEventType.REFUND) {

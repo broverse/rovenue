@@ -5,6 +5,7 @@ import {
   PurchaseStatus,
   Store,
   drizzle,
+  revenueDedupeKind,
   type Product,
   type Purchase,
   type Subscriber,
@@ -37,6 +38,7 @@ import type {
   GoogleVerifyConfig,
 } from "./google";
 import { guardStatusWrite } from "./subscription-transition-guard";
+import { convertToUsd } from "./fx";
 
 const log = logger.child("receipt-verify");
 
@@ -221,6 +223,34 @@ async function verifyAppleReceipt(
       },
     });
   })) as unknown as Purchase;
+
+  // R6: record revenue on the receipt path too (the RevenueCat/Adapty model),
+  // not only on the App Store Server Notification. Idempotent via the same
+  // `apple:<transactionId>:<kind>` dedupeKey the webhook uses, so whichever
+  // arrives first records the row and the other is a no-op — closing the gap
+  // where a delayed/unconfigured webhook left a purchase with access but no
+  // revenue.
+  if (transaction.price != null && transaction.currency) {
+    const amount = transaction.price / 1_000_000;
+    const amountUsd = await convertToUsd(amount, transaction.currency);
+    const type =
+      transaction.transactionId === transaction.originalTransactionId
+        ? "INITIAL"
+        : "RENEWAL";
+    await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+      projectId: args.projectId,
+      subscriberId: subscriber.id,
+      purchaseId: purchase.id,
+      productId: product.id,
+      type,
+      amount: amount.toString(),
+      currency: transaction.currency,
+      amountUsd: amountUsd.toString(),
+      store: Store.APP_STORE,
+      eventDate: new Date(transaction.purchaseDate),
+      dedupeKey: `apple:${transaction.transactionId}:${revenueDedupeKind(type)}`,
+    });
+  }
 
   return { subscriber, product, purchase };
 }

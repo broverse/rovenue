@@ -6,6 +6,7 @@ import {
   Store,
   PurchaseStatus,
   drizzle,
+  revenueDedupeKind,
 } from "@rovenue/db";
 import { logger } from "../../lib/logger";
 import { convertToUsd } from "../fx";
@@ -312,10 +313,16 @@ async function processSubscriptionNotification(
   const revenueEventType = mapRevenueEventType(
     ctx.notification.notificationType,
   );
-  if (revenueEventType) {
+  // Only record revenue when the status write actually applied. A
+  // guard-rejected (out-of-order / replayed-after-terminal) notification
+  // must not emit phantom RENEWAL/REACTIVATION/REFUND revenue.
+  if (guard.apply && revenueEventType) {
     const amount = pricing?.amount ?? 0;
     const currency = pricing?.currency ?? "USD";
     const amountUsd = await convertToUsd(amount, currency);
+    // eventDate uses processing time (partition-safe). Replay dedup no longer
+    // depends on it — it is enforced by the revenue_event_dedupe table.
+    const eventDate = new Date();
     await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
       projectId: ctx.projectId,
       subscriberId: subscriber.id,
@@ -326,7 +333,13 @@ async function processSubscriptionNotification(
       currency,
       amountUsd: amountUsd.toString(),
       store: Store.PLAY_STORE,
-      eventDate: new Date(),
+      eventDate,
+      // latestOrderId is period-specific (it increments per renewal, e.g.
+      // `…0`, `…1`), unlike purchaseToken which is stable across renewals.
+      // Keying on it makes each renewal a distinct economic event while a
+      // replay of the same notification dedups, and the coarse kind lets the
+      // receipt-verify path converge on the same key for the same order.
+      dedupeKey: `google:${purchase.latestOrderId ?? ctx.notification.purchaseToken}:${revenueDedupeKind(revenueEventType)}`,
     });
 
     if (revenueEventType === RevenueEventType.REFUND) {
@@ -492,8 +505,8 @@ async function processVoidedPurchase(
   if (purchase) {
     // FINDING 1: guarded read + status write in one tx (a); the
     // updatePurchase also CASE-guards the terminal status (b).
-    await drizzle.db.transaction(async (dbTx) => {
-      const guard = await guardStatusWrite({
+    const guard = await drizzle.db.transaction(async (dbTx) => {
+      const decided = await guardStatusWrite({
         db: dbTx,
         projectId: args.projectId,
         store: Store.PLAY_STORE,
@@ -502,39 +515,53 @@ async function processVoidedPurchase(
         source: "google:VOIDED_PURCHASE",
       });
       await drizzle.purchaseRepo.updatePurchase(dbTx, purchase.id, {
-        ...(guard.apply ? { status: PurchaseStatus.REFUNDED } : {}),
-        refundDate: new Date(),
+        // Only stamp the refund when the transition actually applies. A
+        // guard-rejected void (purchase already terminal — e.g. a prior
+        // SUBSCRIPTION_REVOKED) must not overwrite refundDate or re-record
+        // the refund, which previously double-counted REVOKE+VOID pairs.
+        ...(decided.apply
+          ? { status: PurchaseStatus.REFUNDED, refundDate: new Date() }
+          : {}),
       });
+      return decided;
     });
     await drizzle.accessRepo.revokeAccessByPurchaseId(drizzle.db, purchase.id);
 
     // Record the refund financially and fire the refund-detected signal,
-    // mirroring the Stripe/Apple inbound-refund handlers. The VOIDED_PURCHASE
-    // RTDN carries no amount, so derive it from the stored purchase price.
-    // Positive magnitude: refunds are stored as positive `amountUsd` (the
-    // platform convention every analytics query nets via `gross - refunds`).
-    const amount = purchase.priceAmount != null ? Number(purchase.priceAmount) : 0;
-    const currency = purchase.priceCurrency ?? "USD";
-    const amountUsd = await convertToUsd(amount, currency);
-    await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
-      projectId: args.projectId,
-      subscriberId: purchase.subscriberId,
-      purchaseId: purchase.id,
-      productId: purchase.productId,
-      type: RevenueEventType.REFUND,
-      amount: amount.toString(),
-      currency,
-      amountUsd: amountUsd.toString(),
-      store: Store.PLAY_STORE,
-      eventDate: new Date(),
-    });
-    await maybeEmitRefundDetected(drizzle.db, {
-      projectId: args.projectId,
-      purchaseId: purchase.id,
-      productId: purchase.productId,
-      amountUsdCents: Math.round(Math.abs(amountUsd) * 100),
-      currency,
-    });
+    // mirroring the Stripe/Apple inbound-refund handlers — but only when the
+    // status transition applied, so a REVOKE-then-VOID (or replay) records a
+    // single refund. The VOIDED_PURCHASE RTDN carries no amount, so derive it
+    // from the stored purchase price. Positive magnitude per platform
+    // convention (analytics net via `gross - refunds`).
+    if (guard.apply) {
+      const amount =
+        purchase.priceAmount != null ? Number(purchase.priceAmount) : 0;
+      const currency = purchase.priceCurrency ?? "USD";
+      const amountUsd = await convertToUsd(amount, currency);
+      const eventDate = new Date();
+      await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+        projectId: args.projectId,
+        subscriberId: purchase.subscriberId,
+        purchaseId: purchase.id,
+        productId: purchase.productId,
+        type: RevenueEventType.REFUND,
+        amount: amount.toString(),
+        currency,
+        amountUsd: amountUsd.toString(),
+        store: Store.PLAY_STORE,
+        eventDate,
+        // A void is terminal/once-per-purchase; key on the token. A
+        // REVOKE+VOID race is additionally prevented by the guard.apply gate.
+        dedupeKey: `google:${args.purchaseToken}:refund`,
+      });
+      await maybeEmitRefundDetected(drizzle.db, {
+        projectId: args.projectId,
+        purchaseId: purchase.id,
+        productId: purchase.productId,
+        amountUsdCents: Math.round(Math.abs(amountUsd) * 100),
+        currency,
+      });
+    }
   }
 
   return purchase
