@@ -1169,6 +1169,7 @@ export interface CreditsTopBurnerRow {
 export interface CreditsLedgerRow {
   id: string;
   subscriberId: string;
+  currencyId: string;
   type: CreditLedgerType;
   /** Signed delta; positive = grant, negative = burn. */
   amount: number;
@@ -1250,6 +1251,7 @@ export interface CreditsRollupResponse {
 
 export const grantCreditsRequestSchema = z.object({
   subscriberId: z.string().min(1),
+  currencyId: z.string().min(1),
   amount: z.number().int().positive(),
   type: z.enum(["BONUS", "PURCHASE", "REFUND"]).default("BONUS"),
   referenceType: z.string().trim().max(60).optional(),
@@ -2083,3 +2085,50 @@ export type ScheduledActionRow = {
 export type ListScheduledActionsResponse = {
   rows: ScheduledActionRow[];
 };
+
+// =============================================================
+// Virtual Currencies
+// =============================================================
+
+export interface VirtualCurrency {
+  id: string;
+  projectId: string;
+  code: string;
+  name: string;
+  archivedAt: string | null;
+  createdAt: string;
+}
+
+export type VirtualCurrencyBalances = Record<string, number>;
+
+const currencyCode = z
+  .string()
+  .trim()
+  .min(2)
+  .max(8)
+  .regex(/^[A-Z][A-Z0-9]*$/, "code must be uppercase alphanumeric");
+
+export const createVirtualCurrencyRequestSchema = z.object({
+  code: currencyCode,
+  name: z.string().trim().min(1).max(60),
+});
+export type CreateVirtualCurrencyRequest = z.infer<
+  typeof createVirtualCurrencyRequestSchema
+>;
+
+export const updateVirtualCurrencyRequestSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+});
+export type UpdateVirtualCurrencyRequest = z.infer<
+  typeof updateVirtualCurrencyRequestSchema
+>;
+
+export const spendVirtualCurrencyRequestSchema = z.object({
+  amount: z.number().int().positive(),
+  referenceType: z.string().trim().max(60).optional(),
+  referenceId: z.string().trim().max(120).optional(),
+  description: z.string().trim().max(200).optional(),
+});
+export type SpendVirtualCurrencyRequest = z.infer<
+  typeof spendVirtualCurrencyRequestSchema
+>;
