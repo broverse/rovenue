@@ -104,7 +104,16 @@ export async function findAssignmentsWithMetrics(
       experiments,
       eq(experiments.id, experimentAssignments.experimentId),
     )
-    .where(eq(experimentAssignments.subscriberId, subscriberId));
+    // Only RUNNING experiments accrue events/conversions — a COMPLETED or
+    // PAUSED experiment must stop recording so its final numbers don't keep
+    // drifting after it was stopped (the expose path already gates on
+    // RUNNING; this keeps the conversion path consistent).
+    .where(
+      and(
+        eq(experimentAssignments.subscriberId, subscriberId),
+        eq(experiments.status, "RUNNING"),
+      ),
+    );
   return rows.map((r) => ({
     id: r.id,
     events: r.events,

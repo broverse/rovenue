@@ -52,25 +52,21 @@ describe("computeExperimentResults", () => {
     expect(res.revenue).toBeNull();
   });
 
-  it("aggregates exposures and computes SRM across two variants", async () => {
+  it("aggregates exposures + conversions and computes SRM over exposed users", async () => {
+    // One row per variant (the per-variant query shape), with the exposed-user
+    // denominator (unique_users) and the post-exposure conversion count.
     mockRunAnalyticsQuery.mockResolvedValueOnce([
       {
-        experiment_id: "exp_1",
         variant_id: "control",
-        day: "2026-04-24",
-        country: "US",
-        platform: "ios",
         exposures: 1000,
         unique_users: 950,
+        conversions: 100,
       },
       {
-        experiment_id: "exp_1",
         variant_id: "treatment",
-        day: "2026-04-24",
-        country: "US",
-        platform: "ios",
         exposures: 1005,
         unique_users: 960,
+        conversions: 150,
       },
     ]);
 
@@ -80,7 +76,13 @@ describe("computeExperimentResults", () => {
       "control",
       "treatment",
     ]);
+    // SRM is computed over uniqueUsers (exposed users), not raw exposures.
     expect(res.srm).not.toBeNull();
     expect(res.srm!.isMismatch).toBe(false);
+    // Conversions are now wired (not hardcoded 0): the analysis reflects the
+    // 100/950 vs 150/960 rates over the exposed-user denominator.
+    expect(res.conversion).not.toBeNull();
+    expect(res.conversion!.controlRate).toBeCloseTo(100 / 950, 5);
+    expect(res.conversion!.variantRate).toBeCloseTo(150 / 960, 5);
   });
 });

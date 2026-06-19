@@ -8,7 +8,7 @@ import {
 } from "../lib/experiment-stats";
 import {
   runAnalyticsQuery,
-  type ExperimentDailyRow,
+  type ExperimentVariantRow,
 } from "./analytics-router";
 import { drizzle } from "@rovenue/db";
 
@@ -72,20 +72,20 @@ export async function computeExperimentResults(
     projectId,
   });
 
-  // Plan 1 ships exposure + unique-user aggregation only. Revenue /
-  // conversion joins with raw_revenue_events land in Plan 2. We still
-  // return a null-filled shape so the route contract is stable.
   const byVariant = aggregate(rows);
   const variants = [...byVariant.values()];
 
+  // SRM and conversion use the EXPOSED-USER count (uniqueUsers) — the correct
+  // A/B unit — not the raw exposure-event count, which over-weights
+  // repeat-viewers.
   const srm =
     variants.length >= 2
       ? checkSRM(
           variants.map((v) => ({
             expected:
-              variants.reduce((sum, x) => sum + x.exposures, 0) /
+              variants.reduce((sum, x) => sum + x.uniqueUsers, 0) /
               variants.length,
-            observed: v.exposures,
+            observed: v.uniqueUsers,
           })),
         )
       : null;
@@ -94,11 +94,11 @@ export async function computeExperimentResults(
     variants.length === 2
       ? analyzeConversion(
           {
-            users: variants[0]!.exposures,
+            users: variants[0]!.uniqueUsers,
             conversions: variants[0]!.conversions,
           },
           {
-            users: variants[1]!.exposures,
+            users: variants[1]!.uniqueUsers,
             conversions: variants[1]!.conversions,
           },
         )
@@ -126,19 +126,19 @@ export async function computeExperimentResults(
   };
 }
 
-function aggregate(rows: ExperimentDailyRow[]): Map<string, VariantAgg> {
+function aggregate(rows: ExperimentVariantRow[]): Map<string, VariantAgg> {
   const out = new Map<string, VariantAgg>();
+  // One row per variant from the query — no per-day rollup to fold.
   for (const r of rows) {
-    const acc = out.get(r.variant_id) ?? {
+    out.set(r.variant_id, {
       variantId: r.variant_id,
-      exposures: 0,
-      uniqueUsers: 0,
-      conversions: 0, // Plan 2 fills this via a revenue join MV
-      revenueSeries: [] as number[],
-    };
-    acc.exposures += Number(r.exposures);
-    acc.uniqueUsers = Math.max(acc.uniqueUsers, Number(r.unique_users));
-    out.set(r.variant_id, acc);
+      exposures: Number(r.exposures),
+      uniqueUsers: Number(r.unique_users),
+      conversions: Number(r.conversions),
+      // Per-user revenue series for analyzeRevenue is a separate enhancement;
+      // conversion-rate analysis above is the shipped metric.
+      revenueSeries: [],
+    });
   }
   return out;
 }

@@ -18,10 +18,8 @@ import { audit, extractRequestContext } from "../../lib/audit";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { ok } from "../../lib/response";
-import {
-  getExperimentResults,
-  invalidateExperimentCache,
-} from "../../services/experiment-engine";
+import { invalidateExperimentCache } from "../../services/experiment-engine";
+import { computeExperimentResults } from "../../services/experiment-results";
 import { invalidateFlagCache } from "../../services/flag-engine";
 
 function inferPromotedFlagType(
@@ -732,6 +730,9 @@ export const experimentsRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(experiment.projectId, user.id);
 
-    const results = await getExperimentResults(id);
+    // Unified on the exposed-user, ClickHouse-backed results (same source as
+    // the SDK /v1/experiments/:id/results) so the dashboard and SDK can never
+    // report divergent sample sizes / conversion rates for one experiment.
+    const results = await computeExperimentResults(id, experiment.projectId);
     return c.json(ok(results));
   });

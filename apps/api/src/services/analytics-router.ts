@@ -31,19 +31,20 @@ export type AnalyticsQuery =
       groupBy?: Array<"country" | "platform">;
     };
 
-export interface ExperimentDailyRow {
-  experiment_id: string;
+export interface ExperimentVariantRow {
   variant_id: string;
-  day: string;
-  country: string;
-  platform: string;
+  /** Distinct exposure events (replay-safe via uniqExact on eventId). */
   exposures: number;
+  /** Distinct exposed subscribers — the correct A/B denominator. */
   unique_users: number;
+  /** Distinct exposed subscribers who had a purchase-class revenue event
+   *  at or after their first exposure to this variant. */
+  conversions: number;
 }
 
 export async function runAnalyticsQuery(
   q: AnalyticsQuery,
-): Promise<ExperimentDailyRow[]> {
+): Promise<ExperimentVariantRow[]> {
   if (!isClickHouseConfigured()) {
     log.warn("analytics query requested but ClickHouse is unconfigured", {
       kind: q.kind,
@@ -53,23 +54,48 @@ export async function runAnalyticsQuery(
 
   switch (q.kind) {
     case "experiment_results":
-      return queryAnalytics<ExperimentDailyRow>(
+      // One row per variant: exposures + exposed-user denominator + the
+      // post-exposure conversion count (a query-time join with
+      // raw_revenue_events — no separate MV, so no MV-recreate Kafka-gap
+      // risk). Scoped by projectId for tenant isolation. Validated against
+      // the live ClickHouse schema (raw_exposures / raw_revenue_events).
+      return queryAnalytics<ExperimentVariantRow>(
         q.projectId,
         `
           SELECT
-            experiment_id,
-            variant_id,
-            toString(day) AS day,
-            country,
-            platform,
-            sum(exposures) AS exposures,
-            uniqMerge(unique_users_state) AS unique_users
-          FROM rovenue.mv_experiment_daily
-          WHERE experiment_id = {experimentId:String}
-          GROUP BY experiment_id, variant_id, day, country, platform
-          ORDER BY day, variant_id
+            exp.variantId AS variant_id,
+            exp.exposures AS exposures,
+            exp.unique_users AS unique_users,
+            ifNull(c.conversions, 0) AS conversions
+          FROM (
+            SELECT
+              variantId,
+              uniqExact(eventId) AS exposures,
+              uniq(subscriberId) AS unique_users
+            FROM rovenue.raw_exposures
+            WHERE projectId = {projectId:String}
+              AND experimentId = {experimentId:String}
+            GROUP BY variantId
+          ) exp
+          LEFT JOIN (
+            SELECT e.variantId AS variantId, uniq(e.subscriberId) AS conversions
+            FROM (
+              SELECT variantId, subscriberId, min(exposedAt) AS firstExposedAt
+              FROM rovenue.raw_exposures
+              WHERE projectId = {projectId:String}
+                AND experimentId = {experimentId:String}
+              GROUP BY variantId, subscriberId
+            ) e
+            INNER JOIN rovenue.raw_revenue_events r
+              ON r.subscriberId = e.subscriberId
+            WHERE r.projectId = {projectId:String}
+              AND r.type IN ('INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION')
+              AND r.eventDate >= e.firstExposedAt
+            GROUP BY e.variantId
+          ) c ON exp.variantId = c.variantId
+          ORDER BY variant_id
         `,
-        { experimentId: q.experimentId },
+        { projectId: q.projectId, experimentId: q.experimentId },
       );
     default: {
       const _exhaustive: never = q.kind;
