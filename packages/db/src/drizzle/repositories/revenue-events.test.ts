@@ -13,7 +13,7 @@ import { eq, sql, and } from "drizzle-orm";
 import { Pool } from "pg";
 import { drizzle as drizzleClient } from "drizzle-orm/node-postgres";
 import * as schema from "../schema";
-import { createRevenueEvent } from "./revenue-events";
+import { createRevenueEvent, findRevenueEventById } from "./revenue-events";
 
 // ---------------------------------------------------------------------------
 // Env bootstrap (mirrors apps/api/tests/setup.ts approach)
@@ -161,6 +161,36 @@ describe("createRevenueEvent", () => {
       eventDate: "2026-04-24T00:00:00.000Z",
     });
     expect(outboxRows[0]!.eventType).toBe("revenue.event.recorded");
+  });
+
+  it("findRevenueEventById returns the row by id, scoped fields intact", async () => {
+    const project = await seedProject();
+    const subscriber = await seedSubscriber(project.id);
+    const product = await seedProduct(project.id);
+    const purchase = await seedPurchase(
+      project.id,
+      subscriber.id,
+      product.id,
+    );
+
+    const baseEventInput = {
+      projectId: project.id,
+      subscriberId: subscriber.id,
+      purchaseId: purchase.id,
+      productId: product.id,
+      type: "INITIAL" as const,
+      amount: "9.9900",
+      currency: "USD",
+      amountUsd: "9.9900",
+      store: "APP_STORE" as const,
+      eventDate: new Date("2026-04-24T00:00:00Z"),
+    };
+
+    const created = await createRevenueEvent(db, baseEventInput);
+    const found = await findRevenueEventById(db, created.id);
+    expect(found?.id).toBe(created.id);
+    expect(found?.purchaseId).toBe(created.purchaseId);
+    expect(await findRevenueEventById(db, "rev_does_not_exist")).toBeNull();
   });
 
   it("rolls back the outbox row if the revenue row fails (FK violation)", async () => {

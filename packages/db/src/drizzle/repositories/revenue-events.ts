@@ -40,6 +40,23 @@ export async function findRecentRevenueEvent(
   return rows[0] ?? null;
 }
 
+/**
+ * Fetch a single revenue_events row by its primary-key id.
+ * Returns `null` when no row exists (safe for refund-endpoint
+ * callers that need to resolve a revenue event → its purchase).
+ */
+export async function findRevenueEventById(
+  db: DbOrTx,
+  id: string,
+): Promise<RevenueEvent | null> {
+  const [row] = await db
+    .select()
+    .from(revenueEvents)
+    .where(eq(revenueEvents.id, id))
+    .limit(1);
+  return row ?? null;
+}
+
 // =============================================================
 // Writes
 // =============================================================
