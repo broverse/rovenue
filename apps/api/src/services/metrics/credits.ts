@@ -77,26 +77,41 @@ interface ChVolumeRow {
 async function readVolume(
   projectId: string,
   window: RollupWindow,
+  currencyId?: string,
 ): Promise<CreditsVolumePoint[]> {
   // NB: alias the projected column to `bucket`, not `day`. Aliasing
   // `toString(day) AS day` shadows the underlying Date column with a
   // String of the same name, and ClickHouse then binds `WHERE day >=
   // {from:Date}` to that String alias → NO_COMMON_TYPE (String vs Date).
+  //
+  // v_credit_consumption_daily is keyed by (projectId, currencyId, day).
+  // Without a currencyId filter the view returns one row per (currency, day);
+  // the sum() + GROUP BY day collapses all currencies back to the project-wide
+  // daily series (preserving pre-existing project-wide behavior).
+  // With a currencyId filter only that currency's rows remain, so the sum
+  // is that currency's daily flow.
+  const currencyFilter = currencyId ? "AND currencyId = {currencyId:String}" : "";
   const rows = await queryAnalytics<ChVolumeRow>(
     projectId,
     `
       SELECT
         toString(day)                  AS bucket,
-        toString(granted_credits)      AS issued,
-        toString(debited_credits)      AS burned,
-        toString(net_flow)             AS net
+        toString(sum(granted_credits)) AS issued,
+        toString(sum(debited_credits)) AS burned,
+        toString(sum(net_flow))        AS net
       FROM rovenue.v_credit_consumption_daily
       WHERE projectId = {projectId:String}
         AND day >= {from:Date}
         AND day <= {to:Date}
+        ${currencyFilter}
+      GROUP BY day
       ORDER BY day ASC
     `,
-    { from: toDateOnly(window.from), to: toDateOnly(window.to) },
+    {
+      from: toDateOnly(window.from),
+      to: toDateOnly(window.to),
+      ...(currencyId ? { currencyId } : {}),
+    },
   );
 
   const byDay = new Map<string, ChVolumeRow>(rows.map((r) => [r.bucket, r]));
@@ -598,6 +613,7 @@ async function fetchProductDisplay(
 export interface GetCreditsRollupInput {
   projectId: string;
   windowDays: number;
+  currencyId?: string;
 }
 
 export async function getCreditsRollup(
@@ -627,7 +643,7 @@ export async function getCreditsRollup(
     prevIssued,
   ] = await Promise.all([
     readKpis(input.projectId, window),
-    readVolume(input.projectId, window),
+    readVolume(input.projectId, window, input.currencyId),
     readPackages(input.projectId, window),
     readTopBurners(input.projectId, window),
     readRecentLedger(input.projectId),

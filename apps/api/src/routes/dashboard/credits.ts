@@ -36,6 +36,7 @@ const rollupQuerySchema = z.object({
     .min(1)
     .max(ROLLUP_WINDOW_MAX_DAYS)
     .default(ROLLUP_WINDOW_DEFAULT_DAYS),
+  currencyCode: z.string().trim().min(1).optional(),
 });
 
 export const creditsRoute = new Hono()
@@ -48,8 +49,22 @@ export const creditsRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
-    const { windowDays } = c.req.valid("query");
-    const payload = await getCreditsRollup({ projectId, windowDays });
+    const { windowDays, currencyCode } = c.req.valid("query");
+
+    let currencyId: string | undefined;
+    if (currencyCode) {
+      const currency = await drizzle.virtualCurrencyRepo.findVirtualCurrencyByCode(
+        drizzle.db,
+        projectId,
+        currencyCode,
+      );
+      if (!currency) {
+        throw new HTTPException(404, { message: "currency not found" });
+      }
+      currencyId = currency.id;
+    }
+
+    const payload = await getCreditsRollup({ projectId, windowDays, currencyId });
     return c.json(ok(payload));
   })
   // -------------------------------------------------------------

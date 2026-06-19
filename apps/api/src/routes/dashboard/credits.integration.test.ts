@@ -18,6 +18,7 @@ import {
 } from "@rovenue/db";
 import { auth } from "../../lib/auth";
 import { creditsRoute } from "./credits";
+import { isClickHouseConfigured, getClickHouseClient } from "../../lib/clickhouse";
 
 async function seedCurrency(projectId: string, suffix = "") {
   return drizzle.virtualCurrencyRepo.createVirtualCurrency(drizzle.db, {
@@ -219,5 +220,112 @@ describe("POST /projects/:projectId/credits — manual grant", () => {
     );
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /projects/:projectId/credits/rollup — currencyCode filter", () => {
+  it("rollup with unknown currencyCode returns 404", async () => {
+    const { userId, cookie } = await createUserAndSession("rollup404");
+    const project = await seedProject("rollup404");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
+
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${project.id}/credits/rollup?currencyCode=NOPE`,
+      { headers: { cookie } },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("rollup scoped to a currencyCode only counts that currency's flow", async () => {
+    if (!isClickHouseConfigured()) {
+      console.log("Skipping CH-scoped volume assertion: ClickHouse not configured");
+      return;
+    }
+
+    const { userId, cookie } = await createUserAndSession("rollupscoped");
+    const project = await seedProject("rollupscoped");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
+    await seedSubscriber({ projectId: project.id, suffix: "rs" });
+
+    // Seed two distinct currencies — GLD and GEM
+    const gld = await drizzle.virtualCurrencyRepo.createVirtualCurrency(drizzle.db, {
+      projectId: project.id,
+      code: "GLD",
+      name: "Gold",
+    });
+    const gem = await drizzle.virtualCurrencyRepo.createVirtualCurrency(drizzle.db, {
+      projectId: project.id,
+      code: "GEM",
+      name: "Gems",
+    });
+
+    const subId = `sub_credroute_${RUN_ID}rs`;
+    const testEventIdGld = `evt_test_gld_${RUN_ID}`;
+    const testEventIdGem = `evt_test_gem_${RUN_ID}`;
+
+    // Insert directly into raw_credit_ledger in ClickHouse so the query-time
+    // view v_credit_consumption_daily picks them up without needing the Kafka
+    // outbox pipeline to be running in the test environment.
+    // CH DateTime64 requires "YYYY-MM-DD HH:MM:SS.mmm" format (no T/Z).
+    const toChDateTime = (d: Date): string =>
+      d.toISOString().replace("T", " ").replace("Z", "");
+    const now = new Date();
+    const nowCh = toChDateTime(now);
+
+    const ch = getClickHouseClient();
+    await ch.insert({
+      table: "raw_credit_ledger",
+      values: [
+        {
+          eventId: testEventIdGld,
+          creditLedgerId: `ledger_gld_${RUN_ID}`,
+          projectId: project.id,
+          subscriberId: subId,
+          currencyId: gld.id,
+          type: "BONUS",
+          amount: 1000,
+          balance: 1000,
+          referenceType: "",
+          referenceId: "",
+          createdAt: nowCh,
+          ingestedAt: nowCh,
+          _version: Date.now(),
+        },
+        {
+          eventId: testEventIdGem,
+          creditLedgerId: `ledger_gem_${RUN_ID}`,
+          projectId: project.id,
+          subscriberId: subId,
+          currencyId: gem.id,
+          type: "BONUS",
+          amount: 5,
+          balance: 5,
+          referenceType: "",
+          referenceId: "",
+          createdAt: nowCh,
+          ingestedAt: nowCh,
+          _version: Date.now(),
+        },
+      ],
+      format: "JSONEachRow",
+    });
+
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${project.id}/credits/rollup?currencyCode=GEM`,
+      { headers: { cookie } },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { volume: Array<{ issued: number }> };
+    };
+    const issued = body.data.volume.reduce(
+      (s: number, p: { issued: number }) => s + p.issued,
+      0,
+    );
+    expect(issued).toBe(5);
   });
 });
