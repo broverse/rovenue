@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, ArrowRight, Check, ShieldCheck } from "lucide-react";
-import { Button } from "../../ui/button";
+import { Link } from "@tanstack/react-router";
+import { Spinner } from "@heroui/react";
+import { Check, Link2, ShieldCheck, TriangleAlert } from "lucide-react";
+import { Button, buttonVariants } from "../../ui/button";
 import { Checkbox } from "../../ui/checkbox";
-import { CopyButton } from "../../ui/copy-button";
 import { useUpdateRefundShieldSettings } from "../../lib/hooks/useRefundShield";
+import { useProjectCredentials } from "../../lib/hooks/useProjectCredentials";
 import { cn } from "../../lib/cn";
 
-type Step = 1 | 2 | 3 | 4;
+/** Default response delay applied on first enable; tunable later in Settings. */
+const DEFAULT_DELAY_MINUTES = 60;
 
 export interface OnboardingWizardProps {
   projectId: string;
@@ -15,29 +18,31 @@ export interface OnboardingWizardProps {
   onCancel?: () => void;
 }
 
+/**
+ * Single-screen setup for Refund Shield. Refund Shield only acts on Apple
+ * CONSUMPTION_REQUEST notifications, so an App Store connection is mandatory:
+ * when Apple credentials are missing we send the operator to connect first
+ * instead of letting them enable a feature that can never fire.
+ */
 export function OnboardingWizard({
   projectId,
   onComplete,
-  onCancel,
 }: OnboardingWizardProps) {
   const { t } = useTranslation();
+  const credentials = useProjectCredentials(projectId);
   const mutation = useUpdateRefundShieldSettings(projectId);
-  const [step, setStep] = useState<Step>(1);
-  const [delay, setDelay] = useState(60);
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const next = () =>
-    setStep((s) => (s < 4 ? ((s + 1) as Step) : s));
-  const back = () =>
-    setStep((s) => (s > 1 ? ((s - 1) as Step) : s));
+  const appleConfigured =
+    credentials.data?.credentials.apple.configured ?? false;
 
-  const finish = async () => {
+  const enable = async () => {
     setError(null);
     try {
       await mutation.mutateAsync({
         enabled: true,
-        responseDelayMinutes: delay,
+        responseDelayMinutes: DEFAULT_DELAY_MINUTES,
         consentAcknowledged: true,
       });
       onComplete();
@@ -47,206 +52,97 @@ export function OnboardingWizard({
   };
 
   return (
-    <div className="mx-auto w-full max-w-2xl rounded-lg border border-rv-divider bg-rv-c1">
-      <header className="flex items-center justify-between border-b border-rv-divider px-5 py-3">
-        <div className="flex items-center gap-2">
-          <ShieldCheck size={16} className="text-rv-accent-500" />
-          <span className="text-[13px] font-medium">
-            {t("refundShield.wizard.title")}
-          </span>
+    <div className="mx-auto w-full max-w-lg rounded-lg border border-rv-divider bg-rv-c1 p-6">
+      <div className="flex items-center gap-2">
+        <ShieldCheck size={18} className="text-rv-accent-500" />
+        <h2 className="text-[15px] font-medium">
+          {t("refundShield.setup.title")}
+        </h2>
+      </div>
+      <p className="mt-2 text-[13px] leading-relaxed text-rv-mute-500">
+        {t("refundShield.setup.body")}
+      </p>
+
+      {credentials.isLoading ? (
+        <div className="mt-6 flex items-center gap-2 text-rv-mute-500">
+          <Spinner /> <span className="text-sm">{t("common.loading")}</span>
         </div>
-        <span className="font-rv-mono text-[10px] text-rv-mute-500">
-          {t("refundShield.wizard.step", { n: step })}
-        </span>
-      </header>
+      ) : !appleConfigured ? (
+        <AppleConnectRequired projectId={projectId} />
+      ) : (
+        <div className="mt-5 flex flex-col gap-4">
+          <label className="flex items-start gap-2.5 text-[12px] leading-relaxed text-rv-mute-700">
+            <Checkbox
+              ariaLabel={t("refundShield.settings.consent.label")}
+              checked={consent}
+              onChange={() => setConsent((v) => !v)}
+            />
+            <span>{t("refundShield.settings.consent.label")}</span>
+          </label>
 
-      <div className="flex items-center gap-1 border-b border-rv-divider bg-rv-c2/50 px-5 py-2">
-        {[1, 2, 3, 4].map((i) => (
-          <span
-            key={i}
-            className={cn(
-              "h-1 flex-1 rounded-full transition-colors",
-              i <= step ? "bg-rv-accent-500" : "bg-rv-c4",
-            )}
-          />
-        ))}
-      </div>
+          {error && (
+            <div className="rounded-md border border-rv-danger/30 bg-rv-danger/10 px-3 py-2 text-[12px] text-rv-danger">
+              {error}
+            </div>
+          )}
 
-      <div className="px-5 py-5">
-        {step === 1 && <Step1 onContinue={next} />}
-        {step === 2 && <Step2 onContinue={next} />}
-        {step === 3 && (
-          <Step3 delay={delay} onDelay={setDelay} onNext={next} />
-        )}
-        {step === 4 && (
-          <Step4
-            consent={consent}
-            onConsent={setConsent}
-            onSubmit={finish}
-            isPending={mutation.isPending}
-          />
-        )}
-        {error && (
-          <div className="mt-3 rounded-md border border-rv-danger/30 bg-rv-danger/10 px-3 py-2 text-[12px] text-rv-danger">
-            {error}
-          </div>
-        )}
-      </div>
-
-      <footer className="flex items-center justify-between border-t border-rv-divider px-5 py-3">
-        <div>
-          {step > 1 && (
-            <Button variant="light" size="sm" onClick={back}>
-              <ArrowLeft size={12} />
-              {t("refundShield.wizard.back")}
+          <div className="flex items-center justify-end gap-2">
+            <span className="mr-auto text-[11px] text-rv-mute-500">
+              {t("refundShield.setup.delayNote", {
+                value: DEFAULT_DELAY_MINUTES,
+              })}
+            </span>
+            <Button
+              variant="solid-primary"
+              size="sm"
+              disabled={!consent || mutation.isPending}
+              onClick={enable}
+            >
+              {mutation.isPending ? (
+                t("refundShield.setup.enabling")
+              ) : (
+                <>
+                  <Check size={12} />
+                  {t("refundShield.setup.enable")}
+                </>
+              )}
             </Button>
-          )}
+          </div>
         </div>
-        {onCancel && (
-          <Button variant="light" size="sm" onClick={onCancel}>
-            {t("refundShield.wizard.exit")}
-          </Button>
-        )}
-      </footer>
+      )}
     </div>
   );
 }
 
-function Step1({ onContinue }: { onContinue: () => void }) {
+/** Shown when the project has no Apple App Store connection yet. */
+function AppleConnectRequired({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-3">
-      <h2 className="text-[15px] font-medium">
-        {t("refundShield.wizard.steps.sdkCheck.title")}
-      </h2>
-      <p className="text-[12px] leading-relaxed text-rv-mute-500">
-        {t("refundShield.wizard.steps.sdkCheck.body")}
-      </p>
-      <div className="mt-2 flex justify-end gap-2">
-        <Button variant="flat" size="sm" onClick={onContinue}>
-          {t("refundShield.wizard.steps.sdkCheck.skip")}
-        </Button>
-        <Button variant="solid-primary" size="sm" onClick={onContinue}>
-          {t("refundShield.wizard.steps.sdkCheck.okay")}
-          <ArrowRight size={12} />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function Step2({ onContinue }: { onContinue: () => void }) {
-  const { t } = useTranslation();
-  const template = t("refundShield.wizard.steps.tos.template");
-  return (
-    <div className="flex flex-col gap-3">
-      <h2 className="text-[15px] font-medium">
-        {t("refundShield.wizard.steps.tos.title")}
-      </h2>
-      <p className="text-[12px] leading-relaxed text-rv-mute-500">
-        {t("refundShield.wizard.steps.tos.body")}
-      </p>
-      <pre className="overflow-x-auto whitespace-pre-wrap rounded-md border border-rv-divider bg-rv-c2 px-3 py-2 font-rv-mono text-[11px] text-rv-mute-700">
-        {template}
-      </pre>
-      <div className="flex items-center justify-between">
-        <CopyButton value={template} label="Copy" />
-        <Button variant="solid-primary" size="sm" onClick={onContinue}>
-          {t("refundShield.wizard.steps.tos.acknowledged")}
-          <ArrowRight size={12} />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function Step3({
-  delay,
-  onDelay,
-  onNext,
-}: {
-  delay: number;
-  onDelay: (n: number) => void;
-  onNext: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex flex-col gap-3">
-      <h2 className="text-[15px] font-medium">
-        {t("refundShield.wizard.steps.delay.title")}
-      </h2>
-      <p className="text-[12px] leading-relaxed text-rv-mute-500">
-        {t("refundShield.wizard.steps.delay.body")}
-      </p>
-      <div className="mt-2 flex items-center gap-3">
-        <input
-          type="range"
-          min={30}
-          max={360}
-          step={5}
-          value={delay}
-          onChange={(e) => onDelay(Number(e.target.value))}
-          className="flex-1 accent-rv-accent-500"
-          aria-label={t("refundShield.settings.delay.label")}
+    <div className="mt-5 rounded-md border border-rv-warning/30 bg-rv-warning/10 px-4 py-3.5">
+      <div className="flex items-start gap-2.5">
+        <TriangleAlert
+          size={15}
+          className="mt-0.5 shrink-0 text-rv-warning"
+          aria-hidden
         />
-        <span className="w-24 text-right font-rv-mono text-[12px]">
-          {t("refundShield.settings.delay.unit", { value: delay })}
-        </span>
+        <div className="min-w-0">
+          <p className="text-[13px] font-medium text-foreground">
+            {t("refundShield.setup.appleRequired.title")}
+          </p>
+          <p className="mt-1 text-[12px] leading-relaxed text-rv-mute-500">
+            {t("refundShield.setup.appleRequired.body")}
+          </p>
+        </div>
       </div>
-      <div className="flex justify-end">
-        <Button variant="solid-primary" size="sm" onClick={onNext}>
-          {t("refundShield.wizard.steps.delay.next")}
-          <ArrowRight size={12} />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function Step4({
-  consent,
-  onConsent,
-  onSubmit,
-  isPending,
-}: {
-  consent: boolean;
-  onConsent: (v: boolean) => void;
-  onSubmit: () => void;
-  isPending: boolean;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex flex-col gap-3">
-      <h2 className="text-[15px] font-medium">
-        {t("refundShield.wizard.steps.enable.title")}
-      </h2>
-      <p className="text-[12px] leading-relaxed text-rv-mute-500">
-        {t("refundShield.wizard.steps.enable.body")}
-      </p>
-      <div className="flex items-start gap-2 text-[12px]">
-        <Checkbox
-          ariaLabel={t("refundShield.settings.consent.label")}
-          checked={consent}
-          onChange={() => onConsent(!consent)}
-        />
-        <span>{t("refundShield.settings.consent.label")}</span>
-      </div>
-      <div className="flex justify-end">
-        <Button
-          variant="solid-primary"
-          size="sm"
-          disabled={!consent || isPending}
-          onClick={onSubmit}
+      <div className="mt-3 flex justify-end">
+        <Link
+          to="/projects/$projectId/apps"
+          params={{ projectId }}
+          className={cn(buttonVariants({ variant: "solid-primary", size: "sm" }))}
         >
-          {isPending ? (
-            t("refundShield.wizard.steps.enable.submitting")
-          ) : (
-            <>
-              <Check size={12} />
-              {t("refundShield.wizard.steps.enable.submit")}
-            </>
-          )}
-        </Button>
+          <Link2 size={13} aria-hidden />
+          {t("refundShield.setup.appleRequired.connect")}
+        </Link>
       </div>
     </div>
   );

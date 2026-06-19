@@ -2116,37 +2116,17 @@
       "saved": "Settings saved.",
       "error": "Could not save settings. {{message}}"
     },
-    "wizard": {
+    "setup": {
       "title": "Set up Refund Shield",
-      "step": "Step {{n}} of 4",
-      "steps": {
-        "sdkCheck": {
-          "title": "SDK requirements",
-          "body": "Refund Shield works best when your SDK is passing an `appAccountToken` on every Apple purchase. Once you ship the updated SDK build, returning customers' new purchases will start populating the token automatically.",
-          "okay": "I've upgraded the SDK",
-          "skip": "Continue anyway"
-        },
-        "tos": {
-          "title": "Update your Terms of Service",
-          "body": "Apple's refund flow requires you to disclose that consumption data may be shared. Copy this clause into your ToS / privacy policy:",
-          "template": "Apple may consult anonymized signals about your usage of the app (session duration, account age, lifetime spend, refund history) when evaluating a refund request you submit. By using this app you consent to us sharing those signals with Apple solely for that purpose.",
-          "copied": "Copied!",
-          "acknowledged": "I've updated our ToS"
-        },
-        "delay": {
-          "title": "Response delay",
-          "body": "How long to wait before replying. The default 60 minutes is a safe middle ground.",
-          "next": "Next"
-        },
-        "enable": {
-          "title": "Enable",
-          "body": "You can disable Refund Shield at any time from Settings.",
-          "submit": "Enable Refund Shield",
-          "submitting": "Enabling…"
-        }
-      },
-      "back": "Back",
-      "exit": "Cancel"
+      "body": "Refund Shield replies to Apple's CONSUMPTION_REQUEST notifications with usage data so unjustified refunds are more likely to be declined. You can tune the response delay and turn this off anytime in Settings.",
+      "enable": "Enable Refund Shield",
+      "enabling": "Enabling…",
+      "delayNote": "Responses are sent {{value}} minutes after Apple notifies us.",
+      "appleRequired": {
+        "title": "Connect your App Store account first",
+        "body": "Refund Shield only acts on Apple refund requests, so it needs an App Store Server API connection. Add your Apple credentials, then come back to enable it.",
+        "connect": "Connect App Store"
+      }
     },
     "subscriberTab": {
       "title": "Refund Shield",
