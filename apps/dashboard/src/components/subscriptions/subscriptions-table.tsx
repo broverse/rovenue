@@ -159,16 +159,24 @@ export function SubscriptionsTable({
                     isExpanded && "bg-rv-c2",
                   )}
                 >
-                  <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                    <span
-                      aria-hidden="true"
+                  <td className="px-3 py-2.5">
+                    <button
+                      type="button"
+                      aria-expanded={isExpanded}
+                      aria-label={t("subscriptions.table.toggleRow", {
+                        defaultValue: "Toggle details",
+                      })}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleExpand(sub.id);
+                      }}
                       className={cn(
-                        "inline-flex size-5 items-center justify-center text-rv-mute-500 transition",
+                        "inline-flex size-5 cursor-pointer items-center justify-center text-rv-mute-500 transition hover:text-foreground",
                         isExpanded && "rotate-90 text-rv-accent-400",
                       )}
                     >
                       <ChevronRight size={13} />
-                    </span>
+                    </button>
                   </td>
                   <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                     <Checkbox
