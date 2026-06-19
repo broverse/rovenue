@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import { BookOpen, Package, Plus, Star, StarOff } from "lucide-react";
+import { BookOpen, Package, Plus, Star, StarOff, Trash2 } from "lucide-react";
 import type { DashboardProductRow } from "@rovenue/shared";
 import { Button } from "../../../../ui/button";
 import { cn } from "../../../../lib/cn";
@@ -18,7 +18,8 @@ import {
   OfferingHeader,
   OfferingIcon,
   OfferingList,
-  OfferingProductsSection,
+  RemoveProductDialog,
+  type GroupProduct,
   type Offering,
 } from "../../../../components/offerings";
 
@@ -177,19 +178,12 @@ function OfferingsPage({ projectId }: { projectId: string }) {
                   onDelete={() => setDeleteOpen(true)}
                 />
 
-                {/* Packages detail section */}
+                {/* Unified packages + linked-products section */}
                 <PackagesSection
                   projectId={projectId}
                   offering={selected}
                   productById={productById}
                   accessById={accessById}
-                  onLinkProduct={() => setLinkOpen(true)}
-                />
-
-                {/* Products section (backwards-compat section for product mgmt) */}
-                <OfferingProductsSection
-                  projectId={projectId}
-                  offering={selected}
                   onLinkProduct={() => setLinkOpen(true)}
                 />
               </>
@@ -244,9 +238,14 @@ function OfferingsPage({ projectId }: { projectId: string }) {
 }
 
 // ─── PackagesSection ───────────────────────────────────────────────────────────
-// Detail pane that shows each package's identifier, bound product, order, and
-// isPromoted flag, plus a read-only list of access levels the offering unlocks.
+// Single unified container for an offering's bindings: one row per package
+// carries its SDK identifier, bound product, pricing/revenue metrics, and the
+// isPromoted flag, with an inline remove. Below the table sits a read-only list
+// of the access levels the offering unlocks. All link/unlink actions live here.
 // ──────────────────────────────────────────────────────────────────────────────
+
+const PKG_GRID =
+  "grid-cols-[minmax(0,1.3fr)_minmax(0,1.4fr)_92px_96px_64px_84px_72px_40px]";
 
 function PackagesSection({
   projectId,
@@ -262,6 +261,15 @@ function PackagesSection({
   onLinkProduct: () => void;
 }) {
   const { t } = useTranslation();
+  const [removeTarget, setRemoveTarget] = useState<GroupProduct | null>(null);
+
+  // Join the GroupProduct metrics (duration/price/subs/mrr) onto each package
+  // by productId — both arrays derive from the same offering.
+  const metricsByProductId = useMemo(() => {
+    const map = new Map<string, GroupProduct>();
+    for (const p of offering.products) map.set(p.id, p);
+    return map;
+  }, [offering.products]);
 
   // Collect the union of access IDs across all package products
   const accessEntries = useMemo(() => {
@@ -289,8 +297,8 @@ function PackagesSection({
 
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1">
-      {/* Header with "Set as current" toggle */}
-      <header className="flex items-center justify-between gap-4 border-b border-rv-divider px-5 py-3.5">
+      {/* Header: title + default toggle + primary Link product action */}
+      <header className="flex items-start justify-between gap-4 border-b border-rv-divider px-5 py-3.5">
         <div>
           <h3 className="text-[14px] font-semibold">
             {t("offerings.packages.heading", "Packages")}
@@ -302,55 +310,85 @@ function PackagesSection({
             )}
           </p>
         </div>
-        <Button
-          variant={offering.isDefault ? "light" : "flat"}
-          size="sm"
-          onClick={toggleDefault}
-          disabled={update.isPending}
-          title={
-            offering.isDefault
-              ? t("offerings.packages.unsetDefault", "Remove as default offering")
-              : t("offerings.packages.setDefault", "Set as default offering")
-          }
-        >
-          {offering.isDefault ? (
-            <StarOff size={13} className="text-rv-accent-500" />
-          ) : (
-            <Star size={13} />
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant={offering.isDefault ? "light" : "flat"}
+            size="sm"
+            onClick={toggleDefault}
+            disabled={update.isPending}
+            title={
+              offering.isDefault
+                ? t("offerings.packages.unsetDefault", "Remove as default offering")
+                : t("offerings.packages.setDefault", "Set as default offering")
+            }
+          >
+            {offering.isDefault ? (
+              <StarOff size={13} className="text-rv-accent-500" />
+            ) : (
+              <Star size={13} />
+            )}
+            {offering.isDefault
+              ? t("offerings.packages.unsetDefault", "Remove as default")
+              : t("offerings.packages.setDefault", "Set as current")}
+          </Button>
+          {offering.packages.length > 0 && (
+            <Button variant="solid-primary" size="sm" onClick={onLinkProduct}>
+              <Plus size={13} />
+              {t("offerings.products.link", "Link product")}
+            </Button>
           )}
-          {offering.isDefault
-            ? t("offerings.packages.unsetDefault", "Remove as default")
-            : t("offerings.packages.setDefault", "Set as current")}
-        </Button>
+        </div>
       </header>
 
       {/* Package rows */}
       {offering.packages.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
-          <div className="flex size-9 items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-500">
-            <Package size={16} />
+        <div className="flex flex-col items-center justify-center gap-3 px-6 py-12 text-center">
+          <div className="flex size-10 items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-500">
+            <Package size={18} />
           </div>
-          <p className="text-[13px] text-rv-mute-500">
-            {t("offerings.packages.empty", "No packages yet. Link a product to create one.")}
-          </p>
-          <Button variant="flat" size="sm" onClick={onLinkProduct}>
+          <div>
+            <div className="text-[14px] font-semibold">
+              {t("offerings.products.empty.title", "No products linked yet")}
+            </div>
+            <p className="mt-0.5 max-w-[360px] text-[12px] text-rv-mute-500">
+              {t(
+                "offerings.products.empty.body",
+                "Link existing products from your catalog to grant this offering's access on purchase.",
+              )}
+            </p>
+          </div>
+          <Button variant="solid-primary" size="sm" onClick={onLinkProduct}>
             <Plus size={13} />
             {t("offerings.products.link", "Link product")}
           </Button>
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_60px_80px] gap-3 px-5 py-2 text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
+          <div
+            className={cn(
+              "grid gap-3 px-5 py-2 text-[10px] font-medium uppercase tracking-wider text-rv-mute-500",
+              PKG_GRID,
+            )}
+          >
             <div>{t("offerings.packages.col.identifier", "Identifier")}</div>
             <div>{t("offerings.packages.col.product", "Product")}</div>
-            <div className="text-center">{t("offerings.packages.col.order", "Order")}</div>
+            <div>{t("offerings.products.col.duration", "Duration")}</div>
+            <div>{t("offerings.products.col.price", "Price")}</div>
+            <div className="text-right">{t("offerings.products.col.subs", "Subs")}</div>
+            <div className="text-right">{t("offerings.products.col.mrr", "MRR")}</div>
             <div className="text-center">{t("offerings.packages.col.promoted", "Promoted")}</div>
+            <div />
           </div>
           <ul>
             {offering.packages.map((pkg) => (
               <PackageRow
-                key={pkg.productId}
+                key={pkg.identifier}
                 pkg={pkg}
+                metrics={metricsByProductId.get(pkg.productId) ?? null}
+                onRemove={() => {
+                  const m = metricsByProductId.get(pkg.productId);
+                  if (m) setRemoveTarget(m);
+                }}
               />
             ))}
           </ul>
@@ -374,22 +412,39 @@ function PackagesSection({
           </ul>
         </div>
       )}
+
+      <RemoveProductDialog
+        projectId={projectId}
+        offering={offering}
+        product={removeTarget}
+        open={removeTarget != null}
+        onClose={() => setRemoveTarget(null)}
+      />
     </section>
   );
 }
 
 function PackageRow({
   pkg,
+  metrics,
+  onRemove,
 }: {
   pkg: Offering["packages"][number];
+  metrics: GroupProduct | null;
+  onRemove: () => void;
 }) {
   const { t } = useTranslation();
-  const { identifier, productName, productSku, order, isPromoted } = pkg;
+  const { identifier, productName, productSku, isPromoted } = pkg;
 
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_60px_80px] items-start gap-3 border-t border-rv-divider px-5 py-2.5 text-[13px]">
+    <li
+      className={cn(
+        "grid items-center gap-3 border-t border-rv-divider px-5 py-2.5 text-[13px]",
+        PKG_GRID,
+      )}
+    >
       {/* Identifier — read-only; set at link time */}
-      <div className="min-w-0 pt-1.5">
+      <div className="min-w-0">
         <span
           className={cn(
             "inline-block font-rv-mono text-[12px]",
@@ -401,7 +456,7 @@ function PackageRow({
       </div>
 
       {/* Bound product */}
-      <div className="min-w-0 pt-1.5">
+      <div className="min-w-0">
         {productName ? (
           <>
             <div className="truncate text-[13px] font-medium text-foreground">
@@ -420,13 +475,28 @@ function PackageRow({
         )}
       </div>
 
-      {/* Order */}
-      <div className="pt-2 text-center font-rv-mono text-[12px] text-rv-mute-600">
-        {order}
+      {/* Duration */}
+      <div className="font-rv-mono text-[12px] text-rv-mute-600">
+        {metrics ? t(`offerings.duration.${metrics.duration}`, metrics.duration) : "—"}
+      </div>
+
+      {/* Price */}
+      <div className="font-rv-mono text-[12px] tabular-nums text-foreground">
+        {metrics ? metrics.price : "—"}
+      </div>
+
+      {/* Subs */}
+      <div className="text-right font-rv-mono text-[12px] tabular-nums text-rv-mute-600">
+        {metrics?.subs == null ? "—" : metrics.subs.toLocaleString()}
+      </div>
+
+      {/* MRR */}
+      <div className="text-right font-rv-mono text-[12px] tabular-nums text-foreground">
+        {metrics ? `$${metrics.mrr.toLocaleString()}` : "—"}
       </div>
 
       {/* isPromoted */}
-      <div className="flex justify-center pt-1.5">
+      <div className="flex justify-center">
         <span
           className={cn(
             "inline-flex items-center rounded-full px-2 py-0.5 font-rv-mono text-[10px] uppercase tracking-wider",
@@ -439,6 +509,19 @@ function PackageRow({
             ? t("offerings.packages.promoted", "Yes")
             : t("offerings.packages.notPromoted", "No")}
         </span>
+      </div>
+
+      {/* Remove */}
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={t("offerings.products.remove", "Remove from offering")}
+          title={t("offerings.products.remove", "Remove from offering")}
+          className="rounded-md p-1.5 text-rv-mute-500 transition hover:bg-rv-c2 hover:text-rv-danger focus:outline-none focus-visible:ring-2 focus-visible:ring-rv-accent-500"
+        >
+          <Trash2 size={14} />
+        </button>
       </div>
     </li>
   );

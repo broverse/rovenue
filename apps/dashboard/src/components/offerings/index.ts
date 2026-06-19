@@ -4,7 +4,6 @@ export { OfferingFormDialog } from "./offering-form-dialog";
 export { OfferingActionsMenu } from "./offering-actions-menu";
 export { OfferingIcon, offeringIconVariants } from "./offering-icon";
 export { DeleteOfferingDialog } from "./delete-offering-dialog";
-export { OfferingProductsSection } from "./offering-products-section";
 export { LinkProductsDialog } from "./link-products-dialog";
 export { RemoveProductDialog } from "./remove-product-dialog";
-export type { Offering } from "./types";
+export type { Offering, GroupProduct } from "./types";

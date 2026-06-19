@@ -62,7 +62,7 @@ export interface Offering {
   packages: ReadonlyArray<OfferingPackageUi>;
   /**
    * Resolved product members, same set as packages but projected to the
-   * GroupProduct shape for backwards-compat with OfferingProductsSection.
+   * GroupProduct shape carrying pricing/revenue metrics for the packages table.
    */
   products: ReadonlyArray<GroupProduct>;
   /** Aggregate MRR across products; `0` until analytics wires. */
