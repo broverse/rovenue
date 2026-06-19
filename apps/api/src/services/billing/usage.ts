@@ -1,6 +1,7 @@
 import type { Db } from "@rovenue/db";
 import { drizzle } from "@rovenue/db";
 import { queryAnalytics, ClickHouseUnavailableError } from "../../lib/clickhouse";
+import type { BillingUsage, UsageMeter, UsageMeterKey } from "@rovenue/shared";
 
 // =============================================================
 // Billing Usage Service
@@ -20,24 +21,7 @@ import { queryAnalytics, ClickHouseUnavailableError } from "../../lib/clickhouse
 // for those meters (best-effort; never fatal).
 // =============================================================
 
-export type UsageMeterKey = "mtr" | "events" | "sql_queries";
-
-export type UsageMeter = {
-  key: UsageMeterKey;
-  current: number | null; // null when the source is unavailable (CH down)
-  limit: number | null;   // null = unlimited
-  cap: "hard" | "soft";
-  unit: "usd" | "count";
-  available: boolean;
-};
-
-export type BillingUsage = {
-  tier: string;
-  cycle: string;
-  periodStart: string; // ISO
-  periodEnd: string;   // ISO
-  meters: UsageMeter[];
-};
+export type { BillingUsage, UsageMeter, UsageMeterKey };
 
 const CAP: Record<UsageMeterKey, "hard" | "soft"> = {
   mtr: "soft",

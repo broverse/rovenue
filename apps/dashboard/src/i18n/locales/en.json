@@ -3381,11 +3381,11 @@
     },
     "usage": {
       "title": "Usage",
-      "subtitle": "Your current billing period · May 1 – May 8, 2026 (8 of 31 days).",
+      "subtitle": "Your current billing period.",
       "limits": {
         "title": "Plan limits",
         "subtitle": "Hard caps trigger overage billing at $0.05 per 10k events. Soft caps are alerts only.",
-        "resets": "Resets June 1, 2026 · {{remaining}} days remaining"
+        "resets": "Resets {{date}} · {{remaining}} days remaining"
       },
       "cap": {
         "hard": "hard cap",

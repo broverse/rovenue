@@ -27,6 +27,9 @@ function daysRemaining(periodEnd: string): number {
   return Math.max(0, Math.ceil(ms / 86_400_000));
 }
 
+const formatResetDate = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+
 export function UsagePage() {
   const { t } = useTranslation();
   const projects = useProjects();
@@ -49,7 +52,7 @@ export function UsagePage() {
         description={t("account.usage.limits.subtitle")}
         meta={
           data
-            ? t("account.usage.limits.resets", { remaining: daysRemaining(data.periodEnd) })
+            ? t("account.usage.limits.resets", { date: formatResetDate(data.periodEnd), remaining: daysRemaining(data.periodEnd) })
             : undefined
         }
         footer={<Button variant="solid-primary">{t("account.billing.plan.upgrade")}</Button>}
