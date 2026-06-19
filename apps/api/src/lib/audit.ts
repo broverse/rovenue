@@ -112,7 +112,8 @@ export type AuditAction =
   | "refund_shield.response.sent"
   | "refund_shield.response.failed"
   // --- merchant-initiated refunds ---
-  | "transaction.refunded";
+  | "transaction.refunded"
+  | "subscription.refunded";
 
 export type AuditResource =
   | "audience"

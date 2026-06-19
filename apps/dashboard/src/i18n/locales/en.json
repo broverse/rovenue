@@ -1671,8 +1671,15 @@
         "empty": "No active access",
         "active": "active",
         "refund": "Refund",
-        "override": "Override",
-        "more": "More actions"
+        "more": "More actions",
+        "refundDialog": {
+          "title": "Refund this subscription?",
+          "body": "This sends a refund request to {{store}}. The subscription updates here once the store confirms.",
+          "confirm": "Refund",
+          "cancel": "Cancel",
+          "pending": "Requesting refund…",
+          "error": "Refund failed: {{message}}"
+        }
       },
       "scheduled": {
         "heading": "Scheduled",

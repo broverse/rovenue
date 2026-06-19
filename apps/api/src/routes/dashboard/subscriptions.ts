@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { MemberRole } from "@rovenue/db";
+import { MemberRole, drizzle } from "@rovenue/db";
 import {
   grantSubscriptionRequestSchema,
   scheduleActionRequestSchema,
@@ -12,7 +12,8 @@ import {
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
-import { ok } from "../../lib/response";
+import { ok, fail } from "../../lib/response";
+import { refundTransaction } from "../../services/refunds/refund-transaction";
 import { grantComp } from "../../services/subscriptions/grant";
 import {
   scheduleAction,
@@ -20,7 +21,7 @@ import {
   cancelScheduledAction,
 } from "../../services/subscriptions/schedule";
 import { streamSubscriptionsCsv } from "../../services/subscriptions/export-csv";
-import { audit } from "../../lib/audit";
+import { audit, extractRequestContext } from "../../lib/audit";
 import {
   __subscriptionsConstants,
   decodeSubsCursor,
@@ -385,6 +386,55 @@ export const subscriptionsRoute = new Hono()
       return c.json(ok(row));
     },
   )
+  .post("/:purchaseId/refund", async (c) => {
+    const projectId = c.req.param("projectId");
+    const purchaseId = c.req.param("purchaseId");
+    if (!projectId || !purchaseId) {
+      throw new HTTPException(400, { message: "Missing projectId/purchaseId" });
+    }
+    const user = c.get("user");
+    await assertProjectCapability(projectId, user.id, "refunds:write");
+
+    const [purchase] = await drizzle.purchaseRepo.findPurchasesByIds(drizzle.db, [
+      purchaseId,
+    ]);
+    if (!purchase || purchase.projectId !== projectId) {
+      return c.json(fail("NOT_FOUND", "Subscription not found."), 404);
+    }
+
+    const result = await refundTransaction({ projectId, purchase });
+    if (!result.ok) {
+      if (result.code === "apple_unsupported" || result.code === "missing_store_ref") {
+        return c.json(fail("VALIDATION_ERROR", result.message), 422);
+      }
+      if (result.code === "already_refunded") {
+        return c.json(fail("HTTP_ERROR", result.message), 409);
+      }
+      // store_error or unknown
+      return c.json(fail("STORE_API_ERROR", result.message), 502);
+    }
+
+    const ctx = extractRequestContext(c);
+    await audit({
+      projectId,
+      userId: user.id,
+      action: "subscription.refunded",
+      resource: "purchase",
+      resourceId: purchaseId,
+      after: { store: result.store, reference: result.reference },
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    });
+
+    return c.json(
+      ok({
+        status: "refund_requested" as const,
+        store: result.store,
+        reference: result.reference,
+      }),
+      200,
+    );
+  })
   .get("/scheduled", async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) throw new HTTPException(400, { message: "Missing projectId" });

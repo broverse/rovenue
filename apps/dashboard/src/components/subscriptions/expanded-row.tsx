@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { Key, MoreHorizontal, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "@tanstack/react-router";
 import { Button } from "../../ui/button";
 import { useScheduledActions, useDeleteScheduledAction } from "../../lib/hooks/useProjectSubscriptions";
+import { RefundConfirmDialog } from "./refund-confirm-dialog";
 import type { Subscription } from "./types";
 
 type Props = { sub: Subscription };
@@ -14,6 +16,7 @@ type Props = { sub: Subscription };
 export function ExpandedRow({ sub }: Props) {
   const { t } = useTranslation();
   const { projectId } = useParams({ strict: false }) as { projectId: string };
+  const [refundOpen, setRefundOpen] = useState(false);
   const scheduled = useScheduledActions(projectId);
   const del = useDeleteScheduledAction(projectId);
   const mine = (scheduled.data?.rows ?? []).filter(
@@ -171,14 +174,19 @@ export function ExpandedRow({ sub }: Props) {
           </div>
         ) : null}
         <div className="mt-3.5 flex items-center gap-1.5">
-          <Button variant="flat" size="sm" className="flex-1 text-[11px]">
-            <RotateCcw size={11} />
-            {t("subscriptions.expanded.grants.refund")}
-          </Button>
-          <Button variant="flat" size="sm" className="flex-1 text-[11px]">
-            <Key size={11} />
-            {t("subscriptions.expanded.grants.override")}
-          </Button>
+          {/* Apple processes App Store refunds itself — there is no
+              merchant-initiated refund, so hide the action for iOS rows. */}
+          {sub.store !== "ios" && (
+            <Button
+              variant="flat"
+              size="sm"
+              className="flex-1 text-[11px]"
+              onClick={() => setRefundOpen(true)}
+            >
+              <RotateCcw size={11} />
+              {t("subscriptions.expanded.grants.refund")}
+            </Button>
+          )}
           <Button
             variant="light"
             size="icon"
@@ -187,6 +195,14 @@ export function ExpandedRow({ sub }: Props) {
             <MoreHorizontal size={13} />
           </Button>
         </div>
+        {sub.store !== "ios" && (
+          <RefundConfirmDialog
+            projectId={projectId}
+            sub={sub}
+            open={refundOpen}
+            onClose={() => setRefundOpen(false)}
+          />
+        )}
       </Column>
     </div>
   );
