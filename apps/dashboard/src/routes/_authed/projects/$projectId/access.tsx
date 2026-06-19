@@ -11,8 +11,8 @@ import {
 } from "../../../../lib/hooks/useProjectAccess";
 import { useProjectProducts } from "../../../../lib/hooks/useProjectProducts";
 import {
+  AccessDetail,
   AccessFormDialog,
-  AccessHeader,
   AccessList,
   DeleteAccessDialog,
 } from "../../../../components/access";
@@ -86,7 +86,7 @@ function AccessPage({ projectId }: { projectId: string }) {
           <p className="mt-0.5 max-w-[640px] text-[13px] text-rv-mute-500">
             {t(
               "access.subtitle",
-              "Define the access bundles your subscribers can unlock and link them to product offerings.",
+              "Access levels are the capabilities subscribers unlock — like Pro or Premium. A product grants one on purchase; your SDK checks it to gate features.",
             )}
           </p>
         </div>
@@ -116,46 +116,14 @@ function AccessPage({ projectId }: { projectId: string }) {
           onCreate={() => setCreateOpen(true)}
         />
 
-        <div className="flex min-w-0 flex-col gap-4">
-          <AccessHeader
-            accessRow={selected}
-            onEdit={() => setEditOpen(true)}
-            onDelete={() => setDeleteOpen(true)}
-          />
-
-          {selected && (
-            <section className="border-t border-rv-divider mt-2 pt-4">
-              <h3 className="text-sm font-semibold mb-3">
-                {t(
-                  "access.grantingProducts.heading",
-                  "Products granting this access level",
-                )}
-              </h3>
-              {grantingProducts.length === 0 ? (
-                <p className="text-xs text-rv-mute-500">
-                  {t(
-                    "access.grantingProducts.empty",
-                    "No products linked to this access level yet.",
-                  )}
-                </p>
-              ) : (
-                <ul className="flex flex-col gap-1">
-                  {grantingProducts.map((p) => (
-                    <li
-                      key={p.id}
-                      className="text-xs px-2 py-1.5 rounded-sm bg-rv-c4/50"
-                    >
-                      <span className="font-medium">{p.displayName}</span>
-                      <span className="ml-2 text-rv-mute-500">
-                        {p.identifier}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
-        </div>
+        <AccessDetail
+          accessRow={selected}
+          grantingProducts={grantingProducts}
+          hasAnyAccess={rows.length > 0}
+          onEdit={() => setEditOpen(true)}
+          onDelete={() => setDeleteOpen(true)}
+          onCreate={() => setCreateOpen(true)}
+        />
       </div>
 
       <AccessFormDialog

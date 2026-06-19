@@ -1889,7 +1889,7 @@
   },
   "access": {
     "title": "Access",
-    "subtitle": "The catalog of access rights subscribers can earn. Products grant access; offerings show which products grant a given access.",
+    "subtitle": "Access levels are the capabilities subscribers unlock — like Pro or Premium. A product grants one on purchase; your SDK checks it to gate features.",
     "create": "New",
     "form": {
       "createTitle": "New access",

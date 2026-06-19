@@ -4,16 +4,21 @@ import { useTranslation } from "react-i18next";
 import {
   Check,
   Copy,
+  KeyRound,
   MoreHorizontal,
+  Package,
   Pencil,
+  Plus,
   Trash2,
 } from "lucide-react";
 import type { DashboardAccessRow } from "@rovenue/shared";
-import { buttonVariants } from "../../ui/button";
+import { Button, buttonVariants } from "../../ui/button";
 import { cn } from "../../lib/cn";
 
 type Props = {
   accessRow: DashboardAccessRow | null;
+  /** Number of products that currently grant this access. */
+  grantingCount: number;
   onEdit: () => void;
   onDelete: () => void;
 };
@@ -27,13 +32,33 @@ const ITEM_CLASS =
 const DANGER_ITEM_CLASS =
   "flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-rv-danger outline-none data-[highlighted]:bg-rv-danger/10 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50";
 
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
+
 /**
- * Top header card for the selected access row. Surfaces the display
- * name + identifier and exposes Edit / Delete actions via the dropdown
- * menu. Renders an empty placeholder when no row is selected.
+ * Top header card for the selected access row. Leads with a keyed avatar so
+ * the "access = a thing users hold" model reads at a glance, surfaces the
+ * display name + a one-click-copy identifier, the description (or a prompt to
+ * add one), and a footer strip with the at-a-glance stats. Renders an empty
+ * placeholder when no row is selected.
  */
-export function AccessHeader({ accessRow, onEdit, onDelete }: Props) {
+export function AccessHeader({
+  accessRow,
+  grantingCount,
+  onEdit,
+  onDelete,
+}: Props) {
   const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
 
   if (!accessRow) {
     return (
@@ -43,30 +68,87 @@ export function AccessHeader({ accessRow, onEdit, onDelete }: Props) {
     );
   }
 
+  const copyIdentifier = async () => {
+    try {
+      await navigator.clipboard.writeText(accessRow.identifier);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      // Clipboard unavailable (insecure context) — no-op.
+    }
+  };
+
   return (
-    <div className="rounded-lg border border-rv-divider bg-rv-c1 p-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="truncate text-[22px] font-semibold leading-7 tracking-tight">
-            {accessRow.displayName}
-          </h2>
-          <div className="mt-0.5 font-rv-mono text-[12px] text-rv-mute-500">
-            {accessRow.identifier}
+    <div className="overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">
+      <div className="flex items-start justify-between gap-4 p-5">
+        <div className="flex min-w-0 gap-3.5">
+          <div className="mt-0.5 grid size-10 shrink-0 place-items-center rounded-lg border border-rv-accent-500/25 bg-rv-accent-500/10 text-rv-accent-500">
+            <KeyRound size={18} />
           </div>
-          {accessRow.description && (
-            <p className="mt-2 max-w-[600px] text-[13px] text-rv-mute-600">
-              {accessRow.description}
-            </p>
-          )}
+          <div className="min-w-0">
+            <h2 className="truncate text-[22px] font-semibold leading-7 tracking-tight">
+              {accessRow.displayName}
+            </h2>
+            <button
+              type="button"
+              onClick={copyIdentifier}
+              title={t("access.menu.copyIdentifier", "Copy identifier")}
+              className="group mt-1 inline-flex max-w-full items-center gap-1.5 rounded border border-rv-divider bg-rv-c3 px-1.5 py-0.5 font-rv-mono text-[11px] text-rv-mute-600 transition hover:border-rv-divider-strong hover:text-foreground"
+            >
+              <span className="truncate">{accessRow.identifier}</span>
+              {copied ? (
+                <Check size={11} className="shrink-0 text-rv-success" />
+              ) : (
+                <Copy
+                  size={11}
+                  className="shrink-0 text-rv-mute-500 transition group-hover:text-rv-mute-700"
+                />
+              )}
+            </button>
+
+            {accessRow.description ? (
+              <p className="mt-2.5 max-w-[600px] text-[13px] leading-relaxed text-rv-mute-600">
+                {accessRow.description}
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={onEdit}
+                className="mt-2.5 inline-flex items-center gap-1 text-[12px] text-rv-mute-500 transition hover:text-rv-accent-500"
+              >
+                <Plus size={12} />
+                {t(
+                  "access.header.addDescription",
+                  "Add a description — explain what this unlocks",
+                )}
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
-          <AccessActionsMenu
-            accessRow={accessRow}
-            onEdit={onEdit}
-            onDelete={onDelete}
-          />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button variant="flat" size="sm" onClick={onEdit}>
+            <Pencil size={13} />
+            {t("access.menu.edit", "Edit access")}
+          </Button>
+          <AccessActionsMenu accessRow={accessRow} onDelete={onDelete} />
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-rv-divider bg-rv-c2/40 px-5 py-2.5 font-rv-mono text-[11px] text-rv-mute-500">
+        <span className="inline-flex items-center gap-1.5">
+          <Package size={12} className="text-rv-mute-600" />
+          <span className="text-rv-mute-800">{grantingCount}</span>
+          {t(
+            grantingCount === 1
+              ? "access.stats.productOne"
+              : "access.stats.productOther",
+            grantingCount === 1 ? "product grants this" : "products grant this",
+          )}
+        </span>
+        <span className="text-rv-mute-700">
+          {t("access.stats.created", "Created")} {formatDate(accessRow.createdAt)}
+        </span>
       </div>
     </div>
   );
@@ -74,11 +156,9 @@ export function AccessHeader({ accessRow, onEdit, onDelete }: Props) {
 
 function AccessActionsMenu({
   accessRow,
-  onEdit,
   onDelete,
 }: {
   accessRow: DashboardAccessRow;
-  onEdit: () => void;
   onDelete: () => void;
 }) {
   const { t } = useTranslation();
@@ -107,15 +187,6 @@ function AccessActionsMenu({
       <Menu.Portal>
         <Menu.Positioner sideOffset={4} align="end" className="z-50">
           <Menu.Popup className={POPUP_CLASS}>
-            <Menu.Item className={ITEM_CLASS} onClick={onEdit}>
-              <Pencil size={13} />
-              <span className="flex-1">
-                {t("access.menu.edit", "Edit access")}
-              </span>
-            </Menu.Item>
-
-            <div className="my-1 h-px bg-rv-divider" />
-
             <Menu.Item
               className={ITEM_CLASS}
               closeOnClick={false}
