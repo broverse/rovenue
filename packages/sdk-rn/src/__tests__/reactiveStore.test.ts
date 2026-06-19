@@ -9,8 +9,8 @@ describe("ReactiveStore", () => {
 
   it("set stores and get retrieves", () => {
     const s = new ReactiveStore();
-    s.set("creditBalance", 42);
-    expect(s.get<number>("creditBalance")).toBe(42);
+    s.set("virtualCurrencies", 42);
+    expect(s.get<number>("virtualCurrencies")).toBe(42);
   });
 
   it("subscribers fire on set", () => {
@@ -27,7 +27,7 @@ describe("ReactiveStore", () => {
     const unsub = s.subscribe(cb);
     s.set("user", { rovenueId: "a", appUserId: null });
     unsub();
-    s.set("creditBalance", 5);
+    s.set("virtualCurrencies", 5);
     expect(cb).toHaveBeenCalledTimes(1);
   });
 
@@ -37,7 +37,7 @@ describe("ReactiveStore", () => {
     const cb2 = vi.fn();
     s.subscribe(cb1);
     s.subscribe(cb2);
-    s.set("creditBalance", 1);
+    s.set("virtualCurrencies", 1);
     expect(cb1).toHaveBeenCalledTimes(1);
     expect(cb2).toHaveBeenCalledTimes(1);
   });

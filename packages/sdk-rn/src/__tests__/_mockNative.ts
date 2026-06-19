@@ -19,7 +19,6 @@ export type MockNative = RovenueModuleSpec & {
   __state: {
     user: UserDTO;
     entitlements: Map<string, EntitlementDTO>;
-    creditBalance: number;
     remoteConfig: {
       flags: Record<string, unknown>;
       experiments: Record<string, unknown>;
@@ -37,7 +36,6 @@ export function makeMockNative(): MockNative {
   const state = {
     user: { rovenueId: "anon_test", appUserId: null } as UserDTO,
     entitlements: new Map<string, EntitlementDTO>(),
-    creditBalance: 0,
     remoteConfig: {
       flags: {} as Record<string, unknown>,
       experiments: {} as Record<string, unknown>,
@@ -85,21 +83,6 @@ export function makeMockNative(): MockNative {
     entitlementsAll: vi.fn(async () => Array.from(state.entitlements.values())),
     refreshEntitlements: vi.fn(async () => {
       mock.__emit("ENTITLEMENTS_CHANGED");
-    }),
-    creditBalance: vi.fn(async () => state.creditBalance),
-    refreshCredits: vi.fn(async () => {
-      mock.__emit("CREDIT_BALANCE_CHANGED");
-    }),
-    consumeCredits: vi.fn(async (amount: number) => {
-      if (state.creditBalance < amount) {
-        const err: any = new Error("insufficient");
-        err.code = "InsufficientCredits";
-        err.extras = { available: state.creditBalance };
-        throw err;
-      }
-      state.creditBalance -= amount;
-      mock.__emit("CREDIT_BALANCE_CHANGED");
-      return state.creditBalance;
     }),
     virtualCurrencies: vi.fn(async () => ({})),
     virtualCurrency: vi.fn(async (_code: string) => 0),
