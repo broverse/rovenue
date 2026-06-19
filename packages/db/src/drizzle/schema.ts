@@ -441,6 +441,9 @@ export const creditLedger = pgTable(
       .notNull()
       .references(() => subscribers.id, { onDelete: "cascade" }),
     type: creditLedgerType("type").notNull(),
+    currencyId: text("currencyId")
+      .notNull()
+      .references(() => virtualCurrencies.id),
     // `amount` is a signed integer — positive for credit, negative for debit.
     amount: integer("amount").notNull(),
     // Running balance AFTER this row's mutation. Enforces
@@ -464,6 +467,9 @@ export const creditLedger = pgTable(
     projectIdSubscriberIdIdx: index(
       "credit_ledger_projectId_subscriberId_idx",
     ).on(t.projectId, t.subscriberId),
+    subscriberIdCurrencyIdCreatedAtIdx: index(
+      "credit_ledger_subscriberId_currencyId_createdAt_idx",
+    ).on(t.subscriberId, t.currencyId, t.createdAt),
   }),
 );
 
@@ -617,6 +623,56 @@ export const products = pgTable(
     ),
   }),
 );
+
+// =============================================================
+// virtual_currencies
+// =============================================================
+
+export const virtualCurrencies = pgTable(
+  "virtual_currencies",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    archivedAt: timestamp("archivedAt", { withTimezone: true }),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectIdCodeKey: uniqueIndex("virtual_currencies_projectId_code_key").on(
+      t.projectId,
+      t.code,
+    ),
+  }),
+);
+
+export type VirtualCurrencyRow = typeof virtualCurrencies.$inferSelect;
+export type NewVirtualCurrency = typeof virtualCurrencies.$inferInsert;
+
+export const productCurrencyGrants = pgTable(
+  "product_currency_grants",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    productId: text("productId")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    currencyId: text("currencyId")
+      .notNull()
+      .references(() => virtualCurrencies.id, { onDelete: "cascade" }),
+    amount: integer("amount").notNull(),
+  },
+  (t) => ({
+    productIdCurrencyIdKey: uniqueIndex(
+      "product_currency_grants_productId_currencyId_key",
+    ).on(t.productId, t.currencyId),
+  }),
+);
+
+export type ProductCurrencyGrantRow = typeof productCurrencyGrants.$inferSelect;
 
 // =============================================================
 // offerings (paywall configurations — RevenueCat-style)
