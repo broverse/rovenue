@@ -193,6 +193,9 @@ function WebhookDetailPage({ projectId }: { projectId: string }) {
                           {t("apps.webhookDetail.deliveries.colEvent")}
                         </th>
                         <th className="px-4 py-2 font-medium">
+                          {t("apps.webhookDetail.deliveries.colStatusCode")}
+                        </th>
+                        <th className="px-4 py-2 font-medium">
                           {t("apps.webhookDetail.deliveries.colAttempts")}
                         </th>
                         <th className="px-4 py-2 font-medium">
@@ -213,6 +216,9 @@ function WebhookDetailPage({ projectId }: { projectId: string }) {
                             <Chip tone={statusTone(d.status)}>{d.status}</Chip>
                           </td>
                           <td className="px-4 py-2 font-rv-mono text-[11.5px]">{d.eventType}</td>
+                          <td className="px-4 py-2 font-rv-mono tabular-nums text-rv-mute-600">
+                            {d.httpStatus ?? "—"}
+                          </td>
                           <td className="px-4 py-2 tabular-nums">{d.attempts}</td>
                           <td className="px-4 py-2 text-rv-mute-600">
                             {new Date(d.createdAt).toLocaleString()}

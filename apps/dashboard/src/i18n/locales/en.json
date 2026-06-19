@@ -3474,6 +3474,7 @@
         "emptyHint": "Deliveries appear here once subscription events start firing.",
         "colStatus": "Status",
         "colEvent": "Event",
+        "colStatusCode": "Status code",
         "colAttempts": "Attempts",
         "colCreated": "Created",
         "colSent": "Sent",
