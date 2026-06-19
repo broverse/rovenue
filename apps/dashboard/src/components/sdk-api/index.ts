@@ -1,3 +1,4 @@
+export { CreateApiKeyDialog } from "./create-api-key-dialog";
 export { SdkHero } from "./sdk-hero";
 export { QuickstartCard } from "./quickstart-card";
 export { KeysCard } from "./keys-card";
