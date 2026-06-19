@@ -1,7 +1,6 @@
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/cn";
-import { CALENDAR_DAYS } from "./mock-data";
 import type { CalendarDay } from "./types";
 
 const LEGEND: ReadonlyArray<{
@@ -13,10 +12,6 @@ const LEGEND: ReadonlyArray<{
   { key: "grace",    color: "var(--color-rv-warning)" },
   { key: "failed",   color: "var(--color-rv-danger)" },
 ];
-
-const MOCK_MAX_TOTAL = Math.max(
-  ...CALENDAR_DAYS.map((d) => d.renewals + d.trials + d.grace + d.failed),
-);
 
 function tooltipFor(d: CalendarDay, t: TFunction): string {
   if (d.past) {
@@ -31,23 +26,21 @@ function tooltipFor(d: CalendarDay, t: TFunction): string {
 }
 
 type RenewalCalendarProps = {
-  /** Optional override; defaults to the design-spec 28-day mock. */
+  /** Per-day buckets from the renewal-calendar API. */
   days?: ReadonlyArray<CalendarDay>;
 };
 
 /**
- * 28-day stacked-bar calendar. Today is rendered with a dashed primary
- * marker; past slots only carry failed-event counts.
+ * Stacked-bar calendar. Today is rendered with a dashed primary marker;
+ * past slots only carry failed-event counts.
  */
 export function RenewalCalendar({ days }: RenewalCalendarProps = {}) {
   const { t } = useTranslation();
-  const data = days && days.length > 0 ? days : CALENDAR_DAYS;
-  const maxTotal = days
-    ? Math.max(
-        1,
-        ...data.map((d) => d.renewals + d.trials + d.grace + d.failed),
-      )
-    : MOCK_MAX_TOTAL;
+  const data = days ?? [];
+  const maxTotal = Math.max(
+    1,
+    ...data.map((d) => d.renewals + d.trials + d.grace + d.failed),
+  );
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">

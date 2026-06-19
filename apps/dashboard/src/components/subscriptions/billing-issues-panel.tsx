@@ -2,7 +2,6 @@ import { AlertTriangle, Check, ChevronRight } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../ui/button";
 import { cn } from "../../lib/cn";
-import { BILLING_ISSUES } from "./mock-data";
 import type { BillingIssue, IssueSeverity } from "./types";
 
 type BillingIssuesPanelProps = {
@@ -25,7 +24,7 @@ const NEXT_TONE: Record<IssueSeverity, string> = {
 
 export function BillingIssuesPanel({ issues }: BillingIssuesPanelProps = {}) {
   const { t } = useTranslation();
-  const data = issues && issues.length > 0 ? issues : BILLING_ISSUES;
+  const data = issues ?? [];
   return (
     <section className="overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">
       <header className="flex items-baseline justify-between border-b border-rv-divider px-4 py-3.5">

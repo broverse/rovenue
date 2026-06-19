@@ -1045,6 +1045,17 @@ export interface SubscriptionsCompositionResponse {
   total: number;
 }
 
+/**
+ * Per-scope row counts powering the subscriptions scope tabs. Each key
+ * matches a `SubscriptionScopeName` and counts the rows the list endpoint
+ * returns for that scope (so the chip totals always agree with the table).
+ */
+export type SubscriptionsScopeCounts = Record<SubscriptionScopeName, number>;
+
+export interface SubscriptionsScopeCountsResponse {
+  counts: SubscriptionsScopeCounts;
+}
+
 export interface RenewalCalendarDay {
   /** ISO date `YYYY-MM-DD`, anchored to UTC midnight. */
   day: string;

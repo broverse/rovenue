@@ -12,6 +12,7 @@ import type {
   SubscriptionsCompositionResponse,
   SubscriptionsKpis,
   SubscriptionsListResponse,
+  SubscriptionsScopeCountsResponse,
 } from "@rovenue/shared";
 import { api } from "../api";
 
@@ -117,6 +118,17 @@ export function useProjectSubscriptionsComposition(projectId: string) {
   });
 }
 
+export function useProjectSubscriptionsScopeCounts(projectId: string) {
+  return useQuery({
+    queryKey: ["subscriptions", "scope-counts", projectId],
+    enabled: Boolean(projectId),
+    queryFn: () =>
+      api<SubscriptionsScopeCountsResponse>(
+        `/dashboard/projects/${projectId}/subscriptions/scope-counts`,
+      ),
+  });
+}
+
 export function useProjectRenewalCalendar({
   projectId,
   pastDays,
@@ -166,6 +178,7 @@ export function useGrantSubscription(projectId: string) {
       void qc.invalidateQueries({ queryKey: ["subscriptions", "list", projectId] });
       void qc.invalidateQueries({ queryKey: ["subscriptions", "kpis", projectId] });
       void qc.invalidateQueries({ queryKey: ["subscriptions", "composition", projectId] });
+      void qc.invalidateQueries({ queryKey: ["subscriptions", "scope-counts", projectId] });
     },
   });
 }

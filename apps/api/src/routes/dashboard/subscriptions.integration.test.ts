@@ -201,6 +201,7 @@ const LIST_SUFFIXES = [
   "lst_xsort",
   "lst_bad",
   "lst_badbool",
+  "lst_scopes",
 ] as const;
 
 async function seedListFixture(suffix: (typeof LIST_SUFFIXES)[number]) {
@@ -400,6 +401,34 @@ describe("GET /projects/:projectId/subscriptions — filters + sort", () => {
       { headers: { cookie } },
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /projects/:projectId/subscriptions/scope-counts", () => {
+  it("returns a count per scope matching the seeded distribution", async () => {
+    // seedListFixture seeds 6 purchases: 2 active, 1 trial, 2 canceling
+    // (ACTIVE + autoRenew=false), 1 grace (GRACE_PERIOD). The grace row
+    // has a NULL gracePeriodExpires so it also satisfies the `issues`
+    // predicate. Nothing is churned.
+    const { cookie, projectId } = await seedListFixture("lst_scopes");
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${projectId}/subscriptions/scope-counts`,
+      { headers: { cookie } },
+    );
+    expect(res.status).toBe(200);
+    const { counts } = (await res.json()).data as {
+      counts: Record<string, number>;
+    };
+    expect(counts).toMatchObject({
+      all: 6,
+      active: 2,
+      trial: 1,
+      grace: 1,
+      canceling: 2,
+      issues: 1,
+      churned: 0,
+    });
   });
 });
 

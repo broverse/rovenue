@@ -1,7 +1,6 @@
 export { BillingIssuesPanel } from "./billing-issues-panel";
 export { GrantSubscriptionModal } from "./grant-modal";
 export { ScheduleCancelModal } from "./schedule-modal";
-export { CohortRetentionPanel } from "./cohort-retention-panel";
 export { CompositionBar } from "./composition-bar";
 export { CountdownCell } from "./countdown-cell";
 export { ExpandedRow } from "./expanded-row";
@@ -17,16 +16,6 @@ export type {
 } from "./filter-toolbar";
 export { SubscriptionStatusChip } from "./subscription-status-chip";
 export { renewalProgressColor } from "./format";
-export {
-  BILLING_ISSUES,
-  CALENDAR_DAYS,
-  COHORT_HEADERS,
-  COHORT_MATRIX,
-  COMPOSITION_SEGMENTS,
-  COMPOSITION_TOTAL,
-  SCOPE_COUNTS,
-  SUBSCRIPTIONS,
-} from "./mock-data";
 export type {
   BillingCycle,
   BillingIssue,

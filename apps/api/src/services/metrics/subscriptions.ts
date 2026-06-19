@@ -13,6 +13,8 @@ import type {
   SubscriptionsCompositionResponse,
   SubscriptionsKpis,
   SubscriptionsListResponse,
+  SubscriptionsScopeCounts,
+  SubscriptionsScopeCountsResponse,
 } from "@rovenue/shared";
 
 // =============================================================
@@ -633,6 +635,47 @@ export async function readSubscriptionsComposition(
           : 0,
     })),
   };
+}
+
+// =============================================================
+// Scope counts (segmented control on the list page)
+// =============================================================
+//
+// One count per scope tab. Each scope reuses the exact `scopeWhere`
+// predicate the list endpoint applies, so a chip's number always
+// matches the rows you get when you click it.
+
+const SCOPE_NAMES: ReadonlyArray<SubscriptionScopeName> = [
+  "all",
+  "active",
+  "trial",
+  "grace",
+  "canceling",
+  "issues",
+  "churned",
+];
+
+export async function readSubscriptionsScopeCounts(
+  projectId: string,
+): Promise<SubscriptionsScopeCountsResponse> {
+  const p = drizzle.schema.purchases;
+  const now = new Date();
+
+  const results = await Promise.all(
+    SCOPE_NAMES.map(async (scope) => {
+      const where = [eq(p.projectId, projectId)];
+      const scoped = scopeWhere(scope, now);
+      if (scoped) where.push(scoped);
+      const rows = await drizzle.db
+        .select({ c: count() })
+        .from(p)
+        .where(and(...where));
+      return [scope, Number(rows[0]?.c ?? 0)] as const;
+    }),
+  );
+
+  const counts = Object.fromEntries(results) as SubscriptionsScopeCounts;
+  return { counts };
 }
 
 // =============================================================

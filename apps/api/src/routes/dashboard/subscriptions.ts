@@ -29,6 +29,7 @@ import {
   readRenewalCalendar,
   readSubscriptionsComposition,
   readSubscriptionsKpis,
+  readSubscriptionsScopeCounts,
 } from "../../services/metrics/subscriptions";
 
 // =============================================================
@@ -224,6 +225,17 @@ export const subscriptionsRoute = new Hono()
     await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
     const payload = await readSubscriptionsComposition(projectId);
+    return c.json(ok(payload));
+  })
+  .get("/scope-counts", async (c) => {
+    const projectId = c.req.param("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "Missing projectId" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+    const payload = await readSubscriptionsScopeCounts(projectId);
     return c.json(ok(payload));
   })
   .get(

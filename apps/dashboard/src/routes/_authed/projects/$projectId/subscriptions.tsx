@@ -18,8 +18,6 @@ import {
   CompositionBar,
   FilterToolbar,
   GrantSubscriptionModal,
-  SCOPE_COUNTS,
-  SUBSCRIPTIONS,
   ScheduleCancelModal,
   ScopeTabs,
   SubscriptionsTable,
@@ -36,6 +34,7 @@ import {
   useProjectSubscriptions,
   useProjectSubscriptionsComposition,
   useProjectSubscriptionsKpis,
+  useProjectSubscriptionsScopeCounts,
 } from "../../../../lib/hooks/useProjectSubscriptions";
 import { useProjectProducts } from "../../../../lib/hooks/useProjectProducts";
 
@@ -141,7 +140,15 @@ export const Route = createFileRoute(
   component: SubscriptionsRouteComponent,
 });
 
-const TOTAL_FALLBACK = 21117;
+/**
+ * Compact label for the scope chips: full thousands-separated number
+ * below 10k, then `21.1k` / `1.2M` style for larger counts.
+ */
+function formatScopeCount(n: number): string {
+  if (n < 10_000) return n.toLocaleString();
+  if (n < 1_000_000) return `${(n / 1_000).toFixed(1)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
 
 function SubscriptionsRouteComponent() {
   const { projectId } = useParams({
@@ -321,6 +328,7 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
   });
   const kpis = useProjectSubscriptionsKpis(projectId);
   const composition = useProjectSubscriptionsComposition(projectId);
+  const scopeCounts = useProjectSubscriptionsScopeCounts(projectId);
   // First page only — product picker doesn't need to walk the cursor.
   const productList = useProjectProducts({
     projectId,
@@ -338,7 +346,24 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
     );
   }, [list.data, nowMs, t]);
 
-  const rows: ReadonlyArray<Subscription> = realRows ?? SUBSCRIPTIONS;
+  const rows: ReadonlyArray<Subscription> = realRows ?? [];
+
+  // Scope-tab counts come straight from the API; render an em dash until
+  // the first response lands so the chips never show a stale/fake number.
+  const scopeCountLabels = useMemo<Record<SubscriptionScope, string>>(() => {
+    const counts = scopeCounts.data?.counts;
+    const fmt = (n: number | undefined) =>
+      n === undefined ? "–" : formatScopeCount(n);
+    return {
+      all: fmt(counts?.all),
+      active: fmt(counts?.active),
+      trial: fmt(counts?.trial),
+      grace: fmt(counts?.grace),
+      canceling: fmt(counts?.canceling),
+      issues: fmt(counts?.issues),
+      churned: fmt(counts?.churned),
+    };
+  }, [scopeCounts.data]);
 
   const productOptions: ReadonlyArray<ProductOption> = useMemo(() => {
     const first = productList.data?.pages?.[0];
@@ -433,15 +458,15 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const kpiTotalActive = kpis.data?.totalActive ?? 20721;
-  const kpiRenewing = kpis.data?.renewing7 ?? 2184;
-  const kpiGrace = kpis.data?.graceRetry ?? 84;
-  const kpiCanceling = kpis.data?.canceling ?? 312;
+  const kpiTotalActive = kpis.data?.totalActive ?? 0;
+  const kpiRenewing = kpis.data?.renewing7 ?? 0;
+  const kpiGrace = kpis.data?.graceRetry ?? 0;
+  const kpiCanceling = kpis.data?.canceling ?? 0;
 
   const compositionSegments = toCompositionSegments(composition.data);
   const compositionTotal = composition.data?.total;
   const totalForFilterBar =
-    composition.data?.total ?? realRows?.length ?? TOTAL_FALLBACK;
+    composition.data?.total ?? realRows?.length ?? 0;
 
   const selectedSubs = useMemo(
     () => rows.filter((s) => selectedIds.has(s.id)),
@@ -537,7 +562,7 @@ function SubscriptionsPage({ projectId }: { projectId: string }) {
         <ScopeTabs
           value={search.scope as SubscriptionScope}
           onChange={onScopeChange}
-          counts={SCOPE_COUNTS}
+          counts={scopeCountLabels}
         />
       </div>
 

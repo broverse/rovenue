@@ -1,13 +1,12 @@
 import { useTranslation } from "react-i18next";
-import { COMPOSITION_SEGMENTS, COMPOSITION_TOTAL } from "./mock-data";
 import type { CompositionSegment } from "./types";
 
 type Props = {
   /** Free-text "updated 12s ago" timestamp shown on the right. */
   updatedLabel: string;
-  /** Optional override — defaults to the design-spec mock segments. */
+  /** Live segments from the API; empty until the first response lands. */
   segments?: ReadonlyArray<CompositionSegment>;
-  /** Optional total override; falls back to summing `segments` (or the mock total). */
+  /** Total override; falls back to summing `segments`. */
   total?: number;
 };
 
@@ -17,10 +16,8 @@ type Props = {
  */
 export function CompositionBar({ updatedLabel, segments, total }: Props) {
   const { t } = useTranslation();
-  const data = segments && segments.length > 0 ? segments : COMPOSITION_SEGMENTS;
-  const totalCount =
-    total ??
-    (segments ? segments.reduce((a, s) => a + s.count, 0) : COMPOSITION_TOTAL);
+  const data = segments ?? [];
+  const totalCount = total ?? data.reduce((a, s) => a + s.count, 0);
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
       <div className="mb-3 flex items-baseline justify-between gap-4">
@@ -40,6 +37,7 @@ export function CompositionBar({ updatedLabel, segments, total }: Props) {
       </div>
 
       <div className="flex h-7 gap-0.5 overflow-hidden rounded">
+        {data.length === 0 && <div className="flex-1 bg-rv-c3" />}
         {data.map((seg) => (
           <div
             key={seg.key}
