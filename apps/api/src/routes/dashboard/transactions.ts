@@ -2,14 +2,17 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { MemberRole } from "@rovenue/db";
+import { MemberRole, drizzle } from "@rovenue/db";
 import type {
   TransactionStoreFilter,
   TransactionsListSort,
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
-import { ok } from "../../lib/response";
+import { assertProjectCapability } from "../../lib/capabilities";
+import { ok, fail } from "../../lib/response";
+import { audit, extractRequestContext } from "../../lib/audit";
+import { refundTransaction } from "../../services/refunds/refund-transaction";
 import {
   __transactionsConstants,
   decodeCursor,
@@ -247,4 +250,52 @@ export const transactionsRoute = new Hono()
         },
       });
     },
-  );
+  )
+  .post("/:id/refund", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "Missing projectId" });
+    }
+    const user = c.get("user");
+    await assertProjectCapability(projectId, user.id, "refunds:write");
+
+    const event = await drizzle.revenueEventRepo.findRevenueEventById(drizzle.db, id);
+    if (!event || event.projectId !== projectId) {
+      return c.json(fail("NOT_FOUND", "Transaction not found."), 404);
+    }
+
+    const [purchase] = await drizzle.purchaseRepo.findPurchasesByIds(drizzle.db, [event.purchaseId]);
+    if (!purchase) {
+      return c.json(fail("NOT_FOUND", "Purchase not found."), 404);
+    }
+
+    const result = await refundTransaction({ projectId, purchase });
+    if (!result.ok) {
+      if (result.code === "apple_unsupported" || result.code === "missing_store_ref") {
+        return c.json(fail("VALIDATION_ERROR", result.message), 422);
+      }
+      if (result.code === "already_refunded") {
+        return c.json(fail("HTTP_ERROR", result.message), 409);
+      }
+      // store_error or unknown
+      return c.json(fail("STORE_API_ERROR", result.message), 502);
+    }
+
+    const ctx = extractRequestContext(c);
+    await audit({
+      projectId,
+      userId: user.id,
+      action: "transaction.refunded",
+      resource: "transaction",
+      resourceId: id,
+      after: { store: result.store, reference: result.reference },
+      ipAddress: ctx.ipAddress,
+      userAgent: ctx.userAgent,
+    });
+
+    return c.json(
+      ok({ status: "refund_requested" as const, store: result.store, reference: result.reference }),
+      200,
+    );
+  });

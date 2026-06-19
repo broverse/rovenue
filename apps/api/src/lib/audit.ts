@@ -110,7 +110,9 @@ export type AuditAction =
   // --- refund shield ---
   | "refund_shield.settings.updated"
   | "refund_shield.response.sent"
-  | "refund_shield.response.failed";
+  | "refund_shield.response.failed"
+  // --- merchant-initiated refunds ---
+  | "transaction.refunded";
 
 export type AuditResource =
   | "audience"
@@ -129,7 +131,8 @@ export type AuditResource =
   | "funnel"
   | "custom_domain"
   | "integration_connection"
-  | "refund_shield_response";
+  | "refund_shield_response"
+  | "transaction";
 
 export interface AuditEntry {
   projectId: string;
