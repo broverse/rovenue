@@ -6,7 +6,7 @@
 // module makes the platform layer irrelevant for these tests.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { render, screen, act, cleanup } from "@testing-library/react";
+import { render, screen, act, cleanup, renderHook } from "@testing-library/react";
 import * as React from "react";
 import { _setNativeForTesting } from "../core/native";
 import { startEventBridge, stopEventBridge } from "../core/eventBridge";
@@ -16,7 +16,7 @@ import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useEntitlement } from "../hooks/useEntitlement";
 import { useEntitlements } from "../hooks/useEntitlements";
 import { useRemoteConfig, useFlag, useExperiment } from "../hooks/useRemoteConfig";
-import { useCreditBalance } from "../hooks/useCreditBalance";
+import { useVirtualCurrencies, useVirtualCurrency } from "../hooks/useVirtualCurrencies";
 
 describe("Rovenue hooks", () => {
   let native: MockNative;
@@ -105,27 +105,16 @@ describe("Rovenue hooks", () => {
     expect(screen.getByTestId("a").textContent).toBe("plus,pro");
   });
 
-  it("useCreditBalance returns 0 when uncached", () => {
-    function App() {
-      const b = useCreditBalance();
-      return <span data-testid="b">{b}</span>;
-    }
-    render(<App />);
-    expect(screen.getByTestId("b").textContent).toBe("0");
+  it("useVirtualCurrencies reflects the store slot", async () => {
+    store.set("virtualCurrencies" as any, { gold: 9 } as any);
+    const { result } = renderHook(() => useVirtualCurrencies());
+    expect(result.current).toEqual({ gold: 9 });
   });
 
-  it("useCreditBalance updates on CREDIT_BALANCE_CHANGED", async () => {
-    function App() {
-      const b = useCreditBalance();
-      return <span data-testid="b">{b}</span>;
-    }
-    render(<App />);
-    await act(async () => {
-      native.__state.creditBalance = 25;
-      native.__emit("CREDIT_BALANCE_CHANGED");
-      await new Promise((r) => setTimeout(r, 0));
-    });
-    expect(screen.getByTestId("b").textContent).toBe("25");
+  it("useVirtualCurrency returns 0 for an absent code", async () => {
+    store.set("virtualCurrencies" as any, { gold: 9 } as any);
+    const { result } = renderHook(() => useVirtualCurrency("silver"));
+    expect(result.current).toBe(0);
   });
 
   it("useFlag warms up on mount then renders the flag value", async () => {

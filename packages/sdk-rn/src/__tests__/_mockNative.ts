@@ -101,6 +101,11 @@ export function makeMockNative(): MockNative {
       mock.__emit("CREDIT_BALANCE_CHANGED");
       return state.creditBalance;
     }),
+    virtualCurrencies: vi.fn(async () => ({})),
+    virtualCurrency: vi.fn(async (_code: string) => 0),
+    refreshVirtualCurrencies: vi.fn(async () => {
+      mock.__emit("VIRTUAL_CURRENCIES_CHANGED");
+    }),
     getOfferings: vi.fn(async () => ({ current: null, offerings: [] })),
     purchase: vi.fn(async () => ({ entitlements: [], creditBalance: 0, productId: "", storeTransactionId: "" })),
     restorePurchases: vi.fn(async () => ({ entitlements: [], creditBalance: 0, productId: "", storeTransactionId: "" })),
