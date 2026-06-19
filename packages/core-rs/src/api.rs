@@ -4,11 +4,12 @@ use std::time::Duration;
 
 use crate::attributes::buffer::AttributeBuffer;
 use crate::attributes::dispatcher::AttributeDispatcher;
-use crate::cache::CacheStore;
+use crate::cache::{CacheStore, ExposureRepo};
 use crate::config::Config;
 use crate::virtual_currencies::VirtualCurrencyReader;
 use crate::entitlements::{Entitlement, EntitlementReader};
 use crate::error::{RovenueError, RovenueResult};
+use crate::exposure::ExposureTracker;
 use crate::identify::IdentifyClient;
 use crate::identity::{IdentityManager, User};
 use crate::observer::{Observer, ObserverBus};
@@ -36,6 +37,7 @@ pub struct RovenueCore {
     receipts: Arc<ReceiptClient>,
     offerings: Arc<OfferingsClient>,
     remote_config: Arc<RemoteConfigReader>,
+    exposure: Arc<ExposureTracker>,
     identify: Arc<IdentifyClient>,
     account_tokens: Arc<AccountTokenStore>,
     sessions: Arc<SessionBuffer>,
@@ -96,6 +98,12 @@ impl RovenueCore {
             )
             .with_observer_bus(Arc::clone(&bus))
             .with_clock(Arc::clone(&clock)),
+        );
+        let exposure = ExposureTracker::new(
+            ExposureRepo::new(Arc::clone(&store)),
+            Some(Arc::clone(&http)),
+            Some(Arc::clone(&clock)),
+            Arc::clone(&identity),
         );
         let identify = Arc::new(IdentifyClient::new(Arc::clone(&http)));
         let account_tokens = Arc::new(AccountTokenStore::new(Arc::clone(&store)));
@@ -176,6 +184,7 @@ impl RovenueCore {
             receipts,
             offerings,
             remote_config,
+            exposure,
             identify,
             account_tokens,
             sessions,
@@ -480,6 +489,9 @@ impl RovenueCore {
     pub fn experiment(&self, key: String) -> Option<ExperimentAssignment> {
         let out = self.remote_config.experiment(&key);
         self.remote_config.maybe_refresh_async(STALENESS_MS);
+        if let Some(ref a) = out {
+            self.exposure.maybe_track(a);
+        }
         out
     }
 

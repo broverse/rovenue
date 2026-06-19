@@ -8,6 +8,7 @@ pub mod config;
 pub mod entitlements;
 pub mod error;
 pub mod events;
+pub mod exposure;
 pub mod identify;
 pub mod identity;
 pub mod observer;
