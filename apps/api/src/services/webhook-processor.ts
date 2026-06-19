@@ -2,7 +2,6 @@ import { Queue, Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
 import type Stripe from "stripe";
 import {
-  CreditLedgerType,
   ProductType,
   drizzle,
 } from "@rovenue/db";
@@ -14,7 +13,7 @@ import {
   loadStripeCredentials,
 } from "../lib/project-credentials";
 import { syncAccess } from "./access-engine";
-import { addCredits } from "./credit-engine";
+import { grantPurchaseCurrencies } from "./purchase-credits";
 import {
   handleAppleNotification,
   type HandleAppleNotificationResult,
@@ -239,32 +238,15 @@ async function maybeCreditConsumablePurchase(
   );
   if (!purchase) return;
   if (purchase.product.type !== ProductType.CONSUMABLE) return;
-  if (!purchase.product.creditAmount || purchase.product.creditAmount <= 0) {
-    return;
-  }
 
-  const existing =
-    await drizzle.creditLedgerRepo.findExistingPurchaseCredit(
-      drizzle.db,
-      subscriberId,
-      purchaseId,
-    );
-  if (existing) return;
-
-  await addCredits({
+  await grantPurchaseCurrencies({
     subscriberId,
-    amount: purchase.product.creditAmount,
-    type: CreditLedgerType.PURCHASE,
-    referenceType: "purchase",
-    referenceId: purchaseId,
-    description: `Credits granted for purchase ${purchaseId}`,
-  });
-
-  log.debug("credited consumable purchase", {
-    subscriberId,
+    productId: purchase.product.id,
     purchaseId,
-    amount: purchase.product.creditAmount,
+    productIdentifier: purchase.product.identifier,
   });
+
+  log.debug("credited consumable purchase", { subscriberId, purchaseId });
 }
 
 interface EnqueueOutgoingWebhookArgs {
@@ -359,4 +341,7 @@ export function createWebhookWorker(): Worker<
   return cachedWorker;
 }
 
-export { enqueueOutgoingWebhook as __test_enqueueOutgoingWebhook };
+export {
+  enqueueOutgoingWebhook as __test_enqueueOutgoingWebhook,
+  maybeCreditConsumablePurchase as __test_maybeCreditConsumablePurchase,
+};
