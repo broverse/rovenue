@@ -255,61 +255,26 @@
     "ownerOnly": "Only the project owner can edit store credentials.",
     "loadError": "Couldn't load store credentials",
     "loadErrorHint": "Refresh the page to try again.",
-    "updateHint": "Saving replaces the stored credential — re-enter secrets to update them.",
+    "updateHint": "Saving replaces the stored credential \u2014 re-enter secrets to update them.",
     "saveError": "Couldn't save credentials. Check the fields and try again.",
     "disconnectConfirm": "Disconnect this store? Receipt verification and webhooks for it will stop until you reconfigure it.",
-    "status": {
-      "connected": "Connected",
-      "notConfigured": "Not configured"
-    },
-    "actions": {
-      "configure": "Configure",
-      "edit": "Edit",
-      "cancel": "Cancel",
-      "save": "Save",
-      "saving": "Saving…",
-      "disconnect": "Disconnect",
-      "disconnecting": "Disconnecting…"
-    },
+    "status": { "connected": "Connected", "notConfigured": "Not configured" },
+    "actions": { "configure": "Configure", "edit": "Edit", "cancel": "Cancel", "save": "Save", "saving": "Saving\u2026", "disconnect": "Disconnect", "disconnecting": "Disconnecting\u2026" },
     "apple": {
       "name": "Apple App Store",
-      "fields": {
-        "bundleId": "Bundle ID",
-        "appAppleId": "App Apple ID",
-        "keyId": "Key ID",
-        "issuerId": "Issuer ID",
-        "privateKey": "In-App Purchase key (.p8)"
-      },
-      "placeholders": {
-        "bundleId": "com.example.app",
-        "appAppleId": "1234567890",
-        "keyId": "ABC123DEFG",
-        "issuerId": "57246542-0000-0000-0000-000000000000",
-        "privateKey": "-----BEGIN PRIVATE KEY-----"
-      }
+      "fields": { "bundleId": "Bundle ID", "appAppleId": "App Apple ID", "keyId": "Key ID", "issuerId": "Issuer ID", "privateKey": "In-App Purchase key (.p8)" },
+      "placeholders": { "bundleId": "com.example.app", "appAppleId": "1234567890", "keyId": "ABC123DEFG", "issuerId": "57246542-0000-0000-0000-000000000000", "privateKey": "-----BEGIN PRIVATE KEY-----" }
     },
     "google": {
       "name": "Google Play",
       "invalidJson": "Paste valid service-account JSON containing client_email and private_key.",
-      "fields": {
-        "packageName": "Package name",
-        "serviceAccount": "Service account JSON"
-      },
-      "placeholders": {
-        "packageName": "com.example.app",
-        "serviceAccount": "{ \"client_email\": \"svc@project.iam.gserviceaccount.com\", \"private_key\": \"-----BEGIN PRIVATE KEY-----\" }"
-      }
+      "fields": { "packageName": "Package name", "serviceAccount": "Service account JSON" },
+      "placeholders": { "packageName": "com.example.app", "serviceAccount": "{ \"client_email\": \"svc@project.iam.gserviceaccount.com\", \"private_key\": \"-----BEGIN PRIVATE KEY-----\" }" }
     },
     "stripe": {
       "name": "Stripe",
-      "fields": {
-        "secretKey": "Secret key",
-        "webhookSecret": "Webhook signing secret"
-      },
-      "placeholders": {
-        "secretKey": "sk_live_…",
-        "webhookSecret": "whsec_…"
-      }
+      "fields": { "secretKey": "Secret key", "webhookSecret": "Webhook signing secret" },
+      "placeholders": { "secretKey": "sk_live_\u2026", "webhookSecret": "whsec_\u2026" }
     }
   },
   "topbar": {
