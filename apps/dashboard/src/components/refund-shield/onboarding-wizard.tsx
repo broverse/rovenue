@@ -136,7 +136,7 @@ function AppleConnectRequired({ projectId }: { projectId: string }) {
       </div>
       <div className="mt-3 flex justify-end">
         <Link
-          to="/projects/$projectId/apps"
+          to="/projects/$projectId/stores"
           params={{ projectId }}
           className={cn(buttonVariants({ variant: "solid-primary", size: "sm" }))}
         >
