@@ -19,6 +19,7 @@ export async function findExistingPurchaseCredit(
   db: DbOrTx,
   subscriberId: string,
   purchaseId: string,
+  currencyId: string,
 ): Promise<{ id: string } | null> {
   const rows = await db
     .select({ id: creditLedger.id })
@@ -28,6 +29,7 @@ export async function findExistingPurchaseCredit(
         eq(creditLedger.subscriberId, subscriberId),
         eq(creditLedger.referenceType, "purchase"),
         eq(creditLedger.referenceId, purchaseId),
+        eq(creditLedger.currencyId, currencyId),
       ),
     )
     .limit(1);
@@ -46,14 +48,34 @@ export async function findExistingPurchaseCredit(
 export async function findLatestBalance(
   db: Db,
   subscriberId: string,
+  currencyId: string,
 ): Promise<{ balance: number } | null> {
   const rows = await db
     .select({ balance: creditLedger.balance })
     .from(creditLedger)
-    .where(eq(creditLedger.subscriberId, subscriberId))
+    .where(
+      and(
+        eq(creditLedger.subscriberId, subscriberId),
+        eq(creditLedger.currencyId, currencyId),
+      ),
+    )
     .orderBy(desc(creditLedger.createdAt))
     .limit(1);
   return rows[0] ?? null;
+}
+
+export async function findAllBalances(
+  db: Db,
+  subscriberId: string,
+): Promise<Array<{ currencyId: string; balance: number }>> {
+  return db
+    .selectDistinctOn([creditLedger.currencyId], {
+      currencyId: creditLedger.currencyId,
+      balance: creditLedger.balance,
+    })
+    .from(creditLedger)
+    .where(eq(creditLedger.subscriberId, subscriberId))
+    .orderBy(creditLedger.currencyId, desc(creditLedger.createdAt));
 }
 
 // =============================================================
@@ -64,6 +86,7 @@ export async function findLatestBalance(
 export interface CreditLedgerEntry {
   projectId: string;
   subscriberId: string;
+  currencyId: string;
   type: CreditLedgerType;
   amount: number;
   balance: number;
@@ -92,6 +115,7 @@ export async function insertCreditLedger(
       .values({
         projectId: entry.projectId,
         subscriberId: entry.subscriberId,
+        currencyId: entry.currencyId,
         type: entry.type,
         amount: entry.amount,
         balance: entry.balance,
@@ -112,6 +136,7 @@ export async function insertCreditLedger(
         creditLedgerId: inserted.id,
         projectId: inserted.projectId,
         subscriberId: inserted.subscriberId,
+        currencyId: inserted.currencyId,
         type: inserted.type,
         amount: inserted.amount,
         balance: inserted.balance,
