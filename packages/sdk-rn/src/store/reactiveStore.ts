@@ -9,7 +9,7 @@ import type { Entitlement, RemoteConfig, User } from "../types";
 
 type StoreSlot =
   | "user"
-  | "creditBalance"
+  | "virtualCurrencies"
   | "entitlementsAll"
   | "remoteConfig"
   | `entitlement:${string}`;
@@ -17,6 +17,7 @@ type StoreSlot =
 type StoreValue =
   | User
   | number
+  | Record<string, number>
   | Entitlement
   | Entitlement[]
   | RemoteConfig

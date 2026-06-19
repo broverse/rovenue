@@ -6,11 +6,11 @@ import { makeMockNative, MockNative } from "./_mockNative";
 import { configure } from "../api/configure";
 import { currentUser, identify, logOut } from "../api/identity";
 import { entitlement, entitlementsAll, refreshEntitlements } from "../api/entitlements";
-import { creditBalance, refreshCredits, consumeCredits } from "../api/credits";
+import { virtualCurrencies, refreshVirtualCurrencies } from "../api/virtualCurrencies";
 import { getOfferings, purchase, restorePurchases } from "../api/purchases";
 import { setForeground, shutdown } from "../api/lifecycle";
 import { Rovenue } from "../index";
-import { InvalidApiKeyError, InsufficientCreditsError, PurchaseCancelledError } from "../errors";
+import { InvalidApiKeyError, PurchaseCancelledError } from "../errors";
 
 describe("Rovenue imperative API", () => {
   let native: MockNative;
@@ -138,39 +138,22 @@ describe("Rovenue imperative API", () => {
     expect(store.get<{ active: boolean }>("entitlement:pro")?.active).toBe(true);
   });
 
-  // -------- credits --------
-  it("creditBalance reads from native (0 default)", async () => {
-    expect(await creditBalance()).toBe(0);
+  // -------- virtual currencies --------
+  it("virtualCurrencies reads from native (empty default)", async () => {
+    expect(await virtualCurrencies()).toEqual({});
   });
 
-  it("consumeCredits succeeds and returns new balance", async () => {
-    native.__state.creditBalance = 10;
-    expect(await consumeCredits(3, "test")).toBe(7);
+  it("virtualCurrencies returns balances from native", async () => {
+    native.virtualCurrencies = vi.fn(async () => ({ gold: 10, gems: 5 }));
+    expect(await virtualCurrencies()).toEqual({ gold: 10, gems: 5 });
   });
 
-  it("consumeCredits throws InsufficientCreditsError with available", async () => {
-    native.__state.creditBalance = 1;
-    try {
-      await consumeCredits(5);
-      throw new Error("should have thrown");
-    } catch (e) {
-      expect(e).toBeInstanceOf(InsufficientCreditsError);
-      expect((e as InsufficientCreditsError).available).toBe(1);
-    }
-  });
-
-  it("consumeCredits passes null description by default", async () => {
-    native.__state.creditBalance = 10;
-    await consumeCredits(1);
-    expect(native.consumeCredits).toHaveBeenCalledWith(1, null);
-  });
-
-  it("refreshCredits triggers store update", async () => {
+  it("refreshVirtualCurrencies triggers store update", async () => {
     configure({ apiKey: "pk", baseUrl: "https://api.example.com" });
-    native.__state.creditBalance = 50;
-    await refreshCredits();
+    native.virtualCurrencies = vi.fn(async () => ({ gold: 50 }));
+    await refreshVirtualCurrencies();
     await new Promise((r) => setTimeout(r, 0));
-    expect(store.get<number>("creditBalance")).toBe(50);
+    expect(store.get<Record<string, number>>("virtualCurrencies")).toEqual({ gold: 50 });
   });
 
   // -------- purchases --------
@@ -230,7 +213,7 @@ describe("Rovenue imperative API", () => {
   it("purchase forwards product id + type to native.purchase", async () => {
     native.purchase = vi.fn(async () => ({
       entitlements: [],
-      creditBalance: 0,
+      virtualCurrencies: {},
       productId: "com.x.m",
       storeTransactionId: "txn_abc",
     }));
@@ -260,13 +243,13 @@ describe("Rovenue imperative API", () => {
   it("restorePurchases delegates to native.restorePurchases", async () => {
     native.restorePurchases = vi.fn(async () => ({
       entitlements: [],
-      creditBalance: 5,
+      virtualCurrencies: { gold: 5 },
       productId: "com.x.pro",
       storeTransactionId: "txn_restore",
     }));
     const result = await restorePurchases();
     expect(native.restorePurchases).toHaveBeenCalledTimes(1);
-    expect(result.creditBalance).toBe(5);
+    expect(result.virtualCurrencies).toEqual({ gold: 5 });
   });
 
   // -------- account token --------

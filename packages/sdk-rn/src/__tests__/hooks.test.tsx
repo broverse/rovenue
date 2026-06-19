@@ -106,13 +106,13 @@ describe("Rovenue hooks", () => {
   });
 
   it("useVirtualCurrencies reflects the store slot", async () => {
-    store.set("virtualCurrencies" as any, { gold: 9 } as any);
+    store.set("virtualCurrencies", { gold: 9 });
     const { result } = renderHook(() => useVirtualCurrencies());
     expect(result.current).toEqual({ gold: 9 });
   });
 
   it("useVirtualCurrency returns 0 for an absent code", async () => {
-    store.set("virtualCurrencies" as any, { gold: 9 } as any);
+    store.set("virtualCurrencies", { gold: 9 });
     const { result } = renderHook(() => useVirtualCurrency("silver"));
     expect(result.current).toBe(0);
   });

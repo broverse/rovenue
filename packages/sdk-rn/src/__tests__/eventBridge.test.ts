@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { _setNativeForTesting } from "../core/native";
 import { startEventBridge, stopEventBridge } from "../core/eventBridge";
 import { store } from "../store/reactiveStore";
@@ -43,12 +43,12 @@ describe("eventBridge", () => {
     expect(store.get<{ active: boolean }>("entitlement:plus")?.active).toBe(false);
   });
 
-  it("CREDIT_BALANCE_CHANGED refreshes creditBalance", async () => {
+  it("VIRTUAL_CURRENCIES_CHANGED refreshes virtualCurrencies", async () => {
     startEventBridge();
-    native.__state.creditBalance = 99;
-    native.__emit("CREDIT_BALANCE_CHANGED");
+    native.virtualCurrencies = vi.fn(async () => ({ gold: 3 }));
+    native.__emit("VIRTUAL_CURRENCIES_CHANGED");
     await new Promise((r) => setTimeout(r, 0));
-    expect(store.get<number>("creditBalance")).toBe(99);
+    expect(store.get<Record<string, number>>("virtualCurrencies")).toEqual({ gold: 3 });
   });
 
   it("startEventBridge is idempotent (second call is no-op)", () => {

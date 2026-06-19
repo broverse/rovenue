@@ -42,7 +42,7 @@ export type Offerings = {
 
 export type PurchaseResult = {
   entitlements: Entitlement[];
-  creditBalance: number;
+  virtualCurrencies: Record<string, number>;
   productId: string;
   storeTransactionId: string;
 };
@@ -50,7 +50,7 @@ export type PurchaseResult = {
 export type ChangeEvent =
   | 'ENTITLEMENTS_CHANGED'
   | 'IDENTITY_CHANGED'
-  | 'CREDIT_BALANCE_CHANGED'
+  | 'VIRTUAL_CURRENCIES_CHANGED'
   | 'REMOTE_CONFIG_CHANGED';
 
 // Remote Config — feature flags + experiment assignments, evaluated

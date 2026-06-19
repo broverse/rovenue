@@ -30,9 +30,9 @@ export function startEventBridge(): void {
           }
           break;
         }
-        case "CREDIT_BALANCE_CHANGED": {
-          const balance = await native.creditBalance();
-          store.set("creditBalance", balance);
+        case "VIRTUAL_CURRENCIES_CHANGED": {
+          const balances = await native.virtualCurrencies();
+          store.set("virtualCurrencies", balances);
           break;
         }
         case "REMOTE_CONFIG_CHANGED": {

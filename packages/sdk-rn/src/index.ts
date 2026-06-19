@@ -1,7 +1,7 @@
 // @rovenue/sdk-rn — public surface.
 //
 // Imperative API:    Rovenue.configure(...), Rovenue.identify(...), ...
-// React hooks:       useCurrentUser, useEntitlement, useEntitlements, useCreditBalance
+// React hooks:       useCurrentUser, useEntitlement, useEntitlements, useVirtualCurrencies
 // Error classes:     RovenueError + 17 subclasses
 
 export { SDK_VERSION } from "./version";
@@ -52,7 +52,7 @@ export {
 export { useCurrentUser } from "./hooks/useCurrentUser";
 export { useEntitlement } from "./hooks/useEntitlement";
 export { useEntitlements } from "./hooks/useEntitlements";
-export { useCreditBalance } from "./hooks/useCreditBalance";
+export { useVirtualCurrencies, useVirtualCurrency } from "./hooks/useVirtualCurrencies";
 export {
   useRemoteConfig,
   useFlag,
@@ -62,7 +62,7 @@ export {
 import { configure } from "./api/configure";
 import { currentUser, identify, logOut } from "./api/identity";
 import { entitlement, entitlementsAll, refreshEntitlements } from "./api/entitlements";
-import { creditBalance, refreshCredits, consumeCredits } from "./api/credits";
+import { virtualCurrencies, virtualCurrency, refreshVirtualCurrencies } from "./api/virtualCurrencies";
 import { getOfferings, purchase, restorePurchases } from "./api/purchases";
 import {
   refreshRemoteConfig,
@@ -94,9 +94,9 @@ export const Rovenue = {
   entitlement,
   entitlementsAll,
   refreshEntitlements,
-  creditBalance,
-  refreshCredits,
-  consumeCredits,
+  virtualCurrencies,
+  virtualCurrency,
+  refreshVirtualCurrencies,
   getOfferings,
   purchase,
   restorePurchases,
