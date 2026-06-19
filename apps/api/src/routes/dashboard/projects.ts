@@ -9,6 +9,7 @@ import {
   API_KEY_KIND,
   API_KEY_PREFIX,
   WEBHOOK_EVENT_CATEGORIES,
+  type CreateApiKeyResponse,
   type CreateProjectResponse,
   type ProjectApiKey,
   type ProjectDetail,
@@ -218,6 +219,10 @@ export const updateProjectBodySchema = z
     message: "At least one field required",
   });
 
+const createApiKeyBodySchema = z.object({
+  label: z.string().trim().min(1).max(60),
+});
+
 export const projectsRoute = new Hono()
   .use("*", requireDashboardAuth)
   .get("/", async (c) => {
@@ -426,6 +431,65 @@ export const projectsRoute = new Hono()
     });
 
     const payload: RotateWebhookSecretResponse = { webhookSecret };
+    return c.json(ok(payload));
+  })
+  // POST /:id/api-keys — ADMIN+. Mints a Production publishable+secret
+  // pair (same material layout as project-create) and returns the
+  // secret plaintext exactly once. The audit payload carries only the
+  // publishable id — never the secret.
+  .post("/:id/api-keys", zValidator("json", createApiKeyBodySchema), async (c) => {
+    const id = c.req.param("id");
+    const user = c.get("user");
+    await assertProjectAccess(id, user.id, MemberRole.ADMIN);
+    const { label } = c.req.valid("json");
+
+    const apiKeyId = newApiKeyId();
+    const keyPublic = `${API_KEY_PREFIX[API_KEY_KIND.PUBLIC]}${urlSafeRandom(24)}`;
+
+    const { apiKey, secretKey } = await drizzle.db.transaction(async (tx) => {
+      const secretPlaintext = `${API_KEY_PREFIX[API_KEY_KIND.SECRET]}${apiKeyId}_${urlSafeRandom(32)}`;
+      const keySecretHash = await bcrypt.hash(secretPlaintext, BCRYPT_ROUNDS);
+
+      const createdApiKey = await drizzle.apiKeyRepo.createApiKey(tx, {
+        id: apiKeyId,
+        projectId: id,
+        label,
+        keyPublic,
+        keySecretHash,
+        environment: Environment.PRODUCTION,
+      });
+
+      await audit(
+        {
+          projectId: id,
+          userId: user.id,
+          action: "api_key.created",
+          resource: "api_key",
+          resourceId: apiKeyId,
+          after: {
+            id: apiKeyId,
+            label,
+            publicKey: keyPublic,
+            environment: Environment.PRODUCTION,
+          },
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
+
+      return { apiKey: createdApiKey, secretKey: secretPlaintext };
+    });
+
+    const payload: CreateApiKeyResponse = {
+      apiKey: {
+        id: apiKey.id,
+        label: apiKey.label,
+        publicKey: apiKey.keyPublic,
+        environment: apiKey.environment,
+        createdAt: apiKey.createdAt.toISOString(),
+      },
+      secretKey,
+    };
     return c.json(ok(payload));
   })
   // DELETE /:id — OWNER only. The audit row records who deleted the
