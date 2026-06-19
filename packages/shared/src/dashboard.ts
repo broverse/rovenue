@@ -1468,6 +1468,12 @@ export interface DashboardProductRow {
   storeIds: Record<string, string>;
   accessIds: string[];
   creditAmount: number | null;
+  /**
+   * Currency grants associated with this product.
+   * NOTE: the products LIST endpoint (GET /) does NOT populate this field —
+   * it always returns `[]`. Use the create (POST /), update (PATCH /:id),
+   * or detail (GET /:id) endpoints to obtain the populated grants.
+   */
   currencyGrants: DashboardProductCurrencyGrant[];
   isActive: boolean;
   metadata: Record<string, unknown>;

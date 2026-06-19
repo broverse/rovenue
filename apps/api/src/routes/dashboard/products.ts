@@ -286,7 +286,7 @@ export const productsDashboardRoute = new Hono()
     });
 
     let grants: Array<{ currencyId: string; amount: number }> = [];
-    if (body.currencyGrants && body.currencyGrants.length > 0) {
+    if (body.currencyGrants !== undefined) {
       for (const g of body.currencyGrants) {
         const vc = await drizzle.virtualCurrencyRepo.findVirtualCurrencyById(
           drizzle.db,
@@ -451,7 +451,7 @@ export const productsDashboardRoute = new Hono()
     }
 
     let grants: Array<{ currencyId: string; amount: number }> = [];
-    if (bodyGrants && bodyGrants.length > 0) {
+    if (bodyGrants !== undefined) {
       for (const g of bodyGrants) {
         const vc = await drizzle.virtualCurrencyRepo.findVirtualCurrencyById(
           drizzle.db,

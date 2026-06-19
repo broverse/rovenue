@@ -1,10 +1,13 @@
 // =============================================================
 // Dashboard products CRUD integration tests — identifier immutability
+// + currency grant persistence
 //
 // Mirrors the pattern of offerings.integration.test.ts:
 // minimal Hono app, real Postgres seeded inline, real Better Auth
 // session cookie so requireDashboardAuth runs unmocked.
 // =============================================================
+
+process.env.DATABASE_URL ??= "postgresql://rovenue:rovenue@localhost:5433/rovenue";
 
 import { afterAll, describe, expect, it } from "vitest";
 import { Hono } from "hono";
@@ -183,5 +186,177 @@ describe("createBodySchema — currencyGrants validation", () => {
       })),
     });
     expect(r.success).toBe(false);
+  });
+});
+
+// =============================================================
+// Currency grant persistence — real-DB integration tests
+// =============================================================
+
+async function seedVirtualCurrency(projectId: string, code: string) {
+  return drizzle.virtualCurrencyRepo.createVirtualCurrency(drizzle.db, {
+    projectId,
+    code,
+    name: `Currency ${code}`,
+  });
+}
+
+describe("POST /projects/:projectId/products — currencyGrants persistence", () => {
+  it("persists currencyGrants and reflects them in the response", async () => {
+    const { userId, cookie } = await createUserAndSession("cg-create");
+    const project = await seedProject("cg-create");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+
+    const vc = await seedVirtualCurrency(project.id, "GEM");
+
+    const app = buildApp();
+    const res = await app.request(`/projects/${project.id}/products`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "com.test.cg.pack",
+        type: "CONSUMABLE",
+        displayName: "Gem Pack",
+        currencyGrants: [{ currencyId: vc.id, amount: 500 }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as {
+      data: { product: { id: string; currencyGrants: Array<{ currencyId: string; amount: number }> } };
+    };
+    expect(data.product.currencyGrants).toHaveLength(1);
+    expect(data.product.currencyGrants[0]).toMatchObject({
+      currencyId: vc.id,
+      amount: 500,
+    });
+
+    // Verify the grant is persisted in the DB
+    const dbGrants = await drizzle.productCurrencyGrantRepo.listProductGrants(
+      drizzle.db,
+      data.product.id,
+    );
+    expect(dbGrants).toHaveLength(1);
+    expect(dbGrants[0]?.currencyId).toBe(vc.id);
+    expect(dbGrants[0]?.amount).toBe(500);
+  });
+
+  it("404s when currencyId does not belong to the project", async () => {
+    const { userId, cookie } = await createUserAndSession("cg-create-404");
+    const project = await seedProject("cg-create-404");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+
+    const app = buildApp();
+    const res = await app.request(`/projects/${project.id}/products`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "com.test.cg.pack.unknown",
+        type: "CONSUMABLE",
+        displayName: "Unknown Currency Pack",
+        currencyGrants: [{ currencyId: "nonexistent-currency-id", amount: 100 }],
+      }),
+    });
+
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("PATCH /projects/:projectId/products/:id — currencyGrants persistence", () => {
+  it("clears grants when PATCH sends currencyGrants: [] (regression for empty-array no-op bug)", async () => {
+    const { userId, cookie } = await createUserAndSession("cg-clear");
+    const project = await seedProject("cg-clear");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+
+    const vc = await seedVirtualCurrency(project.id, "COIN");
+
+    const app = buildApp();
+
+    // Create a product WITH a grant
+    const createRes = await app.request(`/projects/${project.id}/products`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "com.test.cg.clear",
+        type: "CONSUMABLE",
+        displayName: "Clearable Pack",
+        currencyGrants: [{ currencyId: vc.id, amount: 100 }],
+      }),
+    });
+    expect(createRes.status).toBe(200);
+    const { data: createData } = (await createRes.json()) as {
+      data: { product: { id: string } };
+    };
+    const productId = createData.product.id;
+
+    // Confirm grant exists before PATCH
+    const grantsBefore = await drizzle.productCurrencyGrantRepo.listProductGrants(
+      drizzle.db,
+      productId,
+    );
+    expect(grantsBefore).toHaveLength(1);
+
+    // PATCH with empty currencyGrants — must CLEAR existing grants
+    const patchRes = await app.request(
+      `/projects/${project.id}/products/${productId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ currencyGrants: [] }),
+      },
+    );
+    expect(patchRes.status).toBe(200);
+    const { data: patchData } = (await patchRes.json()) as {
+      data: { product: { currencyGrants: unknown[] } };
+    };
+    expect(patchData.product.currencyGrants).toHaveLength(0);
+
+    // Verify the DB is also cleared
+    const grantsAfter = await drizzle.productCurrencyGrantRepo.listProductGrants(
+      drizzle.db,
+      productId,
+    );
+    expect(grantsAfter).toHaveLength(0);
+  });
+
+  it("404s when PATCH currencyGrants references a currency not in the project", async () => {
+    const { userId, cookie } = await createUserAndSession("cg-patch-404");
+    const project = await seedProject("cg-patch-404");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+
+    const app = buildApp();
+
+    // Create a product with no grants
+    const createRes = await app.request(`/projects/${project.id}/products`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "com.test.cg.patch.unknown",
+        type: "CONSUMABLE",
+        displayName: "Unknown Patch Pack",
+      }),
+    });
+    expect(createRes.status).toBe(200);
+    const { data: createData } = (await createRes.json()) as {
+      data: { product: { id: string } };
+    };
+    const productId = createData.product.id;
+
+    // PATCH with a non-existent currencyId
+    const patchRes = await app.request(
+      `/projects/${project.id}/products/${productId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({
+          currencyGrants: [{ currencyId: "no-such-currency", amount: 999 }],
+        }),
+      },
+    );
+    expect(patchRes.status).toBe(404);
   });
 });
