@@ -88,15 +88,14 @@ public class RovenueModule: Module {
         AsyncFunction("refreshEntitlements") {
             try await Rovenue.shared.refreshEntitlements()
         }
-        AsyncFunction("creditBalance") { () -> Double in
+        AsyncFunction("virtualCurrencies") { () -> [String: Double] in
             // Long → Double is lossless up to 2^53.
-            Double(await Rovenue.shared.creditBalance())
+            await Rovenue.shared.virtualCurrencyBalances().mapValues { Double($0) }
         }
-        AsyncFunction("refreshCredits") { try await Rovenue.shared.refreshCredits() }
-        AsyncFunction("consumeCredits") { (amount: Double, description: String?) -> Double in
-            let b = try await Rovenue.shared.consumeCredits(Int64(amount), description: description)
-            return Double(b)
+        AsyncFunction("virtualCurrency") { (code: String) -> Double in
+            Double(await Rovenue.shared.virtualCurrency(code))
         }
+        AsyncFunction("refreshVirtualCurrencies") { try await Rovenue.shared.refreshVirtualCurrencies() }
         // ---------------- Remote Config ----------------
         AsyncFunction("refreshRemoteConfig") { try await Rovenue.shared.refreshRemoteConfig() }
         AsyncFunction("remoteConfigBool") { (key: String, fallback: Bool) -> Bool in
@@ -323,7 +322,7 @@ public class RovenueModule: Module {
     private static func dtoFromPurchaseResult(_ r: PurchaseResult) -> [String: Any?] {
         [
             "entitlements": r.entitlements.map(dtoFromEntitlement),
-            "creditBalance": Double(r.creditBalance),
+            "virtualCurrencies": r.virtualCurrencies.mapValues { Double($0) },
             "productId": r.productId,
             "storeTransactionId": r.storeTransactionId,
         ]
@@ -346,7 +345,7 @@ public class RovenueModule: Module {
         switch event {
         case .entitlementsChanged: return "ENTITLEMENTS_CHANGED"
         case .identityChanged:     return "IDENTITY_CHANGED"
-        case .creditBalanceChanged: return "CREDIT_BALANCE_CHANGED"
+        case .virtualCurrenciesChanged: return "VIRTUAL_CURRENCIES_CHANGED"
         case .remoteConfigChanged: return "REMOTE_CONFIG_CHANGED"
         }
     }
