@@ -176,3 +176,28 @@ export function evalSparkSeries(seed: number): ReadonlyArray<number> {
   }
   return points;
 }
+
+// =============================================================
+// Key (ID) validation — shared by the new-flag form's live check
+// =============================================================
+
+/** Allowed flag-key characters. Mirrors the on-submit rule and SDK lookup. */
+export const FLAG_KEY_PATTERN = /^[a-z0-9_-]+$/i;
+
+export type KeyStatus = "empty" | "invalid" | "available" | "taken";
+
+/**
+ * Classify a typed flag key against the keys already present in the selected
+ * environment. Case-sensitive exact match — mirrors the Postgres unique index
+ * on (projectId, env, key), where "Foo" and "foo" are distinct keys.
+ */
+export function deriveKeyStatus(
+  rawKey: string,
+  existingKeys: readonly string[],
+): KeyStatus {
+  const key = rawKey.trim();
+  if (key.length === 0) return "empty";
+  if (!FLAG_KEY_PATTERN.test(key)) return "invalid";
+  if (existingKeys.includes(key)) return "taken";
+  return "available";
+}

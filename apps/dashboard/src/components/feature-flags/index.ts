@@ -14,11 +14,14 @@ export { TagPill, type TagPillTone } from "./tag-pill";
 export { TypeBadge } from "./type-badge";
 export { VariantSplit } from "./variant-split";
 export {
+  deriveKeyStatus,
   evalSparkSeries,
+  FLAG_KEY_PATTERN,
   formatEvalCount,
   mapApiFeatureFlag,
   toDbEnv,
 } from "./format";
+export type { KeyStatus } from "./format";
 export type {
   Condition,
   FeatureFlag,
