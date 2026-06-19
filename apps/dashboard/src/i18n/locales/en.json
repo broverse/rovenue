@@ -854,7 +854,6 @@
         "displayNamePlaceholder": "Pro Monthly",
         "type": "Type",
         "period": "Billing period",
-        "creditAmount": "Credit amount",
         "storeIds": "Store identifiers",
         "groups": "Offerings",
         "groupsHint": "Add this product to one or more offerings.",
@@ -864,11 +863,19 @@
         "groupsDefaultBadge": "Default",
         "isActive": "Active"
       },
+      "currencyGrants": {
+        "label": "Currency grants",
+        "currency": "Currency",
+        "amount": "Amount",
+        "add": "Add grant",
+        "remove": "Remove grant",
+        "empty": "No currency grants — this product grants no virtual currency on purchase.",
+        "hint": "Granted to the buyer when this product is purchased."
+      },
       "errors": {
         "identifier-required": "Identifier is required.",
         "identifier-invalid": "Use only lowercase letters, numbers and underscores.",
         "name-required": "Display name is required.",
-        "credit-invalid": "Enter a valid credit amount.",
         "store-required": "Add at least one store identifier.",
         "unknown": "Something went wrong. Please try again."
       },

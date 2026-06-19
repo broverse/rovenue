@@ -19,6 +19,7 @@ import {
   useUpdateProduct,
 } from "../../lib/hooks/useProjectProducts";
 import { useProjectAccess } from "../../lib/hooks/useProjectAccess";
+import { useVirtualCurrencies } from "../../lib/hooks/useVirtualCurrencies";
 import { StoreIdentifiersFieldset } from "./store-identifier-fields";
 
 type Props = {
@@ -30,6 +31,8 @@ type Props = {
   onSaved?: (id: string) => void;
 };
 
+type CurrencyGrantRow = { currencyId: string; amount: string };
+
 type FormState = {
   identifier: string;
   displayName: string;
@@ -38,9 +41,9 @@ type FormState = {
   iosId: string;
   androidId: string;
   webId: string;
-  creditAmount: string;
   isActive: boolean;
   accessIds: string[];
+  currencyGrants: CurrencyGrantRow[];
 };
 
 const EMPTY: FormState = {
@@ -51,9 +54,9 @@ const EMPTY: FormState = {
   iosId: "",
   androidId: "",
   webId: "",
-  creditAmount: "",
   isActive: true,
   accessIds: [],
+  currencyGrants: [],
 };
 
 const SLUG_RE = /^[a-zA-Z0-9._:-]+$/;
@@ -73,9 +76,12 @@ function rowToForm(row: DashboardProductRow): FormState {
     iosId: stores.ios ?? "",
     androidId: stores.android ?? "",
     webId: stores.web ?? "",
-    creditAmount: row.creditAmount != null ? String(row.creditAmount) : "",
     isActive: row.isActive,
     accessIds: row.accessIds ?? [],
+    currencyGrants: (row.currencyGrants ?? []).map((g) => ({
+      currencyId: g.currencyId,
+      amount: String(g.amount),
+    })),
   };
 }
 
@@ -93,8 +99,10 @@ export function ProductFormModal({
   const update = useUpdateProduct(projectId);
   const existing = useProductById(projectId, mode === "edit" ? editProductId! : null);
   const accessQuery = useProjectAccess(projectId);
+  const currenciesQuery = useVirtualCurrencies(projectId);
 
   const accessRows = accessQuery.data?.rows ?? [];
+  const allCurrencies = currenciesQuery.data ?? [];
 
   const [form, setForm] = useState<FormState>(EMPTY);
   const [error, setError] = useState<string | null>(null);
@@ -120,11 +128,6 @@ export function ProductFormModal({
     if (!form.identifier.trim()) return "identifier-required";
     if (!SLUG_RE.test(form.identifier.trim())) return "identifier-invalid";
     if (!form.displayName.trim()) return "name-required";
-    if (form.type === "CONSUMABLE") {
-      if (form.creditAmount && Number.isNaN(Number(form.creditAmount))) {
-        return "credit-invalid";
-      }
-    }
     if (!form.iosId.trim() && !form.androidId.trim() && !form.webId.trim()) {
       return "store-required";
     }
@@ -153,10 +156,13 @@ export function ProductFormModal({
       delete baseMeta.period;
     }
 
-    const creditAmount =
-      form.type === "CONSUMABLE" && form.creditAmount.trim() !== ""
-        ? Number(form.creditAmount)
-        : null;
+    // Filter out incomplete rows before sending to the backend.
+    const currencyGrants = form.currencyGrants
+      .filter((g) => {
+        const amt = Number(g.amount);
+        return g.currencyId.trim() !== "" && !Number.isNaN(amt) && amt > 0;
+      })
+      .map((g) => ({ currencyId: g.currencyId, amount: Number(g.amount) }));
 
     try {
       let savedId: string;
@@ -167,7 +173,7 @@ export function ProductFormModal({
           type: form.type,
           storeIds,
           accessIds: form.accessIds,
-          creditAmount,
+          currencyGrants,
           isActive: form.isActive,
           metadata: baseMeta,
         };
@@ -180,7 +186,7 @@ export function ProductFormModal({
           type: form.type,
           storeIds,
           accessIds: form.accessIds,
-          creditAmount,
+          currencyGrants,
           isActive: form.isActive,
           metadata: baseMeta,
         };
@@ -246,6 +252,7 @@ export function ProductFormModal({
                 setForm={setForm}
                 set={set}
                 accessRows={accessRows}
+                allCurrencies={allCurrencies}
                 lockIdentifier={mode === "edit"}
               />
             )}
@@ -289,6 +296,7 @@ function FormBody({
   setForm,
   set,
   accessRows,
+  allCurrencies,
   lockIdentifier,
 }: {
   projectId: string;
@@ -296,6 +304,7 @@ function FormBody({
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
   set: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
   accessRows: ReadonlyArray<{ id: string; identifier: string; displayName: string }>;
+  allCurrencies: ReadonlyArray<{ id: string; name: string; code: string; archivedAt: string | null }>;
   lockIdentifier: boolean;
 }) {
   const { t } = useTranslation();
@@ -303,7 +312,32 @@ function FormBody({
   const idName = useId();
   const idType = useId();
   const idPeriod = useId();
-  const idCredit = useId();
+
+  // Active currencies are selectable; archived ones may appear in existing grants.
+  const activeCurrencies = useMemo(
+    () => allCurrencies.filter((c) => c.archivedAt === null),
+    [allCurrencies],
+  );
+
+  const addGrant = () =>
+    setForm((f) => ({
+      ...f,
+      currencyGrants: [...f.currencyGrants, { currencyId: "", amount: "" }],
+    }));
+
+  const removeGrant = (idx: number) =>
+    setForm((f) => ({
+      ...f,
+      currencyGrants: f.currencyGrants.filter((_, i) => i !== idx),
+    }));
+
+  const setGrant = (idx: number, patch: Partial<CurrencyGrantRow>) =>
+    setForm((f) => ({
+      ...f,
+      currencyGrants: f.currencyGrants.map((g, i) =>
+        i === idx ? { ...g, ...patch } : g,
+      ),
+    }));
 
   return (
     <div className="grid grid-cols-1 gap-4">
@@ -362,17 +396,6 @@ function FormBody({
               <option value="P1Y">{t("products.form.periods.yearly")}</option>
             </NativeSelect>
           </Field>
-        ) : form.type === "CONSUMABLE" ? (
-          <Field label={t("products.form.fields.creditAmount")} htmlFor={idCredit}>
-            <Input
-              id={idCredit}
-              type="number"
-              min={0}
-              value={form.creditAmount}
-              onChange={(e) => set("creditAmount", e.target.value)}
-              placeholder="100"
-            />
-          </Field>
         ) : (
           <div />
         )}
@@ -390,6 +413,75 @@ function FormBody({
           )
         }
       />
+
+      {/* Currency grants */}
+      <div>
+        <div className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-rv-mute-500">
+          {t("products.form.currencyGrants.label")}
+        </div>
+        <div className="flex flex-col gap-2 rounded-md border border-rv-divider bg-rv-c2/50 p-3">
+          {form.currencyGrants.length === 0 && (
+            <p className="text-xs text-rv-mute-500">
+              {t("products.form.currencyGrants.empty")}
+            </p>
+          )}
+          {form.currencyGrants.map((g, idx) => {
+            // Resolve label for potentially-archived currency.
+            const match = allCurrencies.find((c) => c.id === g.currencyId);
+            return (
+              <div key={idx} className="flex items-center gap-2">
+                <NativeSelect
+                  value={g.currencyId}
+                  onChange={(e) => setGrant(idx, { currencyId: e.target.value })}
+                  className="flex-1"
+                >
+                  <option value="">{t("products.form.currencyGrants.currency")}</option>
+                  {/* Show current value if archived so it isn't silently dropped */}
+                  {match && match.archivedAt !== null && (
+                    <option key={match.id} value={match.id}>
+                      {match.name} ({match.code}) — archived
+                    </option>
+                  )}
+                  {activeCurrencies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.code})
+                    </option>
+                  ))}
+                </NativeSelect>
+                <Input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={g.amount}
+                  onChange={(e) => setGrant(idx, { amount: e.target.value })}
+                  placeholder={t("products.form.currencyGrants.amount")}
+                  className="w-24"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeGrant(idx)}
+                  className="shrink-0 rounded p-1 text-rv-mute-500 transition hover:bg-rv-c2 hover:text-rv-danger"
+                  aria-label={t("products.form.currencyGrants.remove")}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-1.5 flex items-center justify-between">
+          <p className="text-[11px] text-rv-mute-500">
+            {t("products.form.currencyGrants.hint")}
+          </p>
+          <button
+            type="button"
+            onClick={addGrant}
+            className="text-[11px] font-medium text-rv-accent hover:underline"
+          >
+            + {t("products.form.currencyGrants.add")}
+          </button>
+        </div>
+      </div>
 
       <div>
         <div className="mb-1 block text-[11px] font-medium uppercase tracking-wider text-rv-mute-500">
