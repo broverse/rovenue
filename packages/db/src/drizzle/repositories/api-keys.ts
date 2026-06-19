@@ -175,3 +175,35 @@ export async function createApiKey(
   if (!row) throw new Error("Failed to create api key");
   return row;
 }
+
+/**
+ * Revoke a single api key by setting `revokedAt`. Scoped to BOTH the
+ * key id and its owning project so a guessed id from another project
+ * can't be revoked, and only affects rows that are still active.
+ * Returns the affected row (sans secret) or null when nothing matched
+ * (already revoked, or wrong project) — callers map null to 404.
+ */
+export async function revokeApiKey(
+  db: Db,
+  projectId: string,
+  keyId: string,
+): Promise<ActiveApiKeyRow | null> {
+  const rows = await db
+    .update(apiKeys)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(apiKeys.id, keyId),
+        eq(apiKeys.projectId, projectId),
+        isNull(apiKeys.revokedAt),
+      ),
+    )
+    .returning({
+      id: apiKeys.id,
+      label: apiKeys.label,
+      keyPublic: apiKeys.keyPublic,
+      environment: apiKeys.environment,
+      createdAt: apiKeys.createdAt,
+    });
+  return rows[0] ?? null;
+}
