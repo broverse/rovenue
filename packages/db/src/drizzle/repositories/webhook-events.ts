@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { webhookEvents, type WebhookEvent } from "../schema";
 import { webhookEventStatus, webhookSource } from "../enums";
@@ -230,4 +230,24 @@ export async function deleteWebhookEventsOlderThan(
     if (Number(n) < batchSize) break;
   }
   return total;
+}
+
+/** Count webhook events processed in a billing period (for usage metering). */
+export async function countWebhookEventsInPeriod(
+  db: Db,
+  projectId: string,
+  periodStart: Date,
+  periodEnd: Date,
+): Promise<number> {
+  const [row] = await db
+    .select({ value: count() })
+    .from(webhookEvents)
+    .where(
+      and(
+        eq(webhookEvents.projectId, projectId),
+        gte(webhookEvents.createdAt, periodStart),
+        lt(webhookEvents.createdAt, periodEnd),
+      ),
+    );
+  return Number(row?.value ?? 0);
 }
