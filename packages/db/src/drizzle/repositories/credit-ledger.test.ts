@@ -59,6 +59,15 @@ async function seedSubscriber(projectId: string) {
   return subscriber;
 }
 
+async function seedCurrency(projectId: string) {
+  const [currency] = await db
+    .insert(schema.virtualCurrencies)
+    .values({ projectId, code: "COINS", name: "Coins" })
+    .returning();
+  if (!currency) throw new Error("seedCurrency: no row returned");
+  return currency;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -67,10 +76,12 @@ describe("insertCreditLedger", () => {
   it("writes exactly one outbox row per credit ledger row", async () => {
     const project = await seedProject();
     const subscriber = await seedSubscriber(project.id);
+    const currency = await seedCurrency(project.id);
 
     const inserted = await insertCreditLedger(db, {
       projectId: project.id,
       subscriberId: subscriber.id,
+      currencyId: currency.id,
       type: "PURCHASE",
       amount: 100,
       balance: 100,
@@ -103,6 +114,7 @@ describe("insertCreditLedger", () => {
       creditLedgerId: inserted.id,
       projectId: project.id,
       subscriberId: subscriber.id,
+      currencyId: currency.id,
       type: "PURCHASE",
       amount: 100,       // number, not string "100"
       balance: 100,      // number, not string "100"
@@ -115,6 +127,7 @@ describe("insertCreditLedger", () => {
 
   it("rolls back both writes if the credit ledger row fails (FK violation)", async () => {
     const project = await seedProject();
+    const currency = await seedCurrency(project.id);
 
     const nonExistentSubscriberId = "nonexistent-subscriber-id-that-does-not-exist";
 
@@ -130,6 +143,7 @@ describe("insertCreditLedger", () => {
       insertCreditLedger(db, {
         projectId: project.id,
         subscriberId: nonExistentSubscriberId,
+        currencyId: currency.id,
         type: "PURCHASE",
         amount: 50,
         balance: 50,
