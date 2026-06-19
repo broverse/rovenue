@@ -21,6 +21,22 @@ export type RefundResult =
 
 const TERMINAL = new Set(["REFUNDED", "REVOKED"]);
 
+/**
+ * Issues a merchant-initiated refund against the originating store. Records NO
+ * domain state — the incoming store webhook (charge.refunded / Play RTDN) is the
+ * single source of truth and writes the REFUND event + status + access revocation
+ * idempotently (decision D2).
+ *
+ * Double-submit safety (two refund calls before the webhook lands and flips
+ * status): the `TERMINAL` precheck below catches the common case, and each store
+ * is independently dedupe-safe at the API level —
+ *   - Stripe: the `refund_<purchaseId>` idempotency key makes a duplicate
+ *     `refunds.create` return the SAME refund object, never a second charge-back.
+ *   - Google Play: `orders.refund({ revoke: true })` is idempotent on Google's
+ *     side; a second call against an already-revoked order is rejected and
+ *     surfaces here as `store_error` (502) rather than refunding twice.
+ * Neither store can double-refund; the asymmetry is only in the error surface.
+ */
 export async function refundTransaction(input: {
   projectId: string;
   purchase: Pick<Purchase, "id" | "store" | "storeTransactionId" | "status">;
