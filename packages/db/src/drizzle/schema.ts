@@ -2618,20 +2618,20 @@ export const warehouseQueryRuns = pgTable(
   "warehouse_query_runs",
   {
     id: text("id").primaryKey().$defaultFn(() => createId()),
-    projectId: text("project_id")
+    projectId: text("projectId")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
-    userId: text("user_id")
+    userId: text("userId")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    executedAt: timestamp("executed_at", { withTimezone: true })
+    executedAt: timestamp("executedAt", { withTimezone: true })
       .notNull()
       .defaultNow(),
-    durationMs: integer("duration_ms"),
-    rowCount: integer("row_count"),
+    durationMs: integer("durationMs"),
+    rowCount: integer("rowCount"),
   },
   (t) => [
-    index("warehouse_query_runs_project_executed_idx").on(
+    index("warehouse_query_runs_projectId_executedAt_idx").on(
       t.projectId,
       t.executedAt,
     ),

@@ -1,5 +1,5 @@
 {
-  "id": "9ccec427-c7eb-4b83-a7ad-863621143954",
+  "id": "ff93cbc8-d7e8-4736-bd26-f777b99fc74a",
   "prevId": "3e5781f2-8100-494c-8979-8c3c4afd44c1",
   "version": "7",
   "dialect": "postgresql",
@@ -8685,50 +8685,50 @@
           "primaryKey": true,
           "notNull": true
         },
-        "project_id": {
-          "name": "project_id",
+        "projectId": {
+          "name": "projectId",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "user_id": {
-          "name": "user_id",
+        "userId": {
+          "name": "userId",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "executed_at": {
-          "name": "executed_at",
+        "executedAt": {
+          "name": "executedAt",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         },
-        "duration_ms": {
-          "name": "duration_ms",
+        "durationMs": {
+          "name": "durationMs",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
-        "row_count": {
-          "name": "row_count",
+        "rowCount": {
+          "name": "rowCount",
           "type": "integer",
           "primaryKey": false,
           "notNull": false
         }
       },
       "indexes": {
-        "warehouse_query_runs_project_executed_idx": {
-          "name": "warehouse_query_runs_project_executed_idx",
+        "warehouse_query_runs_projectId_executedAt_idx": {
+          "name": "warehouse_query_runs_projectId_executedAt_idx",
           "columns": [
             {
-              "expression": "project_id",
+              "expression": "projectId",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "executed_at",
+              "expression": "executedAt",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -8741,12 +8741,12 @@
         }
       },
       "foreignKeys": {
-        "warehouse_query_runs_project_id_projects_id_fk": {
-          "name": "warehouse_query_runs_project_id_projects_id_fk",
+        "warehouse_query_runs_projectId_projects_id_fk": {
+          "name": "warehouse_query_runs_projectId_projects_id_fk",
           "tableFrom": "warehouse_query_runs",
           "tableTo": "projects",
           "columnsFrom": [
-            "project_id"
+            "projectId"
           ],
           "columnsTo": [
             "id"
@@ -8754,12 +8754,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "warehouse_query_runs_user_id_user_id_fk": {
-          "name": "warehouse_query_runs_user_id_user_id_fk",
+        "warehouse_query_runs_userId_user_id_fk": {
+          "name": "warehouse_query_runs_userId_user_id_fk",
           "tableFrom": "warehouse_query_runs",
           "tableTo": "user",
           "columnsFrom": [
-            "user_id"
+            "userId"
           ],
           "columnsTo": [
             "id"
