@@ -10,6 +10,7 @@ import {
   Plus,
   ShieldCheck,
   Sparkles,
+  X,
 } from "lucide-react";
 import type { DashboardAccessRow, DashboardProductRow } from "@rovenue/shared";
 import { Button } from "../../ui/button";
@@ -26,6 +27,8 @@ type Props = {
   onEdit: () => void;
   onDelete: () => void;
   onCreate: () => void;
+  onLinkProducts: () => void;
+  onUnlinkProduct: (product: DashboardProductRow) => void;
 };
 
 const STORE_KEYS: StoreId[] = ["ios", "android", "web"];
@@ -49,6 +52,8 @@ export function AccessDetail({
   onEdit,
   onDelete,
   onCreate,
+  onLinkProducts,
+  onUnlinkProduct,
 }: Props) {
   if (!accessRow) {
     return <ConceptEmptyState hasAnyAccess={hasAnyAccess} onCreate={onCreate} />;
@@ -65,7 +70,11 @@ export function AccessDetail({
 
       <HowItWorks accessRow={accessRow} />
 
-      <GrantingProducts products={grantingProducts} />
+      <GrantingProducts
+        products={grantingProducts}
+        onLinkProducts={onLinkProducts}
+        onUnlinkProduct={onUnlinkProduct}
+      />
     </div>
   );
 }
@@ -153,8 +162,12 @@ function renderSnippet(identifier: string) {
 
 function GrantingProducts({
   products,
+  onLinkProducts,
+  onUnlinkProduct,
 }: {
   products: ReadonlyArray<DashboardProductRow>;
+  onLinkProducts: () => void;
+  onUnlinkProduct: (product: DashboardProductRow) => void;
 }) {
   const { t } = useTranslation();
 
@@ -170,6 +183,12 @@ function GrantingProducts({
             {products.length}
           </span>
         )}
+        <div className="ml-auto">
+          <Button variant="flat" size="sm" className="h-7" onClick={onLinkProducts}>
+            <Plus size={12} />
+            {t("access.grantingProducts.link", "Link products")}
+          </Button>
+        </div>
       </div>
 
       {products.length === 0 ? (
@@ -183,14 +202,14 @@ function GrantingProducts({
           <p className="mt-1 text-[11.5px] text-rv-mute-500">
             {t(
               "access.grantingProducts.emptyHint",
-              "Open a product and link it to this access so purchases unlock it.",
+              "Link a product so its purchases unlock this access.",
             )}
           </p>
         </div>
       ) : (
         <ul className="mt-3 flex flex-col gap-1.5">
           {products.map((p) => (
-            <ProductRow key={p.id} product={p} />
+            <ProductRow key={p.id} product={p} onUnlink={() => onUnlinkProduct(p)} />
           ))}
         </ul>
       )}
@@ -198,7 +217,14 @@ function GrantingProducts({
   );
 }
 
-function ProductRow({ product }: { product: DashboardProductRow }) {
+function ProductRow({
+  product,
+  onUnlink,
+}: {
+  product: DashboardProductRow;
+  onUnlink: () => void;
+}) {
+  const { t } = useTranslation();
   const stores = STORE_KEYS.filter((s) => Boolean(product.storeIds?.[s]));
   const typeLabel = TYPE_LABEL[product.type] ?? product.type;
 
@@ -228,6 +254,21 @@ function ProductRow({ product }: { product: DashboardProductRow }) {
         </div>
       </div>
       {stores.length > 0 && <StoreBadges stores={stores} size="sm" />}
+      <button
+        type="button"
+        onClick={onUnlink}
+        aria-label={t("access.grantingProducts.unlink", {
+          defaultValue: "Unlink {{name}}",
+          name: product.displayName,
+        })}
+        title={t("access.grantingProducts.unlink", {
+          defaultValue: "Unlink {{name}}",
+          name: product.displayName,
+        })}
+        className="rounded-md p-1 text-rv-mute-500 transition hover:bg-rv-c2 hover:text-rv-danger"
+      >
+        <X size={13} />
+      </button>
     </li>
   );
 }
