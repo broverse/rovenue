@@ -272,6 +272,8 @@ describe.sequential("POST /projects/:projectId/transactions/:id/refund", () => {
     );
 
     expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("VALIDATION_ERROR");
   });
 
   it("already refunded → 409", async () => {
@@ -287,6 +289,8 @@ describe.sequential("POST /projects/:projectId/transactions/:id/refund", () => {
     );
 
     expect(res.status).toBe(409);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("HTTP_ERROR");
   });
 
   it("unknown transaction id → 404", async () => {
@@ -296,6 +300,8 @@ describe.sequential("POST /projects/:projectId/transactions/:id/refund", () => {
     );
 
     expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("NOT_FOUND");
   });
 
   it("member without refunds:write capability → 403", async () => {
@@ -305,5 +311,60 @@ describe.sequential("POST /projects/:projectId/transactions/:id/refund", () => {
     );
 
     expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("FORBIDDEN");
+  });
+
+  it("store_error → 502 STORE_API_ERROR", async () => {
+    refundMock.mockResolvedValueOnce({
+      ok: false,
+      code: "store_error",
+      message: "Stripe API error.",
+    });
+
+    const res = await app.request(
+      `/projects/${projectId}/transactions/rev_txrefund_${RUN_ID}_stripe/refund`,
+      { method: "POST", headers: authHeaders },
+    );
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("STORE_API_ERROR");
+  });
+
+  it("missing_store_ref → 422 VALIDATION_ERROR", async () => {
+    refundMock.mockResolvedValueOnce({
+      ok: false,
+      code: "missing_store_ref",
+      message: "No store ref.",
+    });
+
+    const res = await app.request(
+      `/projects/${projectId}/transactions/rev_txrefund_${RUN_ID}_stripe/refund`,
+      { method: "POST", headers: authHeaders },
+    );
+
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("cross-project isolation → 404 when projectId path does not own the event", async () => {
+    // Seed a second project with its own owner. Attempt to refund the stripe
+    // revenue_event (which belongs to the primary projectId) via the second
+    // project's path. The route guards event.projectId !== projectId → 404.
+    const otherProjectId = await seedProject("other");
+    const otherOwner = await createUserAndSession("other_owner");
+    await addMember(otherProjectId, otherOwner.userId, "OWNER");
+    const otherAuthHeaders = { cookie: otherOwner.cookie };
+
+    const res = await app.request(
+      `/projects/${otherProjectId}/transactions/rev_txrefund_${RUN_ID}_stripe/refund`,
+      { method: "POST", headers: otherAuthHeaders },
+    );
+
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("NOT_FOUND");
   });
 });
