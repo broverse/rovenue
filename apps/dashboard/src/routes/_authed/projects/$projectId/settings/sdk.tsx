@@ -6,8 +6,8 @@ import type { ProjectDetail } from "@rovenue/shared";
 import { Button } from "../../../../../ui/button";
 import {
   CreateApiKeyDialog,
+  DOCS_URL,
   EndpointsCard,
-  HERO_STATS,
   KeysCard,
   QuickstartCard,
   ResourcesCard,
@@ -32,6 +32,12 @@ function SdkPage({ project }: { project: ProjectDetail }) {
   const { t } = useTranslation();
   const [createOpen, setCreateOpen] = useState(false);
   const openCreate = () => setCreateOpen(true);
+  // Prefer a production publishable key for the copy-paste snippets, falling
+  // back to whatever key exists; null keeps the `rvn_pk_live_…` placeholder.
+  const publishableKey =
+    project.apiKeys.find((k) => k.environment === "PRODUCTION")?.publicKey ??
+    project.apiKeys[0]?.publicKey ??
+    null;
 
   return (
     <>
@@ -43,11 +49,13 @@ function SdkPage({ project }: { project: ProjectDetail }) {
           <p className="mt-1 text-[12.5px] text-rv-mute-500 sm:text-[13px]">{t("sdkApi.subtitle")}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="flat" size="sm">
-            <BookOpen size={13} />
-            {t("sdkApi.actions.docs")}
-            <ArrowUpRight size={12} />
-          </Button>
+          <a href={DOCS_URL} target="_blank" rel="noreferrer noopener">
+            <Button variant="flat" size="sm">
+              <BookOpen size={13} />
+              {t("sdkApi.actions.docs")}
+              <ArrowUpRight size={12} />
+            </Button>
+          </a>
           <Button variant="flat" size="sm" onClick={openCreate}>
             <KeyRound size={13} />
             {t("sdkApi.actions.manageKeys")}
@@ -55,8 +63,8 @@ function SdkPage({ project }: { project: ProjectDetail }) {
         </div>
       </header>
 
-      <SdkHero stats={HERO_STATS} onCreateKey={openCreate} />
-      <QuickstartCard />
+      <SdkHero onCreateKey={openCreate} />
+      <QuickstartCard publishableKey={publishableKey} />
       <KeysCard projectId={project.id} apiKeys={project.apiKeys} onCreateKey={openCreate} />
       <SdkPackagesGrid />
 

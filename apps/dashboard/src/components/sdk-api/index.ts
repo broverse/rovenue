@@ -10,24 +10,21 @@ export { WebhookCard } from "./webhook-card";
 export { ResourcesCard } from "./resources-card";
 export {
   API_BASE_URL,
-  HERO_STATS,
+  API_REFERENCE_URL,
+  CHANGELOG_URL,
+  DOCS_URL,
   PLATFORMS,
-  PROJECT_SECRETS,
   REST_ENDPOINTS,
   RESOURCES,
   SDK_PACKAGES,
-  WEBHOOK_DELIVERIES,
-} from "./mock-data";
+} from "./sdk-content";
 export type {
   PlatformDescriptor,
   PlatformId,
-  ProjectSecret,
   ProjectSecretKind,
   ResourceLink,
   RestEndpoint,
   RestMethod,
-  SdkHeroStats,
   SdkPackage,
   SdkPackageStatus,
-  WebhookDelivery,
 } from "./types";

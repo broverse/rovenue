@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { ArrowUpRight, GitBranch } from "lucide-react";
 import { Chip, type ChipProps } from "../../ui/chip";
 import { CopyButton } from "../../ui/copy-button";
+import { DOCS_URL } from "./sdk-content";
 import type { SdkPackage } from "./types";
 
 const STATUS_TONE: Record<SdkPackage["status"], NonNullable<ChipProps["tone"]>> = {
@@ -44,9 +45,6 @@ export function SdkPackageCard({ pkg }: Props) {
           <div className="font-rv-mono text-[12px] font-medium text-foreground">
             v{pkg.version}
           </div>
-          <div className="text-[11px] text-rv-mute-500">
-            {t(`sdkApi.packages.published.${pkg.publishedKey}`)}
-          </div>
         </div>
       </header>
 
@@ -70,7 +68,9 @@ export function SdkPackageCard({ pkg }: Props) {
           <span className="font-rv-mono text-rv-mute-700">{pkg.repoLabel}</span>
         </span>
         <a
-          href="#"
+          href={DOCS_URL}
+          target="_blank"
+          rel="noreferrer noopener"
           className="inline-flex items-center gap-1 text-rv-accent-500 hover:text-rv-accent-400"
         >
           {t(`sdkApi.packages.docsLinks.${pkg.docsKey}`)}

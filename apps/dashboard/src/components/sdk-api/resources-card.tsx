@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { ArrowUpRight } from "lucide-react";
-import { RESOURCES } from "./mock-data";
+import { RESOURCES } from "./sdk-content";
 
 export function ResourcesCard() {
   const { t } = useTranslation();

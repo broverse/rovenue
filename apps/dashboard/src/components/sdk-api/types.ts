@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 
-export type PlatformId = "ios" | "android" | "react-native" | "web" | "rest";
+export type PlatformId = "ios" | "android" | "react-native" | "rest";
 
 export type PlatformDescriptor = {
   id: PlatformId;
@@ -25,7 +25,6 @@ export type SdkPackage = {
   icon: LucideIcon;
   iconClass: string;
   version: string;
-  publishedKey: string;
   status: SdkPackageStatus;
   install: string;
   installLanguage: string;
@@ -34,19 +33,6 @@ export type SdkPackage = {
 };
 
 export type ProjectSecretKind = "publishable" | "secret" | "webhook";
-
-export type ProjectSecret = {
-  id: string;
-  kind: ProjectSecretKind;
-  /** i18n key suffix under `sdkApi.keys.items`. */
-  labelKey: string;
-  value: string;
-  /** Truncated/preview value used when the secret is hidden. */
-  preview: string;
-  createdKey: string;
-  /** i18n key suffix under `sdkApi.keys.environments`. */
-  environmentKey: "production" | "sandbox";
-};
 
 export type RestMethod = "GET" | "POST" | "PATCH" | "DELETE";
 
@@ -60,15 +46,6 @@ export type RestEndpoint = {
   scopeKey: "read" | "write" | "admin";
 };
 
-export type WebhookDelivery = {
-  id: string;
-  status: "ok" | "retry" | "failed";
-  /** i18n key suffix under `sdkApi.webhooks.events`. */
-  eventKey: string;
-  latencyMs: number;
-  ageKey: string;
-};
-
 export type ResourceLink = {
   id: string;
   /** i18n key suffix under `sdkApi.resources.items`. */
@@ -77,20 +54,4 @@ export type ResourceLink = {
   descriptionKey: string;
   href: string;
   icon: LucideIcon;
-};
-
-export type SdkHeroStats = {
-  callsValue: string;
-  callsUnit: string;
-  callsDescriptionKey: string;
-  callsDescriptionVars?: Record<string, string | number>;
-  successValue: string;
-  successUnit: string;
-  successDescriptionKey: string;
-  latencyValue: string;
-  latencyUnit: string;
-  latencyDescriptionKey: string;
-  installsValue: string;
-  installsUnit: string;
-  installsDescriptionKey: string;
 };

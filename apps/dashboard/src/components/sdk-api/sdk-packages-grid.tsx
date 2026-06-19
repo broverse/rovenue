@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { ArrowUpRight } from "lucide-react";
-import { SDK_PACKAGES } from "./mock-data";
+import { CHANGELOG_URL, SDK_PACKAGES } from "./sdk-content";
 import { SdkPackageCard } from "./sdk-package-card";
 
 export function SdkPackagesGrid() {
@@ -18,7 +18,9 @@ export function SdkPackagesGrid() {
           </p>
         </div>
         <a
-          href="#"
+          href={CHANGELOG_URL}
+          target="_blank"
+          rel="noreferrer noopener"
           className="inline-flex items-center gap-1 text-[12px] text-rv-accent-500 hover:text-rv-accent-400"
         >
           {t("sdkApi.packages.changelog")}

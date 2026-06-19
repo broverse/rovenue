@@ -4,8 +4,7 @@ import { ArrowUpRight, BookOpen, KeyRound } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Chip } from "../../ui/chip";
 import { CodeBlock } from "../../ui/code-block";
-import { API_BASE_URL } from "./mock-data";
-import type { SdkHeroStats } from "./types";
+import { API_BASE_URL, API_REFERENCE_URL } from "./sdk-content";
 
 const heroStyle: CSSProperties = {
   background:
@@ -13,43 +12,11 @@ const heroStyle: CSSProperties = {
 };
 
 type Props = {
-  stats: SdkHeroStats;
   onCreateKey?: () => void;
 };
 
-export function SdkHero({ stats, onCreateKey }: Props) {
+export function SdkHero({ onCreateKey }: Props) {
   const { t } = useTranslation();
-
-  const tiles = [
-    {
-      labelKey: "calls",
-      value: stats.callsValue,
-      unit: stats.callsUnit,
-      description: t(stats.callsDescriptionKey, stats.callsDescriptionVars),
-      tone: "default" as const,
-    },
-    {
-      labelKey: "success",
-      value: stats.successValue,
-      unit: stats.successUnit,
-      description: t(stats.successDescriptionKey),
-      tone: "success" as const,
-    },
-    {
-      labelKey: "latency",
-      value: stats.latencyValue,
-      unit: stats.latencyUnit,
-      description: t(stats.latencyDescriptionKey),
-      tone: "default" as const,
-    },
-    {
-      labelKey: "installs",
-      value: stats.installsValue,
-      unit: stats.installsUnit,
-      description: t(stats.installsDescriptionKey),
-      tone: "default" as const,
-    },
-  ];
 
   return (
     <div
@@ -72,38 +39,17 @@ export function SdkHero({ stats, onCreateKey }: Props) {
             <KeyRound size={13} />
             {t("sdkApi.hero.actions.generateKey")}
           </Button>
-          <Button variant="flat" size="sm">
-            <BookOpen size={13} />
-            {t("sdkApi.hero.actions.openDocs")}
-            <ArrowUpRight size={12} />
-          </Button>
-        </div>
-
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {tiles.map((tile) => (
-            <div key={tile.labelKey}>
-              <div className="text-[10px] font-medium uppercase tracking-wider text-rv-mute-500">
-                {t(`sdkApi.hero.stats.${tile.labelKey}`)}
-              </div>
-              <div className="mt-1 font-rv-mono text-[17px] font-medium leading-none text-foreground sm:text-[20px]">
-                {tile.value}
-                {tile.unit ? (
-                  <span className="ml-1 text-[11px] font-normal text-rv-mute-500">
-                    {tile.unit}
-                  </span>
-                ) : null}
-              </div>
-              <div
-                className={
-                  tile.tone === "success"
-                    ? "mt-1 font-rv-mono text-[11px] text-rv-success"
-                    : "mt-1 font-rv-mono text-[11px] text-rv-mute-500"
-                }
-              >
-                {tile.description}
-              </div>
-            </div>
-          ))}
+          <a
+            href={API_REFERENCE_URL}
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            <Button variant="flat" size="sm">
+              <BookOpen size={13} />
+              {t("sdkApi.hero.actions.openDocs")}
+              <ArrowUpRight size={12} />
+            </Button>
+          </a>
         </div>
       </div>
 

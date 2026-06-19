@@ -5,7 +5,7 @@ import { Chip, type ChipProps } from "../../ui/chip";
 import { CopyButton } from "../../ui/copy-button";
 import { SearchInput } from "../../ui/search-input";
 import { cn } from "../../lib/cn";
-import { REST_ENDPOINTS, API_BASE_URL } from "./mock-data";
+import { REST_ENDPOINTS, API_BASE_URL, API_REFERENCE_URL } from "./sdk-content";
 import type { RestEndpoint, RestMethod } from "./types";
 
 const METHOD_TONE: Record<RestMethod, NonNullable<ChipProps["tone"]>> = {
@@ -52,7 +52,9 @@ export function EndpointsCard() {
           </p>
         </div>
         <a
-          href="#"
+          href={API_REFERENCE_URL}
+          target="_blank"
+          rel="noreferrer noopener"
           className="inline-flex items-center gap-1 text-[12px] text-rv-accent-500 hover:text-rv-accent-400"
         >
           {t("sdkApi.endpoints.openReference")}

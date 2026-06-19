@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "@tanstack/react-router";
 import { Plus, Trash2 } from "lucide-react";
 import type { ProjectApiKey } from "@rovenue/shared";
 import { Button } from "../../ui/button";
@@ -43,6 +44,7 @@ function formatRelative(iso: string): string {
 
 export function KeysCard({ projectId, apiKeys, onCreateKey }: Props) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const revoke = useRevokeApiKey(projectId);
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
@@ -99,7 +101,16 @@ export function KeysCard({ projectId, apiKeys, onCreateKey }: Props) {
         <span className="text-[12px] text-rv-mute-500">
           {t("sdkApi.keys.footer.note")}
         </span>
-        <Button variant="light" size="sm">
+        <Button
+          variant="light"
+          size="sm"
+          onClick={() =>
+            navigate({
+              to: "/projects/$projectId/settings/audit-logs",
+              params: { projectId },
+            })
+          }
+        >
           {t("sdkApi.keys.footer.audit")}
         </Button>
       </footer>

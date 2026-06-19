@@ -2,17 +2,29 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CodeBlock } from "../../ui/code-block";
 import { cn } from "../../lib/cn";
-import { PLATFORMS } from "./mock-data";
+import { PLATFORMS, PUBLISHABLE_KEY_PLACEHOLDER } from "./sdk-content";
 import type { PlatformId } from "./types";
 
 type Props = {
   initialPlatform?: PlatformId;
+  /**
+   * The project's publishable key, injected into the init snippets so the
+   * operator can copy a working `configure(...)` call. Null when the project
+   * has no key yet — the snippet then keeps the `rvn_pk_live_…` placeholder.
+   */
+  publishableKey?: string | null;
 };
 
-export function QuickstartCard({ initialPlatform = "react-native" }: Props) {
+export function QuickstartCard({
+  initialPlatform = "react-native",
+  publishableKey = null,
+}: Props) {
   const { t } = useTranslation();
   const [active, setActive] = useState<PlatformId>(initialPlatform);
   const platform = PLATFORMS.find((p) => p.id === active) ?? PLATFORMS[0];
+  const initSnippet = publishableKey
+    ? platform.initSnippet.replaceAll(PUBLISHABLE_KEY_PLACEHOLDER, publishableKey)
+    : platform.initSnippet;
 
   return (
     <section className="mb-4 rounded-lg border border-rv-divider bg-rv-c1">
@@ -84,7 +96,7 @@ export function QuickstartCard({ initialPlatform = "react-native" }: Props) {
           <CodeBlock
             language={platform.initLanguage}
             filename={platform.initFilename}
-            code={platform.initSnippet}
+            code={initSnippet}
             copyLabel={t("sdkApi.copy.idle")}
             copiedLabel={t("sdkApi.copy.copied")}
           />
