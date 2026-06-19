@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 import { useParams } from "@tanstack/react-router";
 import { Button } from "../../ui/button";
 import { useScheduledActions, useDeleteScheduledAction } from "../../lib/hooks/useProjectSubscriptions";
-import { RefundConfirmDialog } from "./refund-confirm-dialog";
+import { RefundConfirmDialog } from "../refund/refund-confirm-dialog";
+import { storeFullName } from "./store-chip";
 import type { Subscription } from "./types";
 
 type Props = { sub: Subscription };
@@ -198,7 +199,9 @@ export function ExpandedRow({ sub }: Props) {
         {sub.store !== "ios" && (
           <RefundConfirmDialog
             projectId={projectId}
-            sub={sub}
+            kind="subscription"
+            id={sub.id}
+            storeLabel={storeFullName(sub.store, t)}
             open={refundOpen}
             onClose={() => setRefundOpen(false)}
           />

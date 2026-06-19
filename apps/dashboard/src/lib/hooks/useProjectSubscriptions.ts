@@ -183,29 +183,6 @@ export function useGrantSubscription(projectId: string) {
   });
 }
 
-type RefundResponse = {
-  status: "refund_requested";
-  store: "stripe" | "play";
-  reference: string;
-};
-
-export function useRefundSubscription(projectId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (subscriptionId: string) =>
-      api<RefundResponse>(
-        `/dashboard/projects/${projectId}/subscriptions/${subscriptionId}/refund`,
-        { method: "POST" },
-      ),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["subscriptions", "list", projectId] });
-      void qc.invalidateQueries({ queryKey: ["subscriptions", "kpis", projectId] });
-      void qc.invalidateQueries({ queryKey: ["subscriptions", "composition", projectId] });
-      void qc.invalidateQueries({ queryKey: ["subscriptions", "scope-counts", projectId] });
-    },
-  });
-}
-
 export function useScheduleAction(projectId: string) {
   const qc = useQueryClient();
   return useMutation({

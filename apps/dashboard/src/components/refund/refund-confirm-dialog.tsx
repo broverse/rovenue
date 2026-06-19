@@ -2,28 +2,64 @@ import { Dialog } from "@base-ui-components/react/dialog";
 import { AlertTriangle, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/cn";
-import { useRefundSubscription } from "../../lib/hooks/useProjectSubscriptions";
+import { type RefundKind, useRefund } from "../../lib/hooks/useRefund";
 import { Button } from "../../ui/button";
-import { storeFullName } from "./store-chip";
-import type { Subscription } from "./types";
+
+// i18n keys differ per kind so the two existing translation namespaces keep
+// working; everything else (look, behaviour, store-confirms-later wording) is
+// shared. Tuples are [key, defaultValue].
+const COPY: Record<
+  RefundKind,
+  Record<"title" | "body" | "error" | "cancel" | "pending" | "confirm", [string, string]>
+> = {
+  transaction: {
+    title: ["transactions.inspector.refund.title", "Refund this transaction?"],
+    body: [
+      "transactions.inspector.refund.body",
+      "This sends a refund request to {{store}}. The transaction updates here once the store confirms.",
+    ],
+    error: ["transactions.inspector.refund.error", "Refund failed: {{message}}"],
+    cancel: ["transactions.inspector.refund.cancel", "Cancel"],
+    pending: ["transactions.inspector.refund.pending", "Requesting refund…"],
+    confirm: ["transactions.inspector.refund.confirm", "Refund"],
+  },
+  subscription: {
+    title: ["subscriptions.expanded.grants.refundDialog.title", "Refund this subscription?"],
+    body: [
+      "subscriptions.expanded.grants.refundDialog.body",
+      "This sends a refund request to {{store}}. The subscription updates here once the store confirms.",
+    ],
+    error: ["subscriptions.expanded.grants.refundDialog.error", "Refund failed: {{message}}"],
+    cancel: ["subscriptions.expanded.grants.refundDialog.cancel", "Cancel"],
+    pending: ["subscriptions.expanded.grants.refundDialog.pending", "Requesting refund…"],
+    confirm: ["subscriptions.expanded.grants.refundDialog.confirm", "Refund"],
+  },
+};
 
 export function RefundConfirmDialog({
   projectId,
-  sub,
+  kind,
+  id,
+  storeLabel,
   open,
   onClose,
 }: {
   projectId: string;
-  sub: Subscription;
+  kind: RefundKind;
+  /** Transaction id or subscription (purchase) id, depending on `kind`. */
+  id: string;
+  /** Display name of the store handling the refund, e.g. "Stripe". */
+  storeLabel: string;
   open: boolean;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const refund = useRefundSubscription(projectId);
+  const refund = useRefund(projectId, kind);
+  const copy = COPY[kind];
 
   async function handleConfirm() {
     try {
-      await refund.mutateAsync(sub.id);
+      await refund.mutateAsync(id);
       onClose();
     } catch {
       // error is surfaced inline via refund.error below
@@ -56,10 +92,10 @@ export function RefundConfirmDialog({
               </div>
               <div>
                 <Dialog.Title className="text-[15px] font-semibold leading-5">
-                  {t("subscriptions.expanded.grants.refundDialog.title", "Refund this subscription?")}
+                  {t(copy.title[0], copy.title[1])}
                 </Dialog.Title>
                 <Dialog.Description className="mt-0.5 text-[12px] text-rv-mute-500">
-                  {t("subscriptions.expanded.grants.refundDialog.body", "This sends a refund request to {{store}}. The subscription updates here once the store confirms.", { store: storeFullName(sub.store, t) })}
+                  {t(copy.body[0], copy.body[1], { store: storeLabel })}
                 </Dialog.Description>
               </div>
             </div>
@@ -79,7 +115,7 @@ export function RefundConfirmDialog({
                 role="alert"
                 className="rounded-md border border-rv-danger/30 bg-rv-danger/10 px-3 py-2 text-[12px] text-rv-danger"
               >
-                {t("subscriptions.expanded.grants.refundDialog.error", "Refund failed: {{message}}", {
+                {t(copy.error[0], copy.error[1], {
                   message: (refund.error as Error).message,
                 })}
               </div>
@@ -94,7 +130,7 @@ export function RefundConfirmDialog({
               onClick={onClose}
               disabled={refund.isPending}
             >
-              {t("subscriptions.expanded.grants.refundDialog.cancel", "Cancel")}
+              {t(copy.cancel[0], copy.cancel[1])}
             </Button>
             <Button
               type="button"
@@ -104,9 +140,7 @@ export function RefundConfirmDialog({
               disabled={refund.isPending}
               className="!bg-rv-danger !text-white hover:!bg-rv-danger/90 focus-visible:!ring-rv-danger"
             >
-              {refund.isPending
-                ? t("subscriptions.expanded.grants.refundDialog.pending", "Requesting refund…")
-                : t("subscriptions.expanded.grants.refundDialog.confirm", "Refund")}
+              {refund.isPending ? t(copy.pending[0], copy.pending[1]) : t(copy.confirm[0], copy.confirm[1])}
             </Button>
           </footer>
         </Dialog.Popup>

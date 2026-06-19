@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../../ui/button";
 import { cn } from "../../lib/cn";
 import { formatAbsMoney, formatExactMoney } from "./format";
-import { RefundConfirmDialog } from "./refund-confirm-dialog";
+import { RefundConfirmDialog } from "../refund/refund-confirm-dialog";
 import { TransactionActionsMenu } from "./transaction-actions-menu";
 import { TxIcon } from "./tx-icon";
 import { TxStatusChip } from "./tx-status-chip";
@@ -16,6 +16,12 @@ type Props = {
 };
 
 const escapeHtml = (s: string) => s.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function storeLabel(store: Transaction["store"]): string {
+  if (store === "stripe") return "Stripe";
+  if (store === "play") return "Google Play";
+  return store.charAt(0).toUpperCase() + store.slice(1);
+}
 
 const tokenRegex =
   /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
@@ -160,7 +166,14 @@ export function TransactionInspector({ tx, projectId }: Props) {
         </Button>
         <TransactionActionsMenu projectId={projectId} tx={tx} payload={payload} />
       </div>
-      <RefundConfirmDialog projectId={projectId} tx={tx} open={refundOpen} onClose={() => setRefundOpen(false)} />
+      <RefundConfirmDialog
+        projectId={projectId}
+        kind="transaction"
+        id={tx.id}
+        storeLabel={storeLabel(tx.store)}
+        open={refundOpen}
+        onClose={() => setRefundOpen(false)}
+      />
     </aside>
   );
 }
