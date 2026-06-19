@@ -53,7 +53,7 @@ export type ExperimentAssignmentDTO = {
 
 export type PurchaseResultDTO = {
   entitlements: EntitlementDTO[];
-  creditBalance: number;
+  virtualCurrencies: Record<string, number>;
   productId: string;
   storeTransactionId: string;
 };
@@ -94,10 +94,10 @@ export interface RovenueModuleSpec {
   entitlementsAll(): Promise<EntitlementDTO[]>;
   refreshEntitlements(): Promise<void>;
 
-  // Credits
-  creditBalance(): Promise<number>;
-  refreshCredits(): Promise<void>;
-  consumeCredits(amount: number, description: string | null): Promise<number>;
+  // Virtual currencies (multi-currency; reads only — spend is server-side)
+  virtualCurrencies(): Promise<Record<string, number>>;
+  virtualCurrency(code: string): Promise<number>;
+  refreshVirtualCurrencies(): Promise<void>;
 
   // Purchases
   getOfferings(): Promise<OfferingsDTO>;
