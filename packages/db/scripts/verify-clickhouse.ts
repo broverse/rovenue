@@ -170,6 +170,28 @@ async function main(): Promise<void> {
     console.log(JSON.stringify(consumers, null, 2));
   }
 
+  // ---------- Per-column assertions (migration 0015) ----------
+  //
+  // raw_credit_ledger must carry currencyId added by migration 0015
+  // (Virtual Currencies — Plan 2: Analytics).
+  const colRows = await client.query({
+    query: `
+      SELECT name FROM system.columns
+      WHERE database = 'rovenue' AND table = 'raw_credit_ledger' AND name = 'currencyId'
+    `,
+    format: "JSONEachRow",
+  });
+  const cols = (await colRows.json()) as Array<{ name: string }>;
+  const hasCurrencyId = cols.length > 0;
+  console.log(
+    `\nColumn assertions (migration 0015):\n  ${
+      hasCurrencyId ? "✓" : "✗"
+    } raw_credit_ledger.currencyId`,
+  );
+  if (!hasCurrencyId) {
+    drift++;
+  }
+
   await client.close();
 
   if (drift > 0) {
