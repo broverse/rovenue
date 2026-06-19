@@ -85,3 +85,4 @@ export * as integrationDeliveryRepo from "./repositories/integration-deliveries"
 export * as refundShieldResponseRepo from "./repositories/refund-shield-responses";
 export * as virtualCurrencyRepo from "./repositories/virtual-currencies";
 export * as productCurrencyGrantRepo from "./repositories/product-currency-grants";
+export * as warehouseQueryRunRepo from "./repositories/warehouse-query-runs";

@@ -2609,3 +2609,31 @@ export const integrationDeliveries = pgTable(
 
 export type IntegrationDelivery = typeof integrationDeliveries.$inferSelect;
 export type NewIntegrationDelivery = typeof integrationDeliveries.$inferInsert;
+
+// =============================================================
+// warehouse_query_runs (ad-hoc SQL query execution log)
+// =============================================================
+
+export const warehouseQueryRuns = pgTable(
+  "warehouse_query_runs",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    executedAt: timestamp("executed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    durationMs: integer("duration_ms"),
+    rowCount: integer("row_count"),
+  },
+  (t) => [
+    index("warehouse_query_runs_project_executed_idx").on(
+      t.projectId,
+      t.executedAt,
+    ),
+  ],
+);
