@@ -1,0 +1,53 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const refundsCreate = vi.fn();
+vi.mock("../stripe/stripe-webhook", () => ({ getStripeClient: () => ({ refunds: { create: refundsCreate } }) }));
+vi.mock("../../lib/project-credentials", () => ({
+  loadStripeCredentials: vi.fn(async () => ({ secretKey: "sk_test", webhookSecret: "whsec" })),
+  loadGoogleCredentials: vi.fn(async () => ({ packageName: "com.app", serviceAccount: { client_email: "a@b.com", private_key: "k" } })),
+}));
+const ordersRefund = vi.fn();
+vi.mock("googleapis", () => ({ google: { androidpublisher: () => ({ orders: { refund: ordersRefund } }) } }));
+vi.mock("../google/google-auth", () => ({ getGoogleAccessToken: vi.fn(async () => "tok") }));
+
+import { refundTransaction } from "./refund-transaction";
+
+beforeEach(() => { refundsCreate.mockReset(); ordersRefund.mockReset(); });
+
+it("rejects Apple", async () => {
+  const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "APP_STORE", storeTransactionId: "1000", status: "ACTIVE" } as any });
+  expect(r).toEqual({ ok: false, code: "apple_unsupported", message: expect.any(String) });
+});
+
+it("rejects already-refunded", async () => {
+  const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "STRIPE", storeTransactionId: "ch_1", status: "REFUNDED" } as any });
+  expect(r.ok).toBe(false);
+  if (!r.ok) expect(r.code).toBe("already_refunded");
+});
+
+it("refunds a Stripe charge", async () => {
+  refundsCreate.mockResolvedValue({ id: "re_1" });
+  const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "STRIPE", storeTransactionId: "ch_123", status: "ACTIVE" } as any });
+  expect(refundsCreate).toHaveBeenCalledWith({ charge: "ch_123" }, { idempotencyKey: "refund_pu" });
+  expect(r).toEqual({ ok: true, store: "stripe", reference: "re_1" });
+});
+
+it("uses payment_intent when ref starts with pi_", async () => {
+  refundsCreate.mockResolvedValue({ id: "re_2" });
+  await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "STRIPE", storeTransactionId: "pi_9", status: "ACTIVE" } as any });
+  expect(refundsCreate).toHaveBeenCalledWith({ payment_intent: "pi_9" }, { idempotencyKey: "refund_pu" });
+});
+
+it("refunds a Play order", async () => {
+  ordersRefund.mockResolvedValue({});
+  const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "PLAY_STORE", storeTransactionId: "GPA.1", status: "ACTIVE" } as any });
+  expect(ordersRefund).toHaveBeenCalledWith({ packageName: "com.app", orderId: "GPA.1", revoke: true });
+  expect(r).toEqual({ ok: true, store: "play", reference: "GPA.1" });
+});
+
+it("maps store SDK errors to store_error", async () => {
+  refundsCreate.mockRejectedValue(new Error("charge already refunded"));
+  const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "STRIPE", storeTransactionId: "ch_x", status: "ACTIVE" } as any });
+  expect(r.ok).toBe(false);
+  if (!r.ok) { expect(r.code).toBe("store_error"); expect(r.message).toContain("already refunded"); }
+});
