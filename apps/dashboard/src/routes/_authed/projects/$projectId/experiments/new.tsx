@@ -1604,18 +1604,17 @@ function WeightSlider({
           background: `linear-gradient(to right, var(--color-rv-accent-500) 0%, var(--color-rv-accent-500) ${pct * 100}%, var(--color-rv-c3) ${pct * 100}%, var(--color-rv-c3) 100%)`,
         }}
       />
-      <div className="flex w-20 items-center gap-1.5 rounded border border-rv-divider bg-rv-c1 px-2 py-1 font-rv-mono text-[11px] tabular-nums">
+      <div className="flex w-16 items-center gap-0.5 rounded border border-rv-divider bg-rv-c1 px-2 py-1 font-rv-mono text-[11px] tabular-nums focus-within:border-rv-accent-500">
         <input
           type="number"
           min={0}
-          max={1}
-          step={0.01}
-          value={value}
-          onChange={(e) => onChange(Number(e.target.value))}
-          className="w-full appearance-none border-0 bg-transparent p-0 text-[11px] focus:outline-none focus:ring-0"
+          max={100}
+          step={1}
+          value={Math.round(pct * 100)}
+          onChange={(e) => onChange((Number(e.target.value) || 0) / 100)}
+          className="w-full appearance-none border-0 bg-transparent p-0 text-right text-[11px] focus:outline-none focus:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
-        <span className="text-rv-mute-500">·</span>
-        <span className="text-rv-mute-500">{Math.round(pct * 100)}%</span>
+        <span className="text-rv-mute-500">%</span>
       </div>
     </div>
   );
