@@ -1,7 +1,8 @@
 import { useTranslation } from "react-i18next";
+import { Link } from "@tanstack/react-router";
 import { Activity, ArrowDown, ArrowUp, MoreHorizontal, RotateCw, TriangleAlert } from "lucide-react";
 import { Card, CardFooter, CardHeader } from "../../ui/card";
-import { Button } from "../../ui/button";
+import { Button, buttonVariants } from "../../ui/button";
 
 export type ActivityKind = "up" | "down" | "renew" | "alert";
 
@@ -43,13 +44,14 @@ function ActivityIcon({ kind, color }: { kind: ActivityKind; color: string }) {
 type Props = {
   events: ReadonlyArray<ActivityEvent>;
   live?: boolean;
+  projectId: string;
 };
 
 /**
  * Real-time event ticker — last 6 events with fade-in animation on
  * incoming rows.
  */
-export function RecentActivityPanel({ events, live }: Props) {
+export function RecentActivityPanel({ events, live, projectId }: Props) {
   const { t } = useTranslation();
   return (
     <Card className="flex h-full flex-col">
@@ -112,9 +114,13 @@ export function RecentActivityPanel({ events, live }: Props) {
         ))}
       </div>
       <CardFooter>
-        <Button variant="light" className="h-6 p-0 text-xs">
+        <Link
+          to="/projects/$projectId/live-events"
+          params={{ projectId }}
+          className={buttonVariants({ variant: "light", className: "h-6 p-0 text-xs" })}
+        >
           {t("panels.activity.viewAllEvents")}
-        </Button>
+        </Link>
       </CardFooter>
     </Card>
   );

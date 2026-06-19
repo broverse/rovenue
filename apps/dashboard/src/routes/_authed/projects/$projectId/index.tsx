@@ -564,7 +564,7 @@ function ProjectOverview() {
 
       <div className="mt-4 grid grid-cols-12 gap-4">
         <div className="col-span-12 lg:col-span-6">
-          <RecentActivityPanel events={panelActivity} live />
+          <RecentActivityPanel events={panelActivity} live projectId={projectId} />
         </div>
         <div className="col-span-12 lg:col-span-6">
           <ExperimentsPanel experiments={panelExperiments} projectId={projectId} />

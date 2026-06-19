@@ -8,10 +8,7 @@ import {
   Info,
   Layers,
   Search,
-  Terminal,
-  Webhook,
   X,
-  Zap,
 } from "lucide-react";
 import {
   EVENT_CATEGORIES,
@@ -253,18 +250,6 @@ function LiveEventsPage({ projectId }: { projectId: string }) {
               height={20}
             />
           </span>
-          <Button variant="flat" size="sm" onClick={() => setPaused((p) => !p)}>
-            {paused ? <Zap size={13} /> : <X size={13} />}
-            {paused ? t("liveEvents.actions.resume") : t("liveEvents.actions.pause")}
-          </Button>
-          <Button variant="flat" size="sm">
-            <Terminal size={13} />
-            {t("liveEvents.actions.export")}
-          </Button>
-          <Button variant="flat" size="sm">
-            <Webhook size={13} />
-            {t("liveEvents.actions.replay")}
-          </Button>
         </div>
       </header>
 
