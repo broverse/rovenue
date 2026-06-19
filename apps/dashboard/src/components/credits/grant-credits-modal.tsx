@@ -1,16 +1,15 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog } from "@base-ui-components/react/dialog";
 import { X } from "lucide-react";
 import type { GrantCreditsRequest } from "@rovenue/shared";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
-import { NativeSelect } from "../../ui/native-select";
 import { Segmented } from "../../ui/segmented";
 import { Textarea } from "../../ui/textarea";
 import { cn } from "../../lib/cn";
 import { useGrantCredits } from "../../lib/hooks/useProjectCredits";
-import { useSubscribers } from "../../lib/hooks/useSubscribers";
+import { SubscriberCombobox } from "../subscribers/subscriber-combobox";
 
 type CreditGrantType = "BONUS" | "PURCHASE" | "REFUND";
 
@@ -25,7 +24,6 @@ type Props = {
 export function GrantCreditsModal({ projectId, open, onClose }: Props) {
   const { t } = useTranslation();
 
-  const [subscriberSearch, setSubscriberSearch] = useState("");
   const [subscriberId, setSubscriberId] = useState("");
   const [type, setType] = useState<CreditGrantType>("BONUS");
   const [amount, setAmount] = useState("");
@@ -34,19 +32,8 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Debounce subscriber search like the subscription grant modal.
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleSearchChange = (v: string) => {
-    setSubscriberSearch(v);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setDebouncedSearch(v), 200);
-  };
-
   useEffect(() => {
     if (!open) return;
-    setSubscriberSearch("");
-    setDebouncedSearch("");
     setSubscriberId("");
     setType("BONUS");
     setAmount("");
@@ -55,17 +42,6 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
     setDescription("");
     setError(null);
   }, [open]);
-
-  const subscribersQuery = useSubscribers({
-    projectId,
-    q: debouncedSearch || undefined,
-    limit: 50,
-  });
-
-  const subscriberRows = useMemo(
-    () => subscribersQuery.data?.pages.flatMap((p) => p.subscribers) ?? [],
-    [subscribersQuery.data],
-  );
 
   const grant = useGrantCredits(projectId);
 
@@ -143,28 +119,12 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
           <div className="flex-1 overflow-y-auto px-5 py-4">
             <div className="grid grid-cols-1 gap-4">
               <Field label={t("credits.grant.fields.subscriber")} htmlFor={idSubscriber}>
-                <Input
-                  placeholder={t("credits.grant.fields.subscriberSearch")}
-                  value={subscriberSearch}
-                  onChange={(e) => handleSearchChange(e.target.value)}
-                  className="mb-1"
-                />
-                <NativeSelect
+                <SubscriberCombobox
                   id={idSubscriber}
+                  projectId={projectId}
                   value={subscriberId}
-                  onChange={(e) => setSubscriberId(e.target.value)}
-                >
-                  <option value="">
-                    {subscribersQuery.isPending
-                      ? t("common.loading")
-                      : t("credits.grant.fields.subscriberPlaceholder")}
-                  </option>
-                  {subscriberRows.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.appUserId}
-                    </option>
-                  ))}
-                </NativeSelect>
+                  onChange={setSubscriberId}
+                />
               </Field>
 
               <div>

@@ -15,6 +15,7 @@ export { PlatformTags } from "./platform-tags";
 export { RiskMeter } from "./risk-meter";
 export { ScopeTabs } from "./scope-tabs";
 export { SortPopover } from "./sort-popover";
+export { SubscriberCombobox } from "./subscriber-combobox";
 export { SubscriberDetailPanel } from "./subscriber-detail-panel";
 export {
   SubscriberFilterPopover,

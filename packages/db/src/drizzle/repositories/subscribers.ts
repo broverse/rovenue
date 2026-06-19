@@ -393,7 +393,8 @@ export interface ListSubscribersArgs {
   /** Page size, 1..100. The caller fetches `limit + 1` to detect
    *  the "has more" flag and trims here. */
   limit: number;
-  /** Case-insensitive substring match on appUserId. */
+  /** Case-insensitive substring match on appUserId, rovenueId, or the
+   *  subscriber id (the dashboard's "Rovenue ID"). */
   q?: string;
   /** Derived lifecycle status — matches the dashboard scope tabs. */
   status?: SubscriberStatusFilter;
@@ -450,11 +451,14 @@ export async function listSubscribers(
   if (args.q) {
     // appUserId is null for SDK-only subscribers, which makes an
     // appUserId-only ILIKE evaluate to NULL (excluded). OR in the
-    // rovenueId column so those rows stay searchable.
+    // device `rovenueId` column and the primary `id` (the cuid2 the
+    // dashboard surfaces as the "Rovenue ID") so a row is reachable by
+    // its app user id OR either identifier.
     whereClauses.push(
       or(
         ilike(subscribers.appUserId, `%${args.q}%`),
         ilike(subscribers.rovenueId, `%${args.q}%`),
+        ilike(subscribers.id, `%${args.q}%`),
       )!,
     );
   }

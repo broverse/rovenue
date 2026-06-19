@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog } from "@base-ui-components/react/dialog";
 import { X } from "lucide-react";
@@ -11,7 +11,7 @@ import { Textarea } from "../../ui/textarea";
 import { cn } from "../../lib/cn";
 import { useGrantSubscription } from "../../lib/hooks/useProjectSubscriptions";
 import { useProjectProducts } from "../../lib/hooks/useProjectProducts";
-import { useSubscribers } from "../../lib/hooks/useSubscribers";
+import { SubscriberCombobox } from "../subscribers/subscriber-combobox";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -86,7 +86,6 @@ export function GrantSubscriptionModal({
   const lockedSubscriber = Boolean(initialSubscriberId);
 
   // ── form state ────────────────────────────────────────────────────────────
-  const [subscriberSearch, setSubscriberSearch] = useState("");
   const [subscriberId, setSubscriberId] = useState("");
   const [productId, setProductId] = useState("");
   const [preset, setPreset] = useState<Preset>("1mo");
@@ -94,20 +93,9 @@ export function GrantSubscriptionModal({
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Debounce subscriber search so we don't hammer the API on every keystroke.
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleSearchChange = (v: string) => {
-    setSubscriberSearch(v);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setDebouncedSearch(v), 200);
-  };
-
   // Reset when modal opens.
   useEffect(() => {
     if (!open) return;
-    setSubscriberSearch("");
-    setDebouncedSearch("");
     setSubscriberId(initialSubscriberId ?? "");
     setProductId("");
     setPreset("1mo");
@@ -117,19 +105,9 @@ export function GrantSubscriptionModal({
   }, [open, initialSubscriberId]);
 
   // ── data queries ──────────────────────────────────────────────────────────
-  const subscribersQuery = useSubscribers({
-    projectId,
-    q: debouncedSearch || undefined,
-    limit: 50,
-  });
-
   const productsQuery = useProjectProducts({ projectId, limit: 200 });
 
   // Flatten paginated pages.
-  const subscriberRows = useMemo(
-    () => subscribersQuery.data?.pages.flatMap((p) => p.subscribers) ?? [],
-    [subscribersQuery.data],
-  );
   const productRows = useMemo(
     () => productsQuery.data?.pages.flatMap((p) => p.products) ?? [],
     [productsQuery.data],
@@ -235,36 +213,12 @@ export function GrantSubscriptionModal({
                     disabled
                   />
                 ) : (
-                  <>
-                    <Input
-                      placeholder={t(
-                        "subscriptions.grant.fields.subscriberSearch",
-                        "Search by user ID…",
-                      )}
-                      value={subscriberSearch}
-                      onChange={(e) => handleSearchChange(e.target.value)}
-                      className="mb-1"
-                    />
-                    <NativeSelect
-                      id={idSubscriber}
-                      value={subscriberId}
-                      onChange={(e) => setSubscriberId(e.target.value)}
-                    >
-                      <option value="">
-                        {subscribersQuery.isPending
-                          ? t("common.loading")
-                          : t(
-                              "subscriptions.grant.fields.subscriberPlaceholder",
-                              "— select subscriber —",
-                            )}
-                      </option>
-                      {subscriberRows.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.appUserId}
-                        </option>
-                      ))}
-                    </NativeSelect>
-                  </>
+                  <SubscriberCombobox
+                    id={idSubscriber}
+                    projectId={projectId}
+                    value={subscriberId}
+                    onChange={setSubscriberId}
+                  />
                 )}
               </Field>
 

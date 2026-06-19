@@ -68,8 +68,9 @@ function encodeCreditHistoryCursor(cursor: {
 //
 // Cursor pagination keyed on (createdAt DESC, id DESC) so the same
 // tuple serves as both sort key and tie-breaker. `q` does a simple
-// case-insensitive substring match on appUserId — we stop there
-// because JSON-column "contains anywhere" matching over the
+// case-insensitive substring match on appUserId, rovenueId, and the
+// subscriber id (surfaced as the "Rovenue ID" in the dashboard) — we
+// stop there because JSON-column "contains anywhere" matching over the
 // attributes blob isn't a portable filter.
 //
 // Detail endpoint lives in Task A7; this file is list-only.

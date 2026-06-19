@@ -270,7 +270,8 @@ export interface SubscriberListItem {
 }
 
 export interface SubscriberListFilters {
-  /** Free-text appUserId substring (case-insensitive). */
+  /** Free-text substring (case-insensitive) over appUserId / rovenueId /
+   *  the subscriber's Rovenue ID. */
   q?: string;
   /** Derived lifecycle status — drives the dashboard scope tabs. */
   status?: SubscriberListStatusFilter;
