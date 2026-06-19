@@ -328,4 +328,119 @@ describe("GET /projects/:projectId/credits/rollup — currencyCode filter", () =
     );
     expect(issued).toBe(5);
   });
+
+  it("rollup KPIs are scoped to the requested currencyCode (Postgres-backed)", async () => {
+    // Postgres-backed — does NOT need ClickHouse.
+    // Seed: one subscriber with two ledger rows: GLD balance=1000, GEM balance=5.
+    // ?currencyCode=GEM → outstanding=5, issued28d=5.
+    const { userId, cookie } = await createUserAndSession("pgscoped");
+    const project = await seedProject("pgscoped");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
+    await seedSubscriber({ projectId: project.id, suffix: "pgsc" });
+
+    const gld = await drizzle.virtualCurrencyRepo.createVirtualCurrency(drizzle.db, {
+      projectId: project.id,
+      code: "GLD",
+      name: "Gold",
+    });
+    const gem = await drizzle.virtualCurrencyRepo.createVirtualCurrency(drizzle.db, {
+      projectId: project.id,
+      code: "GEM",
+      name: "Gems",
+    });
+
+    const subId = `sub_credroute_${RUN_ID}pgsc`;
+    const db = getDb();
+    const cl = drizzle.schema.creditLedger;
+
+    await db.insert(cl).values([
+      {
+        projectId: project.id,
+        subscriberId: subId,
+        currencyId: gld.id,
+        type: "BONUS",
+        amount: 1000,
+        balance: 1000,
+      },
+      {
+        projectId: project.id,
+        subscriberId: subId,
+        currencyId: gem.id,
+        type: "BONUS",
+        amount: 5,
+        balance: 5,
+      },
+    ]);
+
+    const app = buildApp();
+
+    // Scoped to GEM: outstanding=5, issued28d=5
+    const resGem = await app.request(
+      `/projects/${project.id}/credits/rollup?currencyCode=GEM`,
+      { headers: { cookie } },
+    );
+    expect(resGem.status).toBe(200);
+    const bodyGem = (await resGem.json()) as {
+      data: { kpis: { outstanding: number; issued28d: number } };
+    };
+    expect(bodyGem.data.kpis.outstanding).toBe(5);
+    expect(bodyGem.data.kpis.issued28d).toBe(5);
+  });
+
+  it("rollup without currencyCode counts each (subscriber,currency) wallet once", async () => {
+    // Postgres-backed — does NOT need ClickHouse.
+    // Uses same project seeded by the previous test (reuses RUN_ID suffix "pgsc").
+    // No currencyCode → outstanding sums both wallets (1000+5=1005), walletCount=2.
+    const { userId, cookie } = await createUserAndSession("pgall");
+    const project = await seedProject("pgall");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "CUSTOMER_SUPPORT" });
+    await seedSubscriber({ projectId: project.id, suffix: "pgall" });
+
+    const gld = await drizzle.virtualCurrencyRepo.createVirtualCurrency(drizzle.db, {
+      projectId: project.id,
+      code: "GLD",
+      name: "Gold",
+    });
+    const gem = await drizzle.virtualCurrencyRepo.createVirtualCurrency(drizzle.db, {
+      projectId: project.id,
+      code: "GEM",
+      name: "Gems",
+    });
+
+    const subId = `sub_credroute_${RUN_ID}pgall`;
+    const db = getDb();
+    const cl = drizzle.schema.creditLedger;
+
+    await db.insert(cl).values([
+      {
+        projectId: project.id,
+        subscriberId: subId,
+        currencyId: gld.id,
+        type: "BONUS",
+        amount: 1000,
+        balance: 1000,
+      },
+      {
+        projectId: project.id,
+        subscriberId: subId,
+        currencyId: gem.id,
+        type: "BONUS",
+        amount: 5,
+        balance: 5,
+      },
+    ]);
+
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${project.id}/credits/rollup`,
+      { headers: { cookie } },
+    );
+    const body = (await res.json()) as {
+      data: { kpis: { outstanding: number; outstandingWalletCount: number } };
+    };
+    expect(body.data.kpis.outstanding).toBe(1005);
+    expect(body.data.kpis.outstandingWalletCount).toBe(2);
+  });
 });

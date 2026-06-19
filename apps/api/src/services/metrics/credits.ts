@@ -131,6 +131,19 @@ async function readVolume(
 }
 
 // =============================================================
+// Currency filter helper
+// =============================================================
+//
+// Returns a Drizzle sql fragment that appends "AND "currencyId" = $1"
+// when a currencyId is supplied, or an empty fragment otherwise.
+// Insert ${currencyClause(currencyId)} after the "projectId" predicate
+// in every credit_ledger raw-sql query.
+
+function currencyClause(currencyId?: string) {
+  return currencyId ? sql` AND "currencyId" = ${currencyId}` : sql``;
+}
+
+// =============================================================
 // CH: credit-pack revenue mix
 // =============================================================
 
@@ -144,6 +157,9 @@ async function readPackages(
   projectId: string,
   window: RollupWindow,
 ): Promise<ChPackageRow[]> {
+  // Intentionally project-wide: raw_revenue_events has no currencyId column —
+  // a credit-pack purchase is real-money revenue (USD), not a virtual-currency
+  // unit. Revenue attribution per currency is out of scope for this plan.
   return queryAnalytics<ChPackageRow>(
     projectId,
     `
@@ -180,7 +196,11 @@ async function readPackages(
 
 async function readOutstandingBalance(
   projectId: string,
+  currencyId?: string,
 ): Promise<{ outstanding: number; walletCount: number }> {
+  // DISTINCT ON ("subscriberId", "currencyId") so each (subscriber, currency)
+  // wallet is counted independently — a subscriber holding GLD and GEM holds
+  // two separate wallets that must both contribute to the outstanding total.
   const rows = await drizzle.db.execute<{
     outstanding: string | null;
     wallet_count: string | null;
@@ -189,10 +209,10 @@ async function readOutstandingBalance(
       COALESCE(SUM(balance), 0)::text                AS outstanding,
       COUNT(*) FILTER (WHERE balance > 0)::text      AS wallet_count
     FROM (
-      SELECT DISTINCT ON ("subscriberId") balance
+      SELECT DISTINCT ON ("subscriberId", "currencyId") balance
       FROM ${drizzle.schema.creditLedger}
-      WHERE "projectId" = ${projectId}
-      ORDER BY "subscriberId", "createdAt" DESC
+      WHERE "projectId" = ${projectId}${currencyClause(currencyId)}
+      ORDER BY "subscriberId", "currencyId", "createdAt" DESC
     ) latest
   `);
   const r = rows.rows[0];
@@ -209,10 +229,11 @@ async function readOutstandingBalance(
 async function readKpis(
   projectId: string,
   window: RollupWindow,
+  currencyId?: string,
 ): Promise<CreditsKpis> {
   const cl = drizzle.schema.creditLedger;
   const [{ outstanding, walletCount }, [windowAgg]] = await Promise.all([
-    readOutstandingBalance(projectId),
+    readOutstandingBalance(projectId, currencyId),
     drizzle.db
       .select({
         issued: sql<string>`COALESCE(SUM(CASE WHEN "amount" > 0 THEN "amount" ELSE 0 END), 0)::text`,
@@ -226,13 +247,14 @@ async function readKpis(
           eq(cl.projectId, projectId),
           gte(cl.createdAt, window.from),
           lte(cl.createdAt, window.to),
+          ...(currencyId ? [eq(cl.currencyId, currencyId)] : []),
         ),
       ),
   ]);
 
-  // Window-scoped CREDIT_PURCHASE USD via PG revenue_events
-  // (CH may not always be hot for a freshly seeded environment,
-  // and we already pay for the read elsewhere).
+  // Intentionally project-wide: revenue_events has no currencyId column —
+  // CREDIT_PURCHASE USD measures real-money revenue (dollars), not virtual-
+  // currency units. Revenue attribution per currency is out of scope.
   const revRows = await drizzle.db
     .select({
       sumUsd: sql<string>`COALESCE(SUM("amountUsd"), 0)::text`,
@@ -291,6 +313,7 @@ const ZERO_FLOW: CreditsFlowByType = {
 async function readFlowByType(
   projectId: string,
   window: RollupWindow,
+  currencyId?: string,
 ): Promise<{ inflow: CreditsFlowByType; outflow: CreditsFlowByType }> {
   const cl = drizzle.schema.creditLedger;
   const rows = await drizzle.db
@@ -304,6 +327,7 @@ async function readFlowByType(
         eq(cl.projectId, projectId),
         gte(cl.createdAt, window.from),
         lte(cl.createdAt, window.to),
+        ...(currencyId ? [eq(cl.currencyId, currencyId)] : []),
       ),
     )
     .groupBy(cl.type);
@@ -357,6 +381,7 @@ const AVG_AGE_LOOKBACK_MS = AGE_LOOKBACK_DAYS * DAY_MS;
 
 async function readLifetimeInflowSplit(
   projectId: string,
+  currencyId?: string,
 ): Promise<{ paid: number; promo: number; transfer: number }> {
   const cl = drizzle.schema.creditLedger;
   const rows = await drizzle.db
@@ -365,7 +390,13 @@ async function readLifetimeInflowSplit(
       total: sql<string>`COALESCE(SUM("amount"), 0)::text`,
     })
     .from(cl)
-    .where(and(eq(cl.projectId, projectId), gte(cl.amount, 1)))
+    .where(
+      and(
+        eq(cl.projectId, projectId),
+        gte(cl.amount, 1),
+        ...(currencyId ? [eq(cl.currencyId, currencyId)] : []),
+      ),
+    )
     .groupBy(cl.type);
   let paid = 0;
   let promo = 0;
@@ -381,6 +412,7 @@ async function readLifetimeInflowSplit(
 
 async function readAverageAgeDays(
   projectId: string,
+  currencyId?: string,
 ): Promise<number | null> {
   const cutoff = new Date(Date.now() - AVG_AGE_LOOKBACK_MS);
   const cl = drizzle.schema.creditLedger;
@@ -388,7 +420,7 @@ async function readAverageAgeDays(
     SELECT (SUM(EXTRACT(EPOCH FROM (NOW() - "createdAt")) * "amount")
             / NULLIF(SUM("amount"), 0)) / 86400.0 AS avg_days
     FROM ${cl}
-    WHERE "projectId" = ${projectId}
+    WHERE "projectId" = ${projectId}${currencyClause(currencyId)}
       AND "amount" > 0
       AND "createdAt" >= ${cutoff}
   `);
@@ -400,6 +432,9 @@ async function readWindowCreditPurchaseUsd(
   projectId: string,
   window: RollupWindow,
 ): Promise<number> {
+  // Intentionally project-wide: revenue_events has no currencyId column —
+  // CREDIT_PURCHASE USD is real-money revenue (dollars), not virtual-currency
+  // units. Revenue attribution per currency is out of scope.
   const rev = drizzle.schema.revenueEvents;
   const rows = await drizzle.db
     .select({
@@ -420,6 +455,7 @@ async function readWindowCreditPurchaseUsd(
 async function readWindowIssued(
   projectId: string,
   window: RollupWindow,
+  currencyId?: string,
 ): Promise<number> {
   const cl = drizzle.schema.creditLedger;
   const rows = await drizzle.db
@@ -432,6 +468,7 @@ async function readWindowIssued(
         eq(cl.projectId, projectId),
         gte(cl.createdAt, window.from),
         lte(cl.createdAt, window.to),
+        ...(currencyId ? [eq(cl.currencyId, currencyId)] : []),
       ),
     );
   return Number(rows[0]?.total ?? "0");
@@ -448,10 +485,11 @@ interface LiabilityInputs {
 async function readLiability(
   projectId: string,
   inputs: LiabilityInputs,
+  currencyId?: string,
 ): Promise<CreditsLiability> {
   const [split, averageAgeDays] = await Promise.all([
-    readLifetimeInflowSplit(projectId),
-    readAverageAgeDays(projectId),
+    readLifetimeInflowSplit(projectId, currencyId),
+    readAverageAgeDays(projectId, currencyId),
   ]);
 
   const totalInflow = split.paid + split.promo + split.transfer;
@@ -492,6 +530,7 @@ async function readLiability(
 async function readTopBurners(
   projectId: string,
   window: RollupWindow,
+  currencyId?: string,
 ): Promise<CreditsTopBurnerRow[]> {
   const cl = drizzle.schema.creditLedger;
   const rows = await drizzle.db
@@ -506,6 +545,7 @@ async function readTopBurners(
         lt(cl.amount, 0),
         gte(cl.createdAt, window.from),
         lte(cl.createdAt, window.to),
+        ...(currencyId ? [eq(cl.currencyId, currencyId)] : []),
       ),
     )
     .groupBy(sql`COALESCE(${cl.referenceType}, 'other')`)
@@ -543,12 +583,17 @@ function isCreditLedgerType(s: string): s is CreditLedgerType {
 
 async function readRecentLedger(
   projectId: string,
+  currencyId?: string,
 ): Promise<CreditsLedgerRow[]> {
   const cl = drizzle.schema.creditLedger;
   const rows = await drizzle.db
     .select()
     .from(cl)
-    .where(eq(cl.projectId, projectId))
+    .where(
+      currencyId
+        ? and(eq(cl.projectId, projectId), eq(cl.currencyId, currencyId))
+        : eq(cl.projectId, projectId),
+    )
     .orderBy(desc(cl.createdAt), desc(cl.id))
     .limit(LEDGER_LIMIT);
 
@@ -642,23 +687,27 @@ export async function getCreditsRollup(
     prevRevenueUsd,
     prevIssued,
   ] = await Promise.all([
-    readKpis(input.projectId, window),
+    readKpis(input.projectId, window, input.currencyId),
     readVolume(input.projectId, window, input.currencyId),
     readPackages(input.projectId, window),
-    readTopBurners(input.projectId, window),
-    readRecentLedger(input.projectId),
-    readFlowByType(input.projectId, window),
+    readTopBurners(input.projectId, window, input.currencyId),
+    readRecentLedger(input.projectId, input.currencyId),
+    readFlowByType(input.projectId, window, input.currencyId),
     readWindowCreditPurchaseUsd(input.projectId, prevWindow),
-    readWindowIssued(input.projectId, prevWindow),
+    readWindowIssued(input.projectId, prevWindow, input.currencyId),
   ]);
 
-  const liability = await readLiability(input.projectId, {
-    outstanding: kpis.outstanding,
-    windowRevenueUsd: Number(kpis.revenue28dUsd),
-    windowIssued: kpis.issued28d,
-    prevWindowRevenueUsd: prevRevenueUsd,
-    prevWindowIssued: prevIssued,
-  });
+  const liability = await readLiability(
+    input.projectId,
+    {
+      outstanding: kpis.outstanding,
+      windowRevenueUsd: Number(kpis.revenue28dUsd),
+      windowIssued: kpis.issued28d,
+      prevWindowRevenueUsd: prevRevenueUsd,
+      prevWindowIssued: prevIssued,
+    },
+    input.currencyId,
+  );
 
   const flow: CreditsFlow = {
     inflow: kpis.issued28d,
