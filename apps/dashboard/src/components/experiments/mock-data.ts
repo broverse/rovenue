@@ -23,6 +23,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
     group: "pricing",
     lift: 6.2,
     winner: null,
+    leadingVariant: null,
   },
   {
     id: "trial_length_7_vs_14",
@@ -41,6 +42,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
     group: "trial",
     lift: -1.4,
     winner: null,
+    leadingVariant: null,
   },
   {
     id: "offering_promo_card_copy",
@@ -59,6 +61,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
     group: "paywall",
     lift: 8.1,
     winner: null,
+    leadingVariant: "variant_a",
   },
   {
     id: "onboarding_copy_v3",
@@ -77,6 +80,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
     group: "onboarding",
     lift: 17.8,
     winner: "variant_b",
+    leadingVariant: null,
   },
   {
     id: "hard_paywall_day_2",
@@ -95,6 +99,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
     group: "paywall",
     lift: -4.2,
     winner: "control",
+    leadingVariant: null,
   },
   {
     id: "push_notif_permission_prime",
@@ -113,6 +118,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
     group: "engagement",
     lift: 2.1,
     winner: null,
+    leadingVariant: null,
   },
   {
     id: "credits_upsell_modal",
@@ -131,6 +137,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
     group: "monetization",
     lift: -0.8,
     winner: null,
+    leadingVariant: null,
   },
   {
     id: "weekly_subscription_unlock",
@@ -148,6 +155,7 @@ export const EXPERIMENTS: ReadonlyArray<ExperimentSummary> = [
     group: "pricing",
     lift: 0,
     winner: null,
+    leadingVariant: null,
   },
 ];
 

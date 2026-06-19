@@ -269,6 +269,107 @@ describe("experimentSchema rejections", () => {
       }),
     ).toThrow();
   });
+
+  test("rejects a variant with 0 weight — every arm must get traffic", () => {
+    expect(() =>
+      experimentSchema.parse({
+        type: "FLAG",
+        key: "zero-arm",
+        variants: [
+          { id: "a", name: "A", value: false, weight: 0 },
+          { id: "b", name: "B", value: true, weight: 1 },
+        ],
+      }),
+    ).toThrow(/traffic/i);
+  });
+});
+
+// =============================================================
+// experimentSchema — variants must differ (meaningless tests)
+// =============================================================
+
+describe("experimentSchema variant-value distinctness", () => {
+  test("rejects two OFFERING variants pointing at the same offering", () => {
+    expect(() =>
+      experimentSchema.parse({
+        type: "OFFERING",
+        key: "same-offering",
+        variants: [
+          { id: "control", name: "A", value: "weekly_first", weight: 0.5 },
+          { id: "variant_a", name: "B", value: "weekly_first", weight: 0.5 },
+        ],
+      }),
+    ).toThrow(/duplicate offering/i);
+  });
+
+  test("rejects a duplicate offering among 3 OFFERING variants", () => {
+    expect(() =>
+      experimentSchema.parse({
+        type: "OFFERING",
+        key: "dup-of-three",
+        variants: [
+          { id: "control", name: "A", value: "default", weight: 0.34 },
+          { id: "variant_a", name: "B", value: "weekly", weight: 0.33 },
+          { id: "variant_b", name: "C", value: "weekly", weight: 0.33 },
+        ],
+      }),
+    ).toThrow(/duplicate offering/i);
+  });
+
+  test("accepts distinct OFFERING variants", () => {
+    expect(() =>
+      experimentSchema.parse({
+        type: "OFFERING",
+        key: "ok-offering",
+        variants: [
+          { id: "control", name: "A", value: "default", weight: 0.5 },
+          { id: "variant_a", name: "B", value: "weekly_first", weight: 0.5 },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  test("rejects FLAG variants whose values are all identical", () => {
+    expect(() =>
+      experimentSchema.parse({
+        type: "FLAG",
+        key: "all-same-flag",
+        variants: [
+          { id: "control", name: "A", value: true, weight: 0.5 },
+          { id: "variant_a", name: "B", value: true, weight: 0.5 },
+        ],
+      }),
+    ).toThrow(/identical/i);
+  });
+
+  test("rejects ELEMENT variants whose values are all identical", () => {
+    expect(() =>
+      experimentSchema.parse({
+        type: "ELEMENT",
+        key: "all-same-element",
+        variants: [
+          { id: "control", name: "A", value: { ctaText: "Buy" }, weight: 0.5 },
+          { id: "variant_a", name: "B", value: { ctaText: "Buy" }, weight: 0.5 },
+        ],
+      }),
+    ).toThrow(/identical/i);
+  });
+
+  test("allows non-OFFERING variants to repeat a value as long as not all match", () => {
+    // A 3-arm FLAG where two arms share a value but a third differs is a
+    // legitimate (if unusual) test — only an all-identical set is rejected.
+    expect(() =>
+      experimentSchema.parse({
+        type: "ELEMENT",
+        key: "partial-dup",
+        variants: [
+          { id: "control", name: "A", value: { ctaText: "Buy" }, weight: 0.34 },
+          { id: "variant_a", name: "B", value: { ctaText: "Buy" }, weight: 0.33 },
+          { id: "variant_b", name: "C", value: { ctaText: "Go" }, weight: 0.33 },
+        ],
+      }),
+    ).not.toThrow();
+  });
 });
 
 // =============================================================

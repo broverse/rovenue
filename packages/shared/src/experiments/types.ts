@@ -90,6 +90,51 @@ export const experimentSchema = experimentObjectSchema
       }
       seen.add(variant.id);
     }
+
+    // Every arm must receive some traffic. A 0-weight variant is never
+    // shown to anyone (selectVariant gives it an empty bucket range), so
+    // it silently drops out of the test — a misconfiguration, not a split.
+    data.variants.forEach((variant, i) => {
+      if (variant.weight === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `variant "${variant.id}" has 0 weight — every variant must receive traffic`,
+          path: ["variants", i, "weight"],
+        });
+      }
+    });
+
+    // Variants must actually differ — otherwise the experiment compares
+    // identical treatments and can never produce a meaningful result.
+    //   OFFERING → each offering may appear at most once (a repeated
+    //              offering is always a mistake; the value space is large).
+    //   others   → reject only a wholly-identical set, since a value space
+    //              like FLAG-boolean legitimately can't be all-distinct.
+    const serialized = data.variants.map((v) => JSON.stringify(v.value ?? null));
+    if (data.type === EXPERIMENT_TYPE.OFFERING) {
+      const seenValues = new Set<string>();
+      data.variants.forEach((variant, i) => {
+        const fingerprint = serialized[i]!;
+        if (seenValues.has(fingerprint)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `duplicate offering across variants: ${String(variant.value)}`,
+            path: ["variants", i, "value"],
+          });
+        }
+        seenValues.add(fingerprint);
+      });
+    } else if (
+      data.variants.length > 0 &&
+      serialized.every((s) => s === serialized[0])
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "all variants have identical values — the experiment has nothing to compare",
+        path: ["variants"],
+      });
+    }
   });
 
 export type Experiment = z.infer<typeof experimentSchema>;

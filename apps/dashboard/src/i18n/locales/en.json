@@ -490,6 +490,7 @@
     "tabs": {
       "aria": "Settings sections",
       "general": "General",
+      "rovi": "Rovi",
       "sdk": "SDK & API keys",
       "billing": "Billing",
       "paymentMethods": "Payment methods",
@@ -2254,6 +2255,8 @@
         "weightSum": "Variant weights must sum to 1 (got {{sum}}).",
         "invalidJson": "Variant value must be valid JSON: {{message}}",
         "offeringMissing": "Select an offering for this variant",
+        "offeringDuplicate": "Each variant must use a different offering — two variants share one, so the test has nothing to compare.",
+        "zeroWeight": "Variant \"{{id}}\" gets 0% traffic. Every variant must receive some traffic.",
         "unknown": "Could not create experiment."
       },
       "flag": {
@@ -2310,7 +2313,7 @@
       "backToList": "Back to experiments",
       "notFound": "Experiment not found, or you don't have access to it.",
       "readOnlyBanner": {
-        "running": "This experiment is live. Configuration is locked — pause or complete it from the lifecycle bar before editing.",
+        "running": "This experiment is live. You can adjust the traffic split, name and description — everything else is locked. Pause it to change variants or targeting.",
         "paused": "This experiment is paused. Resume it to keep collecting data, or complete it to lock the result. Configuration is read-only.",
         "completed": "This experiment is completed. Configuration is locked — duplicate it to run another iteration."
       }

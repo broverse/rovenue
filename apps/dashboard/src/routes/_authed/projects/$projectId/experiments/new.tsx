@@ -301,7 +301,15 @@ export function NewExperimentPage({
   const stop = useStopExperiment();
 
   const status = initialExperiment?.status ?? "DRAFT";
-  const isReadOnly = isEdit && status !== "DRAFT";
+  // PAUSED / COMPLETED → the whole form is locked.
+  // RUNNING → the experiment is live, but the server still accepts traffic
+  // split + name/description edits, so we keep those editable and lock the
+  // rest (type, targeting, variant ids/values, add/remove).
+  const isLocked = isEdit && (status === "PAUSED" || status === "COMPLETED");
+  const isRunning = isEdit && status === "RUNNING";
+  // Drives the explanatory banner; the fieldset itself only hard-disables
+  // when fully locked so RUNNING can still edit its allowed subset.
+  const isReadOnly = isLocked || isRunning;
   const lifecycleBusy =
     start.isPending || pause.isPending || resume.isPending || stop.isPending;
 
@@ -337,6 +345,8 @@ export function NewExperimentPage({
     [variants],
   );
   const weightOk = Math.abs(weightSum - 1) <= 1e-6;
+  // A 0-weight variant never receives traffic — block submit until fixed.
+  const hasZeroWeight = variants.some((v) => Number(v.weight) === 0);
 
   const elementErrors = useMemo(() => {
     if (type !== "ELEMENT") return [] as Array<string | null>;
@@ -473,6 +483,16 @@ export function NewExperimentPage({
       return;
     }
 
+    // Every arm must receive traffic — a 0-weight variant is invisible and
+    // makes the split meaningless. Mirrors the server-side refinement.
+    const zeroWeight = parsedVariants.find((v) => v.weight === 0);
+    if (zeroWeight) {
+      setFormError(
+        t("experiments.new.errors.zeroWeight", { id: zeroWeight.id }),
+      );
+      return;
+    }
+
     if (type === "OFFERING") {
       const missing = parsedVariants.find(
         (v) => typeof v.value !== "string" || v.value.length === 0,
@@ -480,6 +500,17 @@ export function NewExperimentPage({
       if (missing) {
         setFormError(t("experiments.new.errors.offeringMissing"));
         return;
+      }
+      // No two variants may serve the same offering — otherwise the test
+      // compares identical treatments. Mirrors the server-side refinement.
+      const seenOfferings = new Set<string>();
+      for (const v of parsedVariants) {
+        const offering = v.value as string;
+        if (seenOfferings.has(offering)) {
+          setFormError(t("experiments.new.errors.offeringDuplicate"));
+          return;
+        }
+        seenOfferings.add(offering);
       }
     }
 
@@ -525,7 +556,11 @@ export function NewExperimentPage({
   };
 
   const submitDisabled =
-    create.isPending || update.isPending || !weightOk || !elementValid;
+    create.isPending ||
+    update.isPending ||
+    !weightOk ||
+    hasZeroWeight ||
+    !elementValid;
 
   return (
     <>
@@ -619,7 +654,7 @@ export function NewExperimentPage({
           </div>
         ) : null}
         <fieldset
-          disabled={isReadOnly}
+          disabled={isLocked}
           className="contents disabled:cursor-not-allowed disabled:opacity-60"
         >
         <Section
@@ -677,6 +712,7 @@ export function NewExperimentPage({
           >
             <NativeSelect
               value={type}
+              disabled={isRunning}
               onChange={(e) =>
                 setType(e.target.value as DashboardExperimentType)
               }
@@ -699,6 +735,7 @@ export function NewExperimentPage({
             >
               <NativeSelect
                 value={flagSubtype}
+                disabled={isRunning}
                 onChange={(e) =>
                   setFlagSubtype(e.target.value as FlagSubtype)
                 }
@@ -730,6 +767,20 @@ export function NewExperimentPage({
             </div>
           )}
 
+          {type === "OFFERING" &&
+            offerings.length > 0 &&
+            offerings.length < variants.length && (
+              <div className="flex items-start gap-2 rounded-md border border-rv-warning/30 bg-rv-warning/10 px-3 py-2 text-[12px] text-rv-warning">
+                <AlertCircle size={13} className="mt-0.5 flex-shrink-0" />
+                <p className="leading-snug">
+                  {t("experiments.new.offering.notEnough", {
+                    offerings: offerings.length,
+                    variants: variants.length,
+                  })}
+                </p>
+              </div>
+            )}
+
           <Field
             icon={<Users size={11} />}
             label={t("experiments.new.fields.audience")}
@@ -738,7 +789,7 @@ export function NewExperimentPage({
             <NativeSelect
               value={resolvedAudienceId}
               onChange={(e) => setAudienceId(e.target.value)}
-              disabled={audiencesLoading || audiences.length === 0}
+              disabled={isRunning || audiencesLoading || audiences.length === 0}
             >
               {audiences.length === 0 ? (
                 <option value="">
@@ -777,6 +828,15 @@ export function NewExperimentPage({
           <div className="flex flex-col gap-3">
             {variants.map((v, idx) => {
               const pct = Math.round((Number(v.weight) || 0) * 100);
+              // Offerings already claimed by the *other* variants — disabled
+              // in this variant's picker so two arms can't run the same
+              // offering (which would make the experiment a no-op).
+              const takenOfferings = new Set(
+                variants
+                  .filter((_, i) => i !== idx)
+                  .map((o) => o.offeringId)
+                  .filter(Boolean),
+              );
               return (
                 <div
                   key={idx}
@@ -804,7 +864,8 @@ export function NewExperimentPage({
                         type="button"
                         aria-label={t("experiments.new.removeVariant")}
                         onClick={() => removeVariant(idx)}
-                        className="ml-auto inline-flex size-6 cursor-pointer items-center justify-center rounded text-rv-mute-500 hover:bg-rv-c3 hover:text-rv-danger"
+                        disabled={isRunning}
+                        className="ml-auto inline-flex size-6 cursor-pointer items-center justify-center rounded text-rv-mute-500 hover:bg-rv-c3 hover:text-rv-danger disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-rv-mute-500"
                       >
                         <Trash2 size={12} />
                       </button>
@@ -823,6 +884,7 @@ export function NewExperimentPage({
                         aria-label={t("experiments.new.fields.variantId")}
                         mono
                         value={v.id}
+                        disabled={isRunning}
                         onChange={(e) =>
                           updateVariant(idx, { id: e.target.value })
                         }
@@ -865,13 +927,19 @@ export function NewExperimentPage({
                     />
                   </Field>
 
-                  <div className="mt-3">
+                  {/* Variant *values* are immutable once live — only the
+                      traffic split and copy can change on a RUNNING test. */}
+                  <fieldset
+                    disabled={isRunning}
+                    className="mt-3 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
                     <VariantValueEditor
                       type={type}
                       flagSubtype={flagSubtype}
                       variant={v}
                       offerings={offerings}
                       offeringsLoading={offeringsQuery.isLoading}
+                      takenOfferings={takenOfferings}
                       jsonError={elementErrors[idx] ?? null}
                       onFlagChange={(patch) => updateVariantFlag(idx, patch)}
                       onOfferingChange={(id) =>
@@ -884,7 +952,7 @@ export function NewExperimentPage({
                         updateVariant(idx, { element: next })
                       }
                     />
-                  </div>
+                  </fieldset>
                 </div>
               );
             })}
@@ -893,7 +961,8 @@ export function NewExperimentPage({
           <button
             type="button"
             onClick={addVariant}
-            className="mt-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-rv-divider-strong bg-transparent px-4 py-3 text-[12px] font-medium text-rv-mute-600 transition hover:border-rv-accent-500 hover:bg-rv-accent-500/5 hover:text-rv-accent-500"
+            disabled={isRunning}
+            className="mt-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-rv-divider-strong bg-transparent px-4 py-3 text-[12px] font-medium text-rv-mute-600 transition hover:border-rv-accent-500 hover:bg-rv-accent-500/5 hover:text-rv-accent-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-rv-divider-strong disabled:hover:bg-transparent disabled:hover:text-rv-mute-600"
           >
             <Plus size={13} />
             {t("experiments.new.addVariant")}
@@ -907,7 +976,7 @@ export function NewExperimentPage({
           </div>
         )}
 
-        {!isReadOnly ? (
+        {!isLocked ? (
           <div className="flex items-center gap-2 pt-2">
             <Button
               type="submit"
@@ -1073,6 +1142,7 @@ function VariantValueEditor({
   variant,
   offerings,
   offeringsLoading,
+  takenOfferings,
   jsonError,
   onFlagChange,
   onOfferingChange,
@@ -1084,6 +1154,7 @@ function VariantValueEditor({
   variant: DraftVariant;
   offerings: ReadonlyArray<{ id: string; identifier: string }>;
   offeringsLoading: boolean;
+  takenOfferings: ReadonlySet<string>;
   jsonError: string | null;
   onFlagChange: (patch: Partial<DraftVariant["flag"]>) => void;
   onOfferingChange: (identifier: string) => void;
@@ -1105,6 +1176,7 @@ function VariantValueEditor({
         value={variant.offeringId}
         offerings={offerings}
         loading={offeringsLoading}
+        takenOfferings={takenOfferings}
         onChange={onOfferingChange}
       />
     );
@@ -1180,11 +1252,13 @@ function OfferingValueEditor({
   value,
   offerings,
   loading,
+  takenOfferings,
   onChange,
 }: {
   value: string;
   offerings: ReadonlyArray<{ id: string; identifier: string }>;
   loading: boolean;
+  takenOfferings: ReadonlySet<string>;
   onChange: (identifier: string) => void;
 }) {
   const { t } = useTranslation();
@@ -1205,11 +1279,18 @@ function OfferingValueEditor({
             ? t("experiments.new.offering.empty")
             : t("experiments.new.offering.pick")}
         </option>
-        {offerings.map((g) => (
-          <option key={g.id} value={g.identifier}>
-            {g.identifier}
-          </option>
-        ))}
+        {offerings.map((g) => {
+          // Disable an offering already used by another variant — but never
+          // the one this variant currently holds, so it stays selectable.
+          const taken =
+            takenOfferings.has(g.identifier) && g.identifier !== value;
+          return (
+            <option key={g.id} value={g.identifier} disabled={taken}>
+              {g.identifier}
+              {taken ? ` · ${t("experiments.new.offering.inUse")}` : ""}
+            </option>
+          );
+        })}
       </NativeSelect>
     </Field>
   );

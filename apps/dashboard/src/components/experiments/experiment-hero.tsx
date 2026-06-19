@@ -54,7 +54,10 @@ export function ExperimentHero({ experiment, projectId }: Props) {
   const isCompleted = experiment.status === "completed";
   const isDraft = experiment.status === "draft";
   const showWinner =
-    experiment.confidence >= 0.8 && !experiment.winner && experiment.status === "running";
+    experiment.confidence >= 0.8 &&
+    !experiment.winner &&
+    experiment.status === "running" &&
+    experiment.leadingVariant !== null;
 
   const handleEdit = () => {
     void navigate({
@@ -246,7 +249,7 @@ export function ExperimentHero({ experiment, projectId }: Props) {
               i18nKey="experiments.hero.winnerBanner.message"
               values={{
                 confidence: (experiment.confidence * 100).toFixed(0),
-                variant: "variant_b",
+                variant: experiment.leadingVariant ?? "",
               }}
               components={[
                 <b key="v" className="font-rv-mono text-foreground" />,
@@ -262,7 +265,9 @@ export function ExperimentHero({ experiment, projectId }: Props) {
           </div>
           <Button variant="solid-primary">
             <Check size={13} />
-            {t("experiments.hero.winnerBanner.cta", { variant: "variant_b" })}
+            {t("experiments.hero.winnerBanner.cta", {
+              variant: experiment.leadingVariant ?? "",
+            })}
           </Button>
         </div>
       )}

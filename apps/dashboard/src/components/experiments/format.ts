@@ -106,6 +106,9 @@ export function mapApiExperiment(item: ExperimentListItem): ExperimentSummary {
     group: groupFromType(item.type),
     lift: 0,
     winner: item.winnerVariantId,
+    // Phase 3 hydrates this from the results endpoint; until then there is
+    // no real leader, so the "ship winner" banner stays hidden.
+    leadingVariant: null,
   };
 }
 

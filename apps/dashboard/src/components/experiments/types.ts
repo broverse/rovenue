@@ -41,6 +41,12 @@ export type ExperimentSummary = {
   lift: number;
   /** Variant id of the shipped winner, "control" if control prevailed. */
   winner: string | null;
+  /**
+   * Variant id currently leading on the primary metric (pre-ship), used
+   * by the "ship winner" banner. `null` until the results endpoint
+   * hydrates it — the banner stays hidden rather than naming a guess.
+   */
+  leadingVariant: string | null;
 };
 
 /** A single arm of an experiment. */

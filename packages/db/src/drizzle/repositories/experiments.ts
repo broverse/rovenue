@@ -1,5 +1,5 @@
 import { init } from "@paralleldrive/cuid2";
-import { and, count, eq } from "drizzle-orm";
+import { and, asc, count, eq } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   experiments,
@@ -45,6 +45,12 @@ export async function findRunningExperimentsByProject(
   db: Db,
   projectId: string,
 ): Promise<Experiment[]> {
+  // Deterministic order (oldest first) so the engine's mutual-exclusion
+  // arbitration is stable: when a subscriber qualifies for several
+  // experiments sharing a mutualExclusionGroup, the earliest-created one
+  // always claims them. Without an explicit ORDER BY the winner would
+  // depend on Postgres' physical row order and could differ across
+  // cache rebuilds. `id` is the tiebreaker for same-timestamp rows.
   return db
     .select()
     .from(experiments)
@@ -53,7 +59,8 @@ export async function findRunningExperimentsByProject(
         eq(experiments.projectId, projectId),
         eq(experiments.status, "RUNNING"),
       ),
-    );
+    )
+    .orderBy(asc(experiments.createdAt), asc(experiments.id));
 }
 
 export interface ExperimentFilters {
