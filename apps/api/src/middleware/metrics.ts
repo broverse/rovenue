@@ -14,14 +14,16 @@ export const metricsMiddleware: MiddlewareHandler = async (c, next) => {
   }
 
   const start = performance.now();
-  await next();
-  const seconds = (performance.now() - start) / 1000;
-
-  const labels = {
-    method: c.req.method,
-    route: c.req.routePath ?? "unmatched",
-    status: String(c.res.status),
-  };
-  httpRequestsTotal.inc(labels);
-  httpRequestDuration.observe(labels, seconds);
+  try {
+    await next();
+  } finally {
+    const seconds = (performance.now() - start) / 1000;
+    const labels = {
+      method: c.req.method,
+      route: c.req.routePath || "unmatched",
+      status: String(c.res?.status ?? 500),
+    };
+    httpRequestsTotal.inc(labels);
+    httpRequestDuration.observe(labels, seconds);
+  }
 };

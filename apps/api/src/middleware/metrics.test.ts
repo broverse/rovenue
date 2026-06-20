@@ -5,7 +5,7 @@ import { httpRequestsTotal, registry } from "../lib/metrics";
 
 describe("metricsMiddleware", () => {
   beforeEach(() => {
-    httpRequestsTotal.reset();
+    registry.resetMetrics();
   });
 
   function buildApp() {
