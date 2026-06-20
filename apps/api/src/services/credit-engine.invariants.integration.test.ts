@@ -75,4 +75,23 @@ describe("credit_ledger invariants", () => {
     expect(captured).toBeDefined();
     expect(flatMessages(captured)).toMatch(/append-only|credit_ledger is append-only/i);
   });
+
+  it("rejects un-flagged DELETE on a ledger row (append-only trigger)", async () => {
+    const db = getDb();
+    // Insert a valid row (positive balance) to attempt deleting.
+    const [row] = await db.insert(creditLedger).values({
+      projectId: P, subscriberId: S, currencyId: C,
+      type: "PURCHASE", amount: 20, balance: 20,
+    }).returning();
+    let captured: unknown;
+    try {
+      // Plain DELETE with no bypass flag — the trigger must reject it.
+      await db.delete(creditLedger).where(sql`id = ${row.id}`);
+    } catch (err) {
+      captured = err;
+    }
+    expect(captured).toBeDefined();
+    expect(flatMessages(captured)).toMatch(/append-only/i);
+    // afterAll cleans up this row via the authorized trigger-disable path.
+  });
 });

@@ -2,6 +2,7 @@ node_modules/
 dist/
 build/
 .turbo/
+.superpowers/
 coverage/
 .env
 .env.local

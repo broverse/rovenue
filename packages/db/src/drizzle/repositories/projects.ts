@@ -296,9 +296,10 @@ export async function updateProjectWebhookSecret(
  *
  * Sets `rovenue.allow_ledger_delete` for the current transaction so the
  * append-only trigger permits the cascading DELETE on `credit_ledger`.
- * Must be called inside an open transaction (the dashboard DELETE route
- * wraps it in `drizzle.db.transaction`); SET LOCAL is a no-op in
- * auto-commit mode so it is safe if called outside a transaction too.
+ * MUST be called inside an open transaction. `SET LOCAL` only takes effect
+ * within a transaction; outside one the cascading DELETE on `credit_ledger`
+ * would be rejected by the append-only trigger. The dashboard DELETE route
+ * wraps this in `drizzle.db.transaction`.
  */
 export async function deleteProject(
   db: DbOrTx,
