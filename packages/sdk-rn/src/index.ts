@@ -12,6 +12,7 @@ export {
   stripUndefined,
 } from "./events";
 export type { EventEnvelope, IdentityContext } from "./events";
+export type { TrackParams } from "./api/events";
 
 export type {
   User,
@@ -64,6 +65,7 @@ import { currentUser, identify, logOut } from "./api/identity";
 import { entitlement, entitlementsAll, refreshEntitlements } from "./api/entitlements";
 import { virtualCurrencies, virtualCurrency, refreshVirtualCurrencies } from "./api/virtualCurrencies";
 import { getOfferings, purchase, restorePurchases } from "./api/purchases";
+import { track } from "./api/events";
 import {
   refreshRemoteConfig,
   getRemoteConfig,
@@ -100,6 +102,7 @@ export const Rovenue = {
   getOfferings,
   purchase,
   restorePurchases,
+  track,
   refreshRemoteConfig,
   getRemoteConfig,
   getFlag,

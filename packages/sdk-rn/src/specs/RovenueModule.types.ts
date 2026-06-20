@@ -129,6 +129,9 @@ export interface RovenueModuleSpec {
   ): Promise<void>;
   flushSessionEvents(): Promise<number>;
 
+  // Generic event emission (`POST /v1/events`).
+  track(envelopeJson: string): Promise<void>;
+
   // Subscriber attributes — batch set + reserved-key setters + durable flush.
   setAttributes(attributes: Record<string, string | null>): Promise<void>;
   setEmail(email: string | null): Promise<void>;
