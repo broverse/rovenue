@@ -97,6 +97,24 @@ enum SessionEventKind {
     "Close",
 };
 
+dictionary FunnelClaimResult {
+    string subscriber_id;
+    string funnel_answers_json;
+};
+
+dictionary ClaimInstallParams {
+    string platform;
+    string locale;
+    string timezone;
+    string screen_dims;
+    string? device_model;
+    string? install_referrer;
+};
+
+callback interface FunnelClaimListener {
+    void on_funnel_claim_resolved(FunnelClaimResult result);
+};
+
 interface RovenueCore {
     [Throws=RovenueError]
     constructor(Config config);
@@ -181,4 +199,17 @@ interface RovenueCore {
     void register_observer(Observer obs);
     void set_foreground(boolean foreground);
     void shutdown();
+
+    [Throws=RovenueError]
+    FunnelClaimResult claim_funnel_token(string token);
+
+    [Throws=RovenueError]
+    FunnelClaimResult? claim_install(ClaimInstallParams params);
+
+    [Throws=RovenueError]
+    void claim_via_email(string email);
+
+    void register_funnel_claim_listener(FunnelClaimListener listener);
+
+    string install_id();
 };
