@@ -22,4 +22,8 @@ Pod::Spec.new do |s|
   }
   s.source_files       = 'Sources/Rovenue/**/*.swift'
   s.vendored_libraries = 'Sources/Rovenue/librovenue.a'
+  # Apple privacy manifest — bundled so the publishable CocoaPods artifact (the
+  # pod that ships the collecting code) carries its own PrivacyInfo.xcprivacy,
+  # not just the Expo bridge pod. The file lives in Sources/Rovenue/ already.
+  s.resource_bundles   = { 'Rovenue_privacy' => ['Sources/Rovenue/PrivacyInfo.xcprivacy'] }
 end
