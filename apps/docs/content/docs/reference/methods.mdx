@@ -1087,6 +1087,7 @@ The [`ChangeEvent`](/docs/reference/types#changeevent) values:
 | `claimFunnelToken` | `claimFunnelToken(token)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) | [`FunnelTokenNotFoundError`](/docs/reference/errors#error-table), [`FunnelTokenExpiredError`](/docs/reference/errors#error-table), [`FunnelTokenAlreadyClaimedError`](/docs/reference/errors#error-table) |
 | `claimInstall` | `claimInstall(params)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
 | `claimFromClipboard` | `claimFromClipboard()` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
+| `claimFromUrl` | `claimFromUrl(url)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
 | `claimViaEmail` | `claimViaEmail(email)` | `void` | — |
 | `installId` | `installId()` | `string` | — |
 | `addFunnelClaimListener` | `addFunnelClaimListener(cb)` | `() => void` | — |
@@ -1458,5 +1459,81 @@ Register a callback that fires whenever a funnel claim resolves — whether trig
     ```
   </Tab>
 </Tabs>
+
+---
+
+### `claimFromUrl`
+
+Parse and claim a funnel token from any URL the app receives via a Universal Link, App Link, or custom-scheme deep link. Call this whenever the OS hands your app a URL — it is safe to pass **any** URL; non-funnel URLs return `null` immediately without a network request.
+
+Recognized URL shapes:
+
+| Shape | Example |
+|-------|---------|
+| Universal Link / App Link path segment | `https://funnels.example.com/funnels/open/<token>` |
+| Query parameter (any host) | `https://example.com/promo?rovenue_funnel_token=<token>` |
+| `token=` on the `onboarding-complete` deep link | `myapp://onboarding-complete?token=<token>` |
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `url` | `string` | Yes | Any URL the app received from the OS. Non-funnel URLs are ignored and resolve to `null`. |
+
+**Returns** — `Promise<`[`FunnelClaimResult`](/docs/reference/types#funnelclaimresult)` | null>` (`null` for URLs that contain no recognizable funnel token — no network call is made)
+
+**Throws** — nothing (token errors from the server are surfaced via the [`addFunnelClaimListener`](#addfunnelclaimlistener) callback, not as rejections)
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+    import * as Linking from 'expo-linking';
+
+    // Warm start — app already open when the link is tapped:
+    Linking.addEventListener('url', ({ url }) => {
+      Rovenue.claimFromUrl(url);
+    });
+
+    // Cold start — app launched via the link:
+    const initial = await Linking.getInitialURL();
+    if (initial) await Rovenue.claimFromUrl(initial);
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // In SceneDelegate or SwiftUI .onOpenURL / Scene(_:openURLContexts:):
+    func scene(_ scene: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {
+        for ctx in contexts {
+            Task { await Rovenue.shared.claimFromUrl(ctx.url.absoluteString) }
+        }
+    }
+
+    // Or in SwiftUI:
+    .onOpenURL { url in
+        Task { await Rovenue.shared.claimFromUrl(url.absoluteString) }
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // In Activity.onNewIntent or NavController deep-link handler:
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.data?.toString()?.let { url ->
+            lifecycleScope.launch { Rovenue.shared.claimFromUrl(url) }
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+The OS-level deep-link configuration — iOS Associated Domains (for the funnel Universal Link domain), Android App Links intent filter, and any custom URL scheme — lives in the **consuming app**, not the SDK. See your platform's documentation for setup instructions.
+</Callout>
+
+When a funnel token is found and successfully claimed, the result is delivered via [`addFunnelClaimListener`](#addfunnelclaimlistener). The return value of `claimFromUrl` itself is `null` for non-funnel URLs and the [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) for matched ones.
+
+---
 
 **See also:** [Funnel Attribution guide](/docs/guides/funnel-attribution)
