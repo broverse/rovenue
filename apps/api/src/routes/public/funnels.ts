@@ -14,6 +14,7 @@
 // version stored in Postgres.
 // =============================================================
 
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { cors } from "hono/cors";
@@ -38,6 +39,27 @@ import {
 import { generateClaimToken, hashToken } from "../../services/funnel/token";
 import { emitFunnelEvent } from "../../services/funnel/outbox";
 import { resolveHost } from "../../services/custom-domains/host-resolver";
+import { endpointRateLimit } from "../../middleware/rate-limit";
+import { env } from "../../lib/env";
+
+// ---------------------------------------------------------------------------
+// Bounded recursive answer schema (F16).
+// ---------------------------------------------------------------------------
+const answerValueSchema: z.ZodType<unknown> = z.lazy(() =>
+  z.union([
+    z.string().max(2000),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(answerValueSchema).max(100),
+    z.record(z.string().max(100), answerValueSchema),
+  ]),
+);
+
+// First-hop IP from x-forwarded-for (used by both funnel rate limiters).
+function firstHopIp(c: Context): string {
+  return c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+}
 
 interface PublishedRuntimeConfig {
   id: string;
@@ -136,6 +158,7 @@ export const publicFunnelsRoute = new Hono()
   // ---------------------------------------------------------------
   .post(
     "/funnels/:slug/sessions",
+    endpointRateLimit({ name: "funnel:session", max: 30, identify: firstHopIp }),
     zValidator(
       "json",
       z.object({
@@ -197,6 +220,7 @@ export const publicFunnelsRoute = new Hono()
         sameSite: "Lax",
         maxAge: 30 * 24 * 60 * 60,
         path: "/",
+        secure: env.NODE_ENV === "production",
       });
 
       return c.json(
@@ -211,17 +235,22 @@ export const publicFunnelsRoute = new Hono()
   // ---------------------------------------------------------------
   .post(
     "/funnel-sessions/:sessionId/answers",
+    endpointRateLimit({ name: "funnel:answer", max: 120, identify: firstHopIp }),
     zValidator(
       "json",
       z.object({
         page_id: z.string(),
         question_id: z.string(),
-        answer: z.unknown(),
+        answer: answerValueSchema,
       }),
     ),
     async (c) => {
       const sid = c.req.param("sessionId");
       const body = c.req.valid("json");
+      // Hard 16 KB byte cap on answer payload (F16).
+      if (JSON.stringify(body.answer).length > 16_384) {
+        throw new HTTPException(413, { message: "Answer payload too large" });
+      }
       const session = await drizzle.funnelSessionRepo.findById(drizzle.db, sid);
       if (!session) {
         throw new HTTPException(404, { message: "Session not found" });
