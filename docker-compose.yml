@@ -446,6 +446,28 @@ services:
       - "3100"
     restart: unless-stopped
 
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    profiles: ["observability"]
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
+    expose:
+      - "9187"
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    profiles: ["observability"]
+    environment:
+      REDIS_ADDR: "redis://redis:6379"
+    expose:
+      - "9121"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
 volumes:
   rovenue-data:
   rovenue-clickhouse-data:
