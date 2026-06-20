@@ -89,7 +89,7 @@ import {
 import { SDK_VERSION } from "./version";
 import { getEmitter } from "./core/native";
 import { setLogHandler } from "./api/log";
-import { claimFunnelToken, claimInstall, claimViaEmail, installId, addFunnelClaimListener, claimFromClipboard } from "./api/funnel";
+import { claimFunnelToken, claimInstall, claimViaEmail, installId, addFunnelClaimListener, claimFromClipboard, claimFromUrl, extractFunnelToken } from "./api/funnel";
 
 export const Rovenue = {
   configure,
@@ -126,6 +126,7 @@ export const Rovenue = {
   claimInstall,
   claimViaEmail,
   claimFromClipboard,
+  claimFromUrl,
   installId,
   addFunnelClaimListener,
   addChangeListener: (cb: (event: import("./types").ChangeEvent) => void): (() => void) => {
@@ -139,3 +140,4 @@ export const Rovenue = {
 export type { RovenueConfig } from "./api/configure";
 export type { LogEntry } from "./api/log";
 export type { FunnelClaimResult, ClaimInstallParams } from "./api/funnel";
+export { extractFunnelToken } from "./api/funnel";

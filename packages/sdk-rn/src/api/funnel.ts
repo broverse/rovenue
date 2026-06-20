@@ -70,3 +70,67 @@ export async function claimFromClipboard(): Promise<FunnelClaimResult | null> {
     return n ? parse(n) : null;
   });
 }
+
+function safeDecode(s: string): string {
+  if (!s) return "";
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+/**
+ * Extract a funnel token from a deep link / Universal Link. Recognises:
+ *  - Universal Link path: `…/funnels/open/<token>`
+ *  - `rovenue_funnel_token=<token>` query (anywhere — Rovenue-specific key)
+ *  - `token=<token>` query ONLY on the funnel deep-link host
+ *    (`…onboarding-complete…`) so an unrelated deep link's generic `token=` is
+ *    not mistaken for a funnel token.
+ * Returns null for any non-funnel URL. Does not use the `URL` constructor
+ * (unreliable for custom schemes in RN/Hermes).
+ */
+export function extractFunnelToken(url: string): string | null {
+  if (!url) return null;
+
+  // 1) Universal-link path: the segment after "funnels/open/".
+  const marker = "funnels/open/";
+  const mi = url.indexOf(marker);
+  if (mi !== -1) {
+    const rest = url.slice(mi + marker.length);
+    const seg = rest.split("/")[0].split("?")[0].split("#")[0];
+    if (seg) return seg;
+  }
+
+  // 2) Query-string extraction (manual parse — no URL constructor).
+  const qi = url.indexOf("?");
+  if (qi !== -1) {
+    const query = url.slice(qi + 1).split("#")[0];
+    let generic: string | null = null;
+    for (const pair of query.split("&")) {
+      const eq = pair.indexOf("=");
+      if (eq === -1) continue;
+      const key = pair.slice(0, eq);
+      const val = safeDecode(pair.slice(eq + 1));
+      if (!val) continue;
+      if (key === "rovenue_funnel_token") return val; // Rovenue-specific → trust anywhere
+      if (key === "token") generic = val;
+    }
+    // generic `token=` only on the Rovenue funnel deep-link host.
+    if (generic && url.includes("onboarding-complete")) return generic;
+  }
+
+  return null;
+}
+
+/**
+ * Claim a funnel token carried by a deep link / Universal Link. Forward every
+ * incoming URL here from your app's Linking handler; non-funnel URLs resolve
+ * `null` without a network call. A recognized-but-invalid token surfaces the
+ * usual claim error via the returned promise.
+ */
+export async function claimFromUrl(url: string): Promise<FunnelClaimResult | null> {
+  const token = extractFunnelToken(url);
+  if (!token) return null;
+  return call(async () => parse(await getNative().claimFunnelToken(token)));
+}

@@ -11,7 +11,7 @@ vi.mock("../core/native", () => ({
   getEmitter: () => ({ addListener }),
 }));
 
-import { claimFunnelToken as cft, claimInstall as ci, addFunnelClaimListener, claimFromClipboard as cfc } from "./funnel";
+import { claimFunnelToken as cft, claimInstall as ci, addFunnelClaimListener, claimFromClipboard as cfc, extractFunnelToken, claimFromUrl } from "./funnel";
 
 describe("funnel claim", () => {
   beforeEach(() => {
@@ -82,5 +82,50 @@ describe("funnel claim", () => {
   it("claimFromClipboard returns null when native returns null", async () => {
     claimFromClipboard.mockResolvedValue(null);
     expect(await cfc()).toBeNull();
+  });
+});
+
+describe("extractFunnelToken", () => {
+  const TOK = "a".repeat(48); // 40-64 char funnel token
+  it("extracts from a Universal Link path", () => {
+    expect(extractFunnelToken(`https://links.acme.com/universal/funnels/open/${TOK}`)).toBe(TOK);
+  });
+  it("extracts from a path with trailing query/fragment", () => {
+    expect(extractFunnelToken(`https://d/universal/funnels/open/${TOK}?x=1#y`)).toBe(TOK);
+  });
+  it("stops the path token at the next '/' (real funnel tokens have no slash)", () => {
+    expect(extractFunnelToken(`https://d/universal/funnels/open/${TOK}/extra`)).toBe(TOK);
+  });
+  it("extracts from the funnel deep-link query (token= on onboarding-complete)", () => {
+    expect(extractFunnelToken(`myapp://onboarding-complete?token=${TOK}`)).toBe(TOK);
+  });
+  it("extracts rovenue_funnel_token= anywhere", () => {
+    expect(extractFunnelToken(`myapp://whatever?rovenue_funnel_token=${TOK}`)).toBe(TOK);
+  });
+  it("ignores a generic token= on a non-funnel host", () => {
+    expect(extractFunnelToken(`myapp://reset-password?token=${TOK}`)).toBeNull();
+  });
+  it("returns null for a non-funnel URL", () => {
+    expect(extractFunnelToken("https://example.com/page?x=1")).toBeNull();
+  });
+  it("returns null for empty/garbage", () => {
+    expect(extractFunnelToken("")).toBeNull();
+    expect(extractFunnelToken("not a url")).toBeNull();
+  });
+});
+
+describe("claimFromUrl", () => {
+  const TOK = "b".repeat(48);
+  beforeEach(() => claimFunnelToken.mockReset());
+  it("claims when the URL carries a token", async () => {
+    claimFunnelToken.mockResolvedValue({ subscriberId: "s", funnelAnswersJson: '{"q":1}' });
+    const r = await claimFromUrl(`https://d/universal/funnels/open/${TOK}`);
+    expect(claimFunnelToken).toHaveBeenCalledWith(TOK);
+    expect(r).toEqual({ subscriberId: "s", funnelAnswers: { q: 1 } });
+  });
+  it("resolves null and does NOT touch native for a non-funnel URL", async () => {
+    const r = await claimFromUrl("https://example.com/page");
+    expect(r).toBeNull();
+    expect(claimFunnelToken).not.toHaveBeenCalled();
   });
 });
