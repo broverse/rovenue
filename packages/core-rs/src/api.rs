@@ -440,6 +440,19 @@ impl RovenueCore {
             .unwrap_or_default()
     }
 
+    /// True iff this install has already successfully claimed a funnel token
+    /// (funnel_claim_state == "claimed"). Used by the SDK's first-launch
+    /// orchestration to run the resolution chain at most once per install.
+    pub fn has_resolved_funnel_claim(&self) -> bool {
+        let install_id = self.install_id();
+        FunnelRepo::new(&self.store)
+            .claim_state(&install_id)
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("claimed")
+    }
+
     /// Register a listener fired whenever a funnel claim resolves (direct call
     /// now; automatic orchestration later). Mirrors `register_observer`.
     pub fn register_funnel_claim_listener(&self, listener: Box<dyn FunnelClaimListener>) {
@@ -786,6 +799,37 @@ mod tests {
         let b = core.install_id();
         assert!(a.starts_with("inst_"));
         assert_eq!(a, b);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn has_resolved_funnel_claim_false_on_fresh_install() {
+        let core = make_core("http://127.0.0.1:1");
+        assert!(!core.has_resolved_funnel_claim());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn has_resolved_funnel_claim_true_after_successful_claim() {
+        let mut server = mockito::Server::new();
+        let _m_claim = server
+            .mock("POST", "/v1/subscribers/claim-funnel-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"subscriber_id":"sub_1","entitlements":[],"funnel_answers":{}}}"#)
+            .create();
+        let _m_ent = server
+            .mock("GET", "/v1/me/entitlements")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"entitlements":{}}}"#)
+            .expect_at_least(1)
+            .create();
+
+        let core = make_core(&server.url());
+        assert!(!core.has_resolved_funnel_claim());
+        core.claim_funnel_token("a_token_value".into()).expect("claim ok");
+        assert!(core.has_resolved_funnel_claim(), "claimed state → resolved");
     }
 
     fn make_core(base_url: &str) -> RovenueCore {
