@@ -17,6 +17,9 @@ enum RovenueError {
     "EntitlementInactive",
     "DuplicatePurchase",
     "ReceiptInvalid",
+    "FunnelTokenNotFound",
+    "FunnelTokenExpired",
+    "FunnelTokenAlreadyClaimed",
     "Internal",
 };
 

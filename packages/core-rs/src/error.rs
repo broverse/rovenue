@@ -41,6 +41,15 @@ pub enum RovenueError {
     #[error("receipt invalid")]
     ReceiptInvalid,
 
+    #[error("funnel token not found")]
+    FunnelTokenNotFound,
+
+    #[error("funnel token expired")]
+    FunnelTokenExpired,
+
+    #[error("funnel token already claimed")]
+    FunnelTokenAlreadyClaimed,
+
     #[error("internal error")]
     Internal,
 }
