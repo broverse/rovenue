@@ -450,7 +450,7 @@ services:
     image: prometheuscommunity/postgres-exporter:v0.15.0
     profiles: ["observability"]
     environment:
-      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable"
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}?sslmode=disable"
     expose:
       - "9187"
     depends_on:
