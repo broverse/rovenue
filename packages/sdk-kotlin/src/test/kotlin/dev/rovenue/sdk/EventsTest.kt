@@ -32,6 +32,22 @@ class EventsTest {
     }
 
     // ------------------------------------------------------------------
+    // Case 3: Façade claimFunnelToken() forwards token to core
+    // ------------------------------------------------------------------
+    // Verifies the façade dispatches to core.claimFunnelToken(): the Rust
+    // core attempts an HTTP request to the (unreachable) base URL, which
+    // proves the call was forwarded rather than silently dropped.
+    // A NetworkUnavailable exception is the expected outcome against an
+    // unreachable host — a no-op stub would not produce any exception.
+    @Test
+    fun `claimFunnelToken forwards token to core`() = runTest {
+        Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://unreachable.invalid")
+        assertFailsWith<RovenueException.NetworkUnavailable> {
+            Rovenue.shared.claimFunnelToken("some_token_value")
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Case 1: Full round-trip
     // ------------------------------------------------------------------
     // Encodes an EventEnvelope with a fully-populated IdentityContext,

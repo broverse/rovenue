@@ -25,6 +25,7 @@ import dev.rovenue.sdk.Rovenue
 import dev.rovenue.sdk.StoreProblemException
 import dev.rovenue.sdk.StoreProduct
 import dev.rovenue.sdk.generated.ChangeEvent
+import dev.rovenue.sdk.generated.ClaimInstallParams
 import dev.rovenue.sdk.generated.Entitlement
 import dev.rovenue.sdk.generated.ExperimentAssignment
 import dev.rovenue.sdk.generated.SessionEventKind
@@ -41,6 +42,7 @@ import kotlinx.coroutines.launch
 class RovenueModule : Module() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var changesJob: Job? = null
+    private var funnelClaimsJob: Job? = null
     private var logUnsub: (() -> Unit)? = null
 
     override fun definition() = ModuleDefinition {
@@ -206,13 +208,45 @@ class RovenueModule : Module() {
             Rovenue.shared.track(envelopeJson)
         }
 
+        // ---------------- Funnel Claim ----------------
+        AsyncFunction("installId") Coroutine { ->
+            Rovenue.shared.installId()
+        }
+        AsyncFunction("claimFunnelToken") Coroutine { token: String ->
+            val r = Rovenue.shared.claimFunnelToken(token)
+            mapOf("subscriberId" to r.subscriberId, "funnelAnswersJson" to r.funnelAnswersJson)
+        }
+        AsyncFunction("claimInstall") Coroutine { params: Map<String, Any?> ->
+            val p = ClaimInstallParams(
+                platform = params["platform"] as? String ?: "",
+                locale = params["locale"] as? String ?: "",
+                timezone = params["timezone"] as? String ?: "",
+                screenDims = params["screenDims"] as? String ?: "",
+                deviceModel = params["deviceModel"] as? String,
+                installReferrer = params["installReferrer"] as? String,
+            )
+            val r = Rovenue.shared.claimInstall(p) ?: return@Coroutine null
+            mapOf("subscriberId" to r.subscriberId, "funnelAnswersJson" to r.funnelAnswersJson)
+        }
+        AsyncFunction("claimViaEmail") Coroutine { email: String ->
+            Rovenue.shared.claimViaEmail(email)
+        }
+
         // ---------------- Events ----------------
-        Events("onChange", "onLog")
+        Events("onChange", "onLog", "onFunnelClaimResolved")
 
         OnStartObserving {
             changesJob = scope.launch {
                 Rovenue.shared.changes.collect { event ->
                     sendEvent("onChange", mapOf("event" to event.name))
+                }
+            }
+            funnelClaimsJob = scope.launch {
+                Rovenue.shared.funnelClaims.collect { r ->
+                    sendEvent("onFunnelClaimResolved", mapOf(
+                        "subscriberId" to r.subscriberId,
+                        "funnelAnswersJson" to r.funnelAnswersJson,
+                    ))
                 }
             }
             logUnsub = Rovenue.shared.setLogHandler { entry: LogEntry ->
@@ -226,6 +260,8 @@ class RovenueModule : Module() {
         OnStopObserving {
             changesJob?.cancel()
             changesJob = null
+            funnelClaimsJob?.cancel()
+            funnelClaimsJob = null
             logUnsub?.invoke()
             logUnsub = null
         }
