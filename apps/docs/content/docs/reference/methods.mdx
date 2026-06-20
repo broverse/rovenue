@@ -1187,7 +1187,7 @@ type FunnelClaimResult = {
 
 ### `claimInstall`
 
-Attempt probabilistic install attribution using device signals. Returns a `FunnelClaimResult` if a prior funnel session can be matched, or `null` if no match can be recovered. Call this once on first launch, before `configure` completes.
+Recover a prior funnel session deterministically from caller-supplied install context (e.g. an Android Install Referrer token or an iOS clipboard token) and claim it. Returns a `FunnelClaimResult` if a prior funnel session is matched, or `null` if no match can be recovered. This is deterministic — it does **not** use device fingerprinting. Call this once on first launch, immediately after `configure`.
 
 **Params**
 
@@ -1330,7 +1330,7 @@ Initiate an email-based funnel claim. The SDK sends a magic-link email to the pr
 
 ### `installId`
 
-Return the stable, persisted identifier for this install. The install ID is generated on first launch, survives app restarts, and is used as the device fingerprint for probabilistic attribution. It does not change when `identify()` or `logOut()` is called.
+Return the stable, persisted identifier for this install. The install ID is generated on first launch, survives app restarts, and is sent as the idempotency key for `claimInstall` / `claimViaEmail`. It does not change when `identify()` or `logOut()` is called.
 
 **Params** — none
 
@@ -1365,7 +1365,7 @@ Return the stable, persisted identifier for this install. The install ID is gene
 
 ### `addFunnelClaimListener`
 
-Register a callback that fires whenever a funnel claim resolves — whether triggered by a token deep link, a probabilistic install match, or an email magic-link. On React Native, returns an unsubscribe function. On Swift, use the `funnelClaims` `AsyncStream`. On Kotlin, use the `funnelClaims` `SharedFlow`.
+Register a callback that fires whenever a funnel claim resolves — whether triggered by a token deep link, a deterministic install match, or an email magic-link. On React Native, returns an unsubscribe function. On Swift, use the `funnelClaims` `AsyncStream`. On Kotlin, use the `funnelClaims` `SharedFlow`.
 
 **Params**
 
