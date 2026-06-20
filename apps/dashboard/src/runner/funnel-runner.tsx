@@ -23,6 +23,7 @@ import {
   type AdvanceResponse,
   type PublishedFunnelConfig,
 } from "./runner-api";
+import { writeFunnelTokenToClipboard } from "./clipboard";
 import { type LocaleCode } from "@rovenue/shared/i18n";
 import { useRunnerLocale } from "./use-runner-locale";
 
@@ -97,7 +98,8 @@ export function FunnelRunner({ slug }: { slug: string }) {
       // endpoint marks the session paid and issues a fake token, which is
       // enough for end-to-end testing without Stripe.
       if (currentPage.type === "paywall") {
-        await claimToken(state.sessionId);
+        const res = await claimToken(state.sessionId);
+        await writeFunnelTokenToClipboard(res.token);
         setStatus({ kind: "done", reason: "paywall_paid" });
         return;
       }
