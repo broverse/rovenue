@@ -1,0 +1,63 @@
+---
+import Logo from '../ui/Logo.astro';
+
+const columns = [
+  {
+    title: 'Product',
+    links: [
+      { href: '#features', label: 'Revenue analytics' },
+      { href: '#realtime', label: 'Live events' },
+      { href: '#features', label: 'Experiments' },
+      { href: '#features', label: 'Funnels' },
+      { href: '#features', label: 'Feature flags' },
+    ],
+  },
+  {
+    title: 'Developers',
+    links: [
+      { href: '#sdk', label: 'SDKs' },
+      { href: '#', label: 'REST & GraphQL API' },
+      { href: '#realtime', label: 'Webhooks' },
+      { href: '#selfhost', label: 'Self-hosting' },
+      { href: '#', label: 'Changelog' },
+    ],
+  },
+  {
+    title: 'Resources',
+    links: [
+      { href: '#', label: 'Documentation' },
+      { href: '#', label: 'Guides' },
+      { href: '#', label: 'Status' },
+      { href: '#', label: 'Security' },
+    ],
+  },
+  {
+    title: 'Company',
+    links: [
+      { href: '#', label: 'About' },
+      { href: '#', label: 'Blog' },
+      { href: '#', label: 'Careers' },
+      { href: '#', label: 'Contact' },
+    ],
+  },
+];
+---
+
+<footer class="lp-footer lp-container">
+  <div class="lp-footer-grid" data-stagger="70">
+    <div class="lp-footer-brand" data-reveal="up">
+      <Logo />
+      <p>The all-in-one platform to grow your subscription revenue — with your data and your growth firmly in your hands.</p>
+    </div>
+    {columns.map((col) => (
+      <div class="lp-footer-col" data-reveal="up">
+        <h4>{col.title}</h4>
+        {col.links.map((l) => <a href={l.href}>{l.label}</a>)}
+      </div>
+    ))}
+  </div>
+  <div class="lp-footer-bottom">
+    <span>© 2026 Rovenue. MIT licensed.</span>
+    <span class="mono">rovenue v0.9.3 · self-hosted</span>
+  </div>
+</footer>

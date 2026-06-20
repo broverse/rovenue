@@ -1,0 +1,25 @@
+---
+/**
+ * A single bento feature card: icon badge, heading, description, and an
+ * optional visual region (passed via the `visual` slot). The default slot
+ * provides the icon SVG; the title/desc come in as props.
+ */
+interface Props {
+  title: string;
+  description: string;
+  /** column span utility, e.g. "col-3" | "col-2" */
+  span?: string;
+  id?: string;
+}
+const { title, description, span = 'col-2', id } = Astro.props;
+const hasVisual = Astro.slots.has('visual');
+---
+
+<article class={`lp-feat ${span}`} id={id} data-reveal="up">
+  <div class="lp-feat-ic"><slot name="icon" /></div>
+  <h3>{title}</h3>
+  <p>{description}</p>
+  {hasVisual && (
+    <div class="lp-visual"><slot name="visual" /></div>
+  )}
+</article>

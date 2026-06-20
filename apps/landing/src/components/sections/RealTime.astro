@@ -1,0 +1,82 @@
+---
+const checklist = [
+  ['Catch churn as it starts', '— and win customers back before they\'re gone.'],
+  ['Get a Slack ping', 'for every new subscriber, refund or cancellation.'],
+  ['One shared view', 'of revenue for support, finance and growth alike.'],
+];
+---
+
+<section class="lp-section lp-container" id="realtime">
+  <div class="lp-split">
+    <div data-reveal="up">
+      <div class="lp-kicker">Always up to date</div>
+      <h2 class="lp-h2">Watch revenue happen, not yesterday's export</h2>
+      <p class="lp-lead">Everything updates the instant it happens, and everyone sees the same numbers. So you can act on a churn spike or a viral moment today — not after the monthly report lands.</p>
+      <ul class="lp-checklist">
+        {checklist.map(([bold, rest]) => (
+          <li>
+            <span class="ck"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+            <span><b>{bold}</b> {rest}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+    <div class="lp-chart-card" style="background:var(--content1)" data-reveal="up">
+      <div class="ch-head"><div class="ch-title">Live events</div><span class="live-chip"><span class="pulse"></span>Live</span></div>
+      <div id="liveFeed">
+        <div class="lp-af-row"><span class="lp-af-ic" style="background:color-mix(in srgb,var(--success) 15%,transparent);color:var(--success)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg></span><div><div class="lp-af-t">New Pro subscriber</div><div class="lp-af-m">Pro Annual · iOS</div></div><span class="lp-af-r">$59.99<br><span style="color:var(--default-500)">just now</span></span></div>
+        <div class="lp-af-row"><span class="lp-af-ic" style="background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/></svg></span><div><div class="lp-af-t">Subscription renewed</div><div class="lp-af-m">Pro Monthly · Android</div></div><span class="lp-af-r">$9.99<br><span style="color:var(--default-500)">3s</span></span></div>
+        <div class="lp-af-row"><span class="lp-af-ic" style="background:color-mix(in srgb,var(--warning) 15%,transparent);color:var(--warning)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 22h14M5 2h14M17 22v-4l-5-5 5-5V2M7 22v-4l5-5-5-5V2"/></svg></span><div><div class="lp-af-t">Trial started</div><div class="lp-af-m">Pro Annual · web</div></div><span class="lp-af-r">—<br><span style="color:var(--default-500)">8s</span></span></div>
+        <div class="lp-af-row"><span class="lp-af-ic" style="background:color-mix(in srgb,var(--danger) 15%,transparent);color:var(--danger)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span><div><div class="lp-af-t">Customer churned</div><div class="lp-af-m">Pro Monthly · iOS</div></div><span class="lp-af-r">churn<br><span style="color:var(--default-500)">14s</span></span></div>
+        <div class="lp-af-row"><span class="lp-af-ic" style="background:color-mix(in srgb,var(--violet) 15%,transparent);color:var(--violet)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 8v8"/></svg></span><div><div class="lp-af-t">Credits used</div><div class="lp-af-m">50 AI credits</div></div><span class="lp-af-r">-50<br><span style="color:var(--default-500)">21s</span></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  // Live events feed — periodically prepend a fresh event so the panel reads
+  // like a real-time stream. Skipped entirely under reduced-motion.
+  (function () {
+    const feed = document.getElementById('liveFeed');
+    if (!feed || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const ICONS = {
+      sub: '<polyline points="20 6 9 17 4 12"/>',
+      renew: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>',
+      trial: '<path d="M5 22h14M5 2h14M17 22v-4l-5-5 5-5V2M7 22v-4l5-5-5-5V2"/>',
+      churn: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+      credit: '<circle cx="12" cy="12" r="9"/><path d="M8 12h8M12 8v8"/>',
+    };
+    type Ev = { color: string; icon: keyof typeof ICONS; t: string; m: string; r: string };
+    const POOL: Ev[] = [
+      { color: 'var(--success)', icon: 'sub', t: 'New Pro subscriber', m: 'Pro Annual · iOS', r: '$59.99' },
+      { color: 'var(--accent)', icon: 'renew', t: 'Subscription renewed', m: 'Pro Monthly · Android', r: '$9.99' },
+      { color: 'var(--warning)', icon: 'trial', t: 'Trial started', m: 'Pro Annual · web', r: '—' },
+      { color: 'var(--violet)', icon: 'credit', t: 'Credits used', m: '50 AI credits', r: '-50' },
+      { color: 'var(--success)', icon: 'sub', t: 'New subscriber', m: 'Pro Annual · Android', r: '$59.99' },
+      { color: 'var(--accent)', icon: 'renew', t: 'Upgrade', m: 'Monthly → Annual · iOS', r: '+$50.00' },
+      { color: 'var(--danger)', icon: 'churn', t: 'Customer churned', m: 'Pro Monthly · iOS', r: 'churn' },
+    ];
+
+    let i = 0;
+    const make = (ev: Ev) => {
+      const row = document.createElement('div');
+      row.className = 'lp-af-row entering';
+      row.innerHTML =
+        `<span class="lp-af-ic" style="background:color-mix(in srgb,${ev.color} 15%,transparent);color:${ev.color}">` +
+        `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${ICONS[ev.icon]}</svg></span>` +
+        `<div><div class="lp-af-t">${ev.t}</div><div class="lp-af-m">${ev.m}</div></div>` +
+        `<span class="lp-af-r">${ev.r}<br><span style="color:var(--default-500)">just now</span></span>`;
+      return row;
+    };
+
+    setInterval(() => {
+      i = (i + 1) % POOL.length;
+      const row = make(POOL[i]);
+      feed.prepend(row);
+      row.addEventListener('animationend', () => row.classList.remove('entering'), { once: true });
+      while (feed.children.length > 5) feed.lastElementChild?.remove();
+    }, 3800);
+  })();
+</script>

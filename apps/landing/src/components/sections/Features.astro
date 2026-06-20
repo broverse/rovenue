@@ -1,0 +1,122 @@
+---
+import FeatureCard from '../ui/FeatureCard.astro';
+---
+
+<section class="lp-section lp-container" id="features">
+  <div class="lp-sec-head" data-reveal="up">
+    <div class="lp-kicker">Built for growth</div>
+    <h2 class="lp-h2">Everything you need to grow revenue — nothing you don't</h2>
+    <p class="lp-lead">Stop stitching together billing tools, dashboards and spreadsheets. Rovenue gives your whole team one clear view of what makes money, what loses it, and what to do next.</p>
+  </div>
+
+  <div class="lp-bento" data-stagger="80">
+
+    <!-- Revenue analytics — wide -->
+    <FeatureCard span="col-3" title="Know your numbers to the cent" description="See how much you're making and why — revenue, lifetime value and churn, always up to date. No spreadsheets, no waiting for month-end.">
+      <svg slot="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 4 4 5-5"/></svg>
+      <div slot="visual">
+        <div class="lp-chart-card" style="background:var(--content2)">
+          <div class="ch-head"><div class="ch-sub">MRR movement · 28d</div><span class="chip success">+12.4%</span></div>
+          <svg viewBox="0 0 460 120" preserveAspectRatio="none" style="width:100%;height:110px;display:block;">
+            <defs><linearGradient id="fa1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--accent)" stop-opacity="0.3"/><stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+            <path d="M0,96 C50,90 80,82 120,80 C160,78 190,86 230,70 C270,54 300,58 340,44 C380,30 410,30 460,14 L460,120 L0,120 Z" fill="url(#fa1)"/>
+            <path d="M0,96 C50,90 80,82 120,80 C160,78 190,86 230,70 C270,54 300,58 340,44 C380,30 410,30 460,14" fill="none" stroke="var(--accent)" stroke-width="2" data-draw/>
+          </svg>
+        </div>
+      </div>
+    </FeatureCard>
+
+    <!-- Live events -->
+    <FeatureCard span="col-3" id="realtime-card" title="Never miss a beat" description="The moment someone subscribes, renews or cancels, you'll know. Catch a problem the day it starts — not next month.">
+      <svg slot="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      <div slot="visual">
+        <div class="lp-af-row"><span class="lp-af-ic" style="background:color-mix(in srgb,var(--success) 15%,transparent);color:var(--success)">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg></span>
+          <div><div class="lp-af-t">New subscriber</div><div class="lp-af-m">Pro Annual · iOS</div></div><span class="lp-af-r">$59.99<br><span style="color:var(--default-500)">2s</span></span></div>
+        <div class="lp-af-row"><span class="lp-af-ic" style="background:color-mix(in srgb,var(--accent) 15%,transparent);color:var(--accent)">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/></svg></span>
+          <div><div class="lp-af-t">Renewed</div><div class="lp-af-m">Pro Monthly · Android</div></div><span class="lp-af-r">$9.99<br><span style="color:var(--default-500)">6s</span></span></div>
+        <div class="lp-af-row"><span class="lp-af-ic" style="background:color-mix(in srgb,var(--warning) 15%,transparent);color:var(--warning)">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 22h14M5 2h14M17 22v-4l-5-5 5-5V2M7 22v-4l5-5-5-5V2"/></svg></span>
+          <div><div class="lp-af-t">Trial started</div><div class="lp-af-m">Pro Annual · web</div></div><span class="lp-af-r">—<br><span style="color:var(--default-500)">11s</span></span></div>
+      </div>
+    </FeatureCard>
+
+    <!-- Catalog -->
+    <FeatureCard span="col-2" title="Ship plans, not app updates" description="Launch new plans, prices and offers in minutes — and change them whenever you want, without waiting on an app release.">
+      <svg slot="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.27 6.96 12 5.05 8.73-5.05M12 22.08V12"/></svg>
+      <div slot="visual">
+        <div class="lp-chiprow"><span class="nm"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="15" r="4"/><path d="m10.85 12.15 7.9-7.9M18 5l3 3"/></svg></span>Pro access</span><span class="chip success">active</span></div>
+        <div class="lp-chiprow"><span class="nm"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="15" r="4"/><path d="m10.85 12.15 7.9-7.9M18 5l3 3"/></svg></span>Team seats</span><span class="chip primary">3 plans</span></div>
+        <div class="lp-chiprow"><span class="nm"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="15" r="4"/><path d="m10.85 12.15 7.9-7.9M18 5l3 3"/></svg></span>AI credits</span><span class="chip default">metered</span></div>
+      </div>
+    </FeatureCard>
+
+    <!-- Experiments -->
+    <FeatureCard span="col-2" title="Make pricing a science" description="Test prices and paywalls on real users and let Rovenue pick the version that earns the most. Most teams find a double-digit lift.">
+      <svg slot="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6.5L3.4 17a2 2 0 0 0 1.7 3h13.8a2 2 0 0 0 1.7-3L14 9.5V3"/></svg>
+      <div slot="visual">
+        <div class="lp-exp"><div class="lp-exp-h">New pricing test <span class="chip primary" style="margin-left:auto">running</span></div><div class="lp-exp-bar"><span data-bar="w" style="--bar:68%"></span></div></div>
+        <div class="lp-exp"><div class="lp-exp-h">Onboarding paywall <span class="chip success" style="margin-left:auto">+9.2%</span></div><div class="lp-exp-bar"><span data-bar="w" style="--bar:100%;background:var(--success)"></span></div></div>
+        <div class="lp-exp"><div class="lp-exp-h">Annual discount <span class="chip default" style="margin-left:auto">42% rollout</span></div><div class="lp-exp-bar"><span data-bar="w" style="--bar:42%"></span></div></div>
+      </div>
+    </FeatureCard>
+
+    <!-- Funnels -->
+    <FeatureCard span="col-2" title="Plug the revenue leaks" description="See exactly where people drop off on the way to paying — then win those customers back.">
+      <svg slot="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h18l-7 9v6l-4 2v-8z"/></svg>
+      <div slot="visual" class="lp-funnel">
+        <div class="step"><span class="lab">App install</span><span class="pct">100%</span><span class="track"><span data-bar="w" style="--bar:100%"></span></span></div>
+        <div class="step"><span class="lab">Paywall view</span><span class="pct">61%</span><span class="track"><span data-bar="w" style="--bar:61%"></span></span></div>
+        <div class="step"><span class="lab">Trial start</span><span class="pct">38%</span><span class="track"><span data-bar="w" style="--bar:38%"></span></span></div>
+        <div class="step"><span class="lab">Paid</span><span class="pct">16%</span><span class="track"><span data-bar="w" style="--bar:16%"></span></span></div>
+      </div>
+    </FeatureCard>
+
+    <!-- Cohorts / retention -->
+    <FeatureCard span="col-2" title="See who actually sticks" description="Find out which customers stay and which slip away — so you can double down on what keeps them.">
+      <svg slot="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="4"/><circle cx="16" cy="14" r="4"/></svg>
+      <div slot="visual" class="lp-cohort" id="cohort"></div>
+    </FeatureCard>
+
+    <!-- Feature flags -->
+    <FeatureCard span="col-2" title="Launch safely, bill by usage" description="Roll out new features to a few customers first, and charge for what they use — without billing headaches.">
+      <svg slot="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+      <div slot="visual" class="lp-tags">
+        <span class="lp-tag"><span class="ic">⚑</span> new_paywall</span>
+        <span class="lp-tag"><span class="ic">⚑</span> ai_summaries</span>
+        <span class="lp-tag"><span class="ic">◷</span> 500 credits</span>
+      </div>
+    </FeatureCard>
+
+    <!-- Webhooks / integrations — wide -->
+    <article class="lp-feat col-6" id="sdk" data-reveal="up">
+      <div style="display:grid;grid-template-columns:1fr 1.1fr;gap:32px;align-items:center;">
+        <div>
+          <div class="lp-feat-ic">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"/><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06"/><path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8"/></svg>
+          </div>
+          <h3>Live in an afternoon, not a sprint</h3>
+          <p>Your team connects Rovenue once and every plan, platform and payment flows in automatically — no months-long integration project. Works with the tools you already use.</p>
+          <div class="lp-tags">
+            <span class="lp-tag">App Store</span>
+            <span class="lp-tag">Google Play</span>
+            <span class="lp-tag">Stripe</span>
+            <span class="lp-tag">Paddle</span>
+            <span class="lp-tag">Web</span>
+            <span class="lp-tag">Slack</span>
+          </div>
+        </div>
+        <div class="lp-list-card" style="align-self:stretch;">
+          <div class="ch-head"><div class="ch-title">Connected sources</div><span class="chip success">auto-syncing</span></div>
+          <div class="lp-chiprow"><span class="nm"><span class="ic">◈</span>App Store</span><span class="chip success">connected</span></div>
+          <div class="lp-chiprow"><span class="nm"><span class="ic">▸</span>Google Play</span><span class="chip success">connected</span></div>
+          <div class="lp-chiprow"><span class="nm"><span class="ic" style="color:var(--accent)">◆</span>Stripe</span><span class="chip success">connected</span></div>
+          <div class="lp-chiprow"><span class="nm"><span class="ic">○</span>Web checkout</span><span class="chip success">connected</span></div>
+          <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--divider);font-size:12.5px;color:var(--default-600);">Revenue from every store — unified into one dashboard, automatically.</div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+</section>

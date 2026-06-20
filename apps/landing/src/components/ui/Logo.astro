@@ -1,0 +1,11 @@
+---
+interface Props {
+  href?: string;
+}
+const { href = '#top' } = Astro.props;
+---
+
+<a class="lp-brand" href={href} style="text-decoration:none;color:inherit;">
+  <span class="lp-logo">R</span>
+  <span>Rovenue</span>
+</a>
