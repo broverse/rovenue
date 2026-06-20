@@ -133,6 +133,7 @@ export interface RovenueModuleSpec {
   claimFunnelToken(token: string): Promise<{ subscriberId: string; funnelAnswersJson: string }>;
   claimInstall(params: { platform?: string; locale?: string; timezone?: string; screenDims?: string; deviceModel?: string; installReferrer?: string }): Promise<{ subscriberId: string; funnelAnswersJson: string } | null>;
   claimViaEmail(email: string): Promise<void>;
+  claimFromClipboard(): Promise<{ subscriberId: string; funnelAnswersJson: string } | null>;
   installId(): Promise<string>;
 
   // Generic event emission (`POST /v1/events`).

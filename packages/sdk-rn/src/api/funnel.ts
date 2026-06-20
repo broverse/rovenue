@@ -61,3 +61,12 @@ export function addFunnelClaimListener(cb: (result: FunnelClaimResult) => void):
   const sub = getEmitter().addListener("onFunnelClaimResolved", (p: NativeClaim) => cb(parse(p)));
   return () => sub.remove();
 }
+
+/** iOS only: read a `rovenue-funnel:` clipboard marker (after a user gesture)
+ *  and claim it. Resolves null on Android, or when no marker is present. */
+export async function claimFromClipboard(): Promise<FunnelClaimResult | null> {
+  return call(async () => {
+    const n = (await getNative().claimFromClipboard()) as NativeClaim | null;
+    return n ? parse(n) : null;
+  });
+}

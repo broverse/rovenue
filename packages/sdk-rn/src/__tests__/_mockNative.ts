@@ -158,6 +158,7 @@ export function makeMockNative(): MockNative {
     claimFunnelToken: vi.fn(async (_token: string) => ({ subscriberId: "", funnelAnswersJson: "{}" })),
     claimInstall: vi.fn(async (_params: { platform: string; locale: string; timezone: string; screenDims: string; deviceModel?: string; installReferrer?: string }) => null),
     claimViaEmail: vi.fn(async (_email: string) => undefined),
+    claimFromClipboard: vi.fn(async () => null),
     installId: vi.fn(async () => "00000000-0000-0000-0000-000000000000"),
     // Expo EventEmitter wire methods — no-op (stub's EventEmitter
     // delegates to __addChangeListener/__addLogListener instead).

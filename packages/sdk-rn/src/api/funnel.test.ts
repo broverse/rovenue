@@ -3,20 +3,22 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const claimFunnelToken = vi.fn();
 const claimInstall = vi.fn();
 const claimViaEmail = vi.fn(async () => {});
+const claimFromClipboard = vi.fn();
 const addListener = vi.fn();
 const remove = vi.fn();
 vi.mock("../core/native", () => ({
-  getNative: () => ({ claimFunnelToken, claimInstall, claimViaEmail }),
+  getNative: () => ({ claimFunnelToken, claimInstall, claimViaEmail, claimFromClipboard }),
   getEmitter: () => ({ addListener }),
 }));
 
-import { claimFunnelToken as cft, claimInstall as ci, addFunnelClaimListener } from "./funnel";
+import { claimFunnelToken as cft, claimInstall as ci, addFunnelClaimListener, claimFromClipboard as cfc } from "./funnel";
 
 describe("funnel claim", () => {
   beforeEach(() => {
     claimFunnelToken.mockReset();
     claimInstall.mockReset();
     claimViaEmail.mockReset();
+    claimFromClipboard.mockReset();
     addListener.mockReset();
     remove.mockReset();
     addListener.mockReturnValue({ remove });
@@ -70,5 +72,15 @@ describe("funnel claim", () => {
     expect(remove).not.toHaveBeenCalled();
     unsub();
     expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("claimFromClipboard parses a native result", async () => {
+    claimFromClipboard.mockResolvedValue({ subscriberId: "s", funnelAnswersJson: '{"q":1}' });
+    expect(await cfc()).toEqual({ subscriberId: "s", funnelAnswers: { q: 1 } });
+  });
+
+  it("claimFromClipboard returns null when native returns null", async () => {
+    claimFromClipboard.mockResolvedValue(null);
+    expect(await cfc()).toBeNull();
   });
 });
