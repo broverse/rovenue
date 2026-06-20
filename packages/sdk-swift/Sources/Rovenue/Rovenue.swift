@@ -88,7 +88,9 @@ public final class Rovenue: @unchecked Sendable {
         }
         let bridge = ObserverBridge()
         core.registerObserver(obs: bridge)
-        let instance = Rovenue(core: core, bridge: bridge, appVersion: resolvedVersion)
+        let funnelBridge = FunnelClaimBridge()
+        core.registerFunnelClaimListener(listener: funnelBridge)
+        let instance = Rovenue(core: core, bridge: bridge, funnelBridge: funnelBridge, appVersion: resolvedVersion)
         lock.lock()
         defer { lock.unlock() }
         _shared = instance
@@ -120,6 +122,7 @@ public final class Rovenue: @unchecked Sendable {
             s.transactionListener = nil
             s.core.shutdown()
             s.bridge.finishAll()
+            s.funnelBridge.finishAll()
         }
         _shared = nil
     }
@@ -154,6 +157,7 @@ public final class Rovenue: @unchecked Sendable {
 
     internal let core: RovenueCore
     internal let bridge: ObserverBridge
+    internal let funnelBridge: FunnelClaimBridge
     internal let dispatcher: Dispatcher
     /// Captured at configure() time — exposed via
     /// `resolvedAppVersionForTesting` so tests can verify the wiring
@@ -165,9 +169,10 @@ public final class Rovenue: @unchecked Sendable {
     /// cancelled in `shutdown()` / `resetForTesting()`.
     private var transactionListener: Task<Void, Never>?
 
-    private init(core: RovenueCore, bridge: ObserverBridge, appVersion: String?) {
+    private init(core: RovenueCore, bridge: ObserverBridge, funnelBridge: FunnelClaimBridge, appVersion: String?) {
         self.core = core
         self.bridge = bridge
+        self.funnelBridge = funnelBridge
         self.dispatcher = Dispatcher()
         self.appVersion = appVersion
         if #available(iOS 15.0, macOS 12.0, *) {
@@ -682,5 +687,50 @@ public final class Rovenue: @unchecked Sendable {
     /// termination on cancel deregisters the subscriber automatically.
     public var changes: AsyncStream<ChangeEvent> {
         bridge.subscribe()
+    }
+
+    // MARK: - Funnel Claim
+
+    /// AsyncStream of resolved funnel-claim events. Each access returns a new
+    /// stream. Mirrors `changes` / `ObserverBridge` but carries a
+    /// `FunnelClaimResult` payload.
+    public var funnelClaims: AsyncStream<FunnelClaimResult> {
+        funnelBridge.subscribe()
+    }
+
+    /// Returns the SDK's stable install ID (a device-scoped anonymous
+    /// identifier generated once and persisted locally). Synchronous —
+    /// backed by the Rust MMKV store.
+    public func installId() -> String {
+        core.installId()
+    }
+
+    /// Claim a funnel token (from a deep-link or QR code). Returns the
+    /// resolved subscriber record immediately and also emits on `funnelClaims`.
+    public func claimFunnelToken(_ token: String) async throws -> FunnelClaimResult {
+        try await dispatcher.run { [core] in
+            do { return try core.claimFunnelToken(token: token) }
+            catch let err as RovenueError { throw mapError(err) }
+        }
+    }
+
+    /// Claim install attribution. Returns the resolved record when an
+    /// unattributed install matches a pending funnel token; returns `nil`
+    /// when no match is found.
+    public func claimInstall(_ params: ClaimInstallParams) async throws -> FunnelClaimResult? {
+        try await dispatcher.run { [core] in
+            do { return try core.claimInstall(params: params) }
+            catch let err as RovenueError { throw mapError(err) }
+        }
+    }
+
+    /// Claim by email address. The backend matches an install token to the
+    /// provided email; completes without returning a value (resolution is
+    /// notified via the `funnelClaims` stream).
+    public func claimViaEmail(_ email: String) async throws {
+        try await dispatcher.run { [core] in
+            do { try core.claimViaEmail(email: email) }
+            catch let err as RovenueError { throw mapError(err) }
+        }
     }
 }

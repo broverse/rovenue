@@ -23,6 +23,9 @@ public extension Rovenue {
         case duplicatePurchase
         case receiptInvalid
         case internalError
+        case funnelTokenNotFound
+        case funnelTokenExpired
+        case funnelTokenAlreadyClaimed
 
         // Swift-origin purchase-flow errors. These never come from the Rust
         // core (so they are absent from `mapError`) — they describe StoreKit
@@ -62,6 +65,12 @@ public extension Rovenue {
                 return "Receipt could not be validated"
             case .internalError:
                 return "Internal SDK error"
+            case .funnelTokenNotFound:
+                return "Funnel token not found"
+            case .funnelTokenExpired:
+                return "Funnel token has expired"
+            case .funnelTokenAlreadyClaimed:
+                return "Funnel token has already been claimed"
             case .purchaseCancelled:
                 return "The purchase was cancelled by the user"
             case .purchasePending:
@@ -92,7 +101,10 @@ internal func mapError(_ generated: RovenueError) -> Rovenue.Error {
     case .InsufficientCredits:  return .insufficientCredits
     case .EntitlementInactive:  return .entitlementInactive
     case .DuplicatePurchase:    return .duplicatePurchase
-    case .ReceiptInvalid:       return .receiptInvalid
-    case .Internal:             return .internalError
+    case .ReceiptInvalid:             return .receiptInvalid
+    case .Internal:                   return .internalError
+    case .FunnelTokenNotFound:        return .funnelTokenNotFound
+    case .FunnelTokenExpired:         return .funnelTokenExpired
+    case .FunnelTokenAlreadyClaimed:  return .funnelTokenAlreadyClaimed
     }
 }
