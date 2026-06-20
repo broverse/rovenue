@@ -8,6 +8,7 @@ use crate::cache::{CacheStore, ExposureRepo};
 use crate::config::Config;
 use crate::virtual_currencies::VirtualCurrencyReader;
 use crate::entitlements::{Entitlement, EntitlementReader};
+use crate::events::EventsClient;
 use crate::error::{RovenueError, RovenueResult};
 use crate::exposure::ExposureTracker;
 use crate::identify::IdentifyClient;
@@ -35,6 +36,7 @@ pub struct RovenueCore {
     entitlements: Arc<EntitlementReader>,
     virtual_currencies: Arc<VirtualCurrencyReader>,
     receipts: Arc<ReceiptClient>,
+    events: Arc<EventsClient>,
     offerings: Arc<OfferingsClient>,
     remote_config: Arc<RemoteConfigReader>,
     exposure: Arc<ExposureTracker>,
@@ -98,6 +100,7 @@ impl RovenueCore {
                 .with_clock(Arc::clone(&clock)),
         );
         let receipts = Arc::new(ReceiptClient::new(Arc::clone(&http)));
+        let events = Arc::new(EventsClient::new(Arc::clone(&http)));
         let offerings = Arc::new(
             OfferingsClient::new(Arc::clone(&http), Arc::clone(&store))
                 .with_clock(Arc::clone(&clock)),
@@ -194,6 +197,7 @@ impl RovenueCore {
             entitlements: reader,
             virtual_currencies,
             receipts,
+            events,
             offerings,
             remote_config,
             exposure,
@@ -378,6 +382,24 @@ impl RovenueCore {
             obfuscated_profile_id.as_deref(),
         )?;
         Ok(self.finish_receipt(&scope, outcome))
+    }
+
+    /// Emit a generic event to `POST /v1/events` (fire-and-forget, 3-retry).
+    /// `envelope_json` is the camelCase wire envelope built by the façade.
+    /// When the envelope omits `subscriberId`, it is filled from the current
+    /// scope (`app_user_id` if identified, else the anonymous `rovenue_id`).
+    pub fn track(&self, envelope_json: String) -> RovenueResult<()> {
+        let mut envelope: crate::events::EventEnvelope =
+            serde_json::from_str(&envelope_json).map_err(|_| RovenueError::InvalidArgument)?;
+
+        let scope = self.identity.current_user_scope();
+        let scope_opt = if scope.is_empty() { None } else { Some(scope) };
+
+        if envelope.subscriber_id.is_none() {
+            envelope.subscriber_id = scope_opt.clone();
+        }
+
+        self.events.post(&envelope, scope_opt.as_deref())
     }
 
     /// Hydrate entitlement + VC caches from a receipt POST response and
@@ -670,6 +692,61 @@ mod tests {
         assert_eq!(result.entitlements.len(), 0);
 
         _m_ent.assert();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn track_auto_fills_subscriber_from_scope() {
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("POST", "/v1/events")
+            .match_body(mockito::Matcher::JsonString(
+                r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z","subscriberId":"user_42"}"#.into(),
+            ))
+            .with_status(202)
+            .create();
+
+        let core = make_core(&server.url());
+        // identify() writes app_user_id locally even if its own POST fails.
+        core.identify("user_42".into()).unwrap();
+
+        core.track(
+            r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z"}"#.into(),
+        )
+        .expect("track ok");
+
+        m.assert();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn track_preserves_explicit_subscriber_id() {
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("POST", "/v1/events")
+            .match_body(mockito::Matcher::JsonString(
+                r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z","subscriberId":"explicit_sub"}"#.into(),
+            ))
+            .with_status(202)
+            .create();
+
+        let core = make_core(&server.url());
+        core.identify("user_42".into()).unwrap();
+
+        core.track(
+            r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z","subscriberId":"explicit_sub"}"#.into(),
+        )
+        .expect("track ok");
+
+        m.assert();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn track_rejects_malformed_json() {
+        let core = make_core("http://127.0.0.1:1");
+        let err = core.track("not json".into()).unwrap_err();
+        assert!(matches!(err, RovenueError::InvalidArgument));
     }
 
     #[test]
