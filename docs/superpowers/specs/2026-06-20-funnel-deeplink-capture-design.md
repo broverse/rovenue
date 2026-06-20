@@ -66,9 +66,15 @@ custom schemes in RN/Hermes):
    substring after it up to the first `/`, `?`, or `#`; URL-decode it. If
    non-empty → that's the token.
 2. **Query parameter:** otherwise, scan the query string (after `?`, before
-   `#`) for a `token=` or `rovenue_funnel_token=` pair; URL-decode the value.
-   (`token` is the deep-link shape; `rovenue_funnel_token` is accepted for
-   consistency with the referrer/clipboard markers.)
+   `#`):
+   - `rovenue_funnel_token=<token>` → trust anywhere (the key is
+     Rovenue-specific; matches the referrer/clipboard markers).
+   - `token=<token>` → trust **only** when the URL also contains
+     `onboarding-complete` (the Rovenue funnel deep-link host). This prevents an
+     unrelated deep link's generic `?token=` from being treated as a funnel
+     token (which would otherwise trigger a pointless claim that throws
+     `FunnelTokenNotFound`). So `claimFromUrl` is safe to call with ANY incoming
+     URL — non-funnel URLs always resolve `null`, never throw.
 3. Otherwise → `null`.
 Exported so it can be unit-tested directly (and is usable by E later).
 
