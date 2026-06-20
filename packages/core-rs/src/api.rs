@@ -753,6 +753,8 @@ mod tests {
             .with_body(r#"{"data":{"entitlements":{}}}"#).expect_at_least(1).create();
 
         let core = make_core(&server.url());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        core.register_funnel_claim_listener(Box::new(CapturingListener(Arc::clone(&seen))));
         let params = ClaimInstallParams {
             platform: "android".into(), locale: "en-US".into(), timezone: "UTC".into(),
             screen_dims: "390x844".into(), device_model: None,
@@ -760,6 +762,7 @@ mod tests {
         };
         let out = core.claim_install(params).expect("claim_install ok");
         assert_eq!(out.unwrap().subscriber_id, "sub_i");
+        assert_eq!(seen.lock().unwrap().len(), 1, "callback fired exactly once");
     }
 
     #[test]

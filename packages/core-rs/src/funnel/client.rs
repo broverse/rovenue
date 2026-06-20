@@ -77,7 +77,10 @@ impl FunnelClient {
             200 => {
                 let token = parsed
                     .and_then(|v| v.get("data").and_then(|d| d.get("token")).and_then(|t| t.as_str()).map(str::to_string));
-                Ok(token)
+                match token {
+                    Some(t) => Ok(Some(t)),
+                    None => Err(RovenueError::Internal),
+                }
             }
             404 => Ok(None),
             401 => Err(RovenueError::InvalidApiKey),
@@ -151,6 +154,20 @@ mod tests {
         let mut server2 = mockito::Server::new();
         let _m404 = server2.mock("POST", "/v1/sdk/claim-install").with_status(404).create();
         assert_eq!(client(&server2.url()).claim_install(&params, "inst_1").unwrap(), None);
+    }
+
+    #[test]
+    fn claim_install_malformed_200_returns_internal_error() {
+        let mut server = mockito::Server::new();
+        let _m = server.mock("POST", "/v1/sdk/claim-install").with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{}}"#).create();
+        let params = ClaimInstallParams {
+            platform: "ios".into(), locale: "en-US".into(), timezone: "UTC".into(),
+            screen_dims: "390x844".into(), device_model: None, install_referrer: None,
+        };
+        let err = client(&server.url()).claim_install(&params, "inst_m").unwrap_err();
+        assert!(matches!(err, RovenueError::Internal), "malformed 200 must be Internal error");
     }
 
     #[test]

@@ -119,4 +119,23 @@ mod tests {
         assert_eq!(read("inst_p"), None, "pending must not stamp claimed_at_ms");
         assert_eq!(read("inst_c"), Some(2000));
     }
+
+    #[test]
+    fn claimed_at_ms_clears_on_conflict_to_pending() {
+        let s = store();
+        let repo = FunnelRepo::new(&s);
+        repo.set_claim_state("inst_flip", "claimed", Some("sub_1"), 2000).unwrap();
+        repo.set_claim_state("inst_flip", "pending", None, 3000).unwrap();
+        let read = |iid: &str| -> Option<i64> {
+            s.with_conn(|c| {
+                c.query_row(
+                    "SELECT claimed_at_ms FROM funnel_claim_state WHERE install_id = ?1",
+                    [iid],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+            })
+            .unwrap()
+        };
+        assert_eq!(read("inst_flip"), None, "claimed→pending flip must clear claimed_at_ms");
+    }
 }
