@@ -1189,16 +1189,18 @@ type FunnelClaimResult = {
 
 Recover a prior funnel session deterministically from caller-supplied install context (e.g. an Android Install Referrer token or an iOS clipboard token) and claim it. Returns a `FunnelClaimResult` if a prior funnel session is matched, or `null` if no match can be recovered. This is deterministic — it does **not** use device fingerprinting. Call this once on first launch, immediately after `configure`.
 
-**Params**
+**Params** — all optional
+
+On **Android**, the SDK auto-collects `platform`, `locale`, `timezone`, `screenDims`, `deviceModel`, and the Google Play Install Referrer from the native layer — pass any field only to override the auto-collected value. On **iOS**, callers still supply context explicitly (auto-collection for iOS will land in a later release).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `platform` | `"ios" \| "android" \| "web"` | Yes | Platform of the current install. |
-| `locale` | `string` | Yes | IETF BCP 47 locale tag (e.g. `"en-US"`). |
-| `timezone` | `string` | Yes | IANA timezone identifier (e.g. `"America/New_York"`). |
-| `screenDims` | `{ width: number; height: number }` | Yes | Logical screen dimensions in points/dp. |
-| `deviceModel` | `string` | No | Device model string (e.g. `"iPhone16,1"`). |
-| `installReferrer` | `string` | No | Android Install Referrer string from the Play Store; omit on iOS. |
+| `platform` | `"ios" \| "android" \| "web"` | No | Platform of the current install. Auto-collected on Android. |
+| `locale` | `string` | No | IETF BCP 47 locale tag (e.g. `"en-US"`). Auto-collected on Android. |
+| `timezone` | `string` | No | IANA timezone identifier (e.g. `"America/New_York"`). Auto-collected on Android. |
+| `screenDims` | `{ width: number; height: number }` | No | Logical screen dimensions in points/dp. Auto-collected on Android. |
+| `deviceModel` | `string` | No | Device model string (e.g. `"iPhone16,1"`). Auto-collected on Android. |
+| `installReferrer` | `string` | No | Android Install Referrer string from the Play Store; auto-collected on Android, omit on iOS. |
 
 **Returns** — [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `| null` (`null` means no prior funnel session was matched)
 
@@ -1208,18 +1210,10 @@ Recover a prior funnel session deterministically from caller-supplied install co
   <Tab value="React Native">
     ```ts
     import { Rovenue } from '@rovenue/react-native-sdk';
-    import { Dimensions, Platform } from 'react-native';
-    import * as Localization from 'expo-localization';
 
-    const { width, height } = Dimensions.get('screen');
-    const result = await Rovenue.claimInstall({
-      platform: Platform.OS as 'ios' | 'android',
-      locale: Localization.getLocales()[0]?.languageTag ?? 'en-US',
-      timezone: Localization.getCalendars()[0]?.timeZone ?? 'UTC',
-      screenDims: { width, height },
-      // deviceModel: DeviceInfo.getModel(), // optional
-      // installReferrer: referrer,           // Android only, optional
-    });
+    // Android: SDK auto-collects referrer + device context (platform, locale,
+    // timezone, screenDims, deviceModel). iOS: supply params explicitly.
+    const result = await Rovenue.claimInstall(); // Android: auto-collects referrer + context
 
     if (result) {
       console.log('Matched funnel session:', result.subscriberId);
