@@ -6,7 +6,7 @@ description: Every Rovenue SDK method, grouped by capability.
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Quick navigation: [Configuration](#configuration) · [Identity](#identity) · [Entitlements](#entitlements) · [Virtual Currencies](#virtual-currencies) · [Purchases](#purchases) · [Account Token](#account-token) · [Lifecycle](#lifecycle) · [Logging](#logging) · [Change Stream](#change-stream)
+Quick navigation: [Configuration](#configuration) · [Identity](#identity) · [Entitlements](#entitlements) · [Virtual Currencies](#virtual-currencies) · [Events](#events) · [Purchases](#purchases) · [Account Token](#account-token) · [Lifecycle](#lifecycle) · [Logging](#logging) · [Change Stream](#change-stream)
 
 ---
 
@@ -462,6 +462,99 @@ Force a server round-trip to refresh the virtual-currency balance cache. Fires a
 **Errors:** [`NetworkUnavailableError`](/docs/reference/errors#error-table) · [`ServerError`](/docs/reference/errors#error-table)
 
 **See also:** [Virtual Currencies guide](/docs/guides/credits)
+
+---
+
+## Events
+
+### `track`
+
+Emit a generic event to the backend. The server forwards it to any configured integrations (e.g. Meta Conversions API, TikTok Events API). The call is **fire-and-forget** — the SDK does not wait for confirmation before returning.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `eventType` | `string` | Yes | The event name (e.g. `"purchase"`, `"lead"`, `"registration"`). |
+| `params` | [`TrackParams`](#trackparams) | No | Optional event metadata. |
+
+**`TrackParams`**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `occurredAt` | `string` | ISO-8601 timestamp of when the event occurred. Defaults to now. |
+| `subscriberId` | `string` | Override the subscriber scope. Defaults to the current user / anonymous install. |
+| `productId` | `string` | Associated product identifier. |
+| `amount` | `string` | Decimal string (e.g. `"9.99"`). |
+| `currency` | `string` | ISO-4217 currency code (e.g. `"USD"`). |
+| `eventSourceUrl` | `string` | URL of the page or screen where the event occurred. |
+| `identityContext` | `object` | Hashed identity signals for ad-platform matching. Fields: `email`, `externalId`, `phone`, `ip`, `userAgent`, `firstName`, `lastName`, `city`, `countryCode`. |
+
+**Returns** — `void`
+
+**Throws** — nothing (errors are swallowed and logged internally)
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    // Minimal — event type only:
+    await Rovenue.track('lead');
+
+    // With params:
+    await Rovenue.track('purchase', {
+      amount: '9.99',
+      currency: 'USD',
+      productId: 'com.example.pro_monthly',
+    });
+
+    // With identity context for ad-platform matching:
+    await Rovenue.track('registration', {
+      identityContext: {
+        email: 'user@example.com',
+        phone: '+15551234567',
+      },
+    });
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Minimal:
+    await Rovenue.shared.track(eventType: "lead")
+
+    // With params:
+    await Rovenue.shared.track(
+        eventType: "purchase",
+        params: TrackParams(
+            amount: "9.99",
+            currency: "USD",
+            productId: "com.example.pro_monthly"
+        )
+    )
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // Minimal:
+    Rovenue.shared.track(eventType = "lead")
+
+    // With params:
+    Rovenue.shared.track(
+        eventType = "purchase",
+        params = TrackParams(
+            amount = "9.99",
+            currency = "USD",
+            productId = "com.example.pro_monthly"
+        )
+    )
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+`track()` is a client-side convenience wrapper around `POST /v1/events`. For server-side event ingestion (e.g. from your backend after a payment processor webhook), call the HTTP endpoint directly with your secret API key.
+</Callout>
 
 ---
 
