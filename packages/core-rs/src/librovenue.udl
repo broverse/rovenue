@@ -164,6 +164,9 @@ interface RovenueCore {
     u32 flush_session_events();
 
     [Throws=RovenueError]
+    void track(string envelope_json);
+
+    [Throws=RovenueError]
     void set_attributes(record<DOMString, string?> attributes);
 
     [Throws=RovenueError]

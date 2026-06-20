@@ -919,7 +919,7 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "librovenue"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "cuid2",
  "mockito",
@@ -1480,7 +1480,7 @@ dependencies = [
 
 [[package]]
 name = "rovenue-uniffi-bindgen"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "clap_derive",
  "uniffi",

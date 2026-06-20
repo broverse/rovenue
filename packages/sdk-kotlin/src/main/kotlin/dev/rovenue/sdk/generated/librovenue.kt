@@ -448,6 +448,8 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_shutdown(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
+    fun uniffi_rovenue_fn_method_rovenuecore_track(`ptr`: Pointer,`envelopeJson`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_virtual_currency(`ptr`: Pointer,`code`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Long
     fun uniffi_rovenue_fn_method_rovenuecore_virtual_currency_balances(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
@@ -630,6 +632,8 @@ internal interface _UniFFILib : Library {
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_shutdown(
     ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_track(
+    ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_virtual_currency(
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_virtual_currency_balances(
@@ -743,6 +747,9 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_shutdown() != 54828.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_track() != 29958.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_virtual_currency() != 48924.toShort()) {
@@ -1091,7 +1098,8 @@ public interface RovenueCoreInterface {
     fun `remoteConfigString`(`key`: String, `fallback`: String): String@Throws(RovenueException::class)
     fun `setAttributes`(`attributes`: Map<String, String?>)
     fun `setForeground`(`foreground`: Boolean)
-    fun `shutdown`()
+    fun `shutdown`()@Throws(RovenueException::class)
+    fun `track`(`envelopeJson`: String)
     fun `virtualCurrency`(`code`: String): Long
     fun `virtualCurrencyBalances`(): Map<String, Long>
     companion object
@@ -1437,6 +1445,17 @@ class RovenueCore(
     rustCall() { _status ->
     _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_shutdown(it,
         
+        _status)
+}
+        }
+    
+    
+    
+    @Throws(RovenueException::class)override fun `track`(`envelopeJson`: String) =
+        callWithPointer {
+    rustCallWithError(RovenueException) { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_track(it,
+        FfiConverterString.lower(`envelopeJson`),
         _status)
 }
         }
