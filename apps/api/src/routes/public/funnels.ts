@@ -14,12 +14,11 @@
 // version stored in Postgres.
 // =============================================================
 
-import type { Context } from "hono";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { cors } from "hono/cors";
 import { setCookie } from "hono/cookie";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
@@ -52,14 +51,14 @@ const answerValueSchema: z.ZodType<unknown> = z.lazy(() =>
     z.boolean(),
     z.null(),
     z.array(answerValueSchema).max(100),
-    z.record(z.string().max(100), answerValueSchema),
+    z
+      .record(z.string().max(100), answerValueSchema)
+      .refine((obj) => Object.keys(obj).length <= 100, {
+        message: "too many keys",
+      }),
   ]),
 );
 
-// First-hop IP from x-forwarded-for (used by both funnel rate limiters).
-function firstHopIp(c: Context): string {
-  return c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-}
 
 interface PublishedRuntimeConfig {
   id: string;
@@ -158,8 +157,8 @@ export const publicFunnelsRoute = new Hono()
   // ---------------------------------------------------------------
   .post(
     "/funnels/:slug/sessions",
-    endpointRateLimit({ name: "funnel:session", max: 30, identify: firstHopIp }),
-    zValidator(
+    endpointRateLimit({ name: "funnel:session", max: 30 }),
+    validate(
       "json",
       z.object({
         utm: z.record(z.string(), z.string()).optional(),
@@ -235,8 +234,8 @@ export const publicFunnelsRoute = new Hono()
   // ---------------------------------------------------------------
   .post(
     "/funnel-sessions/:sessionId/answers",
-    endpointRateLimit({ name: "funnel:answer", max: 120, identify: firstHopIp }),
-    zValidator(
+    endpointRateLimit({ name: "funnel:answer", max: 120 }),
+    validate(
       "json",
       z.object({
         page_id: z.string(),
@@ -278,7 +277,7 @@ export const publicFunnelsRoute = new Hono()
   // ---------------------------------------------------------------
   .post(
     "/funnel-sessions/:sessionId/advance",
-    zValidator("json", z.object({ from_page_id: z.string() })),
+    validate("json", z.object({ from_page_id: z.string() })),
     async (c) => {
       const sid = c.req.param("sessionId");
       const body = c.req.valid("json");
