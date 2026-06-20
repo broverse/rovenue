@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { MemberRole, drizzle } from "@rovenue/db";
 import type {
@@ -133,7 +133,7 @@ function parseDateBound(raw: string | undefined): Date | undefined {
 
 export const transactionsRoute = new Hono()
   .use("*", requireDashboardAuth)
-  .get("/", zValidator("query", listQuerySchema), async (c) => {
+  .get("/", validate("query", listQuerySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) {
       throw new HTTPException(400, { message: "Missing projectId" });
@@ -177,7 +177,7 @@ export const transactionsRoute = new Hono()
     });
     return c.json(ok(payload));
   })
-  .get("/volume", zValidator("query", volumeQuerySchema), async (c) => {
+  .get("/volume", validate("query", volumeQuerySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) {
       throw new HTTPException(400, { message: "Missing projectId" });
@@ -191,7 +191,7 @@ export const transactionsRoute = new Hono()
   })
   .get(
     "/store-breakdown",
-    zValidator("query", breakdownQuerySchema),
+    validate("query", breakdownQuerySchema),
     async (c) => {
       const projectId = c.req.param("projectId");
       if (!projectId) {
@@ -218,7 +218,7 @@ export const transactionsRoute = new Hono()
   })
   .get(
     "/export.csv",
-    zValidator("query", exportQuerySchema),
+    validate("query", exportQuerySchema),
     async (c) => {
       const projectId = c.req.param("projectId");
       if (!projectId) {

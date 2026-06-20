@@ -19,7 +19,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { drizzle } from "@rovenue/db";
 import { getEvent } from "@rovenue/shared/notifications";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
@@ -88,7 +88,7 @@ export const projectNotificationDefaultsRoute = new Hono()
   })
 
   // PATCH /
-  .patch("/", zValidator("json", patchBodySchema), async (c) => {
+  .patch("/", validate("json", patchBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) throw new HTTPException(400, { message: "projectId required" });
     const user = c.get("user");

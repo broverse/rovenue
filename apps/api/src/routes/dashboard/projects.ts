@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { Environment, MemberRole, drizzle } from "@rovenue/db";
 import {
@@ -261,7 +261,7 @@ export const projectsRoute = new Hono()
   });
     return c.json(ok({ project: payload }));
   })
-  .post("/", zValidator("json", createProjectBodySchema), async (c) => {
+  .post("/", validate("json", createProjectBodySchema), async (c) => {
     const user = c.get("user");
     const body = c.req.valid("json");
 
@@ -338,7 +338,7 @@ export const projectsRoute = new Hono()
   // PATCH /:id — partial update, ADMIN+. Reads the before-snapshot so
   // the audit row captures both sides; only fields present in the body
   // are forwarded to `update`.
-  .patch("/:id", zValidator("json", updateProjectBodySchema), async (c) => {
+  .patch("/:id", validate("json", updateProjectBodySchema), async (c) => {
     const id = c.req.param("id");
     const user = c.get("user");
     await assertProjectAccess(id, user.id, MemberRole.ADMIN);
@@ -452,7 +452,7 @@ export const projectsRoute = new Hono()
   // pair (same material layout as project-create) and returns the
   // secret plaintext exactly once. The audit payload carries only the
   // publishable id — never the secret.
-  .post("/:id/api-keys", zValidator("json", createApiKeyBodySchema), async (c) => {
+  .post("/:id/api-keys", validate("json", createApiKeyBodySchema), async (c) => {
     const id = c.req.param("id");
     const user = c.get("user");
     await assertProjectAccess(id, user.id, MemberRole.ADMIN);

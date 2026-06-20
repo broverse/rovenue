@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { drizzle, getDb } from "@rovenue/db";
 import { recordEvent } from "../../services/experiment-engine";
@@ -75,7 +75,7 @@ export type ExposeBody = z.infer<typeof exposeBodySchema>;
 export const experimentsRoute = new Hono()
   .post(
     "/track",
-    zValidator("json", trackBodySchema),
+    validate("json", trackBodySchema),
     async (c) => {
       const project = c.get("project");
       const appUserId =
@@ -127,7 +127,7 @@ export const experimentsRoute = new Hono()
   )
   .post(
     "/:id/expose",
-    zValidator("json", exposeBodySchema),
+    validate("json", exposeBodySchema),
     async (c) => {
       const experimentId = c.req.param("id");
       const input = c.req.valid("json");

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
@@ -77,7 +77,7 @@ export const audiencesRoute = new Hono()
     return c.json(ok({ audiences }));
   })
   // ----- POST /dashboard/audiences -----
-  .post("/", zValidator("json", createAudienceBodySchema), async (c) => {
+  .post("/", validate("json", createAudienceBodySchema), async (c) => {
     const body = c.req.valid("json");
     const user = c.get("user");
     await assertProjectCapability(body.projectId, user.id, "audiences:write");
@@ -126,7 +126,7 @@ export const audiencesRoute = new Hono()
     return c.json(ok({ audience }));
   })
   // ----- PATCH /dashboard/audiences/:id -----
-  .patch("/:id", zValidator("json", updateAudienceBodySchema), async (c) => {
+  .patch("/:id", validate("json", updateAudienceBodySchema), async (c) => {
     const id = c.req.param("id");
     const existing = await drizzle.audienceRepo.findAudienceById(drizzle.db, id);
     if (!existing) {

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { MemberRole, drizzle, type Db } from "@rovenue/db";
@@ -101,7 +101,7 @@ export const membersRoute = new Hono()
   // PATCH /dashboard/projects/:projectId/members/:userId
   .patch(
     "/:userId",
-    zValidator("json", updateMemberBodySchema),
+    validate("json", updateMemberBodySchema),
     async (c) => {
       const projectId = c.req.param("projectId");
       const targetUserId = c.req.param("userId");
@@ -278,7 +278,7 @@ export const membersRoute = new Hono()
   // POST /dashboard/projects/:projectId/members/transfer
   .post(
     "/transfer",
-    zValidator("json", transferOwnershipBodySchema),
+    validate("json", transferOwnershipBodySchema),
     async (c) => {
       const projectId = c.req.param("projectId");
       if (!projectId)

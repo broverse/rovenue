@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../../lib/validate";
 import { z } from "zod";
 import { and, desc, eq, lt, gte, lte } from "drizzle-orm";
 import { MemberRole, drizzle, getDb } from "@rovenue/db";
@@ -105,7 +105,7 @@ function toDetailWire(
 export const refundShieldResponsesRoute = new Hono()
   .use("*", requireDashboardAuth)
   // ----- GET /responses -----
-  .get("/", zValidator("query", listQuerySchema), async (c) => {
+  .get("/", validate("query", listQuerySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) {
       throw new HTTPException(400, { message: "Missing projectId" });

@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { MemberRole, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
@@ -81,7 +81,7 @@ export const customDomainsRoute = new Hono()
   })
 
   // ----- POST /dashboard/projects/:projectId/custom-domains -----
-  .post("/", zValidator("json", attachBodySchema), async (c) => {
+  .post("/", validate("json", attachBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) throw new HTTPException(400, { message: "Missing projectId" });
     const user = c.get("user");

@@ -9,6 +9,7 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { Hono } from "hono";
+import { errorHandler } from "../../middleware/error";
 import { eq } from "drizzle-orm";
 import {
   getDb,
@@ -31,10 +32,12 @@ async function seedCurrency(projectId: string, suffix = "") {
 const RUN_ID = Date.now();
 
 function buildApp() {
-  return new Hono().route(
+  const app = new Hono().route(
     "/projects/:projectId/credits",
     creditsRoute,
   );
+  app.onError(errorHandler);
+  return app;
 }
 
 async function createUserAndSession(suffix: string): Promise<{ userId: string; cookie: string }> {

@@ -17,6 +17,7 @@ process.env.REDIS_URL = "redis://localhost:6379";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
+import { errorHandler } from "../../middleware/error";
 
 // ---------------------------------------------------------------------------
 // vi.mock factories are hoisted to the top of the compiled output, so they
@@ -131,7 +132,9 @@ const STUB_CONFIG = {
 };
 
 function buildApp() {
-  return new Hono().route("/public", publicFunnelsRoute);
+  const app = new Hono().route("/public", publicFunnelsRoute);
+  app.onError(errorHandler);
+  return app;
 }
 
 function post(app: Hono, path: string, body: unknown, headers: Record<string, string> = {}) {

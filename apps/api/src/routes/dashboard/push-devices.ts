@@ -17,7 +17,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { endpointRateLimit } from "../../middleware/rate-limit";
@@ -46,7 +46,7 @@ export const pushDevicesRoute = new Hono()
       max: 10,
       identify: (c) => c.get("user")?.id ?? "anon",
     }),
-    zValidator("json", upsertBodySchema),
+    validate("json", upsertBodySchema),
     async (c) => {
       const user = c.get("user");
       const body = c.req.valid("json");

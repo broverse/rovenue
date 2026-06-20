@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { MemberRole, drizzle } from "@rovenue/db";
 import {
@@ -172,7 +172,7 @@ const exportQuerySchema = z.object({
 
 export const subscriptionsRoute = new Hono()
   .use("*", requireDashboardAuth)
-  .get("/", zValidator("query", listQuerySchema), async (c) => {
+  .get("/", validate("query", listQuerySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) {
       throw new HTTPException(400, { message: "Missing projectId" });
@@ -241,7 +241,7 @@ export const subscriptionsRoute = new Hono()
   })
   .get(
     "/renewal-calendar",
-    zValidator("query", calendarQuerySchema),
+    validate("query", calendarQuerySchema),
     async (c) => {
       const projectId = c.req.param("projectId");
       if (!projectId) {
@@ -261,7 +261,7 @@ export const subscriptionsRoute = new Hono()
   )
   .get(
     "/billing-issues",
-    zValidator("query", issuesQuerySchema),
+    validate("query", issuesQuerySchema),
     async (c) => {
       const projectId = c.req.param("projectId");
       if (!projectId) {
@@ -277,7 +277,7 @@ export const subscriptionsRoute = new Hono()
   )
   .get(
     "/export.csv",
-    zValidator("query", exportQuerySchema),
+    validate("query", exportQuerySchema),
     async (c) => {
       const projectId = c.req.param("projectId");
       if (!projectId) throw new HTTPException(400, { message: "Missing projectId" });
@@ -350,7 +350,7 @@ export const subscriptionsRoute = new Hono()
   )
   .post(
     "/",
-    zValidator("json", grantSubscriptionRequestSchema),
+    validate("json", grantSubscriptionRequestSchema),
     async (c) => {
       const projectId = c.req.param("projectId");
       if (!projectId) {
@@ -368,7 +368,7 @@ export const subscriptionsRoute = new Hono()
   )
   .post(
     "/:purchaseId/schedule",
-    zValidator("json", scheduleActionRequestSchema),
+    validate("json", scheduleActionRequestSchema),
     async (c) => {
       const projectId = c.req.param("projectId");
       const purchaseId = c.req.param("purchaseId");

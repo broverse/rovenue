@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
 import { API_KEY_KIND } from "@rovenue/shared";
@@ -72,7 +72,7 @@ const bodySchema = z.object({
 export const sdkSessionsRoute = new Hono().post(
   "/",
   requirePublicApiKey,
-  zValidator("json", bodySchema),
+  validate("json", bodySchema),
   async (c) => {
     const project = c.get("project");
     const { subscriberId: rawSubscriberId, events } = c.req.valid("json");

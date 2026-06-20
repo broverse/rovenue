@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { MemberRole } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
@@ -39,7 +39,7 @@ const overviewQuerySchema = z
 
 export const overviewRoute = new Hono()
   .use("*", requireDashboardAuth)
-  .get("/", zValidator("query", overviewQuerySchema), async (c) => {
+  .get("/", validate("query", overviewQuerySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) {
       throw new HTTPException(400, { message: "Missing projectId" });

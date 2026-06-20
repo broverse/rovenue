@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { drizzle } from "@rovenue/db";
 import { exportUser } from "../../services/gdpr/export-user";
@@ -148,7 +148,7 @@ export const meRoute = new Hono()
     return c.json(ok(payload));
   })
   // ----- PATCH /dashboard/me -----
-  .patch("/", zValidator("json", updateMeBodySchema), async (c) => {
+  .patch("/", validate("json", updateMeBodySchema), async (c) => {
     const sessionUser = c.get("user");
     const body = c.req.valid("json");
 
@@ -328,7 +328,7 @@ export const meRoute = new Hono()
     return c.json(ok(payload));
   })
   // ----- POST /dashboard/me/pats -----
-  .post("/pats", zValidator("json", createPatBodySchema), async (c) => {
+  .post("/pats", validate("json", createPatBodySchema), async (c) => {
     const sessionUser = c.get("user");
     const body = c.req.valid("json");
 
@@ -418,7 +418,7 @@ export const meRoute = new Hono()
   // ----- PATCH /dashboard/me/preferences -----
   .patch(
     "/preferences",
-    zValidator(
+    validate(
       "json",
       z
         .object({

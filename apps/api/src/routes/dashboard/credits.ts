@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -41,7 +41,7 @@ const rollupQuerySchema = z.object({
 
 export const creditsRoute = new Hono()
   .use("*", requireDashboardAuth)
-  .get("/rollup", zValidator("query", rollupQuerySchema), async (c) => {
+  .get("/rollup", validate("query", rollupQuerySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) {
       throw new HTTPException(400, { message: "Missing projectId" });
@@ -78,7 +78,7 @@ export const creditsRoute = new Hono()
   // the engine stays the single writer for credit_ledger.
   .post(
     "/",
-    zValidator("json", grantCreditsRequestSchema),
+    validate("json", grantCreditsRequestSchema),
     async (c) => {
       const projectId = c.req.param("projectId");
       if (!projectId) {

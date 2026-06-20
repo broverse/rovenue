@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../../lib/validate";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { MemberRole, drizzle, getDb } from "@rovenue/db";
@@ -91,7 +91,7 @@ export const refundShieldSettingsRoute = new Hono()
     return c.json(ok({ settings: toWire(row) }));
   })
   // ----- PUT /settings -----
-  .put("/", zValidator("json", putBodySchema), async (c) => {
+  .put("/", validate("json", putBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) {
       throw new HTTPException(400, { message: "Missing projectId" });

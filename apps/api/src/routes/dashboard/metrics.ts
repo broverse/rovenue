@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { MemberRole } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
@@ -86,7 +86,7 @@ export const metricsRoute = new Hono()
   // Per-day gross USD, event count, and distinct active
   // subscribers for the window. Returns buckets in ascending
   // order so the client can render a line chart without sorting.
-  .get("/mrr", zValidator("query", mrrQuerySchema), async (c) => {
+  .get("/mrr", validate("query", mrrQuerySchema), async (c) => {
     const projectId = c.req.param("projectId")!;
     const { from, to } = c.req.valid("query");
 
@@ -107,7 +107,7 @@ export const metricsRoute = new Hono()
       }),
     );
   })
-  .get("/summary", zValidator("query", mrrQuerySchema), async (c) => {
+  .get("/summary", validate("query", mrrQuerySchema), async (c) => {
     const projectId = c.req.param("projectId")!;
     const { from, to } = c.req.valid("query");
     const summary = await getRevenueSummary({ projectId, from, to });
@@ -133,7 +133,7 @@ export const metricsRoute = new Hono()
   })
   .get(
     "/mrr-decomposition",
-    zValidator("query", mrrQuerySchema),
+    validate("query", mrrQuerySchema),
     async (c) => {
       const projectId = c.req.param("projectId")!;
       const { from, to } = c.req.valid("query");
@@ -143,7 +143,7 @@ export const metricsRoute = new Hono()
       );
     },
   )
-  .get("/engagement", zValidator("query", mrrQuerySchema), async (c) => {
+  .get("/engagement", validate("query", mrrQuerySchema), async (c) => {
     const projectId = c.req.param("projectId")!;
     const { from, to } = c.req.valid("query");
     const points = await listEngagement({ projectId, from, to });
@@ -162,7 +162,7 @@ export const metricsRoute = new Hono()
   })
   .get(
     "/ltv-prediction",
-    zValidator("query", ltvPredictionQuerySchema),
+    validate("query", ltvPredictionQuerySchema),
     async (c) => {
       const projectId = c.req.param("projectId")!;
       const { horizonMonths, minMatureCohorts } = c.req.valid("query");

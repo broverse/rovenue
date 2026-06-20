@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { MemberRole, drizzle } from "@rovenue/db";
 import {
   createVirtualCurrencyRequestSchema,
@@ -58,7 +58,7 @@ export const virtualCurrenciesDashboardRoute = new Hono()
   })
   .post(
     "/",
-    zValidator("json", createVirtualCurrencyRequestSchema),
+    validate("json", createVirtualCurrencyRequestSchema),
     async (c) => {
       const projectId = requireProjectId(c);
       const user = c.get("user");
@@ -106,7 +106,7 @@ export const virtualCurrenciesDashboardRoute = new Hono()
   )
   .patch(
     "/:id",
-    zValidator("json", updateVirtualCurrencyRequestSchema),
+    validate("json", updateVirtualCurrencyRequestSchema),
     async (c) => {
       const projectId = requireProjectId(c);
       const id = c.req.param("id");

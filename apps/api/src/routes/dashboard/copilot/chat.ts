@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../../lib/validate";
 import { z } from "zod";
 import { streamText, stepCountIs } from "ai";
 import type { LanguageModel, ModelMessage } from "ai";
@@ -100,7 +100,7 @@ function extractLastUserText(
 export const copilotChatRoute = new Hono()
   .use("*", requireDashboardAuth)
   .use("*", roviQuotaGuard())
-  .post("/", zValidator("json", chatBody), async (c) => {
+  .post("/", validate("json", chatBody), async (c) => {
     const projectId = c.req.param("projectId")!;
     const user = c.get("user");
     const membership = await assertProjectAccess(projectId, user.id);

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { drizzle } from "@rovenue/db";
 import {
   spendVirtualCurrencyRequestSchema,
@@ -80,7 +80,7 @@ export const virtualCurrenciesV1Route = new Hono()
     "/:appUserId/:code/transactions",
     requireSecretKey,
     idempotency,
-    zValidator("json", spendVirtualCurrencyRequestSchema),
+    validate("json", spendVirtualCurrencyRequestSchema),
     async (c) => {
       const project = c.get("project");
       const appUserId = c.req.param("appUserId");

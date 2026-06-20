@@ -17,7 +17,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../../lib/validate";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../../middleware/dashboard-auth";
@@ -49,7 +49,7 @@ export const notificationsRoute = new Hono()
   .route("/test-send", notificationTestSendRoute)
 
   // GET /
-  .get("/", zValidator("query", listQuerySchema), async (c) => {
+  .get("/", validate("query", listQuerySchema), async (c) => {
     const user = c.get("user");
     const { limit, cursor: rawCursor, projectId, unreadOnly } =
       c.req.valid("query");
@@ -124,7 +124,7 @@ export const notificationsRoute = new Hono()
   // POST /read-all
   .post(
     "/read-all",
-    zValidator("json", readAllBodySchema),
+    validate("json", readAllBodySchema),
     async (c) => {
       const user = c.get("user");
       const { projectId } = c.req.valid("json");

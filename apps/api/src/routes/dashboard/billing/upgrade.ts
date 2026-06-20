@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../../lib/validate";
 import { z } from "zod";
 import { db, MemberRole } from "@rovenue/db";
 import { assertProjectAccess } from "../../../lib/project-access";
@@ -33,7 +33,7 @@ const bodySchema = z.object({
 
 export const upgradeRoute = new Hono().post(
   "/",
-  zValidator("json", bodySchema),
+  validate("json", bodySchema),
   async (c) => {
     if (!isBillingEnabled()) {
       throw new HTTPException(404, { message: "Not found" });

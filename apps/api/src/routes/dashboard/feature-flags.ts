@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import {
   FeatureFlagEnv,
@@ -86,7 +86,7 @@ export const updateFlagBodySchema = z.object({
 export const featureFlagsRoute = new Hono()
   .use("*", requireDashboardAuth)
   // ----- POST /dashboard/feature-flags -----
-  .post("/", zValidator("json", createFlagBodySchema), async (c) => {
+  .post("/", validate("json", createFlagBodySchema), async (c) => {
     const body = c.req.valid("json");
     const user = c.get("user");
     await assertProjectCapability(body.projectId, user.id, "flags:write");
@@ -158,7 +158,7 @@ export const featureFlagsRoute = new Hono()
     return c.json(ok({ flag }));
   })
   // ----- PATCH /dashboard/feature-flags/:id -----
-  .patch("/:id", zValidator("json", updateFlagBodySchema), async (c) => {
+  .patch("/:id", validate("json", updateFlagBodySchema), async (c) => {
     const id = c.req.param("id");
     const existing = await drizzle.dashboardFeatureFlagRepo.findFeatureFlagById(
       drizzle.db,

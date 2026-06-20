@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
 import { drizzle } from "@rovenue/db";
@@ -101,14 +101,7 @@ export const eventsRoute = new Hono()
   .post(
     "/",
     requirePublicApiKey,
-    zValidator("json", eventEnvelopeSchema, (result) => {
-      // Route validation failures through the global error handler so the
-      // response follows the project-standard { error: { code, message } }
-      // shape instead of @hono/zod-validator's default { success, error }.
-      if (!result.success) {
-        throw result.error;
-      }
-    }),
+    validate("json", eventEnvelopeSchema),
     async (c) => {
       const project = c.get("project");
       const body = c.req.valid("json");

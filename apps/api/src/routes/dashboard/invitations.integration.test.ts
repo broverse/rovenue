@@ -11,6 +11,7 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { Hono } from "hono";
+import { errorHandler } from "../../middleware/error";
 import { eq } from "drizzle-orm";
 import { getDb, projects, drizzle } from "@rovenue/db";
 import { auth } from "../../lib/auth";
@@ -19,10 +20,12 @@ import { invitationsRoute } from "./invitations";
 const RUN_ID = Date.now();
 
 function buildApp() {
-  return new Hono().route(
+  const app = new Hono().route(
     "/projects/:projectId/invitations",
     invitationsRoute,
   );
+  app.onError(errorHandler);
+  return app;
 }
 
 async function createUserAndSession(

@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import {
   ExperimentStatus,
@@ -104,7 +104,7 @@ export const stopExperimentBodySchema = z.object({
 export const experimentsRoute = new Hono()
   .use("*", requireDashboardAuth)
   // ----- POST /dashboard/experiments -----
-  .post("/", zValidator("json", createExperimentBodySchema), async (c) => {
+  .post("/", validate("json", createExperimentBodySchema), async (c) => {
     const body = c.req.valid("json");
 
     // The key is backend-assigned below; validate the variant weight sum

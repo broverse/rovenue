@@ -18,9 +18,12 @@ vi.mock("../../services/store-catalog", async () => {
 import { Hono } from "hono";
 import { productsDashboardRoute } from "./products";
 import { StoreCatalogError } from "../../services/store-catalog";
+import { errorHandler } from "../../middleware/error";
 
 function app() {
-  return new Hono().route("/dashboard/projects/:projectId/products", productsDashboardRoute);
+  const a = new Hono().route("/dashboard/projects/:projectId/products", productsDashboardRoute);
+  a.onError(errorHandler);
+  return a;
 }
 
 beforeEach(() => getStoreCatalog.mockReset());

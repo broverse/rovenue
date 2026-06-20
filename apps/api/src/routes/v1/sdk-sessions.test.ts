@@ -17,6 +17,7 @@
 
 import { Hono } from "hono";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { errorHandler } from "../../middleware/error";
 
 const sendMock = vi.fn();
 
@@ -73,9 +74,11 @@ const PUBLIC_KEY = "rov_pub_test_key";
 async function buildApp() {
   const { sdkSessionsRoute } = await import("./sdk-sessions");
   const { apiKeyAuth } = await import("../../middleware/api-key-auth");
-  return new Hono()
+  const app = new Hono()
     .use("*", apiKeyAuth("any"))
     .route("/v1/sdk/sessions", sdkSessionsRoute);
+  app.onError(errorHandler);
+  return app;
 }
 
 describe("POST /v1/sdk/sessions", () => {

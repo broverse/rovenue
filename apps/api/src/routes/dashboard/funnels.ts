@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { createId } from "@paralleldrive/cuid2";
 import { MemberRole, drizzle } from "@rovenue/db";
@@ -149,7 +149,7 @@ export const funnelsRoute = new Hono()
   })
 
   // ----- POST /dashboard/projects/:projectId/funnels -----
-  .post("/", zValidator("json", createFunnelBodySchema), async (c) => {
+  .post("/", validate("json", createFunnelBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) {
       throw new HTTPException(400, { message: "Missing projectId" });
@@ -203,7 +203,7 @@ export const funnelsRoute = new Hono()
   })
 
   // ----- PATCH /dashboard/projects/:projectId/funnels/:funnelId -----
-  .patch("/:funnelId", zValidator("json", updateFunnelBodySchema), async (c) => {
+  .patch("/:funnelId", validate("json", updateFunnelBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
     const funnelId = c.req.param("funnelId");
     if (!projectId || !funnelId) {
@@ -593,7 +593,7 @@ export const funnelsRoute = new Hono()
   // ----- GET /dashboard/projects/:projectId/funnels/:funnelId/sessions -----
   .get(
     "/:funnelId/sessions",
-    zValidator("query", listSessionsQuerySchema),
+    validate("query", listSessionsQuerySchema),
     async (c) => {
       const projectId = c.req.param("projectId");
       const funnelId = c.req.param("funnelId");

@@ -25,7 +25,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../../lib/validate";
 import { drizzle } from "@rovenue/db";
 import { getEvent } from "@rovenue/shared/notifications";
 import { requireDashboardAuth } from "../../../middleware/dashboard-auth";
@@ -110,7 +110,7 @@ export const notificationPreferencesRoute = new Hono()
   .use("*", requireDashboardAuth)
 
   // GET /
-  .get("/", zValidator("query", getQuerySchema), async (c) => {
+  .get("/", validate("query", getQuerySchema), async (c) => {
     const user = c.get("user");
     const { projectId } = c.req.valid("query");
 
@@ -160,7 +160,7 @@ export const notificationPreferencesRoute = new Hono()
   })
 
   // PATCH /
-  .patch("/", zValidator("json", patchBodySchema), async (c) => {
+  .patch("/", validate("json", patchBodySchema), async (c) => {
     const user = c.get("user");
     const body = c.req.valid("json");
 

@@ -12,7 +12,7 @@
 
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { drizzle } from "@rovenue/db";
 import {
@@ -84,7 +84,7 @@ export const invitationsRoute = new Hono()
   })
 
   // POST /dashboard/projects/:projectId/invitations
-  .post("/", zValidator("json", createBodySchema), async (c) => {
+  .post("/", validate("json", createBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId)
       throw new HTTPException(400, { message: "Missing projectId" });

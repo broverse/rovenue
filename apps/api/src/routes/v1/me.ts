@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { drizzle } from "@rovenue/db";
 import {
   attributesBodySchema,
@@ -70,7 +70,7 @@ export const meRoute = new Hono()
   // -------------------------------------------------------------
   .post(
     "/attributes",
-    zValidator("json", meAttributesBodySchema),
+    validate("json", meAttributesBodySchema),
     async (c) => {
       const project = c.get("project");
       const subscriber = c.get("subscriber");

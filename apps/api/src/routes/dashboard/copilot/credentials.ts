@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../../lib/validate";
 import { z } from "zod";
 import { MemberRole, drizzle } from "@rovenue/db";
 import { encrypt, decrypt } from "@rovenue/shared/crypto";
@@ -46,7 +46,7 @@ export const copilotCredentialsRoute = new Hono()
   })
 
   // PUT / — OWNER only; encrypts and stores the API key
-  .put("/", zValidator("json", upsertBody), async (c) => {
+  .put("/", validate("json", upsertBody), async (c) => {
     const projectId = c.req.param("projectId")!;
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id, MemberRole.OWNER);

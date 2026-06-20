@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { drizzle, type Subscriber } from "@rovenue/db";
 import {
@@ -74,7 +74,7 @@ export const subscribersRoute = new Hono()
   // with no receipts (e.g. just to sync a previously-known account).
   // zValidator keeps the shape correct but we drive downstream
   // logic off the optional `receipts` array directly.
-  .post("/:appUserId/restore", zValidator("json", restoreBodySchema), async (c) => {
+  .post("/:appUserId/restore", validate("json", restoreBodySchema), async (c) => {
     const project = c.get("project");
     const appUserId = c.req.param("appUserId");
     const body = c.req.valid("json");
@@ -129,7 +129,7 @@ export const subscribersRoute = new Hono()
   // -------------------------------------------------------------
   .post(
     "/:appUserId/attributes",
-    zValidator("json", attributesBodySchema),
+    validate("json", attributesBodySchema),
     async (c) => {
       const project = c.get("project");
       const appUserId = c.req.param("appUserId");
@@ -182,7 +182,7 @@ export const subscribersRoute = new Hono()
   .post(
     "/transfer",
     requireSecretKey,
-    zValidator("json", transferBodySchema),
+    validate("json", transferBodySchema),
     async (c) => {
       const project = c.get("project");
       const body = c.req.valid("json");

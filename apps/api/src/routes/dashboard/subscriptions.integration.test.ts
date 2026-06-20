@@ -13,6 +13,7 @@
 
 import { afterAll, describe, expect, it } from "vitest";
 import { Hono } from "hono";
+import { errorHandler } from "../../middleware/error";
 import { eq } from "drizzle-orm";
 import {
   getDb,
@@ -37,10 +38,12 @@ const RUN_ID = Date.now();
 // ---------------------------------------------------------------------------
 
 function buildApp() {
-  return new Hono().route(
+  const app = new Hono().route(
     "/projects/:projectId/subscriptions",
     subscriptionsRoute,
   );
+  app.onError(errorHandler);
+  return app;
 }
 
 // ---------------------------------------------------------------------------

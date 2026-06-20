@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { FeatureFlagEnv } from "@rovenue/db";
 import { attributesBodySchema } from "@rovenue/shared";
@@ -23,7 +23,7 @@ import { ok } from "../../lib/response";
 // freshest picture.
 //
 // Route handlers are chained on a single `new Hono()` expression
-// and the POST body passes through `zValidator("json", …)` so
+// and the POST body passes through `validate("json", …)` so
 // the AppType export at apps/api/src/app.ts carries both the
 // request body + response shape into downstream RPC consumers:
 //
@@ -97,7 +97,7 @@ async function handleConfig(
 
 export const configRoute = new Hono()
   .get("/", (c) => handleConfig(c, {}))
-  .post("/", zValidator("json", configBodySchema), (c) => {
+  .post("/", validate("json", configBodySchema), (c) => {
     const body = c.req.valid("json");
     return handleConfig(c, body.attributes ?? {});
   });

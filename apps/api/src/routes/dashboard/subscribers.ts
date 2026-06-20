@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { MemberRole, drizzle } from "@rovenue/db";
 import { assertProjectCapability } from "../../lib/capabilities";
 import type {
@@ -191,26 +191,11 @@ const anonymizeBodySchema = z.object({
     .default("gdpr_request"),
 });
 
-// zValidator's default failure response is `{ success: false, error }`
-// which doesn't go through our global error handler. Re-throwing as
-// HTTPException routes the failure through `errorHandler` → the
-// canonical `fail(VALIDATION_ERROR, message)` envelope.
-function throwOnInvalid(
-  result: { success: true } | { success: false; error: z.ZodError },
-): void {
-  if (!result.success) {
-    throw new HTTPException(400, {
-      message:
-        result.error.errors[0]?.message ?? "Invalid query parameters",
-    });
-  }
-}
-
 export const subscribersRoute = new Hono()
   .use("*", requireDashboardAuth)
   .get(
     "/",
-    zValidator("query", listQuerySchema, throwOnInvalid),
+    validate("query", listQuerySchema),
     async (c) => {
   const projectId = c.req.param("projectId");
   if (!projectId) {
@@ -391,7 +376,7 @@ export const subscribersRoute = new Hono()
   // publishes (≤2s p99). Documented in Plan 3 ADR / §B.1.
   .get(
     "/:id/credit-history",
-    zValidator("query", creditHistoryQuerySchema, throwOnInvalid),
+    validate("query", creditHistoryQuerySchema),
     async (c) => {
     const projectId = c.req.param("projectId");
     const subscriberId = c.req.param("id");

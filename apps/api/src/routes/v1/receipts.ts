@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { ProductType, drizzle } from "@rovenue/db";
 import { getAllBalances } from "../../services/credit-engine";
@@ -131,7 +131,7 @@ export const receiptsRoute = new Hono()
     "/apple",
     receiptsEndpointLimit,
     idempotency,
-    zValidator("json", receiptBodySchema),
+    validate("json", receiptBodySchema),
     async (c) => {
       const project = c.get("project");
       const body = c.req.valid("json");
@@ -143,7 +143,7 @@ export const receiptsRoute = new Hono()
     "/google",
     receiptsEndpointLimit,
     idempotency,
-    zValidator("json", receiptBodySchema),
+    validate("json", receiptBodySchema),
     async (c) => {
       const project = c.get("project");
       const body = c.req.valid("json");

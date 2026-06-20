@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { zValidator } from "@hono/zod-validator";
+import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { MemberRole, accessIdSchema, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
@@ -209,7 +209,7 @@ function toWire(
 
 export const productsDashboardRoute = new Hono()
   .use("*", requireDashboardAuth)
-  .get("/", zValidator("query", listQuerySchema), async (c) => {
+  .get("/", validate("query", listQuerySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) {
       throw new HTTPException(400, { message: "Missing projectId" });
@@ -253,7 +253,7 @@ export const productsDashboardRoute = new Hono()
     };
     return c.json(ok(payload));
   })
-  .post("/", zValidator("json", createBodySchema), async (c) => {
+  .post("/", validate("json", createBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) {
       throw new HTTPException(400, { message: "Missing projectId" });
@@ -311,7 +311,7 @@ export const productsDashboardRoute = new Hono()
     purgeProjectCatalogCache(projectId);
     return c.json(ok({ product: toWire(row, grants) }));
   })
-  .post("/import", zValidator("json", importBodySchema), async (c) => {
+  .post("/import", validate("json", importBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
     if (!projectId) {
       throw new HTTPException(400, { message: "Missing projectId" });
@@ -368,7 +368,7 @@ export const productsDashboardRoute = new Hono()
   })
   .get(
     "/store-catalog",
-    zValidator("query", storeCatalogQuerySchema),
+    validate("query", storeCatalogQuerySchema),
     async (c) => {
       const projectId = c.req.param("projectId");
       if (!projectId) {
@@ -414,7 +414,7 @@ export const productsDashboardRoute = new Hono()
     );
     return c.json(ok({ product: toWire(row, grants) }));
   })
-  .patch("/:id", zValidator("json", updateBodySchema), async (c) => {
+  .patch("/:id", validate("json", updateBodySchema), async (c) => {
     const projectId = c.req.param("projectId");
     const id = c.req.param("id");
     if (!projectId || !id) {
