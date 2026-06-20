@@ -33,7 +33,13 @@ export const errorHandler: ErrorHandler = (err, c) => {
   }
 
   if (err instanceof ZodError) {
-    return c.json(fail(ERROR_CODE.VALIDATION_ERROR, err.message), 400);
+    log.warn("validation error", {
+      issues: err.issues.map((i) => ({ path: i.path.join("."), code: i.code })),
+    });
+    return c.json(
+      fail(ERROR_CODE.VALIDATION_ERROR, "Request validation failed"),
+      400,
+    );
   }
 
   log.error("unhandled error", {
