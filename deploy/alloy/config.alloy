@@ -23,15 +23,19 @@ loki.source.docker "default" {
   relabel_rules = discovery.relabel.containers.rules
 }
 
-// Pino logs are JSON: lift level into a label, keep msg/requestId as
-// structured metadata.
+// Pino logs are JSON: lift level into an indexed label, and attach msg/requestId
+// as non-indexed structured metadata (queryable without exploding label
+// cardinality; requires Loki's allow_structured_metadata, enabled in loki config).
 loki.process "pino" {
   forward_to = [loki.write.default.receiver]
   stage.json {
-    expressions = { level = "level" }
+    expressions = { level = "level", msg = "msg", requestId = "requestId" }
   }
   stage.labels {
     values = { level = "level" }
+  }
+  stage.structured_metadata {
+    values = { msg = "msg", requestId = "requestId" }
   }
 }
 

@@ -450,11 +450,14 @@ services:
     image: prometheuscommunity/postgres-exporter:v0.15.0
     profiles: ["observability"]
     environment:
+      # sslmode=disable is safe here: the exporter reaches Postgres only over the
+      # internal docker network. Change it if you point this at a TLS-required DB.
       DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}?sslmode=disable"
     expose:
       - "9187"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
   redis-exporter:
@@ -465,7 +468,8 @@ services:
     expose:
       - "9121"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   alloy:
