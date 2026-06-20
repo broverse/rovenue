@@ -21,7 +21,15 @@
     <default remove="remove"/>
     <rovenue>
       <password_sha256_hex from_env="CLICKHOUSE_PASSWORD_SHA256"/>
-      <networks><ip>::/0</ip></networks>
+      <networks>
+        <!-- Docker Compose default bridge network (172.17.0.0/16) falls
+             within 172.16.0.0/12; 10.0.0.0/8 covers custom bridge /
+             overlay networks. Localhost is kept for local healthchecks. -->
+        <ip>127.0.0.1</ip>
+        <ip>::1</ip>
+        <ip>172.16.0.0/12</ip>
+        <ip>10.0.0.0/8</ip>
+      </networks>
       <profile>default</profile>
       <quota>default</quota>
       <access_management>0</access_management>
@@ -32,7 +40,12 @@
     </rovenue>
     <rovenue_reader>
       <password_sha256_hex from_env="CLICKHOUSE_READER_PASSWORD_SHA256"/>
-      <networks><ip>::/0</ip></networks>
+      <networks>
+        <ip>127.0.0.1</ip>
+        <ip>::1</ip>
+        <ip>172.16.0.0/12</ip>
+        <ip>10.0.0.0/8</ip>
+      </networks>
       <profile>readonly_analytics</profile>
       <quota>default</quota>
       <databases>
