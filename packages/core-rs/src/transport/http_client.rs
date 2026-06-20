@@ -278,7 +278,9 @@ impl HttpClient {
 
                     match classify(Some(status), retry_after) {
                         RetryDecision::Success => {
-                            let body = if status == 204 {
+                            // 202 Accepted (and 204) carry no body — the events
+                            // endpoint returns an empty 202. Parsing would fail.
+                            let body = if status == 204 || status == 202 {
                                 None
                             } else {
                                 Some(resp.json::<T>().map_err(|_| RovenueError::Internal)?)
@@ -335,5 +337,33 @@ impl HttpClient {
             }
         }
         Err(last_err)
+    }
+}
+
+#[cfg(test)]
+mod post_json_tests {
+    use super::*;
+    use super::super::types::HttpPostRequest;
+
+    #[test]
+    fn post_json_accepts_empty_202_body() {
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("POST", "/v1/events")
+            .with_status(202)
+            .create();
+
+        let client = HttpClient::new(server.url(), "pk_test".into()).with_max_attempts(1);
+        let body = serde_json::json!({ "eventType": "x", "occurredAt": "2026-06-20T00:00:00Z" });
+        let resp = client
+            .post_json::<serde_json::Value, serde_json::Value>(
+                HttpPostRequest::new("/v1/events"),
+                &body,
+            )
+            .expect("202 must be Ok");
+
+        assert_eq!(resp.status, 202);
+        assert!(resp.body.is_none());
+        m.assert();
     }
 }
