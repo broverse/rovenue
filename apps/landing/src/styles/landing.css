@@ -134,15 +134,15 @@ a.btn { text-decoration: none; }
 /* trust row */
 .lp-trust { display: flex; align-items: center; gap: 14px; margin-top: 34px; }
 .lp-trust-avatars { display: flex; }
-.lp-trust-avatars span {
+.lp-trust-avatars img {
   width: 30px; height: 30px; border-radius: 999px;
   border: 2px solid var(--background);
   margin-left: -9px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 600; color: #fff;
-  font-family: 'Geist Mono', monospace;
+  object-fit: cover;
+  display: block;
+  background: var(--content3);
 }
-.lp-trust-avatars span:first-child { margin-left: 0; }
+.lp-trust-avatars img:first-child { margin-left: 0; }
 .lp-trust-text { font-size: 12.5px; color: var(--default-600); line-height: 1.4; }
 .lp-trust-text b { color: var(--foreground); font-weight: 600; }
 .lp-trust-text .stars { color: var(--warning); letter-spacing: 1px; }
