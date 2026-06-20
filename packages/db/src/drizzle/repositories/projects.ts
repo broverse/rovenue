@@ -293,11 +293,18 @@ export async function updateProjectWebhookSecret(
  * Delete a project. Cascades to members, api_keys, audiences, etc.
  * The audit row MUST be written FIRST so the fk (audit.projectId →
  * project.id) still resolves.
+ *
+ * Sets `rovenue.allow_ledger_delete` for the current transaction so the
+ * append-only trigger permits the cascading DELETE on `credit_ledger`.
+ * Must be called inside an open transaction (the dashboard DELETE route
+ * wraps it in `drizzle.db.transaction`); SET LOCAL is a no-op in
+ * auto-commit mode so it is safe if called outside a transaction too.
  */
 export async function deleteProject(
   db: DbOrTx,
   id: string,
 ): Promise<void> {
+  await db.execute(sql`SET LOCAL "rovenue.allow_ledger_delete" = 'on'`);
   await db.delete(projects).where(eq(projects.id, id));
 }
 
