@@ -14,7 +14,11 @@ const SUB_ID = `sub_cl_${RUN_ID}`;
 
 describe("credit-ledger per-currency", () => {
   afterAll(async () => {
-    await getDb().delete(projects).where(eq(projects.id, PROJECT_ID));
+    // credit_ledger is append-only; insertCreditLedger above created ledger rows
+    // so cascade delete needs the bypass flag.
+    await creditLedgerRepo.withLedgerDeleteAuthorized(getDb(), async (tx) => {
+      await tx.delete(projects).where(eq(projects.id, PROJECT_ID));
+    });
   });
 
   it("tracks balance independently per currency", async () => {

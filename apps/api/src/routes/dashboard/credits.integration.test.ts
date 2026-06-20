@@ -107,10 +107,13 @@ function trackProject(id: string) {
 }
 
 afterAll(async () => {
-  const db = getDb();
-  for (const id of seededProjectIds) {
-    await db.delete(projects).where(eq(projects.id, id));
-  }
+  // credit_ledger is append-only; the BONUS rows inserted above would cause the
+  // cascade delete to be blocked unless we set the bypass flag for this tx.
+  await drizzle.creditLedgerRepo.withLedgerDeleteAuthorized(drizzle.db, async (tx) => {
+    for (const id of seededProjectIds) {
+      await tx.delete(projects).where(eq(projects.id, id));
+    }
+  });
 });
 
 describe("POST /projects/:projectId/credits — manual grant", () => {

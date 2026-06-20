@@ -145,11 +145,13 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (PROJECT_ID) {
-    // Cascade delete removes api_keys, subscribers, virtual_currencies, and
-    // credit_ledger rows tied to this project.
-    await testDb
-      .delete(schema.projects)
-      .where(eq(schema.projects.id, PROJECT_ID));
+    // credit_ledger is append-only at the DB level; the cascade delete would
+    // be blocked by the trigger unless we set the bypass flag first.
+    await drizzleNs.creditLedgerRepo.withLedgerDeleteAuthorized(drizzleNs.db, async (tx) => {
+      await tx
+        .delete(schema.projects)
+        .where(eq(schema.projects.id, PROJECT_ID));
+    });
   }
   await pool.end();
 });
@@ -163,9 +165,13 @@ describe("v1 virtual-currencies helpers", () => {
   const HELPER_SUB_ID = `sub_vcv1_${RUN_ID}`;
 
   afterAll(async () => {
-    await drizzleNs.db
-      .delete(drizzleNs.schema.projects)
-      .where(eq(drizzleNs.schema.projects.id, HELPER_PROJECT_ID));
+    // credit_ledger is append-only; addCredits above created ledger rows so
+    // cascade delete needs the bypass flag.
+    await drizzleNs.creditLedgerRepo.withLedgerDeleteAuthorized(drizzleNs.db, async (tx) => {
+      await tx
+        .delete(drizzleNs.schema.projects)
+        .where(eq(drizzleNs.schema.projects.id, HELPER_PROJECT_ID));
+    });
   });
 
   it("builds a code-keyed balances map", async () => {
@@ -308,5 +314,70 @@ describe("POST /v1/virtual-currencies/:appUserId/:code/transactions", () => {
     );
 
     expect(res.status).toBe(403);
+  });
+
+  it("deduplicates: same referenceId posted twice debits the wallet exactly once (W1.3/F3)", async () => {
+    // Seed a fresh subscriber with a known balance so this test is fully
+    // self-contained and not affected by balance mutations from earlier tests.
+    const debitSubRovId = `u3-debit-${createId().slice(0, 8)}`;
+    const [debitSub] = await testDb
+      .insert(schema.subscribers)
+      .values({ projectId: PROJECT_ID, rovenueId: debitSubRovId })
+      .returning();
+    if (!debitSub) throw new Error("seed: debit subscriber insert returned no row");
+
+    // Grant 100 GEMs so balance is deterministic.
+    await addCredits({
+      subscriberId: debitSub.id,
+      currencyId: CURRENCY_ID,
+      amount: 100,
+      referenceId: `dedup_seed_${createId().slice(0, 8)}`,
+    });
+
+    const DEDUP_REF = `dedup_spend_${createId().slice(0, 12)}`;
+    const app = buildApp();
+
+    // First call — should debit 10 GEMs: 100 → 90.
+    const res1 = await app.request(
+      `/v1/virtual-currencies/${debitSubRovId}/GEM/transactions`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SECRET_KEY}`,
+        },
+        body: JSON.stringify({ amount: 10, referenceId: DEDUP_REF }),
+      },
+    );
+    expect(res1.status).toBe(200);
+    const { data: data1 } = (await res1.json()) as any;
+    expect(data1.code).toBe("GEM");
+    expect(data1.balance).toBe(90);
+
+    // Second call — same referenceId, same amount. Must be idempotent: balance
+    // stays at 90 (wallet debited exactly once, not twice).
+    const res2 = await app.request(
+      `/v1/virtual-currencies/${debitSubRovId}/GEM/transactions`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SECRET_KEY}`,
+        },
+        body: JSON.stringify({ amount: 10, referenceId: DEDUP_REF }),
+      },
+    );
+    expect(res2.status).toBe(200);
+    const { data: data2 } = (await res2.json()) as any;
+    expect(data2.code).toBe("GEM");
+    expect(data2.balance).toBe(90); // still 90 — NOT 80
+
+    // Confirm exactly one SPEND ledger row exists for this referenceId.
+    const ledgerRows = await testDb
+      .select({ id: schema.creditLedger.id, type: schema.creditLedger.type })
+      .from(schema.creditLedger)
+      .where(eq(schema.creditLedger.referenceId, DEDUP_REF));
+    expect(ledgerRows).toHaveLength(1);
+    expect(ledgerRows[0]?.type).toBe("SPEND");
   });
 });

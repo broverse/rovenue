@@ -21,7 +21,11 @@ const PURCHASE_ID = `pur_creditdedup_${RUN_ID}`;
 
 describe("addCredits dedupeOnReference", () => {
   afterAll(async () => {
-    await getDb().delete(projects).where(eq(projects.id, PROJECT_ID));
+    // credit_ledger is append-only; addCredits above created ledger rows so
+    // cascade delete needs the bypass flag.
+    await drizzle.creditLedgerRepo.withLedgerDeleteAuthorized(drizzle.db, async (tx) => {
+      await tx.delete(projects).where(eq(projects.id, PROJECT_ID));
+    });
   });
 
   it("inserts exactly one ledger row under concurrent same-reference grants", async () => {
