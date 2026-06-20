@@ -221,8 +221,8 @@ beforeEach(() => {
   metricsTesting.reset();
 
   drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValue({
-    id: "wh_1",
-    status: "PROCESSING",
+    outcome: "claimed",
+    row: { id: "wh_1", status: "PROCESSING" },
   });
 });
 
@@ -493,7 +493,7 @@ describe("handleAppleNotification — CONSUMPTION_REQUEST", () => {
     // is already PROCESSING/PROCESSED. The handler short-circuits as
     // "duplicate" and never re-invokes the dispatch path → no second
     // insert.
-    drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValueOnce(null);
+    drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValueOnce({ outcome: "duplicate" });
     const result2 = await handleAppleNotification({
       projectId: PROJECT_ID,
       signedPayload: "signed-envelope-stub",

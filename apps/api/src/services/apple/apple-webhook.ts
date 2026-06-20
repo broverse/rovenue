@@ -157,19 +157,16 @@ export async function handleAppleNotification(
   const notification = await verifier.verifyNotification(opts.signedPayload);
 
   // Atomic single-flight claim — exactly one concurrent worker wins.
-  const webhookEvent = await drizzle.webhookEventRepo.claimWebhookEvent(
-    drizzle.db,
-    {
-      projectId: opts.projectId,
-      source: WebhookSource.APPLE,
-      eventType: notification.notificationType,
-      storeEventId: notification.notificationUUID,
-      payload: JSON.parse(JSON.stringify(notification)),
-    },
-  );
+  const claim = await drizzle.webhookEventRepo.claimWebhookEvent(drizzle.db, {
+    projectId: opts.projectId,
+    source: WebhookSource.APPLE,
+    eventType: notification.notificationType,
+    storeEventId: notification.notificationUUID,
+    payload: JSON.parse(JSON.stringify(notification)),
+  });
 
-  if (!webhookEvent) {
-    log.info("notification already claimed or processed, skipping", {
+  if (claim.outcome === "duplicate") {
+    log.info("notification already processed, skipping", {
       uuid: notification.notificationUUID,
       type: notification.notificationType,
     });
@@ -178,6 +175,15 @@ export async function handleAppleNotification(
       notificationType: notification.notificationType,
     };
   }
+  if (claim.outcome === "in_progress") {
+    // Another worker holds a fresh claim. Throw so BullMQ retries with
+    // backoff instead of acking — prevents the historical bug where a
+    // retry of our own crashed attempt silently dropped the event.
+    throw new Error(
+      `webhook ${notification.notificationUUID} claim in progress; retry`,
+    );
+  }
+  const webhookEvent = claim.row;
 
   try {
     const transaction = notification.data?.signedTransactionInfo

@@ -158,8 +158,8 @@ beforeEach(() => {
   vi.clearAllMocks();
 
   drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValue({
-    id: "wh_1",
-    status: "PROCESSING",
+    outcome: "claimed",
+    row: { id: "wh_1", status: "PROCESSING" },
   });
   drizzleMock.subscriberRepo.upsertSubscriber.mockResolvedValue({
     id: "sub_1",

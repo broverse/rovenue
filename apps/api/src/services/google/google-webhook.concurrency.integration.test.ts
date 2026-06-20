@@ -5,9 +5,13 @@
 // Proves the atomic `claimWebhookEvent` swap closes the
 // double-dispatch race the old non-atomic `upsertWebhookEvent` +
 // `status === PROCESSED` guard left open. Two concurrent deliveries
-// of the SAME purchaseToken (= storeEventId) must resolve to exactly
-// one "processed" and one "duplicate", and must write exactly ONE
-// revenue_events row.
+// of the SAME purchaseToken (= storeEventId) must result in exactly
+// ONE successful "processed" and the other either returning "duplicate"
+// (if the first fully completed first) or throwing with
+// "claim in progress; retry" (if both raced and the second hit the
+// PROCESSING lease — the new F1 fix that forces BullMQ to retry
+// instead of silently acking). In all cases exactly ONE revenue_events
+// row must be written.
 //
 // Pre-fix both callers upserted the row PROCESSING (a no-op on
 // conflict) and then read `status === PROCESSED` — which is false for
@@ -160,20 +164,42 @@ describe("handleGoogleNotification — concurrent single-flight claim", () => {
     await db.delete(projects).where(eq(projects.id, PROJECT_ID));
   });
 
-  it("yields exactly one processed and one duplicate, and writes exactly one revenue_events row", async () => {
+  it("yields exactly one processed and prevents double-dispatch; second caller either returns duplicate or throws in-progress", async () => {
     const opts = {
       projectId: PROJECT_ID,
       pushBody: makePushBody(),
       verifyConfig: fakeVerifyConfig,
     };
 
-    const [a, b] = await Promise.all([
+    const results = await Promise.allSettled([
       handleGoogleNotification(opts),
       handleGoogleNotification(opts),
     ]);
 
-    const statuses = [a.status, b.status].sort();
-    expect(statuses).toEqual(["duplicate", "processed"]);
+    // Exactly one must succeed with "processed".
+    const fulfilled = results.filter(
+      (r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof handleGoogleNotification>>> =>
+        r.status === "fulfilled",
+    );
+    const rejected = results.filter((r) => r.status === "rejected");
+
+    // One of two outcomes:
+    // A) Both fulfilled — one "processed" + one "duplicate" (first completed before second claimed)
+    // B) One fulfilled ("processed") + one rejected (threw "claim in progress; retry")
+    // In both cases, dispatch ran exactly once.
+    if (rejected.length === 0) {
+      // Case A: both returned normally
+      const statuses = fulfilled.map((r) => r.value.status).sort();
+      expect(statuses).toEqual(["duplicate", "processed"]);
+    } else {
+      // Case B: loser threw the in-progress error (the new F1 behaviour)
+      expect(fulfilled).toHaveLength(1);
+      expect(fulfilled[0]?.value.status).toBe("processed");
+      expect(rejected).toHaveLength(1);
+      const err = (rejected[0] as PromiseRejectedResult).reason;
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toMatch(/claim in progress/);
+    }
 
     const db = getDb();
 

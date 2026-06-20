@@ -101,7 +101,7 @@ describe("processStripeEvent — atomic claim short-circuit", () => {
   });
 
   test("returns duplicate and runs no dispatch writes when claim returns null", async () => {
-    drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValueOnce(null);
+    drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValueOnce({ outcome: "duplicate" });
 
     const event = makeSubscriptionCreatedEvent();
     const result = await processStripeEvent({
@@ -123,8 +123,8 @@ describe("processStripeEvent — atomic claim short-circuit", () => {
 
   test("proceeds to dispatch when claim returns a row", async () => {
     drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValueOnce({
-      id: "wh_1",
-      status: "PROCESSING",
+      outcome: "claimed",
+      row: { id: "wh_1", status: "PROCESSING" },
     });
     drizzleMock.subscriberRepo.upsertSubscriber.mockResolvedValueOnce({
       id: "sub_row_1",

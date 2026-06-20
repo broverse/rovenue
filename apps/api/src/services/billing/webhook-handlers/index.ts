@@ -100,14 +100,12 @@ export async function dispatchStripeBillingEvent(
   const projectId = sub.projectId;
 
   // Atomic single-flight claim via webhook_events dedupe table. The
-  // claim sets PROCESSING itself (folding the prior RECEIVED step);
-  // a null return means another worker already holds (PROCESSING) or
-  // finished (PROCESSED) this (source, storeEventId). FAILED/RECEIVED
-  // rows stay re-claimable so Stripe's at-least-once retries
-  // re-process. This closes the double-dispatch race the old no-op
+  // claim sets PROCESSING itself (folding the prior RECEIVED step).
+  // FAILED/RECEIVED rows stay re-claimable so Stripe's at-least-once
+  // retries re-process. This closes the double-dispatch race the old no-op
   // upsert + `status === PROCESSED` guard left open under worker
   // concurrency.
-  const whRow = await drizzle.webhookEventRepo.claimWebhookEvent(db, {
+  const claimResult = await drizzle.webhookEventRepo.claimWebhookEvent(db, {
     projectId,
     // Distinct from the per-project store "STRIPE" source: this is the
     // platform billing account, whose Stripe event-id space is independent.
@@ -117,9 +115,16 @@ export async function dispatchStripeBillingEvent(
     storeEventId: event.id,
     payload: event as unknown,
   });
-  if (!whRow) {
+  if (claimResult.outcome === "duplicate") {
     return { status: "duplicate" };
   }
+  if (claimResult.outcome === "in_progress") {
+    // Another worker holds a fresh claim. Throw so BullMQ retries with
+    // backoff instead of acking — prevents the historical bug where a
+    // retry of our own crashed attempt silently dropped the event.
+    throw new Error(`webhook ${event.id} claim in progress; retry`);
+  }
+  const whRow = claimResult.row;
 
   let followUp: (() => Promise<void>) | undefined;
 

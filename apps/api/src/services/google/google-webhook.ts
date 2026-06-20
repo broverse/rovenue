@@ -91,24 +91,25 @@ export async function handleGoogleNotification(
   const kind = classifyNotification(payload);
 
   // Atomic single-flight claim — exactly one concurrent worker wins.
-  // A null return means another worker already holds (PROCESSING) or
-  // finished (PROCESSED) this (source, storeEventId); FAILED/RECEIVED
-  // rows are re-claimable so BullMQ retries re-process.
-  const webhookEvent = await drizzle.webhookEventRepo.claimWebhookEvent(
-    drizzle.db,
-    {
-      projectId: opts.projectId,
-      source: WebhookSource.GOOGLE,
-      eventType: kind,
-      storeEventId,
-      payload: JSON.parse(JSON.stringify(payload)),
-    },
-  );
+  const claim = await drizzle.webhookEventRepo.claimWebhookEvent(drizzle.db, {
+    projectId: opts.projectId,
+    source: WebhookSource.GOOGLE,
+    eventType: kind,
+    storeEventId,
+    payload: JSON.parse(JSON.stringify(payload)),
+  });
 
-  if (!webhookEvent) {
-    log.info("duplicate notification, skipping", { storeEventId, kind });
+  if (claim.outcome === "duplicate") {
+    log.info("notification already processed, skipping", { storeEventId, kind });
     return { status: "duplicate", kind };
   }
+  if (claim.outcome === "in_progress") {
+    // Another worker holds a fresh claim. Throw so BullMQ retries with
+    // backoff instead of acking — prevents the historical bug where a
+    // retry of our own crashed attempt silently dropped the event.
+    throw new Error(`webhook ${storeEventId} claim in progress; retry`);
+  }
+  const webhookEvent = claim.row;
 
   if (!opts.verifyConfig) {
     log.warn("no verify config, persisting without API verification", {

@@ -126,8 +126,8 @@ function lastGuardedChainPatch(): { status: string } {
 beforeEach(() => {
   vi.clearAllMocks();
   drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValue({
-    id: "wh_fr",
-    status: "PROCESSING",
+    outcome: "claimed",
+    row: { id: "wh_fr", status: "PROCESSING" },
   });
 });
 

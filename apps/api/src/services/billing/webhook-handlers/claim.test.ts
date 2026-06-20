@@ -74,7 +74,7 @@ describe("dispatchStripeBillingEvent — atomic claim short-circuit", () => {
   });
 
   test("returns duplicate, opens no tx and runs no handler when claim returns null", async () => {
-    drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValueOnce(null);
+    drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValueOnce({ outcome: "duplicate" });
 
     const result = await dispatchStripeBillingEvent(makeEvent());
 
@@ -88,8 +88,8 @@ describe("dispatchStripeBillingEvent — atomic claim short-circuit", () => {
 
   test("runs the handler inside a tx and marks PROCESSED when claim returns a row", async () => {
     drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValueOnce({
-      id: "wh_1",
-      status: "PROCESSING",
+      outcome: "claimed",
+      row: { id: "wh_1", status: "PROCESSING" },
     });
 
     const result = await dispatchStripeBillingEvent(makeEvent());
