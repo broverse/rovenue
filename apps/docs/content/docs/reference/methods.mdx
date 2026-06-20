@@ -488,11 +488,11 @@ Emit a generic event to the backend. The server forwards it to any configured in
 | `amount` | `string` | Decimal string (e.g. `"9.99"`). |
 | `currency` | `string` | ISO-4217 currency code (e.g. `"USD"`). |
 | `eventSourceUrl` | `string` | URL of the page or screen where the event occurred. |
-| `identityContext` | `object` | Hashed identity signals for ad-platform matching. Fields: `email`, `externalId`, `phone`, `ip`, `userAgent`, `firstName`, `lastName`, `city`, `countryCode`. |
+| `identityContext` | `object` | Identity signals for ad-platform matching. Sent as **plaintext**; the server hashes them before forwarding to integrations. Fields: `email`, `externalId`, `phone`, `ip`, `userAgent`, `firstName`, `lastName`, `city`, `countryCode`. |
 
 **Returns** — `void`
 
-**Throws** — nothing (errors are swallowed and logged internally)
+**Throws** — rejects with a `RovenueError` on failure. Delivery is fire-and-forget, so callers may safely ignore the returned promise.
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
