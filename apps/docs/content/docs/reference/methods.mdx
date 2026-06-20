@@ -1087,7 +1087,7 @@ The [`ChangeEvent`](/docs/reference/types#changeevent) values:
 | `claimFunnelToken` | `claimFunnelToken(token)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) | [`FunnelTokenNotFoundError`](/docs/reference/errors#error-table), [`FunnelTokenExpiredError`](/docs/reference/errors#error-table), [`FunnelTokenAlreadyClaimedError`](/docs/reference/errors#error-table) |
 | `claimInstall` | `claimInstall(params)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
 | `claimFromClipboard` | `claimFromClipboard()` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
-| `claimFromUrl` | `claimFromUrl(url)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
+| `claimFromUrl` | `claimFromUrl(url)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | [`FunnelTokenNotFoundError`](/docs/reference/errors#error-table), [`FunnelTokenExpiredError`](/docs/reference/errors#error-table), [`FunnelTokenAlreadyClaimedError`](/docs/reference/errors#error-table) |
 | `claimViaEmail` | `claimViaEmail(email)` | `void` | — |
 | `installId` | `installId()` | `string` | — |
 | `addFunnelClaimListener` | `addFunnelClaimListener(cb)` | `() => void` | — |
@@ -1482,51 +1482,31 @@ Recognized URL shapes:
 
 **Returns** — `Promise<`[`FunnelClaimResult`](/docs/reference/types#funnelclaimresult)` | null>` (`null` for URLs that contain no recognizable funnel token — no network call is made)
 
-**Throws** — nothing (token errors from the server are surfaced via the [`addFunnelClaimListener`](#addfunnelclaimlistener) callback, not as rejections)
+**Throws** — funnel claim errors when a **recognized** token fails server-side: [`FunnelTokenNotFoundError`](/docs/reference/errors#error-table), [`FunnelTokenExpiredError`](/docs/reference/errors#error-table), or [`FunnelTokenAlreadyClaimedError`](/docs/reference/errors#error-table). Non-funnel URLs resolve `null` and never throw — so always wrap the call (a fire-and-forget handler should `.catch`).
 
-<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
-  <Tab value="React Native">
-    ```ts
-    import { Rovenue } from '@rovenue/react-native-sdk';
-    import * as Linking from 'expo-linking';
+This is a React Native helper. On Swift/Kotlin, parse the token from the incoming URL yourself and call [`claimFunnelToken`](#claimfunneltoken).
 
-    // Warm start — app already open when the link is tapped:
-    Linking.addEventListener('url', ({ url }) => {
-      Rovenue.claimFromUrl(url);
-    });
+```ts
+import { Rovenue } from '@rovenue/react-native-sdk';
+import * as Linking from 'expo-linking';
 
-    // Cold start — app launched via the link:
-    const initial = await Linking.getInitialURL();
-    if (initial) await Rovenue.claimFromUrl(initial);
-    ```
-  </Tab>
-  <Tab value="Swift">
-    ```swift
-    // In SceneDelegate or SwiftUI .onOpenURL / Scene(_:openURLContexts:):
-    func scene(_ scene: UIScene, openURLContexts contexts: Set<UIOpenURLContext>) {
-        for ctx in contexts {
-            Task { await Rovenue.shared.claimFromUrl(ctx.url.absoluteString) }
-        }
-    }
+// Warm start — app already open when the link is tapped:
+Linking.addEventListener('url', ({ url }) => {
+  Rovenue.claimFromUrl(url).catch(() => {
+    // expired / already-claimed / not-found — recover via email or ignore
+  });
+});
 
-    // Or in SwiftUI:
-    .onOpenURL { url in
-        Task { await Rovenue.shared.claimFromUrl(url.absoluteString) }
-    }
-    ```
-  </Tab>
-  <Tab value="Kotlin">
-    ```kotlin
-    // In Activity.onNewIntent or NavController deep-link handler:
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        intent.data?.toString()?.let { url ->
-            lifecycleScope.launch { Rovenue.shared.claimFromUrl(url) }
-        }
-    }
-    ```
-  </Tab>
-</Tabs>
+// Cold start — app launched via the link:
+const initial = await Linking.getInitialURL();
+if (initial) {
+  try {
+    await Rovenue.claimFromUrl(initial);
+  } catch {
+    // recognized token failed server-side — fall back to email recovery
+  }
+}
+```
 
 <Callout type="info">
 The OS-level deep-link configuration — iOS Associated Domains (for the funnel Universal Link domain), Android App Links intent filter, and any custom URL scheme — lives in the **consuming app**, not the SDK. See your platform's documentation for setup instructions.
