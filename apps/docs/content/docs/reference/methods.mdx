@@ -1086,6 +1086,7 @@ The [`ChangeEvent`](/docs/reference/types#changeevent) values:
 |--------|---------------|---------|--------|
 | `claimFunnelToken` | `claimFunnelToken(token)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) | [`FunnelTokenNotFoundError`](/docs/reference/errors#error-table), [`FunnelTokenExpiredError`](/docs/reference/errors#error-table), [`FunnelTokenAlreadyClaimedError`](/docs/reference/errors#error-table) |
 | `claimInstall` | `claimInstall(params)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
+| `resolveFunnelClaim` | `resolveFunnelClaim(opts?)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
 | `claimFromClipboard` | `claimFromClipboard()` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
 | `claimFromUrl` | `claimFromUrl(url)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | [`FunnelTokenNotFoundError`](/docs/reference/errors#error-table), [`FunnelTokenExpiredError`](/docs/reference/errors#error-table), [`FunnelTokenAlreadyClaimedError`](/docs/reference/errors#error-table) |
 | `claimViaEmail` | `claimViaEmail(email)` | `void` | — |
@@ -1278,6 +1279,52 @@ On **Android**, the SDK auto-collects `platform`, `locale`, `timezone`, `screenD
     ```
   </Tab>
 </Tabs>
+
+---
+
+### `resolveFunnelClaim`
+
+**React Native only.** Runs the no-gesture, deterministic first-launch attribution chain once per install and returns the result. The chain is:
+
+1. **Direct deep link** — if a URL is supplied (or the app was cold-started from one), extract and claim the embedded funnel token via `claimFromUrl`.
+2. **Platform deferred match** — if step 1 yields no result, call `claimInstall`, which on Android queries the Google Play Install Referrer and on iOS performs a server-side IP match within a 1-hour window. No device fingerprinting is used at any step.
+
+Once a claim has succeeded for this install the method short-circuits immediately and returns the cached result without a network round-trip.
+
+Internal claim errors (network failures, token not found, etc.) are treated as "unresolved" rather than thrown — the method never throws on its own. Resolved claims are also delivered to any listener registered with [`addFunnelClaimListener`](#addfunnelclaimlistener).
+
+**Params** — all optional
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `url` | `string` | No | The URL the app was launched with (e.g. from `Linking.getInitialURL()`). Pass `undefined` to skip the deep-link step. |
+
+**Returns** — [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `| null` (`null` when neither step resolves a claim)
+
+**Throws** — nothing
+
+```ts
+import { Rovenue } from '@rovenue/react-native-sdk';
+import * as Linking from 'expo-linking';
+
+// Recommended first-launch flow — call once after Rovenue.configure():
+const url = await Linking.getInitialURL();
+const result = await Rovenue.resolveFunnelClaim({ url: url ?? undefined });
+
+if (result) {
+  // Claim resolved deterministically — apply funnel-specific onboarding.
+  console.log('Funnel claim resolved for subscriber:', result.subscriberId);
+} else {
+  // No deterministic match. Try gesture-gated fallbacks in sequence:
+
+  // 1. iOS clipboard (show a "Continue" button, then on tap):
+  //    const clipResult = await Rovenue.claimFromClipboard();
+
+  // 2. Email magic-link (show an email field, then on submit):
+  //    await Rovenue.claimViaEmail(email);
+  //    // Result arrives via addFunnelClaimListener when the link is tapped.
+}
+```
 
 ---
 
