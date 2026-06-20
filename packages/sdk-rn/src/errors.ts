@@ -87,6 +87,15 @@ export class StoreProblemError extends RovenueError {
 export class InternalError extends RovenueError {
   constructor(message: string) { super("Internal", message); this.name = "InternalError"; }
 }
+export class FunnelTokenNotFoundError extends RovenueError {
+  constructor(message: string) { super("FunnelTokenNotFound", message); this.name = "FunnelTokenNotFoundError"; }
+}
+export class FunnelTokenExpiredError extends RovenueError {
+  constructor(message: string) { super("FunnelTokenExpired", message); this.name = "FunnelTokenExpiredError"; }
+}
+export class FunnelTokenAlreadyClaimedError extends RovenueError {
+  constructor(message: string) { super("FunnelTokenAlreadyClaimed", message); this.name = "FunnelTokenAlreadyClaimedError"; }
+}
 
 type Extras = { available?: number; retryAfter?: number; httpStatus?: number };
 
@@ -110,6 +119,9 @@ export function mapNativeError(code: string, message: string, extras?: Extras): 
     case "ProductNotAvailable":   return new ProductNotAvailableError(message);
     case "StoreProblem":          return new StoreProblemError(message);
     case "Internal":              return new InternalError(message);
+    case "FunnelTokenNotFound":       return new FunnelTokenNotFoundError(message);
+    case "FunnelTokenExpired":        return new FunnelTokenExpiredError(message);
+    case "FunnelTokenAlreadyClaimed": return new FunnelTokenAlreadyClaimedError(message);
     default:                      return new InternalError(message);
   }
 }

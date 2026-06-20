@@ -19,6 +19,7 @@ import { Hono } from "hono";
 import { sql } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
 import { env } from "./lib/env";
+import { registry } from "./lib/metrics";
 
 export const internalApp = new Hono();
 
@@ -58,3 +59,11 @@ internalApp.get("/internal/domains/check", async (c) => {
 // Health probe so the docker healthcheck (and Caddy's tcp upstream
 // check) have something cheap to hit.
 internalApp.get("/internal/health", (c) => c.text("ok", 200));
+
+// Prometheus scrape target. Internal-only by design (no auth) — Alloy
+// reaches it over the docker network; it is never published to the host.
+internalApp.get("/metrics", async (c) => {
+  if (!env.METRICS_ENABLED) return c.text("metrics disabled", 404);
+  c.header("Content-Type", registry.contentType);
+  return c.body(await registry.metrics());
+});

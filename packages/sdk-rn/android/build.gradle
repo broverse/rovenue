@@ -38,6 +38,7 @@ dependencies {
     // our config plugin (plugin/withRovenueAndroid.ts).
     implementation 'dev.rovenue:sdk:0.1.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0'
+    implementation 'com.android.installreferrer:installreferrer:2.2'
 }
 
 // Helper for Expo's project-property safe lookups (provided when this

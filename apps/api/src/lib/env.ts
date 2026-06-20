@@ -41,6 +41,14 @@ const envSchema = z
       .enum(["true", "false"])
       .default("true")
       .transform((v) => v === "true"),
+    // Expose Prometheus metrics on the INTERNAL listener (/metrics).
+    // Set to "false" to disable metric collection entirely (e.g. in
+    // ephemeral test environments where prom-client's default-metrics
+    // gc/event-loop timers would outlive the process lifetime).
+    METRICS_ENABLED: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
     // Optional global edge cache (Cloudflare edge-cache Worker, see
     // deploy/cloudflare/edge-cache). When both are set, catalog
     // mutations POST a per-project purge so cached /v1/offerings

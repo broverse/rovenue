@@ -341,6 +341,95 @@ impl HttpClient {
         }
         Err(last_err)
     }
+
+    /// POST that surfaces the raw HTTP status instead of collapsing 4xx into an
+    /// error. Returns `Ok((status, body))` for any 2xx or 4xx response (body is
+    /// `None` when empty or non-JSON); retries 5xx/network/timeout and returns
+    /// `Err` only when those are exhausted. Used by callers that map specific
+    /// 4xx codes themselves (e.g. funnel claim 404/410/409).
+    pub fn post_json_status<B: Serialize>(
+        &self,
+        req: super::types::HttpPostRequest<'_>,
+        body: &B,
+    ) -> RovenueResult<(u16, Option<serde_json::Value>)> {
+        use super::retry::{backoff, classify, RetryDecision, RETRY_AFTER_MAX};
+
+        let url = format!("{}{}", self.base_url, req.path);
+        let mut rng = rand::thread_rng();
+        let mut last_err = RovenueError::NetworkUnavailable;
+        let payload = serde_json::to_vec(body).map_err(|_| RovenueError::Internal)?;
+
+        for attempt in 0..self.max_attempts {
+            let mut builder = self
+                .inner
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Content-Type", "application/json");
+            if let Some(scope) = req.user_scope {
+                builder = builder.header("X-Rovenue-App-User-Id", scope);
+            }
+            if let Some(platform) = &self.platform {
+                builder = builder.header("X-Rovenue-Platform", platform);
+            }
+            if let Some(environment) = &self.environment {
+                builder = builder.header("X-Rovenue-Env", environment);
+            }
+            if let Some(key) = req.idempotency_key {
+                builder = builder.header("Idempotency-Key", key);
+            }
+
+            match builder.body(payload.clone()).send() {
+                Ok(resp) => {
+                    let status = resp.status().as_u16();
+                    // 4xx is a returnable outcome (caller maps it); 2xx too.
+                    if (200..500).contains(&status) {
+                        let parsed = resp.json::<serde_json::Value>().ok();
+                        return Ok((status, parsed));
+                    }
+                    // 5xx (and anything else) → retry per policy.
+                    let retry_after = resp
+                        .headers()
+                        .get("Retry-After")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .map(std::time::Duration::from_secs);
+                    match classify(Some(status), retry_after) {
+                        RetryDecision::RetryAfter(d) => {
+                            if d > RETRY_AFTER_MAX {
+                                return Err(RovenueError::RateLimited);
+                            }
+                            last_err = RovenueError::RateLimited;
+                            if attempt + 1 < self.max_attempts {
+                                std::thread::sleep(d.max(self.min_backoff));
+                            }
+                        }
+                        _ => {
+                            last_err = RovenueError::ServerError;
+                            if attempt + 1 < self.max_attempts {
+                                let d = backoff(attempt, &mut rng).max(self.min_backoff);
+                                std::thread::sleep(d);
+                            }
+                        }
+                    }
+                }
+                Err(e) if e.is_timeout() => {
+                    last_err = RovenueError::Timeout;
+                    if attempt + 1 < self.max_attempts {
+                        let d = backoff(attempt, &mut rng).max(self.min_backoff);
+                        std::thread::sleep(d);
+                    }
+                }
+                Err(_) => {
+                    last_err = RovenueError::NetworkUnavailable;
+                    if attempt + 1 < self.max_attempts {
+                        let d = backoff(attempt, &mut rng).max(self.min_backoff);
+                        std::thread::sleep(d);
+                    }
+                }
+            }
+        }
+        Err(last_err)
+    }
 }
 
 #[cfg(test)]
@@ -394,5 +483,40 @@ mod post_json_tests {
         assert_eq!(resp.status, 202);
         assert_eq!(resp.body.unwrap()["ok"], serde_json::json!(true));
         m.assert();
+    }
+}
+
+#[cfg(test)]
+mod post_json_status_tests {
+    use super::*;
+    use super::super::types::HttpPostRequest;
+
+    #[test]
+    fn returns_status_and_body_for_2xx_and_4xx() {
+        let mut server = mockito::Server::new();
+        let m200 = server.mock("POST", "/ok").with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"x":1}}"#).create();
+        let m404 = server.mock("POST", "/missing").with_status(404)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"error":{"code":"x","message":"y"}}"#).create();
+
+        let client = HttpClient::new(server.url(), "pk_test".into()).with_max_attempts(1);
+        let body = serde_json::json!({"a":1});
+
+        let (s1, b1) = client
+            .post_json_status(HttpPostRequest::new("/ok"), &body)
+            .expect("2xx ok");
+        assert_eq!(s1, 200);
+        assert_eq!(b1.unwrap()["data"]["x"], 1);
+
+        let (s2, b2) = client
+            .post_json_status(HttpPostRequest::new("/missing"), &body)
+            .expect("4xx returns Ok, not Err");
+        assert_eq!(s2, 404);
+        assert_eq!(b2.unwrap()["error"]["code"], "x");
+
+        m200.assert();
+        m404.assert();
     }
 }

@@ -1,0 +1,19 @@
+---
+interface Props {
+  href?: string;
+}
+const { href = '#top' } = Astro.props;
+---
+
+<a class="lp-brand" href={href} aria-label="Rovenue" style="text-decoration:none;color:inherit;">
+  <img class="lp-logo-img" src="/logo.svg" alt="Rovenue" width="785" height="332" />
+</a>
+
+<style>
+  .lp-logo-img {
+    height: 24px;
+    width: auto;
+    display: block;
+    user-select: none;
+  }
+</style>

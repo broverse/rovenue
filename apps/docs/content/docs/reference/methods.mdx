@@ -6,7 +6,7 @@ description: Every Rovenue SDK method, grouped by capability.
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Quick navigation: [Configuration](#configuration) · [Identity](#identity) · [Entitlements](#entitlements) · [Virtual Currencies](#virtual-currencies) · [Events](#events) · [Purchases](#purchases) · [Account Token](#account-token) · [Lifecycle](#lifecycle) · [Logging](#logging) · [Change Stream](#change-stream)
+Quick navigation: [Configuration](#configuration) · [Identity](#identity) · [Entitlements](#entitlements) · [Virtual Currencies](#virtual-currencies) · [Events](#events) · [Purchases](#purchases) · [Account Token](#account-token) · [Lifecycle](#lifecycle) · [Logging](#logging) · [Change Stream](#change-stream) · [Funnel Attribution](#funnel-attribution)
 
 ---
 
@@ -1075,3 +1075,339 @@ The [`ChangeEvent`](/docs/reference/types#changeevent) values:
 </Tabs>
 
 **See also:** [Reacting to changes guide](/docs/guides/reacting-to-changes)
+
+---
+
+## Funnel Attribution
+
+### Method summary
+
+| Method | Signature (RN) | Returns | Throws |
+|--------|---------------|---------|--------|
+| `claimFunnelToken` | `claimFunnelToken(token)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) | [`FunnelTokenNotFoundError`](/docs/reference/errors#error-table), [`FunnelTokenExpiredError`](/docs/reference/errors#error-table), [`FunnelTokenAlreadyClaimedError`](/docs/reference/errors#error-table) |
+| `claimInstall` | `claimInstall(params)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
+| `claimViaEmail` | `claimViaEmail(email)` | `void` | — |
+| `installId` | `installId()` | `string` | — |
+| `addFunnelClaimListener` | `addFunnelClaimListener(cb)` | `() => void` | — |
+
+---
+
+### `claimFunnelToken`
+
+Exchange a funnel token (obtained from a deep link or QR code) for the subscriber's funnel data. This is the primary attribution path for token-based funnels.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `token` | `string` | Yes | The funnel token from the deep link (e.g. `rov_ft_…`). |
+
+**Returns**
+
+```ts
+type FunnelClaimResult = {
+  subscriberId: string;      // Rovenue subscriber ID of the matched user
+  funnelAnswers: Record<string, unknown>; // key-value map of funnel step answers
+};
+```
+
+→ Full type reference: [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult)
+
+**Throws** — see table below
+
+| Error | When it fires |
+|-------|--------------|
+| [`FunnelTokenNotFoundError`](/docs/reference/errors#error-table) | The token does not match any known funnel session |
+| [`FunnelTokenExpiredError`](/docs/reference/errors#error-table) | The token has passed its expiry window |
+| [`FunnelTokenAlreadyClaimedError`](/docs/reference/errors#error-table) | The token was already consumed by a previous install |
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import {
+      Rovenue,
+      FunnelTokenNotFoundError,
+      FunnelTokenExpiredError,
+      FunnelTokenAlreadyClaimedError,
+    } from '@rovenue/react-native-sdk';
+
+    // Called from your deep-link handler:
+    try {
+      const result = await Rovenue.claimFunnelToken(token);
+      console.log('Claimed subscriber:', result.subscriberId);
+      console.log('Funnel answers:', result.funnelAnswers);
+    } catch (e) {
+      if (e instanceof FunnelTokenNotFoundError) {
+        // Token unknown — may be an old or invalid link
+      } else if (e instanceof FunnelTokenExpiredError) {
+        // Prompt the user to re-visit the funnel
+      } else if (e instanceof FunnelTokenAlreadyClaimedError) {
+        // Already claimed — proceed without re-claiming
+      } else {
+        throw e;
+      }
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Called from your deep-link handler (Scene(_:openURLContexts:) or onOpenURL):
+    do {
+        let result = try await Rovenue.shared.claimFunnelToken(token)
+        print("Claimed subscriber: \(result.subscriberId)")
+        print("Funnel answers: \(result.funnelAnswers)")
+    } catch Rovenue.Error.funnelTokenNotFound {
+        // Token unknown — may be an old or invalid link
+    } catch Rovenue.Error.funnelTokenExpired {
+        // Prompt the user to re-visit the funnel
+    } catch Rovenue.Error.funnelTokenAlreadyClaimed {
+        // Already claimed — proceed without re-claiming
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // Called from your deep-link handler (Activity.onNewIntent or NavController):
+    try {
+        val result = Rovenue.shared.claimFunnelToken(token) // suspend fun
+        Log.d("App", "Claimed subscriber: ${result.subscriberId}")
+        Log.d("App", "Funnel answers: ${result.funnelAnswers}")
+    } catch (e: FunnelTokenNotFoundException) {
+        // Token unknown — may be an old or invalid link
+    } catch (e: FunnelTokenExpiredException) {
+        // Prompt the user to re-visit the funnel
+    } catch (e: FunnelTokenAlreadyClaimedException) {
+        // Already claimed — proceed without re-claiming
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### `claimInstall`
+
+Recover a prior funnel session deterministically from caller-supplied install context (e.g. an Android Install Referrer token or an iOS clipboard token) and claim it. Returns a `FunnelClaimResult` if a prior funnel session is matched, or `null` if no match can be recovered. This is deterministic — it does **not** use device fingerprinting. Call this once on first launch, immediately after `configure`.
+
+**Params** — all optional
+
+On **Android**, the SDK auto-collects `platform`, `locale`, `timezone`, `screenDims`, `deviceModel`, and the Google Play Install Referrer from the native layer — pass any field only to override the auto-collected value. On **iOS**, callers still supply context explicitly (auto-collection for iOS will land in a later release).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `platform` | `"ios" \| "android" \| "web"` | No | Platform of the current install. Auto-collected on Android. |
+| `locale` | `string` | No | IETF BCP 47 locale tag (e.g. `"en-US"`). Auto-collected on Android. |
+| `timezone` | `string` | No | IANA timezone identifier (e.g. `"America/New_York"`). Auto-collected on Android. |
+| `screenDims` | `{ width: number; height: number }` | No | Logical screen dimensions in points/dp. Auto-collected on Android. |
+| `deviceModel` | `string` | No | Device model string (e.g. `"iPhone16,1"`). Auto-collected on Android. |
+| `installReferrer` | `string` | No | Android Install Referrer string from the Play Store; auto-collected on Android, omit on iOS. |
+
+**Returns** — [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `| null` (`null` means no prior funnel session was matched)
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    // Android: SDK auto-collects referrer + device context (platform, locale,
+    // timezone, screenDims, deviceModel). iOS: supply params explicitly.
+    const result = await Rovenue.claimInstall(); // Android: auto-collects referrer + context
+
+    if (result) {
+      console.log('Matched funnel session:', result.subscriberId);
+    } else {
+      console.log('No prior funnel session matched');
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    import UIKit
+
+    let screen = UIScreen.main.bounds
+    let result = await Rovenue.shared.claimInstall(
+        platform: "ios",
+        locale: Locale.current.identifier,
+        timezone: TimeZone.current.identifier,
+        screenDims: RovenueScreenDims(
+            width: Double(screen.width),
+            height: Double(screen.height)
+        )
+        // deviceModel: UIDevice.current.model  // optional
+    )
+
+    if let result {
+        print("Matched funnel session: \(result.subscriberId)")
+    } else {
+        print("No prior funnel session matched")
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    import android.util.DisplayMetrics
+    import java.util.Locale
+    import java.util.TimeZone
+
+    val metrics = DisplayMetrics()
+    windowManager.defaultDisplay.getMetrics(metrics)
+
+    val result = Rovenue.shared.claimInstall(
+        platform = "android",
+        locale = Locale.getDefault().toLanguageTag(),
+        timezone = TimeZone.getDefault().id,
+        screenDims = RovenueScreenDims(
+            width = metrics.widthPixels / metrics.density.toDouble(),
+            height = metrics.heightPixels / metrics.density.toDouble()
+        )
+        // deviceModel = Build.MODEL,        // optional
+        // installReferrer = referrerString, // optional
+    ) // suspend fun
+
+    if (result != null) {
+        Log.d("App", "Matched funnel session: ${result.subscriberId}")
+    } else {
+        Log.d("App", "No prior funnel session matched")
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### `claimViaEmail`
+
+Initiate an email-based funnel claim. The SDK sends a magic-link email to the provided address; the claim resolves later when the user taps the link and the app handles the resulting deep link (see [`addFunnelClaimListener`](#addfunnelclaimlistener)).
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `email` | `string` | Yes | The email address to send the claim link to. Must be a valid RFC 5322 address. |
+
+**Returns** — `void` (resolves as soon as the magic-link request is dispatched; the actual claim fires via [`addFunnelClaimListener`](#addfunnelclaimlistener) when the deep link is opened)
+
+**Throws** — [`InvalidArgumentError`](/docs/reference/errors#error-table) if the email address fails format validation.
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    // After the user enters their email in your onboarding flow:
+    await Rovenue.claimViaEmail('user@example.com');
+    // A magic-link email is now on its way.
+    // Listen for the resolved claim via addFunnelClaimListener().
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // After the user enters their email in your onboarding flow:
+    try await Rovenue.shared.claimViaEmail("user@example.com")
+    // A magic-link email is now on its way.
+    // Listen for the resolved claim via the funnelClaims AsyncStream.
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // After the user enters their email in your onboarding flow:
+    Rovenue.shared.claimViaEmail("user@example.com") // suspend fun
+    // A magic-link email is now on its way.
+    // Listen for the resolved claim via addFunnelClaimListener().
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### `installId`
+
+Return the stable, persisted identifier for this install. The install ID is generated on first launch, survives app restarts, and is sent as the idempotency key for `claimInstall` / `claimViaEmail`. It does not change when `identify()` or `logOut()` is called.
+
+**Params** — none
+
+**Returns** — `string` (UUID v4 format, generated once per install and persisted in MMKV)
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    const id = await Rovenue.installId();
+    console.log('Install ID:', id); // e.g. "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let id = await Rovenue.shared.installId()
+    print("Install ID: \(id)") // e.g. "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val id = Rovenue.shared.installId() // suspend fun
+    Log.d("App", "Install ID: $id") // e.g. "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### `addFunnelClaimListener`
+
+Register a callback that fires whenever a funnel claim resolves — whether triggered by a token deep link, a deterministic install match, or an email magic-link. On React Native, returns an unsubscribe function. On Swift, use the `funnelClaims` `AsyncStream`. On Kotlin, use the `funnelClaims` `SharedFlow`.
+
+**Params**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `cb` | `(result: FunnelClaimResult) => void` | Yes | Callback invoked each time a funnel claim resolves. |
+
+**Returns** — `() => void` (call to unregister the listener)
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    const unsub = Rovenue.addFunnelClaimListener((result) => {
+      console.log('Funnel claim resolved for subscriber:', result.subscriberId);
+      console.log('Funnel answers:', result.funnelAnswers);
+      // Apply funnel-specific onboarding, unlock content, etc.
+    });
+
+    // When your component unmounts:
+    unsub();
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Typically in a Task {} inside your SwiftUI view or AppDelegate:
+    for await result in Rovenue.shared.funnelClaims {
+        print("Funnel claim resolved for subscriber: \(result.subscriberId)")
+        print("Funnel answers: \(result.funnelAnswers)")
+        // Apply funnel-specific onboarding, unlock content, etc.
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // In a ViewModel or LifecycleCoroutineScope:
+    Rovenue.shared.funnelClaims
+        .onEach { result ->
+            Log.d("App", "Funnel claim resolved for subscriber: ${result.subscriberId}")
+            Log.d("App", "Funnel answers: ${result.funnelAnswers}")
+            // Apply funnel-specific onboarding, unlock content, etc.
+        }
+        .launchIn(viewModelScope)
+    ```
+  </Tab>
+</Tabs>
+
+**See also:** [Funnel Attribution guide](/docs/guides/funnel-attribution)

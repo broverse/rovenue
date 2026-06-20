@@ -1,0 +1,27 @@
+---
+const metrics = [
+  { to: 31, prefix: '+', suffix: '%', accent: true, label: 'Average revenue lift in 90 days' },
+  { to: 24, prefix: '−', suffix: '%', label: 'Less churn after the first test' },
+  { to: 10, suffix: ' hrs', label: 'Saved on reporting each week' },
+  { to: 5, suffix: ' min', label: 'From signup to first insight' },
+];
+---
+
+<section class="lp-section tight lp-container">
+  <div class="lp-strip" data-stagger="90">
+    {metrics.map((m) => (
+      <div data-reveal="up">
+        <div class="v">
+          <span
+            class={m.accent ? 'accent' : undefined}
+            data-count
+            data-count-to={m.to}
+            data-count-prefix={m.prefix}
+            data-count-suffix={m.suffix}
+          >{m.prefix ?? ''}0{m.suffix ?? ''}</span>
+        </div>
+        <div class="l">{m.label}</div>
+      </div>
+    ))}
+  </div>
+</section>

@@ -48,6 +48,9 @@ export {
   ProductNotAvailableError,
   StoreProblemError,
   InternalError,
+  FunnelTokenNotFoundError,
+  FunnelTokenExpiredError,
+  FunnelTokenAlreadyClaimedError,
 } from "./errors";
 
 export { useCurrentUser } from "./hooks/useCurrentUser";
@@ -86,6 +89,7 @@ import {
 import { SDK_VERSION } from "./version";
 import { getEmitter } from "./core/native";
 import { setLogHandler } from "./api/log";
+import { claimFunnelToken, claimInstall, claimViaEmail, installId, addFunnelClaimListener } from "./api/funnel";
 
 export const Rovenue = {
   configure,
@@ -118,6 +122,11 @@ export const Rovenue = {
   setPhoneNumber,
   setPushToken,
   flushAttributes,
+  claimFunnelToken,
+  claimInstall,
+  claimViaEmail,
+  installId,
+  addFunnelClaimListener,
   addChangeListener: (cb: (event: import("./types").ChangeEvent) => void): (() => void) => {
     const sub = getEmitter().addListener("onChange", (payload: { event: string }) => {
       cb(payload.event as import("./types").ChangeEvent);
@@ -128,3 +137,4 @@ export const Rovenue = {
 
 export type { RovenueConfig } from "./api/configure";
 export type { LogEntry } from "./api/log";
+export type { FunnelClaimResult, ClaimInstallParams } from "./api/funnel";

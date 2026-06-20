@@ -1,0 +1,135 @@
+/* Rovenue — landing animation layer.
+   Entrance/reveal states are gated behind `.anim` on <html>, which is only
+   added by an inline head script when the user has NOT requested reduced
+   motion and JS is available. So: no JS → no `.anim` → everything visible;
+   reduced motion → no `.anim` → everything visible. */
+
+/* ---------- scroll reveal ---------- */
+.anim [data-reveal] {
+  opacity: 0;
+  transition:
+    opacity 0.7s var(--ease-out-quart),
+    transform 0.7s var(--ease-out-quart);
+  transition-delay: var(--reveal-delay, 0ms);
+  will-change: opacity, transform;
+}
+.anim [data-reveal="up"] { transform: translateY(22px); }
+.anim [data-reveal="fade"] { transform: none; }
+.anim [data-reveal="scale"] { transform: scale(0.96); }
+.anim [data-reveal].is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---------- bars that grow from 0 ---------- */
+/* width/height comes from a --bar custom prop so the inline value survives
+   for the no-anim path while CSS can still zero it under .anim. */
+.lp-funnel .step .track > span,
+.lp-exp-bar > span { width: var(--bar, 100%); }
+.lp-float-churn .mini i { height: var(--bar, 100%); }
+
+.anim [data-bar] {
+  transition:
+    width 1.1s var(--ease-out-quart),
+    height 1.1s var(--ease-out-quart);
+}
+.anim [data-bar="w"] { width: 0; }
+.anim [data-bar="h"] { height: 0; }
+.anim [data-bar="w"].is-visible { width: var(--bar); }
+.anim [data-bar="h"].is-visible { height: var(--bar); }
+
+/* ---------- svg draw-on lines ---------- */
+.anim [data-draw] {
+  opacity: 0;
+  transition: opacity 0.4s var(--ease-out-quart);
+}
+.anim [data-draw].is-visible { opacity: 1; }
+
+/* ---------- cohort heatmap stagger ---------- */
+.lp-cohort .cell {
+  transition:
+    opacity 0.5s var(--ease-out-quart),
+    transform 0.5s var(--ease-out-quart);
+}
+.anim .lp-cohort .cell {
+  opacity: 0;
+  transform: scale(0.4);
+}
+.anim .lp-cohort .cell.in {
+  opacity: 1;
+  transform: none;
+}
+
+/* ---------- live events feed prepend ---------- */
+.lp-af-row.entering { animation: feedIn 0.5s var(--ease-out-quart); }
+@keyframes feedIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- nav scroll state ---------- */
+.lp-nav { transition: box-shadow 0.25s var(--ease-out-quart), background 0.25s; }
+.lp-nav.scrolled {
+  box-shadow: 0 10px 30px -14px rgba(0, 0, 0, 0.7);
+  background: color-mix(in srgb, var(--background) 92%, transparent);
+}
+
+/* ---------- hover micro-interactions ---------- */
+.btn.solid-primary:hover { transform: translateY(-1px); }
+.btn:active { transform: translateY(1px); }
+.lp-plat {
+  transition:
+    transform 0.16s var(--ease-out-quart),
+    border-color 0.16s,
+    background 0.16s;
+}
+.lp-plat:hover {
+  transform: translateY(-3px);
+  border-color: var(--divider-strong);
+  background: var(--content2);
+}
+.lp-tag {
+  transition:
+    transform 0.16s var(--ease-out-quart),
+    border-color 0.16s,
+    color 0.16s;
+}
+.lp-tag:hover {
+  transform: translateY(-2px);
+  border-color: var(--divider-strong);
+  color: var(--foreground);
+}
+.lp-cta-banner .btn.lg svg { transition: transform 0.18s var(--ease-out-quart); }
+.lp-cta-banner .btn.lg:hover svg { transform: translateX(3px); }
+
+/* ---------- ambient motion ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .lp-stage::before { animation: glowPulse 9s ease-in-out infinite; }
+  .lp-cta-banner::after {
+    content: "";
+    position: absolute;
+    inset: -40% 0 auto 0;
+    height: 80%;
+    background: radial-gradient(600px 240px at 50% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%);
+    pointer-events: none;
+    animation: ctaGlow 7s ease-in-out infinite;
+  }
+}
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.05); }
+}
+@keyframes ctaGlow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* ---------- safety net ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .anim [data-reveal],
+  .anim [data-bar],
+  .anim [data-draw] {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}

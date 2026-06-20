@@ -13,7 +13,16 @@ package dev.rovenue.sdkrn
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.res.Resources
 import android.os.Build
+import android.util.DisplayMetrics
+import com.android.installreferrer.api.InstallReferrerClient
+import com.android.installreferrer.api.InstallReferrerStateListener
+import java.util.Locale
+import java.util.TimeZone
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import dev.rovenue.sdk.LogEntry
 import dev.rovenue.sdk.Offerings
 import dev.rovenue.sdk.ProductNotAvailableException
@@ -25,6 +34,7 @@ import dev.rovenue.sdk.Rovenue
 import dev.rovenue.sdk.StoreProblemException
 import dev.rovenue.sdk.StoreProduct
 import dev.rovenue.sdk.generated.ChangeEvent
+import dev.rovenue.sdk.generated.ClaimInstallParams
 import dev.rovenue.sdk.generated.Entitlement
 import dev.rovenue.sdk.generated.ExperimentAssignment
 import dev.rovenue.sdk.generated.SessionEventKind
@@ -41,6 +51,7 @@ import kotlinx.coroutines.launch
 class RovenueModule : Module() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var changesJob: Job? = null
+    private var funnelClaimsJob: Job? = null
     private var logUnsub: (() -> Unit)? = null
 
     override fun definition() = ModuleDefinition {
@@ -206,13 +217,46 @@ class RovenueModule : Module() {
             Rovenue.shared.track(envelopeJson)
         }
 
+        // ---------------- Funnel Claim ----------------
+        AsyncFunction("installId") Coroutine { ->
+            Rovenue.shared.installId()
+        }
+        AsyncFunction("claimFunnelToken") Coroutine { token: String ->
+            val r = Rovenue.shared.claimFunnelToken(token)
+            mapOf("subscriberId" to r.subscriberId, "funnelAnswersJson" to r.funnelAnswersJson)
+        }
+        AsyncFunction("claimInstall") Coroutine { params: Map<String, Any?> ->
+            val ctx = collectAndroidContext()
+            val p = ClaimInstallParams(
+                platform = params["platform"] as? String ?: "android",
+                locale = params["locale"] as? String ?: ctx.locale,
+                timezone = params["timezone"] as? String ?: ctx.timezone,
+                screenDims = params["screenDims"] as? String ?: ctx.screenDims,
+                deviceModel = params["deviceModel"] as? String ?: ctx.deviceModel,
+                installReferrer = params["installReferrer"] as? String ?: readInstallReferrer(),
+            )
+            val r = Rovenue.shared.claimInstall(p) ?: return@Coroutine null
+            mapOf("subscriberId" to r.subscriberId, "funnelAnswersJson" to r.funnelAnswersJson)
+        }
+        AsyncFunction("claimViaEmail") Coroutine { email: String ->
+            Rovenue.shared.claimViaEmail(email)
+        }
+
         // ---------------- Events ----------------
-        Events("onChange", "onLog")
+        Events("onChange", "onLog", "onFunnelClaimResolved")
 
         OnStartObserving {
             changesJob = scope.launch {
                 Rovenue.shared.changes.collect { event ->
                     sendEvent("onChange", mapOf("event" to event.name))
+                }
+            }
+            funnelClaimsJob = scope.launch {
+                Rovenue.shared.funnelClaims.collect { r ->
+                    sendEvent("onFunnelClaimResolved", mapOf(
+                        "subscriberId" to r.subscriberId,
+                        "funnelAnswersJson" to r.funnelAnswersJson,
+                    ))
                 }
             }
             logUnsub = Rovenue.shared.setLogHandler { entry: LogEntry ->
@@ -226,6 +270,8 @@ class RovenueModule : Module() {
         OnStopObserving {
             changesJob?.cancel()
             changesJob = null
+            funnelClaimsJob?.cancel()
+            funnelClaimsJob = null
             logUnsub?.invoke()
             logUnsub = null
         }
@@ -336,6 +382,67 @@ class RovenueModule : Module() {
             null
         } catch (_: Throwable) {
             null
+        }
+    }
+
+    private data class AndroidInstallContext(
+        val locale: String,
+        val timezone: String,
+        val screenDims: String,
+        val deviceModel: String,
+    )
+
+    /** Collects the device context the backend's claim-install requires.
+     *  No fingerprinting concern on Android (Google-sanctioned referrer flow). */
+    private fun collectAndroidContext(): AndroidInstallContext {
+        val ctx: Context? = appContext.reactContext?.applicationContext
+        val dm: DisplayMetrics = ctx?.resources?.displayMetrics ?: Resources.getSystem().displayMetrics
+        return AndroidInstallContext(
+            locale = Locale.getDefault().toLanguageTag(),
+            timezone = TimeZone.getDefault().id,
+            screenDims = "${dm.widthPixels}x${dm.heightPixels}",
+            deviceModel = Build.MODEL ?: "",
+        )
+    }
+
+    /** Reads the raw Google Play Install Referrer once, with a 3s connection
+     *  timeout. Returns null when unavailable (no Play Store, sideloaded,
+     *  FEATURE_NOT_SUPPORTED/SERVICE_UNAVAILABLE, timeout, or any error). The
+     *  raw string is parsed server-side (parseInstallReferrer → rovenue_funnel_token). */
+    private suspend fun readInstallReferrer(): String? {
+        val ctx: Context = appContext.reactContext?.applicationContext ?: return null
+        return withTimeoutOrNull(3_000L) {
+            val client = InstallReferrerClient.newBuilder(ctx).build()
+            try {
+                suspendCancellableCoroutine<String?> { cont ->
+                    client.startConnection(object : InstallReferrerStateListener {
+                        override fun onInstallReferrerSetupFinished(responseCode: Int) {
+                            val result = try {
+                                if (responseCode == InstallReferrerClient.InstallReferrerResponse.OK) {
+                                    client.installReferrer.installReferrer
+                                } else {
+                                    null
+                                }
+                            } catch (_: Throwable) {
+                                null
+                            }
+                            if (cont.isActive) cont.resume(result)
+                        }
+
+                        override fun onInstallReferrerServiceDisconnected() {
+                            if (cont.isActive) cont.resume(null)
+                        }
+                    })
+                }
+            } catch (_: Throwable) {
+                null
+            } finally {
+                try {
+                    client.endConnection()
+                } catch (_: Throwable) {
+                    // best-effort
+                }
+            }
         }
     }
 }

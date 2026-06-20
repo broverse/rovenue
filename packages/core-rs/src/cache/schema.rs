@@ -125,6 +125,24 @@ CREATE TABLE experiment_exposure (
 UPDATE schema_meta SET version = 8;
 "#;
 
+pub const MIGRATION_V9: &str = r#"
+CREATE TABLE funnel_install (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    install_id TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL
+);
+
+CREATE TABLE funnel_claim_state (
+    install_id TEXT PRIMARY KEY,
+    state TEXT NOT NULL,
+    subscriber_id TEXT,
+    claimed_at_ms INTEGER,
+    created_at_ms INTEGER NOT NULL
+);
+
+UPDATE schema_meta SET version = 9;
+"#;
+
 pub const MIGRATIONS: &[&str] = &[
     MIGRATION_V1,
     MIGRATION_V2,
@@ -134,5 +152,6 @@ pub const MIGRATIONS: &[&str] = &[
     MIGRATION_V6,
     MIGRATION_V7,
     MIGRATION_V8,
+    MIGRATION_V9,
 ];
-pub const LATEST: u32 = 8;
+pub const LATEST: u32 = 9;

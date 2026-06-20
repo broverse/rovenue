@@ -94,6 +94,10 @@ See `.env.example` for the canonical list. Highlights:
 - APPLE_ROOT_CERTS_DIR — directory of Apple Root CA `.cer` files; required in production for chain-validated StoreKit JWS verification (the verifier fails closed when missing)
 - PORT — API port (default 3000)
 - NODE_ENV / LOG_LEVEL — runtime tuning
+- METRICS_ENABLED — set `true` to enable prom-client RED metrics + internal `/metrics` listener (default `true`; no-op when observability profile is not active)
+- GRAFANA_ADMIN_USER — Grafana admin username (default `admin`)
+- GRAFANA_ADMIN_PASSWORD — Grafana admin password; defaults to `admin` when blank — **must be set to a strong value before exposing Grafana in production**
+- PROMETHEUS_RETENTION — how long Prometheus stores metrics data (default `15d`)
 
 ## Commands
 
@@ -106,3 +110,4 @@ See `.env.example` for the canonical list. Highlights:
 - `pnpm --filter @rovenue/db db:verify:clickhouse` — Verify ClickHouse mirror parity
 - `pnpm test` — Run all tests
 - `docker compose up` — Start full stack (Postgres, Redis, ClickHouse, Redpanda, api, dashboard)
+- `COMPOSE_PROFILES=observability docker compose up` — start the stack WITH Grafana/Prometheus/Loki/Alloy (Grafana on http://localhost:3300)

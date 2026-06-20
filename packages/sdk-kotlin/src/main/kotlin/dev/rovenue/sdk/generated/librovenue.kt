@@ -381,6 +381,7 @@ internal interface _UniFFILib : Library {
             .also { lib: _UniFFILib ->
                 uniffiCheckContractApiVersion(lib)
                 uniffiCheckApiChecksums(lib)
+                FfiConverterTypeFunnelClaimListener.register(lib)
                 FfiConverterTypeObserver.register(lib)
                 }
         }
@@ -390,6 +391,12 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun uniffi_rovenue_fn_constructor_rovenuecore_new(`config`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Pointer
+    fun uniffi_rovenue_fn_method_rovenuecore_claim_funnel_token(`ptr`: Pointer,`token`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_rovenue_fn_method_rovenuecore_claim_install(`ptr`: Pointer,`params`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_rovenue_fn_method_rovenuecore_claim_via_email(`ptr`: Pointer,`email`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
+    ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_current_user(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_rovenue_fn_method_rovenuecore_entitlement(`ptr`: Pointer,`id`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
@@ -412,6 +419,8 @@ internal interface _UniFFILib : Library {
     ): RustBuffer.ByValue
     fun uniffi_rovenue_fn_method_rovenuecore_identify(`ptr`: Pointer,`appUserId`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Unit
+    fun uniffi_rovenue_fn_method_rovenuecore_install_id(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_rovenue_fn_method_rovenuecore_log_out(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_post_apple_receipt(`ptr`: Pointer,`receipt`: RustBuffer.ByValue,`productId`: RustBuffer.ByValue,`appAccountToken`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
@@ -425,6 +434,8 @@ internal interface _UniFFILib : Library {
     fun uniffi_rovenue_fn_method_rovenuecore_refresh_remote_config(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_refresh_virtual_currencies(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): Unit
+    fun uniffi_rovenue_fn_method_rovenuecore_register_funnel_claim_listener(`ptr`: Pointer,`listener`: Long,_uniffi_out_err: RustCallStatus, 
     ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_register_observer(`ptr`: Pointer,`obs`: Long,_uniffi_out_err: RustCallStatus, 
     ): Unit
@@ -454,6 +465,8 @@ internal interface _UniFFILib : Library {
     ): Long
     fun uniffi_rovenue_fn_method_rovenuecore_virtual_currency_balances(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_rovenue_fn_init_callback_funnelclaimlistener(`callbackStub`: ForeignCallback,_uniffi_out_err: RustCallStatus, 
+    ): Unit
     fun uniffi_rovenue_fn_init_callback_observer(`callbackStub`: ForeignCallback,_uniffi_out_err: RustCallStatus, 
     ): Unit
     fun uniffi_rovenue_fn_func_sdk_version(_uniffi_out_err: RustCallStatus, 
@@ -574,6 +587,12 @@ internal interface _UniFFILib : Library {
     ): Unit
     fun uniffi_rovenue_checksum_func_sdk_version(
     ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_claim_funnel_token(
+    ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_claim_install(
+    ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_claim_via_email(
+    ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_current_user(
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_entitlement(
@@ -596,6 +615,8 @@ internal interface _UniFFILib : Library {
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_identify(
     ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_install_id(
+    ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_log_out(
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_post_apple_receipt(
@@ -609,6 +630,8 @@ internal interface _UniFFILib : Library {
     fun uniffi_rovenue_checksum_method_rovenuecore_refresh_remote_config(
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_refresh_virtual_currencies(
+    ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_register_funnel_claim_listener(
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_register_observer(
     ): Short
@@ -640,6 +663,8 @@ internal interface _UniFFILib : Library {
     ): Short
     fun uniffi_rovenue_checksum_constructor_rovenuecore_new(
     ): Short
+    fun uniffi_rovenue_checksum_method_funnelclaimlistener_on_funnel_claim_resolved(
+    ): Short
     fun uniffi_rovenue_checksum_method_observer_on_change(
     ): Short
     fun ffi_rovenue_uniffi_contract_version(
@@ -660,6 +685,15 @@ private fun uniffiCheckContractApiVersion(lib: _UniFFILib) {
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
     if (lib.uniffi_rovenue_checksum_func_sdk_version() != 59903.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_claim_funnel_token() != 13140.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_claim_install() != 14911.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_claim_via_email() != 22991.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_current_user() != 2988.toShort()) {
@@ -695,6 +729,9 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_identify() != 6313.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_install_id() != 43176.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_log_out() != 35599.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -714,6 +751,9 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_refresh_virtual_currencies() != 19129.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_register_funnel_claim_listener() != 10256.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_register_observer() != 60338.toShort()) {
@@ -759,6 +799,9 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_constructor_rovenuecore_new() != 47369.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_funnelclaimlistener_on_funnel_claim_resolved() != 29623.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_method_observer_on_change() != 38179.toShort()) {
@@ -1069,7 +1112,10 @@ abstract class FFIObject(
 }
 
 public interface RovenueCoreInterface {
-    
+    @Throws(RovenueException::class)
+    fun `claimFunnelToken`(`token`: String): FunnelClaimResult@Throws(RovenueException::class)
+    fun `claimInstall`(`params`: ClaimInstallParams): FunnelClaimResult?@Throws(RovenueException::class)
+    fun `claimViaEmail`(`email`: String)
     fun `currentUser`(): User
     fun `entitlement`(`id`: String): Entitlement?
     fun `entitlementsAll`(): List<Entitlement>
@@ -1080,7 +1126,8 @@ public interface RovenueCoreInterface {
     fun `getOfferings`(): CoreOfferings@Throws(RovenueException::class)
     fun `getOrCreateAppAccountToken`(): String
     fun `getVersion`(): String@Throws(RovenueException::class)
-    fun `identify`(`appUserId`: String)@Throws(RovenueException::class)
+    fun `identify`(`appUserId`: String)
+    fun `installId`(): String@Throws(RovenueException::class)
     fun `logOut`()@Throws(RovenueException::class)
     fun `postAppleReceipt`(`receipt`: String, `productId`: String, `appAccountToken`: String?): ReceiptResult@Throws(RovenueException::class)
     fun `postGoogleReceipt`(`receipt`: String, `productId`: String, `obfuscatedAccountId`: String?, `obfuscatedProfileId`: String?): ReceiptResult@Throws(RovenueException::class)
@@ -1088,6 +1135,7 @@ public interface RovenueCoreInterface {
     fun `refreshEntitlements`()@Throws(RovenueException::class)
     fun `refreshRemoteConfig`()@Throws(RovenueException::class)
     fun `refreshVirtualCurrencies`()
+    fun `registerFunnelClaimListener`(`listener`: FunnelClaimListener)
     fun `registerObserver`(`obs`: Observer)
     fun `remoteConfigAllJson`(): String
     fun `remoteConfigBool`(`key`: String, `fallback`: Boolean): Boolean
@@ -1128,6 +1176,41 @@ class RovenueCore(
         }
     }
 
+    
+    @Throws(RovenueException::class)override fun `claimFunnelToken`(`token`: String): FunnelClaimResult =
+        callWithPointer {
+    rustCallWithError(RovenueException) { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_claim_funnel_token(it,
+        FfiConverterString.lower(`token`),
+        _status)
+}
+        }.let {
+            FfiConverterTypeFunnelClaimResult.lift(it)
+        }
+    
+    
+    @Throws(RovenueException::class)override fun `claimInstall`(`params`: ClaimInstallParams): FunnelClaimResult? =
+        callWithPointer {
+    rustCallWithError(RovenueException) { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_claim_install(it,
+        FfiConverterTypeClaimInstallParams.lower(`params`),
+        _status)
+}
+        }.let {
+            FfiConverterOptionalTypeFunnelClaimResult.lift(it)
+        }
+    
+    
+    @Throws(RovenueException::class)override fun `claimViaEmail`(`email`: String) =
+        callWithPointer {
+    rustCallWithError(RovenueException) { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_claim_via_email(it,
+        FfiConverterString.lower(`email`),
+        _status)
+}
+        }
+    
+    
     override fun `currentUser`(): User =
         callWithPointer {
     rustCall() { _status ->
@@ -1253,6 +1336,17 @@ class RovenueCore(
         }
     
     
+    override fun `installId`(): String =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_install_id(it,
+        
+        _status)
+}
+        }.let {
+            FfiConverterString.lift(it)
+        }
+    
     
     @Throws(RovenueException::class)override fun `logOut`() =
         callWithPointer {
@@ -1327,6 +1421,16 @@ class RovenueCore(
     rustCallWithError(RovenueException) { _status ->
     _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_refresh_virtual_currencies(it,
         
+        _status)
+}
+        }
+    
+    
+    override fun `registerFunnelClaimListener`(`listener`: FunnelClaimListener) =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_register_funnel_claim_listener(it,
+        FfiConverterTypeFunnelClaimListener.lower(`listener`),
         _status)
 }
         }
@@ -1509,6 +1613,52 @@ public object FfiConverterTypeRovenueCore: FfiConverter<RovenueCore, Pointer> {
         // The Rust code always expects pointers written as 8 bytes,
         // and will fail to compile if they don't fit.
         buf.putLong(Pointer.nativeValue(lower(value)))
+    }
+}
+
+
+
+
+data class ClaimInstallParams (
+    var `platform`: String, 
+    var `locale`: String, 
+    var `timezone`: String, 
+    var `screenDims`: String, 
+    var `deviceModel`: String?, 
+    var `installReferrer`: String?
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeClaimInstallParams: FfiConverterRustBuffer<ClaimInstallParams> {
+    override fun read(buf: ByteBuffer): ClaimInstallParams {
+        return ClaimInstallParams(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ClaimInstallParams) = (
+            FfiConverterString.allocationSize(value.`platform`) +
+            FfiConverterString.allocationSize(value.`locale`) +
+            FfiConverterString.allocationSize(value.`timezone`) +
+            FfiConverterString.allocationSize(value.`screenDims`) +
+            FfiConverterOptionalString.allocationSize(value.`deviceModel`) +
+            FfiConverterOptionalString.allocationSize(value.`installReferrer`)
+    )
+
+    override fun write(value: ClaimInstallParams, buf: ByteBuffer) {
+            FfiConverterString.write(value.`platform`, buf)
+            FfiConverterString.write(value.`locale`, buf)
+            FfiConverterString.write(value.`timezone`, buf)
+            FfiConverterString.write(value.`screenDims`, buf)
+            FfiConverterOptionalString.write(value.`deviceModel`, buf)
+            FfiConverterOptionalString.write(value.`installReferrer`, buf)
     }
 }
 
@@ -1755,6 +1905,36 @@ public object FfiConverterTypeExperimentAssignment: FfiConverterRustBuffer<Exper
 
 
 
+data class FunnelClaimResult (
+    var `subscriberId`: String, 
+    var `funnelAnswersJson`: String
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeFunnelClaimResult: FfiConverterRustBuffer<FunnelClaimResult> {
+    override fun read(buf: ByteBuffer): FunnelClaimResult {
+        return FunnelClaimResult(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FunnelClaimResult) = (
+            FfiConverterString.allocationSize(value.`subscriberId`) +
+            FfiConverterString.allocationSize(value.`funnelAnswersJson`)
+    )
+
+    override fun write(value: FunnelClaimResult, buf: ByteBuffer) {
+            FfiConverterString.write(value.`subscriberId`, buf)
+            FfiConverterString.write(value.`funnelAnswersJson`, buf)
+    }
+}
+
+
+
+
 data class ReceiptResult (
     var `subscriberId`: String, 
     var `appUserId`: String, 
@@ -1864,6 +2044,9 @@ sealed class RovenueException(message: String): Exception(message) {
         class EntitlementInactive(message: String) : RovenueException(message)
         class DuplicatePurchase(message: String) : RovenueException(message)
         class ReceiptInvalid(message: String) : RovenueException(message)
+        class FunnelTokenNotFound(message: String) : RovenueException(message)
+        class FunnelTokenExpired(message: String) : RovenueException(message)
+        class FunnelTokenAlreadyClaimed(message: String) : RovenueException(message)
         class Internal(message: String) : RovenueException(message)
         
 
@@ -1889,7 +2072,10 @@ public object FfiConverterTypeRovenueError : FfiConverterRustBuffer<RovenueExcep
             11 -> RovenueException.EntitlementInactive(FfiConverterString.read(buf))
             12 -> RovenueException.DuplicatePurchase(FfiConverterString.read(buf))
             13 -> RovenueException.ReceiptInvalid(FfiConverterString.read(buf))
-            14 -> RovenueException.Internal(FfiConverterString.read(buf))
+            14 -> RovenueException.FunnelTokenNotFound(FfiConverterString.read(buf))
+            15 -> RovenueException.FunnelTokenExpired(FfiConverterString.read(buf))
+            16 -> RovenueException.FunnelTokenAlreadyClaimed(FfiConverterString.read(buf))
+            17 -> RovenueException.Internal(FfiConverterString.read(buf))
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
         
@@ -1953,8 +2139,20 @@ public object FfiConverterTypeRovenueError : FfiConverterRustBuffer<RovenueExcep
                 buf.putInt(13)
                 Unit
             }
-            is RovenueException.Internal -> {
+            is RovenueException.FunnelTokenNotFound -> {
                 buf.putInt(14)
+                Unit
+            }
+            is RovenueException.FunnelTokenExpired -> {
+                buf.putInt(15)
+                Unit
+            }
+            is RovenueException.FunnelTokenAlreadyClaimed -> {
+                buf.putInt(16)
+                Unit
+            }
+            is RovenueException.Internal -> {
+                buf.putInt(17)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -2067,6 +2265,92 @@ public abstract class FfiConverterCallbackInterface<CallbackInterface>(
         buf.putLong(lower(value))
     }
 }
+
+// Declaration and FfiConverters for FunnelClaimListener Callback Interface
+
+public interface FunnelClaimListener {
+    fun `onFunnelClaimResolved`(`result`: FunnelClaimResult)
+    
+    companion object
+}
+
+// The ForeignCallback that is passed to Rust.
+internal class ForeignCallbackTypeFunnelClaimListener : ForeignCallback {
+    @Suppress("TooGenericExceptionCaught")
+    override fun callback(handle: Handle, method: Int, argsData: Pointer, argsLen: Int, outBuf: RustBufferByReference): Int {
+        val cb = FfiConverterTypeFunnelClaimListener.lift(handle)
+        return when (method) {
+            IDX_CALLBACK_FREE -> {
+                FfiConverterTypeFunnelClaimListener.drop(handle)
+                // Successful return
+                // See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs`
+                UNIFFI_CALLBACK_SUCCESS
+            }
+            1 -> {
+                // Call the method, write to outBuf and return a status code
+                // See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs` for info
+                try {
+                    this.`invokeOnFunnelClaimResolved`(cb, argsData, argsLen, outBuf)
+                } catch (e: Throwable) {
+                    // Unexpected error
+                    try {
+                        // Try to serialize the error into a string
+                        outBuf.setValue(FfiConverterString.lower(e.toString()))
+                    } catch (e: Throwable) {
+                        // If that fails, then it's time to give up and just return
+                    }
+                    UNIFFI_CALLBACK_UNEXPECTED_ERROR
+                }
+            }
+            
+            else -> {
+                // An unexpected error happened.
+                // See docs of ForeignCallback in `uniffi_core/src/ffi/foreigncallbacks.rs`
+                try {
+                    // Try to serialize the error into a string
+                    outBuf.setValue(FfiConverterString.lower("Invalid Callback index"))
+                } catch (e: Throwable) {
+                    // If that fails, then it's time to give up and just return
+                }
+                UNIFFI_CALLBACK_UNEXPECTED_ERROR
+            }
+        }
+    }
+
+    
+    @Suppress("UNUSED_PARAMETER")
+    private fun `invokeOnFunnelClaimResolved`(kotlinCallbackInterface: FunnelClaimListener, argsData: Pointer, argsLen: Int, outBuf: RustBufferByReference): Int {
+        val argsBuf = argsData.getByteBuffer(0, argsLen.toLong()).also {
+            it.order(ByteOrder.BIG_ENDIAN)
+        }
+        fun makeCall() : Int {
+            kotlinCallbackInterface.`onFunnelClaimResolved`(
+                FfiConverterTypeFunnelClaimResult.read(argsBuf)
+            )
+            return UNIFFI_CALLBACK_SUCCESS
+        }
+        fun makeCallAndHandleError() : Int = makeCall()
+
+        return makeCallAndHandleError()
+    }
+    
+}
+
+// The ffiConverter which transforms the Callbacks in to Handles to pass to Rust.
+public object FfiConverterTypeFunnelClaimListener: FfiConverterCallbackInterface<FunnelClaimListener>(
+    foreignCallback = ForeignCallbackTypeFunnelClaimListener()
+) {
+    override fun register(lib: _UniFFILib) {
+        rustCall() { status ->
+            lib.uniffi_rovenue_fn_init_callback_funnelclaimlistener(this.foreignCallback, status)
+        }
+    }
+}
+
+
+
+
+
 
 // Declaration and FfiConverters for Observer Callback Interface
 
@@ -2261,6 +2545,35 @@ public object FfiConverterOptionalTypeExperimentAssignment: FfiConverterRustBuff
         } else {
             buf.put(1)
             FfiConverterTypeExperimentAssignment.write(value, buf)
+        }
+    }
+}
+
+
+
+
+public object FfiConverterOptionalTypeFunnelClaimResult: FfiConverterRustBuffer<FunnelClaimResult?> {
+    override fun read(buf: ByteBuffer): FunnelClaimResult? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeFunnelClaimResult.read(buf)
+    }
+
+    override fun allocationSize(value: FunnelClaimResult?): Int {
+        if (value == null) {
+            return 1
+        } else {
+            return 1 + FfiConverterTypeFunnelClaimResult.allocationSize(value)
+        }
+    }
+
+    override fun write(value: FunnelClaimResult?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeFunnelClaimResult.write(value, buf)
         }
     }
 }

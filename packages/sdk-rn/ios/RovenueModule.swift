@@ -41,6 +41,7 @@ final class StoreProblemException: Exception {
 
 public class RovenueModule: Module {
     private var changesTask: Task<Void, Never>?
+    private var funnelClaimsTask: Task<Void, Never>?
     private var logUnsubscribe: (() -> Void)?
 
     public func definition() -> ModuleDefinition {
@@ -202,6 +203,30 @@ public class RovenueModule: Module {
             try await Rovenue.shared.track(envelopeJson: envelopeJson)
         }
 
+        // ---------------- Funnel Claim ----------------
+        AsyncFunction("installId") { () -> String in
+            Rovenue.shared.installId()
+        }
+        AsyncFunction("claimFunnelToken") { (token: String) -> [String: Any?] in
+            let r = try await Rovenue.shared.claimFunnelToken(token)
+            return ["subscriberId": r.subscriberId, "funnelAnswersJson": r.funnelAnswersJson]
+        }
+        AsyncFunction("claimInstall") { (params: [String: Any?]) -> [String: Any?]? in
+            let p = ClaimInstallParams(
+                platform: params["platform"] as? String ?? "",
+                locale: params["locale"] as? String ?? "",
+                timezone: params["timezone"] as? String ?? "",
+                screenDims: params["screenDims"] as? String ?? "",
+                deviceModel: params["deviceModel"] as? String,
+                installReferrer: params["installReferrer"] as? String
+            )
+            guard let r = try await Rovenue.shared.claimInstall(p) else { return nil }
+            return ["subscriberId": r.subscriberId, "funnelAnswersJson": r.funnelAnswersJson]
+        }
+        AsyncFunction("claimViaEmail") { (email: String) in
+            try await Rovenue.shared.claimViaEmail(email)
+        }
+
         // ---------------- Subscriber Attributes ----------------
         AsyncFunction("setAttributes") { (attributes: [String: String?]) in
             try await Rovenue.shared.setAttributes(attributes)
@@ -224,12 +249,20 @@ public class RovenueModule: Module {
         }
 
         // ---------------- Events ----------------
-        Events("onChange", "onLog")
+        Events("onChange", "onLog", "onFunnelClaimResolved")
 
         OnStartObserving {
             self.changesTask = Task { [weak self] in
                 for await event in Rovenue.shared.changes {
                     self?.sendEvent("onChange", ["event": Self.eventName(event)])
+                }
+            }
+            self.funnelClaimsTask = Task { [weak self] in
+                for await r in Rovenue.shared.funnelClaims {
+                    self?.sendEvent("onFunnelClaimResolved", [
+                        "subscriberId": r.subscriberId,
+                        "funnelAnswersJson": r.funnelAnswersJson,
+                    ])
                 }
             }
             self.logUnsubscribe = Rovenue.shared.setLogHandler { [weak self] entry in
@@ -243,6 +276,8 @@ public class RovenueModule: Module {
         OnStopObserving {
             self.changesTask?.cancel()
             self.changesTask = nil
+            self.funnelClaimsTask?.cancel()
+            self.funnelClaimsTask = nil
             self.logUnsubscribe?()
             self.logUnsubscribe = nil
         }

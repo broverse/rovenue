@@ -1,0 +1,45 @@
+---
+import '../styles/styles.css';
+import '../styles/landing.css';
+import '../styles/animations.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = 'Rovenue — Revenue infrastructure for subscription apps',
+  description = "Rovenue shows you what's driving revenue, helps you test what grows it, and keeps more customers from churning.",
+} = Astro.props;
+---
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <!-- Enable entrance animations only when JS is on and motion is allowed.
+         Without this class, all [data-reveal] content stays visible. -->
+    <script is:inline>
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        document.documentElement.classList.add('anim');
+      }
+    </script>
+  </head>
+  <body class="lp-body lp">
+    <div class="lp-grid-bg"></div>
+    <div class="lp-wrap">
+      <slot />
+    </div>
+    <script>
+      import '../scripts/reveal.ts';
+    </script>
+  </body>
+</html>

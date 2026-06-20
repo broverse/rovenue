@@ -1,0 +1,174 @@
+/* Rovenue — design-system tokens & shared primitives (Hero UI v3 inspired) */
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --primary-50: #EFF6FF;
+  --primary-100: #DBEAFE;
+  --primary-200: #BFDBFE;
+  --primary-300: #93C5FD;
+  --primary-400: #60A5FA;
+  --primary-500: #3B82F6;
+  --primary-600: #2563EB;
+  --primary-700: #1D4ED8;
+
+  --background: #09090B;
+  --content1: #0F0F12;
+  --content2: #151518;
+  --content3: #1C1C21;
+  --content4: #26262C;
+
+  --divider: rgba(255,255,255,0.08);
+  --divider-strong: rgba(255,255,255,0.12);
+
+  --default-50: #0F0F12;
+  --default-100: #18181B;
+  --default-200: #27272A;
+  --default-300: #3F3F46;
+  --default-400: #52525B;
+  --default-500: #71717A;
+  --default-600: #A1A1AA;
+  --default-700: #D4D4D8;
+  --default-800: #E4E4E7;
+  --default-900: #FAFAFA;
+
+  --success: #10B981;
+  --warning: #F59E0B;
+  --danger:  #EF4444;
+  --violet:  #8B5CF6;
+  --pink:    #EC4899;
+  --cyan:    #06B6D4;
+  --orange:  #F97316;
+  --lime:    #84CC16;
+
+  --foreground: #FAFAFA;
+
+  --row-h: 40px;
+  --card-radius: 8px;
+  --ease-out-quart: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --accent: var(--primary-500);
+  --accent-foreground: #FFFFFF;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv11", "ss01";
+}
+
+.mono { font-family: 'Geist Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 120ms var(--ease-out-quart);
+  color: var(--foreground);
+  background: transparent;
+  white-space: nowrap;
+}
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--accent);
+}
+.btn.solid-primary {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.btn.solid-primary:hover { background: color-mix(in srgb, var(--accent) 85%, white); }
+.btn.flat {
+  background: var(--content2);
+  border-color: var(--divider);
+  color: var(--default-800);
+}
+.btn.flat:hover { background: var(--content3); border-color: var(--divider-strong); }
+.btn.light { color: var(--default-600); }
+.btn.light:hover { background: var(--content2); color: var(--foreground); }
+.btn.icon { width: 32px; padding: 0; justify-content: center; }
+
+/* Live chip */
+.live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--success);
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 120ms;
+}
+.live-chip:hover { background: color-mix(in srgb, var(--success) 16%, transparent); }
+.live-chip .pulse {
+  width: 6px; height: 6px; border-radius: 999px;
+  background: var(--success);
+  position: relative;
+}
+.live-chip .pulse::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 999px;
+  background: var(--success);
+  opacity: 0.4;
+  animation: pulse 1.6s ease-out infinite;
+}
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 0.5; }
+  100% { transform: scale(2.8); opacity: 0; }
+}
+
+/* Chips */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: 'Geist Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+.chip.success { background: color-mix(in srgb, var(--success) 13%, transparent); color: var(--success); }
+.chip.danger  { background: color-mix(in srgb, var(--danger) 13%, transparent); color: var(--danger); }
+.chip.warning { background: color-mix(in srgb, var(--warning) 13%, transparent); color: var(--warning); }
+.chip.default { background: var(--content4); color: var(--default-600); }
+.chip.primary { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+
+/* Code inline */
+code.inline {
+  font-family: 'Geist Mono', monospace;
+  font-size: 12px;
+  background: var(--content4);
+  color: var(--default-700);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--divider);
+}
+
+/* Chart legend */
+.chart-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--default-600); }
+.legend-dot { width: 8px; height: 8px; border-radius: 2px; }
