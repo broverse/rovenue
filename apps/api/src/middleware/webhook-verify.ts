@@ -135,18 +135,18 @@ export const verifyAppleWebhook: MiddlewareHandler = async (c, next) => {
         message: "Apple webhook verifier temporarily unavailable",
       });
     }
-  } else if (env.NODE_ENV === "production") {
-    log.warn("apple webhook rejected: no project credentials in production", {
+  } else if (env.ALLOW_UNVERIFIED_WEBHOOKS) {
+    log.warn("apple webhook: jose fallback via ALLOW_UNVERIFIED_WEBHOOKS", {
+      projectId,
+    });
+    verifier = new JoseAppleNotificationVerifier();
+  } else {
+    log.warn("apple webhook rejected: no project credentials", {
       projectId,
     });
     throw new HTTPException(401, {
       message: "Apple webhook verification unavailable",
     });
-  } else {
-    log.warn("apple webhook: no project credentials, using jose fallback", {
-      projectId,
-    });
-    verifier = new JoseAppleNotificationVerifier();
   }
 
   let notification: AppleResponseBodyV2DecodedPayload;
@@ -217,11 +217,18 @@ function stashGoogleCtx(
 }
 
 export const verifyGoogleWebhook: MiddlewareHandler = async (c, next) => {
-  // Dev fast-path: identity verification is skipped when
-  // PUBSUB_PUSH_AUDIENCE is unset. The body peek still runs so the
-  // downstream replay guard has the ctx vars it needs.
+  // Fast-path: skip Pub/Sub OIDC verification when audience is unconfigured.
+  // Fail closed by default — bypass requires ALLOW_UNVERIFIED_WEBHOOKS.
   if (!env.PUBSUB_PUSH_AUDIENCE) {
-    log.debug("google webhook: PUBSUB_PUSH_AUDIENCE unset, skipping verify");
+    if (!env.ALLOW_UNVERIFIED_WEBHOOKS) {
+      log.warn("google webhook rejected: verification not configured");
+      throw new HTTPException(401, {
+        message: "Pub/Sub verification not configured",
+      });
+    }
+    log.warn(
+      "google webhook: verification bypassed via ALLOW_UNVERIFIED_WEBHOOKS",
+    );
     const { messageId, publishTime } = await extractGoogleMessage(c);
     stashGoogleCtx(c, messageId, publishTime);
     await next();

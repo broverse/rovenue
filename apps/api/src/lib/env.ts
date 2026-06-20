@@ -65,6 +65,11 @@ const envSchema = z
     GOOGLE_CLIENT_SECRET: z.string().optional(),
     PUBSUB_PUSH_AUDIENCE: z.string().min(1).optional(),
     PUBSUB_PUSH_SERVICE_ACCOUNT: z.string().email().optional(),
+    // Bypass webhook signature verification. MUST be false in production.
+    // When true, Apple webhooks fall back to jose-only verification and
+    // Google webhooks skip Pub/Sub OIDC token validation. Intended for
+    // local development and integration test environments only.
+    ALLOW_UNVERIFIED_WEBHOOKS: z.coerce.boolean().default(false),
     // Accepted clock skew (seconds) between a webhook event's
     // timestamp and our wall clock. Deliveries outside this window
     // are rejected by the replay-guard middleware.
@@ -240,6 +245,14 @@ const envSchema = z
       "KAFKA_BROKERS",
       "analytics ingestion requires a Kafka/Redpanda cluster in production",
     );
+
+    if (data.ALLOW_UNVERIFIED_WEBHOOKS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "ALLOW_UNVERIFIED_WEBHOOKS must be false in production",
+        path: ["ALLOW_UNVERIFIED_WEBHOOKS"],
+      });
+    }
 
     if (data.BILLING_ENABLED) {
       require(
