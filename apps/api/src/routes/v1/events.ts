@@ -61,6 +61,12 @@ const identityContextSchema = z
 
 export const eventEnvelopeSchema = z
   .object({
+    // Wire format version (EVENT_WIRE_VERSION). Optional for backwards-compat
+    // with SDKs predating the versioned envelope; current SDKs always send 1.
+    version: z.literal(1).optional(),
+    // Stable client-generated id, reused across SDK retries so downstream
+    // fan-out (Meta CAPI / TikTok) can dedupe on it and avoid double-counting.
+    eventId: z.string().min(1).optional(),
     eventType: z.string().min(1),
     occurredAt: z.string().datetime(),
     subscriberId: z.string().min(1).optional(),
@@ -95,7 +101,14 @@ export const eventsRoute = new Hono()
   .post(
     "/",
     requirePublicApiKey,
-    zValidator("json", eventEnvelopeSchema),
+    zValidator("json", eventEnvelopeSchema, (result) => {
+      // Route validation failures through the global error handler so the
+      // response follows the project-standard { error: { code, message } }
+      // shape instead of @hono/zod-validator's default { success, error }.
+      if (!result.success) {
+        throw result.error;
+      }
+    }),
     async (c) => {
       const project = c.get("project");
       const body = c.req.valid("json");

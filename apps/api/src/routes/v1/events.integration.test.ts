@@ -18,6 +18,7 @@ import { eq, desc } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 import { drizzle as drizzleNs, getDb } from "@rovenue/db";
 import { apiKeyAuth } from "../../middleware/api-key-auth";
+import { errorHandler } from "../../middleware/error";
 import { eventsRoute } from "./events";
 
 // ---------------------------------------------------------------------------
@@ -43,7 +44,8 @@ let PUBLIC_KEY: string; // raw rov_pub_ token (stored plain in keyPublic)
 function buildApp() {
   return new Hono()
     .use("*", apiKeyAuth("any"))
-    .route("/v1/events", eventsRoute);
+    .route("/v1/events", eventsRoute)
+    .onError(errorHandler);
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +153,66 @@ describe("POST /v1/events", () => {
     });
 
     expect(res.status).toBe(400);
+  });
+
+  it("returns { error: { code, message } } shape on validation failure", async () => {
+    const app = buildApp();
+    const res = await app.request("/v1/events", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${PUBLIC_KEY}`,
+      },
+      // missing required eventType → Zod validation failure
+      body: JSON.stringify({ occurredAt: new Date().toISOString() }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json.error).toBeDefined();
+    const err = json.error as Record<string, unknown>;
+    expect(typeof err.code).toBe("string");
+    expect(typeof err.message).toBe("string");
+    // must NOT be the raw @hono/zod-validator { success: false } shape
+    expect(json.success).toBeUndefined();
+  });
+
+  it("accepts version + eventId and stores them in the outbox payload → 202", async () => {
+    const app = buildApp();
+    const eventId = `evt_${createId()}`;
+    const body = {
+      eventType: "purchase.completed",
+      occurredAt: new Date().toISOString(),
+      subscriberId: "sub_ver_1",
+      version: 1,
+      eventId,
+    };
+
+    const res = await app.request("/v1/events", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${PUBLIC_KEY}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    expect(res.status).toBe(202);
+
+    const rows = await testDb
+      .select()
+      .from(schema.outboxEvents)
+      .where(eq(schema.outboxEvents.aggregateId, PROJECT_ID))
+      .orderBy(desc(schema.outboxEvents.createdAt))
+      .limit(5);
+
+    const row = rows.find(
+      (r) => (r.payload as Record<string, unknown>).eventId === eventId,
+    );
+    expect(row).toBeDefined();
+    const payload = row!.payload as Record<string, unknown>;
+    expect(payload.version).toBe(1);
+    expect(payload.eventId).toBe(eventId);
   });
 
   it("accepts body without identityContext → 202 (backwards-compat)", async () => {
