@@ -1,113 +1,47 @@
 # Rovenue
 
-Open-source subscription management platform for mobile & web apps. Self-host, own your data, no revenue share. RevenueCat/Adapty alternative.
+Open-source, self-hosted subscription/credit management for mobile & web apps (RevenueCat/Adapty alternative). AGPL-3.0. Also covers experiments, feature flags, audiences, leaderboards, and GDPR/KVKK export/anonymize.
 
-## Tech Stack
+## Stack
 
-- **Backend:** Hono + TypeScript
-- **Auth:** Better Auth (GitHub + Google OAuth, session management)
-- **Database:** PostgreSQL 16 + Drizzle ORM (declarative range partitions managed by pg_partman for hot tables)
-- **Analytics:** ClickHouse (read replica fed via Kafka Engine + materialized views)
-- **Streaming:** Kafka / Redpanda + transactional outbox pattern (no dual-writes)
-- **Cache/Queue:** Redis + BullMQ
-- **Dashboard:** React (Vite + TypeScript)
-- **SDK:** React Native + TypeScript + Native Modules (StoreKit 2 / Play Billing 6)
-- **Monorepo:** Turborepo + pnpm workspaces
-- **Deploy:** Docker Compose (Coolify-ready)
-- **License:** AGPLv3
+- **API:** Hono + TypeScript (strict). **Dashboard:** React (Vite). **Docs:** Fumadocs (apps/docs).
+- **SDK:** Rust core crate (`librovenue`) + Swift / Kotlin / React Native façades.
+- **DB:** PostgreSQL 16 + Drizzle ORM; hot tables are range-partitioned (pg_partman). **Analytics:** ClickHouse fed via Kafka/Redpanda + the transactional outbox (no dual-writes).
+- **Cache/Queue:** Redis + BullMQ. **Monorepo:** Turborepo + pnpm. **Deploy:** Docker Compose (Coolify-ready).
 
-Beyond core subscription/credit management the platform also covers experiments, feature flags, audiences, leaderboards, and GDPR/KVKK anonymize/export.
+## Layout
 
-## Project Structure
+```
+apps/        api · dashboard · docs
+packages/    sdk-rn · sdk-swift · sdk-kotlin · core-rs (Rust) · db (Drizzle + ClickHouse migrations + seed) · shared
+deploy/      docker-compose.yml · coolify · grafana/alloy (observability profile)
+```
 
-rovenue/
-├── apps/
-│   ├── api/             → Hono API server
-│   ├── dashboard/       → React SPA
-│   └── docs/            → Documentation site
-├── packages/
-│   ├── sdk-rn/          → React Native SDK
-│   ├── db/              → Drizzle schema + drizzle-kit migrations + ClickHouse migrations + seed
-│   └── shared/          → Types, constants, utils
-├── deploy/
-│   ├── docker-compose.yml
-│   └── coolify/
-├── .github/
-│   ├── workflows/
-│   └── CONTRIBUTING.md
-├── CLAUDE.md
-├── LICENSE              → AGPL-3.0
-└── turbo.json
+## Architecture (the non-obvious bits)
 
-## Architecture Decisions
+- **Dashboard auth:** Better Auth, GitHub + Google OAuth only (manages user/session/account/verification tables). **SDK auth:** per-project public API key (Bearer). **S2S:** per-project secret key.
+- **Receipts:** Apple App Store Server API v2 (JWS, chain-pinned to Apple Root CAs — verifier fails closed if `APPLE_ROOT_CERTS_DIR` missing in prod), Google Play Developer API, Stripe webhooks. Webhook processing is idempotent (`store_event_id` dedup).
+- **Subscription state:** TRIAL → ACTIVE → GRACE_PERIOD → EXPIRED | PAUSED | REFUNDED. Entitlements denormalized into `subscriber_access` for fast reads.
+- **Outbox is the only path to Kafka:** never write a domain table and Kafka in the same code path — emit an `outbox_events` row in the same tx; the dispatcher publishes. Outbox is at-least-once, so ClickHouse revenue rollups use query-time idempotent views (not SummingMergeTree) to avoid double-counting on replay.
+- **Audit log:** append-only, per-project SHA-256 hash chain; `audit()` runs inside the caller's Drizzle tx.
+- **Append-only tables:** `credit_ledger`, `audit_logs`.
+- **Offline SDK:** MMKV / SQLite cache for last-known entitlements.
 
-- **Dashboard Auth:** Better Auth with GitHub + Google OAuth only (no email/password)
-  - Better Auth manages user, session, account, verification tables automatically
-  - Mount: `app.on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw))`
-- **SDK Auth:** Public API key (per-project) via Bearer token — no user auth needed
-- **Server-to-Server Auth:** Secret API key (per-project) for webhook configuration
-- Receipt verification: Apple App Store Server API v2 (JWS, chain-pinned via Apple Root CA G3 + Apple Inc Root), Google Play Developer API, Stripe Webhooks
-- Subscription state machine: TRIAL → ACTIVE → GRACE_PERIOD → EXPIRED | PAUSED | REFUNDED
-- Webhook processing: Idempotent (store_event_id deduplication)
-- Entitlements: Denormalized subscriber_access table for fast reads
-- Analytics path: Postgres → outbox → Kafka/Redpanda → ClickHouse Kafka Engine + materialized views (no dual-writes; outbox dispatcher is the single source of truth for downstream events)
-- Audit log: per-project SHA-256 hash chain with `pg_advisory_xact_lock` serialisation; `audit()` runs inside the caller's Drizzle tx so the audit row commits/rolls back atomically with the domain write
-- Offline SDK: MMKV cache for last-known entitlement state
+## Conventions
 
-## Coding Conventions
-
-- TypeScript strict mode everywhere
-- Drizzle for all Postgres access — repositories live under `packages/db/src/drizzle/repositories`; raw SQL only via `drizzle-orm`'s `sql` template when truly necessary
-- Zod for API input validation
-- Hono middleware pattern for auth, rate limiting, error handling
-- All API responses follow: { data: T } or { error: { code, message } }
-- Use barrel exports (index.ts) in each package
-- Tests: Vitest for unit + integration; testcontainers for the `*.integration.test.ts` suites that hit a real Postgres / ClickHouse / Kafka
-- Commit messages: conventional commits (feat:, fix:, chore:, docs:)
-
-## Database
-
-- PostgreSQL 16, Drizzle ORM, drizzle-kit migrations under `packages/db/drizzle/migrations`
-- Hot tables (`revenue_events`, `credit_ledger`, `outgoing_webhooks`) are declarative range partitions; `pg_partman` manages premake/retention for the first two, the partition-maintenance worker handles `outgoing_webhooks`
-- ClickHouse mirrors Postgres via Kafka Engine + materialized views (`packages/db/clickhouse/migrations/`) for MRR / credit balance / consumption / leaderboards
-- **Auth tables (managed by Better Auth):** user, session, account, verification
-- **App tables:** projects, project_members, api_keys, subscribers, products, purchases, subscriber_access, credit_ledger, webhook_events, outgoing_webhooks, revenue_events, audiences, experiments, experiment_assignments, feature_flags, audit_logs, outbox_events
-- All IDs are UUIDs (cuid2 generated); all timestamps UTC with timezone
-- Encrypted store credentials use AES-256-GCM
-- `credit_ledger` is append-only; `audit_logs` are append-only with a per-project SHA-256 hash chain
-- `outbox_events` drives Kafka publishing — never write to a domain table and Kafka in the same code path; produce an outbox row inside the same tx and let the dispatcher emit
-
-## Environment Variables
-
-See `.env.example` for the canonical list. Highlights:
-
-- DATABASE_URL — PostgreSQL connection string
-- REDIS_URL — Redis connection string
-- CLICKHOUSE_URL / CLICKHOUSE_USER / CLICKHOUSE_PASSWORD — analytics replica (required in production; local dev degrades gracefully when blank)
-- KAFKA_BROKERS — comma-separated host:port list for Redpanda/Kafka
-- ENCRYPTION_KEY — 32-byte hex for AES-256-GCM credential encryption
-- BETTER_AUTH_SECRET — Better Auth session encryption key
-- BETTER_AUTH_URL — Backend URL (e.g. http://localhost:3000)
-- DASHBOARD_URL — Dashboard origin (e.g. http://localhost:5173)
-- GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET — GitHub OAuth credentials
-- GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET — Google OAuth credentials
-- APPLE_ROOT_CERTS_DIR — directory of Apple Root CA `.cer` files; required in production for chain-validated StoreKit JWS verification (the verifier fails closed when missing)
-- PORT — API port (default 3000)
-- NODE_ENV / LOG_LEVEL — runtime tuning
-- METRICS_ENABLED — set `true` to enable prom-client RED metrics + internal `/metrics` listener (default `true`; no-op when observability profile is not active)
-- GRAFANA_ADMIN_USER — Grafana admin username (default `admin`)
-- GRAFANA_ADMIN_PASSWORD — Grafana admin password; defaults to `admin` when blank — **must be set to a strong value before exposing Grafana in production**
-- PROMETHEUS_RETENTION — how long Prometheus stores metrics data (default `15d`)
+- TypeScript strict everywhere; Zod for API input; all responses are `{ data: T }` or `{ error: { code, message } }`.
+- Postgres access via Drizzle only — repositories under `packages/db/src/drizzle/repositories`; raw SQL only via `sql` template when truly necessary. In `sql`, qualify columns (`"subscribers"."id"`) — bare `${table.col}` renders unqualified and breaks correlated subqueries.
+- Barrel exports (`index.ts`) per package. Conventional commits.
+- Tests: Vitest (unit + integration); `*.integration.test.ts` use testcontainers (real Postgres/ClickHouse/Kafka). Rust core: `cargo test`; verify sdk-kotlin with `testDebugUnitTest`.
+- All IDs are cuid2 UUIDs; timestamps UTC. Store credentials encrypted with AES-256-GCM. Refund `amountUsd` stored POSITIVE.
 
 ## Commands
 
-- `pnpm dev` — Start all apps in dev mode
-- `pnpm build` — Build all packages
-- `pnpm db:migrate` — Run Drizzle migrations against Postgres
-- `pnpm db:migrate:generate` — Generate a new Drizzle migration from schema
-- `pnpm db:seed` — Seed development data
-- `pnpm --filter @rovenue/db db:clickhouse:migrate` — Apply ClickHouse migrations
-- `pnpm --filter @rovenue/db db:verify:clickhouse` — Verify ClickHouse mirror parity
-- `pnpm test` — Run all tests
-- `docker compose up` — Start full stack (Postgres, Redis, ClickHouse, Redpanda, api, dashboard)
-- `COMPOSE_PROFILES=observability docker compose up` — start the stack WITH Grafana/Prometheus/Loki/Alloy (Grafana on http://localhost:3300)
+- `pnpm dev` / `pnpm build` / `pnpm test`
+- `pnpm db:migrate` · `pnpm db:migrate:generate` · `pnpm db:seed`
+- `pnpm --filter @rovenue/db db:clickhouse:migrate` · `db:verify:clickhouse`
+- `docker compose up` — full stack; prefix `COMPOSE_PROFILES=observability` for Grafana/Prometheus/Loki (Grafana on :3300)
+
+## Env
+
+See `.env.example` for the canonical list. Required in prod: `DATABASE_URL`, `REDIS_URL`, `CLICKHOUSE_URL`, `KAFKA_BROKERS`, `ENCRYPTION_KEY` (32-byte hex), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `DASHBOARD_URL`, OAuth client id/secret pairs, `APPLE_ROOT_CERTS_DIR`. Local dev degrades gracefully when ClickHouse is blank.
