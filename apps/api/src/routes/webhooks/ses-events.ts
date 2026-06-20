@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "@rovenue/db";
 import { env } from "../../lib/env";
 import { logger } from "../../lib/logger";
+import { redis } from "../../lib/redis";
 import { parseSesEvent } from "../../lib/ses-events";
 import { verifySnsSignature, type SnsPayload } from "../../lib/sns-signature";
 
@@ -63,6 +64,26 @@ export const sesEventsRoute = new Hono().post("/", async (c) => {
   }
 
   if (payload.Type === "SubscriptionConfirmation" && payload.SubscribeURL) {
+    // W4.2: Allowlist guard — only fetch URLs on official SNS hostnames to
+    // prevent SSRF (e.g. http://169.254.169.254/ or http://internal-host/).
+    // Reject before any network I/O; signature verification already ran above
+    // but this is a defence-in-depth layer for misconfigured environments
+    // where verification is relaxed.
+    let subscribeHost: string;
+    try {
+      subscribeHost = new URL(payload.SubscribeURL).hostname;
+    } catch {
+      log.warn("SubscribeURL is not a valid URL", { url: payload.SubscribeURL });
+      return c.json({ ok: false }, 400);
+    }
+    const SNS_HOST_RE = /^sns\.[a-z0-9-]+\.amazonaws\.com$/;
+    if (!SNS_HOST_RE.test(subscribeHost)) {
+      log.warn("SubscribeURL host not in SNS allowlist", {
+        host: subscribeHost,
+        url: payload.SubscribeURL,
+      });
+      return c.json({ ok: false }, 400);
+    }
     // One-shot confirm.
     try {
       await fetch(payload.SubscribeURL);
@@ -76,6 +97,28 @@ export const sesEventsRoute = new Hono().post("/", async (c) => {
 
   if (payload.Type !== "Notification") {
     return c.json({ ok: true });
+  }
+
+  // W4.1: MessageId dedup — SNS delivers at-least-once; guard against
+  // a replayed Notification re-applying suppression / status writes.
+  // Fail open on Redis error so a cache outage doesn't drop live events.
+  if (payload.MessageId) {
+    const dedupKey = `ses:seen:${payload.MessageId}`;
+    try {
+      const added = await redis.set(dedupKey, "1", "EX", 3600, "NX");
+      if (added !== "OK") {
+        // Already processed — return 200 without reprocessing.
+        log.info("ses notification deduplicated", { messageId: payload.MessageId });
+        return c.json({ ok: true });
+      }
+    } catch (err) {
+      // Redis is down — fail open; event will be processed (possibly twice
+      // on genuine replay), which is safer than silently dropping a delivery.
+      log.warn("ses dedup redis error, failing open", {
+        messageId: payload.MessageId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   const patch = parseSesEvent(payload.Message);

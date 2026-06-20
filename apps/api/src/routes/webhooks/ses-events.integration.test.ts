@@ -34,10 +34,13 @@ function buildApp() {
 }
 
 /** Minimal SNS Notification envelope wrapping a JSON-stringified SES event. */
-function snsNotification(sesEvent: unknown) {
+let _snsSeq = 0;
+function snsNotification(sesEvent: unknown, messageId?: string) {
   return {
     Type: "Notification",
-    MessageId: `sns-msg-${RUN_ID}`,
+    // Each call gets a unique MessageId so the W4.1 dedup guard doesn't
+    // collapse independent test cases that legitimately send different events.
+    MessageId: messageId ?? `sns-msg-${RUN_ID}-${++_snsSeq}`,
     TopicArn: "arn:aws:sns:us-east-1:123456789012:rovenue-ses",
     Message: JSON.stringify(sesEvent),
     Timestamp: new Date().toISOString(),
