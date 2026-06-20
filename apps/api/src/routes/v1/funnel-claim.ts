@@ -36,11 +36,8 @@ import {
 } from "../../services/funnel/token";
 import { parseInstallReferrer } from "../../services/funnel/install-referrer";
 import { emitFunnelEvent } from "../../services/funnel/outbox";
-import {
-  fingerprintsMatch,
-  normalizeFingerprint,
-  type NormalizedFingerprint,
-} from "../../services/funnel/fingerprint";
+import { hashIp } from "../../services/funnel/fingerprint";
+import { selectUniqueCandidate } from "../../services/funnel/deferred-match";
 import { redis } from "../../lib/redis";
 import { mailer } from "../../lib/mailer";
 
@@ -55,9 +52,9 @@ const claimTokenBody = z.object({
 
 const claimInstallBody = z.object({
   platform: z.enum(["ios", "android"]),
-  locale: z.string().min(2).max(16),
-  timezone: z.string().min(1).max(64),
-  screen_dims: z.string().regex(/^\d+x\d+$/),
+  locale: z.string().max(16).optional(),
+  timezone: z.string().max(64).optional(),
+  screen_dims: z.string().max(16).optional(),
   device_model: z.string().max(64).optional(),
   install_referrer: z.string().max(2048).optional(),
   install_id: z.string().min(1).max(128),
@@ -254,56 +251,36 @@ export const funnelClaimRoute = new Hono()
         return c.json({ data: null }, 404);
       }
 
-      // -- iOS: fingerprint match against deferred rows.
+      // -- iOS: deterministic IP-only unique-match (no device fingerprinting).
+      // We match the request IP against unclaimed deferred rows in the window
+      // and grant ONLY when exactly one exists. Zero candidates → no match;
+      // two or more → shared IP (NAT/CGNAT) where granting could leak one
+      // user's purchase to another — so we decline rather than guess.
       if (body.platform === "ios") {
-        const fp = normalizeFingerprint({
-          ip: readIp(c),
-          userAgent: c.req.header("user-agent") ?? "",
-          locale: body.locale,
-          timezone: body.timezone,
-          screenDims: body.screen_dims,
-          deviceModel: body.device_model ?? null,
-        });
-
+        const ipHash = hashIp(readIp(c));
         const candidates =
           await drizzle.funnelDeferredClaimRepo.findRecentByIpHash(
             drizzle.db,
-            fp.ipHash,
+            ipHash,
             new Date(),
           );
+        const cand = selectUniqueCandidate(candidates);
+        if (!cand) return c.json({ data: null }, 404);
 
-        for (const cand of candidates) {
-          // The stored row's IP is ALREADY hashed (deferred_claims
-          // stores `ip_hash` directly), so build the candidate
-          // fingerprint by overwriting ipHash post-normalize.
-          const candFp: NormalizedFingerprint = {
-            ipHash: cand.ipHash,
-            userAgent: cand.userAgent,
-            locale: cand.locale,
-            timezone: cand.timezone,
-            screenDims: cand.screenDims,
-            deviceModel: cand.deviceModel,
-          };
-          if (!fingerprintsMatch(fp, candFp)) continue;
-
-          // Rotate the token hash so the original universal-link
-          // plaintext can never be replayed. The new plaintext is
-          // returned exactly once, to this SDK install.
-          const fresh = generateClaimToken();
-          await drizzle.funnelClaimTokenRepo.rotateHash(
-            drizzle.db,
-            cand.tokenId,
-            hashToken(fresh),
-          );
-          await drizzle.funnelDeferredClaimRepo.markMatched(
-            drizzle.db,
-            cand.id,
-            body.install_id,
-          );
-          return c.json({ data: { token: fresh } });
-        }
-
-        return c.json({ data: null }, 404);
+        // Rotate the token hash so the universal-link plaintext can never be
+        // replayed; return the fresh plaintext exactly once to this install.
+        const fresh = generateClaimToken();
+        await drizzle.funnelClaimTokenRepo.rotateHash(
+          drizzle.db,
+          cand.tokenId,
+          hashToken(fresh),
+        );
+        await drizzle.funnelDeferredClaimRepo.markMatched(
+          drizzle.db,
+          cand.id,
+          body.install_id,
+        );
+        return c.json({ data: { token: fresh } });
       }
 
       // Android without referrer: nothing we can do.

@@ -46,7 +46,7 @@ interface FunnelLandingSettings {
   app_store_url?: string;
 }
 
-const DEFERRED_TTL_MS = 24 * 60 * 60 * 1000; // 24h window for fingerprint match
+const DEFERRED_TTL_MS = 1 * 60 * 60 * 1000; // 1h window (was 24h) — IP-only match
 
 export const publicFunnelUniversalRoute = new Hono().get(
   "/funnels/open/:token",
