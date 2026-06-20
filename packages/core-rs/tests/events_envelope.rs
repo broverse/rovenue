@@ -10,6 +10,8 @@ use serde_json::Value;
 #[test]
 fn full_identity_context_round_trip() {
     let envelope = EventEnvelope {
+        version: None,
+        event_id: None,
         event_type: "revenue.event.recorded".to_string(),
         occurred_at: "2026-05-28T10:00:00Z".to_string(),
         subscriber_id: Some("sub_abc".to_string()),
@@ -59,6 +61,8 @@ fn full_identity_context_round_trip() {
 #[test]
 fn envelope_without_identity_context_omits_key() {
     let envelope = EventEnvelope {
+        version: None,
+        event_id: None,
         event_type: "subscription.trial.started".to_string(),
         occurred_at: "2026-05-28T12:00:00Z".to_string(),
         subscriber_id: Some("sub_no_ic".to_string()),
@@ -90,4 +94,52 @@ fn identity_context_email_only() {
     let v: Value = serde_json::from_str(&json_str).expect("parse");
 
     assert_eq!(v, serde_json::json!({"email": "a@b.co"}));
+}
+
+/// 4. The wire-format fields populated by `track()` — `version` and
+///    `event_id` — serialise as `version` / `eventId` (camelCase) when set,
+///    are omitted when None, and round-trip on decode.
+#[test]
+fn version_and_event_id_round_trip() {
+    let envelope = EventEnvelope {
+        version: Some(1),
+        event_id: Some("evt_dedupe_1".to_string()),
+        event_type: "revenue.event.recorded".to_string(),
+        occurred_at: "2026-05-28T10:00:00Z".to_string(),
+        subscriber_id: None,
+        product_id: None,
+        amount: None,
+        currency: None,
+        event_source_url: None,
+        identity_context: None,
+    };
+
+    let json_str = serde_json::to_string(&envelope).expect("serialise");
+    let v: Value = serde_json::from_str(&json_str).expect("parse");
+
+    assert_eq!(v["version"], 1);
+    assert_eq!(v["eventId"], "evt_dedupe_1");
+    assert!(v.get("event_id").is_none(), "unexpected snake_case event_id key");
+
+    let decoded: EventEnvelope = serde_json::from_str(&json_str).expect("deserialise");
+    assert_eq!(decoded.version, Some(1));
+    assert_eq!(decoded.event_id.as_deref(), Some("evt_dedupe_1"));
+
+    // Omitted when None.
+    let bare = EventEnvelope {
+        version: None,
+        event_id: None,
+        event_type: "subscription.trial.started".to_string(),
+        occurred_at: "2026-05-28T12:00:00Z".to_string(),
+        subscriber_id: None,
+        product_id: None,
+        amount: None,
+        currency: None,
+        event_source_url: None,
+        identity_context: None,
+    };
+    let bare_v: Value =
+        serde_json::from_str(&serde_json::to_string(&bare).expect("serialise")).expect("parse");
+    assert!(bare_v.get("version").is_none(), "version must be absent when None");
+    assert!(bare_v.get("eventId").is_none(), "eventId must be absent when None");
 }

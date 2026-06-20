@@ -6,7 +6,7 @@ fn fresh_db_runs_v1_then_v2() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("rovenue.db");
     let store = CacheStore::open(&path).expect("open fresh db");
-    assert_eq!(store.schema_version().unwrap(), 8);
+    assert_eq!(store.schema_version().unwrap(), 9);
     assert!(store.has_table("credit_balance").unwrap());
 }
 
@@ -43,6 +43,6 @@ fn upgrades_v1_db_in_place() {
     }
 
     let store = CacheStore::open(&path).expect("reopen + upgrade v1→v2");
-    assert_eq!(store.schema_version().unwrap(), 8);
+    assert_eq!(store.schema_version().unwrap(), 9);
     assert!(store.has_table("credit_balance").unwrap());
 }
