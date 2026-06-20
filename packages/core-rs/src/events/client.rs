@@ -58,6 +58,7 @@ mod tests {
         let mut server = mockito::Server::new();
         let m = server
             .mock("POST", "/v1/events")
+            .match_header("X-Rovenue-App-User-Id", "user_42")
             .match_body(mockito::Matcher::JsonString(
                 r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z","subscriberId":"user_42","amount":"9.99","currency":"USD","identityContext":{"email":"a@b.com"}}"#.into(),
             ))
@@ -67,6 +68,23 @@ mod tests {
         let http = Arc::new(HttpClient::new(server.url(), "pk_test".into()).with_max_attempts(1));
         EventsClient::new(http)
             .post(&envelope(), Some("user_42"))
+            .expect("post ok");
+
+        m.assert();
+    }
+
+    #[test]
+    fn post_omits_scope_header_when_none() {
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("POST", "/v1/events")
+            .match_header("X-Rovenue-App-User-Id", mockito::Matcher::Missing)
+            .with_status(202)
+            .create();
+
+        let http = Arc::new(HttpClient::new(server.url(), "pk_test".into()).with_max_attempts(1));
+        EventsClient::new(http)
+            .post(&envelope(), None)
             .expect("post ok");
 
         m.assert();
