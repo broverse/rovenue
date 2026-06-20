@@ -1,0 +1,87 @@
+// ---------- LOGS: every container's stdout -> Loki ----------
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "default" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.containers.output
+  forward_to    = [loki.process.pino.receiver]
+  relabel_rules = discovery.relabel.containers.rules
+}
+
+// Pino logs are JSON: lift level into a label, keep msg/requestId as
+// structured metadata.
+loki.process "pino" {
+  forward_to = [loki.write.default.receiver]
+  stage.json {
+    expressions = { level = "level" }
+  }
+  stage.labels {
+    values = { level = "level" }
+  }
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// ---------- METRICS: infra -> Prometheus ----------
+prometheus.scrape "infra" {
+  scrape_interval = "15s"
+  targets = [
+    { __address__ = "redpanda:9644",         job = "redpanda" },
+    { __address__ = "clickhouse:9363",        job = "clickhouse" },
+    { __address__ = "postgres-exporter:9187", job = "postgres" },
+    { __address__ = "redis-exporter:9121",    job = "redis" },
+  ]
+  forward_to = [prometheus.remote_write.default.receiver]
+}
+
+// ---------- METRICS: API replicas -> Prometheus ----------
+// Discover every `api` container and scrape the internal :3001/metrics.
+discovery.relabel "api" {
+  targets = discovery.docker.containers.targets
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "api"
+    action        = "keep"
+  }
+  rule {
+    source_labels = ["__meta_docker_network_ip"]
+    target_label  = "__address__"
+    replacement   = "$1:3001"
+  }
+  rule {
+    target_label = "job"
+    replacement  = "rovenue-api"
+  }
+}
+
+prometheus.scrape "api" {
+  scrape_interval = "15s"
+  targets         = discovery.relabel.api.output
+  metrics_path    = "/metrics"
+  forward_to      = [prometheus.remote_write.default.receiver]
+}
+
+prometheus.remote_write "default" {
+  endpoint {
+    url = "http://prometheus:9090/api/v1/write"
+  }
+}

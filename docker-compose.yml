@@ -468,6 +468,21 @@ services:
       - redis
     restart: unless-stopped
 
+  alloy:
+    image: grafana/alloy:v1.4.2
+    profiles: ["observability"]
+    command:
+      - "run"
+      - "/etc/alloy/config.alloy"
+      - "--server.http.listen-addr=0.0.0.0:12345"
+    volumes:
+      - ./deploy/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   rovenue-data:
   rovenue-clickhouse-data:
