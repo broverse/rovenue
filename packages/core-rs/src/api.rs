@@ -4,7 +4,8 @@ use std::time::Duration;
 
 use crate::attributes::buffer::AttributeBuffer;
 use crate::attributes::dispatcher::AttributeDispatcher;
-use crate::cache::{CacheStore, ExposureRepo};
+use crate::cache::{CacheStore, ExposureRepo, FunnelRepo};
+use crate::funnel::{ClaimInstallParams, FunnelClaimBus, FunnelClaimListener, FunnelClaimResult, FunnelClient};
 use crate::config::Config;
 use crate::virtual_currencies::VirtualCurrencyReader;
 use crate::entitlements::{Entitlement, EntitlementReader};
@@ -48,6 +49,8 @@ pub struct RovenueCore {
     virtual_currencies: Arc<VirtualCurrencyReader>,
     receipts: Arc<ReceiptClient>,
     events: Arc<EventsClient>,
+    funnel: Arc<FunnelClient>,
+    funnel_bus: Arc<FunnelClaimBus>,
     offerings: Arc<OfferingsClient>,
     remote_config: Arc<RemoteConfigReader>,
     exposure: Arc<ExposureTracker>,
@@ -112,6 +115,8 @@ impl RovenueCore {
         );
         let receipts = Arc::new(ReceiptClient::new(Arc::clone(&http)));
         let events = Arc::new(EventsClient::new(Arc::clone(&http)));
+        let funnel = Arc::new(FunnelClient::new(Arc::clone(&http)));
+        let funnel_bus = Arc::new(FunnelClaimBus::default());
         let offerings = Arc::new(
             OfferingsClient::new(Arc::clone(&http), Arc::clone(&store))
                 .with_clock(Arc::clone(&clock)),
@@ -209,6 +214,8 @@ impl RovenueCore {
             virtual_currencies,
             receipts,
             events,
+            funnel,
+            funnel_bus,
             offerings,
             remote_config,
             exposure,
@@ -425,6 +432,70 @@ impl RovenueCore {
         self.events.post(&envelope, scope_opt.as_deref())
     }
 
+    /// Persisted per-install id (`inst_<cuid2>`), generated on first access.
+    pub fn install_id(&self) -> String {
+        let now = self.clock.now_unix_ms();
+        FunnelRepo::new(&self.store)
+            .get_or_create_install_id(now)
+            .unwrap_or_default()
+    }
+
+    /// Register a listener fired whenever a funnel claim resolves (direct call
+    /// now; automatic orchestration later). Mirrors `register_observer`.
+    pub fn register_funnel_claim_listener(&self, listener: Box<dyn FunnelClaimListener>) {
+        self.funnel_bus.register(Arc::from(listener));
+    }
+
+    /// Claim a known funnel token. On success refreshes entitlements (the claim
+    /// response carries none), records `claimed` state, fires the callback.
+    pub fn claim_funnel_token(&self, token: String) -> RovenueResult<FunnelClaimResult> {
+        let anon_id = self.identity.rovenue_id();
+        let result = self.funnel.claim_funnel_token(&token, &anon_id);
+        self.finish_claim(result)
+    }
+
+    /// Recover a token via `claim-install` then claim it. `None` when no match.
+    pub fn claim_install(
+        &self,
+        params: ClaimInstallParams,
+    ) -> RovenueResult<Option<FunnelClaimResult>> {
+        let install_id = self.install_id();
+        match self.funnel.claim_install(&params, &install_id)? {
+            Some(token) => Ok(Some(self.claim_funnel_token(token)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Kick off the email magic-link path. Resolution completes later when the
+    /// link returns to the app (deep link → claim_funnel_token).
+    pub fn claim_via_email(&self, email: String) -> RovenueResult<()> {
+        let install_id = self.install_id();
+        self.funnel.claim_via_email(&email, &install_id)
+    }
+
+    /// Shared tail for a token claim: on Ok, refresh entitlements, record state,
+    /// fire the callback; on Err, record `failed`.
+    fn finish_claim(
+        &self,
+        result: RovenueResult<FunnelClaimResult>,
+    ) -> RovenueResult<FunnelClaimResult> {
+        let now = self.clock.now_unix_ms();
+        let install_id = self.install_id();
+        let repo = FunnelRepo::new(&self.store);
+        match result {
+            Ok(r) => {
+                let _ = self.refresh_entitlements();
+                let _ = repo.set_claim_state(&install_id, "claimed", Some(&r.subscriber_id), now);
+                self.funnel_bus.emit(r.clone());
+                Ok(r)
+            }
+            Err(e) => {
+                let _ = repo.set_claim_state(&install_id, "failed", None, now);
+                Err(e)
+            }
+        }
+    }
+
     /// Hydrate entitlement + VC caches from a receipt POST response and
     /// build the FFI result — no follow-up GETs. Falls back to a GET refresh
     /// only when an older server omitted `access` entirely.
@@ -633,6 +704,86 @@ fn dirs_path() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use std::sync::{Arc, Mutex};
+    use crate::funnel::{ClaimInstallParams, FunnelClaimListener, FunnelClaimResult};
+
+    struct CapturingListener(Arc<Mutex<Vec<FunnelClaimResult>>>);
+    impl FunnelClaimListener for CapturingListener {
+        fn on_funnel_claim_resolved(&self, result: FunnelClaimResult) {
+            self.0.lock().unwrap().push(result);
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn claim_funnel_token_refreshes_records_and_fires_callback() {
+        let mut server = mockito::Server::new();
+        let _m_claim = server.mock("POST", "/v1/subscribers/claim-funnel-token")
+            .with_status(200).with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"subscriber_id":"sub_9","entitlements":[],"funnel_answers":{"q1":1}}}"#)
+            .create();
+        // claim_funnel_token triggers refresh_entitlements (a GET).
+        let _m_ent = server.mock("GET", "/v1/me/entitlements")
+            .with_status(200).with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"entitlements":{}}}"#).expect_at_least(1).create();
+
+        let core = make_core(&server.url());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        core.register_funnel_claim_listener(Box::new(CapturingListener(Arc::clone(&seen))));
+
+        let r = core.claim_funnel_token("a_token_value".into()).expect("claim ok");
+        assert_eq!(r.subscriber_id, "sub_9");
+        assert_eq!(r.funnel_answers_json, r#"{"q1":1}"#);
+        assert_eq!(seen.lock().unwrap().len(), 1, "callback fired once");
+        assert_eq!(seen.lock().unwrap()[0].subscriber_id, "sub_9");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn claim_install_chains_to_token_claim() {
+        let mut server = mockito::Server::new();
+        let _m_install = server.mock("POST", "/v1/sdk/claim-install")
+            .with_status(200).with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"token":"recovered"}}"#).create();
+        let _m_claim = server.mock("POST", "/v1/subscribers/claim-funnel-token")
+            .with_status(200).with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"subscriber_id":"sub_i","entitlements":[],"funnel_answers":{}}}"#).create();
+        let _m_ent = server.mock("GET", "/v1/me/entitlements")
+            .with_status(200).with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"entitlements":{}}}"#).expect_at_least(1).create();
+
+        let core = make_core(&server.url());
+        let params = ClaimInstallParams {
+            platform: "android".into(), locale: "en-US".into(), timezone: "UTC".into(),
+            screen_dims: "390x844".into(), device_model: None,
+            install_referrer: Some("rovenue_funnel_token=recovered".into()),
+        };
+        let out = core.claim_install(params).expect("claim_install ok");
+        assert_eq!(out.unwrap().subscriber_id, "sub_i");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn claim_install_returns_none_on_404() {
+        let mut server = mockito::Server::new();
+        let _m = server.mock("POST", "/v1/sdk/claim-install").with_status(404).create();
+        let core = make_core(&server.url());
+        let params = ClaimInstallParams {
+            platform: "ios".into(), locale: "en-US".into(), timezone: "UTC".into(),
+            screen_dims: "390x844".into(), device_model: None, install_referrer: None,
+        };
+        assert!(core.claim_install(params).expect("ok").is_none());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn install_id_is_stable() {
+        let core = make_core("http://127.0.0.1:1");
+        let a = core.install_id();
+        let b = core.install_id();
+        assert!(a.starts_with("inst_"));
+        assert_eq!(a, b);
+    }
 
     fn make_core(base_url: &str) -> RovenueCore {
         let config = Config::new("pk_test_abc".into(), base_url.to_string()).unwrap();
