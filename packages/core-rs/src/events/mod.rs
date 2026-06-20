@@ -2,9 +2,11 @@
 // events — SDK event wire types (M7)
 // =============================================================
 
+pub mod client;
 pub mod envelope;
 pub mod identity_context;
 
+pub use client::EventsClient;
 pub use envelope::EventEnvelope;
 pub use identity_context::IdentityContext;
 
