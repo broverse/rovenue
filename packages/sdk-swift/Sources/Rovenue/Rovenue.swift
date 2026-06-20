@@ -436,6 +436,19 @@ public final class Rovenue: @unchecked Sendable {
         }
     }
 
+    /// Send a pre-serialised event envelope to the server (POST /v1/events).
+    /// The caller is responsible for building the JSON envelope; this method
+    /// forwards it verbatim to the Rust core and then to the API.
+    public func track(envelopeJson: String) async throws {
+        try await dispatcher.run { [core] in
+            do {
+                try core.track(envelopeJson: envelopeJson)
+            } catch let err as RovenueError {
+                throw mapError(err)
+            }
+        }
+    }
+
     /// Force an immediate flush of buffered session events. Returns the
     /// number of events drained. Normally callers don't invoke this — the
     /// Rust core's 30s poll covers it.

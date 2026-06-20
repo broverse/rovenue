@@ -198,6 +198,9 @@ public class RovenueModule: Module {
             let n = try await Rovenue.shared.flushSessionEvents()
             return Double(n)
         }
+        AsyncFunction("track") { (envelopeJson: String) in
+            try await Rovenue.shared.track(envelopeJson: envelopeJson)
+        }
 
         // ---------------- Subscriber Attributes ----------------
         AsyncFunction("setAttributes") { (attributes: [String: String?]) in
