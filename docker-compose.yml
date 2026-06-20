@@ -357,6 +357,10 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+    expose:
+      # Prometheus metrics endpoint — scraped by Grafana Alloy on the
+      # docker network. NOT published to the host.
+      - "9363"
     restart: unless-stopped
 
   redpanda:
@@ -412,9 +416,98 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # --- Observability profile (opt-in) ---
+  # Start with: docker compose --profile observability up -d
+  # Both services are intentionally absent from the default boot so
+  # a bare `docker compose up` does NOT incur the metrics/log storage cost.
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles: ["observability"]
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.enable-remote-write-receiver"
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - rovenue-prometheus-data:/prometheus
+    expose:
+      - "9090"
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.1.1
+    profiles: ["observability"]
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./deploy/loki/config.yaml:/etc/loki/config.yaml:ro
+      - rovenue-loki-data:/loki
+    expose:
+      - "3100"
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    profiles: ["observability"]
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-rovenue}:${POSTGRES_PASSWORD:-rovenue}@db:5432/${POSTGRES_DB:-rovenue}?sslmode=disable"
+    expose:
+      - "9187"
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    profiles: ["observability"]
+    environment:
+      REDIS_ADDR: "redis://redis:6379"
+    expose:
+      - "9121"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.4.2
+    profiles: ["observability"]
+    command:
+      - "run"
+      - "/etc/alloy/config.alloy"
+      - "--server.http.listen-addr=0.0.0.0:12345"
+    volumes:
+      - ./deploy/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+      - prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    profiles: ["observability"]
+    ports:
+      - "3300:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/etc/grafana/dashboards:ro
+      - rovenue-grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - loki
+    restart: unless-stopped
+
 volumes:
   rovenue-data:
   rovenue-clickhouse-data:
   rovenue-redpanda-data:
   caddy-data:
   caddy-config:
+  rovenue-prometheus-data:
+  rovenue-loki-data:
+  rovenue-grafana-data:
