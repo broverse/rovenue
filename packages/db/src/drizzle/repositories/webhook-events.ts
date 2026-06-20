@@ -10,7 +10,7 @@ type WebhookEventStatus = (typeof webhookEventStatus.enumValues)[number];
 /** Idempotency lookup by (source, storeEventId) unique index. */
 export async function findWebhookEventByStoreId(
   db: Db,
-  source: "APPLE" | "GOOGLE" | "STRIPE",
+  source: WebhookSource,
   storeEventId: string,
 ): Promise<WebhookEvent | null> {
   const rows = await db
@@ -176,7 +176,7 @@ export async function claimWebhookEvent(
   // actively working it — the caller must retry, not ack).
   const existing = await findWebhookEventByStoreId(
     db as Db,
-    input.source as "APPLE" | "GOOGLE" | "STRIPE",
+    input.source,
     input.storeEventId,
   );
   if (existing?.status === "PROCESSED") return { outcome: "duplicate" };

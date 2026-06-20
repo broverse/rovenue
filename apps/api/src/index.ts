@@ -21,6 +21,10 @@ import {
   scheduleWebhookRetention,
 } from "./workers/webhook-retention";
 import {
+  createWebhookReaperWorker,
+  scheduleWebhookReaper,
+} from "./workers/webhook-reaper";
+import {
   createOutboxCleanupWorker,
   scheduleOutboxCleanup,
 } from "./workers/outbox-cleanup";
@@ -107,6 +111,16 @@ scheduleDelivery().catch((err: unknown) => {
 createWebhookRetentionWorker();
 scheduleWebhookRetention().catch((err: unknown) => {
   logger.error("failed to schedule webhook retention", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// webhook_events stale-claim reaper — per-minute sweep that resets
+// orphaned PROCESSING rows (claimedAt past the 5-min lease) to FAILED
+// so they become re-claimable and visible to alerting (W2.4).
+createWebhookReaperWorker();
+scheduleWebhookReaper().catch((err: unknown) => {
+  logger.error("failed to schedule webhook reaper", {
     err: err instanceof Error ? err.message : String(err),
   });
 });
