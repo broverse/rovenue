@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { creditLedger, type CreditLedgerRow } from "../schema";
 import { creditLedgerType } from "../enums";
@@ -159,4 +159,20 @@ export async function insertCreditLedger(
   });
 
   return inserted;
+}
+
+/**
+ * Run `fn` inside a transaction that is authorized to DELETE credit_ledger
+ * rows (retention / GDPR erasure / admin teardown), bypassing the
+ * append-only trigger's DELETE guard for this transaction only. UPDATE
+ * remains forbidden. Use ONLY for controlled, audited deletion paths.
+ */
+export async function withLedgerDeleteAuthorized<T>(
+  db: Db,
+  fn: (tx: DbOrTx) => Promise<T>,
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL "rovenue.allow_ledger_delete" = 'on'`);
+    return fn(tx);
+  });
 }

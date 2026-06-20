@@ -22,9 +22,14 @@ describe("credit-engine multi-currency", () => {
   let gemId: string;
 
   afterAll(async () => {
-    await drizzle.db
-      .delete(drizzle.schema.projects)
-      .where(eq(drizzle.schema.projects.id, PROJECT_ID));
+    // credit_ledger is append-only at the DB level; cascade-deleting the
+    // project would normally be blocked by the trigger. Use the authorized
+    // transaction to SET LOCAL the bypass flag for this cleanup only.
+    await drizzle.creditLedgerRepo.withLedgerDeleteAuthorized(drizzle.db, async (tx) => {
+      await tx
+        .delete(drizzle.schema.projects)
+        .where(eq(drizzle.schema.projects.id, PROJECT_ID));
+    });
   });
 
   it("sets up project, subscriber, currencies", async () => {

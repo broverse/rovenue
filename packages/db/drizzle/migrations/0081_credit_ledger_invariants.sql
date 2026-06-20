@@ -8,6 +8,14 @@ ALTER TABLE "credit_ledger"
 CREATE OR REPLACE FUNCTION "credit_ledger_reject_mutation"()
 RETURNS trigger AS $$
 BEGIN
+  -- Append-only: posted ledger rows are immutable. UPDATE is never allowed.
+  -- DELETE is allowed ONLY when a caller (retention sweep, GDPR erasure,
+  -- admin project teardown) explicitly authorizes it for the current
+  -- transaction via: SET LOCAL "rovenue.allow_ledger_delete" = 'on';
+  IF TG_OP = 'DELETE'
+     AND current_setting('rovenue.allow_ledger_delete', true) = 'on' THEN
+    RETURN OLD;
+  END IF;
   RAISE EXCEPTION 'credit_ledger is append-only (% rejected)', TG_OP
     USING ERRCODE = 'restrict_violation';
 END;
