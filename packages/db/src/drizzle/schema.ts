@@ -841,6 +841,10 @@ export const webhookEvents = pgTable(
     errorMessage: text("errorMessage"),
     processedAt: timestamp("processedAt", { withTimezone: true }),
     retryCount: integer("retryCount").notNull().default(0),
+    // Set when a worker atomically claims the row for processing; used as a
+    // lease timestamp so the reaper can reclaim orphaned PROCESSING rows
+    // whose worker crashed before completing.
+    claimedAt: timestamp("claimedAt", { withTimezone: true }),
     createdAt: timestamp("createdAt", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -852,6 +856,9 @@ export const webhookEvents = pgTable(
     statusRetryCountIdx: index(
       "webhook_events_status_retryCount_idx",
     ).on(t.status, t.retryCount),
+    statusClaimedAtIdx: index(
+      "webhook_events_status_claimedAt_idx",
+    ).on(t.status, t.claimedAt),
   }),
 );
 
