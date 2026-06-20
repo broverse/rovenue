@@ -12,6 +12,15 @@ use super::IdentityContext;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventEnvelope {
+    /// Wire format version (EVENT_WIRE_VERSION). Populated by `track()`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<u8>,
+
+    /// Stable, client-generated id reused across retries so downstream
+    /// fan-out can dedupe. Populated by `track()` when the caller omits it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<String>,
+
     pub event_type: String,
 
     /// ISO-8601 UTC timestamp, e.g. "2026-05-28T10:00:00Z"

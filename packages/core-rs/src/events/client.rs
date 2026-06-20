@@ -6,8 +6,8 @@ use crate::transport::types::HttpPostRequest;
 
 use super::EventEnvelope;
 
-/// Thin client for `POST /v1/events`. Fire-and-forget: any 2xx (the route
-/// returns an empty 202) is success and the response body is ignored.
+/// Thin client for `POST /v1/events`. The route returns an empty 202; transport
+/// errors (network failure, 5xx after retries) propagate to the caller.
 pub struct EventsClient {
     http: Arc<HttpClient>,
 }
@@ -18,15 +18,15 @@ impl EventsClient {
     }
 
     /// POST the serialized envelope to `/v1/events`. The optional `scope`
-    /// travels in the `X-Rovenue-App-User-Id` header (forwarded server-side);
-    /// the subscriber identity is also embedded in the envelope body.
+    /// travels in the `X-Rovenue-App-User-Id` header so the server can resolve
+    /// the current user; the canonical subscriber identity is carried in the
+    /// envelope body (`subscriberId`).
     pub fn post(&self, envelope: &EventEnvelope, scope: Option<&str>) -> RovenueResult<()> {
-        let mut req = HttpPostRequest::new("/v1/events");
+        let mut req = HttpPostRequest::new("/v1/events").expect_empty_body();
         if let Some(s) = scope {
             req = req.user_scope(s);
         }
-        let _ = self
-            .http
+        self.http
             .post_json::<EventEnvelope, serde_json::Value>(req, envelope)?;
         Ok(())
     }
@@ -39,6 +39,8 @@ mod tests {
 
     fn envelope() -> EventEnvelope {
         EventEnvelope {
+            version: None,
+            event_id: None,
             event_type: "purchase".into(),
             occurred_at: "2026-06-20T10:00:00Z".into(),
             subscriber_id: Some("user_42".into()),

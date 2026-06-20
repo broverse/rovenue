@@ -29,6 +29,17 @@ const ENTITLEMENTS_INTERVAL_MS: u64 = 30_000;
 const REMOTE_CONFIG_INTERVAL_MS: u64 = 60_000;
 const STALENESS_MS: u64 = 60_000;
 
+/// Conservative sanity check for an RFC3339 / ISO-8601 UTC timestamp.
+/// Rejects clearly-malformed values ("", "tomorrow", "not-a-date") without
+/// risking false negatives on valid timestamps the server would accept — it
+/// only requires a 4-digit year, a `T` separator, and a `:` in the time part.
+fn is_plausible_iso8601(s: &str) -> bool {
+    s.len() >= 16
+        && s.as_bytes()[..4].iter().all(u8::is_ascii_digit)
+        && s.contains('T')
+        && s.contains(':')
+}
+
 pub struct RovenueCore {
     _config: Arc<Config>,
     bus: Arc<ObserverBus>,
@@ -392,6 +403,18 @@ impl RovenueCore {
         let mut envelope: crate::events::EventEnvelope =
             serde_json::from_str(&envelope_json).map_err(|_| RovenueError::InvalidArgument)?;
 
+        if !is_plausible_iso8601(&envelope.occurred_at) {
+            return Err(RovenueError::InvalidArgument);
+        }
+
+        // Stamp the wire version and a stable event id (the latter only when
+        // the caller didn't supply one) so retries reuse the same id and
+        // downstream fan-out can dedupe.
+        envelope.version = Some(crate::events::EVENT_WIRE_VERSION);
+        if envelope.event_id.is_none() {
+            envelope.event_id = Some(format!("evt_{}", cuid2::create_id()));
+        }
+
         let scope = self.identity.current_user_scope();
         let scope_opt = if scope.is_empty() { None } else { Some(scope) };
 
@@ -700,8 +723,8 @@ mod tests {
         let mut server = mockito::Server::new();
         let m = server
             .mock("POST", "/v1/events")
-            .match_body(mockito::Matcher::JsonString(
-                r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z","subscriberId":"user_42"}"#.into(),
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"eventType":"purchase","subscriberId":"user_42"}"#.into(),
             ))
             .with_status(202)
             .create();
@@ -731,15 +754,26 @@ mod tests {
         let mut server = mockito::Server::new();
         let m = server
             .mock("POST", "/v1/events")
-            .match_body(mockito::Matcher::JsonString(
-                r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z","subscriberId":"explicit_sub"}"#.into(),
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"eventType":"purchase","subscriberId":"explicit_sub"}"#.into(),
             ))
             .with_status(202)
+            .create();
+
+        // identify() POSTs /v1/identify; mock it so the scope is actually set
+        // to the identified user_42 (otherwise identify fails silently and the
+        // scope stays the anonymous rovenue_id, and the test exercises nothing).
+        let _m_identify = server
+            .mock("POST", "/v1/identify")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"subscriberId":"sub_x","appUserId":"user_42","transferred":false}}"#)
             .create();
 
         let core = make_core(&server.url());
         core.identify("user_42".into()).unwrap();
 
+        // Explicit subscriberId must win over the identified scope.
         core.track(
             r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z","subscriberId":"explicit_sub"}"#.into(),
         )
@@ -753,6 +787,60 @@ mod tests {
     fn track_rejects_malformed_json() {
         let core = make_core("http://127.0.0.1:1");
         let err = core.track("not json".into()).unwrap_err();
+        assert!(matches!(err, RovenueError::InvalidArgument));
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn track_sets_wire_version_and_generates_event_id() {
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("POST", "/v1/events")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::PartialJsonString(
+                    r#"{"version":1,"eventType":"purchase"}"#.into(),
+                ),
+                // eventId is generated; assert presence + prefix, not value.
+                mockito::Matcher::Regex(r#""eventId":"evt_"#.into()),
+            ]))
+            .with_status(202)
+            .create();
+
+        let core = make_core(&server.url());
+        core.track(r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z"}"#.into())
+            .expect("track ok");
+
+        m.assert();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn track_preserves_explicit_event_id() {
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("POST", "/v1/events")
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"eventId":"evt_custom","version":1}"#.into(),
+            ))
+            .with_status(202)
+            .create();
+
+        let core = make_core(&server.url());
+        core.track(
+            r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z","eventId":"evt_custom"}"#.into(),
+        )
+        .expect("track ok");
+
+        m.assert();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn track_rejects_malformed_occurred_at() {
+        let core = make_core("http://127.0.0.1:1");
+        let err = core
+            .track(r#"{"eventType":"purchase","occurredAt":"not-a-date"}"#.into())
+            .unwrap_err();
         assert!(matches!(err, RovenueError::InvalidArgument));
     }
 

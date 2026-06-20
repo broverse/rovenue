@@ -278,9 +278,12 @@ impl HttpClient {
 
                     match classify(Some(status), retry_after) {
                         RetryDecision::Success => {
-                            // 202 Accepted (and 204) carry no body — the events
-                            // endpoint returns an empty 202. Parsing would fail.
-                            let body = if status == 204 || status == 202 {
+                            // 204 No Content is always bodyless. Other 2xx
+                            // responses are parsed unless the caller opted out
+                            // via `expect_empty_body` (e.g. /v1/events' empty
+                            // 202) — scoped per-request so we never silently
+                            // drop a body another caller actually needs.
+                            let body = if status == 204 || req.expect_empty_body {
                                 None
                             } else {
                                 Some(resp.json::<T>().map_err(|_| RovenueError::Internal)?)
@@ -346,7 +349,7 @@ mod post_json_tests {
     use super::super::types::HttpPostRequest;
 
     #[test]
-    fn post_json_accepts_empty_202_body() {
+    fn post_json_skips_body_when_expect_empty_body() {
         let mut server = mockito::Server::new();
         let m = server
             .mock("POST", "/v1/events")
@@ -357,13 +360,39 @@ mod post_json_tests {
         let body = serde_json::json!({ "eventType": "x", "occurredAt": "2026-06-20T00:00:00Z" });
         let resp = client
             .post_json::<serde_json::Value, serde_json::Value>(
-                HttpPostRequest::new("/v1/events"),
+                HttpPostRequest::new("/v1/events").expect_empty_body(),
                 &body,
             )
             .expect("202 must be Ok");
 
         assert_eq!(resp.status, 202);
         assert!(resp.body.is_none());
+        m.assert();
+    }
+
+    #[test]
+    fn post_json_parses_202_body_when_not_expecting_empty() {
+        // Regression guard: the 202-bodyless carve-out must be scoped to
+        // `expect_empty_body`, not global — other callers' 2xx bodies are kept.
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("POST", "/v1/some/endpoint")
+            .with_status(202)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"ok":true}"#)
+            .create();
+
+        let client = HttpClient::new(server.url(), "pk_test".into()).with_max_attempts(1);
+        let body = serde_json::json!({});
+        let resp = client
+            .post_json::<serde_json::Value, serde_json::Value>(
+                HttpPostRequest::new("/v1/some/endpoint"),
+                &body,
+            )
+            .expect("202 with body must be Ok");
+
+        assert_eq!(resp.status, 202);
+        assert_eq!(resp.body.unwrap()["ok"], serde_json::json!(true));
         m.assert();
     }
 }

@@ -48,6 +48,10 @@ pub struct HttpPostRequest<'a> {
     pub path: &'a str,
     pub user_scope: Option<&'a str>,
     pub idempotency_key: Option<&'a str>,
+    /// When true the caller declares the success response carries no body, so
+    /// `post_json` skips parsing it (e.g. `/v1/events` returns an empty 202).
+    /// Scoped per-request so other callers keep parsing their 2xx bodies.
+    pub expect_empty_body: bool,
 }
 
 impl<'a> HttpPostRequest<'a> {
@@ -56,6 +60,7 @@ impl<'a> HttpPostRequest<'a> {
             path,
             user_scope: None,
             idempotency_key: None,
+            expect_empty_body: false,
         }
     }
     pub fn user_scope(mut self, scope: &'a str) -> Self {
@@ -64,6 +69,10 @@ impl<'a> HttpPostRequest<'a> {
     }
     pub fn idempotency_key(mut self, key: &'a str) -> Self {
         self.idempotency_key = Some(key);
+        self
+    }
+    pub fn expect_empty_body(mut self) -> Self {
+        self.expect_empty_body = true;
         self
     }
 }
