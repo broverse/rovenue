@@ -103,6 +103,10 @@ FROM base AS runtime
 RUN addgroup -S rovenue && adduser -S rovenue -G rovenue
 
 COPY --from=builder --chown=rovenue:rovenue /app/prod /app
+# email-templates locales are loaded at runtime via readdirSync relative to the
+# bundle location: join(fileURLToPath(new URL('.', import.meta.url)), '..', 'locales')
+# = join('/app/dist', '..', 'locales') = /app/locales — copy them explicitly.
+COPY --from=builder --chown=rovenue:rovenue /app/packages/email-templates/locales /app/locales
 
 USER rovenue
 
