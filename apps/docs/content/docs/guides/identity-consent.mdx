@@ -139,4 +139,4 @@ See also: [Identifying users](/docs/guides/identifying-users) for the full `iden
 
 - Rovenue **never persists** `identityContext` fields at rest. PII is hashed in-process and only the hash is forwarded downstream; raw values are not written to any database.
 - `response_body` from downstream providers is stored but **truncated to 4096 bytes** to prevent inadvertent PII capture in error messages.
-- The wire format uses **camelCase JSON** with `ROVENUE_EVENT_WIRE_VERSION: "v1"` in the envelope header. Do not construct envelope JSON manually — use the SDK methods, which enforce the schema and version negotiation.
+- The wire format uses **camelCase JSON**; each envelope carries a numeric `version` field (currently `1`) and a stable `eventId`, both stamped by the SDK. Do not construct envelope JSON manually — use the SDK methods, which enforce the schema and set the version.

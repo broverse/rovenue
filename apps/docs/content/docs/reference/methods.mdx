@@ -469,7 +469,7 @@ Force a server round-trip to refresh the virtual-currency balance cache. Fires a
 
 ### `track`
 
-Emit a generic event to the backend. The server forwards it to any configured integrations (e.g. Meta Conversions API, TikTok Events API). The call is **fire-and-forget** — the SDK does not wait for confirmation before returning.
+Emit a generic event to the backend. The server forwards it to any configured integrations (e.g. Meta Conversions API, TikTok Events API). The call performs the `POST /v1/events` request (retrying transient failures) and **rejects if delivery ultimately fails** — callers that don't need delivery confirmation can ignore the returned promise.
 
 **Params**
 
@@ -492,7 +492,11 @@ Emit a generic event to the backend. The server forwards it to any configured in
 
 **Returns** — `void`
 
-**Throws** — rejects with a `RovenueError` on failure. Delivery is fire-and-forget, so callers may safely ignore the returned promise.
+**Throws** — rejects with a `RovenueError` if the event can't be delivered after retries.
+
+<Callout type="info">
+The typed `track(eventType, params)` signature is the React Native API. On **Swift and Kotlin**, `track(envelopeJson:)` takes a pre-built camelCase JSON envelope string using the same field names (`eventType` and `occurredAt` required). The SDK stamps the wire `version` and a stable `eventId` for you.
+</Callout>
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
   <Tab value="React Native">
@@ -520,33 +524,53 @@ Emit a generic event to the backend. The server forwards it to any configured in
   </Tab>
   <Tab value="Swift">
     ```swift
+    import Foundation
+
+    // Swift takes a pre-built camelCase JSON envelope string.
+    func envelope(_ fields: [String: String]) -> String {
+        let data = try! JSONSerialization.data(withJSONObject: fields)
+        return String(data: data, encoding: .utf8)!
+    }
+    let now = ISO8601DateFormatter().string(from: Date())
+
     // Minimal:
-    await Rovenue.shared.track(eventType: "lead")
+    try await Rovenue.shared.track(envelopeJson: envelope([
+        "eventType": "lead", "occurredAt": now,
+    ]))
 
     // With params:
-    await Rovenue.shared.track(
-        eventType: "purchase",
-        params: TrackParams(
-            amount: "9.99",
-            currency: "USD",
-            productId: "com.example.pro_monthly"
-        )
-    )
+    try await Rovenue.shared.track(envelopeJson: envelope([
+        "eventType": "purchase",
+        "occurredAt": now,
+        "amount": "9.99",
+        "currency": "USD",
+        "productId": "com.example.pro_monthly",
+    ]))
     ```
   </Tab>
   <Tab value="Kotlin">
     ```kotlin
+    import org.json.JSONObject
+    import java.time.Instant
+
+    // Kotlin takes a pre-built camelCase JSON envelope string.
+    // track() is a suspend fun — call it from a coroutine.
+    val now = Instant.now().toString()
+
     // Minimal:
-    Rovenue.shared.track(eventType = "lead")
+    Rovenue.shared.track(
+        JSONObject(mapOf("eventType" to "lead", "occurredAt" to now)).toString()
+    )
 
     // With params:
     Rovenue.shared.track(
-        eventType = "purchase",
-        params = TrackParams(
-            amount = "9.99",
-            currency = "USD",
-            productId = "com.example.pro_monthly"
-        )
+        JSONObject(mapOf(
+            "eventType" to "purchase",
+            "occurredAt" to now,
+            "amount" to "9.99",
+            "currency" to "USD",
+            "productId" to "com.example.pro_monthly",
+        )).toString()
     )
     ```
   </Tab>

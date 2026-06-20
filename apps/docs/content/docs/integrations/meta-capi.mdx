@@ -56,7 +56,7 @@ Rovenue acts as a **data processor**. Your application is the **data controller*
 Additional guarantees:
 - Rovenue **never persists** `identityContext` fields at rest. PII is hashed in-process; raw values are not written to any database.
 - `response_body` from Meta CAPI is stored but **truncated to 4096 bytes**.
-- The wire format uses camelCase JSON with `ROVENUE_EVENT_WIRE_VERSION: "v1"`.
+- The wire format uses camelCase JSON; each envelope carries a numeric `version` field (currently `1`) and a stable `eventId` for downstream dedupe.
 
 ---
 
