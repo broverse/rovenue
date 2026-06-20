@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION "credit_ledger_reject_mutation"()
 RETURNS trigger AS $$
 BEGIN
   RAISE EXCEPTION 'credit_ledger is append-only (% rejected)', TG_OP
-    USING ERRCODE = 'check_violation';
+    USING ERRCODE = 'restrict_violation';
 END;
 $$ LANGUAGE plpgsql;
 
