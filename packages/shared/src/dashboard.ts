@@ -2164,8 +2164,11 @@ export type UpdateVirtualCurrencyRequest = z.infer<
 
 export const spendVirtualCurrencyRequestSchema = z.object({
   amount: z.number().int().positive(),
+  // Required: the caller's idempotency key for this spend. A retried
+  // request with the same referenceId is a no-op (returns the original
+  // SPEND row) instead of double-debiting the wallet.
+  referenceId: z.string().trim().min(1).max(120),
   referenceType: z.string().trim().max(60).optional(),
-  referenceId: z.string().trim().max(120).optional(),
   description: z.string().trim().max(200).optional(),
 });
 export type SpendVirtualCurrencyRequest = z.infer<

@@ -27,10 +27,34 @@ describe("virtual currency schemas", () => {
 
   it("requires positive integer amount on spend", () => {
     expect(
-      spendVirtualCurrencyRequestSchema.safeParse({ amount: 5 }).success,
+      spendVirtualCurrencyRequestSchema.safeParse({ amount: 5, referenceId: "txn_1" }).success,
     ).toBe(true);
     expect(
-      spendVirtualCurrencyRequestSchema.safeParse({ amount: -1 }).success,
+      spendVirtualCurrencyRequestSchema.safeParse({ amount: -1, referenceId: "txn_1" }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a spend with no referenceId", () => {
+    expect(
+      spendVirtualCurrencyRequestSchema.safeParse({ amount: 5 }).success,
+    ).toBe(false);
+  });
+
+  it("accepts a spend with referenceId", () => {
+    expect(
+      spendVirtualCurrencyRequestSchema.safeParse({ amount: 5, referenceId: "txn_1" }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a spend with empty referenceId", () => {
+    expect(
+      spendVirtualCurrencyRequestSchema.safeParse({ amount: 5, referenceId: "" }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a spend with referenceId exceeding 120 chars", () => {
+    expect(
+      spendVirtualCurrencyRequestSchema.safeParse({ amount: 5, referenceId: "x".repeat(121) }).success,
     ).toBe(false);
   });
 });

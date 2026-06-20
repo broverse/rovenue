@@ -249,7 +249,7 @@ describe("POST /v1/virtual-currencies/:appUserId/:code/transactions", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${SECRET_KEY}`,
         },
-        body: JSON.stringify({ amount: 10 }),
+        body: JSON.stringify({ amount: 10, referenceId: `spend_200_${createId().slice(0, 8)}` }),
       },
     );
 
@@ -269,7 +269,7 @@ describe("POST /v1/virtual-currencies/:appUserId/:code/transactions", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${SECRET_KEY}`,
         },
-        body: JSON.stringify({ amount: 1 }),
+        body: JSON.stringify({ amount: 1, referenceId: `spend_404_${createId().slice(0, 8)}` }),
       },
     );
 
@@ -286,7 +286,7 @@ describe("POST /v1/virtual-currencies/:appUserId/:code/transactions", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${SECRET_KEY}`,
         },
-        body: JSON.stringify({ amount: 99999 }),
+        body: JSON.stringify({ amount: 99999, referenceId: `spend_409_${createId().slice(0, 8)}` }),
       },
     );
 
@@ -303,7 +303,7 @@ describe("POST /v1/virtual-currencies/:appUserId/:code/transactions", () => {
           "Content-Type": "application/json",
           Authorization: `Bearer ${PUBLIC_KEY}`,
         },
-        body: JSON.stringify({ amount: 1 }),
+        body: JSON.stringify({ amount: 1, referenceId: `spend_403_${createId().slice(0, 8)}` }),
       },
     );
 

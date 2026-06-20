@@ -7,6 +7,7 @@ import {
   type VirtualCurrencyBalances,
 } from "@rovenue/shared";
 import { requireSecretKey } from "../../middleware/api-key-auth";
+import { idempotency } from "../../middleware/idempotency";
 import { appUserContext } from "../../middleware/app-user-context";
 import { ok } from "../../lib/response";
 import {
@@ -78,6 +79,7 @@ export const virtualCurrenciesV1Route = new Hono()
   .post(
     "/:appUserId/:code/transactions",
     requireSecretKey,
+    idempotency,
     zValidator("json", spendVirtualCurrencyRequestSchema),
     async (c) => {
       const project = c.get("project");
@@ -108,9 +110,10 @@ export const virtualCurrenciesV1Route = new Hono()
           referenceType: body.referenceType,
           referenceId: body.referenceId,
           description: body.description,
-          // A client-supplied referenceId makes the spend idempotent, so a
-          // network retry can't double-debit the wallet.
-          dedupeOnReference: body.referenceId != null,
+          // referenceId is now required on every spend request, so deduplication
+          // is always active — a retried request with the same referenceId is a
+          // no-op (returns the original SPEND row) instead of double-debiting.
+          dedupeOnReference: true,
         });
         return c.json(ok({ code: currency.code, balance: entry.balance }));
       } catch (err) {
