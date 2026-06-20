@@ -49,35 +49,16 @@ prometheus.scrape "infra" {
     { __address__ = "clickhouse:9363",        job = "clickhouse" },
     { __address__ = "postgres-exporter:9187", job = "postgres" },
     { __address__ = "redis-exporter:9121",    job = "redis" },
+    // Static target for the default single-replica deployment (API_REPLICAS=1).
+    // For multi-replica deployments (API_REPLICAS > 1) replace this with Docker
+    // service discovery: use discovery.docker + a discovery.relabel block that
+    // keeps containers where com_docker_compose_service == "api" and rewrites the
+    // per-network IP meta-label (__meta_docker_container_network_info_<net>_ipaddress)
+    // to __address__ with port 3001 — the network-name-dependent label used
+    // previously (__meta_docker_network_ip) is not reliable in Alloy v1.4.2.
+    { __address__ = "api:3001",              job = "rovenue-api" },
   ]
   forward_to = [prometheus.remote_write.default.receiver]
-}
-
-// ---------- METRICS: API replicas -> Prometheus ----------
-// Discover every `api` container and scrape the internal :3001/metrics.
-discovery.relabel "api" {
-  targets = discovery.docker.containers.targets
-  rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    regex         = "api"
-    action        = "keep"
-  }
-  rule {
-    source_labels = ["__meta_docker_network_ip"]
-    target_label  = "__address__"
-    replacement   = "$1:3001"
-  }
-  rule {
-    target_label = "job"
-    replacement  = "rovenue-api"
-  }
-}
-
-prometheus.scrape "api" {
-  scrape_interval = "15s"
-  targets         = discovery.relabel.api.output
-  metrics_path    = "/metrics"
-  forward_to      = [prometheus.remote_write.default.receiver]
 }
 
 prometheus.remote_write "default" {
