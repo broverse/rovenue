@@ -1086,6 +1086,7 @@ The [`ChangeEvent`](/docs/reference/types#changeevent) values:
 |--------|---------------|---------|--------|
 | `claimFunnelToken` | `claimFunnelToken(token)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) | [`FunnelTokenNotFoundError`](/docs/reference/errors#error-table), [`FunnelTokenExpiredError`](/docs/reference/errors#error-table), [`FunnelTokenAlreadyClaimedError`](/docs/reference/errors#error-table) |
 | `claimInstall` | `claimInstall(params)` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
+| `claimFromClipboard` | `claimFromClipboard()` | [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `\| null` | — |
 | `claimViaEmail` | `claimViaEmail(email)` | `void` | — |
 | `installId` | `installId()` | `string` | — |
 | `addFunnelClaimListener` | `addFunnelClaimListener(cb)` | `() => void` | — |
@@ -1187,7 +1188,9 @@ type FunnelClaimResult = {
 
 ### `claimInstall`
 
-Recover a prior funnel session deterministically from caller-supplied install context (e.g. an Android Install Referrer token or an iOS clipboard token) and claim it. Returns a `FunnelClaimResult` if a prior funnel session is matched, or `null` if no match can be recovered. This is deterministic — it does **not** use device fingerprinting. Call this once on first launch, immediately after `configure`.
+Recover a prior funnel session deterministically from caller-supplied install context (e.g. an Android Install Referrer token) and claim it. Returns a `FunnelClaimResult` if a prior funnel session is matched, or `null` if no match can be recovered. This is deterministic — it does **not** use device fingerprinting. Call this once on first launch, immediately after `configure`.
+
+On **iOS**, when no explicit token is available, recovery falls back to a deterministic server-side **IP match within a 1-hour window** — no device fingerprinting is used. For clipboard-based recovery on iOS, see [`claimFromClipboard`](#claimfromclipboard).
 
 **Params** — all optional
 
@@ -1271,6 +1274,52 @@ On **Android**, the SDK auto-collects `platform`, `locale`, `timezone`, `screenD
     } else {
         Log.d("App", "No prior funnel session matched")
     }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### `claimFromClipboard`
+
+**iOS only.** Reads a `rovenue-funnel:<token>` marker placed on the clipboard by the web funnel, then claims it via the standard claim flow. Returns a `FunnelClaimResult` if the marker is present and matched, or `null` on Android or when no marker is found.
+
+**Call from a user-gesture handler** (e.g. a "Continue" tap on your first onboarding screen) — iOS shows a one-time paste-access banner on the clipboard read.
+
+**Params** — none
+
+**Returns** — [`FunnelClaimResult`](/docs/reference/types#funnelclaimresult) `| null` (`null` on Android, or when no `rovenue-funnel:` marker is present)
+
+**Throws** — nothing
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    // Call from a user-gesture handler (e.g. a "Continue" button press):
+    const result = await Rovenue.claimFromClipboard();
+
+    if (result) {
+      console.log('Clipboard funnel claim resolved:', result.subscriberId);
+    }
+    // Returns null on Android or when no rovenue-funnel: marker is present.
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    // Call from a user-gesture handler (e.g. a "Continue" button tap):
+    if let result = await Rovenue.shared.claimFromClipboard() {
+        print("Clipboard funnel claim resolved: \(result.subscriberId)")
+    }
+    // Returns nil when no rovenue-funnel: marker is present.
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    // No-op on Android — always returns null.
+    val result = Rovenue.shared.claimFromClipboard() // suspend fun
+    // result is always null on Android
     ```
   </Tab>
 </Tabs>
