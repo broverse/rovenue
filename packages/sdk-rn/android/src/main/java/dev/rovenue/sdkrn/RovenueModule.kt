@@ -202,6 +202,9 @@ class RovenueModule : Module() {
             // UInt → Double for the JS number bridge.
             Rovenue.shared.flushAttributes().toDouble()
         }
+        AsyncFunction("track") Coroutine { envelopeJson: String ->
+            Rovenue.shared.track(envelopeJson)
+        }
 
         // ---------------- Events ----------------
         Events("onChange", "onLog")

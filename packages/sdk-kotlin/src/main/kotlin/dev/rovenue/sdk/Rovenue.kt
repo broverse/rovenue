@@ -466,6 +466,20 @@ class Rovenue private constructor(
         dispatcher.run { core.flushSessionEvents() }
 
     // ---------------------------------------------------------------
+    // Custom event tracking
+    // ---------------------------------------------------------------
+
+    /**
+     * Send a custom event envelope to the Rovenue backend.
+     * [envelopeJson] must be a valid JSON string matching the
+     * `EventEnvelope` schema (see `EventEnvelope.kt`).
+     */
+    @Throws(RovenueException::class)
+    suspend fun track(envelopeJson: String) {
+        dispatcher.run { core.track(envelopeJson) }
+    }
+
+    // ---------------------------------------------------------------
     // Offerings & purchasing
     // ---------------------------------------------------------------
 

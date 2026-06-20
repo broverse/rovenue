@@ -1,8 +1,11 @@
 package dev.rovenue.sdk
 
+import dev.rovenue.sdk.generated.RovenueException
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class EventsTest {
@@ -10,6 +13,22 @@ class EventsTest {
     private val json = Json {
         encodeDefaults = false
         explicitNulls = false
+    }
+
+    // ------------------------------------------------------------------
+    // Case 0: Façade track() forwards envelopeJson to core
+    // ------------------------------------------------------------------
+    // Verifies the façade wrapper dispatches to core.track(): the Rust
+    // core attempts an HTTP POST to the (unreachable) base URL, which
+    // proves the call was forwarded rather than silently dropped.
+    // A NetworkUnavailable exception is the expected outcome against an
+    // unreachable host — a no-op stub would not produce any exception.
+    @Test
+    fun `track forwards envelope to core`() = runTest {
+        Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://unreachable.invalid")
+        assertFailsWith<RovenueException.NetworkUnavailable> {
+            Rovenue.shared.track("""{"eventType":"purchase","occurredAt":"2026-06-20T00:00:00Z"}""")
+        }
     }
 
     // ------------------------------------------------------------------
