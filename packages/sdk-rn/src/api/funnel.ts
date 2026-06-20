@@ -117,7 +117,10 @@ export function extractFunnelToken(url: string): string | null {
       if (key === "token") generic = val;
     }
     // generic `token=` only on the Rovenue funnel deep-link host.
-    if (generic && url.includes("onboarding-complete")) return generic;
+    // Check only the pre-query portion so a crafted query key like
+    // `?onboarding-complete=1&token=…` cannot bypass this gate.
+    const beforeQuery = url.slice(0, qi);
+    if (generic && beforeQuery.includes("onboarding-complete")) return generic;
   }
 
   return null;

@@ -105,6 +105,9 @@ describe("extractFunnelToken", () => {
   it("ignores a generic token= on a non-funnel host", () => {
     expect(extractFunnelToken(`myapp://reset-password?token=${TOK}`)).toBeNull();
   });
+  it("does NOT honor token= when onboarding-complete appears only in the query", () => {
+    expect(extractFunnelToken(`myapp://reset-password?onboarding-complete=1&token=${TOK}`)).toBeNull();
+  });
   it("returns null for a non-funnel URL", () => {
     expect(extractFunnelToken("https://example.com/page?x=1")).toBeNull();
   });
@@ -125,6 +128,11 @@ describe("claimFromUrl", () => {
   });
   it("resolves null and does NOT touch native for a non-funnel URL", async () => {
     const r = await claimFromUrl("https://example.com/page");
+    expect(r).toBeNull();
+    expect(claimFunnelToken).not.toHaveBeenCalled();
+  });
+  it("resolves null (no native call) for a generic token= on a non-funnel host", async () => {
+    const r = await claimFromUrl(`myapp://reset-password?token=${TOK}`);
     expect(r).toBeNull();
     expect(claimFunnelToken).not.toHaveBeenCalled();
   });
