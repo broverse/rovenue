@@ -27,7 +27,6 @@ function product(over: Partial<DashboardProductRow>): DashboardProductRow {
     displayName: "Product",
     storeIds: {},
     accessIds: [],
-    creditAmount: null,
     isActive: true,
     metadata: {},
     createdAt: "",

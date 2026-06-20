@@ -50,7 +50,6 @@ interface OfferingProductEntry {
   displayName: string;
   order: number;
   isPromoted: boolean;
-  creditAmount: number | null;
   accessIds: string[];
   storeIds: Record<string, string>;
   metadata: unknown;
@@ -64,7 +63,6 @@ function hydrateProducts(
     identifier: string;
     type: string;
     displayName: string;
-    creditAmount: number | null;
     accessIds: string[];
     isActive: boolean;
     storeIds: unknown;
@@ -82,7 +80,6 @@ function hydrateProducts(
         displayName: product.displayName,
         order: entry.order,
         isPromoted: entry.isPromoted,
-        creditAmount: product.creditAmount,
         accessIds: product.accessIds,
         storeIds: parseStoreIds(product.storeIds),
         metadata: entry.metadata ?? {},

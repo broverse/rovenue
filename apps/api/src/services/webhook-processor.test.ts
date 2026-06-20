@@ -52,7 +52,6 @@ describe("maybeCreditConsumablePurchase", () => {
         id: "product-1",
         identifier: "com.example.coins100",
         type: ProductType.CONSUMABLE,
-        creditAmount: null,
       },
     });
 
@@ -83,7 +82,6 @@ describe("maybeCreditConsumablePurchase", () => {
         id: "product-2",
         identifier: "com.example.pro",
         type: ProductType.SUBSCRIPTION,
-        creditAmount: null,
       },
     });
 

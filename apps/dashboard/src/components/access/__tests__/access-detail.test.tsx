@@ -18,7 +18,6 @@ const prod = {
   displayName: "Alpha",
   storeIds: {},
   accessIds: ["acc_1"],
-  creditAmount: null,
   isActive: true,
   metadata: {},
   createdAt: "",

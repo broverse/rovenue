@@ -1467,7 +1467,6 @@ export interface DashboardProductRow {
   displayName: string;
   storeIds: Record<string, string>;
   accessIds: string[];
-  creditAmount: number | null;
   /**
    * Currency grants associated with this product.
    * NOTE: the products LIST endpoint (GET /) does NOT populate this field —

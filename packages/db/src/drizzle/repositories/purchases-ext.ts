@@ -78,7 +78,7 @@ export async function listPurchasesByOriginalTransaction(
 
 /**
  * Find a single purchase by id with the product's `type`,
- * `creditAmount`, `id`, and `identifier` joined. Used by
+ * `id`, and `identifier` joined. Used by
  * webhook-processor to decide whether a completed consumable
  * purchase earns credits and to delegate to the bundle-grant service.
  */
@@ -89,7 +89,6 @@ export interface PurchaseWithCreditInfo {
     id: string;
     identifier: string;
     type: string;
-    creditAmount: number | null;
   };
 }
 
@@ -104,7 +103,6 @@ export async function findPurchaseWithCreditInfo(
       productId: products.id,
       productIdentifier: products.identifier,
       productType: products.type,
-      creditAmount: products.creditAmount,
     })
     .from(purchases)
     .innerJoin(products, eq(products.id, purchases.productId))
@@ -119,7 +117,6 @@ export async function findPurchaseWithCreditInfo(
       id: r.productId,
       identifier: r.productIdentifier,
       type: r.productType,
-      creditAmount: r.creditAmount,
     },
   };
 }

@@ -185,7 +185,6 @@ function toWire(
     displayName: string;
     storeIds: unknown;
     accessIds: string[];
-    creditAmount: number | null;
     isActive: boolean;
     metadata: unknown;
     createdAt: Date;
@@ -200,7 +199,6 @@ function toWire(
     displayName: row.displayName,
     storeIds: (row.storeIds as Record<string, string> | null) ?? {},
     accessIds: row.accessIds,
-    creditAmount: row.creditAmount,
     currencyGrants,
     isActive: row.isActive,
     metadata: (row.metadata as Record<string, unknown> | null) ?? {},
