@@ -235,6 +235,7 @@ export {
   experimentAssignments,
   featureFlags,
   creditLedger,
+  virtualCurrencies,
   revenueEvents,
   outboxEvents as outbox,
   scheduledSubscriptionActions,

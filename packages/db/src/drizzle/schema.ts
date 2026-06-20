@@ -421,9 +421,12 @@ export const subscribers = pgTable(
 );
 
 // =============================================================
-// credit_ledger (append-only by repository-layer convention — no
-// DB-level enforcement; every call site uses .insert() and no
-// UPDATE/DELETE paths exist in the @rovenue/db repositories)
+// credit_ledger (append-only enforced at DB level via:
+//   - CHECK credit_ledger_balance_non_negative (balance >= 0)
+//   - TRIGGER credit_ledger_append_only (rejects UPDATE/DELETE)
+// Both added in migration 0081_credit_ledger_invariants.sql.
+// The append-only trigger has no Drizzle DSL equivalent — it lives
+// in the hand-written migration only.)
 // =============================================================
 
 export const creditLedger = pgTable(
@@ -470,6 +473,10 @@ export const creditLedger = pgTable(
     subscriberIdCurrencyIdCreatedAtIdx: index(
       "credit_ledger_subscriberId_currencyId_createdAt_idx",
     ).on(t.subscriberId, t.currencyId, t.createdAt),
+    balanceNonNegative: check(
+      "credit_ledger_balance_non_negative",
+      sql`${t.balance} >= 0`,
+    ),
   }),
 );
 

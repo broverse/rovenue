@@ -568,6 +568,13 @@
       "when": 1781897798299,
       "tag": "0080_grey_reaper",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1781987991313,
+      "tag": "0081_credit_ledger_invariants",
+      "breakpoints": true
     }
   ]
 }
