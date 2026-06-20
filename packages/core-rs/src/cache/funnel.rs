@@ -46,7 +46,13 @@ impl<'a> FunnelRepo<'a> {
                    state = excluded.state, \
                    subscriber_id = excluded.subscriber_id, \
                    claimed_at_ms = excluded.claimed_at_ms",
-                rusqlite::params![install_id, state, subscriber_id, now_ms as i64, now_ms as i64],
+                rusqlite::params![
+                    install_id,
+                    state,
+                    subscriber_id,
+                    if state == "claimed" { Some(now_ms as i64) } else { None::<i64> },
+                    now_ms as i64
+                ],
             )?;
             Ok(())
         })
@@ -92,5 +98,25 @@ mod tests {
         assert_eq!(repo.claim_state("inst_x").unwrap(), None);
         repo.set_claim_state("inst_x", "claimed", Some("sub_1"), 5000).unwrap();
         assert_eq!(repo.claim_state("inst_x").unwrap(), Some("claimed".into()));
+    }
+
+    #[test]
+    fn claimed_at_ms_only_set_when_claimed() {
+        let s = store();
+        let repo = FunnelRepo::new(&s);
+        repo.set_claim_state("inst_p", "pending", None, 1000).unwrap();
+        repo.set_claim_state("inst_c", "claimed", Some("sub_1"), 2000).unwrap();
+        let read = |iid: &str| -> Option<i64> {
+            s.with_conn(|c| {
+                c.query_row(
+                    "SELECT claimed_at_ms FROM funnel_claim_state WHERE install_id = ?1",
+                    [iid],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+            })
+            .unwrap()
+        };
+        assert_eq!(read("inst_p"), None, "pending must not stamp claimed_at_ms");
+        assert_eq!(read("inst_c"), Some(2000));
     }
 }
