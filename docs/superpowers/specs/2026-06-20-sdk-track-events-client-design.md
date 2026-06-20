@@ -73,22 +73,15 @@ interface TrackParams {
   amount?: string;          // decimal string, e.g. "9.99"
   currency?: string;        // 3-char ISO, e.g. "USD"
   eventSourceUrl?: string;
-  occurredAt?: string;      // ISO-8601 override; defaults to now()
+  occurredAt?: string;      // ISO-8601 override; defaults to isoNow()
   subscriberId?: string;    // override; defaults to current scope
-  identityContext?: EventIdentityContext;
+  identityContext?: IdentityContext;  // existing type from src/events.ts
 }
 
-interface EventIdentityContext {
-  email?: string;
-  externalId?: string;
-  phone?: string;
-  ip?: string;
-  userAgent?: string;
-  firstName?: string;
-  lastName?: string;
-  city?: string;
-  countryCode?: string;
-}
+// IdentityContext (9 fields) already exists in src/events.ts and is
+// re-exported from index.ts — reused as-is, not redefined:
+//   email?, externalId?, phone?, ip?, userAgent?,
+//   firstName?, lastName?, city?, countryCode?
 ```
 
 `track` resolves `Promise<void>` once the POST attempt completes. Rejections
@@ -96,11 +89,11 @@ surface as mapped `RovenueError` codes (see §6).
 
 ## 4. Auto-fill behavior
 
-| Field | Default | Override |
-|-------|---------|----------|
-| `occurredAt` | UTC ISO-8601 stamped in Rust core at call time | `params.occurredAt` |
-| `subscriberId` | `current_user_scope()` = `app_user_id ?? rovenue_id` | `params.subscriberId` |
-| `platform` | **Not in payload.** Travels via the existing `X-Rovenue-Platform` header injected on POST from `Config.platform` | n/a (header) |
+| Field | Default | Stamped where | Override |
+|-------|---------|---------------|----------|
+| `occurredAt` | `new Date().toISOString()` (`isoNow()`) | **TS façade** — consistent with `record_session_event`, which already stamps in TS and passes the ISO string down. Rust core has no date library (no `chrono`/`time` dep), so stamping in core would mean adding one. | `params.occurredAt` |
+| `subscriberId` | `current_user_scope()` = `app_user_id ?? rovenue_id` | **Rust core** — `track` fills `subscriber_id` from scope only when the deserialized envelope leaves it `None`. | `params.subscriberId` |
+| `platform` | **Not in payload.** Travels via the existing `X-Rovenue-Platform` header injected on POST from `Config.platform` | n/a (header) | n/a |
 
 **Platform note:** the backend `eventEnvelopeSchema` has no `platform` field;
 Zod would strip it from the payload. Platform is already conveyed on every POST
@@ -110,71 +103,95 @@ platform into the payload would require a backend schema change — out of scope
 
 ## 5. Implementation
 
-### 5.1 Rust core (`packages/core-rs/src/`)
+**Reuse, don't recreate.** M7 already shipped the wire types and a TS serialiser
+but never wired the actual call:
 
-New module `events/client.rs`:
+- `packages/core-rs/src/events/envelope.rs` — `EventEnvelope` (serde
+  `camelCase`, `skip_serializing_if = "Option::is_none"`), re-exported at crate
+  root (`lib.rs`).
+- `packages/core-rs/src/events/identity_context.rs` — `IdentityContext` (9
+  fields, same serde rules).
+- `packages/sdk-rn/src/events.ts` — `EventEnvelope`/`IdentityContext` TS types +
+  `serializeEnvelope()`/`stripUndefined()`, already re-exported from `index.ts`.
 
-- `TrackParams` struct mirroring §3 (all `Option<String>` + `identity_context:
-  Option<EventIdentityContext>`).
-- `EventIdentityContext` struct with the 9 backend fields (full record — backend
-  already supports all; adding fields later means re-touching udl + 3 façades, so
-  do it once now).
-- `fn track(&self, event_type: String, params: TrackParams) -> RovenueResult<()>`:
-  1. Resolve `occurred_at` = `params.occurred_at_iso` or now() as ISO-8601 UTC.
-  2. Resolve `subscriber_id` = `params.subscriber_id` or `current_user_scope()`.
-  3. Build the JSON envelope (omit `None` fields so Zod sees only set keys).
-  4. `http.post_json("/v1/events", &envelope, user_scope)` reusing the existing
-     `HttpClient` POST path (Bearer + `X-Rovenue-Platform` + scope headers,
-     3-retry).
-  5. Ignore the 202 body; return `Ok(())`.
+The full `identityContext` record is therefore already present on both sides — no
+new type work. The FFI boundary carries the envelope as a **JSON string**
+(`serializeEnvelope()` exists for exactly this), which keeps the Swift/Kotlin
+façade changes to a single `String` pass-through instead of mirrored record
+structs.
 
-`api.rs`: add `impl RovenueCore::track(&self, event_type, params)` delegating to
-the events client, passing `current_user_scope()`.
+### 5.1 Transport fix — `post_json` treats 202 as bodyless
 
-### 5.2 uniffi `.udl` (`librovenue.udl`)
+`POST /v1/events` returns `c.body(null, 202)` (empty body). `classify()` maps
+202 → `Success`, but `post_json`'s success branch only skips body parsing for
+`204`, so it would call `resp.json()` on the empty 202 body and return
+`RovenueError::Internal` on every successful call. Fix: in
+`packages/core-rs/src/transport/http_client.rs`, change the `post_json` no-body
+condition from `status == 204` to `status == 204 || status == 202`. Safe for all
+current callers (`post_sessions`/`post_attributes` discard the body;
+receipts/identify return `200`). 202 Accepted is conventionally empty.
+
+### 5.2 Rust core (`packages/core-rs/src/events/`)
+
+New `events/client.rs`:
+
+```rust
+pub struct EventsClient { http: Arc<HttpClient> }
+impl EventsClient {
+    pub fn new(http: Arc<HttpClient>) -> Self { ... }
+    /// POST the envelope to /v1/events. Any 2xx (route returns 202) is success;
+    /// body ignored.
+    pub fn post(&self, envelope: &EventEnvelope, scope: Option<&str>)
+        -> RovenueResult<()>;
+}
+```
+
+`events/mod.rs`: add `pub mod client; pub use client::EventsClient;`.
+
+`api.rs`:
+- Hold `events: Arc<EventsClient>` (constructed in `from_store_with_http_max_attempts`
+  from the shared `http`).
+- `pub fn track(&self, envelope_json: String) -> RovenueResult<()>`:
+  1. `let mut env: EventEnvelope = serde_json::from_str(&envelope_json)
+     .map_err(|_| RovenueError::InvalidArgument)?;`
+  2. If `env.subscriber_id.is_none()`, fill from `current_user_scope()` when
+     non-empty.
+  3. `self.events.post(&env, scope.as_deref())`.
+
+### 5.3 uniffi `.udl` (`librovenue.udl`)
+
+Single method on `interface RovenueCore` — no new dictionaries (envelope crosses
+as a JSON string):
 
 ```
-dictionary EventIdentityContext {
-  string? email;
-  string? external_id;
-  string? phone;
-  string? ip;
-  string? user_agent;
-  string? first_name;
-  string? last_name;
-  string? city;
-  string? country_code;
-};
-
-dictionary TrackParams {
-  string? product_id;
-  string? amount;
-  string? currency;
-  string? event_source_url;
-  string? occurred_at_iso;
-  string? subscriber_id;
-  EventIdentityContext? identity_context;
-};
-
-interface RovenueCore {
-  // ...
-  [Throws=RovenueError]
-  void track(string event_type, TrackParams params);
-};
+[Throws=RovenueError]
+void track(string envelope_json);
 ```
 
 Bindings regenerated via `npm run sdk:bindings` (generated Swift/Kotlin are
 gitignored build artifacts — see [[rovenue_sdk_uniffi_bindings]]).
 
-### 5.3 Façades
+### 5.4 Façades (String pass-through)
 
-- Swift `ios/RovenueModule.swift`: `AsyncFunction("track")` → `Rovenue.shared.track(...)`.
-- Kotlin `android/src/main/java/dev/rovenue/sdkrn/RovenueModule.kt`:
-  `AsyncFunction("track") Coroutine { ... }`.
-- RN TS: new `src/api/events.ts` with `track(eventType, params?)` wrapping
-  `getNative().track(...)` through the existing `call()` error-mapping helper;
-  export from `Rovenue` object in `src/index.ts`. Snake_case ↔ camelCase mapping
-  for params happens at the TS boundary (consistent with existing wrappers).
+- Swift façade `packages/sdk-swift/Sources/Rovenue/Rovenue.swift`:
+  `func track(envelopeJson: String) async throws` → `dispatcher.run { core.track(envelopeJson:) }`,
+  mapping `RovenueError` → public error (mirrors `recordSessionEvent`).
+- Swift Expo module `packages/sdk-rn/ios/RovenueModule.swift`:
+  `AsyncFunction("track") { (envelopeJson: String) in try await Rovenue.shared.track(envelopeJson: envelopeJson) }`.
+- Kotlin façade `packages/sdk-kotlin/.../Rovenue.kt`:
+  `suspend fun track(envelopeJson: String) { dispatcher.run { core.track(envelopeJson) } }`.
+- Kotlin Expo module `packages/sdk-rn/android/.../RovenueModule.kt`:
+  `AsyncFunction("track") Coroutine { envelopeJson: String -> Rovenue.shared.track(envelopeJson) }`.
+
+### 5.5 RN TS (`packages/sdk-rn/src/`)
+
+- New `src/api/events.ts`: `track(eventType, params?)` builds an `EventEnvelope`
+  (`occurredAt: params.occurredAt ?? isoNow()`), calls
+  `getNative().track(serializeEnvelope(envelope))` through the established
+  `call()` error-mapping helper.
+- `src/core/native.ts`: add `track(envelopeJson: string): Promise<void>` to
+  `RovenueModuleSpec`.
+- `src/index.ts`: add `track` to the exported `Rovenue` object.
 
 ## 6. Error handling & delivery
 
@@ -187,10 +204,13 @@ gitignored build artifacts — see [[rovenue_sdk_uniffi_bindings]]).
 
 ## 7. Testing
 
-- **Rust unit** (`events/client.rs`): mock HTTP asserts (a) path `/v1/events`,
-  (b) `occurredAt` auto-stamped when absent and preserved when provided,
-  (c) `subscriberId` auto-filled from scope and overridable, (d) `None` fields
-  omitted from the JSON body.
+- **Rust unit** (`http_client.rs`): `post_json` returns `Ok` (no body) on a 202
+  empty response — guards the transport fix in §5.1.
+- **Rust unit** (`events/client.rs` + `api.rs::track`): mock HTTP asserts (a) path
+  `/v1/events` receives the POST, (b) `subscriberId` auto-filled from scope when
+  absent and preserved when provided, (c) `occurredAt` passed through verbatim,
+  (d) `None` fields omitted from the JSON body, (e) malformed `envelope_json` →
+  `InvalidArgument`.
 - **RN TS**: `track` wrapper calls the native module with correctly mapped
   (camel→snake) arguments; default-params path.
 - **Façade build verification**: Kotlin `testDebugUnitTest` (not just compile —
