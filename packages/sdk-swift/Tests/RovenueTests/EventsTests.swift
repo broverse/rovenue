@@ -4,6 +4,25 @@ import XCTest
 final class EventsTests: XCTestCase {
 
     // ------------------------------------------------------------------
+    // Case 0: Façade track() forwards envelopeJson to core
+    // ------------------------------------------------------------------
+    // Mirrors the Kotlin `track forwards envelope to core` test: the Rust
+    // core attempts an HTTP POST to the unreachable base URL, proving the
+    // call was forwarded rather than silently dropped. A no-op stub would
+    // not throw.
+    func test_track_forwardsEnvelopeToCore() async throws {
+        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://unreachable.invalid")
+        do {
+            try await Rovenue.shared.track(
+                envelopeJson: #"{"eventType":"purchase","occurredAt":"2026-06-20T00:00:00Z"}"#
+            )
+            XCTFail("expected track to throw against an unreachable host")
+        } catch let error as Rovenue.Error {
+            XCTAssertEqual(error, .networkUnavailable)
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Case 1: Full round-trip
     // ------------------------------------------------------------------
     // Encodes an EventEnvelope with a fully-populated IdentityContext,

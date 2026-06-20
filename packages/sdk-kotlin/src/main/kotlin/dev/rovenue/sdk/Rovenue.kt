@@ -476,7 +476,14 @@ class Rovenue private constructor(
      */
     @Throws(RovenueException::class)
     suspend fun track(envelopeJson: String) {
-        dispatcher.run { core.track(envelopeJson) }
+        emit(LogEntry(level = "info", message = "track"))
+        try {
+            dispatcher.run { core.track(envelopeJson) }
+            emit(LogEntry(level = "info", message = "track ok"))
+        } catch (e: Throwable) {
+            emit(LogEntry(level = "error", message = "track failed: ${e.message ?: e.javaClass.simpleName}"))
+            throw e
+        }
     }
 
     // ---------------------------------------------------------------
