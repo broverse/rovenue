@@ -18,6 +18,15 @@ describe("Rovenue RN version parity", () => {
     expect(SDK_VERSION).toBe(m![1]);
   });
 
+  it("SDK_VERSION matches the published package.json version", () => {
+    // getVersion() returns SDK_VERSION at runtime; if it drifts from the npm
+    // package version, telemetry/support version tagging lies. (Drifted twice.)
+    const pkg = JSON.parse(
+      readFileSync(join(__dirname, "../../package.json"), "utf8"),
+    ) as { version: string };
+    expect(SDK_VERSION).toBe(pkg.version);
+  });
+
   it("core-rs Cargo.toml inherits from workspace package", () => {
     const cargoToml = readFileSync(
       join(__dirname, "../../../core-rs/Cargo.toml"),

@@ -61,6 +61,20 @@ describe("serializeEnvelope", () => {
     expect(Object.keys(parsed.identityContext)).toEqual(["email"]);
   });
 
+  it("passes wire version and eventId through when supplied", () => {
+    const env: EventEnvelope = {
+      version: 1,
+      eventId: "evt_custom",
+      eventType: "purchase.completed",
+      occurredAt: "2026-05-28T14:00:00Z",
+    };
+
+    const parsed = JSON.parse(serializeEnvelope(env));
+
+    expect(parsed.version).toBe(1);
+    expect(parsed.eventId).toBe("evt_custom");
+  });
+
   it("omits identityContext entirely when not provided", () => {
     const env: EventEnvelope = {
       eventType: "subscription.expired",

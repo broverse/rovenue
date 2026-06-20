@@ -35,10 +35,11 @@ async function call<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Emit a generic event to the backend (`POST /v1/events`). Fire-and-forget:
- * resolves once the POST attempt completes; the SDK's HTTP layer retries
- * transient failures. `occurredAt` defaults to now; `subscriberId` is filled
- * server-of-SDK from the current scope when omitted.
+ * Emit a generic event to the backend (`POST /v1/events`). The SDK's HTTP
+ * layer retries transient failures; the returned promise rejects if the POST
+ * ultimately fails. `occurredAt` defaults to now; `subscriberId` is filled
+ * from the current scope when omitted, and the native core stamps the wire
+ * version and a stable `eventId`.
  */
 export async function track(eventType: string, params: TrackParams = {}): Promise<void> {
   const envelope: EventEnvelope = {
