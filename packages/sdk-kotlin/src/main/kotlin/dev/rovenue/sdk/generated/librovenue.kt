@@ -417,6 +417,8 @@ internal interface _UniFFILib : Library {
     ): RustBuffer.ByValue
     fun uniffi_rovenue_fn_method_rovenuecore_get_version(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_rovenue_fn_method_rovenuecore_has_resolved_funnel_claim(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
+    ): Byte
     fun uniffi_rovenue_fn_method_rovenuecore_identify(`ptr`: Pointer,`appUserId`: RustBuffer.ByValue,_uniffi_out_err: RustCallStatus, 
     ): Unit
     fun uniffi_rovenue_fn_method_rovenuecore_install_id(`ptr`: Pointer,_uniffi_out_err: RustCallStatus, 
@@ -613,6 +615,8 @@ internal interface _UniFFILib : Library {
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_get_version(
     ): Short
+    fun uniffi_rovenue_checksum_method_rovenuecore_has_resolved_funnel_claim(
+    ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_identify(
     ): Short
     fun uniffi_rovenue_checksum_method_rovenuecore_install_id(
@@ -724,6 +728,9 @@ private fun uniffiCheckApiChecksums(lib: _UniFFILib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_get_version() != 4970.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_rovenue_checksum_method_rovenuecore_has_resolved_funnel_claim() != 61114.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_rovenue_checksum_method_rovenuecore_identify() != 6313.toShort()) {
@@ -1125,7 +1132,8 @@ public interface RovenueCoreInterface {
     fun `flushSessionEvents`(): UInt@Throws(RovenueException::class)
     fun `getOfferings`(): CoreOfferings@Throws(RovenueException::class)
     fun `getOrCreateAppAccountToken`(): String
-    fun `getVersion`(): String@Throws(RovenueException::class)
+    fun `getVersion`(): String
+    fun `hasResolvedFunnelClaim`(): Boolean@Throws(RovenueException::class)
     fun `identify`(`appUserId`: String)
     fun `installId`(): String@Throws(RovenueException::class)
     fun `logOut`()@Throws(RovenueException::class)
@@ -1323,6 +1331,17 @@ class RovenueCore(
 }
         }.let {
             FfiConverterString.lift(it)
+        }
+    
+    override fun `hasResolvedFunnelClaim`(): Boolean =
+        callWithPointer {
+    rustCall() { _status ->
+    _UniFFILib.INSTANCE.uniffi_rovenue_fn_method_rovenuecore_has_resolved_funnel_claim(it,
+        
+        _status)
+}
+        }.let {
+            FfiConverterBoolean.lift(it)
         }
     
     

@@ -212,4 +212,6 @@ interface RovenueCore {
     void register_funnel_claim_listener(FunnelClaimListener listener);
 
     string install_id();
+
+    boolean has_resolved_funnel_claim();
 };
