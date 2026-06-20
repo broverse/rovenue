@@ -706,6 +706,13 @@ mod tests {
             .with_status(202)
             .create();
 
+        let _m_identify = server
+            .mock("POST", "/v1/identify")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"subscriberId":"sub_x","appUserId":"user_42","transferred":false}}"#)
+            .create();
+
         let core = make_core(&server.url());
         // identify() writes app_user_id locally even if its own POST fails.
         core.identify("user_42".into()).unwrap();
