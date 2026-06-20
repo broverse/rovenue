@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { env } from "./lib/env";
 import { errorHandler } from "./middleware/error";
 import { globalIpRateLimit } from "./middleware/rate-limit";
+import { metricsMiddleware } from "./middleware/metrics";
 import { requestIdMiddleware } from "./middleware/request-id";
 import { requestLoggerMiddleware } from "./middleware/request-logger";
 import {
@@ -99,6 +100,7 @@ export function createApp() {
     )
     .route("/health", healthRoute)
     .use("*", globalIpRateLimit())
+    .use("*", metricsMiddleware)
     .route("/api/auth", authRoute)
     .route("/billing", billingRoute)
     .route("/webhooks", webhooksRoute)
