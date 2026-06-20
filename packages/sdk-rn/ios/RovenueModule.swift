@@ -10,6 +10,7 @@
 
 import ExpoModulesCore
 import Rovenue
+import UIKit
 
 // Expo coded exceptions for the StoreKit purchase flow. The `code` of each
 // surfaces to JS unchanged and is matched by `mapNativeError` in
@@ -211,9 +212,24 @@ public class RovenueModule: Module {
             let r = try await Rovenue.shared.claimFunnelToken(token)
             return ["subscriberId": r.subscriberId, "funnelAnswersJson": r.funnelAnswersJson]
         }
+        AsyncFunction("claimFromClipboard") { () -> [String: Any?]? in
+            let marker = "rovenue-funnel:"
+            let raw: String? = await MainActor.run { UIPasteboard.general.string }
+            guard let s = raw, s.hasPrefix(marker) else { return nil }
+            let token = String(s.dropFirst(marker.count))
+            guard !token.isEmpty else { return nil }
+            let r = try await Rovenue.shared.claimFunnelToken(token)
+            // Clear only our own marked content so it isn't re-claimed/leaked.
+            await MainActor.run {
+                if UIPasteboard.general.string?.hasPrefix(marker) == true {
+                    UIPasteboard.general.string = ""
+                }
+            }
+            return ["subscriberId": r.subscriberId, "funnelAnswersJson": r.funnelAnswersJson]
+        }
         AsyncFunction("claimInstall") { (params: [String: Any?]) -> [String: Any?]? in
             let p = ClaimInstallParams(
-                platform: params["platform"] as? String ?? "",
+                platform: params["platform"] as? String ?? "ios",
                 locale: params["locale"] as? String ?? "",
                 timezone: params["timezone"] as? String ?? "",
                 screenDims: params["screenDims"] as? String ?? "",

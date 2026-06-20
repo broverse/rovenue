@@ -225,6 +225,11 @@ class RovenueModule : Module() {
             val r = Rovenue.shared.claimFunnelToken(token)
             mapOf("subscriberId" to r.subscriberId, "funnelAnswersJson" to r.funnelAnswersJson)
         }
+        AsyncFunction("claimFromClipboard") Coroutine { ->
+            // Android's deferred path is the Play Install Referrer (sub-project B);
+            // clipboard recovery is iOS-only. No-op for API symmetry.
+            null
+        }
         AsyncFunction("claimInstall") Coroutine { params: Map<String, Any?> ->
             val ctx = collectAndroidContext()
             val p = ClaimInstallParams(
