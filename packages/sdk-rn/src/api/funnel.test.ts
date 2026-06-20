@@ -4,14 +4,15 @@ const claimFunnelToken = vi.fn();
 const claimInstall = vi.fn();
 const claimViaEmail = vi.fn(async () => {});
 const claimFromClipboard = vi.fn();
+const hasResolvedFunnelClaim = vi.fn();
 const addListener = vi.fn();
 const remove = vi.fn();
 vi.mock("../core/native", () => ({
-  getNative: () => ({ claimFunnelToken, claimInstall, claimViaEmail, claimFromClipboard }),
+  getNative: () => ({ claimFunnelToken, claimInstall, claimViaEmail, claimFromClipboard, hasResolvedFunnelClaim }),
   getEmitter: () => ({ addListener }),
 }));
 
-import { claimFunnelToken as cft, claimInstall as ci, addFunnelClaimListener, claimFromClipboard as cfc, extractFunnelToken, claimFromUrl } from "./funnel";
+import { claimFunnelToken as cft, claimInstall as ci, addFunnelClaimListener, claimFromClipboard as cfc, extractFunnelToken, claimFromUrl, resolveFunnelClaim } from "./funnel";
 
 describe("funnel claim", () => {
   beforeEach(() => {
@@ -135,5 +136,57 @@ describe("claimFromUrl", () => {
     const r = await claimFromUrl(`myapp://reset-password?token=${TOK}`);
     expect(r).toBeNull();
     expect(claimFunnelToken).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveFunnelClaim", () => {
+  const TOK = "c".repeat(48);
+  const FUNNEL_URL = `https://d/universal/funnels/open/${TOK}`;
+  beforeEach(() => {
+    hasResolvedFunnelClaim.mockReset();
+    claimFunnelToken.mockReset();
+    claimInstall.mockReset();
+  });
+
+  it("skips the chain when already resolved", async () => {
+    hasResolvedFunnelClaim.mockResolvedValue(true);
+    expect(await resolveFunnelClaim({ url: FUNNEL_URL })).toBeNull();
+    expect(claimFunnelToken).not.toHaveBeenCalled();
+    expect(claimInstall).not.toHaveBeenCalled();
+  });
+
+  it("returns the deep-link claim when the url resolves", async () => {
+    hasResolvedFunnelClaim.mockResolvedValue(false);
+    claimFunnelToken.mockResolvedValue({ subscriberId: "s", funnelAnswersJson: "{}" });
+    const r = await resolveFunnelClaim({ url: FUNNEL_URL });
+    expect(r).toEqual({ subscriberId: "s", funnelAnswers: {} });
+    expect(claimInstall).not.toHaveBeenCalled();
+  });
+
+  it("falls through to claimInstall when the deep-link token is invalid (throws)", async () => {
+    hasResolvedFunnelClaim.mockResolvedValue(false);
+    claimFunnelToken.mockRejectedValue(Object.assign(new Error("x"), { code: "FunnelTokenExpired" }));
+    claimInstall.mockResolvedValue({ subscriberId: "s2", funnelAnswersJson: "{}" });
+    const r = await resolveFunnelClaim({ url: FUNNEL_URL });
+    expect(r).toEqual({ subscriberId: "s2", funnelAnswers: {} });
+    expect(claimInstall).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses claimInstall when no url is given", async () => {
+    hasResolvedFunnelClaim.mockResolvedValue(false);
+    claimInstall.mockResolvedValue({ subscriberId: "s3", funnelAnswersJson: "{}" });
+    expect(await resolveFunnelClaim()).toEqual({ subscriberId: "s3", funnelAnswers: {} });
+  });
+
+  it("returns null when nothing resolves", async () => {
+    hasResolvedFunnelClaim.mockResolvedValue(false);
+    claimInstall.mockResolvedValue(null);
+    expect(await resolveFunnelClaim({})).toBeNull();
+  });
+
+  it("returns null (no throw) when claimInstall throws", async () => {
+    hasResolvedFunnelClaim.mockResolvedValue(false);
+    claimInstall.mockRejectedValue(new Error("network"));
+    expect(await resolveFunnelClaim({})).toBeNull();
   });
 });

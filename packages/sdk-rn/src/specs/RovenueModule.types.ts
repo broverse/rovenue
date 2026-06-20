@@ -135,6 +135,7 @@ export interface RovenueModuleSpec {
   claimViaEmail(email: string): Promise<void>;
   claimFromClipboard(): Promise<{ subscriberId: string; funnelAnswersJson: string } | null>;
   installId(): Promise<string>;
+  hasResolvedFunnelClaim(): Promise<boolean>;
 
   // Generic event emission (`POST /v1/events`).
   track(envelopeJson: string): Promise<void>;

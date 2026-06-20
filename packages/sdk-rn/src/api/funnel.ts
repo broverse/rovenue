@@ -137,3 +137,36 @@ export async function claimFromUrl(url: string): Promise<FunnelClaimResult | nul
   if (!token) return null;
   return call(async () => parse(await getNative().claimFunnelToken(token)));
 }
+
+/**
+ * Run the no-gesture deterministic funnel-recovery chain once per install:
+ *   direct deep link (opts.url) → platform deferred match (claimInstall:
+ *   Android Install Referrer / iOS IP-only). Returns the claim, or null when
+ *   nothing resolves — then surface the gesture fallbacks yourself
+ *   (claimFromClipboard on iOS, then claimViaEmail). Resolved claims also fire
+ *   the addFunnelClaimListener callback. Safe to call on every launch; it
+ *   short-circuits once a claim has succeeded for this install.
+ */
+export async function resolveFunnelClaim(
+  opts: { url?: string } = {},
+): Promise<FunnelClaimResult | null> {
+  if (await getNative().hasResolvedFunnelClaim()) return null;
+
+  if (opts.url) {
+    try {
+      const r = await claimFromUrl(opts.url);
+      if (r) return r;
+    } catch {
+      // recognized-but-invalid deep-link token → fall through to the next source
+    }
+  }
+
+  try {
+    const r = await claimInstall();
+    if (r) return r;
+  } catch {
+    // network / transient → unresolved
+  }
+
+  return null;
+}
