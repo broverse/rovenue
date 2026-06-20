@@ -42,14 +42,16 @@ describe("claimWebhookEvent", () => {
       webhookEventRepo.claimWebhookEvent(db, input),
     ]);
 
-    const winners = [a, b].filter((r) => r !== null);
-    const losers = [a, b].filter((r) => r === null);
+    const winners = [a, b].filter((r) => r.outcome === "claimed");
+    const others = [a, b].filter((r) => r.outcome !== "claimed");
     expect(winners).toHaveLength(1);
-    expect(losers).toHaveLength(1);
-    expect(winners[0]?.status).toBe("PROCESSING");
+    expect(others).toHaveLength(1);
+    expect(others[0]?.outcome).toBe("in_progress");
+    const winner = winners[0];
+    expect(winner?.outcome === "claimed" && winner.row.status).toBe("PROCESSING");
   });
 
-  it("returns null for an already-PROCESSED event", async () => {
+  it("returns duplicate for an already-PROCESSED event", async () => {
     const db = getDb();
     const input = {
       projectId: PROJECT_ID,
@@ -59,12 +61,13 @@ describe("claimWebhookEvent", () => {
       payload: {},
     };
     const first = await webhookEventRepo.claimWebhookEvent(db, input);
-    expect(first).not.toBeNull();
-    await webhookEventRepo.updateWebhookEvent(db, first!.id, {
+    expect(first.outcome).toBe("claimed");
+    if (first.outcome !== "claimed") throw new Error("unreachable");
+    await webhookEventRepo.updateWebhookEvent(db, first.row.id, {
       status: "PROCESSED",
       processedAt: new Date(),
     });
     const second = await webhookEventRepo.claimWebhookEvent(db, input);
-    expect(second).toBeNull();
+    expect(second.outcome).toBe("duplicate");
   });
 });

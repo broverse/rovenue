@@ -117,20 +117,38 @@ export interface ClaimWebhookEventInput {
   payload: unknown;
 }
 
+// Mirrors outgoing-webhooks CLAIM_LEASE_MS. A PROCESSING row whose
+// claimedAt predates this window is assumed orphaned (the worker that
+// claimed it crashed) and is re-claimable. Must exceed the slowest
+// realistic handler run (store API verify + dispatch) by a wide margin.
+const WEBHOOK_CLAIM_LEASE_MS = 5 * 60_000;
+
+export type ClaimResult =
+  | { outcome: "claimed"; row: WebhookEvent }
+  | { outcome: "duplicate" }
+  | { outcome: "in_progress" };
+
 /**
- * Atomically claim a webhook event for processing. Inserts the row
- * as PROCESSING; on conflict it transitions an existing row to
- * PROCESSING ONLY when its current status is neither PROCESSING nor
- * PROCESSED. Returns the claimed row, or null when another worker
- * already holds (PROCESSING) or finished (PROCESSED) it.
+ * Atomically claim a webhook event for processing with a lease timestamp.
  *
- * This is the single-flight guard for concurrent deliveries of the
- * same (source, storeEventId): exactly one caller gets a row back.
+ * - Fresh insert → PROCESSING + claimedAt = now → { outcome: "claimed" }
+ * - Conflict on (source, storeEventId):
+ *   - If existing row is PROCESSED → { outcome: "duplicate" }
+ *   - If existing row is PROCESSING but claimedAt is past the lease
+ *     (orphaned worker) → update to PROCESSING + claimedAt = now → { outcome: "claimed" }
+ *   - If existing row is PROCESSING and claimedAt is fresh → { outcome: "in_progress" }
+ *
+ * The setWhere clause fires only when the row is either not yet claimed
+ * (RECEIVED/FAILED) OR the PROCESSING lease has expired. If setWhere is
+ * false, no row is returned — we then do a follow-up read to distinguish
+ * PROCESSED (safe to skip) from fresh PROCESSING (caller must retry).
  */
 export async function claimWebhookEvent(
   db: DbOrTx,
   input: ClaimWebhookEventInput,
-): Promise<WebhookEvent | null> {
+  now: Date = new Date(),
+): Promise<ClaimResult> {
+  const leaseCutoff = new Date(now.getTime() - WEBHOOK_CLAIM_LEASE_MS);
   const rows = await db
     .insert(webhookEvents)
     .values({
@@ -140,14 +158,49 @@ export async function claimWebhookEvent(
       storeEventId: input.storeEventId,
       payload: input.payload as typeof webhookEvents.$inferInsert.payload,
       status: "PROCESSING",
+      claimedAt: now,
     })
     .onConflictDoUpdate({
       target: [webhookEvents.source, webhookEvents.storeEventId],
-      set: { status: "PROCESSING" },
-      setWhere: sql`${webhookEvents.status} NOT IN ('PROCESSING', 'PROCESSED')`,
+      set: { status: "PROCESSING", claimedAt: now },
+      // Claim if NOT already done, AND either not currently being worked
+      // or the in-flight claim has expired (orphaned worker).
+      setWhere: sql`${webhookEvents.status} <> 'PROCESSED'
+        AND (${webhookEvents.status} <> 'PROCESSING'
+             OR ${webhookEvents.claimedAt} < ${leaseCutoff})`,
     })
     .returning();
-  return rows[0] ?? null;
+  if (rows[0]) return { outcome: "claimed", row: rows[0] };
+  // No row returned → the setWhere was false. Distinguish PROCESSED
+  // (truly done — safe to skip) from fresh PROCESSING (someone else is
+  // actively working it — the caller must retry, not ack).
+  const existing = await findWebhookEventByStoreId(
+    db as Db,
+    input.source as "APPLE" | "GOOGLE" | "STRIPE",
+    input.storeEventId,
+  );
+  if (existing?.status === "PROCESSED") return { outcome: "duplicate" };
+  return { outcome: "in_progress" };
+}
+
+/**
+ * Reset orphaned PROCESSING rows (claimedAt past the lease) back to
+ * FAILED so they become re-claimable and visible to alerting. Returns
+ * the count reclaimed. Called at the top of the reaper tick.
+ */
+export async function reclaimStaleWebhookEvents(
+  db: DbOrTx,
+  now: Date = new Date(),
+): Promise<number> {
+  const cutoff = new Date(now.getTime() - WEBHOOK_CLAIM_LEASE_MS);
+  const result = await db.execute(sql`
+    UPDATE ${webhookEvents}
+    SET status = 'FAILED',
+        "errorMessage" = 'reclaimed: orphaned PROCESSING past lease',
+        "retryCount" = "retryCount" + 1
+    WHERE status = 'PROCESSING' AND "claimedAt" < ${cutoff}
+  `);
+  return (result as unknown as { rowCount?: number }).rowCount ?? 0;
 }
 
 export interface UpdateWebhookEventInput {
