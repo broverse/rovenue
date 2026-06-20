@@ -18,6 +18,7 @@ import { Redis } from "ioredis";
 import { drizzle } from "@rovenue/db";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
+import { webhookEventsReclaimedTotal } from "../lib/metrics";
 
 const log = logger.child("webhook-reaper");
 
@@ -44,6 +45,7 @@ export async function runWebhookReaper(
   );
   if (reclaimed > 0) {
     log.warn("reclaimed orphaned PROCESSING webhook_events", { reclaimed });
+    webhookEventsReclaimedTotal.inc(reclaimed);
   }
   return { reclaimed };
 }

@@ -3,6 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { redis } from "../lib/redis";
 import { logger } from "../lib/logger";
 import { env } from "../lib/env";
+import { webhookReplayGuardFailOpenTotal } from "../lib/metrics";
 
 const log = logger.child("webhook-replay-guard");
 
@@ -61,6 +62,7 @@ export function webhookReplayGuard(
         eventId,
         err: err instanceof Error ? err.message : String(err),
       });
+      webhookReplayGuardFailOpenTotal.labels({ source: opts.source }).inc();
       await next();
       return;
     }
