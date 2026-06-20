@@ -4,7 +4,10 @@
     "module": "esnext",
     "moduleResolution": "node",
     "jsx": "react-jsx",
-    "lib": ["ES2020", "DOM"],
+    "lib": [
+      "ES2020",
+      "DOM"
+    ],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -12,5 +15,10 @@
     "allowSyntheticDefaultImports": true,
     "isolatedModules": true
   },
-  "include": ["App.tsx", "**/*.ts", "**/*.tsx"]
+  "include": [
+    "App.tsx",
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "extends": "expo/tsconfig.base"
 }

@@ -14,14 +14,29 @@ Pod::Spec.new do |s|
   s.homepage         = 'https://rovenue.io'
   s.license          = { :type => 'AGPL-3.0' }
   s.authors          = 'Rovenue'
-  s.platforms        = { :ios => '13.0' }
+  s.platforms        = { :ios => '15.0' }
   s.swift_version    = '5.9'
   s.source           = {
     :http   => "https://github.com/rovenue/rovenue/releases/download/sdk-swift-v#{s.version}/Rovenue-#{s.version}.zip",
     :sha256 => '0000000000000000000000000000000000000000000000000000000000000000'
   }
   s.source_files       = 'Sources/Rovenue/**/*.swift'
-  s.vendored_libraries = 'Sources/Rovenue/librovenue.a'
+  # NOTE: must NOT be `librovenue.a` — CocoaPods names this pod's own
+  # compiled static lib `libRovenue.a`, which collides case-insensitively
+  # with a vendored `librovenue.a` on macOS ("conflicting names"). Use a
+  # distinct basename for the vendored Rust core.
+  s.vendored_libraries = 'Sources/Rovenue/librovenue_ffi.a'
+
+  # Expose the uniffi C FFI layer (RustBuffer / RustCallStatus / ForeignBytes,
+  # declared in Sources/Rovenue/Generated/RovenueFFI.h) as an importable clang
+  # module so the generated RovenueFFI.swift's `#if canImport(RovenueFFI)`
+  # branch succeeds. SPM wires this through a `systemLibrary` target; under
+  # CocoaPods we put the module.modulemap directory on the Swift import path.
+  s.preserve_paths      = 'Sources/RovenueFFI/**/*'
+  s.pod_target_xcconfig = {
+    'SWIFT_INCLUDE_PATHS' => '$(PODS_TARGET_SRCROOT)/Sources/RovenueFFI'
+  }
+
   # Apple privacy manifest — bundled so the publishable CocoaPods artifact (the
   # pod that ships the collecting code) carries its own PrivacyInfo.xcprivacy,
   # not just the Expo bridge pod. The file lives in Sources/Rovenue/ already.

@@ -9,7 +9,7 @@ Pod::Spec.new do |s|
   s.homepage       = 'https://rovenue.io'
   s.license        = { :type => 'AGPL-3.0' }
   s.authors        = 'Rovenue'
-  s.platforms      = { :ios => '13.0' }
+  s.platforms      = { :ios => '15.0' }
   s.swift_version  = '5.9'
   s.source         = { :path => '.' }
   s.static_framework = true
@@ -24,4 +24,22 @@ Pod::Spec.new do |s|
   # `pod 'Rovenue', :path => '<monorepo-relative path>'` injected by
   # our config plugin (plugin/withRovenueIos.ts).
   s.dependency 'Rovenue'
+
+  # Importing the `Rovenue` Swift module pulls in its transitive clang
+  # module `RovenueFFI` (the uniffi C layer). CocoaPods does not propagate
+  # SWIFT_INCLUDE_PATHS from a dependency, so this bridge pod must also put
+  # the RovenueFFI module.modulemap (in the sibling sdk-swift package) on
+  # its Swift import path or the build fails with
+  # "Unable to resolve module dependency: 'RovenueFFI'".
+  s.pod_target_xcconfig = {
+    'SWIFT_INCLUDE_PATHS' => '$(PODS_TARGET_SRCROOT)/../../sdk-swift/Sources/RovenueFFI'
+  }
+  # The app target also imports these modules (via the generated
+  # ExpoModulesProvider), so it needs RovenueFFI on its import path too.
+  # user_target_xcconfig propagates the setting to the integrating app
+  # target. PODS_ROOT is <app>/ios/Pods, so the sibling sdk-swift package
+  # sits four levels up.
+  s.user_target_xcconfig = {
+    'SWIFT_INCLUDE_PATHS' => '$(inherited) "${PODS_ROOT}/../../../../packages/sdk-swift/Sources/RovenueFFI"'
+  }
 end
