@@ -208,6 +208,9 @@ public class RovenueModule: Module {
         AsyncFunction("installId") { () -> String in
             Rovenue.shared.installId()
         }
+        AsyncFunction("hasResolvedFunnelClaim") { () -> Bool in
+            Rovenue.shared.hasResolvedFunnelClaim()
+        }
         AsyncFunction("claimFunnelToken") { (token: String) -> [String: Any?] in
             let r = try await Rovenue.shared.claimFunnelToken(token)
             return ["subscriberId": r.subscriberId, "funnelAnswersJson": r.funnelAnswersJson]

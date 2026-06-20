@@ -631,6 +631,8 @@ class Rovenue private constructor(
      *  Does not hit the network. */
     fun installId(): String = core.installId()
 
+    fun hasResolvedFunnelClaim(): Boolean = core.hasResolvedFunnelClaim()
+
     /**
      * Claim a funnel token (deep-link / QR code / referral code) and
      * resolve it to a subscriber + funnel-answer payload server-side.

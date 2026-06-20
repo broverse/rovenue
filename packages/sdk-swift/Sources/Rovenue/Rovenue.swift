@@ -705,6 +705,10 @@ public final class Rovenue: @unchecked Sendable {
         core.installId()
     }
 
+    public func hasResolvedFunnelClaim() -> Bool {
+        core.hasResolvedFunnelClaim()
+    }
+
     /// Claim a funnel token (from a deep-link or QR code). Returns the
     /// resolved subscriber record immediately and also emits on `funnelClaims`.
     public func claimFunnelToken(_ token: String) async throws -> FunnelClaimResult {

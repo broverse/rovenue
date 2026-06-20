@@ -221,6 +221,9 @@ class RovenueModule : Module() {
         AsyncFunction("installId") Coroutine { ->
             Rovenue.shared.installId()
         }
+        AsyncFunction("hasResolvedFunnelClaim") Coroutine { ->
+            Rovenue.shared.hasResolvedFunnelClaim()
+        }
         AsyncFunction("claimFunnelToken") Coroutine { token: String ->
             val r = Rovenue.shared.claimFunnelToken(token)
             mapOf("subscriberId" to r.subscriberId, "funnelAnswersJson" to r.funnelAnswersJson)
