@@ -111,50 +111,52 @@ export interface CreditLedgerEntry {
  * The DB has no BEFORE INSERT trigger that normalises this — keeping
  * the balance consistent is the caller's contract.
  *
- * Co-writes a CREDIT_LEDGER outbox row in the same transaction so
- * both inserts commit or roll back together.
+ * Co-writes a CREDIT_LEDGER outbox row on the SAME handle so both
+ * inserts commit or roll back atomically with the caller's transaction.
+ * Callers MUST already be inside a transaction (the credit engine opens
+ * one and holds the per-wallet advisory lock for the whole unit of work).
+ * There is no nested savepoint — the ledger row and outbox event share
+ * the caller's tx context directly.
  */
 export async function insertCreditLedger(
   db: DbOrTx,
   entry: CreditLedgerEntry,
 ): Promise<CreditLedgerRow> {
-  return db.transaction(async (tx) => {
-    const rows = await tx
-      .insert(creditLedger)
-      .values({
-        projectId: entry.projectId,
-        subscriberId: entry.subscriberId,
-        currencyId: entry.currencyId,
-        type: entry.type,
-        amount: entry.amount,
-        balance: entry.balance,
-        referenceType: entry.referenceType ?? null,
-        referenceId: entry.referenceId ?? null,
-        description: entry.description ?? null,
-        metadata: (entry.metadata ?? null) as typeof creditLedger.$inferInsert.metadata,
-      })
-      .returning();
-    const inserted = rows[0];
-    if (!inserted) throw new Error("insertCreditLedger: no row returned");
+  const rows = await db
+    .insert(creditLedger)
+    .values({
+      projectId: entry.projectId,
+      subscriberId: entry.subscriberId,
+      currencyId: entry.currencyId,
+      type: entry.type,
+      amount: entry.amount,
+      balance: entry.balance,
+      referenceType: entry.referenceType ?? null,
+      referenceId: entry.referenceId ?? null,
+      description: entry.description ?? null,
+      metadata: (entry.metadata ?? null) as typeof creditLedger.$inferInsert.metadata,
+    })
+    .returning();
+  const inserted = rows[0];
+  if (!inserted) throw new Error("insertCreditLedger: no row returned");
 
-    await outboxRepo.insert(tx, {
-      aggregateType: "CREDIT_LEDGER",
-      aggregateId: inserted.id,
-      eventType: "credit.ledger.appended",
-      payload: {
-        creditLedgerId: inserted.id,
-        projectId: inserted.projectId,
-        subscriberId: inserted.subscriberId,
-        currencyId: inserted.currencyId,
-        type: inserted.type,
-        amount: inserted.amount,
-        balance: inserted.balance,
-        referenceType: inserted.referenceType,
-        referenceId: inserted.referenceId,
-        createdAt: inserted.createdAt.toISOString(),
-      },
-    });
-
-    return inserted;
+  await outboxRepo.insert(db, {
+    aggregateType: "CREDIT_LEDGER",
+    aggregateId: inserted.id,
+    eventType: "credit.ledger.appended",
+    payload: {
+      creditLedgerId: inserted.id,
+      projectId: inserted.projectId,
+      subscriberId: inserted.subscriberId,
+      currencyId: inserted.currencyId,
+      type: inserted.type,
+      amount: inserted.amount,
+      balance: inserted.balance,
+      referenceType: inserted.referenceType,
+      referenceId: inserted.referenceId,
+      createdAt: inserted.createdAt.toISOString(),
+    },
   });
+
+  return inserted;
 }
