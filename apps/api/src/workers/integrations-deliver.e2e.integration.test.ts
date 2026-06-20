@@ -15,6 +15,7 @@
 // HTTP calls are intercepted by undici MockAgent — no real network traffic.
 // Requires live Postgres (5433) + Redis (6380) matching docker-compose.
 
+import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createId } from "@paralleldrive/cuid2";
 import { Pool } from "pg";
@@ -41,8 +42,7 @@ import { hashPii } from "../services/integrations/hash-pii";
 // ---------------------------------------------------------------------------
 process.env.DATABASE_URL ??= "postgresql://rovenue:rovenue@localhost:5433/rovenue";
 process.env.REDIS_URL ??= "redis://localhost:6380";
-process.env.ENCRYPTION_KEY ??=
-  "6ecfcd0f73d5afe055ff651e0e4ce85679cdd12bb4cede7aa4338b693047b8f1";
+process.env.ENCRYPTION_KEY ??= randomBytes(32).toString("hex");
 
 const REDIS_URL = process.env.REDIS_URL!;
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY!;

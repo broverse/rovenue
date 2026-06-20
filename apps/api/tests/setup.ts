@@ -17,6 +17,7 @@
 // the rest of the codebase reads `process.env` directly. A ~15 line
 // built-in parser below keeps the dep surface unchanged.
 
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,8 +71,7 @@ process.env.KAFKA_BROKERS ??= "localhost:19092";
 process.env.CLICKHOUSE_URL ??= "http://localhost:8124";
 process.env.CLICKHOUSE_USER ??= "rovenue";
 process.env.CLICKHOUSE_PASSWORD ??= "rovenue";
-process.env.ENCRYPTION_KEY ??=
-  "6ecfcd0f73d5afe055ff651e0e4ce85679cdd12bb4cede7aa4338b693047b8f1";
+process.env.ENCRYPTION_KEY ??= randomBytes(32).toString("hex");
 // No real SNS endpoint is involved in tests; bypass the signature
 // fetch+verify path globally so the SES feedback webhook tests
 // (and any future SNS-driven tests) don't need to stub fetch().

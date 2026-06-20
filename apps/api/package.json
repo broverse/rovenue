@@ -60,7 +60,7 @@
     "pg": "^8.20.0",
     "supertest": "^6.3.0",
     "testcontainers": "^10.15.0",
-    "tsx": "^4.7.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.4.0",
     "vitest": "^1.3.0"
   }

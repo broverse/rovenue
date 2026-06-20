@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 const auditMock = vi.hoisted(() => ({
   audit: vi.fn(async () => undefined),
@@ -105,8 +106,7 @@ function signedIn(userId = "user_1") {
 beforeEach(() => vi.clearAllMocks());
 
 // Minimum ENCRYPTION_KEY for the real helper to run.
-process.env.ENCRYPTION_KEY ??=
-  "6ecfcd0f73d5afe055ff651e0e4ce85679cdd12bb4cede7aa4338b693047b8f1";
+process.env.ENCRYPTION_KEY ??= randomBytes(32).toString("hex");
 
 describe("GET /dashboard/projects/:projectId/credentials", () => {
   test("forbidden for non-member", async () => {

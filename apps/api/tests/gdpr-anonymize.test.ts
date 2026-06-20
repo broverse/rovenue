@@ -1,6 +1,11 @@
 import { describe, expect, test, beforeEach, vi } from "vitest";
 
-const { drizzleMock, auditMock } = vi.hoisted(() => {
+const { drizzleMock, auditMock, testEncryptionKey } = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { randomBytes } = require("node:crypto") as {
+    randomBytes: (size: number) => Buffer;
+  };
+  const testEncryptionKey = randomBytes(32).toString("hex");
   const auditMock = {
     audit: vi.fn(async () => undefined),
     extractRequestContext: vi.fn(() => ({
@@ -27,7 +32,7 @@ const { drizzleMock, auditMock } = vi.hoisted(() => {
       anonymizeSubscriberRow: vi.fn(async () => undefined),
     },
   };
-  return { drizzleMock, auditMock };
+  return { drizzleMock, auditMock, testEncryptionKey };
 });
 
 vi.mock("@rovenue/db", () => ({
@@ -38,8 +43,7 @@ vi.mock("drizzle-orm", () => ({ eq: () => ({}) }));
 vi.mock("../src/lib/audit", () => auditMock);
 vi.mock("../src/lib/env", () => ({
   env: {
-    ENCRYPTION_KEY:
-      "6ecfcd0f73d5afe055ff651e0e4ce85679cdd12bb4cede7aa4338b693047b8f1",
+    ENCRYPTION_KEY: testEncryptionKey,
   },
 }));
 

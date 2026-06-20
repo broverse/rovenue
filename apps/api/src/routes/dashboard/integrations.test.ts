@@ -81,8 +81,8 @@ async function seedMember({
   });
 }
 
-// Encryption key for tests — must match setup.ts ENCRYPTION_KEY fallback
-const TEST_ENC_KEY = "6ecfcd0f73d5afe055ff651e0e4ce85679cdd12bb4cede7aa4338b693047b8f1";
+// Encryption key for tests — read from env so it matches setup.ts ENCRYPTION_KEY
+const TEST_ENC_KEY = process.env.ENCRYPTION_KEY!;
 
 async function seedConnection({
   projectId,
