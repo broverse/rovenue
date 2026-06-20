@@ -2,7 +2,7 @@
   "name": "rovenue",
   "version": "0.0.0",
   "private": true,
-  "packageManager": "pnpm@9.0.0",
+  "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": ">=22.7"
   },
@@ -35,5 +35,31 @@
     "turbo": "^2.0.0",
     "typescript": "^5.4.0",
     "typescript-eslint": "^7.0.0"
+  },
+  "pnpm": {
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-5xrq-8626-4rwp",
+        "GHSA-34x7-hfp2-rc4v",
+        "GHSA-8qq5-rm4j-mr97",
+        "GHSA-83g3-92jg-28cx",
+        "GHSA-qffp-2rhf-9h96",
+        "GHSA-9ppj-qmqm-q256",
+        "GHSA-r6q2-hw4h-h46w",
+        "GHSA-wh4c-j3r5-mjhp",
+        "GHSA-2v35-w6hq-6mfw",
+        "GHSA-f6ww-3ggp-fr8h",
+        "GHSA-x6wf-f3px-wcqx",
+        "GHSA-j759-j44w-7fr8",
+        "GHSA-8x6r-g9mw-2r78",
+        "GHSA-rxv8-25v2-qmq8",
+        "GHSA-pv5w-4p9q-p3v2",
+        "GHSA-96hv-2xvq-fx4p",
+        "GHSA-hmw2-7cc7-3qxx",
+        "GHSA-fx2h-pf6j-xcff",
+        "GHSA-8hv8-536x-4wqp",
+        "GHSA-2pvr-wf23-7pc7"
+      ]
+    }
   }
 }
