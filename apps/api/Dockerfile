@@ -26,7 +26,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install
 
 # =============================================================
-# Builder — copy sources
+# Builder — compile TypeScript to dist/
 # =============================================================
 FROM deps AS builder
 
@@ -34,8 +34,10 @@ COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY apps/api ./apps/api
 
+RUN pnpm --filter @rovenue/api build
+
 # =============================================================
-# Runtime — slim image running the api via tsx
+# Runtime — slim image running compiled JS (no tsx)
 # =============================================================
 FROM base AS runtime
 
@@ -50,4 +52,4 @@ ENV NODE_ENV=production \
 
 EXPOSE 3000
 
-CMD ["pnpm", "--filter", "@rovenue/api", "exec", "tsx", "src/index.ts"]
+CMD ["node", "apps/api/dist/index.js"]
