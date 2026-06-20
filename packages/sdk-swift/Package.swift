@@ -16,6 +16,7 @@ let package = Package(
             name: "Rovenue",
             dependencies: ["RovenueFFI"],
             path: "Sources/Rovenue",
+            resources: [.copy("PrivacyInfo.xcprivacy")],
             linkerSettings: [
                 .linkedLibrary("rovenue"),
                 .unsafeFlags(["-L../../target/release"], .when(platforms: [.macOS])),

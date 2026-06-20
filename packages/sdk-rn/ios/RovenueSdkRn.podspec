@@ -15,6 +15,7 @@ Pod::Spec.new do |s|
   s.static_framework = true
 
   s.source_files   = '**/*.{h,m,swift}'
+  s.resource_bundles = { 'RovenueSdkRn_privacy' => ['PrivacyInfo.xcprivacy'] }
 
   # Expo Modules runtime — provided by the consuming app via autolinking
   s.dependency 'ExpoModulesCore'
