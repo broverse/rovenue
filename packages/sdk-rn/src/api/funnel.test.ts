@@ -40,6 +40,18 @@ describe("funnel claim", () => {
     expect(r).toEqual({ subscriberId: "sub_2", funnelAnswers: {} });
   });
 
+  it("claimInstall() with no args forwards an empty object to native", async () => {
+    claimInstall.mockResolvedValue(null);
+    await ci();
+    expect(claimInstall).toHaveBeenCalledWith({});
+  });
+
+  it("claimInstall passes caller overrides through unchanged", async () => {
+    claimInstall.mockResolvedValue({ subscriberId: "s", funnelAnswersJson: "{}" });
+    await ci({ installReferrer: "rovenue_funnel_token%3Dabc" });
+    expect(claimInstall).toHaveBeenCalledWith({ installReferrer: "rovenue_funnel_token%3Dabc" });
+  });
+
   it("addFunnelClaimListener delivers parsed payload and unsubscribe calls remove", () => {
     let capturedHandler: ((p: any) => void) | undefined;
     addListener.mockImplementation((_event: string, handler: (p: any) => void) => {

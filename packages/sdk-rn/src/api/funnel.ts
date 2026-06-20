@@ -37,7 +37,9 @@ export async function claimFunnelToken(token: string): Promise<FunnelClaimResult
 }
 
 /** Recover + claim via install attribution. Resolves `null` when no match. */
-export async function claimInstall(params: ClaimInstallParams): Promise<FunnelClaimResult | null> {
+export async function claimInstall(
+  params: Partial<ClaimInstallParams> = {},
+): Promise<FunnelClaimResult | null> {
   return call(async () => {
     const n = (await getNative().claimInstall(params)) as NativeClaim | null;
     return n ? parse(n) : null;
