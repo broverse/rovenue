@@ -22,9 +22,9 @@
 
 **Files:** various `package.json` + lockfile; root `package.json` `pnpm.auditConfig.ignoreGhsas`; `.superpowers/sdd/briefs/W5.1-report.md` (rationale doc).
 
-### Task FW1.1: Upgrade vitest 1.x → 3.x (retire GHSA-5xrq suppression)
+### Task FW1.1: Upgrade vitest 1.x → 3.x+ (retire GHSA-5xrq suppression)
 
-**Context:** `vitest@1.x` is suppressed (CRITICAL GHSA-5xrq-8626-4rwp — the UI server). It's dev/test-only (`vitest run`, never `--ui`, never shipped). Patch requires a major 1→3 bump across the packages that depend on vitest.
+**Context:** `vitest@1.x` is suppressed (CRITICAL GHSA-5xrq-8626-4rwp — the UI server). It's dev/test-only (`vitest run`, never `--ui`, never shipped). VERIFIED 2026-06-21: still `^1.3.0` (installed 1.6.1) in 6 packages; suppression present. The fix needs a major bump — latest is **4.1.9**, so target the lowest fixed major that's a manageable migration (vitest 3.x fixes the advisory with less churn than 4.x; pick 3.x unless 4.x is trivial). Bump across ALL six packages: sdk-rn, email-templates, shared, db, dashboard, api.
 
 - [ ] **Step 1: Inventory** — `grep -rn '"vitest"' --include=package.json . | grep -v node_modules` to list every package on vitest 1.x (and any `@vitest/*`, `vite` peer). Note the versions.
 - [ ] **Step 2: Bump** vitest (+ `@vitest/ui` if present, + `vite` to the version vitest 3 requires) to latest 3.x in every owning package.json. `pnpm install`.
@@ -50,7 +50,7 @@
 
 ### Task FW1.3: Re-evaluate drizzle-kit / @esbuild-kit (F13)
 
-**Context:** F13 was deferred — `drizzle-kit@0.31.10` (the only stable release) directly depends on `@esbuild-kit/esm-loader` + `esbuild ^0.25.4`, pulling deprecated `@esbuild-kit/*` + `esbuild@0.18.20`. The whole 1.x line is pre-release. No CVE; dev-build-only.
+**Context:** F13 was deferred — `drizzle-kit@0.31.10` (the only stable release) directly depends on `@esbuild-kit/esm-loader` + `esbuild ^0.25.4`, pulling deprecated `@esbuild-kit/*` + `esbuild@0.18.20`. The whole 1.x line is pre-release. No CVE; dev-build-only. RE-VERIFIED 2026-06-21: drizzle-kit `dist-tags.latest` is STILL `0.31.10` — **no stable fix exists yet, so this task is currently a no-op re-check** (Step 2b). Run it only when a newer stable drizzle-kit ships.
 
 - [ ] **Step 1: Check** `pnpm view drizzle-kit dist-tags` — has `latest` moved off 0.31.10 to a stable 1.x (or newer 0.3x that dropped @esbuild-kit)? Also `pnpm view drizzle-kit@<candidate> dependencies | grep -i esbuild`.
 - [ ] **Step 2a (if a stable drizzle-kit that drops @esbuild-kit exists):** bump `drizzle-kit` in `packages/db/package.json`; `pnpm install`; **verify the migration CLI still works with the repo config** — `timeout 120 pnpm db:migrate:generate` against a scratch schema change (or a dry/help invocation) and `timeout 120 pnpm db:migrate` on a fresh local Postgres; confirm no config-format breakage. Then `pnpm dedupe`; confirm `pnpm why @esbuild-kit/core-utils` is empty and `grep -c "@esbuild-kit" pnpm-lock.yaml` is 0. Commit `chore(db): upgrade drizzle-kit; drop deprecated @esbuild-kit toolchain (F13)`.
@@ -86,13 +86,11 @@
 - [ ] **Step 3: Typecheck** — `pnpm --filter @rovenue/api exec tsc --noEmit` clean (comment-only + test-only changes).
 - [ ] **Step 4: Commit** — `git commit -m "chore(api): drop dead env mock; fix stale zValidator comments"`
 
-### Task FW2.4: Align @types/nodemailer with runtime v9
+### Task FW2.4: ~~Align @types/nodemailer with runtime v9~~ — NON-ISSUE (optional patch only)
 
-**Context:** Runtime `nodemailer` was bumped to `^9.0.1` (W5.1) but `@types/nodemailer` stays `^8.0.0`. Verified type-compatible for the used API, but should be aligned to avoid drift.
+**RE-VERIFIED 2026-06-21 — this is essentially a false alarm; SKIP unless you want the latest patch.** `@types/nodemailer` versioning does NOT track the nodemailer runtime major. Its `dist-tags.latest` is **8.0.1** (there is no "v9" types package). The repo has `@types/nodemailer@8.0.0` installed — i.e. it is already on the current major, which is the correct/compatible types for nodemailer 9 (mailer test 3/3 green, `tsc --noEmit` clean). There is NO real version mismatch.
 
-- [ ] **Step 1: Bump** `@types/nodemailer` to the v9-matching major in `apps/api/package.json` (`pnpm view @types/nodemailer dist-tags`). `pnpm install`.
-- [ ] **Step 2: Typecheck + mailer test** — `pnpm --filter @rovenue/api exec tsc --noEmit` clean; `pnpm --filter @rovenue/api exec vitest run src/lib/mailer-smtp.test.ts` (3/3 PASS). Fix any type drift the v9 types surface in the email code.
-- [ ] **Step 3: Commit** — `git commit -m "chore(api): align @types/nodemailer with nodemailer v9"`
+- [ ] **Optional:** bump `^8.0.0` → `^8.0.1` in `apps/api/package.json` for the latest patch, `pnpm install`, confirm `tsc --noEmit` + `mailer-smtp.test.ts` still green, commit `chore(api): bump @types/nodemailer to 8.0.1`. Otherwise close this ticket as a verified non-issue — no action needed.
 
 ---
 
