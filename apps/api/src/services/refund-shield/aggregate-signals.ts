@@ -19,7 +19,7 @@ import type { RefundShieldSignals } from "../apple/refund-shield-buckets";
 // 1. Postgres `subscribers` + `subscriber_access` + `purchases` —
 //    tenure (firstSeenAt), entitlement state, and the purchase
 //    window/trial flag scoped to the originating transaction.
-// 2. ClickHouse `sdk_sessions_daily_tbl` — lifetime session_ms,
+// 2. ClickHouse `v_sdk_sessions_lifetime_subscriber` — lifetime session_ms,
 //    aggregated across all `(projectId, subscriberId)` rows.
 // 3. ClickHouse `v_revenue_lifetime_subscriber` — lifetime $
 //    purchased + refunded in cents.
@@ -153,8 +153,8 @@ export async function aggregateRefundShieldSignals(
   // -----------------------------------------------------------
   const sessionsResult = await input.ch.query({
     query: `
-      SELECT coalesce(sum(session_ms), 0) AS lifetime_session_ms
-      FROM sdk_sessions_daily_tbl
+      SELECT coalesce(sum(lifetime_session_ms), 0) AS lifetime_session_ms
+      FROM rovenue.v_sdk_sessions_lifetime_subscriber
       WHERE projectId = {pid:String} AND subscriberId = {sid:String}
     `,
     query_params: { pid: input.projectId, sid: input.subscriberId },

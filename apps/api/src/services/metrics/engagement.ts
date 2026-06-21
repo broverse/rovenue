@@ -32,7 +32,7 @@ export async function listEngagement(
         toString(sum(session_count))       AS session_count,
         toString(sum(session_ms))          AS session_ms,
         toString(uniqExact(subscriberId))  AS active_subscribers
-      FROM rovenue.sdk_sessions_daily_tbl
+      FROM rovenue.v_sdk_sessions_daily
       WHERE projectId = {projectId:String}
         AND day >= {from:Date}
         AND day <= {to:Date}
