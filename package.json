@@ -37,9 +37,11 @@
     "typescript-eslint": "^7.0.0"
   },
   "pnpm": {
+    "overrides": {
+      "vitest": "^3.2.6"
+    },
     "auditConfig": {
       "ignoreGhsas": [
-        "GHSA-5xrq-8626-4rwp",
         "GHSA-34x7-hfp2-rc4v",
         "GHSA-8qq5-rm4j-mr97",
         "GHSA-83g3-92jg-28cx",

@@ -11,6 +11,10 @@ export default defineConfig({
       },
     },
   },
+  resolve: {
+    // Ensure a single React instance across all modules (vitest 3.x ESM dedup)
+    dedupe: ["react", "react-dom", "react-dom/client"],
+  },
   test: {
     environment: "jsdom",
     globals: true,

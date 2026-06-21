@@ -17,9 +17,4 @@ export default defineConfig({
       ),
     },
   },
-  test: {
-    environmentMatchGlobs: [
-      ["**/*.test.tsx", "happy-dom"],
-    ],
-  },
 });
