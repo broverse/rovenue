@@ -17,15 +17,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Google — 401 when PUBSUB_PUSH_AUDIENCE unset + flag false
 // ---------------------------------------------------------------------------
 
-vi.mock("../lib/env", () => ({
-  env: {
-    PUBSUB_PUSH_AUDIENCE: undefined,
-    ALLOW_UNVERIFIED_WEBHOOKS: false,
-    NODE_ENV: "test",
-    WEBHOOK_REPLAY_TOLERANCE_SECONDS: 300,
-  },
-}));
-
 describe("verifyGoogleWebhook — fail-closed (W3.1)", () => {
   beforeEach(() => {
     vi.resetModules();

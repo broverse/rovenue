@@ -72,7 +72,7 @@ export const subscribersRoute = new Hono()
   // -------------------------------------------------------------
   // Restore is permissive on the body because the SDK may call it
   // with no receipts (e.g. just to sync a previously-known account).
-  // zValidator keeps the shape correct but we drive downstream
+  // validate() keeps the shape correct but we drive downstream
   // logic off the optional `receipts` array directly.
   .post("/:appUserId/restore", validate("json", restoreBodySchema), async (c) => {
     const project = c.get("project");

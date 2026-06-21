@@ -33,7 +33,7 @@ import { ok } from "../../lib/response";
 // Zod request schemas — mirror apps/api/src/lib/project-credentials.ts
 // =============================================================
 //
-// The body shape depends on the `:store` route param so zValidator
+// The body shape depends on the `:store` route param so validate()
 // (static schema) isn't a clean fit here. The handler dispatches
 // to the right schema post-match and surfaces a 400 with a
 // field-level Zod message on failure.

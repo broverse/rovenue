@@ -24,7 +24,7 @@ import { logger } from "../../lib/logger";
 // it from the event, but recordEvent dispatches against every
 // active assignment regardless of key.
 //
-// zValidator guarantees the JSON body matches trackBodySchema
+// validate() guarantees the JSON body matches trackBodySchema
 // before the handler runs, which gives us a 400 response with
 // field-level messages for free and types the body through
 // `c.req.valid("json")` for RPC consumers.

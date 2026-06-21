@@ -235,7 +235,7 @@ export const experimentsRoute = new Hono()
   //
   // Body shape depends on the current experiment status — DRAFT
   // accepts the full field set, RUNNING narrows to name/description
-  // + variant weights. Since zValidator is static we keep the
+  // + variant weights. Since validate() is call-site we keep the
   // discriminated validation inside the handler with the two
   // exported schemas as single source of truth.
   .patch("/:id", async (c) => {
@@ -548,7 +548,7 @@ export const experimentsRoute = new Hono()
 
     // Stop accepts an optional body so clients that `.post()` without
     // a Content-Type still work. We hand-parse via safeParse rather
-    // than zValidator so an empty body gracefully defaults to {}.
+    // than validate() so an empty body gracefully defaults to {}.
     const raw = await c.req.json().catch(() => ({}));
     const body = stopExperimentBodySchema.parse(raw);
 
