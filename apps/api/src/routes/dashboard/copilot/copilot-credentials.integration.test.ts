@@ -20,6 +20,7 @@ import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { getDb, drizzle, projects } from "@rovenue/db";
 import { auth } from "../../../lib/auth";
+import { env } from "../../../lib/env";
 import { copilotCredentialsRoute } from "./credentials";
 
 // ---------------------------------------------------------------------------
@@ -27,6 +28,13 @@ import { copilotCredentialsRoute } from "./credentials";
 // ---------------------------------------------------------------------------
 
 const RUN_ID = Date.now();
+
+// ---------------------------------------------------------------------------
+// HOST_MODE: BYOK credential CRUD is self-host-only; run the whole suite as
+// HOST_MODE=self so PUT/GET/test succeed.  Restore original in afterAll.
+// ---------------------------------------------------------------------------
+
+const origHostMode = env.HOST_MODE;
 
 // ---------------------------------------------------------------------------
 // Minimal Hono test app — mirrors how dashboardRoute mounts the route
@@ -116,6 +124,11 @@ beforeAll(async () => {
     { projectId, userId: ownerUserId, role: "OWNER" },
     { projectId, userId: csUserId, role: "CUSTOMER_SUPPORT" },
   ]);
+
+  // BYOK credential CRUD is self-host-only; switch to self mode after seeding
+  // (registration must be open during sign-up above, then guard must pass
+  // during the actual route calls below).
+  env.HOST_MODE = "self";
 });
 
 // ---------------------------------------------------------------------------
@@ -123,6 +136,8 @@ beforeAll(async () => {
 // ---------------------------------------------------------------------------
 
 afterAll(async () => {
+  env.HOST_MODE = origHostMode;
+
   const db = getDb();
   // project ON DELETE CASCADE removes copilot_credentials and project_members.
   if (projectId) {
