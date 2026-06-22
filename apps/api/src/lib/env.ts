@@ -17,6 +17,17 @@ const envSchema = z
     NODE_ENV: z
       .enum(["development", "production", "test"])
       .default("development"),
+    // ---- Deployment mode (self-hosted vs managed cloud) ------------------
+    // "self"  → no billing, Rovi unlimited + BYOK, registration closed after
+    //           the first user (invite-only). Default for self-hosters.
+    // "cloud" → Stripe billing, Rovi tier quotas, open registration.
+    HOST_MODE: z.enum(["self", "cloud"]).default("self"),
+    // Open-registration override. Unset → derived from HOST_MODE
+    // (self → false, cloud → true). "true" allows anyone to sign up.
+    ALLOW_REGISTRATION: z
+      .enum(["true", "false"])
+      .optional()
+      .transform((v) => (v === undefined ? undefined : v === "true")),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional(),
     DATABASE_URL: z.string().url().optional(),
     REDIS_URL: z.string().url().default("redis://localhost:6379"),
@@ -109,14 +120,8 @@ const envSchema = z
       .enum(["true", "false"])
       .default("true")
       .transform((v) => v === "true"),
-    // ---- Billing (Stripe) --------------------------------------------------
-    // Set BILLING_ENABLED=true to activate the /billing routes and Stripe
-    // integration. When false (default) all billing endpoints return 404 and
-    // no Stripe client is initialised.
-    BILLING_ENABLED: z
-      .enum(["true", "false"])
-      .default("false")
-      .transform((v) => v === "true"),
+    // ---- Billing (Stripe) — cloud only (HOST_MODE=cloud) -----------------
+    // Required in production when HOST_MODE=cloud (see superRefine below).
     STRIPE_BILLING_SECRET_KEY: z.string().min(1).optional(),
     STRIPE_BILLING_WEBHOOK_SECRET: z.string().min(1).optional(),
     STRIPE_BILLING_PUBLISHABLE_KEY: z.string().min(1).optional(),
@@ -167,10 +172,9 @@ const envSchema = z
     // else. The factory parses it lazily on first use.
     FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
     // ---- Rovi (AI copilot) ------------------------------------------------
-    // Self-host: set ROVI_UNLIMITED=true to disable tier quotas.
-    // Cloud: leave false and set ROVI_TIER per deployment if not stored in
-    // projects.metadata. Defaults to false (cloud safety, quota enforcement).
-    ROVI_UNLIMITED: z.coerce.boolean().default(false),
+    // Tier quotas apply only in cloud (HOST_MODE=cloud); self-host is
+    // unlimited (see lib/host-mode.ts). ROVI_TIER sets the cloud default
+    // tier when projects.metadata has no rovi_tier override.
     ROVI_TIER: z.enum(["free", "team", "business", "enterprise"]).optional(),
     ROVI_RATE_LIMIT_PER_USER: z.coerce.number().int().positive().default(30),
     ROVI_MESSAGE_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
@@ -254,21 +258,21 @@ const envSchema = z
       });
     }
 
-    if (data.BILLING_ENABLED) {
+    if (data.HOST_MODE === "cloud") {
       require(
         data.STRIPE_BILLING_SECRET_KEY,
         "STRIPE_BILLING_SECRET_KEY",
-        "BILLING_ENABLED=true requires a Stripe secret key in production",
+        "HOST_MODE=cloud requires a Stripe secret key in production",
       );
       require(
         data.STRIPE_BILLING_WEBHOOK_SECRET,
         "STRIPE_BILLING_WEBHOOK_SECRET",
-        "BILLING_ENABLED=true requires a Stripe webhook secret in production",
+        "HOST_MODE=cloud requires a Stripe webhook secret in production",
       );
       require(
         data.STRIPE_BILLING_INDIE_MONTHLY_PRICE_ID,
         "STRIPE_BILLING_INDIE_MONTHLY_PRICE_ID",
-        "BILLING_ENABLED=true requires the Indie monthly Stripe price id",
+        "HOST_MODE=cloud requires the Indie monthly Stripe price id",
       );
     }
   });
