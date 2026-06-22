@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { user } from "../schema";
 
@@ -8,6 +8,13 @@ import { user } from "../schema";
 //
 // Better Auth owns the write side of `user`; this module only
 // provides the lookups our own dashboard needs (invites by email).
+
+// Total registered users. Used by the registration gate to detect the
+// founding (first) user.
+export async function countUsers(db: Db): Promise<number> {
+  const rows = await db.select({ n: sql<number>`count(*)::int` }).from(user);
+  return rows[0]?.n ?? 0;
+}
 
 export async function findUserByEmail(
   db: Db,

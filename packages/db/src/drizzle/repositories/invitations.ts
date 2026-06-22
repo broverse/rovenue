@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import type { DbOrTx } from "./projects";
 import {
@@ -86,6 +86,28 @@ export async function findPendingInvitationByEmail(
         eq(projectInvitations.email, email.toLowerCase()),
         isNull(projectInvitations.acceptedAt),
         isNull(projectInvitations.revokedAt),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+// Project-agnostic pending invite lookup used by the registration gate:
+// any non-accepted, non-revoked, unexpired invitation for this email,
+// across ALL projects. Email matched case-insensitively (stored lowercase).
+export async function findAnyPendingInvitationByEmail(
+  db: Db,
+  email: string,
+): Promise<ProjectInvitation | null> {
+  const rows = await db
+    .select()
+    .from(projectInvitations)
+    .where(
+      and(
+        eq(projectInvitations.email, email.toLowerCase()),
+        isNull(projectInvitations.acceptedAt),
+        isNull(projectInvitations.revokedAt),
+        gt(projectInvitations.expiresAt, new Date()),
       ),
     )
     .limit(1);
