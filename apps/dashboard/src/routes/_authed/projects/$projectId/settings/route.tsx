@@ -16,18 +16,20 @@ import {
   UserCog,
 } from "lucide-react";
 import { cn } from "../../../../../lib/cn";
+import { billingEnabled } from "../../../../../lib/host-mode";
 
 export const Route = createFileRoute("/_authed/projects/$projectId/settings")({
   component: SettingsLayout,
 });
 
-const TABS = [
+const ALL_TABS = [
   {
     id: "general",
     labelKey: "settings.tabs.general",
     icon: SettingsIcon,
     to: "/projects/$projectId/settings" as const,
     match: (id: string) => id.endsWith("/settings/") || id.endsWith("/settings"),
+    billingOnly: false,
   },
   {
     id: "rovi",
@@ -35,6 +37,7 @@ const TABS = [
     icon: Sparkles,
     to: "/projects/$projectId/settings/rovi" as const,
     match: (id: string) => id.endsWith("/settings/rovi"),
+    billingOnly: false,
   },
   {
     id: "billing",
@@ -42,6 +45,7 @@ const TABS = [
     icon: Receipt,
     to: "/projects/$projectId/settings/billing" as const,
     match: (id: string) => id.endsWith("/settings/billing"),
+    billingOnly: true,
   },
   {
     id: "paymentMethods",
@@ -49,6 +53,7 @@ const TABS = [
     icon: CreditCard,
     to: "/projects/$projectId/settings/payment-methods" as const,
     match: (id: string) => id.endsWith("/settings/payment-methods"),
+    billingOnly: true,
   },
   {
     id: "invoices",
@@ -56,6 +61,7 @@ const TABS = [
     icon: FileText,
     to: "/projects/$projectId/settings/invoices" as const,
     match: (id: string) => id.endsWith("/settings/invoices"),
+    billingOnly: true,
   },
   {
     id: "members",
@@ -63,6 +69,7 @@ const TABS = [
     icon: UserCog,
     to: "/projects/$projectId/settings/members" as const,
     match: (id: string) => id.endsWith("/settings/members"),
+    billingOnly: false,
   },
   {
     id: "auditLogs",
@@ -70,8 +77,11 @@ const TABS = [
     icon: History,
     to: "/projects/$projectId/settings/audit-logs" as const,
     match: (id: string) => id.endsWith("/settings/audit-logs"),
+    billingOnly: false,
   },
-] as const;
+];
+
+const TABS = ALL_TABS.filter((tab) => !tab.billingOnly || billingEnabled);
 
 function SettingsLayout() {
   const { t } = useTranslation();

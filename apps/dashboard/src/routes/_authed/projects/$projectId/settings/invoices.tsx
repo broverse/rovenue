@@ -9,6 +9,7 @@ import {
   InvoiceStatusChip,
   type InvoiceStatus,
 } from "../../../../../components/billing";
+import { billingEnabled } from "../../../../../lib/host-mode";
 
 export const Route = createFileRoute(
   "/_authed/projects/$projectId/settings/invoices",
@@ -17,6 +18,17 @@ export const Route = createFileRoute(
 });
 
 function InvoicesPage() {
+  if (!billingEnabled) {
+    return (
+      <div className="p-6 text-[13px] text-rv-mute-500">
+        Billing is managed by your administrator on self-hosted instances.
+      </div>
+    );
+  }
+  return <InvoicesPageCloud />;
+}
+
+function InvoicesPageCloud() {
   const { projectId } = useParams({
     from: "/_authed/projects/$projectId/settings/invoices",
   });

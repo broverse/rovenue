@@ -7,6 +7,7 @@ import {
 } from "@stripe/react-stripe-js";
 import { loadStripe, type Stripe } from "@stripe/stripe-js";
 import { Button } from "../../ui/button";
+import { billingEnabled } from "../../lib/host-mode";
 
 interface UpgradeModalProps {
   clientSecret: string;
@@ -21,6 +22,8 @@ export function UpgradeModal(props: UpgradeModalProps) {
   useEffect(() => {
     setStripePromise(loadStripe(props.publishableKey));
   }, [props.publishableKey]);
+
+  if (!billingEnabled) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">

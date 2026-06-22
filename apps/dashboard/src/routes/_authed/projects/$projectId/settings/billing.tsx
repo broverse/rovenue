@@ -9,12 +9,24 @@ import {
 } from "../../../../../components/dashboard";
 import { PlanCard, UpgradeModal } from "../../../../../components/billing";
 import { Button } from "../../../../../ui/button";
+import { billingEnabled } from "../../../../../lib/host-mode";
 
 export const Route = createFileRoute("/_authed/projects/$projectId/settings/billing")({
   component: BillingPage,
 });
 
 function BillingPage() {
+  if (!billingEnabled) {
+    return (
+      <div className="p-6 text-[13px] text-rv-mute-500">
+        Billing is managed by your administrator on self-hosted instances.
+      </div>
+    );
+  }
+  return <BillingPageCloud />;
+}
+
+function BillingPageCloud() {
   const { projectId } = useParams({
     from: "/_authed/projects/$projectId/settings/billing",
   });

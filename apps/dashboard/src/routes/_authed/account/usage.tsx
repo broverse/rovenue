@@ -10,6 +10,7 @@ import {
 import { Button } from "../../../ui/button";
 import { useBillingUsage, type UsageMeter } from "../../../lib/hooks/useBillingUsage";
 import { useProjects } from "../../../lib/hooks/useProjects";
+import { billingEnabled } from "../../../lib/host-mode";
 
 export const Route = createFileRoute("/_authed/account/usage")({
   component: UsagePage,
@@ -55,7 +56,7 @@ export function UsagePage() {
             ? t("account.usage.limits.resets", { date: formatResetDate(data.periodEnd), remaining: daysRemaining(data.periodEnd) })
             : undefined
         }
-        footer={<Button variant="solid-primary">{t("account.billing.plan.upgrade")}</Button>}
+        footer={billingEnabled ? <Button variant="solid-primary">{t("account.billing.plan.upgrade")}</Button> : undefined}
       >
         {isLoading || !data ? (
           <div className="py-3 text-[12px] text-rv-mute-500">
