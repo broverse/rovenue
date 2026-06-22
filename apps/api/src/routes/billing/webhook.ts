@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { env } from "../../lib/env";
 import { getPlatformStripe } from "../../lib/stripe-billing";
-import { isBillingEnabled } from "../../lib/billing-flags";
+import { isBillingEnabled } from "../../lib/host-mode";
 import { logger } from "../../lib/logger";
 import { dispatchStripeBillingEvent } from "../../services/billing/webhook-handlers";
 
@@ -29,7 +29,7 @@ export const billingWebhookRoute = new Hono().post("/", async (c) => {
   }
   const stripe = getPlatformStripe();
   if (!stripe || !env.STRIPE_BILLING_WEBHOOK_SECRET) {
-    log.error("BILLING_ENABLED=true but Stripe client/secret unavailable");
+    log.error("HOST_MODE=cloud but Stripe client/secret unavailable");
     throw new HTTPException(503, { message: "Billing not configured" });
   }
 

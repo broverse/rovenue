@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { drizzle, db, MemberRole } from "@rovenue/db";
 import { assertProjectAccess } from "../../../lib/project-access";
-import { isBillingEnabled } from "../../../lib/billing-flags";
+import { isBillingEnabled } from "../../../lib/host-mode";
 import { ok } from "../../../lib/response";
 
 // =============================================================
@@ -20,8 +20,8 @@ import { ok } from "../../../lib/response";
 // `refundedAmount` vs `amountPaid`; the server stays presentation-
 // agnostic.
 //
-// Feature-flagged via `BILLING_ENABLED` like the rest of the
-// billing surface. Auth + rate-limit are provided by the parent
+// Gated by `isBillingEnabled()` like the rest of the billing surface
+// (cloud-only; hidden in self-host). Auth + rate-limit are provided by the parent
 // dashboard router tree — `requireDashboardAuth` is NOT re-mounted.
 
 export const invoicesRoute = new Hono().get("/", async (c) => {

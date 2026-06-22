@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 import { env } from "./env";
-import { isBillingEnabled } from "./billing-flags";
+import { isBillingEnabled } from "./host-mode";
 import { logger } from "./logger";
 
 // =============================================================
@@ -12,7 +12,7 @@ import { logger } from "./logger";
 // subscriptions). This one talks to Rovenue's own Stripe account
 // (the one we charge customers for using the cloud).
 //
-// Returns null when BILLING_ENABLED=false so callers can early-return
+// Returns null when HOST_MODE != "cloud" so callers can early-return
 // without throwing. Self-host installs always see null.
 
 const log = logger.child("stripe-billing");
@@ -23,7 +23,7 @@ export function getPlatformStripe(): Stripe | null {
   if (!isBillingEnabled()) return null;
   if (!env.STRIPE_BILLING_SECRET_KEY) {
     log.warn(
-      "BILLING_ENABLED=true but STRIPE_BILLING_SECRET_KEY is missing — billing is inert",
+      "HOST_MODE=cloud but STRIPE_BILLING_SECRET_KEY is missing — billing is inert",
     );
     return null;
   }

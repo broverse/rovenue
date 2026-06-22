@@ -4,7 +4,7 @@ import { validate } from "../../../lib/validate";
 import { z } from "zod";
 import { db, MemberRole } from "@rovenue/db";
 import { assertProjectAccess } from "../../../lib/project-access";
-import { isBillingEnabled } from "../../../lib/billing-flags";
+import { isBillingEnabled } from "../../../lib/host-mode";
 import { ok } from "../../../lib/response";
 import { upgradeProject } from "../../../services/billing/upgrade-project";
 

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { db, MemberRole } from "@rovenue/db";
 import { assertProjectAccess } from "../../../lib/project-access";
-import { isBillingEnabled } from "../../../lib/billing-flags";
+import { isBillingEnabled } from "../../../lib/host-mode";
 import { ok } from "../../../lib/response";
 import { buildBillingSummary } from "../../../services/billing/billing-summary";
 
@@ -13,9 +13,9 @@ import { buildBillingSummary } from "../../../services/billing/billing-summary";
 // Read-only summary endpoint: returns the project's current
 // billing_subscriptions row (state/tier/cycle/period) plus the
 // default payment method (if any), assembled by
-// `buildBillingSummary`. Gated by `BILLING_ENABLED` so the surface
-// is fully hidden in self-host where the platform-billing feature
-// is irrelevant.
+// `buildBillingSummary`. Gated by `isBillingEnabled()` so the surface
+// is fully hidden in self-host (HOST_MODE=self) where the platform-
+// billing feature is irrelevant.
 //
 // Auth + per-user rate limit are mounted by the parent dashboard
 // router tree (apps/api/src/routes/dashboard/index.ts) — see the

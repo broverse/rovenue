@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { drizzle, db, MemberRole } from "@rovenue/db";
 import { assertProjectAccess } from "../../../lib/project-access";
-import { isBillingEnabled } from "../../../lib/billing-flags";
+import { isBillingEnabled } from "../../../lib/host-mode";
 import { getPlatformStripe } from "../../../lib/stripe-billing";
 import { ok } from "../../../lib/response";
 import { startAddPaymentMethod } from "../../../services/billing/add-payment-method";
