@@ -1,6 +1,18 @@
 import { Link } from "@tanstack/react-router";
+import { byokAllowed } from "../../lib/host-mode";
 
 export function RoviMissingConfig({ projectId }: { projectId: string }) {
+  if (!byokAllowed) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
+        <p className="text-sm font-medium text-foreground">Rovi</p>
+        <p className="mt-1 max-w-[280px] text-xs text-rv-mute-600">
+          AI is managed on Rovenue Cloud — no provider key needed.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
       <p className="text-sm font-medium text-foreground">Rovi needs an API key</p>

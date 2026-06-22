@@ -3,8 +3,7 @@ import { BookOpen, Menu as MenuIcon, Search } from "lucide-react";
 import { BellDropdown } from "../notifications/bell-dropdown";
 import { TopbarRoviButton } from "../rovi/topbar-rovi-button";
 import { TopbarUserMenu } from "./topbar-user-menu";
-
-const IS_SELF_HOSTED = import.meta.env.VITE_SELF_HOSTED === "true";
+import { isSelfHosted as IS_SELF_HOSTED } from "../../lib/host-mode";
 
 type TopbarProps = {
   projectName: string;

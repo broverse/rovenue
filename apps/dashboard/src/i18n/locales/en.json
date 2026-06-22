@@ -433,6 +433,8 @@
       "welcomePrefix": "Welcome back to ",
       "welcomeBrand": "Rovenue.",
       "tagline": "Subscription revenue, paywall experiments, and a self-hosted data warehouse — all in one open-source dashboard.",
+      "inviteOnly": "New accounts are invite-only on this instance. Sign in if you already have an account, or ask a project owner to invite you.",
+      "errorRegistrationClosed": "Sign-ups are closed on this instance. If you already have an account, sign in with the provider you used to register.",
       "orWithEmail": "or with email",
       "emailLabel": "Work email",
       "emailHint": "we'll send a magic link",

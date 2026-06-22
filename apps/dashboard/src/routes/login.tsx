@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Trans, useTranslation } from "react-i18next";
 import { signIn } from "../lib/auth";
 import logoUrl from "../assets/logos/logo.svg";
+import { registrationOpen } from "../lib/host-mode";
 
 export const Route = createFileRoute("/login")({
   component: LoginRouteComponent,
@@ -78,7 +79,15 @@ export function LoginPage({ error }: { error?: string }) {
 
                 {error && (
                   <div role="alert" className="si-error">
-                    {error}
+                    {error === "REGISTRATION_CLOSED"
+                      ? t("auth.signIn.errorRegistrationClosed")
+                      : error}
+                  </div>
+                )}
+
+                {!registrationOpen && (
+                  <div role="status" className="si-info">
+                    {t("auth.signIn.inviteOnly")}
                   </div>
                 )}
 
@@ -563,6 +572,16 @@ const LOGIN_STYLES = `
   border: 1px solid color-mix(in srgb, #EF4444 40%, var(--si-divider));
   background: color-mix(in srgb, #EF4444 10%, var(--si-content1));
   color: #FCA5A5;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.si-info {
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--si-primary-500) 35%, var(--si-divider));
+  background: color-mix(in srgb, var(--si-primary-500) 8%, var(--si-content1));
+  color: var(--si-mute-600);
   padding: 10px 12px;
   font-size: 13px;
   line-height: 1.4;

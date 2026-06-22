@@ -2,6 +2,7 @@ import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 import { Sparkles } from "lucide-react";
 import { useRoviCredentials } from "../../../../../lib/hooks/useRoviCredentials";
+import { byokAllowed } from "../../../../../lib/host-mode";
 
 export const Route = createFileRoute(
   "/_authed/projects/$projectId/settings/rovi",
@@ -74,92 +75,100 @@ function RoviSettingsRoute() {
         encrypted at rest (AES-256-GCM). Owners only.
       </p>
 
-      <div className="space-y-4 rounded-md border border-rv-divider bg-rv-c1 p-4">
-        <div>
-          <label className="mb-1 block text-xs uppercase tracking-wide text-rv-mute-500">
-            Provider
-          </label>
-          <select
-            value={provider}
-            onChange={(e) => onProviderChange(e.target.value as Provider)}
-            className="h-9 w-full rounded-md border border-rv-divider bg-rv-c2 px-2.5 text-sm text-foreground focus:border-rv-c4 focus:outline-none"
-          >
-            {PROVIDERS.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs uppercase tracking-wide text-rv-mute-500">
-            API key
-          </label>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder={existing?.hasKey ? "•••••••• (saved)" : "sk-…"}
-            className="h-9 w-full rounded-md border border-rv-divider bg-rv-c2 px-2.5 text-sm text-foreground placeholder:text-rv-mute-500 focus:border-rv-c4 focus:outline-none"
-          />
-          <p className="mt-1 text-[11px] text-rv-mute-500">
-            Leave blank to keep the existing key.
-          </p>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs uppercase tracking-wide text-rv-mute-500">
-            Default model
-          </label>
-          <input
-            type="text"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className="h-9 w-full rounded-md border border-rv-divider bg-rv-c2 px-2.5 text-sm text-foreground focus:border-rv-c4 focus:outline-none"
-          />
-        </div>
-
-        {provider === "ollama" ? (
+      {byokAllowed ? (
+        <div className="space-y-4 rounded-md border border-rv-divider bg-rv-c1 p-4">
           <div>
             <label className="mb-1 block text-xs uppercase tracking-wide text-rv-mute-500">
-              Base URL
+              Provider
+            </label>
+            <select
+              value={provider}
+              onChange={(e) => onProviderChange(e.target.value as Provider)}
+              className="h-9 w-full rounded-md border border-rv-divider bg-rv-c2 px-2.5 text-sm text-foreground focus:border-rv-c4 focus:outline-none"
+            >
+              {PROVIDERS.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs uppercase tracking-wide text-rv-mute-500">
+              API key
             </label>
             <input
-              type="url"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="http://localhost:11434/v1"
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={existing?.hasKey ? "•••••••• (saved)" : "sk-…"}
               className="h-9 w-full rounded-md border border-rv-divider bg-rv-c2 px-2.5 text-sm text-foreground placeholder:text-rv-mute-500 focus:border-rv-c4 focus:outline-none"
             />
+            <p className="mt-1 text-[11px] text-rv-mute-500">
+              Leave blank to keep the existing key.
+            </p>
           </div>
-        ) : null}
 
-        <div className="flex items-center gap-2 pt-2">
-          <button
-            type="button"
-            onClick={save}
-            disabled={upsert.isPending || (!apiKey && !existing?.hasKey)}
-            className="h-9 rounded-md bg-rv-c4 px-3 text-sm font-medium text-foreground transition hover:opacity-90 disabled:opacity-50"
-          >
-            {upsert.isPending ? "Saving…" : "Save"}
-          </button>
-          <button
-            type="button"
-            onClick={runTest}
-            disabled={!existing?.hasKey || test.isPending}
-            className="h-9 rounded-md border border-rv-divider px-3 text-sm text-rv-mute-700 transition hover:bg-rv-c2 hover:text-foreground disabled:opacity-40"
-          >
-            {test.isPending ? "Testing…" : "Test"}
-          </button>
-          {testResult ? (
-            <span className="text-xs text-rv-mute-600">{testResult}</span>
+          <div>
+            <label className="mb-1 block text-xs uppercase tracking-wide text-rv-mute-500">
+              Default model
+            </label>
+            <input
+              type="text"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="h-9 w-full rounded-md border border-rv-divider bg-rv-c2 px-2.5 text-sm text-foreground focus:border-rv-c4 focus:outline-none"
+            />
+          </div>
+
+          {provider === "ollama" ? (
+            <div>
+              <label className="mb-1 block text-xs uppercase tracking-wide text-rv-mute-500">
+                Base URL
+              </label>
+              <input
+                type="url"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder="http://localhost:11434/v1"
+                className="h-9 w-full rounded-md border border-rv-divider bg-rv-c2 px-2.5 text-sm text-foreground placeholder:text-rv-mute-500 focus:border-rv-c4 focus:outline-none"
+              />
+            </div>
           ) : null}
-          {saveError ? (
-            <span className="text-xs text-red-500">{saveError}</span>
-          ) : null}
+
+          <div className="flex items-center gap-2 pt-2">
+            <button
+              type="button"
+              onClick={save}
+              disabled={upsert.isPending || (!apiKey && !existing?.hasKey)}
+              className="h-9 rounded-md bg-rv-c4 px-3 text-sm font-medium text-foreground transition hover:opacity-90 disabled:opacity-50"
+            >
+              {upsert.isPending ? "Saving…" : "Save"}
+            </button>
+            <button
+              type="button"
+              onClick={runTest}
+              disabled={!existing?.hasKey || test.isPending}
+              className="h-9 rounded-md border border-rv-divider px-3 text-sm text-rv-mute-700 transition hover:bg-rv-c2 hover:text-foreground disabled:opacity-40"
+            >
+              {test.isPending ? "Testing…" : "Test"}
+            </button>
+            {testResult ? (
+              <span className="text-xs text-rv-mute-600">{testResult}</span>
+            ) : null}
+            {saveError ? (
+              <span className="text-xs text-red-500">{saveError}</span>
+            ) : null}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="rounded-md border border-rv-divider bg-rv-c1 p-4">
+          <p className="text-sm text-rv-mute-600">
+            AI is managed on Rovenue Cloud — no provider key needed.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
