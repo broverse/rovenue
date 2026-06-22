@@ -44,7 +44,10 @@ const {
 vi.mock("../src/services/billing/add-payment-method", () => ({
   startAddPaymentMethod,
 }));
-vi.mock("../src/lib/billing-flags", () => ({ isBillingEnabled }));
+vi.mock("../src/lib/host-mode", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/host-mode")>();
+  return { ...actual, isBillingEnabled };
+});
 vi.mock("../src/lib/project-access", () => ({ assertProjectAccess }));
 vi.mock("../src/lib/stripe-billing", () => ({ getPlatformStripe }));
 vi.mock("@rovenue/db", async () => {

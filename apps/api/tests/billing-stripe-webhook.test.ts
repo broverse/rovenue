@@ -28,8 +28,8 @@ describe("POST /billing/stripe/webhook", () => {
     });
   }
 
-  it("returns 404 when BILLING_ENABLED=false", async () => {
-    process.env.BILLING_ENABLED = "false";
+  it("returns 404 when HOST_MODE=self (billing disabled)", async () => {
+    process.env.HOST_MODE = "self";
     const app = await buildApp();
     const res = await app.request("/billing/stripe/webhook", {
       method: "POST",
@@ -40,7 +40,7 @@ describe("POST /billing/stripe/webhook", () => {
   });
 
   it("returns 400 when the Stripe signature is invalid", async () => {
-    process.env.BILLING_ENABLED = "true";
+    process.env.HOST_MODE = "cloud";
     process.env.STRIPE_BILLING_SECRET_KEY = "sk_test_fake";
     process.env.STRIPE_BILLING_WEBHOOK_SECRET = "whsec_test_secret";
     const app = await buildApp();
@@ -53,7 +53,7 @@ describe("POST /billing/stripe/webhook", () => {
   });
 
   it("returns 200 with received:true for a valid signed event", async () => {
-    process.env.BILLING_ENABLED = "true";
+    process.env.HOST_MODE = "cloud";
     process.env.STRIPE_BILLING_SECRET_KEY = "sk_test_fake";
     process.env.STRIPE_BILLING_WEBHOOK_SECRET = "whsec_test_secret";
     const app = await buildApp();

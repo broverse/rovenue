@@ -18,9 +18,10 @@ vi.mock("../src/services/billing/billing-summary", () => ({
   buildBillingSummary,
 }));
 
-vi.mock("../src/lib/billing-flags", () => ({
-  isBillingEnabled: vi.fn(() => true),
-}));
+vi.mock("../src/lib/host-mode", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/host-mode")>();
+  return { ...actual, isBillingEnabled: vi.fn(() => true) };
+});
 
 vi.mock("../src/lib/project-access", () => ({
   assertProjectAccess: vi.fn(async () => ({ id: "m1", role: "OWNER" })),
@@ -36,7 +37,7 @@ vi.mock("@rovenue/db", async () => {
 });
 
 import { billingSubRouter } from "../src/routes/dashboard/billing";
-import { isBillingEnabled } from "../src/lib/billing-flags";
+import { isBillingEnabled } from "../src/lib/host-mode";
 
 function mountAppWithUser() {
   const app = new Hono()

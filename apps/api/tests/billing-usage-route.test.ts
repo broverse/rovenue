@@ -20,7 +20,10 @@ const { buildUsageReport, isBillingEnabled, assertProjectAccess } = vi.hoisted(
 );
 
 vi.mock("../src/services/billing/usage", () => ({ buildUsageReport }));
-vi.mock("../src/lib/billing-flags", () => ({ isBillingEnabled }));
+vi.mock("../src/lib/host-mode", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/host-mode")>();
+  return { ...actual, isBillingEnabled };
+});
 vi.mock("../src/lib/project-access", () => ({ assertProjectAccess }));
 
 // `db` is passed through to the mocked service so any value works.

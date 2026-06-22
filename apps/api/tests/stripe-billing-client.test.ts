@@ -10,8 +10,8 @@ describe("stripe-billing client", () => {
     process.env = { ...original };
   });
 
-  it("getPlatformStripe returns a Stripe instance when BILLING_ENABLED and secret set", async () => {
-    process.env.BILLING_ENABLED = "true";
+  it("getPlatformStripe returns a Stripe instance when HOST_MODE=cloud and secret set", async () => {
+    process.env.HOST_MODE = "cloud";
     process.env.STRIPE_BILLING_SECRET_KEY = "sk_test_fake_123";
     const mod = await import("../src/lib/stripe-billing");
     const stripe = mod.getPlatformStripe();
@@ -19,16 +19,16 @@ describe("stripe-billing client", () => {
     expect(typeof stripe!.customers.create).toBe("function");
   });
 
-  it("getPlatformStripe returns null when BILLING_ENABLED=false", async () => {
-    process.env.BILLING_ENABLED = "false";
+  it("getPlatformStripe returns null when HOST_MODE=self", async () => {
+    process.env.HOST_MODE = "self";
     const mod = await import("../src/lib/stripe-billing");
     expect(mod.getPlatformStripe()).toBeNull();
   });
 
-  it("isBillingEnabled mirrors env", async () => {
-    process.env.BILLING_ENABLED = "true";
+  it("isBillingEnabled mirrors HOST_MODE", async () => {
+    process.env.HOST_MODE = "cloud";
     process.env.STRIPE_BILLING_SECRET_KEY = "sk_test_fake";
-    const mod = await import("../src/lib/billing-flags");
+    const mod = await import("../src/lib/host-mode");
     expect(mod.isBillingEnabled()).toBe(true);
   });
 });

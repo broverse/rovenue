@@ -32,7 +32,10 @@ vi.mock("@rovenue/db", async () => {
   };
 });
 
-vi.mock("../src/lib/billing-flags", () => ({ isBillingEnabled }));
+vi.mock("../src/lib/host-mode", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/host-mode")>();
+  return { ...actual, isBillingEnabled };
+});
 vi.mock("../src/lib/project-access", () => ({ assertProjectAccess }));
 
 import { billingSubRouter } from "../src/routes/dashboard/billing";

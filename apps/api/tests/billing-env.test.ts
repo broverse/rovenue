@@ -5,24 +5,24 @@ describe("billing env vars", () => {
     vi.resetModules();
   });
 
-  it("BILLING_ENABLED defaults to false when unset", async () => {
-    const original = process.env.BILLING_ENABLED;
-    delete process.env.BILLING_ENABLED;
+  it("HOST_MODE defaults to 'self' when unset", async () => {
+    const original = process.env.HOST_MODE;
+    delete process.env.HOST_MODE;
     try {
       const { env } = await import("../src/lib/env");
-      expect(env.BILLING_ENABLED).toBe(false);
+      expect(env.HOST_MODE).toBe("self");
     } finally {
-      if (original !== undefined) process.env.BILLING_ENABLED = original;
+      if (original !== undefined) process.env.HOST_MODE = original;
     }
   });
 
-  it("BILLING_ENABLED=true parses to true", async () => {
-    process.env.BILLING_ENABLED = "true";
+  it("HOST_MODE=cloud enables billing", async () => {
+    process.env.HOST_MODE = "cloud";
     try {
-      const { env } = await import("../src/lib/env");
-      expect(env.BILLING_ENABLED).toBe(true);
+      const { isBillingEnabled } = await import("../src/lib/host-mode");
+      expect(isBillingEnabled()).toBe(true);
     } finally {
-      delete process.env.BILLING_ENABLED;
+      process.env.HOST_MODE = "cloud"; // restore setup.ts default
     }
   });
 
@@ -41,15 +41,15 @@ describe("billing env vars", () => {
     }
   });
 
-  it("STRIPE_BILLING_SECRET_KEY is required when BILLING_ENABLED=true in production", async () => {
+  it("STRIPE_BILLING_SECRET_KEY is required when HOST_MODE=cloud in production", async () => {
     const origNode = process.env.NODE_ENV;
-    const origBilling = process.env.BILLING_ENABLED;
+    const origHostMode = process.env.HOST_MODE;
     const origKey = process.env.STRIPE_BILLING_SECRET_KEY;
     const origWebhook = process.env.STRIPE_BILLING_WEBHOOK_SECRET;
 
-    // Set production with BILLING_ENABLED=true but no Stripe keys
+    // Set production with HOST_MODE=cloud but no Stripe keys
     process.env.NODE_ENV = "production";
-    process.env.BILLING_ENABLED = "true";
+    process.env.HOST_MODE = "cloud";
     delete process.env.STRIPE_BILLING_SECRET_KEY;
     delete process.env.STRIPE_BILLING_WEBHOOK_SECRET;
 
@@ -67,9 +67,9 @@ describe("billing env vars", () => {
       await expect(import("../src/lib/env")).rejects.toThrow();
     } finally {
       process.env.NODE_ENV = origNode;
-      if (origBilling !== undefined)
-        process.env.BILLING_ENABLED = origBilling;
-      else delete process.env.BILLING_ENABLED;
+      if (origHostMode !== undefined)
+        process.env.HOST_MODE = origHostMode;
+      else delete process.env.HOST_MODE;
       if (origKey !== undefined)
         process.env.STRIPE_BILLING_SECRET_KEY = origKey;
       if (origWebhook !== undefined)

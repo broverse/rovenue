@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
+import { errorHandler } from "../src/middleware/error";
 
 // =============================================================
 // Route test: POST /dashboard/projects/:projectId/billing/upgrade
@@ -21,7 +22,10 @@ const { upgradeProject, isBillingEnabled, assertProjectAccess } = vi.hoisted(
 );
 
 vi.mock("../src/services/billing/upgrade-project", () => ({ upgradeProject }));
-vi.mock("../src/lib/billing-flags", () => ({ isBillingEnabled }));
+vi.mock("../src/lib/host-mode", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/host-mode")>();
+  return { ...actual, isBillingEnabled };
+});
 vi.mock("../src/lib/project-access", () => ({ assertProjectAccess }));
 vi.mock("@rovenue/db", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("@rovenue/db");
@@ -34,13 +38,15 @@ vi.mock("@rovenue/db", async () => {
 import { billingSubRouter } from "../src/routes/dashboard/billing";
 
 function mountAppWithUser() {
-  return new Hono()
+  const app = new Hono()
     .use("*", async (c, next) => {
       c.set("user", { id: "u1" } as never);
       c.set("session", { id: "s1" } as never);
       await next();
     })
     .route("/projects/:projectId/billing", billingSubRouter);
+  app.onError(errorHandler);
+  return app;
 }
 
 describe("POST /dashboard/projects/:projectId/billing/upgrade", () => {
