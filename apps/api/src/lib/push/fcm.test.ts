@@ -21,7 +21,7 @@ const baseMsg = {
 
 function mockSender(res: FcmHttpResponse) {
   return vi
-    .fn<[Parameters<FcmHttpSend>[0]], ReturnType<FcmHttpSend>>()
+    .fn<(req: Parameters<FcmHttpSend>[0]) => ReturnType<FcmHttpSend>>()
     .mockResolvedValue(res);
 }
 

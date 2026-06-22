@@ -34,7 +34,7 @@ const baseMsg = {
 
 describe("ApnsPushTransport", () => {
   it("returns ok on 200 with apns-id header", async () => {
-    const sender = vi.fn<[Parameters<ApnsHttp2Send>[0]], ReturnType<ApnsHttp2Send>>().mockResolvedValue({
+    const sender = vi.fn<(req: Parameters<ApnsHttp2Send>[0]) => ReturnType<ApnsHttp2Send>>().mockResolvedValue({
       statusCode: 200,
       headers: { "apns-id": "abc-123" },
       body: "",
@@ -46,7 +46,7 @@ describe("ApnsPushTransport", () => {
   });
 
   it("posts to /3/device/<token> with the right APNs headers", async () => {
-    const sender = vi.fn<[Parameters<ApnsHttp2Send>[0]], ReturnType<ApnsHttp2Send>>().mockResolvedValue({
+    const sender = vi.fn<(req: Parameters<ApnsHttp2Send>[0]) => ReturnType<ApnsHttp2Send>>().mockResolvedValue({
       statusCode: 200,
       headers: { "apns-id": "id" },
       body: "",
@@ -79,7 +79,7 @@ describe("ApnsPushTransport", () => {
   });
 
   it("signs the JWT with kid=keyId, iss=teamId, alg=ES256", async () => {
-    const sender = vi.fn<[Parameters<ApnsHttp2Send>[0]], ReturnType<ApnsHttp2Send>>().mockResolvedValue({
+    const sender = vi.fn<(req: Parameters<ApnsHttp2Send>[0]) => ReturnType<ApnsHttp2Send>>().mockResolvedValue({
       statusCode: 200,
       headers: { "apns-id": "id" },
       body: "",
@@ -99,7 +99,7 @@ describe("ApnsPushTransport", () => {
   });
 
   it("caches the JWT across sends within the TTL window", async () => {
-    const sender = vi.fn<[Parameters<ApnsHttp2Send>[0]], ReturnType<ApnsHttp2Send>>().mockResolvedValue({
+    const sender = vi.fn<(req: Parameters<ApnsHttp2Send>[0]) => ReturnType<ApnsHttp2Send>>().mockResolvedValue({
       statusCode: 200,
       headers: { "apns-id": "id" },
       body: "",
@@ -119,7 +119,7 @@ describe("ApnsPushTransport", () => {
   });
 
   it("marks 400 + BadDeviceToken as permanent", async () => {
-    const sender = vi.fn<[Parameters<ApnsHttp2Send>[0]], ReturnType<ApnsHttp2Send>>().mockResolvedValue({
+    const sender = vi.fn<(req: Parameters<ApnsHttp2Send>[0]) => ReturnType<ApnsHttp2Send>>().mockResolvedValue({
       statusCode: 400,
       headers: {},
       body: JSON.stringify({ reason: "BadDeviceToken" }),
@@ -134,7 +134,7 @@ describe("ApnsPushTransport", () => {
   });
 
   it("marks 410 Gone as permanent", async () => {
-    const sender = vi.fn<[Parameters<ApnsHttp2Send>[0]], ReturnType<ApnsHttp2Send>>().mockResolvedValue({
+    const sender = vi.fn<(req: Parameters<ApnsHttp2Send>[0]) => ReturnType<ApnsHttp2Send>>().mockResolvedValue({
       statusCode: 410,
       headers: {},
       body: JSON.stringify({ reason: "Unregistered" }),
@@ -146,7 +146,7 @@ describe("ApnsPushTransport", () => {
   });
 
   it("treats 5xx as transient", async () => {
-    const sender = vi.fn<[Parameters<ApnsHttp2Send>[0]], ReturnType<ApnsHttp2Send>>().mockResolvedValue({
+    const sender = vi.fn<(req: Parameters<ApnsHttp2Send>[0]) => ReturnType<ApnsHttp2Send>>().mockResolvedValue({
       statusCode: 503,
       headers: {},
       body: "",
@@ -158,7 +158,7 @@ describe("ApnsPushTransport", () => {
   });
 
   it("treats 429 as transient", async () => {
-    const sender = vi.fn<[Parameters<ApnsHttp2Send>[0]], ReturnType<ApnsHttp2Send>>().mockResolvedValue({
+    const sender = vi.fn<(req: Parameters<ApnsHttp2Send>[0]) => ReturnType<ApnsHttp2Send>>().mockResolvedValue({
       statusCode: 429,
       headers: {},
       body: JSON.stringify({ reason: "TooManyRequests" }),
@@ -174,7 +174,7 @@ describe("ApnsPushTransport", () => {
 
   it("returns transient failure when sender throws", async () => {
     const sender = vi
-      .fn<[Parameters<ApnsHttp2Send>[0]], ReturnType<ApnsHttp2Send>>()
+      .fn<(req: Parameters<ApnsHttp2Send>[0]) => ReturnType<ApnsHttp2Send>>()
       .mockRejectedValue(new Error("ECONNRESET"));
     const t = new ApnsPushTransport(configWith(), sender);
     const r = await t.send(baseMsg);

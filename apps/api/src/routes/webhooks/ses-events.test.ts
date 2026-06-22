@@ -53,7 +53,7 @@ vi.mock("@rovenue/db", async (importOriginal) => {
 });
 
 // Track when the rate-limit middleware is invoked.
-const rateLimitSpy = vi.fn<[], void>();
+const rateLimitSpy = vi.fn<() => void>();
 vi.mock("../../middleware/rate-limit", () => ({
   endpointRateLimit: (_opts: unknown) =>
     async (_c: unknown, next: () => Promise<void>) => {

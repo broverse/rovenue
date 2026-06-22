@@ -14,7 +14,7 @@ import { registry, webhookEventsReclaimedTotal } from "../lib/metrics";
 // ---------------------------------------------------------------------------
 // Mock @rovenue/db so reclaimStaleWebhookEvents never touches Postgres.
 // ---------------------------------------------------------------------------
-const reclaimMock = vi.fn<[unknown, unknown], Promise<number>>();
+const reclaimMock = vi.fn<(a: unknown, b: unknown) => Promise<number>>();
 
 vi.mock("@rovenue/db", () => ({
   drizzle: {
