@@ -12,6 +12,7 @@ import {
   buildAiSdkModel,
 } from "../../../services/copilot/providers";
 import { env } from "../../../lib/env";
+import { isByokAllowed } from "../../../lib/host-mode";
 
 const upsertBody = z.object({
   provider: z.enum(["openai", "anthropic", "mistral", "ollama"]),
@@ -47,6 +48,19 @@ export const copilotCredentialsRoute = new Hono()
 
   // PUT / — OWNER only; encrypts and stores the API key
   .put("/", validate("json", upsertBody), async (c) => {
+    if (!isByokAllowed()) {
+      return c.json(
+        {
+          error: {
+            code: "byok_not_allowed",
+            message:
+              "Adding an AI provider key is only available on self-hosted instances",
+          },
+        },
+        403,
+      );
+    }
+
     const projectId = c.req.param("projectId")!;
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id, MemberRole.OWNER);
@@ -75,6 +89,19 @@ export const copilotCredentialsRoute = new Hono()
 
   // POST /test — OWNER only; decrypts, pings provider with 1 token
   .post("/test", async (c) => {
+    if (!isByokAllowed()) {
+      return c.json(
+        {
+          error: {
+            code: "byok_not_allowed",
+            message:
+              "Adding an AI provider key is only available on self-hosted instances",
+          },
+        },
+        403,
+      );
+    }
+
     const projectId = c.req.param("projectId")!;
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id, MemberRole.OWNER);
