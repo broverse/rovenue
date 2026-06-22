@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { evaluateQuota } from "./quota";
+import { evaluateQuota, resolveTier } from "./quota";
 
 describe("evaluateQuota", () => {
   it("allows when unlimited", () => {
@@ -39,5 +39,24 @@ describe("evaluateQuota", () => {
       usage: { messages: 100, inputTokens: 1_000, outputTokens: 100 },
     });
     expect(out.allowed).toBe(true);
+  });
+});
+
+describe("resolveTier", () => {
+  it("self-host (unlimited=true) → enterprise + unlimited", () => {
+    expect(resolveTier({ project: { metadata: null }, env: {}, unlimited: true }))
+      .toEqual({ tier: "enterprise", unlimited: true });
+  });
+  it("cloud (unlimited=false) → env tier, enforced", () => {
+    expect(resolveTier({ project: { metadata: null }, env: { ROVI_TIER: "team" }, unlimited: false }))
+      .toEqual({ tier: "team", unlimited: false });
+  });
+  it("cloud default tier is free when nothing set", () => {
+    expect(resolveTier({ project: { metadata: null }, env: {}, unlimited: false }))
+      .toEqual({ tier: "free", unlimited: false });
+  });
+  it("project metadata rovi_tier overrides env", () => {
+    expect(resolveTier({ project: { metadata: { rovi_tier: "business" } }, env: { ROVI_TIER: "team" }, unlimited: false }))
+      .toEqual({ tier: "business", unlimited: false });
   });
 });

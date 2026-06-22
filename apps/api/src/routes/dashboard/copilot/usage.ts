@@ -6,6 +6,7 @@ import { ok } from "../../../lib/response";
 import { TIER_LIMITS } from "@rovenue/shared";
 import { env } from "../../../lib/env";
 import { resolveTier } from "../../../services/copilot/quota";
+import { quotasUnlimited } from "../../../lib/host-mode";
 
 export const copilotUsageRoute = new Hono()
   .use("*", requireDashboardAuth)
@@ -21,6 +22,7 @@ export const copilotUsageRoute = new Hono()
     const { tier, unlimited } = resolveTier({
       project: { metadata: project?.settings as Record<string, unknown> | null },
       env,
+      unlimited: quotasUnlimited(),
     });
     const ym = currentYearMonth();
     const row =

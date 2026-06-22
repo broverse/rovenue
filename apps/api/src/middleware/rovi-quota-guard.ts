@@ -3,6 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { drizzle, currentYearMonth } from "@rovenue/db";
 import { env } from "../lib/env";
 import { evaluateQuota, resolveTier } from "../services/copilot/quota";
+import { quotasUnlimited } from "../lib/host-mode";
 
 export function roviQuotaGuard(): MiddlewareHandler {
   return async (c, next) => {
@@ -18,6 +19,7 @@ export function roviQuotaGuard(): MiddlewareHandler {
     const { tier, unlimited } = resolveTier({
       project: { metadata: project.settings as Record<string, unknown> | null },
       env,
+      unlimited: quotasUnlimited(),
     });
     const ym = currentYearMonth();
     const usage =

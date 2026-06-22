@@ -9,7 +9,7 @@
 //   The `env` const is parsed+frozen at module-load time via Zod, so
 //   mutating process.env after import has no effect. We use vi.mock to
 //   replace the entire `../../../lib/env` module with a copy whose
-//   ROVI_UNLIMITED is forced to false (and ROVI_TIER is unset) before
+//   HOST_MODE is forced to "cloud" (and ROVI_TIER is unset) before
 //   any test module imports env. Vitest hoists vi.mock() calls above
 //   static imports automatically, so this reliably takes effect.
 // =============================================================
@@ -28,7 +28,7 @@ vi.mock("../../../lib/env", async () => {
     ...actual,
     env: {
       ...actual.env,
-      ROVI_UNLIMITED: false,
+      HOST_MODE: "cloud",
       ROVI_TIER: undefined,
     },
   };

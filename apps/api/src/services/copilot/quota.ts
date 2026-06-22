@@ -36,10 +36,11 @@ export function evaluateQuota(input: QuotaInput): QuotaResult {
 
 export function resolveTier(args: {
   project: { metadata?: Record<string, unknown> | null };
-  env: { ROVI_TIER?: RoviTier; ROVI_UNLIMITED?: boolean };
+  env: { ROVI_TIER?: RoviTier };
+  unlimited: boolean;
 }): { tier: RoviTier; unlimited: boolean } {
   const metaTier = args.project.metadata?.["rovi_tier"] as RoviTier | undefined;
   const tier =
-    metaTier ?? args.env.ROVI_TIER ?? (args.env.ROVI_UNLIMITED ? "enterprise" : "free");
-  return { tier, unlimited: Boolean(args.env.ROVI_UNLIMITED) };
+    metaTier ?? (args.unlimited ? "enterprise" : (args.env.ROVI_TIER ?? "free"));
+  return { tier, unlimited: args.unlimited };
 }
