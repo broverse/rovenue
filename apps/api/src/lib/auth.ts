@@ -177,6 +177,9 @@ export const auth = betterAuth({
   // schema, which keeps the test mock surface minimal (a stub db
   // object is all the test surface needs).
   database: drizzleAdapter(drizzle.db, { provider: "pg" }),
+  onAPIError: {
+    errorURL: `${env.DASHBOARD_URL}/login`,
+  },
   emailAndPassword: {
     enabled: emailPasswordEnabled,
     autoSignIn: true,
