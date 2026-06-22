@@ -58,6 +58,11 @@ process.env.NODE_ENV ??= "test";
 process.env.BETTER_AUTH_SECRET ??= "test-better-auth-secret-not-for-prod-xxxxx";
 process.env.BETTER_AUTH_URL ??= "http://localhost:3000";
 process.env.DASHBOARD_URL ??= "http://localhost:5173";
+// Default the test environment to managed-cloud mode so open registration
+// is on — otherwise the registration gate (auth.ts user.create.before) blocks
+// every signUp after the first user in the shared dev database. Tests that
+// exercise the gate / BYOK / Rovi quotas set env.HOST_MODE per-case.
+process.env.HOST_MODE ??= "cloud";
 process.env.GITHUB_CLIENT_ID ??= "test-github-id";
 process.env.GITHUB_CLIENT_SECRET ??= "test-github-secret";
 process.env.GOOGLE_CLIENT_ID ??= "test-google-id";
