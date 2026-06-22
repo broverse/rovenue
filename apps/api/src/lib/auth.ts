@@ -1,5 +1,5 @@
 import { betterAuth, type BetterAuthPlugin } from "better-auth";
-import { createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { twoFactor } from "better-auth/plugins";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { drizzle } from "@rovenue/db";
@@ -7,6 +7,8 @@ import { env } from "./env";
 import { logger } from "./logger";
 import { maybeEmitNewDevice } from "../services/notifications/new-device-emit";
 import { maybeEmitOAuthLink } from "../services/notifications/oauth-link-emit";
+import { registrationOpen } from "./host-mode";
+import { isRegistrationAllowed } from "./registration-gate";
 
 const log = logger.child("auth");
 
@@ -184,6 +186,40 @@ export const auth = betterAuth({
   trustedOrigins: [env.DASHBOARD_URL],
   baseURL: env.BETTER_AUTH_URL,
   secret: env.BETTER_AUTH_SECRET,
+  databaseHooks: {
+    user: {
+      create: {
+        // Gate account creation. Runs for every new user (OAuth callback and
+        // dev email/password). Existing users sign in without hitting this.
+        before: async (newUser: { email?: string }) => {
+          const email = (newUser.email ?? "").toLowerCase();
+          const userCount = await drizzle.userRepo.countUsers(drizzle.db);
+          const hasPendingInvite = email
+            ? Boolean(
+                await drizzle.invitationRepo.findAnyPendingInvitationByEmail(
+                  drizzle.db,
+                  email,
+                ),
+              )
+            : false;
+
+          if (
+            !isRegistrationAllowed({
+              userCount,
+              registrationOpen: registrationOpen(),
+              hasPendingInvite,
+            })
+          ) {
+            log.warn("registration_blocked", { email });
+            throw new APIError("FORBIDDEN", {
+              code: "REGISTRATION_CLOSED",
+              message: "registration_closed",
+            });
+          }
+        },
+      },
+    },
+  },
   plugins: [
     // OAuth-only deployment: no credential password exists for
     // most users, so `allowPasswordless: true` skips the password
