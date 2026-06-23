@@ -342,6 +342,146 @@ refreshed entitlement state. If you have a listener attached via
 
 ---
 
+## Redeeming promotional offers (iOS)
+
+iOS allows app publishers to offer promotional discounts on subscriptions. These appear
+in `StoreProduct.discounts` and can be passed to `purchase()` to apply a time-limited
+discount at the moment of purchase. The SDK automatically requests a server-signed offer
+signature (valid 24 hours) — no additional setup required.
+
+### Overview
+
+- **Promotional offers** come from `StoreProduct.discounts` with `type` = `'promotional'` or `'winBack'`.
+- **Introductory offers** (`type: 'introductory'`) are applied automatically by the App Store and **must NOT** be passed to `purchase()` — doing so throws.
+- The server signs offers using your project's existing Apple In-App Purchase credentials (no new `.p8` file needed).
+- A signature is valid for 24 hours; the SDK requests a fresh one per purchase automatically.
+- **Android:** Promotional offers are not supported; the `promotionalOfferId` parameter is ignored (no-op).
+
+<Callout type="warn">
+**Introductory offers are automatic**
+
+Do not pass offers with `type: 'introductory'` to `purchase()`. The App Store applies them
+automatically based on eligibility. Attempting to pass one results in an error.
+
+```ts
+// ❌ Wrong
+const intro = product.discounts.find(d => d.type === 'introductory');
+await purchase(pkg, { promotionalOfferId: intro?.identifier });
+
+// ✅ Correct
+const promo = product.discounts.find(d => d.type === 'promotional' || d.type === 'winBack');
+await purchase(pkg, { promotionalOfferId: promo?.identifier });
+```
+</Callout>
+
+### Usage by platform
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    Pass the offer's `identifier` in the options object:
+
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    const offerings = await Rovenue.getOfferings();
+    const pkg = offerings.current?.packages[0];
+    const product = pkg?.product;
+
+    // Find a promotional offer (skip 'introductory')
+    const promoOffer = product?.discounts?.find(
+      d => d.type === 'promotional' || d.type === 'winBack'
+    );
+
+    if (promoOffer) {
+      try {
+        const result = await Rovenue.purchase(pkg, {
+          promotionalOfferId: promoOffer.identifier,
+        });
+        console.log('Purchase with promo succeeded:', result.productId);
+      } catch (e) {
+        // Handle errors (see [Errors](/docs/reference/errors))
+      }
+    } else {
+      // No promotional offer available; purchase at full price
+      const result = await Rovenue.purchase(pkg);
+    }
+    ```
+
+    **Note:** On Android, the `promotionalOfferId` parameter is present but ignored; the purchase proceeds at the standard price.
+  </Tab>
+  <Tab value="Swift">
+    Pass a `Discount` object (or use the id-based overload):
+
+    ```swift
+    let offerings = try await Rovenue.shared.getOfferings()
+    let pkg = offerings.current?.packages.first
+    let product = pkg?.product
+
+    // Find a promotional offer (skip 'introductory')
+    let promoOffer = product?.discounts.first { discount in
+      discount.type == .promotional || discount.type == .winBack
+    }
+
+    if let offer = promoOffer {
+      do {
+        // Pass the Discount object directly
+        let result = try await Rovenue.shared.purchase(product!, promotionalOffer: offer)
+        print("Purchase with promo succeeded: \(result.productId)")
+
+        // Or use the id-based overload:
+        // let result = try await Rovenue.shared.purchase(product!, promotionalOfferId: offer.identifier!)
+      } catch {
+        // Handle errors (see [Errors](/docs/reference/errors))
+      }
+    } else {
+      // No promotional offer available; purchase at full price
+      let result = try await Rovenue.shared.purchase(product!)
+    }
+    ```
+
+    **Important:** Passing a `.introductory` offer throws an error with code `.ineligible` and message
+    "Introductory offers are applied automatically; do not pass them as a promotional offer."
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val offerings = Rovenue.shared.getOfferings()
+    val pkg = offerings.current?.packages?.firstOrNull()
+    val product = pkg?.product
+
+    // Find a promotional offer (skip 'introductory')
+    val promoOffer = product?.discounts?.firstOrNull { discount ->
+      discount.type == DiscountType.PROMOTIONAL || discount.type == DiscountType.WIN_BACK
+    }
+
+    if (promoOffer != null) {
+      try {
+        val result = Rovenue.shared.purchase(activity, pkg!!, 
+          promotionalOfferId = promoOffer.identifier)
+        println("Purchase with promo succeeded: ${result.productId}")
+      } catch (e: Exception) {
+        // Handle errors (see [Errors](/docs/reference/errors))
+      }
+    } else {
+      // No promotional offer available; purchase at full price
+      val result = Rovenue.shared.purchase(activity, pkg!!)
+    }
+    ```
+
+    **Note:** Promotional offer signing is iOS-specific. On Android, the `promotionalOfferId` parameter is accepted but ignored; the purchase uses the standard Play Billing offer model instead.
+  </Tab>
+</Tabs>
+
+### Server prerequisites
+
+Your project must have a valid Apple In-App Purchase `.p8` certificate file (from [App Store Connect](https://appstoreconnect.apple.com))
+configured in the Rovenue dashboard under **Settings → Apple In-App Purchase**.
+This certificate is already used for receipt validation; the same credential is reused to sign promotional offers.
+
+If signing fails, the API returns error code `apple_offer_signing_unavailable` — check that your Apple credentials
+are complete and valid.
+
+---
+
 <Callout type="info">
 **Related:** [Checking Entitlements](/docs/guides/entitlements) · [Reacting to
 changes](/docs/guides/reacting-to-changes) · [Methods — Purchases](/docs/reference/methods#purchases) ·

@@ -481,11 +481,13 @@ type Discount = {
 | `period` | [`Period`](#period) | The duration of each discount cycle. |
 | `numberOfPeriods` | `number` | How many cycles the discount applies (e.g. `3` = 3 months at discount price). |
 | `paymentMode` | `'freeTrial' \| 'payAsYouGo' \| 'payUpFront'` | When payment is charged. |
-| `type` | `'introductory' \| 'promotional' \| 'winBack'` | Offer type: introductory (new subs only), promotional (all users), or winBack (lapsed subs). |
+| `type` | `'introductory' \| 'promotional' \| 'winBack'` | Offer type: introductory (new subs only, applied automatically), promotional (all users), or winBack (lapsed subs). **Note:** only `.promotional` and `.winBack` can be passed to `purchase()`; `.introductory` is applied automatically by the App Store. |
 
 **Platform:** iOS only. Empty array on Android.
 
 **Used by:** [`StoreProduct.discounts`](#storeproduct)
+
+**See also:** [Redeeming promotional offers (iOS)](/docs/guides/processing-purchases#redeeming-promotional-offers-ios)
 
 ---
 
