@@ -1499,6 +1499,8 @@ export interface DashboardProductCreateInput {
   isActive?: boolean;
   metadata?: Record<string, unknown>;
   currencyGrants?: DashboardProductCurrencyGrant[];
+  androidBasePlanId?: string | null;
+  androidOfferId?: string | null;
 }
 
 export interface DashboardProductUpdateInput {
@@ -1511,6 +1513,8 @@ export interface DashboardProductUpdateInput {
   isActive?: boolean;
   metadata?: Record<string, unknown>;
   currencyGrants?: DashboardProductCurrencyGrant[];
+  androidBasePlanId?: string | null;
+  androidOfferId?: string | null;
 }
 
 /** Per-row input for bulk import from a store. */

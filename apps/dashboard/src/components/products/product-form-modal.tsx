@@ -41,6 +41,8 @@ type FormState = {
   iosId: string;
   androidId: string;
   webId: string;
+  androidBasePlanId: string;
+  androidOfferId: string;
   isActive: boolean;
   accessIds: string[];
   currencyGrants: CurrencyGrantRow[];
@@ -54,6 +56,8 @@ const EMPTY: FormState = {
   iosId: "",
   androidId: "",
   webId: "",
+  androidBasePlanId: "",
+  androidOfferId: "",
   isActive: true,
   accessIds: [],
   currencyGrants: [],
@@ -76,6 +80,8 @@ function rowToForm(row: DashboardProductRow): FormState {
     iosId: stores.ios ?? "",
     androidId: stores.android ?? "",
     webId: stores.web ?? "",
+    androidBasePlanId: row.androidBasePlanId ?? "",
+    androidOfferId: row.androidOfferId ?? "",
     isActive: row.isActive,
     accessIds: row.accessIds ?? [],
     currencyGrants: (row.currencyGrants ?? []).map((g) => ({
@@ -176,6 +182,8 @@ export function ProductFormModal({
           currencyGrants,
           isActive: form.isActive,
           metadata: baseMeta,
+          androidBasePlanId: form.androidBasePlanId.trim() || null,
+          androidOfferId: form.androidOfferId.trim() || null,
         };
         const res = await create.mutateAsync(body);
         savedId = res.product.id;
@@ -189,6 +197,8 @@ export function ProductFormModal({
           currencyGrants,
           isActive: form.isActive,
           metadata: baseMeta,
+          androidBasePlanId: form.androidBasePlanId.trim() || null,
+          androidOfferId: form.androidOfferId.trim() || null,
         };
         const res = await update.mutateAsync({ id: editProductId!, ...patch });
         savedId = res.product.id;
@@ -406,12 +416,16 @@ function FormBody({
         iosId={form.iosId}
         androidId={form.androidId}
         webId={form.webId}
+        androidBasePlanId={form.androidBasePlanId}
+        androidOfferId={form.androidOfferId}
         onChange={(store, v) =>
           set(
             store === "ios" ? "iosId" : store === "android" ? "androidId" : "webId",
             v,
           )
         }
+        onAndroidBasePlanIdChange={(v) => set("androidBasePlanId", v)}
+        onAndroidOfferIdChange={(v) => set("androidOfferId", v)}
       />
 
       {/* Currency grants */}

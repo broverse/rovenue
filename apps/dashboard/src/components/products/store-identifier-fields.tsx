@@ -19,18 +19,29 @@ export function StoreIdentifiersFieldset({
   iosId,
   androidId,
   webId,
+  androidBasePlanId,
+  androidOfferId,
   onChange,
+  onAndroidBasePlanIdChange,
+  onAndroidOfferIdChange,
 }: {
   projectId: string;
   iosId: string;
   androidId: string;
   webId: string;
+  androidBasePlanId: string;
+  androidOfferId: string;
   onChange: (store: "ios" | "android" | "web", value: string) => void;
+  onAndroidBasePlanIdChange: (value: string) => void;
+  onAndroidOfferIdChange: (value: string) => void;
 }) {
   const { t } = useTranslation();
   const creds = useProjectCredentials(projectId);
   const c = creds.data?.credentials;
   const loading = creds.isPending;
+
+  const idBasePlan = useId();
+  const idOfferId = useId();
 
   return (
     <fieldset className="grid grid-cols-1 gap-2 rounded-md border border-rv-divider bg-rv-c2/50 p-3">
@@ -53,6 +64,30 @@ export function StoreIdentifiersFieldset({
         value={androidId}
         onChange={(v) => onChange("android", v)}
       />
+      <StoreRowShell label={t("products.form.storeIds.basePlanLabel", "Base plan")} htmlFor={idBasePlan}>
+        <Input
+          id={idBasePlan}
+          mono
+          value={androidBasePlanId}
+          onChange={(e) => onAndroidBasePlanIdChange(e.target.value)}
+          placeholder={t("products.form.storeIds.basePlanPlaceholder", "e.g. monthly")}
+        />
+      </StoreRowShell>
+      <StoreRowShell label={t("products.form.storeIds.offerIdLabel", "Offer ID")} htmlFor={idOfferId}>
+        <Input
+          id={idOfferId}
+          mono
+          value={androidOfferId}
+          onChange={(e) => onAndroidOfferIdChange(e.target.value)}
+          placeholder={t("products.form.storeIds.offerIdPlaceholder", "e.g. introductory")}
+        />
+      </StoreRowShell>
+      <p className="text-[11px] text-rv-mute-500">
+        {t(
+          "products.form.storeIds.androidDefaultOfferHint",
+          "Optional. Default Play base plan / offer to purchase when the app doesn't pick one; blank = lowest-priced base plan.",
+        )}
+      </p>
       <WebStoreRow
         label="Web"
         projectId={projectId}
