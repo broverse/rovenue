@@ -355,7 +355,8 @@ signature (valid 24 hours) — no additional setup required.
 - **Introductory offers** (`type: 'introductory'`) are applied automatically by the App Store and **must NOT** be passed to `purchase()` — doing so throws.
 - The server signs offers using your project's existing Apple In-App Purchase credentials (no new `.p8` file needed).
 - A signature is valid for 24 hours; the SDK requests a fresh one per purchase automatically.
-- **Android:** Promotional offers are not supported; the `promotionalOfferId` parameter is ignored (no-op).
+- **iOS:** Promotional offer redemption is supported via `purchase(..., promotionalOffer:)` or `purchase(..., promotionalOfferId:)`.
+- **Android:** Promotional offers are not supported on native apps. React Native apps accept (but ignore) the `promotionalOfferId` option on Android.
 
 <Callout type="warn">
 **Introductory offers are automatic**
@@ -443,31 +444,27 @@ await purchase(pkg, { promotionalOfferId: promo?.identifier });
     "Introductory offers are applied automatically; do not pass them as a promotional offer."
   </Tab>
   <Tab value="Kotlin">
+    Promotional offer redemption is **not supported** on native Android. The native Kotlin SDK's
+    `purchase()` method does not expose a promotional-offer parameter.
+
     ```kotlin
     val offerings = Rovenue.shared.getOfferings()
     val pkg = offerings.current?.packages?.firstOrNull()
-    val product = pkg?.product
 
-    // Find a promotional offer (skip 'introductory')
-    val promoOffer = product?.discounts?.firstOrNull { discount ->
-      discount.type == DiscountType.PROMOTIONAL || discount.type == DiscountType.WIN_BACK
-    }
-
-    if (promoOffer != null) {
+    if (pkg != null) {
       try {
-        val result = Rovenue.shared.purchase(activity, pkg!!, 
-          promotionalOfferId = promoOffer.identifier)
-        println("Purchase with promo succeeded: ${result.productId}")
+        // Native Android uses the standard purchase flow; promotional offers are unavailable
+        val result = Rovenue.shared.purchase(activity, pkg)
+        println("Purchase succeeded: ${result.productId}")
       } catch (e: Exception) {
         // Handle errors (see [Errors](/docs/reference/errors))
       }
-    } else {
-      // No promotional offer available; purchase at full price
-      val result = Rovenue.shared.purchase(activity, pkg!!)
     }
     ```
 
-    **Note:** Promotional offer signing is iOS-specific. On Android, the `promotionalOfferId` parameter is accepted but ignored; the purchase uses the standard Play Billing offer model instead.
+    **Note:** Promotional offer redemption is iOS-only. Google Play uses a different offer model
+    (`offerToken`) which the SDK does not currently expose for purchase. React Native apps on Android
+    will have the `promotionalOfferId` option accepted but ignored, falling back to standard pricing.
   </Tab>
 </Tabs>
 
