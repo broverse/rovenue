@@ -172,7 +172,7 @@ impl HttpClient {
                             crate::logging::LogLevel::Debug,
                             || format!("http GET {path}"),
                             || {
-                                let mut f = std::collections::BTreeMap::new();
+                                let mut f = std::collections::HashMap::new();
                                 f.insert("method".to_string(), "GET".to_string());
                                 f.insert("path".to_string(), path.clone());
                                 f.insert("status".to_string(), status.to_string());
@@ -239,7 +239,7 @@ impl HttpClient {
                                     crate::logging::LogLevel::Error,
                                     || format!("http GET {path} failed"),
                                     || {
-                                        let mut f = std::collections::BTreeMap::new();
+                                        let mut f = std::collections::HashMap::new();
                                         f.insert("method".to_string(), "GET".to_string());
                                         f.insert("path".to_string(), path.clone());
                                         f.insert("status".to_string(), status.to_string());
@@ -280,7 +280,7 @@ impl HttpClient {
                 crate::logging::LogLevel::Error,
                 || format!("http GET {path} failed after all attempts"),
                 || {
-                    let mut f = std::collections::BTreeMap::new();
+                    let mut f = std::collections::HashMap::new();
                     f.insert("method".to_string(), "GET".to_string());
                     f.insert("path".to_string(), path.clone());
                     f.insert("attempt".to_string(), (self.max_attempts - 1).to_string());
@@ -371,7 +371,7 @@ impl HttpClient {
                             crate::logging::LogLevel::Debug,
                             || format!("http POST {path}"),
                             || {
-                                let mut f = std::collections::BTreeMap::new();
+                                let mut f = std::collections::HashMap::new();
                                 f.insert("method".to_string(), "POST".to_string());
                                 f.insert("path".to_string(), path.clone());
                                 f.insert("status".to_string(), status.to_string());
@@ -437,7 +437,7 @@ impl HttpClient {
                                     crate::logging::LogLevel::Error,
                                     || format!("http POST {path} failed"),
                                     || {
-                                        let mut f = std::collections::BTreeMap::new();
+                                        let mut f = std::collections::HashMap::new();
                                         f.insert("method".to_string(), "POST".to_string());
                                         f.insert("path".to_string(), path.clone());
                                         f.insert("status".to_string(), status.to_string());
@@ -478,7 +478,7 @@ impl HttpClient {
                 crate::logging::LogLevel::Error,
                 || format!("http POST {path} failed after all attempts"),
                 || {
-                    let mut f = std::collections::BTreeMap::new();
+                    let mut f = std::collections::HashMap::new();
                     f.insert("method".to_string(), "POST".to_string());
                     f.insert("path".to_string(), path.clone());
                     f.insert("attempt".to_string(), (self.max_attempts - 1).to_string());
@@ -538,7 +538,7 @@ impl HttpClient {
                             crate::logging::LogLevel::Debug,
                             || format!("http POST {path}"),
                             || {
-                                let mut f = std::collections::BTreeMap::new();
+                                let mut f = std::collections::HashMap::new();
                                 f.insert("method".to_string(), "POST".to_string());
                                 f.insert("path".to_string(), path.clone());
                                 f.insert("status".to_string(), status.to_string());
@@ -605,7 +605,7 @@ impl HttpClient {
                 crate::logging::LogLevel::Error,
                 || format!("http POST {path} failed after all attempts"),
                 || {
-                    let mut f = std::collections::BTreeMap::new();
+                    let mut f = std::collections::HashMap::new();
                     f.insert("method".to_string(), "POST".to_string());
                     f.insert("path".to_string(), path.clone());
                     f.insert("attempt".to_string(), (self.max_attempts - 1).to_string());

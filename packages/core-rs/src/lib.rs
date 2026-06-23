@@ -34,7 +34,7 @@ pub use funnel::{
 };
 pub use identify::{IdentifyClient, IdentifyResult};
 pub use identity::User;
-pub use logging::LogLevel;
+pub use logging::{LogLevel, LogRecord, LogSink};
 pub use observer::{ChangeEvent, Observer};
 pub use offerings::{CoreOffering, CoreOfferingProduct, CoreOfferings};
 pub use receipts::ReceiptResult;

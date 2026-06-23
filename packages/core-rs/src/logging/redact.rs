@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 const SENSITIVE_KEY_TOKENS: &[&str] = &[
     "token", "receipt", "email", "app_user_id", "authorization",
     "signature", "jws", "password", "secret",
 ];
 
-pub fn redact_fields(fields: BTreeMap<String, String>) -> BTreeMap<String, String> {
+pub fn redact_fields(fields: HashMap<String, String>) -> HashMap<String, String> {
     fields
         .into_iter()
         .map(|(k, v)| {
@@ -56,7 +56,7 @@ mod tests {
 
     #[test]
     fn fields_with_sensitive_keys_are_masked() {
-        let mut f = BTreeMap::new();
+        let mut f = HashMap::new();
         f.insert("status".to_string(), "401".to_string());
         f.insert("authorization".to_string(), "Bearer pk_live_abc".to_string());
         f.insert("app_user_id".to_string(), "user_42".to_string());

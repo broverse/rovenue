@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub mod redact;
@@ -16,7 +16,7 @@ pub enum LogLevel {
 pub struct LogRecord {
     pub level: LogLevel,
     pub message: String,
-    pub fields: BTreeMap<String, String>,
+    pub fields: HashMap<String, String>,
 }
 
 pub trait LogSink: Send + Sync {
@@ -51,7 +51,7 @@ impl Logger {
         &self,
         level: LogLevel,
         message: impl FnOnce() -> String,
-        fields: impl FnOnce() -> BTreeMap<String, String>,
+        fields: impl FnOnce() -> HashMap<String, String>,
     ) {
         if !self.enabled(level) {
             return;
@@ -75,7 +75,7 @@ impl Logger {
 
     pub fn warn(&self, message: &str) {
         let msg = message.to_string();
-        self.log(LogLevel::Warn, move || msg, BTreeMap::new);
+        self.log(LogLevel::Warn, move || msg, HashMap::new);
     }
 }
 
@@ -112,7 +112,7 @@ mod tests {
                 b.fetch_add(1, Ordering::SeqCst);
                 "should not build".to_string()
             },
-            BTreeMap::new,
+            HashMap::new,
         );
         assert_eq!(sink.lock().unwrap().len(), 0);
         assert_eq!(built.load(Ordering::SeqCst), 0);
@@ -123,8 +123,8 @@ mod tests {
         let logger = Logger::new(LogLevel::Debug);
         let sink = Arc::new(Mutex::new(Vec::new()));
         logger.set_sink(Arc::new(Collector(sink.clone())));
-        logger.log(LogLevel::Error, || "err".to_string(), BTreeMap::new);
-        logger.log(LogLevel::Debug, || "dbg".to_string(), BTreeMap::new);
+        logger.log(LogLevel::Error, || "err".to_string(), HashMap::new);
+        logger.log(LogLevel::Debug, || "dbg".to_string(), HashMap::new);
         let got = sink.lock().unwrap();
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].message, "err");
@@ -135,20 +135,20 @@ mod tests {
         let logger = Logger::new(LogLevel::Off);
         let sink = Arc::new(Mutex::new(Vec::new()));
         logger.set_sink(Arc::new(Collector(sink.clone())));
-        logger.log(LogLevel::Error, || "err".to_string(), BTreeMap::new);
+        logger.log(LogLevel::Error, || "err".to_string(), HashMap::new);
         assert_eq!(sink.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn no_sink_is_noop() {
         let logger = Logger::new(LogLevel::Trace);
-        logger.log(LogLevel::Error, || "err".to_string(), BTreeMap::new); // must not panic
+        logger.log(LogLevel::Error, || "err".to_string(), HashMap::new); // must not panic
     }
 
     #[test]
     fn panicking_sink_does_not_unwind() {
         let logger = Logger::new(LogLevel::Trace);
         logger.set_sink(Arc::new(Panicky));
-        logger.log(LogLevel::Error, || "err".to_string(), BTreeMap::new); // caught, no panic
+        logger.log(LogLevel::Error, || "err".to_string(), HashMap::new); // caught, no panic
     }
 }

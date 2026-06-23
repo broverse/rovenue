@@ -265,7 +265,7 @@ impl RovenueCore {
             level,
             move || message,
             move || {
-                let mut f = std::collections::BTreeMap::new();
+                let mut f = std::collections::HashMap::new();
                 f.insert("op".to_string(), op);
                 for (k, v) in extra {
                     f.insert(k, v);

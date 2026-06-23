@@ -62,6 +62,16 @@ enum ChangeEvent {
     "RemoteConfigChanged",
 };
 
+dictionary LogRecord {
+    LogLevel level;
+    string message;
+    record<string, string> fields;
+};
+
+callback interface LogSink {
+    void on_log(LogRecord record);
+};
+
 dictionary ExperimentAssignment {
     string experiment_id;
     string key;
@@ -203,6 +213,7 @@ interface RovenueCore {
     string get_or_create_app_account_token();
 
     void register_observer(Observer obs);
+    void register_log_sink(LogSink sink);
     void set_foreground(boolean foreground);
     void shutdown();
 
