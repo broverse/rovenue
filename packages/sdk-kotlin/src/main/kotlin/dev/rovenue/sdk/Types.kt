@@ -7,6 +7,7 @@
 
 package dev.rovenue.sdk
 
+import com.android.billingclient.api.ProductDetails
 import dev.rovenue.sdk.generated.Entitlement
 
 /**
@@ -30,6 +31,38 @@ enum class ProductType {
     }
 }
 
+enum class ProductCategory { SUBSCRIPTION, NON_SUBSCRIPTION }
+enum class PeriodUnit { DAY, WEEK, MONTH, YEAR }
+enum class PaymentMode { FREE_TRIAL, PAY_AS_YOU_GO, PAY_UP_FRONT }
+enum class DiscountType { INTRODUCTORY, PROMOTIONAL, WIN_BACK }
+enum class RecurrenceMode { INFINITE_RECURRING, FINITE_RECURRING, NON_RECURRING }
+
+data class Period(val value: Int, val unit: PeriodUnit, val iso8601: String)
+
+data class IntroPrice(
+    val price: Double?, val priceString: String?, val currencyCode: String?,
+    val period: Period, val cycles: Int, val paymentMode: PaymentMode,
+)
+
+data class Discount(
+    val identifier: String?, val price: Double?, val priceString: String?, val currencyCode: String?,
+    val period: Period, val numberOfPeriods: Int, val paymentMode: PaymentMode, val type: DiscountType,
+)
+
+data class PricingPhase(
+    val price: Double?, val priceString: String?, val currencyCode: String?,
+    val billingPeriod: Period, val billingCycleCount: Int?,
+    val recurrenceMode: RecurrenceMode, val paymentMode: PaymentMode?,
+)
+
+data class SubscriptionOption(
+    val id: String, val basePlanId: String?, val offerId: String?, val tags: List<String>,
+    val isBasePlan: Boolean, val isPrepaid: Boolean, val pricingPhases: List<PricingPhase>,
+    val freePhase: PricingPhase?, val introPhase: PricingPhase?, val fullPricePhase: PricingPhase?,
+)
+
+enum class PackageType { UNKNOWN, CUSTOM, LIFETIME, ANNUAL, SIX_MONTH, THREE_MONTH, TWO_MONTH, MONTHLY, WEEKLY }
+
 /**
  * A purchasable product as configured in Rovenue. In v1 the price fields are
  * null at the offerings layer (configuration only); localized price metadata
@@ -38,15 +71,33 @@ enum class ProductType {
 data class StoreProduct(
     val id: String,
     val type: ProductType,
+    val productCategory: ProductCategory,
     val displayName: String,
+    val description: String? = null,
     val priceString: String? = null,
     val price: Double? = null,
     val currencyCode: String? = null,
+    val subscriptionPeriod: Period? = null,
+    val subscriptionGroupIdentifier: String? = null,
+    val isFamilyShareable: Boolean = false,
+    val introPrice: IntroPrice? = null,
+    val discounts: List<Discount> = emptyList(),
+    val isEligibleForIntroOffer: Boolean? = null,
+    val subscriptionOptions: List<SubscriptionOption>? = null,
+    val defaultOption: SubscriptionOption? = null,
+    val pricePerWeek: Double? = null,
+    val pricePerMonth: Double? = null,
+    val pricePerYear: Double? = null,
+    val pricePerWeekString: String? = null,
+    val pricePerMonthString: String? = null,
+    val pricePerYearString: String? = null,
+    val rawStoreProduct: ProductDetails? = null,
 )
 
 /** A named slot within an [Offering] that points at a single [StoreProduct]. */
 data class Package(
     val identifier: String,
+    val packageType: PackageType,
     val product: StoreProduct,
 )
 

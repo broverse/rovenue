@@ -14,6 +14,8 @@ import android.app.Activity
 import dev.rovenue.sdk.Offering
 import dev.rovenue.sdk.Offerings
 import dev.rovenue.sdk.Package
+import dev.rovenue.sdk.PackageType
+import dev.rovenue.sdk.ProductCategory
 import dev.rovenue.sdk.ProductType
 import dev.rovenue.sdk.StoreProduct
 import dev.rovenue.sdk.generated.CoreOffering
@@ -60,9 +62,13 @@ private fun mapProductId(p: CoreOfferingProduct): String = p.googleProductId ?: 
 private fun mapProduct(p: CoreOfferingProduct, prices: Map<String, PriceInfo>): StoreProduct {
     val id = mapProductId(p)
     val price = prices[id]
+    val productType = ProductType.from(p.productType)
+    val productCategory = if (productType == ProductType.SUBSCRIPTION) ProductCategory.SUBSCRIPTION
+                          else ProductCategory.NON_SUBSCRIPTION
     return StoreProduct(
         id = id,
-        type = ProductType.from(p.productType),
+        type = productType,
+        productCategory = productCategory,
         displayName = p.displayName,
         priceString = price?.priceString,
         price = price?.price,
@@ -78,7 +84,13 @@ private fun mapOffering(o: CoreOffering, prices: Map<String, PriceInfo>): Offeri
         // Package.identifier — that is the value the SDK contract exposes to
         // callers. The product's own catalog identifier is available via
         // pkg.product.id.
-        packages = o.packages.map { Package(identifier = it.packageIdentifier, product = mapProduct(it, prices)) },
+        packages = o.packages.map {
+            Package(
+                identifier = it.packageIdentifier,
+                packageType = PackageType.CUSTOM,
+                product = mapProduct(it, prices),
+            )
+        },
     )
 
 /**

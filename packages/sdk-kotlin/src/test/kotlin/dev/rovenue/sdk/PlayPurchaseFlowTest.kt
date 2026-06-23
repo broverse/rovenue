@@ -31,6 +31,7 @@ class PurchaseTypesTest {
         val p = StoreProduct(
             id = "pro_monthly",
             type = ProductType.SUBSCRIPTION,
+            productCategory = ProductCategory.SUBSCRIPTION,
             displayName = "Pro Monthly",
         )
         assertEquals("pro_monthly", p.id)
@@ -43,6 +44,7 @@ class PurchaseTypesTest {
         val priced = StoreProduct(
             id = "coins_100",
             type = ProductType.CONSUMABLE,
+            productCategory = ProductCategory.NON_SUBSCRIPTION,
             displayName = "100 Coins",
             priceString = "$0.99",
             price = 0.99,
@@ -55,16 +57,26 @@ class PurchaseTypesTest {
 
     @Test
     fun `Package wraps a StoreProduct under an identifier`() {
-        val product = StoreProduct("pro_monthly", ProductType.SUBSCRIPTION, "Pro Monthly")
-        val pkg = Package(identifier = "monthly", product = product)
+        val product = StoreProduct(
+            id = "pro_monthly",
+            type = ProductType.SUBSCRIPTION,
+            productCategory = ProductCategory.SUBSCRIPTION,
+            displayName = "Pro Monthly",
+        )
+        val pkg = Package(identifier = "monthly", packageType = PackageType.CUSTOM, product = product)
         assertEquals("monthly", pkg.identifier)
         assertSame(product, pkg.product)
     }
 
     @Test
     fun `Offering groups packages and exposes default flag`() {
-        val product = StoreProduct("pro_monthly", ProductType.SUBSCRIPTION, "Pro Monthly")
-        val pkg = Package("monthly", product)
+        val product = StoreProduct(
+            id = "pro_monthly",
+            type = ProductType.SUBSCRIPTION,
+            productCategory = ProductCategory.SUBSCRIPTION,
+            displayName = "Pro Monthly",
+        )
+        val pkg = Package(identifier = "monthly", packageType = PackageType.CUSTOM, product = product)
         val offering = Offering(identifier = "default", isDefault = true, packages = listOf(pkg))
         assertEquals("default", offering.identifier)
         assertTrue(offering.isDefault)
@@ -74,8 +86,17 @@ class PurchaseTypesTest {
 
     @Test
     fun `Offerings exposes current and all map`() {
-        val product = StoreProduct("pro_monthly", ProductType.SUBSCRIPTION, "Pro Monthly")
-        val offering = Offering("default", true, listOf(Package("monthly", product)))
+        val product = StoreProduct(
+            id = "pro_monthly",
+            type = ProductType.SUBSCRIPTION,
+            productCategory = ProductCategory.SUBSCRIPTION,
+            displayName = "Pro Monthly",
+        )
+        val offering = Offering(
+            identifier = "default",
+            isDefault = true,
+            packages = listOf(Package(identifier = "monthly", packageType = PackageType.CUSTOM, product = product)),
+        )
         val offerings = Offerings(current = offering, all = mapOf("default" to offering))
         assertSame(offering, offerings.current)
         assertEquals(1, offerings.all.size)
