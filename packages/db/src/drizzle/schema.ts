@@ -611,6 +611,8 @@ export const products = pgTable(
       .notNull()
       .default(sql`ARRAY[]::text[]`),
     creditAmount: integer("creditAmount"),
+    androidBasePlanId: text("androidBasePlanId"),
+    androidOfferId: text("androidOfferId"),
     isActive: boolean("isActive").notNull().default(true),
     metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
     createdAt: timestamp("createdAt", { withTimezone: true })

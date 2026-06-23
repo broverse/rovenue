@@ -186,6 +186,8 @@ export interface UpdateProductInput {
   storeIds?: Record<string, string>;
   accessIds?: string[];
   creditAmount?: number | null;
+  androidBasePlanId?: string | null;
+  androidOfferId?: string | null;
   isActive?: boolean;
   metadata?: Record<string, unknown>;
 }
