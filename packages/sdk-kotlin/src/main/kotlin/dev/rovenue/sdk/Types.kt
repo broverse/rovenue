@@ -106,7 +106,17 @@ data class Offering(
     val identifier: String,
     val isDefault: Boolean,
     val packages: List<Package>,
-)
+) {
+    fun packageBy(identifier: String): Package? = packages.firstOrNull { it.identifier == identifier }
+    private fun byType(t: PackageType): Package? = packages.firstOrNull { it.packageType == t }
+    val lifetime: Package? get() = byType(PackageType.LIFETIME)
+    val annual: Package? get() = byType(PackageType.ANNUAL)
+    val sixMonth: Package? get() = byType(PackageType.SIX_MONTH)
+    val threeMonth: Package? get() = byType(PackageType.THREE_MONTH)
+    val twoMonth: Package? get() = byType(PackageType.TWO_MONTH)
+    val monthly: Package? get() = byType(PackageType.MONTHLY)
+    val weekly: Package? get() = byType(PackageType.WEEKLY)
+}
 
 /** The full set of configured offerings plus the currently-selected one. */
 data class Offerings(
