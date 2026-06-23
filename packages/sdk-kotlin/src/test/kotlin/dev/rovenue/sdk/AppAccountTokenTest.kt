@@ -1,5 +1,6 @@
 package dev.rovenue.sdk
 
+import dev.rovenue.sdk.generated.LogLevel
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -13,7 +14,7 @@ class AppAccountTokenTest {
     @BeforeEach
     fun setup() {
         Rovenue.resetForTesting()
-        Rovenue.configure(apiKey = "test_pk", baseUrl = "http://localhost:0", debug = true)
+        Rovenue.configure(apiKey = "test_pk", baseUrl = "http://localhost:0", logLevel = LogLevel.WARN)
     }
 
     @AfterEach

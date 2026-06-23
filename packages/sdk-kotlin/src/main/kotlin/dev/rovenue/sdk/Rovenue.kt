@@ -19,6 +19,9 @@ import dev.rovenue.sdk.generated.CoreOfferings
 import dev.rovenue.sdk.generated.ExperimentAssignment
 import dev.rovenue.sdk.generated.FunnelClaimResult
 import dev.rovenue.sdk.generated.ErrorKind
+import dev.rovenue.sdk.generated.LogLevel
+import dev.rovenue.sdk.generated.LogRecord
+import dev.rovenue.sdk.generated.LogSink
 import dev.rovenue.sdk.generated.RovenueCore
 import dev.rovenue.sdk.generated.RovenueErrorFfi
 import dev.rovenue.sdk.generated.SessionEventKind
@@ -55,6 +58,28 @@ data class LogEntry(
     val message: String,
     val data: Map<String, String>? = null,
 )
+
+/**
+ * Bridges the Rust core's [LogSink] callback into Rovenue's [setLogHandler]
+ * machinery. Registered once per [Rovenue.configure] call so all core-
+ * authoritative logs flow through the same handler pipeline.
+ *
+ * The [when] is exhaustive over all six [LogLevel] variants with no `else`
+ * branch so a future variant addition causes a compile error here.
+ */
+internal class LogSinkBridge : LogSink {
+    override fun onLog(record: LogRecord) {
+        val level = when (record.level) {
+            LogLevel.OFF -> return
+            LogLevel.ERROR -> "error"
+            LogLevel.WARN -> "warn"
+            LogLevel.INFO -> "info"
+            LogLevel.DEBUG -> "debug"
+            LogLevel.TRACE -> "trace"
+        }
+        Rovenue.emit(LogEntry(level, record.message, record.fields.ifEmpty { null }))
+    }
+}
 
 class Rovenue private constructor(
     internal val core: RovenueCore,
@@ -116,12 +141,11 @@ class Rovenue private constructor(
         fun configure(
             apiKey: String,
             baseUrl: String? = null,
-            debug: Boolean = false,
+            logLevel: LogLevel = LogLevel.WARN,
             appVersion: String? = null,
             context: Context? = null,
             environment: String? = null,
         ) {
-            emit(LogEntry(level = "info", message = "configure"))
             if (apiKey.isBlank()) {
                 throw RovenueException(kind = ErrorKind.INVALID_API_KEY, message = "apiKey is blank")
             }
@@ -129,7 +153,7 @@ class Rovenue private constructor(
             // applies; the Rust core validates it on construction.
             val config = Config(
                 apiKey = apiKey,
-                debug = debug,
+                logLevel = logLevel,
                 appVersion = appVersion,
                 platform = "android",
                 environment = environment,
@@ -143,6 +167,7 @@ class Rovenue private constructor(
             core.registerObserver(bridge)
             val funnelBridge = FunnelClaimBridge()
             core.registerFunnelClaimListener(funnelBridge)
+            core.registerLogSink(LogSinkBridge())
             val instance = Rovenue(
                 core,
                 bridge,
@@ -256,12 +281,9 @@ class Rovenue private constructor(
      *  backend calling /v1/subscribers/transfer with the secret key. */
     @Throws(RovenueException::class)
     suspend fun identify(appUserId: String) {
-        emit(LogEntry(level = "info", message = "identify"))
         try {
             dispatcher.run { core.identify(appUserId) }
-            emit(LogEntry(level = "info", message = "identify ok"))
         } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "identify failed: ${e.message ?: e.javaClass.simpleName}"))
             throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
@@ -270,12 +292,9 @@ class Rovenue private constructor(
      *  association. Client-local only — does not contact the server. */
     @Throws(RovenueException::class)
     suspend fun logOut() {
-        emit(LogEntry(level = "info", message = "logOut"))
         try {
             dispatcher.run { core.logOut() }
-            emit(LogEntry(level = "info", message = "logOut ok"))
         } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "logOut failed: ${e.message ?: e.javaClass.simpleName}"))
             throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
@@ -289,12 +308,9 @@ class Rovenue private constructor(
      *  fields server-side; pass a null value to clear an attribute. */
     @Throws(RovenueException::class)
     suspend fun setAttributes(attributes: Map<String, String?>) {
-        emit(LogEntry(level = "info", message = "setAttributes"))
         try {
             dispatcher.run { core.setAttributes(attributes) }
-            emit(LogEntry(level = "info", message = "setAttributes ok"))
         } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "setAttributes failed: ${e.message ?: e.javaClass.simpleName}"))
             throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
@@ -336,12 +352,9 @@ class Rovenue private constructor(
      *  of `changes`. */
     @Throws(RovenueException::class)
     suspend fun refreshEntitlements() {
-        emit(LogEntry(level = "info", message = "refreshEntitlements"))
         try {
             dispatcher.run { core.refreshEntitlements() }
-            emit(LogEntry(level = "info", message = "refreshEntitlements ok"))
         } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "refreshEntitlements failed: ${e.message ?: e.javaClass.simpleName}"))
             throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
@@ -362,12 +375,9 @@ class Rovenue private constructor(
      *  On change, emits ChangeEvent.VIRTUAL_CURRENCIES_CHANGED. */
     @Throws(RovenueException::class)
     suspend fun refreshVirtualCurrencies() {
-        emit(LogEntry(level = "info", message = "refreshVirtualCurrencies"))
         try {
             dispatcher.run { core.refreshVirtualCurrencies() }
-            emit(LogEntry(level = "info", message = "refreshVirtualCurrencies ok"))
         } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "refreshVirtualCurrencies failed: ${e.message ?: e.javaClass.simpleName}"))
             throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
@@ -381,12 +391,9 @@ class Rovenue private constructor(
      *  ChangeEvent.REMOTE_CONFIG_CHANGED. */
     @Throws(RovenueException::class)
     suspend fun refreshRemoteConfig() {
-        emit(LogEntry(level = "info", message = "refreshRemoteConfig"))
         try {
             dispatcher.run { core.refreshRemoteConfig() }
-            emit(LogEntry(level = "info", message = "refreshRemoteConfig ok"))
         } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "refreshRemoteConfig failed: ${e.message ?: e.javaClass.simpleName}"))
             throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
@@ -503,12 +510,9 @@ class Rovenue private constructor(
      */
     @Throws(RovenueException::class)
     suspend fun track(envelopeJson: String) {
-        emit(LogEntry(level = "info", message = "track"))
         try {
             dispatcher.run { core.track(envelopeJson) }
-            emit(LogEntry(level = "info", message = "track ok"))
         } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "track failed: ${e.message ?: e.javaClass.simpleName}"))
             throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
@@ -526,24 +530,20 @@ class Rovenue private constructor(
      *  getOfferings never fails just because pricing was unavailable. */
     @Throws(RovenueException::class)
     suspend fun getOfferings(): Offerings {
-        emit(LogEntry(level = "info", message = "getOfferings"))
         try {
             val core: CoreOfferings = dispatcher.run { core.getOfferings() }
             val context = appContext
             val offerings = if (context != null) {
                 runCatching { hydrateOfferings(core, PlayBillingStore(context)) }
                     .getOrElse {
-                        emit(LogEntry(level = "warn", message = "getOfferings price hydration failed: ${it.message ?: it.javaClass.simpleName}"))
                         hydrateOfferings(core, NoPriceStore)
                     }
             } else {
                 // Pure-JVM / no-Context: config-only offerings, null prices.
                 hydrateOfferings(core, NoPriceStore)
             }
-            emit(LogEntry(level = "info", message = "getOfferings ok"))
             return offerings
         } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "getOfferings failed: ${e.message ?: e.javaClass.simpleName}"))
             throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
@@ -556,7 +556,6 @@ class Rovenue private constructor(
      *  validates the purchase token server-side, acknowledges/consumes it,
      *  then returns the refreshed entitlement/credit state. */
     suspend fun purchase(activity: Activity, product: StoreProduct): PurchaseResult {
-        emit(LogEntry(level = "info", message = "purchase"))
         val context = appContext
             ?: throw RovenueException(kind = ErrorKind.STORE_PROBLEM, message = "Rovenue.configure(...) must be called with a Context before purchasing")
         val token = runCatching { getAppAccountToken() }.getOrNull()
@@ -567,11 +566,8 @@ class Rovenue private constructor(
             },
         )
         try {
-            val result = flow.run(activity, product.id, product.type, token)
-            emit(LogEntry(level = "info", message = "purchase ok"))
-            return result
+            return flow.run(activity, product.id, product.type, token)
         } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "purchase failed: ${e.message ?: e.javaClass.simpleName}"))
             throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
@@ -589,7 +585,6 @@ class Rovenue private constructor(
      *  Best-effort: also invoked automatically (off-thread, errors swallowed)
      *  after [configure]. Safe to call manually, e.g. on app foreground. */
     suspend fun reconcilePurchases() {
-        emit(LogEntry(level = "info", message = "reconcilePurchases"))
         val context = appContext
             ?: throw RovenueException(kind = ErrorKind.STORE_PROBLEM, message = "Rovenue.configure(...) must be called with a Context before reconciling")
         val token = runCatching { getAppAccountToken() }.getOrNull()
@@ -601,9 +596,7 @@ class Rovenue private constructor(
         )
         try {
             reconciler.reconcile()
-            emit(LogEntry(level = "info", message = "reconcilePurchases ok"))
         } catch (e: Throwable) {
-            emit(LogEntry(level = "error", message = "reconcilePurchases failed: ${e.message ?: e.javaClass.simpleName}"))
             throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
@@ -613,7 +606,6 @@ class Rovenue private constructor(
      *  revision) and returns the resulting entitlement/credit state. */
     @Throws(RovenueException::class)
     suspend fun restorePurchases(activity: Activity): PurchaseResult {
-        emit(LogEntry(level = "info", message = "restorePurchases"))
         refreshEntitlements()
         return PurchaseResult(
             entitlements = entitlementsAll(),
@@ -631,14 +623,12 @@ class Rovenue private constructor(
      *  the SDK's internal polling scheduler ticks; while background,
      *  polling pauses. Call from your Activity / Application lifecycle. */
     fun setForeground(foreground: Boolean) {
-        emit(LogEntry(level = "info", message = "setForeground"))
         core.setForeground(foreground)
     }
 
     /** Stop background work cleanly. Called automatically on
      *  resetForTesting() and on configure-twice. */
     fun shutdown() {
-        emit(LogEntry(level = "info", message = "shutdown"))
         core.shutdown()
     }
 
