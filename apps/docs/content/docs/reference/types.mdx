@@ -650,17 +650,22 @@ The `Offering` type provides accessors to quickly find packages by type:
     ```
   </Tab>
   <Tab value="Kotlin">
-    Kotlin does not expose convenience accessors on the `Offering` object itself. Use [`Package.packageType`](#package) to filter packages:
+    Kotlin `Offering` includes convenience properties:
     
     ```kotlin
     val offering = offerings.current
     
-    // Find by packageType
-    val monthly = offering?.packages?.find { it.packageType == PackageType.monthly }
-    val annual = offering?.packages?.find { it.packageType == PackageType.annual }
+    // Access by PackageType enum
+    val monthly = offering?.monthly    // Package? matching MONTHLY
+    val annual = offering?.annual      // Package? matching ANNUAL
+    val weekly = offering?.weekly      // Package? matching WEEKLY
+    val sixMonth = offering?.sixMonth
+    val threeMonth = offering?.threeMonth
+    val twoMonth = offering?.twoMonth
+    val lifetime = offering?.lifetime
     
-    // Find by identifier
-    val custom = offering?.packages?.find { it.identifier == "pro_custom" }
+    // Or look up by identifier
+    val custom = offering?.packageBy("\$rov_monthly")
     ```
   </Tab>
 </Tabs>
