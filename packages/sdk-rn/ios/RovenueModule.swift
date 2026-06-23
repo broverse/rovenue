@@ -343,16 +343,180 @@ public class RovenueModule: Module {
         }
     }
 
+    // MARK: - Enum → string mappers
+
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func productCategoryString(_ c: ProductCategory) -> String {
+        switch c {
+        case .subscription:    return "subscription"
+        case .nonSubscription: return "nonSubscription"
+        }
+    }
+
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func periodUnitString(_ u: PeriodUnit) -> String {
+        switch u {
+        case .day:   return "day"
+        case .week:  return "week"
+        case .month: return "month"
+        case .year:  return "year"
+        }
+    }
+
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func paymentModeString(_ m: PaymentMode) -> String {
+        switch m {
+        case .freeTrial:  return "freeTrial"
+        case .payAsYouGo: return "payAsYouGo"
+        case .payUpFront: return "payUpFront"
+        }
+    }
+
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func discountTypeString(_ t: DiscountType) -> String {
+        switch t {
+        case .introductory: return "introductory"
+        case .promotional:  return "promotional"
+        case .winBack:      return "winBack"
+        }
+    }
+
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func recurrenceModeString(_ r: RecurrenceMode) -> String {
+        switch r {
+        case .infiniteRecurring: return "infiniteRecurring"
+        case .finiteRecurring:   return "finiteRecurring"
+        case .nonRecurring:      return "nonRecurring"
+        }
+    }
+
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func packageTypeString(_ t: PackageType) -> String {
+        switch t {
+        case .unknown:    return "unknown"
+        case .custom:     return "custom"
+        case .lifetime:   return "lifetime"
+        case .annual:     return "annual"
+        case .sixMonth:   return "sixMonth"
+        case .threeMonth: return "threeMonth"
+        case .twoMonth:   return "twoMonth"
+        case .monthly:    return "monthly"
+        case .weekly:     return "weekly"
+        }
+    }
+
+    // MARK: - Nested DTO helpers
+
+    /// Maps `Period` to `PeriodDTO` dict: { value, unit, iso8601 }.
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func periodDict(_ p: Period) -> [String: Any] {
+        [
+            "value":   p.value,
+            "unit":    periodUnitString(p.unit),
+            "iso8601": p.iso8601,
+        ]
+    }
+
+    /// Maps optional `IntroPrice` → `IntroPriceDTO` dict or `NSNull`.
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func introDict(_ i: IntroPrice?) -> Any {
+        guard let i else { return NSNull() }
+        return [
+            "price":        i.price.map { NSDecimalNumber(decimal: $0).doubleValue } as Any,
+            "priceString":  i.priceString as Any,
+            "currencyCode": i.currencyCode as Any,
+            "period":       periodDict(i.period),
+            "cycles":       i.cycles,
+            "paymentMode":  paymentModeString(i.paymentMode),
+        ] as [String: Any]
+    }
+
+    /// Maps `Discount` → `DiscountDTO` dict.
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func discountDict(_ d: Discount) -> [String: Any] {
+        [
+            "identifier":      d.identifier as Any,
+            "price":           d.price.map { NSDecimalNumber(decimal: $0).doubleValue } as Any,
+            "priceString":     d.priceString as Any,
+            "currencyCode":    d.currencyCode as Any,
+            "period":          periodDict(d.period),
+            "numberOfPeriods": d.numberOfPeriods,
+            "paymentMode":     paymentModeString(d.paymentMode),
+            "type":            discountTypeString(d.type),
+        ]
+    }
+
+    /// Maps `PricingPhase` → `PricingPhaseDTO` dict.
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func phaseDict(_ ph: PricingPhase) -> [String: Any] {
+        [
+            "price":             ph.price.map { NSDecimalNumber(decimal: $0).doubleValue } as Any,
+            "priceString":       ph.priceString as Any,
+            "currencyCode":      ph.currencyCode as Any,
+            "billingPeriod":     periodDict(ph.billingPeriod),
+            "billingCycleCount": ph.billingCycleCount as Any,
+            "recurrenceMode":    recurrenceModeString(ph.recurrenceMode),
+            "paymentMode":       ph.paymentMode.map { paymentModeString($0) } as Any,
+        ]
+    }
+
+    /// Maps optional `PricingPhase` → `PricingPhaseDTO` dict or `NSNull`.
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func optionalPhaseDict(_ ph: PricingPhase?) -> Any {
+        guard let ph else { return NSNull() }
+        return phaseDict(ph)
+    }
+
+    /// Maps `SubscriptionOption` → `SubscriptionOptionDTO` dict.
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func optionDict(_ opt: SubscriptionOption) -> [String: Any] {
+        [
+            "id":              opt.id,
+            "basePlanId":      opt.basePlanId as Any,
+            "offerId":         opt.offerId as Any,
+            "tags":            opt.tags,
+            "isBasePlan":      opt.isBasePlan,
+            "isPrepaid":       opt.isPrepaid,
+            "pricingPhases":   opt.pricingPhases.map { phaseDict($0) },
+            "freePhase":       optionalPhaseDict(opt.freePhase),
+            "introPhase":      optionalPhaseDict(opt.introPhase),
+            "fullPricePhase":  optionalPhaseDict(opt.fullPricePhase),
+        ]
+    }
+
+    // MARK: - Top-level product DTO
+
     @available(iOS 15.0, macOS 12.0, *)
     private static func dtoFromStoreProduct(_ p: StoreProduct) -> [String: Any] {
-        [
-            "id": p.id,
-            "type": productTypeString(p.type),
-            "displayName": p.displayName,
-            "priceString": p.priceString as Any,
-            // Decimal → Double for the JS number bridge; NSNull when absent.
-            "price": p.price.map { NSDecimalNumber(decimal: $0).doubleValue } as Any,
-            "currencyCode": p.currencyCode as Any,
+        // Helper: Decimal? → Double or NSNull (for the JS number bridge).
+        func decimalOrNull(_ d: Decimal?) -> Any {
+            d.map { NSDecimalNumber(decimal: $0).doubleValue } as Any
+        }
+        return [
+            "id":                         p.id,
+            "type":                       productTypeString(p.type),
+            "productCategory":            productCategoryString(p.productCategory),
+            "displayName":                p.displayName,
+            "description":                p.description as Any,
+            "priceString":                p.priceString as Any,
+            "price":                      decimalOrNull(p.price),
+            "currencyCode":               p.currencyCode as Any,
+            "subscriptionPeriod":         p.subscriptionPeriod.map { periodDict($0) } as Any,
+            "subscriptionGroupIdentifier": p.subscriptionGroupIdentifier as Any,
+            "isFamilyShareable":          p.isFamilyShareable,
+            "introPrice":                 introDict(p.introPrice),
+            "discounts":                  p.discounts.map { discountDict($0) },
+            "isEligibleForIntroOffer":    p.isEligibleForIntroOffer as Any,
+            // subscriptionOptions / defaultOption are Android-only (Google Play
+            // base plans + offers). iOS always emits NSNull for both.
+            "subscriptionOptions":        NSNull(),
+            "defaultOption":              NSNull(),
+            "pricePerWeek":               decimalOrNull(p.pricePerWeek),
+            "pricePerMonth":              decimalOrNull(p.pricePerMonth),
+            "pricePerYear":               decimalOrNull(p.pricePerYear),
+            "pricePerWeekString":         p.pricePerWeekString as Any,
+            "pricePerMonthString":        p.pricePerMonthString as Any,
+            "pricePerYearString":         p.pricePerYearString as Any,
         ]
     }
 
@@ -364,8 +528,9 @@ public class RovenueModule: Module {
                 "isDefault": off.isDefault,
                 "packages": off.packages.map { pkg in
                     [
-                        "identifier": pkg.identifier,
-                        "product": dtoFromStoreProduct(pkg.product),
+                        "identifier":  pkg.identifier,
+                        "packageType": packageTypeString(pkg.packageType),
+                        "product":     dtoFromStoreProduct(pkg.product),
                     ] as [String: Any]
                 },
             ]
