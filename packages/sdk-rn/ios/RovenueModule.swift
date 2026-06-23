@@ -80,12 +80,23 @@ public class RovenueModule: Module {
         // façade falls back to Bundle.main.infoDictionary[CFBundleShortVersionString].
         // For Expo apps that's the value baked from app.json's `expo.version`
         // at prebuild time; for bare RN it's the host project's plist.
-        Function("configure") { (apiKey: String, baseUrl: String?, debug: Bool, appVersion: String?, environment: String?) in
+        Function("configure") { (apiKey: String, baseUrl: String?, logLevel: String, appVersion: String?, environment: String?) in
+            let level: LogLevel = {
+                switch logLevel {
+                case "off":   return .off
+                case "error": return .error
+                case "warn":  return .warn
+                case "info":  return .info
+                case "debug": return .debug
+                case "trace": return .trace
+                default:      return .warn
+                }
+            }()
             try rovenueCallSync {
                 try Rovenue.configure(
                     apiKey: apiKey,
                     baseUrl: baseUrl,
-                    debug: debug,
+                    logLevel: level,
                     appVersion: appVersion,
                     environment: environment
                 )

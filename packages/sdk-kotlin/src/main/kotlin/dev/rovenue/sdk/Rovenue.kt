@@ -54,7 +54,7 @@ import kotlin.concurrent.withLock
  * structured payloads, which MUST NOT include PII).
  */
 data class LogEntry(
-    val level: String,                    // "debug" | "info" | "warn" | "error"
+    val level: String,                    // "off" | "error" | "warn" | "info" | "debug" | "trace"
     val message: String,
     val data: Map<String, String>? = null,
 )

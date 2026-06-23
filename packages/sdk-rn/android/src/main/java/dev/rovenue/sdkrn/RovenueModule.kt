@@ -28,6 +28,7 @@ import dev.rovenue.sdk.DiscountType
 import dev.rovenue.sdk.IntroPrice
 import dev.rovenue.sdk.LogEntry
 import dev.rovenue.sdk.Offerings
+import dev.rovenue.sdk.generated.LogLevel
 import dev.rovenue.sdk.PackageType
 import dev.rovenue.sdk.PaymentMode
 import dev.rovenue.sdk.Period
@@ -72,13 +73,22 @@ class RovenueModule : Module() {
         // For Expo apps that's the value baked from app.json's
         // `expo.version` at prebuild time (into android/app/build.gradle
         // versionName); for bare RN it's the host project's gradle config.
-        Function("configure") { apiKey: String, baseUrl: String?, debug: Boolean, appVersion: String?, environment: String? ->
+        Function("configure") { apiKey: String, baseUrl: String?, logLevel: String, appVersion: String?, environment: String? ->
             val resolved = appVersion ?: readPackageVersionName()
+            val level = when (logLevel) {
+                "off"   -> LogLevel.OFF
+                "error" -> LogLevel.ERROR
+                "warn"  -> LogLevel.WARN
+                "info"  -> LogLevel.INFO
+                "debug" -> LogLevel.DEBUG
+                "trace" -> LogLevel.TRACE
+                else    -> LogLevel.WARN
+            }
             // The M4 Kotlin façade needs a Context to drive Play Billing.
             Rovenue.configure(
                 apiKey = apiKey,
                 baseUrl = baseUrl,
-                debug = debug,
+                logLevel = level,
                 appVersion = resolved,
                 context = appContext.reactContext?.applicationContext,
                 environment = environment,

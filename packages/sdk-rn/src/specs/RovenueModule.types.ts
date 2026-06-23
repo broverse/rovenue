@@ -111,7 +111,7 @@ export type PurchaseResultDTO = {
 };
 
 export type LogEntryDTO = {
-  level: "debug" | "info" | "warn" | "error";
+  level: "off" | "error" | "warn" | "info" | "debug" | "trace";
   message: string;
   fields: Record<string, string>;
 };

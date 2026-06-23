@@ -18,7 +18,7 @@ import type {
 
 /** Native onLog payload shape (mirrors core LogRecord forwarded by iOS/Android bridges). */
 export type NativeLogPayload = {
-  level: "debug" | "info" | "warn" | "error";
+  level: "off" | "error" | "warn" | "info" | "debug" | "trace";
   message: string;
   fields: Record<string, string>;
 };

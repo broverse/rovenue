@@ -9,7 +9,7 @@
 import { getEmitter } from "../core/native";
 
 export type LogEntry = {
-  level: "debug" | "info" | "warn" | "error";
+  level: "off" | "error" | "warn" | "info" | "debug" | "trace";
   message: string;
   data?: Record<string, unknown>;
 };

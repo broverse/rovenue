@@ -18,7 +18,7 @@ import StoreKit
 /// field is currently always `nil` (reserved for future structured
 /// payloads, which MUST NOT include PII).
 public struct LogEntry: Sendable {
-    public let level: String   // "debug" | "info" | "warn" | "error"
+    public let level: String   // "off" | "error" | "warn" | "info" | "debug" | "trace"
     public let message: String
     public let data: [String: String]?
 
