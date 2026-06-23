@@ -11,6 +11,19 @@ ALTER TABLE rovenue.raw_credit_ledger
   ADD COLUMN IF NOT EXISTS currencyId String AFTER subscriberId;
 
 -- An MV's SELECT cannot be ALTERed; drop and recreate to add the extraction.
+--
+-- ⚠️ LIVE-CH HAZARD (see MEMORY: clickhouse_mv_recreate_kafka_gap): mv_credit_to_raw
+-- ingests from the Kafka Engine table rovenue.credit_queue (consumer group
+-- rovenue-ch-credit). On an empty topic — a FRESH install applying migrations in
+-- order — this DROP→CREATE is safe. But on a LIVE system with credit traffic, the
+-- Kafka offset advances during the gap with no MV attached, so every credit event
+-- consumed between DROP and CREATE is permanently lost from raw_credit_ledger.
+-- If this migration (or any future recreation of mv_credit_to_raw) is ever applied
+-- to a live ClickHouse: FIRST pause the rovenue-ch-credit consumer group (DETACH the
+-- credit_queue table or stop ingestion), then apply, then backfill raw_credit_ledger
+-- from Postgres credit_ledger for the gap window before resuming. 0016 leaves its
+-- ingestion MV untouched for exactly this reason; this one had to recreate it to add
+-- the currencyId column, so the pause-and-backfill discipline is mandatory on live.
 DROP VIEW IF EXISTS rovenue.mv_credit_to_raw;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS rovenue.mv_credit_to_raw
