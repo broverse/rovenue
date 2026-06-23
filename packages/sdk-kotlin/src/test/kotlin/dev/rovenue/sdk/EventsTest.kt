@@ -1,6 +1,6 @@
 package dev.rovenue.sdk
 
-import dev.rovenue.sdk.generated.RovenueException
+import dev.rovenue.sdk.generated.ErrorKind
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
@@ -26,9 +26,10 @@ class EventsTest {
     @Test
     fun `track forwards envelope to core`() = runTest {
         Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://unreachable.invalid")
-        assertFailsWith<RovenueException.NetworkUnavailable> {
+        val ex = assertFailsWith<RovenueException> {
             Rovenue.shared.track("""{"eventType":"purchase","occurredAt":"2026-06-20T00:00:00Z"}""")
         }
+        assertEquals(ErrorKind.NETWORK_UNAVAILABLE, ex.kind)
     }
 
     // ------------------------------------------------------------------
@@ -42,9 +43,10 @@ class EventsTest {
     @Test
     fun `claimFunnelToken forwards token to core`() = runTest {
         Rovenue.configure(apiKey = "pk_test_xyz", baseUrl = "https://unreachable.invalid")
-        assertFailsWith<RovenueException.NetworkUnavailable> {
+        val ex = assertFailsWith<RovenueException> {
             Rovenue.shared.claimFunnelToken("some_token_value")
         }
+        assertEquals(ErrorKind.NETWORK_UNAVAILABLE, ex.kind)
     }
 
     // ------------------------------------------------------------------

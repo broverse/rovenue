@@ -79,7 +79,7 @@ class PurchaseReconcilerTest {
 
         val reconciler = PurchaseReconciler(
             store = FakeReconcileStore(listOf(unacked)),
-            validate = { _, _ -> throw StoreProblemException("server rejected") },
+            validate = { _, _ -> throw RovenueException(kind = dev.rovenue.sdk.generated.ErrorKind.STORE_PROBLEM, message = "server rejected") },
         )
 
         // reconcile swallows the per-purchase failure (does not throw).

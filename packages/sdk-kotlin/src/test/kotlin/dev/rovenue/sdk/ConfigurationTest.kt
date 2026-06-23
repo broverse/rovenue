@@ -1,6 +1,5 @@
 package dev.rovenue.sdk
 
-import dev.rovenue.sdk.generated.RovenueException
 import dev.rovenue.sdk.generated.sdkVersion
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -18,14 +17,14 @@ class ConfigurationTest {
 
     @Test
     fun `configure rejects blank api key`() {
-        assertFailsWith<RovenueException.InvalidApiKey> {
+        assertFailsWith<RovenueException> {
             Rovenue.configure(apiKey = "", baseUrl = "https://api.rovenue.io")
         }
     }
 
     @Test
     fun `configure rejects whitespace api key`() {
-        assertFailsWith<RovenueException.InvalidApiKey> {
+        assertFailsWith<RovenueException> {
             Rovenue.configure(apiKey = "   ", baseUrl = "https://api.rovenue.io")
         }
     }

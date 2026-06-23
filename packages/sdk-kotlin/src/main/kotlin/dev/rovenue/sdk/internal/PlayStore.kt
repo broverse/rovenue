@@ -24,11 +24,37 @@ sealed interface StorePurchaseOutcome {
         val acknowledge: suspend () -> Unit,
     ) : StorePurchaseOutcome
 
+    /** User cancelled the billing flow — not an error, no exception thrown. */
     data object UserCancelled : StorePurchaseOutcome
 
-    data object Pending : StorePurchaseOutcome
+    /**
+     * Play Billing returned PENDING state. The purchase is awaiting external
+     * approval (e.g. cash payment at a kiosk). Not a failure — surface as
+     * [dev.rovenue.sdk.PurchaseResult.isDeferred] = true to the caller.
+     */
+    data object Deferred : StorePurchaseOutcome
 
+    /** The product was not found in the Play Billing catalog. */
     data object ProductNotFound : StorePurchaseOutcome
+
+    /** User already owns this item. */
+    data object AlreadyOwned : StorePurchaseOutcome
+
+    /** Payment was declined (e.g. insufficient funds). */
+    data object PaymentDeclined : StorePurchaseOutcome
+
+    /** Play Billing service is temporarily unavailable or disconnected. */
+    data object ServiceUnavailable : StorePurchaseOutcome
+
+    /** User is not eligible for this product or offer. */
+    data object Ineligible : StorePurchaseOutcome
+
+    /**
+     * An unexpected billing error occurred (catch-all for codes not mapped to
+     * a specific outcome). Surfaces as [dev.rovenue.sdk.RovenueException] with
+     * [dev.rovenue.sdk.generated.ErrorKind.STORE_PROBLEM].
+     */
+    data object StoreProblem : StorePurchaseOutcome
 }
 
 /**

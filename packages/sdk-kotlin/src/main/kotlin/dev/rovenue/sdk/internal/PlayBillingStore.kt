@@ -22,7 +22,8 @@ import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
 import dev.rovenue.sdk.ProductType
-import dev.rovenue.sdk.StoreProblemException
+import dev.rovenue.sdk.RovenueException
+import dev.rovenue.sdk.generated.ErrorKind
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
@@ -38,26 +39,28 @@ class PlayBillingStore(private val context: Context) : PlayStore {
     private val purchasesListener = PurchasesUpdatedListener { result, purchases ->
         val cont = pending ?: return@PurchasesUpdatedListener
         pending = null
-        when (result.responseCode) {
-            BillingClient.BillingResponseCode.OK -> {
-                val purchase = purchases?.firstOrNull()
-                if (purchase == null) {
-                    cont.resume(StorePurchaseOutcome.ProductNotFound)
-                } else when (purchase.purchaseState) {
-                    Purchase.PurchaseState.PURCHASED ->
-                        cont.resume(successFor(purchase))
-                    Purchase.PurchaseState.PENDING ->
-                        cont.resume(StorePurchaseOutcome.Pending)
-                    else ->
-                        cont.resume(StorePurchaseOutcome.Pending)
-                }
-            }
-            BillingClient.BillingResponseCode.USER_CANCELED ->
-                cont.resume(StorePurchaseOutcome.UserCancelled)
-            BillingClient.BillingResponseCode.ITEM_UNAVAILABLE ->
+        if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+            val purchase = purchases?.firstOrNull()
+            if (purchase == null) {
                 cont.resume(StorePurchaseOutcome.ProductNotFound)
-            else ->
-                cont.resumeWithException(StoreProblemException("billing error ${result.responseCode}: ${result.debugMessage}"))
+            } else if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
+                cont.resume(successFor(purchase))
+            } else {
+                // PENDING or unknown state → Deferred (not a failure)
+                cont.resume(StorePurchaseOutcome.Deferred)
+            }
+        } else {
+            val outcome = mapBillingCode(result.responseCode, null, null)
+            when (outcome) {
+                is StorePurchaseOutcome.StoreProblem ->
+                    cont.resumeWithException(
+                        RovenueException(
+                            kind = ErrorKind.STORE_PROBLEM,
+                            message = "billing error ${result.responseCode}: ${result.debugMessage}",
+                        ),
+                    )
+                else -> cont.resume(outcome)
+            }
         }
     }
 
@@ -74,6 +77,11 @@ class PlayBillingStore(private val context: Context) : PlayStore {
         productType: ProductType,
         obfuscatedAccountId: String?,
     ): StorePurchaseOutcome {
+        // Concurrency guard — reject a second in-flight purchase rather than
+        // silently clobbering the single pending continuation.
+        if (pending != null) {
+            return StorePurchaseOutcome.StoreProblem
+        }
         pendingType = productType
         val client = connect()
         val details = queryDetails(client, productId, productType)
@@ -103,7 +111,10 @@ class PlayBillingStore(private val context: Context) : PlayStore {
             if (launch.responseCode != BillingClient.BillingResponseCode.OK) {
                 pending = null
                 cont.resumeWithException(
-                    StoreProblemException("launchBillingFlow failed ${launch.responseCode}: ${launch.debugMessage}"),
+                    RovenueException(
+                        kind = ErrorKind.STORE_PROBLEM,
+                        message = "launchBillingFlow failed ${launch.responseCode}: ${launch.debugMessage}",
+                    ),
                 )
             }
         }
@@ -237,7 +248,7 @@ class PlayBillingStore(private val context: Context) : PlayStore {
             purchaseToken = purchase.purchaseToken,
             orderId = purchase.orderId ?: "",
             acknowledge = {
-                val c = client ?: throw StoreProblemException("billing client gone")
+                val c = client ?: throw RovenueException(kind = ErrorKind.STORE_PROBLEM, message = "billing client gone")
                 if (isConsumable) {
                     consume(c, purchase.purchaseToken)
                 } else if (!purchase.isAcknowledged) {
@@ -265,7 +276,10 @@ class PlayBillingStore(private val context: Context) : PlayStore {
                         cont.resume(client)
                     } else {
                         cont.resumeWithException(
-                            StoreProblemException("billing setup failed ${result.responseCode}: ${result.debugMessage}"),
+                            RovenueException(
+                                kind = ErrorKind.STORE_PROBLEM,
+                                message = "billing setup failed ${result.responseCode}: ${result.debugMessage}",
+                            ),
                         )
                     }
                 }
@@ -314,7 +328,10 @@ class PlayBillingStore(private val context: Context) : PlayStore {
                     cont.resume(details.productDetailsList)
                 } else {
                     cont.resumeWithException(
-                        StoreProblemException("queryProductDetails failed ${result.responseCode}: ${result.debugMessage}"),
+                        RovenueException(
+                            kind = ErrorKind.STORE_PROBLEM,
+                            message = "queryProductDetails failed ${result.responseCode}: ${result.debugMessage}",
+                        ),
                     )
                 }
             }
@@ -330,7 +347,10 @@ class PlayBillingStore(private val context: Context) : PlayStore {
                     cont.resume(purchases)
                 } else {
                     cont.resumeWithException(
-                        StoreProblemException("queryPurchases failed ${result.responseCode}: ${result.debugMessage}"),
+                        RovenueException(
+                            kind = ErrorKind.STORE_PROBLEM,
+                            message = "queryPurchases failed ${result.responseCode}: ${result.debugMessage}",
+                        ),
                     )
                 }
             }
@@ -344,7 +364,10 @@ class PlayBillingStore(private val context: Context) : PlayStore {
                     cont.resume(Unit)
                 } else {
                     cont.resumeWithException(
-                        StoreProblemException("consume failed ${result.responseCode}: ${result.debugMessage}"),
+                        RovenueException(
+                            kind = ErrorKind.STORE_PROBLEM,
+                            message = "consume failed ${result.responseCode}: ${result.debugMessage}",
+                        ),
                     )
                 }
             }
@@ -358,9 +381,57 @@ class PlayBillingStore(private val context: Context) : PlayStore {
                     cont.resume(Unit)
                 } else {
                     cont.resumeWithException(
-                        StoreProblemException("acknowledge failed ${result.responseCode}: ${result.debugMessage}"),
+                        RovenueException(
+                            kind = ErrorKind.STORE_PROBLEM,
+                            message = "acknowledge failed ${result.responseCode}: ${result.debugMessage}",
+                        ),
                     )
                 }
             }
         }
+}
+
+// ---------------------------------------------------------------------------
+// Billing-code mapping — package-internal so it can be unit-tested without a
+// live BillingClient. PURCHASED is NOT handled here (the caller uses
+// successFor(purchase) when the purchase state is PURCHASED).
+//
+// @param code       BillingClient.BillingResponseCode
+// @param subResponse PBL9 sub-response code, or null (for ERROR with
+//                    PAYMENT_DECLINED / USER_INELIGIBLE disambiguation)
+// @param state      Purchase.PurchaseState, or null (used only when code==OK)
+// ---------------------------------------------------------------------------
+
+// PBL9 sub-response constants (not exposed as a public API by the SDK).
+private const val SUB_RESPONSE_PAYMENT_DECLINED = 1   // PAYMENT_DECLINED_DUE_TO_INSUFFICIENT_FUNDS
+private const val SUB_RESPONSE_USER_INELIGIBLE = 2    // USER_INELIGIBLE
+
+internal fun mapBillingCode(
+    code: Int,
+    subResponse: Int?,
+    state: Int?,
+): StorePurchaseOutcome = when (code) {
+    BillingClient.BillingResponseCode.OK -> when (state) {
+        Purchase.PurchaseState.PURCHASED -> StorePurchaseOutcome.Deferred // replaced by successFor at call site
+        Purchase.PurchaseState.PENDING -> StorePurchaseOutcome.Deferred
+        else -> StorePurchaseOutcome.Deferred
+    }
+    BillingClient.BillingResponseCode.USER_CANCELED ->
+        StorePurchaseOutcome.UserCancelled
+    BillingClient.BillingResponseCode.ITEM_UNAVAILABLE ->
+        StorePurchaseOutcome.ProductNotFound
+    BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED ->
+        StorePurchaseOutcome.AlreadyOwned
+    BillingClient.BillingResponseCode.SERVICE_DISCONNECTED,
+    BillingClient.BillingResponseCode.SERVICE_UNAVAILABLE,
+    BillingClient.BillingResponseCode.BILLING_UNAVAILABLE,
+    BillingClient.BillingResponseCode.NETWORK_ERROR ->
+        StorePurchaseOutcome.ServiceUnavailable
+    BillingClient.BillingResponseCode.ERROR -> when (subResponse) {
+        SUB_RESPONSE_PAYMENT_DECLINED -> StorePurchaseOutcome.PaymentDeclined
+        SUB_RESPONSE_USER_INELIGIBLE -> StorePurchaseOutcome.Ineligible
+        else -> StorePurchaseOutcome.StoreProblem
+    }
+    else ->
+        StorePurchaseOutcome.StoreProblem
 }

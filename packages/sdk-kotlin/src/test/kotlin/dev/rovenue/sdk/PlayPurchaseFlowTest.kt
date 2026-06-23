@@ -124,11 +124,10 @@ class PurchaseTypesTest {
     }
 
     @Test
-    fun `purchase exceptions carry their message`() {
-        assertEquals("nope", PurchaseCancelledException("nope").message)
-        assertEquals("later", PurchasePendingException("later").message)
-        assertEquals("gone", ProductNotAvailableException("gone").message)
-        assertEquals("oops", StoreProblemException("oops").message)
+    fun `RovenueException carries kind and message`() {
+        val ex = RovenueException(kind = dev.rovenue.sdk.generated.ErrorKind.PURCHASE_CANCELED, message = "nope")
+        assertEquals("nope", ex.message)
+        assertEquals(dev.rovenue.sdk.generated.ErrorKind.PURCHASE_CANCELED, ex.kind)
     }
 }
 
@@ -157,38 +156,53 @@ class PlayPurchaseFlowTest {
         ReceiptResult(subscriberId = "sub_1", appUserId = "anon_1", virtualCurrencies = virtualCurrencies, entitlements = emptyList())
 
     @Test
-    fun `cancelled outcome throws and never validates`() = runTest {
+    fun `cancelled outcome throws RovenueException(PURCHASE_CANCELED) and never validates`() = runTest {
         var validated = false
         val flow = PlayPurchaseFlow(
             store = storeReturning(StorePurchaseOutcome.UserCancelled),
             validate = { _, _ -> validated = true; receipt(emptyMap()) },
         )
-        assertFailsWith<PurchaseCancelledException> {
+        val ex = assertFailsWith<RovenueException> {
             flow.run(activity, "pro_monthly", ProductType.SUBSCRIPTION, null)
         }
+        assertEquals(dev.rovenue.sdk.generated.ErrorKind.PURCHASE_CANCELED, ex.kind)
         assertFalse(validated, "validation must not run on a cancelled purchase")
     }
 
     @Test
-    fun `pending outcome throws PurchasePendingException`() = runTest {
+    fun `deferred outcome returns PurchaseResult with isDeferred=true and never validates`() = runTest {
+        var validated = false
         val flow = PlayPurchaseFlow(
-            store = storeReturning(StorePurchaseOutcome.Pending),
-            validate = { _, _ -> error("should not validate") },
+            store = storeReturning(StorePurchaseOutcome.Deferred),
+            validate = { _, _ -> validated = true; receipt(emptyMap()) },
         )
-        assertFailsWith<PurchasePendingException> {
-            flow.run(activity, "pro_monthly", ProductType.SUBSCRIPTION, null)
-        }
+        val result = flow.run(activity, "pro_monthly", ProductType.SUBSCRIPTION, null)
+        assertTrue(result.isDeferred, "deferred purchase must set isDeferred=true")
+        assertFalse(validated, "validation must not run on a deferred purchase")
     }
 
     @Test
-    fun `product-not-found outcome throws ProductNotAvailableException`() = runTest {
+    fun `product-not-found outcome throws RovenueException(PRODUCT_NOT_AVAILABLE)`() = runTest {
         val flow = PlayPurchaseFlow(
             store = storeReturning(StorePurchaseOutcome.ProductNotFound),
             validate = { _, _ -> error("should not validate") },
         )
-        assertFailsWith<ProductNotAvailableException> {
+        val ex = assertFailsWith<RovenueException> {
             flow.run(activity, "missing", ProductType.CONSUMABLE, null)
         }
+        assertEquals(dev.rovenue.sdk.generated.ErrorKind.PRODUCT_NOT_AVAILABLE, ex.kind)
+    }
+
+    @Test
+    fun `already-owned outcome throws RovenueException(ALREADY_OWNED)`() = runTest {
+        val flow = PlayPurchaseFlow(
+            store = storeReturning(StorePurchaseOutcome.AlreadyOwned),
+            validate = { _, _ -> error("should not validate") },
+        )
+        val ex = assertFailsWith<RovenueException> {
+            flow.run(activity, "pro_monthly", ProductType.SUBSCRIPTION, null)
+        }
+        assertEquals(dev.rovenue.sdk.generated.ErrorKind.ALREADY_OWNED, ex.kind)
     }
 
     @Test
@@ -229,10 +243,10 @@ class PlayPurchaseFlowTest {
         )
         val flow = PlayPurchaseFlow(
             store = storeReturning(success),
-            validate = { _, _ -> throw StoreProblemException("server rejected") },
+            validate = { _, _ -> throw RovenueException(kind = dev.rovenue.sdk.generated.ErrorKind.STORE_PROBLEM, message = "server rejected") },
         )
 
-        assertFailsWith<StoreProblemException> {
+        assertFailsWith<RovenueException> {
             flow.run(activity, "coins_100", ProductType.CONSUMABLE, null)
         }
         assertFalse(acknowledged, "must not acknowledge when validation fails")

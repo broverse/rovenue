@@ -130,15 +130,11 @@ data class PurchaseResult(
     val virtualCurrencies: Map<String, Long>,
     val productId: String,
     val storeTransactionId: String,
+    /**
+     * True when Play Billing returned PENDING (now Deferred) — the payment is
+     * pending external action (e.g. cash at a kiosk). No entitlements are
+     * granted yet; the SDK will deliver them when the purchase completes via
+     * reconcilePurchases(). Swift parity: PurchaseResultState.deferred flag.
+     */
+    val isDeferred: Boolean = false,
 )
-
-// Purchase exceptions — top-level classes (the generated RovenueException is a
-// sealed class we must not extend). Mirrors the Swift SDK's purchase errors.
-
-class PurchaseCancelledException(message: String) : Exception(message)
-
-class PurchasePendingException(message: String) : Exception(message)
-
-class ProductNotAvailableException(message: String) : Exception(message)
-
-class StoreProblemException(message: String) : Exception(message)

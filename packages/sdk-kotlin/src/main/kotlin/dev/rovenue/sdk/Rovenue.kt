@@ -18,8 +18,9 @@ import dev.rovenue.sdk.generated.Config
 import dev.rovenue.sdk.generated.CoreOfferings
 import dev.rovenue.sdk.generated.ExperimentAssignment
 import dev.rovenue.sdk.generated.FunnelClaimResult
+import dev.rovenue.sdk.generated.ErrorKind
 import dev.rovenue.sdk.generated.RovenueCore
-import dev.rovenue.sdk.generated.RovenueException
+import dev.rovenue.sdk.generated.RovenueErrorFfi
 import dev.rovenue.sdk.generated.SessionEventKind
 import dev.rovenue.sdk.generated.sdkVersion
 import dev.rovenue.sdk.internal.Dispatcher
@@ -122,7 +123,7 @@ class Rovenue private constructor(
         ) {
             emit(LogEntry(level = "info", message = "configure"))
             if (apiKey.isBlank()) {
-                throw RovenueException.InvalidApiKey("apiKey is blank")
+                throw RovenueException(kind = ErrorKind.INVALID_API_KEY, message = "apiKey is blank")
             }
             // Omit baseUrl → the generated Config default ("https://api.rovenue.io")
             // applies; the Rust core validates it on construction.
@@ -133,7 +134,11 @@ class Rovenue private constructor(
                 platform = "android",
                 environment = environment,
             ).let { if (baseUrl != null) it.copy(baseUrl = baseUrl) else it }
-            val core = RovenueCore(config)  // may throw RovenueException
+            val core = try {
+                RovenueCore(config)
+            } catch (e: RovenueErrorFfi.Generic) {
+                throw RovenueException.from(e)
+            }
             val bridge = ObserverBridge()
             core.registerObserver(bridge)
             val funnelBridge = FunnelClaimBridge()
@@ -257,7 +262,7 @@ class Rovenue private constructor(
             emit(LogEntry(level = "info", message = "identify ok"))
         } catch (e: Throwable) {
             emit(LogEntry(level = "error", message = "identify failed: ${e.message ?: e.javaClass.simpleName}"))
-            throw e
+            throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
 
@@ -271,7 +276,7 @@ class Rovenue private constructor(
             emit(LogEntry(level = "info", message = "logOut ok"))
         } catch (e: Throwable) {
             emit(LogEntry(level = "error", message = "logOut failed: ${e.message ?: e.javaClass.simpleName}"))
-            throw e
+            throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
 
@@ -290,7 +295,7 @@ class Rovenue private constructor(
             emit(LogEntry(level = "info", message = "setAttributes ok"))
         } catch (e: Throwable) {
             emit(LogEntry(level = "error", message = "setAttributes failed: ${e.message ?: e.javaClass.simpleName}"))
-            throw e
+            throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
 
@@ -333,7 +338,7 @@ class Rovenue private constructor(
             emit(LogEntry(level = "info", message = "refreshEntitlements ok"))
         } catch (e: Throwable) {
             emit(LogEntry(level = "error", message = "refreshEntitlements failed: ${e.message ?: e.javaClass.simpleName}"))
-            throw e
+            throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
 
@@ -359,7 +364,7 @@ class Rovenue private constructor(
             emit(LogEntry(level = "info", message = "refreshVirtualCurrencies ok"))
         } catch (e: Throwable) {
             emit(LogEntry(level = "error", message = "refreshVirtualCurrencies failed: ${e.message ?: e.javaClass.simpleName}"))
-            throw e
+            throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
 
@@ -378,7 +383,7 @@ class Rovenue private constructor(
             emit(LogEntry(level = "info", message = "refreshRemoteConfig ok"))
         } catch (e: Throwable) {
             emit(LogEntry(level = "error", message = "refreshRemoteConfig failed: ${e.message ?: e.javaClass.simpleName}"))
-            throw e
+            throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
 
@@ -490,7 +495,7 @@ class Rovenue private constructor(
             emit(LogEntry(level = "info", message = "track ok"))
         } catch (e: Throwable) {
             emit(LogEntry(level = "error", message = "track failed: ${e.message ?: e.javaClass.simpleName}"))
-            throw e
+            throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
 
@@ -525,7 +530,7 @@ class Rovenue private constructor(
             return offerings
         } catch (e: Throwable) {
             emit(LogEntry(level = "error", message = "getOfferings failed: ${e.message ?: e.javaClass.simpleName}"))
-            throw e
+            throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
 
@@ -539,7 +544,7 @@ class Rovenue private constructor(
     suspend fun purchase(activity: Activity, product: StoreProduct): PurchaseResult {
         emit(LogEntry(level = "info", message = "purchase"))
         val context = appContext
-            ?: throw StoreProblemException("Rovenue.configure(...) must be called with a Context before purchasing")
+            ?: throw RovenueException(kind = ErrorKind.STORE_PROBLEM, message = "Rovenue.configure(...) must be called with a Context before purchasing")
         val token = runCatching { getAppAccountToken() }.getOrNull()
         val flow = PlayPurchaseFlow(
             store = PlayBillingStore(context),
@@ -553,7 +558,7 @@ class Rovenue private constructor(
             return result
         } catch (e: Throwable) {
             emit(LogEntry(level = "error", message = "purchase failed: ${e.message ?: e.javaClass.simpleName}"))
-            throw e
+            throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
 
@@ -572,7 +577,7 @@ class Rovenue private constructor(
     suspend fun reconcilePurchases() {
         emit(LogEntry(level = "info", message = "reconcilePurchases"))
         val context = appContext
-            ?: throw StoreProblemException("Rovenue.configure(...) must be called with a Context before reconciling")
+            ?: throw RovenueException(kind = ErrorKind.STORE_PROBLEM, message = "Rovenue.configure(...) must be called with a Context before reconciling")
         val token = runCatching { getAppAccountToken() }.getOrNull()
         val reconciler = PurchaseReconciler(
             store = PlayBillingStore(context),
@@ -585,7 +590,7 @@ class Rovenue private constructor(
             emit(LogEntry(level = "info", message = "reconcilePurchases ok"))
         } catch (e: Throwable) {
             emit(LogEntry(level = "error", message = "reconcilePurchases failed: ${e.message ?: e.javaClass.simpleName}"))
-            throw e
+            throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }
     }
 
@@ -640,8 +645,11 @@ class Rovenue private constructor(
      * @throws RovenueException on network failure or invalid token.
      */
     @Throws(RovenueException::class)
-    suspend fun claimFunnelToken(token: String): FunnelClaimResult =
+    suspend fun claimFunnelToken(token: String): FunnelClaimResult = try {
         dispatcher.run { core.claimFunnelToken(token) }
+    } catch (e: RovenueErrorFfi.Generic) {
+        throw RovenueException.from(e)
+    }
 
     /**
      * Claim via install attribution — passes install-time context to the
@@ -652,8 +660,11 @@ class Rovenue private constructor(
      * @throws RovenueException on network failure.
      */
     @Throws(RovenueException::class)
-    suspend fun claimInstall(params: ClaimInstallParams): FunnelClaimResult? =
+    suspend fun claimInstall(params: ClaimInstallParams): FunnelClaimResult? = try {
         dispatcher.run { core.claimInstall(params) }
+    } catch (e: RovenueErrorFfi.Generic) {
+        throw RovenueException.from(e)
+    }
 
     /**
      * Claim via email — associates the current subscriber with the supplied
@@ -663,7 +674,11 @@ class Rovenue private constructor(
      */
     @Throws(RovenueException::class)
     suspend fun claimViaEmail(email: String) {
-        dispatcher.run { core.claimViaEmail(email) }
+        try {
+            dispatcher.run { core.claimViaEmail(email) }
+        } catch (e: RovenueErrorFfi.Generic) {
+            throw RovenueException.from(e)
+        }
     }
 
     // ---------------------------------------------------------------
