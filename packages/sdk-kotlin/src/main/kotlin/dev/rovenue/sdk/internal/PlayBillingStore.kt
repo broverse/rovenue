@@ -15,13 +15,12 @@ import com.android.billingclient.api.BillingClientStateListener
 import com.android.billingclient.api.BillingFlowParams
 import com.android.billingclient.api.BillingResult
 import com.android.billingclient.api.ConsumeParams
+import com.android.billingclient.api.PendingPurchasesParams
 import com.android.billingclient.api.ProductDetails
 import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
-import com.android.billingclient.api.queryProductDetails
-import com.android.billingclient.api.queryPurchasesAsync
 import dev.rovenue.sdk.ProductType
 import dev.rovenue.sdk.StoreProblemException
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -145,13 +144,7 @@ class PlayBillingStore(private val context: Context) : PlayStore {
                 },
             )
             .build()
-        val outcome = client.queryProductDetails(params)
-        if (outcome.billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
-            throw StoreProblemException(
-                "queryProductDetails failed ${outcome.billingResult.responseCode}: ${outcome.billingResult.debugMessage}",
-            )
-        }
-        return outcome.productDetailsList ?: emptyList()
+        return awaitProductDetails(client, params)
     }
 
     private fun inappPrice(details: ProductDetails): PriceInfo? {
@@ -192,13 +185,7 @@ class PlayBillingStore(private val context: Context) : PlayStore {
         @Suppress("UNUSED_PARAMETER") isConsumable: Boolean,
     ): List<PendingPurchase> {
         val params = QueryPurchasesParams.newBuilder().setProductType(type).build()
-        val result = client.queryPurchasesAsync(params)
-        if (result.billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
-            throw StoreProblemException(
-                "queryPurchases failed ${result.billingResult.responseCode}: ${result.billingResult.debugMessage}",
-            )
-        }
-        return result.purchasesList
+        return awaitPurchases(client, params)
             .filter { it.purchaseState == Purchase.PurchaseState.PURCHASED }
             .map { purchase ->
                 val productId = purchase.products.firstOrNull() ?: ""
@@ -243,7 +230,11 @@ class PlayBillingStore(private val context: Context) : PlayStore {
         billingClient?.let { if (it.isReady) return it }
         val client = BillingClient.newBuilder(context)
             .setListener(purchasesListener)
-            .enablePendingPurchases()
+            // PBL 8 removed the no-arg enablePendingPurchases(); the params form
+            // with enableOneTimeProducts() is the documented functional equivalent.
+            .enablePendingPurchases(
+                PendingPurchasesParams.newBuilder().enableOneTimeProducts().build(),
+            )
             .build()
         billingClient = client
         return suspendCancellableCoroutine { cont ->
@@ -285,14 +276,44 @@ class PlayBillingStore(private val context: Context) : PlayStore {
                 ),
             )
             .build()
-        val outcome = client.queryProductDetails(params)
-        if (outcome.billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
-            throw StoreProblemException(
-                "queryProductDetails failed ${outcome.billingResult.responseCode}: ${outcome.billingResult.debugMessage}",
-            )
-        }
-        return outcome.productDetailsList?.firstOrNull()
+        return awaitProductDetails(client, params).firstOrNull()
     }
+
+    // PBL 8 dropped the Kotlin suspend ktx extensions (billing-ktx now ships
+    // Kotlin 2.x metadata, incompatible with this module's Kotlin 1.9), so we
+    // bridge the callback query APIs to coroutines ourselves — same pattern as
+    // consume/acknowledge below.
+    private suspend fun awaitProductDetails(
+        client: BillingClient,
+        params: QueryProductDetailsParams,
+    ): List<ProductDetails> =
+        suspendCancellableCoroutine { cont ->
+            client.queryProductDetailsAsync(params) { result, details ->
+                if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+                    cont.resume(details.productDetailsList)
+                } else {
+                    cont.resumeWithException(
+                        StoreProblemException("queryProductDetails failed ${result.responseCode}: ${result.debugMessage}"),
+                    )
+                }
+            }
+        }
+
+    private suspend fun awaitPurchases(
+        client: BillingClient,
+        params: QueryPurchasesParams,
+    ): List<Purchase> =
+        suspendCancellableCoroutine { cont ->
+            client.queryPurchasesAsync(params) { result, purchases ->
+                if (result.responseCode == BillingClient.BillingResponseCode.OK) {
+                    cont.resume(purchases)
+                } else {
+                    cont.resumeWithException(
+                        StoreProblemException("queryPurchases failed ${result.responseCode}: ${result.debugMessage}"),
+                    )
+                }
+            }
+        }
 
     private suspend fun consume(client: BillingClient, token: String) =
         suspendCancellableCoroutine<Unit> { cont ->
