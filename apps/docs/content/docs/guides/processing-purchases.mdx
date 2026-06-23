@@ -493,6 +493,18 @@ to redeem the user's chosen variant.
 - If the selected offer is no longer available on Google Play, purchase fails with `RovenueException` (Kotlin) or `RovenueError` (React Native) — refresh offerings and retry.
 - **iOS:** the `subscriptionOption` parameter is ignored on iOS (iOS uses [promotional offers](/docs/guides/processing-purchases#redeeming-promotional-offers-ios) instead).
 
+### Server-configured default
+
+The default offer (`product.defaultOption`) can be configured server-side in the Rovenue dashboard:
+
+- Per-product configuration in the **Android** section: set an **Base plan ID** (and optionally an **Offer ID**).
+- When configured, `product.defaultOption` resolves to this server-chosen plan instead of the lowest-price option.
+- This ensures the advertised default price in your UI matches the actual plan the SDK purchases when the user selects a package without explicitly choosing an offer variant.
+- When left blank, the SDK falls back to the lowest-priced base plan (current behavior).
+- **Important:** an offer ID cannot be configured without a base plan ID — the API rejects orphaned offers.
+- If the configured base plan or offer no longer exists on Google Play, the SDK gracefully falls back to the lowest-priced base plan at purchase time (does not fail).
+- **Android-only:** iOS has no base-plan concept; these configuration fields are ignored on iOS.
+
 ### Usage by platform
 
 <Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
