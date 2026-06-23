@@ -104,7 +104,8 @@ impl RovenueCore {
             HttpClient::new(config.base_url.clone(), config.api_key.clone())
                 .with_platform(config.platform.clone())
                 .with_environment(config.environment.clone())
-                .with_max_attempts(http_max_attempts),
+                .with_max_attempts(http_max_attempts)
+                .with_logger(Arc::clone(&logger)),
         );
         let reader = Arc::new(
             EntitlementReader::new(Arc::clone(&store), Arc::clone(&identity))

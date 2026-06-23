@@ -51,6 +51,12 @@ pub struct HttpClient {
     /// `X-Rovenue-Env` on every request when set. `None` omits the header so
     /// the backend falls back to `prod`.
     environment: Option<String>,
+    /// Optional structured logger; when set, emits Debug + Error records per
+    /// logical request. Authorization / api key are never included in records.
+    logger: Option<std::sync::Arc<crate::logging::Logger>>,
+    /// Monotonic counter for correlation ids (req-0, req-1, …). Counts per
+    /// HttpClient instance; does NOT use wall-clock or random.
+    corr_counter: std::sync::atomic::AtomicU64,
 }
 
 impl HttpClient {
@@ -67,6 +73,8 @@ impl HttpClient {
             request_timeout: Duration::from_secs(10),
             platform: None,
             environment: None,
+            logger: None,
+            corr_counter: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -108,6 +116,22 @@ impl HttpClient {
         self
     }
 
+    /// Attach a structured logger. When set, each logical request emits a
+    /// `Debug` record (path, method, status, attempt, correlation_id) and an
+    /// `Error` record on terminal failure.  `Authorization` and the api key
+    /// are never included in any emitted record.
+    pub fn with_logger(mut self, logger: std::sync::Arc<crate::logging::Logger>) -> Self {
+        self.logger = Some(logger);
+        self
+    }
+
+    /// Monotonically increasing correlation id for each logical request.
+    /// Format: `req-{n}` where n starts at 0 and increments per call.
+    fn next_correlation_id(&self) -> String {
+        let n = self.corr_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        format!("req-{n}")
+    }
+
     pub fn get_json<T: DeserializeOwned>(
         &self,
         req: HttpRequest<'_>,
@@ -115,6 +139,7 @@ impl HttpClient {
         let url = format!("{}{}", self.base_url, req.path);
         let mut rng = rand::thread_rng();
         let mut last_err = RovenueError::NetworkUnavailable();
+        let corr = self.next_correlation_id();
 
         for attempt in 0..self.max_attempts {
             let mut builder = self
@@ -140,6 +165,23 @@ impl HttpClient {
             match builder.send() {
                 Ok(resp) => {
                     let status = resp.status().as_u16();
+                    if let Some(l) = &self.logger {
+                        let path = req.path.to_string();
+                        let corr_c = corr.clone();
+                        l.log(
+                            crate::logging::LogLevel::Debug,
+                            || format!("http GET {path}"),
+                            || {
+                                let mut f = std::collections::BTreeMap::new();
+                                f.insert("method".to_string(), "GET".to_string());
+                                f.insert("path".to_string(), path.clone());
+                                f.insert("status".to_string(), status.to_string());
+                                f.insert("attempt".to_string(), attempt.to_string());
+                                f.insert("correlation_id".to_string(), corr_c);
+                                crate::logging::redact::redact_fields(f)
+                            },
+                        );
+                    }
                     let retry_after = resp
                         .headers()
                         .get("Retry-After")
@@ -188,7 +230,27 @@ impl HttpClient {
                         }
                         RetryDecision::Fatal => {
                             let body_text = resp.text().unwrap_or_default();
-                            return Err(error_from_status(status, &body_text));
+                            let err = error_from_status(status, &body_text);
+                            if let Some(l) = &self.logger {
+                                let path = req.path.to_string();
+                                let corr_c = corr.clone();
+                                let kind = format!("{:?}", err.kind);
+                                l.log(
+                                    crate::logging::LogLevel::Error,
+                                    || format!("http GET {path} failed"),
+                                    || {
+                                        let mut f = std::collections::BTreeMap::new();
+                                        f.insert("method".to_string(), "GET".to_string());
+                                        f.insert("path".to_string(), path.clone());
+                                        f.insert("status".to_string(), status.to_string());
+                                        f.insert("attempt".to_string(), attempt.to_string());
+                                        f.insert("correlation_id".to_string(), corr_c);
+                                        f.insert("kind".to_string(), kind);
+                                        crate::logging::redact::redact_fields(f)
+                                    },
+                                );
+                            }
+                            return Err(err);
                         }
                     }
                 }
@@ -209,6 +271,25 @@ impl HttpClient {
             }
         }
 
+        // Terminal network/timeout failure after all attempts exhausted.
+        if let Some(l) = &self.logger {
+            let path = req.path.to_string();
+            let corr_c = corr.clone();
+            let kind = format!("{:?}", last_err.kind);
+            l.log(
+                crate::logging::LogLevel::Error,
+                || format!("http GET {path} failed after all attempts"),
+                || {
+                    let mut f = std::collections::BTreeMap::new();
+                    f.insert("method".to_string(), "GET".to_string());
+                    f.insert("path".to_string(), path.clone());
+                    f.insert("attempt".to_string(), (self.max_attempts - 1).to_string());
+                    f.insert("correlation_id".to_string(), corr_c);
+                    f.insert("kind".to_string(), kind);
+                    crate::logging::redact::redact_fields(f)
+                },
+            );
+        }
         Err(last_err)
     }
 
@@ -256,6 +337,7 @@ impl HttpClient {
         let url = format!("{}{}", self.base_url, req.path);
         let mut rng = rand::thread_rng();
         let mut last_err = RovenueError::NetworkUnavailable();
+        let corr = self.next_correlation_id();
 
         let payload = serde_json::to_vec(body).map_err(|_| RovenueError::Internal())?;
 
@@ -282,6 +364,23 @@ impl HttpClient {
             match req_built.send() {
                 Ok(resp) => {
                     let status = resp.status().as_u16();
+                    if let Some(l) = &self.logger {
+                        let path = req.path.to_string();
+                        let corr_c = corr.clone();
+                        l.log(
+                            crate::logging::LogLevel::Debug,
+                            || format!("http POST {path}"),
+                            || {
+                                let mut f = std::collections::BTreeMap::new();
+                                f.insert("method".to_string(), "POST".to_string());
+                                f.insert("path".to_string(), path.clone());
+                                f.insert("status".to_string(), status.to_string());
+                                f.insert("attempt".to_string(), attempt.to_string());
+                                f.insert("correlation_id".to_string(), corr_c);
+                                crate::logging::redact::redact_fields(f)
+                            },
+                        );
+                    }
                     let retry_after = resp
                         .headers()
                         .get("Retry-After")
@@ -329,7 +428,27 @@ impl HttpClient {
                         }
                         RetryDecision::Fatal => {
                             let body_text = resp.text().unwrap_or_default();
-                            return Err(error_from_status(status, &body_text));
+                            let err = error_from_status(status, &body_text);
+                            if let Some(l) = &self.logger {
+                                let path = req.path.to_string();
+                                let corr_c = corr.clone();
+                                let kind = format!("{:?}", err.kind);
+                                l.log(
+                                    crate::logging::LogLevel::Error,
+                                    || format!("http POST {path} failed"),
+                                    || {
+                                        let mut f = std::collections::BTreeMap::new();
+                                        f.insert("method".to_string(), "POST".to_string());
+                                        f.insert("path".to_string(), path.clone());
+                                        f.insert("status".to_string(), status.to_string());
+                                        f.insert("attempt".to_string(), attempt.to_string());
+                                        f.insert("correlation_id".to_string(), corr_c);
+                                        f.insert("kind".to_string(), kind);
+                                        crate::logging::redact::redact_fields(f)
+                                    },
+                                );
+                            }
+                            return Err(err);
                         }
                     }
                 }
@@ -349,6 +468,26 @@ impl HttpClient {
                 }
             }
         }
+
+        // Terminal network/timeout failure after all attempts exhausted.
+        if let Some(l) = &self.logger {
+            let path = req.path.to_string();
+            let corr_c = corr.clone();
+            let kind = format!("{:?}", last_err.kind);
+            l.log(
+                crate::logging::LogLevel::Error,
+                || format!("http POST {path} failed after all attempts"),
+                || {
+                    let mut f = std::collections::BTreeMap::new();
+                    f.insert("method".to_string(), "POST".to_string());
+                    f.insert("path".to_string(), path.clone());
+                    f.insert("attempt".to_string(), (self.max_attempts - 1).to_string());
+                    f.insert("correlation_id".to_string(), corr_c);
+                    f.insert("kind".to_string(), kind);
+                    crate::logging::redact::redact_fields(f)
+                },
+            );
+        }
         Err(last_err)
     }
 
@@ -367,6 +506,7 @@ impl HttpClient {
         let url = format!("{}{}", self.base_url, req.path);
         let mut rng = rand::thread_rng();
         let mut last_err = RovenueError::NetworkUnavailable();
+        let corr = self.next_correlation_id();
         let payload = serde_json::to_vec(body).map_err(|_| RovenueError::Internal())?;
 
         for attempt in 0..self.max_attempts {
@@ -391,6 +531,23 @@ impl HttpClient {
             match builder.body(payload.clone()).send() {
                 Ok(resp) => {
                     let status = resp.status().as_u16();
+                    if let Some(l) = &self.logger {
+                        let path = req.path.to_string();
+                        let corr_c = corr.clone();
+                        l.log(
+                            crate::logging::LogLevel::Debug,
+                            || format!("http POST {path}"),
+                            || {
+                                let mut f = std::collections::BTreeMap::new();
+                                f.insert("method".to_string(), "POST".to_string());
+                                f.insert("path".to_string(), path.clone());
+                                f.insert("status".to_string(), status.to_string());
+                                f.insert("attempt".to_string(), attempt.to_string());
+                                f.insert("correlation_id".to_string(), corr_c);
+                                crate::logging::redact::redact_fields(f)
+                            },
+                        );
+                    }
                     // 4xx is a returnable outcome (caller maps it); 2xx too.
                     if (200..500).contains(&status) {
                         let parsed = resp.json::<serde_json::Value>().ok();
@@ -438,7 +595,64 @@ impl HttpClient {
                 }
             }
         }
+
+        // Terminal network/timeout failure after all attempts exhausted.
+        if let Some(l) = &self.logger {
+            let path = req.path.to_string();
+            let corr_c = corr.clone();
+            let kind = format!("{:?}", last_err.kind);
+            l.log(
+                crate::logging::LogLevel::Error,
+                || format!("http POST {path} failed after all attempts"),
+                || {
+                    let mut f = std::collections::BTreeMap::new();
+                    f.insert("method".to_string(), "POST".to_string());
+                    f.insert("path".to_string(), path.clone());
+                    f.insert("attempt".to_string(), (self.max_attempts - 1).to_string());
+                    f.insert("correlation_id".to_string(), corr_c);
+                    f.insert("kind".to_string(), kind);
+                    crate::logging::redact::redact_fields(f)
+                },
+            );
+        }
         Err(last_err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_level_logs_request_metadata_without_authorization() {
+        use crate::logging::{LogLevel, LogRecord, LogSink, Logger};
+        use std::sync::Mutex as StdMutex;
+        struct Collector(std::sync::Arc<StdMutex<Vec<LogRecord>>>);
+        impl LogSink for Collector {
+            fn on_log(&self, r: LogRecord) { self.0.lock().unwrap().push(r); }
+        }
+        let recs = std::sync::Arc::new(StdMutex::new(Vec::new()));
+        let logger = std::sync::Arc::new(Logger::new(LogLevel::Debug));
+        logger.set_sink(std::sync::Arc::new(Collector(recs.clone())));
+
+        // Point at an unroutable local port so the request fails fast; we only
+        // assert on the emitted trace metadata, not on a live response.
+        let client = HttpClient::new("http://127.0.0.1:1".to_string(), "pk_secret".to_string())
+            .with_max_attempts(1)
+            .with_logger(logger);
+        let _ = client.get_json::<serde_json::Value>(HttpRequest::new("/v1/entitlements"));
+
+        let got = recs.lock().unwrap();
+        assert!(got.iter().any(|r| r.fields.get("path").map(|p| p == "/v1/entitlements").unwrap_or(false)),
+            "expected a record carrying the request path");
+        for r in got.iter() {
+            for v in r.fields.values() {
+                assert!(!v.contains("pk_secret"), "api key leaked into trace: {v}");
+            }
+            assert!(!r.message.contains("pk_secret"), "api key leaked into message: {}", r.message);
+            assert!(!r.fields.contains_key("Authorization") && !r.fields.contains_key("authorization"),
+                "Authorization must never be a logged field");
+        }
     }
 }
 
