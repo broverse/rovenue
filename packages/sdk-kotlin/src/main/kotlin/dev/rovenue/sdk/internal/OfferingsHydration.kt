@@ -164,6 +164,8 @@ internal object NoPriceStore : PlayStore {
         productId: String,
         productType: ProductType,
         obfuscatedAccountId: String?,
+        basePlanId: String?,
+        offerId: String?,
     ): StorePurchaseOutcome = StorePurchaseOutcome.ProductNotFound
 
     override suspend fun queryProducts(

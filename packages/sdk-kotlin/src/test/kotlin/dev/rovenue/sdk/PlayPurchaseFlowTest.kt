@@ -142,6 +142,8 @@ class PlayPurchaseFlowTest {
             productId: String,
             productType: ProductType,
             obfuscatedAccountId: String?,
+            basePlanId: String?,
+            offerId: String?,
         ): StorePurchaseOutcome = outcome
 
         override suspend fun queryProducts(

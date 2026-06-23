@@ -35,8 +35,12 @@ class PlayPurchaseFlow(
         productId: String,
         productType: ProductType,
         obfuscatedAccountId: String?,
+        basePlanId: String? = null,
+        offerId: String? = null,
     ): PurchaseResult {
-        when (val outcome = store.purchase(activity, productId, productType, obfuscatedAccountId)) {
+        when (val outcome = store.purchase(activity, productId, productType, obfuscatedAccountId, basePlanId, offerId)) {
+            is StorePurchaseOutcome.OfferNotFound ->
+                throw RovenueException(kind = ErrorKind.PRODUCT_NOT_AVAILABLE, message = "requested subscription offer is no longer available")
             is StorePurchaseOutcome.UserCancelled ->
                 throw RovenueException(kind = ErrorKind.PURCHASE_CANCELED, message = "purchase cancelled by user")
             is StorePurchaseOutcome.ProductNotFound ->

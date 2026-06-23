@@ -55,6 +55,9 @@ sealed interface StorePurchaseOutcome {
      * [dev.rovenue.sdk.generated.ErrorKind.STORE_PROBLEM].
      */
     data object StoreProblem : StorePurchaseOutcome
+
+    /** The requested base-plan/offer is no longer present in the live ProductDetails. */
+    data object OfferNotFound : StorePurchaseOutcome
 }
 
 /**
@@ -79,6 +82,8 @@ interface PlayStore {
         productId: String,
         productType: ProductType,
         obfuscatedAccountId: String?,
+        basePlanId: String? = null,
+        offerId: String? = null,
     ): StorePurchaseOutcome
 
     /**

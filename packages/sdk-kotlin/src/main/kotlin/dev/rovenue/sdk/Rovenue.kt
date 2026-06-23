@@ -548,14 +548,19 @@ class Rovenue private constructor(
         }
     }
 
-    /** Purchase the product backing a [Package]. */
-    suspend fun purchase(activity: Activity, pkg: Package): PurchaseResult =
-        purchase(activity, pkg.product)
+    /** Purchase the product backing a [Package], optionally selecting a specific [SubscriptionOption]. */
+    suspend fun purchase(activity: Activity, pkg: Package, option: SubscriptionOption? = null): PurchaseResult =
+        purchase(activity, pkg.product, option)
 
-    /** Purchase a [StoreProduct] via Play Billing. Launches the billing flow,
-     *  validates the purchase token server-side, acknowledges/consumes it,
+    /** Purchase a [StoreProduct] via Play Billing, optionally selecting a specific [SubscriptionOption].
+     *  Launches the billing flow, validates the purchase token server-side, acknowledges/consumes it,
      *  then returns the refreshed entitlement/credit state. */
-    suspend fun purchase(activity: Activity, product: StoreProduct): PurchaseResult {
+    suspend fun purchase(activity: Activity, product: StoreProduct, option: SubscriptionOption? = null): PurchaseResult =
+        purchase(activity, product, option?.basePlanId, option?.offerId)
+
+    /** Purchase a [StoreProduct] with explicit base-plan and offer identifiers.
+     *  This is the single-sourced core; the two-arg overloads delegate here. */
+    suspend fun purchase(activity: Activity, product: StoreProduct, basePlanId: String?, offerId: String?): PurchaseResult {
         val context = appContext
             ?: throw RovenueException(kind = ErrorKind.STORE_PROBLEM, message = "Rovenue.configure(...) must be called with a Context before purchasing")
         val token = runCatching { getAppAccountToken() }.getOrNull()
@@ -566,7 +571,7 @@ class Rovenue private constructor(
             },
         )
         try {
-            return flow.run(activity, product.id, product.type, token)
+            return flow.run(activity, product.id, product.type, token, basePlanId, offerId)
         } catch (e: Throwable) {
             throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
         }

@@ -83,6 +83,8 @@ class PlayBillingStore(private val context: Context) : PlayStore {
         productId: String,
         productType: ProductType,
         obfuscatedAccountId: String?,
+        basePlanId: String?,
+        offerId: String?,
     ): StorePurchaseOutcome {
         // Atomic concurrency guard — compareAndSet ensures exactly one caller
         // can enter the billing flow at a time. A second concurrent purchase()
@@ -96,16 +98,27 @@ class PlayBillingStore(private val context: Context) : PlayStore {
         val details = queryDetails(client, productId, productType)
             ?: run { inFlight.set(false); return StorePurchaseOutcome.ProductNotFound }
 
+        var selectedOfferToken: String? = null
+        if (productType == ProductType.SUBSCRIPTION) {
+            val candidates = (details.subscriptionOfferDetails ?: emptyList()).map { offer ->
+                PlayOfferToken(
+                    basePlanId = offer.basePlanId,
+                    offerId = offer.offerId,
+                    offerToken = offer.offerToken,
+                    recurringPriceMicros = offer.pricingPhases.pricingPhaseList
+                        .firstOrNull { it.recurrenceMode == 1 }?.priceAmountMicros,
+                )
+            }
+            selectedOfferToken = selectOfferToken(candidates, basePlanId, offerId)
+            // Caller asked for a specific offer that no longer exists → fail loudly, do not pick a different price.
+            if (selectedOfferToken == null && basePlanId != null) {
+                inFlight.set(false); return StorePurchaseOutcome.OfferNotFound
+            }
+        }
+
         val productParams = BillingFlowParams.ProductDetailsParams.newBuilder()
             .setProductDetails(details)
-            .apply {
-                // Subscriptions require an offer token; pick the first base plan.
-                if (productType == ProductType.SUBSCRIPTION) {
-                    details.subscriptionOfferDetails?.firstOrNull()?.offerToken?.let {
-                        setOfferToken(it)
-                    }
-                }
-            }
+            .apply { selectedOfferToken?.let { setOfferToken(it) } }
             .build()
 
         val flowParams = BillingFlowParams.newBuilder()
