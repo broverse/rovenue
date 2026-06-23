@@ -34,7 +34,7 @@ describe("session tracker lifecycle", () => {
   it("starts the tracker on configure() and stops on shutdown()", async () => {
     const mock = makeMockNative();
     _setNativeForTesting(mock);
-    configure({ apiKey: "test_pk", baseUrl: "http://localhost:0", debug: true });
+    configure({ apiKey: "test_pk", baseUrl: "http://localhost:0", logLevel: "debug" });
     // initial 'open' is recorded synchronously then awaited via microtask
     await Promise.resolve();
     expect(mock.recordSessionEvent).toHaveBeenCalled();
