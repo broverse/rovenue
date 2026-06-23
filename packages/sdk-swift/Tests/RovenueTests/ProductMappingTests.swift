@@ -47,3 +47,24 @@ extension ProductMappingTests {
         XCTAssertNil(p.subscriptionOptions)
     }
 }
+
+extension ProductMappingTests {
+    func testPackageTypeFromSlot() {
+        XCTAssertEqual(packageType(forSlot: "$rov_monthly"), .monthly)
+        XCTAssertEqual(packageType(forSlot: "$rov_annual"), .annual)
+        XCTAssertEqual(packageType(forSlot: "weird_slot"), .custom)
+    }
+    func testOfferingAccessors() {
+        let prod = StoreProduct(id: "x", type: .subscription, productCategory: .subscription,
+            displayName: "x", description: nil, priceString: nil, price: nil, currencyCode: nil,
+            subscriptionPeriod: nil, subscriptionGroupIdentifier: nil, isFamilyShareable: false,
+            introPrice: nil, discounts: [], isEligibleForIntroOffer: nil, subscriptionOptions: nil,
+            defaultOption: nil, pricePerWeek: nil, pricePerMonth: nil, pricePerYear: nil,
+            pricePerWeekString: nil, pricePerMonthString: nil, pricePerYearString: nil, rawStoreProduct: nil)
+        let pkg = Package(identifier: "$rov_annual", packageType: .annual, product: prod)
+        let off = Offering(identifier: "default", isDefault: true, packages: [pkg])
+        XCTAssertEqual(off.annual?.identifier, "$rov_annual")
+        XCTAssertNil(off.monthly)
+        XCTAssertEqual(off.package(identifier: "$rov_annual")?.packageType, .annual)
+    }
+}

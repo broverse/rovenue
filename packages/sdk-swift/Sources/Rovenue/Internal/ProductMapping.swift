@@ -72,7 +72,7 @@ func appleOfferInputs(from product: StoreKit.Product)
         case .week: return .week
         case .month: return .month
         case .year: return .year
-        @unknown default: return .day
+        @unknown default: return .month
         }
     }
     func mode(_ m: StoreKit.Product.SubscriptionOffer.PaymentMode) -> PaymentMode {
@@ -133,4 +133,19 @@ func perUnitPrices(price: Decimal?, period: Period?, formatCurrency: (Decimal) -
     let m = pricePer(price, period: period, targetDays: 30)
     let y = pricePer(price, period: period, targetDays: 365)
     return (w, m, y, formatCurrency(w), formatCurrency(m), formatCurrency(y))
+}
+
+// MARK: - PackageType derivation
+
+func packageType(forSlot id: String) -> PackageType {
+    switch id {
+    case "$rov_weekly": return .weekly
+    case "$rov_monthly": return .monthly
+    case "$rov_two_month": return .twoMonth
+    case "$rov_three_month": return .threeMonth
+    case "$rov_six_month": return .sixMonth
+    case "$rov_annual": return .annual
+    case "$rov_lifetime": return .lifetime
+    default: return .custom
+    }
 }

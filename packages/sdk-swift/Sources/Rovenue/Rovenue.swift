@@ -587,7 +587,7 @@ public final class Rovenue: @unchecked Sendable {
         func buildOffering(_ o: CoreOffering) async -> Offering {
             var packages: [Package] = []
             for pkg in o.packages {
-                packages.append(Package(identifier: pkg.packageIdentifier, packageType: .custom,
+                packages.append(Package(identifier: pkg.packageIdentifier, packageType: packageType(forSlot: pkg.packageIdentifier),
                                         product: await buildProduct(pkg)))
             }
             return Offering(

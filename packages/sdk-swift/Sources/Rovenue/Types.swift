@@ -211,6 +211,20 @@ public struct Offering: Sendable, Equatable {
     }
 }
 
+extension Offering {
+    public func package(identifier: String) -> Package? {
+        packages.first { $0.identifier == identifier }
+    }
+    private func first(_ t: PackageType) -> Package? { packages.first { $0.packageType == t } }
+    public var lifetime: Package? { first(.lifetime) }
+    public var annual: Package? { first(.annual) }
+    public var sixMonth: Package? { first(.sixMonth) }
+    public var threeMonth: Package? { first(.threeMonth) }
+    public var twoMonth: Package? { first(.twoMonth) }
+    public var monthly: Package? { first(.monthly) }
+    public var weekly: Package? { first(.weekly) }
+}
+
 /// The full set of offerings, plus the server-designated `current` offering.
 public struct Offerings: Sendable, Equatable {
     public let current: Offering?
