@@ -21,9 +21,14 @@ import Foundation
 internal struct ApplePurchaseFlow {
     let store: AppleStore
     let validate: @Sendable (_ jws: String, _ productId: String) async throws -> ReceiptResult
+    let signOffer: @Sendable (_ productId: String, _ offerId: String, _ appAccountToken: String) async throws -> AppleSignedOffer
 
-    func run(productId: String, appAccountToken: String?) async throws -> PurchaseResult {
-        let outcome = try await store.purchase(productId: productId, appAccountToken: appAccountToken)
+    func run(productId: String, appAccountToken: String?, promotionalOfferId: String? = nil) async throws -> PurchaseResult {
+        var signedOffer: AppleSignedOffer?
+        if let offerId = promotionalOfferId {
+            signedOffer = try await signOffer(productId, offerId, appAccountToken ?? "")
+        }
+        let outcome = try await store.purchase(productId: productId, appAccountToken: appAccountToken, signedOffer: signedOffer)
         switch outcome {
         case .userCancelled:
             throw RovenueError(kind: .purchaseCanceled, message: "The purchase was cancelled by the user")

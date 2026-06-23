@@ -31,18 +31,28 @@ internal enum StorePurchaseOutcome {
     case productNotAvailableInStorefront
 }
 
+/// Signed promotional-offer material assembled from the server-side signature
+/// and passed into StoreKit so Apple can verify it hasn't been tampered with.
+internal struct AppleSignedOffer: Sendable {
+    let offerId: String
+    let keyId: String
+    let nonce: String
+    let signatureBase64: String
+    let timestamp: Int
+}
+
 /// Minimal seam over the App Store. Implementations must be `Sendable` so they
 /// can be captured into the `ApplePurchaseFlow` struct across concurrency
 /// domains.
 internal protocol AppleStore: Sendable {
-    func purchase(productId: String, appAccountToken: String?) async throws -> StorePurchaseOutcome
+    func purchase(productId: String, appAccountToken: String?, signedOffer: AppleSignedOffer?) async throws -> StorePurchaseOutcome
 }
 
 /// The real StoreKit 2 implementation. Build-verified only — never exercised
 /// under `swift test` (requires a live App Store / StoreKit testing host).
 @available(iOS 15.0, macOS 12.0, *)
 internal struct StoreKitAppleStore: AppleStore {
-    func purchase(productId: String, appAccountToken: String?) async throws -> StorePurchaseOutcome {
+    func purchase(productId: String, appAccountToken: String?, signedOffer: AppleSignedOffer?) async throws -> StorePurchaseOutcome {
         let products: [Product]
         do {
             products = try await Product.products(for: [productId])
@@ -65,6 +75,13 @@ internal struct StoreKitAppleStore: AppleStore {
         var options: Set<Product.PurchaseOption> = []
         if let token = appAccountToken, let uuid = UUID(uuidString: token) {
             options.insert(.appAccountToken(uuid))
+        }
+        if let o = signedOffer {
+            guard let nonceUUID = UUID(uuidString: o.nonce),
+                  let sigData = Data(base64Encoded: o.signatureBase64) else {
+                return .ineligible   // malformed signature material
+            }
+            options.insert(.promotionalOffer(offerID: o.offerId, keyID: o.keyId, nonce: nonceUUID, signature: sigData, timestamp: o.timestamp))
         }
 
         let result: Product.PurchaseResult

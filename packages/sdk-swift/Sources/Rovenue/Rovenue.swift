@@ -586,16 +586,42 @@ public final class Rovenue: @unchecked Sendable {
         return Offerings(current: current, all: all)
     }
 
-    /// Purchase the product backing a `Package`.
+    /// Purchase the product backing a `Package`, optionally with a signed promotional offer.
     @available(iOS 15.0, macOS 12.0, *)
-    public func purchase(_ package: Package) async throws -> PurchaseResult {
-        try await purchase(package.product)
+    public func purchase(_ package: Package, promotionalOffer: Discount? = nil) async throws -> PurchaseResult {
+        try await purchase(package.product, promotionalOffer: promotionalOffer)
+    }
+
+    /// Purchase a `StoreProduct` by promotional offer id directly.
+    /// The offer id is used as-is — no introductory/identifier guards are applied.
+    /// The RN bridge calls this overload directly.
+    @available(iOS 15.0, macOS 12.0, *)
+    public func purchase(_ product: StoreProduct, promotionalOfferId: String) async throws -> PurchaseResult {
+        try await _purchaseCore(product: product, offerId: promotionalOfferId)
     }
 
     /// Purchase a `StoreProduct`. Runs the StoreKit flow, validates the JWS
     /// server-side, finishes the transaction, then returns refreshed state.
+    /// Pass a `promotionalOffer` (`.promotional` or `.winBack`) to sign and
+    /// inject a promotional offer; `.introductory` throws immediately.
     @available(iOS 15.0, macOS 12.0, *)
-    public func purchase(_ product: StoreProduct) async throws -> PurchaseResult {
+    public func purchase(_ product: StoreProduct, promotionalOffer: Discount? = nil) async throws -> PurchaseResult {
+        var offerId: String? = nil
+        if let offer = promotionalOffer {
+            guard offer.type != .introductory else {
+                throw RovenueError(kind: .ineligible, message: "Introductory offers are applied automatically; do not pass them as a promotional offer.")
+            }
+            guard let id = offer.identifier else {
+                throw RovenueError(kind: .ineligible, message: "Promotional offer is missing an identifier.")
+            }
+            offerId = id
+        }
+        return try await _purchaseCore(product: product, offerId: offerId)
+    }
+
+    /// Single-sourced purchase implementation used by all public purchase overloads.
+    @available(iOS 15.0, macOS 12.0, *)
+    private func _purchaseCore(product: StoreProduct, offerId: String?) async throws -> PurchaseResult {
         let token = try? await getAppAccountToken()
         let flow = ApplePurchaseFlow(
             store: StoreKitAppleStore(),
@@ -607,10 +633,18 @@ public final class Rovenue: @unchecked Sendable {
                         throw mapError(err)
                     }
                 }
+            },
+            signOffer: { [core] pid, oid, tok in
+                try await self.dispatcher.run {
+                    do {
+                        let sig = try core.getAppleOfferSignature(productId: pid, offerId: oid, appAccountToken: tok.isEmpty ? nil : tok)
+                        return AppleSignedOffer(offerId: oid, keyId: sig.keyIdentifier, nonce: sig.nonce, signatureBase64: sig.signature, timestamp: Int(sig.timestamp))
+                    } catch let err as RovenueErrorFfi { throw mapError(err) }
+                }
             }
         )
         do {
-            let result = try await flow.run(productId: product.id, appAccountToken: token)
+            let result = try await flow.run(productId: product.id, appAccountToken: token, promotionalOfferId: offerId)
             return result
         } catch {
             throw error

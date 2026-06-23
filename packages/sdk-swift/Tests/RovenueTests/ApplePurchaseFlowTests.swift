@@ -166,9 +166,13 @@ private actor FinishFlag {
 
 private struct FakeStore: AppleStore {
     let outcome: StorePurchaseOutcome
-    func purchase(productId: String, appAccountToken: String?) async throws -> StorePurchaseOutcome {
+    func purchase(productId: String, appAccountToken: String?, signedOffer: AppleSignedOffer?) async throws -> StorePurchaseOutcome {
         outcome
     }
+}
+
+private func noSignOffer(_ productId: String, _ offerId: String, _ token: String) async throws -> AppleSignedOffer {
+    throw RovenueError(kind: .storeProblem, message: "signOffer should not be called in this test")
 }
 
 final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
@@ -183,7 +187,8 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
             validate: { _, _ in
                 await validated.mark()
                 return ReceiptResult(subscriberId: "s", appUserId: "u", virtualCurrencies: [:], entitlements: [])
-            }
+            },
+            signOffer: noSignOffer
         )
         do {
             _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
@@ -202,7 +207,8 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
     func test_pending_returns_deferred_result() async throws {
         let flow = ApplePurchaseFlow(
             store: FakeStore(outcome: .pending),
-            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", virtualCurrencies: [:], entitlements: []) }
+            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", virtualCurrencies: [:], entitlements: []) },
+            signOffer: noSignOffer
         )
         let result = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
         XCTAssertTrue(result.isDeferred, "pending outcome must set isDeferred")
@@ -213,7 +219,8 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
     func test_productNotFound_throws_productNotAvailable() async {
         let flow = ApplePurchaseFlow(
             store: FakeStore(outcome: .productNotFound),
-            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", virtualCurrencies: [:], entitlements: []) }
+            validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", virtualCurrencies: [:], entitlements: []) },
+            signOffer: noSignOffer
         )
         do {
             _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
@@ -240,7 +247,8 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
                 let wasFinished = await finished.finished
                 XCTAssertFalse(wasFinished, "finish() must run after validate, not before")
                 return ReceiptResult(subscriberId: "sub_1", appUserId: "user_1", virtualCurrencies: ["COIN": 250], entitlements: [self.sampleEntitlement()])
-            }
+            },
+            signOffer: noSignOffer
         )
 
         let result = try await flow.run(productId: "premium_monthly", appAccountToken: "tok")
@@ -264,7 +272,8 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
             })),
             validate: { _, _ in
                 throw RovenueError(kind: .receiptInvalid, message: "Receipt could not be validated")
-            }
+            },
+            signOffer: noSignOffer
         )
         do {
             _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
