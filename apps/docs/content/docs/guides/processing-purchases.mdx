@@ -185,9 +185,9 @@ unlocks) or adds credits (consumables). Both product types go through the same
     ```ts
     import {
       Rovenue,
+      RovenueError,
       PurchaseCancelledError,
       PurchasePendingError,
-      ProductNotAvailableError,
       StoreProblemError,
     } from '@rovenue/react-native-sdk';
 
@@ -208,7 +208,7 @@ unlocks) or adds credits (consumables). Both product types go through the same
           // Ask-to-Buy / deferred payment — show a "waiting for approval" message
           // The SDK will emit EntitlementsChanged when it resolves
           showPendingMessage();
-        } else if (e instanceof ProductNotAvailableError) {
+        } else if (e instanceof RovenueError && e.kind === 'ProductNotAvailable') {
           // Product ID not available in this store environment
           showError('This product is not available. Please try again later.');
         } else if (e instanceof StoreProblemError) {
@@ -279,7 +279,7 @@ unlocks) or adds credits (consumables). Both product types go through the same
 
 - `PurchaseCancelledError` — the user dismissed the store sheet. Safe to ignore; do not show an error.
 - `PurchasePendingError` — Ask-to-Buy (iOS) or a pending Play Billing transaction. Show a "waiting for approval" message and listen for an `EntitlementsChanged` event via `addChangeListener`.
-- `ProductNotAvailableError` — the product ID is not available in this store environment. Check your dashboard configuration.
+- `RovenueError` with `kind === 'ProductNotAvailable'` — the product ID is not available in this store environment. Check your dashboard configuration.
 - `StoreProblemError` — an unexpected StoreKit / Play Billing error. Retry or surface to the user.
 
 See [Errors](/docs/reference/errors) for the full error reference.
@@ -490,7 +490,7 @@ to redeem the user's chosen variant.
 - **Subscription offers** come from `product.subscriptionOptions`, a list of `SubscriptionOption` objects available on the product.
 - Each `SubscriptionOption` has a stable identity (`basePlanId` and `offerId`) that the SDK uses to resolve the live Play offer at purchase time.
 - When no option is passed to `purchase()`, the SDK uses the default option (`product.defaultOption`) — the lowest-price base plan, not Play's arbitrary first offer.
-- If the selected offer is no longer available on Google Play, purchase fails with a `ProductNotAvailableError` — refresh offerings and retry.
+- If the selected offer is no longer available on Google Play, purchase fails with `RovenueException` (Kotlin) or `RovenueError` (React Native) — refresh offerings and retry.
 - **iOS:** the `subscriptionOption` parameter is ignored on iOS (iOS uses [promotional offers](/docs/guides/processing-purchases#redeeming-promotional-offers-ios) instead).
 
 ### Usage by platform
@@ -500,7 +500,7 @@ to redeem the user's chosen variant.
     Pass the chosen `SubscriptionOption` in the options object:
 
     ```ts
-    import { Rovenue } from '@rovenue/react-native-sdk';
+    import { Rovenue, RovenueError } from '@rovenue/react-native-sdk';
 
     const offerings = await Rovenue.getOfferings();
     const pkg = offerings.current?.packages[0];
@@ -519,7 +519,7 @@ to redeem the user's chosen variant.
         });
         console.log('Purchase with offer succeeded:', result.productId);
       } catch (e) {
-        if (e instanceof ProductNotAvailableError) {
+        if (e instanceof RovenueError && e.kind === 'ProductNotAvailable') {
           // The selected offer is no longer available; refresh offerings and retry
           showError('This offer is no longer available. Please try again.');
         } else {
@@ -562,6 +562,9 @@ to redeem the user's chosen variant.
     Pass the chosen `SubscriptionOption` to `purchase()`:
 
     ```kotlin
+    import dev.rovenue.sdk.RovenueException
+    import dev.rovenue.sdk.ErrorKind
+
     val offerings = Rovenue.shared.getOfferings()
     val pkg = offerings.current?.packages?.firstOrNull()
     val product = pkg?.product
@@ -578,11 +581,13 @@ to redeem the user's chosen variant.
           // Pass the chosen option to purchase
           val result = Rovenue.shared.purchase(activity, product, selectedOption)
           println("Purchase with offer succeeded: ${result.productId}")
-        } catch (e: ProductNotAvailableException) {
-          // The selected offer is no longer available; refresh offerings and retry
-          showError("This offer is no longer available. Please try again.")
-        } catch (e: Exception) {
-          // Handle other errors (see [Errors](/docs/reference/errors))
+        } catch (e: RovenueException) {
+          if (e.kind == ErrorKind.PRODUCT_NOT_AVAILABLE) {
+            // The selected offer is no longer available; refresh offerings and retry
+            showError("This offer is no longer available. Please try again.")
+          } else {
+            // Handle other errors (see [Errors](/docs/reference/errors))
+          }
         }
       } else {
         // No specific offer selected; purchase the default option
@@ -607,23 +612,28 @@ to redeem the user's chosen variant.
 **Handling stale or unavailable offers**
 
 If the `SubscriptionOption` you selected is no longer available on Google Play (e.g., because the offer was
-removed or expired), the SDK will raise `ProductNotAvailableError` at purchase time. The error is raised only
+removed or expired), the SDK will raise `RovenueException` with `kind == ErrorKind.PRODUCT_NOT_AVAILABLE` at purchase time. The error is raised only
 at the moment of purchase — not when building the UI.
 
 **What to do:**
-1. Catch `ProductNotAvailableError` in your purchase handler.
+1. Catch `RovenueException` and check `kind == ErrorKind.PRODUCT_NOT_AVAILABLE` in your purchase handler.
 2. Call `Rovenue.getOfferings()` again to refresh the product list.
 3. Show the user a message like "This offer is no longer available" and let them select another.
 
 ```kotlin
+import dev.rovenue.sdk.RovenueException
+import dev.rovenue.sdk.ErrorKind
+
 try {
   val result = Rovenue.shared.purchase(activity, product, selectedOption)
-} catch (e: ProductNotAvailableException) {
-  // Refresh offerings
-  val refreshed = Rovenue.shared.getOfferings()
-  showError("This offer is no longer available. Please select another.")
-} catch (e: Exception) {
-  // Handle other errors
+} catch (e: RovenueException) {
+  if (e.kind == ErrorKind.PRODUCT_NOT_AVAILABLE) {
+    // Refresh offerings
+    val refreshed = Rovenue.shared.getOfferings()
+    showError("This offer is no longer available. Please select another.")
+  } else {
+    // Handle other errors
+  }
 }
 ```
 </Callout>
