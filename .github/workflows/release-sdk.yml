@@ -71,7 +71,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # version.test.ts asserts crate == RN == Kotlin == Swift; a skew fails here.
-      - run: pnpm --filter @rovenue/sdk-rn test
+      - run: pnpm --filter @rovenue/react-native-sdk test
 
   publish-crate:
     name: Publish crate (crates.io)
@@ -104,7 +104,7 @@ jobs:
           cache: pnpm
           registry-url: "https://registry.npmjs.org"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @rovenue/sdk-rn build
+      - run: pnpm --filter @rovenue/react-native-sdk build
       - name: npm publish
         working-directory: packages/sdk-rn
         run: npm publish --access public

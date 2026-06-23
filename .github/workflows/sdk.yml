@@ -100,5 +100,5 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @rovenue/sdk-rn test
-      - run: pnpm --filter @rovenue/sdk-rn build
+      - run: pnpm --filter @rovenue/react-native-sdk test
+      - run: pnpm --filter @rovenue/react-native-sdk build
