@@ -45,7 +45,17 @@ impl FunnelClaimBus {
     pub fn emit(&self, result: FunnelClaimResult) {
         let guard = self.subs.lock().unwrap_or_else(|e| e.into_inner());
         for s in guard.iter() {
-            s.on_funnel_claim_resolved(result.clone());
+            let s = s.clone();
+            let r = result.clone();
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                s.on_funnel_claim_resolved(r);
+            }))
+            .is_err()
+            {
+                eprintln!(
+                    "[rovenue] funnel_claim_listener.on_funnel_claim_resolved panicked; skipping"
+                );
+            }
         }
     }
 }
