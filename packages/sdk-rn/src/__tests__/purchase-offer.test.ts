@@ -11,11 +11,11 @@ describe("purchase with promotional offer", () => {
   it("forwards promotionalOfferId to native", async () => {
     const product = { id: "premium_monthly", type: "subscription" } as any;
     await purchase(product, { promotionalOfferId: "winback10" });
-    expect(purchaseSpy).toHaveBeenCalledWith("premium_monthly", "subscription", "winback10");
+    expect(purchaseSpy).toHaveBeenCalledWith("premium_monthly", "subscription", "winback10", undefined, undefined);
   });
   it("passes undefined when no offer", async () => {
     const product = { id: "premium_monthly", type: "subscription" } as any;
     await purchase(product);
-    expect(purchaseSpy).toHaveBeenCalledWith("premium_monthly", "subscription", undefined);
+    expect(purchaseSpy).toHaveBeenCalledWith("premium_monthly", "subscription", undefined, undefined, undefined);
   });
 });

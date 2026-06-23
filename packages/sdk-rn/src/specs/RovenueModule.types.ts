@@ -153,7 +153,7 @@ export interface RovenueModuleSpec {
 
   // Purchases
   getOfferings(): Promise<OfferingsDTO>;
-  purchase(productId: string, productType: ProductTypeDTO, promotionalOfferId?: string): Promise<PurchaseResultDTO>;
+  purchase(productId: string, productType: ProductTypeDTO, promotionalOfferId?: string, basePlanId?: string, offerId?: string): Promise<PurchaseResultDTO>;
   restorePurchases(): Promise<PurchaseResultDTO>;
 
   // Remote Config — feature flags + experiment assignments. Typed getters

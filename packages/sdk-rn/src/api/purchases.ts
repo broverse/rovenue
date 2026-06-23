@@ -1,6 +1,6 @@
 import { getNative } from "../core/native";
 import { mapNativeError } from "../errors";
-import type { Offerings, Offering, Package, PurchaseResult, StoreProduct, PackageType } from "../types";
+import type { Offerings, Offering, Package, PurchaseResult, StoreProduct, PackageType, SubscriptionOption } from "../types";
 
 async function call<T>(fn: () => Promise<T>): Promise<T> {
   try { return await fn(); } catch (e: any) {
@@ -44,10 +44,16 @@ export async function getOfferings(): Promise<Offerings> {
 
 export async function purchase(
   target: Package | StoreProduct,
-  options?: { promotionalOfferId?: string },
+  options?: { promotionalOfferId?: string; subscriptionOption?: SubscriptionOption },
 ): Promise<PurchaseResult> {
   const product = "product" in target ? target.product : target;
-  return call(() => getNative().purchase(product.id, product.type, options?.promotionalOfferId));
+  const opt = options?.subscriptionOption;
+  return call(() =>
+    getNative().purchase(
+      product.id, product.type, options?.promotionalOfferId,
+      opt?.basePlanId ?? undefined, opt?.offerId ?? undefined,
+    ),
+  );
 }
 
 export async function restorePurchases(): Promise<PurchaseResult> {

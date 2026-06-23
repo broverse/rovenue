@@ -170,9 +170,8 @@ class RovenueModule : Module() {
                 throw codedError(e)
             }
         }
-        AsyncFunction("purchase") Coroutine { productId: String, productType: String, promotionalOfferId: String? ->
-            // Android: promotional-offer signing is iOS-only; promotionalOfferId is ignored
-            // (Play uses offerToken, which is out of scope for this bridge).
+        AsyncFunction("purchase") Coroutine { productId: String, productType: String, promotionalOfferId: String?, basePlanId: String?, offerId: String? ->
+            // promotionalOfferId is iOS-only (ignored here). basePlanId/offerId select a Play subscription offer.
             // Play Billing needs the foreground Activity to launch the flow.
             val activity = appContext.currentActivity
                 ?: throw StoreProblemFallbackCodedException("No foreground Activity available for purchase")
@@ -185,7 +184,7 @@ class RovenueModule : Module() {
                 displayName = "",
             )
             try {
-                dtoFromPurchaseResult(Rovenue.shared.purchase(activity, product))
+                dtoFromPurchaseResult(Rovenue.shared.purchase(activity, product, basePlanId, offerId))
             } catch (e: Throwable) {
                 throw codedError(e)
             }

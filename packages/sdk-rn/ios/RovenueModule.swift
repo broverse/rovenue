@@ -189,7 +189,8 @@ public class RovenueModule: Module {
                 throw RovenueCodedError(e)
             }
         }
-        AsyncFunction("purchase") { (productId: String, productType: String, promotionalOfferId: String?) -> [String: Any?] in
+        AsyncFunction("purchase") { (productId: String, productType: String, promotionalOfferId: String?, basePlanId: String?, offerId: String?) -> [String: Any?] in
+            // basePlanId/offerId select a Play subscription offer on Android; ignored on iOS.
             guard #available(iOS 15.0, macOS 12.0, *) else {
                 throw StoreProblemFallbackException("Purchases require iOS 15 / macOS 12 or newer")
             }

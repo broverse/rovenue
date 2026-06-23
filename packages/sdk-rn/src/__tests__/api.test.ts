@@ -222,7 +222,7 @@ describe("Rovenue imperative API", () => {
       product: { id: "com.x.m", type: "subscription" as const, displayName: "Monthly", priceString: "$4.99", price: 4.99, currencyCode: "USD" },
     };
     const result = await purchase(pkg);
-    expect(native.purchase).toHaveBeenCalledWith("com.x.m", "subscription", undefined);
+    expect(native.purchase).toHaveBeenCalledWith("com.x.m", "subscription", undefined, undefined, undefined);
     expect(result.storeTransactionId).toBe("txn_abc");
     expect(result.productId).toBe("com.x.m");
   });
