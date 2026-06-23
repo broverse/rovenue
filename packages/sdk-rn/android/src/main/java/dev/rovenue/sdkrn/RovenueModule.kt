@@ -33,15 +33,12 @@ import dev.rovenue.sdk.PaymentMode
 import dev.rovenue.sdk.Period
 import dev.rovenue.sdk.PeriodUnit
 import dev.rovenue.sdk.ProductCategory
-import dev.rovenue.sdk.ProductNotAvailableException
 import dev.rovenue.sdk.ProductType
 import dev.rovenue.sdk.PricingPhase
-import dev.rovenue.sdk.PurchaseCancelledException
-import dev.rovenue.sdk.PurchasePendingException
 import dev.rovenue.sdk.PurchaseResult
 import dev.rovenue.sdk.RecurrenceMode
 import dev.rovenue.sdk.Rovenue
-import dev.rovenue.sdk.StoreProblemException
+import dev.rovenue.sdk.RovenueException
 import dev.rovenue.sdk.StoreProduct
 import dev.rovenue.sdk.SubscriptionOption
 import dev.rovenue.sdk.generated.ChangeEvent
@@ -99,10 +96,10 @@ class RovenueModule : Module() {
             mapOf("rovenueId" to u.rovenueId, "appUserId" to u.appUserId)
         }
         AsyncFunction("identify") Coroutine { appUserId: String ->
-            Rovenue.shared.identify(appUserId)
+            try { Rovenue.shared.identify(appUserId) } catch (e: Throwable) { throw codedError(e) }
         }
         AsyncFunction("logOut") Coroutine { ->
-            Rovenue.shared.logOut()
+            try { Rovenue.shared.logOut() } catch (e: Throwable) { throw codedError(e) }
         }
         AsyncFunction("entitlement") Coroutine { id: String ->
             Rovenue.shared.entitlement(id)?.let(::dtoFromEntitlement)
@@ -111,7 +108,7 @@ class RovenueModule : Module() {
             Rovenue.shared.entitlementsAll().map(::dtoFromEntitlement)
         }
         AsyncFunction("refreshEntitlements") Coroutine { ->
-            Rovenue.shared.refreshEntitlements()
+            try { Rovenue.shared.refreshEntitlements() } catch (e: Throwable) { throw codedError(e) }
         }
         AsyncFunction("virtualCurrencies") Coroutine { ->
             Rovenue.shared.virtualCurrencyBalances().mapValues { it.value.toDouble() }
@@ -119,9 +116,13 @@ class RovenueModule : Module() {
         AsyncFunction("virtualCurrency") Coroutine { code: String ->
             Rovenue.shared.virtualCurrency(code).toDouble()
         }
-        AsyncFunction("refreshVirtualCurrencies") Coroutine { -> Rovenue.shared.refreshVirtualCurrencies() }
+        AsyncFunction("refreshVirtualCurrencies") Coroutine { ->
+            try { Rovenue.shared.refreshVirtualCurrencies() } catch (e: Throwable) { throw codedError(e) }
+        }
         // ---------------- Remote Config ----------------
-        AsyncFunction("refreshRemoteConfig") Coroutine { -> Rovenue.shared.refreshRemoteConfig() }
+        AsyncFunction("refreshRemoteConfig") Coroutine { ->
+            try { Rovenue.shared.refreshRemoteConfig() } catch (e: Throwable) { throw codedError(e) }
+        }
         AsyncFunction("remoteConfigBool") Coroutine { key: String, fallback: Boolean ->
             Rovenue.shared.remoteConfigBool(key, fallback)
         }
@@ -162,7 +163,7 @@ class RovenueModule : Module() {
         AsyncFunction("purchase") Coroutine { productId: String, productType: String ->
             // Play Billing needs the foreground Activity to launch the flow.
             val activity = appContext.currentActivity
-                ?: throw StoreProblemCodedException("No foreground Activity available for purchase")
+                ?: throw StoreProblemFallbackCodedException("No foreground Activity available for purchase")
             // JS sends the lowercase DTO string; reconstruct the façade enum.
             // The façade re-resolves the real Play product by id, so
             // displayName/price are not needed here.
@@ -179,7 +180,7 @@ class RovenueModule : Module() {
         }
         AsyncFunction("restorePurchases") Coroutine { ->
             val activity = appContext.currentActivity
-                ?: throw StoreProblemCodedException("No foreground Activity available for restore")
+                ?: throw StoreProblemFallbackCodedException("No foreground Activity available for restore")
             try {
                 dtoFromPurchaseResult(Rovenue.shared.restorePurchases(activity))
             } catch (e: Throwable) {
@@ -189,7 +190,7 @@ class RovenueModule : Module() {
 
         // ---------------- Refund Shield ----------------
         AsyncFunction("getAppAccountToken") Coroutine { ->
-            Rovenue.shared.getAppAccountToken()
+            try { Rovenue.shared.getAppAccountToken() } catch (e: Throwable) { throw codedError(e) }
         }
         AsyncFunction("recordSessionEvent") Coroutine { kind: String, occurredAt: String, durationMs: Double? ->
             val kindEnum = when (kind) {
@@ -198,34 +199,36 @@ class RovenueModule : Module() {
                 "close" -> SessionEventKind.CLOSE
                 else -> SessionEventKind.OPEN
             }
-            Rovenue.shared.recordSessionEvent(kindEnum, occurredAt, durationMs?.toInt()?.toUInt())
+            try {
+                Rovenue.shared.recordSessionEvent(kindEnum, occurredAt, durationMs?.toInt()?.toUInt())
+            } catch (e: Throwable) { throw codedError(e) }
         }
         AsyncFunction("flushSessionEvents") Coroutine { ->
-            Rovenue.shared.flushSessionEvents().toDouble()
+            try { Rovenue.shared.flushSessionEvents().toDouble() } catch (e: Throwable) { throw codedError(e) }
         }
 
         // ---------------- Subscriber Attributes ----------------
         AsyncFunction("setAttributes") Coroutine { attributes: Map<String, String?> ->
-            Rovenue.shared.setAttributes(attributes)
+            try { Rovenue.shared.setAttributes(attributes) } catch (e: Throwable) { throw codedError(e) }
         }
         AsyncFunction("setEmail") Coroutine { email: String? ->
-            Rovenue.shared.setEmail(email)
+            try { Rovenue.shared.setEmail(email) } catch (e: Throwable) { throw codedError(e) }
         }
         AsyncFunction("setDisplayName") Coroutine { name: String? ->
-            Rovenue.shared.setDisplayName(name)
+            try { Rovenue.shared.setDisplayName(name) } catch (e: Throwable) { throw codedError(e) }
         }
         AsyncFunction("setPhoneNumber") Coroutine { phone: String? ->
-            Rovenue.shared.setPhoneNumber(phone)
+            try { Rovenue.shared.setPhoneNumber(phone) } catch (e: Throwable) { throw codedError(e) }
         }
         AsyncFunction("setPushToken") Coroutine { token: String? ->
-            Rovenue.shared.setPushToken(token)
+            try { Rovenue.shared.setPushToken(token) } catch (e: Throwable) { throw codedError(e) }
         }
         AsyncFunction("flushAttributes") Coroutine { ->
             // UInt → Double for the JS number bridge.
-            Rovenue.shared.flushAttributes().toDouble()
+            try { Rovenue.shared.flushAttributes().toDouble() } catch (e: Throwable) { throw codedError(e) }
         }
         AsyncFunction("track") Coroutine { envelopeJson: String ->
-            Rovenue.shared.track(envelopeJson)
+            try { Rovenue.shared.track(envelopeJson) } catch (e: Throwable) { throw codedError(e) }
         }
 
         // ---------------- Funnel Claim ----------------
@@ -236,8 +239,10 @@ class RovenueModule : Module() {
             Rovenue.shared.hasResolvedFunnelClaim()
         }
         AsyncFunction("claimFunnelToken") Coroutine { token: String ->
-            val r = Rovenue.shared.claimFunnelToken(token)
-            mapOf("subscriberId" to r.subscriberId, "funnelAnswersJson" to r.funnelAnswersJson)
+            try {
+                val r = Rovenue.shared.claimFunnelToken(token)
+                mapOf("subscriberId" to r.subscriberId, "funnelAnswersJson" to r.funnelAnswersJson)
+            } catch (e: Throwable) { throw codedError(e) }
         }
         AsyncFunction("claimFromClipboard") Coroutine { ->
             // Android's deferred path is the Play Install Referrer (sub-project B);
@@ -254,11 +259,13 @@ class RovenueModule : Module() {
                 deviceModel = params["deviceModel"] as? String ?: ctx.deviceModel,
                 installReferrer = params["installReferrer"] as? String ?: readInstallReferrer(),
             )
-            val r = Rovenue.shared.claimInstall(p) ?: return@Coroutine null
-            mapOf("subscriberId" to r.subscriberId, "funnelAnswersJson" to r.funnelAnswersJson)
+            try {
+                val r = Rovenue.shared.claimInstall(p) ?: return@Coroutine null
+                mapOf("subscriberId" to r.subscriberId, "funnelAnswersJson" to r.funnelAnswersJson)
+            } catch (e: Throwable) { throw codedError(e) }
         }
         AsyncFunction("claimViaEmail") Coroutine { email: String ->
-            Rovenue.shared.claimViaEmail(email)
+            try { Rovenue.shared.claimViaEmail(email) } catch (e: Throwable) { throw codedError(e) }
         }
 
         // ---------------- Events ----------------
@@ -479,21 +486,18 @@ class RovenueModule : Module() {
         "virtualCurrencies" to r.virtualCurrencies.mapValues { it.value.toDouble() },
         "productId"         to r.productId,
         "storeTransactionId" to r.storeTransactionId,
+        "isDeferred"        to r.isDeferred,
     )
 
     /**
-     * Map the four façade purchase exceptions to Expo coded exceptions whose
-     * `code` matches the RN `mapNativeError` switch in
-     * packages/sdk-rn/src/errors.ts. Anything else is rethrown unchanged so
-     * Expo surfaces its default code/message.
+     * Convert a [RovenueException] to a [RovenueCodedError] so the Expo bridge
+     * surfaces a structured `code` (= `error.kind.name` = UPPER_SNAKE_CASE) and
+     * extras (`serverCode`, `httpStatus`, `retryable`) to JS. The JS
+     * `mapNativeError()` normaliser resolves UPPER_SNAKE back to PascalCase.
+     * Non-RovenueException throwables propagate unchanged.
      */
-    private fun codedError(e: Throwable): Throwable = when (e) {
-        is PurchaseCancelledException   -> PurchaseCancelledCodedException(e.message)
-        is PurchasePendingException     -> PurchasePendingCodedException(e.message)
-        is ProductNotAvailableException -> ProductNotAvailableCodedException(e.message)
-        is StoreProblemException        -> StoreProblemCodedException(e.message)
-        else                            -> e
-    }
+    private fun codedError(e: Throwable): Throwable =
+        if (e is RovenueException) RovenueCodedError(e) else e
 
     /**
      * Reads the host app's `versionName` from its installed PackageInfo.
@@ -585,17 +589,32 @@ class RovenueModule : Module() {
     }
 }
 
-// Expo coded exceptions for the Play Billing purchase flow. The explicit
-// `code` surfaces to JS unchanged and is matched by `mapNativeError` in
-// packages/sdk-rn/src/errors.ts.
-private class PurchaseCancelledCodedException(message: String?) :
-    CodedException("PurchaseCancelled", message ?: "The purchase was cancelled", null)
+/**
+ * Single Expo CodedException that wraps any [RovenueException] from the Kotlin façade.
+ *
+ * `code` = `error.kind.name` — yields UPPER_SNAKE_CASE (e.g. "NETWORK_UNAVAILABLE",
+ *           "PURCHASE_CANCELED"). The JS `mapNativeError()` normaliser strips underscores
+ *           and does a case-insensitive lookup to resolve the canonical PascalCase ErrorKind.
+ * `extras` carries `serverCode`, `httpStatus`, and `retryable` so mapNativeError() can
+ *           populate the full RovenueError on the JS side.
+ */
+private class RovenueCodedError(e: RovenueException) : CodedException(
+    e.kind.name,
+    e.message,
+    buildExtras(e),
+) {
+    companion object {
+        private fun buildExtras(e: RovenueException): Map<String, Any?> {
+            val m = mutableMapOf<String, Any?>()
+            e.serverCode?.let  { m["serverCode"]  = it }
+            e.httpStatus?.let  { m["httpStatus"]   = it }
+            m["retryable"] = e.isRetryable
+            return m
+        }
+    }
+}
 
-private class PurchasePendingCodedException(message: String?) :
-    CodedException("PurchasePending", message ?: "The purchase is pending", null)
-
-private class ProductNotAvailableCodedException(message: String?) :
-    CodedException("ProductNotAvailable", message ?: "The product is not available", null)
-
-private class StoreProblemCodedException(message: String?) :
-    CodedException("StoreProblem", message ?: "A store error occurred", null)
+// Fallback for the "No foreground Activity" guard (no RovenueException available yet).
+// JS normalizer maps "STORE_PROBLEM" → "StoreProblem".
+private class StoreProblemFallbackCodedException(message: String?) :
+    CodedException("STORE_PROBLEM", message ?: "A store error occurred", null)

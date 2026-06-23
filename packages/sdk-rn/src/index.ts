@@ -2,7 +2,7 @@
 //
 // Imperative API:    Rovenue.configure(...), Rovenue.identify(...), ...
 // React hooks:       useCurrentUser, useEntitlement, useEntitlements, useVirtualCurrencies
-// Error classes:     RovenueError + 17 subclasses
+// Errors:            RovenueError (single class with .kind: ErrorKind), ERROR_KINDS, mapNativeError
 
 export { SDK_VERSION } from "./version";
 
@@ -30,28 +30,10 @@ export type {
 
 export {
   RovenueError,
-  InvalidApiKeyError,
-  InvalidArgumentError,
-  NotConfiguredError,
-  NetworkUnavailableError,
-  TimeoutError,
-  RateLimitedError,
-  ServerError,
-  StorageError,
-  UserNotFoundError,
-  InsufficientCreditsError,
-  EntitlementInactiveError,
-  DuplicatePurchaseError,
-  ReceiptInvalidError,
-  PurchaseCancelledError,
-  PurchasePendingError,
-  ProductNotAvailableError,
-  StoreProblemError,
-  InternalError,
-  FunnelTokenNotFoundError,
-  FunnelTokenExpiredError,
-  FunnelTokenAlreadyClaimedError,
+  ERROR_KINDS,
+  mapNativeError,
 } from "./errors";
+export type { ErrorKind, ErrorExtras } from "./errors";
 
 export { useCurrentUser } from "./hooks/useCurrentUser";
 export { useEntitlement } from "./hooks/useEntitlement";

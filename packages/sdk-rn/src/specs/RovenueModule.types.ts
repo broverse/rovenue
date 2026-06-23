@@ -107,6 +107,7 @@ export type PurchaseResultDTO = {
   virtualCurrencies: Record<string, number>;
   productId: string;
   storeTransactionId: string;
+  isDeferred: boolean;
 };
 
 export type LogEntryDTO = {

@@ -12,32 +12,58 @@ import ExpoModulesCore
 import Rovenue
 import UIKit
 
-// Expo coded exceptions for the StoreKit purchase flow. The `code` of each
-// surfaces to JS unchanged and is matched by `mapNativeError` in
-// packages/sdk-rn/src/errors.ts.
-final class PurchaseCancelledException: Exception {
+// Single Expo exception that wraps ANY RovenueError from the Swift façade.
+//
+// `code`   = String(describing: error.kind) — yields camelCase
+//            (e.g. "networkUnavailable", "purchaseCanceled"). The JS
+//            mapNativeError() normaliser resolves this back to the canonical
+//            PascalCase ErrorKind.
+// `reason` = error.message
+// userInfo carries the structured extras so mapNativeError() can populate
+// serverCode / httpStatus / isRetryable / available / retryAfter.
+final class RovenueCodedError: Exception {
+    private let _code: String
+    private let _reason: String
+    private let _userInfo: [String: Any]
+
+    init(_ error: RovenueError) {
+        _code   = String(describing: error.kind)
+        _reason = error.message
+        var info: [String: Any] = [:]
+        if let sc = error.serverCode  { info["serverCode"] = sc }
+        if let hs = error.httpStatus  { info["httpStatus"]  = hs }
+        info["retryable"] = error.isRetryable
+        _userInfo = info
+        super.init()
+    }
+
+    override var code: String { _code }
+    override var reason: String { _reason }
+    // Expose extras so expo-modules-core forwards them to JS as `e.userInfo`.
+    override var userInfo: [String: Any] { _userInfo }
+}
+
+// Minimal fallback for OS-version guards where we have no RovenueError yet.
+// JS normalizer maps "storeProblem" → "StoreProblem".
+private final class StoreProblemFallbackException: Exception {
     private let _reason: String
     init(_ reason: String) { _reason = reason; super.init() }
-    override var code: String { "PurchaseCancelled" }
+    override var code: String { "storeProblem" }
     override var reason: String { _reason }
 }
-final class PurchasePendingException: Exception {
-    private let _reason: String
-    init(_ reason: String) { _reason = reason; super.init() }
-    override var code: String { "PurchasePending" }
-    override var reason: String { _reason }
+
+// Helper: run `body`, converting any thrown RovenueError to RovenueCodedError
+// so the Expo bridge surfaces a structured `code`/userInfo to JS.
+// Non-RovenueError failures propagate unchanged.
+private func rovenueCall<T>(_ body: () async throws -> T) async throws -> T {
+    do { return try await body() }
+    catch let e as RovenueError { throw RovenueCodedError(e) }
 }
-final class ProductNotAvailableException: Exception {
-    private let _reason: String
-    init(_ reason: String) { _reason = reason; super.init() }
-    override var code: String { "ProductNotAvailable" }
-    override var reason: String { _reason }
-}
-final class StoreProblemException: Exception {
-    private let _reason: String
-    init(_ reason: String) { _reason = reason; super.init() }
-    override var code: String { "StoreProblem" }
-    override var reason: String { _reason }
+
+// Sync variant for configure (called from a non-async closure).
+private func rovenueCallSync<T>(_ body: () throws -> T) throws -> T {
+    do { return try body() }
+    catch let e as RovenueError { throw RovenueCodedError(e) }
 }
 
 public class RovenueModule: Module {
@@ -55,13 +81,15 @@ public class RovenueModule: Module {
         // For Expo apps that's the value baked from app.json's `expo.version`
         // at prebuild time; for bare RN it's the host project's plist.
         Function("configure") { (apiKey: String, baseUrl: String?, debug: Bool, appVersion: String?, environment: String?) in
-            try Rovenue.configure(
-                apiKey: apiKey,
-                baseUrl: baseUrl,
-                debug: debug,
-                appVersion: appVersion,
-                environment: environment
-            )
+            try rovenueCallSync {
+                try Rovenue.configure(
+                    apiKey: apiKey,
+                    baseUrl: baseUrl,
+                    debug: debug,
+                    appVersion: appVersion,
+                    environment: environment
+                )
+            }
         }
         Function("shutdown") { Rovenue.shared.shutdown() }
         Function("setForeground") { (foreground: Bool) in
@@ -75,10 +103,10 @@ public class RovenueModule: Module {
             return ["rovenueId": u.rovenueId, "appUserId": u.appUserId as Any?]
         }
         AsyncFunction("identify") { (appUserId: String) in
-            try await Rovenue.shared.identify(appUserId)
+            try await rovenueCall { try await Rovenue.shared.identify(appUserId) }
         }
         AsyncFunction("logOut") {
-            try await Rovenue.shared.logOut()
+            try await rovenueCall { try await Rovenue.shared.logOut() }
         }
         AsyncFunction("entitlement") { (id: String) -> [String: Any?]? in
             guard let e = await Rovenue.shared.entitlement(id) else { return nil }
@@ -88,7 +116,7 @@ public class RovenueModule: Module {
             await Rovenue.shared.entitlementsAll().map(Self.dtoFromEntitlement)
         }
         AsyncFunction("refreshEntitlements") {
-            try await Rovenue.shared.refreshEntitlements()
+            try await rovenueCall { try await Rovenue.shared.refreshEntitlements() }
         }
         AsyncFunction("virtualCurrencies") { () -> [String: Double] in
             // Long → Double is lossless up to 2^53.
@@ -97,9 +125,13 @@ public class RovenueModule: Module {
         AsyncFunction("virtualCurrency") { (code: String) -> Double in
             Double(await Rovenue.shared.virtualCurrency(code))
         }
-        AsyncFunction("refreshVirtualCurrencies") { try await Rovenue.shared.refreshVirtualCurrencies() }
+        AsyncFunction("refreshVirtualCurrencies") {
+            try await rovenueCall { try await Rovenue.shared.refreshVirtualCurrencies() }
+        }
         // ---------------- Remote Config ----------------
-        AsyncFunction("refreshRemoteConfig") { try await Rovenue.shared.refreshRemoteConfig() }
+        AsyncFunction("refreshRemoteConfig") {
+            try await rovenueCall { try await Rovenue.shared.refreshRemoteConfig() }
+        }
         AsyncFunction("remoteConfigBool") { (key: String, fallback: Bool) -> Bool in
             await Rovenue.shared.remoteConfigBool(key, default: fallback)
         }
@@ -137,18 +169,18 @@ public class RovenueModule: Module {
         // with a `StoreProblem` coded error rather than crashing.
         AsyncFunction("getOfferings") { () -> [String: Any] in
             guard #available(iOS 15.0, macOS 12.0, *) else {
-                throw StoreProblemException("Offerings require iOS 15 / macOS 12 or newer")
+                throw StoreProblemFallbackException("Offerings require iOS 15 / macOS 12 or newer")
             }
             do {
                 let o = try await Rovenue.shared.getOfferings()
                 return Self.dtoFromOfferings(o)
-            } catch let e as Rovenue.Error {
-                throw Self.codedError(for: e)
+            } catch let e as RovenueError {
+                throw RovenueCodedError(e)
             }
         }
         AsyncFunction("purchase") { (productId: String, productType: String) -> [String: Any?] in
             guard #available(iOS 15.0, macOS 12.0, *) else {
-                throw StoreProblemException("Purchases require iOS 15 / macOS 12 or newer")
+                throw StoreProblemFallbackException("Purchases require iOS 15 / macOS 12 or newer")
             }
             // JS sends the lowercase DTO string; reconstruct the façade
             // enum. The façade re-resolves the real StoreKit product by
@@ -161,25 +193,25 @@ public class RovenueModule: Module {
             do {
                 let r = try await Rovenue.shared.purchase(product)
                 return Self.dtoFromPurchaseResult(r)
-            } catch let e as Rovenue.Error {
-                throw Self.codedError(for: e)
+            } catch let e as RovenueError {
+                throw RovenueCodedError(e)
             }
         }
         AsyncFunction("restorePurchases") { () -> [String: Any?] in
             guard #available(iOS 15.0, macOS 12.0, *) else {
-                throw StoreProblemException("Restore requires iOS 15 / macOS 12 or newer")
+                throw StoreProblemFallbackException("Restore requires iOS 15 / macOS 12 or newer")
             }
             do {
                 let r = try await Rovenue.shared.restorePurchases()
                 return Self.dtoFromPurchaseResult(r)
-            } catch let e as Rovenue.Error {
-                throw Self.codedError(for: e)
+            } catch let e as RovenueError {
+                throw RovenueCodedError(e)
             }
         }
 
         // ---------------- Refund Shield ----------------
         AsyncFunction("getAppAccountToken") { () -> String in
-            try await Rovenue.shared.getAppAccountToken()
+            try await rovenueCall { try await Rovenue.shared.getAppAccountToken() }
         }
         AsyncFunction("recordSessionEvent") { (kind: String, occurredAt: String, durationMs: Double?) -> Void in
             let kindEnum: SessionEventKind = {
@@ -190,18 +222,20 @@ public class RovenueModule: Module {
                 default: return .open
                 }
             }()
-            try await Rovenue.shared.recordSessionEvent(
-                kind: kindEnum,
-                occurredAt: occurredAt,
-                durationMs: durationMs.map { UInt32($0) }
-            )
+            try await rovenueCall {
+                try await Rovenue.shared.recordSessionEvent(
+                    kind: kindEnum,
+                    occurredAt: occurredAt,
+                    durationMs: durationMs.map { UInt32($0) }
+                )
+            }
         }
         AsyncFunction("flushSessionEvents") { () -> Double in
-            let n = try await Rovenue.shared.flushSessionEvents()
+            let n = try await rovenueCall { try await Rovenue.shared.flushSessionEvents() }
             return Double(n)
         }
         AsyncFunction("track") { (envelopeJson: String) in
-            try await Rovenue.shared.track(envelopeJson: envelopeJson)
+            try await rovenueCall { try await Rovenue.shared.track(envelopeJson: envelopeJson) }
         }
 
         // ---------------- Funnel Claim ----------------
@@ -212,7 +246,7 @@ public class RovenueModule: Module {
             Rovenue.shared.hasResolvedFunnelClaim()
         }
         AsyncFunction("claimFunnelToken") { (token: String) -> [String: Any?] in
-            let r = try await Rovenue.shared.claimFunnelToken(token)
+            let r = try await rovenueCall { try await Rovenue.shared.claimFunnelToken(token) }
             return ["subscriberId": r.subscriberId, "funnelAnswersJson": r.funnelAnswersJson]
         }
         AsyncFunction("claimFromClipboard") { () -> [String: Any?]? in
@@ -221,7 +255,7 @@ public class RovenueModule: Module {
             guard let s = raw, s.hasPrefix(marker) else { return nil }
             let token = String(s.dropFirst(marker.count))
             guard !token.isEmpty else { return nil }
-            let r = try await Rovenue.shared.claimFunnelToken(token)
+            let r = try await rovenueCall { try await Rovenue.shared.claimFunnelToken(token) }
             // Clear only our own marked content so it isn't re-claimed/leaked.
             await MainActor.run {
                 if UIPasteboard.general.string?.hasPrefix(marker) == true {
@@ -239,32 +273,33 @@ public class RovenueModule: Module {
                 deviceModel: params["deviceModel"] as? String,
                 installReferrer: params["installReferrer"] as? String
             )
-            guard let r = try await Rovenue.shared.claimInstall(p) else { return nil }
+            guard let r = try await rovenueCall({ try await Rovenue.shared.claimInstall(p) }) else { return nil }
             return ["subscriberId": r.subscriberId, "funnelAnswersJson": r.funnelAnswersJson]
         }
         AsyncFunction("claimViaEmail") { (email: String) in
-            try await Rovenue.shared.claimViaEmail(email)
+            try await rovenueCall { try await Rovenue.shared.claimViaEmail(email) }
         }
 
         // ---------------- Subscriber Attributes ----------------
         AsyncFunction("setAttributes") { (attributes: [String: String?]) in
-            try await Rovenue.shared.setAttributes(attributes)
+            try await rovenueCall { try await Rovenue.shared.setAttributes(attributes) }
         }
         AsyncFunction("setEmail") { (email: String?) in
-            try await Rovenue.shared.setEmail(email)
+            try await rovenueCall { try await Rovenue.shared.setEmail(email) }
         }
         AsyncFunction("setDisplayName") { (name: String?) in
-            try await Rovenue.shared.setDisplayName(name)
+            try await rovenueCall { try await Rovenue.shared.setDisplayName(name) }
         }
         AsyncFunction("setPhoneNumber") { (phone: String?) in
-            try await Rovenue.shared.setPhoneNumber(phone)
+            try await rovenueCall { try await Rovenue.shared.setPhoneNumber(phone) }
         }
         AsyncFunction("setPushToken") { (token: String?) in
-            try await Rovenue.shared.setPushToken(token)
+            try await rovenueCall { try await Rovenue.shared.setPushToken(token) }
         }
         AsyncFunction("flushAttributes") { () -> Double in
             // UInt32 → Double for the JS number bridge (lossless).
-            Double(try await Rovenue.shared.flushAttributes())
+            let n = try await rovenueCall { try await Rovenue.shared.flushAttributes() }
+            return Double(n)
         }
 
         // ---------------- Events ----------------
@@ -547,21 +582,8 @@ public class RovenueModule: Module {
             "virtualCurrencies": r.virtualCurrencies.mapValues { Double($0) },
             "productId": r.productId,
             "storeTransactionId": r.storeTransactionId,
+            "isDeferred": r.isDeferred,
         ]
-    }
-
-    /// Map the four Swift purchase-flow errors to Expo coded exceptions whose
-    /// `code` matches the RN `mapNativeError` switch. Any other `Rovenue.Error`
-    /// is rethrown unchanged (Expo surfaces its default code/message).
-    private static func codedError(for e: Rovenue.Error) -> Exception {
-        let message = e.errorDescription ?? "purchase error"
-        switch e {
-        case .purchaseCancelled:    return PurchaseCancelledException(message)
-        case .purchasePending:      return PurchasePendingException(message)
-        case .productNotAvailable:  return ProductNotAvailableException(message)
-        case .storeProblem:         return StoreProblemException(message)
-        default:                    return StoreProblemException(message)
-        }
     }
     private static func eventName(_ event: ChangeEvent) -> String {
         switch event {

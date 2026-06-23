@@ -10,7 +10,7 @@ import { virtualCurrencies, refreshVirtualCurrencies } from "../api/virtualCurre
 import { getOfferings, purchase, restorePurchases } from "../api/purchases";
 import { setForeground, shutdown } from "../api/lifecycle";
 import { Rovenue } from "../index";
-import { InvalidApiKeyError, PurchaseCancelledError } from "../errors";
+import { RovenueError } from "../errors";
 
 describe("Rovenue imperative API", () => {
   let native: MockNative;
@@ -29,13 +29,13 @@ describe("Rovenue imperative API", () => {
   // -------- configure --------
   it("configure rejects blank api key without touching native", () => {
     expect(() => configure({ apiKey: "", baseUrl: "https://api.example.com" }))
-      .toThrow(InvalidApiKeyError);
+      .toThrow(RovenueError);
     expect(native.configure).not.toHaveBeenCalled();
   });
 
   it("configure rejects whitespace api key", () => {
     expect(() => configure({ apiKey: "   ", baseUrl: "https://api.example.com" }))
-      .toThrow(InvalidApiKeyError);
+      .toThrow(RovenueError);
   });
 
   it("configure rejects malformed baseUrl when provided", () => {
@@ -227,17 +227,19 @@ describe("Rovenue imperative API", () => {
     expect(result.productId).toBe("com.x.m");
   });
 
-  it("purchase maps PurchaseCancelled native rejection to PurchaseCancelledError", async () => {
+  it("purchase maps PurchaseCanceled native rejection to RovenueError with kind PurchaseCanceled", async () => {
     native.purchase = vi.fn(async () => {
       const err: any = new Error("cancelled by user");
-      err.code = "PurchaseCancelled";
+      err.code = "PurchaseCanceled"; // canonical UDL name (one l)
       throw err;
     });
     const pkg = {
       identifier: "monthly",
       product: { id: "com.x.m", type: "subscription" as const, displayName: "Monthly", priceString: "$4.99", price: 4.99, currencyCode: "USD" },
     };
-    await expect(purchase(pkg)).rejects.toBeInstanceOf(PurchaseCancelledError);
+    const e = await purchase(pkg).catch((err) => err);
+    expect(e).toBeInstanceOf(RovenueError);
+    expect((e as RovenueError).kind).toBe("PurchaseCanceled");
   });
 
   it("restorePurchases delegates to native.restorePurchases", async () => {

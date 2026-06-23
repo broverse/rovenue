@@ -1,6 +1,6 @@
 import { startEventBridge } from "../core/eventBridge";
 import { getNative } from "../core/native";
-import { InvalidApiKeyError } from "../errors";
+import { RovenueError } from "../errors";
 import { startSessionTracker } from "./sessionTracker";
 
 export type RovenueConfig = {
@@ -34,10 +34,10 @@ export type RovenueConfig = {
 
 export function configure(opts: RovenueConfig): void {
   if (!opts.apiKey || opts.apiKey.trim() === "") {
-    throw new InvalidApiKeyError("apiKey is blank");
+    throw new RovenueError("InvalidApiKey", "apiKey is blank");
   }
   if (opts.baseUrl !== undefined && !/^https?:\/\//.test(opts.baseUrl)) {
-    throw new InvalidApiKeyError("baseUrl must start with http:// or https://");
+    throw new RovenueError("InvalidApiKey", "baseUrl must start with http:// or https://");
   }
   const native = getNative();
   native.configure(

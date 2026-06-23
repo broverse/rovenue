@@ -21,10 +21,10 @@ describe("accountToken", () => {
     const mock = makeMockNative();
     mock.getAppAccountToken = vi.fn(async () => {
       const e: any = new Error("not configured");
-      e.code = "NotConfigured";
+      e.code = "InvalidApiKey"; // use a canonical ErrorKind code
       throw e;
     });
     _setNativeForTesting(mock);
-    await expect(getAppAccountToken()).rejects.toMatchObject({ name: "NotConfiguredError" });
+    await expect(getAppAccountToken()).rejects.toMatchObject({ name: "RovenueError", kind: "InvalidApiKey" });
   });
 });

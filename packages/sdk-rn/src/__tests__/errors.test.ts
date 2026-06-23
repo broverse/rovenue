@@ -1,103 +1,47 @@
 import { describe, expect, it } from "vitest";
-import {
-  RovenueError,
-  InvalidApiKeyError,
-  InvalidArgumentError,
-  NotConfiguredError,
-  NetworkUnavailableError,
-  TimeoutError,
-  RateLimitedError,
-  ServerError,
-  StorageError,
-  UserNotFoundError,
-  InsufficientCreditsError,
-  EntitlementInactiveError,
-  DuplicatePurchaseError,
-  ReceiptInvalidError,
-  InternalError,
-  PurchaseCancelledError,
-  PurchasePendingError,
-  ProductNotAvailableError,
-  StoreProblemError,
-  mapNativeError,
-} from "../errors";
+import { RovenueError, mapNativeError, ERROR_KINDS } from "../errors";
 
-describe("Rovenue error classes", () => {
-  it("all 14 subclasses extend RovenueError", () => {
-    const cases: Array<[new (m: string) => RovenueError, string]> = [
-      [InvalidApiKeyError, "InvalidApiKey"],
-      [InvalidArgumentError, "InvalidArgument"],
-      [NotConfiguredError, "NotConfigured"],
-      [NetworkUnavailableError, "NetworkUnavailable"],
-      [TimeoutError, "Timeout"],
-      [RateLimitedError, "RateLimited"],
-      [ServerError, "Server"],
-      [StorageError, "Storage"],
-      [UserNotFoundError, "UserNotFound"],
-      [InsufficientCreditsError, "InsufficientCredits"],
-      [EntitlementInactiveError, "EntitlementInactive"],
-      [DuplicatePurchaseError, "DuplicatePurchase"],
-      [ReceiptInvalidError, "ReceiptInvalid"],
-      [InternalError, "Internal"],
-    ];
-    for (const [Ctor, code] of cases) {
-      const e = new Ctor("test message");
-      expect(e).toBeInstanceOf(RovenueError);
-      expect(e).toBeInstanceOf(Ctor);
-      expect(e.code).toBe(code);
-      expect(e.message).toBe("test message");
-    }
+describe("RN unified error", () => {
+  it("maps a known kind with carried fields", () => {
+    const e = mapNativeError("Forbidden", "no access",
+      { serverCode: "FORBIDDEN", httpStatus: 403, retryable: false });
+    expect(e).toBeInstanceOf(RovenueError);
+    expect(e.kind).toBe("Forbidden");
+    expect(e.serverCode).toBe("FORBIDDEN");
+    expect(e.httpStatus).toBe(403);
+    expect(e.isRetryable).toBe(false);
   });
 
-  it("mapNativeError picks the right class by code", () => {
-    expect(mapNativeError("InvalidApiKey", "x")).toBeInstanceOf(InvalidApiKeyError);
-    expect(mapNativeError("InvalidArgument", "x")).toBeInstanceOf(InvalidArgumentError);
-    expect(mapNativeError("InsufficientCredits", "x", { available: 3 })).toBeInstanceOf(
-      InsufficientCreditsError,
-    );
-    expect(mapNativeError("RateLimited", "x", { retryAfter: 30 })).toBeInstanceOf(
-      RateLimitedError,
-    );
+  it("preserves serverCode even for an unknown kind", () => {
+    const e = mapNativeError("SomethingNew", "msg", { serverCode: "X" });
+    expect(e.kind).toBe("Internal");      // normalized fallback
+    expect(e.serverCode).toBe("X");        // but nothing lost
   });
 
-  it("mapNativeError falls back to InternalError for unknown codes", () => {
-    const e = mapNativeError("UnknownCode", "huh");
-    expect(e).toBeInstanceOf(InternalError);
-    expect(e.message).toBe("huh");
+  it("derives isRetryable from kind when native omits it", () => {
+    expect(mapNativeError("Timeout", "t", {}).isRetryable).toBe(true);
   });
 
-  it("InsufficientCreditsError preserves available extra", () => {
-    const e = mapNativeError("InsufficientCredits", "not enough", { available: 3 });
-    expect((e as InsufficientCreditsError).available).toBe(3);
+  it("normalizes UPPER_SNAKE (Android casing) to PascalCase", () => {
+    const e = mapNativeError("NETWORK_UNAVAILABLE", "no net", {});
+    expect(e.kind).toBe("NetworkUnavailable");
+    expect(e.isRetryable).toBe(true);
   });
 
-  it("RateLimitedError preserves retryAfter extra (null when missing)", () => {
-    const e1 = mapNativeError("RateLimited", "slow down", { retryAfter: 30 });
-    expect((e1 as RateLimitedError).retryAfter).toBe(30);
-    const e2 = mapNativeError("RateLimited", "slow down");
-    expect((e2 as RateLimitedError).retryAfter).toBeNull();
+  it("normalizes camelCase (iOS casing) to PascalCase", () => {
+    const e = mapNativeError("networkUnavailable", "no net", {});
+    expect(e.kind).toBe("NetworkUnavailable");
+    expect(e.isRetryable).toBe(true);
   });
 
-  it("ServerError preserves httpStatus extra (null when missing)", () => {
-    const e = mapNativeError("Server", "boom", { httpStatus: 503 });
-    expect((e as ServerError).httpStatus).toBe(503);
+  it("ERROR_KINDS has exactly 24 entries", () => {
+    expect(ERROR_KINDS.length).toBe(24);
   });
 
-  it("purchase-flow error classes extend RovenueError with correct codes", () => {
-    expect(new PurchaseCancelledError("x")).toBeInstanceOf(RovenueError);
-    expect(new PurchaseCancelledError("x").code).toBe("PurchaseCancelled");
-    expect(new PurchasePendingError("x")).toBeInstanceOf(RovenueError);
-    expect(new PurchasePendingError("x").code).toBe("PurchasePending");
-    expect(new ProductNotAvailableError("x")).toBeInstanceOf(RovenueError);
-    expect(new ProductNotAvailableError("x").code).toBe("ProductNotAvailable");
-    expect(new StoreProblemError("x")).toBeInstanceOf(RovenueError);
-    expect(new StoreProblemError("x").code).toBe("StoreProblem");
-  });
-
-  it("mapNativeError maps purchase-flow codes to correct classes", () => {
-    expect(mapNativeError("PurchaseCancelled", "x")).toBeInstanceOf(PurchaseCancelledError);
-    expect(mapNativeError("PurchasePending", "x")).toBeInstanceOf(PurchasePendingError);
-    expect(mapNativeError("ProductNotAvailable", "x")).toBeInstanceOf(ProductNotAvailableError);
-    expect(mapNativeError("StoreProblem", "x")).toBeInstanceOf(StoreProblemError);
+  it("carries available and retryAfter in data", () => {
+    const e = mapNativeError("InsufficientCredits", "not enough",
+      { available: 5, retryAfter: 30 });
+    expect(e.data?.available).toBe(5);
+    expect(e.data?.retryAfter).toBe(30);
   });
 });

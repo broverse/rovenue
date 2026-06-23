@@ -96,6 +96,9 @@ export type PurchaseResult = {
   virtualCurrencies: Record<string, number>;
   productId: string;
   storeTransactionId: string;
+  /** True when the purchase is pending external approval (parental controls etc.).
+   *  Mirrors Swift `PurchaseResult.isDeferred` and Kotlin `PurchaseResult.isDeferred`. */
+  isDeferred: boolean;
 };
 
 export type ChangeEvent =

@@ -1,127 +1,113 @@
-// Error class hierarchy mirroring Kotlin M4's RovenueException sealed
-// class. Native impl rejects Nitro promises with `code: <variant>`;
-// mapNativeError picks the right class.
+// Single-class error surface for the Rovenue RN SDK.
 //
-// Why 13 classes instead of one error with a code field: enables
-// `try { ... } catch (e) { if (e instanceof InsufficientCreditsError)
-// { show e.available } }` — typed access to per-variant extras without
-// runtime code switches in user code.
+// Every failure from native (iOS/Android) is surfaced as a RovenueError with
+// a `kind: ErrorKind` discriminant. The 24 canonical PascalCase kinds match
+// the Rust UDL definitions; the JS normalizer absorbs the three casings that
+// the native bridges emit:
+//
+//   iOS bridge   → String(describing: error.kind) = camelCase  "networkUnavailable"
+//   Android bridge → error.kind.name               = UPPER_SNAKE "NETWORK_UNAVAILABLE"
+//   Direct JS    → PascalCase                                   "NetworkUnavailable"
+//
+// All three land in mapNativeError() which strips underscores and does a
+// case-insensitive compare to resolve the canonical kind.
+
+export const ERROR_KINDS = [
+  "NetworkUnavailable",
+  "Timeout",
+  "RateLimited",
+  "ServerError",
+  "InvalidApiKey",
+  "Forbidden",
+  "NotFound",
+  "InvalidRequest",
+  "Conflict",
+  "InvalidArgument",
+  "InsufficientCredits",
+  "FunnelTokenNotFound",
+  "FunnelTokenExpired",
+  "FunnelTokenAlreadyClaimed",
+  "PurchaseCanceled",
+  "ProductNotAvailable",
+  "AlreadyOwned",
+  "PaymentDeclined",
+  "StoreServiceUnavailable",
+  "Ineligible",
+  "ReceiptInvalid",
+  "StoreProblem",
+  "Storage",
+  "Internal",
+] as const;
+
+export type ErrorKind = (typeof ERROR_KINDS)[number];
+
+// Pre-compute lowercase-no-underscore lookup table once at module load.
+// Maps stripped-lowercase → canonical PascalCase kind.
+const KIND_LOOKUP = new Map<string, ErrorKind>(
+  ERROR_KINDS.map((k) => [k.toLowerCase().replace(/_/g, ""), k]),
+);
+
+const RETRYABLE = new Set<ErrorKind>([
+  "NetworkUnavailable",
+  "Timeout",
+  "RateLimited",
+  "ServerError",
+  "StoreServiceUnavailable",
+]);
+
+export interface ErrorExtras {
+  serverCode?: string;
+  httpStatus?: number;
+  retryable?: boolean;
+  available?: number;
+  retryAfter?: number;
+}
 
 export class RovenueError extends Error {
-  readonly code: string;
-  constructor(code: string, message: string) {
+  readonly kind: ErrorKind;
+  readonly serverCode?: string;
+  readonly httpStatus?: number;
+  readonly isRetryable: boolean;
+  /** Carries per-kind payload: `available` for InsufficientCredits, `retryAfter` for RateLimited. */
+  readonly data?: { available?: number; retryAfter?: number };
+
+  constructor(kind: ErrorKind, message: string, extras: ErrorExtras = {}) {
     super(message);
     this.name = "RovenueError";
-    this.code = code;
-    // Preserve prototype chain when transpiled to ES5 (no-op on ES2020).
-    Object.setPrototypeOf(this, new.target.prototype);
+    // Preserve prototype chain when transpiled to ES5.
+    Object.setPrototypeOf(this, RovenueError.prototype);
+    this.kind = kind;
+    this.serverCode = extras.serverCode;
+    this.httpStatus = extras.httpStatus;
+    this.isRetryable = extras.retryable ?? RETRYABLE.has(kind);
+    if (extras.available !== undefined || extras.retryAfter !== undefined) {
+      this.data = { available: extras.available, retryAfter: extras.retryAfter };
+    }
   }
 }
 
-export class InvalidApiKeyError extends RovenueError {
-  constructor(message: string) { super("InvalidApiKey", message); this.name = "InvalidApiKeyError"; }
-}
-export class InvalidArgumentError extends RovenueError {
-  constructor(message: string) { super("InvalidArgument", message); this.name = "InvalidArgumentError"; }
-}
-export class NotConfiguredError extends RovenueError {
-  constructor(message: string) { super("NotConfigured", message); this.name = "NotConfiguredError"; }
-}
-export class NetworkUnavailableError extends RovenueError {
-  constructor(message: string) { super("NetworkUnavailable", message); this.name = "NetworkUnavailableError"; }
-}
-export class TimeoutError extends RovenueError {
-  constructor(message: string) { super("Timeout", message); this.name = "TimeoutError"; }
-}
-export class RateLimitedError extends RovenueError {
-  readonly retryAfter: number | null;
-  constructor(message: string, retryAfter: number | null = null) {
-    super("RateLimited", message);
-    this.name = "RateLimitedError";
-    this.retryAfter = retryAfter;
-  }
-}
-export class ServerError extends RovenueError {
-  readonly httpStatus: number | null;
-  constructor(message: string, httpStatus: number | null = null) {
-    super("Server", message);
-    this.name = "ServerError";
-    this.httpStatus = httpStatus;
-  }
-}
-export class StorageError extends RovenueError {
-  constructor(message: string) { super("Storage", message); this.name = "StorageError"; }
-}
-export class UserNotFoundError extends RovenueError {
-  constructor(message: string) { super("UserNotFound", message); this.name = "UserNotFoundError"; }
-}
-export class InsufficientCreditsError extends RovenueError {
-  readonly available: number;
-  constructor(message: string, available: number = 0) {
-    super("InsufficientCredits", message);
-    this.name = "InsufficientCreditsError";
-    this.available = available;
-  }
-}
-export class EntitlementInactiveError extends RovenueError {
-  constructor(message: string) { super("EntitlementInactive", message); this.name = "EntitlementInactiveError"; }
-}
-export class DuplicatePurchaseError extends RovenueError {
-  constructor(message: string) { super("DuplicatePurchase", message); this.name = "DuplicatePurchaseError"; }
-}
-export class ReceiptInvalidError extends RovenueError {
-  constructor(message: string) { super("ReceiptInvalid", message); this.name = "ReceiptInvalidError"; }
-}
-export class PurchaseCancelledError extends RovenueError {
-  constructor(message: string) { super("PurchaseCancelled", message); this.name = "PurchaseCancelledError"; }
-}
-export class PurchasePendingError extends RovenueError {
-  constructor(message: string) { super("PurchasePending", message); this.name = "PurchasePendingError"; }
-}
-export class ProductNotAvailableError extends RovenueError {
-  constructor(message: string) { super("ProductNotAvailable", message); this.name = "ProductNotAvailableError"; }
-}
-export class StoreProblemError extends RovenueError {
-  constructor(message: string) { super("StoreProblem", message); this.name = "StoreProblemError"; }
-}
-export class InternalError extends RovenueError {
-  constructor(message: string) { super("Internal", message); this.name = "InternalError"; }
-}
-export class FunnelTokenNotFoundError extends RovenueError {
-  constructor(message: string) { super("FunnelTokenNotFound", message); this.name = "FunnelTokenNotFoundError"; }
-}
-export class FunnelTokenExpiredError extends RovenueError {
-  constructor(message: string) { super("FunnelTokenExpired", message); this.name = "FunnelTokenExpiredError"; }
-}
-export class FunnelTokenAlreadyClaimedError extends RovenueError {
-  constructor(message: string) { super("FunnelTokenAlreadyClaimed", message); this.name = "FunnelTokenAlreadyClaimedError"; }
+/**
+ * Normalize a native-bridge error code to a canonical `ErrorKind`.
+ *
+ * Accepts all three casings that the native layers emit:
+ *  - PascalCase  "NetworkUnavailable"  (RN canonical / direct JS)
+ *  - camelCase   "networkUnavailable"  (iOS — `String(describing: error.kind)`)
+ *  - UPPER_SNAKE "NETWORK_UNAVAILABLE" (Android — `error.kind.name`)
+ *
+ * Strategy: strip underscores, lowercase, look up in the precomputed table.
+ * Unknown codes fall back to "Internal" while still preserving serverCode/
+ * message/extras so nothing is lost.
+ */
+function normalizeKind(code: string): ErrorKind {
+  const key = code.toLowerCase().replace(/_/g, "");
+  return KIND_LOOKUP.get(key) ?? "Internal";
 }
 
-type Extras = { available?: number; retryAfter?: number; httpStatus?: number };
-
-export function mapNativeError(code: string, message: string, extras?: Extras): RovenueError {
-  switch (code) {
-    case "InvalidApiKey":         return new InvalidApiKeyError(message);
-    case "InvalidArgument":       return new InvalidArgumentError(message);
-    case "NotConfigured":         return new NotConfiguredError(message);
-    case "NetworkUnavailable":    return new NetworkUnavailableError(message);
-    case "Timeout":               return new TimeoutError(message);
-    case "RateLimited":           return new RateLimitedError(message, extras?.retryAfter ?? null);
-    case "Server":                return new ServerError(message, extras?.httpStatus ?? null);
-    case "Storage":               return new StorageError(message);
-    case "UserNotFound":          return new UserNotFoundError(message);
-    case "InsufficientCredits":   return new InsufficientCreditsError(message, extras?.available ?? 0);
-    case "EntitlementInactive":   return new EntitlementInactiveError(message);
-    case "DuplicatePurchase":     return new DuplicatePurchaseError(message);
-    case "ReceiptInvalid":        return new ReceiptInvalidError(message);
-    case "PurchaseCancelled":     return new PurchaseCancelledError(message);
-    case "PurchasePending":       return new PurchasePendingError(message);
-    case "ProductNotAvailable":   return new ProductNotAvailableError(message);
-    case "StoreProblem":          return new StoreProblemError(message);
-    case "Internal":              return new InternalError(message);
-    case "FunnelTokenNotFound":       return new FunnelTokenNotFoundError(message);
-    case "FunnelTokenExpired":        return new FunnelTokenExpiredError(message);
-    case "FunnelTokenAlreadyClaimed": return new FunnelTokenAlreadyClaimedError(message);
-    default:                      return new InternalError(message);
-  }
+export function mapNativeError(
+  code: string,
+  message: string,
+  extras: ErrorExtras = {},
+): RovenueError {
+  const kind = normalizeKind(code);
+  return new RovenueError(kind, message, extras);
 }

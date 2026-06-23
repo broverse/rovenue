@@ -9,7 +9,7 @@ import {
 } from "./attributes";
 import { _setNativeForTesting } from "../core/native";
 import { makeMockNative } from "../__tests__/_mockNative";
-import { NotConfiguredError } from "../errors";
+import { RovenueError } from "../errors";
 
 describe("attributes api", () => {
   beforeEach(() => {
@@ -69,6 +69,8 @@ describe("attributes api", () => {
       throw e;
     });
     _setNativeForTesting(mock);
-    await expect(setAttributes({ x: "y" })).rejects.toBeInstanceOf(NotConfiguredError);
+    const e = await setAttributes({ x: "y" }).catch((err) => err);
+    expect(e).toBeInstanceOf(RovenueError);
+    expect((e as RovenueError).kind).toBe("Internal"); // NotConfigured is not a canonical ErrorKind; maps to Internal
   });
 });
