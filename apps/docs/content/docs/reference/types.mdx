@@ -200,16 +200,190 @@ type ProductType = 'subscription' | 'consumable' | 'non_consumable';
 
 ## StoreProduct
 
-Represents a store product with localised pricing from the App Store or Google Play. You receive this as `Package.product` — you do not construct it directly.
+Represents a store product with localised pricing and subscription metadata from the App Store or Google Play. You receive this as `Package.product` — you do not construct it directly.
+
+### Basic schema
 
 ```ts
 type StoreProduct = {
+  // Core fields
   id: string;
   type: ProductType;
+  productCategory: 'subscription' | 'nonSubscription';
   displayName: string;
-  priceString: string;
-  price: number;
-  currencyCode: string;
+  description: string | null;
+  priceString: string | null;
+  price: number | null;
+  currencyCode: string | null;
+
+  // Subscription metadata
+  subscriptionPeriod: Period | null;
+  subscriptionGroupIdentifier: string | null;  // iOS only
+  isFamilyShareable: boolean;  // iOS only
+  introPrice: IntroPrice | null;  // iOS only
+  discounts: Discount[];  // iOS promotional offers (empty on Android)
+  isEligibleForIntroOffer: boolean | null;
+
+  // Android subscription options (null on iOS)
+  subscriptionOptions: SubscriptionOption[] | null;
+  defaultOption: SubscriptionOption | null;
+
+  // Per-unit pricing (approximated)
+  pricePerWeek: number | null;
+  pricePerMonth: number | null;
+  pricePerYear: number | null;
+  pricePerWeekString: string | null;
+  pricePerMonthString: string | null;
+  pricePerYearString: string | null;
+
+  // Platform-native escape hatch (Swift & Kotlin only; null on React Native)
+  rawStoreProduct: StoreKit.Product | ProductDetails | null;
+};
+```
+
+**Core Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | The store product identifier (e.g. `"com.example.pro_monthly"`). |
+| `type` | [`ProductType`](#producttype) | What the product delivers: subscription, consumable, or non-consumable. |
+| `productCategory` | `'subscription' \| 'nonSubscription'` | Product category from the store. Maps to `type`: subscriptions have category `'subscription'`; consumables and non-consumables have `'nonSubscription'`. |
+| `displayName` | `string` | Localised product name from the store (e.g. `"Pro Monthly"`). |
+| `description` | `string \| null` | Localised product description. `null` if not provided by the store. |
+| `priceString` | `string \| null` | Localised, formatted price string (e.g. `"$4.99"`, `"€4,99"`). Display this directly in your paywall. `null` if unavailable. |
+| `price` | `number \| null` | Numeric price in the user's currency (e.g. `4.99`). `null` if unavailable. |
+| `currencyCode` | `string \| null` | ISO 4217 currency code (e.g. `"USD"`, `"EUR"`). `null` if unavailable. |
+
+**Subscription Fields**
+
+| Field | Type | Platform | Description |
+|-------|------|----------|-------------|
+| `subscriptionPeriod` | [`Period`](#period) `\| null` | All | The billing interval (e.g. 1 month, 1 year). `null` for non-subscription products. |
+| `subscriptionGroupIdentifier` | `string \| null` | iOS | The App Store subscription group. Groups related subscriptions so users can switch between them. `null` on Android and non-subscription products. |
+| `isFamilyShareable` | `boolean` | iOS | `true` if eligible for family sharing on iOS. Always `false` on Android. |
+| `introPrice` | [`IntroPrice`](#introprice) `\| null` | iOS | The introductory offer (free trial or discounted period). iOS only; `null` on Android. |
+| `discounts` | [`Discount[]`](#discount) | iOS | iOS promotional offers (introductory + winback offers). Empty array on Android. |
+| `isEligibleForIntroOffer` | `boolean \| null` | All | **iOS:** the real StoreKit value (true if intro offer eligible). **Android:** derived; `true` iff a free or intro phase is present. Play enforces actual eligibility at purchase time. `null` if unavailable. |
+| `subscriptionOptions` | [`SubscriptionOption[]`](#subscriptionoption) `\| null` | Android | Android subscription options (base plans + offers). `null` on iOS. |
+| `defaultOption` | [`SubscriptionOption`](#subscriptionoption) `\| null` | Android | The recommended option for this product (e.g. the base plan without an offer). `null` on iOS. |
+
+**Per-Unit Pricing (Approximated)**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pricePerWeek` | `number \| null` | Estimated weekly price, calculated from `subscriptionPeriod` and `price` (7 days per week). For a 2-week plan priced at $5, this is ~$3.50/week. An approximation only; exact billing varies by period. |
+| `pricePerMonth` | `number \| null` | Estimated monthly price (30 days per month). |
+| `pricePerYear` | `number \| null` | Estimated annual price (365 days per year). |
+| `pricePerWeekString` | `string \| null` | Localised price-per-week string. |
+| `pricePerMonthString` | `string \| null` | Localised price-per-month string. |
+| `pricePerYearString` | `string \| null` | Localised price-per-year string. |
+
+**Platform-Native Escape Hatch**
+
+| Field | Type | Platform | Description |
+|-------|------|----------|-------------|
+| `rawStoreProduct` | `StoreKit.Product` (iOS) / `ProductDetails` (Android) / `null` (RN) | Swift & Kotlin | Direct reference to the platform's native product object. Use only when the Rovenue wrapper is insufficient. Not available in React Native. |
+
+**Used by:** [`Package.product`](#package)
+
+**Usage**
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const pkg = offerings.current?.packages[0];
+    if (pkg) {
+      const {
+        displayName, priceString, type, description, subscriptionPeriod,
+        pricePerMonthString, isEligibleForIntroOffer
+      } = pkg.product;
+      
+      console.log(`${displayName} — ${priceString}`);
+      console.log(`Description: ${description}`);
+      
+      if (subscriptionPeriod) {
+        console.log(`Billing: every ${subscriptionPeriod.value} ${subscriptionPeriod.unit}`);
+        console.log(`~${pricePerMonthString}/month`);
+      }
+      
+      if (isEligibleForIntroOffer) {
+        console.log('Eligible for intro offer');
+      }
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let pkg = offerings.current?.packages.first
+    if let product = pkg?.product {
+      print("\(product.displayName) — \(product.priceString ?? "N/A")")
+      
+      if let period = product.subscriptionPeriod {
+        print("Billing: every \(period.value) \(period.unit)")
+        print("~\(product.pricePerMonthString ?? "N/A")/month")
+      }
+      
+      if let intro = product.introPrice {
+        print("Intro: \(intro.priceString ?? "free") for \(intro.cycles) cycles")
+      }
+      
+      // Access promotional offers (iOS-specific)
+      for discount in product.discounts {
+        print("Promo: \(discount.priceString ?? "free")")
+      }
+      
+      // Access native StoreKit.Product if needed
+      if let native = product.rawStoreProduct {
+        print("Native product: \(native.id)")
+      }
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val pkg = offerings.current?.packages.firstOrNull()
+    pkg?.product?.let { product ->
+      println("${product.displayName} — ${product.priceString ?: "N/A"}")
+      
+      product.subscriptionPeriod?.let { period ->
+        println("Billing: every ${period.value} ${period.unit}")
+        println("~${product.pricePerMonthString ?: "N/A"}/month")
+      }
+      
+      product.introPrice?.let { intro ->
+        println("Intro: ${intro.priceString ?: "free"} for ${intro.cycles} cycles")
+      }
+      
+      // Access Android subscription options
+      product.subscriptionOptions?.forEach { option ->
+        println("Option: ${option.id}")
+        option.pricingPhases.forEach { phase ->
+          println("  Phase: ${phase.priceString} (${phase.recurrenceMode})")
+        }
+      }
+      
+      // Access native ProductDetails if needed
+      product.rawStoreProduct?.let { native ->
+        println("Native product: ${native.productId}")
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Supporting types for StoreProduct
+
+### Period
+
+Represents a billing or time interval.
+
+```ts
+type Period = {
+  value: number;
+  unit: 'day' | 'week' | 'month' | 'year';
+  iso8601: string;
 };
 ```
 
@@ -217,25 +391,279 @@ type StoreProduct = {
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | `string` | The store product identifier (e.g. `"com.example.pro_monthly"`). |
-| `type` | [`ProductType`](#producttype) | What the product delivers: subscription, consumable, or non-consumable. |
-| `displayName` | `string` | Localised product name from the store (e.g. `"Pro Monthly"`). |
-| `priceString` | `string` | Localised, formatted price string (e.g. `"$4.99"`, `"€4,99"`). Display this directly in your paywall. |
-| `price` | `number` | Numeric price in the user's currency (e.g. `4.99`). |
-| `currencyCode` | `string` | ISO 4217 currency code (e.g. `"USD"`, `"EUR"`). |
+| `value` | `number` | The magnitude (e.g. `1`, `3`, `12`). |
+| `unit` | `'day' \| 'week' \| 'month' \| 'year'` | The time unit. |
+| `iso8601` | `string` | ISO 8601 duration string (e.g. `"P1M"` for 1 month, `"P1Y"` for 1 year). Useful for standardised duration calculations. |
 
-**Used by:** [`Package.product`](#package)
+**Used by:** [`StoreProduct.subscriptionPeriod`](#storeproduct), [`IntroPrice.period`](#introprice), [`Discount.period`](#discount), [`PricingPhase.billingPeriod`](#pricinphase)
 
-**Usage**
+**Example**
 
 ```ts
-const pkg = offerings.current?.packages[0];
-if (pkg) {
-  const { displayName, priceString, type } = pkg.product;
-  console.log(`${displayName} — ${priceString} (${type})`);
-  // e.g. "Pro Monthly — $4.99 (subscription)"
+const period = product.subscriptionPeriod;
+if (period?.unit === 'month' && period.value === 1) {
+  console.log('Billing monthly'); // period.iso8601 → "P1M"
 }
 ```
+
+---
+
+### IntroPrice
+
+The introductory offer on an iOS subscription (free trial or discounted period).
+
+```ts
+type IntroPrice = {
+  price: number | null;
+  priceString: string | null;
+  currencyCode: string | null;
+  period: Period;
+  cycles: number;
+  paymentMode: 'freeTrial' | 'payAsYouGo' | 'payUpFront';
+};
+```
+
+**Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `price` | `number \| null` | The price per cycle (e.g. `0` for free trial, `0.99` for discounted). `null` if unavailable. |
+| `priceString` | `string \| null` | Localised price string. `null` if unavailable. |
+| `currencyCode` | `string \| null` | ISO 4217 code. `null` if unavailable. |
+| `period` | [`Period`](#period) | The duration of each intro cycle (e.g. 1 week free). |
+| `cycles` | `number` | How many intro periods apply (e.g. `1` = 1-week free trial; `3` = 3-week trial). |
+| `paymentMode` | `'freeTrial' \| 'payAsYouGo' \| 'payUpFront'` | When payment is charged: `'freeTrial'` (after trial ends), `'payAsYouGo'` (each cycle, starting now), `'payUpFront'` (upfront). |
+
+**Platform:** iOS only. `null` on Android (use `subscriptionOptions.introPhase` instead).
+
+**Used by:** [`StoreProduct.introPrice`](#storeproduct)
+
+**Example**
+
+```ts
+const intro = product.introPrice;
+if (intro) {
+  if (intro.paymentMode === 'freeTrial' && intro.price === 0) {
+    console.log(`${intro.cycles}-${intro.period.unit} free trial`);
+  } else {
+    console.log(`${intro.priceString}/${intro.period.value} ${intro.period.unit} for ${intro.cycles} cycles`);
+  }
+}
+```
+
+---
+
+### Discount
+
+An iOS promotional offer (winback or ongoing discount on a subscription).
+
+```ts
+type Discount = {
+  identifier: string | null;
+  price: number | null;
+  priceString: string | null;
+  currencyCode: string | null;
+  period: Period;
+  numberOfPeriods: number;
+  paymentMode: 'freeTrial' | 'payAsYouGo' | 'payUpFront';
+  type: 'introductory' | 'promotional' | 'winBack';
+};
+```
+
+**Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `identifier` | `string \| null` | The offer identifier from the App Store dashboard. `null` if unavailable. |
+| `price` | `number \| null` | The discounted price per cycle. `null` if unavailable. |
+| `priceString` | `string \| null` | Localised price string. |
+| `currencyCode` | `string \| null` | ISO 4217 code. |
+| `period` | [`Period`](#period) | The duration of each discount cycle. |
+| `numberOfPeriods` | `number` | How many cycles the discount applies (e.g. `3` = 3 months at discount price). |
+| `paymentMode` | `'freeTrial' \| 'payAsYouGo' \| 'payUpFront'` | When payment is charged. |
+| `type` | `'introductory' \| 'promotional' \| 'winBack'` | Offer type: introductory (new subs only), promotional (all users), or winBack (lapsed subs). |
+
+**Platform:** iOS only. Empty array on Android.
+
+**Used by:** [`StoreProduct.discounts`](#storeproduct)
+
+---
+
+### PricingPhase
+
+An Android subscription pricing phase (free, intro, or full price; part of a `SubscriptionOption`).
+
+```ts
+type PricingPhase = {
+  price: number | null;
+  priceString: string | null;
+  currencyCode: string | null;
+  billingPeriod: Period;
+  billingCycleCount: number | null;
+  recurrenceMode: 'infiniteRecurring' | 'finiteRecurring' | 'nonRecurring';
+  paymentMode: 'freeTrial' | 'payAsYouGo' | 'payUpFront' | null;
+};
+```
+
+**Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `price` | `number \| null` | Price per cycle in this phase. `0` for free phases. `null` if unavailable. |
+| `priceString` | `string \| null` | Localised price string. |
+| `currencyCode` | `string \| null` | ISO 4217 code. |
+| `billingPeriod` | [`Period`](#period) | How often the user is billed in this phase. |
+| `billingCycleCount` | `number \| null` | How many billing cycles this phase lasts (e.g. `1` for a 1-month free trial, `12` for year-long offer). `null` for infinite recurrence. |
+| `recurrenceMode` | `'infiniteRecurring' \| 'finiteRecurring' \| 'nonRecurring'` | `'infiniteRecurring'` (lasts forever), `'finiteRecurring'` (ends after `billingCycleCount` cycles), `'nonRecurring'` (one-time). |
+| `paymentMode` | `'freeTrial' \| 'payAsYouGo' \| 'payUpFront' \| null` | When charged. `null` if unavailable. |
+
+**Platform:** Android only. Not used on iOS.
+
+**Used by:** [`SubscriptionOption.pricingPhases`](#subscriptionoption), [`SubscriptionOption.freePhase`](#subscriptionoption), [`SubscriptionOption.introPhase`](#subscriptionoption), [`SubscriptionOption.fullPricePhase`](#subscriptionoption)
+
+---
+
+### SubscriptionOption
+
+An Android subscription option (base plan + offer combination, or just base plan). Equivalent to an iOS product in a subscription group but with explicit phase structure.
+
+```ts
+type SubscriptionOption = {
+  id: string;
+  basePlanId: string | null;
+  offerId: string | null;
+  tags: string[];
+  isBasePlan: boolean;
+  isPrepaid: boolean;
+  pricingPhases: PricingPhase[];
+  freePhase: PricingPhase | null;
+  introPhase: PricingPhase | null;
+  fullPricePhase: PricingPhase | null;
+};
+```
+
+**Fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Unique identifier for this option (e.g. `"base"`, `"base:offer_30_day_trial"`). |
+| `basePlanId` | `string \| null` | The base plan this option belongs to (e.g. `"base"`, `"annual"`). `null` if unavailable. |
+| `offerId` | `string \| null` | The offer ID if this is a base plan + offer combo (e.g. `"30_day_trial"`). `null` if this is the base plan without an offer. |
+| `tags` | `string[]` | User-assigned tags from the Play Console (e.g. `["trial", "new_user"]`). Empty if none. |
+| `isBasePlan` | `boolean` | `true` if this option is the base plan (no offer applied). |
+| `isPrepaid` | `boolean` | `true` if prepaid (e.g. annual upfront). |
+| `pricingPhases` | [`PricingPhase[]`](#pricinphase) | All pricing phases in order (free → intro → full price, or just full price). Used to compute net price. |
+| `freePhase` | [`PricingPhase`](#pricinphase) `\| null` | The free phase if present (e.g. 2-week free trial). `null` if none. |
+| `introPhase` | [`PricingPhase`](#pricinphase) `\| null` | The introductory discounted phase if present. `null` if none. |
+| `fullPricePhase` | [`PricingPhase`](#pricinphase) `\| null` | The full-price phase that lasts indefinitely (the recurring rate). `null` if unavailable. |
+
+**Platform:** Android only. `null` on iOS.
+
+**Used by:** [`StoreProduct.subscriptionOptions`](#storeproduct), [`StoreProduct.defaultOption`](#storeproduct)
+
+**Example**
+
+```ts
+const option = product.defaultOption || product.subscriptionOptions?.[0];
+if (option) {
+  console.log(`Option: ${option.id}`);
+  option.pricingPhases.forEach((phase, i) => {
+    console.log(`Phase ${i}: ${phase.priceString} (${phase.recurrenceMode})`);
+  });
+  
+  if (option.freePhase) {
+    console.log(`Free trial: ${option.freePhase.billingCycleCount} ${option.freePhase.billingPeriod.unit}`);
+  }
+  
+  if (option.fullPricePhase) {
+    console.log(`Then: ${option.fullPricePhase.priceString}/${option.fullPricePhase.billingPeriod.value} ${option.fullPricePhase.billingPeriod.unit}`);
+  }
+}
+```
+
+---
+
+### PackageType
+
+A convenience enum classifying packages into common categories (e.g. monthly, annual, lifetime) for UI presentation.
+
+```ts
+type PackageType =
+  | 'unknown' | 'custom'
+  | 'lifetime' | 'annual' | 'sixMonth' | 'threeMonth' | 'twoMonth' | 'monthly' | 'weekly';
+```
+
+**Values**
+
+| Value | Description |
+|-------|-------------|
+| `'lifetime'` | One-time permanent unlock. |
+| `'annual'` | 1-year subscription. |
+| `'sixMonth'` | 6-month subscription. |
+| `'threeMonth'` | 3-month subscription. |
+| `'twoMonth'` | 2-month subscription. |
+| `'monthly'` | 1-month subscription. |
+| `'weekly'` | 1-week subscription. |
+| `'custom'` | Billed on a custom interval (e.g. 2 weeks, 90 days). |
+| `'unknown'` | Unable to determine. Fallback for unrecognized patterns. |
+
+**Used by:** [`Package.packageType`](#package)
+
+---
+
+## Offering convenience accessors
+
+The `Offering` type provides accessors to quickly find packages by type:
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    React Native does not expose convenience accessors on the `Offering` object itself. Use [`Package.packageType`](#package) to filter packages manually, or look them up by `identifier`:
+    
+    ```ts
+    const offerings = await Rovenue.getOfferings();
+    const offering = offerings.current;
+    
+    // Find by packageType
+    const monthly = offering?.packages.find(p => p.packageType === 'monthly');
+    
+    // Find by identifier
+    const annual = offering?.packages.find(p => p.identifier === 'annual');
+    ```
+  </Tab>
+  <Tab value="Swift">
+    Swift `Offering` includes convenience properties:
+    
+    ```swift
+    let offering = offerings.current
+    
+    // Access by PackageType enum
+    let monthly = offering?.monthly    // Package? matching .monthly
+    let annual = offering?.annual      // Package? matching .annual
+    let weekly = offering?.weekly      // Package? matching .weekly
+    let sixMonth = offering?.sixMonth
+    let threeMonth = offering?.threeMonth
+    let twoMonth = offering?.twoMonth
+    let lifetime = offering?.lifetime
+    
+    // Or look up by identifier
+    let custom = offering?.package(identifier: "pro_custom")
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    Kotlin does not expose convenience accessors on the `Offering` object itself. Use [`Package.packageType`](#package) to filter packages:
+    
+    ```kotlin
+    val offering = offerings.current
+    
+    // Find by packageType
+    val monthly = offering?.packages?.find { it.packageType == PackageType.monthly }
+    val annual = offering?.packages?.find { it.packageType == PackageType.annual }
+    
+    // Find by identifier
+    val custom = offering?.packages?.find { it.identifier == "pro_custom" }
+    ```
+  </Tab>
+</Tabs>
 
 ---
 
@@ -245,7 +673,8 @@ A wrapper around a [`StoreProduct`](#storeproduct) as configured in the Rovenue 
 
 ```ts
 type Package = {
-  id: string;
+  identifier: string;
+  packageType: PackageType;
   product: StoreProduct;
 };
 ```
@@ -254,22 +683,52 @@ type Package = {
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | `string` | The package identifier as configured in the Rovenue dashboard (e.g. `"monthly"`, `"annual"`, `"credits_100"`). |
-| `product` | [`StoreProduct`](#storeproduct) | The underlying store product with localised pricing. |
+| `identifier` | `string` | The package identifier as configured in the Rovenue dashboard (e.g. `"monthly"`, `"annual"`, `"credits_100"`). |
+| `packageType` | [`PackageType`](#packagetype) | A convenience category for the package (e.g. `'monthly'`, `'annual'`, `'lifetime'`). Use this to simplify paywall UI logic. |
+| `product` | [`StoreProduct`](#storeproduct) | The underlying store product with localised pricing and subscription metadata. |
 
 **Returned by:** [`Offering.packages`](#offering) (via [`getOfferings()`](/docs/reference/methods#getofferings))
 
 **Usage**
 
-```ts
-const offerings = await Rovenue.getOfferings();
-const pkg = offerings.current?.packages.find(p => p.id === 'annual');
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    ```ts
+    const offerings = await Rovenue.getOfferings();
+    const pkg = offerings.current?.packages.find(p => p.identifier === 'annual');
 
-if (pkg) {
-  console.log(`Annual plan: ${pkg.product.priceString}`);
-  const result = await Rovenue.purchase(pkg);
-}
-```
+    if (pkg) {
+      console.log(`Annual plan: ${pkg.product.priceString}`);
+      console.log(`Type: ${pkg.packageType}`);
+      const result = await Rovenue.purchase(pkg);
+    }
+    ```
+  </Tab>
+  <Tab value="Swift">
+    ```swift
+    let offerings = try await Rovenue.shared.getOfferings()
+    let pkg = offerings.current?.packages.first { $0.identifier == "annual" }
+
+    if let pkg = pkg {
+      print("Annual plan: \(pkg.product.priceString ?? "N/A")")
+      print("Type: \(pkg.packageType)")
+      let result = try await Rovenue.shared.purchase(pkg)
+    }
+    ```
+  </Tab>
+  <Tab value="Kotlin">
+    ```kotlin
+    val offerings = Rovenue.shared.getOfferings()
+    val pkg = offerings.current?.packages?.find { it.identifier == "annual" }
+
+    pkg?.let {
+      println("Annual plan: ${it.product.priceString}")
+      println("Type: ${it.packageType}")
+      val result = Rovenue.shared.purchase(it)
+    }
+    ```
+  </Tab>
+</Tabs>
 
 ---
 

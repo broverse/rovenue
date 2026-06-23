@@ -221,15 +221,30 @@ type Offerings = {
   all: Record<string, Offering>;
 };
 
-type Offering  = { identifier: string; isDefault: boolean; packages: Package[] };
-type Package   = { identifier: string; product: StoreProduct };
+type Offering = { identifier: string; isDefault: boolean; packages: Package[] };
+type Package = {
+  identifier: string;
+  packageType: 'monthly' | 'annual' | 'weekly' | /* ... */ 'lifetime';
+  product: StoreProduct;
+};
 type StoreProduct = {
   id: string;
   type: 'subscription' | 'consumable' | 'non_consumable';
+  productCategory: 'subscription' | 'nonSubscription';
   displayName: string;
+  description: string | null;
   priceString: string | null; // localised, e.g. "$4.99"
   price: number | null;
   currencyCode: string | null;
+  subscriptionPeriod: Period | null; // { value: number; unit: 'day'|'week'|'month'|'year'; iso8601: string }
+  introPrice: IntroPrice | null; // iOS only
+  discounts: Discount[]; // iOS promotional offers
+  isEligibleForIntroOffer: boolean | null;
+  subscriptionOptions: SubscriptionOption[] | null; // Android only
+  defaultOption: SubscriptionOption | null;
+  pricePerMonth: number | null; // approximated per-unit prices
+  pricePerMonthString: string | null;
+  // ... see Types reference for full schema
 };
 ```
 
