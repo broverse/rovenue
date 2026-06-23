@@ -57,14 +57,67 @@ final class PromotionalOfferPurchaseTests: XCTestCase {
         XCTAssertFalse(signCalled)
     }
 
-    /// Validates that the Discount-based public API throws for `.introductory` offers.
-    /// This is wired at the Rovenue.swift level, but we document the intent here.
-    func testIntroductoryDiscountTypeIsRejected() async throws {
-        // Introductory discounts must not be passed as promotional offers.
-        // This is validated in Rovenue.purchase(_:promotionalOffer:) before
-        // reaching ApplePurchaseFlow. We verify the DiscountType enum exists
-        // and that .introductory is distinct from .promotional and .winBack.
-        XCTAssertNotEqual(DiscountType.introductory, DiscountType.promotional)
-        XCTAssertNotEqual(DiscountType.introductory, DiscountType.winBack)
+    /// Validates that `resolvePromotionalOfferId` rejects `.introductory` offers,
+    /// missing identifiers, and returns nil for nil input.
+    func testIntroductoryDiscountTypeIsRejected() throws {
+        let monthlyPeriod = Period(value: 1, unit: .month, iso8601: "P1M")
+
+        // Test 1: introductory discount throws with .ineligible
+        let introDiscount = Discount(
+            identifier: "intro_offer",
+            price: nil,
+            priceString: nil,
+            currencyCode: nil,
+            period: monthlyPeriod,
+            numberOfPeriods: 1,
+            paymentMode: .freeTrial,
+            type: .introductory
+        )
+        XCTAssertThrowsError(try resolvePromotionalOfferId(introDiscount)) { error in
+            guard let rovenueError = error as? RovenueError else {
+                XCTFail("Expected RovenueError, got \(type(of: error))")
+                return
+            }
+            XCTAssertEqual(rovenueError.kind, .ineligible)
+            XCTAssertTrue(rovenueError.message.contains("Introductory offers"))
+        }
+
+        // Test 2: promotional discount with valid identifier returns the id
+        let promoDiscount = Discount(
+            identifier: "winback10",
+            price: nil,
+            priceString: nil,
+            currencyCode: nil,
+            period: monthlyPeriod,
+            numberOfPeriods: 1,
+            paymentMode: .payAsYouGo,
+            type: .promotional
+        )
+        let result = try resolvePromotionalOfferId(promoDiscount)
+        XCTAssertEqual(result, "winback10")
+
+        // Test 3: discount with nil identifier throws with .ineligible
+        let missingIdDiscount = Discount(
+            identifier: nil,
+            price: nil,
+            priceString: nil,
+            currencyCode: nil,
+            period: monthlyPeriod,
+            numberOfPeriods: 1,
+            paymentMode: .payAsYouGo,
+            type: .promotional
+        )
+        XCTAssertThrowsError(try resolvePromotionalOfferId(missingIdDiscount)) { error in
+            guard let rovenueError = error as? RovenueError else {
+                XCTFail("Expected RovenueError, got \(type(of: error))")
+                return
+            }
+            XCTAssertEqual(rovenueError.kind, .ineligible)
+            XCTAssertTrue(rovenueError.message.contains("missing an identifier"))
+        }
+
+        // Test 4: nil input returns nil
+        let nilResult = try resolvePromotionalOfferId(nil)
+        XCTAssertNil(nilResult)
     }
 }

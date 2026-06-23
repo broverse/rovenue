@@ -29,6 +29,23 @@ public struct LogEntry: Sendable {
     }
 }
 
+// MARK: - Promotional offer validation (file-scope, testable function)
+
+/// Resolves the offer id to redeem, throwing for offers that can't be redeemed via the promotional-offer path.
+/// - Parameter offer: A `Discount` to validate and extract the identifier from, or nil.
+/// - Returns: The offer identifier to pass to the purchase flow, or nil if no offer was provided.
+/// - Throws: `RovenueError` with `.ineligible` kind if the offer is `.introductory` or missing an identifier.
+internal func resolvePromotionalOfferId(_ offer: Discount?) throws -> String? {
+    guard let offer else { return nil }
+    guard offer.type != .introductory else {
+        throw RovenueError(kind: .ineligible, message: "Introductory offers are applied automatically; do not pass them as a promotional offer.")
+    }
+    guard let id = offer.identifier else {
+        throw RovenueError(kind: .ineligible, message: "Promotional offer is missing an identifier.")
+    }
+    return id
+}
+
 public final class Rovenue: @unchecked Sendable {
     // MARK: - Singleton plumbing
     //
@@ -606,16 +623,7 @@ public final class Rovenue: @unchecked Sendable {
     /// inject a promotional offer; `.introductory` throws immediately.
     @available(iOS 15.0, macOS 12.0, *)
     public func purchase(_ product: StoreProduct, promotionalOffer: Discount? = nil) async throws -> PurchaseResult {
-        var offerId: String? = nil
-        if let offer = promotionalOffer {
-            guard offer.type != .introductory else {
-                throw RovenueError(kind: .ineligible, message: "Introductory offers are applied automatically; do not pass them as a promotional offer.")
-            }
-            guard let id = offer.identifier else {
-                throw RovenueError(kind: .ineligible, message: "Promotional offer is missing an identifier.")
-            }
-            offerId = id
-        }
+        let offerId = try resolvePromotionalOfferId(promotionalOffer)
         return try await _purchaseCore(product: product, offerId: offerId)
     }
 
@@ -643,12 +651,7 @@ public final class Rovenue: @unchecked Sendable {
                 }
             }
         )
-        do {
-            let result = try await flow.run(productId: product.id, appAccountToken: token, promotionalOfferId: offerId)
-            return result
-        } catch {
-            throw error
-        }
+        return try await flow.run(productId: product.id, appAccountToken: token, promotionalOfferId: offerId)
     }
 
     /// Restore the user's prior purchases. Syncs with the App Store, re-posts
