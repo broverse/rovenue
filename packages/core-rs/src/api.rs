@@ -15,7 +15,7 @@ use crate::funnel::{
 };
 use crate::identify::IdentifyClient;
 use crate::identity::{IdentityManager, User};
-use crate::logging::{Logger, LogSink};
+use crate::logging::{LogLevel, Logger, LogSink};
 use crate::observer::{Observer, ObserverBus};
 use crate::offerings::{CoreOfferings, OfferingsClient};
 use crate::polling::PollingScheduler;
@@ -252,6 +252,29 @@ impl RovenueCore {
         Self::from_store_with_http_max_attempts(config, store, 1)
     }
 
+    /// Structured operation log. Emits `op` field always; caller appends `kind` on error.
+    /// Never pass PII (app_user_id, email, receipt) as `message` or in `extra`.
+    fn log_op(&self, level: LogLevel, message: &str, op: &str, extra: &[(&str, &str)]) {
+        let message = message.to_string();
+        let op = op.to_string();
+        let extra: Vec<(String, String)> = extra
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        self.logger.log(
+            level,
+            move || message,
+            move || {
+                let mut f = std::collections::BTreeMap::new();
+                f.insert("op".to_string(), op);
+                for (k, v) in extra {
+                    f.insert(k, v);
+                }
+                f
+            },
+        );
+    }
+
     pub fn get_version(&self) -> String {
         SDK_VERSION.to_string()
     }
@@ -266,19 +289,35 @@ impl RovenueCore {
     /// [`reconcile_identity`](Self::reconcile_identity) retries it later.
     /// Validation errors (empty id) propagate as `Err`.
     pub fn identify(&self, app_user_id: String) -> RovenueResult<()> {
-        let changed = self.identity.set_app_user_id(app_user_id.clone())?;
-        if changed {
-            let rovenue_id = self.identity.rovenue_id();
-            match self.identify.identify(&rovenue_id, &app_user_id) {
-                Ok(_) => {
-                    // Guarded by the posted id so a concurrent identify() of a
-                    // different id isn't falsely marked synced.
-                    let _ = self.identity.mark_synced(&app_user_id);
+        self.log_op(LogLevel::Info, "identify", "identify", &[]);
+        let result = (|| -> RovenueResult<()> {
+            let changed = self.identity.set_app_user_id(app_user_id.clone())?;
+            if changed {
+                let rovenue_id = self.identity.rovenue_id();
+                match self.identify.identify(&rovenue_id, &app_user_id) {
+                    Ok(_) => {
+                        // Guarded by the posted id so a concurrent identify() of a
+                        // different id isn't falsely marked synced.
+                        let _ = self.identity.mark_synced(&app_user_id);
+                    }
+                    Err(_e) => { /* offline: keep synced=false; reconcile retries */ }
                 }
-                Err(_e) => { /* offline: keep synced=false; reconcile retries */ }
             }
+            Ok(())
+        })();
+        match &result {
+            Ok(_) => self.log_op(LogLevel::Info, "identify ok", "identify", &[]),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "identify failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "identify",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
         }
-        Ok(())
+        result
     }
 
     /// Retries a pending (`synced == false`) identify against the server.
@@ -290,15 +329,31 @@ impl RovenueCore {
     /// Logs out the current user: mints a fresh anonymous `rovenue_id`, drops the
     /// `app_user_id`, and clears scope-bound caches so the next user starts clean.
     pub fn log_out(&self) -> RovenueResult<()> {
-        self.identity.log_out()?;
-        // Clear scope-bound state so the new identity starts clean. The account
-        // token and buffered session events are tied to the previous scope.
-        self.account_tokens.clear()?;
-        self.sessions.clear()?;
-        self.attributes.clear()?;
-        // Entitlements and credits are stateless scope-keyed readers (no in-memory
-        // cache); the new rovenue_id scope naturally reads empty, so no clear call.
-        Ok(())
+        self.log_op(LogLevel::Info, "log_out", "log_out", &[]);
+        let result = (|| -> RovenueResult<()> {
+            self.identity.log_out()?;
+            // Clear scope-bound state so the new identity starts clean. The account
+            // token and buffered session events are tied to the previous scope.
+            self.account_tokens.clear()?;
+            self.sessions.clear()?;
+            self.attributes.clear()?;
+            // Entitlements and credits are stateless scope-keyed readers (no in-memory
+            // cache); the new rovenue_id scope naturally reads empty, so no clear call.
+            Ok(())
+        })();
+        match &result {
+            Ok(_) => self.log_op(LogLevel::Info, "log_out ok", "log_out", &[]),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "log_out failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "log_out",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
     }
 
     /// Test-only: number of stored app account tokens.
@@ -329,7 +384,26 @@ impl RovenueCore {
     }
 
     pub fn refresh_entitlements(&self) -> RovenueResult<()> {
-        self.entitlements.refresh()
+        self.log_op(LogLevel::Info, "refresh_entitlements", "refresh_entitlements", &[]);
+        let result = self.entitlements.refresh();
+        match &result {
+            Ok(_) => self.log_op(
+                LogLevel::Info,
+                "refresh_entitlements ok",
+                "refresh_entitlements",
+                &[],
+            ),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "refresh_entitlements failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "refresh_entitlements",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
     }
 
     /// Used by UniFFI FFI (callback interface passes Box).
@@ -372,7 +446,31 @@ impl RovenueCore {
     }
 
     pub fn refresh_virtual_currencies(&self) -> RovenueResult<()> {
-        self.virtual_currencies.refresh()
+        self.log_op(
+            LogLevel::Info,
+            "refresh_virtual_currencies",
+            "refresh_virtual_currencies",
+            &[],
+        );
+        let result = self.virtual_currencies.refresh();
+        match &result {
+            Ok(_) => self.log_op(
+                LogLevel::Info,
+                "refresh_virtual_currencies ok",
+                "refresh_virtual_currencies",
+                &[],
+            ),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "refresh_virtual_currencies failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "refresh_virtual_currencies",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
     }
 
     pub fn post_apple_receipt(
@@ -381,16 +479,37 @@ impl RovenueCore {
         product_id: String,
         app_account_token: Option<String>,
     ) -> RovenueResult<ReceiptResult> {
-        let scope = self.identity.current_user_scope();
-        let key = IdempotencyKey::for_receipt("apple", &receipt);
-        let outcome = self.receipts.post_apple(
-            &receipt,
-            &scope,
-            &product_id,
-            key.as_str(),
-            app_account_token.as_deref(),
-        )?;
-        Ok(self.finish_receipt(&scope, outcome))
+        self.log_op(LogLevel::Info, "post_apple_receipt", "post_apple_receipt", &[]);
+        let result = (|| -> RovenueResult<ReceiptResult> {
+            let scope = self.identity.current_user_scope();
+            let key = IdempotencyKey::for_receipt("apple", &receipt);
+            let outcome = self.receipts.post_apple(
+                &receipt,
+                &scope,
+                &product_id,
+                key.as_str(),
+                app_account_token.as_deref(),
+            )?;
+            Ok(self.finish_receipt(&scope, outcome))
+        })();
+        match &result {
+            Ok(_) => self.log_op(
+                LogLevel::Info,
+                "post_apple_receipt ok",
+                "post_apple_receipt",
+                &[],
+            ),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "post_apple_receipt failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "post_apple_receipt",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
     }
 
     pub fn post_google_receipt(
@@ -400,17 +519,38 @@ impl RovenueCore {
         obfuscated_account_id: Option<String>,
         obfuscated_profile_id: Option<String>,
     ) -> RovenueResult<ReceiptResult> {
-        let scope = self.identity.current_user_scope();
-        let key = IdempotencyKey::for_receipt("google", &receipt);
-        let outcome = self.receipts.post_google(
-            &receipt,
-            &scope,
-            &product_id,
-            key.as_str(),
-            obfuscated_account_id.as_deref(),
-            obfuscated_profile_id.as_deref(),
-        )?;
-        Ok(self.finish_receipt(&scope, outcome))
+        self.log_op(LogLevel::Info, "post_google_receipt", "post_google_receipt", &[]);
+        let result = (|| -> RovenueResult<ReceiptResult> {
+            let scope = self.identity.current_user_scope();
+            let key = IdempotencyKey::for_receipt("google", &receipt);
+            let outcome = self.receipts.post_google(
+                &receipt,
+                &scope,
+                &product_id,
+                key.as_str(),
+                obfuscated_account_id.as_deref(),
+                obfuscated_profile_id.as_deref(),
+            )?;
+            Ok(self.finish_receipt(&scope, outcome))
+        })();
+        match &result {
+            Ok(_) => self.log_op(
+                LogLevel::Info,
+                "post_google_receipt ok",
+                "post_google_receipt",
+                &[],
+            ),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "post_google_receipt failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "post_google_receipt",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
     }
 
     /// Emit a generic event to `POST /v1/events` (fire-and-forget, 3-retry).
@@ -418,29 +558,46 @@ impl RovenueCore {
     /// When the envelope omits `subscriberId`, it is filled from the current
     /// scope (`app_user_id` if identified, else the anonymous `rovenue_id`).
     pub fn track(&self, envelope_json: String) -> RovenueResult<()> {
-        let mut envelope: crate::events::EventEnvelope =
-            serde_json::from_str(&envelope_json).map_err(|_| RovenueError::InvalidArgument())?;
+        self.log_op(LogLevel::Info, "track", "track", &[]);
+        let result = (|| -> RovenueResult<()> {
+            let mut envelope: crate::events::EventEnvelope =
+                serde_json::from_str(&envelope_json)
+                    .map_err(|_| RovenueError::InvalidArgument())?;
 
-        if !is_plausible_iso8601(&envelope.occurred_at) {
-            return Err(RovenueError::InvalidArgument());
+            if !is_plausible_iso8601(&envelope.occurred_at) {
+                return Err(RovenueError::InvalidArgument());
+            }
+
+            // Stamp the wire version and a stable event id (the latter only when
+            // the caller didn't supply one) so retries reuse the same id and
+            // downstream fan-out can dedupe.
+            envelope.version = Some(crate::events::EVENT_WIRE_VERSION);
+            if envelope.event_id.is_none() {
+                envelope.event_id = Some(format!("evt_{}", cuid2::create_id()));
+            }
+
+            let scope = self.identity.current_user_scope();
+            let scope_opt = if scope.is_empty() { None } else { Some(scope) };
+
+            if envelope.subscriber_id.is_none() {
+                envelope.subscriber_id = scope_opt.clone();
+            }
+
+            self.events.post(&envelope, scope_opt.as_deref())
+        })();
+        match &result {
+            Ok(_) => self.log_op(LogLevel::Info, "track ok", "track", &[]),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "track failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "track",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
         }
-
-        // Stamp the wire version and a stable event id (the latter only when
-        // the caller didn't supply one) so retries reuse the same id and
-        // downstream fan-out can dedupe.
-        envelope.version = Some(crate::events::EVENT_WIRE_VERSION);
-        if envelope.event_id.is_none() {
-            envelope.event_id = Some(format!("evt_{}", cuid2::create_id()));
-        }
-
-        let scope = self.identity.current_user_scope();
-        let scope_opt = if scope.is_empty() { None } else { Some(scope) };
-
-        if envelope.subscriber_id.is_none() {
-            envelope.subscriber_id = scope_opt.clone();
-        }
-
-        self.events.post(&envelope, scope_opt.as_deref())
+        result
     }
 
     /// Persisted per-install id (`inst_<cuid2>`), generated on first access.
@@ -473,9 +630,28 @@ impl RovenueCore {
     /// Claim a known funnel token. On success refreshes entitlements (the claim
     /// response carries none), records `claimed` state, fires the callback.
     pub fn claim_funnel_token(&self, token: String) -> RovenueResult<FunnelClaimResult> {
+        self.log_op(LogLevel::Info, "claim_funnel_token", "claim_funnel_token", &[]);
         let anon_id = self.identity.rovenue_id();
-        let result = self.funnel.claim_funnel_token(&token, &anon_id);
-        self.finish_claim(result)
+        let inner = self.funnel.claim_funnel_token(&token, &anon_id);
+        let result = self.finish_claim(inner);
+        match &result {
+            Ok(_) => self.log_op(
+                LogLevel::Info,
+                "claim_funnel_token ok",
+                "claim_funnel_token",
+                &[],
+            ),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "claim_funnel_token failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "claim_funnel_token",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
     }
 
     /// Recover a token via `claim-install` then claim it. `None` when no match.
@@ -483,18 +659,50 @@ impl RovenueCore {
         &self,
         params: ClaimInstallParams,
     ) -> RovenueResult<Option<FunnelClaimResult>> {
-        let install_id = self.install_id();
-        match self.funnel.claim_install(&params, &install_id)? {
-            Some(token) => Ok(Some(self.claim_funnel_token(token)?)),
-            None => Ok(None),
+        self.log_op(LogLevel::Info, "claim_install", "claim_install", &[]);
+        let result = (|| -> RovenueResult<Option<FunnelClaimResult>> {
+            let install_id = self.install_id();
+            match self.funnel.claim_install(&params, &install_id)? {
+                Some(token) => Ok(Some(self.claim_funnel_token(token)?)),
+                None => Ok(None),
+            }
+        })();
+        match &result {
+            Ok(_) => self.log_op(LogLevel::Info, "claim_install ok", "claim_install", &[]),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "claim_install failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "claim_install",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
         }
+        result
     }
 
     /// Kick off the email magic-link path. Resolution completes later when the
     /// link returns to the app (deep link → claim_funnel_token).
     pub fn claim_via_email(&self, email: String) -> RovenueResult<()> {
-        let install_id = self.install_id();
-        self.funnel.claim_via_email(&email, &install_id)
+        self.log_op(LogLevel::Info, "claim_via_email", "claim_via_email", &[]);
+        let result = (|| -> RovenueResult<()> {
+            let install_id = self.install_id();
+            self.funnel.claim_via_email(&email, &install_id)
+        })();
+        match &result {
+            Ok(_) => self.log_op(LogLevel::Info, "claim_via_email ok", "claim_via_email", &[]),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "claim_via_email failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "claim_via_email",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
     }
 
     /// Shared tail for a token claim: on Ok, refresh entitlements, record state,
@@ -567,10 +775,26 @@ impl RovenueCore {
         &self,
         attributes: std::collections::HashMap<String, Option<String>>,
     ) -> RovenueResult<()> {
-        for (key, value) in attributes.iter() {
-            self.attributes.set(key, value.as_deref())?;
+        self.log_op(LogLevel::Info, "set_attributes", "set_attributes", &[]);
+        let result = (|| -> RovenueResult<()> {
+            for (key, value) in attributes.iter() {
+                self.attributes.set(key, value.as_deref())?;
+            }
+            Ok(())
+        })();
+        match &result {
+            Ok(_) => self.log_op(LogLevel::Info, "set_attributes ok", "set_attributes", &[]),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "set_attributes failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "set_attributes",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
         }
-        Ok(())
+        result
     }
 
     /// Force an immediate flush. Returns the number of mutations sent.
@@ -588,19 +812,78 @@ impl RovenueCore {
     }
 
     pub fn get_or_create_app_account_token(&self) -> RovenueResult<String> {
-        let scope = self.identity.current_user_scope();
-        self.account_tokens.get_or_create(&scope)
+        self.log_op(
+            LogLevel::Info,
+            "get_or_create_app_account_token",
+            "get_or_create_app_account_token",
+            &[],
+        );
+        let result = (|| -> RovenueResult<String> {
+            let scope = self.identity.current_user_scope();
+            self.account_tokens.get_or_create(&scope)
+        })();
+        match &result {
+            Ok(_) => self.log_op(
+                LogLevel::Info,
+                "get_or_create_app_account_token ok",
+                "get_or_create_app_account_token",
+                &[],
+            ),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "get_or_create_app_account_token failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "get_or_create_app_account_token",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
     }
 
     pub fn get_offerings(&self) -> RovenueResult<CoreOfferings> {
-        self.offerings.get_offerings()
+        self.log_op(LogLevel::Info, "get_offerings", "get_offerings", &[]);
+        let result = self.offerings.get_offerings();
+        match &result {
+            Ok(_) => self.log_op(LogLevel::Info, "get_offerings ok", "get_offerings", &[]),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "get_offerings failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "get_offerings",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
     }
 
     // ---- Remote Config (feature flags + experiment assignments) ----
 
     /// Force an immediate Remote Config fetch from `/v1/config`.
     pub fn refresh_remote_config(&self) -> RovenueResult<()> {
-        self.remote_config.refresh()
+        self.log_op(LogLevel::Info, "refresh_remote_config", "refresh_remote_config", &[]);
+        let result = self.remote_config.refresh();
+        match &result {
+            Ok(_) => self.log_op(
+                LogLevel::Info,
+                "refresh_remote_config ok",
+                "refresh_remote_config",
+                &[],
+            ),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "refresh_remote_config failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "refresh_remote_config",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
     }
 
     pub fn remote_config_bool(&self, key: String, fallback: bool) -> bool {
@@ -1108,6 +1391,45 @@ mod tests {
         // Allow the background thread to complete its single refresh.
         std::thread::sleep(std::time::Duration::from_millis(300));
         _m_ent.assert();
+    }
+
+    #[test]
+    fn identify_logs_op_at_info_with_op_field() {
+        use crate::logging::{LogLevel, LogRecord, LogSink};
+        use std::sync::Mutex as StdMutex;
+        struct Collector(Arc<StdMutex<Vec<LogRecord>>>);
+        impl LogSink for Collector {
+            fn on_log(&self, r: LogRecord) {
+                self.0.lock().unwrap().push(r);
+            }
+        }
+        let mut cfg = Config::new("pk_test".to_string(), String::new()).unwrap();
+        cfg.log_level = LogLevel::Info;
+        let core = RovenueCore::new_for_test(cfg).unwrap();
+        let recs = Arc::new(StdMutex::new(Vec::new()));
+        core.register_log_sink(Box::new(Collector(recs.clone())));
+        let _ = core.identify("user_should_not_appear".to_string());
+        let got = recs.lock().unwrap();
+        // An "identify" op record exists at info level...
+        assert!(
+            got.iter()
+                .any(|r| r.fields.get("op").map(|o| o == "identify").unwrap_or(false)),
+            "expected an op=identify record, got: {:?}",
+            got.iter().map(|r| (&r.message, &r.fields)).collect::<Vec<_>>()
+        );
+        // ...and the app_user_id never appears in any message or field.
+        for r in got.iter() {
+            assert!(
+                !r.message.contains("user_should_not_appear"),
+                "PII leaked in message: {}",
+                r.message
+            );
+            assert!(
+                r.fields.values().all(|v| !v.contains("user_should_not_appear")),
+                "PII leaked in fields: {:?}",
+                r.fields
+            );
+        }
     }
 
     #[test]
