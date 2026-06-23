@@ -479,6 +479,157 @@ are complete and valid.
 
 ---
 
+## Selecting a subscription offer (Android)
+
+Android products can expose multiple subscription offers through `subscriptionOptions` — for example, a
+monthly base plan and a monthly-with-free-trial offer. You can select a specific offer at purchase time
+to redeem the user's chosen variant.
+
+### Overview
+
+- **Subscription offers** come from `product.subscriptionOptions`, a list of `SubscriptionOption` objects available on the product.
+- Each `SubscriptionOption` has a stable identity (`basePlanId` and `offerId`) that the SDK uses to resolve the live Play offer at purchase time.
+- When no option is passed to `purchase()`, the SDK uses the default option (`product.defaultOption`) — the lowest-price base plan, not Play's arbitrary first offer.
+- If the selected offer is no longer available on Google Play, purchase fails with a `ProductNotAvailableError` — refresh offerings and retry.
+- **iOS:** the `subscriptionOption` parameter is ignored on iOS (iOS uses [promotional offers](/docs/guides/processing-purchases#redeeming-promotional-offers-ios) instead).
+
+### Usage by platform
+
+<Tabs groupId="platform" persist items={['React Native', 'Swift', 'Kotlin']}>
+  <Tab value="React Native">
+    Pass the chosen `SubscriptionOption` in the options object:
+
+    ```ts
+    import { Rovenue } from '@rovenue/react-native-sdk';
+
+    const offerings = await Rovenue.getOfferings();
+    const pkg = offerings.current?.packages[0];
+    const product = pkg?.product;
+
+    // Get available subscription offers for this product
+    const options = product?.subscriptionOptions ?? [];
+
+    // Select the offer (e.g., the free-trial variant)
+    const selectedOption = options.find(opt => opt.tags.includes('free_trial'));
+
+    if (selectedOption && pkg) {
+      try {
+        const result = await Rovenue.purchase(pkg, {
+          subscriptionOption: selectedOption,
+        });
+        console.log('Purchase with offer succeeded:', result.productId);
+      } catch (e) {
+        if (e instanceof ProductNotAvailableError) {
+          // The selected offer is no longer available; refresh offerings and retry
+          showError('This offer is no longer available. Please try again.');
+        } else {
+          // Handle other errors (see [Errors](/docs/reference/errors))
+        }
+      }
+    } else if (pkg) {
+      // No specific offer selected; purchase the default option
+      const result = await Rovenue.purchase(pkg);
+    }
+    ```
+
+    **Note:** On iOS, the `subscriptionOption` parameter is present but ignored; the purchase proceeds with the standard iOS flow.
+  </Tab>
+  <Tab value="Swift">
+    Subscription offer selection is **not directly supported** on native Swift. The native Kotlin SDK exposes this
+    feature for Android; React Native apps can use the feature cross-platform.
+
+    ```swift
+    let offerings = try await Rovenue.shared.getOfferings()
+    let pkg = offerings.current?.packages.first
+    let product = pkg?.product
+
+    if let product = product {
+      do {
+        // Native Swift does not expose subscriptionOptions
+        // Use the standard purchase flow; the selected offer is an Android-only feature
+        let result = try await Rovenue.shared.purchase(product)
+        print("Purchase succeeded: \(result.productId)")
+      } catch {
+        // Handle errors (see [Errors](/docs/reference/errors))
+      }
+    }
+    ```
+
+    **Note:** Subscription offer selection is Android-only (Play Billing feature). If you need this functionality
+    on iOS, use React Native instead.
+  </Tab>
+  <Tab value="Kotlin">
+    Pass the chosen `SubscriptionOption` to `purchase()`:
+
+    ```kotlin
+    val offerings = Rovenue.shared.getOfferings()
+    val pkg = offerings.current?.packages?.firstOrNull()
+    val product = pkg?.product
+
+    if (product != null) {
+      // Get available subscription offers for this product
+      val options = product.subscriptionOptions ?: emptyList()
+
+      // Select the offer (e.g., the free-trial variant)
+      val selectedOption = options.find { opt -> opt.tags.contains("free_trial") }
+
+      if (selectedOption != null) {
+        try {
+          // Pass the chosen option to purchase
+          val result = Rovenue.shared.purchase(activity, product, selectedOption)
+          println("Purchase with offer succeeded: ${result.productId}")
+        } catch (e: ProductNotAvailableException) {
+          // The selected offer is no longer available; refresh offerings and retry
+          showError("This offer is no longer available. Please try again.")
+        } catch (e: Exception) {
+          // Handle other errors (see [Errors](/docs/reference/errors))
+        }
+      } else {
+        // No specific offer selected; purchase the default option
+        val result = Rovenue.shared.purchase(activity, product)
+        println("Purchase with default offer succeeded: ${result.productId}")
+      }
+    }
+    ```
+
+    You can also pass the option when purchasing a `Package`:
+
+    ```kotlin
+    val pkg = offerings.current?.packages?.firstOrNull()
+    if (pkg != null && selectedOption != null) {
+      val result = Rovenue.shared.purchase(activity, pkg, selectedOption)
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="warn">
+**Handling stale or unavailable offers**
+
+If the `SubscriptionOption` you selected is no longer available on Google Play (e.g., because the offer was
+removed or expired), the SDK will raise `ProductNotAvailableError` at purchase time. The error is raised only
+at the moment of purchase — not when building the UI.
+
+**What to do:**
+1. Catch `ProductNotAvailableError` in your purchase handler.
+2. Call `Rovenue.getOfferings()` again to refresh the product list.
+3. Show the user a message like "This offer is no longer available" and let them select another.
+
+```kotlin
+try {
+  val result = Rovenue.shared.purchase(activity, product, selectedOption)
+} catch (e: ProductNotAvailableException) {
+  // Refresh offerings
+  val refreshed = Rovenue.shared.getOfferings()
+  showError("This offer is no longer available. Please select another.")
+} catch (e: Exception) {
+  // Handle other errors
+}
+```
+</Callout>
+
+---
+
 <Callout type="info">
 **Related:** [Checking Entitlements](/docs/guides/entitlements) · [Reacting to
 changes](/docs/guides/reacting-to-changes) · [Methods — Purchases](/docs/reference/methods#purchases) ·
