@@ -48,6 +48,6 @@ fn post_apple_403_is_fatal() {
     let err = c
         .post_apple("<jws>", "anon_99", "pro", "idem_x", None)
         .unwrap_err();
-    assert_eq!(err.kind, rovenue::ErrorKind::ServerError);
+    assert_eq!(err.kind, rovenue::ErrorKind::Forbidden);
     m.assert();
 }

@@ -7,3 +7,16 @@ use serde::Deserialize;
 pub struct ApiEnvelope<T> {
     pub data: T,
 }
+
+/// Top-level error envelope: `{ "error": { "code": "…", "message": "…" } }`.
+#[derive(Debug, Deserialize)]
+pub struct ApiErrorBody {
+    pub error: ApiError,
+}
+
+/// Backend error payload carried inside `ApiErrorBody`.
+#[derive(Debug, Deserialize)]
+pub struct ApiError {
+    pub code: String,
+    pub message: String,
+}

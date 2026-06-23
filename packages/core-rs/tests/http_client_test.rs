@@ -103,7 +103,7 @@ fn forbidden_is_fatal_no_retry() {
             HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"),
         )
         .unwrap_err();
-    assert_eq!(err.kind, rovenue::ErrorKind::ServerError);
+    assert_eq!(err.kind, rovenue::ErrorKind::Forbidden);
     m.assert();
 }
 

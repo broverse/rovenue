@@ -12,6 +12,29 @@ use super::types::HttpResponse;
 pub use super::types::HttpPostRequest;
 pub use super::types::HttpRequest;
 
+/// Map an HTTP error status + response body to a [`RovenueError`], preserving
+/// the backend `{"error":{"code","message"}}` envelope when present.
+pub fn error_from_status(status: u16, body: &str) -> RovenueError {
+    use crate::error::ErrorKind;
+    use super::api::ApiErrorBody;
+    let kind = match status {
+        401 => ErrorKind::InvalidApiKey,
+        402 => ErrorKind::InsufficientCredits,
+        403 => ErrorKind::Forbidden,
+        404 => ErrorKind::NotFound,
+        409 => ErrorKind::Conflict,
+        422 | 400 => ErrorKind::InvalidRequest,
+        429 => ErrorKind::RateLimited,
+        405..=499 => ErrorKind::InvalidRequest, // other 4xx are client-side
+        500..=599 => ErrorKind::ServerError,
+        _ => ErrorKind::Internal,
+    };
+    match serde_json::from_str::<ApiErrorBody>(body) {
+        Ok(parsed) => RovenueError::http(kind, status, Some(parsed.error.code), parsed.error.message),
+        Err(_) => RovenueError::http(kind, status, None, String::new()),
+    }
+}
+
 pub struct HttpClient {
     base_url: String,
     api_key: String,
@@ -162,11 +185,8 @@ impl HttpClient {
                             }
                         }
                         RetryDecision::Fatal => {
-                            return Err(if status == 401 {
-                                RovenueError::InvalidApiKey()
-                            } else {
-                                RovenueError::ServerError()
-                            });
+                            let body_text = resp.text().unwrap_or_default();
+                            return Err(error_from_status(status, &body_text));
                         }
                     }
                 }
@@ -267,15 +287,6 @@ impl HttpClient {
                         .and_then(|s| s.parse::<u64>().ok())
                         .map(std::time::Duration::from_secs);
 
-                    // 422 = idempotency-key conflict (different body for same key).
-                    if status == 422 {
-                        return Err(RovenueError::Internal());
-                    }
-                    // 402 = InsufficientCredits.
-                    if status == 402 {
-                        return Err(RovenueError::InsufficientCredits());
-                    }
-
                     match classify(Some(status), retry_after) {
                         RetryDecision::Success => {
                             // 204 No Content is always bodyless. Other 2xx
@@ -315,11 +326,8 @@ impl HttpClient {
                             }
                         }
                         RetryDecision::Fatal => {
-                            return Err(if status == 401 {
-                                RovenueError::InvalidApiKey()
-                            } else {
-                                RovenueError::ServerError()
-                            });
+                            let body_text = resp.text().unwrap_or_default();
+                            return Err(error_from_status(status, &body_text));
                         }
                     }
                 }

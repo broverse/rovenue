@@ -78,7 +78,7 @@ fn post_json_idempotent_replay_header_observed() {
 }
 
 #[test]
-fn post_json_422_idempotency_conflict_maps_to_internal() {
+fn post_json_422_maps_to_invalid_request() {
     let mut server = mockito::Server::new();
     let m = server
         .mock("POST", "/v1/me/credits/spend")
@@ -95,7 +95,7 @@ fn post_json_422_idempotency_conflict_maps_to_internal() {
             &Body { amount: 5 },
         )
         .unwrap_err();
-    assert_eq!(err.kind, rovenue::ErrorKind::Internal);
+    assert_eq!(err.kind, rovenue::ErrorKind::InvalidRequest);
     m.assert();
 }
 

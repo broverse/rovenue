@@ -74,23 +74,37 @@ impl RovenueError {
         let message = if message.is_empty() { kind.default_message().to_string() } else { message };
         Self { kind, message, server_code, http_status: Some(status), retryable: kind.is_retryable() }
     }
+}
 
+impl RovenueError {
     // ── Shim constructors preserving old call-site API ──────────────────────
-    // These delegate to `RovenueError::kind`; transport mapping is rewritten
-    // in Task 2. Call sites that pattern-match on kind use `e.kind == ErrorKind::X`.
-
-    #[inline] pub fn Internal() -> Self { Self::kind(ErrorKind::Internal) }
-    #[inline] pub fn NetworkUnavailable() -> Self { Self::kind(ErrorKind::NetworkUnavailable) }
-    #[inline] pub fn ServerError() -> Self { Self::kind(ErrorKind::ServerError) }
-    #[inline] pub fn RateLimited() -> Self { Self::kind(ErrorKind::RateLimited) }
-    #[inline] pub fn InvalidApiKey() -> Self { Self::kind(ErrorKind::InvalidApiKey) }
-    #[inline] pub fn Timeout() -> Self { Self::kind(ErrorKind::Timeout) }
-    #[inline] pub fn InsufficientCredits() -> Self { Self::kind(ErrorKind::InsufficientCredits) }
-    #[inline] pub fn Storage() -> Self { Self::kind(ErrorKind::Storage) }
-    #[inline] pub fn InvalidArgument() -> Self { Self::kind(ErrorKind::InvalidArgument) }
-    #[inline] pub fn FunnelTokenNotFound() -> Self { Self::kind(ErrorKind::FunnelTokenNotFound) }
-    #[inline] pub fn FunnelTokenExpired() -> Self { Self::kind(ErrorKind::FunnelTokenExpired) }
-    #[inline] pub fn FunnelTokenAlreadyClaimed() -> Self { Self::kind(ErrorKind::FunnelTokenAlreadyClaimed) }
+    // PascalCase names are intentional: they mirror the old fieldless-variant API
+    // so hundreds of call sites compile unchanged while Task 2+ migrates them
+    // incrementally. `#[allow(non_snake_case)]` is scoped to this impl block only.
+    #[allow(non_snake_case)]
+    pub fn Internal() -> Self { Self::kind(ErrorKind::Internal) }
+    #[allow(non_snake_case)]
+    pub fn NetworkUnavailable() -> Self { Self::kind(ErrorKind::NetworkUnavailable) }
+    #[allow(non_snake_case)]
+    pub fn ServerError() -> Self { Self::kind(ErrorKind::ServerError) }
+    #[allow(non_snake_case)]
+    pub fn RateLimited() -> Self { Self::kind(ErrorKind::RateLimited) }
+    #[allow(non_snake_case)]
+    pub fn InvalidApiKey() -> Self { Self::kind(ErrorKind::InvalidApiKey) }
+    #[allow(non_snake_case)]
+    pub fn Timeout() -> Self { Self::kind(ErrorKind::Timeout) }
+    #[allow(non_snake_case)]
+    pub fn InsufficientCredits() -> Self { Self::kind(ErrorKind::InsufficientCredits) }
+    #[allow(non_snake_case)]
+    pub fn Storage() -> Self { Self::kind(ErrorKind::Storage) }
+    #[allow(non_snake_case)]
+    pub fn InvalidArgument() -> Self { Self::kind(ErrorKind::InvalidArgument) }
+    #[allow(non_snake_case)]
+    pub fn FunnelTokenNotFound() -> Self { Self::kind(ErrorKind::FunnelTokenNotFound) }
+    #[allow(non_snake_case)]
+    pub fn FunnelTokenExpired() -> Self { Self::kind(ErrorKind::FunnelTokenExpired) }
+    #[allow(non_snake_case)]
+    pub fn FunnelTokenAlreadyClaimed() -> Self { Self::kind(ErrorKind::FunnelTokenAlreadyClaimed) }
 }
 
 impl std::fmt::Display for RovenueError {

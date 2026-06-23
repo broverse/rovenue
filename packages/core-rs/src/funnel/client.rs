@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::error::{ErrorKind, RovenueError, RovenueResult};
+use crate::error::{RovenueError, RovenueResult};
 use crate::transport::http_client::HttpClient;
 use crate::transport::types::HttpPostRequest;
 
@@ -113,6 +113,7 @@ impl FunnelClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ErrorKind;
 
     fn client(url: &str) -> FunnelClient {
         FunnelClient::new(Arc::new(

@@ -7,7 +7,7 @@ use crate::attributes::dispatcher::AttributeDispatcher;
 use crate::cache::{CacheStore, ExposureRepo, FunnelRepo};
 use crate::config::Config;
 use crate::entitlements::{Entitlement, EntitlementReader};
-use crate::error::{ErrorKind, RovenueError, RovenueResult};
+use crate::error::{RovenueError, RovenueResult};
 use crate::events::EventsClient;
 use crate::exposure::ExposureTracker;
 use crate::funnel::{
@@ -721,6 +721,7 @@ fn dirs_path() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::error::ErrorKind;
     use crate::funnel::{ClaimInstallParams, FunnelClaimListener, FunnelClaimResult};
     use std::sync::{Arc, Mutex};
 
