@@ -12,6 +12,7 @@ pub mod exposure;
 pub mod funnel;
 pub mod identify;
 pub mod identity;
+pub mod logging;
 pub mod observer;
 pub mod offerings;
 pub mod polling;
