@@ -76,7 +76,7 @@ export type StoreProduct = {
 
 export type Package = {
   identifier: string;
-  packageType?: PackageType;
+  packageType: PackageType;
   product: StoreProduct;
 };
 
