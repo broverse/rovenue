@@ -15,17 +15,68 @@ export type Entitlement = {
 
 export type ProductType = 'subscription' | 'consumable' | 'non_consumable';
 
+export type ProductCategory = 'subscription' | 'nonSubscription';
+export type PeriodUnit = 'day' | 'week' | 'month' | 'year';
+export type PaymentMode = 'freeTrial' | 'payAsYouGo' | 'payUpFront';
+export type DiscountType = 'introductory' | 'promotional' | 'winBack';
+export type RecurrenceMode = 'infiniteRecurring' | 'finiteRecurring' | 'nonRecurring';
+export type PackageType =
+  | 'unknown' | 'custom' | 'lifetime' | 'annual'
+  | 'sixMonth' | 'threeMonth' | 'twoMonth' | 'monthly' | 'weekly';
+
+export type Period = { value: number; unit: PeriodUnit; iso8601: string };
+
+export type IntroPrice = {
+  price: number | null; priceString: string | null; currencyCode: string | null;
+  period: Period; cycles: number; paymentMode: PaymentMode;
+};
+
+export type Discount = {
+  identifier: string | null; price: number | null; priceString: string | null;
+  currencyCode: string | null; period: Period; numberOfPeriods: number;
+  paymentMode: PaymentMode; type: DiscountType;
+};
+
+export type PricingPhase = {
+  price: number | null; priceString: string | null; currencyCode: string | null;
+  billingPeriod: Period; billingCycleCount: number | null;
+  recurrenceMode: RecurrenceMode; paymentMode: PaymentMode | null;
+};
+
+export type SubscriptionOption = {
+  id: string; basePlanId: string | null; offerId: string | null; tags: string[];
+  isBasePlan: boolean; isPrepaid: boolean; pricingPhases: PricingPhase[];
+  freePhase: PricingPhase | null; introPhase: PricingPhase | null; fullPricePhase: PricingPhase | null;
+};
+
 export type StoreProduct = {
   id: string;
   type: ProductType;
+  productCategory: ProductCategory;
   displayName: string;
+  description: string | null;
   priceString: string | null;
   price: number | null;
   currencyCode: string | null;
+  subscriptionPeriod: Period | null;
+  subscriptionGroupIdentifier: string | null;
+  isFamilyShareable: boolean;
+  introPrice: IntroPrice | null;
+  discounts: Discount[];
+  isEligibleForIntroOffer: boolean | null;
+  subscriptionOptions: SubscriptionOption[] | null;
+  defaultOption: SubscriptionOption | null;
+  pricePerWeek: number | null;
+  pricePerMonth: number | null;
+  pricePerYear: number | null;
+  pricePerWeekString: string | null;
+  pricePerMonthString: string | null;
+  pricePerYearString: string | null;
 };
 
 export type Package = {
   identifier: string;
+  packageType?: PackageType;
   product: StoreProduct;
 };
 

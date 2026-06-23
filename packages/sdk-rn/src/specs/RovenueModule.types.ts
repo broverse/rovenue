@@ -17,17 +17,68 @@ export type EntitlementDTO = {
 
 export type ProductTypeDTO = "subscription" | "consumable" | "non_consumable";
 
+export type ProductCategoryDTO = "subscription" | "nonSubscription";
+export type PeriodUnitDTO = "day" | "week" | "month" | "year";
+export type PaymentModeDTO = "freeTrial" | "payAsYouGo" | "payUpFront";
+export type DiscountTypeDTO = "introductory" | "promotional" | "winBack";
+export type RecurrenceModeDTO = "infiniteRecurring" | "finiteRecurring" | "nonRecurring";
+export type PackageTypeDTO =
+  | "unknown" | "custom" | "lifetime" | "annual"
+  | "sixMonth" | "threeMonth" | "twoMonth" | "monthly" | "weekly";
+
+export type PeriodDTO = { value: number; unit: PeriodUnitDTO; iso8601: string };
+
+export type IntroPriceDTO = {
+  price: number | null; priceString: string | null; currencyCode: string | null;
+  period: PeriodDTO; cycles: number; paymentMode: PaymentModeDTO;
+};
+
+export type DiscountDTO = {
+  identifier: string | null; price: number | null; priceString: string | null;
+  currencyCode: string | null; period: PeriodDTO; numberOfPeriods: number;
+  paymentMode: PaymentModeDTO; type: DiscountTypeDTO;
+};
+
+export type PricingPhaseDTO = {
+  price: number | null; priceString: string | null; currencyCode: string | null;
+  billingPeriod: PeriodDTO; billingCycleCount: number | null;
+  recurrenceMode: RecurrenceModeDTO; paymentMode: PaymentModeDTO | null;
+};
+
+export type SubscriptionOptionDTO = {
+  id: string; basePlanId: string | null; offerId: string | null; tags: string[];
+  isBasePlan: boolean; isPrepaid: boolean; pricingPhases: PricingPhaseDTO[];
+  freePhase: PricingPhaseDTO | null; introPhase: PricingPhaseDTO | null; fullPricePhase: PricingPhaseDTO | null;
+};
+
 export type StoreProductDTO = {
   id: string;
   type: ProductTypeDTO;
+  productCategory: ProductCategoryDTO;
   displayName: string;
+  description: string | null;
   priceString: string | null;
   price: number | null;
   currencyCode: string | null;
+  subscriptionPeriod: PeriodDTO | null;
+  subscriptionGroupIdentifier: string | null;
+  isFamilyShareable: boolean;
+  introPrice: IntroPriceDTO | null;
+  discounts: DiscountDTO[];
+  isEligibleForIntroOffer: boolean | null;
+  subscriptionOptions: SubscriptionOptionDTO[] | null;
+  defaultOption: SubscriptionOptionDTO | null;
+  pricePerWeek: number | null;
+  pricePerMonth: number | null;
+  pricePerYear: number | null;
+  pricePerWeekString: string | null;
+  pricePerMonthString: string | null;
+  pricePerYearString: string | null;
 };
 
 export type PackageDTO = {
   identifier: string;
+  packageType?: PackageTypeDTO;
   product: StoreProductDTO;
 };
 
