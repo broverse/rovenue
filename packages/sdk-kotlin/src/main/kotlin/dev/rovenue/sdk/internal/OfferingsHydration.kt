@@ -13,11 +13,13 @@ package dev.rovenue.sdk.internal
 import android.app.Activity
 import com.android.billingclient.api.ProductDetails
 import dev.rovenue.sdk.IntroPrice
+import dev.rovenue.sdk.LogEntry
 import dev.rovenue.sdk.Offering
 import dev.rovenue.sdk.Offerings
 import dev.rovenue.sdk.PaymentMode
 import dev.rovenue.sdk.ProductCategory
 import dev.rovenue.sdk.ProductType
+import dev.rovenue.sdk.Rovenue
 import dev.rovenue.sdk.StoreProduct
 import dev.rovenue.sdk.generated.CoreOffering
 import dev.rovenue.sdk.generated.CoreOfferingProduct
@@ -82,10 +84,38 @@ private fun mapProduct(
 
     // Determine headline price from defaultOption (subscriptions) or oneTimePrice (INAPP).
     val options = info.options
-    val defaultOption = options
+
+    // Normalize null and empty-string offer IDs as equivalent (Play Billing uses null for no offer,
+    // server config may send "" — treat both as "no specific offer").
+    fun normId(s: String?): String? = if (s.isNullOrEmpty()) null else s
+
+    val lowestPriceDefault = options
         ?.filter { it.isBasePlan }
         ?.minByOrNull { it.fullPricePhase?.price ?: Double.MAX_VALUE }
         ?: options?.firstOrNull()
+
+    val defaultOption = if (p.androidBasePlanId != null) {
+        val wantOffer = normId(p.androidOfferId)
+        val matched = options?.firstOrNull {
+            it.basePlanId == p.androidBasePlanId && normId(it.offerId) == wantOffer
+        }
+        if (matched == null) {
+            Rovenue.emit(
+                LogEntry(
+                    level = "warn",
+                    message = "Server-configured androidBasePlanId '${p.androidBasePlanId}' (offerId='${p.androidOfferId}') " +
+                        "did not match any live Play Billing option for product '${p.identifier}'; " +
+                        "falling back to lowest-price default.",
+                    data = null,
+                ),
+            )
+            lowestPriceDefault
+        } else {
+            matched
+        }
+    } else {
+        lowestPriceDefault
+    }
 
     val basePhase = defaultOption?.fullPricePhase
     val priceString = basePhase?.priceString ?: info.oneTimePrice?.formattedPrice

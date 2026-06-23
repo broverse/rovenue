@@ -553,10 +553,13 @@ class Rovenue private constructor(
         purchase(activity, pkg.product, option)
 
     /** Purchase a [StoreProduct] via Play Billing, optionally selecting a specific [SubscriptionOption].
-     *  Launches the billing flow, validates the purchase token server-side, acknowledges/consumes it,
-     *  then returns the refreshed entitlement/credit state. */
-    suspend fun purchase(activity: Activity, product: StoreProduct, option: SubscriptionOption? = null): PurchaseResult =
-        purchase(activity, product, option?.basePlanId, option?.offerId)
+     *  When [option] is null, falls back to [StoreProduct.defaultOption] (server-configured or
+     *  lowest-price). Launches the billing flow, validates the purchase token server-side,
+     *  acknowledges/consumes it, then returns the refreshed entitlement/credit state. */
+    suspend fun purchase(activity: Activity, product: StoreProduct, option: SubscriptionOption? = null): PurchaseResult {
+        val effective = option ?: product.defaultOption
+        return purchase(activity, product, effective?.basePlanId, effective?.offerId)
+    }
 
     /** Purchase a [StoreProduct] with explicit base-plan and offer identifiers.
      *  This is the single-sourced core; the two-arg overloads delegate here. */

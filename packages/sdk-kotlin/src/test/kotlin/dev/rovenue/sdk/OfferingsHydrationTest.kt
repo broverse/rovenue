@@ -58,6 +58,8 @@ class OfferingsHydrationTest {
         type: String,
         google: String?,
         display: String = identifier,
+        androidBasePlanId: String? = null,
+        androidOfferId: String? = null,
     ) = CoreOfferingProduct(
         packageIdentifier = packageIdentifier,
         identifier = identifier,
@@ -65,6 +67,8 @@ class OfferingsHydrationTest {
         displayName = display,
         appleProductId = null,
         googleProductId = google,
+        androidBasePlanId = androidBasePlanId,
+        androidOfferId = androidOfferId,
     )
 
     private fun monthlyPhase(priceMicros: Long = 9_990_000L, currency: String = "USD"): PlayPhaseInput =
@@ -248,7 +252,7 @@ class OfferingsHydrationTest {
                 CoreOffering(
                     "default", true, listOf(
                         CoreOfferingProduct(
-                            "\$rov_monthly", "premium", "SUBSCRIPTION", "Premium", null, "premium_monthly",
+                            "\$rov_monthly", "premium", "SUBSCRIPTION", "Premium", null, "premium_monthly", null, null,
                         ),
                     ),
                 ),
@@ -308,5 +312,118 @@ class OfferingsHydrationTest {
         assertNull(product.defaultOption)
         assertNull(product.isEligibleForIntroOffer)
         assertNotNull(offerings.current)
+    }
+
+    // -----------------------------------------------------------------------
+    // Server-config driven defaultOption helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * Build a CoreOfferings with a single "default" offering containing one
+     * product ("premium") whose [androidBasePlanId]/[androidOfferId] are set.
+     * The Play Billing product id is "premium_sub" (subscriptions).
+     */
+    private fun coreWith(
+        androidBasePlanId: String?,
+        androidOfferId: String?,
+    ): CoreOfferings = CoreOfferings(
+        current = "default",
+        offerings = listOf(
+            CoreOffering(
+                identifier = "default",
+                isDefault = true,
+                packages = listOf(
+                    product(
+                        packageIdentifier = "\$rov_annual",
+                        identifier = "premium",
+                        type = "SUBSCRIPTION",
+                        google = "premium_sub",
+                        androidBasePlanId = androidBasePlanId,
+                        androidOfferId = androidOfferId,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    /**
+     * FakeStore that returns two base-plan options for "premium_sub":
+     * - "monthly": price $9.99/month (cheaper)
+     * - "annual": price $79.99/year (pricier)
+     * This lets tests verify lowest-price fallback selects "monthly".
+     */
+    private fun fakeStoreWithMonthlyAndAnnual(): FakeStore {
+        val monthlyOffer = PlayOfferInput(
+            basePlanId = "monthly",
+            offerId = null,
+            tags = emptyList(),
+            phases = listOf(
+                PlayPhaseInput(
+                    priceMicros = 9_990_000L,
+                    formattedPrice = "$9.99",
+                    currencyCode = "USD",
+                    billingPeriodIso = "P1M",
+                    billingCycleCount = 1,
+                    recurrenceMode = 1,
+                ),
+            ),
+        )
+        val annualOffer = PlayOfferInput(
+            basePlanId = "annual",
+            offerId = null,
+            tags = emptyList(),
+            phases = listOf(
+                PlayPhaseInput(
+                    priceMicros = 79_990_000L,
+                    formattedPrice = "$79.99",
+                    currencyCode = "USD",
+                    billingPeriodIso = "P1Y",
+                    billingCycleCount = 1,
+                    recurrenceMode = 1,
+                ),
+            ),
+        )
+        return FakeStore(
+            mapOf(
+                "premium_sub" to ProductInfo(
+                    description = "Premium subscription",
+                    options = listOf(
+                        mapSubscriptionOption(monthlyOffer),
+                        mapSubscriptionOption(annualOffer),
+                    ),
+                    oneTimePrice = null,
+                ),
+            ),
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // Server-config driven defaultOption tests
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun serverBasePlanDrivesDefaultOption() = runTest {
+        // Server config says "annual" — store has both monthly (cheaper) and annual.
+        val core = coreWith(androidBasePlanId = "annual", androidOfferId = null)
+        val offerings = hydrateOfferings(core, fakeStoreWithMonthlyAndAnnual())
+        val def = offerings.current!!.packages.first().product.defaultOption
+        assertEquals("annual", def?.basePlanId) // server choice, NOT the cheaper monthly
+    }
+
+    @Test
+    fun missingServerOptionFallsBackToLowestPrice() = runTest {
+        // Server config says "weekly" — not a live option → should fall back to lowest-price "monthly".
+        val core = coreWith(androidBasePlanId = "weekly", androidOfferId = null)
+        val offerings = hydrateOfferings(core, fakeStoreWithMonthlyAndAnnual())
+        val def = offerings.current!!.packages.first().product.defaultOption
+        assertEquals("monthly", def?.basePlanId) // fallback = lowest-price
+    }
+
+    @Test
+    fun noServerConfigUsesLowestPrice() = runTest {
+        // No server config → lowest-price "monthly".
+        val core = coreWith(androidBasePlanId = null, androidOfferId = null)
+        val offerings = hydrateOfferings(core, fakeStoreWithMonthlyAndAnnual())
+        assertEquals("monthly", offerings.current!!.packages.first().product.defaultOption?.basePlanId)
     }
 }
