@@ -135,7 +135,10 @@ pub type RovenueResult<T> = std::result::Result<T, RovenueError>;
 pub enum RovenueErrorFfi {
     Generic {
         kind: ErrorKind,
-        message: String,
+        /// Renamed from `message` to `detail` to avoid collision with
+        /// Kotlin `Exception.message` / Swift `LocalizedError.errorDescription`
+        /// in the uniffi-generated façade types.
+        detail: String,
         server_code: Option<String>,
         http_status: Option<u16>,
         retryable: bool,
@@ -146,7 +149,7 @@ impl From<RovenueError> for RovenueErrorFfi {
     fn from(e: RovenueError) -> Self {
         RovenueErrorFfi::Generic {
             kind: e.kind,
-            message: e.message,
+            detail: e.message,
             server_code: e.server_code,
             http_status: e.http_status,
             retryable: e.retryable,
@@ -156,8 +159,8 @@ impl From<RovenueError> for RovenueErrorFfi {
 
 impl std::fmt::Display for RovenueErrorFfi {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let RovenueErrorFfi::Generic { message, .. } = self;
-        write!(f, "{message}")
+        let RovenueErrorFfi::Generic { detail, .. } = self;
+        write!(f, "{detail}")
     }
 }
 

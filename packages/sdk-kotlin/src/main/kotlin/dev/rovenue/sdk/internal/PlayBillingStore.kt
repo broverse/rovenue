@@ -25,11 +25,17 @@ import dev.rovenue.sdk.ProductType
 import dev.rovenue.sdk.RovenueException
 import dev.rovenue.sdk.generated.ErrorKind
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 class PlayBillingStore(private val context: Context) : PlayStore {
+
+    // Atomic flag that prevents two concurrent purchase() calls from both
+    // entering the billing flow and racing on the single `pending` slot.
+    // compareAndSet(false, true) succeeds only for the first caller.
+    private val inFlight = AtomicBoolean(false)
 
     // The PurchasesUpdatedListener fires asynchronously after launchBillingFlow.
     // We hold the in-flight continuation here and resume it from the listener.
@@ -39,6 +45,7 @@ class PlayBillingStore(private val context: Context) : PlayStore {
     private val purchasesListener = PurchasesUpdatedListener { result, purchases ->
         val cont = pending ?: return@PurchasesUpdatedListener
         pending = null
+        inFlight.set(false)
         if (result.responseCode == BillingClient.BillingResponseCode.OK) {
             val purchase = purchases?.firstOrNull()
             if (purchase == null) {
@@ -77,15 +84,17 @@ class PlayBillingStore(private val context: Context) : PlayStore {
         productType: ProductType,
         obfuscatedAccountId: String?,
     ): StorePurchaseOutcome {
-        // Concurrency guard — reject a second in-flight purchase rather than
-        // silently clobbering the single pending continuation.
-        if (pending != null) {
+        // Atomic concurrency guard — compareAndSet ensures exactly one caller
+        // can enter the billing flow at a time. A second concurrent purchase()
+        // is rejected immediately rather than silently clobbering the pending
+        // continuation slot (which would result in one caller never resuming).
+        if (!inFlight.compareAndSet(false, true)) {
             return StorePurchaseOutcome.StoreProblem
         }
         pendingType = productType
         val client = connect()
         val details = queryDetails(client, productId, productType)
-            ?: return StorePurchaseOutcome.ProductNotFound
+            ?: run { inFlight.set(false); return StorePurchaseOutcome.ProductNotFound }
 
         val productParams = BillingFlowParams.ProductDetailsParams.newBuilder()
             .setProductDetails(details)
@@ -106,10 +115,14 @@ class PlayBillingStore(private val context: Context) : PlayStore {
 
         return suspendCancellableCoroutine { cont ->
             pending = cont
-            cont.invokeOnCancellation { pending = null }
+            cont.invokeOnCancellation {
+                pending = null
+                inFlight.set(false)
+            }
             val launch = client.launchBillingFlow(activity, flowParams)
             if (launch.responseCode != BillingClient.BillingResponseCode.OK) {
                 pending = null
+                inFlight.set(false)
                 cont.resumeWithException(
                     RovenueException(
                         kind = ErrorKind.STORE_PROBLEM,

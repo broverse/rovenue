@@ -35,7 +35,7 @@ class RovenueException(
         /** Lift a [RovenueErrorFfi.Generic] from the FFI boundary. */
         internal fun from(ffi: RovenueErrorFfi.Generic): RovenueException = RovenueException(
             kind = ffi.kind,
-            message = ffi.errorMessage,
+            message = ffi.detail,
             serverCode = ffi.serverCode,
             httpStatus = ffi.httpStatus?.toInt(),
             isRetryable = ffi.retryable,

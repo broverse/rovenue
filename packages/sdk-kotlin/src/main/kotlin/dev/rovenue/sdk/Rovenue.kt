@@ -312,7 +312,11 @@ class Rovenue private constructor(
     /** Force an immediate flush of buffered attributes. Returns the number
      *  of attributes drained. */
     @Throws(RovenueException::class)
-    suspend fun flushAttributes(): UInt = dispatcher.run { core.flushAttributes() }
+    suspend fun flushAttributes(): UInt = try {
+        dispatcher.run { core.flushAttributes() }
+    } catch (e: RovenueErrorFfi.Generic) {
+        throw RovenueException.from(e)
+    }
 
     // ---------------------------------------------------------------
     // Entitlements (cache-first reads; refresh hits HTTP)
@@ -448,8 +452,11 @@ class Rovenue private constructor(
      * different UUID for the now-known user.
      */
     @Throws(RovenueException::class)
-    suspend fun getAppAccountToken(): String =
+    suspend fun getAppAccountToken(): String = try {
         dispatcher.run { core.getOrCreateAppAccountToken() }
+    } catch (e: RovenueErrorFfi.Generic) {
+        throw RovenueException.from(e)
+    }
 
     // ---------------------------------------------------------------
     // Refund Shield — session telemetry
@@ -466,7 +473,11 @@ class Rovenue private constructor(
         occurredAt: String,
         durationMs: UInt? = null,
     ) {
-        dispatcher.run { core.recordSessionEvent(kind, occurredAt, durationMs) }
+        try {
+            dispatcher.run { core.recordSessionEvent(kind, occurredAt, durationMs) }
+        } catch (e: RovenueErrorFfi.Generic) {
+            throw RovenueException.from(e)
+        }
     }
 
     /**
@@ -475,8 +486,11 @@ class Rovenue private constructor(
      * Rust core's 30s poll covers it.
      */
     @Throws(RovenueException::class)
-    suspend fun flushSessionEvents(): UInt =
+    suspend fun flushSessionEvents(): UInt = try {
         dispatcher.run { core.flushSessionEvents() }
+    } catch (e: RovenueErrorFfi.Generic) {
+        throw RovenueException.from(e)
+    }
 
     // ---------------------------------------------------------------
     // Custom event tracking

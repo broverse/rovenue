@@ -17,7 +17,7 @@ enum ErrorKind {
 // (single `Generic` variant) that the Swift/Kotlin façades consume.
 [Error]
 interface RovenueErrorFfi {
-    Generic(ErrorKind kind, string message, string? server_code, u16? http_status, boolean retryable);
+    Generic(ErrorKind kind, string detail, string? server_code, u16? http_status, boolean retryable);
 };
 
 dictionary Config {
