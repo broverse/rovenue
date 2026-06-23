@@ -158,6 +158,11 @@ services:
       dockerfile: apps/dashboard/Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+        # Build-time deployment-mode flags (Vite inlines VITE_* at build, not
+        # runtime — env_file would not reach the static bundle). Keep these in
+        # sync with the API's HOST_MODE / ALLOW_REGISTRATION below.
+        VITE_HOST_MODE: ${HOST_MODE:-self}
+        VITE_ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-}
     restart: unless-stopped
     # No published ports — only the edge Caddy reaches it on the
     # docker network. Exposed container port is 80.

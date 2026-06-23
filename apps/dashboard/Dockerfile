@@ -7,11 +7,23 @@ FROM node:22-alpine AS builder
 RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 WORKDIR /app
 
-# VITE_API_URL is inlined into the bundle at build time (Vite reads
-# import.meta.env.* during `vite build`). Override per environment:
-#   docker build --build-arg VITE_API_URL=https://rovenue.io ...
+# Vite inlines import.meta.env.VITE_* at build time (during `vite build`),
+# NOT at runtime — so these MUST be passed as build args. A runtime env_file
+# (as the API uses) does nothing for a static client bundle. Override per
+# environment, e.g.:
+#   docker build --build-arg VITE_API_URL=https://rovenue.io \
+#                --build-arg VITE_HOST_MODE=cloud ...
 ARG VITE_API_URL=http://localhost:3000
 ENV VITE_API_URL=${VITE_API_URL}
+
+# Deployment mode flags, mirrored from the API's HOST_MODE/ALLOW_REGISTRATION.
+# Self-host leaves the default (self); Rovenue Cloud builds with cloud.
+# Without these the bundle falls back to "self" and a cloud dashboard would
+# hide all billing/upgrade UI and wrongly expose BYOK.
+ARG VITE_HOST_MODE=self
+ENV VITE_HOST_MODE=${VITE_HOST_MODE}
+ARG VITE_ALLOW_REGISTRATION
+ENV VITE_ALLOW_REGISTRATION=${VITE_ALLOW_REGISTRATION}
 
 # Manifests first for layer caching.
 COPY pnpm-workspace.yaml package.json ./
