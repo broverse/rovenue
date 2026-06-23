@@ -15,6 +15,7 @@ use crate::funnel::{
 };
 use crate::identify::IdentifyClient;
 use crate::identity::{IdentityManager, User};
+use crate::logging::{Logger, LogSink};
 use crate::observer::{Observer, ObserverBus};
 use crate::offerings::{CoreOfferings, OfferingsClient};
 use crate::polling::PollingScheduler;
@@ -45,6 +46,7 @@ fn is_plausible_iso8601(s: &str) -> bool {
 
 pub struct RovenueCore {
     _config: Arc<Config>,
+    pub(crate) logger: Arc<Logger>,
     bus: Arc<ObserverBus>,
     identity: Arc<IdentityManager>,
     entitlements: Arc<EntitlementReader>,
@@ -89,7 +91,8 @@ impl RovenueCore {
         store: Arc<CacheStore>,
         http_max_attempts: u32,
     ) -> RovenueResult<Self> {
-        let bus = Arc::new(ObserverBus::default());
+        let logger = Arc::new(Logger::new(config.log_level));
+        let bus = Arc::new(ObserverBus::default().with_logger(Arc::clone(&logger)));
         let clock: Arc<dyn Clock> = Arc::new(SystemClock);
         let store_for_self = Arc::clone(&store);
         let identity = Arc::new(IdentityManager::new(
@@ -118,7 +121,7 @@ impl RovenueCore {
         let receipts = Arc::new(ReceiptClient::new(Arc::clone(&http)));
         let events = Arc::new(EventsClient::new(Arc::clone(&http)));
         let funnel = Arc::new(FunnelClient::new(Arc::clone(&http)));
-        let funnel_bus = Arc::new(FunnelClaimBus::default());
+        let funnel_bus = Arc::new(FunnelClaimBus::default().with_logger(Arc::clone(&logger)));
         let offerings = Arc::new(
             OfferingsClient::new(Arc::clone(&http), Arc::clone(&store))
                 .with_clock(Arc::clone(&clock)),
@@ -206,6 +209,7 @@ impl RovenueCore {
         }
         let core = Self {
             _config: Arc::new(config),
+            logger,
             bus,
             identity,
             entitlements: reader,
@@ -335,6 +339,11 @@ impl RovenueCore {
     /// Convenience for Rust-side callers (tests, façades) that hold an Arc.
     pub fn add_observer(&self, obs: Arc<dyn Observer>) {
         self.bus.register(obs);
+    }
+
+    /// Register a log sink to receive structured log records from this core instance.
+    pub fn register_log_sink(&self, sink: Box<dyn LogSink>) {
+        self.logger.set_sink(Arc::from(sink));
     }
 
     pub fn set_foreground(&self, foreground: bool) {
@@ -1098,5 +1107,24 @@ mod tests {
         // Allow the background thread to complete its single refresh.
         std::thread::sleep(std::time::Duration::from_millis(300));
         _m_ent.assert();
+    }
+
+    #[test]
+    fn register_log_sink_receives_records() {
+        use crate::logging::{LogRecord, LogSink};
+        use std::sync::Mutex as StdMutex;
+        struct Collector(Arc<StdMutex<Vec<LogRecord>>>);
+        impl LogSink for Collector {
+            fn on_log(&self, r: LogRecord) {
+                self.0.lock().unwrap().push(r);
+            }
+        }
+        let cfg = Config::new("pk_test".to_string(), String::new()).unwrap();
+        let core = RovenueCore::new_for_test(cfg).unwrap();
+        let recs = Arc::new(StdMutex::new(Vec::new()));
+        core.register_log_sink(Box::new(Collector(recs.clone())));
+        // Assert the sink wiring is live by emitting a warn directly.
+        core.logger.warn("test-warn");
+        assert!(recs.lock().unwrap().iter().any(|r| r.message == "test-warn"));
     }
 }

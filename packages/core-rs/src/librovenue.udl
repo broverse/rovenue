@@ -20,9 +20,18 @@ interface RovenueErrorFfi {
     Generic(ErrorKind kind, string detail, string? server_code, u16? http_status, boolean retryable);
 };
 
+enum LogLevel {
+    "Off",
+    "Error",
+    "Warn",
+    "Info",
+    "Debug",
+    "Trace",
+};
+
 dictionary Config {
     string api_key;
-    boolean debug;
+    LogLevel log_level;
     string? app_version;
     string? platform;
     string? environment;

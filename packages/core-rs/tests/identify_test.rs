@@ -37,7 +37,7 @@ fn core(url: String) -> RovenueCore {
     RovenueCore::new_for_test(Config {
         api_key: "pk_test".into(),
         base_url: url,
-        debug: true,
+        log_level: rovenue::logging::LogLevel::Debug,
         app_version: None,
         platform: None,
         environment: None,

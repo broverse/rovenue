@@ -1,4 +1,5 @@
 use crate::error::{RovenueError, RovenueResult};
+use crate::logging::LogLevel;
 
 /// Canonical hosted endpoint used when the caller does not supply a base URL.
 /// MUST stay in sync with the `base_url` default literal in `librovenue.udl`.
@@ -8,7 +9,7 @@ pub const DEFAULT_BASE_URL: &str = "https://api.rovenue.io";
 pub struct Config {
     pub api_key: String,
     pub base_url: String,
-    pub debug: bool,
+    pub log_level: LogLevel,
     /// Host app's user-facing version string (CFBundleShortVersionString on iOS,
     /// PackageInfo.versionName on Android). Forwarded into session-event
     /// telemetry payloads. `None` is serialized as `""` to preserve the
@@ -34,7 +35,7 @@ impl Config {
         Ok(Self {
             api_key,
             base_url: resolve_base_url(&base_url)?,
-            debug: false,
+            log_level: LogLevel::Warn,
             app_version: None,
             platform: None,
             environment: None,

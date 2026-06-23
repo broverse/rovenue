@@ -61,5 +61,5 @@ fn config_accepts_valid_inputs() {
     let cfg = Config::new("pk_test_abc".into(), "https://api.rovenue.io".into()).unwrap();
     assert_eq!(cfg.api_key, "pk_test_abc");
     assert_eq!(cfg.base_url, "https://api.rovenue.io");
-    assert!(!cfg.debug);
+    assert_eq!(cfg.log_level, rovenue::logging::LogLevel::Warn);
 }

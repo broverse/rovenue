@@ -67,7 +67,7 @@ fn core_get_offerings_round_trips() {
     let core = RovenueCore::new_for_test(Config {
         api_key: "pk_test".into(),
         base_url: server.url(),
-        debug: true,
+        log_level: rovenue::logging::LogLevel::Debug,
         app_version: None,
         platform: None,
         environment: None,

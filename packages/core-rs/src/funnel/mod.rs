@@ -2,6 +2,7 @@ pub mod client;
 
 pub use client::FunnelClient;
 
+use crate::logging::Logger;
 use std::sync::{Arc, Mutex};
 
 /// FFI-facing result of a resolved funnel claim. `funnel_answers_json` is the
@@ -35,9 +36,15 @@ pub trait FunnelClaimListener: Send + Sync {
 #[derive(Default)]
 pub struct FunnelClaimBus {
     subs: Mutex<Vec<Arc<dyn FunnelClaimListener>>>,
+    logger: Option<Arc<Logger>>,
 }
 
 impl FunnelClaimBus {
+    pub fn with_logger(mut self, logger: Arc<Logger>) -> Self {
+        self.logger = Some(logger);
+        self
+    }
+
     pub fn register(&self, l: Arc<dyn FunnelClaimListener>) {
         self.subs.lock().unwrap_or_else(|e| e.into_inner()).push(l);
     }
@@ -52,9 +59,9 @@ impl FunnelClaimBus {
             }))
             .is_err()
             {
-                eprintln!(
-                    "[rovenue] funnel_claim_listener.on_funnel_claim_resolved panicked; skipping"
-                );
+                if let Some(l) = self.logger.as_ref() {
+                    l.warn("funnel_claim_listener.on_funnel_claim_resolved panicked; skipping");
+                }
             }
         }
     }
