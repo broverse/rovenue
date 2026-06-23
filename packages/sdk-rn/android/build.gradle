@@ -15,11 +15,11 @@ if (expoModulesCorePlugin.exists()) {
 
 android {
     namespace 'dev.rovenue.sdkrn'
-    compileSdkVersion safeExtGet('compileSdkVersion', 34)
+    compileSdkVersion safeExtGet('compileSdkVersion', 35)
 
     defaultConfig {
         minSdkVersion safeExtGet('minSdkVersion', 24)
-        targetSdkVersion safeExtGet('targetSdkVersion', 34)
+        targetSdkVersion safeExtGet('targetSdkVersion', 35)
     }
 
     compileOptions {

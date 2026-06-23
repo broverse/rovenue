@@ -121,7 +121,7 @@ The `rov_pub_` key is safe to ship in client code — it can only read public pr
     npx expo prebuild
     ```
 
-    **Bare React Native:** Link native modules (React Native ≥ 0.73 auto-links via the Nitro module spec — no manual `react-native link` needed). For Android, ensure `minSdkVersion` is 24 or higher in `android/build.gradle`.
+    **Bare React Native:** Link native modules (React Native ≥ 0.76 auto-links via the Nitro module spec — no manual `react-native link` needed). For Android, ensure `minSdkVersion` is 24 or higher in `android/build.gradle`; on iOS the deployment target must be 16.0 or higher.
   </Tab>
   <Tab value="Swift">
     No additional wiring is needed beyond adding the package. The SDK hooks into StoreKit 2 automatically at runtime.

@@ -14,7 +14,7 @@ Pod::Spec.new do |s|
   s.homepage         = 'https://rovenue.io'
   s.license          = { :type => 'AGPL-3.0' }
   s.authors          = 'Rovenue'
-  s.platforms        = { :ios => '15.0' }
+  s.platforms        = { :ios => '16.0' }
   s.swift_version    = '5.9'
   s.source           = {
     :http   => "https://github.com/rovenue/rovenue/releases/download/sdk-swift-v#{s.version}/Rovenue-#{s.version}.zip",
