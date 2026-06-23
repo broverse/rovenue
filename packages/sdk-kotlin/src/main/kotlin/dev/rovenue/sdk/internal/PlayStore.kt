@@ -5,6 +5,7 @@
 package dev.rovenue.sdk.internal
 
 import android.app.Activity
+import com.android.billingclient.api.ProductDetails
 import dev.rovenue.sdk.ProductType
 
 /**
@@ -31,16 +32,6 @@ sealed interface StorePurchaseOutcome {
 }
 
 /**
- * Localized price metadata for a single product, extracted from Play Billing's
- * ProductDetails. Mirrors the price fields on the public [dev.rovenue.sdk.StoreProduct].
- */
-data class PriceInfo(
-    val priceString: String,
-    val price: Double,
-    val currencyCode: String,
-)
-
-/**
  * An unfinished purchase discovered by querying Play Billing — a purchase the
  * user owns that hasn't yet been acknowledged/consumed (e.g. the app died
  * mid-flow, or the purchase happened out-of-band). [acknowledge] consumes
@@ -65,15 +56,23 @@ interface PlayStore {
     ): StorePurchaseOutcome
 
     /**
-     * Query Play Billing for localized prices. [subscriptionIds] are queried as
-     * SUBS, [productIds] as INAPP (Play Billing requires the product type up
-     * front). Returns a map keyed by product id; ids with no matching
+     * Query Play Billing for enriched product metadata. [subscriptionIds] are
+     * queried as SUBS, [inappIds] as INAPP (Play Billing requires the product
+     * type up front). Returns a map keyed by product id; ids with no matching
      * ProductDetails are simply omitted.
      */
-    suspend fun queryPrices(
-        productIds: List<String>,
+    suspend fun queryProducts(
+        inappIds: List<String>,
         subscriptionIds: List<String>,
-    ): Map<String, PriceInfo>
+    ): Map<String, ProductInfo>
+
+    /**
+     * Return the raw [ProductDetails] objects keyed by product id, as fetched
+     * during the last [queryProducts] call. Used by [hydrateOfferings] to
+     * populate [dev.rovenue.sdk.StoreProduct.rawStoreProduct]. Defaults to an
+     * empty map so fakes and [NoPriceStore] need not override it.
+     */
+    fun rawDetails(): Map<String, ProductDetails> = emptyMap()
 
     /**
      * Query Play Billing for purchases the user owns that may be unfinished

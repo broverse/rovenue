@@ -109,23 +109,32 @@ class PlayBillingStore(private val context: Context) : PlayStore {
         }
     }
 
-    override suspend fun queryPrices(
-        productIds: List<String>,
+    @Volatile
+    private var lastRawDetails: Map<String, ProductDetails> = emptyMap()
+
+    override fun rawDetails(): Map<String, ProductDetails> = lastRawDetails
+
+    override suspend fun queryProducts(
+        inappIds: List<String>,
         subscriptionIds: List<String>,
-    ): Map<String, PriceInfo> {
-        if (productIds.isEmpty() && subscriptionIds.isEmpty()) return emptyMap()
+    ): Map<String, ProductInfo> {
+        if (inappIds.isEmpty() && subscriptionIds.isEmpty()) return emptyMap()
         val client = connect()
-        val out = mutableMapOf<String, PriceInfo>()
-        if (productIds.isNotEmpty()) {
-            queryDetailsBatch(client, productIds, BillingClient.ProductType.INAPP).forEach { details ->
-                inappPrice(details)?.let { out[details.productId] = it }
+        val out = mutableMapOf<String, ProductInfo>()
+        val rawOut = mutableMapOf<String, ProductDetails>()
+        if (inappIds.isNotEmpty()) {
+            queryDetailsBatch(client, inappIds, BillingClient.ProductType.INAPP).forEach { details ->
+                rawOut[details.productId] = details
+                inappProductInfo(details)?.let { out[details.productId] = it }
             }
         }
         if (subscriptionIds.isNotEmpty()) {
             queryDetailsBatch(client, subscriptionIds, BillingClient.ProductType.SUBS).forEach { details ->
-                subsPrice(details)?.let { out[details.productId] = it }
+                rawOut[details.productId] = details
+                subsProductInfo(details)?.let { out[details.productId] = it }
             }
         }
+        lastRawDetails = rawOut
         return out
     }
 
@@ -147,28 +156,40 @@ class PlayBillingStore(private val context: Context) : PlayStore {
         return awaitProductDetails(client, params)
     }
 
-    private fun inappPrice(details: ProductDetails): PriceInfo? {
+    private fun inappProductInfo(details: ProductDetails): ProductInfo? {
         val offer = details.oneTimePurchaseOfferDetails ?: return null
-        return PriceInfo(
-            priceString = offer.formattedPrice,
-            price = offer.priceAmountMicros / 1_000_000.0,
+        val phase = PlayPhaseInput(
+            priceMicros = offer.priceAmountMicros,
+            formattedPrice = offer.formattedPrice,
             currencyCode = offer.priceCurrencyCode,
+            billingPeriodIso = "P1M", // one-time purchases have no period; use a safe default
+            billingCycleCount = 1,
+            recurrenceMode = 3, // NON_RECURRING
         )
+        return ProductInfo(description = details.description, options = null, oneTimePrice = phase)
     }
 
-    private fun subsPrice(details: ProductDetails): PriceInfo? {
-        // First base-plan offer, first pricing phase — the headline recurring price.
-        val phase = details.subscriptionOfferDetails
-            ?.firstOrNull()
-            ?.pricingPhases
-            ?.pricingPhaseList
-            ?.firstOrNull()
-            ?: return null
-        return PriceInfo(
-            priceString = phase.formattedPrice,
-            price = phase.priceAmountMicros / 1_000_000.0,
-            currencyCode = phase.priceCurrencyCode,
-        )
+    private fun subsProductInfo(details: ProductDetails): ProductInfo? {
+        val offerDetails = details.subscriptionOfferDetails ?: return null
+        val options = offerDetails.map { offer ->
+            val phases = offer.pricingPhases.pricingPhaseList.map { phase ->
+                PlayPhaseInput(
+                    priceMicros = phase.priceAmountMicros,
+                    formattedPrice = phase.formattedPrice,
+                    currencyCode = phase.priceCurrencyCode,
+                    billingPeriodIso = phase.billingPeriod,
+                    billingCycleCount = phase.billingCycleCount,
+                    recurrenceMode = phase.recurrenceMode,
+                )
+            }
+            mapSubscriptionOption(PlayOfferInput(
+                basePlanId = offer.basePlanId,
+                offerId = offer.offerId,
+                tags = offer.offerTags,
+                phases = phases,
+            ))
+        }
+        return ProductInfo(description = details.description, options = options, oneTimePrice = null)
     }
 
     override suspend fun queryUnacknowledgedPurchases(): List<PendingPurchase> {

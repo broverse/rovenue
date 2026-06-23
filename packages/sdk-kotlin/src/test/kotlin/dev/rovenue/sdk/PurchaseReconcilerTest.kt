@@ -7,7 +7,7 @@ package dev.rovenue.sdk
 import android.app.Activity
 import dev.rovenue.sdk.internal.PendingPurchase
 import dev.rovenue.sdk.internal.PlayStore
-import dev.rovenue.sdk.internal.PriceInfo
+import dev.rovenue.sdk.internal.ProductInfo
 import dev.rovenue.sdk.internal.PurchaseReconciler
 import dev.rovenue.sdk.internal.StorePurchaseOutcome
 import kotlinx.coroutines.test.runTest
@@ -27,10 +27,10 @@ class PurchaseReconcilerTest {
             obfuscatedAccountId: String?,
         ): StorePurchaseOutcome = StorePurchaseOutcome.ProductNotFound
 
-        override suspend fun queryPrices(
-            productIds: List<String>,
+        override suspend fun queryProducts(
+            inappIds: List<String>,
             subscriptionIds: List<String>,
-        ): Map<String, PriceInfo> = emptyMap()
+        ): Map<String, ProductInfo> = emptyMap()
 
         override suspend fun queryUnacknowledgedPurchases(): List<PendingPurchase> = pending
     }

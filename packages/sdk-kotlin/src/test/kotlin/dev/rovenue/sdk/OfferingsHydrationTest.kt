@@ -9,20 +9,24 @@ import dev.rovenue.sdk.generated.CoreOffering
 import dev.rovenue.sdk.generated.CoreOfferingProduct
 import dev.rovenue.sdk.generated.CoreOfferings
 import dev.rovenue.sdk.internal.PendingPurchase
+import dev.rovenue.sdk.internal.PlayOfferInput
+import dev.rovenue.sdk.internal.PlayPhaseInput
 import dev.rovenue.sdk.internal.PlayStore
-import dev.rovenue.sdk.internal.PriceInfo
+import dev.rovenue.sdk.internal.ProductInfo
 import dev.rovenue.sdk.internal.StorePurchaseOutcome
 import dev.rovenue.sdk.internal.hydrateOfferings
+import dev.rovenue.sdk.internal.mapSubscriptionOption
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class OfferingsHydrationTest {
 
-    /** A PlayStore that returns a fixed price map and records its query args. */
-    private class FakePriceStore(private val prices: Map<String, PriceInfo>) : PlayStore {
+    /** A PlayStore that returns a fixed ProductInfo map and records its query args. */
+    private class FakeStore(private val products: Map<String, ProductInfo> = emptyMap()) : PlayStore {
         var lastInapp: List<String>? = null
         var lastSubs: List<String>? = null
 
@@ -33,13 +37,13 @@ class OfferingsHydrationTest {
             obfuscatedAccountId: String?,
         ): StorePurchaseOutcome = StorePurchaseOutcome.ProductNotFound
 
-        override suspend fun queryPrices(
-            productIds: List<String>,
+        override suspend fun queryProducts(
+            inappIds: List<String>,
             subscriptionIds: List<String>,
-        ): Map<String, PriceInfo> {
-            lastInapp = productIds
+        ): Map<String, ProductInfo> {
+            lastInapp = inappIds
             lastSubs = subscriptionIds
-            return prices
+            return products
         }
 
         override suspend fun queryUnacknowledgedPurchases(): List<PendingPurchase> = emptyList()
@@ -60,6 +64,26 @@ class OfferingsHydrationTest {
         googleProductId = google,
     )
 
+    private fun monthlyPhase(priceMicros: Long = 9_990_000L, currency: String = "USD"): PlayPhaseInput =
+        PlayPhaseInput(
+            priceMicros = priceMicros,
+            formattedPrice = "$%.2f".format(priceMicros / 1_000_000.0),
+            currencyCode = currency,
+            billingPeriodIso = "P1M",
+            billingCycleCount = 1,
+            recurrenceMode = 1, // INFINITE_RECURRING
+        )
+
+    private fun trialPhase(): PlayPhaseInput =
+        PlayPhaseInput(
+            priceMicros = 0L,
+            formattedPrice = "Free",
+            currencyCode = "USD",
+            billingPeriodIso = "P1W",
+            billingCycleCount = 1,
+            recurrenceMode = 2, // FINITE_RECURRING — free-trial phase
+        )
+
     @Test
     fun `hydrates prices for present ids and leaves absent ids null`() = runTest {
         val core = CoreOfferings(
@@ -76,10 +100,33 @@ class OfferingsHydrationTest {
                 ),
             ),
         )
-        val store = FakePriceStore(
+
+        val basePlanOffer = PlayOfferInput(
+            basePlanId = "monthly",
+            offerId = null,
+            tags = emptyList(),
+            phases = listOf(monthlyPhase(9_990_000L)),
+        )
+        val inappPhase = PlayPhaseInput(
+            priceMicros = 990_000L,
+            formattedPrice = "$0.99",
+            currencyCode = "USD",
+            billingPeriodIso = "P1M",
+            billingCycleCount = 1,
+            recurrenceMode = 3,
+        )
+        val store = FakeStore(
             mapOf(
-                "pro_monthly" to PriceInfo("$9.99", 9.99, "USD"),
-                "coins_100" to PriceInfo("$0.99", 0.99, "USD"),
+                "pro_monthly" to ProductInfo(
+                    description = "Premium monthly",
+                    options = listOf(mapSubscriptionOption(basePlanOffer)),
+                    oneTimePrice = null,
+                ),
+                "coins_100" to ProductInfo(
+                    description = "100 coins",
+                    options = null,
+                    oneTimePrice = inappPhase,
+                ),
                 // lifetime_unlock intentionally absent → null prices
             ),
         )
@@ -122,7 +169,21 @@ class OfferingsHydrationTest {
                 ),
             ),
         )
-        val store = FakePriceStore(mapOf("weekly" to PriceInfo("$1.99", 1.99, "USD")))
+        val weeklyOffer = PlayOfferInput(
+            basePlanId = "weekly",
+            offerId = null,
+            tags = emptyList(),
+            phases = listOf(
+                PlayPhaseInput(1_990_000L, "$1.99", "USD", "P1W", 1, 1),
+            ),
+        )
+        val store = FakeStore(
+            mapOf("weekly" to ProductInfo(
+                description = null,
+                options = listOf(mapSubscriptionOption(weeklyOffer)),
+                oneTimePrice = null,
+            )),
+        )
 
         val offerings = hydrateOfferings(core, store)
 
@@ -134,9 +195,6 @@ class OfferingsHydrationTest {
 
     @Test
     fun `Package identifier is the slot id not the product catalog id`() = runTest {
-        // packageIdentifier ($rov_monthly) is the package slot from the server;
-        // identifier (pro_monthly_catalog) is the product catalog id — they must
-        // not be confused or a swap bug silently passes.
         val core = CoreOfferings(
             current = "default",
             offerings = listOf(
@@ -154,7 +212,19 @@ class OfferingsHydrationTest {
                 ),
             ),
         )
-        val store = FakePriceStore(mapOf("pro_monthly_catalog" to PriceInfo("$9.99", 9.99, "USD")))
+        val offer = PlayOfferInput(
+            basePlanId = "pro_monthly_catalog",
+            offerId = null,
+            tags = emptyList(),
+            phases = listOf(monthlyPhase()),
+        )
+        val store = FakeStore(
+            mapOf("pro_monthly_catalog" to ProductInfo(
+                description = null,
+                options = listOf(mapSubscriptionOption(offer)),
+                oneTimePrice = null,
+            )),
+        )
 
         val offerings = hydrateOfferings(core, store)
 
@@ -163,5 +233,74 @@ class OfferingsHydrationTest {
         assertEquals("\$rov_monthly", pkg.identifier)
         // The product's own store id is separately accessible and distinct.
         assertEquals("pro_monthly_catalog", pkg.product.id)
+        // packageType is derived from slot id
+        assertEquals(PackageType.MONTHLY, pkg.packageType)
+    }
+
+    @Test
+    fun `hydratesSubscriptionWithTrialAndOptions`() = runTest {
+        val core = CoreOfferings(
+            current = "default",
+            offerings = listOf(
+                CoreOffering(
+                    "default", true, listOf(
+                        CoreOfferingProduct(
+                            "\$rov_monthly", "premium", "SUBSCRIPTION", "Premium", null, "premium_monthly",
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val trialOffer = PlayOfferInput(
+            basePlanId = "monthly",
+            offerId = "trial",
+            tags = emptyList(),
+            phases = listOf(trialPhase(), monthlyPhase()),
+        )
+        val opt = mapSubscriptionOption(trialOffer)
+        val info = ProductInfo(
+            description = "Premium subscription",
+            options = listOf(opt),
+            oneTimePrice = null,
+        )
+
+        val store = FakeStore(mapOf("premium_monthly" to info))
+        val offerings = hydrateOfferings(core, store)
+
+        val product = offerings.all.getValue("default").packages.single().product
+        assertEquals("premium_monthly", product.id)
+        assertNotNull(product.priceString)
+        assertNotNull(product.pricePerYear)
+        assertEquals(1, product.subscriptionOptions?.size)
+    }
+
+    @Test
+    fun `config-only product when store returns empty map`() = runTest {
+        val core = CoreOfferings(
+            current = "default",
+            offerings = listOf(
+                CoreOffering(
+                    identifier = "default",
+                    isDefault = true,
+                    packages = listOf(
+                        product("\$rov_monthly", "premium_monthly", "SUBSCRIPTION", google = "premium_monthly"),
+                    ),
+                ),
+            ),
+        )
+        val store = FakeStore(emptyMap())
+
+        val offerings = hydrateOfferings(core, store)
+
+        val product = offerings.all.getValue("default").packages.single().product
+        assertEquals("premium_monthly", product.id)
+        assertNull(product.priceString)
+        assertNull(product.price)
+        assertNull(product.currencyCode)
+        assertNull(product.subscriptionOptions)
+        assertNull(product.defaultOption)
+        assertNull(product.isEligibleForIntroOffer)
+        assertNotNull(offerings.current)
     }
 }

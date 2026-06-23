@@ -3,7 +3,9 @@ package dev.rovenue.sdk
 import android.app.Activity
 import dev.rovenue.sdk.generated.ReceiptResult
 import dev.rovenue.sdk.internal.PlayPurchaseFlow
+import dev.rovenue.sdk.internal.PendingPurchase
 import dev.rovenue.sdk.internal.PlayStore
+import dev.rovenue.sdk.internal.ProductInfo
 import dev.rovenue.sdk.internal.StorePurchaseOutcome
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
@@ -143,12 +145,12 @@ class PlayPurchaseFlowTest {
             obfuscatedAccountId: String?,
         ): StorePurchaseOutcome = outcome
 
-        override suspend fun queryPrices(
-            productIds: List<String>,
+        override suspend fun queryProducts(
+            inappIds: List<String>,
             subscriptionIds: List<String>,
-        ): Map<String, dev.rovenue.sdk.internal.PriceInfo> = emptyMap()
+        ): Map<String, ProductInfo> = emptyMap()
 
-        override suspend fun queryUnacknowledgedPurchases(): List<dev.rovenue.sdk.internal.PendingPurchase> = emptyList()
+        override suspend fun queryUnacknowledgedPurchases(): List<PendingPurchase> = emptyList()
     }
 
     private fun receipt(virtualCurrencies: Map<String, Long>) =

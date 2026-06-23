@@ -11,10 +11,11 @@
 package dev.rovenue.sdk.internal
 
 import android.app.Activity
+import com.android.billingclient.api.ProductDetails
+import dev.rovenue.sdk.IntroPrice
 import dev.rovenue.sdk.Offering
 import dev.rovenue.sdk.Offerings
-import dev.rovenue.sdk.Package
-import dev.rovenue.sdk.PackageType
+import dev.rovenue.sdk.PaymentMode
 import dev.rovenue.sdk.ProductCategory
 import dev.rovenue.sdk.ProductType
 import dev.rovenue.sdk.StoreProduct
@@ -27,8 +28,8 @@ import dev.rovenue.sdk.generated.CoreOfferings
  * price fields from a live Play Billing price query via [store].
  *
  * Product ids are gathered by type (SUBS vs INAPP) so the single
- * [PlayStore.queryPrices] call can build the correct Play Billing query.
- * Products whose id is absent from the returned price map keep null prices.
+ * [PlayStore.queryProducts] call can build the correct Play Billing query.
+ * Products whose id is absent from the returned product map keep null prices.
  */
 internal suspend fun hydrateOfferings(core: CoreOfferings, store: PlayStore): Offerings {
     // The id we query Play Billing with is the google product id when present,
@@ -46,12 +47,13 @@ internal suspend fun hydrateOfferings(core: CoreOfferings, store: PlayStore): Of
         }
     }
 
-    val prices = store.queryPrices(
-        productIds = inappIds.toList(),
+    val products = store.queryProducts(
+        inappIds = inappIds.toList(),
         subscriptionIds = subscriptionIds.toList(),
     )
+    val rawMap: Map<String, ProductDetails> = store.rawDetails()
 
-    val offerings = core.offerings.map { mapOffering(it, prices) }
+    val offerings = core.offerings.map { mapOffering(it, products, rawMap) }
     val all = offerings.associateBy { it.identifier }
     val current = core.current?.let { all[it] }
     return Offerings(current = current, all = all)
@@ -59,39 +61,97 @@ internal suspend fun hydrateOfferings(core: CoreOfferings, store: PlayStore): Of
 
 private fun mapProductId(p: CoreOfferingProduct): String = p.googleProductId ?: p.identifier
 
-private fun mapProduct(p: CoreOfferingProduct, prices: Map<String, PriceInfo>): StoreProduct {
+private fun productCategory(type: String): ProductCategory =
+    if (type.uppercase() == "SUBSCRIPTION") ProductCategory.SUBSCRIPTION else ProductCategory.NON_SUBSCRIPTION
+
+private fun mapProduct(
+    p: CoreOfferingProduct,
+    info: ProductInfo?,
+    raw: ProductDetails?,
+): StoreProduct {
+    val type = ProductType.from(p.productType)
     val id = mapProductId(p)
-    val price = prices[id]
-    val productType = ProductType.from(p.productType)
-    val productCategory = if (productType == ProductType.SUBSCRIPTION) ProductCategory.SUBSCRIPTION
-                          else ProductCategory.NON_SUBSCRIPTION
+    if (info == null) {
+        return StoreProduct(
+            id = id, type = type,
+            productCategory = productCategory(p.productType),
+            displayName = p.displayName,
+            rawStoreProduct = raw,
+        )
+    }
+
+    // Determine headline price from defaultOption (subscriptions) or oneTimePrice (INAPP).
+    val options = info.options
+    val defaultOption = options
+        ?.filter { it.isBasePlan }
+        ?.minByOrNull { it.fullPricePhase?.price ?: Double.MAX_VALUE }
+        ?: options?.firstOrNull()
+
+    val basePhase = defaultOption?.fullPricePhase
+    val priceString = basePhase?.priceString ?: info.oneTimePrice?.formattedPrice
+    val basePrice = basePhase?.price ?: info.oneTimePrice?.let { it.priceMicros / 1_000_000.0 }
+    val currency = basePhase?.currencyCode ?: info.oneTimePrice?.currencyCode
+    val period = basePhase?.billingPeriod
+
+    val per = perUnitPrices(basePrice, period) { d ->
+        // Simple two-decimal formatter — currency symbol kept from the base price string prefix.
+        val prefix = priceString?.takeWhile { !it.isDigit() } ?: ""
+        "$prefix%.2f".format(d)
+    }
+
+    val intro = defaultOption?.introPhase ?: defaultOption?.freePhase
+    val introPrice = intro?.let {
+        IntroPrice(
+            price = it.price,
+            priceString = it.priceString,
+            currencyCode = it.currencyCode,
+            period = it.billingPeriod,
+            cycles = it.billingCycleCount ?: 1,
+            paymentMode = it.paymentMode ?: PaymentMode.FREE_TRIAL,
+        )
+    }
+    val eligible = if (type == ProductType.SUBSCRIPTION) (intro != null) else null
+
     return StoreProduct(
-        id = id,
-        type = productType,
-        productCategory = productCategory,
+        id = id, type = type,
+        productCategory = productCategory(p.productType),
         displayName = p.displayName,
-        priceString = price?.priceString,
-        price = price?.price,
-        currencyCode = price?.currencyCode,
+        description = info.description,
+        priceString = priceString,
+        price = basePrice,
+        currencyCode = currency,
+        subscriptionPeriod = period,
+        introPrice = introPrice,
+        discounts = emptyList(),
+        isEligibleForIntroOffer = eligible,
+        subscriptionOptions = options,
+        defaultOption = defaultOption,
+        pricePerWeek = per.week,
+        pricePerMonth = per.month,
+        pricePerYear = per.year,
+        pricePerWeekString = per.weekStr,
+        pricePerMonthString = per.monthStr,
+        pricePerYearString = per.yearStr,
+        rawStoreProduct = raw,
     )
 }
 
-private fun mapOffering(o: CoreOffering, prices: Map<String, PriceInfo>): Offering =
-    Offering(
-        identifier = o.identifier,
-        isDefault = o.isDefault,
-        // Use packageIdentifier (the slot id, e.g. $rov_monthly) as
-        // Package.identifier — that is the value the SDK contract exposes to
-        // callers. The product's own catalog identifier is available via
-        // pkg.product.id.
-        packages = o.packages.map {
-            Package(
-                identifier = it.packageIdentifier,
-                packageType = PackageType.CUSTOM,
-                product = mapProduct(it, prices),
-            )
-        },
-    )
+private fun mapOffering(
+    o: CoreOffering,
+    products: Map<String, ProductInfo>,
+    rawMap: Map<String, ProductDetails>,
+): Offering = Offering(
+    identifier = o.identifier,
+    isDefault = o.isDefault,
+    packages = o.packages.map { pkg ->
+        val pid = mapProductId(pkg)
+        dev.rovenue.sdk.Package(
+            identifier = pkg.packageIdentifier,
+            packageType = packageType(pkg.packageIdentifier),
+            product = mapProduct(pkg, products[pid], rawMap[pid]),
+        )
+    },
+)
 
 /**
  * A [PlayStore] that yields no prices and no pending purchases. Used as the
@@ -106,10 +166,10 @@ internal object NoPriceStore : PlayStore {
         obfuscatedAccountId: String?,
     ): StorePurchaseOutcome = StorePurchaseOutcome.ProductNotFound
 
-    override suspend fun queryPrices(
-        productIds: List<String>,
+    override suspend fun queryProducts(
+        inappIds: List<String>,
         subscriptionIds: List<String>,
-    ): Map<String, PriceInfo> = emptyMap()
+    ): Map<String, ProductInfo> = emptyMap()
 
     override suspend fun queryUnacknowledgedPurchases(): List<PendingPurchase> = emptyList()
 }
