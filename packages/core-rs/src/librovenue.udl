@@ -101,6 +101,8 @@ dictionary CoreOfferingProduct {
     string display_name;
     string? apple_product_id;
     string? google_product_id;
+    string? android_base_plan_id;
+    string? android_offer_id;
 };
 
 dictionary CoreOffering {

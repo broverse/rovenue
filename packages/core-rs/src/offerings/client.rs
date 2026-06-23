@@ -96,6 +96,8 @@ fn map_response(resp: OfferingsResponse) -> CoreOfferings {
                     display_name: p.display_name,
                     apple_product_id: p.store_ids.apple,
                     google_product_id: p.store_ids.google,
+                    android_base_plan_id: p.android_base_plan_id,
+                    android_offer_id: p.android_offer_id,
                 })
                 .collect(),
         })

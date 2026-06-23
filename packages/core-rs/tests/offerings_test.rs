@@ -46,6 +46,8 @@ fn get_offerings_maps_wire_to_ffi_and_sets_current() {
     assert_eq!(pkg.product_type, "SUBSCRIPTION");
     assert_eq!(pkg.apple_product_id.as_deref(), Some("com.x.pro.monthly"));
     assert_eq!(pkg.google_product_id.as_deref(), Some("pro_monthly"));
+    assert_eq!(pkg.android_base_plan_id.as_deref(), Some("annual"));
+    assert_eq!(pkg.android_offer_id, None);
 
     let second = &offerings.offerings[1];
     assert_eq!(second.identifier, "promo");

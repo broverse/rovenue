@@ -1,7 +1,7 @@
 { "data": { "offerings": [
   { "identifier": "default", "isDefault": true, "packages": [
     { "packageIdentifier": "$rov_monthly", "identifier": "pro_monthly", "type": "SUBSCRIPTION", "displayName": "Pro Monthly",
-      "storeIds": { "apple": "com.x.pro.monthly", "google": "pro_monthly" } } ] },
+      "storeIds": { "apple": "com.x.pro.monthly", "google": "pro_monthly" }, "androidBasePlanId": "annual" } ] },
   { "identifier": "promo", "isDefault": false, "packages": [
     { "packageIdentifier": "$rov_lifetime", "identifier": "pro_lifetime", "type": "NON_CONSUMABLE", "displayName": "Lifetime",
       "storeIds": { "apple": "com.x.lifetime", "google": null } } ] } ] } }

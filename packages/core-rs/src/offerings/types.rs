@@ -11,6 +11,8 @@ pub struct CoreOfferingProduct {
     pub display_name: String,
     pub apple_product_id: Option<String>,
     pub google_product_id: Option<String>,
+    pub android_base_plan_id: Option<String>,
+    pub android_offer_id: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoreOffering {
@@ -42,6 +44,10 @@ pub struct OfferingProductWire {
     pub display_name: String,
     #[serde(rename = "storeIds")]
     pub store_ids: StoreIdsWire,
+    #[serde(rename = "androidBasePlanId", default)]
+    pub android_base_plan_id: Option<String>,
+    #[serde(rename = "androidOfferId", default)]
+    pub android_offer_id: Option<String>,
 }
 #[derive(Debug, Deserialize, Serialize)]
 pub struct OfferingWire {
