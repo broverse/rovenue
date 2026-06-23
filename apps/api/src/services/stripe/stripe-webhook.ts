@@ -264,6 +264,7 @@ async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
 
   const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
     drizzle.db,
+    ctx.projectId,
     Store.STRIPE,
     subscription.id,
   );
@@ -332,6 +333,7 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
 
   const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
     drizzle.db,
+    ctx.projectId,
     Store.STRIPE,
     subscriptionId,
   );
@@ -437,6 +439,7 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
 
   const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
     drizzle.db,
+    ctx.projectId,
     Store.STRIPE,
     subscriptionId,
   );
@@ -449,8 +452,19 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
   ctx.outcome.purchaseId = purchase.id;
 
   const captured = charge.amount_captured ?? charge.amount ?? 0;
-  const refunded = charge.amount_refunded ?? 0;
-  const isFullRefund = captured > 0 && refunded >= captured;
+  // `amount_refunded` is the charge's CUMULATIVE refunded total. It is the
+  // right signal for "is the charge now fully refunded?" but the WRONG amount
+  // to record per event: each `charge.refunded` delivery (one per refund)
+  // carries the growing cumulative, so summing them across serial partial
+  // refunds over-counts (e.g. $3 then $4 on a $10 charge would record $3 + $7
+  // = $10 refunded after only $7 was returned). Record the delta — this
+  // refund's own amount — taken from the newest refund object (Stripe orders
+  // `refunds.data` most-recent-first). Fall back to cumulative only when the
+  // refunds sub-list isn't present on the event payload.
+  const cumulativeRefunded = charge.amount_refunded ?? 0;
+  const isFullRefund = captured > 0 && cumulativeRefunded >= captured;
+  const latestRefund = charge.refunds?.data?.[0];
+  const refunded = latestRefund?.amount ?? cumulativeRefunded;
 
   const eventDate = ctx.event.created
     ? new Date(ctx.event.created * 1000)
@@ -480,8 +494,7 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
     }
   }
 
-  // `amount_refunded` is the charge's cumulative refunded total; for a single
-  // (full or one-shot partial) refund this equals the refund amount.
+  // `refunded` is this event's refund delta (see above), in minor units.
   const amount = refunded / 100;
   const currency =
     charge.currency?.toUpperCase() ?? purchase.priceCurrency ?? "USD";

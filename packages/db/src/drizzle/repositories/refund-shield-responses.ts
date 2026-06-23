@@ -51,8 +51,8 @@ export interface InsertConsumptionRequestInput {
 export async function insertConsumptionRequest(
   db: DbOrTx,
   input: InsertConsumptionRequestInput,
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const inserted = await db
     .insert(refundShieldResponses)
     .values({
       projectId: input.projectId,
@@ -65,7 +65,10 @@ export async function insertConsumptionRequest(
       status: input.status,
       appleEnvironment: input.appleEnvironment,
     })
-    .onConflictDoNothing({ target: refundShieldResponses.appleNotificationUuid });
+    .onConflictDoNothing({ target: refundShieldResponses.appleNotificationUuid })
+    .returning({ id: refundShieldResponses.id });
+  // [] on conflict (duplicate notification UUID) → not a fresh request.
+  return inserted.length > 0;
 }
 
 /**
@@ -111,13 +114,19 @@ export interface UpdateOutcomeInput {
  * Set outcome ONLY when it is currently NULL. Used for the initial
  * REFUND / REFUND_DECLINED notifications so a later, conflicting
  * outcome cannot quietly stomp on the first-recorded decision.
+ *
+ * Returns `true` when a row actually transitioned (outcome was NULL),
+ * `false` when it was a no-op (already set). Callers use this to keep
+ * side effects — e.g. metric counters — first-wins too: a webhook that
+ * fails after this point and is retried must not double-count, because
+ * the retry finds the outcome already set and gets `false`.
  */
 export async function updateOutcomeByOriginalTransactionIdIfNull(
   db: DbOrTx,
   input: UpdateOutcomeInput,
-): Promise<void> {
+): Promise<boolean> {
   const now = new Date();
-  await db
+  const updated = await db
     .update(refundShieldResponses)
     .set({
       outcome: input.outcome,
@@ -133,7 +142,9 @@ export async function updateOutcomeByOriginalTransactionIdIfNull(
         ),
         isNull(refundShieldResponses.outcome),
       ),
-    );
+    )
+    .returning({ id: refundShieldResponses.id });
+  return updated.length > 0;
 }
 
 /**

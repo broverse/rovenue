@@ -59,8 +59,8 @@ const { drizzleMock } = vi.hoisted(() => {
       createRevenueEvent: vi.fn(async () => undefined),
     },
     refundShieldResponseRepo: {
-      insertConsumptionRequest: vi.fn(async () => undefined),
-      updateOutcomeByOriginalTransactionIdIfNull: vi.fn(async () => undefined),
+      insertConsumptionRequest: vi.fn(async () => true),
+      updateOutcomeByOriginalTransactionIdIfNull: vi.fn(async () => true),
       updateOutcomeByOriginalTransactionIdOverwrite: vi.fn(
         async () => undefined,
       ),
@@ -744,7 +744,7 @@ describe("handleAppleNotification — outcome linkage", () => {
     // looks identical to the success case: no throw, existing
     // revenue-events path still runs.
     drizzleMock.refundShieldResponseRepo.updateOutcomeByOriginalTransactionIdIfNull.mockResolvedValueOnce(
-      undefined,
+      false,
     );
     drizzleMock.purchaseExtRepo.findPurchaseByStoreTransaction.mockResolvedValue(
       {

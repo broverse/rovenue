@@ -425,15 +425,18 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
   // matches zero rows when no prior CONSUMPTION_REQUEST was seen
   // (e.g. Refund Shield wasn't enabled at the time), which is the
   // desired no-op — the revenue-events path below still runs.
-  await drizzle.refundShieldResponseRepo.updateOutcomeByOriginalTransactionIdIfNull(
-    drizzle.db,
-    {
-      projectId: ctx.projectId,
-      originalTransactionId: ctx.transaction.originalTransactionId,
-      outcome: "REFUND_APPROVED",
-    },
-  );
-  incRefundShieldOutcomeApproved(ctx.projectId);
+  const approvedRecorded =
+    await drizzle.refundShieldResponseRepo.updateOutcomeByOriginalTransactionIdIfNull(
+      drizzle.db,
+      {
+        projectId: ctx.projectId,
+        originalTransactionId: ctx.transaction.originalTransactionId,
+        outcome: "REFUND_APPROVED",
+      },
+    );
+  // Count once, on the transition only — a failed-then-retried webhook finds
+  // the outcome already set and must not re-increment the approval counter.
+  if (approvedRecorded) incRefundShieldOutcomeApproved(ctx.projectId);
 
   const refundDate = new Date(ctx.transaction.signedDate);
   // Refund targets the specific transaction by (store, storeTxnId),
@@ -444,6 +447,7 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
   // pair has a unique index.
   const found = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
     drizzle.db,
+    ctx.projectId,
     Store.APP_STORE,
     ctx.transaction.transactionId,
   );
@@ -474,6 +478,7 @@ async function applyRefund(ctx: DispatchContext): Promise<void> {
 
   const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
     drizzle.db,
+    ctx.projectId,
     Store.APP_STORE,
     ctx.transaction.transactionId,
   );
@@ -508,15 +513,16 @@ async function applyRevoke(ctx: DispatchContext): Promise<void> {
 // existing outcome (a duplicate redelivery shouldn't flip the
 // record).
 async function applyRefundDeclined(ctx: DispatchContext): Promise<void> {
-  await drizzle.refundShieldResponseRepo.updateOutcomeByOriginalTransactionIdIfNull(
-    drizzle.db,
-    {
-      projectId: ctx.projectId,
-      originalTransactionId: ctx.transaction.originalTransactionId,
-      outcome: "REFUND_DECLINED",
-    },
-  );
-  incRefundShieldOutcomeDeclined(ctx.projectId);
+  const declinedRecorded =
+    await drizzle.refundShieldResponseRepo.updateOutcomeByOriginalTransactionIdIfNull(
+      drizzle.db,
+      {
+        projectId: ctx.projectId,
+        originalTransactionId: ctx.transaction.originalTransactionId,
+        outcome: "REFUND_DECLINED",
+      },
+    );
+  if (declinedRecorded) incRefundShieldOutcomeDeclined(ctx.projectId);
 }
 
 // REFUND_REVERSED: Apple reversed a previously-approved refund (e.g.
@@ -549,6 +555,7 @@ async function applyRefundReversed(ctx: DispatchContext): Promise<void> {
   // so this branch only runs once per Apple notification UUID.
   const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
     drizzle.db,
+    ctx.projectId,
     Store.APP_STORE,
     ctx.transaction.transactionId,
   );
@@ -677,21 +684,25 @@ async function applyConsumptionRequest(ctx: DispatchContext): Promise<void> {
       ? "SANDBOX"
       : "PRODUCTION";
 
-  await drizzle.refundShieldResponseRepo.insertConsumptionRequest(
-    drizzle.db,
-    {
-      projectId,
-      subscriberId,
-      appleNotificationUuid: notification.notificationUUID,
-      appleOriginalTransactionId: transaction.originalTransactionId,
-      appleTransactionId: transaction.transactionId,
-      detectedAt,
-      scheduledFor,
-      status,
-      appleEnvironment,
-    },
-  );
-  incRefundShieldReceived(projectId);
+  const requestRecorded =
+    await drizzle.refundShieldResponseRepo.insertConsumptionRequest(
+      drizzle.db,
+      {
+        projectId,
+        subscriberId,
+        appleNotificationUuid: notification.notificationUUID,
+        appleOriginalTransactionId: transaction.originalTransactionId,
+        appleTransactionId: transaction.transactionId,
+        detectedAt,
+        scheduledFor,
+        status,
+        appleEnvironment,
+      },
+    );
+  // Count once per distinct CONSUMPTION_REQUEST. A duplicate notification
+  // UUID (ON CONFLICT DO NOTHING) or a failed-then-retried webhook must not
+  // re-increment the received counter.
+  if (requestRecorded) incRefundShieldReceived(projectId);
 
   if (subscriberId) ctx.outcome.subscriberId = subscriberId;
 

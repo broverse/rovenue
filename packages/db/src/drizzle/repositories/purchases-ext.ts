@@ -10,11 +10,17 @@ import { products, purchases, type Purchase } from "../schema";
 // so each module stays focused on one caller type.
 
 /**
- * Lookup a purchase by its store-side transaction id. Composite-
- * unique index over (store, storeTransactionId).
+ * Lookup a purchase by its store-side transaction id, scoped to the
+ * project. The (store, storeTransactionId) pair is unique globally, not
+ * per-project — so a webhook handler must constrain to its own
+ * `ctx.projectId`, otherwise a (signature-valid) delivery routed to the
+ * wrong project, or a cross-tenant store-id collision, could act on
+ * another project's purchase and attribute revenue/refunds to the caller.
+ * Mirrors `findPurchaseByOriginalTransaction`, which is already scoped.
  */
 export async function findPurchaseByStoreTransaction(
   db: Db,
+  projectId: string,
   store: "APP_STORE" | "PLAY_STORE" | "STRIPE",
   storeTransactionId: string,
 ): Promise<Purchase | null> {
@@ -23,6 +29,7 @@ export async function findPurchaseByStoreTransaction(
     .from(purchases)
     .where(
       and(
+        eq(purchases.projectId, projectId),
         eq(purchases.store, store),
         eq(purchases.storeTransactionId, storeTransactionId),
       ),

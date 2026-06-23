@@ -431,10 +431,11 @@ async function resolveSubscriber(
   const existingPurchase =
     await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
       drizzle.db,
+      ctx.projectId,
       Store.PLAY_STORE,
       ctx.notification.purchaseToken,
     );
-  if (existingPurchase && existingPurchase.projectId === ctx.projectId) {
+  if (existingPurchase) {
     const existingSubscriber = await drizzle.subscriberRepo.findSubscriberById(
       drizzle.db,
       existingPurchase.subscriberId,
@@ -499,6 +500,7 @@ async function processVoidedPurchase(
 ): Promise<GoogleDispatchOutcome> {
   const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
     drizzle.db,
+    args.projectId,
     Store.PLAY_STORE,
     args.purchaseToken,
   );
