@@ -34,4 +34,29 @@ describe("Rovenue RN version parity", () => {
     );
     expect(cargoToml).toContain("version.workspace = true");
   });
+
+  // Kotlin + Swift versions are hand-maintained strings with no compile-time
+  // link to the Rust core, so they silently drifted to 0.7.0 / 0.6.0 while the
+  // core moved to 0.15.0. Assert them here so a future bump fails CI until all
+  // four façades are aligned — the parity test is the only thing that catches
+  // this (sdk.yml runs it in the rn job).
+  it("SDK_VERSION matches the sdk-kotlin build.gradle.kts version", () => {
+    const gradle = readFileSync(
+      join(__dirname, "../../../sdk-kotlin/build.gradle.kts"),
+      "utf8",
+    );
+    const m = gradle.match(/^version\s*=\s*"([^"]+)"/m);
+    expect(m, "could not find version in sdk-kotlin/build.gradle.kts").not.toBeNull();
+    expect(SDK_VERSION).toBe(m![1]);
+  });
+
+  it("SDK_VERSION matches the sdk-swift podspec version", () => {
+    const podspec = readFileSync(
+      join(__dirname, "../../../sdk-swift/Rovenue.podspec"),
+      "utf8",
+    );
+    const m = podspec.match(/s\.version\s*=\s*'([^']+)'/);
+    expect(m, "could not find s.version in sdk-swift/Rovenue.podspec").not.toBeNull();
+    expect(SDK_VERSION).toBe(m![1]);
+  });
 });

@@ -9,7 +9,7 @@
 
 Pod::Spec.new do |s|
   s.name             = 'Rovenue'
-  s.version          = '0.6.0'
+  s.version          = '0.15.0'
   s.summary          = 'Rovenue Swift façade'
   s.homepage         = 'https://rovenue.io'
   s.license          = { :type => 'AGPL-3.0' }
