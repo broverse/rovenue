@@ -59,11 +59,10 @@ public final class Rovenue: @unchecked Sendable {
     public static func configure(
         apiKey: String,
         baseUrl: String? = nil,
-        debug: Bool = false,
+        logLevel: LogLevel = .warn,
         appVersion: String? = nil,
         environment: String? = nil
     ) throws {
-        emit(LogEntry(level: "info", message: "configure"))
         guard !apiKey.trimmingCharacters(in: .whitespaces).isEmpty else {
             throw RovenueError(kind: .invalidApiKey, message: "API key is missing or invalid")
         }
@@ -72,7 +71,7 @@ public final class Rovenue: @unchecked Sendable {
         // applies; the Rust core validates it on construction.
         var config = Config(
             apiKey: apiKey,
-            debug: debug,
+            logLevel: logLevel,
             appVersion: resolvedVersion,
             platform: "ios",
             environment: environment
@@ -88,6 +87,7 @@ public final class Rovenue: @unchecked Sendable {
         }
         let bridge = ObserverBridge()
         core.registerObserver(obs: bridge)
+        core.registerLogSink(sink: LogSinkBridge())
         let funnelBridge = FunnelClaimBridge()
         core.registerFunnelClaimListener(listener: funnelBridge)
         let instance = Rovenue(core: core, bridge: bridge, funnelBridge: funnelBridge, appVersion: resolvedVersion)
@@ -203,7 +203,6 @@ public final class Rovenue: @unchecked Sendable {
     /// Client-local only — server-side merging happens via the customer's
     /// backend calling `/v1/subscribers/transfer` with the secret key.
     public func identify(_ appUserId: String) async throws {
-        Self.emit(LogEntry(level: "info", message: "identify"))
         do {
             try await dispatcher.run { [core] in
                 do {
@@ -212,9 +211,7 @@ public final class Rovenue: @unchecked Sendable {
                     throw mapError(err)
                 }
             }
-            Self.emit(LogEntry(level: "info", message: "identify ok"))
         } catch {
-            Self.emit(LogEntry(level: "error", message: "identify failed: \(error.localizedDescription)"))
             throw error
         }
     }
@@ -223,14 +220,11 @@ public final class Rovenue: @unchecked Sendable {
     /// The core generates a new anonymous `rovenueId`; `appUserId` becomes nil.
     @available(iOS 15.0, macOS 12.0, *)
     public func logOut() async throws {
-        Self.emit(LogEntry(level: "info", message: "logOut"))
         do {
             try await dispatcher.run { [core] in
                 do { try core.logOut() } catch let e as RovenueErrorFfi { throw mapError(e) }
             }
-            Self.emit(LogEntry(level: "info", message: "logOut ok"))
         } catch {
-            Self.emit(LogEntry(level: "error", message: "logOut failed: \(error.localizedDescription)"))
             throw error
         }
     }
@@ -255,7 +249,6 @@ public final class Rovenue: @unchecked Sendable {
     /// Force a refresh of the entitlements cache against the server.
     /// On success, emits `.entitlementsChanged` to subscribers of `changes`.
     public func refreshEntitlements() async throws {
-        Self.emit(LogEntry(level: "info", message: "refreshEntitlements"))
         do {
             try await dispatcher.run { [core] in
                 do {
@@ -264,9 +257,7 @@ public final class Rovenue: @unchecked Sendable {
                     throw mapError(err)
                 }
             }
-            Self.emit(LogEntry(level: "info", message: "refreshEntitlements ok"))
         } catch {
-            Self.emit(LogEntry(level: "error", message: "refreshEntitlements failed: \(error.localizedDescription)"))
             throw error
         }
     }
@@ -290,7 +281,6 @@ public final class Rovenue: @unchecked Sendable {
     /// Force a refresh of virtual-currency balances against the server.
     /// On success (when balances changed), emits `.virtualCurrenciesChanged`.
     public func refreshVirtualCurrencies() async throws {
-        Self.emit(LogEntry(level: "info", message: "refreshVirtualCurrencies"))
         do {
             try await dispatcher.run { [core] in
                 do {
@@ -299,9 +289,7 @@ public final class Rovenue: @unchecked Sendable {
                     throw mapError(err)
                 }
             }
-            Self.emit(LogEntry(level: "info", message: "refreshVirtualCurrencies ok"))
         } catch {
-            Self.emit(LogEntry(level: "error", message: "refreshVirtualCurrencies failed: \(error.localizedDescription)"))
             throw error
         }
     }
@@ -311,7 +299,6 @@ public final class Rovenue: @unchecked Sendable {
     /// Force a refresh of the remote config cache against the server.
     /// On success (when values changed), emits `.remoteConfigChanged`.
     public func refreshRemoteConfig() async throws {
-        Self.emit(LogEntry(level: "info", message: "refreshRemoteConfig"))
         do {
             try await dispatcher.run { [core] in
                 do {
@@ -320,9 +307,7 @@ public final class Rovenue: @unchecked Sendable {
                     throw mapError(err)
                 }
             }
-            Self.emit(LogEntry(level: "info", message: "refreshRemoteConfig ok"))
         } catch {
-            Self.emit(LogEntry(level: "error", message: "refreshRemoteConfig failed: \(error.localizedDescription)"))
             throw error
         }
     }
@@ -445,7 +430,6 @@ public final class Rovenue: @unchecked Sendable {
     /// The caller is responsible for building the JSON envelope; this method
     /// forwards it verbatim to the Rust core and then to the API.
     public func track(envelopeJson: String) async throws {
-        Self.emit(LogEntry(level: "info", message: "track"))
         do {
             try await dispatcher.run { [core] in
                 do {
@@ -454,9 +438,7 @@ public final class Rovenue: @unchecked Sendable {
                     throw mapError(err)
                 }
             }
-            Self.emit(LogEntry(level: "info", message: "track ok"))
         } catch {
-            Self.emit(LogEntry(level: "error", message: "track failed: \(error.localizedDescription)"))
             throw error
         }
     }
@@ -478,7 +460,6 @@ public final class Rovenue: @unchecked Sendable {
     /// the key. Written locally immediately; flushed to the server in the
     /// background (30s tick / foreground / manual `flushAttributes`).
     public func setAttributes(_ attributes: [String: String?]) async throws {
-        Self.emit(LogEntry(level: "info", message: "setAttributes"))
         do {
             try await dispatcher.run { [core] in
                 do {
@@ -487,9 +468,7 @@ public final class Rovenue: @unchecked Sendable {
                     throw mapError(err)
                 }
             }
-            Self.emit(LogEntry(level: "info", message: "setAttributes ok"))
         } catch {
-            Self.emit(LogEntry(level: "error", message: "setAttributes failed: \(error.localizedDescription)"))
             throw error
         }
     }
@@ -525,7 +504,6 @@ public final class Rovenue: @unchecked Sendable {
 
     /// Stop background work cleanly. Called automatically on `resetForTesting`.
     public func shutdown() {
-        Self.emit(LogEntry(level: "info", message: "shutdown"))
         transactionListener?.cancel()
         transactionListener = nil
         core.shutdown()
@@ -544,7 +522,6 @@ public final class Rovenue: @unchecked Sendable {
     /// Products missing from StoreKit still appear, just without price fields.
     @available(iOS 15.0, macOS 12.0, *)
     public func getOfferings() async throws -> Offerings {
-        Self.emit(LogEntry(level: "info", message: "getOfferings"))
         let ffi: CoreOfferings
         do {
             ffi = try await dispatcher.run { [core] in
@@ -552,7 +529,6 @@ public final class Rovenue: @unchecked Sendable {
                 catch let err as RovenueErrorFfi { throw mapError(err) }
             }
         } catch {
-            Self.emit(LogEntry(level: "error", message: "getOfferings failed: \(error.localizedDescription)"))
             throw error
         }
 
@@ -607,7 +583,6 @@ public final class Rovenue: @unchecked Sendable {
         }
         let all = Dictionary(uniqueKeysWithValues: offerings.map { ($0.identifier, $0) })
         let current = ffi.current.flatMap { all[$0] }
-        Self.emit(LogEntry(level: "info", message: "getOfferings ok"))
         return Offerings(current: current, all: all)
     }
 
@@ -621,7 +596,6 @@ public final class Rovenue: @unchecked Sendable {
     /// server-side, finishes the transaction, then returns refreshed state.
     @available(iOS 15.0, macOS 12.0, *)
     public func purchase(_ product: StoreProduct) async throws -> PurchaseResult {
-        Self.emit(LogEntry(level: "info", message: "purchase"))
         let token = try? await getAppAccountToken()
         let flow = ApplePurchaseFlow(
             store: StoreKitAppleStore(),
@@ -637,10 +611,8 @@ public final class Rovenue: @unchecked Sendable {
         )
         do {
             let result = try await flow.run(productId: product.id, appAccountToken: token)
-            Self.emit(LogEntry(level: "info", message: "purchase ok"))
             return result
         } catch {
-            Self.emit(LogEntry(level: "error", message: "purchase failed: \(error.localizedDescription)"))
             throw error
         }
     }
@@ -650,7 +622,6 @@ public final class Rovenue: @unchecked Sendable {
     /// refreshes and returns the resulting entitlement/credit state.
     @available(iOS 15.0, macOS 12.0, *)
     public func restorePurchases() async throws -> PurchaseResult {
-        Self.emit(LogEntry(level: "info", message: "restorePurchases"))
         try? await AppStore.sync()
         for await result in Transaction.currentEntitlements {
             guard case let .verified(t) = result else { continue }
@@ -669,7 +640,6 @@ public final class Rovenue: @unchecked Sendable {
             productId: "",
             storeTransactionId: ""
         )
-        Self.emit(LogEntry(level: "info", message: "restorePurchases ok"))
         return result
     }
 

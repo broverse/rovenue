@@ -5,7 +5,7 @@ final class AppAccountTokenTests: XCTestCase {
     override func setUp() async throws {
         isolateRovenueHome(self)
         Rovenue.resetForTesting()
-        try Rovenue.configure(apiKey: "test_pk", baseUrl: "http://localhost:0", debug: true)
+        try Rovenue.configure(apiKey: "test_pk", baseUrl: "http://localhost:0", logLevel: .debug)
     }
 
     override func tearDown() async throws {

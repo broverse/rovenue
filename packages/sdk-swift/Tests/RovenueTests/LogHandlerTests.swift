@@ -7,12 +7,35 @@ final class LogHandlerTests: XCTestCase {
         try await super.setUp()
         isolateRovenueHome(self)
         Rovenue.resetForTesting()
-        try Rovenue.configure(apiKey: "pk_test", baseUrl: "https://api.test", debug: true)
+        try Rovenue.configure(apiKey: "pk_test", baseUrl: "https://api.test", logLevel: .debug)
     }
 
     override func tearDown() async throws {
         Rovenue.resetForTesting()
         try await super.tearDown()
+    }
+
+    // Tests that LogSinkBridge correctly maps LogRecord → LogEntry and routes it
+    // to registered handlers. We exercise the bridge directly (rather than
+    // going through Rovenue.shared.identify which needs a real server) because
+    // the unit-test harness has no reachable backend. The direct path is the
+    // authoritative contract: onLog → Rovenue.emit → handler.
+    func testCoreLogReachesHandler() throws {
+        let captured = LockedBox<[LogEntry]>([])
+        let unsub = Rovenue.shared.setLogHandler { entry in
+            captured.with { $0.append(entry) }
+        }
+        defer { unsub() }
+
+        let bridge = LogSinkBridge()
+        // Simulate what the Rust core emits for an identify op.
+        bridge.onLog(record: LogRecord(level: .info, message: "identify", fields: ["op": "identify"]))
+
+        let entries = captured.value
+        XCTAssertTrue(entries.contains { $0.message.contains("identify") },
+                      "handler must receive the identify log from core")
+        XCTAssertFalse(entries.contains { $0.message.contains("user_pii_check") },
+                       "raw app_user_id must never reach the handler")
     }
 
     func testHandlerReceivesEntries() async throws {

@@ -7,7 +7,7 @@ final class RovenueTests: XCTestCase {
     // -----------------------------------------------------------------
 
     func test_getVersion_matchesCargoPkgVersion() throws {
-        let cfg = Config(apiKey: "pk_test_xyz", debug: false, appVersion: nil, platform: nil, environment: nil, baseUrl: "https://api.rovenue.io")
+        let cfg = Config(apiKey: "pk_test_xyz", logLevel: .warn, appVersion: nil, platform: nil, environment: nil, baseUrl: "https://api.rovenue.io")
         let core = try RovenueCore(config: cfg)
         XCTAssertFalse(core.getVersion().isEmpty)
         // Both derive from the librovenue crate (workspace) version; asserting
@@ -17,7 +17,7 @@ final class RovenueTests: XCTestCase {
     }
 
     func test_invalidApiKey_throws_atGeneratedLayer() {
-        let cfg = Config(apiKey: "", debug: false, appVersion: nil, platform: nil, environment: nil, baseUrl: "https://api.rovenue.io")
+        let cfg = Config(apiKey: "", logLevel: .warn, appVersion: nil, platform: nil, environment: nil, baseUrl: "https://api.rovenue.io")
         XCTAssertThrowsError(try RovenueCore(config: cfg)) { err in
             guard let ffiErr = err as? RovenueErrorFfi,
                   case let .Generic(kind, _, _, _, _) = ffiErr,
