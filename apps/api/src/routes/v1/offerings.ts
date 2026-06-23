@@ -52,6 +52,8 @@ interface OfferingProductEntry {
   isPromoted: boolean;
   accessIds: string[];
   storeIds: Record<string, string>;
+  androidBasePlanId: string | null;
+  androidOfferId: string | null;
   metadata: unknown;
 }
 
@@ -66,6 +68,8 @@ function hydrateProducts(
     accessIds: string[];
     isActive: boolean;
     storeIds: unknown;
+    androidBasePlanId: string | null;
+    androidOfferId: string | null;
   }>,
 ): OfferingProductEntry[] {
   return [...memberships]
@@ -82,6 +86,8 @@ function hydrateProducts(
         isPromoted: entry.isPromoted,
         accessIds: product.accessIds,
         storeIds: parseStoreIds(product.storeIds),
+        androidBasePlanId: product.androidBasePlanId ?? null,
+        androidOfferId: product.androidOfferId ?? null,
         metadata: entry.metadata ?? {},
       };
     })

@@ -135,6 +135,24 @@ afterAll(async () => {
 // ---------------------------------------------------------------------------
 
 describe("GET /v1/offerings", () => {
+  it("includes androidBasePlanId/androidOfferId in offering packages", async () => {
+    // The seeded product has no androidBasePlanId/androidOfferId (both null by default).
+    // We verify the fields are present on the package with null values (not absent/undefined).
+    const app = buildApp();
+    const res = await app.request("/v1/offerings", {
+      headers: { Authorization: `Bearer ${PUBLIC_KEY}` },
+    });
+    expect(res.status).toBe(200);
+
+    const { data } = (await res.json()) as any;
+    const o = data.offerings.find((x: any) => x.identifier === OFFERING_IDENTIFIER);
+    expect(o).toBeDefined();
+
+    const pkg = o.packages[0];
+    expect(pkg.androidBasePlanId).toBeNull();
+    expect(pkg.androidOfferId).toBeNull();
+  });
+
   it("hydrates packages with packageIdentifier and omits accessId", async () => {
     const app = buildApp();
     const res = await app.request("/v1/offerings", {
