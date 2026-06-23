@@ -136,10 +136,18 @@ mod tests {
         }
         sched.set_foreground(true);
         std::thread::sleep(std::time::Duration::from_millis(60));
-        assert_eq!(count.load(Ordering::SeqCst), 1, "first foreground fires once");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "first foreground fires once"
+        );
 
         sched.reset_cadence();
         std::thread::sleep(std::time::Duration::from_millis(60));
-        assert_eq!(count.load(Ordering::SeqCst), 2, "reset_cadence re-fires immediately");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            2,
+            "reset_cadence re-fires immediately"
+        );
     }
 }

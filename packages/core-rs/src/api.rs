@@ -5,26 +5,28 @@ use std::time::Duration;
 use crate::attributes::buffer::AttributeBuffer;
 use crate::attributes::dispatcher::AttributeDispatcher;
 use crate::cache::{CacheStore, ExposureRepo, FunnelRepo};
-use crate::funnel::{ClaimInstallParams, FunnelClaimBus, FunnelClaimListener, FunnelClaimResult, FunnelClient};
 use crate::config::Config;
-use crate::virtual_currencies::VirtualCurrencyReader;
 use crate::entitlements::{Entitlement, EntitlementReader};
-use crate::events::EventsClient;
 use crate::error::{RovenueError, RovenueResult};
+use crate::events::EventsClient;
 use crate::exposure::ExposureTracker;
+use crate::funnel::{
+    ClaimInstallParams, FunnelClaimBus, FunnelClaimListener, FunnelClaimResult, FunnelClient,
+};
 use crate::identify::IdentifyClient;
 use crate::identity::{IdentityManager, User};
 use crate::observer::{Observer, ObserverBus};
 use crate::offerings::{CoreOfferings, OfferingsClient};
 use crate::polling::PollingScheduler;
-use crate::receipts::{ReceiptClient, ReceiptResult};
 use crate::receipts::types::ReceiptPostOutcome;
+use crate::receipts::{ReceiptClient, ReceiptResult};
 use crate::remote_config::{ExperimentAssignment, RemoteConfigReader};
 use crate::sessions::{AccountTokenStore, SessionBuffer, SessionDispatcher, SessionEventKind};
 use crate::time::{Clock, SystemClock};
 use crate::transport::http_client::HttpClient;
 use crate::transport::idempotency::IdempotencyKey;
 use crate::version::SDK_VERSION;
+use crate::virtual_currencies::VirtualCurrencyReader;
 
 const ENTITLEMENTS_INTERVAL_MS: u64 = 30_000;
 const REMOTE_CONFIG_INTERVAL_MS: u64 = 60_000;
@@ -122,13 +124,9 @@ impl RovenueCore {
                 .with_clock(Arc::clone(&clock)),
         );
         let remote_config = Arc::new(
-            RemoteConfigReader::new(
-                Arc::clone(&http),
-                Arc::clone(&store),
-                Arc::clone(&identity),
-            )
-            .with_observer_bus(Arc::clone(&bus))
-            .with_clock(Arc::clone(&clock)),
+            RemoteConfigReader::new(Arc::clone(&http), Arc::clone(&store), Arc::clone(&identity))
+                .with_observer_bus(Arc::clone(&bus))
+                .with_clock(Arc::clone(&clock)),
         );
         let exposure = ExposureTracker::new(
             ExposureRepo::new(Arc::clone(&store)),
@@ -307,7 +305,10 @@ impl RovenueCore {
     /// Test-only: number of buffered session events.
     #[doc(hidden)]
     pub fn test_session_event_count(&self) -> i64 {
-        self.store.list_session_events(usize::MAX).map(|r| r.len() as i64).unwrap_or(0)
+        self.store
+            .list_session_events(usize::MAX)
+            .map(|r| r.len() as i64)
+            .unwrap_or(0)
     }
 
     pub fn entitlement(&self, id: String) -> Option<Entitlement> {
@@ -522,8 +523,11 @@ impl RovenueCore {
                 let _ = self.entitlements.refresh();
             }
         }
-        let balances: std::collections::BTreeMap<String, i64> =
-            outcome.virtual_currencies.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let balances: std::collections::BTreeMap<String, i64> = outcome
+            .virtual_currencies
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
         let _ = self.virtual_currencies.set_balances(scope, &balances, now);
         ReceiptResult {
             subscriber_id: outcome.subscriber_id,
@@ -717,8 +721,8 @@ fn dirs_path() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use std::sync::{Arc, Mutex};
     use crate::funnel::{ClaimInstallParams, FunnelClaimListener, FunnelClaimResult};
+    use std::sync::{Arc, Mutex};
 
     struct CapturingListener(Arc<Mutex<Vec<FunnelClaimResult>>>);
     impl FunnelClaimListener for CapturingListener {
@@ -731,20 +735,30 @@ mod tests {
     #[serial_test::serial]
     fn claim_funnel_token_refreshes_records_and_fires_callback() {
         let mut server = mockito::Server::new();
-        let _m_claim = server.mock("POST", "/v1/subscribers/claim-funnel-token")
-            .with_status(200).with_header("content-type", "application/json")
-            .with_body(r#"{"data":{"subscriber_id":"sub_9","entitlements":[],"funnel_answers":{"q1":1}}}"#)
+        let _m_claim = server
+            .mock("POST", "/v1/subscribers/claim-funnel-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"data":{"subscriber_id":"sub_9","entitlements":[],"funnel_answers":{"q1":1}}}"#,
+            )
             .create();
         // claim_funnel_token triggers refresh_entitlements (a GET).
-        let _m_ent = server.mock("GET", "/v1/me/entitlements")
-            .with_status(200).with_header("content-type", "application/json")
-            .with_body(r#"{"data":{"entitlements":{}}}"#).expect_at_least(1).create();
+        let _m_ent = server
+            .mock("GET", "/v1/me/entitlements")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"entitlements":{}}}"#)
+            .expect_at_least(1)
+            .create();
 
         let core = make_core(&server.url());
         let seen = Arc::new(Mutex::new(Vec::new()));
         core.register_funnel_claim_listener(Box::new(CapturingListener(Arc::clone(&seen))));
 
-        let r = core.claim_funnel_token("a_token_value".into()).expect("claim ok");
+        let r = core
+            .claim_funnel_token("a_token_value".into())
+            .expect("claim ok");
         assert_eq!(r.subscriber_id, "sub_9");
         assert_eq!(r.funnel_answers_json, r#"{"q1":1}"#);
         assert_eq!(seen.lock().unwrap().len(), 1, "callback fired once");
@@ -755,22 +769,37 @@ mod tests {
     #[serial_test::serial]
     fn claim_install_chains_to_token_claim() {
         let mut server = mockito::Server::new();
-        let _m_install = server.mock("POST", "/v1/sdk/claim-install")
-            .with_status(200).with_header("content-type", "application/json")
-            .with_body(r#"{"data":{"token":"recovered"}}"#).create();
-        let _m_claim = server.mock("POST", "/v1/subscribers/claim-funnel-token")
-            .with_status(200).with_header("content-type", "application/json")
-            .with_body(r#"{"data":{"subscriber_id":"sub_i","entitlements":[],"funnel_answers":{}}}"#).create();
-        let _m_ent = server.mock("GET", "/v1/me/entitlements")
-            .with_status(200).with_header("content-type", "application/json")
-            .with_body(r#"{"data":{"entitlements":{}}}"#).expect_at_least(1).create();
+        let _m_install = server
+            .mock("POST", "/v1/sdk/claim-install")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"token":"recovered"}}"#)
+            .create();
+        let _m_claim = server
+            .mock("POST", "/v1/subscribers/claim-funnel-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"data":{"subscriber_id":"sub_i","entitlements":[],"funnel_answers":{}}}"#,
+            )
+            .create();
+        let _m_ent = server
+            .mock("GET", "/v1/me/entitlements")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"entitlements":{}}}"#)
+            .expect_at_least(1)
+            .create();
 
         let core = make_core(&server.url());
         let seen = Arc::new(Mutex::new(Vec::new()));
         core.register_funnel_claim_listener(Box::new(CapturingListener(Arc::clone(&seen))));
         let params = ClaimInstallParams {
-            platform: "android".into(), locale: "en-US".into(), timezone: "UTC".into(),
-            screen_dims: "390x844".into(), device_model: None,
+            platform: "android".into(),
+            locale: "en-US".into(),
+            timezone: "UTC".into(),
+            screen_dims: "390x844".into(),
+            device_model: None,
             install_referrer: Some("rovenue_funnel_token=recovered".into()),
         };
         let out = core.claim_install(params).expect("claim_install ok");
@@ -782,11 +811,18 @@ mod tests {
     #[serial_test::serial]
     fn claim_install_returns_none_on_404() {
         let mut server = mockito::Server::new();
-        let _m = server.mock("POST", "/v1/sdk/claim-install").with_status(404).create();
+        let _m = server
+            .mock("POST", "/v1/sdk/claim-install")
+            .with_status(404)
+            .create();
         let core = make_core(&server.url());
         let params = ClaimInstallParams {
-            platform: "ios".into(), locale: "en-US".into(), timezone: "UTC".into(),
-            screen_dims: "390x844".into(), device_model: None, install_referrer: None,
+            platform: "ios".into(),
+            locale: "en-US".into(),
+            timezone: "UTC".into(),
+            screen_dims: "390x844".into(),
+            device_model: None,
+            install_referrer: None,
         };
         assert!(core.claim_install(params).expect("ok").is_none());
     }
@@ -816,7 +852,9 @@ mod tests {
             .mock("POST", "/v1/subscribers/claim-funnel-token")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"data":{"subscriber_id":"sub_1","entitlements":[],"funnel_answers":{}}}"#)
+            .with_body(
+                r#"{"data":{"subscriber_id":"sub_1","entitlements":[],"funnel_answers":{}}}"#,
+            )
             .create();
         let _m_ent = server
             .mock("GET", "/v1/me/entitlements")
@@ -828,7 +866,8 @@ mod tests {
 
         let core = make_core(&server.url());
         assert!(!core.has_resolved_funnel_claim());
-        core.claim_funnel_token("a_token_value".into()).expect("claim ok");
+        core.claim_funnel_token("a_token_value".into())
+            .expect("claim ok");
         assert!(core.has_resolved_funnel_claim(), "claimed state → resolved");
     }
 
@@ -856,14 +895,8 @@ mod tests {
             .create();
 
         // Ensure no GET calls to entitlements or credits are made
-        let _m_ent = server
-            .mock("GET", "/v1/me/entitlements")
-            .expect(0)
-            .create();
-        let _m_cred = server
-            .mock("GET", "/v1/me/credits")
-            .expect(0)
-            .create();
+        let _m_ent = server.mock("GET", "/v1/me/entitlements").expect(0).create();
+        let _m_cred = server.mock("GET", "/v1/me/credits").expect(0).create();
 
         let core = make_core(&server.url());
         let result = core
@@ -890,9 +923,7 @@ mod tests {
             .mock("POST", "/v1/receipts/apple")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(
-                r#"{"data":{"subscriber":{"id":"sub_2","appUserId":"u2"}}}"#,
-            )
+            .with_body(r#"{"data":{"subscriber":{"id":"sub_2","appUserId":"u2"}}}"#)
             .create();
 
         // Exactly one GET to entitlements should fire as fallback
@@ -931,17 +962,17 @@ mod tests {
             .mock("POST", "/v1/identify")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"data":{"subscriberId":"sub_x","appUserId":"user_42","transferred":false}}"#)
+            .with_body(
+                r#"{"data":{"subscriberId":"sub_x","appUserId":"user_42","transferred":false}}"#,
+            )
             .create();
 
         let core = make_core(&server.url());
         // identify() writes app_user_id locally even if its own POST fails.
         core.identify("user_42".into()).unwrap();
 
-        core.track(
-            r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z"}"#.into(),
-        )
-        .expect("track ok");
+        core.track(r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z"}"#.into())
+            .expect("track ok");
 
         m.assert();
     }
@@ -965,7 +996,9 @@ mod tests {
             .mock("POST", "/v1/identify")
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"data":{"subscriberId":"sub_x","appUserId":"user_42","transferred":false}}"#)
+            .with_body(
+                r#"{"data":{"subscriberId":"sub_x","appUserId":"user_42","transferred":false}}"#,
+            )
             .create();
 
         let core = make_core(&server.url());

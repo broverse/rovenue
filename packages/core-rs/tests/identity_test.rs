@@ -160,7 +160,10 @@ fn mark_synced_flips_persisted_synced_true() {
     mgr.set_app_user_id("user_1".into()).unwrap();
     assert!(!persisted_synced(&store));
     mgr.mark_synced("user_1").unwrap();
-    assert!(persisted_synced(&store), "mark_synced should persist synced=true");
+    assert!(
+        persisted_synced(&store),
+        "mark_synced should persist synced=true"
+    );
 }
 
 #[test]
@@ -172,7 +175,10 @@ fn mark_synced_ignores_a_stale_app_user_id() {
     mgr.set_app_user_id("user_A".into()).unwrap();
     mgr.set_app_user_id("user_B".into()).unwrap();
     mgr.mark_synced("user_A").unwrap();
-    assert!(!persisted_synced(&store), "stale id must not mark the row synced");
+    assert!(
+        !persisted_synced(&store),
+        "stale id must not mark the row synced"
+    );
     assert_eq!(
         mgr.pending_app_user_id().as_deref(),
         Some("user_B"),

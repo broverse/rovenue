@@ -36,8 +36,14 @@ fn full_identity_context_round_trip() {
     let v: Value = serde_json::from_str(&json_str).expect("parse");
 
     // Top-level camelCase keys
-    assert!(v.get("identityContext").is_some(), "expected identityContext key");
-    assert!(v.get("identity_context").is_none(), "unexpected snake_case key");
+    assert!(
+        v.get("identityContext").is_some(),
+        "expected identityContext key"
+    );
+    assert!(
+        v.get("identity_context").is_none(),
+        "unexpected snake_case key"
+    );
 
     let ic = &v["identityContext"];
     assert_eq!(ic["externalId"], "uid_123");
@@ -119,7 +125,10 @@ fn version_and_event_id_round_trip() {
 
     assert_eq!(v["version"], 1);
     assert_eq!(v["eventId"], "evt_dedupe_1");
-    assert!(v.get("event_id").is_none(), "unexpected snake_case event_id key");
+    assert!(
+        v.get("event_id").is_none(),
+        "unexpected snake_case event_id key"
+    );
 
     let decoded: EventEnvelope = serde_json::from_str(&json_str).expect("deserialise");
     assert_eq!(decoded.version, Some(1));
@@ -140,6 +149,12 @@ fn version_and_event_id_round_trip() {
     };
     let bare_v: Value =
         serde_json::from_str(&serde_json::to_string(&bare).expect("serialise")).expect("parse");
-    assert!(bare_v.get("version").is_none(), "version must be absent when None");
-    assert!(bare_v.get("eventId").is_none(), "eventId must be absent when None");
+    assert!(
+        bare_v.get("version").is_none(),
+        "version must be absent when None"
+    );
+    assert!(
+        bare_v.get("eventId").is_none(),
+        "eventId must be absent when None"
+    );
 }

@@ -28,7 +28,7 @@ fn identify_client_posts_rovenue_and_app_user_id() {
     let client = IdentifyClient::new(Arc::new(http(&server.url())));
     let res = client.identify("rov_x", "user_1").unwrap();
     m.assert();
-    assert_eq!(res.transferred, false);
+    assert!(!res.transferred);
     assert_eq!(res.subscriber_id, "sub_1");
     assert_eq!(res.app_user_id, "user_1");
 }

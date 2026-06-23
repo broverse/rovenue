@@ -92,11 +92,8 @@ mod tests {
         let buf = Arc::new(AttributeBuffer::new(Arc::clone(&store)));
         buf.set("$email", Some("a@b.com")).unwrap();
         // http would fail if called; provider returns None so it never is.
-        let dispatcher = AttributeDispatcher::new(
-            Arc::clone(&buf),
-            http_unreachable(),
-            Box::new(|| None),
-        );
+        let dispatcher =
+            AttributeDispatcher::new(Arc::clone(&buf), http_unreachable(), Box::new(|| None));
         assert_eq!(dispatcher.flush_once().unwrap(), 0);
         // queue is preserved
         assert_eq!(buf.list(100).unwrap().len(), 1);

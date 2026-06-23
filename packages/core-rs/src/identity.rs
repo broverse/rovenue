@@ -54,7 +54,9 @@ impl IdentityManager {
     /// The user scope used by the cache layer — `app_user_id` if identified, else `rovenue_id`.
     pub fn current_user_scope(&self) -> String {
         let u = self.cached.lock().expect("identity mutex poisoned");
-        u.app_user_id.clone().unwrap_or_else(|| u.rovenue_id.clone())
+        u.app_user_id
+            .clone()
+            .unwrap_or_else(|| u.rovenue_id.clone())
     }
 
     /// Optimistic-local identity set. Persists the `app_user_id` with

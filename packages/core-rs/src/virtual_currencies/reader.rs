@@ -87,7 +87,10 @@ impl VirtualCurrencyReader {
         now_ms: u64,
     ) -> RovenueResult<()> {
         let repo = self.repo();
-        let changed = repo.get_all(scope).map(|prev| &prev != balances).unwrap_or(true);
+        let changed = repo
+            .get_all(scope)
+            .map(|prev| &prev != balances)
+            .unwrap_or(true);
         repo.upsert_all(scope, balances, now_ms)?;
         if changed {
             if let Some(bus) = &self.bus {

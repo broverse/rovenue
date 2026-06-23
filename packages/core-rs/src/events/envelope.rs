@@ -6,8 +6,8 @@
 // the server's /v1/events endpoint consumes.  All optional fields
 // are omitted when absent so the wire payload stays minimal.
 
-use serde::{Deserialize, Serialize};
 use super::IdentityContext;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

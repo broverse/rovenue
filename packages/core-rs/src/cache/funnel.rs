@@ -15,7 +15,11 @@ impl<'a> FunnelRepo<'a> {
     pub fn get_or_create_install_id(&self, now_ms: u64) -> RovenueResult<String> {
         self.store.with_conn(|c| {
             let existing: Option<String> = c
-                .query_row("SELECT install_id FROM funnel_install WHERE id = 1", [], |r| r.get(0))
+                .query_row(
+                    "SELECT install_id FROM funnel_install WHERE id = 1",
+                    [],
+                    |r| r.get(0),
+                )
                 .ok();
             if let Some(id) = existing {
                 return Ok(id);
@@ -50,7 +54,11 @@ impl<'a> FunnelRepo<'a> {
                     install_id,
                     state,
                     subscriber_id,
-                    if state == "claimed" { Some(now_ms as i64) } else { None::<i64> },
+                    if state == "claimed" {
+                        Some(now_ms as i64)
+                    } else {
+                        None::<i64>
+                    },
                     now_ms as i64
                 ],
             )?;
@@ -96,7 +104,8 @@ mod tests {
         let s = store();
         let repo = FunnelRepo::new(&s);
         assert_eq!(repo.claim_state("inst_x").unwrap(), None);
-        repo.set_claim_state("inst_x", "claimed", Some("sub_1"), 5000).unwrap();
+        repo.set_claim_state("inst_x", "claimed", Some("sub_1"), 5000)
+            .unwrap();
         assert_eq!(repo.claim_state("inst_x").unwrap(), Some("claimed".into()));
     }
 
@@ -104,8 +113,10 @@ mod tests {
     fn claimed_at_ms_only_set_when_claimed() {
         let s = store();
         let repo = FunnelRepo::new(&s);
-        repo.set_claim_state("inst_p", "pending", None, 1000).unwrap();
-        repo.set_claim_state("inst_c", "claimed", Some("sub_1"), 2000).unwrap();
+        repo.set_claim_state("inst_p", "pending", None, 1000)
+            .unwrap();
+        repo.set_claim_state("inst_c", "claimed", Some("sub_1"), 2000)
+            .unwrap();
         let read = |iid: &str| -> Option<i64> {
             s.with_conn(|c| {
                 c.query_row(
@@ -124,8 +135,10 @@ mod tests {
     fn claimed_at_ms_clears_on_conflict_to_pending() {
         let s = store();
         let repo = FunnelRepo::new(&s);
-        repo.set_claim_state("inst_flip", "claimed", Some("sub_1"), 2000).unwrap();
-        repo.set_claim_state("inst_flip", "pending", None, 3000).unwrap();
+        repo.set_claim_state("inst_flip", "claimed", Some("sub_1"), 2000)
+            .unwrap();
+        repo.set_claim_state("inst_flip", "pending", None, 3000)
+            .unwrap();
         let read = |iid: &str| -> Option<i64> {
             s.with_conn(|c| {
                 c.query_row(
@@ -136,6 +149,10 @@ mod tests {
             })
             .unwrap()
         };
-        assert_eq!(read("inst_flip"), None, "claimed→pending flip must clear claimed_at_ms");
+        assert_eq!(
+            read("inst_flip"),
+            None,
+            "claimed→pending flip must clear claimed_at_ms"
+        );
     }
 }

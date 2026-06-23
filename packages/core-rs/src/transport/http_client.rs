@@ -434,16 +434,13 @@ impl HttpClient {
 
 #[cfg(test)]
 mod post_json_tests {
-    use super::*;
     use super::super::types::HttpPostRequest;
+    use super::*;
 
     #[test]
     fn post_json_skips_body_when_expect_empty_body() {
         let mut server = mockito::Server::new();
-        let m = server
-            .mock("POST", "/v1/events")
-            .with_status(202)
-            .create();
+        let m = server.mock("POST", "/v1/events").with_status(202).create();
 
         let client = HttpClient::new(server.url(), "pk_test".into()).with_max_attempts(1);
         let body = serde_json::json!({ "eventType": "x", "occurredAt": "2026-06-20T00:00:00Z" });
@@ -488,18 +485,24 @@ mod post_json_tests {
 
 #[cfg(test)]
 mod post_json_status_tests {
-    use super::*;
     use super::super::types::HttpPostRequest;
+    use super::*;
 
     #[test]
     fn returns_status_and_body_for_2xx_and_4xx() {
         let mut server = mockito::Server::new();
-        let m200 = server.mock("POST", "/ok").with_status(200)
+        let m200 = server
+            .mock("POST", "/ok")
+            .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"data":{"x":1}}"#).create();
-        let m404 = server.mock("POST", "/missing").with_status(404)
+            .with_body(r#"{"data":{"x":1}}"#)
+            .create();
+        let m404 = server
+            .mock("POST", "/missing")
+            .with_status(404)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"error":{"code":"x","message":"y"}}"#).create();
+            .with_body(r#"{"error":{"code":"x","message":"y"}}"#)
+            .create();
 
         let client = HttpClient::new(server.url(), "pk_test".into()).with_max_attempts(1);
         let body = serde_json::json!({"a":1});

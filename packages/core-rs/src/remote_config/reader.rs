@@ -444,7 +444,10 @@ mod tests {
 
         // A brand-new reader over the SAME store, pointed at a dead endpoint,
         // still resolves flags from the persisted payload.
-        let dead_http = Arc::new(HttpClient::new("http://127.0.0.1:1".into(), "pk_test".into()));
+        let dead_http = Arc::new(HttpClient::new(
+            "http://127.0.0.1:1".into(),
+            "pk_test".into(),
+        ));
         let cold = RemoteConfigReader::new(dead_http, Arc::clone(&store), identity);
         assert!(cold.bool("new_paywall", false));
         assert_eq!(cold.int("max_items", 0), 5);

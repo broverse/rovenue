@@ -54,9 +54,11 @@ impl OfferingsClient {
                 // Persist the raw response (best-effort: a cache write failure
                 // must not fail an otherwise-successful fetch).
                 if let Ok(raw) = serde_json::to_string(&body.data) {
-                    let _ =
-                        OfferingsCacheRepo::new(&self.store)
-                            .put(OFFERINGS_RESOURCE, &raw, self.clock.now_unix_ms());
+                    let _ = OfferingsCacheRepo::new(&self.store).put(
+                        OFFERINGS_RESOURCE,
+                        &raw,
+                        self.clock.now_unix_ms(),
+                    );
                 }
                 Ok(map_response(body.data))
             }

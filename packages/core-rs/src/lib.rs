@@ -28,7 +28,9 @@ pub use config::Config;
 pub use entitlements::Entitlement;
 pub use error::{RovenueError, RovenueResult};
 pub use events::{EventEnvelope, IdentityContext, EVENT_WIRE_VERSION};
-pub use funnel::{ClaimInstallParams, FunnelClaimBus, FunnelClaimListener, FunnelClaimResult, FunnelClient};
+pub use funnel::{
+    ClaimInstallParams, FunnelClaimBus, FunnelClaimListener, FunnelClaimResult, FunnelClient,
+};
 pub use identify::{IdentifyClient, IdentifyResult};
 pub use identity::User;
 pub use observer::{ChangeEvent, Observer};

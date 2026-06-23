@@ -24,8 +24,7 @@ fn migration_v8_creates_virtual_currency_and_exposure_tables() {
     // schema is migrated to LATEST on open
     let version = store
         .with_conn(|c| {
-            let v: u32 = c
-                .query_row("SELECT version FROM schema_meta", [], |r| r.get(0))?;
+            let v: u32 = c.query_row("SELECT version FROM schema_meta", [], |r| r.get(0))?;
             Ok(v)
         })
         .unwrap();

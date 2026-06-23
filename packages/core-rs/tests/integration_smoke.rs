@@ -35,10 +35,7 @@ fn current_user_has_rovenue_id_by_default() {
 fn identify_then_current_user_reflects_known_id() {
     let core = test_core();
     core.identify("user_42".into()).unwrap();
-    assert_eq!(
-        core.current_user().app_user_id.as_deref(),
-        Some("user_42")
-    );
+    assert_eq!(core.current_user().app_user_id.as_deref(), Some("user_42"));
 }
 
 struct Capture(Mutex<Vec<ChangeEvent>>);

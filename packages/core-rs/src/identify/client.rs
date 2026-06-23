@@ -36,11 +36,7 @@ impl IdentifyClient {
     /// POST `/v1/identify` linking the anonymous `rovenue_id` device to an
     /// `app_user_id`. The device key travels in the `X-Rovenue-App-User-Id`
     /// header via `user_scope`.
-    pub fn identify(
-        &self,
-        rovenue_id: &str,
-        app_user_id: &str,
-    ) -> RovenueResult<IdentifyResult> {
+    pub fn identify(&self, rovenue_id: &str, app_user_id: &str) -> RovenueResult<IdentifyResult> {
         let body = IdentifyBody {
             rovenue_id,
             app_user_id,

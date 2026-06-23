@@ -92,7 +92,8 @@ impl EntitlementReader {
         let resp = http.get_json::<ApiEnvelope<EntitlementsResponse>>(req)?;
 
         if resp.status == 304 {
-            self.last_refresh_ms.store(clock.now_unix_ms(), Ordering::Relaxed);
+            self.last_refresh_ms
+                .store(clock.now_unix_ms(), Ordering::Relaxed);
             return Ok(());
         }
 
@@ -135,7 +136,11 @@ impl EntitlementReader {
             Some(c) => c.now_unix_ms(),
             None => return,
         };
-        if !is_stale(now, self.last_refresh_ms.load(Ordering::Relaxed), staleness_ms) {
+        if !is_stale(
+            now,
+            self.last_refresh_ms.load(Ordering::Relaxed),
+            staleness_ms,
+        ) {
             return;
         }
         if self

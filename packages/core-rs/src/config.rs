@@ -76,7 +76,11 @@ impl Config {
 /// - anything else → [`RovenueError::InvalidArgument`]
 pub fn resolve_base_url(input: &str) -> RovenueResult<String> {
     let trimmed = input.trim();
-    let url = if trimmed.is_empty() { DEFAULT_BASE_URL } else { trimmed };
+    let url = if trimmed.is_empty() {
+        DEFAULT_BASE_URL
+    } else {
+        trimmed
+    };
 
     if let Some(rest) = url.strip_prefix("https://") {
         if rest.is_empty() {

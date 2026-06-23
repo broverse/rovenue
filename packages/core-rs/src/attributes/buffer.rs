@@ -50,7 +50,8 @@ mod tests {
         let rows = buf.list(100).unwrap();
         assert_eq!(rows.len(), 2);
 
-        buf.delete(&rows.iter().map(|r| r.id).collect::<Vec<_>>()).unwrap();
+        buf.delete(&rows.iter().map(|r| r.id).collect::<Vec<_>>())
+            .unwrap();
         assert_eq!(buf.list(100).unwrap().len(), 0);
     }
 

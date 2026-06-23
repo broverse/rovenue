@@ -111,7 +111,10 @@ fn serves_cache_on_network_failure() {
     assert_eq!(cached.current.as_deref(), Some("default"));
     assert_eq!(cached.offerings.len(), 2);
     assert_eq!(cached.offerings[0].identifier, "default");
-    assert_eq!(cached.offerings[0].packages[0].package_identifier, "$rov_monthly");
+    assert_eq!(
+        cached.offerings[0].packages[0].package_identifier,
+        "$rov_monthly"
+    );
     assert_eq!(cached.offerings[1].packages[0].google_product_id, None);
 }
 

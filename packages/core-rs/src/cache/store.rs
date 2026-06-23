@@ -204,11 +204,10 @@ impl CacheStore {
             return Ok(());
         }
         let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
-        let placeholders = std::iter::repeat("?")
-            .take(ids.len())
+        let placeholders = std::iter::repeat_n("?", ids.len())
             .collect::<Vec<_>>()
             .join(",");
-        let sql = format!("DELETE FROM session_events WHERE id IN ({})", placeholders);
+        let sql = format!("DELETE FROM session_events WHERE id IN ({placeholders})");
         let params: Vec<&dyn rusqlite::ToSql> =
             ids.iter().map(|i| i as &dyn rusqlite::ToSql).collect();
         guard
@@ -217,11 +216,7 @@ impl CacheStore {
         Ok(())
     }
 
-    pub fn append_attribute_mutation(
-        &self,
-        key: &str,
-        value: Option<&str>,
-    ) -> RovenueResult<()> {
+    pub fn append_attribute_mutation(&self, key: &str, value: Option<&str>) -> RovenueResult<()> {
         let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
         guard
             .execute(
@@ -270,14 +265,10 @@ impl CacheStore {
             return Ok(());
         }
         let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
-        let placeholders = std::iter::repeat("?")
-            .take(ids.len())
+        let placeholders = std::iter::repeat_n("?", ids.len())
             .collect::<Vec<_>>()
             .join(",");
-        let sql = format!(
-            "DELETE FROM attribute_mutations WHERE id IN ({})",
-            placeholders
-        );
+        let sql = format!("DELETE FROM attribute_mutations WHERE id IN ({placeholders})");
         let params: Vec<&dyn rusqlite::ToSql> =
             ids.iter().map(|i| i as &dyn rusqlite::ToSql).collect();
         guard
@@ -328,11 +319,7 @@ mod tests {
         let store = CacheStore::open_in_memory().unwrap();
         for i in 0..1005 {
             store
-                .append_session_event(
-                    "open",
-                    &format!("2026-05-28T10:00:{:02}Z", i % 60),
-                    None,
-                )
+                .append_session_event("open", &format!("2026-05-28T10:00:{:02}Z", i % 60), None)
                 .unwrap();
         }
         let rows = store.list_session_events(2000).unwrap();
@@ -347,8 +334,12 @@ mod tests {
     #[test]
     fn attribute_mutations_crud() {
         let store = CacheStore::open_in_memory().unwrap();
-        store.append_attribute_mutation("$email", Some("a@b.com")).unwrap();
-        store.append_attribute_mutation("favoriteTeam", Some("GS")).unwrap();
+        store
+            .append_attribute_mutation("$email", Some("a@b.com"))
+            .unwrap();
+        store
+            .append_attribute_mutation("favoriteTeam", Some("GS"))
+            .unwrap();
         store.append_attribute_mutation("country", None).unwrap(); // delete marker
 
         let rows = store.list_attribute_mutations(100).unwrap();

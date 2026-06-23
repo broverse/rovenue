@@ -23,9 +23,10 @@ impl FunnelClient {
         anon_id: &str,
     ) -> RovenueResult<FunnelClaimResult> {
         let body = serde_json::json!({ "token": token, "anon_id": anon_id });
-        let (status, parsed) = self
-            .http
-            .post_json_status(HttpPostRequest::new("/v1/subscribers/claim-funnel-token"), &body)?;
+        let (status, parsed) = self.http.post_json_status(
+            HttpPostRequest::new("/v1/subscribers/claim-funnel-token"),
+            &body,
+        )?;
         match status {
             200 => {
                 let data = parsed
@@ -41,7 +42,10 @@ impl FunnelClient {
                     .cloned()
                     .unwrap_or(serde_json::json!({}))
                     .to_string();
-                Ok(FunnelClaimResult { subscriber_id, funnel_answers_json })
+                Ok(FunnelClaimResult {
+                    subscriber_id,
+                    funnel_answers_json,
+                })
             }
             404 => Err(RovenueError::FunnelTokenNotFound),
             410 => Err(RovenueError::FunnelTokenExpired),
@@ -75,8 +79,12 @@ impl FunnelClient {
             .post_json_status(HttpPostRequest::new("/v1/sdk/claim-install"), &body)?;
         match status {
             200 => {
-                let token = parsed
-                    .and_then(|v| v.get("data").and_then(|d| d.get("token")).and_then(|t| t.as_str()).map(str::to_string));
+                let token = parsed.and_then(|v| {
+                    v.get("data")
+                        .and_then(|d| d.get("token"))
+                        .and_then(|t| t.as_str())
+                        .map(str::to_string)
+                });
                 match token {
                     Some(t) => Ok(Some(t)),
                     None => Err(RovenueError::Internal),
@@ -107,7 +115,9 @@ mod tests {
     use super::*;
 
     fn client(url: &str) -> FunnelClient {
-        FunnelClient::new(Arc::new(HttpClient::new(url.to_string(), "pk_test".into()).with_max_attempts(1)))
+        FunnelClient::new(Arc::new(
+            HttpClient::new(url.to_string(), "pk_test".into()).with_max_attempts(1),
+        ))
     }
 
     #[test]
@@ -117,7 +127,9 @@ mod tests {
             .with_status(200).with_header("content-type", "application/json")
             .with_body(r#"{"data":{"subscriber_id":"sub_1","entitlements":[],"funnel_answers":{"q1":"yes"}}}"#)
             .create();
-        let r = client(&server.url()).claim_funnel_token("tok", "rov_x").expect("ok");
+        let r = client(&server.url())
+            .claim_funnel_token("tok", "rov_x")
+            .expect("ok");
         assert_eq!(r.subscriber_id, "sub_1");
         assert_eq!(r.funnel_answers_json, r#"{"q1":"yes"}"#);
         m.assert();
@@ -125,15 +137,23 @@ mod tests {
 
     #[test]
     fn claim_funnel_token_maps_status_errors() {
-        let cases: &[(u16, fn(RovenueError) -> bool)] = &[
+        type StatusCheck = fn(RovenueError) -> bool;
+        let cases: &[(u16, StatusCheck)] = &[
             (404, |e| matches!(e, RovenueError::FunnelTokenNotFound)),
             (410, |e| matches!(e, RovenueError::FunnelTokenExpired)),
-            (409, |e| matches!(e, RovenueError::FunnelTokenAlreadyClaimed)),
+            (409, |e| {
+                matches!(e, RovenueError::FunnelTokenAlreadyClaimed)
+            }),
         ];
         for (code, check_fn) in cases {
             let mut server = mockito::Server::new();
-            let _m = server.mock("POST", "/v1/subscribers/claim-funnel-token").with_status((*code).into()).create();
-            let err = client(&server.url()).claim_funnel_token("tok", "rov_x").unwrap_err();
+            let _m = server
+                .mock("POST", "/v1/subscribers/claim-funnel-token")
+                .with_status((*code).into())
+                .create();
+            let err = client(&server.url())
+                .claim_funnel_token("tok", "rov_x")
+                .unwrap_err();
             assert!(check_fn(err), "status {code}");
         }
     }
@@ -141,40 +161,77 @@ mod tests {
     #[test]
     fn claim_install_returns_token_or_none() {
         let mut server = mockito::Server::new();
-        let m_ok = server.mock("POST", "/v1/sdk/claim-install").with_status(200)
+        let m_ok = server
+            .mock("POST", "/v1/sdk/claim-install")
+            .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"data":{"token":"recovered_tok"}}"#).create();
+            .with_body(r#"{"data":{"token":"recovered_tok"}}"#)
+            .create();
         let params = ClaimInstallParams {
-            platform: "android".into(), locale: "en-US".into(), timezone: "UTC".into(),
-            screen_dims: "390x844".into(), device_model: None, install_referrer: Some("rovenue_funnel_token=recovered_tok".into()),
+            platform: "android".into(),
+            locale: "en-US".into(),
+            timezone: "UTC".into(),
+            screen_dims: "390x844".into(),
+            device_model: None,
+            install_referrer: Some("rovenue_funnel_token=recovered_tok".into()),
         };
-        assert_eq!(client(&server.url()).claim_install(&params, "inst_1").unwrap(), Some("recovered_tok".into()));
+        assert_eq!(
+            client(&server.url())
+                .claim_install(&params, "inst_1")
+                .unwrap(),
+            Some("recovered_tok".into())
+        );
         m_ok.assert();
 
         let mut server2 = mockito::Server::new();
-        let _m404 = server2.mock("POST", "/v1/sdk/claim-install").with_status(404).create();
-        assert_eq!(client(&server2.url()).claim_install(&params, "inst_1").unwrap(), None);
+        let _m404 = server2
+            .mock("POST", "/v1/sdk/claim-install")
+            .with_status(404)
+            .create();
+        assert_eq!(
+            client(&server2.url())
+                .claim_install(&params, "inst_1")
+                .unwrap(),
+            None
+        );
     }
 
     #[test]
     fn claim_install_malformed_200_returns_internal_error() {
         let mut server = mockito::Server::new();
-        let _m = server.mock("POST", "/v1/sdk/claim-install").with_status(200)
+        let _m = server
+            .mock("POST", "/v1/sdk/claim-install")
+            .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"data":{}}"#).create();
+            .with_body(r#"{"data":{}}"#)
+            .create();
         let params = ClaimInstallParams {
-            platform: "ios".into(), locale: "en-US".into(), timezone: "UTC".into(),
-            screen_dims: "390x844".into(), device_model: None, install_referrer: None,
+            platform: "ios".into(),
+            locale: "en-US".into(),
+            timezone: "UTC".into(),
+            screen_dims: "390x844".into(),
+            device_model: None,
+            install_referrer: None,
         };
-        let err = client(&server.url()).claim_install(&params, "inst_m").unwrap_err();
-        assert!(matches!(err, RovenueError::Internal), "malformed 200 must be Internal error");
+        let err = client(&server.url())
+            .claim_install(&params, "inst_m")
+            .unwrap_err();
+        assert!(
+            matches!(err, RovenueError::Internal),
+            "malformed 200 must be Internal error"
+        );
     }
 
     #[test]
     fn claim_via_email_accepts_202() {
         let mut server = mockito::Server::new();
-        let m = server.mock("POST", "/v1/sdk/claim-via-email").with_status(202).create();
-        client(&server.url()).claim_via_email("a@b.com", "inst_1").expect("202 ok");
+        let m = server
+            .mock("POST", "/v1/sdk/claim-via-email")
+            .with_status(202)
+            .create();
+        client(&server.url())
+            .claim_via_email("a@b.com", "inst_1")
+            .expect("202 ok");
         m.assert();
     }
 }

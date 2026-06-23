@@ -111,9 +111,9 @@ impl ExposureTracker {
                 &body,
             );
             if res.is_ok() {
-                let _ =
-                    this.repo
-                        .mark(&scope, &experiment_id, &variant_id, clock.now_unix_ms());
+                let _ = this
+                    .repo
+                    .mark(&scope, &experiment_id, &variant_id, clock.now_unix_ms());
                 // Leave the key in `pending` — it acts as a permanent in-memory
                 // sentinel so subsequent reads never even hit SQLite.
             } else {

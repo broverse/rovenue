@@ -19,8 +19,7 @@ impl<'a> RemoteConfigCacheRepo<'a> {
 
     pub fn get(&self, resource: &str) -> RovenueResult<Option<String>> {
         self.store.with_conn(|c| {
-            let mut stmt =
-                c.prepare("SELECT body FROM remote_config_cache WHERE resource = ?1")?;
+            let mut stmt = c.prepare("SELECT body FROM remote_config_cache WHERE resource = ?1")?;
             let mut rows = stmt.query(params![resource])?;
             if let Some(r) = rows.next()? {
                 Ok(Some(r.get::<_, String>(0)?))
