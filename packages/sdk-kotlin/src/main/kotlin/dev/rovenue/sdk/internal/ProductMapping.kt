@@ -90,3 +90,35 @@ fun packageType(slot: String): PackageType = when (slot) {
     "\$rov_lifetime" -> PackageType.LIFETIME
     else -> PackageType.CUSTOM
 }
+
+data class PlayOfferToken(
+    val basePlanId: String,
+    val offerId: String?,            // null/"" = base plan (no offer)
+    val offerToken: String,
+    val recurringPriceMicros: Long?, // INFINITE_RECURRING phase price; null if none
+)
+
+/**
+ * Choose which Play offerToken to redeem.
+ * - requestedBasePlanId != null → match basePlanId AND offerId (null/"" normalized as "base plan").
+ *     No match → null (caller surfaces OfferNotFound).
+ * - requestedBasePlanId == null → the base-plan offer (offerId null/"") with the lowest
+ *     recurringPriceMicros (mirrors StoreProduct.defaultOption); else first base plan; else first offer.
+ */
+fun selectOfferToken(
+    offers: List<PlayOfferToken>,
+    requestedBasePlanId: String?,
+    requestedOfferId: String?,
+): String? {
+    if (offers.isEmpty()) return null
+    fun norm(s: String?): String? = if (s.isNullOrEmpty()) null else s
+    if (requestedBasePlanId != null) {
+        val wantOffer = norm(requestedOfferId)
+        return offers.firstOrNull { it.basePlanId == requestedBasePlanId && norm(it.offerId) == wantOffer }?.offerToken
+    }
+    val basePlans = offers.filter { norm(it.offerId) == null }
+    val chosen = basePlans.filter { it.recurringPriceMicros != null }.minByOrNull { it.recurringPriceMicros!! }
+        ?: basePlans.firstOrNull()
+        ?: offers.firstOrNull()
+    return chosen?.offerToken
+}
