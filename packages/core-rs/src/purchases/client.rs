@@ -111,10 +111,13 @@ mod tests {
     }
 
     #[test]
-    fn get_apple_offer_signature_omits_app_account_token_when_none() {
+    fn get_apple_offer_signature_includes_app_account_token_when_some() {
         let mut server = mockito::Server::new();
         let _m = server
             .mock("POST", "/v1/purchases/apple-offer-signature")
+            .match_body(mockito::Matcher::JsonString(
+                r#"{"productId":"prod_id","offerId":"offer_id","appAccountToken":"tok-abc"}"#.into(),
+            ))
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(
@@ -128,12 +131,40 @@ mod tests {
                 .with_request_timeout(Duration::from_millis(500)),
         );
         let client = PurchasesClient::new(http);
-        // Pass Some app_account_token to verify it is included
         let result = client
             .get_apple_offer_signature("prod_id", "offer_id", Some("tok-abc"))
             .expect("signature ok");
 
         assert_eq!(result.key_identifier, "K2");
         assert_eq!(result.timestamp, 456);
+    }
+
+    #[test]
+    fn get_apple_offer_signature_omits_app_account_token_when_none() {
+        let mut server = mockito::Server::new();
+        let _m = server
+            .mock("POST", "/v1/purchases/apple-offer-signature")
+            .match_body(mockito::Matcher::JsonString(
+                r#"{"productId":"prod_id","offerId":"offer_id"}"#.into(),
+            ))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"data":{"keyIdentifier":"K3","nonce":"n3","signature":"s3","timestamp":789}}"#,
+            )
+            .create();
+
+        let http = Arc::new(
+            HttpClient::new(server.url(), "pk_test".into())
+                .with_max_attempts(1)
+                .with_request_timeout(Duration::from_millis(500)),
+        );
+        let client = PurchasesClient::new(http);
+        let result = client
+            .get_apple_offer_signature("prod_id", "offer_id", None)
+            .expect("signature ok");
+
+        assert_eq!(result.key_identifier, "K3");
+        assert_eq!(result.timestamp, 789);
     }
 }
