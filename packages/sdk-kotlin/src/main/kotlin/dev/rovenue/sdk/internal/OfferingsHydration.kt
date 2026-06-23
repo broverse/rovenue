@@ -99,7 +99,7 @@ private fun mapProduct(
         "$prefix%.2f".format(d)
     }
 
-    val intro = defaultOption?.introPhase ?: defaultOption?.freePhase
+    val intro = defaultOption?.freePhase ?: defaultOption?.introPhase
     val introPrice = intro?.let {
         IntroPrice(
             price = it.price,

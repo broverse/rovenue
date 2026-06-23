@@ -162,7 +162,7 @@ class PlayBillingStore(private val context: Context) : PlayStore {
             priceMicros = offer.priceAmountMicros,
             formattedPrice = offer.formattedPrice,
             currencyCode = offer.priceCurrencyCode,
-            billingPeriodIso = "P1M", // one-time purchases have no period; use a safe default
+            billingPeriodIso = "P0D", // one-time purchases have no period; explicit zero period
             billingCycleCount = 1,
             recurrenceMode = 3, // NON_RECURRING
         )

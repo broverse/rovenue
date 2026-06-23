@@ -8,6 +8,7 @@ import android.app.Activity
 import dev.rovenue.sdk.generated.CoreOffering
 import dev.rovenue.sdk.generated.CoreOfferingProduct
 import dev.rovenue.sdk.generated.CoreOfferings
+import dev.rovenue.sdk.PaymentMode
 import dev.rovenue.sdk.internal.PendingPurchase
 import dev.rovenue.sdk.internal.PlayOfferInput
 import dev.rovenue.sdk.internal.PlayPhaseInput
@@ -273,6 +274,9 @@ class OfferingsHydrationTest {
         assertNotNull(product.priceString)
         assertNotNull(product.pricePerYear)
         assertEquals(1, product.subscriptionOptions?.size)
+        assertEquals(PaymentMode.FREE_TRIAL, product.introPrice?.paymentMode)
+        assertEquals(true, product.isEligibleForIntroOffer)
+        assertEquals("P1M", product.subscriptionPeriod?.iso8601)
     }
 
     @Test
