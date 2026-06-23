@@ -6,11 +6,103 @@ description: The RovenueError family and how each surfaces per platform.
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { Callout } from 'fumadocs-ui/components/callout';
 
-Every Rovenue SDK error originates from the same Rust-core `RovenueError` enum and is mapped to an idiomatic type on each platform:
+Every Rovenue SDK error originates from the same Rust-core `RovenueError` type and is mapped to an idiomatic type on each platform:
 
-- **React Native** — thrown as a JS class extending `Error` (e.g. `NotConfiguredError`). Use `instanceof` to narrow.
-- **Swift** — thrown as a Swift enum `Rovenue.Error` with associated cases (e.g. `.notConfigured`). Catch with `catch Rovenue.Error.xxx` or `catch let e as Rovenue.Error`.
-- **Kotlin** — thrown as a sealed class hierarchy under `RovenueException` (e.g. `RovenueException.NotConfigured`). Catch by subclass or the sealed base.
+- **React Native** — thrown as `RovenueError` (a class extending `Error`) with a `kind` discriminant. Use `e.kind === "..."` to branch.
+- **Swift** — thrown as `RovenueError` (a struct conforming to `LocalizedError`) with a `kind: ErrorKind` discriminant. Catch with `catch let e as RovenueError`.
+- **Kotlin** — thrown as `RovenueException` (sealed class) with a `kind: ErrorKind` discriminant. Catch by `kind` or the sealed base.
+
+---
+
+## Migrating from 0.15.x → 0.16.0
+
+<Callout type="warn">
+**Breaking change in 0.16.0** — the per-type error subclasses and Swift `Rovenue.Error` enum cases are replaced by a single `RovenueError`/`RovenueException` with a `kind` string discriminant, and `.pending` purchases are now a non-throwing `Deferred` outcome.
+</Callout>
+
+### React Native: `instanceof` → `e.kind`
+
+```ts
+// Before (0.15.x)
+import { InsufficientCreditsError, NetworkUnavailableError } from '@rovenue/react-native-sdk';
+try {
+  await Rovenue.purchase(pkg);
+} catch (e) {
+  if (e instanceof InsufficientCreditsError) { /* … */ }
+  if (e instanceof NetworkUnavailableError) { /* … */ }
+}
+
+// After (0.16.0)
+import { RovenueError } from '@rovenue/react-native-sdk';
+try {
+  const result = await Rovenue.purchase(pkg);
+  if (result.isDeferred) {
+    // Ask-to-Buy / parental controls — not an error, poll or wait for the
+    // PURCHASES_UPDATED listener before granting entitlements.
+    showToast('Your purchase is awaiting approval.');
+    return;
+  }
+} catch (e) {
+  if (e instanceof RovenueError) {
+    if (e.kind === 'InsufficientCredits') { /* … */ }
+    if (e.kind === 'NetworkUnavailable') { /* … */ }
+  }
+}
+```
+
+### Swift: `Rovenue.Error` enum → `RovenueError` struct
+
+```swift
+// Before (0.15.x)
+do {
+  try await Rovenue.shared.purchase(pkg)
+} catch Rovenue.Error.purchasePending { showToast("Awaiting approval.") }
+  catch Rovenue.Error.insufficientCredits { /* … */ }
+
+// After (0.16.0)
+do {
+  let result = try await Rovenue.shared.purchase(pkg)
+  if result.isDeferred { showToast("Awaiting approval."); return }
+} catch let e as RovenueError {
+  switch e.kind {
+  case .insufficientCredits: /* … */
+  default: throw e
+  }
+}
+```
+
+### Kotlin: standalone exceptions → `RovenueException.kind`
+
+```kotlin
+// Before (0.15.x)
+try {
+  Rovenue.shared.purchase(activity, pkg)
+} catch (e: PurchasePendingException) { showToast("Awaiting approval.") }
+  catch (e: PurchaseCancelledException) { /* user cancelled */ }
+
+// After (0.16.0)
+val outcome = Rovenue.shared.purchase(activity, pkg)
+if (outcome.isDeferred) { showToast("Awaiting approval."); return }
+// Errors:
+try {
+  Rovenue.shared.purchase(activity, pkg)
+} catch (e: RovenueException) {
+  when (e.kind) {
+    ErrorKind.PURCHASE_CANCELED -> { /* user cancelled — no action */ }
+    else -> throw e
+  }
+}
+```
+
+### Handling the Deferred purchase state
+
+`purchase()` no longer throws for Ask-to-Buy / parental-control holds. Instead, it returns a `StorePurchaseOutcome` with `isDeferred = true`. You should:
+
+1. Show a friendly message (e.g. "Your purchase is awaiting approval from your family organizer.").
+2. Do **not** grant entitlements — entitlements are only granted after the purchase completes asynchronously.
+3. Listen for the `PURCHASES_UPDATED` notification (RN: `Rovenue.addPurchasesUpdatedListener`; Swift: `RovenueDelegate.purchasesDidUpdate`; Kotlin: `PurchasesUpdatedListener`) to know when the deferred purchase resolves.
+
+---
 
 ---
 

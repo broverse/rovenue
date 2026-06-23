@@ -140,9 +140,15 @@ mod tests {
     fn claim_funnel_token_maps_status_errors() {
         type StatusCheck = fn(RovenueError) -> bool;
         let cases: &[(u16, StatusCheck)] = &[
-            (404, |e: RovenueError| e.kind == ErrorKind::FunnelTokenNotFound),
-            (410, |e: RovenueError| e.kind == ErrorKind::FunnelTokenExpired),
-            (409, |e: RovenueError| e.kind == ErrorKind::FunnelTokenAlreadyClaimed),
+            (404, |e: RovenueError| {
+                e.kind == ErrorKind::FunnelTokenNotFound
+            }),
+            (410, |e: RovenueError| {
+                e.kind == ErrorKind::FunnelTokenExpired
+            }),
+            (409, |e: RovenueError| {
+                e.kind == ErrorKind::FunnelTokenAlreadyClaimed
+            }),
         ];
         for (code, check_fn) in cases {
             let mut server = mockito::Server::new();

@@ -1,7 +1,9 @@
-use rovenue::transport::http_client::error_from_status;
 use rovenue::error::ErrorKind;
+use rovenue::transport::http_client::error_from_status;
 
-fn body() -> &'static str { r#"{"error":{"code":"BYOK_NOT_ALLOWED","message":"byok off"}}"# }
+fn body() -> &'static str {
+    r#"{"error":{"code":"BYOK_NOT_ALLOWED","message":"byok off"}}"#
+}
 
 #[test]
 fn maps_status_codes_to_kinds() {
@@ -18,7 +20,11 @@ fn maps_status_codes_to_kinds() {
         (503, ErrorKind::ServerError),
     ];
     for (status, kind) in cases {
-        assert_eq!(error_from_status(status, body()).kind, kind, "status {status}");
+        assert_eq!(
+            error_from_status(status, body()).kind,
+            kind,
+            "status {status}"
+        );
     }
 }
 

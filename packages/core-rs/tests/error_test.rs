@@ -28,7 +28,10 @@ fn internal_displays() {
 
 #[test]
 fn network_unavailable_displays() {
-    assert_eq!(displays(ErrorKind::NetworkUnavailable), "network unavailable");
+    assert_eq!(
+        displays(ErrorKind::NetworkUnavailable),
+        "network unavailable"
+    );
 }
 
 #[test]
@@ -48,7 +51,10 @@ fn storage_displays() {
 
 #[test]
 fn insufficient_credits_displays() {
-    assert_eq!(displays(ErrorKind::InsufficientCredits), "insufficient credits");
+    assert_eq!(
+        displays(ErrorKind::InsufficientCredits),
+        "insufficient credits"
+    );
 }
 
 #[test]

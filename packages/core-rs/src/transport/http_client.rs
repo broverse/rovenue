@@ -15,8 +15,8 @@ pub use super::types::HttpRequest;
 /// Map an HTTP error status + response body to a [`RovenueError`], preserving
 /// the backend `{"error":{"code","message"}}` envelope when present.
 pub fn error_from_status(status: u16, body: &str) -> RovenueError {
-    use crate::error::ErrorKind;
     use super::api::ApiErrorBody;
+    use crate::error::ErrorKind;
     let kind = match status {
         401 => ErrorKind::InvalidApiKey,
         402 => ErrorKind::InsufficientCredits,
@@ -30,7 +30,9 @@ pub fn error_from_status(status: u16, body: &str) -> RovenueError {
         _ => ErrorKind::Internal,
     };
     match serde_json::from_str::<ApiErrorBody>(body) {
-        Ok(parsed) => RovenueError::http(kind, status, Some(parsed.error.code), parsed.error.message),
+        Ok(parsed) => {
+            RovenueError::http(kind, status, Some(parsed.error.code), parsed.error.message)
+        }
         Err(_) => RovenueError::http(kind, status, None, String::new()),
     }
 }

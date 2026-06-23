@@ -58,7 +58,8 @@ impl CacheStore {
         for (idx, sql) in MIGRATIONS.iter().enumerate() {
             let target = idx as u32 + 1;
             if current < target {
-                conn.execute_batch(sql).map_err(|_| RovenueError::Storage())?;
+                conn.execute_batch(sql)
+                    .map_err(|_| RovenueError::Storage())?;
             }
         }
         Ok(())

@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 use rovenue::cache::identity::IdentityRepo;
 use rovenue::cache::CacheStore;
 use rovenue::identity::IdentityManager;
-use rovenue::ErrorKind;
 use rovenue::observer::{ChangeEvent, Observer, ObserverBus};
 use rovenue::time::SystemClock;
+use rovenue::ErrorKind;
 
 struct Capture(Mutex<Vec<ChangeEvent>>);
 impl Observer for Capture {

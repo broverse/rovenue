@@ -2,23 +2,46 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
     // network / transport
-    NetworkUnavailable, Timeout, RateLimited, ServerError,
+    NetworkUnavailable,
+    Timeout,
+    RateLimited,
+    ServerError,
     // auth / request
-    InvalidApiKey, Forbidden, NotFound, InvalidRequest, Conflict, InvalidArgument,
+    InvalidApiKey,
+    Forbidden,
+    NotFound,
+    InvalidRequest,
+    Conflict,
+    InvalidArgument,
     // domain
-    InsufficientCredits, FunnelTokenNotFound, FunnelTokenExpired, FunnelTokenAlreadyClaimed,
+    InsufficientCredits,
+    FunnelTokenNotFound,
+    FunnelTokenExpired,
+    FunnelTokenAlreadyClaimed,
     // store
-    PurchaseCanceled, ProductNotAvailable, AlreadyOwned, PaymentDeclined,
-    StoreServiceUnavailable, Ineligible, ReceiptInvalid, StoreProblem,
+    PurchaseCanceled,
+    ProductNotAvailable,
+    AlreadyOwned,
+    PaymentDeclined,
+    StoreServiceUnavailable,
+    Ineligible,
+    ReceiptInvalid,
+    StoreProblem,
     // other
-    Storage, Internal,
+    Storage,
+    Internal,
 }
 
 impl ErrorKind {
     pub fn is_retryable(&self) -> bool {
-        matches!(self,
-            ErrorKind::NetworkUnavailable | ErrorKind::Timeout | ErrorKind::RateLimited
-            | ErrorKind::ServerError | ErrorKind::StoreServiceUnavailable)
+        matches!(
+            self,
+            ErrorKind::NetworkUnavailable
+                | ErrorKind::Timeout
+                | ErrorKind::RateLimited
+                | ErrorKind::ServerError
+                | ErrorKind::StoreServiceUnavailable
+        )
     }
 
     /// Default English message used when the backend supplies none.
@@ -65,14 +88,33 @@ pub struct RovenueError {
 impl RovenueError {
     /// Construct from a kind alone (network/store/internal paths).
     pub fn kind(kind: ErrorKind) -> Self {
-        Self { kind, message: kind.default_message().to_string(),
-               server_code: None, http_status: None, retryable: kind.is_retryable() }
+        Self {
+            kind,
+            message: kind.default_message().to_string(),
+            server_code: None,
+            http_status: None,
+            retryable: kind.is_retryable(),
+        }
     }
     /// Construct from an HTTP error, preserving the backend code/message.
-    pub fn http(kind: ErrorKind, status: u16,
-                server_code: Option<String>, message: String) -> Self {
-        let message = if message.is_empty() { kind.default_message().to_string() } else { message };
-        Self { kind, message, server_code, http_status: Some(status), retryable: kind.is_retryable() }
+    pub fn http(
+        kind: ErrorKind,
+        status: u16,
+        server_code: Option<String>,
+        message: String,
+    ) -> Self {
+        let message = if message.is_empty() {
+            kind.default_message().to_string()
+        } else {
+            message
+        };
+        Self {
+            kind,
+            message,
+            server_code,
+            http_status: Some(status),
+            retryable: kind.is_retryable(),
+        }
     }
 }
 
@@ -82,29 +124,53 @@ impl RovenueError {
     // so hundreds of call sites compile unchanged while Task 2+ migrates them
     // incrementally. `#[allow(non_snake_case)]` is scoped to this impl block only.
     #[allow(non_snake_case)]
-    pub fn Internal() -> Self { Self::kind(ErrorKind::Internal) }
+    pub fn Internal() -> Self {
+        Self::kind(ErrorKind::Internal)
+    }
     #[allow(non_snake_case)]
-    pub fn NetworkUnavailable() -> Self { Self::kind(ErrorKind::NetworkUnavailable) }
+    pub fn NetworkUnavailable() -> Self {
+        Self::kind(ErrorKind::NetworkUnavailable)
+    }
     #[allow(non_snake_case)]
-    pub fn ServerError() -> Self { Self::kind(ErrorKind::ServerError) }
+    pub fn ServerError() -> Self {
+        Self::kind(ErrorKind::ServerError)
+    }
     #[allow(non_snake_case)]
-    pub fn RateLimited() -> Self { Self::kind(ErrorKind::RateLimited) }
+    pub fn RateLimited() -> Self {
+        Self::kind(ErrorKind::RateLimited)
+    }
     #[allow(non_snake_case)]
-    pub fn InvalidApiKey() -> Self { Self::kind(ErrorKind::InvalidApiKey) }
+    pub fn InvalidApiKey() -> Self {
+        Self::kind(ErrorKind::InvalidApiKey)
+    }
     #[allow(non_snake_case)]
-    pub fn Timeout() -> Self { Self::kind(ErrorKind::Timeout) }
+    pub fn Timeout() -> Self {
+        Self::kind(ErrorKind::Timeout)
+    }
     #[allow(non_snake_case)]
-    pub fn InsufficientCredits() -> Self { Self::kind(ErrorKind::InsufficientCredits) }
+    pub fn InsufficientCredits() -> Self {
+        Self::kind(ErrorKind::InsufficientCredits)
+    }
     #[allow(non_snake_case)]
-    pub fn Storage() -> Self { Self::kind(ErrorKind::Storage) }
+    pub fn Storage() -> Self {
+        Self::kind(ErrorKind::Storage)
+    }
     #[allow(non_snake_case)]
-    pub fn InvalidArgument() -> Self { Self::kind(ErrorKind::InvalidArgument) }
+    pub fn InvalidArgument() -> Self {
+        Self::kind(ErrorKind::InvalidArgument)
+    }
     #[allow(non_snake_case)]
-    pub fn FunnelTokenNotFound() -> Self { Self::kind(ErrorKind::FunnelTokenNotFound) }
+    pub fn FunnelTokenNotFound() -> Self {
+        Self::kind(ErrorKind::FunnelTokenNotFound)
+    }
     #[allow(non_snake_case)]
-    pub fn FunnelTokenExpired() -> Self { Self::kind(ErrorKind::FunnelTokenExpired) }
+    pub fn FunnelTokenExpired() -> Self {
+        Self::kind(ErrorKind::FunnelTokenExpired)
+    }
     #[allow(non_snake_case)]
-    pub fn FunnelTokenAlreadyClaimed() -> Self { Self::kind(ErrorKind::FunnelTokenAlreadyClaimed) }
+    pub fn FunnelTokenAlreadyClaimed() -> Self {
+        Self::kind(ErrorKind::FunnelTokenAlreadyClaimed)
+    }
 }
 
 impl std::fmt::Display for RovenueError {
@@ -172,20 +238,35 @@ mod tests {
 
     #[test]
     fn retryable_kinds_are_classified() {
-        for k in [ErrorKind::NetworkUnavailable, ErrorKind::Timeout, ErrorKind::RateLimited,
-                  ErrorKind::ServerError, ErrorKind::StoreServiceUnavailable] {
+        for k in [
+            ErrorKind::NetworkUnavailable,
+            ErrorKind::Timeout,
+            ErrorKind::RateLimited,
+            ErrorKind::ServerError,
+            ErrorKind::StoreServiceUnavailable,
+        ] {
             assert!(k.is_retryable(), "{k:?} should be retryable");
         }
-        for k in [ErrorKind::InvalidApiKey, ErrorKind::Forbidden, ErrorKind::NotFound,
-                  ErrorKind::InvalidRequest, ErrorKind::InsufficientCredits, ErrorKind::Internal] {
+        for k in [
+            ErrorKind::InvalidApiKey,
+            ErrorKind::Forbidden,
+            ErrorKind::NotFound,
+            ErrorKind::InvalidRequest,
+            ErrorKind::InsufficientCredits,
+            ErrorKind::Internal,
+        ] {
             assert!(!k.is_retryable(), "{k:?} should NOT be retryable");
         }
     }
 
     #[test]
     fn http_constructor_carries_fields() {
-        let e = RovenueError::http(ErrorKind::Forbidden, 403,
-            Some("FORBIDDEN".into()), "no access".into());
+        let e = RovenueError::http(
+            ErrorKind::Forbidden,
+            403,
+            Some("FORBIDDEN".into()),
+            "no access".into(),
+        );
         assert_eq!(e.kind, ErrorKind::Forbidden);
         assert_eq!(e.http_status, Some(403));
         assert_eq!(e.server_code.as_deref(), Some("FORBIDDEN"));
