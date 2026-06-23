@@ -89,7 +89,12 @@ publishing {
             // The android `release` component only exists after evaluation.
             afterEvaluate { from(components["release"]) }
             groupId = project.group.toString()
-            artifactId = "rovenue-sdk"
+            // Coordinate MUST be `dev.rovenue:sdk` — that's what the RN Android
+            // module (android/build.gradle) and the Expo config plugin
+            // (sdk-rn/plugin/withRovenueAndroid.ts) inject as
+            // `implementation("dev.rovenue:sdk:<v>")`. Any other artifactId is
+            // unresolvable for those consumers.
+            artifactId = "sdk"
             version = project.version.toString()
             pom {
                 name.set("Rovenue Android SDK")
