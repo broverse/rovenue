@@ -1,92 +1,70 @@
-use rovenue::error::RovenueError;
+use rovenue::{ErrorKind, RovenueError};
 
-#[test]
-fn not_configured_displays() {
-    assert_eq!(format!("{}", RovenueError::NotConfigured), "not configured");
+/// Display delegates to the carried `message`, which `RovenueError::kind`
+/// seeds from `ErrorKind::default_message`.
+fn displays(kind: ErrorKind) -> String {
+    format!("{}", RovenueError::kind(kind))
 }
 
 #[test]
 fn invalid_api_key_displays() {
-    assert_eq!(
-        format!("{}", RovenueError::InvalidApiKey),
-        "invalid api key"
-    );
+    assert_eq!(displays(ErrorKind::InvalidApiKey), "invalid api key");
 }
 
 #[test]
 fn invalid_argument_displays() {
-    assert_eq!(
-        format!("{}", RovenueError::InvalidArgument),
-        "invalid argument"
-    );
+    assert_eq!(displays(ErrorKind::InvalidArgument), "invalid argument");
 }
 
 #[test]
 fn server_error_displays() {
-    assert_eq!(format!("{}", RovenueError::ServerError), "server error");
+    assert_eq!(displays(ErrorKind::ServerError), "server error");
 }
 
 #[test]
 fn internal_displays() {
-    assert_eq!(format!("{}", RovenueError::Internal), "internal error");
+    assert_eq!(displays(ErrorKind::Internal), "internal error");
 }
 
 #[test]
 fn network_unavailable_displays() {
-    assert_eq!(
-        format!("{}", RovenueError::NetworkUnavailable),
-        "network unavailable"
-    );
+    assert_eq!(displays(ErrorKind::NetworkUnavailable), "network unavailable");
 }
 
 #[test]
 fn timeout_displays() {
-    assert_eq!(format!("{}", RovenueError::Timeout), "timeout");
+    assert_eq!(displays(ErrorKind::Timeout), "request timed out");
 }
 
 #[test]
 fn rate_limited_displays() {
-    assert_eq!(format!("{}", RovenueError::RateLimited), "rate limited");
+    assert_eq!(displays(ErrorKind::RateLimited), "rate limited");
 }
 
 #[test]
 fn storage_displays() {
-    assert_eq!(format!("{}", RovenueError::Storage), "storage error");
-}
-
-#[test]
-fn user_not_found_displays() {
-    assert_eq!(format!("{}", RovenueError::UserNotFound), "user not found");
+    assert_eq!(displays(ErrorKind::Storage), "storage error");
 }
 
 #[test]
 fn insufficient_credits_displays() {
-    assert_eq!(
-        format!("{}", RovenueError::InsufficientCredits),
-        "insufficient credits"
-    );
-}
-
-#[test]
-fn entitlement_inactive_displays() {
-    assert_eq!(
-        format!("{}", RovenueError::EntitlementInactive),
-        "entitlement inactive"
-    );
-}
-
-#[test]
-fn duplicate_purchase_displays() {
-    assert_eq!(
-        format!("{}", RovenueError::DuplicatePurchase),
-        "duplicate purchase"
-    );
+    assert_eq!(displays(ErrorKind::InsufficientCredits), "insufficient credits");
 }
 
 #[test]
 fn receipt_invalid_displays() {
-    assert_eq!(
-        format!("{}", RovenueError::ReceiptInvalid),
-        "receipt invalid"
+    assert_eq!(displays(ErrorKind::ReceiptInvalid), "receipt invalid");
+}
+
+#[test]
+fn http_constructor_overrides_message_but_keeps_kind() {
+    let e = RovenueError::http(
+        ErrorKind::Forbidden,
+        403,
+        Some("FORBIDDEN".into()),
+        "no access".into(),
     );
+    assert_eq!(format!("{e}"), "no access");
+    assert_eq!(e.kind, ErrorKind::Forbidden);
+    assert_eq!(e.http_status, Some(403));
 }

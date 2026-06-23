@@ -103,7 +103,7 @@ fn forbidden_is_fatal_no_retry() {
             HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"),
         )
         .unwrap_err();
-    assert!(matches!(err, rovenue::RovenueError::ServerError));
+    assert_eq!(err.kind, rovenue::ErrorKind::ServerError);
     m.assert();
 }
 
@@ -152,7 +152,7 @@ fn rate_limited_exceeds_max_wait_surfaces_error() {
             HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"),
         )
         .unwrap_err();
-    assert!(matches!(err, rovenue::RovenueError::RateLimited));
+    assert_eq!(err.kind, rovenue::ErrorKind::RateLimited);
     m.assert();
 }
 
@@ -174,7 +174,7 @@ fn rate_limited_budget_exhausted_surfaces_error() {
             HttpRequest::new("/v1/me/entitlements").user_scope("anon_123"),
         )
         .unwrap_err();
-    assert!(matches!(err, rovenue::RovenueError::RateLimited));
+    assert_eq!(err.kind, rovenue::ErrorKind::RateLimited);
     m.assert();
 }
 

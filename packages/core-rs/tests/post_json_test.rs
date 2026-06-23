@@ -95,7 +95,7 @@ fn post_json_422_idempotency_conflict_maps_to_internal() {
             &Body { amount: 5 },
         )
         .unwrap_err();
-    assert!(matches!(err, rovenue::RovenueError::Internal));
+    assert_eq!(err.kind, rovenue::ErrorKind::Internal);
     m.assert();
 }
 

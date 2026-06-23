@@ -2,25 +2,22 @@ namespace librovenue {
     string sdk_version();
 };
 
+// Normalized error category — the stable discriminant the façades switch on.
+enum ErrorKind {
+    "NetworkUnavailable", "Timeout", "RateLimited", "ServerError",
+    "InvalidApiKey", "Forbidden", "NotFound", "InvalidRequest", "Conflict", "InvalidArgument",
+    "InsufficientCredits", "FunnelTokenNotFound", "FunnelTokenExpired", "FunnelTokenAlreadyClaimed",
+    "PurchaseCanceled", "ProductNotAvailable", "AlreadyOwned", "PaymentDeclined",
+    "StoreServiceUnavailable", "Ineligible", "ReceiptInvalid", "StoreProblem",
+    "Storage", "Internal",
+};
+
+// Rich error carrying the full normalized shape across the FFI. The ergonomic
+// `RovenueError` struct lives Rust-internal; this is its FFI projection
+// (single `Generic` variant) that the Swift/Kotlin façades consume.
 [Error]
-enum RovenueError {
-    "NotConfigured",
-    "InvalidApiKey",
-    "InvalidArgument",
-    "ServerError",
-    "NetworkUnavailable",
-    "Timeout",
-    "RateLimited",
-    "Storage",
-    "UserNotFound",
-    "InsufficientCredits",
-    "EntitlementInactive",
-    "DuplicatePurchase",
-    "ReceiptInvalid",
-    "FunnelTokenNotFound",
-    "FunnelTokenExpired",
-    "FunnelTokenAlreadyClaimed",
-    "Internal",
+interface RovenueErrorFfi {
+    Generic(ErrorKind kind, string message, string? server_code, u16? http_status, boolean retryable);
 };
 
 dictionary Config {
@@ -116,40 +113,40 @@ callback interface FunnelClaimListener {
 };
 
 interface RovenueCore {
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     constructor(Config config);
 
     string get_version();
 
     User current_user();
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     void identify(string app_user_id);
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     void log_out();
 
     Entitlement? entitlement(string id);
     sequence<Entitlement> entitlements_all();
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     void refresh_entitlements();
 
     record<string, i64> virtual_currency_balances();
 
     i64 virtual_currency(string code);
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     void refresh_virtual_currencies();
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     ReceiptResult post_apple_receipt(
         string receipt,
         string product_id,
         string? app_account_token
     );
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     ReceiptResult post_google_receipt(
         string receipt,
         string product_id,
@@ -157,10 +154,10 @@ interface RovenueCore {
         string? obfuscated_profile_id
     );
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     CoreOfferings get_offerings();
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     void refresh_remote_config();
 
     boolean remote_config_bool(string key, boolean fallback);
@@ -174,39 +171,39 @@ interface RovenueCore {
     ExperimentAssignment? experiment(string key);
     sequence<ExperimentAssignment> experiments_all();
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     void record_session_event(
         SessionEventKind kind,
         string occurred_at,
         u32? duration_ms
     );
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     u32 flush_session_events();
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     void track(string envelope_json);
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     void set_attributes(record<DOMString, string?> attributes);
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     u32 flush_attributes();
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     string get_or_create_app_account_token();
 
     void register_observer(Observer obs);
     void set_foreground(boolean foreground);
     void shutdown();
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     FunnelClaimResult claim_funnel_token(string token);
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     FunnelClaimResult? claim_install(ClaimInstallParams params);
 
-    [Throws=RovenueError]
+    [Throws=RovenueErrorFfi]
     void claim_via_email(string email);
 
     void register_funnel_claim_listener(FunnelClaimListener listener);

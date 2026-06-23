@@ -103,6 +103,52 @@ impl std::error::Error for RovenueError {}
 
 pub type RovenueResult<T> = std::result::Result<T, RovenueError>;
 
+// ── FFI projection ──────────────────────────────────────────────────────────
+//
+// uniffi 0.25 (UDL mode) requires the thrown error to be a Rust *enum* whose
+// variant carries the fields declared in `[Error] interface RovenueErrorFfi`.
+// We keep the ergonomic `RovenueError` struct for all internal Rust use (field
+// access `e.kind`, `e.http_status`, …) and project it onto this single-variant
+// rich enum at the FFI boundary. uniffi's generated scaffolding appends
+// `.map_err(Into::into)` to every `[Throws]` method in UDL mode, so the
+// `From<RovenueError>` impl below is the only wiring needed — the `RovenueCore`
+// methods continue to return `RovenueResult<T>` unchanged.
+//
+// The generated Swift `RovenueErrorFfi` / Kotlin `RovenueErrorFfiException`
+// surface the `.Generic` case carrying kind/message/serverCode/httpStatus/
+// retryable, which the façade tasks (5–7) consume.
+#[derive(Debug, Clone)]
+pub enum RovenueErrorFfi {
+    Generic {
+        kind: ErrorKind,
+        message: String,
+        server_code: Option<String>,
+        http_status: Option<u16>,
+        retryable: bool,
+    },
+}
+
+impl From<RovenueError> for RovenueErrorFfi {
+    fn from(e: RovenueError) -> Self {
+        RovenueErrorFfi::Generic {
+            kind: e.kind,
+            message: e.message,
+            server_code: e.server_code,
+            http_status: e.http_status,
+            retryable: e.retryable,
+        }
+    }
+}
+
+impl std::fmt::Display for RovenueErrorFfi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let RovenueErrorFfi::Generic { message, .. } = self;
+        write!(f, "{message}")
+    }
+}
+
+impl std::error::Error for RovenueErrorFfi {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

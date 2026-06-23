@@ -1,10 +1,10 @@
 use rovenue::config::{resolve_base_url, Config, DEFAULT_BASE_URL};
-use rovenue::RovenueError;
+use rovenue::ErrorKind;
 
 #[test]
 fn config_validates_non_empty_api_key() {
     let err = Config::new("".into(), "https://api.rovenue.io".into()).unwrap_err();
-    assert!(matches!(err, RovenueError::InvalidApiKey));
+    assert_eq!(err.kind, ErrorKind::InvalidApiKey);
 }
 
 #[test]
@@ -26,13 +26,13 @@ fn https_base_url_is_accepted() {
 #[test]
 fn plain_http_base_url_is_rejected() {
     let err = resolve_base_url("http://self.hosted.example.com").unwrap_err();
-    assert!(matches!(err, RovenueError::InvalidArgument));
+    assert_eq!(err.kind, ErrorKind::InvalidArgument);
 }
 
 #[test]
 fn non_http_scheme_is_rejected() {
     let err = resolve_base_url("ftp://api").unwrap_err();
-    assert!(matches!(err, RovenueError::InvalidArgument));
+    assert_eq!(err.kind, ErrorKind::InvalidArgument);
 }
 
 #[test]

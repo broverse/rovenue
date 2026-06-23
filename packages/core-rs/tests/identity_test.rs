@@ -2,8 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use rovenue::cache::identity::IdentityRepo;
 use rovenue::cache::CacheStore;
-use rovenue::error::RovenueError;
 use rovenue::identity::IdentityManager;
+use rovenue::ErrorKind;
 use rovenue::observer::{ChangeEvent, Observer, ObserverBus};
 use rovenue::time::SystemClock;
 
@@ -73,14 +73,14 @@ fn set_app_user_id_rejects_empty_input_with_invalid_argument() {
     let (_, _, mgr) = fresh();
     // Empty / whitespace-only input is an invalid argument, NOT an invalid API
     // key — consumers catching InvalidApiKey must not catch this.
-    assert!(matches!(
-        mgr.set_app_user_id("".into()),
-        Err(RovenueError::InvalidArgument)
-    ));
-    assert!(matches!(
-        mgr.set_app_user_id("   ".into()),
-        Err(RovenueError::InvalidArgument)
-    ));
+    assert_eq!(
+        mgr.set_app_user_id("".into()).unwrap_err().kind,
+        ErrorKind::InvalidArgument
+    );
+    assert_eq!(
+        mgr.set_app_user_id("   ".into()).unwrap_err().kind,
+        ErrorKind::InvalidArgument
+    );
 }
 
 #[test]
