@@ -42,9 +42,12 @@ export async function getOfferings(): Promise<Offerings> {
   return { current, all };
 }
 
-export async function purchase(target: Package | StoreProduct): Promise<PurchaseResult> {
+export async function purchase(
+  target: Package | StoreProduct,
+  options?: { promotionalOfferId?: string },
+): Promise<PurchaseResult> {
   const product = "product" in target ? target.product : target;
-  return call(() => getNative().purchase(product.id, product.type));
+  return call(() => getNative().purchase(product.id, product.type, options?.promotionalOfferId));
 }
 
 export async function restorePurchases(): Promise<PurchaseResult> {

@@ -189,7 +189,7 @@ public class RovenueModule: Module {
                 throw RovenueCodedError(e)
             }
         }
-        AsyncFunction("purchase") { (productId: String, productType: String) -> [String: Any?] in
+        AsyncFunction("purchase") { (productId: String, productType: String, promotionalOfferId: String?) -> [String: Any?] in
             guard #available(iOS 15.0, macOS 12.0, *) else {
                 throw StoreProblemFallbackException("Purchases require iOS 15 / macOS 12 or newer")
             }
@@ -202,7 +202,14 @@ public class RovenueModule: Module {
                 displayName: ""
             )
             do {
-                let r = try await Rovenue.shared.purchase(product)
+                let r: PurchaseResult
+                if let offerId = promotionalOfferId {
+                    // Task 4 added a public id-based overload that takes the
+                    // offer identifier directly — no need to construct a Discount.
+                    r = try await Rovenue.shared.purchase(product, promotionalOfferId: offerId)
+                } else {
+                    r = try await Rovenue.shared.purchase(product)
+                }
                 return Self.dtoFromPurchaseResult(r)
             } catch let e as RovenueError {
                 throw RovenueCodedError(e)
