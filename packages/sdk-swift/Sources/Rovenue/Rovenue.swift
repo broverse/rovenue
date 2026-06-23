@@ -562,49 +562,49 @@ public final class Rovenue: @unchecked Sendable {
             .compactMap { $0.appleProductId }
         let skProducts = await StoreKitAppleStore().products(for: Array(Set(appleIds)))
 
-        func buildProduct(_ p: CoreOfferingProduct) -> StoreProduct {
-            let sk = p.appleProductId.flatMap { skProducts[$0] }
-            let type = ProductType.from(p.productType)
-            return StoreProduct(
-                id: p.appleProductId ?? p.identifier,
-                type: type,
-                productCategory: type == .subscription ? .subscription : .nonSubscription,
-                displayName: sk?.displayName ?? p.displayName,
-                description: nil,
-                priceString: sk?.displayPrice,
-                price: sk?.price,
-                currencyCode: sk?.priceFormatStyle.currencyCode,
-                subscriptionPeriod: nil,
-                subscriptionGroupIdentifier: nil,
-                isFamilyShareable: false,
-                introPrice: nil,
-                discounts: [],
-                isEligibleForIntroOffer: nil,
-                subscriptionOptions: nil,
-                defaultOption: nil,
-                pricePerWeek: nil,
-                pricePerMonth: nil,
-                pricePerYear: nil,
-                pricePerWeekString: nil,
-                pricePerMonthString: nil,
-                pricePerYearString: nil,
-                rawStoreProduct: nil
-            )
+        func buildProduct(_ p: CoreOfferingProduct) async -> StoreProduct {
+            guard let product = p.appleProductId.flatMap({ skProducts[$0] }) else {
+                // No StoreKit product found — return config-only product.
+                return mapAppleStoreProduct(core: p, period: nil, introOffer: nil,
+                    promoOffers: [], groupId: nil, isFamilyShareable: false, description: nil,
+                    priceString: nil, price: nil, currencyCode: nil, isEligible: nil, raw: nil,
+                    formatCurrency: { _ in nil })
+            }
+            let offers = appleOfferInputs(from: product)
+            let isEligible = try? await product.subscription?.isEligibleForIntroOffer
+            let priceString = product.displayPrice
+            let price = product.price
+            let currencyCode = product.priceFormatStyle.currencyCode
+            let fmtStyle = product.priceFormatStyle
+            let formatCurrency: (Decimal) -> String? = { $0.formatted(fmtStyle) }
+            return mapAppleStoreProduct(core: p, period: offers.period, introOffer: offers.intro,
+                promoOffers: offers.promos, groupId: offers.groupId,
+                isFamilyShareable: product.isFamilyShareable, description: product.description,
+                priceString: priceString, price: price, currencyCode: currencyCode,
+                isEligible: isEligible, raw: product, formatCurrency: formatCurrency)
         }
 
-        func buildOffering(_ o: CoreOffering) -> Offering {
-            Offering(
+        func buildOffering(_ o: CoreOffering) async -> Offering {
+            var packages: [Package] = []
+            for pkg in o.packages {
+                packages.append(Package(identifier: pkg.packageIdentifier, packageType: .custom,
+                                        product: await buildProduct(pkg)))
+            }
+            return Offering(
                 identifier: o.identifier,
                 isDefault: o.isDefault,
                 // Use packageIdentifier (the slot id, e.g. $rov_monthly) as
                 // Package.identifier — that is the value the SDK contract
                 // exposes to callers. The product's own catalog identifier
                 // is available via pkg.product.id.
-                packages: o.packages.map { Package(identifier: $0.packageIdentifier, packageType: .custom, product: buildProduct($0)) }
+                packages: packages
             )
         }
 
-        let offerings = ffi.offerings.map(buildOffering)
+        var offerings: [Offering] = []
+        for o in ffi.offerings {
+            offerings.append(await buildOffering(o))
+        }
         let all = Dictionary(uniqueKeysWithValues: offerings.map { ($0.identifier, $0) })
         let current = ffi.current.flatMap { all[$0] }
         Self.emit(LogEntry(level: "info", message: "getOfferings ok"))
