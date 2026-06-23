@@ -86,32 +86,33 @@ export async function addCredits(args: AddCreditsArgs): Promise<CreditLedger> {
       throw new Error(`Subscriber ${args.subscriberId} not found`);
     }
 
-    if (args.dedupeOnReference && args.referenceId) {
-      const existing = await drizzle.creditLedgerRepo.findExistingPurchaseCredit(
-        tx,
-        args.subscriberId,
-        args.referenceId,
-        args.currencyId,
-      );
-      if (existing) {
+    // Dedup is scoped by (subscriber, currency, referenceType, referenceId).
+    // referenceType matters: a PURCHASE grant ("purchase") and a REFUND
+    // grant ("refund") that happen to share a referenceId are distinct
+    // events and must NOT collapse into one another — so dedup requires a
+    // referenceType too. Without one we cannot safely identify a prior row,
+    // so we fall through and append (the caller opted out of dedup).
+    if (args.dedupeOnReference && args.referenceId && args.referenceType) {
+      const existing = await tx
+        .select()
+        .from(drizzle.schema.creditLedger)
+        .where(
+          and(
+            eq(drizzle.schema.creditLedger.subscriberId, args.subscriberId),
+            eq(drizzle.schema.creditLedger.referenceType, args.referenceType),
+            eq(drizzle.schema.creditLedger.referenceId, args.referenceId),
+            eq(drizzle.schema.creditLedger.currencyId, args.currencyId),
+          ),
+        )
+        .limit(1);
+      if (existing[0]) {
         log.debug("credit already granted for reference, skipping", {
           subscriberId: args.subscriberId,
           currencyId: args.currencyId,
+          referenceType: args.referenceType,
           referenceId: args.referenceId,
         });
-        const rows = await tx
-          .select()
-          .from(drizzle.schema.creditLedger)
-          .where(
-            and(
-              eq(drizzle.schema.creditLedger.subscriberId, args.subscriberId),
-              eq(drizzle.schema.creditLedger.referenceType, "purchase"),
-              eq(drizzle.schema.creditLedger.referenceId, args.referenceId),
-              eq(drizzle.schema.creditLedger.currencyId, args.currencyId),
-            ),
-          )
-          .limit(1);
-        return rows[0] as CreditLedger;
+        return existing[0] as CreditLedger;
       }
     }
 
@@ -273,5 +274,9 @@ export async function refundCredits(
     referenceId: args.referenceId,
     description: args.description,
     metadata: args.metadata,
+    // Store refund webhooks are at-least-once; a replayed REFUND must not
+    // re-grant currency. referenceId is required on this path, so dedup is
+    // always armed (matches the spend path's idempotency contract).
+    dedupeOnReference: true,
   });
 }

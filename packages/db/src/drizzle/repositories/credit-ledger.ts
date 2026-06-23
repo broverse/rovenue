@@ -11,14 +11,22 @@ type DbOrTx = Db;
 export type CreditLedgerType = (typeof creditLedgerType.enumValues)[number];
 
 /**
- * Dedup guard used by receipt verification: has this purchase
- * already produced a ledger entry? Accepts a tx handle so the
- * check can run inside the per-subscriber advisory lock.
+ * Dedup guard used by grant/refund paths: has a ledger entry already
+ * been written for this (subscriber, currency, referenceType,
+ * referenceId)? Accepts a tx handle so the check can run inside the
+ * per-subscriber advisory lock.
+ *
+ * `referenceType` MUST match the type the caller will insert with —
+ * a grant appended as "purchase" and a refund appended as "refund"
+ * occupy distinct dedup namespaces, so passing the wrong type would
+ * silently miss and let a duplicate through. (Previously hardcoded to
+ * "purchase", which made dedup a no-op for BONUS/REFUND grants.)
  */
-export async function findExistingPurchaseCredit(
+export async function findExistingCreditByReference(
   db: DbOrTx,
   subscriberId: string,
-  purchaseId: string,
+  referenceType: string,
+  referenceId: string,
   currencyId: string,
 ): Promise<{ id: string } | null> {
   const rows = await db
@@ -27,8 +35,8 @@ export async function findExistingPurchaseCredit(
     .where(
       and(
         eq(creditLedger.subscriberId, subscriberId),
-        eq(creditLedger.referenceType, "purchase"),
-        eq(creditLedger.referenceId, purchaseId),
+        eq(creditLedger.referenceType, referenceType),
+        eq(creditLedger.referenceId, referenceId),
         eq(creditLedger.currencyId, currencyId),
       ),
     )

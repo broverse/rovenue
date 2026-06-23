@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog } from "@base-ui-components/react/dialog";
 import { X } from "lucide-react";
@@ -65,6 +65,10 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
   }, [open, activeCurrencies]);
 
   const grant = useGrantCredits(projectId);
+  // Synchronous re-entrancy guard. `grant.isPending` only disables the button
+  // after a re-render, so two clicks in the same tick can both pass the
+  // `canSubmit` check and fire two grants. This ref flips synchronously.
+  const inFlight = useRef(false);
 
   const parsedAmount = Number(amount);
   const amountInvalid =
@@ -77,7 +81,8 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
     !grant.isPending;
 
   const submit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || inFlight.current) return;
+    inFlight.current = true;
     setError(null);
 
     const body: GrantCreditsRequest = {
@@ -99,6 +104,8 @@ export function GrantCreditsModal({ projectId, open, onClose }: Props) {
           ? e.message
           : t("credits.grant.errors.unknown", "Something went wrong."),
       );
+    } finally {
+      inFlight.current = false;
     }
   };
 

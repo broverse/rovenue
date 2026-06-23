@@ -13,6 +13,7 @@ import {
   type GrantCreditsResponse,
 } from "@rovenue/shared";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
+import { idempotency } from "../../middleware/idempotency";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { audit, extractRequestContext } from "../../lib/audit";
@@ -78,6 +79,12 @@ export const creditsRoute = new Hono()
   // the engine stays the single writer for credit_ledger.
   .post(
     "/",
+    // Retry-dangerous: a double-submit (operator double-click, client retry on
+    // a slow response) would otherwise append a second ledger row and credit
+    // the wallet twice. `idempotency` replays the first response when the
+    // client sends a stable Idempotency-Key; `dedupeOnReference` below is the
+    // durable DB-level backstop when the grant carries a referenceId.
+    idempotency,
     validate("json", grantCreditsRequestSchema),
     async (c) => {
       const projectId = c.req.param("projectId");
@@ -119,6 +126,9 @@ export const creditsRoute = new Hono()
         referenceType: input.referenceType,
         referenceId: input.referenceId,
         description: input.description,
+        // When the operator supplies a (referenceType, referenceId), a
+        // duplicate submit returns the original row instead of double-granting.
+        dedupeOnReference: true,
       });
 
       const ctx = extractRequestContext(c);

@@ -34,7 +34,15 @@ export function useGrantCredits(projectId: string) {
     mutationFn: (body: GrantCreditsRequest) =>
       api<GrantCreditsResponse>(
         `/dashboard/projects/${projectId}/credits`,
-        { method: "POST", body: JSON.stringify(body) },
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+          // Idempotency-Key lets the server replay the first response instead
+          // of granting twice if this exact request is retried (slow network,
+          // proxy retry). One key per submit; the modal's in-flight guard
+          // stops a double-click from minting two keys.
+          headers: { "idempotency-key": crypto.randomUUID() },
+        },
       ),
     onSuccess: () => {
       void qc.invalidateQueries({
