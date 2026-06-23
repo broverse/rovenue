@@ -23,16 +23,27 @@ import java.util.TimeZone
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
+import dev.rovenue.sdk.Discount
+import dev.rovenue.sdk.DiscountType
+import dev.rovenue.sdk.IntroPrice
 import dev.rovenue.sdk.LogEntry
 import dev.rovenue.sdk.Offerings
+import dev.rovenue.sdk.PackageType
+import dev.rovenue.sdk.PaymentMode
+import dev.rovenue.sdk.Period
+import dev.rovenue.sdk.PeriodUnit
+import dev.rovenue.sdk.ProductCategory
 import dev.rovenue.sdk.ProductNotAvailableException
 import dev.rovenue.sdk.ProductType
+import dev.rovenue.sdk.PricingPhase
 import dev.rovenue.sdk.PurchaseCancelledException
 import dev.rovenue.sdk.PurchasePendingException
 import dev.rovenue.sdk.PurchaseResult
+import dev.rovenue.sdk.RecurrenceMode
 import dev.rovenue.sdk.Rovenue
 import dev.rovenue.sdk.StoreProblemException
 import dev.rovenue.sdk.StoreProduct
+import dev.rovenue.sdk.SubscriptionOption
 import dev.rovenue.sdk.generated.ChangeEvent
 import dev.rovenue.sdk.generated.ClaimInstallParams
 import dev.rovenue.sdk.generated.Entitlement
@@ -319,13 +330,131 @@ class RovenueModule : Module() {
         else             -> ProductType.SUBSCRIPTION
     }
 
+    // ---------------- Enum → lowerCamel string mappers ----------------
+
+    private fun productCategoryString(c: ProductCategory): String = when (c) {
+        ProductCategory.SUBSCRIPTION     -> "subscription"
+        ProductCategory.NON_SUBSCRIPTION -> "nonSubscription"
+    }
+
+    private fun periodUnitString(u: PeriodUnit): String = when (u) {
+        PeriodUnit.DAY   -> "day"
+        PeriodUnit.WEEK  -> "week"
+        PeriodUnit.MONTH -> "month"
+        PeriodUnit.YEAR  -> "year"
+    }
+
+    private fun paymentModeString(m: PaymentMode): String = when (m) {
+        PaymentMode.FREE_TRIAL   -> "freeTrial"
+        PaymentMode.PAY_AS_YOU_GO -> "payAsYouGo"
+        PaymentMode.PAY_UP_FRONT -> "payUpFront"
+    }
+
+    private fun discountTypeString(t: DiscountType): String = when (t) {
+        DiscountType.INTRODUCTORY -> "introductory"
+        DiscountType.PROMOTIONAL  -> "promotional"
+        DiscountType.WIN_BACK     -> "winBack"
+    }
+
+    private fun recurrenceModeString(r: RecurrenceMode): String = when (r) {
+        RecurrenceMode.INFINITE_RECURRING -> "infiniteRecurring"
+        RecurrenceMode.FINITE_RECURRING   -> "finiteRecurring"
+        RecurrenceMode.NON_RECURRING      -> "nonRecurring"
+    }
+
+    private fun packageTypeString(t: PackageType): String = when (t) {
+        PackageType.UNKNOWN     -> "unknown"
+        PackageType.CUSTOM      -> "custom"
+        PackageType.LIFETIME    -> "lifetime"
+        PackageType.ANNUAL      -> "annual"
+        PackageType.SIX_MONTH   -> "sixMonth"
+        PackageType.THREE_MONTH -> "threeMonth"
+        PackageType.TWO_MONTH   -> "twoMonth"
+        PackageType.MONTHLY     -> "monthly"
+        PackageType.WEEKLY      -> "weekly"
+    }
+
+    // ---------------- Nested DTO helpers ----------------
+
+    private fun periodMap(p: Period): Map<String, Any?> = mapOf(
+        "value"   to p.value,
+        "unit"    to periodUnitString(p.unit),
+        "iso8601" to p.iso8601,
+    )
+
+    private fun introMap(i: IntroPrice?): Any? {
+        if (i == null) return null
+        return mapOf(
+            "price"        to i.price,
+            "priceString"  to i.priceString,
+            "currencyCode" to i.currencyCode,
+            "period"       to periodMap(i.period),
+            "cycles"       to i.cycles,
+            "paymentMode"  to paymentModeString(i.paymentMode),
+        )
+    }
+
+    private fun discountMap(d: Discount): Map<String, Any?> = mapOf(
+        "identifier"     to d.identifier,
+        "price"          to d.price,
+        "priceString"    to d.priceString,
+        "currencyCode"   to d.currencyCode,
+        "period"         to periodMap(d.period),
+        "numberOfPeriods" to d.numberOfPeriods,
+        "paymentMode"    to paymentModeString(d.paymentMode),
+        "type"           to discountTypeString(d.type),
+    )
+
+    private fun phaseMap(ph: PricingPhase): Map<String, Any?> = mapOf(
+        "price"            to ph.price,
+        "priceString"      to ph.priceString,
+        "currencyCode"     to ph.currencyCode,
+        "billingPeriod"    to periodMap(ph.billingPeriod),
+        "billingCycleCount" to ph.billingCycleCount,
+        "recurrenceMode"   to recurrenceModeString(ph.recurrenceMode),
+        "paymentMode"      to ph.paymentMode?.let { paymentModeString(it) },
+    )
+
+    private fun optionMap(opt: SubscriptionOption): Map<String, Any?> = mapOf(
+        "id"             to opt.id,
+        "basePlanId"     to opt.basePlanId,
+        "offerId"        to opt.offerId,
+        "tags"           to opt.tags,
+        "isBasePlan"     to opt.isBasePlan,
+        "isPrepaid"      to opt.isPrepaid,
+        "pricingPhases"  to opt.pricingPhases.map { phaseMap(it) },
+        "freePhase"      to opt.freePhase?.let { phaseMap(it) },
+        "introPhase"     to opt.introPhase?.let { phaseMap(it) },
+        "fullPricePhase" to opt.fullPricePhase?.let { phaseMap(it) },
+    )
+
+    // ---------------- StoreProduct + Offerings serializers ----------------
+
     private fun dtoFromStoreProduct(p: StoreProduct): Map<String, Any?> = mapOf(
-        "id"           to p.id,
-        "type"         to productTypeString(p.type),
-        "displayName"  to p.displayName,
-        "priceString"  to p.priceString,
-        "price"        to p.price,
-        "currencyCode" to p.currencyCode,
+        "id"                          to p.id,
+        "type"                        to productTypeString(p.type),
+        "productCategory"             to productCategoryString(p.productCategory),
+        "displayName"                 to p.displayName,
+        "description"                 to p.description,
+        "priceString"                 to p.priceString,
+        "price"                       to p.price,
+        "currencyCode"                to p.currencyCode,
+        "subscriptionPeriod"          to p.subscriptionPeriod?.let { periodMap(it) },
+        "subscriptionGroupIdentifier" to p.subscriptionGroupIdentifier,
+        "isFamilyShareable"           to p.isFamilyShareable,
+        "introPrice"                  to introMap(p.introPrice),
+        // Discounts are iOS-only (App Store promotional offers); always empty on Android.
+        "discounts"                   to emptyList<Any>(),
+        "isEligibleForIntroOffer"     to p.isEligibleForIntroOffer,
+        // subscriptionOptions + defaultOption are Android-only (Google Play base plans + offers).
+        "subscriptionOptions"         to p.subscriptionOptions?.map { optionMap(it) },
+        "defaultOption"               to p.defaultOption?.let { optionMap(it) },
+        "pricePerWeek"                to p.pricePerWeek,
+        "pricePerMonth"               to p.pricePerMonth,
+        "pricePerYear"                to p.pricePerYear,
+        "pricePerWeekString"          to p.pricePerWeekString,
+        "pricePerMonthString"         to p.pricePerMonthString,
+        "pricePerYearString"          to p.pricePerYearString,
     )
 
     private fun dtoFromOfferings(o: Offerings): Map<String, Any?> = mapOf(
@@ -336,8 +465,9 @@ class RovenueModule : Module() {
                 "isDefault"  to off.isDefault,
                 "packages"   to off.packages.map { pkg ->
                     mapOf(
-                        "identifier" to pkg.identifier,
-                        "product"    to dtoFromStoreProduct(pkg.product),
+                        "identifier"  to pkg.identifier,
+                        "packageType" to packageTypeString(pkg.packageType),
+                        "product"     to dtoFromStoreProduct(pkg.product),
                     )
                 },
             )
