@@ -19,6 +19,8 @@ export const ERROR_CODE = {
   API_KEY_KIND_MISMATCH: "API_KEY_KIND_MISMATCH",
   STORE_NOT_CONFIGURED: "STORE_NOT_CONFIGURED",
   STORE_API_ERROR: "STORE_API_ERROR",
+  APPLE_OFFER_SIGNING_UNAVAILABLE: "apple_offer_signing_unavailable",
+  APPLE_OFFER_SIGNING_FAILED: "apple_offer_signing_failed",
 } as const;
 export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE];
 
