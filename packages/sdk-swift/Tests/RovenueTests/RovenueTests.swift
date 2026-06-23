@@ -19,8 +19,10 @@ final class RovenueTests: XCTestCase {
     func test_invalidApiKey_throws_atGeneratedLayer() {
         let cfg = Config(apiKey: "", debug: false, appVersion: nil, platform: nil, environment: nil, baseUrl: "https://api.rovenue.io")
         XCTAssertThrowsError(try RovenueCore(config: cfg)) { err in
-            guard case RovenueError.InvalidApiKey = err else {
-                return XCTFail("expected InvalidApiKey, got \(err)")
+            guard let ffiErr = err as? RovenueErrorFfi,
+                  case let .Generic(kind, _, _, _, _) = ffiErr,
+                  kind == .invalidApiKey else {
+                return XCTFail("expected invalidApiKey, got \(err)")
             }
         }
     }

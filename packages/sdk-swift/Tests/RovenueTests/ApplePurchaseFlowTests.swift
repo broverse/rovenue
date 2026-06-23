@@ -176,7 +176,7 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
         Entitlement(id: "ent_1", isActive: true, productIdentifier: "premium_monthly", store: "APP_STORE", expiresIso: nil)
     }
 
-    func test_userCancelled_throws_purchaseCancelled_and_does_not_validate() async {
+    func test_userCancelled_throws_purchaseCanceled_and_does_not_validate() async {
         let validated = FinishFlag()
         let flow = ApplePurchaseFlow(
             store: FakeStore(outcome: .userCancelled),
@@ -187,9 +187,9 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
         )
         do {
             _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
-            XCTFail("expected purchaseCancelled")
-        } catch let e as Rovenue.Error {
-            XCTAssertEqual(e, .purchaseCancelled)
+            XCTFail("expected purchaseCanceled")
+        } catch let e as RovenueError {
+            XCTAssertEqual(e.kind, .purchaseCanceled)
         } catch {
             XCTFail("unexpected error: \(error)")
         }
@@ -197,19 +197,17 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
         XCTAssertFalse(didValidate, "validate must not run on cancel")
     }
 
-    func test_pending_throws_purchasePending() async {
+    /// Deferred (Ask-to-Buy / pending) purchases do NOT throw — they return a
+    /// `PurchaseResult` with `isDeferred = true` and empty entitlements.
+    func test_pending_returns_deferred_result() async throws {
         let flow = ApplePurchaseFlow(
             store: FakeStore(outcome: .pending),
             validate: { _, _ in ReceiptResult(subscriberId: "s", appUserId: "u", virtualCurrencies: [:], entitlements: []) }
         )
-        do {
-            _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
-            XCTFail("expected purchasePending")
-        } catch let e as Rovenue.Error {
-            XCTAssertEqual(e, .purchasePending)
-        } catch {
-            XCTFail("unexpected error: \(error)")
-        }
+        let result = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
+        XCTAssertTrue(result.isDeferred, "pending outcome must set isDeferred")
+        XCTAssertTrue(result.entitlements.isEmpty, "deferred result has no entitlements yet")
+        XCTAssertEqual(result.productId, "premium_monthly")
     }
 
     func test_productNotFound_throws_productNotAvailable() async {
@@ -220,8 +218,8 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
         do {
             _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
             XCTFail("expected productNotAvailable")
-        } catch let e as Rovenue.Error {
-            XCTAssertEqual(e, .productNotAvailable)
+        } catch let e as RovenueError {
+            XCTAssertEqual(e.kind, .productNotAvailable)
         } catch {
             XCTFail("unexpected error: \(error)")
         }
@@ -255,22 +253,24 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
         XCTAssertEqual(result.productId, "premium_monthly")
         XCTAssertEqual(result.storeTransactionId, "txn-42")
         XCTAssertEqual(result.entitlements, [sampleEntitlement()])
+        XCTAssertFalse(result.isDeferred)
     }
 
     func test_validation_throws_then_finish_not_called_and_error_propagates() async {
         let finished = FinishFlag()
-        struct ValidationError: Swift.Error {}
         let flow = ApplePurchaseFlow(
             store: FakeStore(outcome: .success(jws: "jws-blob", transactionId: "txn-99", finish: {
                 await finished.mark()
             })),
-            validate: { _, _ in throw Rovenue.Error.receiptInvalid }
+            validate: { _, _ in
+                throw RovenueError(kind: .receiptInvalid, message: "Receipt could not be validated")
+            }
         )
         do {
             _ = try await flow.run(productId: "premium_monthly", appAccountToken: nil)
             XCTFail("expected validation error to propagate")
-        } catch let e as Rovenue.Error {
-            XCTAssertEqual(e, .receiptInvalid)
+        } catch let e as RovenueError {
+            XCTAssertEqual(e.kind, .receiptInvalid)
         } catch {
             XCTFail("unexpected error: \(error)")
         }
@@ -280,25 +280,48 @@ final class ApplePurchaseFlowOrchestrationTests: XCTestCase {
 }
 
 final class PurchaseErrorTests: XCTestCase {
-    func test_purchase_error_cases_exist() {
-        // These are Swift-origin (not mapped from RovenueError) — they describe
-        // StoreKit-side outcomes that never reach the Rust core.
-        let cases: [Rovenue.Error] = [
-            .purchaseCancelled,
-            .purchasePending,
-            .productNotAvailable,
-            .storeProblem,
-        ]
-        XCTAssertEqual(cases.count, 4)
-        // Each must be distinct + Equatable.
-        XCTAssertNotEqual(Rovenue.Error.purchaseCancelled, .purchasePending)
-        XCTAssertNotEqual(Rovenue.Error.productNotAvailable, .storeProblem)
+    func test_purchaseResult_isDeferred_defaults_false() {
+        let result = PurchaseResult(
+            entitlements: [],
+            virtualCurrencies: [:],
+            productId: "p",
+            storeTransactionId: "t"
+        )
+        XCTAssertFalse(result.isDeferred)
     }
 
-    func test_purchase_errors_have_descriptions() {
-        XCTAssertNotNil(Rovenue.Error.purchaseCancelled.errorDescription)
-        XCTAssertNotNil(Rovenue.Error.purchasePending.errorDescription)
-        XCTAssertNotNil(Rovenue.Error.productNotAvailable.errorDescription)
-        XCTAssertNotNil(Rovenue.Error.storeProblem.errorDescription)
+    func test_purchaseResult_isDeferred_can_be_true() {
+        let result = PurchaseResult(
+            entitlements: [],
+            virtualCurrencies: [:],
+            productId: "p",
+            storeTransactionId: "",
+            isDeferred: true
+        )
+        XCTAssertTrue(result.isDeferred)
+    }
+
+    func test_purchase_rovenueError_kinds_exist() {
+        // Verify the ErrorKind cases used by the purchase flow are accessible.
+        let kinds: [ErrorKind] = [
+            .purchaseCanceled,
+            .productNotAvailable,
+            .alreadyOwned,
+            .paymentDeclined,
+            .storeServiceUnavailable,
+            .ineligible,
+            .storeProblem,
+            .receiptInvalid,
+        ]
+        XCTAssertEqual(kinds.count, 8)
+    }
+
+    func test_purchase_errors_have_messages() {
+        let e1 = RovenueError(kind: .purchaseCanceled, message: "cancelled")
+        let e2 = RovenueError(kind: .productNotAvailable, message: "not available")
+        let e3 = RovenueError(kind: .storeProblem, message: "store problem")
+        XCTAssertNotNil(e1.errorDescription)
+        XCTAssertNotNil(e2.errorDescription)
+        XCTAssertNotNil(e3.errorDescription)
     }
 }

@@ -49,7 +49,7 @@ public final class Rovenue: @unchecked Sendable {
     }
 
     /// Configure the SDK. Must be called before any other API.
-    /// Throws `Rovenue.Error.invalidApiKey` if the api key is empty/whitespace.
+    /// Throws `RovenueError(kind: .invalidApiKey, …)` if the api key is empty/whitespace.
     /// Calling this a second time replaces the shared instance.
     ///
     /// `appVersion` defaults to `Bundle.main.infoDictionary?["CFBundleShortVersionString"]`
@@ -65,7 +65,7 @@ public final class Rovenue: @unchecked Sendable {
     ) throws {
         emit(LogEntry(level: "info", message: "configure"))
         guard !apiKey.trimmingCharacters(in: .whitespaces).isEmpty else {
-            throw Rovenue.Error.invalidApiKey
+            throw RovenueError(kind: .invalidApiKey, message: "API key is missing or invalid")
         }
         let resolvedVersion = appVersion ?? readBundleAppVersion()
         // Omit baseUrl → the generated Config default ("https://api.rovenue.io")
@@ -83,7 +83,7 @@ public final class Rovenue: @unchecked Sendable {
         let core: RovenueCore
         do {
             core = try RovenueCore(config: config)
-        } catch let err as RovenueError {
+        } catch let err as RovenueErrorFfi {
             throw mapError(err)
         }
         let bridge = ObserverBridge()
@@ -208,7 +208,7 @@ public final class Rovenue: @unchecked Sendable {
             try await dispatcher.run { [core] in
                 do {
                     try core.identify(appUserId: appUserId)
-                } catch let err as RovenueError {
+                } catch let err as RovenueErrorFfi {
                     throw mapError(err)
                 }
             }
@@ -226,7 +226,7 @@ public final class Rovenue: @unchecked Sendable {
         Self.emit(LogEntry(level: "info", message: "logOut"))
         do {
             try await dispatcher.run { [core] in
-                do { try core.logOut() } catch let e as RovenueError { throw mapError(e) }
+                do { try core.logOut() } catch let e as RovenueErrorFfi { throw mapError(e) }
             }
             Self.emit(LogEntry(level: "info", message: "logOut ok"))
         } catch {
@@ -260,7 +260,7 @@ public final class Rovenue: @unchecked Sendable {
             try await dispatcher.run { [core] in
                 do {
                     try core.refreshEntitlements()
-                } catch let err as RovenueError {
+                } catch let err as RovenueErrorFfi {
                     throw mapError(err)
                 }
             }
@@ -295,7 +295,7 @@ public final class Rovenue: @unchecked Sendable {
             try await dispatcher.run { [core] in
                 do {
                     try core.refreshVirtualCurrencies()
-                } catch let err as RovenueError {
+                } catch let err as RovenueErrorFfi {
                     throw mapError(err)
                 }
             }
@@ -316,7 +316,7 @@ public final class Rovenue: @unchecked Sendable {
             try await dispatcher.run { [core] in
                 do {
                     try core.refreshRemoteConfig()
-                } catch let err as RovenueError {
+                } catch let err as RovenueErrorFfi {
                     throw mapError(err)
                 }
             }
@@ -414,7 +414,7 @@ public final class Rovenue: @unchecked Sendable {
     public func getAppAccountToken() async throws -> String {
         try await dispatcher.run { [core] in
             do { return try core.getOrCreateAppAccountToken() }
-            catch let err as RovenueError { throw mapError(err) }
+            catch let err as RovenueErrorFfi { throw mapError(err) }
         }
     }
 
@@ -435,7 +435,7 @@ public final class Rovenue: @unchecked Sendable {
                     occurredAt: occurredAt,
                     durationMs: durationMs
                 )
-            } catch let err as RovenueError {
+            } catch let err as RovenueErrorFfi {
                 throw mapError(err)
             }
         }
@@ -450,7 +450,7 @@ public final class Rovenue: @unchecked Sendable {
             try await dispatcher.run { [core] in
                 do {
                     try core.track(envelopeJson: envelopeJson)
-                } catch let err as RovenueError {
+                } catch let err as RovenueErrorFfi {
                     throw mapError(err)
                 }
             }
@@ -468,7 +468,7 @@ public final class Rovenue: @unchecked Sendable {
     public func flushSessionEvents() async throws -> UInt32 {
         try await dispatcher.run { [core] in
             do { return try core.flushSessionEvents() }
-            catch let err as RovenueError { throw mapError(err) }
+            catch let err as RovenueErrorFfi { throw mapError(err) }
         }
     }
 
@@ -483,7 +483,7 @@ public final class Rovenue: @unchecked Sendable {
             try await dispatcher.run { [core] in
                 do {
                     try core.setAttributes(attributes: attributes)
-                } catch let err as RovenueError {
+                } catch let err as RovenueErrorFfi {
                     throw mapError(err)
                 }
             }
@@ -510,7 +510,7 @@ public final class Rovenue: @unchecked Sendable {
     public func flushAttributes() async throws -> UInt32 {
         try await dispatcher.run { [core] in
             do { return try core.flushAttributes() }
-            catch let err as RovenueError { throw mapError(err) }
+            catch let err as RovenueErrorFfi { throw mapError(err) }
         }
     }
 
@@ -549,7 +549,7 @@ public final class Rovenue: @unchecked Sendable {
         do {
             ffi = try await dispatcher.run { [core] in
                 do { return try core.getOfferings() }
-                catch let err as RovenueError { throw mapError(err) }
+                catch let err as RovenueErrorFfi { throw mapError(err) }
             }
         } catch {
             Self.emit(LogEntry(level: "error", message: "getOfferings failed: \(error.localizedDescription)"))
@@ -629,7 +629,7 @@ public final class Rovenue: @unchecked Sendable {
                 try await self.dispatcher.run {
                     do {
                         return try core.postAppleReceipt(receipt: jws, productId: pid, appAccountToken: token)
-                    } catch let err as RovenueError {
+                    } catch let err as RovenueErrorFfi {
                         throw mapError(err)
                     }
                 }
@@ -732,7 +732,7 @@ public final class Rovenue: @unchecked Sendable {
     public func claimFunnelToken(_ token: String) async throws -> FunnelClaimResult {
         try await dispatcher.run { [core] in
             do { return try core.claimFunnelToken(token: token) }
-            catch let err as RovenueError { throw mapError(err) }
+            catch let err as RovenueErrorFfi { throw mapError(err) }
         }
     }
 
@@ -742,7 +742,7 @@ public final class Rovenue: @unchecked Sendable {
     public func claimInstall(_ params: ClaimInstallParams) async throws -> FunnelClaimResult? {
         try await dispatcher.run { [core] in
             do { return try core.claimInstall(params: params) }
-            catch let err as RovenueError { throw mapError(err) }
+            catch let err as RovenueErrorFfi { throw mapError(err) }
         }
     }
 
@@ -752,7 +752,7 @@ public final class Rovenue: @unchecked Sendable {
     public func claimViaEmail(_ email: String) async throws {
         try await dispatcher.run { [core] in
             do { try core.claimViaEmail(email: email) }
-            catch let err as RovenueError { throw mapError(err) }
+            catch let err as RovenueErrorFfi { throw mapError(err) }
         }
     }
 }

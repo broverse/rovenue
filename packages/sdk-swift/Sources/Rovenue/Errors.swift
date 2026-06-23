@@ -1,110 +1,67 @@
 //  Errors.swift — public Swift error surface for the Rovenue façade.
 //
-//  Wraps the UniFFI-generated `RovenueError` (which carries `(message: String)`
-//  on every case and uses PascalCase) as a flat camelCase Swift enum. The
-//  associated message is dropped from the public type but appears in
-//  `errorDescription` so consumers can surface it to logs / UI.
+//  Single concrete struct `RovenueError` wraps every failure the SDK can
+//  produce — both FFI-originated errors (mapped from `RovenueErrorFfi`) and
+//  Swift-origin purchase-flow outcomes (constructed directly from StoreKit
+//  results). Consumers check `.kind` for programmatic branching and read
+//  `.message` / `.errorDescription` for user-facing text.
+//
+//  Name collision note: the UniFFI-generated error enum is `RovenueErrorFfi`
+//  (not `RovenueError`), so there is no shadowing issue.
 
 import Foundation
 
-public extension Rovenue {
-    enum Error: Swift.Error, Equatable, Sendable, LocalizedError {
-        case notConfigured
-        case invalidApiKey
-        case invalidArgument
-        case serverError
-        case networkUnavailable
-        case timeout
-        case rateLimited
-        case storage
-        case userNotFound
-        case insufficientCredits
-        case entitlementInactive
-        case duplicatePurchase
-        case receiptInvalid
-        case internalError
-        case funnelTokenNotFound
-        case funnelTokenExpired
-        case funnelTokenAlreadyClaimed
+/// The single public error type thrown by every Rovenue SDK method.
+public struct RovenueError: Error, LocalizedError, Equatable, Sendable {
+    /// Programmatic discriminant — mirrors the Rust `ErrorKind` enum.
+    public let kind: ErrorKind
+    /// Human-readable detail (maps from the generated `.detail` field).
+    public let message: String
+    /// Server-supplied error code, if any (e.g. `"SUBSCRIPTION_NOT_FOUND"`).
+    public let serverCode: String?
+    /// HTTP status code that accompanied the error, if any.
+    public let httpStatus: Int?
 
-        // Swift-origin purchase-flow errors. These never come from the Rust
-        // core (so they are absent from `mapError`) — they describe StoreKit
-        // outcomes surfaced by the SDK-driven purchase flow.
-        case purchaseCancelled
-        case purchasePending
-        case productNotAvailable
-        case storeProblem
+    public init(
+        kind: ErrorKind,
+        message: String,
+        serverCode: String? = nil,
+        httpStatus: Int? = nil
+    ) {
+        self.kind = kind
+        self.message = message
+        self.serverCode = serverCode
+        self.httpStatus = httpStatus
+    }
 
-        public var errorDescription: String? {
-            switch self {
-            case .notConfigured:
-                return "Rovenue.configure() must be called before accessing Rovenue.shared"
-            case .invalidApiKey:
-                return "API key is missing or invalid"
-            case .invalidArgument:
-                return "An argument was invalid (e.g. an empty value)"
-            case .serverError:
-                return "Server returned an error"
-            case .networkUnavailable:
-                return "Network is unavailable"
-            case .timeout:
-                return "Request timed out"
-            case .rateLimited:
-                return "Rate limit exceeded"
-            case .storage:
-                return "Local storage error"
-            case .userNotFound:
-                return "User not found"
-            case .insufficientCredits:
-                return "Insufficient credits for this operation"
-            case .entitlementInactive:
-                return "Entitlement is inactive"
-            case .duplicatePurchase:
-                return "Purchase already recorded"
-            case .receiptInvalid:
-                return "Receipt could not be validated"
-            case .internalError:
-                return "Internal SDK error"
-            case .funnelTokenNotFound:
-                return "Funnel token not found"
-            case .funnelTokenExpired:
-                return "Funnel token has expired"
-            case .funnelTokenAlreadyClaimed:
-                return "Funnel token has already been claimed"
-            case .purchaseCancelled:
-                return "The purchase was cancelled by the user"
-            case .purchasePending:
-                return "The purchase is pending external action (e.g. Ask to Buy)"
-            case .productNotAvailable:
-                return "The requested product is not available from the store"
-            case .storeProblem:
-                return "An unexpected error occurred communicating with the store"
-            }
+    /// True when the operation is worth retrying after a short back-off.
+    public var isRetryable: Bool {
+        switch kind {
+        case .networkUnavailable, .timeout, .rateLimited, .serverError, .storeServiceUnavailable:
+            return true
+        default:
+            return false
         }
     }
+
+    /// `LocalizedError` conformance — forwards `message` so the error surfaces
+    /// correctly in `catch { error.localizedDescription }` call sites.
+    public var errorDescription: String? { message }
 }
 
-/// Maps the UniFFI-generated `RovenueError` to the public `Rovenue.Error`.
-/// Exhaustively switched: any future Rust-side variant addition causes a
-/// compile error here, surfacing the gap at build time rather than runtime.
-internal func mapError(_ generated: RovenueError) -> Rovenue.Error {
-    switch generated {
-    case .NotConfigured:        return .notConfigured
-    case .InvalidApiKey:        return .invalidApiKey
-    case .InvalidArgument:      return .invalidArgument
-    case .ServerError:          return .serverError
-    case .NetworkUnavailable:   return .networkUnavailable
-    case .Timeout:              return .timeout
-    case .RateLimited:          return .rateLimited
-    case .Storage:              return .storage
-    case .UserNotFound:         return .userNotFound
-    case .InsufficientCredits:  return .insufficientCredits
-    case .EntitlementInactive:  return .entitlementInactive
-    case .DuplicatePurchase:    return .duplicatePurchase
-    case .ReceiptInvalid:             return .receiptInvalid
-    case .Internal:                   return .internalError
-    case .FunnelTokenNotFound:        return .funnelTokenNotFound
-    case .FunnelTokenExpired:         return .funnelTokenExpired
-    case .FunnelTokenAlreadyClaimed:  return .funnelTokenAlreadyClaimed
+// MARK: - FFI mapper
+
+/// Maps the UniFFI-generated `RovenueErrorFfi` into the public `RovenueError`.
+/// The single `.Generic` case carries all fields; `detail` becomes `message`,
+/// `httpStatus: UInt16?` is widened to `Int?`.
+internal func mapError(_ e: RovenueErrorFfi) -> RovenueError {
+    switch e {
+    case let .Generic(kind, detail, serverCode, httpStatus, _):
+        return RovenueError(
+            kind: kind,
+            message: detail,
+            serverCode: serverCode,
+            httpStatus: httpStatus.map(Int.init)
+        )
     }
 }

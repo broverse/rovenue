@@ -238,21 +238,30 @@ public struct Offerings: Sendable, Equatable {
 
 /// The result of a completed purchase: refreshed entitlements + virtual-currency balances,
 /// plus the product / store-transaction identifiers for the purchase that ran.
+///
+/// `isDeferred` is `true` when the purchase is pending external approval
+/// (e.g. Ask to Buy). In that case `entitlements` is empty and
+/// `storeTransactionId` is an empty string — the entitlements will arrive
+/// asynchronously once the approver accepts.
 public struct PurchaseResult: Sendable, Equatable {
     public let entitlements: [Entitlement]
     public let virtualCurrencies: [String: Int64]
     public let productId: String
     public let storeTransactionId: String
+    /// `true` when the purchase is deferred pending external approval.
+    public var isDeferred: Bool
 
     public init(
         entitlements: [Entitlement],
         virtualCurrencies: [String: Int64],
         productId: String,
-        storeTransactionId: String
+        storeTransactionId: String,
+        isDeferred: Bool = false
     ) {
         self.entitlements = entitlements
         self.virtualCurrencies = virtualCurrencies
         self.productId = productId
         self.storeTransactionId = storeTransactionId
+        self.isDeferred = isDeferred
     }
 }

@@ -15,8 +15,20 @@ import StoreKit
 internal enum StorePurchaseOutcome {
     case success(jws: String, transactionId: String, finish: @Sendable () async -> Void)
     case userCancelled
+    /// The purchase is pending external action (Ask to Buy, etc.).
+    /// The flow returns a deferred `PurchaseResult` rather than throwing.
     case pending
     case productNotFound
+    /// The user already owns this non-consumable / active subscription.
+    case alreadyOwned
+    /// Payment was declined (e.g. parental controls, insufficient funds signal).
+    case paymentDeclined
+    /// The App Store is temporarily unreachable.
+    case serviceUnavailable
+    /// The user is ineligible for the offer (e.g. introductory offer already used).
+    case ineligible
+    /// The product is not available in the user's storefront.
+    case productNotAvailableInStorefront
 }
 
 /// Minimal seam over the App Store. Implementations must be `Sendable` so they
@@ -34,8 +46,17 @@ internal struct StoreKitAppleStore: AppleStore {
         let products: [Product]
         do {
             products = try await Product.products(for: [productId])
+        } catch let skErr as StoreKitError {
+            switch skErr {
+            case .networkError, .systemError:
+                return .serviceUnavailable
+            case .notAvailableInStorefront:
+                return .productNotAvailableInStorefront
+            default:
+                throw RovenueError(kind: .storeProblem, message: "\(skErr)")
+            }
         } catch {
-            throw Rovenue.Error.storeProblem
+            throw RovenueError(kind: .storeProblem, message: "\(error)")
         }
         guard let product = products.first else {
             return .productNotFound
@@ -49,8 +70,24 @@ internal struct StoreKitAppleStore: AppleStore {
         let result: Product.PurchaseResult
         do {
             result = try await product.purchase(options: options)
+        } catch let skErr as StoreKitError {
+            switch skErr {
+            case .networkError, .systemError:
+                return .serviceUnavailable
+            case .notAvailableInStorefront:
+                return .productNotAvailableInStorefront
+            default:
+                throw RovenueError(kind: .storeProblem, message: "\(skErr)")
+            }
+        } catch let pErr as Product.PurchaseError {
+            switch pErr {
+            case .ineligibleForOffer, .invalidQuantity, .productUnavailable:
+                return .ineligible
+            default:
+                throw RovenueError(kind: .storeProblem, message: "\(pErr)")
+            }
         } catch {
-            throw Rovenue.Error.storeProblem
+            throw RovenueError(kind: .storeProblem, message: "\(error)")
         }
 
         switch result {
@@ -60,7 +97,7 @@ internal struct StoreKitAppleStore: AppleStore {
             return .pending
         case let .success(verification):
             guard case let .verified(transaction) = verification else {
-                throw Rovenue.Error.receiptInvalid
+                throw RovenueError(kind: .receiptInvalid, message: "StoreKit transaction could not be verified")
             }
             return .success(
                 jws: verification.jwsRepresentation,
@@ -68,7 +105,7 @@ internal struct StoreKitAppleStore: AppleStore {
                 finish: { await transaction.finish() }
             )
         @unknown default:
-            throw Rovenue.Error.storeProblem
+            throw RovenueError(kind: .storeProblem, message: "Unexpected StoreKit result")
         }
     }
 

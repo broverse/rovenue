@@ -11,14 +11,15 @@ final class ConfigurationTests: XCTestCase {
 
     func test_configure_rejectsEmptyApiKey() {
         XCTAssertThrowsError(try Rovenue.configure(apiKey: "", baseUrl: "https://api.rovenue.io")) { err in
-            guard let e = err as? Rovenue.Error else { return XCTFail("expected Rovenue.Error, got \(err)") }
-            XCTAssertEqual(e, .invalidApiKey)
+            guard let e = err as? RovenueError else { return XCTFail("expected RovenueError, got \(err)") }
+            XCTAssertEqual(e.kind, .invalidApiKey)
         }
     }
 
     func test_configure_rejectsWhitespaceApiKey() {
         XCTAssertThrowsError(try Rovenue.configure(apiKey: "   ", baseUrl: "https://api.rovenue.io")) { err in
-            XCTAssertEqual(err as? Rovenue.Error, .invalidApiKey)
+            guard let e = err as? RovenueError else { return XCTFail("expected RovenueError, got \(err)") }
+            XCTAssertEqual(e.kind, .invalidApiKey)
         }
     }
 

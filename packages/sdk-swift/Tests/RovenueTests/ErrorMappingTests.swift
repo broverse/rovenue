@@ -1,72 +1,99 @@
+//  ErrorMappingTests.swift — TDD tests for the new single-struct RovenueError.
+//
+//  These tests were written first (red), then the implementation in
+//  Errors.swift was updated to make them green.
+
 import XCTest
 @testable import Rovenue
 
 final class ErrorMappingTests: XCTestCase {
-    func test_mapError_NotConfigured() {
-        XCTAssertEqual(mapError(.NotConfigured(message: "x")), .notConfigured)
+
+    // ------------------------------------------------------------------
+    // isRetryable derivation
+    // ------------------------------------------------------------------
+
+    func testRetryableDerivation() {
+        XCTAssertTrue(RovenueError(kind: .networkUnavailable, message: "").isRetryable)
+        XCTAssertTrue(RovenueError(kind: .timeout, message: "").isRetryable)
+        XCTAssertTrue(RovenueError(kind: .rateLimited, message: "").isRetryable)
+        XCTAssertTrue(RovenueError(kind: .serverError, message: "").isRetryable)
+        XCTAssertTrue(RovenueError(kind: .storeServiceUnavailable, message: "").isRetryable)
+        XCTAssertFalse(RovenueError(kind: .forbidden, message: "").isRetryable)
+        XCTAssertFalse(RovenueError(kind: .invalidApiKey, message: "").isRetryable)
+        XCTAssertFalse(RovenueError(kind: .receiptInvalid, message: "").isRetryable)
+        XCTAssertFalse(RovenueError(kind: .purchaseCanceled, message: "").isRetryable)
     }
 
-    func test_mapError_InvalidApiKey() {
-        XCTAssertEqual(mapError(.InvalidApiKey(message: "x")), .invalidApiKey)
+    // ------------------------------------------------------------------
+    // Carries serverCode / httpStatus / errorDescription
+    // ------------------------------------------------------------------
+
+    func testCarriesServerCode() {
+        let e = RovenueError(kind: .forbidden, message: "no", serverCode: "FORBIDDEN", httpStatus: 403)
+        XCTAssertEqual(e.serverCode, "FORBIDDEN")
+        XCTAssertEqual(e.httpStatus, 403)
+        XCTAssertEqual(e.errorDescription, "no")
     }
 
-    func test_mapError_InvalidArgument() {
-        XCTAssertEqual(mapError(.InvalidArgument(message: "x")), .invalidArgument)
+    func testErrorDescriptionEqualsMessage() {
+        let e = RovenueError(kind: .timeout, message: "Request timed out", serverCode: nil, httpStatus: nil)
+        XCTAssertEqual(e.errorDescription, "Request timed out")
     }
 
-    func test_mapError_ServerError() {
-        XCTAssertEqual(mapError(.ServerError(message: "x")), .serverError)
+    func testNilOptionals() {
+        let e = RovenueError(kind: .storage, message: "disk full")
+        XCTAssertNil(e.serverCode)
+        XCTAssertNil(e.httpStatus)
     }
 
-    func test_mapError_NetworkUnavailable() {
-        XCTAssertEqual(mapError(.NetworkUnavailable(message: "x")), .networkUnavailable)
+    // ------------------------------------------------------------------
+    // mapError reads .detail → .message, httpStatus UInt16? → Int?
+    // ------------------------------------------------------------------
+
+    func testMapError_readsDetail() {
+        let ffi = RovenueErrorFfi.Generic(
+            kind: .networkUnavailable,
+            detail: "no network",
+            serverCode: nil,
+            httpStatus: nil,
+            retryable: true
+        )
+        let mapped = mapError(ffi)
+        XCTAssertEqual(mapped.kind, .networkUnavailable)
+        XCTAssertEqual(mapped.message, "no network")
+        XCTAssertNil(mapped.serverCode)
+        XCTAssertNil(mapped.httpStatus)
+        XCTAssertTrue(mapped.isRetryable)
     }
 
-    func test_mapError_Timeout() {
-        XCTAssertEqual(mapError(.Timeout(message: "x")), .timeout)
+    func testMapError_convertsHttpStatus() {
+        let ffi = RovenueErrorFfi.Generic(
+            kind: .forbidden,
+            detail: "forbidden",
+            serverCode: "FORBIDDEN",
+            httpStatus: UInt16(403),
+            retryable: false
+        )
+        let mapped = mapError(ffi)
+        XCTAssertEqual(mapped.httpStatus, 403)
+        XCTAssertEqual(mapped.serverCode, "FORBIDDEN")
+        XCTAssertFalse(mapped.isRetryable)
     }
 
-    func test_mapError_RateLimited() {
-        XCTAssertEqual(mapError(.RateLimited(message: "x")), .rateLimited)
-    }
-
-    func test_mapError_Storage() {
-        XCTAssertEqual(mapError(.Storage(message: "x")), .storage)
-    }
-
-    func test_mapError_UserNotFound() {
-        XCTAssertEqual(mapError(.UserNotFound(message: "x")), .userNotFound)
-    }
-
-    func test_mapError_InsufficientCredits() {
-        XCTAssertEqual(mapError(.InsufficientCredits(message: "x")), .insufficientCredits)
-    }
-
-    func test_mapError_EntitlementInactive() {
-        XCTAssertEqual(mapError(.EntitlementInactive(message: "x")), .entitlementInactive)
-    }
-
-    func test_mapError_DuplicatePurchase() {
-        XCTAssertEqual(mapError(.DuplicatePurchase(message: "x")), .duplicatePurchase)
-    }
-
-    func test_mapError_ReceiptInvalid() {
-        XCTAssertEqual(mapError(.ReceiptInvalid(message: "x")), .receiptInvalid)
-    }
-
-    func test_mapError_Internal() {
-        XCTAssertEqual(mapError(.Internal(message: "x")), .internalError)
-    }
-
-    func test_errorDescription_isHumanReadable() {
-        // Every case has a non-empty description for debugging.
-        let cases: [Rovenue.Error] = [
-            .notConfigured, .invalidApiKey, .invalidArgument, .serverError, .networkUnavailable,
-            .timeout, .rateLimited, .storage, .userNotFound, .insufficientCredits,
-            .entitlementInactive, .duplicatePurchase, .receiptInvalid, .internalError,
+    func testMapError_allKindsProduceRovenueError() {
+        // Smoke: the single .Generic case maps to a RovenueError for every ErrorKind.
+        let kinds: [ErrorKind] = [
+            .networkUnavailable, .timeout, .rateLimited, .serverError,
+            .invalidApiKey, .forbidden, .notFound, .invalidRequest,
+            .conflict, .invalidArgument, .insufficientCredits,
+            .funnelTokenNotFound, .funnelTokenExpired, .funnelTokenAlreadyClaimed,
+            .purchaseCanceled, .productNotAvailable, .alreadyOwned,
+            .paymentDeclined, .storeServiceUnavailable, .ineligible,
+            .receiptInvalid, .storeProblem, .storage, .internal
         ]
-        for c in cases {
-            XCTAssertFalse(c.errorDescription?.isEmpty ?? true, "\(c) has empty description")
+        for kind in kinds {
+            let e = mapError(RovenueErrorFfi.Generic(kind: kind, detail: "x", serverCode: nil, httpStatus: nil, retryable: false))
+            XCTAssertEqual(e.kind, kind, "kind should be preserved for \(kind)")
         }
     }
 }

@@ -17,8 +17,8 @@ final class EventsTests: XCTestCase {
                 envelopeJson: #"{"eventType":"purchase","occurredAt":"2026-06-20T00:00:00Z"}"#
             )
             XCTFail("expected track to throw against an unreachable host")
-        } catch let error as Rovenue.Error {
-            XCTAssertEqual(error, .networkUnavailable)
+        } catch let error as RovenueError {
+            XCTAssertEqual(error.kind, .networkUnavailable)
         }
     }
 
