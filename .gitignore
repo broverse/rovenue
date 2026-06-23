@@ -39,3 +39,7 @@ packages/sdk-swift/Sources/Rovenue/Generated/*
 !packages/sdk-swift/Sources/Rovenue/Generated/.gitkeep
 packages/sdk-kotlin/src/main/kotlin/dev/rovenue/sdk/generated/*
 !packages/sdk-kotlin/src/main/kotlin/dev/rovenue/sdk/generated/.gitkeep
+
+# Cross-compiled Android native libs (built by build-android.sh, bundled in the AAR)
+packages/sdk-kotlin/src/main/jniLibs/**/*.so
+!packages/sdk-kotlin/src/main/jniLibs/.gitkeep

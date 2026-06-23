@@ -126,12 +126,16 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v3
-      # Generates the Kotlin UniFFI binding + the native lib the AAR builds against.
+      # Generates the Kotlin UniFFI binding the AAR compiles against.
       - run: ./packages/core-rs/scripts/build-bindings.sh
-      # NOTE: confirm the AAR bundles the librovenue native .so for Android ABIs
-      # (arm64-v8a / armeabi-v7a / x86_64) before relying on this for real device
-      # consumption — the gradle config publishes a valid Maven artifact, but
-      # Android-ABI native packaging is a separate concern from desktop unit tests.
+      # Cross-compile the native core for every Android ABI and stage it into
+      # src/main/jniLibs (renamed to libuniffi_librovenue.so) so the published
+      # AAR actually runs on-device. ubuntu-latest ships an NDK
+      # (ANDROID_NDK_LATEST_HOME); build-android.sh adds the rust targets itself.
+      - name: Cross-compile Android native libs
+        run: |
+          cargo install cargo-ndk --locked
+          ./packages/core-rs/scripts/build-android.sh
       - name: gradle publish
         working-directory: packages/sdk-kotlin
         run: >

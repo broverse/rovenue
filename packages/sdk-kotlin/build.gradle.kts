@@ -17,6 +17,12 @@ android {
         minSdk = 24
     }
 
+    // The Android core libs are cross-compiled + staged into src/main/jniLibs by
+    // packages/core-rs/scripts/build-android.sh (renamed to libuniffi_librovenue.so
+    // so the generated binding's hard-coded library name resolves on-device). AGP
+    // packages this dir into the AAR; declared explicitly to document the contract.
+    sourceSets["main"].jniLibs.srcDir("src/main/jniLibs")
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
