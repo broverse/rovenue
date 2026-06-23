@@ -564,13 +564,31 @@ public final class Rovenue: @unchecked Sendable {
 
         func buildProduct(_ p: CoreOfferingProduct) -> StoreProduct {
             let sk = p.appleProductId.flatMap { skProducts[$0] }
+            let type = ProductType.from(p.productType)
             return StoreProduct(
                 id: p.appleProductId ?? p.identifier,
-                type: ProductType.from(p.productType),
+                type: type,
+                productCategory: type == .subscription ? .subscription : .nonSubscription,
                 displayName: sk?.displayName ?? p.displayName,
+                description: nil,
                 priceString: sk?.displayPrice,
                 price: sk?.price,
-                currencyCode: sk?.priceFormatStyle.currencyCode
+                currencyCode: sk?.priceFormatStyle.currencyCode,
+                subscriptionPeriod: nil,
+                subscriptionGroupIdentifier: nil,
+                isFamilyShareable: false,
+                introPrice: nil,
+                discounts: [],
+                isEligibleForIntroOffer: nil,
+                subscriptionOptions: nil,
+                defaultOption: nil,
+                pricePerWeek: nil,
+                pricePerMonth: nil,
+                pricePerYear: nil,
+                pricePerWeekString: nil,
+                pricePerMonthString: nil,
+                pricePerYearString: nil,
+                rawStoreProduct: nil
             )
         }
 
@@ -582,7 +600,7 @@ public final class Rovenue: @unchecked Sendable {
                 // Package.identifier — that is the value the SDK contract
                 // exposes to callers. The product's own catalog identifier
                 // is available via pkg.product.id.
-                packages: o.packages.map { Package(identifier: $0.packageIdentifier, product: buildProduct($0)) }
+                packages: o.packages.map { Package(identifier: $0.packageIdentifier, packageType: .custom, product: buildProduct($0)) }
             )
         }
 

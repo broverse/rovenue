@@ -12,10 +12,27 @@ final class PurchaseTypesTests: XCTestCase {
         let p = StoreProduct(
             id: "premium_monthly",
             type: .subscription,
+            productCategory: .subscription,
             displayName: "Premium Monthly",
+            description: nil,
             priceString: "$9.99",
             price: Decimal(string: "9.99"),
-            currencyCode: "USD"
+            currencyCode: "USD",
+            subscriptionPeriod: nil,
+            subscriptionGroupIdentifier: nil,
+            isFamilyShareable: false,
+            introPrice: nil,
+            discounts: [],
+            isEligibleForIntroOffer: nil,
+            subscriptionOptions: nil,
+            defaultOption: nil,
+            pricePerWeek: nil,
+            pricePerMonth: nil,
+            pricePerYear: nil,
+            pricePerWeekString: nil,
+            pricePerMonthString: nil,
+            pricePerYearString: nil,
+            rawStoreProduct: nil
         )
         XCTAssertEqual(p.id, "premium_monthly")
         XCTAssertEqual(p.type, .subscription)
@@ -26,7 +43,31 @@ final class PurchaseTypesTests: XCTestCase {
     }
 
     func test_storeProduct_defaults_are_nil() {
-        let p = StoreProduct(id: "coins_100", type: .consumable, displayName: "100 Coins")
+        let p = StoreProduct(
+            id: "coins_100",
+            type: .consumable,
+            productCategory: .nonSubscription,
+            displayName: "100 Coins",
+            description: nil,
+            priceString: nil,
+            price: nil,
+            currencyCode: nil,
+            subscriptionPeriod: nil,
+            subscriptionGroupIdentifier: nil,
+            isFamilyShareable: false,
+            introPrice: nil,
+            discounts: [],
+            isEligibleForIntroOffer: nil,
+            subscriptionOptions: nil,
+            defaultOption: nil,
+            pricePerWeek: nil,
+            pricePerMonth: nil,
+            pricePerYear: nil,
+            pricePerWeekString: nil,
+            pricePerMonthString: nil,
+            pricePerYearString: nil,
+            rawStoreProduct: nil
+        )
         XCTAssertNil(p.priceString)
         XCTAssertNil(p.price)
         XCTAssertNil(p.currencyCode)
@@ -40,8 +81,32 @@ final class PurchaseTypesTests: XCTestCase {
     }
 
     func test_package_and_offering_shape() {
-        let prod = StoreProduct(id: "premium_monthly", type: .subscription, displayName: "Premium")
-        let pkg = Package(identifier: "$rov_monthly", product: prod)
+        let prod = StoreProduct(
+            id: "premium_monthly",
+            type: .subscription,
+            productCategory: .subscription,
+            displayName: "Premium",
+            description: nil,
+            priceString: nil,
+            price: nil,
+            currencyCode: nil,
+            subscriptionPeriod: nil,
+            subscriptionGroupIdentifier: nil,
+            isFamilyShareable: false,
+            introPrice: nil,
+            discounts: [],
+            isEligibleForIntroOffer: nil,
+            subscriptionOptions: nil,
+            defaultOption: nil,
+            pricePerWeek: nil,
+            pricePerMonth: nil,
+            pricePerYear: nil,
+            pricePerWeekString: nil,
+            pricePerMonthString: nil,
+            pricePerYearString: nil,
+            rawStoreProduct: nil
+        )
+        let pkg = Package(identifier: "$rov_monthly", packageType: .custom, product: prod)
         XCTAssertEqual(pkg.identifier, "$rov_monthly")
         XCTAssertEqual(pkg.product, prod)
 
@@ -52,8 +117,32 @@ final class PurchaseTypesTests: XCTestCase {
     }
 
     func test_offerings_shape() {
-        let prod = StoreProduct(id: "premium_monthly", type: .subscription, displayName: "Premium")
-        let pkg = Package(identifier: "$rov_monthly", product: prod)
+        let prod = StoreProduct(
+            id: "premium_monthly",
+            type: .subscription,
+            productCategory: .subscription,
+            displayName: "Premium",
+            description: nil,
+            priceString: nil,
+            price: nil,
+            currencyCode: nil,
+            subscriptionPeriod: nil,
+            subscriptionGroupIdentifier: nil,
+            isFamilyShareable: false,
+            introPrice: nil,
+            discounts: [],
+            isEligibleForIntroOffer: nil,
+            subscriptionOptions: nil,
+            defaultOption: nil,
+            pricePerWeek: nil,
+            pricePerMonth: nil,
+            pricePerYear: nil,
+            pricePerWeekString: nil,
+            pricePerMonthString: nil,
+            pricePerYearString: nil,
+            rawStoreProduct: nil
+        )
+        let pkg = Package(identifier: "$rov_monthly", packageType: .custom, product: prod)
         let off = Offering(identifier: "default", isDefault: true, packages: [pkg])
         let offerings = Offerings(current: off, all: ["default": off])
         XCTAssertEqual(offerings.current, off)
