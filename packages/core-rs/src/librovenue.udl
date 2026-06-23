@@ -87,6 +87,13 @@ dictionary ReceiptResult {
     sequence<Entitlement> entitlements;
 };
 
+dictionary AppleOfferSignature {
+    string key_identifier;
+    string nonce;
+    string signature;
+    i64 timestamp;
+};
+
 dictionary CoreOfferingProduct {
     string package_identifier;
     string identifier;
@@ -171,6 +178,13 @@ interface RovenueCore {
         string product_id,
         string? obfuscated_account_id,
         string? obfuscated_profile_id
+    );
+
+    [Throws=RovenueErrorFfi]
+    AppleOfferSignature get_apple_offer_signature(
+        string product_id,
+        string offer_id,
+        string? app_account_token
     );
 
     [Throws=RovenueErrorFfi]

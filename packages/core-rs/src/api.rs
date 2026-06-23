@@ -19,6 +19,7 @@ use crate::logging::{LogLevel, Logger, LogSink};
 use crate::observer::{Observer, ObserverBus};
 use crate::offerings::{CoreOfferings, OfferingsClient};
 use crate::polling::PollingScheduler;
+use crate::purchases::{AppleOfferSignature, PurchasesClient};
 use crate::receipts::types::ReceiptPostOutcome;
 use crate::receipts::{ReceiptClient, ReceiptResult};
 use crate::remote_config::{ExperimentAssignment, RemoteConfigReader};
@@ -52,6 +53,7 @@ pub struct RovenueCore {
     entitlements: Arc<EntitlementReader>,
     virtual_currencies: Arc<VirtualCurrencyReader>,
     receipts: Arc<ReceiptClient>,
+    purchases: Arc<PurchasesClient>,
     events: Arc<EventsClient>,
     funnel: Arc<FunnelClient>,
     funnel_bus: Arc<FunnelClaimBus>,
@@ -120,6 +122,7 @@ impl RovenueCore {
                 .with_clock(Arc::clone(&clock)),
         );
         let receipts = Arc::new(ReceiptClient::new(Arc::clone(&http)));
+        let purchases = Arc::new(PurchasesClient::new(Arc::clone(&http)));
         let events = Arc::new(EventsClient::new(Arc::clone(&http)));
         let funnel = Arc::new(FunnelClient::new(Arc::clone(&http)));
         let funnel_bus = Arc::new(FunnelClaimBus::default().with_logger(Arc::clone(&logger)));
@@ -216,6 +219,7 @@ impl RovenueCore {
             entitlements: reader,
             virtual_currencies,
             receipts,
+            purchases,
             events,
             funnel,
             funnel_bus,
@@ -547,6 +551,47 @@ impl RovenueCore {
                     crate::logging::redact::redact_message(&e.message)
                 ),
                 "post_google_receipt",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
+    }
+
+    /// Request an Apple promotional-offer signature from the backend.
+    ///
+    /// Project-scoped (authenticated by the project API key only — no
+    /// subscriber scope or idempotency key is needed).
+    pub fn get_apple_offer_signature(
+        &self,
+        product_id: String,
+        offer_id: String,
+        app_account_token: Option<String>,
+    ) -> RovenueResult<AppleOfferSignature> {
+        self.log_op(
+            LogLevel::Info,
+            "get_apple_offer_signature",
+            "get_apple_offer_signature",
+            &[],
+        );
+        let result = self.purchases.get_apple_offer_signature(
+            &product_id,
+            &offer_id,
+            app_account_token.as_deref(),
+        );
+        match &result {
+            Ok(_) => self.log_op(
+                LogLevel::Info,
+                "get_apple_offer_signature ok",
+                "get_apple_offer_signature",
+                &[],
+            ),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "get_apple_offer_signature failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "get_apple_offer_signature",
                 &[("kind", &format!("{:?}", e.kind))],
             ),
         }
