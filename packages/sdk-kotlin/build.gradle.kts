@@ -2,6 +2,8 @@ plugins {
     id("com.android.library") version "8.5.2"
     kotlin("android") version "1.9.24"
     kotlin("plugin.serialization") version "1.9.24"
+    `maven-publish`
+    signing
 }
 
 group = "dev.rovenue"
@@ -30,6 +32,16 @@ android {
             isIncludeAndroidResources = true
         }
     }
+
+    // Publish the release variant as an AAR with sources + (empty) javadoc jars
+    // — Maven Central requires all three. AGP wires the `release` software
+    // component consumed by the maven-publish block below.
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
 }
 
 dependencies {
@@ -51,6 +63,86 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.11.1")
     testImplementation("io.mockk:mockk:1.13.10")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+// ---- Maven publishing -------------------------------------------------------
+// Publishes the release AAR (+ sources/javadoc) to a Maven repository. NOTHING
+// is hardcoded — the target repo, credentials, and signing key all come from
+// Gradle properties or env vars at publish time, so no secret lands in git:
+//
+//   ./gradlew :publishReleasePublicationToReleaseRepository \
+//     -Provenue.publish.url=https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/ \
+//     -Provenue.publish.user=$OSSRH_USER -Provenue.publish.password=$OSSRH_PASSWORD \
+//     -Provenue.signing.key="$GPG_PRIVATE_KEY" -Provenue.signing.password=$GPG_PASSWORD
+//
+// To publish to GitHub Packages instead, set rovenue.publish.url to
+//   https://maven.pkg.github.com/rovenue/rovenue
+// With no rovenue.publish.url set, publishing targets a local build/repo dir so
+// the config can be exercised offline. Signing activates only when a key is
+// supplied, keeping local `gradle build`/`test` unsigned and frictionless.
+fun publishProp(name: String): String? =
+    (findProperty(name) as String?) ?: System.getenv(name.replace('.', '_').uppercase())
+
+publishing {
+    publications {
+        register<MavenPublication>("release") {
+            // The android `release` component only exists after evaluation.
+            afterEvaluate { from(components["release"]) }
+            groupId = project.group.toString()
+            artifactId = "rovenue-sdk"
+            version = project.version.toString()
+            pom {
+                name.set("Rovenue Android SDK")
+                description.set(
+                    "Rovenue subscription / virtual-currency SDK — Kotlin façade over the librovenue Rust core.",
+                )
+                url.set("https://github.com/rovenue/rovenue")
+                licenses {
+                    license {
+                        name.set("AGPL-3.0-only")
+                        url.set("https://www.gnu.org/licenses/agpl-3.0.html")
+                    }
+                }
+                developers {
+                    developer {
+                        id.set("rovenue")
+                        name.set("Rovenue")
+                    }
+                }
+                scm {
+                    url.set("https://github.com/rovenue/rovenue")
+                    connection.set("scm:git:https://github.com/rovenue/rovenue.git")
+                    developerConnection.set("scm:git:ssh://git@github.com/rovenue/rovenue.git")
+                }
+            }
+        }
+    }
+    repositories {
+        maven {
+            name = "release"
+            url = uri(
+                publishProp("rovenue.publish.url")
+                    ?: layout.buildDirectory.dir("repo").get().asFile.toURI().toString(),
+            )
+            val user = publishProp("rovenue.publish.user")
+            val pass = publishProp("rovenue.publish.password")
+            if (user != null && pass != null) {
+                credentials {
+                    username = user
+                    password = pass
+                }
+            }
+        }
+    }
+}
+
+signing {
+    val signingKey = publishProp("rovenue.signing.key")
+    val signingPassword = publishProp("rovenue.signing.password")
+    if (signingKey != null) {
+        useInMemoryPgpKeys(signingKey, signingPassword)
+        sign(publishing.publications["release"])
+    }
 }
 
 tasks.withType<Test> {

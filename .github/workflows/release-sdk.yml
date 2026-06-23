@@ -1,0 +1,171 @@
+# Coordinated SDK release — publishes all four façades at the version currently
+# committed in the repo (Rust crate, RN npm, Kotlin AAR, Swift pod). It does NOT
+# bump versions: bump first (see scripts/sdk-parity.sh + the version parity test
+# that locks all four to one number), merge, then run this.
+#
+# Manual-only by design — publishing is irreversible, so an operator triggers it
+# from the Actions tab and ticks which artifacts to push. The `verify` gate runs
+# the same checks as sdk.yml (incl. the 4-façade version parity test) so a
+# version skew or red test blocks every publish job.
+#
+# Required repository secrets (publish jobs are skipped/fail clearly if unset):
+#   CARGO_REGISTRY_TOKEN  — crates.io API token
+#   NPM_TOKEN             — npm automation token (publish scope)
+#   MAVEN_PUBLISH_URL     — e.g. https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/
+#                           or  https://maven.pkg.github.com/rovenue/rovenue
+#   MAVEN_PUBLISH_USER / MAVEN_PUBLISH_PASSWORD — Maven repo credentials
+#   MAVEN_SIGNING_KEY / MAVEN_SIGNING_PASSWORD  — ASCII-armored GPG private key + passphrase (Central requires signed artifacts)
+#   COCOAPODS_TRUNK_TOKEN — `pod trunk` session token
+name: release-sdk
+
+on:
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: "Publish Rust crate to crates.io"
+        type: boolean
+        default: true
+      rn:
+        description: "Publish RN package to npm"
+        type: boolean
+        default: true
+      kotlin:
+        description: "Publish Kotlin AAR to Maven"
+        type: boolean
+        default: true
+      swift:
+        description: "Publish Swift pod to CocoaPods Trunk"
+        type: boolean
+        default: true
+
+# release-pod.sh creates a GitHub Release for the Swift zip.
+permissions:
+  contents: write
+
+# Never run two releases concurrently.
+concurrency:
+  group: release-sdk
+  cancel-in-progress: false
+
+jobs:
+  # ---- Gate: same checks as sdk.yml, including version parity across all 4 ----
+  verify:
+    name: Verify (tests + 4-façade version parity)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: rustfmt, clippy
+      - run: sudo apt-get update && sudo apt-get install -y build-essential
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --all-targets
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # version.test.ts asserts crate == RN == Kotlin == Swift; a skew fails here.
+      - run: pnpm --filter @rovenue/sdk-rn test
+
+  publish-crate:
+    name: Publish crate (crates.io)
+    needs: verify
+    if: ${{ inputs.crate }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - run: sudo apt-get update && sudo apt-get install -y build-essential
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo publish
+        run: cargo publish -p librovenue --manifest-path packages/core-rs/Cargo.toml
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  publish-rn:
+    name: Publish RN (npm)
+    needs: verify
+    if: ${{ inputs.rn }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @rovenue/sdk-rn build
+      - name: npm publish
+        working-directory: packages/sdk-rn
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-kotlin:
+    name: Publish Kotlin (Maven)
+    needs: verify
+    if: ${{ inputs.kotlin }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - run: sudo apt-get update && sudo apt-get install -y build-essential
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v3
+      # Generates the Kotlin UniFFI binding + the native lib the AAR builds against.
+      - run: ./packages/core-rs/scripts/build-bindings.sh
+      # NOTE: confirm the AAR bundles the librovenue native .so for Android ABIs
+      # (arm64-v8a / armeabi-v7a / x86_64) before relying on this for real device
+      # consumption — the gradle config publishes a valid Maven artifact, but
+      # Android-ABI native packaging is a separate concern from desktop unit tests.
+      - name: gradle publish
+        working-directory: packages/sdk-kotlin
+        run: >
+          gradle publishReleasePublicationToReleaseRepository --no-daemon
+          -Provenue.publish.url="$MAVEN_PUBLISH_URL"
+          -Provenue.publish.user="$MAVEN_PUBLISH_USER"
+          -Provenue.publish.password="$MAVEN_PUBLISH_PASSWORD"
+          -Provenue.signing.key="$MAVEN_SIGNING_KEY"
+          -Provenue.signing.password="$MAVEN_SIGNING_PASSWORD"
+        env:
+          MAVEN_PUBLISH_URL: ${{ secrets.MAVEN_PUBLISH_URL }}
+          MAVEN_PUBLISH_USER: ${{ secrets.MAVEN_PUBLISH_USER }}
+          MAVEN_PUBLISH_PASSWORD: ${{ secrets.MAVEN_PUBLISH_PASSWORD }}
+          MAVEN_SIGNING_KEY: ${{ secrets.MAVEN_SIGNING_KEY }}
+          MAVEN_SIGNING_PASSWORD: ${{ secrets.MAVEN_SIGNING_PASSWORD }}
+
+  publish-swift:
+    name: Publish Swift (CocoaPods)
+    needs: verify
+    if: ${{ inputs.swift }}
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+      # Builds the arm64 static lib, zips Sources + staticlib, creates the
+      # GitHub Release, and patches the podspec sha256 in place.
+      - name: Build + release artifact + patch podspec sha256
+        working-directory: packages/sdk-swift
+        run: ./scripts/release-pod.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: pod trunk push
+        working-directory: packages/sdk-swift
+        run: pod trunk push Rovenue.podspec --allow-warnings
+        env:
+          COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
