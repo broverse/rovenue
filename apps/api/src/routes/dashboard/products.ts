@@ -109,16 +109,28 @@ const currencyGrantSchema = z.object({
   amount: z.number().int().positive(),
 });
 
-export const createBodySchema = z.object({
-  identifier: z.string().trim().min(1).max(160),
-  type: productType,
-  displayName: z.string().trim().min(1).max(200),
-  storeIds: storeIdsSchema.optional(),
-  accessIds: z.array(accessIdSchema).optional(),
-  currencyGrants: z.array(currencyGrantSchema).max(20).optional(),
-  isActive: z.boolean().optional(),
-  metadata: z.record(z.unknown()).optional(),
-});
+export const createBodySchema = z
+  .object({
+    identifier: z.string().trim().min(1).max(160),
+    type: productType,
+    displayName: z.string().trim().min(1).max(200),
+    storeIds: storeIdsSchema.optional(),
+    accessIds: z.array(accessIdSchema).optional(),
+    currencyGrants: z.array(currencyGrantSchema).max(20).optional(),
+    isActive: z.boolean().optional(),
+    metadata: z.record(z.unknown()).optional(),
+    androidBasePlanId: z.string().trim().min(1).max(200).nullable().optional(),
+    androidOfferId: z.string().trim().min(1).max(200).nullable().optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.androidOfferId && !v.androidBasePlanId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["androidOfferId"],
+        message: "androidOfferId requires androidBasePlanId",
+      });
+    }
+  });
 
 const importItemSchema = z.object({
   storeId: z.string().trim().min(1).max(200),
@@ -148,11 +160,22 @@ export const updateBodySchema = z
     currencyGrants: z.array(currencyGrantSchema).max(20).optional(),
     isActive: z.boolean().optional(),
     metadata: z.record(z.unknown()).optional(),
+    androidBasePlanId: z.string().trim().min(1).max(200).nullable().optional(),
+    androidOfferId: z.string().trim().min(1).max(200).nullable().optional(),
   })
   .refine(
     (v) => Object.values(v).some((x) => x !== undefined),
     { message: "At least one field is required" },
-  );
+  )
+  .superRefine((v, ctx) => {
+    if (v.androidOfferId && !v.androidBasePlanId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["androidOfferId"],
+        message: "androidOfferId requires androidBasePlanId",
+      });
+    }
+  });
 
 /**
  * Validates that every `accessId` referenced from a product row
@@ -189,6 +212,8 @@ function toWire(
     metadata: unknown;
     createdAt: Date;
     updatedAt: Date;
+    androidBasePlanId?: string | null;
+    androidOfferId?: string | null;
   },
   currencyGrants: Array<{ currencyId: string; amount: number }> = [],
 ): DashboardProductRow {
@@ -204,6 +229,8 @@ function toWire(
     metadata: (row.metadata as Record<string, unknown> | null) ?? {},
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    androidBasePlanId: row.androidBasePlanId ?? null,
+    androidOfferId: row.androidOfferId ?? null,
   };
 }
 
@@ -284,6 +311,8 @@ export const productsDashboardRoute = new Hono()
       accessIds: body.accessIds ?? [],
       isActive: body.isActive ?? true,
       metadata: body.metadata ?? {},
+      androidBasePlanId: body.androidBasePlanId ?? null,
+      androidOfferId: body.androidOfferId ?? null,
     });
 
     let grants: Array<{ currencyId: string; amount: number }> = [];

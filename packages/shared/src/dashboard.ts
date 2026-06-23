@@ -1478,6 +1478,10 @@ export interface DashboardProductRow {
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  /** Google Play base plan identifier for server-configured default offer selection. */
+  androidBasePlanId: string | null;
+  /** Google Play offer identifier; requires androidBasePlanId to be set. */
+  androidOfferId: string | null;
 }
 
 export interface DashboardProductsListResponse {

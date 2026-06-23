@@ -360,3 +360,57 @@ describe("PATCH /projects/:projectId/products/:id — currencyGrants persistence
     expect(patchRes.status).toBe(404);
   });
 });
+
+// =============================================================
+// androidBasePlanId / androidOfferId — Task 2
+// =============================================================
+
+describe("POST /projects/:projectId/products — androidBasePlanId/androidOfferId", () => {
+  it("persists androidBasePlanId/androidOfferId and returns them", async () => {
+    const { userId, cookie } = await createUserAndSession("android-fields");
+    const project = await seedProject("android-fields");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+
+    const app = buildApp();
+    const res = await app.request(`/projects/${project.id}/products`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "pro_a",
+        type: "SUBSCRIPTION",
+        displayName: "Pro A",
+        storeIds: { android: "pro_a" },
+        androidBasePlanId: "annual",
+        androidOfferId: "promo10",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as {
+      data: { product: { androidBasePlanId: string | null; androidOfferId: string | null } };
+    };
+    expect(data.product.androidBasePlanId).toBe("annual");
+    expect(data.product.androidOfferId).toBe("promo10");
+  });
+
+  it("rejects androidOfferId without androidBasePlanId", async () => {
+    const { userId, cookie } = await createUserAndSession("android-fields-reject");
+    const project = await seedProject("android-fields-reject");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+
+    const app = buildApp();
+    const res = await app.request(`/projects/${project.id}/products`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "pro_b",
+        type: "SUBSCRIPTION",
+        displayName: "Pro B",
+        storeIds: { android: "pro_b" },
+        androidOfferId: "promo10",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
