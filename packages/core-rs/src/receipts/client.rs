@@ -85,7 +85,7 @@ impl ReceiptClient {
                     .idempotency_key(idempotency_key),
                 &body,
             )?;
-        let data = resp.body.ok_or(RovenueError::Internal)?.data;
+        let data = resp.body.ok_or(RovenueError::Internal())?.data;
         Ok(ReceiptPostOutcome {
             subscriber_id: data.subscriber.id,
             app_user_id: data.subscriber.app_user_id,

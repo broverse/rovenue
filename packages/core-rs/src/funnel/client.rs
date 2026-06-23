@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::error::{RovenueError, RovenueResult};
+use crate::error::{ErrorKind, RovenueError, RovenueResult};
 use crate::transport::http_client::HttpClient;
 use crate::transport::types::HttpPostRequest;
 
@@ -31,11 +31,11 @@ impl FunnelClient {
             200 => {
                 let data = parsed
                     .and_then(|v| v.get("data").cloned())
-                    .ok_or(RovenueError::Internal)?;
+                    .ok_or(RovenueError::Internal())?;
                 let subscriber_id = data
                     .get("subscriber_id")
                     .and_then(|v| v.as_str())
-                    .ok_or(RovenueError::Internal)?
+                    .ok_or(RovenueError::Internal())?
                     .to_string();
                 let funnel_answers_json = data
                     .get("funnel_answers")
@@ -47,11 +47,11 @@ impl FunnelClient {
                     funnel_answers_json,
                 })
             }
-            404 => Err(RovenueError::FunnelTokenNotFound),
-            410 => Err(RovenueError::FunnelTokenExpired),
-            409 => Err(RovenueError::FunnelTokenAlreadyClaimed),
-            401 => Err(RovenueError::InvalidApiKey),
-            _ => Err(RovenueError::ServerError),
+            404 => Err(RovenueError::FunnelTokenNotFound()),
+            410 => Err(RovenueError::FunnelTokenExpired()),
+            409 => Err(RovenueError::FunnelTokenAlreadyClaimed()),
+            401 => Err(RovenueError::InvalidApiKey()),
+            _ => Err(RovenueError::ServerError()),
         }
     }
 
@@ -87,12 +87,12 @@ impl FunnelClient {
                 });
                 match token {
                     Some(t) => Ok(Some(t)),
-                    None => Err(RovenueError::Internal),
+                    None => Err(RovenueError::Internal()),
                 }
             }
             404 => Ok(None),
-            401 => Err(RovenueError::InvalidApiKey),
-            _ => Err(RovenueError::ServerError),
+            401 => Err(RovenueError::InvalidApiKey()),
+            _ => Err(RovenueError::ServerError()),
         }
     }
 
@@ -104,8 +104,8 @@ impl FunnelClient {
             .post_json_status(HttpPostRequest::new("/v1/sdk/claim-via-email"), &body)?;
         match status {
             202 | 200 => Ok(()),
-            401 => Err(RovenueError::InvalidApiKey),
-            _ => Err(RovenueError::ServerError),
+            401 => Err(RovenueError::InvalidApiKey()),
+            _ => Err(RovenueError::ServerError()),
         }
     }
 }
@@ -139,11 +139,9 @@ mod tests {
     fn claim_funnel_token_maps_status_errors() {
         type StatusCheck = fn(RovenueError) -> bool;
         let cases: &[(u16, StatusCheck)] = &[
-            (404, |e| matches!(e, RovenueError::FunnelTokenNotFound)),
-            (410, |e| matches!(e, RovenueError::FunnelTokenExpired)),
-            (409, |e| {
-                matches!(e, RovenueError::FunnelTokenAlreadyClaimed)
-            }),
+            (404, |e: RovenueError| e.kind == ErrorKind::FunnelTokenNotFound),
+            (410, |e: RovenueError| e.kind == ErrorKind::FunnelTokenExpired),
+            (409, |e: RovenueError| e.kind == ErrorKind::FunnelTokenAlreadyClaimed),
         ];
         for (code, check_fn) in cases {
             let mut server = mockito::Server::new();
@@ -217,7 +215,7 @@ mod tests {
             .claim_install(&params, "inst_m")
             .unwrap_err();
         assert!(
-            matches!(err, RovenueError::Internal),
+            err.kind == ErrorKind::Internal,
             "malformed 200 must be Internal error"
         );
     }

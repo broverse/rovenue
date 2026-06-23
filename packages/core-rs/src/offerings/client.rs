@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::cache::offerings::OfferingsCacheRepo;
 use crate::cache::CacheStore;
-use crate::error::{RovenueError, RovenueResult};
+use crate::error::{ErrorKind, RovenueError, RovenueResult};
 use crate::time::{Clock, SystemClock};
 use crate::transport::api::ApiEnvelope;
 use crate::transport::http_client::HttpClient;
@@ -50,7 +50,7 @@ impl OfferingsClient {
             .get_json::<ApiEnvelope<OfferingsResponse>>(HttpRequest::new("/v1/offerings"))
         {
             Ok(resp) => {
-                let body = resp.body.ok_or(RovenueError::Internal)?;
+                let body = resp.body.ok_or(RovenueError::Internal())?;
                 // Persist the raw response (best-effort: a cache write failure
                 // must not fail an otherwise-successful fetch).
                 if let Ok(raw) = serde_json::to_string(&body.data) {
@@ -62,13 +62,13 @@ impl OfferingsClient {
                 }
                 Ok(map_response(body.data))
             }
-            Err(e @ (RovenueError::NetworkUnavailable | RovenueError::Timeout)) => {
+            Err(e) if matches!(e.kind, ErrorKind::NetworkUnavailable | ErrorKind::Timeout) => {
                 // Connectivity failure: serve last-known offerings if present,
                 // otherwise propagate the original network error.
                 match OfferingsCacheRepo::new(&self.store).get(OFFERINGS_RESOURCE)? {
                     Some(raw) => {
                         let parsed: OfferingsResponse =
-                            serde_json::from_str(&raw).map_err(|_| RovenueError::Internal)?;
+                            serde_json::from_str(&raw).map_err(|_| RovenueError::Internal())?;
                         Ok(map_response(parsed))
                     }
                     None => Err(e),

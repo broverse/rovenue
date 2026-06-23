@@ -66,14 +66,14 @@ impl VirtualCurrencyReader {
 
     /// GET /v1/virtual-currencies/me → replace the cached balance set.
     pub fn refresh(&self) -> RovenueResult<()> {
-        let http = self.http.as_ref().ok_or(RovenueError::Internal)?;
-        let clock = self.clock.as_ref().ok_or(RovenueError::Internal)?;
+        let http = self.http.as_ref().ok_or(RovenueError::Internal())?;
+        let clock = self.clock.as_ref().ok_or(RovenueError::Internal())?;
         let scope = self.identity.current_user_scope();
 
         let resp = http.get_json::<ApiEnvelope<VcBalancesWire>>(
             HttpRequest::new("/v1/virtual-currencies/me").user_scope(&scope),
         )?;
-        let body = resp.body.ok_or(RovenueError::Internal)?;
+        let body = resp.body.ok_or(RovenueError::Internal())?;
         let balances: BTreeMap<String, i64> = body.data.balances.into_iter().collect();
         self.set_balances(&scope, &balances, clock.now_unix_ms())
     }

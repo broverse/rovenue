@@ -47,7 +47,7 @@ impl IdentifyClient {
                 HttpPostRequest::new("/v1/identify").user_scope(rovenue_id),
                 &body,
             )?;
-        let data = resp.body.ok_or(RovenueError::Internal)?.data;
+        let data = resp.body.ok_or(RovenueError::Internal())?.data;
         Ok(data)
     }
 }

@@ -29,7 +29,7 @@ pub struct CacheStore {
 
 impl CacheStore {
     pub fn open(path: &Path) -> RovenueResult<Self> {
-        let conn = Connection::open(path).map_err(|_| RovenueError::Storage)?;
+        let conn = Connection::open(path).map_err(|_| RovenueError::Storage())?;
         conn.pragma_update(None, "journal_mode", "WAL").ok();
         conn.pragma_update(None, "synchronous", "NORMAL").ok();
         conn.pragma_update(None, "foreign_keys", "ON").ok();
@@ -40,7 +40,7 @@ impl CacheStore {
     }
 
     pub fn open_in_memory() -> RovenueResult<Self> {
-        let conn = Connection::open_in_memory().map_err(|_| RovenueError::Storage)?;
+        let conn = Connection::open_in_memory().map_err(|_| RovenueError::Storage())?;
         Self::run_migrations(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
@@ -58,30 +58,30 @@ impl CacheStore {
         for (idx, sql) in MIGRATIONS.iter().enumerate() {
             let target = idx as u32 + 1;
             if current < target {
-                conn.execute_batch(sql).map_err(|_| RovenueError::Storage)?;
+                conn.execute_batch(sql).map_err(|_| RovenueError::Storage())?;
             }
         }
         Ok(())
     }
 
     pub fn schema_version(&self) -> RovenueResult<u32> {
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         guard
             .query_row("SELECT version FROM schema_meta LIMIT 1", [], |r| {
                 r.get::<_, u32>(0)
             })
-            .map_err(|_| RovenueError::Storage)
+            .map_err(|_| RovenueError::Storage())
     }
 
     pub fn has_table(&self, name: &str) -> RovenueResult<bool> {
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         let count: i64 = guard
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
                 [name],
                 |r| r.get(0),
             )
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         Ok(count > 0)
     }
 
@@ -90,8 +90,8 @@ impl CacheStore {
         &self,
         f: impl FnOnce(&Connection) -> rusqlite::Result<R>,
     ) -> RovenueResult<R> {
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
-        f(&guard).map_err(|_| RovenueError::Storage)
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
+        f(&guard).map_err(|_| RovenueError::Storage())
     }
 
     /// Latest schema version the binary knows how to apply.
@@ -100,7 +100,7 @@ impl CacheStore {
     }
 
     pub fn get_app_account_token(&self, scope: &str) -> RovenueResult<Option<String>> {
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         guard
             .query_row(
                 "SELECT token FROM app_account_tokens WHERE scope = ?1",
@@ -108,11 +108,11 @@ impl CacheStore {
                 |r| r.get::<_, String>(0),
             )
             .optional()
-            .map_err(|_| RovenueError::Storage)
+            .map_err(|_| RovenueError::Storage())
     }
 
     pub fn put_app_account_token(&self, scope: &str, token: &str) -> RovenueResult<()> {
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         // INSERT OR IGNORE so the first writer wins — idempotent.
         guard
             .execute(
@@ -120,25 +120,25 @@ impl CacheStore {
                  VALUES (?1, ?2, datetime('now'))",
                 [scope, token],
             )
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         Ok(())
     }
 
     /// Wipes every app account token. Used on log_out — tokens are bound to the
     /// previous identity scope and must not carry over to the next user.
     pub fn clear_app_account_tokens(&self) -> RovenueResult<()> {
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         guard
             .execute("DELETE FROM app_account_tokens", [])
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         Ok(())
     }
 
     pub fn count_app_account_tokens(&self) -> RovenueResult<i64> {
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         guard
             .query_row("SELECT COUNT(*) FROM app_account_tokens", [], |r| r.get(0))
-            .map_err(|_| RovenueError::Storage)
+            .map_err(|_| RovenueError::Storage())
     }
 
     pub fn append_session_event(
@@ -147,14 +147,14 @@ impl CacheStore {
         occurred_at: &str,
         duration_ms: Option<u32>,
     ) -> RovenueResult<()> {
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         guard
             .execute(
                 "INSERT INTO session_events (kind, occurred_at, duration_ms) \
                  VALUES (?1, ?2, ?3)",
                 rusqlite::params![kind, occurred_at, duration_ms],
             )
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         // FIFO trim — keep newest 1000.
         guard
             .execute(
@@ -162,28 +162,28 @@ impl CacheStore {
                  (SELECT id FROM session_events ORDER BY id DESC LIMIT 1000)",
                 [],
             )
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         Ok(())
     }
 
     /// Wipes every buffered session event. Used on log_out — undispatched events
     /// belong to the previous identity scope and must not flush under the next user.
     pub fn clear_session_events(&self) -> RovenueResult<()> {
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         guard
             .execute("DELETE FROM session_events", [])
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         Ok(())
     }
 
     pub fn list_session_events(&self, limit: usize) -> RovenueResult<Vec<SessionEventRow>> {
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         let mut stmt = guard
             .prepare(
                 "SELECT id, kind, occurred_at, duration_ms FROM session_events \
                  ORDER BY id ASC LIMIT ?1",
             )
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         let rows = stmt
             .query_map([limit as i64], |r| {
                 Ok(SessionEventRow {
@@ -193,9 +193,9 @@ impl CacheStore {
                     duration_ms: r.get(3)?,
                 })
             })
-            .map_err(|_| RovenueError::Storage)?
+            .map_err(|_| RovenueError::Storage())?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         Ok(rows)
     }
 
@@ -203,7 +203,7 @@ impl CacheStore {
         if ids.is_empty() {
             return Ok(());
         }
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         let placeholders = std::iter::repeat_n("?", ids.len())
             .collect::<Vec<_>>()
             .join(",");
@@ -212,18 +212,18 @@ impl CacheStore {
             ids.iter().map(|i| i as &dyn rusqlite::ToSql).collect();
         guard
             .execute(&sql, params.as_slice())
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         Ok(())
     }
 
     pub fn append_attribute_mutation(&self, key: &str, value: Option<&str>) -> RovenueResult<()> {
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         guard
             .execute(
                 "INSERT INTO attribute_mutations (key, value) VALUES (?1, ?2)",
                 rusqlite::params![key, value],
             )
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         // FIFO trim — keep newest 1000 (backstop for an endlessly-failing flush).
         guard
             .execute(
@@ -231,7 +231,7 @@ impl CacheStore {
                  (SELECT id FROM attribute_mutations ORDER BY id DESC LIMIT 1000)",
                 [],
             )
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         Ok(())
     }
 
@@ -239,13 +239,13 @@ impl CacheStore {
         &self,
         limit: usize,
     ) -> RovenueResult<Vec<AttributeMutationRow>> {
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         let mut stmt = guard
             .prepare(
                 "SELECT id, key, value FROM attribute_mutations \
                  ORDER BY id ASC LIMIT ?1",
             )
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         let rows = stmt
             .query_map([limit as i64], |r| {
                 Ok(AttributeMutationRow {
@@ -254,9 +254,9 @@ impl CacheStore {
                     value: r.get(2)?,
                 })
             })
-            .map_err(|_| RovenueError::Storage)?
+            .map_err(|_| RovenueError::Storage())?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         Ok(rows)
     }
 
@@ -264,7 +264,7 @@ impl CacheStore {
         if ids.is_empty() {
             return Ok(());
         }
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         let placeholders = std::iter::repeat_n("?", ids.len())
             .collect::<Vec<_>>()
             .join(",");
@@ -273,15 +273,15 @@ impl CacheStore {
             ids.iter().map(|i| i as &dyn rusqlite::ToSql).collect();
         guard
             .execute(&sql, params.as_slice())
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         Ok(())
     }
 
     pub fn clear_attribute_mutations(&self) -> RovenueResult<()> {
-        let guard = self.conn.lock().map_err(|_| RovenueError::Storage)?;
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         guard
             .execute("DELETE FROM attribute_mutations", [])
-            .map_err(|_| RovenueError::Storage)?;
+            .map_err(|_| RovenueError::Storage())?;
         Ok(())
     }
 }

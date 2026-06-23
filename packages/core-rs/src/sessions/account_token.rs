@@ -19,7 +19,7 @@ impl AccountTokenStore {
     /// first call; subsequent calls return the same UUID.
     pub fn get_or_create(&self, scope: &str) -> RovenueResult<String> {
         if scope.trim().is_empty() {
-            return Err(RovenueError::Internal);
+            return Err(RovenueError::Internal());
         }
         if let Some(existing) = self.store.get_app_account_token(scope)? {
             return Ok(existing);
@@ -29,7 +29,7 @@ impl AccountTokenStore {
         // Re-read to handle race: another caller may have inserted first.
         self.store
             .get_app_account_token(scope)?
-            .ok_or(RovenueError::Storage)
+            .ok_or(RovenueError::Storage())
     }
 
     /// Drops every stored token. Called on log_out so the next identity does not

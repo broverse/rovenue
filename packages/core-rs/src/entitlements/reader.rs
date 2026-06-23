@@ -77,8 +77,8 @@ impl EntitlementReader {
     }
 
     pub fn refresh(&self) -> RovenueResult<()> {
-        let http = self.http.as_ref().ok_or(RovenueError::Internal)?;
-        let clock = self.clock.as_ref().ok_or(RovenueError::Internal)?;
+        let http = self.http.as_ref().ok_or(RovenueError::Internal())?;
+        let clock = self.clock.as_ref().ok_or(RovenueError::Internal())?;
 
         let scope = self.identity.current_user_scope();
         let etag_repo = EtagRepo::new(&self.store);
@@ -97,7 +97,7 @@ impl EntitlementReader {
             return Ok(());
         }
 
-        let body = resp.body.ok_or(RovenueError::Internal)?;
+        let body = resp.body.ok_or(RovenueError::Internal())?;
         let now = clock.now_unix_ms();
         let rows = map_to_rows(body.data.entitlements, now);
         EntitlementsRepo::new(&self.store).upsert_many(&scope, &rows)?;

@@ -29,7 +29,7 @@ pub struct Config {
 impl Config {
     pub fn new(api_key: String, base_url: String) -> RovenueResult<Self> {
         if api_key.trim().is_empty() {
-            return Err(RovenueError::InvalidApiKey);
+            return Err(RovenueError::InvalidApiKey());
         }
         Ok(Self {
             api_key,
@@ -73,7 +73,7 @@ impl Config {
 /// - blank (after trim) → [`DEFAULT_BASE_URL`]
 /// - `https://…` accepted
 /// - `http://…` accepted ONLY for localhost / 127.0.0.1 / [::1] (local dev)
-/// - anything else → [`RovenueError::InvalidArgument`]
+/// - anything else → [`RovenueError::InvalidArgument()`]
 pub fn resolve_base_url(input: &str) -> RovenueResult<String> {
     let trimmed = input.trim();
     let url = if trimmed.is_empty() {
@@ -84,7 +84,7 @@ pub fn resolve_base_url(input: &str) -> RovenueResult<String> {
 
     if let Some(rest) = url.strip_prefix("https://") {
         if rest.is_empty() {
-            return Err(RovenueError::InvalidArgument);
+            return Err(RovenueError::InvalidArgument());
         }
         return Ok(url.to_string());
     }
@@ -100,8 +100,8 @@ pub fn resolve_base_url(input: &str) -> RovenueResult<String> {
         if is_local {
             return Ok(url.to_string());
         }
-        return Err(RovenueError::InvalidArgument);
+        return Err(RovenueError::InvalidArgument());
     }
 
-    Err(RovenueError::InvalidArgument)
+    Err(RovenueError::InvalidArgument())
 }

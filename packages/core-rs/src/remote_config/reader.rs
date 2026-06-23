@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::cache::remote_config::RemoteConfigCacheRepo;
 use crate::cache::CacheStore;
-use crate::error::{RovenueError, RovenueResult};
+use crate::error::{ErrorKind, RovenueError, RovenueResult};
 use crate::identity::IdentityManager;
 use crate::observer::{ChangeEvent, ObserverBus};
 use crate::time::{Clock, SystemClock};
@@ -253,7 +253,7 @@ impl Inner {
         let req = HttpRequest::new("/v1/config").subscriber_id(&scope);
         match self.http.get_json::<ApiEnvelope<ConfigResponse>>(req) {
             Ok(resp) => {
-                let body = resp.body.ok_or(RovenueError::Internal)?;
+                let body = resp.body.ok_or(RovenueError::Internal())?;
                 // Persist the raw payload first (best-effort) so an offline
                 // relaunch still has it even if the in-memory swap races.
                 if let Ok(raw) = serde_json::to_string(&body.data) {
@@ -264,7 +264,7 @@ impl Inner {
                     );
                 }
                 {
-                    let mut guard = self.state.write().map_err(|_| RovenueError::Internal)?;
+                    let mut guard = self.state.write().map_err(|_| RovenueError::Internal())?;
                     *guard = build_state(body.data);
                 }
                 self.hydrated.store(true, Ordering::SeqCst);
@@ -275,7 +275,7 @@ impl Inner {
                 }
                 Ok(())
             }
-            Err(e @ (RovenueError::NetworkUnavailable | RovenueError::Timeout)) => {
+            Err(e) if matches!(e.kind, ErrorKind::NetworkUnavailable | ErrorKind::Timeout) => {
                 // Connectivity failure: keep serving the last-known payload.
                 // Hydrate from disk if memory is still cold, then surface the
                 // original network error to the caller.

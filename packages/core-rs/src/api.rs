@@ -7,7 +7,7 @@ use crate::attributes::dispatcher::AttributeDispatcher;
 use crate::cache::{CacheStore, ExposureRepo, FunnelRepo};
 use crate::config::Config;
 use crate::entitlements::{Entitlement, EntitlementReader};
-use crate::error::{RovenueError, RovenueResult};
+use crate::error::{ErrorKind, RovenueError, RovenueResult};
 use crate::events::EventsClient;
 use crate::exposure::ExposureTracker;
 use crate::funnel::{
@@ -70,7 +70,7 @@ pub struct RovenueCore {
 impl RovenueCore {
     pub fn new(config: Config) -> RovenueResult<Self> {
         if config.api_key.trim().is_empty() {
-            return Err(RovenueError::InvalidApiKey);
+            return Err(RovenueError::InvalidApiKey());
         }
         let config = config.normalized()?;
         let store = Arc::new(CacheStore::open(&default_db_path()?)?);
@@ -240,7 +240,7 @@ impl RovenueCore {
     #[doc(hidden)]
     pub fn new_for_test(config: Config) -> RovenueResult<Self> {
         if config.api_key.trim().is_empty() {
-            return Err(RovenueError::InvalidApiKey);
+            return Err(RovenueError::InvalidApiKey());
         }
         let config = config.normalized()?;
         let store = Arc::new(CacheStore::open_in_memory()?);
@@ -409,10 +409,10 @@ impl RovenueCore {
     /// scope (`app_user_id` if identified, else the anonymous `rovenue_id`).
     pub fn track(&self, envelope_json: String) -> RovenueResult<()> {
         let mut envelope: crate::events::EventEnvelope =
-            serde_json::from_str(&envelope_json).map_err(|_| RovenueError::InvalidArgument)?;
+            serde_json::from_str(&envelope_json).map_err(|_| RovenueError::InvalidArgument())?;
 
         if !is_plausible_iso8601(&envelope.occurred_at) {
-            return Err(RovenueError::InvalidArgument);
+            return Err(RovenueError::InvalidArgument());
         }
 
         // Stamp the wire version and a stable event id (the latter only when
@@ -671,10 +671,10 @@ fn reconcile_identity_impl(identity: &IdentityManager, identify: &IdentifyClient
 }
 
 fn default_db_path() -> RovenueResult<PathBuf> {
-    let mut p = dirs_path().ok_or(RovenueError::Storage)?;
+    let mut p = dirs_path().ok_or(RovenueError::Storage())?;
     p.push("rovenue.db");
     if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent).map_err(|_| RovenueError::Storage)?;
+        std::fs::create_dir_all(parent).map_err(|_| RovenueError::Storage())?;
     }
     Ok(p)
 }
@@ -1018,7 +1018,7 @@ mod tests {
     fn track_rejects_malformed_json() {
         let core = make_core("http://127.0.0.1:1");
         let err = core.track("not json".into()).unwrap_err();
-        assert!(matches!(err, RovenueError::InvalidArgument));
+        assert!(err.kind == ErrorKind::InvalidArgument);
     }
 
     #[test]
@@ -1072,7 +1072,7 @@ mod tests {
         let err = core
             .track(r#"{"eventType":"purchase","occurredAt":"not-a-date"}"#.into())
             .unwrap_err();
-        assert!(matches!(err, RovenueError::InvalidArgument));
+        assert!(err.kind == ErrorKind::InvalidArgument);
     }
 
     #[test]

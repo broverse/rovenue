@@ -89,7 +89,7 @@ impl HttpClient {
     ) -> RovenueResult<HttpResponse<T>> {
         let url = format!("{}{}", self.base_url, req.path);
         let mut rng = rand::thread_rng();
-        let mut last_err = RovenueError::NetworkUnavailable;
+        let mut last_err = RovenueError::NetworkUnavailable();
 
         for attempt in 0..self.max_attempts {
             let mut builder = self
@@ -132,7 +132,7 @@ impl HttpClient {
                             let body = if status == 304 || status == 204 {
                                 None
                             } else {
-                                Some(resp.json::<T>().map_err(|_| RovenueError::Internal)?)
+                                Some(resp.json::<T>().map_err(|_| RovenueError::Internal())?)
                             };
                             return Ok(HttpResponse {
                                 status,
@@ -142,9 +142,9 @@ impl HttpClient {
                         }
                         RetryDecision::Retryable => {
                             last_err = if (500..600).contains(&status) {
-                                RovenueError::ServerError
+                                RovenueError::ServerError()
                             } else {
-                                RovenueError::NetworkUnavailable
+                                RovenueError::NetworkUnavailable()
                             };
                             if attempt + 1 < self.max_attempts {
                                 let d = backoff(attempt, &mut rng).max(self.min_backoff);
@@ -154,31 +154,31 @@ impl HttpClient {
                         RetryDecision::RetryAfter(d) => {
                             use super::retry::RETRY_AFTER_MAX;
                             if d > RETRY_AFTER_MAX {
-                                return Err(RovenueError::RateLimited);
+                                return Err(RovenueError::RateLimited());
                             }
-                            last_err = RovenueError::RateLimited;
+                            last_err = RovenueError::RateLimited();
                             if attempt + 1 < self.max_attempts {
                                 std::thread::sleep(d.max(self.min_backoff));
                             }
                         }
                         RetryDecision::Fatal => {
                             return Err(if status == 401 {
-                                RovenueError::InvalidApiKey
+                                RovenueError::InvalidApiKey()
                             } else {
-                                RovenueError::ServerError
+                                RovenueError::ServerError()
                             });
                         }
                     }
                 }
                 Err(e) if e.is_timeout() => {
-                    last_err = RovenueError::Timeout;
+                    last_err = RovenueError::Timeout();
                     if attempt + 1 < self.max_attempts {
                         let d = backoff(attempt, &mut rng).max(self.min_backoff);
                         std::thread::sleep(d);
                     }
                 }
                 Err(_) => {
-                    last_err = RovenueError::NetworkUnavailable;
+                    last_err = RovenueError::NetworkUnavailable();
                     if attempt + 1 < self.max_attempts {
                         let d = backoff(attempt, &mut rng).max(self.min_backoff);
                         std::thread::sleep(d);
@@ -233,9 +233,9 @@ impl HttpClient {
 
         let url = format!("{}{}", self.base_url, req.path);
         let mut rng = rand::thread_rng();
-        let mut last_err = RovenueError::NetworkUnavailable;
+        let mut last_err = RovenueError::NetworkUnavailable();
 
-        let payload = serde_json::to_vec(body).map_err(|_| RovenueError::Internal)?;
+        let payload = serde_json::to_vec(body).map_err(|_| RovenueError::Internal())?;
 
         for attempt in 0..self.max_attempts {
             let mut builder = self
@@ -269,11 +269,11 @@ impl HttpClient {
 
                     // 422 = idempotency-key conflict (different body for same key).
                     if status == 422 {
-                        return Err(RovenueError::Internal);
+                        return Err(RovenueError::Internal());
                     }
                     // 402 = InsufficientCredits.
                     if status == 402 {
-                        return Err(RovenueError::InsufficientCredits);
+                        return Err(RovenueError::InsufficientCredits());
                     }
 
                     match classify(Some(status), retry_after) {
@@ -286,7 +286,7 @@ impl HttpClient {
                             let body = if status == 204 || req.expect_empty_body {
                                 None
                             } else {
-                                Some(resp.json::<T>().map_err(|_| RovenueError::Internal)?)
+                                Some(resp.json::<T>().map_err(|_| RovenueError::Internal())?)
                             };
                             return Ok(HttpResponse {
                                 status,
@@ -296,9 +296,9 @@ impl HttpClient {
                         }
                         RetryDecision::Retryable => {
                             last_err = if (500..600).contains(&status) {
-                                RovenueError::ServerError
+                                RovenueError::ServerError()
                             } else {
-                                RovenueError::NetworkUnavailable
+                                RovenueError::NetworkUnavailable()
                             };
                             if attempt + 1 < self.max_attempts {
                                 let d = backoff(attempt, &mut rng).max(self.min_backoff);
@@ -307,31 +307,31 @@ impl HttpClient {
                         }
                         RetryDecision::RetryAfter(d) => {
                             if d > RETRY_AFTER_MAX {
-                                return Err(RovenueError::RateLimited);
+                                return Err(RovenueError::RateLimited());
                             }
-                            last_err = RovenueError::RateLimited;
+                            last_err = RovenueError::RateLimited();
                             if attempt + 1 < self.max_attempts {
                                 std::thread::sleep(d.max(self.min_backoff));
                             }
                         }
                         RetryDecision::Fatal => {
                             return Err(if status == 401 {
-                                RovenueError::InvalidApiKey
+                                RovenueError::InvalidApiKey()
                             } else {
-                                RovenueError::ServerError
+                                RovenueError::ServerError()
                             });
                         }
                     }
                 }
                 Err(e) if e.is_timeout() => {
-                    last_err = RovenueError::Timeout;
+                    last_err = RovenueError::Timeout();
                     if attempt + 1 < self.max_attempts {
                         let d = backoff(attempt, &mut rng).max(self.min_backoff);
                         std::thread::sleep(d);
                     }
                 }
                 Err(_) => {
-                    last_err = RovenueError::NetworkUnavailable;
+                    last_err = RovenueError::NetworkUnavailable();
                     if attempt + 1 < self.max_attempts {
                         let d = backoff(attempt, &mut rng).max(self.min_backoff);
                         std::thread::sleep(d);
@@ -356,8 +356,8 @@ impl HttpClient {
 
         let url = format!("{}{}", self.base_url, req.path);
         let mut rng = rand::thread_rng();
-        let mut last_err = RovenueError::NetworkUnavailable;
-        let payload = serde_json::to_vec(body).map_err(|_| RovenueError::Internal)?;
+        let mut last_err = RovenueError::NetworkUnavailable();
+        let payload = serde_json::to_vec(body).map_err(|_| RovenueError::Internal())?;
 
         for attempt in 0..self.max_attempts {
             let mut builder = self
@@ -396,15 +396,15 @@ impl HttpClient {
                     match classify(Some(status), retry_after) {
                         RetryDecision::RetryAfter(d) => {
                             if d > RETRY_AFTER_MAX {
-                                return Err(RovenueError::RateLimited);
+                                return Err(RovenueError::RateLimited());
                             }
-                            last_err = RovenueError::RateLimited;
+                            last_err = RovenueError::RateLimited();
                             if attempt + 1 < self.max_attempts {
                                 std::thread::sleep(d.max(self.min_backoff));
                             }
                         }
                         _ => {
-                            last_err = RovenueError::ServerError;
+                            last_err = RovenueError::ServerError();
                             if attempt + 1 < self.max_attempts {
                                 let d = backoff(attempt, &mut rng).max(self.min_backoff);
                                 std::thread::sleep(d);
@@ -413,14 +413,14 @@ impl HttpClient {
                     }
                 }
                 Err(e) if e.is_timeout() => {
-                    last_err = RovenueError::Timeout;
+                    last_err = RovenueError::Timeout();
                     if attempt + 1 < self.max_attempts {
                         let d = backoff(attempt, &mut rng).max(self.min_backoff);
                         std::thread::sleep(d);
                     }
                 }
                 Err(_) => {
-                    last_err = RovenueError::NetworkUnavailable;
+                    last_err = RovenueError::NetworkUnavailable();
                     if attempt + 1 < self.max_attempts {
                         let d = backoff(attempt, &mut rng).max(self.min_backoff);
                         std::thread::sleep(d);
