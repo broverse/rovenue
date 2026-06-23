@@ -12,7 +12,7 @@ export type RovenueConfig = {
    * (http:// is accepted only for localhost during local dev).
    */
   baseUrl?: string;
-  debug?: boolean;
+  logLevel?: "off" | "error" | "warn" | "info" | "debug" | "trace";
   /**
    * Optional override for the host app's user-facing version. When
    * omitted, the native modules auto-read the value:
@@ -43,7 +43,7 @@ export function configure(opts: RovenueConfig): void {
   native.configure(
     opts.apiKey,
     opts.baseUrl,
-    opts.debug ?? false,
+    opts.logLevel ?? "warn",
     opts.appVersion,
     opts.environment,
   );

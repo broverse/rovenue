@@ -30,7 +30,7 @@ describe("configure forwards appVersion to native", () => {
     expect(native.configure).toHaveBeenCalledWith(
       "pk_test",
       "https://api.example.com",
-      false,
+      "warn",
       undefined,
       undefined,
     );
@@ -45,7 +45,7 @@ describe("configure forwards appVersion to native", () => {
     expect(native.configure).toHaveBeenCalledWith(
       "pk_test",
       "https://api.example.com",
-      false,
+      "warn",
       "2.7.0",
       undefined,
     );

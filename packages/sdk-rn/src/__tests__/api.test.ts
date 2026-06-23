@@ -48,20 +48,20 @@ describe("Rovenue imperative API", () => {
     expect(native.configure).toHaveBeenCalledWith(
       "pk_test",
       undefined,
-      false,
+      "warn",
       undefined,
       undefined,
     );
   });
 
   it("configure forwards to native + starts event bridge", () => {
-    configure({ apiKey: "pk_test", baseUrl: "https://api.example.com", debug: true });
+    configure({ apiKey: "pk_test", baseUrl: "https://api.example.com", logLevel: "debug" });
     // 4th arg (appVersion) is undefined here — the native side will
     // auto-read Bundle.main / PackageManager when nothing is supplied.
     expect(native.configure).toHaveBeenCalledWith(
       "pk_test",
       "https://api.example.com",
-      true,
+      "debug",
       undefined,
       undefined,
     );
@@ -69,12 +69,12 @@ describe("Rovenue imperative API", () => {
     expect(native.__state.changeListeners.length).toBe(1);
   });
 
-  it("configure debug defaults to false when omitted", () => {
+  it("configure logLevel defaults to warn when omitted", () => {
     configure({ apiKey: "pk_test", baseUrl: "https://api.example.com" });
     expect(native.configure).toHaveBeenCalledWith(
       "pk_test",
       "https://api.example.com",
-      false,
+      "warn",
       undefined,
       undefined,
     );
@@ -89,7 +89,7 @@ describe("Rovenue imperative API", () => {
     expect(native.configure).toHaveBeenCalledWith(
       "pk_test",
       "https://api.example.com",
-      false,
+      "warn",
       undefined,
       "staging",
     );

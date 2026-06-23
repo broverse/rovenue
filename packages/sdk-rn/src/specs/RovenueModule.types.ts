@@ -113,7 +113,7 @@ export type PurchaseResultDTO = {
 export type LogEntryDTO = {
   level: "debug" | "info" | "warn" | "error";
   message: string;
-  data?: Record<string, unknown>;
+  fields: Record<string, string>;
 };
 
 export interface RovenueModuleSpec {
@@ -128,7 +128,7 @@ export interface RovenueModuleSpec {
   configure(
     apiKey: string,
     baseUrl: string | undefined,
-    debug: boolean,
+    logLevel: "off" | "error" | "warn" | "info" | "debug" | "trace",
     appVersion?: string,
     environment?: string,
   ): void;

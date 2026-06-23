@@ -20,6 +20,19 @@ export function setLogHandler(fn: ((entry: LogEntry) => void) | null): void {
   subscription?.remove();
   subscription = null;
   if (fn) {
-    subscription = getEmitter().addListener("onLog", fn);
+    subscription = getEmitter().addListener(
+      "onLog",
+      (native: { level: LogEntry["level"]; message: string; fields?: Record<string, string> }) => {
+        const entry: LogEntry = {
+          level: native.level,
+          message: native.message,
+          data:
+            native.fields && Object.keys(native.fields).length > 0
+              ? native.fields
+              : undefined,
+        };
+        fn(entry);
+      },
+    );
   }
 }

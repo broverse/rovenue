@@ -5,6 +5,7 @@
 //     no-ops since the stub's EventEmitter delegates to __addChangeListener)
 //   - __addChangeListener(cb) / __emit(event)         — change-event channel
 //   - __addLogListener(cb) / __emitLog(entry)         — log-event channel
+//   - emitMockNativeLog(payload)                      — simulate native bridge onLog
 //   - __state — mutable test fixture state
 
 import { vi } from "vitest";
@@ -15,6 +16,13 @@ import type {
   UserDTO,
 } from "../specs/RovenueModule.types";
 
+/** Native onLog payload shape (mirrors core LogRecord forwarded by iOS/Android bridges). */
+export type NativeLogPayload = {
+  level: "debug" | "info" | "warn" | "error";
+  message: string;
+  fields: Record<string, string>;
+};
+
 export type MockNative = RovenueModuleSpec & {
   __state: {
     user: UserDTO;
@@ -24,12 +32,13 @@ export type MockNative = RovenueModuleSpec & {
       experiments: Record<string, unknown>;
     };
     changeListeners: Array<(payload: { event: string }) => void>;
-    logListeners: Array<(entry: LogEntryDTO) => void>;
+    logListeners: Array<(entry: NativeLogPayload) => void>;
   };
   __emit(event: string): void;
   __emitLog(entry: LogEntryDTO): void;
+  emitMockNativeLog(payload: NativeLogPayload): void;
   __addChangeListener(cb: (payload: { event: string }) => void): () => void;
-  __addLogListener(cb: (entry: LogEntryDTO) => void): () => void;
+  __addLogListener(cb: (entry: NativeLogPayload) => void): () => void;
 };
 
 export function makeMockNative(): MockNative {
@@ -41,7 +50,7 @@ export function makeMockNative(): MockNative {
       experiments: {} as Record<string, unknown>,
     },
     changeListeners: [] as Array<(payload: { event: string }) => void>,
-    logListeners: [] as Array<(entry: LogEntryDTO) => void>,
+    logListeners: [] as Array<(entry: NativeLogPayload) => void>,
   };
 
   const mock: MockNative = {
@@ -50,7 +59,15 @@ export function makeMockNative(): MockNative {
       state.changeListeners.forEach((cb) => cb({ event }));
     },
     __emitLog(entry: LogEntryDTO) {
-      state.logListeners.forEach((cb) => cb(entry));
+      // Delegates to emitMockNativeLog: LogEntryDTO now has `fields` directly.
+      mock.emitMockNativeLog({
+        level: entry.level,
+        message: entry.message,
+        fields: entry.fields,
+      });
+    },
+    emitMockNativeLog(payload: NativeLogPayload) {
+      state.logListeners.forEach((cb) => cb(payload));
     },
     __addChangeListener(cb: (payload: { event: string }) => void) {
       state.changeListeners.push(cb);
@@ -59,7 +76,7 @@ export function makeMockNative(): MockNative {
         if (i >= 0) state.changeListeners.splice(i, 1);
       };
     },
-    __addLogListener(cb: (entry: LogEntryDTO) => void) {
+    __addLogListener(cb: (entry: NativeLogPayload) => void) {
       state.logListeners.push(cb);
       return () => {
         const i = state.logListeners.indexOf(cb);
