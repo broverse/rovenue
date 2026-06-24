@@ -103,11 +103,41 @@ function normalizeKind(code: string): ErrorKind {
   return KIND_LOOKUP.get(key) ?? "Internal";
 }
 
+/**
+ * Tag that marks a native error `message` as a JSON extras-envelope.
+ *
+ * The Expo JSI bridge forwards ONLY `code` + `message` to JS — neither the iOS
+ * `userInfo` nor the Android `CodedException` cause/extras survive the crossing
+ * (iOS `makeCodedError(code, message)`; Android `PromiseImpl.reject` →
+ * `callback.invoke(code, message)`). So the native bridges fold the structured
+ * extras INTO the message as `PREFIX + JSON({ message, serverCode, httpStatus,
+ * retryable, available, retryAfter })`, and we unpack them back out here. Kept
+ * in sync verbatim with RovenueModule.swift / RovenueModule.kt.
+ */
+export const NATIVE_ERROR_ENVELOPE_PREFIX = "@rovenue/err1:";
+
 export function mapNativeError(
   code: string,
   message: string,
   extras: ErrorExtras = {},
 ): RovenueError {
   const kind = normalizeKind(code);
-  return new RovenueError(kind, message, extras);
+  let realMessage = message;
+  let realExtras = extras;
+  if (typeof message === "string" && message.startsWith(NATIVE_ERROR_ENVELOPE_PREFIX)) {
+    try {
+      const env = JSON.parse(message.slice(NATIVE_ERROR_ENVELOPE_PREFIX.length));
+      realMessage = typeof env.message === "string" ? env.message : "";
+      realExtras = {
+        serverCode: env.serverCode,
+        httpStatus: env.httpStatus,
+        retryable: env.retryable,
+        available: env.available,
+        retryAfter: env.retryAfter,
+      };
+    } catch {
+      // Malformed envelope — surface the raw message rather than throwing.
+    }
+  }
+  return new RovenueError(kind, realMessage, realExtras);
 }

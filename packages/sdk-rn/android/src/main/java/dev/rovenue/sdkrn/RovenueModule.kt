@@ -56,6 +56,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 class RovenueModule : Module() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -603,24 +604,34 @@ class RovenueModule : Module() {
 /**
  * Single Expo CodedException that wraps any [RovenueException] from the Kotlin façade.
  *
- * `code` = `error.kind.name` — yields UPPER_SNAKE_CASE (e.g. "NETWORK_UNAVAILABLE",
- *           "PURCHASE_CANCELED"). The JS `mapNativeError()` normaliser strips underscores
- *           and does a case-insensitive lookup to resolve the canonical PascalCase ErrorKind.
- * `extras` carries `serverCode`, `httpStatus`, and `retryable` so mapNativeError() can
- *           populate the full RovenueError on the JS side.
+ * `code`    = `error.kind.name` — yields UPPER_SNAKE_CASE (e.g. "NETWORK_UNAVAILABLE",
+ *             "PURCHASE_CANCELED"). The JS `mapNativeError()` normaliser strips underscores
+ *             and does a case-insensitive lookup to resolve the canonical PascalCase ErrorKind.
+ * `message` = a tagged JSON envelope carrying the human message AND the structured extras
+ *             (serverCode, httpStatus, retryable).
+ *
+ * WHY an envelope: the Expo JSI bridge forwards ONLY `code` + `message` to JS —
+ * `PromiseImpl.reject(code, message, cause)` calls `callback.invoke(code, message)` and
+ * drops the `cause`/anything else. (The third `CodedException` ctor arg is a `Throwable?`
+ * cause, NOT an extras map.) So the extras are folded into the message and the JS
+ * mapNativeError() unpacks them. The prefix is kept in sync verbatim with
+ * NATIVE_ERROR_ENVELOPE_PREFIX in src/errors.ts.
  */
 private class RovenueCodedError(e: RovenueException) : CodedException(
     e.kind.name,
-    e.message,
-    buildExtras(e),
+    buildEnvelope(e),
+    null,
 ) {
     companion object {
-        private fun buildExtras(e: RovenueException): Map<String, Any?> {
-            val m = mutableMapOf<String, Any?>()
-            e.serverCode?.let  { m["serverCode"]  = it }
-            e.httpStatus?.let  { m["httpStatus"]   = it }
-            m["retryable"] = e.isRetryable
-            return m
+        private const val ENVELOPE_PREFIX = "@rovenue/err1:"
+
+        private fun buildEnvelope(e: RovenueException): String {
+            val o = JSONObject()
+            o.put("message", e.message ?: "")
+            o.put("retryable", e.isRetryable)
+            e.serverCode?.let { o.put("serverCode", it) }
+            e.httpStatus?.let { o.put("httpStatus", it) }
+            return ENVELOPE_PREFIX + o.toString()
         }
     }
 }

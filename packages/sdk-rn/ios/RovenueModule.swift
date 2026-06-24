@@ -18,29 +18,41 @@ import UIKit
 //            (e.g. "networkUnavailable", "purchaseCanceled"). The JS
 //            mapNativeError() normaliser resolves this back to the canonical
 //            PascalCase ErrorKind.
-// `reason` = error.message
-// userInfo carries the structured extras so mapNativeError() can populate
-// serverCode / httpStatus / isRetryable / available / retryAfter.
+// `reason` = a tagged JSON envelope carrying the human message AND the
+//            structured extras (serverCode / httpStatus / retryable).
+//
+// WHY an envelope and not `userInfo`: the Expo JSI bridge forwards ONLY `code`
+// and `message` to JS. `Exception.userInfo` is never read — the reject path
+// (`callPromiseSetupWithBlock` → `makeCodedError(code, message)`) discards
+// everything else. So the only way to get the extras across is to fold them
+// into the message; the JS mapNativeError() unpacks them. The prefix is kept
+// in sync verbatim with NATIVE_ERROR_ENVELOPE_PREFIX in src/errors.ts.
 final class RovenueCodedError: Exception {
     private let _code: String
     private let _reason: String
-    private let _userInfo: [String: Any]
 
     init(_ error: RovenueError) {
         _code   = String(describing: error.kind)
-        _reason = error.message
-        var info: [String: Any] = [:]
-        if let sc = error.serverCode  { info["serverCode"] = sc }
-        if let hs = error.httpStatus  { info["httpStatus"]  = hs }
-        info["retryable"] = error.isRetryable
-        _userInfo = info
+        _reason = Self.encodeEnvelope(error)
         super.init()
     }
 
     override var code: String { _code }
     override var reason: String { _reason }
-    // Expose extras so expo-modules-core forwards them to JS as `e.userInfo`.
-    override var userInfo: [String: Any] { _userInfo }
+
+    private static let envelopePrefix = "@rovenue/err1:"
+
+    private static func encodeEnvelope(_ error: RovenueError) -> String {
+        var env: [String: Any] = ["message": error.message, "retryable": error.isRetryable]
+        if let sc = error.serverCode { env["serverCode"] = sc }
+        if let hs = error.httpStatus { env["httpStatus"]  = hs }
+        guard let data = try? JSONSerialization.data(withJSONObject: env),
+              let json = String(data: data, encoding: .utf8) else {
+            // Fall back to the plain message; JS treats a non-prefixed message verbatim.
+            return error.message
+        }
+        return envelopePrefix + json
+    }
 }
 
 // Minimal fallback for OS-version guards where we have no RovenueError yet.
