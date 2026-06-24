@@ -39,6 +39,7 @@ import type {
 } from "./google";
 import { guardStatusWrite } from "./subscription-transition-guard";
 import { convertToUsd } from "./fx";
+import { reassignAllAssets, safeSyncAccessAfterMerge } from "./subscriber-transfer";
 
 const log = logger.child("receipt-verify");
 
@@ -150,7 +151,15 @@ async function verifyAppleReceipt(
     });
   }
 
-  const subscriber = await upsertSubscriber(args.projectId, args.appUserId);
+  // Resolve the subscriber RC/Adapty-style: bind the JWS appAccountToken and
+  // converge any webhook-first row that already owns this transaction/token,
+  // so receipt-driven and webhook-driven state never split across two rows.
+  const subscriber = await reconcileAppleReceiptSubscriber({
+    projectId: args.projectId,
+    appUserId: args.appUserId,
+    appAccountToken: transaction.appAccountToken ?? null,
+    originalTransactionId: transaction.originalTransactionId,
+  });
 
   const environment =
     transaction.environment === APPLE_ENVIRONMENT.PRODUCTION
@@ -433,6 +442,109 @@ async function verifyGoogleProductReceipt(
 // =============================================================
 // Helpers
 // =============================================================
+
+/**
+ * Resolve the canonical subscriber for an Apple receipt and bind the JWS
+ * `appAccountToken`, converging any webhook-first row that already owns this
+ * transaction/token (RevenueCat/Adapty transfer-on-identify model).
+ *
+ * The app authoritatively names the user (`appUserId`), so the app-user row is
+ * canonical. If an earlier webhook created a synthetic owner for this
+ * transaction — or any row already carries the token — its assets are
+ * transferred onto the canonical row, it is soft-deleted as merged, and the
+ * token is rebound onto the survivor. Serialised by a project-scoped advisory
+ * lock on the appUserId + the transaction anchor so a concurrent
+ * receipt/webhook for the same purchase can't race the merge or the unique
+ * (projectId, appleAppAccountToken) slot.
+ */
+export async function reconcileAppleReceiptSubscriber(args: {
+  projectId: string;
+  appUserId: string;
+  appAccountToken: string | null;
+  originalTransactionId: string;
+}): Promise<Subscriber> {
+  const { projectId, appUserId, appAccountToken, originalTransactionId } = args;
+
+  const { subscriber, merged } = await drizzle.db.transaction(async (tx) => {
+    const keys = [
+      `${projectId}:${appUserId}`,
+      `${projectId}:apple:${originalTransactionId}`,
+    ].sort();
+    await drizzle.lockRepo.advisoryXactLock2(tx, keys[0]!, keys[1]!);
+
+    // Canonical = the app-user subscriber. Create/touch WITHOUT the token yet:
+    // a stray webhook-first row may still occupy the unique token slot.
+    const canonical = await drizzle.subscriberRepo.upsertSubscriber(tx, {
+      projectId,
+      rovenueId: appUserId,
+    });
+
+    // Find a stray owner of this transaction/token that is not canonical:
+    // first by the token binding, then by the store-transaction anchor.
+    let stray: Subscriber | null = null;
+    if (appAccountToken) {
+      const byToken =
+        await drizzle.subscriberRepo.findSubscriberByAppleAppAccountToken(
+          tx,
+          projectId,
+          appAccountToken,
+        );
+      if (byToken && byToken.id !== canonical.id && !byToken.deletedAt) {
+        stray = byToken as Subscriber;
+      }
+    }
+    if (!stray) {
+      const purchase =
+        await drizzle.purchaseExtRepo.findPurchaseByOriginalTransaction(
+          tx,
+          projectId,
+          originalTransactionId,
+        );
+      if (purchase && purchase.subscriberId !== canonical.id) {
+        const owner = await drizzle.subscriberRepo.findSubscriberById(
+          tx,
+          purchase.subscriberId,
+        );
+        if (owner && !owner.deletedAt) stray = owner;
+      }
+    }
+
+    let merged = false;
+    if (stray) {
+      // Free the unique (projectId, appleAppAccountToken) slot BEFORE rebinding
+      // it onto canonical — the partial index does not exclude soft-deleted
+      // rows, so a merged-away holder must surrender the token first.
+      await drizzle.subscriberRepo.clearAppleAppAccountToken(tx, stray.id);
+      await reassignAllAssets(
+        tx,
+        projectId,
+        { id: stray.id, label: stray.appUserId ?? stray.rovenueId },
+        { id: canonical.id, label: appUserId },
+      );
+      merged = true;
+    }
+
+    // Bind the (now authoritative, slot-free) token onto canonical.
+    if (appAccountToken) {
+      await drizzle.subscriberRepo.setAppleAppAccountToken(
+        tx,
+        canonical.id,
+        appAccountToken,
+      );
+    }
+
+    const fresh = await drizzle.subscriberRepo.findSubscriberById(
+      tx,
+      canonical.id,
+    );
+    return { subscriber: (fresh ?? canonical) as Subscriber, merged };
+  });
+
+  // Reconcile the survivor's denormalized access now that merged purchases +
+  // access rows belong to it (best-effort; self-heals on next access event).
+  if (merged) await safeSyncAccessAfterMerge(subscriber.id);
+  return subscriber;
+}
 
 async function upsertSubscriber(
   projectId: string,

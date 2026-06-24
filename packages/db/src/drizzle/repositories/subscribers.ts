@@ -219,6 +219,41 @@ export async function setAppUserId(
     .where(eq(subscribers.id, id));
 }
 
+/**
+ * Bind (or rebind) the Apple `appAccountToken` onto a subscriber row.
+ * The JWS-decoded token is authoritative, so this overwrites. Constrained
+ * by the partial unique index (projectId, appleAppAccountToken) — the
+ * caller must first free the slot via [`clearAppleAppAccountToken`] if
+ * another LIVE OR soft-deleted row currently holds the same token.
+ */
+export async function setAppleAppAccountToken(
+  db: DbOrTx,
+  id: string,
+  appleAppAccountToken: string,
+): Promise<void> {
+  await db
+    .update(subscribers)
+    .set({ appleAppAccountToken, updatedAt: new Date() })
+    .where(eq(subscribers.id, id));
+}
+
+/**
+ * Release the Apple `appAccountToken` from a subscriber row (set NULL).
+ * Used before merging a webhook-first row into the canonical subscriber:
+ * the partial unique index on (projectId, appleAppAccountToken) does NOT
+ * exclude soft-deleted rows, so a merged-away holder must surrender the
+ * token before it can be rebound onto the survivor.
+ */
+export async function clearAppleAppAccountToken(
+  db: DbOrTx,
+  id: string,
+): Promise<void> {
+  await db
+    .update(subscribers)
+    .set({ appleAppAccountToken: null, updatedAt: new Date() })
+    .where(eq(subscribers.id, id));
+}
+
 export async function findSubscriberById(
   db: Db,
   id: string,

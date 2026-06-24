@@ -27,8 +27,12 @@ const { drizzleMock } = vi.hoisted(() => {
     subscriberRepo: {
       upsertSubscriber: vi.fn(),
       createSubscriber: vi.fn(),
-      findSubscriberById: vi.fn(async () => null),
-      findSubscriberByAppleAppAccountToken: vi.fn(async () => null),
+      findSubscriberById: vi.fn(
+        async (): Promise<Record<string, unknown> | null> => null,
+      ),
+      findSubscriberByAppleAppAccountToken: vi.fn(
+        async (): Promise<Record<string, unknown> | null> => null,
+      ),
     },
     purchaseRepo: {
       upsertPurchase: vi.fn(),
@@ -37,7 +41,9 @@ const { drizzleMock } = vi.hoisted(() => {
       lockPurchaseStatusByStoreTransaction: vi.fn(async () => null),
     },
     purchaseExtRepo: {
-      findPurchaseByOriginalTransaction: vi.fn(async () => null),
+      findPurchaseByOriginalTransaction: vi.fn(
+        async (): Promise<Record<string, unknown> | null> => null,
+      ),
       findPurchaseByStoreTransaction: vi.fn(async () => null),
     },
     offeringRepo: {
