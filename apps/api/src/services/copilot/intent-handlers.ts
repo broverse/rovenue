@@ -202,6 +202,11 @@ export function registerAllIntentHandlers(): void {
           ctx.projectId,
           productId,
         );
+        if (!before) {
+          throw new Error(
+            `Product ${productId} not found in project ${ctx.projectId}`,
+          );
+        }
 
         const result = await drizzle.productRepo.updateProduct(
           tx as never,
@@ -209,11 +214,16 @@ export function registerAllIntentHandlers(): void {
           productId,
           {
             metadata: {
-              ...(before?.metadata as Record<string, unknown> | undefined ?? {}),
+              ...(before.metadata as Record<string, unknown> | undefined ?? {}),
               roviPriceOverride: { amount: price, currency },
             },
           },
         );
+        if (!result) {
+          throw new Error(
+            `Product ${productId} update affected no rows`,
+          );
+        }
 
         await audit(
           {
@@ -222,11 +232,9 @@ export function registerAllIntentHandlers(): void {
             action: "product.updated",
             resource: "product",
             resourceId: productId,
-            before: before
-              ? {
-                  metadata: before.metadata as Record<string, unknown> | undefined ?? null,
-                }
-              : null,
+            before: {
+              metadata: before.metadata as Record<string, unknown> | undefined ?? null,
+            },
             after: { price, currency },
           },
           tx as Parameters<typeof audit>[1],
