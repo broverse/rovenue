@@ -14,7 +14,8 @@ Open-source, self-hosted subscription/credit management for mobile & web apps (R
 ```
 apps/        api · dashboard · docs
 packages/    sdk-rn · sdk-swift · sdk-kotlin · core-rs (Rust) · db (Drizzle + ClickHouse migrations + seed) · shared
-deploy/      docker-compose.yml · coolify · grafana/alloy (observability profile)
+deploy/      caddy · postgres · clickhouse · cloudflare · apple-certs · grafana/prometheus/loki/alloy (observability profile)
+docker-compose.yml   root file — full stack; COMPOSE_PROFILES=observability for Grafana/Prometheus/Loki
 ```
 
 ## Architecture (the non-obvious bits)
