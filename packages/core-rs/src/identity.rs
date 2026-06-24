@@ -51,7 +51,15 @@ impl IdentityManager {
         self.cached.lock().expect("identity mutex poisoned").clone()
     }
 
-    /// The user scope used by the cache layer — `app_user_id` if identified, else `rovenue_id`.
+    /// The user scope used by the **local cache layer ONLY** — `app_user_id` if
+    /// identified, else `rovenue_id`. So a logged-in user's cached entitlements
+    /// live in their own namespace and flip on identify/log_out.
+    ///
+    /// NEVER send this on the wire. Every server endpoint resolves the inbound
+    /// identity header/field as a `rovenueId` (the `app_user_id` is a
+    /// server-side label attached via `POST /v1/identify`). Use
+    /// [`rovenue_id`](Self::rovenue_id) as the network identity instead;
+    /// sending the `app_user_id` routes requests to an orphan subscriber row.
     pub fn current_user_scope(&self) -> String {
         let u = self.cached.lock().expect("identity mutex poisoned");
         u.app_user_id

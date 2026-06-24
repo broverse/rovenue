@@ -64,7 +64,10 @@ impl ExposureTracker {
             _ => return,
         };
 
+        // `scope` namespaces the local dedup ledger/coalesce key; `wire_id` is
+        // the stable rovenue_id sent to the server (resolved as a rovenueId).
         let scope = self.identity.current_user_scope();
+        let wire_id = self.identity.rovenue_id();
         let experiment_id = assignment.experiment_id.clone();
         let variant_id = assignment.variant_id.clone();
 
@@ -102,12 +105,12 @@ impl ExposureTracker {
             let path = format!("/v1/experiments/{experiment_id}/expose");
             let body = ExposeBody {
                 variant_id: &variant_id,
-                subscriber_id: &scope,
+                subscriber_id: &wire_id,
             };
             // Use serde_json::Value as the response data type so that a 202 with
             // an empty or non-JSON body doesn't cause a deserialization failure.
             let res = http.post_json::<ExposeBody, ApiEnvelope<serde_json::Value>>(
-                HttpPostRequest::new(&path).user_scope(&scope),
+                HttpPostRequest::new(&path).user_scope(&wire_id),
                 &body,
             );
             if res.is_ok() {

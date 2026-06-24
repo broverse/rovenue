@@ -80,11 +80,15 @@ impl EntitlementReader {
         let http = self.http.as_ref().ok_or(RovenueError::Internal())?;
         let clock = self.clock.as_ref().ok_or(RovenueError::Internal())?;
 
+        // Cache is namespaced by the identity scope (flips on identify), but the
+        // WIRE identity is always the stable rovenue_id — the server resolves
+        // every inbound header as a rovenueId. See IdentityManager docs.
         let scope = self.identity.current_user_scope();
+        let wire_id = self.identity.rovenue_id();
         let etag_repo = EtagRepo::new(&self.store);
         let prior_etag = etag_repo.get(RESOURCE)?;
 
-        let mut req = HttpRequest::new("/v1/me/entitlements").user_scope(&scope);
+        let mut req = HttpRequest::new("/v1/me/entitlements").user_scope(&wire_id);
         if let Some(ref e) = prior_etag {
             req = req.etag(e);
         }
@@ -260,5 +264,63 @@ mod panic_safety_tests {
                 .is_ok(),
             "flag must be claimable again after a panicking refresh"
         );
+    }
+}
+
+#[cfg(test)]
+mod wire_identity_tests {
+    use super::EntitlementReader;
+    use crate::cache::CacheStore;
+    use crate::identity::IdentityManager;
+    use crate::observer::ObserverBus;
+    use crate::time::{Clock, SystemClock};
+    use crate::transport::http_client::HttpClient;
+    use std::sync::Arc;
+
+    /// Regression (P0): after `identify()`, the network identity sent to the
+    /// server MUST remain the permanent `rovenue_id` device key — NOT the
+    /// `app_user_id`. The server resolves every inbound `X-Rovenue-App-User-Id`
+    /// header as a rovenueId; sending the `app_user_id` would route the request
+    /// to a different (orphan) subscriber row and strand the real entitlements.
+    #[test]
+    fn refresh_sends_rovenue_id_not_app_user_id_after_identify() {
+        let store = Arc::new(CacheStore::open_in_memory().unwrap());
+        let bus = Arc::new(ObserverBus::default());
+        let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+        let identity = Arc::new(IdentityManager::new(
+            Arc::clone(&store),
+            Arc::clone(&bus),
+            Arc::clone(&clock),
+        ));
+
+        let rovenue_id = identity.rovenue_id();
+        identity.set_app_user_id("user_42".to_string()).unwrap();
+        // Sanity: the cache scope now flips to the app_user_id...
+        assert_eq!(identity.current_user_scope(), "user_42");
+        // ...but the device key is unchanged.
+        assert_eq!(identity.rovenue_id(), rovenue_id);
+
+        let mut server = mockito::Server::new();
+        // Only matches when the wire header carries the STABLE rovenue_id.
+        // If the code (incorrectly) sends "user_42", this mock never matches,
+        // mockito answers 501, refresh() errors, and m.assert() fails.
+        let m = server
+            .mock("GET", "/v1/me/entitlements")
+            .match_header("X-Rovenue-App-User-Id", rovenue_id.as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"entitlements":{}}}"#)
+            .expect(1)
+            .create();
+
+        let http = Arc::new(HttpClient::new(server.url(), "pk_test".to_string()));
+        let reader = EntitlementReader::new(Arc::clone(&store), Arc::clone(&identity))
+            .with_http(http)
+            .with_clock(Arc::clone(&clock));
+
+        reader
+            .refresh()
+            .expect("refresh must hit the rovenue_id-scoped endpoint and succeed");
+        m.assert();
     }
 }

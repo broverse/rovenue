@@ -149,11 +149,13 @@ impl RovenueCore {
             Arc::clone(&sessions),
             Arc::clone(&http),
             Arc::new(move || {
-                let scope = identity_for_sub.current_user_scope();
-                if scope.is_empty() {
+                // Wire identity is the stable rovenue_id (server resolves it as a
+                // rovenueId); never the app_user_id, which would orphan the row.
+                let id = identity_for_sub.rovenue_id();
+                if id.is_empty() {
                     None
                 } else {
-                    Some(scope)
+                    Some(id)
                 }
             }),
             config.app_version.clone(),
@@ -164,11 +166,13 @@ impl RovenueCore {
             Arc::clone(&attributes),
             Arc::clone(&http),
             Box::new(move || {
-                let scope = identity_for_attr.current_user_scope();
-                if scope.is_empty() {
+                // Wire identity is the stable rovenue_id (server resolves it as a
+                // rovenueId); never the app_user_id, which would orphan the row.
+                let id = identity_for_attr.rovenue_id();
+                if id.is_empty() {
                     None
                 } else {
-                    Some(scope)
+                    Some(id)
                 }
             }),
         ));
@@ -485,11 +489,14 @@ impl RovenueCore {
     ) -> RovenueResult<ReceiptResult> {
         self.log_op(LogLevel::Info, "post_apple_receipt", "post_apple_receipt", &[]);
         let result = (|| -> RovenueResult<ReceiptResult> {
+            // Wire identity (server resolves the body appUserId as a rovenueId);
+            // `scope` namespaces the local receipt cache write in finish_receipt.
             let scope = self.identity.current_user_scope();
+            let wire_id = self.identity.rovenue_id();
             let key = IdempotencyKey::for_receipt("apple", &receipt);
             let outcome = self.receipts.post_apple(
                 &receipt,
-                &scope,
+                &wire_id,
                 &product_id,
                 key.as_str(),
                 app_account_token.as_deref(),
@@ -525,11 +532,14 @@ impl RovenueCore {
     ) -> RovenueResult<ReceiptResult> {
         self.log_op(LogLevel::Info, "post_google_receipt", "post_google_receipt", &[]);
         let result = (|| -> RovenueResult<ReceiptResult> {
+            // Wire identity (server resolves the body appUserId as a rovenueId);
+            // `scope` namespaces the local receipt cache write in finish_receipt.
             let scope = self.identity.current_user_scope();
+            let wire_id = self.identity.rovenue_id();
             let key = IdempotencyKey::for_receipt("google", &receipt);
             let outcome = self.receipts.post_google(
                 &receipt,
-                &scope,
+                &wire_id,
                 &product_id,
                 key.as_str(),
                 obfuscated_account_id.as_deref(),
@@ -621,14 +631,21 @@ impl RovenueCore {
                 envelope.event_id = Some(format!("evt_{}", cuid2::create_id()));
             }
 
-            let scope = self.identity.current_user_scope();
-            let scope_opt = if scope.is_empty() { None } else { Some(scope) };
+            // Attribute events to the stable rovenue_id device key — the server
+            // resolves the subscriberId as a rovenueId, so the app_user_id would
+            // route to an orphan row.
+            let wire_id = self.identity.rovenue_id();
+            let wire_opt = if wire_id.is_empty() {
+                None
+            } else {
+                Some(wire_id)
+            };
 
             if envelope.subscriber_id.is_none() {
-                envelope.subscriber_id = scope_opt.clone();
+                envelope.subscriber_id = wire_opt.clone();
             }
 
-            self.events.post(&envelope, scope_opt.as_deref())
+            self.events.post(&envelope, wire_opt.as_deref())
         })();
         match &result {
             Ok(_) => self.log_op(LogLevel::Info, "track ok", "track", &[]),
@@ -1254,6 +1271,51 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
+    fn post_apple_receipt_sends_rovenue_id_not_app_user_id_after_identify() {
+        // Regression (P0): after identify("user_42"), the receipt body's
+        // appUserId field (which the server resolves as a rovenueId) MUST carry
+        // the stable rovenue_id device key — not the app_user_id. Otherwise the
+        // purchase attaches to an orphan subscriber row instead of the device's.
+        let mut server = mockito::Server::new();
+        let _m_identify = server
+            .mock("POST", "/v1/identify")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"data":{"subscriberId":"sub_x","appUserId":"user_42","transferred":false}}"#,
+            )
+            .create();
+
+        let core = make_core(&server.url());
+        core.identify("user_42".into()).unwrap();
+        let rovenue_id = core.current_user().rovenue_id;
+        assert_ne!(rovenue_id, "user_42");
+
+        let m_receipt = server
+            .mock("POST", "/v1/receipts/apple")
+            .match_body(mockito::Matcher::PartialJsonString(format!(
+                r#"{{"appUserId":"{rovenue_id}"}}"#
+            )))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"subscriber":{"id":"sub_1","appUserId":"user_42"}}}"#)
+            .expect(1)
+            .create();
+        let _m_ent = server
+            .mock("GET", "/v1/me/entitlements")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data":{"entitlements":{}}}"#)
+            .create();
+
+        core.post_apple_receipt("jws_token".into(), "pro_monthly".into(), None)
+            .expect("receipt ok");
+
+        m_receipt.assert();
+    }
+
+    #[test]
+    #[serial_test::serial]
     fn post_apple_receipt_falls_back_to_get_when_access_absent() {
         let mut server = mockito::Server::new();
 
@@ -1287,16 +1349,12 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn track_auto_fills_subscriber_from_scope() {
+    fn track_auto_fills_subscriber_with_rovenue_id_after_identify() {
+        // Regression (P0): even after identify("user_42"), the event's wire
+        // subscriberId MUST be the stable rovenue_id device key — NOT the
+        // app_user_id. The server resolves subscriberId as a rovenueId, so the
+        // app_user_id would attribute the event to an orphan row.
         let mut server = mockito::Server::new();
-        let m = server
-            .mock("POST", "/v1/events")
-            .match_body(mockito::Matcher::PartialJsonString(
-                r#"{"eventType":"purchase","subscriberId":"user_42"}"#.into(),
-            ))
-            .with_status(202)
-            .create();
-
         let _m_identify = server
             .mock("POST", "/v1/identify")
             .with_status(200)
@@ -1309,6 +1367,16 @@ mod tests {
         let core = make_core(&server.url());
         // identify() writes app_user_id locally even if its own POST fails.
         core.identify("user_42".into()).unwrap();
+        let rovenue_id = core.current_user().rovenue_id;
+        assert_ne!(rovenue_id, "user_42");
+
+        let m = server
+            .mock("POST", "/v1/events")
+            .match_body(mockito::Matcher::PartialJsonString(format!(
+                r#"{{"eventType":"purchase","subscriberId":"{rovenue_id}"}}"#
+            )))
+            .with_status(202)
+            .create();
 
         core.track(r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z"}"#.into())
             .expect("track ok");

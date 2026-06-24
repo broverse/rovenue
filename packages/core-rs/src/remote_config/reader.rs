@@ -249,8 +249,11 @@ impl Inner {
     }
 
     fn refresh(&self) -> RovenueResult<()> {
-        let scope = self.identity.current_user_scope();
-        let req = HttpRequest::new("/v1/config").subscriber_id(&scope);
+        // Wire identity is always the stable rovenue_id — the server resolves
+        // the X-Rovenue-User-Id header as a rovenueId. (Config is cached under a
+        // fixed resource key, so there is no scope-namespaced cache to preserve.)
+        let wire_id = self.identity.rovenue_id();
+        let req = HttpRequest::new("/v1/config").subscriber_id(&wire_id);
         match self.http.get_json::<ApiEnvelope<ConfigResponse>>(req) {
             Ok(resp) => {
                 let body = resp.body.ok_or(RovenueError::Internal())?;

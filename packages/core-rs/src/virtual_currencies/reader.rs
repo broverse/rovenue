@@ -68,10 +68,13 @@ impl VirtualCurrencyReader {
     pub fn refresh(&self) -> RovenueResult<()> {
         let http = self.http.as_ref().ok_or(RovenueError::Internal())?;
         let clock = self.clock.as_ref().ok_or(RovenueError::Internal())?;
+        // Cache namespaced by scope; wire identity is always the stable
+        // rovenue_id (server resolves the header as a rovenueId).
         let scope = self.identity.current_user_scope();
+        let wire_id = self.identity.rovenue_id();
 
         let resp = http.get_json::<ApiEnvelope<VcBalancesWire>>(
-            HttpRequest::new("/v1/virtual-currencies/me").user_scope(&scope),
+            HttpRequest::new("/v1/virtual-currencies/me").user_scope(&wire_id),
         )?;
         let body = resp.body.ok_or(RovenueError::Internal())?;
         let balances: BTreeMap<String, i64> = body.data.balances.into_iter().collect();
