@@ -28,6 +28,7 @@ const { drizzleMock } = vi.hoisted(() => {
       upsertSubscriber: vi.fn(),
       createSubscriber: vi.fn(),
       findSubscriberById: vi.fn(async () => null),
+      findSubscriberByAppleAppAccountToken: vi.fn(async () => null),
     },
     purchaseRepo: {
       upsertPurchase: vi.fn(),
@@ -184,8 +185,15 @@ beforeEach(() => {
 // Tests
 // =============================================================
 
-describe("handleAppleNotification — appAccountToken persistence", () => {
-  test("forwards appleAppAccountToken to upsertSubscriber when JWS provides it", async () => {
+describe("handleAppleNotification — appAccountToken-first subscriber resolution", () => {
+  test("resolves the existing subscriber bound to the appAccountToken (no fabrication)", async () => {
+    // RC/Adapty model: the appAccountToken is the cross-path join key.
+    // When a subscriber already carries it (e.g. set by the receipt path
+    // from the JWS), the webhook MUST resolve to that row — never mint a
+    // new subscriber keyed by the token (the old rovenueId=token bug).
+    drizzleMock.subscriberRepo.findSubscriberByAppleAppAccountToken.mockResolvedValue(
+      { id: "sub_real", appUserId: "rov_device", appleAppAccountToken: ACCOUNT_TOKEN },
+    );
     const verifier = makeStubVerifier(
       makeFakeJwsTransactionPayload({
         appAccountToken: ACCOUNT_TOKEN,
@@ -202,24 +210,66 @@ describe("handleAppleNotification — appAccountToken persistence", () => {
 
     expect(result.status).toBe("processed");
     expect(
-      drizzleMock.subscriberRepo.upsertSubscriber,
-    ).toHaveBeenCalledOnce();
-    const upsertArgs =
-      drizzleMock.subscriberRepo.upsertSubscriber.mock.calls[0]![1];
-    expect(upsertArgs).toMatchObject({
-      projectId: PROJECT_ID,
-      appUserId: ACCOUNT_TOKEN,
-      appleAppAccountToken: ACCOUNT_TOKEN,
-    });
+      drizzleMock.subscriberRepo.findSubscriberByAppleAppAccountToken,
+    ).toHaveBeenCalledWith(expect.anything(), PROJECT_ID, ACCOUNT_TOKEN);
+    // Never fabricate a parallel identity for an already-bound token.
+    expect(drizzleMock.subscriberRepo.upsertSubscriber).not.toHaveBeenCalled();
+    expect(drizzleMock.subscriberRepo.createSubscriber).not.toHaveBeenCalled();
   });
 
-  test("passes appleAppAccountToken=null when JWS has none", async () => {
-    // No appAccountToken → resolveSubscriber falls back to the
-    // synthetic-id path; upsertSubscriber is *not* called. The
-    // contract here is "don't crash and don't write a fake token".
+  test("anchors on originalTransactionId when token has no binding yet", async () => {
+    // Token present but unbound (no column hit). Fall back to the store
+    // transaction anchor: whoever already owns this originalTransactionId
+    // (e.g. the receipt-created subscriber) is the canonical owner.
+    drizzleMock.subscriberRepo.findSubscriberByAppleAppAccountToken.mockResolvedValue(
+      null,
+    );
+    drizzleMock.purchaseExtRepo.findPurchaseByOriginalTransaction.mockResolvedValue(
+      { id: "pur_x", subscriberId: "sub_receipt" },
+    );
+    drizzleMock.subscriberRepo.findSubscriberById.mockResolvedValue({
+      id: "sub_receipt",
+      appUserId: "rov_device",
+      appleAppAccountToken: null,
+    });
     const verifier = makeStubVerifier(
       makeFakeJwsTransactionPayload({
-        appAccountToken: undefined,
+        appAccountToken: ACCOUNT_TOKEN,
+        originalTransactionId: "1000000001",
+        productId: "premium_monthly",
+      }),
+    );
+
+    const result = await handleAppleNotification({
+      projectId: PROJECT_ID,
+      signedPayload: "signed-envelope-stub",
+      verifier,
+    });
+
+    expect(result.status).toBe("processed");
+    expect(drizzleMock.subscriberRepo.findSubscriberById).toHaveBeenCalledWith(
+      expect.anything(),
+      "sub_receipt",
+    );
+    // Resolved an existing owner → no new row.
+    expect(drizzleMock.subscriberRepo.upsertSubscriber).not.toHaveBeenCalled();
+    expect(drizzleMock.subscriberRepo.createSubscriber).not.toHaveBeenCalled();
+  });
+
+  test("first sighting (webhook-first) creates a synthetic keyed by the transaction anchor, carrying the token", async () => {
+    // No token binding, no existing purchase → genuinely first sighting.
+    // Key the row by the STABLE transaction anchor (apple:<originalTx>),
+    // NOT by the appAccountToken, and stash the token in its column so a
+    // later receipt converges onto this row.
+    drizzleMock.subscriberRepo.findSubscriberByAppleAppAccountToken.mockResolvedValue(
+      null,
+    );
+    drizzleMock.purchaseExtRepo.findPurchaseByOriginalTransaction.mockResolvedValue(
+      null,
+    );
+    const verifier = makeStubVerifier(
+      makeFakeJwsTransactionPayload({
+        appAccountToken: ACCOUNT_TOKEN,
         originalTransactionId: "1000000002",
         productId: "premium_monthly",
       }),
@@ -232,24 +282,22 @@ describe("handleAppleNotification — appAccountToken persistence", () => {
     });
 
     expect(result.status).toBe("processed");
-    expect(
-      drizzleMock.subscriberRepo.upsertSubscriber,
-    ).not.toHaveBeenCalled();
-    expect(
-      drizzleMock.subscriberRepo.createSubscriber,
-    ).toHaveBeenCalledOnce();
-    // The fallback createSubscriber path does NOT carry a token —
-    // confirming we never invent / forge one when Apple omits it.
-    const createArgs =
-      drizzleMock.subscriberRepo.createSubscriber.mock.calls[0]![1];
-    expect(createArgs).not.toHaveProperty("appleAppAccountToken");
+    expect(drizzleMock.subscriberRepo.upsertSubscriber).toHaveBeenCalledOnce();
+    const upsertArgs =
+      drizzleMock.subscriberRepo.upsertSubscriber.mock.calls[0]![1];
+    expect(upsertArgs).toMatchObject({
+      projectId: PROJECT_ID,
+      rovenueId: "apple:1000000002",
+      appleAppAccountToken: ACCOUNT_TOKEN,
+    });
+    // The token is NEVER used as the rovenueId / appUserId identity.
+    expect(upsertArgs.rovenueId).not.toBe(ACCOUNT_TOKEN);
   });
 
-  test("does not erase an existing token on subsequent upsert with no JWS token", async () => {
-    // Repo-layer contract: when caller passes appleAppAccountToken=null
-    // (or omits it), the upsert update branch must not overwrite the
-    // existing column. We exercise this indirectly via the webhook —
-    // if the handler invents a token here, the assertion fails.
+  test("no JWS token: never forges one; keys the synthetic by the transaction anchor", async () => {
+    drizzleMock.purchaseExtRepo.findPurchaseByOriginalTransaction.mockResolvedValue(
+      null,
+    );
     const verifier = makeStubVerifier(
       makeFakeJwsTransactionPayload({
         appAccountToken: undefined,
@@ -258,16 +306,22 @@ describe("handleAppleNotification — appAccountToken persistence", () => {
       }),
     );
 
-    await handleAppleNotification({
+    const result = await handleAppleNotification({
       projectId: PROJECT_ID,
       signedPayload: "signed-envelope-stub",
       verifier,
     });
 
-    // upsertSubscriber is bypassed entirely on the no-token path, so
-    // by definition the column on any pre-existing row is untouched.
+    expect(result.status).toBe("processed");
+    // Token lookup is skipped when Apple omits the claim.
     expect(
-      drizzleMock.subscriberRepo.upsertSubscriber,
+      drizzleMock.subscriberRepo.findSubscriberByAppleAppAccountToken,
     ).not.toHaveBeenCalled();
+    expect(drizzleMock.subscriberRepo.upsertSubscriber).toHaveBeenCalledOnce();
+    const upsertArgs =
+      drizzleMock.subscriberRepo.upsertSubscriber.mock.calls[0]![1];
+    expect(upsertArgs).toMatchObject({ rovenueId: "apple:1000000003" });
+    // appleAppAccountToken must be null/absent — never invented.
+    expect(upsertArgs.appleAppAccountToken ?? null).toBeNull();
   });
 });

@@ -735,23 +735,27 @@ function mapEnvironment(tx: AppleJwsTransactionPayload): Environment {
 
 async function resolveSubscriber(ctx: DispatchContext) {
   const { projectId, transaction } = ctx;
-  // JWS `appAccountToken` is an opaque UUID the client attaches at
-  // purchase time via `Product.PurchaseOption.appAccountToken(_:)`.
-  // We persist it on the subscriber row so Refund Shield's
-  // CONSUMPTION_REQUEST handler can look the subscriber back up from
-  // an inbound webhook payload without needing the original
-  // transaction id.
+  // Resolution mirrors the receipt path so both converge on ONE subscriber
+  // (RevenueCat/Adapty model): the JWS `appAccountToken` is the client→customer
+  // binding, and `originalTransactionId` is the store-authoritative anchor.
+  // The token is NEVER used as the rovenueId/appUserId identity — that would
+  // fabricate a parallel subscriber divorced from the receipt-created row.
   const appleAppAccountToken = transaction.appAccountToken ?? null;
 
-  if (transaction.appAccountToken) {
-    return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
-      projectId,
-      rovenueId: transaction.appAccountToken,
-      appUserId: transaction.appAccountToken,
-      appleAppAccountToken,
-    });
+  // 1. Existing binding: a subscriber already carrying this appAccountToken
+  //    (set by the receipt path from the same JWS claim, or a prior webhook).
+  if (appleAppAccountToken) {
+    const byToken =
+      await drizzle.subscriberRepo.findSubscriberByAppleAppAccountToken(
+        drizzle.db,
+        projectId,
+        appleAppAccountToken,
+      );
+    if (byToken) return byToken;
   }
 
+  // 2. Store-transaction anchor: whoever already owns this originalTransactionId
+  //    (typically the receipt-created subscriber when no token binding exists).
   const existingPurchase =
     await drizzle.purchaseExtRepo.findPurchaseByOriginalTransaction(
       drizzle.db,
@@ -766,11 +770,16 @@ async function resolveSubscriber(ctx: DispatchContext) {
     if (existingSubscriber) return existingSubscriber;
   }
 
+  // 3. First sighting (webhook arrived before any receipt). Key the row by the
+  //    stable transaction anchor and stash the token in its dedicated column so
+  //    a later receipt converges onto this exact row. Upsert (not create) keeps
+  //    duplicate notifications for the same transaction idempotent.
   const syntheticId = `apple:${transaction.originalTransactionId}`;
-  return drizzle.subscriberRepo.createSubscriber(drizzle.db, {
+  return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
     projectId,
     rovenueId: syntheticId,
     appUserId: syntheticId,
+    appleAppAccountToken,
   });
 }
 
