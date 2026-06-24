@@ -67,6 +67,17 @@ export function registerAllIntentHandlers(): void {
       };
 
       return drizzle.db.transaction(async (tx) => {
+        // Cross-project guard: the payload's subscriberId is stored verbatim
+        // from the AI tool call and the access write is keyed by id alone, so
+        // confirm the subscriber belongs to this project before granting.
+        const sub = await drizzle.subscriberRepo.findSubscriberById(
+          tx as never,
+          subscriberId,
+        );
+        if (!sub || sub.projectId !== ctx.projectId) {
+          throw new Error(`Subscriber ${subscriberId} not found in project`);
+        }
+
         // A complimentary grant has no real purchase behind it; we use
         // a sentinel purchaseId derived from the subscriber + access id.
         const sentinelPurchaseId = `manual:${subscriberId}:${accessId}`;
@@ -274,6 +285,16 @@ export function registerAllIntentHandlers(): void {
     };
 
     return drizzle.db.transaction(async (tx) => {
+      // Cross-project guard: updateAudience filters by id alone.
+      const owned = await drizzle.audienceRepo.findAudienceInProject(
+        tx as never,
+        ctx.projectId,
+        audienceId,
+      );
+      if (!owned) {
+        throw new Error(`Audience ${audienceId} not found in project`);
+      }
+
       const result = await drizzle.audienceRepo.updateAudience(tx, audienceId, {
         name,
         description,
@@ -307,6 +328,15 @@ export function registerAllIntentHandlers(): void {
     };
 
     return drizzle.db.transaction(async (tx) => {
+      // Cross-project guard: updateFeatureFlag filters by id alone.
+      const flag = await drizzle.dashboardFeatureFlagRepo.findFeatureFlagById(
+        tx as never,
+        flagId,
+      );
+      if (!flag || flag.projectId !== ctx.projectId) {
+        throw new Error(`Feature flag ${flagId} not found in project`);
+      }
+
       const result = await drizzle.dashboardFeatureFlagRepo.updateFeatureFlag(
         tx,
         flagId,
@@ -342,6 +372,15 @@ export function registerAllIntentHandlers(): void {
       };
 
       return drizzle.db.transaction(async (tx) => {
+        // Cross-project guard: updateFeatureFlag filters by id alone.
+        const flag = await drizzle.dashboardFeatureFlagRepo.findFeatureFlagById(
+          tx as never,
+          flagId,
+        );
+        if (!flag || flag.projectId !== ctx.projectId) {
+          throw new Error(`Feature flag ${flagId} not found in project`);
+        }
+
         const result = await drizzle.dashboardFeatureFlagRepo.updateFeatureFlag(
           tx,
           flagId,
@@ -373,6 +412,16 @@ export function registerAllIntentHandlers(): void {
     const { experimentId } = payload as { experimentId: string };
 
     return drizzle.db.transaction(async (tx) => {
+      // Cross-project guard: updateExperiment filters by id alone.
+      const owned = await drizzle.experimentRepo.findByIdInProject(
+        tx as never,
+        experimentId,
+        ctx.projectId,
+      );
+      if (!owned) {
+        throw new Error(`Experiment ${experimentId} not found in project`);
+      }
+
       const result = await drizzle.experimentRepo.updateExperiment(
         tx,
         experimentId,
@@ -406,6 +455,16 @@ export function registerAllIntentHandlers(): void {
     };
 
     return drizzle.db.transaction(async (tx) => {
+      // Cross-project guard: updateExperiment filters by id alone.
+      const owned = await drizzle.experimentRepo.findByIdInProject(
+        tx as never,
+        experimentId,
+        ctx.projectId,
+      );
+      if (!owned) {
+        throw new Error(`Experiment ${experimentId} not found in project`);
+      }
+
       const result = await drizzle.experimentRepo.updateExperiment(
         tx,
         experimentId,
