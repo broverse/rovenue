@@ -329,7 +329,11 @@ async function verifyGoogleSubscriptionReceipt(
     );
   }
 
-  const subscriber = await upsertSubscriber(args.projectId, args.appUserId);
+  const subscriber = await reconcileGoogleReceiptSubscriber({
+    projectId: args.projectId,
+    appUserId: args.appUserId,
+    purchaseToken: args.receipt,
+  });
 
   const lineItem = subscription.lineItems?.[0];
   const expiresDate = lineItem?.expiryTime
@@ -409,7 +413,11 @@ async function verifyGoogleProductReceipt(
     );
   }
 
-  const subscriber = await upsertSubscriber(args.projectId, args.appUserId);
+  const subscriber = await reconcileGoogleReceiptSubscriber({
+    projectId: args.projectId,
+    appUserId: args.appUserId,
+    purchaseToken: args.receipt,
+  });
 
   const purchaseTimeMs = productPurchase.purchaseTimeMillis
     ? Number(productPurchase.purchaseTimeMillis)
@@ -546,15 +554,69 @@ export async function reconcileAppleReceiptSubscriber(args: {
   return subscriber;
 }
 
-async function upsertSubscriber(
-  projectId: string,
-  rovenueId: string,
-): Promise<Subscriber> {
-  // Receipts identify by the device key (= rovenueId); the customer
-  // label (appUserId) is attached later via POST /v1/identify.
-  const row = await drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
-    projectId,
-    rovenueId,
+/**
+ * Google analog of [`reconcileAppleReceiptSubscriber`]. Google Play's
+ * `purchaseToken` (= the receipt) is the store-authoritative anchor present in
+ * both the receipt and the RTDN, so convergence keys on the purchase's
+ * `storeTransactionId` — no dedicated obfuscated-account-id column is needed
+ * (unlike Apple, whose CONSUMPTION_REQUEST motivated the token column).
+ *
+ * The app authoritatively names the user (`appUserId`), so the app-user row is
+ * canonical. If an earlier RTDN created a synthetic owner for this
+ * `purchaseToken`, its assets are transferred onto the canonical row and it is
+ * soft-deleted as merged. Serialised by a project-scoped advisory lock on the
+ * appUserId + the purchaseToken anchor.
+ */
+export async function reconcileGoogleReceiptSubscriber(args: {
+  projectId: string;
+  appUserId: string;
+  purchaseToken: string;
+}): Promise<Subscriber> {
+  const { projectId, appUserId, purchaseToken } = args;
+
+  const { subscriber, merged } = await drizzle.db.transaction(async (tx) => {
+    const keys = [
+      `${projectId}:${appUserId}`,
+      `${projectId}:google:${purchaseToken}`,
+    ].sort();
+    await drizzle.lockRepo.advisoryXactLock2(tx, keys[0]!, keys[1]!);
+
+    const canonical = await drizzle.subscriberRepo.upsertSubscriber(tx, {
+      projectId,
+      rovenueId: appUserId,
+    });
+
+    // Stray = a different subscriber that already owns this purchaseToken
+    // (e.g. an RTDN-first synthetic).
+    let stray: Subscriber | null = null;
+    const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
+      tx,
+      projectId,
+      Store.PLAY_STORE,
+      purchaseToken,
+    );
+    if (purchase && purchase.subscriberId !== canonical.id) {
+      const owner = await drizzle.subscriberRepo.findSubscriberById(
+        tx,
+        purchase.subscriberId,
+      );
+      if (owner && !owner.deletedAt) stray = owner;
+    }
+
+    let merged = false;
+    if (stray) {
+      await reassignAllAssets(
+        tx,
+        projectId,
+        { id: stray.id, label: stray.appUserId ?? stray.rovenueId },
+        { id: canonical.id, label: appUserId },
+      );
+      merged = true;
+    }
+
+    return { subscriber: canonical as Subscriber, merged };
   });
-  return row as unknown as Subscriber;
+
+  if (merged) await safeSyncAccessAfterMerge(subscriber.id);
+  return subscriber;
 }

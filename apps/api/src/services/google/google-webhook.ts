@@ -209,7 +209,7 @@ async function processSubscriptionNotification(
     ctx.notification.purchaseToken,
   );
 
-  const subscriber = await resolveSubscriber(ctx, purchase);
+  const subscriber = await resolveSubscriber(ctx);
 
   const lineItem = purchase.lineItems?.[0];
   const productId = lineItem?.productId ?? ctx.notification.subscriptionId;
@@ -412,22 +412,15 @@ async function ensureAcknowledged(
   }
 }
 
-async function resolveSubscriber(
-  ctx: SubscriptionCtx,
-  purchase: GoogleSubscriptionPurchaseV2,
-) {
-  const externalId =
-    purchase.externalAccountIdentifiers?.externalAccountId ??
-    purchase.externalAccountIdentifiers?.obfuscatedExternalAccountId;
-
-  if (externalId) {
-    return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
-      projectId: ctx.projectId,
-      rovenueId: externalId,
-      appUserId: externalId,
-    });
-  }
-
+async function resolveSubscriber(ctx: SubscriptionCtx) {
+  // Resolution mirrors the receipt path so both converge on ONE subscriber
+  // (RevenueCat/Adapty model). Google Play's purchaseToken is the
+  // store-authoritative anchor carried by every RTDN; the client's
+  // externalAccountId is NOT used as the subscriber identity — that would
+  // fabricate a parallel row keyed by the token, divorced from the
+  // receipt-created subscriber, splitting purchase/access from
+  // renewal/refund state. The receipt path (reconcileGoogleReceiptSubscriber)
+  // converges any synthetic created here once it arrives.
   const existingPurchase =
     await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
       drizzle.db,
@@ -443,8 +436,11 @@ async function resolveSubscriber(
     if (existingSubscriber) return existingSubscriber;
   }
 
+  // First sighting (RTDN before any receipt). Key by the stable purchaseToken
+  // anchor so a later receipt converges onto this exact row. Upsert (not
+  // create) keeps duplicate notifications for the same token idempotent.
   const syntheticId = `google:${ctx.notification.purchaseToken.slice(0, 24)}`;
-  return drizzle.subscriberRepo.createSubscriber(drizzle.db, {
+  return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
     projectId: ctx.projectId,
     rovenueId: syntheticId,
     appUserId: syntheticId,
