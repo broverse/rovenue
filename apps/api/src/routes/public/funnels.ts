@@ -277,6 +277,7 @@ export const publicFunnelsRoute = new Hono()
   // ---------------------------------------------------------------
   .post(
     "/funnel-sessions/:sessionId/advance",
+    endpointRateLimit({ name: "funnel:advance", max: 120 }),
     validate("json", z.object({ from_page_id: z.string() })),
     async (c) => {
       const sid = c.req.param("sessionId");
@@ -345,7 +346,10 @@ export const publicFunnelsRoute = new Hono()
   // ---------------------------------------------------------------
   // GET /funnel-sessions/:sessionId/state — poll progress + token status
   // ---------------------------------------------------------------
-  .get("/funnel-sessions/:sessionId/state", async (c) => {
+  .get(
+    "/funnel-sessions/:sessionId/state",
+    endpointRateLimit({ name: "funnel:state", max: 240 }),
+    async (c) => {
     const sid = c.req.param("sessionId");
     const session = await drizzle.funnelSessionRepo.findById(drizzle.db, sid);
     if (!session) {
@@ -374,7 +378,10 @@ export const publicFunnelsRoute = new Hono()
   // NODE_ENV !== "production" — a developer convenience for
   // end-to-end testing without Stripe.
   // ---------------------------------------------------------------
-  .post("/funnel-sessions/:sessionId/claim-token", async (c) => {
+  .post(
+    "/funnel-sessions/:sessionId/claim-token",
+    endpointRateLimit({ name: "funnel:claim-token", max: 30 }),
+    async (c) => {
     const sid = c.req.param("sessionId");
     const session = await drizzle.funnelSessionRepo.findById(drizzle.db, sid);
     if (!session) {

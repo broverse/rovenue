@@ -172,6 +172,26 @@ describe("W4.3a/b: rate-limit middleware is mounted on funnel POSTs", () => {
     });
     expect(rateLimitCalls.some((c) => c.name === "funnel:answer")).toBe(true);
   });
+
+  it("invokes funnel:advance rate limit on POST /funnel-sessions/:id/advance", async () => {
+    const app = buildApp();
+    await post(app, "/public/funnel-sessions/session-id/advance", {
+      from_page_id: "page-1",
+    });
+    expect(rateLimitCalls.some((c) => c.name === "funnel:advance")).toBe(true);
+  });
+
+  it("invokes funnel:state rate limit on GET /funnel-sessions/:id/state", async () => {
+    const app = buildApp();
+    await app.request("/public/funnel-sessions/session-id/state");
+    expect(rateLimitCalls.some((c) => c.name === "funnel:state")).toBe(true);
+  });
+
+  it("invokes funnel:claim-token rate limit on POST /funnel-sessions/:id/claim-token", async () => {
+    const app = buildApp();
+    await post(app, "/public/funnel-sessions/session-id/claim-token", {});
+    expect(rateLimitCalls.some((c) => c.name === "funnel:claim-token")).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
