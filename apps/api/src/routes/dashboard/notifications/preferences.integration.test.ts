@@ -5,7 +5,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
-import { getDb, drizzle, projects } from "@rovenue/db";
+import { getDb, drizzle, projects, MemberRole } from "@rovenue/db";
 import { auth } from "../../../lib/auth";
 import { errorHandler } from "../../../middleware/error";
 import { notificationsRoute } from "./index";
@@ -38,9 +38,18 @@ async function createUserAndSession(suffix: string) {
 }
 
 const seededProjectIds: string[] = [];
-async function seedProject(suffix: string) {
+async function seedProject(suffix: string, memberUserId?: string) {
   const id = `prj_prefroute_${RUN_ID}_${suffix}`;
   await db.insert(projects).values({ id, name: id });
+  // The route now requires project membership to read/write per-project
+  // preferences, so grant the test user a membership when supplied.
+  if (memberUserId) {
+    await db.insert(schema.projectMembers).values({
+      projectId: id,
+      userId: memberUserId,
+      role: MemberRole.OWNER,
+    });
+  }
   seededProjectIds.push(id);
   return id;
 }
@@ -99,7 +108,7 @@ describe.sequential("dashboard/notifications/preferences", () => {
 
   it("PATCH scope=project merges overrides without clobbering existing keys", async () => {
     const { userId, cookie } = await createUserAndSession("proj");
-    const projectId = await seedProject("proj");
+    const projectId = await seedProject("proj", userId);
 
     // Seed an existing override for a different event so we can
     // verify the second PATCH preserves it.
@@ -132,8 +141,8 @@ describe.sequential("dashboard/notifications/preferences", () => {
   });
 
   it("PATCH scope=project rejects a forced-channel event with 400", async () => {
-    const { cookie } = await createUserAndSession("forced");
-    const projectId = await seedProject("forced");
+    const { userId, cookie } = await createUserAndSession("forced");
+    const projectId = await seedProject("forced", userId);
     const app = buildApp();
     const res = await app.request("/notifications/preferences", {
       method: "PATCH",
@@ -153,8 +162,8 @@ describe.sequential("dashboard/notifications/preferences", () => {
   });
 
   it("PATCH scope=project rejects unknown event keys with 400", async () => {
-    const { cookie } = await createUserAndSession("unknown");
-    const projectId = await seedProject("unknown");
+    const { userId, cookie } = await createUserAndSession("unknown");
+    const projectId = await seedProject("unknown", userId);
     const app = buildApp();
     const res = await app.request("/notifications/preferences", {
       method: "PATCH",
@@ -170,7 +179,7 @@ describe.sequential("dashboard/notifications/preferences", () => {
 
   it("GET with projectId returns the resolved view including overrides", async () => {
     const { userId, cookie } = await createUserAndSession("getproj");
-    const projectId = await seedProject("getproj");
+    const projectId = await seedProject("getproj", userId);
     await drizzle.notificationPreferencesRepo.upsertProjectDefaults(
       db,
       projectId,
@@ -199,5 +208,48 @@ describe.sequential("dashboard/notifications/preferences", () => {
     expect(body.data.projectId).toBe(projectId);
     expect(body.data.projectDefaults["revenue.digest.daily"]).toBe(true);
     expect(body.data.userOverrides["revenue.digest.daily"]).toBe(false);
+  });
+
+  it("GET with projectId returns 403 for a non-member", async () => {
+    const { cookie } = await createUserAndSession("nonmember-get");
+    // Seeded WITHOUT a membership for this user.
+    const projectId = await seedProject("nonmember-get");
+    await drizzle.notificationPreferencesRepo.upsertProjectDefaults(db, projectId, {
+      "revenue.digest.daily": true,
+    });
+
+    const app = buildApp();
+    const res = await app.request(
+      `/notifications/preferences?projectId=${projectId}`,
+      { method: "GET", headers: { cookie } },
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("PATCH scope=project returns 403 and writes nothing for a non-member", async () => {
+    const { userId, cookie } = await createUserAndSession("nonmember-patch");
+    // Seeded WITHOUT a membership for this user.
+    const projectId = await seedProject("nonmember-patch");
+
+    const app = buildApp();
+    const res = await app.request("/notifications/preferences", {
+      method: "PATCH",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({
+        scope: "project",
+        projectId,
+        overrides: { "revenue.digest.daily": false },
+      }),
+    });
+    expect(res.status).toBe(403);
+
+    // The override row must not have been written.
+    const overrides =
+      await drizzle.notificationPreferencesRepo.getUserProjectOverrides(
+        db,
+        userId,
+        projectId,
+      );
+    expect(overrides["revenue.digest.daily"]).toBeUndefined();
   });
 });

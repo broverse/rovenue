@@ -29,6 +29,7 @@ import { validate } from "../../../lib/validate";
 import { drizzle } from "@rovenue/db";
 import { getEvent } from "@rovenue/shared/notifications";
 import { requireDashboardAuth } from "../../../middleware/dashboard-auth";
+import { assertProjectAccess } from "../../../lib/project-access";
 import { redis } from "../../../lib/redis";
 import { logger } from "../../../lib/logger";
 import { ok } from "../../../lib/response";
@@ -135,6 +136,10 @@ export const notificationPreferencesRoute = new Hono()
       );
     }
 
+    // The project's default overrides are tenant data — only a member may
+    // read them (and their own per-project override map for that project).
+    await assertProjectAccess(projectId, user.id);
+
     const [projectDefaults, userOverrides] = await Promise.all([
       notificationPreferencesRepo.getProjectDefaults(drizzle.db, projectId),
       notificationPreferencesRepo.getUserProjectOverrides(
@@ -178,6 +183,10 @@ export const notificationPreferencesRoute = new Hono()
       await invalidateUserPrefs(user.id);
       return c.json(ok({ ok: true }));
     }
+
+    // A per-project override row must not be writable for a project the
+    // user isn't a member of — guard before touching any data.
+    await assertProjectAccess(body.projectId, user.id);
 
     rejectForcedOverrides(body.overrides);
     await notificationPreferencesRepo.upsertUserProjectOverrides(
