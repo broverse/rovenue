@@ -133,19 +133,43 @@ export async function dispatchStripeBillingEvent(
     if (result && "followUp" in result && result.followUp) {
       followUp = result.followUp;
     }
-    await drizzle.webhookEventRepo.updateWebhookEvent(tx, whRow.id, {
+    // Without a follow-up the handler's effects ARE the whole event, so
+    // finalize atomically inside the tx. With a follow-up we must NOT mark
+    // PROCESSED yet — see below.
+    if (!followUp) {
+      await drizzle.webhookEventRepo.updateWebhookEvent(tx, whRow.id, {
+        status: "PROCESSED",
+        processedAt: new Date(),
+      });
+    }
+  });
+
+  // Post-commit external follow-up (stripe.subscriptions.create). This can't
+  // run inside the tx (slow roundtrip), and it must NOT be marked PROCESSED
+  // until it actually succeeds: if we committed PROCESSED first and the
+  // follow-up then failed, Stripe's retry would dedupe to `duplicate` at the
+  // claim above and the subscription would never be created (silent loss of
+  // an upgrade). Instead we leave the row PROCESSING across the follow-up:
+  //   - success → mark PROCESSED.
+  //   - failure → mark FAILED (re-claimable + visible to alerting) and rethrow
+  //     so Stripe/BullMQ retry. The retry re-runs the handler (idempotent on
+  //     re-run) and the follow-up (stripe.subscriptions.create with a stable
+  //     idempotency key, so it's a no-op once the subscription exists).
+  if (followUp) {
+    try {
+      await followUp();
+    } catch (e) {
+      await drizzle.webhookEventRepo.updateWebhookEvent(db, whRow.id, {
+        status: "FAILED",
+        errorMessage: `follow-up failed: ${(e as Error).message}`,
+        incrementRetryCount: true,
+      });
+      throw e;
+    }
+    await drizzle.webhookEventRepo.updateWebhookEvent(db, whRow.id, {
       status: "PROCESSED",
       processedAt: new Date(),
     });
-  });
-
-  // Stripe API call AFTER tx commit. If it throws, Stripe will
-  // retry the webhook; our webhook_events dedupe means handlers
-  // are no-ops on the second attempt. The follow-up itself uses
-  // stripe.subscriptions.create with an idempotency key, so a retry
-  // is a no-op there too.
-  if (followUp) {
-    await followUp();
   }
 
   return { status: "ok" };

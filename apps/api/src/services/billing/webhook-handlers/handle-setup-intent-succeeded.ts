@@ -70,31 +70,42 @@ export async function handleSetupIntentSucceeded(
     return {};
   }
 
-  const existingDefault = await drizzle.billingPaymentMethodRepo.findDefaultPaymentMethod(
+  // Idempotent on re-run: a prior attempt may have committed the PM insert
+  // and then had its post-commit follow-up (subscriptions.create) fail,
+  // leaving the webhook re-claimable. Stripe's retry re-enters this handler,
+  // so we must not re-insert (stripe_payment_method_id is UNIQUE → would
+  // throw and starve the follow-up retry) or re-emit the outbox event.
+  let inserted = await drizzle.billingPaymentMethodRepo.findByStripePaymentMethodId(
     ctx.tx,
-    ctx.projectId,
+    pm.id,
   );
-  const isDefault = existingDefault === null;
+  if (!inserted) {
+    const existingDefault = await drizzle.billingPaymentMethodRepo.findDefaultPaymentMethod(
+      ctx.tx,
+      ctx.projectId,
+    );
+    const isDefault = existingDefault === null;
 
-  const inserted = await drizzle.billingPaymentMethodRepo.insertPaymentMethod(
-    ctx.tx,
-    {
+    inserted = await drizzle.billingPaymentMethodRepo.insertPaymentMethod(
+      ctx.tx,
+      {
+        projectId: ctx.projectId,
+        stripePaymentMethodId: pm.id,
+        brand: pm.card.brand,
+        last4: pm.card.last4,
+        expMonth: pm.card.exp_month,
+        expYear: pm.card.exp_year,
+        isDefault,
+      },
+    );
+
+    await publishBillingPaymentMethodAdded(ctx.tx, {
       projectId: ctx.projectId,
-      stripePaymentMethodId: pm.id,
+      paymentMethodId: inserted.id,
       brand: pm.card.brand,
       last4: pm.card.last4,
-      expMonth: pm.card.exp_month,
-      expYear: pm.card.exp_year,
-      isDefault,
-    },
-  );
-
-  await publishBillingPaymentMethodAdded(ctx.tx, {
-    projectId: ctx.projectId,
-    paymentMethodId: inserted.id,
-    brand: pm.card.brand,
-    last4: pm.card.last4,
-  });
+    });
+  }
 
   const flow = intent.metadata?.rovenue_flow;
   if (flow !== "upgrade") {
