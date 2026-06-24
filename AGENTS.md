@@ -29,12 +29,11 @@ rovenue/
 │   ├── sdk-rn/          → React Native SDK
 │   ├── db/              → Drizzle schema + drizzle-kit migrations + ClickHouse migrations + seed
 │   └── shared/          → Types, constants, utils
-├── deploy/
-│   ├── docker-compose.yml
-│   └── coolify/
+├── deploy/             → service config: caddy · postgres · clickhouse · cloudflare · apple-certs · grafana/prometheus/loki/alloy (observability)
 ├── .github/
 │   ├── workflows/
 │   └── CONTRIBUTING.md
+├── docker-compose.yml  → full stack (root file); COMPOSE_PROFILES=observability adds Grafana/Prometheus/Loki
 ├── AGENTS.md
 ├── LICENSE              → AGPL-3.0
 └── turbo.json
