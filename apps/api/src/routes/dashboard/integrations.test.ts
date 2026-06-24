@@ -585,6 +585,50 @@ describe("POST /projects/:projectId/integrations/validate", () => {
     expect(countAfter).toBe(countBefore);
   });
 
+  it("rate-limits credential validation per user (over budget → 429)", async () => {
+    // P2: /validate makes an outbound third-party credential check on every
+    // call. Without a rate limit an authenticated developer can drive
+    // unbounded egress/cost. Enforce a per-user endpoint budget.
+    const agent = new MockAgent();
+    agent.disableNetConnect();
+    setGlobalDispatcher(agent);
+    agent
+      .get("https://graph.facebook.com")
+      .intercept({ path: /\/v18\.0\/px_rl/, method: "GET" })
+      .reply(200, '{"id":"px_rl"}')
+      .persist();
+
+    const owner = await createUserAndSession("validate_rl");
+    const project = await seedProject("_validate_rl");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId: owner.userId, role: "DEVELOPER" });
+
+    const app = buildApp();
+    const call = () =>
+      app.request(`/projects/${project.id}/integrations/validate`, {
+        method: "POST",
+        headers: { cookie: owner.cookie, "content-type": "application/json" },
+        body: JSON.stringify({
+          providerId: "META_CAPI",
+          credentials: { access_token: "tok_rl", pixel_id: "px_rl" },
+        }),
+      });
+
+    // The per-user budget for this endpoint.
+    const MAX = 20;
+    let lastStatus = 0;
+    for (let i = 0; i < MAX; i++) {
+      lastStatus = (await call()).status;
+    }
+    // Still within budget — not rate-limited.
+    expect(lastStatus).toBe(200);
+    // One over the budget within the same window → 429.
+    const over = await call();
+    expect(over.status).toBe(429);
+
+    await agent.close();
+  });
+
   it("returns {ok: false, reason} with 200 status on invalid credentials", async () => {
     const agent = new MockAgent();
     agent.disableNetConnect();

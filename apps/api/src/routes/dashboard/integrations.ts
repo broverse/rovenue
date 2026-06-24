@@ -8,6 +8,7 @@ import { createId } from "@paralleldrive/cuid2";
 import { MemberRole, drizzle, getDb } from "@rovenue/db";
 import { encrypt, decrypt } from "@rovenue/shared/crypto";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
+import { endpointRateLimit, clientIp } from "../../middleware/rate-limit";
 import { assertProjectAccess } from "../../lib/project-access";
 import { ok } from "../../lib/response";
 import { audit } from "../../lib/audit";
@@ -293,36 +294,51 @@ export const integrationsRoute = new Hono()
   // M5.6 — dry-run credential validation, no DB write
   // NOTE: Must be registered BEFORE /:id routes to avoid id="validate" clash
   // =============================================================
-  .post("/validate", async (c) => {
-    const projectId = c.req.param("projectId");
-    if (!projectId) throw new HTTPException(400, { message: "Missing projectId" });
+  .post(
+    "/validate",
+    // This endpoint makes an outbound third-party credential-validation call
+    // on every request. Cap it per authenticated dashboard user so an
+    // authenticated (or compromised) developer can't drive unbounded
+    // egress/cost. Runs before the access check so abusive traffic is shed early.
+    endpointRateLimit({
+      name: "integrations-validate",
+      max: 20,
+      identify: (c) => c.get("user")?.id ?? clientIp(c),
+    }),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      if (!projectId)
+        throw new HTTPException(400, { message: "Missing projectId" });
 
-    const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.DEVELOPER);
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.DEVELOPER);
 
-    const raw = await c.req.json();
-    const parse = validateBody.safeParse(raw);
-    if (!parse.success) {
+      const raw = await c.req.json();
+      const parse = validateBody.safeParse(raw);
+      if (!parse.success) {
+        return c.json(
+          { error: { code: "VALIDATION_ERROR", message: parse.error.message } },
+          400,
+        );
+      }
+      const body = parse.data;
+
+      const http = createUndiciHttpClient();
+      const provider = getProvider(body.providerId as ProviderId);
+      const result = await provider.validateCredentials(body.credentials, http);
+
+      if (result.ok) {
+        return c.json(ok({ ok: true }));
+      }
+      // Failure goes in body with 200 status — NOT 400 (per plan §M5.6)
       return c.json(
-        { error: { code: "VALIDATION_ERROR", message: parse.error.message } },
-        400,
+        ok({
+          ok: false,
+          reason: (result as { ok: false; reason: string }).reason,
+        }),
       );
-    }
-    const body = parse.data;
-
-    // NOTE: rate-limit middleware for this endpoint deferred to M9.1
-    const http = createUndiciHttpClient();
-    const provider = getProvider(body.providerId as ProviderId);
-    const result = await provider.validateCredentials(body.credentials, http);
-
-    if (result.ok) {
-      return c.json(ok({ ok: true }));
-    }
-    // Failure goes in body with 200 status — NOT 400 (per plan §M5.6)
-    return c.json(
-      ok({ ok: false, reason: (result as { ok: false; reason: string }).reason }),
-    );
-  })
+    },
+  )
 
   // =============================================================
   // PATCH /dashboard/projects/:projectId/integrations/:id
