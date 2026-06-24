@@ -32,14 +32,18 @@ impl SessionDispatcher {
         }
     }
 
-    /// Drain up to 200 events and POST to /v1/sdk/sessions. On error,
-    /// re-append is NOT attempted (telemetry is best-effort; dropping
-    /// is preferable to unbounded retry on a flaky network).
+    /// Peek up to 200 events and POST to /v1/sdk/sessions, deleting them from
+    /// the buffer ONLY after the server confirms receipt (2xx). On a 503
+    /// (Kafka down) or network error the batch is retained and retried on the
+    /// next tick — the API returns 503 precisely to signal "keep it". This is
+    /// at-least-once delivery; the server derives a deterministic eventId from
+    /// the event's stable fields so a replayed batch dedupes in ClickHouse.
+    /// Growth is bounded by the buffer's FIFO cap (newest 1000 on append).
     pub fn flush_once(&self) -> RovenueResult<usize> {
         let Some(sub_id) = (self.subscriber_id_provider)() else {
             return Ok(0);
         };
-        let rows = self.buffer.drain(200)?;
+        let rows = self.buffer.peek(200)?;
         if rows.is_empty() {
             return Ok(0);
         }
@@ -56,7 +60,10 @@ impl SessionDispatcher {
                 })
             })
             .collect();
-        let _ = self.http.post_sessions(&sub_id, &events);
+        // Propagates on failure (5xx / network) WITHOUT deleting → retained.
+        self.http.post_sessions(&sub_id, &events)?;
+        let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+        self.buffer.delete(&ids)?;
         Ok(rows.len())
     }
 
@@ -65,5 +72,77 @@ impl SessionDispatcher {
         scheduler.register("sessions", Duration::from_secs(30), move || {
             let _ = me.flush_once();
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cache::CacheStore;
+    use crate::sessions::SessionEventKind;
+
+    fn setup(base_url: String) -> (Arc<SessionBuffer>, Arc<SessionDispatcher>) {
+        let store = Arc::new(CacheStore::open_in_memory().unwrap());
+        let buffer = Arc::new(SessionBuffer::new(Arc::clone(&store)));
+        // max_attempts=1 so a 503 fails fast without exponential backoff.
+        let http = Arc::new(HttpClient::new(base_url, "pk_test".to_string()).with_max_attempts(1));
+        let dispatcher = Arc::new(SessionDispatcher::new(
+            Arc::clone(&buffer),
+            http,
+            Arc::new(|| Some("rov_test".to_string())),
+            Some("1.0.0".to_string()),
+        ));
+        (buffer, dispatcher)
+    }
+
+    /// Regression (P1): on a 503 (Kafka down) / network error the batch must be
+    /// RETAINED for the next flush — the API returns 503 precisely so the SDK
+    /// keeps it. Previously flush drained-then-discarded, losing the events.
+    #[test]
+    fn retains_events_when_server_returns_503() {
+        let mut server = mockito::Server::new();
+        let _m = server
+            .mock("POST", "/v1/sdk/sessions")
+            .with_status(503)
+            .with_body(r#"{"error":{"code":"TELEMETRY_UNAVAILABLE"}}"#)
+            .create();
+
+        let (buffer, dispatcher) = setup(server.url());
+        buffer
+            .record(SessionEventKind::Open, "2026-05-28T10:00:00Z", None)
+            .unwrap();
+
+        // The flush fails; the events must NOT be deleted.
+        let result = dispatcher.flush_once();
+        assert!(result.is_err(), "a 503 must surface as an error");
+        assert_eq!(
+            buffer.peek(100).unwrap().len(),
+            1,
+            "events must be retained for retry after a 503"
+        );
+    }
+
+    #[test]
+    fn deletes_events_after_successful_post() {
+        let mut server = mockito::Server::new();
+        let _m = server
+            .mock("POST", "/v1/sdk/sessions")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("{}")
+            .create();
+
+        let (buffer, dispatcher) = setup(server.url());
+        buffer
+            .record(SessionEventKind::Open, "2026-05-28T10:00:00Z", None)
+            .unwrap();
+
+        let flushed = dispatcher.flush_once().unwrap();
+        assert_eq!(flushed, 1);
+        assert_eq!(
+            buffer.peek(100).unwrap().len(),
+            0,
+            "events must be removed only after the server confirms receipt"
+        );
     }
 }

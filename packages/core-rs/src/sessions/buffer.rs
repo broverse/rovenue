@@ -25,11 +25,18 @@ impl SessionBuffer {
             .append_session_event(kind.as_wire(), occurred_at, duration_ms)
     }
 
-    pub fn drain(&self, limit: usize) -> RovenueResult<Vec<SessionEventRow>> {
-        let rows = self.store.list_session_events(limit)?;
-        let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
-        self.store.delete_session_events(&ids)?;
-        Ok(rows)
+    /// Read up to `limit` buffered events WITHOUT removing them. The dispatcher
+    /// removes them (via [`delete`](Self::delete)) only after the server
+    /// confirms receipt, so a 503 (Kafka down) / network failure retains the
+    /// batch for the next flush instead of dropping it. Growth is bounded by
+    /// the store's FIFO cap (newest 1000) applied on append.
+    pub fn peek(&self, limit: usize) -> RovenueResult<Vec<SessionEventRow>> {
+        self.store.list_session_events(limit)
+    }
+
+    /// Remove the given event ids — called only after a successful dispatch.
+    pub fn delete(&self, ids: &[i64]) -> RovenueResult<()> {
+        self.store.delete_session_events(ids)
     }
 
     /// Discards every buffered event. Called on log_out so undispatched events do
@@ -78,13 +85,37 @@ mod tests {
     }
 
     #[test]
-    fn drain_returns_and_deletes() {
+    fn peek_does_not_delete() {
+        // The dispatcher must be able to read the batch WITHOUT removing it,
+        // so a failed (503 / network) POST retains the events for retry.
         let store = Arc::new(CacheStore::open_in_memory().unwrap());
         let buf = SessionBuffer::new(Arc::clone(&store));
         buf.record(SessionEventKind::Open, "2026-05-28T10:00:00Z", None)
             .unwrap();
-        let drained = buf.drain(100).unwrap();
-        assert_eq!(drained.len(), 1);
-        assert_eq!(store.list_session_events(10).unwrap().len(), 0);
+        buf.record(SessionEventKind::Close, "2026-05-28T10:05:00Z", None)
+            .unwrap();
+
+        let peeked = buf.peek(100).unwrap();
+        assert_eq!(peeked.len(), 2);
+        // Nothing removed — a second peek sees the same rows.
+        assert_eq!(buf.peek(100).unwrap().len(), 2);
+        assert_eq!(store.list_session_events(10).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn delete_removes_only_the_given_ids() {
+        let store = Arc::new(CacheStore::open_in_memory().unwrap());
+        let buf = SessionBuffer::new(Arc::clone(&store));
+        buf.record(SessionEventKind::Open, "2026-05-28T10:00:00Z", None)
+            .unwrap();
+        buf.record(SessionEventKind::Close, "2026-05-28T10:05:00Z", None)
+            .unwrap();
+
+        let rows = buf.peek(100).unwrap();
+        buf.delete(&[rows[0].id]).unwrap();
+
+        let remaining = buf.peek(100).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, rows[1].id);
     }
 }

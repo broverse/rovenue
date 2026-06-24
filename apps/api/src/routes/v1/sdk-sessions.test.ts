@@ -155,6 +155,74 @@ describe("POST /v1/sdk/sessions", () => {
     });
   });
 
+  it("derives a deterministic eventId so at-least-once SDK retries dedupe in ClickHouse", async () => {
+    const app = await buildApp();
+    const body = JSON.stringify({
+      subscriberId: "sub_dedupe",
+      events: [
+        {
+          type: "open",
+          occurredAt: "2026-05-28T10:00:00.000Z",
+          durationMs: 0,
+          appVersion: "1.0.0",
+          sdkVersion: "0.6.0",
+        },
+      ],
+    });
+    const post = () =>
+      app.request("/v1/sdk/sessions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${PUBLIC_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body,
+      });
+
+    // Same batch sent twice (the SDK retried after a lost/failed response).
+    expect((await post()).status).toBe(202);
+    expect((await post()).status).toBe(202);
+
+    const id1 = JSON.parse(sendMock.mock.calls[0]?.[0].messages[0].value).eventId;
+    const id2 = JSON.parse(sendMock.mock.calls[1]?.[0].messages[0].value).eventId;
+    // Stable across re-sends → ReplacingMergeTree(_version) FINAL collapses
+    // the replay (CH dedup key is projectId/subscriberId/occurredAt/eventId).
+    expect(id1).toBe(id2);
+  });
+
+  it("gives distinct eventIds to events differing in a stable field", async () => {
+    const app = await buildApp();
+    const res = await app.request("/v1/sdk/sessions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${PUBLIC_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        subscriberId: "sub_distinct",
+        events: [
+          {
+            type: "open",
+            occurredAt: "2026-05-28T10:00:00.000Z",
+            appVersion: "1.0.0",
+            sdkVersion: "0.6.0",
+          },
+          {
+            type: "close",
+            occurredAt: "2026-05-28T10:05:00.000Z",
+            appVersion: "1.0.0",
+            sdkVersion: "0.6.0",
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(202);
+    const ids = sendMock.mock.calls[0]?.[0].messages.map(
+      (m: { value: string }) => JSON.parse(m.value).eventId,
+    );
+    expect(new Set(ids).size).toBe(2);
+  });
+
   it("rejects without bearer", async () => {
     const app = await buildApp();
     const res = await app.request("/v1/sdk/sessions", {

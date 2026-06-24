@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
-import { createId } from "@paralleldrive/cuid2";
+import { createHash } from "node:crypto";
 import { API_KEY_KIND } from "@rovenue/shared";
 import { HTTPException } from "hono/http-exception";
 import { drizzle } from "@rovenue/db";
@@ -42,6 +42,26 @@ import { logger } from "../../lib/logger";
 // JSONExtract* expressions parse out.
 
 const log = logger.child("route:v1:sdk-sessions");
+
+/**
+ * Content-derived, deterministic event id for a session event. Stable across
+ * SDK re-sends of the same logical event so the at-least-once dispatcher's
+ * retries dedupe in ClickHouse (raw_sdk_session_events ReplacingMergeTree
+ * FINAL, dedup key projectId/subscriberId/occurredAt/eventId). Derived from
+ * the event's stable identity fields — never a fresh per-POST id.
+ */
+function sessionEventId(
+  projectId: string,
+  subscriberId: string,
+  e: { type: string; occurredAt: string; durationMs?: number },
+): string {
+  return createHash("sha256")
+    .update(
+      `${projectId}|${subscriberId}|${e.type}|${e.occurredAt}|${e.durationMs ?? 0}`,
+    )
+    .digest("hex")
+    .slice(0, 32);
+}
 
 const requirePublicApiKey: import("hono").MiddlewareHandler = async (
   c,
@@ -96,7 +116,12 @@ export const sdkSessionsRoute = new Hono().post(
       // partition so ReplacingMergeTree dedup is deterministic.
       key: subscriberId,
       value: JSON.stringify({
-        eventId: createId(),
+        // Deterministic, content-derived id (NOT a fresh createId() per POST):
+        // the SDK dispatcher is at-least-once and may re-send a batch after a
+        // failed/lost response, so the eventId MUST be stable across re-sends
+        // for raw_sdk_session_events' ReplacingMergeTree FINAL dedup (key:
+        // projectId/subscriberId/occurredAt/eventId) to collapse the replay.
+        eventId: sessionEventId(project.id, subscriberId, e),
         aggregateId: subscriberId,
         eventType: "sdk.session",
         payload: JSON.stringify({
