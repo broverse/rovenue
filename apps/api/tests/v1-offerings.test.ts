@@ -455,7 +455,9 @@ describe("GET /v1/offerings", () => {
         identifier: "default",
         accessId: "acc_x",
         isDefault: true,
-        products: [{ productId: "prod_1", order: 0, isPromoted: false }],
+        packages: [
+          { identifier: "$rov_monthly", productId: "prod_1", order: 0, isPromoted: false },
+        ],
         metadata: {},
       },
     ] as any);
@@ -475,7 +477,7 @@ describe("GET /v1/offerings", () => {
     const res = await app.request(withPublicAuth("/v1/offerings"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    const product = body.data.offerings[0].products[0];
+    const product = body.data.offerings[0].packages[0];
     expect(product.storeIds).toEqual({ apple: "com.x.pro.monthly", google: "pro_monthly" });
     expect(product.identifier).toBe("monthly");
     expect(product.type).toBe("SUBSCRIPTION");
@@ -488,7 +490,7 @@ describe("GET /v1/offerings", () => {
         identifier: "default",
         accessId: "acc_x",
         isDefault: true,
-        products: [],
+        packages: [],
         metadata: { theme: "dark" },
       },
     ] as any);
@@ -507,7 +509,7 @@ describe("GET /v1/offerings", () => {
         identifier: "empty",
         accessId: null,
         isDefault: false,
-        products: [],
+        packages: [],
         metadata: {},
       },
     ] as any);
@@ -516,7 +518,7 @@ describe("GET /v1/offerings", () => {
     const res = await app.request(withPublicAuth("/v1/offerings"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.data.offerings[0].products).toEqual([]);
+    expect(body.data.offerings[0].packages).toEqual([]);
   });
 
   it("filters out inactive products", async () => {
@@ -526,9 +528,9 @@ describe("GET /v1/offerings", () => {
         identifier: "mixed",
         accessId: null,
         isDefault: true,
-        products: [
-          { productId: "prod_active", order: 0, isPromoted: false },
-          { productId: "prod_inactive", order: 1, isPromoted: false },
+        packages: [
+          { identifier: "$rov_active", productId: "prod_active", order: 0, isPromoted: false },
+          { identifier: "$rov_inactive", productId: "prod_inactive", order: 1, isPromoted: false },
         ],
         metadata: {},
       },
@@ -559,8 +561,136 @@ describe("GET /v1/offerings", () => {
     const res = await app.request(withPublicAuth("/v1/offerings"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.data.offerings[0].products).toHaveLength(1);
-    expect(body.data.offerings[0].products[0].identifier).toBe("active_monthly");
+    expect(body.data.offerings[0].packages).toHaveLength(1);
+    expect(body.data.offerings[0].packages[0].identifier).toBe("active_monthly");
+  });
+});
+
+// =============================================================
+// GET /v1/offerings (list) — experiment override drives `current`
+// =============================================================
+//
+// Regression: OFFERING A/B experiments only applied on
+// GET /:identifier, but the SDK's getOfferings() calls the list
+// endpoint. The list path must now flip isDefault onto the variant's
+// target offering (the SDK derives `current` from is_default) and
+// emit X-Rovenue-Experiment for exposure logging.
+
+describe("GET /v1/offerings (list) — OFFERING experiment override", () => {
+  const LIST = [
+    {
+      id: "off_default",
+      identifier: "default",
+      accessId: null,
+      isDefault: true,
+      packages: [],
+      metadata: {},
+    },
+    {
+      id: "off_premium",
+      identifier: "premium",
+      accessId: null,
+      isDefault: false,
+      packages: [],
+      metadata: {},
+    },
+  ];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    evaluateExperimentsMock.mockResolvedValue({});
+    dbMock.apiKey.findUnique.mockImplementation(async (args: any) => {
+      if (args?.where?.keyPublic === PUBLIC_KEY) return apiKeyRecord;
+      if (args?.where?.id === "testapikeyid") return apiKeyRecord;
+      return null;
+    });
+    vi.mocked(drizzleMock.offeringRepo.listOfferings).mockResolvedValue(
+      LIST as any,
+    );
+    vi.mocked(drizzleMock.offeringRepo.findProductsByIds).mockResolvedValue(
+      [] as any,
+    );
+  });
+
+  it("flips isDefault to the variant's target offering and sets the experiment header", async () => {
+    vi.mocked(
+      drizzleMock.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy,
+    ).mockResolvedValue({
+      id: "sub_abc",
+      projectId: "proj_test",
+      attributes: { plan: "free" },
+    } as any);
+    evaluateExperimentsMock.mockResolvedValue({
+      exp_1: {
+        key: "exp_1",
+        variantId: "variant_premium",
+        type: "OFFERING",
+        value: "premium",
+      },
+    });
+
+    const res = await app.request(
+      withPublicAuth("/v1/offerings", {
+        headers: { "x-rovenue-user-id": "rov_x" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-rovenue-experiment")).toBe("exp_1:variant_premium");
+
+    const body = await res.json();
+    const byId = Object.fromEntries(
+      body.data.offerings.map((o: any) => [o.identifier, o.isDefault]),
+    );
+    // `current` (the only is_default) is now the experiment's target.
+    expect(byId.premium).toBe(true);
+    expect(byId.default).toBe(false);
+  });
+
+  it("leaves the natural default and sets no header when no subscriber is identified", async () => {
+    const res = await app.request(withPublicAuth("/v1/offerings"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-rovenue-experiment")).toBeNull();
+    expect(evaluateExperimentsMock).not.toHaveBeenCalled();
+
+    const body = await res.json();
+    const byId = Object.fromEntries(
+      body.data.offerings.map((o: any) => [o.identifier, o.isDefault]),
+    );
+    expect(byId.default).toBe(true);
+    expect(byId.premium).toBe(false);
+  });
+
+  it("ignores an override whose target offering is not in the project's list", async () => {
+    vi.mocked(
+      drizzleMock.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy,
+    ).mockResolvedValue({
+      id: "sub_abc",
+      projectId: "proj_test",
+      attributes: {},
+    } as any);
+    evaluateExperimentsMock.mockResolvedValue({
+      exp_1: {
+        key: "exp_1",
+        variantId: "variant_ghost",
+        type: "OFFERING",
+        value: "ghost_offering",
+      },
+    });
+
+    const res = await app.request(
+      withPublicAuth("/v1/offerings", {
+        headers: { "x-rovenue-user-id": "rov_x" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    // No applicable target → natural default stands, no exposure header.
+    expect(res.headers.get("x-rovenue-experiment")).toBeNull();
+    const body = await res.json();
+    const byId = Object.fromEntries(
+      body.data.offerings.map((o: any) => [o.identifier, o.isDefault]),
+    );
+    expect(byId.default).toBe(true);
+    expect(byId.premium).toBe(false);
   });
 });
 
@@ -574,7 +704,7 @@ describe("GET /v1/offerings/:identifier — rovenueId-first experiment resolutio
     identifier: "default",
     accessId: null,
     isDefault: true,
-    products: [],
+    packages: [],
     metadata: {},
   };
   const OFFERING_OVERRIDE = {
@@ -582,7 +712,7 @@ describe("GET /v1/offerings/:identifier — rovenueId-first experiment resolutio
     identifier: "premium",
     accessId: null,
     isDefault: false,
-    products: [],
+    packages: [],
     metadata: {},
   };
 
