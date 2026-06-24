@@ -10,15 +10,15 @@ export function actionFeatureFlagsTools(ctx: ToolContext) {
       description:
         "Enable or disable a feature flag globally. Returns a pending intent; the user must approve before it executes.",
       inputSchema: z.object({
-        featureFlagId: z.string().min(1),
+        flagId: z.string().min(1),
         enabled: z.boolean(),
         reason: z.string().min(1),
       }),
       requiresRole: "DEVELOPER",
       buildPreview: (i) => ({
-        title: `${i.enabled ? "Enable" : "Disable"} feature flag ${i.featureFlagId}`,
+        title: `${i.enabled ? "Enable" : "Disable"} feature flag ${i.flagId}`,
         fields: [
-          { label: "Feature Flag", after: i.featureFlagId },
+          { label: "Feature Flag", after: i.flagId },
           { label: "New State", after: i.enabled ? "enabled" : "disabled" },
           { label: "Reason", after: i.reason },
         ],
@@ -31,15 +31,15 @@ export function actionFeatureFlagsTools(ctx: ToolContext) {
       description:
         "Update targeting rules for a feature flag. Returns a pending intent; the user must approve before it executes.",
       inputSchema: z.object({
-        featureFlagId: z.string().min(1),
+        flagId: z.string().min(1),
         rules: z.array(z.record(z.unknown())),
         reason: z.string().min(1),
       }),
       requiresRole: "DEVELOPER",
       buildPreview: (i) => ({
-        title: `Update rules for feature flag ${i.featureFlagId}`,
+        title: `Update rules for feature flag ${i.flagId}`,
         fields: [
-          { label: "Feature Flag", after: i.featureFlagId },
+          { label: "Feature Flag", after: i.flagId },
           { label: "Rule Count", after: i.rules.length },
           { label: "Reason", after: i.reason },
         ],

@@ -12,7 +12,7 @@ export function actionAudiencesTools(ctx: ToolContext) {
       inputSchema: z.object({
         name: z.string().min(1),
         description: z.string().optional(),
-        filters: z.record(z.unknown()),
+        rules: z.record(z.unknown()),
         reason: z.string().min(1),
       }),
       requiresRole: "DEVELOPER",
@@ -35,7 +35,7 @@ export function actionAudiencesTools(ctx: ToolContext) {
         audienceId: z.string().min(1),
         name: z.string().min(1).optional(),
         description: z.string().optional(),
-        filters: z.record(z.unknown()).optional(),
+        rules: z.record(z.unknown()).optional(),
         reason: z.string().min(1),
       }),
       requiresRole: "DEVELOPER",

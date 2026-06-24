@@ -31,7 +31,7 @@ export function actionExperimentsTools(ctx: ToolContext) {
         "Stop a running experiment and conclude enrollment. Returns a pending intent; the user must approve before it executes.",
       inputSchema: z.object({
         experimentId: z.string().min(1),
-        winningVariantId: z.string().min(1).optional(),
+        winnerVariantId: z.string().min(1).optional(),
         reason: z.string().min(1),
       }),
       requiresRole: "ADMIN",
@@ -39,7 +39,7 @@ export function actionExperimentsTools(ctx: ToolContext) {
         title: `Stop experiment ${i.experimentId}`,
         fields: [
           { label: "Experiment", after: i.experimentId },
-          { label: "Winning Variant", after: i.winningVariantId ?? "none" },
+          { label: "Winning Variant", after: i.winnerVariantId ?? "none" },
           { label: "Reason", after: i.reason },
         ],
       }),
