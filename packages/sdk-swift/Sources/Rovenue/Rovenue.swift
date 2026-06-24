@@ -588,8 +588,9 @@ public final class Rovenue: @unchecked Sendable {
                 isDefault: o.isDefault,
                 // Use packageIdentifier (the slot id, e.g. $rov_monthly) as
                 // Package.identifier — that is the value the SDK contract
-                // exposes to callers. The product's own catalog identifier
-                // is available via pkg.product.id.
+                // exposes to callers. The product's App Store SKU (the id used
+                // for StoreKit lookups and purchases) is available via
+                // pkg.product.id.
                 packages: packages
             )
         }

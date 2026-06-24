@@ -49,7 +49,12 @@ func mapAppleStoreProduct(
     }
     let per = perUnitPrices(price: price, period: period, formatCurrency: formatCurrency)
 
-    return StoreProduct(id: core.identifier, type: type, productCategory: category,
+    // StoreProduct.id is the App Store SKU used for StoreKit product lookups
+    // and server-side receipt validation — NOT the Rovenue catalog slug. Mirror
+    // the Kotlin façade's `mapProductId` (googleProductId ?? identifier): fall
+    // back to the catalog identifier only when no Apple product id is configured.
+    let productId = core.appleProductId ?? core.identifier
+    return StoreProduct(id: productId, type: type, productCategory: category,
         displayName: displayName, description: description, priceString: priceString,
         price: price, currencyCode: currencyCode, subscriptionPeriod: period,
         subscriptionGroupIdentifier: groupId, isFamilyShareable: isFamilyShareable,

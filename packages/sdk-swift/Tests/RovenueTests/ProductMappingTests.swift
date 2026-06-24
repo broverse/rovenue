@@ -26,7 +26,8 @@ extension ProductMappingTests {
     func testMapAppleProductBuildsIntroAndDiscounts() {
         let core = CoreOfferingProduct(packageIdentifier: "$rov_monthly", identifier: "premium",
             productType: "SUBSCRIPTION", displayName: "Premium",
-            appleProductId: "com.acme.monthly", googleProductId: nil)
+            appleProductId: "com.acme.monthly", googleProductId: nil,
+            androidBasePlanId: nil, androidOfferId: nil)
         let intro = AppleOfferInput(id: nil, type: .introductory, paymentMode: .freeTrial,
             price: 0, displayPrice: "Free", periodValue: 1, periodUnit: .week, periodCount: 1)
         let promo = AppleOfferInput(id: "promo1", type: .promotional, paymentMode: .payAsYouGo,
@@ -35,6 +36,9 @@ extension ProductMappingTests {
             introOffer: intro, promoOffers: [promo], groupId: "grp", isFamilyShareable: true,
             description: "Pro", priceString: "$9.99", price: 9.99, currencyCode: "USD",
             isEligible: true, raw: nil, formatCurrency: { "$\($0)" })
+        // StoreProduct.id must be the App Store SKU (used for the StoreKit
+        // purchase lookup), not the Rovenue catalog identifier ("premium").
+        XCTAssertEqual(p.id, "com.acme.monthly")
         XCTAssertEqual(p.type, .subscription)
         XCTAssertEqual(p.introPrice?.paymentMode, .freeTrial)
         XCTAssertEqual(p.introPrice?.period.iso8601, "P1W")
@@ -45,6 +49,17 @@ extension ProductMappingTests {
         XCTAssertEqual(p.isEligibleForIntroOffer, true)
         XCTAssertNotNil(p.pricePerMonth)
         XCTAssertNil(p.subscriptionOptions)
+    }
+
+    func testMapAppleProductFallsBackToCatalogIdWhenNoAppleProductId() {
+        let core = CoreOfferingProduct(packageIdentifier: "$rov_monthly", identifier: "premium",
+            productType: "SUBSCRIPTION", displayName: "Premium",
+            appleProductId: nil, googleProductId: nil,
+            androidBasePlanId: nil, androidOfferId: nil)
+        let p = mapAppleStoreProduct(core: core, period: nil, introOffer: nil, promoOffers: [],
+            groupId: nil, isFamilyShareable: false, description: nil, priceString: nil, price: nil,
+            currencyCode: nil, isEligible: nil, raw: nil, formatCurrency: { _ in nil })
+        XCTAssertEqual(p.id, "premium")
     }
 }
 
