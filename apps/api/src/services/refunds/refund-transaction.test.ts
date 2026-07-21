@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const refundsCreate = vi.fn();
-vi.mock("../stripe/stripe-webhook", () => ({ getStripeClient: () => ({ refunds: { create: refundsCreate } }) }));
+const getConnectedStripe = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/stripe-platform", () => ({ getConnectedStripe }));
 vi.mock("../../lib/project-credentials", () => ({
-  loadStripeCredentials: vi.fn(async () => ({ secretKey: "sk_test", webhookSecret: "whsec" })),
   loadGoogleCredentials: vi.fn(async () => ({ packageName: "com.app", serviceAccount: { client_email: "a@b.com", private_key: "k" } })),
 }));
 const ordersRefund = vi.fn();
@@ -12,7 +12,16 @@ vi.mock("../google/google-auth", () => ({ getGoogleAccessToken: vi.fn(async () =
 
 import { refundTransaction } from "./refund-transaction";
 
-beforeEach(() => { refundsCreate.mockReset(); ordersRefund.mockReset(); });
+beforeEach(() => {
+  refundsCreate.mockReset();
+  ordersRefund.mockReset();
+  getConnectedStripe.mockReset();
+  getConnectedStripe.mockResolvedValue({
+    stripe: { refunds: { create: refundsCreate } },
+    accountId: "acct_1",
+    livemode: true,
+  });
+});
 
 it("rejects Apple", async () => {
   const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "APP_STORE", storeTransactionId: "1000", status: "ACTIVE" } as any });
@@ -28,14 +37,40 @@ it("rejects already-refunded", async () => {
 it("refunds a Stripe charge", async () => {
   refundsCreate.mockResolvedValue({ id: "re_1" });
   const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "STRIPE", storeTransactionId: "ch_123", status: "ACTIVE" } as any });
-  expect(refundsCreate).toHaveBeenCalledWith({ charge: "ch_123" }, { idempotencyKey: "refund_pu" });
+  expect(refundsCreate).toHaveBeenCalledWith(
+    { charge: "ch_123" },
+    { idempotencyKey: "refund_pu", stripeAccount: "acct_1" },
+  );
   expect(r).toEqual({ ok: true, store: "stripe", reference: "re_1" });
 });
 
 it("uses payment_intent when ref starts with pi_", async () => {
   refundsCreate.mockResolvedValue({ id: "re_2" });
   await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "STRIPE", storeTransactionId: "pi_9", status: "ACTIVE" } as any });
-  expect(refundsCreate).toHaveBeenCalledWith({ payment_intent: "pi_9" }, { idempotencyKey: "refund_pu" });
+  expect(refundsCreate).toHaveBeenCalledWith(
+    { payment_intent: "pi_9" },
+    { idempotencyKey: "refund_pu", stripeAccount: "acct_1" },
+  );
+});
+
+it("issues the refund against the connected account", async () => {
+  getConnectedStripe.mockResolvedValue({
+    stripe: { refunds: { create: refundsCreate } },
+    accountId: "acct_1",
+    livemode: true,
+  });
+  refundsCreate.mockResolvedValue({ id: "re_1" });
+
+  const r = await refundTransaction({
+    projectId: "proj_1",
+    purchase: { id: "pur_1", store: "STRIPE", storeTransactionId: "pi_123", status: "ACTIVE" } as any,
+  });
+
+  expect(r).toMatchObject({ ok: true, store: "stripe", reference: "re_1" });
+  expect(refundsCreate).toHaveBeenCalledWith(
+    { payment_intent: "pi_123" },
+    { idempotencyKey: "refund_pur_1", stripeAccount: "acct_1" },
+  );
 });
 
 it("refunds a Play order", async () => {
@@ -52,12 +87,15 @@ it("maps store SDK errors to store_error", async () => {
   if (!r.ok) { expect(r.code).toBe("store_error"); expect(r.message).toContain("already refunded"); }
 });
 
-import { loadStripeCredentials, loadGoogleCredentials } from "../../lib/project-credentials";
+import { loadGoogleCredentials } from "../../lib/project-credentials";
 
-it("returns store_error when Stripe credentials are null", async () => {
-  (loadStripeCredentials as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
-  const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "STRIPE", storeTransactionId: "ch_1", status: "ACTIVE" } as any });
-  expect(r).toEqual({ ok: false, code: "store_error", message: expect.any(String) });
+it("returns store_error when the project has no Stripe connection", async () => {
+  getConnectedStripe.mockResolvedValue(null);
+  const r = await refundTransaction({
+    projectId: "proj_1",
+    purchase: { id: "pur_1", store: "STRIPE", storeTransactionId: "pi_123", status: "ACTIVE" } as any,
+  });
+  expect(r).toMatchObject({ ok: false, code: "store_error" });
 });
 
 it("returns store_error when Google credentials are null", async () => {

@@ -1,10 +1,7 @@
 import { google } from "googleapis";
 import { PurchaseStatus, Store, drizzle, type Purchase } from "@rovenue/db";
-import { getStripeClient } from "../stripe/stripe-webhook";
-import {
-  loadStripeCredentials,
-  loadGoogleCredentials,
-} from "../../lib/project-credentials";
+import { getConnectedStripe } from "../../lib/stripe-platform";
+import { loadGoogleCredentials } from "../../lib/project-credentials";
 import { getGoogleAccessToken } from "../google/google-auth";
 import { guardStatusWrite } from "../subscription-transition-guard";
 import { logger } from "../../lib/logger";
@@ -124,20 +121,20 @@ export async function refundTransaction(input: {
   let success: Extract<RefundResult, { ok: true }>;
   try {
     if (purchase.store === "STRIPE") {
-      const creds = await loadStripeCredentials(projectId);
-      if (!creds) {
+      const connected = await getConnectedStripe(projectId);
+      if (!connected) {
         return {
           ok: false,
           code: "store_error",
-          message: "Stripe credentials not configured for this project.",
+          message: "No Stripe connection for this project.",
         };
       }
-      const client = getStripeClient(creds.secretKey);
       const params = ref.startsWith("pi_")
         ? { payment_intent: ref }
         : { charge: ref };
-      const refund = await client.refunds.create(params, {
+      const refund = await connected.stripe.refunds.create(params, {
         idempotencyKey: `refund_${purchase.id}`,
+        stripeAccount: connected.accountId,
       });
       success = { ok: true, store: "stripe", reference: refund.id };
     } else if (purchase.store === "PLAY_STORE") {

@@ -8,7 +8,7 @@ import {
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import { audit } from "../lib/audit";
-import { getStripeClient } from "../services/stripe/stripe-webhook";
+import { getConnectedStripe } from "../lib/stripe-platform";
 
 type ScheduledActionRow =
   typeof drizzle.schema.scheduledSubscriptionActions.$inferSelect;
@@ -79,7 +79,7 @@ export async function runScheduledActionsSweep(): Promise<SweepResult> {
 // Action executor
 // =============================================================
 
-async function executeAction(
+export async function executeAction(
   tx: typeof drizzle.db,
   row: ScheduledActionRow,
 ): Promise<void> {
@@ -155,25 +155,17 @@ async function executeAction(
     }
 
     case "STRIPE": {
-      // Load project Stripe credentials
-      const credRow = await drizzle.projectRepo.findProjectCredentials(
-        drizzle.db,
-        purchase.projectId,
-        "stripe",
-      );
-      const credentials = credRow?.value as
-        | { secretKey?: string }
-        | null
-        | undefined;
-      if (!credentials?.secretKey) {
+      const connected = await getConnectedStripe(purchase.projectId);
+      if (!connected) {
         throw new Error(
-          `executeAction: no Stripe secret key for project ${purchase.projectId}`,
+          `Project ${purchase.projectId} has no active Stripe connection`,
         );
       }
-      const stripe = getStripeClient(credentials.secretKey);
-      await stripe.subscriptions.update(purchase.originalTransactionId, {
-        cancel_at_period_end: true,
-      });
+      await connected.stripe.subscriptions.update(
+        purchase.originalTransactionId,
+        { cancel_at_period_end: true },
+        { stripeAccount: connected.accountId },
+      );
 
       await tx
         .update(purchases)
