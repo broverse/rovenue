@@ -41,7 +41,14 @@ export function connectClientId(mode: ConnectMode): string | null {
   return id ?? null;
 }
 
-/** True when the deployment can run the live Connect flow at all. */
+/**
+ * True when the deployment can run the live Connect flow at all.
+ *
+ * Deliberately only inspects live-mode env vars: answers "can the LIVE Connect
+ * flow run", not "is either mode usable". This asymmetry is intentional so
+ * callers can distinguish between "live Connect is available" (gating UI/flows)
+ * vs "any mode is configured" (for initialization checks).
+ */
 export function isConnectConfigured(): boolean {
   return Boolean(env.STRIPE_CONNECT_CLIENT_ID && env.STRIPE_PLATFORM_SECRET_KEY);
 }
@@ -50,7 +57,7 @@ export function isConnectConfigured(): boolean {
  * Memoised platform client for one mode. Returns null when that mode's
  * secret key is unset so callers can degrade instead of throwing.
  */
-export function getPlatformStripe(livemode: boolean): Stripe | null {
+export function getConnectPlatformStripe(livemode: boolean): Stripe | null {
   const slot = livemode ? "live" : "test";
   const existing = cached[slot];
   if (existing) return existing;
@@ -71,7 +78,7 @@ export function getPlatformStripe(livemode: boolean): Stripe | null {
 }
 
 // Test-only — clears both cached clients so callers re-read env.
-export function _resetPlatformStripeForTests(): void {
+export function _resetConnectPlatformStripeForTests(): void {
   cached.live = null;
   cached.test = null;
 }

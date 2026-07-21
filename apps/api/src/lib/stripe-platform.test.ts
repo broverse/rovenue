@@ -10,9 +10,9 @@ const envMock = vi.hoisted(() => ({
 vi.mock("./env", () => ({ env: envMock }));
 
 import {
-  _resetPlatformStripeForTests,
+  _resetConnectPlatformStripeForTests,
   connectClientId,
-  getPlatformStripe,
+  getConnectPlatformStripe,
   isConnectConfigured,
 } from "./stripe-platform";
 
@@ -21,11 +21,11 @@ beforeEach(() => {
   envMock.STRIPE_CONNECT_CLIENT_ID_TEST = undefined;
   envMock.STRIPE_PLATFORM_SECRET_KEY = undefined;
   envMock.STRIPE_PLATFORM_SECRET_KEY_TEST = undefined;
-  _resetPlatformStripeForTests();
+  _resetConnectPlatformStripeForTests();
 });
 
 afterEach(() => {
-  _resetPlatformStripeForTests();
+  _resetConnectPlatformStripeForTests();
 });
 
 describe("isConnectConfigured", () => {
@@ -65,22 +65,22 @@ describe("connectClientId", () => {
   });
 });
 
-describe("getPlatformStripe", () => {
+describe("getConnectPlatformStripe", () => {
   it("returns null when the key for that mode is unset", () => {
     envMock.STRIPE_PLATFORM_SECRET_KEY = "sk_live_x";
-    expect(getPlatformStripe(false)).toBeNull();
+    expect(getConnectPlatformStripe(false)).toBeNull();
   });
 
   it("returns a client for live mode and memoises it", () => {
     envMock.STRIPE_PLATFORM_SECRET_KEY = "sk_live_x";
-    const first = getPlatformStripe(true);
+    const first = getConnectPlatformStripe(true);
     expect(first).not.toBeNull();
-    expect(getPlatformStripe(true)).toBe(first);
+    expect(getConnectPlatformStripe(true)).toBe(first);
   });
 
   it("keeps live and test clients separate", () => {
     envMock.STRIPE_PLATFORM_SECRET_KEY = "sk_live_x";
     envMock.STRIPE_PLATFORM_SECRET_KEY_TEST = "sk_test_x";
-    expect(getPlatformStripe(true)).not.toBe(getPlatformStripe(false));
+    expect(getConnectPlatformStripe(true)).not.toBe(getConnectPlatformStripe(false));
   });
 });
