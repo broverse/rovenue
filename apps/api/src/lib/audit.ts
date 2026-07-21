@@ -43,6 +43,9 @@ export type AuditAction =
   // --- credentials ---
   | "credential.updated"
   | "credential.cleared"
+  // --- stripe connect ---
+  | "stripe.connected"
+  | "stripe.disconnected"
   // --- product / group ---
   | "product.created"
   | "product.updated"

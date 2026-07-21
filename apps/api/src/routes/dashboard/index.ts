@@ -32,6 +32,7 @@ import { productsDashboardRoute } from "./products";
 import { projectsRoute } from "./projects";
 import { queriesRoute } from "./queries";
 import { refundShieldRoute } from "./refund-shield";
+import { stripeConnectRoute } from "./stripe-connect";
 import { subscribersRoute } from "./subscribers";
 import { subscriptionsRoute } from "./subscriptions";
 import { transactionsRoute } from "./transactions";
@@ -93,6 +94,7 @@ export const dashboardRoute = new Hono()
   .route("/projects/:projectId/products", productsDashboardRoute)
   .route("/projects/:projectId/queries", queriesRoute)
   .route("/projects/:projectId/refund-shield", refundShieldRoute)
+  .route("/projects/:projectId/stripe", stripeConnectRoute)
   .route("/projects/:projectId/subscribers", subscribersRoute)
   .route("/projects/:projectId/subscriptions", subscriptionsRoute)
   .route("/projects/:projectId/transactions", transactionsRoute)
