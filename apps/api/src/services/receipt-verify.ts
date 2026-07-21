@@ -151,6 +151,24 @@ async function verifyAppleReceipt(
     });
   }
 
+  // Security: the client supplies `args.productId`, but the resolved product
+  // MUST correspond to the JWS-verified `transaction.productId`. The lookup
+  // matches on `identifier = <client> OR storeIds.apple = <verified>`, so a
+  // valid cheap receipt paired with an expensive product identifier could
+  // otherwise resolve — and grant — the expensive product's currency bundle.
+  // A product corresponds when its Apple store id equals the verified id, or
+  // (for products with no explicit Apple store id) its identifier does.
+  const appleStoreId = (product.storeIds as { apple?: string } | null)?.apple;
+  const productMatchesTransaction =
+    appleStoreId != null
+      ? appleStoreId === transaction.productId
+      : product.identifier === transaction.productId;
+  if (!productMatchesTransaction) {
+    throw new HTTPException(400, {
+      message: "productId does not match the verified transaction",
+    });
+  }
+
   // Resolve the subscriber RC/Adapty-style: bind the JWS appAccountToken and
   // converge any webhook-first row that already owns this transaction/token,
   // so receipt-driven and webhook-driven state never split across two rows.
