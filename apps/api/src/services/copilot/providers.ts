@@ -3,6 +3,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createMistral } from "@ai-sdk/mistral";
 import type { LanguageModel } from "ai";
+import { ssrfSafeFetch } from "../../lib/ssrf-guard";
 
 export type ProviderSource = "byok" | "env";
 
@@ -66,17 +67,34 @@ export async function resolveProviderForProject(
 }
 
 export function buildAiSdkModel(r: ResolvedProvider): LanguageModel {
+  // Cloud providers: the BYOK `baseUrl` is dashboard-controlled, so route
+  // their HTTP through the SSRF-safe dispatcher — there is never a
+  // legitimate reason for openai/anthropic/mistral traffic to reach a
+  // private/link-local/metadata address. Ollama is intentionally a
+  // localhost/LAN provider and is left unguarded.
   switch (r.provider) {
     case "openai": {
-      const sdk = createOpenAI({ apiKey: r.apiKey, baseURL: r.baseUrl });
+      const sdk = createOpenAI({
+        apiKey: r.apiKey,
+        baseURL: r.baseUrl,
+        fetch: ssrfSafeFetch,
+      });
       return sdk(r.model);
     }
     case "anthropic": {
-      const sdk = createAnthropic({ apiKey: r.apiKey, baseURL: r.baseUrl });
+      const sdk = createAnthropic({
+        apiKey: r.apiKey,
+        baseURL: r.baseUrl,
+        fetch: ssrfSafeFetch,
+      });
       return sdk(r.model);
     }
     case "mistral": {
-      const sdk = createMistral({ apiKey: r.apiKey, baseURL: r.baseUrl });
+      const sdk = createMistral({
+        apiKey: r.apiKey,
+        baseURL: r.baseUrl,
+        fetch: ssrfSafeFetch,
+      });
       return sdk(r.model);
     }
     case "ollama": {

@@ -13,6 +13,7 @@ import {
 } from "../../../services/copilot/providers";
 import { env } from "../../../lib/env";
 import { isByokAllowed } from "../../../lib/host-mode";
+import { assertAllowedOutboundUrl } from "../../../lib/ssrf-guard";
 
 const upsertBody = z.object({
   provider: z.enum(["openai", "anthropic", "mistral", "ollama"]),
@@ -66,6 +67,19 @@ export const copilotCredentialsRoute = new Hono()
     await assertProjectAccess(projectId, user.id, MemberRole.OWNER);
 
     const body = c.req.valid("json");
+
+    // Cloud providers must not point at an internal address. Ollama is a
+    // localhost/LAN provider by design, so its baseUrl is exempt (runtime
+    // ollama traffic is not routed through the SSRF dispatcher).
+    if (body.provider !== "ollama" && body.baseUrl) {
+      try {
+        assertAllowedOutboundUrl(body.baseUrl);
+      } catch (e) {
+        throw new HTTPException(400, {
+          message: `Invalid baseUrl: ${(e as Error).message}`,
+        });
+      }
+    }
 
     if (!env.ENCRYPTION_KEY) {
       throw new HTTPException(500, {

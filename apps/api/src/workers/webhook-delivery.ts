@@ -7,6 +7,7 @@ import { env } from "../lib/env";
 import { logger } from "../lib/logger";
 import { captureNotifierError } from "../lib/sentry-notifications";
 import { emitNotification } from "../services/notifications/emit";
+import { ssrfSafeAgent } from "../lib/ssrf-guard";
 
 // =============================================================
 // Outgoing webhook delivery worker
@@ -146,12 +147,20 @@ async function attemptDelivery(
       headers["x-rovenue-signature"] = `t=${timestamp},v1=${signPayload(body, timestamp, wh.projectWebhookSecret)}`;
     }
 
+    // SSRF guard: the destination URL is dashboard-configured, so route
+    // the request through a dispatcher that rejects any connection landing
+    // on a private/link-local/metadata address (validated at connect time,
+    // so DNS rebinding and each redirect hop are covered too). `redirect:
+    // "manual"` means a 3xx is treated as a delivery response rather than
+    // followed into an unvalidated hop.
     const res = await fetchFn(wh.url, {
       method: "POST",
       headers,
       body,
+      redirect: "manual",
       signal: controller.signal,
-    });
+      dispatcher: ssrfSafeAgent,
+    } as RequestInit);
 
     clearTimeout(timeout);
     httpStatus = res.status;
