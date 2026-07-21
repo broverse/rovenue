@@ -430,26 +430,42 @@ Note: hand-write this file. Do not run `drizzle-kit generate` and keep its outpu
 
 - [ ] **Step 3: Write the failing integration test**
 
-Create `packages/db/src/drizzle/repositories/project-stripe-connections.integration.test.ts`. Follow the container/bootstrap helper the sibling integration tests in this directory use; the assertions are:
+Create `packages/db/src/drizzle/repositories/project-stripe-connections.integration.test.ts`, following the exact bootstrap shape of the sibling `credit-ledger.integration.test.ts`: a bare `process.env.DATABASE_URL ??=` assignment as the **first statement in the file, above every import**, then `getDb()` from `../client`, direct inserts for seeding, and an `afterAll` that deletes the project (the connection rows cascade).
 
 ```ts
-import { beforeEach, describe, expect, it } from "vitest";
-import { drizzle } from "../index";
+process.env.DATABASE_URL ??=
+  "postgresql://rovenue:rovenue@localhost:5433/rovenue";
 
-// Assumes the suite's shared testcontainer bootstrap has run migrations
-// and that `seedProject()` returns a project id — mirror the helper used
-// by the neighbouring *.integration.test.ts files in this directory.
-declare function seedProject(): Promise<string>;
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { getDb } from "../client";
+import { projects, projectStripeConnections } from "../schema";
+import * as stripeConnectionRepo from "./project-stripe-connections";
+
+const RUN_ID = Date.now();
+const PROJECT_ID = `prj_sc_${RUN_ID}`;
 
 describe("stripeConnectionRepo", () => {
-  let projectId: string;
+  const projectId = PROJECT_ID;
+
+  afterAll(async () => {
+    await getDb().delete(projects).where(eq(projects.id, PROJECT_ID));
+  });
 
   beforeEach(async () => {
-    projectId = await seedProject();
+    const db = getDb();
+    await db
+      .insert(projects)
+      .values({ id: PROJECT_ID, name: `SC ${RUN_ID}` })
+      .onConflictDoNothing();
+    // Each case starts from no connection rows.
+    await db
+      .delete(projectStripeConnections)
+      .where(eq(projectStripeConnections.projectId, PROJECT_ID));
   });
 
   it("insert then findActiveByProject round-trips", async () => {
-    await drizzle.stripeConnectionRepo.insert(drizzle.db, {
+    await stripeConnectionRepo.insert(getDb(), {
       projectId,
       stripeAccountId: "acct_live_1",
       livemode: true,
@@ -459,8 +475,8 @@ describe("stripeConnectionRepo", () => {
       capabilities: { card_payments: "active" },
     });
 
-    const found = await drizzle.stripeConnectionRepo.findActiveByProject(
-      drizzle.db,
+    const found = await stripeConnectionRepo.findActiveByProject(
+      getDb(),
       projectId,
     );
     expect(found?.stripeAccountId).toBe("acct_live_1");
@@ -468,7 +484,7 @@ describe("stripeConnectionRepo", () => {
   });
 
   it("rejects a second active connection for the same project", async () => {
-    await drizzle.stripeConnectionRepo.insert(drizzle.db, {
+    await stripeConnectionRepo.insert(getDb(), {
       projectId,
       stripeAccountId: "acct_a",
       livemode: true,
@@ -476,7 +492,7 @@ describe("stripeConnectionRepo", () => {
     });
 
     await expect(
-      drizzle.stripeConnectionRepo.insert(drizzle.db, {
+      stripeConnectionRepo.insert(getDb(), {
         projectId,
         stripeAccountId: "acct_b",
         livemode: true,
@@ -486,19 +502,19 @@ describe("stripeConnectionRepo", () => {
   });
 
   it("allows reconnecting after a disconnect", async () => {
-    const first = await drizzle.stripeConnectionRepo.insert(drizzle.db, {
+    const first = await stripeConnectionRepo.insert(getDb(), {
       projectId,
       stripeAccountId: "acct_a",
       livemode: true,
       scope: "read_write",
     });
-    await drizzle.stripeConnectionRepo.markDisconnected(
-      drizzle.db,
+    await stripeConnectionRepo.markDisconnected(
+      getDb(),
       first.id,
       "user",
     );
 
-    const second = await drizzle.stripeConnectionRepo.insert(drizzle.db, {
+    const second = await stripeConnectionRepo.insert(getDb(), {
       projectId,
       stripeAccountId: "acct_b",
       livemode: true,
@@ -506,42 +522,42 @@ describe("stripeConnectionRepo", () => {
     });
     expect(second.stripeAccountId).toBe("acct_b");
 
-    const active = await drizzle.stripeConnectionRepo.findActiveByProject(
-      drizzle.db,
+    const active = await stripeConnectionRepo.findActiveByProject(
+      getDb(),
       projectId,
     );
     expect(active?.id).toBe(second.id);
   });
 
   it("findActiveByAccountId ignores disconnected rows", async () => {
-    const row = await drizzle.stripeConnectionRepo.insert(drizzle.db, {
+    const row = await stripeConnectionRepo.insert(getDb(), {
       projectId,
       stripeAccountId: "acct_gone",
       livemode: true,
       scope: "read_write",
     });
     expect(
-      await drizzle.stripeConnectionRepo.findActiveByAccountId(
-        drizzle.db,
+      await stripeConnectionRepo.findActiveByAccountId(
+        getDb(),
         "acct_gone",
       ),
     ).not.toBeNull();
 
-    await drizzle.stripeConnectionRepo.markDisconnected(
-      drizzle.db,
+    await stripeConnectionRepo.markDisconnected(
+      getDb(),
       row.id,
       "stripe_deauthorized",
     );
     expect(
-      await drizzle.stripeConnectionRepo.findActiveByAccountId(
-        drizzle.db,
+      await stripeConnectionRepo.findActiveByAccountId(
+        getDb(),
         "acct_gone",
       ),
     ).toBeNull();
   });
 
   it("updateAccountState overwrites capability fields", async () => {
-    const row = await drizzle.stripeConnectionRepo.insert(drizzle.db, {
+    const row = await stripeConnectionRepo.insert(getDb(), {
       projectId,
       stripeAccountId: "acct_c",
       livemode: true,
@@ -549,7 +565,7 @@ describe("stripeConnectionRepo", () => {
       chargesEnabled: false,
     });
 
-    await drizzle.stripeConnectionRepo.updateAccountState(drizzle.db, row.id, {
+    await stripeConnectionRepo.updateAccountState(getDb(), row.id, {
       chargesEnabled: true,
       payoutsEnabled: true,
       capabilities: { card_payments: "active" },
@@ -557,8 +573,8 @@ describe("stripeConnectionRepo", () => {
       defaultCurrency: "try",
     });
 
-    const found = await drizzle.stripeConnectionRepo.findActiveByProject(
-      drizzle.db,
+    const found = await stripeConnectionRepo.findActiveByProject(
+      getDb(),
       projectId,
     );
     expect(found?.chargesEnabled).toBe(true);
@@ -571,7 +587,7 @@ describe("stripeConnectionRepo", () => {
 - [ ] **Step 4: Run the test to verify it fails**
 
 Run: `pnpm --filter @rovenue/db exec vitest run src/drizzle/repositories/project-stripe-connections.integration.test.ts`
-Expected: FAIL — `drizzle.stripeConnectionRepo` is undefined.
+Expected: FAIL — cannot resolve `./project-stripe-connections`.
 
 - [ ] **Step 5: Implement the repository**
 
@@ -2562,8 +2578,14 @@ Expected: no TypeScript errors. `CredentialStore` narrowing will surface any das
 
 - [ ] **Step 11: Commit**
 
+Stage tracked modifications and deletions plus the one new file explicitly —
+never `git add -A` here, which would also sweep up any untracked scratch file
+that happens to be in the tree:
+
 ```bash
-git add -A
+git add -u
+git add packages/db/drizzle/migrations/0087_drop_stripe_credentials.sql
+git status --short   # confirm nothing unexpected is staged before committing
 git commit -m "refactor!: remove per-project Stripe API-key integration
 
 Stripe Connect fully replaces pasted secret and webhook keys. Drops
@@ -2737,7 +2759,8 @@ Expected: all packages build clean.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add -A
+git add -u
+git status --short   # confirm nothing unexpected is staged before committing
 git commit -m "refactor(dashboard): drop the Stripe key form and rewire its dependents"
 ```
 
