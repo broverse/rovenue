@@ -2421,6 +2421,62 @@ export const customDomains = pgTable(
   }),
 );
 
+// =============================================================
+// project_stripe_connections — Stripe Connect (Standard accounts)
+// =============================================================
+//
+// One active connection per project. We deliberately do NOT store the
+// OAuth access/refresh tokens: direct charges on a Standard account
+// need only the account id plus our platform key, so persisting the
+// tokens would add a secret to rotate for no capability gained.
+//
+// Rows are soft-deleted (`disconnected_at`) rather than removed so the
+// connect/disconnect history stays auditable.
+
+export const projectStripeConnections = pgTable(
+  "project_stripe_connections",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    stripeAccountId: text("stripe_account_id").notNull(),
+    livemode: boolean("livemode").notNull(),
+    scope: text("scope").notNull(),
+    chargesEnabled: boolean("charges_enabled").notNull().default(false),
+    payoutsEnabled: boolean("payouts_enabled").notNull().default(false),
+    capabilities: jsonb("capabilities").notNull().default(sql`'{}'::jsonb`),
+    country: text("country"),
+    defaultCurrency: text("default_currency"),
+    connectedAt: timestamp("connected_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    connectedBy: text("connected_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
+    disconnectReason: text("disconnect_reason"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+  },
+  (t) => ({
+    // At most one live connection per project. Partial so historical
+    // disconnected rows never block a reconnect.
+    activeUnique: uniqueIndex("project_stripe_connections_active_uq")
+      .on(t.projectId)
+      .where(sql`${t.disconnectedAt} IS NULL`),
+    // Webhook routing looks a project up by the account on the event.
+    accountIdx: index("project_stripe_connections_account_idx").on(
+      t.stripeAccountId,
+    ),
+  }),
+);
+
+export type ProjectStripeConnection = typeof projectStripeConnections.$inferSelect;
+export type NewProjectStripeConnection =
+  typeof projectStripeConnections.$inferInsert;
+
 export type FunnelSession = typeof funnelSessions.$inferSelect;
 export type NewFunnelSession = typeof funnelSessions.$inferInsert;
 export type FunnelAnswer = typeof funnelAnswers.$inferSelect;
