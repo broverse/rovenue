@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HTTPException } from "hono/http-exception";
+import { MemberRole } from "@rovenue/db";
 
 const findActiveByProject = vi.hoisted(() => vi.fn());
 const insertConnection = vi.hoisted(() => vi.fn(async (_tx, v) => ({ id: "conn_1", ...v })));
@@ -106,8 +107,11 @@ describe("Stripe Connect routes", () => {
     process.env = { ...original };
     process.env.PUBLIC_BASE_URL = "https://api.example.com";
     process.env.DASHBOARD_URL = "https://app.example.com";
-    process.env.STRIPE_CONNECT_CLIENT_ID = "ca_live";
-    process.env.STRIPE_PLATFORM_SECRET_KEY = "sk_live_fake";
+    // STRIPE_CONNECT_CLIENT_ID / STRIPE_PLATFORM_SECRET_KEY are
+    // deliberately NOT set here: isConnectConfigured, connectClientId
+    // and getConnectPlatformStripe are all mocked below, so the real
+    // env readers in ../src/lib/stripe-platform never run in this
+    // suite and these two vars would be dead weight.
     delete process.env.STRIPE_CONNECT_CLIENT_ID_TEST;
     findActiveByProject.mockReset().mockResolvedValue(null);
     insertConnection.mockClear();
@@ -169,6 +173,14 @@ describe("Stripe Connect routes", () => {
       const app = await buildApp();
       const res = await app.request(connectPath);
       expect(res.status).toBe(302);
+      // Connect rotates who can move money on the customer's behalf —
+      // OWNER is its only defence, so pin it here rather than relying
+      // on the fully-mocked assertProjectAccess to fail open silently.
+      expect(assertProjectAccess).toHaveBeenCalledWith(
+        "proj_1",
+        "user_1",
+        MemberRole.OWNER,
+      );
       const location = new URL(res.headers.get("location") ?? "");
       expect(location.origin + location.pathname).toBe(
         "https://connect.stripe.com/oauth/authorize",
@@ -321,6 +333,12 @@ describe("Stripe Connect routes", () => {
       const app = await buildApp();
       const res = await app.request(connectPath, { method: "DELETE" });
       expect(res.status).toBe(200);
+      // Disconnect is the other money-moving route — same OWNER gate.
+      expect(assertProjectAccess).toHaveBeenCalledWith(
+        "proj_1",
+        "user_1",
+        MemberRole.OWNER,
+      );
       expect(markDisconnected).toHaveBeenCalledWith(
         expect.anything(),
         "conn_1",
@@ -330,6 +348,68 @@ describe("Stripe Connect routes", () => {
         expect.objectContaining({ action: "stripe.disconnected" }),
         expect.anything(),
       );
+    });
+  });
+
+  describe("GET …/stripe/connection", () => {
+    const connectionPath = "/dashboard/projects/proj_1/stripe/connection";
+
+    it("calls assertProjectAccess with CUSTOMER_SUPPORT and reports not-connected", async () => {
+      findActiveByProject.mockResolvedValue(null);
+      const app = await buildApp();
+      const res = await app.request(connectionPath);
+      expect(res.status).toBe(200);
+      expect(assertProjectAccess).toHaveBeenCalledWith(
+        "proj_1",
+        "user_1",
+        MemberRole.CUSTOMER_SUPPORT,
+      );
+      const body = await res.json();
+      expect(body).toEqual({
+        data: {
+          platformConfigured: true,
+          testModeAvailable: false,
+          connection: null,
+        },
+      });
+    });
+
+    it("reports the connected shape with an ISO connectedAt", async () => {
+      const connectedAt = new Date("2026-01-01T00:00:00.000Z");
+      findActiveByProject.mockResolvedValue({
+        id: "conn_1",
+        stripeAccountId: "acct_1",
+        livemode: true,
+        chargesEnabled: true,
+        payoutsEnabled: false,
+        country: "TR",
+        defaultCurrency: "try",
+        connectedAt,
+      });
+      const app = await buildApp();
+      const res = await app.request(connectionPath);
+      expect(res.status).toBe(200);
+      expect(assertProjectAccess).toHaveBeenCalledWith(
+        "proj_1",
+        "user_1",
+        MemberRole.CUSTOMER_SUPPORT,
+      );
+      const body = await res.json();
+      expect(body).toEqual({
+        data: {
+          platformConfigured: true,
+          testModeAvailable: false,
+          connection: {
+            accountId: "acct_1",
+            livemode: true,
+            chargesEnabled: true,
+            payoutsEnabled: false,
+            country: "TR",
+            defaultCurrency: "try",
+            connectedAt: connectedAt.toISOString(),
+          },
+        },
+      });
     });
   });
 });

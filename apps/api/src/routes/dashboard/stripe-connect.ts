@@ -26,7 +26,10 @@ import { createOAuthState } from "../../services/stripe/oauth-state";
 const log = logger.child("route:dashboard:stripe-connect");
 
 function redirectUri(): string {
-  const base = env.PUBLIC_BASE_URL ?? "http://localhost:3000";
+  // Strip a trailing slash — otherwise a PUBLIC_BASE_URL like
+  // "https://host/" produces "https://host//stripe/oauth/callback",
+  // which will not byte-match the redirect_uri registered with Stripe.
+  const base = env.PUBLIC_BASE_URL.replace(/\/+$/, "");
   return `${base}/stripe/oauth/callback`;
 }
 
