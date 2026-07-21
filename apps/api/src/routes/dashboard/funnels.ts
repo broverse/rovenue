@@ -11,6 +11,7 @@ import { audit, extractRequestContext } from "../../lib/audit";
 import { ok } from "../../lib/response";
 import { validateFunnelGraph } from "../../services/funnel/branching-validator";
 import { invalidatePublishedConfig } from "../../services/funnel/runtime-cache";
+import { chargesEnabled } from "../../lib/stripe-platform";
 
 // =============================================================
 // Dashboard: Funnels CRUD + publish/duplicate/versions/revert
@@ -350,16 +351,16 @@ export const funnelsRoute = new Hono()
       });
     }
 
-    // Production-gate: paywall pages require a connected Stripe account.
-    // This is a placeholder — sub-project B replaces it with a real
-    // capability check against the billing connection state.
-    if (
-      process.env.NODE_ENV === "production" &&
-      pages.some((p) => p.type === "paywall")
-    ) {
-      throw new HTTPException(400, {
-        message: JSON.stringify({ code: "STRIPE_NOT_CONNECTED" }),
-      });
+    // Paywall pages require an account that can actually take a card.
+    // Connecting is not sufficient — Stripe withholds charges_enabled
+    // and the card_payments capability until verification completes.
+    if (pages.some((p) => p.type === "paywall")) {
+      const canCharge = await chargesEnabled(projectId);
+      if (!canCharge) {
+        throw new HTTPException(400, {
+          message: JSON.stringify({ code: "STRIPE_NOT_CONNECTED" }),
+        });
+      }
     }
 
     const result = await drizzle.db.transaction(async (tx) => {
