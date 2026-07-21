@@ -31,6 +31,27 @@ vi.mock("../src/lib/stripe-platform", async (importOriginal) => {
   return { ...actual, chargesEnabled };
 });
 
+// `validateFunnelGraph` runs BEFORE the gate and rejects any funnel with
+// no paywall page (MISSING_PAYWALL, unconditional). That makes the gate's
+// own `pages.some(p => p.type === "paywall")` branch unreachable through
+// the real validator — so one test overrides the result to reach it.
+// Default is null, meaning "use the real validator"; setting a value is
+// how a test forces graph validation to pass.
+const validateOverride = vi.hoisted(() => ({
+  value: null as { ok: boolean; issues?: unknown[]; warnings: unknown[] } | null,
+}));
+vi.mock("../src/services/funnel/branching-validator", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../src/services/funnel/branching-validator")
+    >();
+  return {
+    ...actual,
+    validateFunnelGraph: (pages: Parameters<typeof actual.validateFunnelGraph>[0]) =>
+      validateOverride.value ?? actual.validateFunnelGraph(pages),
+  };
+});
+
 vi.mock("../src/lib/project-access", () => ({
   assertProjectAccess: vi.fn().mockResolvedValue(undefined),
 }));
@@ -101,6 +122,7 @@ describe("funnel publish paywall gate", () => {
     findFunnelById.mockReset();
     insertVersion.mockClear();
     auditFn.mockClear();
+    validateOverride.value = null;
   });
 
   it("rejects with STRIPE_NOT_CONNECTED when the project cannot take charges", async () => {
@@ -120,22 +142,37 @@ describe("funnel publish paywall gate", () => {
     expect(insertVersion).toHaveBeenCalled();
   });
 
-  it("never asks chargesEnabled for a funnel with no paywall page", async () => {
-    // `validateFunnelGraph` (pre-existing, out of scope for this gate)
-    // already requires every publishable funnel to contain a paywall
-    // page — MISSING_PAYWALL — so a paywall-free draft 400s at graph
-    // validation, one step before this gate ever runs. That still
-    // proves what matters here: `pages.some(p => p.type === "paywall")`
-    // is checked before any capability lookup, so a funnel with
-    // nothing to charge for never triggers a chargesEnabled db round
-    // trip. It is NOT a 200 — see branching-validator.test.ts for the
-    // MISSING_PAYWALL contract this route rejects earlier on.
+  it("rejects a paywall-free funnel at graph validation, before the gate", async () => {
+    // NOTE: this does NOT prove the gate's internal ordering. Graph
+    // validation rejects MISSING_PAYWALL one step earlier, so execution
+    // never reaches the gate at all — chargesEnabled would be uncalled
+    // even if the gate looked it up unconditionally. The ordering is
+    // pinned by the next test instead. What this pins is that the two
+    // checks stay in this order relative to each other.
     findFunnelById.mockResolvedValue(funnel(noPaywallPages));
     chargesEnabled.mockResolvedValue(false);
     const res = await publish();
     expect(res.status).toBe(400);
     expect(JSON.stringify(await res.json())).toContain("FUNNEL_VALIDATION");
     expect(chargesEnabled).not.toHaveBeenCalled();
+  });
+
+  it("skips the capability lookup when the funnel has no paywall page", async () => {
+    // Forces graph validation to pass on a paywall-free funnel, which the
+    // real validator never allows (MISSING_PAYWALL). That is the only way
+    // to reach the gate's own `pages.some(p => p.type === "paywall")`
+    // branch, so this is what actually pins the ordering the plan calls
+    // load-bearing: a funnel with nothing to charge for must not cost a
+    // database round trip.
+    validateOverride.value = { ok: true, warnings: [] };
+    findFunnelById.mockResolvedValue(funnel(noPaywallPages));
+    chargesEnabled.mockResolvedValue(false);
+
+    const res = await publish();
+
+    expect(res.status).toBe(200);
+    expect(chargesEnabled).not.toHaveBeenCalled();
+    expect(insertVersion).toHaveBeenCalled();
   });
 
   it("applies the gate outside production too", async () => {
