@@ -617,6 +617,13 @@
       "when": 1784663790829,
       "tag": "0087_drop_stripe_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1784678227902,
+      "tag": "0088_flimsy_sentry",
+      "breakpoints": true
     }
   ]
 }

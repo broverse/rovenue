@@ -726,6 +726,73 @@ export const offerings = pgTable(
 );
 
 // =============================================================
+// paywalls
+// =============================================================
+
+export const paywalls = pgTable(
+  "paywalls",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    identifier: text("identifier").notNull(),
+    name: text("name").notNull(),
+    offeringId: text("offeringId")
+      .notNull()
+      .references(() => offerings.id, { onDelete: "restrict" }),
+    // { defaultLocale: string, locales: { [locale]: object } }
+    remoteConfig: jsonb("remoteConfig").notNull().default(sql`'{}'::jsonb`),
+    configFormatVersion: integer("configFormatVersion").notNull().default(1),
+    builderConfig: jsonb("builderConfig"), // reserved for Phase B, null in Phase A
+    isActive: boolean("isActive").notNull().default(true),
+    metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectIdIdentifierKey: uniqueIndex(
+      "paywalls_projectId_identifier_key",
+    ).on(t.projectId, t.identifier),
+  }),
+);
+
+// =============================================================
+// placements
+// =============================================================
+
+export const placements = pgTable(
+  "placements",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    projectId: text("projectId")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    identifier: text("identifier").notNull(),
+    name: text("name").notNull(),
+    revision: integer("revision").notNull().default(1),
+    // Ordered rows: { audienceId: string|null, target: {type:"paywall",paywallId} | {type:"experiment",experimentId} | {type:"none"} }
+    rows: jsonb("rows").notNull().default(sql`'[]'::jsonb`),
+    isActive: boolean("isActive").notNull().default(true),
+    createdAt: timestamp("createdAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updatedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    projectIdIdentifierKey: uniqueIndex(
+      "placements_projectId_identifier_key",
+    ).on(t.projectId, t.identifier),
+  }),
+);
+
+// =============================================================
 // purchases
 // =============================================================
 
@@ -1869,6 +1936,12 @@ export type NewProduct = typeof products.$inferInsert;
 
 export type Offering = typeof offerings.$inferSelect;
 export type NewOffering = typeof offerings.$inferInsert;
+
+export type Paywall = typeof paywalls.$inferSelect;
+export type NewPaywall = typeof paywalls.$inferInsert;
+
+export type Placement = typeof placements.$inferSelect;
+export type NewPlacement = typeof placements.$inferInsert;
 
 export type Purchase = typeof purchases.$inferSelect;
 export type NewPurchase = typeof purchases.$inferInsert;
