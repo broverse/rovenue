@@ -51,7 +51,12 @@ the existing enum value, purchase flow, and env var untouched.
 Schema changes (via `drizzle-kit generate`, then hand-append data DML —
 per the known gotcha, trim any unrelated DDL from the generated file):
 
-- `billing_tier_enum`: add value `studio` (additive ALTER TYPE).
+- `billing_tier_enum`: add value `studio` via the recreate-enum pattern
+  (rename old type → CREATE TYPE with the new value list → retype the
+  two tier columns → drop old type). Plain `ALTER TYPE … ADD VALUE`
+  does not work here: the drizzle migrator runs all pending migrations
+  in one transaction, and Postgres forbids using a value added by
+  ADD VALUE inside the same transaction (0085 inserts studio rows).
 - `projects`: add nullable `usage_locked_at timestamptz`.
 
 Data migration in the same file:
