@@ -79,7 +79,33 @@ export async function runScheduledActionsSweep(): Promise<SweepResult> {
 // Action executor
 // =============================================================
 
-export async function executeAction(
+/**
+ * Cancel a Stripe subscription at period end on the project's connected
+ * account.
+ *
+ * Exported so the Connect wiring can be unit-tested directly. Throwing on
+ * a missing connection is deliberate: this runs inside a BullMQ job where
+ * a throw is the retry signal — unlike the refund path, which answers a
+ * dashboard request with a result object.
+ */
+export async function cancelStripeSubscriptionAtPeriodEnd(
+  projectId: string,
+  subscriptionId: string,
+): Promise<void> {
+  const connected = await getConnectedStripe(projectId);
+  if (!connected) {
+    throw new Error(`Project ${projectId} has no active Stripe connection`);
+  }
+  // `stripeAccount` is what makes this act on the customer's own account
+  // rather than on Rovenue's platform account.
+  await connected.stripe.subscriptions.update(
+    subscriptionId,
+    { cancel_at_period_end: true },
+    { stripeAccount: connected.accountId },
+  );
+}
+
+async function executeAction(
   tx: typeof drizzle.db,
   row: ScheduledActionRow,
 ): Promise<void> {
@@ -155,16 +181,9 @@ export async function executeAction(
     }
 
     case "STRIPE": {
-      const connected = await getConnectedStripe(purchase.projectId);
-      if (!connected) {
-        throw new Error(
-          `Project ${purchase.projectId} has no active Stripe connection`,
-        );
-      }
-      await connected.stripe.subscriptions.update(
+      await cancelStripeSubscriptionAtPeriodEnd(
+        purchase.projectId,
         purchase.originalTransactionId,
-        { cancel_at_period_end: true },
-        { stripeAccount: connected.accountId },
       );
 
       await tx

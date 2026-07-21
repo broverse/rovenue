@@ -2,16 +2,19 @@
 // scheduled-actions worker — unit tests (Stripe Connect rewire)
 // =============================================================
 //
-// Focused unit coverage for executeAction()'s STRIPE branch. The existing
-// scheduled-actions.integration.test.ts exercises runScheduledActionsSweep()
-// end-to-end against a real Postgres instance but only covers the MANUAL
-// store path — there is no fixture there for a STRIPE purchase, and adding
-// one would mean either hitting the real Stripe API or mocking modules
-// inside a test file that otherwise deliberately avoids vi.mock() to stay
-// close to production wiring. A small, mocked unit test alongside the
-// integration suite is the cheaper and more precise way to pin down the
-// Stripe Connect call shape (stripeAccount request option + the
-// missing-connection throw) without touching that file's contract.
+// Focused unit coverage for the Stripe Connect wiring the scheduled-cancel
+// path uses. The existing scheduled-actions.integration.test.ts exercises
+// runScheduledActionsSweep() end-to-end against a real Postgres instance
+// but only covers the MANUAL store path — there is no fixture there for a
+// STRIPE purchase, and adding one would mean either hitting the real
+// Stripe API or mocking modules inside a test file that otherwise
+// deliberately avoids vi.mock() to stay close to production wiring.
+//
+// These tests target `cancelStripeSubscriptionAtPeriodEnd` directly rather
+// than the whole action executor: it is the only part this task changed,
+// and driving it through `executeAction` would have meant exporting the
+// executor purely for test access, widening the module's boundary for no
+// extra coverage of the Connect wiring.
 //
 // @rovenue/db is mocked so this test never touches Postgres (same pattern
 // as ../workers/webhook-reaper.test.ts and ../workers/usage-cap-sweeper.test.ts).
@@ -38,48 +41,13 @@ vi.mock("@rovenue/db", () => ({
   },
 }));
 
-import { executeAction } from "./scheduled-actions";
-
-type FakeTx = Parameters<typeof executeAction>[0];
-
-function makeTx(purchaseRow: Record<string, unknown>): FakeTx {
-  const selectChain = {
-    from: () => selectChain,
-    where: () => selectChain,
-    limit: () => Promise.resolve([purchaseRow]),
-  };
-  const updateChain = {
-    set: () => updateChain,
-    where: () => Promise.resolve(undefined),
-  };
-  return {
-    select: () => selectChain,
-    update: () => updateChain,
-  } as unknown as FakeTx;
-}
-
-const baseRow = {
-  id: "act_1",
-  purchaseId: "pur_1",
-  createdBy: "user-1",
-  payload: {},
-} as unknown as Parameters<typeof executeAction>[1];
-
-function stripePurchase() {
-  return {
-    id: "pur_1",
-    projectId: "proj_1",
-    store: "STRIPE",
-    originalTransactionId: "sub_123",
-    priceCurrency: "USD",
-  };
-}
+import { cancelStripeSubscriptionAtPeriodEnd } from "./scheduled-actions";
 
 beforeEach(() => {
   getConnectedStripe.mockReset();
 });
 
-describe("executeAction — STRIPE", () => {
+describe("cancelStripeSubscriptionAtPeriodEnd", () => {
   it("cancels the subscription on the connected account", async () => {
     const subscriptionsUpdate = vi.fn(async () => ({}));
     getConnectedStripe.mockResolvedValue({
@@ -88,10 +56,11 @@ describe("executeAction — STRIPE", () => {
       livemode: true,
     });
 
-    const tx = makeTx(stripePurchase());
-    await executeAction(tx, baseRow);
+    await cancelStripeSubscriptionAtPeriodEnd("proj_1", "sub_123");
 
     expect(getConnectedStripe).toHaveBeenCalledWith("proj_1");
+    // Without `stripeAccount` this would cancel a subscription on
+    // Rovenue's own platform account instead of the customer's.
     expect(subscriptionsUpdate).toHaveBeenCalledWith(
       "sub_123",
       { cancel_at_period_end: true },
@@ -100,12 +69,12 @@ describe("executeAction — STRIPE", () => {
   });
 
   it("throws when the project has no active Stripe connection", async () => {
+    // A throw is the retry signal inside a BullMQ job — deliberately
+    // unlike the refund path, which returns a result object.
     getConnectedStripe.mockResolvedValue(null);
 
-    const tx = makeTx(stripePurchase());
-
-    await expect(executeAction(tx, baseRow)).rejects.toThrow(
-      /no active Stripe connection/,
-    );
+    await expect(
+      cancelStripeSubscriptionAtPeriodEnd("proj_1", "sub_123"),
+    ).rejects.toThrow(/no active Stripe connection/);
   });
 });
