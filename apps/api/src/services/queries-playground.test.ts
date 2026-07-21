@@ -50,6 +50,43 @@ describe("validatePlaygroundSql", () => {
       validatePlaygroundSql(`SELECT '${"a".repeat(16_001)}'`),
     ).toThrow(/16,000/);
   });
+
+  it("rejects table functions that bypass project scoping / reach egress", () => {
+    // merge() reads across every project's tables (cross-tenant).
+    expect(() =>
+      validatePlaygroundSql("SELECT * FROM merge('rovenue','^raw_revenue_events$')"),
+    ).toThrow(/Table functions/);
+    // url() → SSRF to the cloud-metadata endpoint.
+    expect(() =>
+      validatePlaygroundSql(
+        "SELECT * FROM url('http://169.254.169.254/latest/meta-data/','CSV','c String')",
+      ),
+    ).toThrow(/Table functions/);
+    // file() → local filesystem read.
+    expect(() =>
+      validatePlaygroundSql("SELECT * FROM file('/etc/passwd','LineAsString','l String')"),
+    ).toThrow(/Table functions/);
+    // remote() / s3() are likewise blocked.
+    expect(() =>
+      validatePlaygroundSql(
+        "SELECT * FROM remote('10.0.0.1:9000','rovenue','raw_revenue_events')",
+      ),
+    ).toThrow(/Table functions/);
+    expect(() =>
+      validatePlaygroundSql("SELECT * FROM s3('https://x/y.csv','CSV','c String')"),
+    ).toThrow();
+  });
+
+  it("does not false-positive on columns/CTEs that merely share a function name", () => {
+    // `url` as a column selection (not a function call) is fine.
+    expect(() =>
+      validatePlaygroundSql("SELECT url FROM raw_revenue_events"),
+    ).not.toThrow();
+    // A CTE named like a table function, referenced without `(`, is fine.
+    expect(() =>
+      validatePlaygroundSql("WITH merge AS (SELECT 1 AS n) SELECT n FROM merge"),
+    ).not.toThrow();
+  });
 });
 
 describe("buildProjectScopeFilters", () => {

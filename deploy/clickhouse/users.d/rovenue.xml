@@ -15,8 +15,31 @@
   <profiles>
     <readonly_analytics>
       <readonly>2</readonly>
+      <!-- Block memory/binary introspection functions (addressToLine,
+           symbolizeTrace, …) for the query-playground reader. -->
+      <allow_introspection_functions>0</allow_introspection_functions>
+      <constraints>
+        <readonly>
+          <readonly/>
+        </readonly>
+        <allow_introspection_functions>
+          <readonly/>
+        </allow_introspection_functions>
+      </constraints>
     </readonly_analytics>
   </profiles>
+  <!--
+    Defense-in-depth note: ClickHouse table functions (url/file/remote/merge/
+    s3/mysql/…) read data OUTSIDE the `rovenue` database, so neither readonly=2
+    nor the <databases> allow-list stops them — they can reach internal
+    services, the cloud-metadata endpoint, or the local filesystem. The API's
+    query playground rejects those functions before execution
+    (validatePlaygroundSql in apps/api/src/services/queries-playground.ts).
+    Operators SHOULD additionally deny this container outbound network egress
+    (except to its own dependencies) so a future gap in the app-layer filter
+    cannot be turned into SSRF.
+  -->
+
   <users>
     <default remove="remove"/>
     <rovenue>

@@ -47,6 +47,17 @@ const MAX_RESULT_BYTES = 32 * 1024 * 1024; // 32 MB
 const VALID_LEAD_RE = /^\s*(?:--[^\n]*\n|\/\*[\s\S]*?\*\/|\s)*(select|with)\s/i;
 const FORBIDDEN_KEYWORD_RE =
   /\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|attach|detach|optimize|kill|system)\b/i;
+// ClickHouse table functions read data OUTSIDE the analytics tables, so they
+// bypass both `readonly = 2` (which only blocks writes) and the
+// `additional_table_filters` project scoping (which only filters named
+// `rovenue.*` tables). `merge()` reads across every project's tables; `url()`,
+// `file()`, `remote()`, `s3()`, `mysql()` etc. reach internal services / the
+// cloud-metadata endpoint / the local filesystem. Reject any of them as a
+// function call. (Requiring the trailing `(` avoids false positives on a
+// column or CTE that merely shares one of these names.) Durable enforcement is
+// the REVOKE on the `rovenue_reader` ClickHouse user; this is defense-in-depth.
+const FORBIDDEN_TABLE_FUNCTION_RE =
+  /\b(url|urlCluster|file|fileCluster|remote|remoteSecure|cluster|clusterAllReplicas|merge|mysql|postgresql|mongodb|redis|sqlite|jdbc|odbc|hdfs|hdfsCluster|s3|s3Cluster|gcs|azureBlobStorage|azureBlobStorageCluster|deltaLake|hudi|iceberg|executable|input)\s*\(/i;
 const MULTI_STATEMENT_RE = /;\s*\S/;
 
 // Project IDs are cuid2 / prefixed identifiers — strictly
@@ -76,6 +87,11 @@ export function validatePlaygroundSql(sql: string): void {
   if (FORBIDDEN_KEYWORD_RE.test(sql)) {
     throw new QueryValidationError(
       "Mutation / DDL keywords are not allowed in the playground",
+    );
+  }
+  if (FORBIDDEN_TABLE_FUNCTION_RE.test(sql)) {
+    throw new QueryValidationError(
+      "Table functions (url, file, remote, merge, s3, …) are not allowed in the playground",
     );
   }
   if (MULTI_STATEMENT_RE.test(sql.trim().replace(/;$/, ""))) {

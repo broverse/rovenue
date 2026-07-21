@@ -205,7 +205,10 @@ export const queriesRoute = new Hono()
       throw new HTTPException(400, { message: "Missing projectId" });
     }
     const user = c.get("user");
-    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+    // Raw SQL execution is a power-user capability and (even sandboxed) a
+    // higher-risk surface than the rest of the dashboard, so require at least
+    // DEVELOPER — CUSTOMER_SUPPORT must not reach the ClickHouse executor.
+    await assertProjectAccess(projectId, user.id, MemberRole.DEVELOPER);
 
     try {
       const payload = await executePlaygroundQuery({
