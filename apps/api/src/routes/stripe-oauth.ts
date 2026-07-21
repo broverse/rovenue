@@ -252,10 +252,15 @@ export const stripeOAuthRoute = new Hono().get("/callback", async (c) => {
         // just obtained has no local row, and disconnect needs one — so
         // without this the customer could never revoke it through
         // Rovenue.
-        log.info("stripe oauth: another account won; revoking this one", {
-          projectId: state.projectId,
-          knownWinner: winnerAccountId !== null,
-        });
+        log.info(
+          winnerAccountId === null
+            ? "stripe oauth: could not identify the winner; revoking this one"
+            : "stripe oauth: another account won; revoking this one",
+          {
+            projectId: state.projectId,
+            knownWinner: winnerAccountId !== null,
+          },
+        );
         await bestEffortDeauthorize(stripe, state.mode, accountId, state.projectId);
       }
 

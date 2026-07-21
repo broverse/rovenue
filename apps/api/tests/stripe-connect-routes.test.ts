@@ -411,6 +411,26 @@ describe("Stripe Connect routes", () => {
         });
       });
 
+      it("revokes when the winner cannot be determined at all", async () => {
+        oauthToken.mockResolvedValue(GOOD_TOKEN);
+        accountsRetrieve.mockResolvedValue(GOOD_ACCOUNT);
+        insertConnection.mockRejectedValue(uniqueViolation());
+
+        const res = await runCallback(() => {
+          // The re-read itself fails. We cannot prove the winner is this
+          // same account, so the safe default is to revoke rather than
+          // leave an authorization nobody can reach.
+          findActiveByProject.mockRejectedValue(new Error("db unreachable"));
+        });
+
+        expect(res.status).toBe(302);
+        expect(res.headers.get("location")).toContain("stripe=already_connected");
+        expect(oauthDeauthorize).toHaveBeenCalledWith({
+          client_id: "ca_live",
+          stripe_user_id: "acct_new",
+        });
+      });
+
       it("refuses a token whose livemode disagrees with the requested mode", async () => {
         oauthToken.mockResolvedValue({ ...GOOD_TOKEN, livemode: false });
         accountsRetrieve.mockResolvedValue(GOOD_ACCOUNT);
