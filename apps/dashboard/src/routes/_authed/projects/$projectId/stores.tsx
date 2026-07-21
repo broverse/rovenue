@@ -11,7 +11,7 @@ import { useProjectCredentials } from "../../../../lib/hooks/useProjectCredentia
 import { useProjects } from "../../../../lib/hooks/useProjects";
 import { cn } from "../../../../lib/cn";
 
-const STORES: Exclude<CredentialStore, "stripe">[] = ["apple", "google"];
+const STORES: CredentialStore[] = ["apple", "google"];
 
 /** The four outcomes the OAuth callback redirects the stores page with. */
 const STRIPE_OUTCOMES = ["connected", "declined", "error", "already_connected"] as const;

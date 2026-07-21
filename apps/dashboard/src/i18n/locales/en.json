@@ -141,8 +141,7 @@
       },
       "stripe": {
         "title": "Stripe account",
-        "account": "Stripe account",
-        "oauthConnect": "OAuth connect"
+        "connectHint": "Connect your Stripe account from the project's Stores page after setup."
       }
     },
     "currency": {
@@ -202,7 +201,6 @@
         "activePlatforms": "Active platforms",
         "iosBundle": "iOS bundle",
         "androidPackage": "Android package",
-        "stripeAccount": "Stripe account",
         "reportingCurrency": "Reporting currency",
         "timezone": "Timezone",
         "weekStart": "Week starts on",
@@ -274,8 +272,6 @@
     },
     "stripe": {
       "name": "Stripe",
-      "fields": { "secretKey": "Secret key", "webhookSecret": "Webhook signing secret" },
-      "placeholders": { "secretKey": "sk_live_\u2026", "webhookSecret": "whsec_\u2026" },
       "connect": {
         "title": "Stripe",
         "description": "Connect your Stripe account so Rovenue can create checkouts and process webhooks on your behalf.",

@@ -7,6 +7,7 @@ import { Input } from "../../ui/input";
 import { cn } from "../../lib/cn";
 import { useStoreCatalog } from "../../lib/hooks/useProjectProducts";
 import { useProjectCredentials } from "../../lib/hooks/useProjectCredentials";
+import { useStripeConnection } from "../../lib/hooks/useStripeConnection";
 
 type ApiStore = "ios" | "android";
 
@@ -39,6 +40,7 @@ export function StoreIdentifiersFieldset({
   const creds = useProjectCredentials(projectId);
   const c = creds.data?.credentials;
   const loading = creds.isPending;
+  const stripeConnection = useStripeConnection(projectId);
 
   const idBasePlan = useId();
   const idOfferId = useId();
@@ -91,7 +93,11 @@ export function StoreIdentifiersFieldset({
       <WebStoreRow
         label="Web"
         projectId={projectId}
-        configured={loading ? undefined : (c?.stripe.configured ?? false)}
+        configured={
+          stripeConnection.isPending
+            ? undefined
+            : stripeConnection.data?.connection != null
+        }
         value={webId}
         onChange={(v) => onChange("web", v)}
       />

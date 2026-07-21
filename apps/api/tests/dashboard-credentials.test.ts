@@ -134,7 +134,6 @@ describe("GET /dashboard/projects/:projectId/credentials", () => {
     };
     expect(body.data.credentials.apple.configured).toBe(false);
     expect(body.data.credentials.google.configured).toBe(false);
-    expect(body.data.credentials.stripe.configured).toBe(false);
   });
 
   test("returns configured=true + safe fields, never plaintext secrets", async () => {
@@ -159,10 +158,9 @@ describe("GET /dashboard/projects/:projectId/credentials", () => {
     expect(body.data.credentials.apple.safeFields).toEqual(
       expect.objectContaining({ bundleId: "com.acme.app", keyId: "KEY1" }),
     );
-    // Stripe credentials no longer live on the project row — the route
-    // reports a permanent "not configured" stub. Real connection state
-    // comes from GET /dashboard/projects/:id/stripe-connect instead.
-    expect(body.data.credentials.stripe.configured).toBe(false);
+    // Stripe credentials no longer live on the project row at all — the
+    // `credentials` response only carries apple/google now. Real Stripe
+    // connection state comes from GET /dashboard/projects/:id/stripe/connection.
     const serialized = JSON.stringify(body.data);
     expect(serialized).not.toContain("LEAKED");
   });

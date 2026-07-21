@@ -72,13 +72,6 @@ export function StepReview({ form, mode, onJump }: StepReviewProps) {
             empty={!form.androidPackage}
           />
         ) : null}
-        {form.platforms.includes("stripe") ? (
-          <ReviewRow
-            label={t("projectSetup.review.fields.stripeAccount")}
-            value={form.stripeAcct || t("projectSetup.review.notSet")}
-            empty={!form.stripeAcct}
-          />
-        ) : null}
       </ReviewSection>
 
       <ReviewSection

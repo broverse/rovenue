@@ -123,13 +123,17 @@ export interface RotateWebhookSecretResponse {
 }
 
 // =============================================================
-// Store credentials (apple / google / stripe)
+// Store credentials (apple / google)
 // =============================================================
 // Responses never carry plaintext secret material. Only a
 // `configured` flag plus a small allowlist of safe-to-display
-// fields (bundleId, packageName, etc.).
+// fields (bundleId, packageName, etc.). Stripe used to live here
+// too (pasted secret + webhook key) — Stripe Connect replaced it,
+// so this type no longer names a "stripe" store; see
+// StripeConnectionStatus (useStripeConnection) for Stripe's own
+// connected-account status.
 
-export type CredentialStore = "apple" | "google" | "stripe";
+export type CredentialStore = "apple" | "google";
 
 export interface CredentialStatus {
   store: CredentialStore;
@@ -141,7 +145,6 @@ export interface CredentialsListResponse {
   credentials: {
     apple: CredentialStatus;
     google: CredentialStatus;
-    stripe: CredentialStatus;
   };
 }
 
@@ -160,11 +163,6 @@ export interface UpdateGoogleCredentialsRequest {
     private_key: string;
     [key: string]: unknown;
   };
-}
-
-export interface UpdateStripeCredentialsRequest {
-  secretKey: string;
-  webhookSecret: string;
 }
 
 // =============================================================

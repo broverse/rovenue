@@ -3,14 +3,12 @@ import type {
   CredentialStore,
   UpdateAppleCredentialsRequest,
   UpdateGoogleCredentialsRequest,
-  UpdateStripeCredentialsRequest,
 } from "@rovenue/shared";
 import { api } from "../api";
 
 export type StoreCredentialBody =
   | UpdateAppleCredentialsRequest
-  | UpdateGoogleCredentialsRequest
-  | UpdateStripeCredentialsRequest;
+  | UpdateGoogleCredentialsRequest;
 
 type CredentialMutationResult = {
   credential: { store: CredentialStore; configured: boolean };

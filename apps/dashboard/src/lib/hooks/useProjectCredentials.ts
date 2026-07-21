@@ -3,10 +3,11 @@ import type { CredentialsListResponse } from "@rovenue/shared";
 import { api } from "../api";
 
 /**
- * Per-store credential status (apple / google / stripe) for a project.
+ * Per-store credential status (apple / google) for a project.
  * `credentials.<store>.configured` is the authoritative "store connected"
- * signal — the store-catalog fetch and the product store-id pickers gate
- * on it.
+ * signal — the store-catalog fetch and the iOS/Android product store-id
+ * pickers gate on it. Stripe's connection status lives separately, see
+ * `useStripeConnection`.
  */
 export function useProjectCredentials(projectId: string) {
   return useQuery({

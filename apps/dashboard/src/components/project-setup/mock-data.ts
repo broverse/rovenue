@@ -78,7 +78,6 @@ export const EMPTY_FORM: SetupForm = {
   androidPackage: "",
   storeIssuer: "",
   storeKeyId: "",
-  stripeAcct: "",
   currency: "USD",
   fxSource: "ecb",
   timezone: "UTC",

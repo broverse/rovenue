@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Apple, ChevronDown, CreditCard, Store } from "lucide-react";
+import { Apple, ChevronDown, Store } from "lucide-react";
 import type {
   CredentialStatus,
   CredentialStore,
@@ -20,7 +20,6 @@ import {
 const STORE_ICON: Record<CredentialStore, typeof Apple> = {
   apple: Apple,
   google: Store,
-  stripe: CreditCard,
 };
 
 interface Props {
@@ -49,8 +48,6 @@ export function StoreCredentialCard({ projectId, store, status, canEdit }: Props
   const [privateKey, setPrivateKey] = useState("");
   const [packageName, setPackageName] = useState(safe.packageName ?? "");
   const [serviceAccount, setServiceAccount] = useState("");
-  const [secretKey, setSecretKey] = useState("");
-  const [webhookSecret, setWebhookSecret] = useState("");
 
   const Icon = STORE_ICON[store];
   const name = t(`stores.${store}.name`);
@@ -58,9 +55,7 @@ export function StoreCredentialCard({ projectId, store, status, canEdit }: Props
   const summary =
     store === "apple"
       ? safe.bundleId
-      : store === "google"
-        ? [safe.packageName, safe.clientEmail].filter(Boolean).join(" · ")
-        : undefined;
+      : [safe.packageName, safe.clientEmail].filter(Boolean).join(" · ");
 
   const toggle = () => {
     setError(null);
@@ -70,9 +65,7 @@ export function StoreCredentialCard({ projectId, store, status, canEdit }: Props
   const valid =
     store === "apple"
       ? bundleId.trim().length > 0
-      : store === "google"
-        ? packageName.trim().length > 0 && serviceAccount.trim().length > 0
-        : secretKey.trim().length > 0 && webhookSecret.trim().length > 0;
+      : packageName.trim().length > 0 && serviceAccount.trim().length > 0;
 
   const buildBody = (): StoreCredentialBody | null => {
     if (store === "apple") {
@@ -86,24 +79,21 @@ export function StoreCredentialCard({ projectId, store, status, canEdit }: Props
       if (privateKey.trim()) apple.privateKey = privateKey;
       return apple;
     }
-    if (store === "google") {
-      let parsed: { client_email?: string; private_key?: string };
-      try {
-        parsed = JSON.parse(serviceAccount);
-      } catch {
-        setError(t("stores.google.invalidJson"));
-        return null;
-      }
-      if (!parsed?.client_email || !parsed?.private_key) {
-        setError(t("stores.google.invalidJson"));
-        return null;
-      }
-      return {
-        packageName: packageName.trim(),
-        serviceAccount: parsed as { client_email: string; private_key: string },
-      };
+    let parsed: { client_email?: string; private_key?: string };
+    try {
+      parsed = JSON.parse(serviceAccount);
+    } catch {
+      setError(t("stores.google.invalidJson"));
+      return null;
     }
-    return { secretKey: secretKey.trim(), webhookSecret: webhookSecret.trim() };
+    if (!parsed?.client_email || !parsed?.private_key) {
+      setError(t("stores.google.invalidJson"));
+      return null;
+    }
+    return {
+      packageName: packageName.trim(),
+      serviceAccount: parsed as { client_email: string; private_key: string },
+    };
   };
 
   const handleSave = async () => {
@@ -115,8 +105,6 @@ export function StoreCredentialCard({ projectId, store, status, canEdit }: Props
       setExpanded(false);
       setPrivateKey("");
       setServiceAccount("");
-      setSecretKey("");
-      setWebhookSecret("");
     } catch {
       setError(t("stores.saveError"));
     }
@@ -241,7 +229,7 @@ export function StoreCredentialCard({ projectId, store, status, canEdit }: Props
                   />
                 </Field>
               </>
-            ) : store === "google" ? (
+            ) : (
               <>
                 <Field label={t("stores.google.fields.packageName")}>
                   <Input
@@ -257,27 +245,6 @@ export function StoreCredentialCard({ projectId, store, status, canEdit }: Props
                     value={serviceAccount}
                     onChange={(e) => setServiceAccount(e.target.value)}
                     placeholder={t("stores.google.placeholders.serviceAccount")}
-                  />
-                </Field>
-              </>
-            ) : (
-              <>
-                <Field label={t("stores.stripe.fields.secretKey")}>
-                  <Input
-                    mono
-                    type="password"
-                    value={secretKey}
-                    onChange={(e) => setSecretKey(e.target.value)}
-                    placeholder={t("stores.stripe.placeholders.secretKey")}
-                  />
-                </Field>
-                <Field label={t("stores.stripe.fields.webhookSecret")}>
-                  <Input
-                    mono
-                    type="password"
-                    value={webhookSecret}
-                    onChange={(e) => setWebhookSecret(e.target.value)}
-                    placeholder={t("stores.stripe.placeholders.webhookSecret")}
                   />
                 </Field>
               </>

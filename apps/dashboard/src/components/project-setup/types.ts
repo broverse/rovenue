@@ -30,7 +30,6 @@ export interface SetupForm {
   androidPackage: string;
   storeIssuer: string;
   storeKeyId: string;
-  stripeAcct: string;
   currency: string;
   fxSource: FxSourceId;
   timezone: string;

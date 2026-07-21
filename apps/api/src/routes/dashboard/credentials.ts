@@ -153,13 +153,6 @@ export const credentialsRoute = new Hono()
     credentials: {
       apple: statusFor("apple", project.appleCredentials),
       google: statusFor("google", project.googleCredentials),
-      // Stripe no longer stores per-project secrets — see
-      // routes/dashboard/stripe-connect.ts for real connection status.
-      // `CredentialStore`/`CredentialsListResponse` still declare this
-      // key (narrowing them is Task 10's job alongside the dashboard),
-      // so report a permanent "not configured" stub rather than
-      // querying a column that no longer exists.
-      stripe: { store: "stripe", configured: false },
     },
   };
     return c.json(ok(payload));

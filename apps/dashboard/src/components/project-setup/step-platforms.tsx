@@ -1,4 +1,4 @@
-import { Upload, Webhook } from "lucide-react";
+import { Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
@@ -137,25 +137,9 @@ export function StepPlatforms({
           iconLabel="St"
           title={t("projectSetup.platforms.stripe.title")}
         >
-          <Field
-            className="mb-0"
-            label={t("projectSetup.platforms.stripe.account")}
-            optional={t("projectSetup.basics.required")}
-          >
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Input
-                mono
-                placeholder="acct_…"
-                value={form.stripeAcct}
-                className="flex-1"
-                onChange={(event) => onUpdate("stripeAcct", event.target.value)}
-              />
-              <Button type="button" variant="flat" className="h-9 shrink-0">
-                <Webhook className="size-3.5" aria-hidden="true" />
-                {t("projectSetup.platforms.stripe.oauthConnect")}
-              </Button>
-            </div>
-          </Field>
+          <p className="text-[12.5px] text-rv-mute-500">
+            {t("projectSetup.platforms.stripe.connectHint")}
+          </p>
         </CredentialCard>
       ) : null}
     </>
