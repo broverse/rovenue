@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithRouter } from "../../../tests/render";
 import { StripeConnectCard } from "./stripe-connect-card";
 
@@ -11,6 +12,17 @@ vi.mock("../../lib/hooks/useStripeConnection", () => ({
 
 function arrange(data: unknown) {
   useStripeConnection.mockReturnValue({ data, isLoading: false });
+  return renderWithRouter(<StripeConnectCard projectId="proj_1" />);
+}
+
+function arrangeError(refetch = vi.fn()) {
+  useStripeConnection.mockReturnValue({
+    data: undefined,
+    isLoading: false,
+    isError: true,
+    isFetching: false,
+    refetch,
+  });
   return renderWithRouter(<StripeConnectCard projectId="proj_1" />);
 }
 
@@ -69,5 +81,19 @@ describe("StripeConnectCard", () => {
     await waitFor(() => {
       expect(screen.getByTestId("stripe-verification-pending")).toBeInTheDocument();
     });
+  });
+
+  it("surfaces a failed status lookup instead of spinning forever", async () => {
+    // Without its own branch the `!data` guard renders the same
+    // title-only skeleton as loading, so a transient API failure looks
+    // identical to "still loading" and offers no way out.
+    const refetch = vi.fn();
+    arrangeError(refetch);
+    await waitFor(() => {
+      expect(screen.getByTestId("stripe-connection-error")).toBeInTheDocument();
+    });
+    const retry = screen.getByRole("button", { name: /retry/i });
+    await userEvent.click(retry);
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 });

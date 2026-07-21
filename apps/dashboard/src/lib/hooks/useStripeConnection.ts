@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { rpc, unwrap } from "../api";
 
 export interface StripeConnectionSummary {
   accountId: string;
@@ -32,8 +32,10 @@ export function useStripeConnection(projectId: string) {
     enabled: Boolean(projectId),
     staleTime: 30_000,
     queryFn: () =>
-      api<StripeConnectionStatus>(
-        `/dashboard/projects/${projectId}/stripe/connection`,
+      unwrap<StripeConnectionStatus>(
+        rpc.dashboard.projects[":projectId"].stripe.connection.$get({
+          param: { projectId },
+        }),
       ),
   });
 }
@@ -47,9 +49,10 @@ export function useDisconnectStripe(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () =>
-      api<{ disconnected: boolean }>(
-        `/dashboard/projects/${projectId}/stripe/connect`,
-        { method: "DELETE" },
+      unwrap<{ disconnected: boolean }>(
+        rpc.dashboard.projects[":projectId"].stripe.connect.$delete({
+          param: { projectId },
+        }),
       ),
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: ["stripe-connection", projectId] }),

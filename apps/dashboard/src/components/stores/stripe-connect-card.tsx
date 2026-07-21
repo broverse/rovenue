@@ -21,10 +21,39 @@ interface Props {
  */
 export function StripeConnectCard({ projectId }: Props) {
   const { t } = useTranslation();
-  const { data, isLoading } = useStripeConnection(projectId);
+  const { data, isLoading, isError, refetch, isFetching } =
+    useStripeConnection(projectId);
   const disconnect = useDisconnectStripe(projectId);
   const [testMode, setTestMode] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+
+  // A failed status lookup must not look like a card that is still
+  // loading: without its own branch the `!data` guard below swallows the
+  // error and spins forever, leaving the owner no way to retry.
+  if (isError) {
+    return (
+      <section className="rounded-lg border border-rv-divider bg-rv-c1 px-4 py-3.5 sm:px-5">
+        <span className="text-[13px] font-semibold text-foreground">
+          {t("stores.stripe.connect.title")}
+        </span>
+        <p
+          data-testid="stripe-connection-error"
+          className="mt-2 text-[11.5px] text-rv-danger"
+        >
+          {t("stores.stripe.connect.loadFailed")}
+        </p>
+        <Button
+          variant="light"
+          size="sm"
+          className="mt-2"
+          disabled={isFetching}
+          onClick={() => void refetch()}
+        >
+          {t("stores.stripe.connect.retry")}
+        </Button>
+      </section>
+    );
+  }
 
   if (isLoading || !data) {
     return (

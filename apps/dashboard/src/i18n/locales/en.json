@@ -1,6 +1,7 @@
 {
   "common": {
     "refresh": "Refresh",
+    "dismiss": "Dismiss",
     "export": "Export",
     "viewAll": "View all",
     "viewAllArrow": "View all →",
@@ -289,6 +290,8 @@
         "disconnectTitle": "Disconnect Stripe?",
         "disconnectBody": "Subscriptions already running on your Stripe account keep billing \u2014 disconnecting only stops Rovenue's access to it, it does not cancel anything.",
         "platformUnconfigured": "Stripe Connect isn't configured on this deployment yet. Ask your operator to set up Stripe Connect platform credentials before you can connect an account.",
+        "loadFailed": "Couldn't load your Stripe connection status.",
+        "retry": "Retry",
         "callback": {
           "connected": "Stripe account connected.",
           "declined": "Stripe connection cancelled \u2014 you can try again anytime.",
