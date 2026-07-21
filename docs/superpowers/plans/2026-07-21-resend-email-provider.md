@@ -31,7 +31,7 @@
 - Consumes: `Mailer`, `MailMessage` from `./mailer` (existing).
 - Produces: `export class ResendMailer implements Mailer` with `constructor(opts: { apiKey: string; from: string })`, `readonly provider = "resend"`, `send(msg: MailMessage): Promise<{ messageId: string }>`. Task 2 imports `ResendMailer` from `./mailer-resend`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `apps/api/src/lib/mailer-resend.test.ts`:
 
@@ -118,12 +118,12 @@ describe("ResendMailer", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/lib/mailer-resend.test.ts`
 Expected: FAIL — cannot resolve `./mailer-resend`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `apps/api/src/lib/mailer-resend.ts`:
 
@@ -179,12 +179,12 @@ export class ResendMailer implements Mailer {
 
 Note: `readonly provider` is not on the `Mailer` interface yet (Task 3 adds it); the extra field is harmless until then.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/lib/mailer-resend.test.ts`
 Expected: PASS (4 tests).
 
-- [ ] **Step 5: Typecheck + commit**
+- [x] **Step 5: Typecheck + commit**
 
 ```bash
 pnpm --filter @rovenue/api typecheck
@@ -206,7 +206,7 @@ git commit -m "feat(api): add ResendMailer send transport"
 - Consumes: `ResendMailer` from `./mailer-resend` (Task 1).
 - Produces: env keys `RESEND_API_KEY?: string`, `RESEND_WEBHOOK_SECRET?: string`, `RESEND_EVENTS_VERIFY_SIGNATURE: boolean` (Task 6 reads the latter two); `EMAIL_PROVIDER` typed `"resend" | "ses" | "smtp"` defaulting to `"resend"`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to the `describe("mailer", ...)` block in `apps/api/src/lib/mailer.test.ts` (also add `import { ResendMailer } from "./mailer-resend";` at the top, and add `RESEND_API_KEY: undefined,` to the `baseEnv` object literal):
 
@@ -247,12 +247,12 @@ Append to the `describe("mailer", ...)` block in `apps/api/src/lib/mailer.test.t
 
 (After Task 3 adds `Mailer.provider`, tighten the fallback assertion to `expect(m.provider).toBe("ses")` — Task 3 Step 3 does this.)
 
-- [ ] **Step 2: Run tests to verify the new ones fail**
+- [x] **Step 2: Run tests to verify the new ones fail**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/lib/mailer.test.ts`
 Expected: the resend selection tests FAIL (resend branch missing → falls into the SES/noop default paths).
 
-- [ ] **Step 3: Implement env additions**
+- [x] **Step 3: Implement env additions**
 
 In `apps/api/src/lib/env.ts`, replace the email transport selection block:
 
@@ -280,7 +280,7 @@ Directly below it (before `EMAIL_FROM`), add:
       .transform((v) => v === "true"),
 ```
 
-- [ ] **Step 4: Implement the selection branch**
+- [x] **Step 4: Implement the selection branch**
 
 In `apps/api/src/lib/mailer.ts`:
 - Add `import { ResendMailer } from "./mailer-resend";`
@@ -326,7 +326,7 @@ In `apps/api/src/lib/mailer.ts`:
 
 (The existing trailing `if (!from) return new NoopMailer(); … SesMailer` block stays and now only serves `EMAIL_PROVIDER=ses`.)
 
-- [ ] **Step 5: Update `.env.example`**
+- [x] **Step 5: Update `.env.example`**
 
 Replace the `EMAIL_PROVIDER` comment block + line (currently documents `ses` as default) with:
 
@@ -351,7 +351,7 @@ RESEND_EVENTS_VERIFY_SIGNATURE=true
 
 Keep the existing SES and SMTP blocks unchanged (only the header comment above SES changes from "(used when EMAIL_PROVIDER=ses)" to "(used when EMAIL_PROVIDER=ses, or as resend fallback)").
 
-- [ ] **Step 6: Run tests, typecheck, commit**
+- [x] **Step 6: Run tests, typecheck, commit**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/lib/mailer.test.ts src/lib/mailer-resend.test.ts`
 Expected: PASS.
@@ -376,7 +376,7 @@ git commit -m "feat(api): resend is the default EMAIL_PROVIDER with SES fallback
 **Interfaces:**
 - Produces: `Mailer` interface gains `readonly provider: string`. Values: `"resend"` (already set in Task 1), `"ses"`, `"smtp"`, `"noop"`, `"test"` (test doubles).
 
-- [ ] **Step 1: Add the field to the interface and all implementers**
+- [x] **Step 1: Add the field to the interface and all implementers**
 
 In `apps/api/src/lib/mailer.ts`:
 
@@ -390,7 +390,7 @@ export interface Mailer {
 
 Add `readonly provider = "ses";` as the first member of `SesMailer` and `readonly provider = "noop";` to `NoopMailer`. In `mailer-smtp.ts` add `readonly provider = "smtp";` to `SmtpMailer`. In the three test doubles add `readonly provider = "test";`.
 
-- [ ] **Step 2: Use it in the worker**
+- [x] **Step 2: Use it in the worker**
 
 In `apps/api/src/workers/send-email-worker.ts` replace:
 
@@ -406,7 +406,7 @@ with:
 
 Also grep the file for any other hardcoded `"ses"` transport label (e.g. in the `failed` handler's `observeSendDuration` call, if present) and replace the same way. Do NOT touch the `rateLimit` comment mentioning the SES sandbox.
 
-- [ ] **Step 3: Tighten the Task 2 fallback test**
+- [x] **Step 3: Tighten the Task 2 fallback test**
 
 In `apps/api/src/lib/mailer.test.ts`, in the test `"EMAIL_PROVIDER=resend without key falls back to SES when a from address exists"`, replace the two weak assertions with:
 
@@ -414,14 +414,14 @@ In `apps/api/src/lib/mailer.test.ts`, in the test `"EMAIL_PROVIDER=resend withou
     expect(m.provider).toBe("ses");
 ```
 
-- [ ] **Step 4: Run tests + typecheck**
+- [x] **Step 4: Run tests + typecheck**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/lib/mailer.test.ts src/lib/mailer-smtp.test.ts src/lib/mailer-resend.test.ts src/workers/email.test.ts`
 Expected: PASS.
 Run: `pnpm --filter @rovenue/api typecheck`
 Expected: clean — this is the real gate: it catches any `implements Mailer` site missed in Step 1.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A apps/api/src
@@ -441,7 +441,7 @@ git commit -m "feat(api): Mailer.provider label replaces hardcoded ses metrics t
 
 Scheme (https://docs.svix.com/receiving/verifying-payloads/how-manual): key = base64-decode of the secret after the `whsec_` prefix; expected = base64(HMAC-SHA256(key, `${id}.${timestamp}.${body}`)); the `svix-signature` header is a space-separated list of `v1,<base64>` entries — any match passes; timestamps outside ±5 minutes are rejected.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `apps/api/src/lib/svix-signature.test.ts`:
 
@@ -545,12 +545,12 @@ describe("verifySvixSignature", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/lib/svix-signature.test.ts`
 Expected: FAIL — cannot resolve `./svix-signature`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `apps/api/src/lib/svix-signature.ts`:
 
@@ -616,12 +616,12 @@ export function verifySvixSignature(
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/lib/svix-signature.test.ts`
 Expected: PASS (7 tests).
 
-- [ ] **Step 5: Typecheck + commit**
+- [x] **Step 5: Typecheck + commit**
 
 ```bash
 pnpm --filter @rovenue/api typecheck
@@ -641,7 +641,7 @@ git commit -m "feat(api): hand-rolled Svix webhook signature verification"
 - Consumes: `type DeliveryStatus` from `./ses-events` (existing: `"DELIVERED" | "BOUNCED" | "COMPLAINED"`).
 - Produces: `parseResendEvent(rawBody: string): ResendEventPatch | null` with `interface ResendEventPatch { providerMessageId: string; status: DeliveryStatus; error: string | null; recipients: string[] }`. Task 6 consumes both.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 `apps/api/src/lib/resend-events.test.ts`:
 
@@ -735,12 +735,12 @@ describe("parseResendEvent", () => {
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/lib/resend-events.test.ts`
 Expected: FAIL — cannot resolve `./resend-events`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `apps/api/src/lib/resend-events.ts`:
 
@@ -813,12 +813,12 @@ export function parseResendEvent(rawBody: string): ResendEventPatch | null {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/lib/resend-events.test.ts`
 Expected: PASS (8 tests).
 
-- [ ] **Step 5: Typecheck + commit**
+- [x] **Step 5: Typecheck + commit**
 
 ```bash
 pnpm --filter @rovenue/api typecheck
@@ -839,7 +839,7 @@ git commit -m "feat(api): parse Resend delivery-event webhooks"
 - Consumes: `verifySvixSignature`/`SvixHeaders` (Task 4), `parseResendEvent` (Task 5), env keys `RESEND_WEBHOOK_SECRET` + `RESEND_EVENTS_VERIFY_SIGNATURE` (Task 2); Drizzle repos exactly as `ses-events.ts` uses them.
 - Produces: `export const resendEventsRoute: Hono` mounted at `/webhooks/resend-events`.
 
-- [ ] **Step 1: Write the failing route tests**
+- [x] **Step 1: Write the failing route tests**
 
 `apps/api/src/routes/webhooks/resend-events.test.ts` — mirrors the mock scaffolding of `ses-events.test.ts` (env before imports, hoisted `vi.mock` factories):
 
@@ -1028,12 +1028,12 @@ describe("resend-events route", () => {
 
 Note on the complaint master-switch flip: `ses-events.ts` resolves the notification's `userId` via `drizzle.db.select(...)`; with `db` mocked as `{}` that query path can't run in a unit test, so (as in `ses-events.test.ts`) the flip's full path is left to the integration test. The unit test asserts the suppression write; keep the route code path identical to ses-events.
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/routes/webhooks/resend-events.test.ts`
 Expected: FAIL — cannot resolve `./resend-events`.
 
-- [ ] **Step 3: Write the route**
+- [x] **Step 3: Write the route**
 
 `apps/api/src/routes/webhooks/resend-events.ts`:
 
@@ -1197,7 +1197,7 @@ export const resendEventsRoute = new Hono().post("/", async (c) => {
 });
 ```
 
-- [ ] **Step 4: Mount the route**
+- [x] **Step 4: Mount the route**
 
 In `apps/api/src/routes/webhooks/index.ts` add the import and two chain lines (keep the single-expression chain shape):
 
@@ -1219,12 +1219,12 @@ export const webhooksRoute = new Hono()
   .route("/stripe", stripeWebhookRoute);
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/routes/webhooks/resend-events.test.ts src/routes/webhooks/ses-events.test.ts`
 Expected: PASS (both files — ses-events proves the mount change didn't regress).
 
-- [ ] **Step 6: Full unit suite, typecheck, commit**
+- [x] **Step 6: Full unit suite, typecheck, commit**
 
 Run: `pnpm --filter @rovenue/api exec vitest run --exclude '**/*.integration.test.ts' src`
 Expected: PASS (pre-existing failures listed in memory notes aside — do not fix unrelated reds).
