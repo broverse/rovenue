@@ -1,18 +1,36 @@
+import { useEffect, useState } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
-import { Store } from "lucide-react";
+import { CheckCircle2, Info, Store, XCircle } from "lucide-react";
 import type { CredentialStore } from "@rovenue/shared";
 import { StoreCredentialCard } from "../../../../components/stores";
+import { StripeConnectCard } from "../../../../components/stores/stripe-connect-card";
 import { LoadingState } from "../../../../components/dashboard/loading-state";
 import { EmptyStateCard } from "../../../../components/dashboard/empty-state-card";
 import { useProjectCredentials } from "../../../../lib/hooks/useProjectCredentials";
 import { useProjects } from "../../../../lib/hooks/useProjects";
+import { cn } from "../../../../lib/cn";
+
+const STORES: Exclude<CredentialStore, "stripe">[] = ["apple", "google"];
+
+/** The four outcomes the OAuth callback redirects the stores page with. */
+const STRIPE_OUTCOMES = ["connected", "declined", "error", "already_connected"] as const;
+type StripeOutcome = (typeof STRIPE_OUTCOMES)[number];
+
+type StoresSearch = {
+  stripe?: StripeOutcome;
+};
 
 export const Route = createFileRoute("/_authed/projects/$projectId/stores")({
   component: StoresRoute,
+  validateSearch: (raw: Record<string, unknown>): StoresSearch => ({
+    stripe:
+      typeof raw.stripe === "string" &&
+      (STRIPE_OUTCOMES as readonly string[]).includes(raw.stripe)
+        ? (raw.stripe as StripeOutcome)
+        : undefined,
+  }),
 });
-
-const STORES: CredentialStore[] = ["apple", "google", "stripe"];
 
 function StoresRoute() {
   const { projectId } = useParams({ from: "/_authed/projects/$projectId/stores" });
@@ -28,6 +46,20 @@ function StoresPage({ projectId }: { projectId: string }) {
   const role = projects.data?.find((p) => p.id === projectId)?.role;
   const canEdit = role === "OWNER";
 
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const [stripeOutcome, setStripeOutcome] = useState<StripeOutcome | null>(null);
+
+  // The Stripe OAuth callback redirects here with `?stripe=<outcome>`. Move
+  // it into local state immediately and strip the query param so a refresh
+  // or back-navigation doesn't re-show the banner.
+  useEffect(() => {
+    if (!search.stripe) return;
+    setStripeOutcome(search.stripe);
+    void navigate({ search: (prev) => ({ ...prev, stripe: undefined }), replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.stripe]);
+
   return (
     <>
       <header className="pb-5">
@@ -39,6 +71,10 @@ function StoresPage({ projectId }: { projectId: string }) {
         </p>
       </header>
 
+      {stripeOutcome ? (
+        <StripeCallbackBanner outcome={stripeOutcome} onDismiss={() => setStripeOutcome(null)} />
+      ) : null}
+
       {credentials.isLoading ? (
         <LoadingState />
       ) : credentials.isError || !credentials.data ? (
@@ -49,6 +85,7 @@ function StoresPage({ projectId }: { projectId: string }) {
         />
       ) : (
         <div className="flex flex-col gap-3">
+          <StripeConnectCard projectId={projectId} />
           {STORES.map((store) => (
             <StoreCredentialCard
               key={store}
@@ -61,5 +98,54 @@ function StoresPage({ projectId }: { projectId: string }) {
         </div>
       )}
     </>
+  );
+}
+
+const OUTCOME_KEY: Record<StripeOutcome, string> = {
+  connected: "connected",
+  declined: "declined",
+  error: "error",
+  already_connected: "alreadyConnected",
+};
+
+function StripeCallbackBanner({
+  outcome,
+  onDismiss,
+}: {
+  outcome: StripeOutcome;
+  onDismiss: () => void;
+}) {
+  const { t } = useTranslation();
+  // `declined` is the customer backing out of Stripe's consent screen, not
+  // an error — and `already_connected` just means another attempt won a
+  // race, so both read as informational rather than a failure.
+  const tone: "success" | "danger" | "info" = outcome === "connected"
+    ? "success"
+    : outcome === "error"
+      ? "danger"
+      : "info";
+  const Icon = tone === "success" ? CheckCircle2 : tone === "danger" ? XCircle : Info;
+
+  return (
+    <div
+      data-testid="stripe-callback-banner"
+      data-outcome={outcome}
+      className={cn(
+        "mb-4 flex items-start gap-2.5 rounded-lg border px-4 py-3 text-[12.5px]",
+        tone === "success" && "border-rv-success/30 bg-rv-success/10 text-rv-success",
+        tone === "danger" && "border-rv-danger/30 bg-rv-danger/10 text-rv-danger",
+        tone === "info" && "border-rv-divider bg-rv-c2 text-rv-mute-700",
+      )}
+    >
+      <Icon size={16} className="mt-0.5 shrink-0" />
+      <p className="flex-1">{t(`stores.stripe.connect.callback.${OUTCOME_KEY[outcome]}`)}</p>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="text-[11.5px] font-medium underline underline-offset-2 opacity-70 hover:opacity-100"
+      >
+        {t("common.dismiss", "Dismiss")}
+      </button>
+    </div>
   );
 }

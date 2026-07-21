@@ -274,7 +274,28 @@
     "stripe": {
       "name": "Stripe",
       "fields": { "secretKey": "Secret key", "webhookSecret": "Webhook signing secret" },
-      "placeholders": { "secretKey": "sk_live_\u2026", "webhookSecret": "whsec_\u2026" }
+      "placeholders": { "secretKey": "sk_live_\u2026", "webhookSecret": "whsec_\u2026" },
+      "connect": {
+        "title": "Stripe",
+        "description": "Connect your Stripe account so Rovenue can create checkouts and process webhooks on your behalf.",
+        "connectButton": "Connect Stripe",
+        "testModeToggle": "Connect in test mode",
+        "accountLabel": "Account",
+        "liveBadge": "Live",
+        "testBadge": "Test",
+        "verificationPending": "Stripe is still verifying this account, so it can't take payments yet. Finish verification in your Stripe dashboard.",
+        "disconnect": "Disconnect",
+        "disconnecting": "Disconnecting\u2026",
+        "disconnectTitle": "Disconnect Stripe?",
+        "disconnectBody": "Subscriptions already running on your Stripe account keep billing \u2014 disconnecting only stops Rovenue's access to it, it does not cancel anything.",
+        "platformUnconfigured": "Stripe Connect isn't configured on this deployment yet. Ask your operator to set up Stripe Connect platform credentials before you can connect an account.",
+        "callback": {
+          "connected": "Stripe account connected.",
+          "declined": "Stripe connection cancelled \u2014 you can try again anytime.",
+          "error": "Something went wrong connecting Stripe. Please try again.",
+          "alreadyConnected": "This project is already connected to Stripe."
+        }
+      }
     }
   },
   "topbar": {
