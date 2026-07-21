@@ -114,7 +114,7 @@ export function startSendEmailWorker(
         );
         throw sendErr;
       }
-      observeSendDuration("email", "ses", "ok", performance.now() - startMs);
+      observeSendDuration("email", deps.mailer.provider, "ok", performance.now() - startMs);
 
       await notificationDeliveryRepo.markDeliveryStatus(
         deps.db,

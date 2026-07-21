@@ -16,6 +16,8 @@ export interface SmtpMailerOptions {
  * for self-hosted deployments without AWS credentials.
  */
 export class SmtpMailer implements Mailer {
+  readonly provider = "smtp";
+
   private readonly transport: Transporter;
 
   constructor(private readonly opts: SmtpMailerOptions) {

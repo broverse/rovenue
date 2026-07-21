@@ -4,6 +4,7 @@ import { runInvitationEmailJob } from "./email";
 import { drizzle } from "@rovenue/db";
 
 class RecordingMailer implements Mailer {
+  readonly provider = "test";
   sent: Array<{ to: string; subject: string; correlationId?: string }> = [];
   async send(m: { to: string; subject: string; html: string; text: string; correlationId?: string }) {
     this.sent.push({ to: m.to, subject: m.subject, correlationId: m.correlationId });

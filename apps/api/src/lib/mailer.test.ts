@@ -35,6 +35,7 @@ describe("mailer", () => {
 
   it("uses an injected mailer for tests", async () => {
     class RecordingMailer implements Mailer {
+      readonly provider = "test";
       sent: Array<{ to: string; subject: string }> = [];
       async send(m: { to: string; subject: string; html: string; text: string }) {
         this.sent.push({ to: m.to, subject: m.subject });
@@ -184,7 +185,7 @@ describe("createMailerFromEnv", () => {
       }),
     );
     expect(m).not.toBeInstanceOf(ResendMailer);
-    expect(m.constructor.name).toBe("SesMailer");
+    expect(m.provider).toBe("ses");
   });
 
   it("EMAIL_PROVIDER=resend with nothing configured is a noop mailer", async () => {

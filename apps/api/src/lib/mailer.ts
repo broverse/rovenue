@@ -19,6 +19,8 @@ export interface MailMessage {
 }
 
 export interface Mailer {
+  /** Short transport name used as the metrics label (e.g. "resend", "ses"). */
+  readonly provider: string;
   send(msg: MailMessage): Promise<{ messageId: string }>;
 }
 
@@ -32,6 +34,8 @@ function combineHeaders(
 }
 
 class SesMailer implements Mailer {
+  readonly provider = "ses";
+
   constructor(
     private client: SESv2Client,
     private from: string,
@@ -64,6 +68,8 @@ class SesMailer implements Mailer {
 }
 
 class NoopMailer implements Mailer {
+  readonly provider = "noop";
+
   async send(msg: MailMessage) {
     logger.warn("mailer.noop", { to: msg.to, subject: msg.subject });
     return { messageId: "noop" };

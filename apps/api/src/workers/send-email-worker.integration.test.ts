@@ -24,6 +24,7 @@ const db = getDb();
 const schema = drizzle.schema;
 
 class StubMailer implements Mailer {
+  readonly provider = "test";
   sent: MailMessage[] = [];
   /** When non-null, send() throws this error and records the attempt. */
   failWith: Error | null = null;
