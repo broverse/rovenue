@@ -43,6 +43,10 @@ import {
 } from "./workers/scheduled-actions";
 import { createEmailWorker } from "./workers/email";
 import {
+  createUsageCapSweeperWorker,
+  scheduleUsageCapSweep,
+} from "./workers/usage-cap-sweeper";
+import {
   createFunnelAbandonerWorker,
   scheduleFunnelAbandoner,
 } from "./workers/funnel-abandoner";
@@ -149,6 +153,15 @@ schedulePartitionMaintenance().catch((err: unknown) => {
 getScheduledActionsWorker();
 ensureScheduledActionsRepeatable().catch((err: unknown) => {
   logger.error("failed to schedule scheduled-actions sweep", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
+
+// Usage-cap sweep — daily; flips projects.usage_locked_at per the
+// two-consecutive-periods rule (cloud mode only; no-op when self-hosted).
+createUsageCapSweeperWorker();
+scheduleUsageCapSweep().catch((err: unknown) => {
+  logger.error("failed to schedule usage-cap sweep", {
     err: err instanceof Error ? err.message : String(err),
   });
 });

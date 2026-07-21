@@ -30,6 +30,15 @@ export async function createFreeBillingSubscription(
   return rows[0]!;
 }
 
+export async function listProjectIdsWithBillingSubscription(
+  db: Db,
+): Promise<string[]> {
+  const rows = await db
+    .select({ projectId: billingSubscriptions.projectId })
+    .from(billingSubscriptions);
+  return rows.map((r) => r.projectId);
+}
+
 export async function findBillingSubscriptionByProject(
   db: Db,
   projectId: string,

@@ -248,6 +248,18 @@ export interface UpdateProjectInput {
  * composes this from whitelisted body fields (name / description /
  * webhookUrl / settings) — anything else is stripped by Zod upstream.
  */
+/** Set (or clear, with null) the usage-cap dashboard lock timestamp. */
+export async function setUsageLockedAt(
+  db: DbOrTx,
+  projectId: string,
+  at: Date | null,
+): Promise<void> {
+  await db
+    .update(projects)
+    .set({ usageLockedAt: at })
+    .where(eq(projects.id, projectId));
+}
+
 export async function updateProject(
   db: DbOrTx,
   id: string,

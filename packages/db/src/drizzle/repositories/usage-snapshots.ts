@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "../client";
 import {
   usageSnapshots,
@@ -43,6 +43,22 @@ export async function findUsageSnapshotsForProject(
       and(
         eq(usageSnapshots.projectId, projectId),
         eq(usageSnapshots.periodStart, periodStart),
+      ),
+    );
+}
+
+export async function findSnapshotsForPeriodStarts(
+  db: Db,
+  projectId: string,
+  periodStarts: Date[],
+): Promise<UsageSnapshot[]> {
+  return db
+    .select()
+    .from(usageSnapshots)
+    .where(
+      and(
+        eq(usageSnapshots.projectId, projectId),
+        inArray(usageSnapshots.periodStart, periodStarts),
       ),
     );
 }
