@@ -116,10 +116,15 @@ vi.mock("../src/lib/project-credentials", () => ({
     packageName: "com.example.app",
     serviceAccount: { client_email: "s@p.iam", private_key: "key" },
   })),
-  loadStripeCredentials: vi.fn(async () => ({
-    secretKey: "sk_test_xxx",
-    webhookSecret: "whsec_xxx",
+}));
+
+vi.mock("../src/lib/stripe-platform", () => ({
+  getConnectedStripe: vi.fn(async () => ({
+    stripe: {},
+    accountId: "acct_1",
+    livemode: true,
   })),
+  chargesEnabled: vi.fn(async () => true),
 }));
 
 vi.mock("../src/middleware/dashboard-auth", () => ({
@@ -324,7 +329,12 @@ describe("GET /health/stores", () => {
       data: {
         apple: { connected: boolean; lastWebhookAt: string | null; credentialStatus: string };
         google: { connected: boolean; lastWebhookAt: string | null; credentialStatus: string };
-        stripe: { connected: boolean; lastWebhookAt: string | null; credentialStatus: string };
+        stripe: {
+          connected: boolean;
+          lastWebhookAt: string | null;
+          credentialStatus: string;
+          chargesEnabled: boolean;
+        };
       };
     };
 
@@ -339,6 +349,7 @@ describe("GET /health/stores", () => {
     expect(body.data.stripe.connected).toBe(true);
     expect(body.data.stripe.lastWebhookAt).toBeNull();
     expect(body.data.stripe.credentialStatus).toBe("ok");
+    expect(body.data.stripe.chargesEnabled).toBe(true);
   });
 
   test("reports credentialStatus=missing when a store has no credentials", async () => {
@@ -351,10 +362,8 @@ describe("GET /health/stores", () => {
 
     dbMock.webhookEvent.findFirst.mockResolvedValue(null);
 
-    const { loadStripeCredentials } = await import(
-      "../src/lib/project-credentials"
-    );
-    vi.mocked(loadStripeCredentials).mockResolvedValueOnce(null);
+    const { getConnectedStripe } = await import("../src/lib/stripe-platform");
+    vi.mocked(getConnectedStripe).mockResolvedValueOnce(null);
 
     const res = await buildApp().request(
       "/health/stores?projectId=proj_a",
@@ -364,10 +373,11 @@ describe("GET /health/stores", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       data: {
-        stripe: { connected: boolean; credentialStatus: string };
+        stripe: { connected: boolean; credentialStatus: string; chargesEnabled: boolean };
       };
     };
     expect(body.data.stripe.connected).toBe(false);
     expect(body.data.stripe.credentialStatus).toBe("missing");
+    expect(body.data.stripe.chargesEnabled).toBe(false);
   });
 });

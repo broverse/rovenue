@@ -253,18 +253,13 @@ describe("POST /webhooks/stripe/connect", () => {
     );
   });
 
-  it("is not swallowed by the legacy /stripe/:projectId route", async () => {
-    findActiveByAccountId.mockResolvedValue(null);
-    const app = await buildApp();
-    const { body, headers } = post(event({}));
-    const res = await app.request("/webhooks/stripe/connect", {
-      method: "POST",
-      body,
-      headers,
-    });
-    // The legacy route answers 401 for an unknown project; the Connect
-    // route answers 202 unknown_account. Anything else means the mount
-    // order regressed.
-    expect(res.status).toBe(202);
-  });
+  // The former "is not swallowed by the legacy /stripe/:projectId route"
+  // regression test lived here. Task 8 deleted that legacy route
+  // entirely, so the mount-order hazard it guarded against (the legacy
+  // route's `/:projectId` pattern matching the literal segment "connect")
+  // can no longer occur — `/stripe` now mounts only this Connect route.
+  // Its sole remaining assertion (a 202 when no connection matches) was
+  // already an exact duplicate of "202s with unknown_account when no
+  // active connection matches" above, so it's retired rather than kept
+  // as dead weight.
 });

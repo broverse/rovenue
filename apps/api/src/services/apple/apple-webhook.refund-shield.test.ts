@@ -202,7 +202,6 @@ function makeProjectRow(overrides: {
     description: null,
     appleCredentials: null,
     googleCredentials: null,
-    stripeCredentials: null,
     webhookUrl: null,
     webhookSecret: null,
     settings: {},

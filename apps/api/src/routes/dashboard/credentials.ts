@@ -19,8 +19,12 @@ import { env } from "../../lib/env";
 import { ok } from "../../lib/response";
 
 // =============================================================
-// Dashboard: Store credentials (apple / google / stripe)
+// Dashboard: Store credentials (apple / google)
 // =============================================================
+//
+// Stripe used to live here too (pasted secret + webhook key). Stripe
+// Connect (routes/dashboard/stripe-connect.ts) replaced it — this
+// route no longer reads or writes any Stripe credential material.
 //
 // Write requires OWNER (secret material rotation is a privileged
 // operation). Read is VIEWER+ and NEVER echoes plaintext — only a
@@ -60,14 +64,11 @@ export const googleCredentialsBodySchema = z
   })
   .passthrough();
 
-export const stripeCredentialsBodySchema = z
-  .object({
-    secretKey: z.string().min(1),
-    webhookSecret: z.string().min(1),
-  })
-  .passthrough();
-
-const storeParam = z.enum(["apple", "google", "stripe"]);
+// Stripe credentials are no longer stored here — projects authenticate
+// with Stripe via Connect OAuth (see routes/dashboard/stripe-connect.ts).
+// `store` still accepts only "apple"/"google"; a "stripe" store param now
+// 400s same as any other unknown store.
+const storeParam = z.enum(["apple", "google"]);
 
 // =============================================================
 // Shape → safe-to-display subset
@@ -97,11 +98,6 @@ function safeFields(
     }
     return out;
   }
-  if (store === "stripe") {
-    // Only return "configured: true" plus a hint that the webhook
-    // secret is set. Never echo any Stripe secrets.
-    return { configured: "true" };
-  }
   return undefined;
 }
 
@@ -127,19 +123,17 @@ export const credentialsRoute = new Hono()
   const user = c.get("user");
   await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
-  const [appleRow, googleRow, stripeRow] = await Promise.all([
+  const [appleRow, googleRow] = await Promise.all([
     drizzle.projectRepo.findProjectCredentials(drizzle.db, projectId, "apple"),
     drizzle.projectRepo.findProjectCredentials(drizzle.db, projectId, "google"),
-    drizzle.projectRepo.findProjectCredentials(drizzle.db, projectId, "stripe"),
   ]);
-  if (!appleRow && !googleRow && !stripeRow) {
+  if (!appleRow && !googleRow) {
     const exists = await drizzle.projectRepo.findProjectById(drizzle.db, projectId);
     if (!exists) throw new HTTPException(404, { message: "Project not found" });
   }
   const project = {
     appleCredentials: appleRow?.value ?? null,
     googleCredentials: googleRow?.value ?? null,
-    stripeCredentials: stripeRow?.value ?? null,
   };
 
   const statusFor = (
@@ -159,7 +153,13 @@ export const credentialsRoute = new Hono()
     credentials: {
       apple: statusFor("apple", project.appleCredentials),
       google: statusFor("google", project.googleCredentials),
-      stripe: statusFor("stripe", project.stripeCredentials),
+      // Stripe no longer stores per-project secrets — see
+      // routes/dashboard/stripe-connect.ts for real connection status.
+      // `CredentialStore`/`CredentialsListResponse` still declare this
+      // key (narrowing them is Task 10's job alongside the dashboard),
+      // so report a permanent "not configured" stub rather than
+      // querying a column that no longer exists.
+      stripe: { store: "stripe", configured: false },
     },
   };
     return c.json(ok(payload));
@@ -185,11 +185,8 @@ export const credentialsRoute = new Hono()
   let body: Record<string, unknown>;
   try {
     const raw = await c.req.json();
-    const schema = store === "apple"
-      ? appleCredentialsBodySchema
-      : store === "google"
-        ? googleCredentialsBodySchema
-        : stripeCredentialsBodySchema;
+    const schema =
+      store === "apple" ? appleCredentialsBodySchema : googleCredentialsBodySchema;
     body = schema.parse(raw) as Record<string, unknown>;
   } catch (err) {
     throw new HTTPException(400, {

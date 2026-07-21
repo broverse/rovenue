@@ -5,7 +5,6 @@ import { googleWebhookRoute } from "./google";
 import { resendEventsRoute } from "./resend-events";
 import { sesEventsRoute } from "./ses-events";
 import { stripeConnectWebhookRoute } from "./stripe-connect";
-import { stripeWebhookRoute } from "./stripe";
 
 // =============================================================
 // /webhooks route tree
@@ -46,10 +45,8 @@ export const webhooksRoute = new Hono()
   .route("/google", googleWebhookRoute)
   .route("/ses-events", sesEventsRoute)
   .route("/resend-events", resendEventsRoute)
-  // Connect must be mounted before the legacy per-project route: its
-  // `/:projectId` pattern happily matches the literal segment
-  // "connect", so registering it first would swallow every Connect
-  // webhook and 401 it as an unknown project. Removed in Task 8 along
-  // with stripeWebhookRoute itself.
-  .route("/stripe", stripeConnectWebhookRoute)
-  .route("/stripe", stripeWebhookRoute);
+  // The legacy per-project /stripe/:projectId route (and the mount-order
+  // hazard it created — its `/:projectId` pattern would have happily
+  // matched the literal segment "connect") is gone as of Task 8. Stripe
+  // Connect's platform-level webhook is now the only thing mounted here.
+  .route("/stripe", stripeConnectWebhookRoute);

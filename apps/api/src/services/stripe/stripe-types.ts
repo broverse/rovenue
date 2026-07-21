@@ -55,14 +55,3 @@ export type StripeInvoiceBillingReason =
 // =============================================================
 
 export const STRIPE_SIGNATURE_HEADER = "stripe-signature";
-
-// =============================================================
-// Per-project credentials stored under Project.stripeCredentials.
-// Intended to be AES-256-GCM encrypted at the application layer;
-// this interface is the plaintext shape the handler consumes.
-// =============================================================
-
-export interface StripeProjectCredentials {
-  secretKey: string;
-  webhookSecret: string;
-}

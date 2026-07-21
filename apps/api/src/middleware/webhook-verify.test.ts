@@ -107,7 +107,6 @@ describe("verifyAppleWebhook — fail-closed (W3.1)", () => {
     // Mock project-credentials so loadAppleCredentials returns null (no creds)
     vi.doMock("../lib/project-credentials", () => ({
       loadAppleCredentials: vi.fn().mockResolvedValue(null),
-      loadStripeCredentials: vi.fn().mockResolvedValue(null),
     }));
 
     const { Hono } = await import("hono");
@@ -147,7 +146,6 @@ describe("verifyAppleWebhook — fail-closed (W3.1)", () => {
 
     vi.doMock("../lib/project-credentials", () => ({
       loadAppleCredentials: vi.fn().mockResolvedValue(null),
-      loadStripeCredentials: vi.fn().mockResolvedValue(null),
     }));
 
     // Mock JoseAppleNotificationVerifier to succeed (avoids needing a real JWS)

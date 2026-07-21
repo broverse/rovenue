@@ -14,11 +14,7 @@ import {
 // tell encrypted rows apart from legacy plaintext rows (which
 // still decrypt as a pass-through during the migration window).
 
-const CREDENTIAL_FIELDS = [
-  "appleCredentials",
-  "googleCredentials",
-  "stripeCredentials",
-] as const;
+const CREDENTIAL_FIELDS = ["appleCredentials", "googleCredentials"] as const;
 
 type CredentialField = (typeof CREDENTIAL_FIELDS)[number];
 
@@ -57,7 +53,6 @@ export function decryptCredential<T>(
 type ProjectCredentialsInput = {
   appleCredentials?: unknown;
   googleCredentials?: unknown;
-  stripeCredentials?: unknown;
   [key: string]: unknown;
 };
 

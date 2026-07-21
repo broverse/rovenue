@@ -41,19 +41,17 @@ describe("encryptCredential / decryptCredential", () => {
 });
 
 describe("encryptProjectCredentials", () => {
-  test("encrypts apple, google and stripe fields when present", () => {
+  test("encrypts apple and google fields when present", () => {
     const input = {
       name: "My Project",
       appleCredentials: { bundleId: "com.a" },
       googleCredentials: { packageName: "com.g" },
-      stripeCredentials: { secretKey: "sk_live" },
     };
 
     const out = encryptProjectCredentials(input, KEY);
 
     expect(isEncryptedCredential(out.appleCredentials)).toBe(true);
     expect(isEncryptedCredential(out.googleCredentials)).toBe(true);
-    expect(isEncryptedCredential(out.stripeCredentials)).toBe(true);
     expect(out.name).toBe("My Project");
   });
 
@@ -84,7 +82,6 @@ describe("withDecryptedProjectCredentials", () => {
       id: "p1",
       appleCredentials: encryptCredential(apple, KEY),
       googleCredentials: encryptCredential(google, KEY),
-      stripeCredentials: null,
     };
 
     const decrypted = withDecryptedProjectCredentials(row, KEY);
@@ -92,7 +89,6 @@ describe("withDecryptedProjectCredentials", () => {
     expect(decrypted).not.toBeNull();
     expect(decrypted!.appleCredentials).toEqual(apple);
     expect(decrypted!.googleCredentials).toEqual(google);
-    expect(decrypted!.stripeCredentials).toBeNull();
   });
 
   test("returns null when the row is null", () => {

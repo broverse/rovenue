@@ -264,7 +264,6 @@ export const projects = pgTable("projects", {
   description: text("description"),
   appleCredentials: jsonb("appleCredentials"),
   googleCredentials: jsonb("googleCredentials"),
-  stripeCredentials: jsonb("stripeCredentials"),
   webhookUrl: text("webhookUrl"),
   webhookSecret: text("webhookSecret"),
   webhookEventCategories: jsonb("webhookEventCategories")

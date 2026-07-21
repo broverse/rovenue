@@ -610,6 +610,13 @@
       "when": 1784663789829,
       "tag": "0086_stripe_connect",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1784663790829,
+      "tag": "0087_drop_stripe_credentials",
+      "breakpoints": true
     }
   ]
 }

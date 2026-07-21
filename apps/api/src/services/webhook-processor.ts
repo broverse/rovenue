@@ -8,10 +8,8 @@ import {
 import { toWebhookEventCategory } from "@rovenue/shared";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
-import {
-  loadGoogleCredentials,
-  loadStripeCredentials,
-} from "../lib/project-credentials";
+import { loadGoogleCredentials } from "../lib/project-credentials";
+import { requireConnectedStripe } from "../lib/stripe-platform";
 import { syncAccess } from "./access-engine";
 import { grantPurchaseCurrencies } from "./purchase-credits";
 import {
@@ -26,7 +24,6 @@ import {
   type HandleGoogleNotificationResult,
 } from "./google";
 import {
-  getStripeClient,
   processStripeEvent,
   type HandleStripeNotificationResult,
 } from "./stripe/stripe-webhook";
@@ -145,17 +142,18 @@ async function dispatchToHandler(
       });
     }
     case "STRIPE": {
-      const credentials = await loadStripeCredentials(data.projectId);
-      if (!credentials) {
-        throw new Error(
-          `Stripe credentials not configured for project ${data.projectId}`,
-        );
-      }
-      const stripe = getStripeClient(credentials.secretKey);
+      // Throws StripeNotConnectedError when the project has no active
+      // connection, which BullMQ treats as a retry signal (same as the
+      // old "credentials not configured" throw did).
+      const connected = await requireConnectedStripe(data.projectId);
       return processStripeEvent({
         projectId: data.projectId,
         event: data.event,
-        stripe,
+        stripe: connected.stripe,
+        // Every Stripe call processStripeEvent's dispatch makes is
+        // routed through this so it acts on the customer's connected
+        // account, not Rovenue's platform account.
+        accountId: connected.accountId,
       });
     }
   }

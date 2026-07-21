@@ -72,7 +72,6 @@ export async function findProjectWebhookConfig(
 export interface ProjectCredentialsFields {
   appleCredentials: unknown;
   googleCredentials: unknown;
-  stripeCredentials: unknown;
 }
 
 /**
@@ -84,14 +83,10 @@ export interface ProjectCredentialsFields {
 export async function findProjectCredentials(
   db: Db,
   id: string,
-  store: "apple" | "google" | "stripe",
+  store: "apple" | "google",
 ): Promise<{ value: unknown } | null> {
   const column =
-    store === "apple"
-      ? projects.appleCredentials
-      : store === "google"
-        ? projects.googleCredentials
-        : projects.stripeCredentials;
+    store === "apple" ? projects.appleCredentials : projects.googleCredentials;
   const rows = await db
     .select({ value: column })
     .from(projects)
@@ -331,15 +326,10 @@ export async function deleteProject(
 export async function writeProjectCredential(
   db: DbOrTx,
   projectId: string,
-  store: "apple" | "google" | "stripe",
+  store: "apple" | "google",
   encrypted: unknown,
 ): Promise<void> {
-  const column =
-    store === "apple"
-      ? "appleCredentials"
-      : store === "google"
-        ? "googleCredentials"
-        : "stripeCredentials";
+  const column = store === "apple" ? "appleCredentials" : "googleCredentials";
   await db
     .update(projects)
     .set({ [column]: encrypted } as Partial<typeof projects.$inferInsert>)
@@ -354,14 +344,9 @@ export async function writeProjectCredential(
 export async function clearProjectCredential(
   db: DbOrTx,
   projectId: string,
-  store: "apple" | "google" | "stripe",
+  store: "apple" | "google",
 ): Promise<void> {
-  const column =
-    store === "apple"
-      ? "appleCredentials"
-      : store === "google"
-        ? "googleCredentials"
-        : "stripeCredentials";
+  const column = store === "apple" ? "appleCredentials" : "googleCredentials";
   await db
     .update(projects)
     .set({ [column]: sql`NULL` } as Partial<typeof projects.$inferInsert>)

@@ -5,10 +5,7 @@ import { z } from "zod";
 import { BEARER_SCHEME, HEADER } from "@rovenue/shared";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
-import {
-  loadAppleCredentials,
-  loadStripeCredentials,
-} from "../lib/project-credentials";
+import { loadAppleCredentials } from "../lib/project-credentials";
 import {
   createAppleVerifier,
   decodeUnverifiedJws,
@@ -20,8 +17,6 @@ import type {
   AppleResponseBodyV2DecodedPayload,
 } from "../services/apple/apple-types";
 import { verifyPubSubPushToken } from "../services/google/google-auth";
-import { STRIPE_SIGNATURE_HEADER } from "../services/stripe/stripe-types";
-import { getStripeClient } from "../services/stripe/stripe-webhook";
 
 // =============================================================
 // Webhook signature verification middleware
@@ -263,53 +258,12 @@ export const verifyGoogleWebhook: MiddlewareHandler = async (c, next) => {
 };
 
 // =============================================================
-// Stripe — Stripe-Signature HMAC with 300s tolerance
+// Stripe — verified by apps/api/src/routes/webhooks/stripe-connect.ts
 // =============================================================
-
-const STRIPE_TOLERANCE_SECONDS = 300;
-
-export const verifyStripeWebhook: MiddlewareHandler = async (c, next) => {
-  const projectId = requireProjectId(c.req.param("projectId"));
-
-  const signature = c.req.header(STRIPE_SIGNATURE_HEADER);
-  if (!signature) {
-    log.warn("stripe webhook rejected: missing Stripe-Signature header", {
-      projectId,
-    });
-    throw new HTTPException(401, {
-      message: "Missing Stripe-Signature header",
-    });
-  }
-
-  const credentials = await loadStripeCredentials(projectId);
-  if (!credentials) {
-    log.warn("stripe webhook rejected: no project credentials", { projectId });
-    throw new HTTPException(401, {
-      message: "Project not configured for Stripe",
-    });
-  }
-
-  const rawBody = await c.req.text();
-  const stripe = getStripeClient(credentials.secretKey);
-
-  let event: Stripe.Event;
-  try {
-    event = stripe.webhooks.constructEvent(
-      rawBody,
-      signature,
-      credentials.webhookSecret,
-      STRIPE_TOLERANCE_SECONDS,
-    );
-  } catch (err) {
-    log.warn("stripe signature verification failed", {
-      projectId,
-      err: err instanceof Error ? err.message : String(err),
-    });
-    throw new HTTPException(401, { message: "Invalid Stripe signature" });
-  }
-
-  c.set("verifiedWebhook", { source: "STRIPE", rawBody, event });
-  c.set("webhookEventId", event.id);
-  c.set("webhookEventTimestamp", event.created);
-  await next();
-};
+//
+// Stripe Connect's platform-level webhook verifies its own signature
+// inline (one platform secret covers every connected account, so there
+// is no per-project credential lookup to share with the other stores'
+// middleware here). The `VerifiedStripe` shape below stays — Connect's
+// route still populates `c.set("verifiedWebhook", { source: "STRIPE", … })`
+// against the same `ContextVariableMap` augmentation.

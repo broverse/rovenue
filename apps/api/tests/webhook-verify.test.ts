@@ -15,22 +15,10 @@ const mocks = vi.hoisted(() => {
 
   const createAppleVerifier = vi.fn(() => appleVerifier);
 
-  const stripeClient = {
-    webhooks: {
-      constructEvent: vi.fn(),
-    },
-  };
-
-  const getStripeClient = vi.fn(() => stripeClient);
-
   const verifyPubSubPushToken = vi.fn(async () => undefined);
 
   const loadAppleCredentials = vi.fn(async () => ({
     bundleId: "com.example.app",
-  }));
-  const loadStripeCredentials = vi.fn(async () => ({
-    secretKey: "sk_test_xxx",
-    webhookSecret: "whsec_xxx",
   }));
 
   const env = {
@@ -44,11 +32,8 @@ const mocks = vi.hoisted(() => {
   return {
     appleVerifier,
     createAppleVerifier,
-    stripeClient,
-    getStripeClient,
     verifyPubSubPushToken,
     loadAppleCredentials,
-    loadStripeCredentials,
     env,
   };
 });
@@ -61,17 +46,12 @@ vi.mock("../src/services/apple/apple-verify", () => ({
   decodeUnverifiedJws: () => ({ data: { environment: "Sandbox" } }),
 }));
 
-vi.mock("../src/services/stripe/stripe-webhook", () => ({
-  getStripeClient: mocks.getStripeClient,
-}));
-
 vi.mock("../src/services/google/google-auth", () => ({
   verifyPubSubPushToken: mocks.verifyPubSubPushToken,
 }));
 
 vi.mock("../src/lib/project-credentials", () => ({
   loadAppleCredentials: mocks.loadAppleCredentials,
-  loadStripeCredentials: mocks.loadStripeCredentials,
 }));
 
 vi.mock("../src/lib/env", () => ({ env: mocks.env }));
@@ -83,7 +63,6 @@ vi.mock("../src/lib/env", () => ({ env: mocks.env }));
 import {
   verifyAppleWebhook,
   verifyGoogleWebhook,
-  verifyStripeWebhook,
 } from "../src/middleware/webhook-verify";
 
 function makeApp(
@@ -114,10 +93,6 @@ beforeEach(() => {
   mocks.env.PUBSUB_PUSH_AUDIENCE = "https://hooks.example.com/webhooks/google";
   mocks.env.PUBSUB_PUSH_SERVICE_ACCOUNT = undefined;
   mocks.loadAppleCredentials.mockResolvedValue({ bundleId: "com.example.app" });
-  mocks.loadStripeCredentials.mockResolvedValue({
-    secretKey: "sk_test_xxx",
-    webhookSecret: "whsec_xxx",
-  });
 });
 
 // =============================================================
@@ -372,103 +347,5 @@ describe("verifyGoogleWebhook", () => {
     expect(body.eventTimestamp).toBe(
       Math.floor(new Date("2026-04-21T10:00:00Z").getTime() / 1000),
     );
-  });
-});
-
-// =============================================================
-// Stripe
-// =============================================================
-
-describe("verifyStripeWebhook", () => {
-  test("verifies signature and stashes the verified event + raw body", async () => {
-    mocks.stripeClient.webhooks.constructEvent.mockReturnValue({
-      id: "evt_1",
-      type: "invoice.paid",
-    });
-
-    const app = makeApp(verifyStripeWebhook);
-    const res = await app.request("/proj_a", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "stripe-signature": "t=123,v1=abc",
-      },
-      body: '{"id":"evt_1"}',
-    });
-
-    expect(res.status).toBe(200);
-    const [rawBody, sig, secret, tolerance] =
-      mocks.stripeClient.webhooks.constructEvent.mock.calls[0]!;
-    expect(rawBody).toBe('{"id":"evt_1"}');
-    expect(sig).toBe("t=123,v1=abc");
-    expect(secret).toBe("whsec_xxx");
-    expect(tolerance).toBe(300);
-  });
-
-  test("401 when Stripe-Signature header is missing", async () => {
-    const app = makeApp(verifyStripeWebhook);
-    const res = await app.request("/proj_a", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: '{"id":"evt_1"}',
-    });
-
-    expect(res.status).toBe(401);
-    expect(mocks.stripeClient.webhooks.constructEvent).not.toHaveBeenCalled();
-  });
-
-  test("401 when constructEvent throws on bad signature", async () => {
-    mocks.stripeClient.webhooks.constructEvent.mockImplementation(() => {
-      throw new Error("No signatures found matching the expected signature");
-    });
-
-    const app = makeApp(verifyStripeWebhook);
-    const res = await app.request("/proj_a", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "stripe-signature": "t=123,v1=wrong",
-      },
-      body: '{"id":"evt_1"}',
-    });
-
-    expect(res.status).toBe(401);
-  });
-
-  test("401 when the project has no Stripe credentials configured", async () => {
-    mocks.loadStripeCredentials.mockResolvedValue(null);
-
-    const app = makeApp(verifyStripeWebhook);
-    const res = await app.request("/proj_a", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "stripe-signature": "t=123,v1=abc",
-      },
-      body: '{"id":"evt_1"}',
-    });
-
-    expect(res.status).toBe(401);
-    expect(mocks.stripeClient.webhooks.constructEvent).not.toHaveBeenCalled();
-  });
-
-  test("stashes event.id + event.created on ctx", async () => {
-    mocks.stripeClient.webhooks.constructEvent.mockReturnValue({
-      id: "evt_stripe_1",
-      created: 1_700_000_123,
-      type: "invoice.paid",
-    } as never);
-    const app = makeApp(verifyStripeWebhook);
-    const res = await app.request("/proj_a", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "stripe-signature": "t=1,v1=fake",
-      },
-      body: '{"raw":true}',
-    });
-    const body = (await res.json()) as { eventId: string; eventTimestamp: number };
-    expect(body.eventId).toBe("evt_stripe_1");
-    expect(body.eventTimestamp).toBe(1_700_000_123);
   });
 });

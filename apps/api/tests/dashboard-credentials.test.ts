@@ -122,7 +122,6 @@ describe("GET /dashboard/projects/:projectId/credentials", () => {
     dbMock.project.findUnique.mockResolvedValue({
       appleCredentials: null,
       googleCredentials: null,
-      stripeCredentials: null,
     });
     const res = await app.request("/dashboard/projects/proj_1/credentials");
     expect(res.status).toBe(200);
@@ -142,14 +141,9 @@ describe("GET /dashboard/projects/:projectId/credentials", () => {
       { bundleId: "com.acme.app", keyId: "KEY1", privateKey: "LEAKED" },
       key,
     );
-    const encryptedStripe = encryptCredential(
-      { secretKey: "sk_live_SUPER_SECRET", webhookSecret: "whsec_LEAK" },
-      key,
-    );
     dbMock.project.findUnique.mockResolvedValue({
       appleCredentials: encryptedApple,
       googleCredentials: null,
-      stripeCredentials: encryptedStripe,
     });
 
     const res = await app.request("/dashboard/projects/proj_1/credentials");
@@ -161,11 +155,12 @@ describe("GET /dashboard/projects/:projectId/credentials", () => {
     expect(body.data.credentials.apple.safeFields).toEqual(
       expect.objectContaining({ bundleId: "com.acme.app", keyId: "KEY1" }),
     );
-    expect(body.data.credentials.stripe.configured).toBe(true);
+    // Stripe credentials no longer live on the project row — the route
+    // reports a permanent "not configured" stub. Real connection state
+    // comes from GET /dashboard/projects/:id/stripe-connect instead.
+    expect(body.data.credentials.stripe.configured).toBe(false);
     const serialized = JSON.stringify(body.data);
     expect(serialized).not.toContain("LEAKED");
-    expect(serialized).not.toContain("SUPER_SECRET");
-    expect(serialized).not.toContain("whsec_LEAK");
   });
 });
 
@@ -219,10 +214,10 @@ describe("PUT /dashboard/projects/:projectId/credentials/:store", () => {
   test("rejects invalid payload with 400", async () => {
     signedIn("owner");
     dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
-    const res = await app.request("/dashboard/projects/proj_1/credentials/stripe", {
+    const res = await app.request("/dashboard/projects/proj_1/credentials/apple", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ secretKey: "" }), // empty, invalid
+      body: JSON.stringify({ bundleId: "" }), // empty, invalid
     });
     expect(res.status).toBe(400);
     expect(drizzleMock.projectRepo.writeProjectCredential).not.toHaveBeenCalled();
@@ -238,6 +233,19 @@ describe("PUT /dashboard/projects/:projectId/credentials/:store", () => {
       body: JSON.stringify({ foo: "bar" }),
     });
     expect(res.status).toBe(400);
+  });
+
+  test("rejects stripe as a store — Stripe Connect replaced per-project keys", async () => {
+    signedIn("owner");
+    dbMock.projectMember.findUnique.mockResolvedValue({ id: "pm", role: "OWNER" });
+    const res = await app.request("/dashboard/projects/proj_1/credentials/stripe", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ secretKey: "sk_live_x", webhookSecret: "whsec_x" }),
+    });
+    expect(res.status).toBe(400);
+    expect(drizzleMock.projectRepo.writeProjectCredential).not.toHaveBeenCalled();
+    expect(auditMock.audit).not.toHaveBeenCalled();
   });
 });
 

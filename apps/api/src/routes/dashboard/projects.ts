@@ -128,7 +128,7 @@ function assertSettingsSafe(settings: Record<string, unknown>): void {
   for (const k of Object.keys(settings)) {
     if (SENSITIVE_SETTINGS_KEY_RE.test(k)) {
       throw new HTTPException(400, {
-        message: `settings key "${k}" looks sensitive — store secrets in appleCredentials / googleCredentials / stripeCredentials instead`,
+        message: `settings key "${k}" looks sensitive — store secrets in appleCredentials / googleCredentials instead`,
       });
     }
   }

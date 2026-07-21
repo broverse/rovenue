@@ -1,5 +1,4 @@
-import Stripe from "stripe";
-import { HTTPException } from "hono/http-exception";
+import type Stripe from "stripe";
 import {
   type Db,
   Environment,
@@ -18,38 +17,14 @@ import {
   STRIPE_EVENT_TYPE,
   STRIPE_INVOICE_BILLING_REASON,
   STRIPE_SUBSCRIPTION_STATUS,
-  type StripeProjectCredentials,
 } from "./stripe-types";
 import { guardStatusWrite } from "../subscription-transition-guard";
 
 const log = logger.child("stripe-webhook");
 
 // =============================================================
-// Stripe client cache
-// =============================================================
-
-const clientCache = new Map<string, Stripe>();
-
-export function getStripeClient(secretKey: string): Stripe {
-  const existing = clientCache.get(secretKey);
-  if (existing) return existing;
-
-  const client = new Stripe(secretKey);
-  clientCache.set(secretKey, client);
-  log.debug("provisioned stripe client");
-  return client;
-}
-
-// =============================================================
 // Public API
 // =============================================================
-
-export interface HandleStripeNotificationOptions {
-  projectId: string;
-  rawBody: string;
-  signature: string;
-  credentials: StripeProjectCredentials;
-}
 
 export type HandleStripeNotificationResult =
   | {
@@ -66,40 +41,19 @@ interface StripeDispatchOutcome {
   purchaseId?: string;
 }
 
-/**
- * Verify + process a Stripe webhook from the raw request body. Preferred
- * for synchronous route handlers.
- */
-export async function handleStripeNotification(
-  opts: HandleStripeNotificationOptions,
-): Promise<HandleStripeNotificationResult> {
-  const stripe = getStripeClient(opts.credentials.secretKey);
-
-  let event: Stripe.Event;
-  try {
-    event = stripe.webhooks.constructEvent(
-      opts.rawBody,
-      opts.signature,
-      opts.credentials.webhookSecret,
-    );
-  } catch (err) {
-    log.warn("signature verification failed", {
-      err: err instanceof Error ? err.message : String(err),
-    });
-    throw new HTTPException(400, { message: "Invalid Stripe signature" });
-  }
-
-  return processStripeEvent({
-    projectId: opts.projectId,
-    event,
-    stripe,
-  });
-}
-
 export interface ProcessStripeEventOptions {
   projectId: string;
   event: Stripe.Event;
   stripe: Stripe;
+  /**
+   * Stripe Connect account id for this project. Passed as `{ stripeAccount }`
+   * request options on every direct Stripe API call made during dispatch
+   * so the call acts on the customer's connected account rather than on
+   * Rovenue's platform account. Optional only so existing unit tests that
+   * stub `stripe` directly (and never make a real API call) don't need to
+   * supply one.
+   */
+  accountId?: string;
 }
 
 /**
@@ -110,7 +64,7 @@ export interface ProcessStripeEventOptions {
 export async function processStripeEvent(
   opts: ProcessStripeEventOptions,
 ): Promise<HandleStripeNotificationResult> {
-  const { event, projectId, stripe } = opts;
+  const { event, projectId, stripe, accountId } = opts;
 
   // Atomic single-flight claim — exactly one concurrent worker wins.
   const claim = await drizzle.webhookEventRepo.claimWebhookEvent(drizzle.db, {
@@ -138,7 +92,7 @@ export async function processStripeEvent(
 
   try {
     const outcome: StripeDispatchOutcome = {};
-    await dispatch({ projectId, event, stripe, outcome });
+    await dispatch({ projectId, event, stripe, accountId, outcome });
 
     await drizzle.webhookEventRepo.updateWebhookEvent(
       drizzle.db,
@@ -186,6 +140,8 @@ interface DispatchContext {
   projectId: string;
   event: Stripe.Event;
   stripe: Stripe;
+  /** See {@link ProcessStripeEventOptions.accountId}. */
+  accountId?: string;
   outcome: StripeDispatchOutcome;
 }
 
@@ -427,7 +383,12 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
     return;
   }
 
-  const invoice = await ctx.stripe.invoices.retrieve(invoiceId);
+  // `stripeAccount` targets the customer's connected account rather than
+  // Rovenue's platform account — see ProcessStripeEventOptions.accountId.
+  const invoice = await ctx.stripe.invoices.retrieve(
+    invoiceId,
+    ctx.accountId ? { stripeAccount: ctx.accountId } : undefined,
+  );
   const subscriptionId =
     typeof invoice.subscription === "string"
       ? invoice.subscription

@@ -21,13 +21,6 @@ const googleSchema = z
   })
   .passthrough();
 
-const stripeSchema = z
-  .object({
-    secretKey: z.string().min(1),
-    webhookSecret: z.string().min(1),
-  })
-  .passthrough();
-
 const appleSchema = z
   .object({
     bundleId: z.string().min(1),
@@ -39,7 +32,6 @@ const appleSchema = z
   .passthrough();
 
 export type GoogleCredentials = z.infer<typeof googleSchema>;
-export type StripeCredentials = z.infer<typeof stripeSchema>;
 export type AppleCredentials = z.infer<typeof appleSchema>;
 
 // =============================================================
@@ -71,27 +63,6 @@ export async function loadGoogleCredentials(
   const parsed = googleSchema.safeParse(plain);
   if (!parsed.success) {
     log.warn("google credentials schema mismatch", {
-      projectId,
-      issues: parsed.error.issues,
-    });
-    return null;
-  }
-  return parsed.data;
-}
-
-export async function loadStripeCredentials(
-  projectId: string,
-): Promise<StripeCredentials | null> {
-  const row = await drizzle.projectRepo.findProjectCredentials(
-    drizzle.db,
-    projectId,
-    "stripe",
-  );
-  const plain = unwrap(row?.value ?? null);
-  if (!plain) return null;
-  const parsed = stripeSchema.safeParse(plain);
-  if (!parsed.success) {
-    log.warn("stripe credentials schema mismatch", {
       projectId,
       issues: parsed.error.issues,
     });

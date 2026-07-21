@@ -4,11 +4,8 @@ import { WebhookSource, drizzle } from "@rovenue/db";
 import { sql } from "drizzle-orm";
 import { getStoreCircuits, type CircuitBreakerStats } from "../lib/circuit-breaker";
 import { redis } from "../lib/redis";
-import {
-  loadAppleCredentials,
-  loadGoogleCredentials,
-  loadStripeCredentials,
-} from "../lib/project-credentials";
+import { loadAppleCredentials, loadGoogleCredentials } from "../lib/project-credentials";
+import { chargesEnabled, getConnectedStripe } from "../lib/stripe-platform";
 import { getWebhookQueue } from "../services/webhook-processor";
 import { getDeliveryQueue } from "../workers/webhook-delivery";
 import { getFxQueue, isFxStale } from "../services/fx";
@@ -199,6 +196,17 @@ interface StoreHealth {
   circuit: CircuitBreakerStats;
 }
 
+/**
+ * Stripe reports connection state (Stripe Connect), not credential
+ * presence — there's no per-project secret to load anymore. `connected`
+ * mirrors "has an active Stripe Connect connection"; `chargesEnabled`
+ * additionally surfaces whether Stripe has actually cleared onboarding
+ * for card payments (connecting alone isn't enough).
+ */
+interface StripeStoreHealth extends StoreHealth {
+  chargesEnabled: boolean;
+}
+
 async function lastProcessedWebhookAt(
   projectId: string,
   source: WebhookSource,
@@ -228,6 +236,28 @@ async function loadStoreHealth<T>(
   }
 }
 
+async function loadStripeConnectionHealth(
+  projectId: string,
+): Promise<{
+  connected: boolean;
+  credentialStatus: CredentialStatus;
+  chargesEnabled: boolean;
+}> {
+  try {
+    const connected = await getConnectedStripe(projectId);
+    if (!connected) {
+      return { connected: false, credentialStatus: "missing", chargesEnabled: false };
+    }
+    const enabled = await chargesEnabled(projectId);
+    return { connected: true, credentialStatus: "ok", chargesEnabled: enabled };
+  } catch (err) {
+    log.warn("stripe connection health check failed", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return { connected: false, credentialStatus: "invalid", chargesEnabled: false };
+  }
+}
+
 healthRoute.get("/stores", requireDashboardAuth, async (c) => {
   const projectId = c.req.query("projectId");
   if (!projectId) {
@@ -240,14 +270,14 @@ healthRoute.get("/stores", requireDashboardAuth, async (c) => {
   const [
     appleCreds,
     googleCreds,
-    stripeCreds,
+    stripeConnection,
     appleLast,
     googleLast,
     stripeLast,
   ] = await Promise.all([
     loadStoreHealth(() => loadAppleCredentials(projectId)),
     loadStoreHealth(() => loadGoogleCredentials(projectId)),
-    loadStoreHealth(() => loadStripeCredentials(projectId)),
+    loadStripeConnectionHealth(projectId),
     lastProcessedWebhookAt(projectId, WebhookSource.APPLE),
     lastProcessedWebhookAt(projectId, WebhookSource.GOOGLE),
     lastProcessedWebhookAt(projectId, WebhookSource.STRIPE),
@@ -257,7 +287,11 @@ healthRoute.get("/stores", requireDashboardAuth, async (c) => {
 
   const apple: StoreHealth = { ...appleCreds, lastWebhookAt: appleLast, circuit: circuits.apple! };
   const google: StoreHealth = { ...googleCreds, lastWebhookAt: googleLast, circuit: circuits.google! };
-  const stripe: StoreHealth = { ...stripeCreds, lastWebhookAt: stripeLast, circuit: circuits.stripe! };
+  const stripe: StripeStoreHealth = {
+    ...stripeConnection,
+    lastWebhookAt: stripeLast,
+    circuit: circuits.stripe!,
+  };
 
   return c.json(ok({ apple, google, stripe }));
 });
