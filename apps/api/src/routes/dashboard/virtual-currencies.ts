@@ -62,7 +62,7 @@ export const virtualCurrenciesDashboardRoute = new Hono()
     async (c) => {
       const projectId = requireProjectId(c);
       const user = c.get("user");
-      await assertProjectCapability(projectId, user.id, "credits:write");
+      await assertProjectCapability(projectId, user.id, "virtual-currency:manage");
       const body = c.req.valid("json");
 
       const existing = await drizzle.virtualCurrencyRepo.findVirtualCurrencyByCode(
@@ -112,7 +112,7 @@ export const virtualCurrenciesDashboardRoute = new Hono()
       const id = c.req.param("id");
       if (!id) throw new HTTPException(400, { message: "Missing id" });
       const user = c.get("user");
-      await assertProjectCapability(projectId, user.id, "credits:write");
+      await assertProjectCapability(projectId, user.id, "virtual-currency:manage");
       const body = c.req.valid("json");
       const existing = await drizzle.virtualCurrencyRepo.findVirtualCurrencyById(
         drizzle.db,
@@ -147,7 +147,7 @@ export const virtualCurrenciesDashboardRoute = new Hono()
     const id = c.req.param("id");
     if (!id) throw new HTTPException(400, { message: "Missing id" });
     const user = c.get("user");
-    await assertProjectCapability(projectId, user.id, "credits:write");
+    await assertProjectCapability(projectId, user.id, "virtual-currency:manage");
     const row = await drizzle.virtualCurrencyRepo.archiveVirtualCurrency(
       drizzle.db,
       projectId,

@@ -28,10 +28,26 @@ describe("roleHasCapability", () => {
     expect(roleHasCapability("GROWTH", "products:write")).toBe(false);
   });
 
-  it("CUSTOMER_SUPPORT can write to subscribers + credits only", () => {
+  it("CUSTOMER_SUPPORT can edit subscriber attributes but not perform money/GDPR ops", () => {
     expect(roleHasCapability("CUSTOMER_SUPPORT", "subscribers:write")).toBe(true);
-    expect(roleHasCapability("CUSTOMER_SUPPORT", "credits:write")).toBe(true);
+    // Money-equivalent and irreversible/PII-exfil operations are gated above
+    // CUSTOMER_SUPPORT: minting currency, GDPR anonymize/export.
+    expect(roleHasCapability("CUSTOMER_SUPPORT", "credits:write")).toBe(false);
+    expect(roleHasCapability("CUSTOMER_SUPPORT", "subscribers:gdpr")).toBe(false);
     expect(roleHasCapability("CUSTOMER_SUPPORT", "experiments:write")).toBe(false);
+  });
+
+  it("credit grants are ADMIN+, currency-definition management includes DEVELOPER", () => {
+    expect(roleHasCapability("ADMIN", "credits:write")).toBe(true);
+    expect(roleHasCapability("DEVELOPER", "credits:write")).toBe(false);
+    expect(roleHasCapability("DEVELOPER", "virtual-currency:manage")).toBe(true);
+    expect(roleHasCapability("CUSTOMER_SUPPORT", "virtual-currency:manage")).toBe(false);
+  });
+
+  it("GDPR anonymize/export is ADMIN-and-above only", () => {
+    expect(roleHasCapability("OWNER", "subscribers:gdpr")).toBe(true);
+    expect(roleHasCapability("ADMIN", "subscribers:gdpr")).toBe(true);
+    expect(roleHasCapability("DEVELOPER", "subscribers:gdpr")).toBe(false);
   });
 
   it("every role can read", () => {

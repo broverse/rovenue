@@ -429,7 +429,7 @@ export const subscribersRoute = new Hono()
       throw new HTTPException(400, { message: "Missing path parameters" });
     }
     const user = c.get("user");
-    await assertProjectCapability(projectId, user.id, "subscribers:write");
+    await assertProjectCapability(projectId, user.id, "subscribers:gdpr");
 
     let body: z.infer<typeof anonymizeBodySchema>;
     try {
@@ -471,7 +471,7 @@ export const subscribersRoute = new Hono()
       throw new HTTPException(400, { message: "Missing path parameters" });
     }
     const user = c.get("user");
-    await assertProjectCapability(projectId, user.id, "subscribers:write");
+    await assertProjectCapability(projectId, user.id, "subscribers:gdpr");
 
     const { ipAddress, userAgent } = extractRequestContext(c);
 

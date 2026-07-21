@@ -15,7 +15,9 @@ export type Capability =
   | "audiences:write"
   | "leaderboards:write"
   | "subscribers:write"
+  | "subscribers:gdpr"
   | "credits:write"
+  | "virtual-currency:manage"
   | "refunds:write";
 
 const CAPABILITY_ROLES: Record<Capability, ReadonlyArray<MemberRole>> = {
@@ -32,7 +34,14 @@ const CAPABILITY_ROLES: Record<Capability, ReadonlyArray<MemberRole>> = {
   "audiences:write":        ["OWNER", "ADMIN", "DEVELOPER", "GROWTH"],
   "leaderboards:write":     ["OWNER", "ADMIN", "DEVELOPER", "GROWTH"],
   "subscribers:write":      ["OWNER", "ADMIN", "DEVELOPER", "CUSTOMER_SUPPORT"],
-  "credits:write":          ["OWNER", "ADMIN", "DEVELOPER", "CUSTOMER_SUPPORT"],
+  // Irreversible GDPR anonymize + full PII/ledger export — ADMIN-and-above
+  // only, matching the intent documented on the handlers. Kept distinct from
+  // the everyday `subscribers:write` (attribute edits) which CS may perform.
+  "subscribers:gdpr":       ["OWNER", "ADMIN"],
+  // Granting spendable virtual currency is a money-equivalent action, gated
+  // like refunds. Managing currency *definitions* (below) is configuration.
+  "credits:write":          ["OWNER", "ADMIN"],
+  "virtual-currency:manage": ["OWNER", "ADMIN", "DEVELOPER"],
   "refunds:write":          ["OWNER", "ADMIN"],
 };
 
