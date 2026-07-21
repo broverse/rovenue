@@ -30,7 +30,7 @@ export function UpgradeModal(props: UpgradeModalProps) {
       <div className="w-[440px] rounded-lg bg-white p-6 shadow-xl">
         <h2 className="text-lg font-semibold">Upgrade to Indie</h2>
         <p className="mt-1 text-sm text-rv-mute-500">
-          $29 / month. Cancellable any time.
+          $49 / month. Cancellable any time.
         </p>
         {stripePromise && (
           <Elements

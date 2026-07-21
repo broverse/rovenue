@@ -59,6 +59,13 @@ function BillingPageCloud() {
 
   return (
     <div className="flex flex-col gap-6 p-6">
+      {s.usageLockedAt && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Dashboard access is limited: usage exceeded your plan&apos;s limits
+          for two consecutive billing periods. Upgrade to restore full access —
+          data collection and your SDK are unaffected.
+        </div>
+      )}
       <PlanCard
         eyebrow="Plan"
         name={tierLabel(s.tier)}
@@ -88,7 +95,7 @@ function BillingPageCloud() {
                 setSetupSecret(res);
               }}
             >
-              {upgrade.isPending ? "Preparing…" : "Upgrade to Indie ($29 / mo)"}
+              {upgrade.isPending ? "Preparing…" : "Upgrade to Indie ($49 / mo)"}
             </Button>
           ) : null
         }
