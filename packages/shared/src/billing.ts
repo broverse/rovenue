@@ -9,11 +9,14 @@ export type BillingState =
   | "paused"
   | "deleted";
 
+// Public ladder is free/indie/studio/enterprise; pro/scale/growth are
+// legacy values kept for rows created before the 2026-07 consolidation.
 export type BillingTier =
   | "free"
   | "indie"
   | "pro"
   | "scale"
+  | "studio"
   | "growth"
   | "enterprise";
 

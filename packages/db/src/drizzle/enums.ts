@@ -182,11 +182,14 @@ export const billingStateEnum = pgEnum("billing_state", [
   "paused",
   "deleted",
 ]);
+// Public ladder is free/indie/studio/enterprise; pro/scale/growth are
+// legacy values kept because Postgres enum removal is unsafe.
 export const billingTierEnum = pgEnum("billing_tier", [
   "free",
   "indie",
   "pro",
   "scale",
+  "studio",
   "growth",
   "enterprise",
 ]);
@@ -204,11 +207,14 @@ export const billingState = [
 ] as const;
 export type BillingState = (typeof billingState)[number];
 
+// Public ladder is free/indie/studio/enterprise; pro/scale/growth are
+// legacy values kept because Postgres enum removal is unsafe.
 export const billingTier = [
   "free",
   "indie",
   "pro",
   "scale",
+  "studio",
   "growth",
   "enterprise",
 ] as const;

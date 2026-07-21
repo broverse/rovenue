@@ -276,6 +276,9 @@ export const projects = pgTable("projects", {
   refundShieldConsentAcknowledgedAt: timestamp("refund_shield_consent_acknowledged_at", { withTimezone: true }),
   refundShieldConsentAcknowledgedBy: text("refund_shield_consent_acknowledged_by").references(() => user.id, { onDelete: "set null" }),
   refundShieldResponseDelayMinutes: integer("refund_shield_response_delay_minutes").notNull().default(60),
+  // Set by the usage-cap sweeper when hard caps are exceeded two
+  // consecutive billing periods; dashboard guard reads it. Null = unlocked.
+  usageLockedAt: timestamp("usage_locked_at", { withTimezone: true }),
   createdAt: timestamp("createdAt", { withTimezone: true })
     .notNull()
     .defaultNow(),

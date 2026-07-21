@@ -73,23 +73,17 @@ async function main() {
 
   const TIER_LIMITS = [
     // Free
-    { tier: "free",       cycle: "monthly", priceCents:       0, mtrMin:       0, mtrMax:     3000, events:     5_000_000, sql:    100, retention:   30, audit:    7 },
-    { tier: "free",       cycle: "annual",  priceCents:       0, mtrMin:       0, mtrMax:     3000, events:     5_000_000, sql:    100, retention:   30, audit:    7 },
-    // Indie
-    { tier: "indie",      cycle: "monthly", priceCents:    2900, mtrMin:    3000, mtrMax:    10000, events:    15_000_000, sql:    500, retention:   60, audit:   30 },
-    { tier: "indie",      cycle: "annual",  priceCents:   29000, mtrMin:    3000, mtrMax:    10000, events:    15_000_000, sql:    500, retention:   60, audit:   30 },
-    // Pro
-    { tier: "pro",        cycle: "monthly", priceCents:    9900, mtrMin:   10000, mtrMax:    50000, events:    50_000_000, sql:   2500, retention:  180, audit:   90 },
-    { tier: "pro",        cycle: "annual",  priceCents:   99000, mtrMin:   10000, mtrMax:    50000, events:    50_000_000, sql:   2500, retention:  180, audit:   90 },
-    // Scale
-    { tier: "scale",      cycle: "monthly", priceCents:   39900, mtrMin:   50000, mtrMax:   250000, events:   250_000_000, sql:   null, retention:  365, audit:  365 },
-    { tier: "scale",      cycle: "annual",  priceCents:  399000, mtrMin:   50000, mtrMax:   250000, events:   250_000_000, sql:   null, retention:  365, audit:  365 },
-    // Growth
-    { tier: "growth",     cycle: "monthly", priceCents:  149900, mtrMin:  250000, mtrMax:  1000000, events: 1_000_000_000, sql:   null, retention:  730, audit:  730 },
-    { tier: "growth",     cycle: "annual",  priceCents: 1499000, mtrMin:  250000, mtrMax:  1000000, events: 1_000_000_000, sql:   null, retention:  730, audit:  730 },
+    { tier: "free",       cycle: "monthly", priceCents:      0, mtrMin:      0, mtrMax:   5000, events:     5_000_000, sql:  100, retention:   30, audit:    7 },
+    { tier: "free",       cycle: "annual",  priceCents:      0, mtrMin:      0, mtrMax:   5000, events:     5_000_000, sql:  100, retention:   30, audit:    7 },
+    // Indie (merged former indie+pro band)
+    { tier: "indie",      cycle: "monthly", priceCents:   4900, mtrMin:   5000, mtrMax:  50000, events:    50_000_000, sql: 2500, retention:  180, audit:   90 },
+    { tier: "indie",      cycle: "annual",  priceCents:  49000, mtrMin:   5000, mtrMax:  50000, events:    50_000_000, sql: 2500, retention:  180, audit:   90 },
+    // Studio (former scale bracket)
+    { tier: "studio",     cycle: "monthly", priceCents:  39900, mtrMin:  50000, mtrMax: 250000, events:   250_000_000, sql: null, retention:  365, audit:  365 },
+    { tier: "studio",     cycle: "annual",  priceCents: 399000, mtrMin:  50000, mtrMax: 250000, events:   250_000_000, sql: null, retention:  365, audit:  365 },
     // Enterprise
-    { tier: "enterprise", cycle: "monthly", priceCents:       0, mtrMin: 1000000, mtrMax:     null, events:         null, sql:   null, retention: 1825, audit: 1825 },
-    { tier: "enterprise", cycle: "annual",  priceCents:       0, mtrMin: 1000000, mtrMax:     null, events:         null, sql:   null, retention: 1825, audit: 1825 },
+    { tier: "enterprise", cycle: "monthly", priceCents:      0, mtrMin: 250000, mtrMax:   null, events:          null, sql: null, retention: 1825, audit: 1825 },
+    { tier: "enterprise", cycle: "annual",  priceCents:      0, mtrMin: 250000, mtrMax:   null, events:          null, sql: null, retention: 1825, audit: 1825 },
   ] as const;
 
   const indieMonthlyPriceId =

@@ -589,6 +589,20 @@
       "when": 1782252741250,
       "tag": "0083_faulty_gateway",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1784663787829,
+      "tag": "0084_brown_nick_fury",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1784663788829,
+      "tag": "0085_pricing_consolidation",
+      "breakpoints": true
     }
   ]
 }
