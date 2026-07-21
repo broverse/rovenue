@@ -94,7 +94,28 @@ export const creditsRoute = new Hono()
       const user = c.get("user");
       await assertProjectCapability(projectId, user.id, "credits:write");
 
+      // Retry-safety: require an Idempotency-Key so a double-submit replays
+      // the first response (via the `idempotency` middleware) instead of
+      // appending a second ledger row. The middleware fails open when Redis
+      // is unavailable, so we ALSO arm the durable ledger-level dedupe below.
+      const idempotencyKey = c.req.header("idempotency-key");
+      if (!idempotencyKey) {
+        throw new HTTPException(400, {
+          message: "Idempotency-Key header is required for credit grants",
+        });
+      }
+
       const input = c.req.valid("json");
+
+      // Always supply a (referenceType, referenceId) pair so `dedupeOnReference`
+      // is armed. When the caller provides its own reference we honour it;
+      // otherwise the idempotency key becomes the dedupe reference, making a
+      // retried grant a no-op at the DB layer regardless of the Redis cache.
+      const hasCallerReference = Boolean(input.referenceType && input.referenceId);
+      const referenceType = hasCallerReference
+        ? input.referenceType
+        : "grant_idempotency";
+      const referenceId = hasCallerReference ? input.referenceId : idempotencyKey;
 
       const [sub] = await drizzle.db
         .select({
@@ -123,10 +144,10 @@ export const creditsRoute = new Hono()
         currencyId: input.currencyId,
         amount: input.amount,
         type: input.type as CreditLedgerType,
-        referenceType: input.referenceType,
-        referenceId: input.referenceId,
+        referenceType,
+        referenceId,
         description: input.description,
-        // When the operator supplies a (referenceType, referenceId), a
+        // A (referenceType, referenceId) pair is always set above, so a
         // duplicate submit returns the original row instead of double-granting.
         dedupeOnReference: true,
       });
