@@ -112,11 +112,15 @@ describe("Stripe Connect routes", () => {
     // and getConnectPlatformStripe are all mocked below, so the real
     // env readers in ../src/lib/stripe-platform never run in this
     // suite and these two vars would be dead weight.
-    delete process.env.STRIPE_CONNECT_CLIENT_ID_TEST;
     findActiveByProject.mockReset().mockResolvedValue(null);
-    insertConnection.mockClear();
+    insertConnection
+      .mockReset()
+      .mockImplementation(async (_tx, v) => ({ id: "conn_1", ...v }));
     markDisconnected.mockReset();
     oauthToken.mockReset();
+    // Without this reset the disconnect test's queued rejection leaks
+    // into whichever test runs next and asserts on deauthorize.
+    oauthDeauthorize.mockReset().mockResolvedValue({});
     accountsRetrieve.mockReset();
     auditFn.mockReset();
     assertProjectAccess.mockReset().mockResolvedValue(undefined);
@@ -313,6 +317,114 @@ describe("Stripe Connect routes", () => {
       expect(written).not.toContain("LEAK");
       expect(written).not.toContain("access_token");
       expect(written).not.toContain("refresh_token");
+    });
+
+    // Everything below covers failures AFTER the token exchange has
+    // succeeded. At that point a live Stripe authorization exists and the
+    // nonce is spent, so the flow cannot be retried — these branches are
+    // the only thing standing between the customer and an authorization
+    // they cannot revoke through Rovenue.
+    describe("post-exchange failures", () => {
+      const GOOD_TOKEN = {
+        stripe_user_id: "acct_new",
+        livemode: true,
+        scope: "read_write",
+      };
+      const GOOD_ACCOUNT = {
+        charges_enabled: true,
+        payouts_enabled: true,
+        capabilities: { card_payments: "active" },
+      };
+
+      function uniqueViolation() {
+        return Object.assign(new Error("duplicate key"), { code: "23505" });
+      }
+
+      /**
+       * Obtain a state nonce, then hit the callback.
+       *
+       * `arrangeRace` runs BETWEEN the two steps on purpose: the connect
+       * route 409s when a connection already exists, so a winning row
+       * staged up front would break the handshake instead of the insert.
+       */
+      async function runCallback(arrangeRace?: () => void) {
+        const app = await buildApp();
+        const state = await connectAndGetState(app);
+        arrangeRace?.();
+        return app.request(`/stripe/oauth/callback?state=${state}&code=good`);
+      }
+
+      it("revokes the authorization when the account lookup fails", async () => {
+        oauthToken.mockResolvedValue(GOOD_TOKEN);
+        accountsRetrieve.mockRejectedValue(new Error("stripe is down"));
+
+        const res = await runCallback();
+
+        expect(res.status).toBe(302);
+        expect(res.headers.get("location")).toContain("stripe=error");
+        expect(insertConnection).not.toHaveBeenCalled();
+        expect(oauthDeauthorize).toHaveBeenCalledWith({
+          client_id: "ca_live",
+          stripe_user_id: "acct_new",
+        });
+      });
+
+      it("keeps the existing connection when the SAME account raced itself", async () => {
+        oauthToken.mockResolvedValue(GOOD_TOKEN);
+        accountsRetrieve.mockResolvedValue(GOOD_ACCOUNT);
+        insertConnection.mockRejectedValue(uniqueViolation());
+
+        const res = await runCallback(() => {
+          // The winning row is this very account — the double-tab case.
+          findActiveByProject.mockResolvedValue({
+            id: "conn_winner",
+            stripeAccountId: "acct_new",
+            livemode: true,
+          });
+        });
+
+        expect(res.status).toBe(302);
+        expect(res.headers.get("location")).toContain("stripe=already_connected");
+        // Revoking here would break a working connection.
+        expect(oauthDeauthorize).not.toHaveBeenCalled();
+      });
+
+      it("revokes the loser when a DIFFERENT account won the race", async () => {
+        oauthToken.mockResolvedValue(GOOD_TOKEN);
+        accountsRetrieve.mockResolvedValue(GOOD_ACCOUNT);
+        insertConnection.mockRejectedValue(uniqueViolation());
+
+        const res = await runCallback(() => {
+          findActiveByProject.mockResolvedValue({
+            id: "conn_winner",
+            stripeAccountId: "acct_other",
+            livemode: true,
+          });
+        });
+
+        expect(res.status).toBe(302);
+        expect(res.headers.get("location")).toContain("stripe=already_connected");
+        // acct_new has no local row, so disconnect could never reach it.
+        expect(oauthDeauthorize).toHaveBeenCalledWith({
+          client_id: "ca_live",
+          stripe_user_id: "acct_new",
+        });
+      });
+
+      it("refuses a token whose livemode disagrees with the requested mode", async () => {
+        oauthToken.mockResolvedValue({ ...GOOD_TOKEN, livemode: false });
+        accountsRetrieve.mockResolvedValue(GOOD_ACCOUNT);
+
+        const res = await runCallback();
+
+        expect(res.status).toBe(302);
+        expect(res.headers.get("location")).toContain("stripe=error");
+        expect(insertConnection).not.toHaveBeenCalled();
+        expect(oauthDeauthorize).toHaveBeenCalledWith({
+          client_id: "ca_live",
+          stripe_user_id: "acct_new",
+        });
+      });
     });
   });
 

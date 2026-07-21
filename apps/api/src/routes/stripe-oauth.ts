@@ -5,7 +5,11 @@ import { drizzle } from "@rovenue/db";
 import { audit, extractRequestContext } from "../lib/audit";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
-import { connectClientId, getConnectPlatformStripe } from "../lib/stripe-platform";
+import {
+  connectClientId,
+  getConnectPlatformStripe,
+  type ConnectMode,
+} from "../lib/stripe-platform";
 import { consumeOAuthState } from "../services/stripe/oauth-state";
 
 // =============================================================
@@ -44,17 +48,69 @@ function dashboardRedirect(projectId: string | null, query: string): string {
     : `${base}/?${query}`;
 }
 
+/**
+ * An error this file authored itself. Its message is a literal we wrote,
+ * so — unlike a Stripe error message — it provably cannot contain the
+ * authorization code and is safe to log verbatim.
+ */
+class InternalOAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InternalOAuthError";
+  }
+}
+
 // A stable discriminator safe to log in place of `err.message`. Stripe's
 // `invalid_grant` responses carry an `error_description` of the form
 // "Authorization code does not exist: ac_…", so the raw message can
 // contain the authorization code — which must never be logged.
 function stripeErrorDiscriminator(
   err: unknown,
-): { type: string; code: string | null } | "unknown" {
+): { type: string; code: string | null } | { internal: string } | "unknown" {
   if (err instanceof Stripe.errors.StripeError) {
     return { type: err.type, code: err.code ?? null };
   }
+  // Keep our own failures diagnosable instead of flattening them to the
+  // same "unknown" a network fault produces.
+  if (err instanceof InternalOAuthError) {
+    return { internal: err.message };
+  }
   return "unknown";
+}
+
+/**
+ * Revoke an authorization we obtained but could not record locally.
+ *
+ * Swallows its own failures: the caller is mid-OAuth with a browser
+ * waiting, so a failed cleanup must still let it redirect rather than
+ * surface a JSON 500.
+ */
+async function bestEffortDeauthorize(
+  stripe: Stripe,
+  mode: ConnectMode,
+  accountId: string,
+  projectId: string,
+): Promise<void> {
+  const clientId = connectClientId(mode);
+  if (!clientId) {
+    log.error("cannot deauthorize stranded stripe authorization: no client id for mode", {
+      projectId,
+      mode,
+    });
+    return;
+  }
+  try {
+    await stripe.oauth.deauthorize({
+      client_id: clientId,
+      stripe_user_id: accountId,
+    });
+    log.info("deauthorized stranded stripe authorization", { projectId });
+  } catch (err) {
+    log.error("failed to deauthorize stranded stripe authorization", {
+      projectId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 export const stripeOAuthRoute = new Hono().get("/callback", async (c) => {
@@ -101,7 +157,9 @@ export const stripeOAuthRoute = new Hono().get("/callback", async (c) => {
       grant_type: "authorization_code",
       code,
     });
-    if (!token.stripe_user_id) throw new Error("missing stripe_user_id");
+    if (!token.stripe_user_id) {
+      throw new InternalOAuthError("missing stripe_user_id");
+    }
     accountId = token.stripe_user_id;
     livemode = Boolean(token.livemode);
     scope = token.scope ?? "read_write";
@@ -126,7 +184,7 @@ export const stripeOAuthRoute = new Hono().get("/callback", async (c) => {
     // against it.
     const expectedLivemode = state.mode === "live";
     if (livemode !== expectedLivemode) {
-      throw new Error(
+      throw new InternalOAuthError(
         `livemode mismatch: token livemode=${livemode}, state mode=${state.mode}`,
       );
     }
@@ -163,14 +221,44 @@ export const stripeOAuthRoute = new Hono().get("/callback", async (c) => {
   } catch (err) {
     // Postgres unique_violation on the partial index (project_id WHERE
     // disconnected_at IS NULL): two concurrent connect flows both had
-    // nonces issued before either callback returned. The other one won
-    // — this account IS authorized on Stripe, but so is the other, and
-    // the existing connection is legitimate. Do not deauthorize either;
-    // just tell the customer they're already connected.
+    // nonces issued before either callback returned, and the other one
+    // won. Whether we may walk away depends on WHICH account won.
     if ((err as { code?: string })?.code === "23505") {
-      log.info("stripe oauth: project already has an active connection", {
-        projectId: state.projectId,
-      });
+      // Guarded: this re-read runs inside the catch, so letting it throw
+      // would escape to the generic JSON handler mid-OAuth.
+      let winnerAccountId: string | null = null;
+      try {
+        const existing = await drizzle.stripeConnectionRepo.findActiveByProject(
+          drizzle.db,
+          state.projectId,
+        );
+        winnerAccountId = existing?.stripeAccountId ?? null;
+      } catch (readErr) {
+        log.error("stripe oauth: could not re-read the winning connection", {
+          projectId: state.projectId,
+          err: readErr instanceof Error ? readErr.message : String(readErr),
+        });
+      }
+
+      if (winnerAccountId === accountId) {
+        // Same account, twice (the double-tab case). The existing
+        // connection IS this authorization — revoking it would break a
+        // working setup.
+        log.info("stripe oauth: project already connected to this account", {
+          projectId: state.projectId,
+        });
+      } else {
+        // A DIFFERENT account won, or we could not tell. The account we
+        // just obtained has no local row, and disconnect needs one — so
+        // without this the customer could never revoke it through
+        // Rovenue.
+        log.info("stripe oauth: another account won; revoking this one", {
+          projectId: state.projectId,
+          knownWinner: winnerAccountId !== null,
+        });
+        await bestEffortDeauthorize(stripe, state.mode, accountId, state.projectId);
+      }
+
       return c.redirect(
         dashboardRedirect(state.projectId, "stripe=already_connected"),
         302,
@@ -182,28 +270,7 @@ export const stripeOAuthRoute = new Hono().get("/callback", async (c) => {
       err: err instanceof Error ? err.message : String(err),
     });
 
-    const clientId = connectClientId(state.mode);
-    if (clientId) {
-      try {
-        await stripe.oauth.deauthorize({
-          client_id: clientId,
-          stripe_user_id: accountId,
-        });
-        log.info("deauthorized stranded stripe authorization", {
-          projectId: state.projectId,
-        });
-      } catch (deauthErr) {
-        log.error("failed to deauthorize stranded stripe authorization", {
-          projectId: state.projectId,
-          err: deauthErr instanceof Error ? deauthErr.message : String(deauthErr),
-        });
-      }
-    } else {
-      log.error("cannot deauthorize stranded stripe authorization: no client id for mode", {
-        projectId: state.projectId,
-        mode: state.mode,
-      });
-    }
+    await bestEffortDeauthorize(stripe, state.mode, accountId, state.projectId);
 
     return c.redirect(dashboardRedirect(state.projectId, "stripe=error"), 302);
   }
