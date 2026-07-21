@@ -38,7 +38,7 @@
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `getPlatformStripe(livemode: boolean): Stripe | null`, `isConnectConfigured(): boolean`, `connectClientId(mode: "live" | "test"): string | null`, `_resetPlatformStripeForTests(): void` from `apps/api/src/lib/stripe-platform.ts`.
+- Produces: `getConnectPlatformStripe(livemode: boolean): Stripe | null`, `isConnectConfigured(): boolean`, `connectClientId(mode: "live" | "test"): string | null`, `_resetConnectPlatformStripeForTests(): void` from `apps/api/src/lib/stripe-platform.ts`.
 
 - [ ] **Step 1: Add the env vars**
 
@@ -137,9 +137,9 @@ const envMock = vi.hoisted(() => ({
 vi.mock("./env", () => ({ env: envMock }));
 
 import {
-  _resetPlatformStripeForTests,
+  _resetConnectPlatformStripeForTests,
   connectClientId,
-  getPlatformStripe,
+  getConnectPlatformStripe,
   isConnectConfigured,
 } from "./stripe-platform";
 
@@ -148,11 +148,11 @@ beforeEach(() => {
   envMock.STRIPE_CONNECT_CLIENT_ID_TEST = undefined;
   envMock.STRIPE_PLATFORM_SECRET_KEY = undefined;
   envMock.STRIPE_PLATFORM_SECRET_KEY_TEST = undefined;
-  _resetPlatformStripeForTests();
+  _resetConnectPlatformStripeForTests();
 });
 
 afterEach(() => {
-  _resetPlatformStripeForTests();
+  _resetConnectPlatformStripeForTests();
 });
 
 describe("isConnectConfigured", () => {
@@ -192,23 +192,23 @@ describe("connectClientId", () => {
   });
 });
 
-describe("getPlatformStripe", () => {
+describe("getConnectPlatformStripe", () => {
   it("returns null when the key for that mode is unset", () => {
     envMock.STRIPE_PLATFORM_SECRET_KEY = "sk_live_x";
-    expect(getPlatformStripe(false)).toBeNull();
+    expect(getConnectPlatformStripe(false)).toBeNull();
   });
 
   it("returns a client for live mode and memoises it", () => {
     envMock.STRIPE_PLATFORM_SECRET_KEY = "sk_live_x";
-    const first = getPlatformStripe(true);
+    const first = getConnectPlatformStripe(true);
     expect(first).not.toBeNull();
-    expect(getPlatformStripe(true)).toBe(first);
+    expect(getConnectPlatformStripe(true)).toBe(first);
   });
 
   it("keeps live and test clients separate", () => {
     envMock.STRIPE_PLATFORM_SECRET_KEY = "sk_live_x";
     envMock.STRIPE_PLATFORM_SECRET_KEY_TEST = "sk_test_x";
-    expect(getPlatformStripe(true)).not.toBe(getPlatformStripe(false));
+    expect(getConnectPlatformStripe(true)).not.toBe(getConnectPlatformStripe(false));
   });
 });
 ```
@@ -275,7 +275,7 @@ export function isConnectConfigured(): boolean {
  * Memoised platform client for one mode. Returns null when that mode's
  * secret key is unset so callers can degrade instead of throwing.
  */
-export function getPlatformStripe(livemode: boolean): Stripe | null {
+export function getConnectPlatformStripe(livemode: boolean): Stripe | null {
   const slot = livemode ? "live" : "test";
   const existing = cached[slot];
   if (existing) return existing;
@@ -296,7 +296,7 @@ export function getPlatformStripe(livemode: boolean): Stripe | null {
 }
 
 // Test-only — clears both cached clients so callers re-read env.
-export function _resetPlatformStripeForTests(): void {
+export function _resetConnectPlatformStripeForTests(): void {
   cached.live = null;
   cached.test = null;
 }
@@ -736,7 +736,7 @@ git commit -m "feat(db): project_stripe_connections table and repository"
 - Test: `apps/api/src/lib/stripe-connected.test.ts`
 
 **Interfaces:**
-- Consumes: `getPlatformStripe` (Task 1), `drizzle.stripeConnectionRepo` (Task 2).
+- Consumes: `getConnectPlatformStripe` (Task 1), `drizzle.stripeConnectionRepo` (Task 2).
 - Produces: `type ConnectedStripe = { stripe: Stripe; accountId: string; livemode: boolean }`, `getConnectedStripe(projectId: string): Promise<ConnectedStripe | null>`, `requireConnectedStripe(projectId: string): Promise<ConnectedStripe>`, `chargesEnabled(projectId: string): Promise<boolean>`.
 
 - [ ] **Step 1: Write the failing test**
@@ -760,7 +760,7 @@ vi.mock("@rovenue/db", () => ({
 }));
 
 import {
-  _resetPlatformStripeForTests,
+  _resetConnectPlatformStripeForTests,
   chargesEnabled,
   getConnectedStripe,
   requireConnectedStripe,
@@ -768,7 +768,7 @@ import {
 
 beforeEach(() => {
   findActiveByProject.mockReset();
-  _resetPlatformStripeForTests();
+  _resetConnectPlatformStripeForTests();
 });
 
 describe("getConnectedStripe", () => {
@@ -804,7 +804,7 @@ describe("getConnectedStripe", () => {
 
   it("returns null when the platform key for that mode is unset", async () => {
     envMock.STRIPE_PLATFORM_SECRET_KEY_TEST = undefined;
-    _resetPlatformStripeForTests();
+    _resetConnectPlatformStripeForTests();
     findActiveByProject.mockResolvedValue({
       stripeAccountId: "acct_t",
       livemode: false,
@@ -895,7 +895,7 @@ export async function getConnectedStripe(
   );
   if (!connection) return null;
 
-  const stripe = getPlatformStripe(connection.livemode);
+  const stripe = getConnectPlatformStripe(connection.livemode);
   if (!stripe) {
     log.error("connection exists but its platform key is unset", {
       projectId,
@@ -966,7 +966,7 @@ git commit -m "feat(api): connected-account Stripe resolver and charges capabili
 - Test: `apps/api/src/services/stripe/oauth-state.test.ts`, `apps/api/tests/stripe-connect-routes.test.ts`
 
 **Interfaces:**
-- Consumes: `connectClientId`, `getPlatformStripe`, `isConnectConfigured` (Task 1); `drizzle.stripeConnectionRepo` (Task 2).
+- Consumes: `connectClientId`, `getConnectPlatformStripe`, `isConnectConfigured` (Task 1); `drizzle.stripeConnectionRepo` (Task 2).
 - Produces: `createOAuthState(payload: OAuthStatePayload): Promise<string>`, `consumeOAuthState(nonce: string): Promise<OAuthStatePayload | null>`, `type OAuthStatePayload = { projectId: string; userId: string; mode: ConnectMode }`; routes `stripeConnectRoute` and `stripeOAuthRoute`.
 
 - [ ] **Step 1: Add the audit actions**
@@ -1151,7 +1151,7 @@ import { logger } from "../../lib/logger";
 import { ok } from "../../lib/response";
 import {
   connectClientId,
-  getPlatformStripe,
+  getConnectPlatformStripe,
   isConnectConfigured,
   type ConnectMode,
 } from "../../lib/stripe-platform";
@@ -1263,7 +1263,7 @@ export const stripeConnectRoute = new Hono()
       throw new HTTPException(404, { message: "No active Stripe connection" });
     }
 
-    const stripe = getPlatformStripe(row.livemode);
+    const stripe = getConnectPlatformStripe(row.livemode);
     const clientId = connectClientId(row.livemode ? "live" : "test");
     if (stripe && clientId) {
       try {
@@ -1319,7 +1319,7 @@ import { drizzle } from "@rovenue/db";
 import { audit, extractRequestContext } from "../lib/audit";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
-import { getPlatformStripe } from "../lib/stripe-platform";
+import { getConnectPlatformStripe } from "../lib/stripe-platform";
 import { consumeOAuthState } from "../services/stripe/oauth-state";
 
 // =============================================================
@@ -1371,7 +1371,7 @@ export const stripeOAuthRoute = new Hono().get("/callback", async (c) => {
     );
   }
 
-  const stripe = getPlatformStripe(state.mode === "live");
+  const stripe = getConnectPlatformStripe(state.mode === "live");
   if (!stripe) {
     return c.json(
       { error: { code: "NOT_CONFIGURED", message: "Stripe Connect is not configured" } },
@@ -1501,7 +1501,7 @@ vi.mock("../src/lib/stripe-platform", async (importOriginal) => {
     await importOriginal<typeof import("../src/lib/stripe-platform")>();
   return {
     ...actual,
-    getPlatformStripe: () => ({
+    getConnectPlatformStripe: () => ({
       oauth: { token: oauthToken, deauthorize: oauthDeauthorize },
       accounts: { retrieve: accountsRetrieve },
     }),
@@ -1761,7 +1761,7 @@ git commit -m "feat(api): Stripe Connect OAuth connect, callback and disconnect"
 - Test: `apps/api/tests/stripe-connect-webhook.test.ts`
 
 **Interfaces:**
-- Consumes: `getPlatformStripe` (Task 1), `drizzle.stripeConnectionRepo` (Task 2), the existing `webhookReplayGuard` and `enqueueWebhookEvent`.
+- Consumes: `getConnectPlatformStripe` (Task 1), `drizzle.stripeConnectionRepo` (Task 2), the existing `webhookReplayGuard` and `enqueueWebhookEvent`.
 - Produces: `stripeConnectWebhookRoute`.
 
 - [ ] **Step 1: Write the failing test**
@@ -2011,7 +2011,7 @@ import { enqueueWebhookEvent } from "../../services/webhook-processor";
 import { env } from "../../lib/env";
 import { logger } from "../../lib/logger";
 import { ok } from "../../lib/response";
-import { getPlatformStripe } from "../../lib/stripe-platform";
+import { getConnectPlatformStripe } from "../../lib/stripe-platform";
 
 // =============================================================
 // Stripe Connect webhook — one endpoint for every connected account
@@ -2037,7 +2037,7 @@ export const stripeConnectWebhookRoute = new Hono().post(
       throw new HTTPException(401, { message: "Missing Stripe-Signature header" });
     }
     const secret = env.STRIPE_CONNECT_WEBHOOK_SECRET;
-    const stripe = getPlatformStripe(true) ?? getPlatformStripe(false);
+    const stripe = getConnectPlatformStripe(true) ?? getConnectPlatformStripe(false);
     if (!secret || !stripe) {
       throw new HTTPException(503, { message: "Stripe Connect is not configured" });
     }
@@ -2820,7 +2820,7 @@ vi.mock("../src/lib/stripe-platform", async (importOriginal) => {
     await importOriginal<typeof import("../src/lib/stripe-platform")>();
   return {
     ...actual,
-    getPlatformStripe: () => ({
+    getConnectPlatformStripe: () => ({
       oauth: { token: oauthToken, deauthorize: oauthDeauthorize },
       accounts: { retrieve: accountsRetrieve },
       webhooks: Stripe.webhooks,
