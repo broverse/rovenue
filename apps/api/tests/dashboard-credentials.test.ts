@@ -134,6 +134,16 @@ describe("GET /dashboard/projects/:projectId/credentials", () => {
     };
     expect(body.data.credentials.apple.configured).toBe(false);
     expect(body.data.credentials.google.configured).toBe(false);
+    // Stripe is no longer a credential store — it is a Connect link, read
+    // via GET /dashboard/projects/:id/stripe/connection. Assert the key is
+    // absent rather than just dropping the old check, or a route that
+    // accidentally re-adds it would sail through: the decoded type below
+    // is a Record, so an extra key breaks nothing on its own.
+    expect(body.data.credentials).not.toHaveProperty("stripe");
+    expect(Object.keys(body.data.credentials).sort()).toEqual([
+      "apple",
+      "google",
+    ]);
   });
 
   test("returns configured=true + safe fields, never plaintext secrets", async () => {
@@ -161,6 +171,7 @@ describe("GET /dashboard/projects/:projectId/credentials", () => {
     // Stripe credentials no longer live on the project row at all — the
     // `credentials` response only carries apple/google now. Real Stripe
     // connection state comes from GET /dashboard/projects/:id/stripe/connection.
+    expect(body.data.credentials).not.toHaveProperty("stripe");
     const serialized = JSON.stringify(body.data);
     expect(serialized).not.toContain("LEAKED");
   });

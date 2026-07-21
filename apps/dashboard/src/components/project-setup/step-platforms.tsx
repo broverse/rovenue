@@ -1,5 +1,7 @@
-import { Upload } from "lucide-react";
+import { Upload, Webhook } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useParams } from "@tanstack/react-router";
+import { API_BASE_URL } from "../../lib/api";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { CardPick, CardPickGrid } from "./card-pick";
@@ -22,6 +24,15 @@ export function StepPlatforms({
   onTogglePlatform,
 }: StepPlatformsProps) {
   const { t } = useTranslation();
+  // The wizard renders in two modes. In update mode it sits inside the
+  // /projects/$projectId/edit route, so the ambient param gives us a real
+  // project to connect. In create mode there is no $projectId segment and
+  // this is undefined — which is correct, the project does not exist yet.
+  // `strict: false` is the codebase's idiom for shared components that
+  // read a route param without being route components themselves.
+  const { projectId } = useParams({ strict: false }) as {
+    projectId?: string;
+  };
 
   return (
     <>
@@ -137,9 +148,29 @@ export function StepPlatforms({
           iconLabel="St"
           title={t("projectSetup.platforms.stripe.title")}
         >
-          <p className="text-[12.5px] text-rv-mute-500">
-            {t("projectSetup.platforms.stripe.connectHint")}
-          </p>
+          {projectId ? (
+            <Button
+              type="button"
+              variant="flat"
+              className="h-9 w-full justify-start"
+              onClick={() => {
+                // The connect endpoint answers with a 302 to Stripe's
+                // consent screen, so this must be a full-page navigation
+                // rather than a fetch — same as StripeConnectCard.
+                window.location.href = `${API_BASE_URL}/dashboard/projects/${projectId}/stripe/connect`;
+              }}
+            >
+              <Webhook className="size-3.5" aria-hidden="true" />
+              {t("projectSetup.platforms.stripe.oauthConnect")}
+            </Button>
+          ) : (
+            // Create mode: the project genuinely does not exist yet, so
+            // there is no id to connect against. Point at where the real
+            // flow lives instead of faking one.
+            <p className="text-[12.5px] text-rv-mute-500">
+              {t("projectSetup.platforms.stripe.connectHint")}
+            </p>
+          )}
         </CredentialCard>
       ) : null}
     </>

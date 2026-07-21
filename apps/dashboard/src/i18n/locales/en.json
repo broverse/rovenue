@@ -141,6 +141,7 @@
       },
       "stripe": {
         "title": "Stripe account",
+        "oauthConnect": "Connect with Stripe",
         "connectHint": "Connect your Stripe account from the project's Stores page after setup."
       }
     },
