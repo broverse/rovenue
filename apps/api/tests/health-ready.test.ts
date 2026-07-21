@@ -83,6 +83,15 @@ vi.mock("@rovenue/db", () => ({
     GOOGLE: "GOOGLE",
     STRIPE: "STRIPE",
   },
+  // The /health/stores route now uses the shared assertProjectAccess, which
+  // reads MemberRole ranks at module load, so the mock must expose it.
+  MemberRole: {
+    OWNER: "OWNER",
+    ADMIN: "ADMIN",
+    DEVELOPER: "DEVELOPER",
+    GROWTH: "GROWTH",
+    CUSTOMER_SUPPORT: "CUSTOMER_SUPPORT",
+  },
 }));
 
 vi.mock("../src/lib/redis", () => ({ redis: redisMock }));

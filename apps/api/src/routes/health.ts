@@ -13,6 +13,7 @@ import { getWebhookQueue } from "../services/webhook-processor";
 import { getDeliveryQueue } from "../workers/webhook-delivery";
 import { getFxQueue, isFxStale } from "../services/fx";
 import { requireDashboardAuth } from "../middleware/dashboard-auth";
+import { assertProjectAccess } from "../lib/project-access";
 import { ok } from "../lib/response";
 import { logger } from "../lib/logger";
 
@@ -224,22 +225,6 @@ async function loadStoreHealth<T>(
       err: err instanceof Error ? err.message : String(err),
     });
     return { connected: false, credentialStatus: "invalid" };
-  }
-}
-
-async function assertProjectAccess(
-  projectId: string,
-  userId: string,
-): Promise<void> {
-  const membership = await drizzle.projectRepo.findMembership(
-    drizzle.db,
-    projectId,
-    userId,
-  );
-  if (!membership) {
-    throw new HTTPException(403, {
-      message: "Not a member of this project",
-    });
   }
 }
 
