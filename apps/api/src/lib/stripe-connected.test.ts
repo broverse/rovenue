@@ -73,6 +73,16 @@ describe("requireConnectedStripe", () => {
     findActiveByProject.mockResolvedValue(null);
     await expect(requireConnectedStripe("proj_42")).rejects.toThrow(/proj_42/);
   });
+
+  it("resolves to the ConnectedStripe value when an active connection exists", async () => {
+    findActiveByProject.mockResolvedValue({
+      stripeAccountId: "acct_1",
+      livemode: true,
+    });
+    const result = await requireConnectedStripe("proj_42");
+    expect(result.accountId).toBe("acct_1");
+    expect(result.stripe).toBeDefined();
+  });
 });
 
 describe("chargesEnabled", () => {

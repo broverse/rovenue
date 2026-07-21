@@ -90,6 +90,14 @@ export interface ConnectedStripe {
   readonly livemode: boolean;
 }
 
+/** Single lookup point for a project's active Stripe connection row. */
+async function fetchActiveConnection(projectId: string) {
+  return drizzle.stripeConnectionRepo.findActiveByProject(
+    drizzle.db,
+    projectId,
+  );
+}
+
 /**
  * Resolve a project's connected account into a ready-to-use client.
  * Returns null rather than throwing so read paths (health, dashboard
@@ -104,10 +112,7 @@ export interface ConnectedStripe {
 export async function getConnectedStripe(
   projectId: string,
 ): Promise<ConnectedStripe | null> {
-  const connection = await drizzle.stripeConnectionRepo.findActiveByProject(
-    drizzle.db,
-    projectId,
-  );
+  const connection = await fetchActiveConnection(projectId);
   if (!connection) return null;
 
   const stripe = getConnectPlatformStripe(connection.livemode);
@@ -147,10 +152,7 @@ export async function requireConnectedStripe(
  * `card_payments` capability until onboarding and verification finish.
  */
 export async function chargesEnabled(projectId: string): Promise<boolean> {
-  const connection = await drizzle.stripeConnectionRepo.findActiveByProject(
-    drizzle.db,
-    projectId,
-  );
+  const connection = await fetchActiveConnection(projectId);
   if (!connection || !connection.chargesEnabled) return false;
   const caps = (connection.capabilities ?? {}) as Record<string, unknown>;
   return caps.card_payments === "active";
