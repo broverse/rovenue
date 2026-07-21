@@ -60,6 +60,7 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
   };
 
   const reassignPurchases = vi.fn(async () => undefined);
+  const reassignRevenueEvents = vi.fn(async () => undefined);
   const reassignSubscriberAccess = vi.fn(async () => undefined);
   const reassignExperimentAssignments = vi.fn(async () => undefined);
   const softDeleteSubscriberAsMerged = vi.fn(
@@ -122,6 +123,7 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
         findSubscriberByAppUserId,
         findSubscriberByRovenueId,
         reassignPurchases,
+        reassignRevenueEvents,
         reassignSubscriberAccess,
         reassignExperimentAssignments,
         softDeleteSubscriberAsMerged,
@@ -220,6 +222,9 @@ describe("transferSubscriber", () => {
       "sub_from",
       "sub_to",
     );
+    expect(
+      drizzleMock.subscriberRepo.reassignRevenueEvents,
+    ).toHaveBeenCalledWith(expect.anything(), "sub_from", "sub_to");
     expect(
       drizzleMock.subscriberRepo.reassignSubscriberAccess,
     ).toHaveBeenCalledWith(expect.anything(), "sub_from", "sub_to");

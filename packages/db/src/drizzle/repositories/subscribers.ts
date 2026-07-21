@@ -3,6 +3,7 @@ import type { Db } from "../client";
 import {
   experimentAssignments,
   purchases,
+  revenueEvents,
   subscriberAccess,
   subscribers,
   type Subscriber,
@@ -771,6 +772,24 @@ export async function reassignPurchases(
  * Bulk-reassign every subscriber_access row from one subscriber to
  * another.
  */
+/**
+ * Bulk-reassign every revenue_events row from one subscriber to another.
+ * A merge must move revenue history onto the survivor: rows left on the
+ * soft-deleted source under-count the canonical subscriber's lifetime
+ * revenue (revenue_lifetime_subscriber_mv / Refund Shield) and escape the
+ * expiry-checker's per-subscriber dedup lookup.
+ */
+export async function reassignRevenueEvents(
+  db: DbOrTx,
+  fromSubscriberId: string,
+  toSubscriberId: string,
+): Promise<void> {
+  await db
+    .update(revenueEvents)
+    .set({ subscriberId: toSubscriberId })
+    .where(eq(revenueEvents.subscriberId, fromSubscriberId));
+}
+
 export async function reassignSubscriberAccess(
   db: DbOrTx,
   fromSubscriberId: string,
@@ -833,8 +852,12 @@ export async function softDeleteSubscriberAsMerged(
 
 /**
  * Apply the GDPR / KVKK "right to erasure" write: replace appUserId
- * with the deterministic anonymous token, clear attributes, and
- * soft-delete.
+ * with the deterministic anonymous token, clear attributes, release the
+ * Apple appAccountToken, and soft-delete. The token MUST be released:
+ * the partial unique index on (projectId, appleAppAccountToken) only
+ * excludes NULL — not deletedAt rows — so a kept token either routes a
+ * later webhook onto this invisible row or 23505s the receipt path's
+ * rebind onto the user's next subscriber.
  */
 export async function anonymizeSubscriberRow(
   db: DbOrTx,
@@ -847,6 +870,7 @@ export async function anonymizeSubscriberRow(
     .set({
       appUserId: anonymousId,
       attributes: {} as typeof subscribers.$inferInsert.attributes,
+      appleAppAccountToken: null,
       deletedAt,
     })
     .where(eq(subscribers.id, subscriberId));

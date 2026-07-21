@@ -68,6 +68,7 @@ export async function reassignAllAssets(
   to: { id: string; label: string },
 ): Promise<number> {
   await drizzle.subscriberRepo.reassignPurchases(tx, from.id, to.id);
+  await drizzle.subscriberRepo.reassignRevenueEvents(tx, from.id, to.id);
   await drizzle.subscriberRepo.reassignSubscriberAccess(tx, from.id, to.id);
   await drizzle.subscriberRepo.reassignExperimentAssignments(tx, from.id, to.id);
 
