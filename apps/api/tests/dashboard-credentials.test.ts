@@ -85,7 +85,11 @@ vi.mock("@rovenue/db", async () => {
   return {
     ...actual,
     default: dbMock,
-    drizzle: drizzleMock,
+    // `schema` must come from the real module: sibling dashboard routes
+    // destructure `drizzle.schema` at import time (e.g. notifications),
+    // so a schema-less mock throws during collection and the whole file
+    // silently registers ZERO tests instead of failing a visible case.
+    drizzle: { ...drizzleMock, schema: actual.drizzle.schema },
     MemberRole: { OWNER: "OWNER", ADMIN: "ADMIN", VIEWER: "VIEWER" },
     // encryptCredential / decryptCredential come from the real module —
     // tests verify both the write shape (encrypted tag) and the round

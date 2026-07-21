@@ -108,6 +108,7 @@ describe("processStripeEvent — atomic claim short-circuit", () => {
       projectId: "prj_test",
       event,
       stripe: {} as Stripe,
+      accountId: "acct_test",
     });
 
     expect(result).toEqual({ status: "duplicate", eventType: event.type });
@@ -143,11 +144,44 @@ describe("processStripeEvent — atomic claim short-circuit", () => {
       projectId: "prj_test",
       event,
       stripe: {} as Stripe,
+      accountId: "acct_test",
     });
 
     expect(result.status).toBe("processed");
     // Dispatch ran: the claimed row was transitioned to PROCESSED.
     expect(drizzleMock.subscriberRepo.upsertSubscriber).toHaveBeenCalledTimes(1);
     expect(drizzleMock.webhookEventRepo.updateWebhookEvent).toHaveBeenCalledTimes(1);
+  });
+
+  // The client handed to processStripeEvent is Rovenue's PLATFORM client.
+  // Omitting `stripeAccount` therefore does not fail loudly — it quietly
+  // reads from Rovenue's own Stripe account instead of the customer's.
+  // This is the only live Stripe API call on the dispatch path, so it is
+  // the one that has to be pinned.
+  test("passes stripeAccount on the invoice lookup", async () => {
+    drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValueOnce({
+      outcome: "claimed",
+      row: { id: "whe_2", retryCount: 0 },
+    });
+    // Returns no subscription, so the handler stops right after the
+    // lookup — this test is about the call's arguments, nothing further.
+    const retrieve = vi.fn(async () => ({ subscription: null }));
+
+    const event = {
+      id: "evt_stripe_refund_1",
+      type: "charge.refunded",
+      data: { object: { invoice: "in_123", amount: 500, amount_refunded: 500 } },
+    } as unknown as Stripe.Event;
+
+    await processStripeEvent({
+      projectId: "prj_test",
+      event,
+      stripe: { invoices: { retrieve } } as unknown as Stripe,
+      accountId: "acct_x",
+    });
+
+    expect(retrieve).toHaveBeenCalledWith("in_123", {
+      stripeAccount: "acct_x",
+    });
   });
 });

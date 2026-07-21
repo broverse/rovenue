@@ -49,9 +49,3 @@ export const STRIPE_INVOICE_BILLING_REASON = {
 } as const;
 export type StripeInvoiceBillingReason =
   (typeof STRIPE_INVOICE_BILLING_REASON)[keyof typeof STRIPE_INVOICE_BILLING_REASON];
-
-// =============================================================
-// Headers
-// =============================================================
-
-export const STRIPE_SIGNATURE_HEADER = "stripe-signature";

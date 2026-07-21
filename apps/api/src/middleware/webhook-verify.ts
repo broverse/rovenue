@@ -257,13 +257,11 @@ export const verifyGoogleWebhook: MiddlewareHandler = async (c, next) => {
   await next();
 };
 
-// =============================================================
-// Stripe — verified by apps/api/src/routes/webhooks/stripe-connect.ts
-// =============================================================
-//
-// Stripe Connect's platform-level webhook verifies its own signature
-// inline (one platform secret covers every connected account, so there
-// is no per-project credential lookup to share with the other stores'
-// middleware here). The `VerifiedStripe` shape below stays — Connect's
-// route still populates `c.set("verifiedWebhook", { source: "STRIPE", … })`
-// against the same `ContextVariableMap` augmentation.
+// Stripe has no middleware here on purpose: Connect's platform-level
+// webhook (apps/api/src/routes/webhooks/stripe-connect.ts) verifies its
+// own signature inline, because one platform secret covers every
+// connected account and there is no per-project credential lookup left
+// to share with the other stores. See the `VerifiedStripe` interface
+// above — Connect's route still populates
+// `c.set("verifiedWebhook", { source: "STRIPE", … })` against the same
+// `ContextVariableMap` augmentation.

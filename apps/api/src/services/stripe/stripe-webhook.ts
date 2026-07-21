@@ -49,11 +49,14 @@ export interface ProcessStripeEventOptions {
    * Stripe Connect account id for this project. Passed as `{ stripeAccount }`
    * request options on every direct Stripe API call made during dispatch
    * so the call acts on the customer's connected account rather than on
-   * Rovenue's platform account. Optional only so existing unit tests that
-   * stub `stripe` directly (and never make a real API call) don't need to
-   * supply one.
+   * Rovenue's platform account.
+   *
+   * Required on purpose: `stripe` here is the PLATFORM client, so omitting
+   * the header does not fail loudly — it quietly targets Rovenue's own
+   * account. Keeping this non-optional is what stops a future caller from
+   * introducing that silently.
    */
-  accountId?: string;
+  accountId: string;
 }
 
 /**
@@ -141,7 +144,7 @@ interface DispatchContext {
   event: Stripe.Event;
   stripe: Stripe;
   /** See {@link ProcessStripeEventOptions.accountId}. */
-  accountId?: string;
+  accountId: string;
   outcome: StripeDispatchOutcome;
 }
 
@@ -385,10 +388,9 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
 
   // `stripeAccount` targets the customer's connected account rather than
   // Rovenue's platform account — see ProcessStripeEventOptions.accountId.
-  const invoice = await ctx.stripe.invoices.retrieve(
-    invoiceId,
-    ctx.accountId ? { stripeAccount: ctx.accountId } : undefined,
-  );
+  const invoice = await ctx.stripe.invoices.retrieve(invoiceId, {
+    stripeAccount: ctx.accountId,
+  });
   const subscriptionId =
     typeof invoice.subscription === "string"
       ? invoice.subscription
