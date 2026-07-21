@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
+import { usageLockGuard } from "../../middleware/usage-lock";
 import { dashboardUserRateLimit } from "../../middleware/rate-limit";
 import { accessRoute } from "./access";
 import { appsRoute } from "./apps";
@@ -55,6 +56,10 @@ import { virtualCurrenciesDashboardRoute } from "./virtual-currencies";
 export const dashboardRoute = new Hono()
   .use("*", requireDashboardAuth)
   .use("*", dashboardUserRateLimit())
+  // Plausible-model usage lock: feature routes 403 while locked; the
+  // billing sub-tree stays reachable (exempted inside the guard) and the
+  // bare /projects/:projectId detail route is not matched by the wildcard.
+  .use("/projects/:projectId/*", usageLockGuard)
   .route("/audiences", audiencesRoute)
   .route("/audit-logs", auditLogsRoute)
   .route("/experiments", experimentsRoute)

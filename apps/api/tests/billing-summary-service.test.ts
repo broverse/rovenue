@@ -20,6 +20,12 @@ vi.mock("@rovenue/db", async () => {
       billingPaymentMethodRepo: {
         findDefaultPaymentMethod: vi.fn(),
       },
+      projectRepo: {
+        findProjectById: vi.fn().mockResolvedValue({
+          id: "proj_1",
+          usageLockedAt: null,
+        }),
+      },
     },
   };
 });
@@ -65,6 +71,7 @@ describe("buildBillingSummary", () => {
       currentPeriodEnd: null,
       defaultPaymentMethod: null,
       hasStripeCustomer: false,
+      usageLockedAt: null,
     });
   });
 

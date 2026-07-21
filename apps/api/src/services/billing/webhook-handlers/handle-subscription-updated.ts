@@ -55,6 +55,10 @@ export async function handleSubscriptionUpdated(
     },
   );
 
+  // Upgrading raises limits — release any usage lock immediately rather
+  // than waiting for the next daily usage-cap sweep.
+  await drizzle.projectRepo.setUsageLockedAt(ctx.tx, ctx.projectId, null);
+
   // P2: past_due / dunning state is not yet driven by this handler;
   // P5 layers the dunning_state writes on top.
 }

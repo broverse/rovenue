@@ -20,12 +20,13 @@ export async function buildBillingSummary(
   db: Db,
   projectId: string,
 ): Promise<BillingSummary> {
-  const [subscription, defaultPm] = await Promise.all([
+  const [subscription, defaultPm, project] = await Promise.all([
     drizzle.billingSubscriptionRepo.findBillingSubscriptionByProject(
       db,
       projectId,
     ),
     drizzle.billingPaymentMethodRepo.findDefaultPaymentMethod(db, projectId),
+    drizzle.projectRepo.findProjectById(db, projectId),
   ]);
 
   if (!subscription) {
@@ -55,5 +56,6 @@ export async function buildBillingSummary(
     currentPeriodEnd: subscription.currentPeriodEnd?.toISOString() ?? null,
     defaultPaymentMethod,
     hasStripeCustomer: subscription.stripeCustomerId !== null,
+    usageLockedAt: project?.usageLockedAt?.toISOString() ?? null,
   };
 }

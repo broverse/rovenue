@@ -47,6 +47,8 @@ export interface BillingSummary {
   currentPeriodEnd: string | null;
   defaultPaymentMethod: PaymentMethodSummary | null;
   hasStripeCustomer: boolean;
+  /** Set when the usage-cap sweeper locked the dashboard (Plausible model). */
+  usageLockedAt: string | null;
 }
 
 export interface InvoiceSummary {
