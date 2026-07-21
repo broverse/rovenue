@@ -10,12 +10,14 @@ import {
   type Mailer,
 } from "./mailer";
 import { SmtpMailer } from "./mailer-smtp";
+import { ResendMailer } from "./mailer-resend";
 
 type EnvShape = typeof RealEnv;
 function baseEnv(overrides: Partial<EnvShape> = {}): EnvShape {
   return {
     EMAIL_PROVIDER: "ses",
     EMAIL_FROM: undefined,
+    RESEND_API_KEY: undefined,
     AWS_SES_FROM_EMAIL: undefined,
     AWS_SES_REGION: "us-east-1",
     AWS_SES_CONFIGURATION_SET: undefined,
@@ -160,5 +162,36 @@ describe("createMailerFromEnv", () => {
         }),
       ),
     ).toThrow(/EMAIL_PROVIDER=smtp requires/);
+  });
+
+  it("EMAIL_PROVIDER=resend with key + from builds a ResendMailer", () => {
+    const m = createMailerFromEnv(
+      baseEnv({
+        EMAIL_PROVIDER: "resend",
+        RESEND_API_KEY: "re_key",
+        EMAIL_FROM: "noreply@rovenue.app",
+      }),
+    );
+    expect(m).toBeInstanceOf(ResendMailer);
+  });
+
+  it("EMAIL_PROVIDER=resend without key falls back to SES when a from address exists", () => {
+    const m = createMailerFromEnv(
+      baseEnv({
+        EMAIL_PROVIDER: "resend",
+        RESEND_API_KEY: undefined,
+        AWS_SES_FROM_EMAIL: "noreply@rovenue.app",
+      }),
+    );
+    expect(m).not.toBeInstanceOf(ResendMailer);
+    expect(m.constructor.name).toBe("SesMailer");
+  });
+
+  it("EMAIL_PROVIDER=resend with nothing configured is a noop mailer", async () => {
+    const m = createMailerFromEnv(
+      baseEnv({ EMAIL_PROVIDER: "resend", RESEND_API_KEY: undefined }),
+    );
+    const out = await m.send({ to: "a@b.com", subject: "s", html: "h", text: "t" });
+    expect(out.messageId).toBe("noop");
   });
 });

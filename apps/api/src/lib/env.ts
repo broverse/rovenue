@@ -127,10 +127,21 @@ const envSchema = z
     STRIPE_BILLING_PUBLISHABLE_KEY: z.string().min(1).optional(),
     STRIPE_BILLING_INDIE_MONTHLY_PRICE_ID: z.string().min(1).optional(),
     // ---- Email transport selection -----------------------------
-    // EMAIL_PROVIDER picks the Mailer impl. "ses" is the default
-    // (uses AWS_SES_* above). "smtp" enables the nodemailer path
-    // for self-hosted instances without AWS credentials.
-    EMAIL_PROVIDER: z.enum(["ses", "smtp"]).default("ses"),
+    // EMAIL_PROVIDER picks the Mailer impl. "resend" is the default
+    // (uses RESEND_API_KEY below; falls back to SES when the key is
+    // missing but AWS_SES_* is configured — protects deployments that
+    // upgraded past the default flip). "ses" uses AWS_SES_* above.
+    // "smtp" enables the nodemailer path for self-hosted instances
+    // without AWS credentials or a Resend account.
+    EMAIL_PROVIDER: z.enum(["resend", "ses", "smtp"]).default("resend"),
+    // ---- Resend (default email transport) ----------------------
+    RESEND_API_KEY: z.string().min(1).optional(),
+    // Svix signing secret ("whsec_…") for /webhooks/resend-events.
+    RESEND_WEBHOOK_SECRET: z.string().min(1).optional(),
+    RESEND_EVENTS_VERIFY_SIGNATURE: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
     // Overrides AWS_SES_FROM_EMAIL when set (also required by the
     // SMTP path which has no SES equivalent).
     EMAIL_FROM: z.string().email().optional(),

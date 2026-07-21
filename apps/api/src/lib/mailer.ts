@@ -2,6 +2,7 @@ import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { env } from "./env";
 import { logger } from "./logger";
 import { SmtpMailer } from "./mailer-smtp";
+import { ResendMailer } from "./mailer-resend";
 
 export interface MailMessage {
   to: string;
@@ -78,6 +79,10 @@ let _mailer: Mailer | null = null;
  *
  * Selection rules:
  *   - EMAIL_PROVIDER=smtp → SmtpMailer (requires SMTP_HOST/PORT/USER/PASS + a from address)
+ *   - EMAIL_PROVIDER=resend (default) + RESEND_API_KEY + from → ResendMailer
+ *   - EMAIL_PROVIDER=resend without RESEND_API_KEY → SES fallback when a
+ *     from address is set (deployments upgrading past the default flip
+ *     keep sending), else NoopMailer
  *   - EMAIL_PROVIDER=ses + AWS_SES_FROM_EMAIL or EMAIL_FROM set → SesMailer
  *   - otherwise → NoopMailer (dev convenience; logs and returns id="noop")
  */
@@ -98,6 +103,23 @@ export function createMailerFromEnv(e: typeof env): Mailer {
       secure: e.SMTP_SECURE,
       from,
     });
+  }
+
+  if (e.EMAIL_PROVIDER === "resend") {
+    if (e.RESEND_API_KEY && from) {
+      return new ResendMailer({ apiKey: e.RESEND_API_KEY, from });
+    }
+    if (from) {
+      // Default-flip safety: "resend" became the default provider; an
+      // instance configured only for SES keeps its SES path instead of
+      // silently degrading to noop.
+      logger.info("mailer.resend_fallback_ses", {
+        reason: "RESEND_API_KEY missing",
+      });
+      const client = new SESv2Client({ region: e.AWS_SES_REGION });
+      return new SesMailer(client, from, e.AWS_SES_CONFIGURATION_SET ?? undefined);
+    }
+    return new NoopMailer();
   }
 
   if (!from) return new NoopMailer();
