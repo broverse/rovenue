@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { drizzle } from "@rovenue/db";
 import { env } from "./env";
 import { logger } from "./logger";
 
@@ -81,4 +82,76 @@ export function getConnectPlatformStripe(livemode: boolean): Stripe | null {
 export function _resetConnectPlatformStripeForTests(): void {
   cached.live = null;
   cached.test = null;
+}
+
+export interface ConnectedStripe {
+  readonly stripe: Stripe;
+  readonly accountId: string;
+  readonly livemode: boolean;
+}
+
+/**
+ * Resolve a project's connected account into a ready-to-use client.
+ * Returns null rather than throwing so read paths (health, dashboard
+ * status) can branch on it; write paths should use
+ * `requireConnectedStripe` instead.
+ *
+ * Every Stripe call made with this client MUST pass
+ * `{ stripeAccount: accountId }` as the request-options argument —
+ * that header is what makes it a direct charge on the customer's
+ * account rather than on Rovenue's platform account.
+ */
+export async function getConnectedStripe(
+  projectId: string,
+): Promise<ConnectedStripe | null> {
+  const connection = await drizzle.stripeConnectionRepo.findActiveByProject(
+    drizzle.db,
+    projectId,
+  );
+  if (!connection) return null;
+
+  const stripe = getConnectPlatformStripe(connection.livemode);
+  if (!stripe) {
+    log.error("connection exists but its platform key is unset", {
+      projectId,
+      livemode: connection.livemode,
+    });
+    return null;
+  }
+
+  return {
+    stripe,
+    accountId: connection.stripeAccountId,
+    livemode: connection.livemode,
+  };
+}
+
+export class StripeNotConnectedError extends Error {
+  constructor(projectId: string) {
+    super(`Project ${projectId} has no active Stripe connection`);
+    this.name = "StripeNotConnectedError";
+  }
+}
+
+export async function requireConnectedStripe(
+  projectId: string,
+): Promise<ConnectedStripe> {
+  const connected = await getConnectedStripe(projectId);
+  if (!connected) throw new StripeNotConnectedError(projectId);
+  return connected;
+}
+
+/**
+ * Can this project actually take a card payment right now? Connecting
+ * is not enough — Stripe withholds `charges_enabled` and the
+ * `card_payments` capability until onboarding and verification finish.
+ */
+export async function chargesEnabled(projectId: string): Promise<boolean> {
+  const connection = await drizzle.stripeConnectionRepo.findActiveByProject(
+    drizzle.db,
+    projectId,
+  );
+  if (!connection || !connection.chargesEnabled) return false;
+  const caps = (connection.capabilities ?? {}) as Record<string, unknown>;
+  return caps.card_payments === "active";
 }
