@@ -4,7 +4,7 @@ import {
   Coins,
   Flag,
   FlaskConical,
-  // Funnel, // re-enable when Funnels is unhidden from the sidebar
+  Funnel,
   KeyRound,
   LayoutGrid,
   LineChart,
@@ -92,14 +92,13 @@ export const NAV_SECTIONS: ReadonlyArray<NavSection> = [
   {
     sectionKey: "growth",
     items: [
-      // Funnels temporarily hidden from the UI — re-enable when the feature ships.
-      // {
-      //   id: "funnels",
-      //   labelKey: "sidebar.items.funnels",
-      //   icon: Funnel,
-      //   to: "/projects/$projectId/funnels",
-      //   badge: "web",
-      // },
+      {
+        id: "funnels",
+        labelKey: "sidebar.items.funnels",
+        icon: Funnel,
+        to: "/projects/$projectId/funnels",
+        badge: "web",
+      },
       {
         id: "experiments",
         labelKey: "sidebar.items.experiments",

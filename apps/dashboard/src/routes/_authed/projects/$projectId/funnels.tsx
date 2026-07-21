@@ -3,7 +3,6 @@ import {
   createFileRoute,
   Link,
   Outlet,
-  redirect,
   useChildMatches,
   useNavigate,
   useParams,
@@ -37,11 +36,6 @@ import { useProject } from "../../../../lib/hooks/useProject";
 import { rpc, unwrap } from "../../../../lib/api";
 
 export const Route = createFileRoute("/_authed/projects/$projectId/funnels")({
-  // Funnels temporarily hidden — block direct URL access (covers child routes too).
-  // Remove this beforeLoad when re-enabling the feature in the sidebar.
-  beforeLoad: ({ params }) => {
-    throw redirect({ to: "/projects/$projectId", params: { projectId: params.projectId } });
-  },
   component: FunnelsRoute,
 });
 
