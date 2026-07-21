@@ -155,6 +155,39 @@ describe("POST /v1/sdk/sessions", () => {
     });
   });
 
+  it("accepts an explicit null durationMs (the SDK wire shape for open events)", async () => {
+    // The Rust dispatcher serializes Option::None as JSON null — it does not
+    // omit the key — so every "open" event arrives as `durationMs: null`.
+    const app = await buildApp();
+    const res = await app.request("/v1/sdk/sessions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${PUBLIC_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        subscriberId: "foreign_sub_xyz",
+        events: [
+          {
+            type: "open",
+            occurredAt: "2026-05-28T10:00:00.000Z",
+            durationMs: null,
+            appVersion: "1.0.0",
+            sdkVersion: "0.6.0",
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(202);
+
+    // null normalizes to 0 in the Kafka payload, matching the `?? 0` used
+    // in the deterministic eventId hash input.
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    const envelope = JSON.parse(sendMock.mock.calls[0]?.[0].messages[0].value);
+    const payload = JSON.parse(envelope.payload);
+    expect(payload.durationMs).toBe(0);
+  });
+
   it("derives a deterministic eventId so at-least-once SDK retries dedupe in ClickHouse", async () => {
     const app = await buildApp();
     const body = JSON.stringify({

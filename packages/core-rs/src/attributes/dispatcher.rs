@@ -48,8 +48,17 @@ impl AttributeDispatcher {
             };
             map.insert(r.key.clone(), v);
         }
-        // Post first; only delete if it succeeded (durable).
-        self.http.post_attributes(&sub_id, &map)?;
+        // Post first; only delete if it succeeded (durable). A permanent
+        // rejection (4xx other than 429) is the one exception: retaining a
+        // queue the server will never accept re-sends it every tick and
+        // blocks newer mutations forever, so drop it instead.
+        if let Err(err) = self.http.post_attributes(&sub_id, &map) {
+            if !err.retryable && matches!(err.http_status, Some(s) if (400..500).contains(&s)) {
+                let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+                self.buffer.delete(&ids)?;
+            }
+            return Err(err);
+        }
         let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
         self.buffer.delete(&ids)?;
         // Report distinct keys synced (coalesced), not raw queue rows drained.
@@ -129,6 +138,39 @@ mod tests {
         assert_eq!(dispatcher.flush_once().unwrap(), 2);
         assert_eq!(buf.list(100).unwrap().len(), 0);
         m.assert();
+    }
+
+    /// Same poison-pill guard as the session dispatcher: a queue the server
+    /// permanently rejects (4xx other than 429) must be dropped, or every
+    /// future flush re-sends it and newer mutations never sync.
+    #[test]
+    fn flush_discards_queue_on_permanent_4xx() {
+        let mut server = mockito::Server::new();
+        let _m = server
+            .mock("POST", "/v1/me/attributes")
+            .with_status(400)
+            .with_body(r#"{"error":{"code":"VALIDATION_ERROR"}}"#)
+            .create();
+
+        let store = Arc::new(CacheStore::open_in_memory().unwrap());
+        let buf = Arc::new(AttributeBuffer::new(Arc::clone(&store)));
+        buf.set("$email", Some("a@b.com")).unwrap();
+        let http = Arc::new(
+            HttpClient::new(server.url(), "pk_test_abc".into())
+                .with_max_attempts(1)
+                .with_request_timeout(Duration::from_millis(500)),
+        );
+        let dispatcher = AttributeDispatcher::new(
+            Arc::clone(&buf),
+            http,
+            Box::new(|| Some("rov_x".to_string())),
+        );
+        assert!(dispatcher.flush_once().is_err(), "a 400 must still surface");
+        assert_eq!(
+            buf.list(100).unwrap().len(),
+            0,
+            "a 4xx-rejected queue must be dropped, not retried forever"
+        );
     }
 
     #[test]

@@ -53,7 +53,7 @@ const log = logger.child("route:v1:sdk-sessions");
 function sessionEventId(
   projectId: string,
   subscriberId: string,
-  e: { type: string; occurredAt: string; durationMs?: number },
+  e: { type: string; occurredAt: string; durationMs?: number | null },
 ): string {
   return createHash("sha256")
     .update(
@@ -77,7 +77,10 @@ const requirePublicApiKey: import("hono").MiddlewareHandler = async (
 const sessionEventSchema = z.object({
   type: z.enum(["open", "background", "close"]),
   occurredAt: z.string().datetime(),
-  durationMs: z.number().int().nonnegative().optional(),
+  // The Rust dispatcher serializes Option::None as an explicit JSON null
+  // (it never omits the key), so "open" events always arrive as
+  // `durationMs: null` — the schema must accept null, not just absence.
+  durationMs: z.number().int().nonnegative().nullable().optional(),
   appVersion: z.string().min(1).max(32),
   sdkVersion: z.string().min(1).max(32),
 });

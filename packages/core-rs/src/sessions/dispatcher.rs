@@ -61,7 +61,17 @@ impl SessionDispatcher {
             })
             .collect();
         // Propagates on failure (5xx / network) WITHOUT deleting → retained.
-        self.http.post_sessions(&sub_id, &events)?;
+        // A permanent rejection (4xx other than 429) is the one exception:
+        // peek returns id ASC, so retaining a batch the server will never
+        // accept re-sends it every tick and head-of-line-blocks all newer
+        // telemetry until the FIFO cap evicts it. Drop it instead.
+        if let Err(err) = self.http.post_sessions(&sub_id, &events) {
+            if !err.retryable && matches!(err.http_status, Some(s) if (400..500).contains(&s)) {
+                let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+                self.buffer.delete(&ids)?;
+            }
+            return Err(err);
+        }
         let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
         self.buffer.delete(&ids)?;
         Ok(rows.len())
@@ -119,6 +129,33 @@ mod tests {
             buffer.peek(100).unwrap().len(),
             1,
             "events must be retained for retry after a 503"
+        );
+    }
+
+    /// A permanently-rejected batch (4xx other than 429) must be DISCARDED,
+    /// not retained: peek returns rows in id ASC order, so a retained
+    /// poison batch would be re-sent on every tick and head-of-line-block
+    /// all newer telemetry behind it until the FIFO cap evicts it.
+    #[test]
+    fn discards_batch_on_permanent_4xx_rejection() {
+        let mut server = mockito::Server::new();
+        let _m = server
+            .mock("POST", "/v1/sdk/sessions")
+            .with_status(400)
+            .with_body(r#"{"error":{"code":"VALIDATION_ERROR"}}"#)
+            .create();
+
+        let (buffer, dispatcher) = setup(server.url());
+        buffer
+            .record(SessionEventKind::Open, "2026-05-28T10:00:00Z", None)
+            .unwrap();
+
+        let result = dispatcher.flush_once();
+        assert!(result.is_err(), "a 400 must still surface as an error");
+        assert_eq!(
+            buffer.peek(100).unwrap().len(),
+            0,
+            "a 4xx-rejected batch must be dropped, not poison the queue"
         );
     }
 
