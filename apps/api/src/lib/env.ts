@@ -70,6 +70,7 @@ const envSchema = z
     BETTER_AUTH_SECRET: z.string().min(1).optional(),
     BETTER_AUTH_URL: z.string().url().default("http://localhost:3000"),
     DASHBOARD_URL: z.string().url().default("http://localhost:5173"),
+    PUBLIC_BASE_URL: z.string().url().default("http://localhost:3000"),
     GITHUB_CLIENT_ID: z.string().optional(),
     GITHUB_CLIENT_SECRET: z.string().optional(),
     GOOGLE_CLIENT_ID: z.string().optional(),
@@ -126,6 +127,18 @@ const envSchema = z
     STRIPE_BILLING_WEBHOOK_SECRET: z.string().min(1).optional(),
     STRIPE_BILLING_PUBLISHABLE_KEY: z.string().min(1).optional(),
     STRIPE_BILLING_INDIE_MONTHLY_PRICE_ID: z.string().min(1).optional(),
+    // ---- Stripe Connect (customer accounts) — NOT HOST_MODE gated ---------
+    // Rovenue acts as a Connect platform so customers can authorise us to
+    // charge on their behalf. Self-hosted installs register their own
+    // platform and fill these in; when unset, Stripe features report
+    // themselves unavailable rather than crashing at boot.
+    STRIPE_CONNECT_CLIENT_ID: z.string().min(1).optional(),
+    STRIPE_CONNECT_CLIENT_ID_TEST: z.string().min(1).optional(),
+    STRIPE_PLATFORM_SECRET_KEY: z.string().min(1).optional(),
+    STRIPE_PLATFORM_SECRET_KEY_TEST: z.string().min(1).optional(),
+    STRIPE_PLATFORM_PUBLISHABLE_KEY: z.string().min(1).optional(),
+    STRIPE_PLATFORM_PUBLISHABLE_KEY_TEST: z.string().min(1).optional(),
+    STRIPE_CONNECT_WEBHOOK_SECRET: z.string().min(1).optional(),
     // ---- Email transport selection -----------------------------
     // EMAIL_PROVIDER picks the Mailer impl. "resend" is the default
     // (uses RESEND_API_KEY below; falls back to SES when the key is
@@ -284,6 +297,21 @@ const envSchema = z
         data.STRIPE_BILLING_INDIE_MONTHLY_PRICE_ID,
         "STRIPE_BILLING_INDIE_MONTHLY_PRICE_ID",
         "HOST_MODE=cloud requires the Indie monthly Stripe price id",
+      );
+    }
+
+    // Connect is opt-in, but half-configured Connect is a deploy bug: if the
+    // client id is present the platform key and webhook secret must be too.
+    if (data.STRIPE_CONNECT_CLIENT_ID) {
+      require(
+        data.STRIPE_PLATFORM_SECRET_KEY,
+        "STRIPE_PLATFORM_SECRET_KEY",
+        "STRIPE_CONNECT_CLIENT_ID is set so a platform secret key is required in production",
+      );
+      require(
+        data.STRIPE_CONNECT_WEBHOOK_SECRET,
+        "STRIPE_CONNECT_WEBHOOK_SECRET",
+        "STRIPE_CONNECT_CLIENT_ID is set so a Connect webhook secret is required in production",
       );
     }
   });
