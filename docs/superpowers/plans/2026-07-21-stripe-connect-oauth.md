@@ -2520,6 +2520,7 @@ git commit -m "feat(api): gate paywall publish on real Stripe charge capability"
 - Modify: `apps/api/src/routes/webhooks/index.ts`, `apps/api/src/middleware/webhook-verify.ts:265-315`, `apps/api/src/lib/project-credentials.ts:24-29,42,82-101`, `apps/api/src/routes/dashboard/credentials.ts`, `apps/api/src/services/stripe/stripe-webhook.ts:31-41,73-97`, `apps/api/src/routes/health.ts:243-262`, `apps/api/src/routes/dashboard/projects.ts:131`
 - Modify: `packages/db/src/helpers/encrypted-field.ts:17-21,57-62`, `packages/db/src/drizzle/repositories/projects.ts:75,94,330,352`, `packages/db/src/drizzle/schema.ts:267`, `packages/shared/src/dashboard.ts:132,165`
 - Create: `packages/db/drizzle/migrations/0087_drop_stripe_credentials.sql`
+- Modify: `packages/db/drizzle/migrations/meta/_journal.json` (append the `0087` entry — the migrator only runs migrations listed in the journal, so a hand-written `.sql` without a journal entry is silently never applied)
 - Modify: `apps/api/tests/dashboard-credentials.test.ts`, `apps/api/tests/webhook-verify.test.ts`
 
 **Interfaces:**
@@ -2550,7 +2551,7 @@ In `apps/api/src/services/stripe/stripe-webhook.ts`, delete `getStripeClient` an
 
 Remove `stripeCredentials: jsonb("stripeCredentials"),` from `packages/db/src/drizzle/schema.ts:267`. Remove `"stripeCredentials"` from `CREDENTIAL_FIELDS` and from `ProjectCredentialsInput` in `packages/db/src/helpers/encrypted-field.ts`. Remove the `stripe` branches from `findProjectCredentials`, `writeProjectCredential` and `clearProjectCredential` in `packages/db/src/drizzle/repositories/projects.ts`.
 
-Create `packages/db/drizzle/migrations/0087_drop_stripe_credentials.sql`:
+Create `packages/db/drizzle/migrations/0087_drop_stripe_credentials.sql`, and append a matching entry to `packages/db/drizzle/migrations/meta/_journal.json` (`idx: 87`, `tag: "0087_drop_stripe_credentials"`, `version: "7"`, `breakpoints: true`, `when` greater than the `0086` entry's). Without the journal entry the migrator never runs the file:
 
 ```sql
 -- Stripe Connect replaces per-project API keys. This is destructive and
