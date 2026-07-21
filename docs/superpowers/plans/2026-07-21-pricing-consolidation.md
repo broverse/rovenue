@@ -32,7 +32,7 @@
 **Interfaces:**
 - Produces: `"studio"` as a valid `BillingTier`; `projects.usageLockedAt: Date | null` on the Drizzle projects model (Tasks 3–4 consume).
 
-- [ ] **Step 1: TS enum + schema edits**
+- [x] **Step 1: TS enum + schema edits**
 
 In `packages/db/src/drizzle/enums.ts`, add `"studio"` after `"scale"` in BOTH the `billingTierEnum` pgEnum array and the `billingTier` const array, and add this comment above each:
 
@@ -51,12 +51,12 @@ In `packages/db/src/drizzle/schema.ts`, inside the `projects` pgTable column lis
 
 In `packages/shared/src/billing.ts`, extend `BillingTier` with `| "studio"` (after `"scale"`) and add the same public-ladder comment.
 
-- [ ] **Step 2: Generate the DDL migration**
+- [x] **Step 2: Generate the DDL migration**
 
 Run: `pnpm db:migrate:generate`
 Inspect the new `packages/db/drizzle/migrations/0084_*.sql`: it must contain ONLY `ALTER TYPE "billing_tier" ADD VALUE 'studio' …` and `ALTER TABLE "projects" ADD COLUMN "usage_locked_at" timestamp with time zone;`. Known gotcha: drizzle-kit sometimes re-emits hand-written DDL from earlier migrations — delete anything else it generated and fix the meta snapshot only if drizzle complains on apply.
 
-- [ ] **Step 3: Hand-write the DML migration**
+- [x] **Step 3: Hand-write the DML migration**
 
 Create `packages/db/drizzle/migrations/0085_pricing_consolidation.sql` (separate file because Postgres cannot use a new enum value in the same transaction that added it):
 
@@ -99,7 +99,7 @@ DELETE FROM "billing_tier_limits" WHERE "tier" IN ('pro', 'scale', 'growth');
 
 Register 0085 in `packages/db/drizzle/migrations/meta/_journal.json` the same way neighbouring hand-written migrations (e.g. 0081/0082) are registered — copy the previous entry's shape, bump `idx` and `tag`.
 
-- [ ] **Step 4: Update the seed**
+- [x] **Step 4: Update the seed**
 
 Replace `TIER_LIMITS` in `packages/db/seed.ts` with:
 
@@ -122,7 +122,7 @@ Replace `TIER_LIMITS` in `packages/db/seed.ts` with:
 
 The `indieMonthlyPriceId` wiring below it stays untouched.
 
-- [ ] **Step 5: Build + typecheck + commit**
+- [x] **Step 5: Build + typecheck + commit**
 
 Run: `pnpm --filter @rovenue/shared build && pnpm --filter @rovenue/db build && pnpm --filter @rovenue/api typecheck`
 Expected: clean.
@@ -144,7 +144,7 @@ git commit -m "feat(db): consolidate billing ladder to free/indie/studio/enterpr
 **Interfaces:**
 - Produces: `shouldLockUsage(rows: SnapshotLike[], periods: [Date, Date]): boolean` and `completedPeriodStarts(now: Date): [Date, Date]` (Task 3 consumes). `SnapshotLike = { meterKey: string; periodStart: Date; currentValue: string; limitValue: string | null }`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -225,12 +225,12 @@ describe("completedPeriodStarts", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/services/billing/usage-lock-rule.test.ts`
 Expected: FAIL — module missing.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```ts
 // =============================================================
@@ -273,7 +273,7 @@ export function shouldLockUsage(rows: SnapshotLike[], periods: [Date, Date]): bo
 }
 ```
 
-- [ ] **Step 4: Run tests, typecheck, commit**
+- [x] **Step 4: Run tests, typecheck, commit**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/services/billing/usage-lock-rule.test.ts` → PASS (8 tests).
 
@@ -298,7 +298,7 @@ git commit -m "feat(api): pure two-consecutive-periods usage-lock rule"
 - Consumes: `shouldLockUsage` / `completedPeriodStarts` (Task 2), `buildUsageReport` (existing), `projects.usageLockedAt` (Task 1).
 - Produces: `applyUsageLockState(db, projectId, now): Promise<"locked" | "unlocked" | "unchanged">` (exported for tests and reused by nothing else), `createUsageCapSweeperWorker()`, `scheduleUsageCapSweep()`.
 
-- [ ] **Step 1: Repo additions**
+- [x] **Step 1: Repo additions**
 
 `usage-snapshots.ts` (uses the existing `inArray` import pattern):
 
@@ -351,7 +351,7 @@ export async function setUsageLockedAt(
 (Adjust `updatedAt` handling to match how `updateProject` in the same file does it; drop the `updatedAt` set entirely if the sibling doesn't touch it.)
 Ensure the three functions are exported through the repositories barrel the same way their siblings are.
 
-- [ ] **Step 2: Write the failing worker test**
+- [x] **Step 2: Write the failing worker test**
 
 `apps/api/src/workers/usage-cap-sweeper.test.ts` — mock `@rovenue/db` (hoisted factory, same pattern as `routes/webhooks/resend-events.test.ts`) and `../services/billing/usage` (stub `buildUsageReport` to resolve) and `../lib/audit` (stub `audit`). Test `applyUsageLockState` transitions:
 
@@ -441,7 +441,7 @@ describe("applyUsageLockState", () => {
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/workers/usage-cap-sweeper.test.ts` → FAIL (module missing).
 
-- [ ] **Step 3: Implement the worker**
+- [x] **Step 3: Implement the worker**
 
 `apps/api/src/workers/usage-cap-sweeper.ts` — mirror the repeatable-job scaffolding of `scheduled-actions.ts` (Queue + Worker + `ensure…Repeatable()` with `REPEAT_EVERY_MS`), with:
 
@@ -534,7 +534,7 @@ export async function sweepUsageCaps(db: Db, now = new Date()): Promise<void> {
 
 plus `createUsageCapSweeperWorker()` / `scheduleUsageCapSweep()` copied structurally from `scheduled-actions.ts` (repeatable job calling `sweepUsageCaps(drizzle.db)`). Match `drizzle.db.transaction` usage to how other services open transactions (copy an existing `db.transaction` call site); adapt the outbox `payload` typing to `NewOutboxEvent` (stringify if the column expects text — copy `event-bus.ts`).
 
-- [ ] **Step 4: Bootstrap in `apps/api/src/index.ts`**
+- [x] **Step 4: Bootstrap in `apps/api/src/index.ts`**
 
 Next to the scheduled-actions block:
 
@@ -549,7 +549,7 @@ scheduleUsageCapSweep().catch((err: unknown) => {
 });
 ```
 
-- [ ] **Step 5: Run tests, typecheck, commit**
+- [x] **Step 5: Run tests, typecheck, commit**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/workers/usage-cap-sweeper.test.ts src/services/billing/usage-lock-rule.test.ts` → PASS.
 Run: `pnpm --filter @rovenue/db build && pnpm --filter @rovenue/api typecheck` → clean.
@@ -574,7 +574,7 @@ git commit -m "feat(api): daily usage-cap sweeper locks projects after two over-
 - Consumes: `projects.usageLockedAt` (Task 1), `projectRepo.setUsageLockedAt` (Task 3).
 - Produces: `usageLockGuard: MiddlewareHandler`; `BillingSummary.usageLockedAt: string | null` (Task 5 consumes in the dashboard).
 
-- [ ] **Step 1: Write the failing middleware test**
+- [x] **Step 1: Write the failing middleware test**
 
 ```ts
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -633,7 +633,7 @@ describe("usageLockGuard", () => {
 
 Run → FAIL (module missing).
 
-- [ ] **Step 2: Implement the middleware**
+- [x] **Step 2: Implement the middleware**
 
 ```ts
 import type { MiddlewareHandler } from "hono";
@@ -678,7 +678,7 @@ Mount in `apps/api/src/routes/dashboard/index.ts` after the two existing `.use("
 
 (plus the import). The bare `/projects/:projectId` detail route is not matched by the wildcard, so the project shell keeps rendering.
 
-- [ ] **Step 3: Billing summary field**
+- [x] **Step 3: Billing summary field**
 
 In `packages/shared/src/billing.ts` add to `BillingSummary`:
 
@@ -689,7 +689,7 @@ In `packages/shared/src/billing.ts` add to `BillingSummary`:
 
 In `apps/api/src/services/billing/billing-summary.ts`, load the project row (`drizzle.projectRepo.findProjectById`) and add `usageLockedAt: project?.usageLockedAt?.toISOString() ?? null` to the returned object. Fix any summary tests that assert the full object shape.
 
-- [ ] **Step 4: Clear the lock on subscription tier change**
+- [x] **Step 4: Clear the lock on subscription tier change**
 
 In `handle-subscription-updated.ts`, after `updateAfterStripeUpdated(…)`:
 
@@ -701,7 +701,7 @@ In `handle-subscription-updated.ts`, after `updateAfterStripeUpdated(…)`:
 
 Extend the handler's existing test (if present in `webhook-handlers/`) to assert `setUsageLockedAt` was called with `null`; if no test file exists, add the assertion to whichever billing webhook test covers `subscription.updated`.
 
-- [ ] **Step 5: Run tests, typecheck, commit**
+- [x] **Step 5: Run tests, typecheck, commit**
 
 Run: `pnpm --filter @rovenue/api exec vitest run src/middleware/usage-lock.test.ts` plus the touched billing test files → PASS.
 Run: `pnpm --filter @rovenue/shared build && pnpm --filter @rovenue/api typecheck` → clean.
@@ -719,12 +719,12 @@ git commit -m "feat(api): usage-lock dashboard guard + summary field + unlock on
 - Modify: `apps/dashboard/src/components/billing/upgrade-modal.tsx` ("$29 / month" → "$49 / month")
 - Modify: `apps/dashboard/src/routes/_authed/projects/$projectId/settings/billing.tsx` ("Upgrade to Indie ($29 / mo)" → "($49 / mo)"; lock banner)
 
-- [ ] **Step 1: Copy updates**
+- [x] **Step 1: Copy updates**
 
 In `upgrade-modal.tsx`: `$29 / month. Cancellable any time.` → `$49 / month. Cancellable any time.`
 In `billing.tsx`: `Upgrade to Indie ($29 / mo)` → `Upgrade to Indie ($49 / mo)`.
 
-- [ ] **Step 2: Lock banner**
+- [x] **Step 2: Lock banner**
 
 In `billing.tsx`, where the summary (`s`) renders, add above the plan card:
 
@@ -740,7 +740,7 @@ In `billing.tsx`, where the summary (`s`) renders, add above the plan card:
 
 Match the file's existing styling idiom (if it uses design tokens like `text-rv-mute-500`, reuse the closest alert/banner pattern found in the dashboard instead of raw amber classes).
 
-- [ ] **Step 3: Build, commit**
+- [x] **Step 3: Build, commit**
 
 Run: `pnpm --filter @rovenue/dashboard build` (or the repo's dashboard typecheck script) → clean.
 
