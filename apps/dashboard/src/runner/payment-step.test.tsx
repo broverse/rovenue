@@ -16,6 +16,9 @@ const stripe = vi.hoisted(() => ({
   confirmSetup: vi.fn(),
 }));
 const loadStripe = vi.hoisted(() => vi.fn());
+// Stands in for the ExpressCheckoutElement confirm event. The real one
+// carries paymentFailed(), which is how the wallet sheet is dismissed.
+const walletEvent = vi.hoisted(() => ({ paymentFailed: vi.fn() }));
 
 vi.mock("@stripe/stripe-js", () => ({ loadStripe }));
 
@@ -24,8 +27,16 @@ vi.mock("@stripe/react-stripe-js", () => ({
     <div data-testid="stripe-elements">{children}</div>
   ),
   PaymentElement: () => <div data-testid="payment-element" />,
-  ExpressCheckoutElement: ({ onConfirm }: { onConfirm: () => void }) => (
-    <button type="button" data-testid="express-checkout" onClick={() => onConfirm()}>
+  ExpressCheckoutElement: ({
+    onConfirm,
+  }: {
+    onConfirm: (event: typeof walletEvent) => void;
+  }) => (
+    <button
+      type="button"
+      data-testid="express-checkout"
+      onClick={() => onConfirm(walletEvent)}
+    >
       Express checkout
     </button>
   ),
@@ -248,6 +259,81 @@ describe("<PaymentStep>", () => {
       deepLinkUrl: null,
       universalLinkUrl: null,
     });
+  });
+
+  it("never shows the buyer the JSON envelope some endpoints put in the message", async () => {
+    // apps/api/src/routes/public/funnel-payment.ts smuggles a machine
+    // code through the HTTPException message, and the error handler
+    // passes it through verbatim.
+    vi.mocked(api.createPaymentIntent).mockRejectedValue(
+      new RunnerApiError(
+        "HTTP_ERROR",
+        JSON.stringify({ code: "STRIPE_NOT_CONNECTED" }),
+        409,
+      ),
+    );
+    renderStep({ email: "known@example.com" });
+
+    const note = await screen.findByRole("alert");
+    expect(note).toHaveTextContent(/can't take payments right now/i);
+    expect(note.textContent).not.toContain("STRIPE_NOT_CONNECTED");
+    expect(note.textContent).not.toContain("{");
+  });
+
+  it("falls back to the server's own prose for a JSON envelope whose code it doesn't know", async () => {
+    vi.mocked(api.createPaymentIntent).mockRejectedValue(
+      new RunnerApiError(
+        "HTTP_ERROR",
+        JSON.stringify({ code: "SOMETHING_NEW", message: "Try again later" }),
+        503,
+      ),
+    );
+    renderStep({ email: "known@example.com" });
+
+    const note = await screen.findByRole("alert");
+    expect(note).toHaveTextContent("Try again later");
+    expect(note.textContent).not.toContain("{");
+  });
+
+  it("sends someone whose confirmation never settled to restore-by-email, not to a refresh", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.confirmFunnelPayment).mockRejectedValue(
+      new RunnerApiError("HTTP_ERROR", "Payment is not complete", 409),
+    );
+    renderStep({ email: "known@example.com" });
+
+    await user.click(await screen.findByRole("button", { name: /pay/i }));
+
+    const note = await screen.findByRole("alert");
+    await waitFor(() =>
+      expect(note).toHaveTextContent(/restore your purchase with the email/i),
+    );
+    // Refreshing mints a NEW session, so it cannot recover this one.
+    expect(note.textContent).not.toMatch(/refresh/i);
+  });
+
+  it("tells the wallet sheet to close when the payment is declined", async () => {
+    const user = userEvent.setup();
+    stripe.confirmPayment.mockResolvedValue({
+      error: { message: "Your card was declined." },
+    });
+    renderStep({ email: "known@example.com" });
+
+    await user.click(await screen.findByTestId("express-checkout"));
+
+    await waitFor(() => expect(walletEvent.paymentFailed).toHaveBeenCalledTimes(1));
+    expect(walletEvent.paymentFailed).toHaveBeenCalledWith({ reason: "fail" });
+    expect(await screen.findByText("Your card was declined.")).toBeInTheDocument();
+  });
+
+  it("leaves the wallet sheet alone when the payment goes through", async () => {
+    const user = userEvent.setup();
+    const { onPaid } = renderStep({ email: "known@example.com" });
+
+    await user.click(await screen.findByTestId("express-checkout"));
+
+    await waitFor(() => expect(onPaid).toHaveBeenCalledTimes(1));
+    expect(walletEvent.paymentFailed).not.toHaveBeenCalled();
   });
 
   it("surfaces an intent-creation failure and lets the buyer back out", async () => {

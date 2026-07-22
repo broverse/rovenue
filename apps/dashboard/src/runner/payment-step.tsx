@@ -86,8 +86,64 @@ const DEFAULT_CONFIRM_RETRY_DELAYS_MS = [500, 1_500, 5_000];
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/**
+ * The part of Stripe's ExpressCheckoutElement confirm event we use.
+ *
+ * Structural rather than imported so the same handler can serve the
+ * card button, which has no event at all. `paymentFailed()` is what
+ * dismisses the Apple Pay / Google Pay sheet — the sheet is modal and
+ * sits above our error note, so failing to call it hides the very
+ * message the buyer needs.
+ */
+interface WalletConfirmEvent {
+  paymentFailed?: (payload?: { reason?: "fail" }) => void;
+}
+
+/**
+ * Buyer-facing copy for the machine-readable codes the funnel payment
+ * endpoints answer with. Anything not listed here falls back to the
+ * server's own prose, which for these routes is already written for a
+ * human ("Package has no usable price" is the exception, and it is a
+ * misconfiguration nobody's buyer should ever reach).
+ */
+const ERROR_COPY: Record<string, string> = {
+  STRIPE_NOT_CONNECTED:
+    "This checkout can't take payments right now. Please try again later.",
+  PAYMENT_ALREADY_RECORDED:
+    "This purchase is already recorded — you haven't been charged twice.",
+  PAYMENT_IN_FLIGHT:
+    "A payment for this session is already going through. Give it a moment before trying again.",
+  PAYMENT_TEMPORARILY_UNAVAILABLE:
+    "Payments are temporarily unavailable. Please try again in a moment.",
+};
+
+/**
+ * Turns whatever we caught into something a buyer can read.
+ *
+ * Several of these endpoints carry a machine-readable code by putting
+ * `JSON.stringify({ code, message })` in the HTTPException message
+ * (apps/api/src/routes/public/funnel-payment.ts), and the API's error
+ * handler passes that through verbatim — so the raw `Error.message`
+ * here can literally be `{"code":"STRIPE_NOT_CONNECTED"}`. Rendering
+ * that to someone trying to pay is not an option.
+ */
 function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  const raw = err instanceof Error ? err.message : String(err);
+  if (!raw.trimStart().startsWith("{")) return raw;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return raw; // prose that merely began with a brace
+  }
+  if (typeof parsed !== "object" || parsed === null) return raw;
+  const { code, message } = parsed as { code?: unknown; message?: unknown };
+  if (typeof code === "string" && ERROR_COPY[code]) return ERROR_COPY[code];
+  if (typeof message === "string" && message.trim()) return message;
+  if (typeof code === "string") {
+    return "Something went wrong with this payment. Please try again.";
+  }
+  return raw;
 }
 
 /**
@@ -283,37 +339,53 @@ function PaymentForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const confirm = useCallback(async () => {
-    if (!stripe || !elements || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      // `redirect: "if_required"` is the no-leaving-the-page guarantee.
-      // A trial has nothing to charge yet — its client secret belongs to
-      // a SetupIntent, and confirmPayment would reject it.
-      const result =
-        mode === "setup"
-          ? await stripe.confirmSetup({ elements, redirect: "if_required" })
-          : await stripe.confirmPayment({ elements, redirect: "if_required" });
-
-      if (result.error) {
-        // A decline, an invalid card, a failed 3DS. Stripe's own message
-        // is the useful one; the buyer stays here and can try again.
-        setError(result.error.message ?? "That payment could not be completed.");
+  const confirm = useCallback(
+    async (wallet?: WalletConfirmEvent) => {
+      if (!stripe || !elements || busy) {
+        // The wallet sheet is modal and waits on us; never leave it up.
+        wallet?.paymentFailed?.({ reason: "fail" });
         return;
       }
+      setBusy(true);
+      setError(null);
+      try {
+        // `redirect: "if_required"` is the no-leaving-the-page guarantee.
+        // A trial has nothing to charge yet — its client secret belongs to
+        // a SetupIntent, and confirmPayment would reject it.
+        const result =
+          mode === "setup"
+            ? await stripe.confirmSetup({ elements, redirect: "if_required" })
+            : await stripe.confirmPayment({ elements, redirect: "if_required" });
 
-      onPaid(await settleFunnelPayment(sessionId, confirmRetryDelaysMs));
-    } catch (err) {
-      // Reached only once the retries are spent. Worded so it never
-      // tells someone who paid that they did not.
-      setError(
-        `We're still confirming your payment. Don't pay again — refresh in a moment. (${messageOf(err)})`,
-      );
-    } finally {
-      setBusy(false);
-    }
-  }, [stripe, elements, busy, mode, sessionId, confirmRetryDelaysMs, onPaid]);
+        if (result.error) {
+          // A decline, an invalid card, a failed 3DS. Stripe's own message
+          // is the useful one; the buyer stays here and can try again.
+          wallet?.paymentFailed?.({ reason: "fail" });
+          setError(
+            result.error.message ?? "That payment could not be completed.",
+          );
+          return;
+        }
+
+        onPaid(await settleFunnelPayment(sessionId, confirmRetryDelaysMs));
+      } catch (err) {
+        // Reached only once the retries are spent. Worded so it never
+        // tells someone who paid that they did not — and pointed at the
+        // route that actually works. Refreshing does NOT: the runner
+        // opens a brand-new session on every mount, so the paid one is
+        // gone and there is nothing left to confirm. What does work is
+        // the webhook backstop plus the emailed claim, which is exactly
+        // a restore by email.
+        wallet?.paymentFailed?.({ reason: "fail" });
+        setError(
+          `We're still confirming your payment. Don't pay again — open the app and restore your purchase with the email you paid with. (${messageOf(err)})`,
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [stripe, elements, busy, mode, sessionId, confirmRetryDelaysMs, onPaid],
+  );
 
   const payLabel =
     mode === "setup"
@@ -325,8 +397,12 @@ function PaymentForm({
   return (
     <div className="flex flex-col gap-4">
       {/* Wallets first: Apple Pay / Google Pay are one tap and confirm
-          through the very same handler as the card form below. */}
-      <ExpressCheckoutElement onConfirm={() => void confirm()} />
+          through the very same handler as the card form below. The
+          event is passed on, not dropped — it carries paymentFailed(),
+          the only way to tell the browser's payment sheet to come down
+          when confirmation fails. Without it a declined wallet payment
+          leaves the sheet spinning over the error. */}
+      <ExpressCheckoutElement onConfirm={(event) => void confirm(event)} />
       <div className="flex items-center gap-3 text-[11px] uppercase tracking-wide text-zinc-500">
         <span className="h-px flex-1 bg-zinc-200" />
         or pay by card
