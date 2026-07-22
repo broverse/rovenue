@@ -149,8 +149,8 @@ Docs guide: fallback setup per platform, overrides/cellTemplate authoring, new v
 
 ## Verification (after all tasks)
 
-- [ ] `pnpm build --force` green; shared / renderer / dashboard / api suites
-- [ ] cargo test+fmt+clippy; bindings regen clean, none committed
-- [ ] swift test; `./gradlew testDebugUnitTest`; RN vitest+tsc+tsup
-- [ ] CH testcontainers round-trip (kind column) — local CH env still known-broken, harness is authoritative
-- [ ] No B3-owned file touched: `git diff --stat <base>..HEAD` contains no funnel/checkout paths
+- [x] `pnpm build --force` 9/9; shared 338/338; renderer 34/34; dashboard builder 106+; api affected suites green (2026-07-22)
+- [x] cargo test (queue 13 + ladder 15 + fallback 6 + …) + fmt + clippy clean; bindings regen, none committed
+- [x] swift test 160/160; gradle 197/197 (XML-verified); RN 262/262 + tsc + tsup
+- [x] CH testcontainers round-trip 4/4 incl. kind column (local CH env still known-broken; harness authoritative)
+- [x] B3 sweep clean: none of the 16 Phase-D commits touch funnel/checkout paths (per-commit stat grep)
