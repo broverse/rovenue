@@ -165,12 +165,18 @@ interface DispatchContext {
  * to sync from it. The funnel backstop is the entire work for that event.
  *
  * `setup_intent.succeeded` is present although it syncs no billing state
- * either, and the entry is honest on the table's own terms: it really is
- * work that must still run when the backstop fails. That direction never
+ * either, and the entry is honest on the table's own terms: it is work
+ * that must still run when the backstop fails. That direction never
  * arises in practice — the backstop's lookup has no case for the event,
- * so it returns before touching anything and cannot fail — and the
- * converse direction is handled inside the entry itself, which contains
- * its own failures rather than turning them into a failed event.
+ * so it returns before touching anything and cannot fail, which makes
+ * the swallow branch above unreachable for it.
+ *
+ * The converse direction is NOT contained: a failure inside
+ * `persistFunnelPaymentMethod` fails the event, deliberately. Everything
+ * that would make the write pointless is checked before it, so a failure
+ * at the write is retryable by construction — and swallowing it would
+ * mark the event PROCESSED, which consumes Stripe's redelivery and loses
+ * the write for good.
  */
 const DOMAIN_SYNC: Readonly<
   Partial<Record<string, (ctx: DispatchContext) => Promise<void>>>
@@ -440,22 +446,24 @@ async function backstopFunnelSession(ctx: DispatchContext): Promise<void> {
 // Setup-intent persistence
 // =============================================================
 //
-// The gap this closes. A trial package's card is attached through the
-// subscription's `pending_setup_intent`, and settlement is judged from
-// two signals: `default_payment_method` on the subscription, and that
-// intent reaching `succeeded`. Stripe CLEARS `pending_setup_intent` when
-// it succeeds — so if it clears before `default_payment_method` has been
-// written (that write is tied to a subscription *payment*, which on a
-// trial is weeks away), a `/confirm` arriving in the window sees neither
-// signal and refuses a buyer who really did attach a card.
+// What this is for. A trial package's card is attached through the
+// subscription's `pending_setup_intent`, and Stripe's own
+// `save_default_payment_method: "on_subscription"` writes it onto the
+// subscription only when a subscription PAYMENT succeeds — which on a
+// trial is weeks away. Until then the subscription has no
+// `default_payment_method`, which is a problem on its own terms long
+// before any gate reads it: that is the field the trial converts
+// against, and `trial_settings.end_behavior.missing_payment_method` is
+// what acts on its absence. So the card Stripe just confirmed is written
+// onto the subscription here, which is Stripe's own documented
+// recommendation for this deferred-payment flow.
 //
-// The fix is to stop depending on a transient object: write the card
-// Stripe just confirmed onto the subscription as its
-// `default_payment_method` ourselves, which is also Stripe's own
-// documented recommendation for this deferred-payment flow. The field is
-// durable, so the signal cannot evaporate between the two reads. The
-// settlement predicate is untouched — this makes its first input true
-// EARLIER and more reliably; it does not lower the bar.
+// What this is NOT for, any more: making `/confirm` able to answer. That
+// path settles a trial on the setup intent id the purchase row stores at
+// create time (see routes/public/funnel-payment.ts) and depends on
+// neither this handler nor the operator having configured the event.
+// This write still moves the shared predicate's first input EARLIER and
+// more reliably; it does not lower the bar, and nothing waits on it.
 //
 // Completion is left to the events that already do it: writing
 // `default_payment_method` produces a `customer.subscription.updated`,
@@ -472,25 +480,34 @@ const SUBSCRIPTION_TERMINAL: ReadonlySet<string> = new Set([
  * Persist a funnel trial's confirmed card as the subscription's default
  * payment method.
  *
- * Contains its own failures on purpose. Everything it does is a repair
- * of a signal that already has two other routes — `/confirm` reads the
- * live subscription, and the conversion invoice writes the same field
- * eventually — so no buyer is stranded by a failure here, and there is
- * nothing in this event a retry could rescue that those do not already
- * cover. Letting it throw would mark the event FAILED and, on the way,
- * take down nothing else (this is the whole handler) while burning
- * Stripe's redeliveries on a call that is failing for a reason a retry
- * will not change (a subscription in a state that refuses the write).
+ * Rethrows, deliberately. This handler is the whole work of the event, so
+ * swallowing a failure marks the row PROCESSED — and a PROCESSED row
+ * makes `claimWebhookEvent` answer `duplicate` on Stripe's redelivery,
+ * consuming that redelivery and BullMQ's retry in one go. The write is
+ * then lost for good, and with it the thing that lets a converted trial
+ * actually bill.
+ *
+ * Nothing is lost by retrying instead. Every reason the write would be
+ * WRONG rather than merely failed — a default payment method already
+ * present, a canceled or expired subscription, an intent belonging to
+ * another project or a superseded attempt — is checked above the write
+ * and returns early, so what reaches the write is retryable by
+ * construction. And every check is a read, so a redelivered event that
+ * has since become one of those cases simply returns early too.
  */
 async function persistFunnelPaymentMethod(ctx: DispatchContext): Promise<void> {
   try {
     await writeConfirmedCardOntoSubscription(ctx);
   } catch (err) {
+    // The generic failure log upstream has the event id and type; this
+    // one says which handler, which is the part that is not obvious from
+    // a `setup_intent.succeeded` that failed.
     log.error("could not persist the funnel setup intent's payment method", {
       eventId: ctx.event.id,
       projectId: ctx.projectId,
       err: err instanceof Error ? err.message : String(err),
     });
+    throw err;
   }
 }
 
@@ -512,6 +529,21 @@ async function writeConfirmedCardOntoSubscription(
   const sessionId = intent.metadata?.[FUNNEL_METADATA_KEY.SESSION_ID];
   const subscriptionId = intent.metadata?.[FUNNEL_METADATA_KEY.SUBSCRIPTION_ID];
   if (!sessionId || !subscriptionId) return;
+
+  // The event type is Stripe's claim about the object; the object's own
+  // status is the fact. They agree today, but this handler is registered
+  // by type in one table and reads the object in another file, so the
+  // day a second event type is pointed here — or a replayed body is
+  // handed to it — the only thing that keeps it from writing a card off
+  // an unconfirmed intent is this line.
+  if (intent.status !== "succeeded") {
+    log.warn("funnel setup intent is not succeeded; not writing its card", {
+      sessionId,
+      setupIntentId: intent.id,
+      status: intent.status,
+    });
+    return;
+  }
 
   const paymentMethodId =
     typeof intent.payment_method === "string"
@@ -539,6 +571,24 @@ async function writeConfirmedCardOntoSubscription(
     log.warn("funnel setup intent names another project's session; ignoring", {
       sessionId,
       eventProjectId: ctx.projectId,
+    });
+    return;
+  }
+
+  // Whose card is this? The intent's metadata says which subscription to
+  // write to, and metadata is a string map the account can edit — so
+  // without this the buyer behind the card is inferred from nothing at
+  // all. The customer is the one link Stripe itself maintains between
+  // the intent and the purchase this row records, and a mismatch means
+  // the card being written belongs to somebody else.
+  const intentCustomerId =
+    typeof intent.customer === "string" ? intent.customer : intent.customer?.id;
+  if (intentCustomerId !== purchase.stripeCustomerId) {
+    log.warn("funnel setup intent's customer is not the purchase's; ignoring", {
+      sessionId,
+      setupIntentId: intent.id,
+      intentCustomerId,
+      rowCustomerId: purchase.stripeCustomerId,
     });
     return;
   }

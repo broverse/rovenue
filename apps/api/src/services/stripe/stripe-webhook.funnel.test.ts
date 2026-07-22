@@ -637,35 +637,80 @@ describe("processStripeEvent — setup_intent.succeeded", () => {
     expect(subscriptionsUpdate).not.toHaveBeenCalled();
   });
 
-  // Tolerance. The write is a repair of a signal that has two other
-  // routes (`/confirm` reads the live subscription; the conversion
-  // invoice writes the same field), so a failure must cost the event
-  // nothing — a FAILED row here buys no buyer anything and burns
-  // Stripe's redeliveries.
-  test("a failing write does not fail the event", async () => {
+  // The event type is Stripe's claim; the object's status is the fact.
+  // This handler is registered by type in one table and reads the object
+  // in another file, so nothing but this check stops it writing a card
+  // off an intent that was never confirmed.
+  test("does not write the card of an intent that has not succeeded", async () => {
+    const event = setupIntentEvent(STAMPED);
+    (event.data.object as unknown as { status: string }).status =
+      "requires_action";
+
+    await run(event);
+
+    expect(subscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  // Metadata is a string map on the connected account's own object. The
+  // customer is the one link Stripe itself maintains between the intent
+  // and the purchase this row records, so a mismatch means the card
+  // being written belongs to somebody else.
+  test("ignores an intent whose customer is not the purchase's", async () => {
+    const event = setupIntentEvent(STAMPED);
+    (event.data.object as unknown as { customer: string }).customer =
+      "cus_someone_else";
+
+    await run(event);
+
+    expect(subscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  // The event must stay retryable. This handler is the whole work of the
+  // event, so a swallowed failure marks the row PROCESSED —
+  // `claimWebhookEvent` then answers `duplicate` on Stripe's redelivery
+  // and the write is lost for good. Everything that would make the write
+  // WRONG is checked before it and returns early, so what reaches the
+  // write is retryable by construction.
+  test("a failing write leaves the event retryable rather than PROCESSED", async () => {
     subscriptionsUpdate.mockRejectedValue(
       new Error("subscription is in an invalid state") as never,
     );
 
-    const result = await run(setupIntentEvent(STAMPED));
+    await expect(run(setupIntentEvent(STAMPED))).rejects.toThrow(
+      "subscription is in an invalid state",
+    );
 
-    expect(result.status).toBe("processed");
     expect(
       drizzleMock.webhookEventRepo.updateWebhookEvent,
     ).toHaveBeenCalledWith(
+      expect.anything(),
+      "whe_1",
+      expect.objectContaining({ status: "FAILED", incrementRetryCount: true }),
+    );
+    expect(
+      drizzleMock.webhookEventRepo.updateWebhookEvent,
+    ).not.toHaveBeenCalledWith(
       expect.anything(),
       "whe_1",
       expect.objectContaining({ status: "PROCESSED" }),
     );
   });
 
-  test("a failing purchase lookup does not fail the event", async () => {
+  test("a failing purchase lookup leaves the event retryable", async () => {
     drizzleMock.funnelPurchaseRepo.findBySession.mockRejectedValue(
       new Error("funnel_purchases unavailable"),
     );
 
-    const result = await run(setupIntentEvent(STAMPED));
+    await expect(run(setupIntentEvent(STAMPED))).rejects.toThrow(
+      "funnel_purchases unavailable",
+    );
 
-    expect(result.status).toBe("processed");
+    expect(
+      drizzleMock.webhookEventRepo.updateWebhookEvent,
+    ).toHaveBeenCalledWith(
+      expect.anything(),
+      "whe_1",
+      expect.objectContaining({ status: "FAILED" }),
+    );
   });
 });
