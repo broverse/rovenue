@@ -13,17 +13,17 @@ import {
   type StackNode,
   type TextNode,
 } from "@rovenue/shared/paywall";
-import type { RendererOffering, RendererPackage } from "./types";
+import type { RendererOffering } from "./types";
 import { resolveThemeColor, resolveThemeUrl, stackContainerStyle, Z_OVERLAY_CHILD_STYLE } from "./styles";
 
 // =============================================================
-// Static node rendering. Pure presentational: no network, no SDK,
-// no CSS framework (inline styles only). Interactivity — click to
-// select a package, firing a purchase, re-resolving {{variables}}
-// against the newly-selected package — is the NEXT task; `RenderCtx`
-// already carries `selectedPackage`/`onPurchase` so that task can
-// wire state (e.g. useState in PaywallRenderer feeding a new
-// selectedPackageId down) without restructuring these components.
+// Node rendering + interactivity. Presentational plus a thin layer
+// of local state wiring: click-to-select a package (packageList),
+// firing a purchase for the selected package (purchaseButton), and
+// button actions (close/url/restore). No network, no SDK, no CSS
+// framework (inline styles only) — selection state itself lives in
+// `PaywallRenderer` (useState); this module only reads/writes it
+// through `RenderCtx`.
 // =============================================================
 
 export type RenderCtx = {
@@ -31,9 +31,11 @@ export type RenderCtx = {
   offering: RendererOffering | null;
   locale: string;
   colorScheme: "light" | "dark";
-  /** The package whose values back {{variables}} in text/button labels — today always the packageList's defaultSelected (or its first id); Task 3 wires this to live selection state. */
+  priceView?: Record<string, PackageView>;
+  /** Live selection state, lifted into `PaywallRenderer`'s useState. */
   selectedPackageId: string | null;
   selectedPackage: PackageView | null;
+  onSelectPackage: (packageIdentifier: string) => void;
   onPurchase: (packageIdentifier: string) => void;
   onClose?: () => void;
   onRestore?: () => void;
@@ -41,23 +43,29 @@ export type RenderCtx = {
 };
 
 /**
- * Best-effort mapping from a RendererPackage (the loose, SDK-free
- * offering shape this package accepts) to the `{{variable}}`
- * substitution values `resolveVariables` understands. Price fields
- * aren't part of the minimal RendererOffering contract — they ride
- * in `metadata` when the host app supplies them (e.g. formatted
- * StoreProduct pricing). Missing fields resolve to "" rather than
- * throwing or leaving `undefined` on the object.
+ * Resolve a package's `{{variable}}` substitution values. `packageName`
+ * comes from the offering package's `displayName`; price/pricePerPeriod/
+ * period are NOT derivable client-agnostically from the minimal
+ * `RendererOffering` contract (this package has no SDK/network access) —
+ * they come from the `priceView` prop the consumer supplies, keyed by
+ * packageIdentifier. Returns null when the identifier is null or isn't
+ * found in `offering`; a found package with no matching `priceView` entry
+ * still resolves (price fields "" rather than throwing).
  */
-export function packageToView(pkg: RendererPackage): PackageView {
-  const meta =
-    pkg.metadata && typeof pkg.metadata === "object" ? (pkg.metadata as Record<string, unknown>) : {};
-  const str = (v: unknown): string => (typeof v === "string" ? v : "");
+export function resolvePackageView(
+  offering: RendererOffering | null,
+  priceView: Record<string, PackageView> | undefined,
+  packageIdentifier: string | null,
+): PackageView | null {
+  if (!packageIdentifier) return null;
+  const pkg = offering?.packages.find((p) => p.packageIdentifier === packageIdentifier);
+  if (!pkg) return null;
+  const view = priceView?.[packageIdentifier];
   return {
     packageName: pkg.displayName,
-    price: str(meta.price),
-    pricePerPeriod: str(meta.pricePerPeriod),
-    period: str(meta.period),
+    price: view?.price ?? "",
+    pricePerPeriod: view?.pricePerPeriod ?? "",
+    period: view?.period ?? "",
   };
 }
 
@@ -146,6 +154,12 @@ const BUTTON_STYLE_BASE: Record<ButtonNode["style"], { background?: string; colo
 };
 
 function renderButton(node: ButtonNode, ctx: RenderCtx): ReactElement | null {
+  // The funnel runner suppresses restore entirely when there's nowhere to
+  // route it — unlike close/url, an inert-but-visible restore button would
+  // be actively misleading (it implies restore is possible).
+  if (node.action.kind === "restore" && !ctx.onRestore) {
+    return renderFallbackOrNull(node, ctx);
+  }
   const label = resolveLabel(ctx, node.labelKey);
   if (label === null) return renderFallbackOrNull(node, ctx);
   const visual = BUTTON_STYLE_BASE[node.style];
@@ -174,8 +188,6 @@ function renderButton(node: ButtonNode, ctx: RenderCtx): ReactElement | null {
 }
 
 function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement {
-  const packageById = new Map((ctx.offering?.packages ?? []).map((p) => [p.packageIdentifier, p] as const));
-  const selectedId = node.defaultSelected ?? node.packageIds[0] ?? null;
   return (
     <div
       data-rov-node={node.id}
@@ -187,17 +199,17 @@ function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement 
       }}
     >
       {node.packageIds.map((packageId) => {
-        const pkg = packageById.get(packageId);
-        const view = pkg ? packageToView(pkg) : null;
-        const isSelected = packageId === selectedId;
+        const view = resolvePackageView(ctx.offering, ctx.priceView, packageId);
+        const isSelected = packageId === ctx.selectedPackageId;
         return (
           <button
             type="button"
             key={packageId}
             data-rov-package={packageId}
             aria-pressed={isSelected}
+            onClick={() => ctx.onSelectPackage(packageId)}
             style={{
-              cursor: "default",
+              cursor: "pointer",
               display: "flex",
               flexDirection: "column",
               gap: "2px",
@@ -220,13 +232,18 @@ function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement 
 function renderPurchaseButton(node: PurchaseButtonNode, ctx: RenderCtx): ReactElement | null {
   const label = resolveLabel(ctx, node.labelKey);
   if (label === null) return renderFallbackOrNull(node, ctx);
+  const selectedId = ctx.selectedPackageId;
+  const handleClick = () => {
+    if (selectedId) ctx.onPurchase(selectedId);
+  };
   return (
     <button
       type="button"
       data-rov-node={node.id}
-      disabled={!ctx.selectedPackageId}
+      disabled={!selectedId}
+      onClick={handleClick}
       style={{
-        cursor: ctx.selectedPackageId ? "pointer" : "not-allowed",
+        cursor: selectedId ? "pointer" : "not-allowed",
         padding: "12px 20px",
         borderRadius: "8px",
         fontSize: "16px",
@@ -234,7 +251,7 @@ function renderPurchaseButton(node: PurchaseButtonNode, ctx: RenderCtx): ReactEl
         background: "#111111",
         color: "#ffffff",
         border: "none",
-        opacity: ctx.selectedPackageId ? 1 : 0.5,
+        opacity: selectedId ? 1 : 0.5,
       }}
     >
       {label}

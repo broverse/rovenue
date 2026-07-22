@@ -1,4 +1,4 @@
-import type { BuilderConfig } from "@rovenue/shared/paywall";
+import type { BuilderConfig, PackageView } from "@rovenue/shared/paywall";
 
 // =============================================================
 // Renderer-facing types. `RendererOffering` is a deliberately
@@ -26,6 +26,14 @@ export type PaywallRendererProps = {
   offering: RendererOffering | null;
   locale?: string;
   colorScheme: "light" | "dark";
+  /**
+   * Package -> {{variable}} substitution values, keyed by packageIdentifier.
+   * Price fields aren't derivable from the minimal `RendererOffering`
+   * contract alone (this package has no SDK/network access); the consumer
+   * supplies formatted price strings here (dashboard preview passes
+   * placeholder views, web consumers pass real store-formatted prices).
+   */
+  priceView?: Record<string, PackageView>;
   onPurchase: (packageIdentifier: string) => void;
   onClose?: () => void;
   onRestore?: () => void;

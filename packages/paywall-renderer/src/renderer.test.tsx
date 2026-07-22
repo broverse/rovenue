@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
-import type { BuilderConfig, PaywallNode } from "@rovenue/shared/paywall";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render } from "@testing-library/react";
+import type { BuilderConfig, PackageView, PaywallNode } from "@rovenue/shared/paywall";
 import { PaywallRenderer } from "./renderer";
 import type { RendererOffering } from "./types";
 
@@ -21,6 +21,11 @@ const offering: RendererOffering = {
       storeIds: { apple: "com.rovenue.annual" },
     },
   ],
+};
+
+const priceView: Record<string, PackageView> = {
+  monthly: { packageName: "Monthly", price: "$4.99", pricePerPeriod: "$4.99/mo", period: "month" },
+  annual: { packageName: "Annual", price: "$39.99", pricePerPeriod: "$3.33/mo", period: "year" },
 };
 
 function baseConfig(overrides?: Partial<BuilderConfig>): BuilderConfig {
@@ -230,5 +235,188 @@ describe("PaywallRenderer", () => {
         />,
       ),
     ).not.toThrow();
+  });
+
+  describe("selection", () => {
+    it("defaults to the packageList's defaultSelected when present", () => {
+      const { container } = render(
+        <PaywallRenderer config={baseConfig()} offering={offering} colorScheme="light" onPurchase={noop} />,
+      );
+      expect(container.querySelector('[data-rov-package="annual"]')?.getAttribute("aria-pressed")).toBe(
+        "true",
+      );
+    });
+
+    it("falls back to the packageList's first packageId when defaultSelected is absent", () => {
+      const config = baseConfig();
+      const packages = config.root.children.find(
+        (c): c is Extract<PaywallNode, { type: "packageList" }> => c.type === "packageList",
+      )!;
+      packages.defaultSelected = undefined;
+      const { container } = render(
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" onPurchase={noop} />,
+      );
+      expect(container.querySelector('[data-rov-package="monthly"]')?.getAttribute("aria-pressed")).toBe(
+        "true",
+      );
+    });
+
+    it("falls back to the offering's first package when there is no packageList at all", () => {
+      const config = baseConfig({
+        root: {
+          type: "stack",
+          id: "root",
+          axis: "v",
+          children: [{ type: "purchaseButton", id: "purchase", labelKey: "purchase" }],
+        },
+      });
+      const { container } = render(
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" onPurchase={noop} />,
+      );
+      const button = container.querySelector('[data-rov-node="purchase"]') as HTMLButtonElement;
+      // selected via offering.packages[0] ("monthly") -> purchaseButton enabled.
+      expect(button.disabled).toBe(false);
+    });
+
+    it("resolves to null when there is no packageList and no offering", () => {
+      const config = baseConfig({
+        root: {
+          type: "stack",
+          id: "root",
+          axis: "v",
+          children: [{ type: "purchaseButton", id: "purchase", labelKey: "purchase" }],
+        },
+      });
+      const { container } = render(
+        <PaywallRenderer config={config} offering={null} colorScheme="light" onPurchase={noop} />,
+      );
+      const button = container.querySelector('[data-rov-node="purchase"]') as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+    });
+
+    it("clicking a packageList cell switches selection and updates aria-pressed", () => {
+      const { container } = render(
+        <PaywallRenderer config={baseConfig()} offering={offering} colorScheme="light" onPurchase={noop} />,
+      );
+      const monthlyCell = container.querySelector('[data-rov-package="monthly"]') as HTMLButtonElement;
+      const annualCell = container.querySelector('[data-rov-package="annual"]') as HTMLButtonElement;
+
+      fireEvent.click(monthlyCell);
+
+      expect(monthlyCell.getAttribute("aria-pressed")).toBe("true");
+      expect(annualCell.getAttribute("aria-pressed")).toBe("false");
+    });
+  });
+
+  describe("purchase", () => {
+    it("fires onPurchase with the selected package identifier", () => {
+      const onPurchase = vi.fn();
+      const { container } = render(
+        <PaywallRenderer config={baseConfig()} offering={offering} colorScheme="light" onPurchase={onPurchase} />,
+      );
+      const purchaseButton = container.querySelector('[data-rov-node="purchase"]') as HTMLButtonElement;
+      fireEvent.click(purchaseButton);
+      expect(onPurchase).toHaveBeenCalledWith("annual");
+    });
+
+    it("fires onPurchase with the newly selected package identifier after a click", () => {
+      const onPurchase = vi.fn();
+      const { container } = render(
+        <PaywallRenderer config={baseConfig()} offering={offering} colorScheme="light" onPurchase={onPurchase} />,
+      );
+      fireEvent.click(container.querySelector('[data-rov-package="monthly"]') as HTMLButtonElement);
+      fireEvent.click(container.querySelector('[data-rov-node="purchase"]') as HTMLButtonElement);
+      expect(onPurchase).toHaveBeenCalledWith("monthly");
+    });
+
+    it("disables purchaseButton and never fires onPurchase when there is no selectable package", () => {
+      const onPurchase = vi.fn();
+      const config = baseConfig({
+        root: {
+          type: "stack",
+          id: "root",
+          axis: "v",
+          children: [{ type: "purchaseButton", id: "purchase", labelKey: "purchase" }],
+        },
+      });
+      const { container } = render(
+        <PaywallRenderer config={config} offering={null} colorScheme="light" onPurchase={onPurchase} />,
+      );
+      const purchaseButton = container.querySelector('[data-rov-node="purchase"]') as HTMLButtonElement;
+      expect(purchaseButton.disabled).toBe(true);
+      fireEvent.click(purchaseButton);
+      expect(onPurchase).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("restore action", () => {
+    function restoreConfig(): BuilderConfig {
+      return baseConfig({
+        localizations: {
+          en: { title: "Go Pro", subtitle: "Unlock everything", close: "Close", purchase: "Subscribe for {{price}}", restore: "Restore" },
+        },
+        root: {
+          type: "stack",
+          id: "root",
+          axis: "v",
+          children: [
+            { type: "button", id: "restore-btn", labelKey: "restore", style: "plain", action: { kind: "restore" } },
+          ],
+        },
+      });
+    }
+
+    it("hides the restore button entirely when onRestore is absent", () => {
+      const { container } = render(
+        <PaywallRenderer config={restoreConfig()} offering={offering} colorScheme="light" onPurchase={noop} />,
+      );
+      expect(container.querySelector('[data-rov-node="restore-btn"]')).toBeNull();
+    });
+
+    it("renders and wires the restore button when onRestore is present", () => {
+      const onRestore = vi.fn();
+      const { container } = render(
+        <PaywallRenderer
+          config={restoreConfig()}
+          offering={offering}
+          colorScheme="light"
+          onPurchase={noop}
+          onRestore={onRestore}
+        />,
+      );
+      const restoreBtn = container.querySelector('[data-rov-node="restore-btn"]') as HTMLButtonElement;
+      expect(restoreBtn).not.toBeNull();
+      fireEvent.click(restoreBtn);
+      expect(onRestore).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("variable resolution", () => {
+    it("swaps purchaseButton variable text when selection changes, without touching other cells", () => {
+      const { container, getByText } = render(
+        <PaywallRenderer
+          config={baseConfig()}
+          offering={offering}
+          priceView={priceView}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+
+      // default selection is "annual" -> purchase button shows the annual price.
+      expect(getByText("Subscribe for $39.99")).toBeInTheDocument();
+
+      fireEvent.click(container.querySelector('[data-rov-package="monthly"]') as HTMLButtonElement);
+
+      // selection changed -> purchase button text re-resolves against monthly.
+      expect(getByText("Subscribe for $4.99")).toBeInTheDocument();
+
+      // cell-scoped: each packageList cell always shows its OWN package's price,
+      // never the globally selected one.
+      const annualCell = container.querySelector('[data-rov-package="annual"]') as HTMLElement;
+      expect(annualCell.textContent).toContain("$39.99");
+      const monthlyCell = container.querySelector('[data-rov-package="monthly"]') as HTMLElement;
+      expect(monthlyCell.textContent).toContain("$4.99");
+    });
   });
 });

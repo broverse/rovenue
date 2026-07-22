@@ -1,15 +1,17 @@
-import type { JSX } from "react";
-import type { PackageListNode, PackageView, PaywallNode } from "@rovenue/shared/paywall";
+import { useState, type JSX } from "react";
+import type { PackageListNode, PaywallNode } from "@rovenue/shared/paywall";
 import type { PaywallRendererProps, RendererOffering } from "./types";
-import { renderNode, packageToView, type RenderCtx } from "./nodes";
+import { renderNode, resolvePackageView, type RenderCtx } from "./nodes";
 import { resolveThemeColor } from "./styles";
 
 // =============================================================
-// Root renderer. Presentational only: no network, no SDK. Walks
-// the config once to find the package that {{variables}} resolve
-// against (today: the first packageList's defaultSelected, or its
-// first packageId — click-to-select is Task 3), builds a RenderCtx,
-// and dispatches to `renderNode` for the tree.
+// Root renderer. Presentational plus the one piece of local state
+// this package owns: which package is selected. Walks the config
+// once to find the initial selection (the first packageList's
+// defaultSelected, else its first packageId, else the offering's
+// first package — see `initialSelectedPackageId`), lifts it into
+// useState so packageList cells can change it via click, builds a
+// RenderCtx, and dispatches to `renderNode` for the tree.
 // =============================================================
 
 /** Depth-first search over the PRIMARY tree (not fallback subtrees) for the first packageList node. */
@@ -24,34 +26,40 @@ function findFirstPackageList(node: PaywallNode): PackageListNode | null {
   return null;
 }
 
-function resolveSelectedPackage(
-  root: PaywallNode,
-  offering: RendererOffering | null,
-): { selectedPackageId: string | null; selectedPackage: PackageView | null } {
+/**
+ * Initial selection, in order: the first packageList's defaultSelected,
+ * else its first packageId, else (no packageList in the tree at all) the
+ * offering's first package, else null.
+ */
+function initialSelectedPackageId(root: PaywallNode, offering: RendererOffering | null): string | null {
   const packageList = findFirstPackageList(root);
-  const selectedPackageId = packageList
-    ? (packageList.defaultSelected ?? packageList.packageIds[0] ?? null)
-    : null;
-  if (!selectedPackageId || !offering) {
-    return { selectedPackageId, selectedPackage: null };
-  }
-  const pkg = offering.packages.find((p) => p.packageIdentifier === selectedPackageId);
-  return { selectedPackageId, selectedPackage: pkg ? packageToView(pkg) : null };
+  return (
+    packageList?.defaultSelected ??
+    packageList?.packageIds[0] ??
+    offering?.packages[0]?.packageIdentifier ??
+    null
+  );
 }
 
 export function PaywallRenderer(props: PaywallRendererProps): JSX.Element {
-  const { config, offering, colorScheme, onPurchase, onClose, onRestore, onUrl } = props;
+  const { config, offering, colorScheme, priceView, onPurchase, onClose, onRestore, onUrl } = props;
   const locale = props.locale ?? config.defaultLocale;
 
-  const { selectedPackageId, selectedPackage } = resolveSelectedPackage(config.root, offering);
+  const [selectedPackageId, setSelectedPackageId] = useState<string | null>(() =>
+    initialSelectedPackageId(config.root, offering),
+  );
+
+  const selectedPackage = resolvePackageView(offering, priceView, selectedPackageId);
 
   const ctx: RenderCtx = {
     config,
     offering,
     locale,
     colorScheme,
+    priceView,
     selectedPackageId,
     selectedPackage,
+    onSelectPackage: setSelectedPackageId,
     onPurchase,
     onClose,
     onRestore,
