@@ -1,5 +1,5 @@
 {
-  "_comment": "Cross-platform contract for builder-paywall decoding + text/variable semantics. The TS authoring schema is STRICT (unknown node types are rejected: acceptLenient entries FAIL it). Platform decoders (Swift Codable, Kotlin kotlinx-serialization) are lenient by design: unknown node types decode to an unknown node retaining id+fallback and render the fallback (or nothing). reject entries must fail EVERYWHERE (schema AND platform decoders → null). Generated from the real TS implementations; frozen — regenerate only by re-running the generator against packages/shared/src/paywall.",
+  "_comment": "Cross-platform contract for builder-paywall decoding + text/variable semantics. The TS authoring schema is STRICT (unknown node types are rejected: acceptLenient entries FAIL it). Platform decoders (Swift Codable, Kotlin kotlinx-serialization) are lenient by design: unknown node types decode to an unknown node retaining id+fallback and render the fallback (or nothing); an override entry with an unknown `when.kind` is skipped individually (that one entry ignored, config otherwise decodes normally) — also acceptLenient, per the unknown-condition-kind leniency rule (spec D2/D3). reject entries must fail EVERYWHERE (schema AND platform decoders → null), including a structural key (e.g. `type`) inside override props on an otherwise-KNOWN when.kind — malformed props in a known kind is a whole-config failure, not a skippable entry. Overrides APPLICATION semantics (base props, then matching overrides in array order, later wins, shallow per-field) are pinned by per-platform unit tests sharing D-Task 1's TS case table (schema.test.ts / validate.test.ts `applyOverrides` cases) — NOT by fixture sections here, since applying overrides needs live selected/introEligible state the static fixture format doesn't carry. Generated from the real TS implementations; frozen — regenerate only by re-running the generator against packages/shared/src/paywall.",
   "accept": [
     {
       "name": "canonical every-node multi-locale",
@@ -339,6 +339,266 @@
           ]
         }
       }
+    },
+    {
+      "name": "overrides: introEligible + selected across node types, incl. a text key-swap",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "title_key": "Go Pro",
+            "title_key_intro": "Try Pro Free",
+            "cta_key": "Continue",
+            "cta_key_selected": "Continue with this plan",
+            "terms_key": "Terms"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "overrides": [
+            {
+              "when": {
+                "kind": "selected"
+              },
+              "props": {
+                "spacing": 4,
+                "align": "start",
+                "background": {
+                  "light": "#eee"
+                },
+                "cornerRadius": 2
+              }
+            }
+          ],
+          "children": [
+            {
+              "type": "image",
+              "id": "hero",
+              "url": {
+                "light": "https://cdn.example.com/hero.png"
+              },
+              "overrides": [
+                {
+                  "when": {
+                    "kind": "introEligible"
+                  },
+                  "props": {
+                    "cornerRadius": 24
+                  }
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "title",
+              "key": "title_key",
+              "role": "title",
+              "overrides": [
+                {
+                  "when": {
+                    "kind": "introEligible"
+                  },
+                  "props": {
+                    "key": "title_key_intro",
+                    "align": "center"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "button",
+              "id": "cta",
+              "labelKey": "cta_key",
+              "style": "primary",
+              "action": {
+                "kind": "close"
+              },
+              "overrides": [
+                {
+                  "when": {
+                    "kind": "selected"
+                  },
+                  "props": {
+                    "labelKey": "cta_key_selected",
+                    "style": "secondary"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "button",
+              "id": "terms",
+              "labelKey": "terms_key",
+              "style": "plain",
+              "action": {
+                "kind": "url",
+                "url": "https://example.com/terms"
+              },
+              "overrides": [
+                {
+                  "when": {
+                    "kind": "introEligible"
+                  },
+                  "props": {}
+                }
+              ]
+            },
+            {
+              "type": "spacer",
+              "id": "sp",
+              "size": 8,
+              "overrides": [
+                {
+                  "when": {
+                    "kind": "selected"
+                  },
+                  "props": {}
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "overrides: packageList (empty props) + purchaseButton labelKey swap, selected outside any cellTemplate",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "buy": "Buy",
+            "buy_selected": "Buy this plan"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "packageList",
+              "id": "pl",
+              "packageIds": [
+                "$rov_monthly",
+                "$rov_annual"
+              ],
+              "defaultSelected": "$rov_annual",
+              "cellLayout": "row",
+              "overrides": [
+                {
+                  "when": {
+                    "kind": "selected"
+                  },
+                  "props": {}
+                }
+              ]
+            },
+            {
+              "type": "purchaseButton",
+              "id": "pb",
+              "labelKey": "buy",
+              "overrides": [
+                {
+                  "when": {
+                    "kind": "selected"
+                  },
+                  "props": {
+                    "labelKey": "buy_selected"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "packageList with cellTemplate (visual nodes only, selected-condition badge)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "cell_name": "Annual",
+            "cell_badge": "Save 40%",
+            "buy": "Continue"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "packageList",
+              "id": "pl",
+              "packageIds": [
+                "$rov_monthly",
+                "$rov_annual"
+              ],
+              "cellLayout": "column",
+              "cellTemplate": {
+                "type": "stack",
+                "id": "cell_root",
+                "axis": "v",
+                "spacing": 4,
+                "overrides": [
+                  {
+                    "when": {
+                      "kind": "selected"
+                    },
+                    "props": {
+                      "background": {
+                        "light": "#EEF2FF"
+                      }
+                    }
+                  }
+                ],
+                "children": [
+                  {
+                    "type": "text",
+                    "id": "cell_name",
+                    "key": "cell_name",
+                    "role": "body"
+                  },
+                  {
+                    "type": "text",
+                    "id": "cell_badge",
+                    "key": "cell_badge",
+                    "role": "caption",
+                    "overrides": [
+                      {
+                        "when": {
+                          "kind": "selected"
+                        },
+                        "props": {
+                          "color": {
+                            "light": "#4338CA"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "spacer",
+                    "id": "cell_sp",
+                    "size": 2
+                  }
+                ]
+              }
+            },
+            {
+              "type": "purchaseButton",
+              "id": "pb",
+              "labelKey": "buy"
+            }
+          ]
+        }
+      }
     }
   ],
   "acceptLenient": [
@@ -391,6 +651,49 @@
               "url": {
                 "light": "https://x/v.mp4"
               }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "override with unknown when.kind 'sizeClass' (strict schema rejects the whole config; platform decoders decode leniently, skipping ONLY this override entry per the unknown-condition-kind rule)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "title_key": "Go Pro"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "text",
+              "id": "title",
+              "key": "title_key",
+              "role": "title",
+              "overrides": [
+                {
+                  "when": {
+                    "kind": "introEligible"
+                  },
+                  "props": {
+                    "align": "center"
+                  }
+                },
+                {
+                  "when": {
+                    "kind": "sizeClass"
+                  },
+                  "props": {
+                    "align": "start"
+                  }
+                }
+              ]
             }
           ]
         }
@@ -524,6 +827,42 @@
           "role": "body"
         }
       }
+    },
+    {
+      "name": "structural key 'type' inside override props on a known when.kind",
+      "reason": "malformed props in a known kind: 'type' is a structural field, never overridable — strict schema rejects, and platform decoders must ALSO fail the whole config (not just skip the entry, since introEligible IS a known kind)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "title_key": "Go Pro"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "text",
+              "id": "title",
+              "key": "title_key",
+              "role": "title",
+              "overrides": [
+                {
+                  "when": {
+                    "kind": "introEligible"
+                  },
+                  "props": {
+                    "type": "spacer"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
     }
   ],
   "variables": [
@@ -606,6 +945,222 @@
       "text": "mixed {{period}} and {{nope}}",
       "pkg": null,
       "expected": "mixed {{period}} and {{nope}}"
+    },
+    {
+      "text": "{{pricePerDay}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year",
+        "pricePerDay": "$0.11",
+        "pricePerWeek": "$0.77",
+        "pricePerMonth": "$3.33",
+        "pricePerYear": "$39.99",
+        "introPrice": "$0.99",
+        "introPeriod": "1 week",
+        "relativeDiscount": "17%"
+      },
+      "expected": "$0.11"
+    },
+    {
+      "text": "{{pricePerWeek}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year",
+        "pricePerDay": "$0.11",
+        "pricePerWeek": "$0.77",
+        "pricePerMonth": "$3.33",
+        "pricePerYear": "$39.99",
+        "introPrice": "$0.99",
+        "introPeriod": "1 week",
+        "relativeDiscount": "17%"
+      },
+      "expected": "$0.77"
+    },
+    {
+      "text": "{{pricePerMonth}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year",
+        "pricePerDay": "$0.11",
+        "pricePerWeek": "$0.77",
+        "pricePerMonth": "$3.33",
+        "pricePerYear": "$39.99",
+        "introPrice": "$0.99",
+        "introPeriod": "1 week",
+        "relativeDiscount": "17%"
+      },
+      "expected": "$3.33"
+    },
+    {
+      "text": "{{pricePerYear}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year",
+        "pricePerDay": "$0.11",
+        "pricePerWeek": "$0.77",
+        "pricePerMonth": "$3.33",
+        "pricePerYear": "$39.99",
+        "introPrice": "$0.99",
+        "introPeriod": "1 week",
+        "relativeDiscount": "17%"
+      },
+      "expected": "$39.99"
+    },
+    {
+      "text": "{{introPrice}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year",
+        "pricePerDay": "$0.11",
+        "pricePerWeek": "$0.77",
+        "pricePerMonth": "$3.33",
+        "pricePerYear": "$39.99",
+        "introPrice": "$0.99",
+        "introPeriod": "1 week",
+        "relativeDiscount": "17%"
+      },
+      "expected": "$0.99"
+    },
+    {
+      "text": "{{introPeriod}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year",
+        "pricePerDay": "$0.11",
+        "pricePerWeek": "$0.77",
+        "pricePerMonth": "$3.33",
+        "pricePerYear": "$39.99",
+        "introPrice": "$0.99",
+        "introPeriod": "1 week",
+        "relativeDiscount": "17%"
+      },
+      "expected": "1 week"
+    },
+    {
+      "text": "{{relativeDiscount}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year",
+        "pricePerDay": "$0.11",
+        "pricePerWeek": "$0.77",
+        "pricePerMonth": "$3.33",
+        "pricePerYear": "$39.99",
+        "introPrice": "$0.99",
+        "introPeriod": "1 week",
+        "relativeDiscount": "17%"
+      },
+      "expected": "17%"
+    },
+    {
+      "text": "{{pricePerDay}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "{{pricePerDay}}"
+    },
+    {
+      "text": "{{pricePerWeek}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "{{pricePerWeek}}"
+    },
+    {
+      "text": "{{pricePerMonth}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "{{pricePerMonth}}"
+    },
+    {
+      "text": "{{pricePerYear}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "{{pricePerYear}}"
+    },
+    {
+      "text": "{{introPrice}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "{{introPrice}}"
+    },
+    {
+      "text": "{{introPeriod}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "{{introPeriod}}"
+    },
+    {
+      "text": "{{relativeDiscount}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "{{relativeDiscount}}"
+    },
+    {
+      "text": "{{pricePerDay}} / {{pricePerWeek}} / {{pricePerMonth}} / {{pricePerYear}} — intro {{introPrice}} for {{introPeriod}}, save {{relativeDiscount}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year",
+        "pricePerDay": "$0.11",
+        "pricePerWeek": "$0.77",
+        "pricePerMonth": "$3.33",
+        "pricePerYear": "$39.99",
+        "introPrice": "$0.99",
+        "introPeriod": "1 week",
+        "relativeDiscount": "17%"
+      },
+      "expected": "$0.11 / $0.77 / $3.33 / $39.99 — intro $0.99 for 1 week, save 17%"
+    },
+    {
+      "text": "{{pricePerDay}} / {{pricePerWeek}} / {{pricePerMonth}} / {{pricePerYear}} — intro {{introPrice}} for {{introPeriod}}, save {{relativeDiscount}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "{{pricePerDay}} / {{pricePerWeek}} / {{pricePerMonth}} / {{pricePerYear}} — intro {{introPrice}} for {{introPeriod}}, save {{relativeDiscount}}"
     }
   ],
   "resolveText": [
