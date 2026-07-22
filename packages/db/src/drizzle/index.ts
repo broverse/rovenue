@@ -38,6 +38,7 @@ export * as personalAccessTokenRepo from "./repositories/personal-access-tokens"
 export * as userPreferencesRepo from "./repositories/user-preferences";
 export * as offeringRepo from "./repositories/offerings";
 export * as paywallRepo from "./repositories/paywalls";
+export * as paywallVersionRepo from "./repositories/paywall-versions";
 export * as placementRepo from "./repositories/placements";
 export * as experimentAssignmentRepo from "./repositories/experiment-assignments";
 export * as purchaseRepo from "./repositories/purchases";

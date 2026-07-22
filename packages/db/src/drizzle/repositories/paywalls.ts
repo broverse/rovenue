@@ -83,6 +83,8 @@ export interface UpdatePaywallInput {
   configFormatVersion?: number;
   builderConfig?: unknown;
   isActive?: boolean;
+  status?: "draft" | "published" | "archived";
+  publishedVersionId?: string | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -154,4 +156,23 @@ export async function deletePaywall(
     .where(and(eq(paywalls.projectId, projectId), eq(paywalls.id, id)))
     .returning({ id: paywalls.id });
   return rows.length > 0;
+}
+
+/**
+ * Point a paywall at a published version. Also flips `status` to
+ * `published` — the two always move together, so callers can't leave a
+ * paywall claiming `draft` while serving a version.
+ */
+export async function setPublishedVersion(
+  db: Db,
+  projectId: string,
+  paywallId: string,
+  versionId: string,
+): Promise<Paywall | null> {
+  const [row] = await db
+    .update(paywalls)
+    .set({ publishedVersionId: versionId, status: "published", updatedAt: new Date() })
+    .where(and(eq(paywalls.projectId, projectId), eq(paywalls.id, paywallId)))
+    .returning();
+  return row ?? null;
 }
