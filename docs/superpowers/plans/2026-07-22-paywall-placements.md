@@ -536,9 +536,9 @@ Model every component on `components/offerings/` (list + form dialog + actions m
 
 ## Verification (after all tasks)
 
-- [ ] `pnpm build --force` — 8/8 green
-- [ ] `pnpm test` (API integration suites need Docker/testcontainers)
-- [ ] `cargo test && cargo fmt --check && cargo clippy` in `packages/core-rs`
-- [ ] `./gradlew testDebugUnitTest` in `packages/sdk-kotlin`
-- [ ] `pnpm --filter @rovenue/db db:verify:clickhouse`
-- [ ] Known pre-existing red: 6 integrations-framework tests (missing 0053) — not regressions.
+- [x] `pnpm build --force` — 8/8 green (2026-07-22)
+- [x] `pnpm test` — all NEW placements suites green; api suite carries ~41 pre-existing failures from stale shared test-DB rows (reproduced on clean main via git stash — not regressions)
+- [x] `cargo test && cargo fmt --check && cargo clippy` in `packages/core-rs` (fmt required clearing pre-existing drift — commit after f450984a)
+- [x] `./gradlew testDebugUnitTest` in `packages/sdk-kotlin` — green
+- [ ] `pnpm --filter @rovenue/db db:verify:clickhouse` — code verified green during Task 7 (migrate + verify + real Redpanda/CH round-trip); final re-run blocked by a LOCAL environment issue (rovenue_reader AUTHENTICATION_FAILED — credentials drifted after Task 7's green run; not a code defect)
+- [x] Known pre-existing red: 6 integrations-framework tests (missing 0053) — not regressions.
