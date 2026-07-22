@@ -184,9 +184,32 @@ describe("withAccount — payment resources", () => {
       { customer: "cus_1", items: [] },
       { stripeAccount: "acct_x" },
     );
-    expect(subscriptionsRetrieve).toHaveBeenCalledWith("sub_1", {
-      stripeAccount: "acct_x",
+    // Three-arg form even with no params: `subscriptions.retrieve` is
+    // `(id, params, options)`, so the account header has to be the third
+    // argument. Passing it second would land it in `params`, where Stripe
+    // ignores it and runs the call on the platform account.
+    expect(subscriptionsRetrieve).toHaveBeenCalledWith(
+      "sub_1",
+      {},
+      { stripeAccount: "acct_x" },
+    );
+  });
+
+  // The funnel cleanup path decides whether a `trialing` subscription has
+  // been paid for from its `latest_invoice`, which only comes back inline
+  // if `expand` reaches Stripe as a *params* field. Dropped or merged into
+  // the options it would return a bare id, the caller could not prove the
+  // subscription was unpaid, and it would refuse to cancel anything.
+  it("forwards subscriptions.retrieve params alongside the bound account", async () => {
+    const { stripe, subscriptionsRetrieve } = stubClientWide();
+    await withAccount(stripe, "acct_x").subscriptions.retrieve("sub_1", {
+      expand: ["latest_invoice"],
     });
+    expect(subscriptionsRetrieve).toHaveBeenCalledWith(
+      "sub_1",
+      { expand: ["latest_invoice"] },
+      { stripeAccount: "acct_x" },
+    );
   });
 
   // Cancels clean up the Stripe objects a superseded funnel payment

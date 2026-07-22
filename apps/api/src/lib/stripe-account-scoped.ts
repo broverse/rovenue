@@ -79,8 +79,15 @@ export interface AccountScopedStripe {
       params: Stripe.SubscriptionCreateParams,
       options?: ScopedRequestOptions,
     ): Promise<Stripe.Response<Stripe.Subscription>>;
+    /**
+     * `params` is here for `expand`, which is a params field and not a
+     * request option: the funnel cleanup path needs `latest_invoice`
+     * inline to tell a trial nobody has paid for from one that has
+     * already billed, and it must not cancel the second kind.
+     */
     retrieve(
       id: string,
+      params?: Stripe.SubscriptionRetrieveParams,
       options?: ScopedRequestOptions,
     ): Promise<Stripe.Response<Stripe.Subscription>>;
     cancel(
@@ -148,8 +155,15 @@ export function withAccount(
         stripe.subscriptions.update(id, params, { ...options, ...bound }),
       create: (params, options) =>
         stripe.subscriptions.create(params, { ...options, ...bound }),
-      retrieve: (id, options) =>
-        stripe.subscriptions.retrieve(id, { ...options, ...bound }),
+      // Three-arg form: passing `params` as the second argument is what
+      // keeps `expand` out of the request options, where Stripe would
+      // ignore it, and keeps the account header in the options, where
+      // omitting it would silently target the platform account.
+      retrieve: (id, params, options) =>
+        stripe.subscriptions.retrieve(id, params ?? {}, {
+          ...options,
+          ...bound,
+        }),
       cancel: (id, options) =>
         stripe.subscriptions.cancel(id, { ...options, ...bound }),
     },

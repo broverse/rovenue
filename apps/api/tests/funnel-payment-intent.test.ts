@@ -117,21 +117,29 @@ vi.mock("../src/lib/stripe-platform", () => ({
 }));
 
 // Redis is not running in this test environment, but the route's
-// per-session lock is real logic worth exercising, so `set`/`eval` are
-// backed by an in-memory map with the semantics withLock relies on:
-// SET NX refuses an existing key, and the release script deletes only on
-// a token match. Everything else on the client stays undefined — notably
-// `multi()`, which is what the endpoint rate limiter uses, and it fails
-// open (falls back to the in-process insurance limiter) when a redis
-// call throws; see middleware/rate-limit.ts.
+// per-session lock is real logic worth exercising, so `set`/`get`/`eval`
+// are backed by an in-memory map with the semantics withLock relies on:
+// SET NX refuses an existing key, GET is what the ownership fence reads,
+// and the release script deletes only on a token match. Everything else
+// on the client stays undefined — notably `multi()`, which is what the
+// endpoint rate limiter uses, and it fails open (falls back to the
+// in-process insurance limiter) when a redis call throws; see
+// middleware/rate-limit.ts.
+//
+// The Lua itself is never executed here. That is what
+// src/lib/redis-lock.integration.test.ts is for.
 const lockStore = vi.hoisted(() => new Map<string, string>());
+// Flipped by the "redis is down" case only, and reset per test.
+const redisDown = vi.hoisted(() => ({ value: false }));
 vi.mock("../src/lib/redis", () => ({
   redis: {
     set: async (key: string, value: string, _px: string, _ttl: number, mode?: string) => {
+      if (redisDown.value) throw new Error("ECONNREFUSED 127.0.0.1:6379");
       if (mode === "NX" && lockStore.has(key)) return null;
       lockStore.set(key, value);
       return "OK";
     },
+    get: async (key: string) => lockStore.get(key) ?? null,
     eval: async (_script: string, _numKeys: number, key: string, token: string) => {
       if (lockStore.get(key) !== token) return 0;
       lockStore.delete(key);
@@ -555,7 +563,12 @@ describe("POST payment-intent — a second attempt on the same session", () => {
     expect(paymentIntentsCancel).not.toHaveBeenCalled();
   });
 
-  it("leaves a non-pending row alone and creates a fresh customer", async () => {
+  // A paid row is not merely un-reusable and un-cancellable — it must not
+  // be re-driven at all. upsertPending conflicts on sessionId and forces
+  // status "pending", so continuing would reset the row that records a
+  // real payment and replace its Stripe ids, leaving no orphan entry and
+  // no record of the charge.
+  it("409s on a row that is no longer pending rather than overwriting it", async () => {
     findPurchaseBySession.mockResolvedValue({
       id: "purchase_1",
       sessionId: "sess_1",
@@ -566,13 +579,12 @@ describe("POST payment-intent — a second attempt on the same session", () => {
       stripePaymentIntentId: null,
     });
 
-    await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
+    const res = await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
 
-    expect(customersCreate).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).toContain("PAYMENT_ALREADY_RECORDED");
+    expect(upsertPurchase).not.toHaveBeenCalled();
     expect(subscriptionsCancel).not.toHaveBeenCalled();
-    expect(subscriptionsCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ customer: "cus_new" }),
-    );
   });
 
   it("still returns the new client secret when the cleanup cancel fails", async () => {
@@ -749,8 +761,81 @@ describe("POST payment-intent — cancelling a superseded object", () => {
 
     await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
 
-    expect(subscriptionsRetrieve).toHaveBeenCalledWith("sub_old");
+    // The invoice has to come back inline: the trial cases below are
+    // decided on what it collected, and an unexpanded id proves nothing.
+    expect(subscriptionsRetrieve).toHaveBeenCalledWith("sub_old", {
+      expand: ["latest_invoice"],
+    });
     expect(subscriptionsCancel).toHaveBeenCalledWith("sub_old");
+  });
+
+  // The trial path creates with default_incomplete *and* trial_period_days,
+  // so nothing is due and Stripe never parks the subscription at
+  // `incomplete` — it goes straight to `trialing`. An allow-list of
+  // `incomplete` alone therefore skips cleanup on the common funnel case,
+  // leaving the abandoned first subscription live on the customer the
+  // second attempt reuses, free to bill when the trial ends.
+  it("cancels a superseded trialing subscription that has no invoice", async () => {
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_old",
+      status: "trialing",
+      latest_invoice: null,
+    });
+
+    await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
+
+    expect(subscriptionsCancel).toHaveBeenCalledWith("sub_old");
+  });
+
+  it("cancels a superseded trialing subscription whose invoice collected nothing", async () => {
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_old",
+      status: "trialing",
+      latest_invoice: { id: "in_old", amount_paid: 0 },
+    });
+
+    await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
+
+    expect(subscriptionsCancel).toHaveBeenCalledWith("sub_old");
+  });
+
+  // The other half of the same rule, and the guarantee that must survive
+  // allowing `trialing` at all: money changed hands, Stripe would cancel
+  // it just as happily and refund nothing.
+  it("never cancels a trialing subscription whose invoice was paid", async () => {
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_old",
+      status: "trialing",
+      latest_invoice: { id: "in_old", amount_paid: 4999 },
+    });
+
+    const res = await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
+
+    expect(res.status).toBe(200);
+    expect(subscriptionsCancel).not.toHaveBeenCalled();
+    expect(upsertPurchase).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        rawPayload: expect.objectContaining({
+          orphaned_stripe_objects: ["sub_old"],
+        }),
+      }),
+    );
+  });
+
+  // Fails closed. Without the expansion we cannot prove the invoice
+  // collected nothing, so the subscription is left alone rather than
+  // cancelled on an assumption.
+  it("does not cancel a trialing subscription whose invoice came back unexpanded", async () => {
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_old",
+      status: "trialing",
+      latest_invoice: "in_old",
+    });
+
+    await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
+
+    expect(subscriptionsCancel).not.toHaveBeenCalled();
   });
 
   // THE regression test for this round.
@@ -1034,6 +1119,7 @@ describe("POST payment-intent — the per-session lock", () => {
       .mockResolvedValue({ id: "pi_old", status: "requires_payment_method" });
     requireConnectedStripe.mockClear();
     lockStore.clear();
+    redisDown.value = false;
 
     resolvePricesForPackages.mockReset().mockResolvedValue({
       $rov_monthly: {
@@ -1064,7 +1150,11 @@ describe("POST payment-intent — the per-session lock", () => {
     const res = await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
 
     expect(res.status).toBe(409);
-    expect(JSON.stringify(await res.json())).toContain("already in flight");
+    const body = JSON.stringify(await res.json());
+    expect(body).toContain("already in flight");
+    // Structured like the neighbouring 409s: a browser has to tell "retry
+    // in a moment" apart from "this session is done".
+    expect(body).toContain("PAYMENT_IN_FLIGHT");
     expect(customersCreate).not.toHaveBeenCalled();
     expect(subscriptionsCreate).not.toHaveBeenCalled();
     expect(upsertPurchase).not.toHaveBeenCalled();
@@ -1097,9 +1187,65 @@ describe("POST payment-intent — the per-session lock", () => {
     expect((await first).status).toBe(200);
   });
 
+  // The TTL is a deadline, not a guarantee: the Connect client has no
+  // per-request timeout and this section makes up to six Stripe
+  // round-trips, so it can outrun any fixed number. When it does, another
+  // request holds the key and is working from a newer read — cancelling
+  // its objects or overwriting its row is the exact race the lock exists
+  // to close, and both requests would believe they were serialized.
+  it("cancels nothing and writes nothing when the lock is lost mid-flight", async () => {
+    findPurchaseBySession.mockResolvedValue({
+      id: "purchase_1",
+      sessionId: "sess_1",
+      projectId: "proj_1",
+      status: "pending",
+      stripeCustomerId: "cus_existing",
+      stripeSubscriptionId: "sub_old",
+      stripePaymentIntentId: null,
+    });
+    // Our TTL expires and a concurrent POST takes the key while we are
+    // still waiting on Stripe.
+    subscriptionsCreate.mockImplementationOnce(async () => {
+      lockStore.set("funnel:payment:sess_1", "a-later-holders-token");
+      return {
+        id: "sub_1",
+        pending_setup_intent: null,
+        latest_invoice: { payment_intent: { id: "pi_1", client_secret: "pi_secret" } },
+      };
+    });
+
+    const res = await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
+
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).toContain("PAYMENT_IN_FLIGHT");
+    expect(subscriptionsCancel).not.toHaveBeenCalled();
+    expect(paymentIntentsCancel).not.toHaveBeenCalled();
+    expect(upsertPurchase).not.toHaveBeenCalled();
+    // And the holder's key is left exactly as it was — releasing it would
+    // hand the session to a third request mid-flight.
+    expect(lockStore.get("funnel:payment:sess_1")).toBe("a-later-holders-token");
+  });
+
+  // Failing closed on a Redis outage is correct and stays. Reporting it as
+  // an unexpected internal bug is not: it is a deliberate, transient,
+  // retryable dependency failure and the visitor should be told to try
+  // again rather than that something broke.
+  it("503s rather than 500s when redis cannot be reached at all", async () => {
+    redisDown.value = true;
+
+    const res = await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
+
+    expect(res.status).toBe(503);
+    expect(JSON.stringify(await res.json())).toContain(
+      "PAYMENT_TEMPORARILY_UNAVAILABLE",
+    );
+    expect(customersCreate).not.toHaveBeenCalled();
+    expect(upsertPurchase).not.toHaveBeenCalled();
+  });
+
   it("releases the lock when the request throws, rather than wedging the session", async () => {
     // A 502 from inside the critical section must not hold the key for
-    // the rest of its 30s TTL.
+    // the rest of its TTL.
     subscriptionsCreate.mockResolvedValueOnce({
       id: "sub_1",
       pending_setup_intent: null,

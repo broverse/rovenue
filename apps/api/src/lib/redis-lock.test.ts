@@ -12,15 +12,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const redisSet = vi.hoisted(() => vi.fn());
 const redisEval = vi.hoisted(() => vi.fn());
+const redisGet = vi.hoisted(() => vi.fn());
 
-vi.mock("./redis", () => ({ redis: { set: redisSet, eval: redisEval } }));
+vi.mock("./redis", () => ({
+  redis: { set: redisSet, eval: redisEval, get: redisGet },
+}));
 
-const { withLock } = await import("./redis-lock");
+const { withLock, LockUnavailableError } = await import("./redis-lock");
 
 describe("withLock", () => {
   beforeEach(() => {
     redisSet.mockReset().mockResolvedValue("OK");
     redisEval.mockReset().mockResolvedValue(1);
+    redisGet.mockReset().mockResolvedValue(null);
   });
 
   it("acquires with SET NX PX and runs the function", async () => {
@@ -85,5 +89,85 @@ describe("withLock", () => {
     // The key still expires on its own, so a failed release costs one TTL
     // of contention — it must not cost the caller its result.
     expect(await withLock("k", 30_000, async () => "done")).toBe("done");
+  });
+
+  // "Nobody could take the lock" and "somebody else has it" are different
+  // answers to the client: the first is a retryable dependency outage, the
+  // second is contention. Collapsing them into `null` would present a
+  // Redis outage as a 409 and hide it.
+  it("throws LockUnavailableError when the acquire itself fails", async () => {
+    redisSet.mockRejectedValue(new Error("ECONNREFUSED"));
+    const fn = vi.fn(async () => "done");
+
+    await expect(withLock("k", 30_000, fn)).rejects.toBeInstanceOf(
+      LockUnavailableError,
+    );
+    expect(fn).not.toHaveBeenCalled();
+    expect(redisEval).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================
+// The ownership fence
+// =============================================================
+//
+// A TTL is a deadline, not a guarantee. Work that outruns it keeps
+// running while another request holds the key — both believing they are
+// serialized. stillHeld() is how the holder finds that out before it
+// commits anything, so it must be exact about the token and must fail
+// closed.
+
+describe("withLock — stillHeld", () => {
+  beforeEach(() => {
+    redisSet.mockReset().mockResolvedValue("OK");
+    redisEval.mockReset().mockResolvedValue(1);
+    redisGet.mockReset().mockResolvedValue(null);
+  });
+
+  it("is true while the key still carries our own token", async () => {
+    let held: boolean | undefined;
+    await withLock("k", 30_000, async (lock) => {
+      redisGet.mockResolvedValue(redisSet.mock.calls[0][1]);
+      held = await lock.stillHeld();
+      return "done";
+    });
+
+    expect(redisGet).toHaveBeenCalledWith("k");
+    expect(held).toBe(true);
+  });
+
+  it("is false once the key holds someone else's token", async () => {
+    redisGet.mockResolvedValue("a-later-holders-token");
+    let held: boolean | undefined;
+    await withLock("k", 30_000, async (lock) => {
+      held = await lock.stillHeld();
+      return "done";
+    });
+
+    expect(held).toBe(false);
+  });
+
+  it("is false when the key expired and is simply gone", async () => {
+    redisGet.mockResolvedValue(null);
+    let held: boolean | undefined;
+    await withLock("k", 30_000, async (lock) => {
+      held = await lock.stillHeld();
+      return "done";
+    });
+
+    expect(held).toBe(false);
+  });
+
+  // Fails closed: callers gate destructive work on this answer, and doing
+  // that work unserialized is the failure the lock exists to prevent.
+  it("is false when redis cannot answer", async () => {
+    redisGet.mockRejectedValue(new Error("redis down"));
+    let held: boolean | undefined;
+    await withLock("k", 30_000, async (lock) => {
+      held = await lock.stillHeld();
+      return "done";
+    });
+
+    expect(held).toBe(false);
   });
 });
