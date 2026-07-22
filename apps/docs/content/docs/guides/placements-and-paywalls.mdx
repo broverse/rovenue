@@ -275,3 +275,165 @@ impression — same as the Swift and Kotlin renderers. An optional native
 presentation bridge (hosting the SwiftUI/Android views for pixel parity)
 may come later; it is no longer required to show builder paywalls in RN.
 </Callout>
+
+## Offline fallback file
+
+Builder paywalls and placements can work offline using a bundled fallback file. This file contains the serialized configuration for all active placements, resolved with empty attributes. On network failure or during app startup before the first successful fetch, the cached fallback provides a complete, deterministic experience.
+
+### Export the fallback file
+
+The dashboard exports a fallback file containing all active placements:
+
+```bash
+# GET /dashboard/projects/:projectId/paywalls/fallback-export
+# Downloads rovenue-fallback.json (Content-Disposition attachment)
+curl -H "Authorization: Bearer <user_session_token>" \
+  https://dashboard.rovenue.app/dashboard/projects/proj_123/paywalls/fallback-export \
+  > rovenue-fallback.json
+```
+
+The file format is a JSON array of resolved placement envelopes, one per active placement identifier.
+
+### Set up per platform
+
+<Tabs items={['Swift', 'Kotlin', 'React Native']}>
+<Tab value="Swift">
+
+Load the fallback file on app launch:
+
+```swift
+import Rovenue
+
+// From a bundled asset
+if let fileURL = Bundle.main.url(forResource: "rovenue-fallback", withExtension: "json") {
+    let count = try? Rovenue.shared.setFallbackPlacements(fileURL: fileURL)
+    // count: number of placements loaded from fallback
+}
+
+// Or from a string (if fetched dynamically)
+let jsonString = try String(contentsOf: url, encoding: .utf8)
+let count = try? Rovenue.shared.setFallbackPlacements(json: jsonString)
+```
+
+</Tab>
+<Tab value="Kotlin">
+
+```kotlin
+import dev.rovenue.sdk.Rovenue
+
+// From an Android asset (recommended)
+val count = Rovenue.setFallbackPlacements(
+    context = applicationContext,
+    assetPath = "rovenue-fallback.json"  // in assets/
+)
+
+// Or from a JSON string
+val count = Rovenue.setFallbackPlacements(json = jsonString)
+```
+
+</Tab>
+<Tab value="React Native">
+
+```ts
+import { setFallbackPlacements } from '@rovenue/react-native';
+
+// From a JSON string (bundled or fetched)
+const count = await setFallbackPlacements(jsonString);
+// count: number of placements loaded from fallback
+```
+
+</Tab>
+</Tabs>
+
+When `getPaywall(placementId)` runs, it tries network first, then cache, then fallback. The returned paywall carries a `servedFromFallback: boolean` flag so your app can react if needed (e.g., disable purchase buttons, show a sync notice). A/B test variant selection remains deterministic from the fallback — the same subscriber + experiment always draws the same variant, even offline.
+
+## Conditional styling (overrides)
+
+Builder paywalls support per-node conditional overrides. In the Paywalls builder, click a node's **Overrides** section to add styling changes that apply when:
+
+- **Intro Eligible** — the user can purchase an introductory offer (iOS/Android only; web is always false).
+- **Selected** — the cell is the user's selected choice in a package list (only inside `cellTemplate` nodes).
+
+Each override specifies visual properties (color, background, cornerRadius, align, spacing, style) to apply conditionally. Overrides are merged in order, so later ones win.
+
+### Cell templates
+
+When authoring a package list cell, you can define a `cellTemplate` — a reusable node tree that renders **once per package**. This enables rich, per-package styling without duplicating nodes.
+
+In the builder:
+
+1. Click the package list node.
+2. In the properties panel, find **Cell Template**.
+3. Design the template node tree (buttons, text, badges, etc.).
+4. Apply overrides to nodes *inside* the template to customize per package or state.
+
+The template renders inside each cell's pressable wrapper, with cell-scoped variables like `{{price}}` resolved per package. Unknown node types fallback gracefully; malformed templates cause a decode error (blocks publish until fixed).
+
+## Variables
+
+Builder paywalls support variable substitution in text. Variables are surrounded by double braces: `{{variableName}}`. If a variable is absent or unsupported by the platform, the placeholder text is left verbatim.
+
+| Variable | Type | Platform | Notes |
+|---|---|---|---|
+| `{{price}}` | string | Web, iOS, Android, RN | Formatted price (e.g., "$9.99" or "€9,99"). Requires priceView on web. |
+| `{{pricePerPeriod}}` | string | Web, iOS, Android, RN | Price per billing period (e.g., "$2.49/month"). |
+| `{{period}}` | string | Web, iOS, Android, RN | Billing period (e.g., "month", "year"). |
+| `{{pricePerDay}}` | string | Web, iOS, Android, RN | Price per day (e.g., "$0.33/day"). |
+| `{{pricePerWeek}}` | string | Web, iOS, Android, RN | Price per week (e.g., "$1.92/week"). |
+| `{{pricePerMonth}}` | string | Web, iOS, Android, RN | Price per month (e.g., "$8.33/month"). |
+| `{{pricePerYear}}` | string | Web, iOS, Android, RN | Price per year (e.g., "$99.99/year"). |
+| `{{introPrice}}` | string | iOS, Android | Formatted intro offer price; absent if no intro offer. |
+| `{{introPeriod}}` | string | iOS, Android | Intro offer period (e.g., "3 days", "1 month"). |
+| `{{relativeDiscount}}` | string | Web, iOS, Android, RN | Discount percentage (e.g., "33%") relative to the yearly price; absent if N/A. |
+
+Native platforms (iOS/Android) derive these from real store pricing (StoreKit, Play Billing). Web requires optional `priceView` props passed to the renderer. If a platform does not supply a variable's value, the placeholder remains unchanged in the rendered text (e.g., "Save {{relativeDiscount}}" shows literally if the discount is unknown).
+
+## Events
+
+Builder paywalls and placements emit analytics events on all platforms.
+
+### Paywall shown
+
+Paywalls displayed via `getPaywall()` + your custom rendering emit a `paywall_view` event when you call:
+
+```ts
+logPaywallShown(paywall)
+```
+
+Views and unique viewers appear on the placement's dashboard page.
+
+<Callout type="warn">
+This is a best-effort beacon; call it once per presentation, not per render.
+</Callout>
+
+### Paywall closed
+
+All renderers (web, native, RN) automatically emit a `paywall_close` event when the paywall is dismissed. You can also log a close manually:
+
+<Tabs items={['Swift', 'Kotlin', 'React Native']}>
+<Tab value="Swift">
+
+```swift
+Rovenue.shared.logPaywallClosed(paywall)
+```
+
+</Tab>
+<Tab value="Kotlin">
+
+```kotlin
+Rovenue.logPaywallClosed(paywall)
+```
+
+</Tab>
+<Tab value="React Native">
+
+```ts
+import { logPaywallClosed } from '@rovenue/react-native';
+
+logPaywallClosed(paywall);
+```
+
+</Tab>
+</Tabs>
+
+Paywall events ride a **durable, at-least-once queue** on the device. Events survive process kills and retries automatically on network recovery. If the server returns 5xx or network fails, the event stays queued; on 2xx, it's removed. This guarantees every close is eventually reported, even if the user dismisses the paywall and immediately closes the app.

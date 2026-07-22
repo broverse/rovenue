@@ -44,8 +44,8 @@ export function applyOverrides<T extends PaywallNode>(node: T, active: { introEl
 ```
 Validator: `CELL_TEMPLATE_BAD_NODE` (packageList/purchaseButton anywhere inside a cellTemplate subtree — blocking), `OVERRIDE_BAD_PROP` (unreachable via strict schema but validator re-checks parsed configs defensively — blocking), `OVERRIDE_SELECTED_OUTSIDE_CELL` (selected-condition override on nodes NOT inside any cellTemplate — warning), traversal now descends `cellTemplate` (dup-id detection, loc-key collection include it; `findFirstPackageList` semantics unchanged: cellTemplate is NOT primary-children for selection purposes).
 
-- [ ] **Step 1 (TDD):** schema tests (override accept per type; unknown kind rejected; structural prop rejected; cellTemplate accepts nested visual tree; packageList-in-cellTemplate rejected BY VALIDATOR not schema; overrides survive on fallback subtrees) + validator tests (each new code, warning vs blocking, traversal into cellTemplate) + applyOverrides tests (order, shallow merge, unknown-kind skip) → RED.
-- [ ] **Step 2:** Implement. **Step 3:** `pnpm --filter @rovenue/shared test` green + tsc. Commit: `feat(shared): paywall overrides, cellTemplate and validator codes`.
+- [x] **Step 1 (TDD):** schema tests (override accept per type; unknown kind rejected; structural prop rejected; cellTemplate accepts nested visual tree; packageList-in-cellTemplate rejected BY VALIDATOR not schema; overrides survive on fallback subtrees) + validator tests (each new code, warning vs blocking, traversal into cellTemplate) + applyOverrides tests (order, shallow merge, unknown-kind skip) → RED.
+- [x] **Step 2:** Implement. **Step 3:** `pnpm --filter @rovenue/shared test` green + tsc. Commit: `feat(shared): paywall overrides, cellTemplate and validator codes`.
 
 ---
 
@@ -55,7 +55,7 @@ Validator: `CELL_TEMPLATE_BAD_NODE` (packageList/purchaseButton anywhere inside 
 
 `PackageView` += optional `pricePerDay? pricePerWeek? pricePerMonth? pricePerYear? introPrice? introPeriod? relativeDiscount?` (all pre-formatted strings). `resolveVariables` maps the seven new variables; a KNOWN variable whose field is absent stays VERBATIM (tested). Fixture additions: `accept` cases exercising overrides + cellTemplate (≥2, incl. an unknown-condition entry in an `acceptLenient` config — strict schema rejects unknown kinds so that case goes to acceptLenient with a `_note`), `variables` vectors for all new vars incl. absent-field-verbatim, and a `overridesApplication` section? NO — keep fixture to decode/text/variable semantics; applyOverrides is pinned by per-platform unit tests sharing the Task-1 TS cases (document this in the fixture _comment update).
 
-- [ ] **Step 1 (TDD)** → RED, **Step 2** implement+regenerate, **Step 3** shared suite green. Commit: `feat(shared): expanded paywall variables + fixture cases for overrides`.
+- [x] **Step 1 (TDD)** → RED, **Step 2** implement+regenerate, **Step 3** shared suite green. Commit: `feat(shared): expanded paywall variables + fixture cases for overrides`.
 
 ---
 
@@ -65,7 +65,7 @@ Validator: `CELL_TEMPLATE_BAD_NODE` (packageList/purchaseButton anywhere inside 
 
 Props += `eligibility?: Record<string, boolean>` (packageIdentifier → introEligible; absent → false). Rendering: every node passes through `applyOverrides` (from @rovenue/shared/paywall) with `{ introEligible: eligibilityOf(relevantPackage), selected: <cell is the selected one> }` before styling; `selected` is only ever true inside cellTemplate subtrees. packageList with `cellTemplate` renders the template per effective package inside the existing pressable cell wrapper (cell-scoped variables already plumbed); without → built-in cell (unchanged snapshot). Decoder side: the renderer consumes the strict-schema types from shared — lenient concerns don't apply on web (config arrives server-validated), but `applyOverrides` still skips unknown kinds defensively.
 
-- [ ] TDD (override applied when eligible/selected; not applied otherwise; order; cellTemplate renders per package w/ cell-scoped `{{price}}`; new variables via priceView optional fields; backward-compat: no-override configs render byte-identically) → green + tsc. Commit: `feat(paywall-renderer): overrides, cell templates and eligibility`.
+- [x] TDD (override applied when eligible/selected; not applied otherwise; order; cellTemplate renders per package w/ cell-scoped `{{price}}`; new variables via priceView optional fields; backward-compat: no-override configs render byte-identically) → green + tsc. Commit: `feat(paywall-renderer): overrides, cell templates and eligibility`.
 
 ---
 
@@ -75,7 +75,7 @@ Props += `eligibility?: Record<string, boolean>` (packageIdentifier → introEli
 
 Decoder: `NodeOverride`/`OverrideCondition` (unknown kind → decodes to `.unknown` CONDITION retained-but-never-matching — NOT a config failure; malformed props in known kind → whole-config nil), `cellTemplate` on PackageListProps (recursive). `applyOverrides` Swift port (pure, tested against the SAME case matrix as Task 1's TS tests — copy the table). PackageView += the seven optional fields; `packageView(from:)` fills them from enriched StoreProduct (pricePerWeekString/introPrice; relativeDiscount per the spec formula); resolveVariables extended (absent → verbatim). Renderer: overrides applied with introEligible from `StoreProduct.isEligibleForIntroOffer ?? false`, selected inside cellTemplate cells; cellTemplate rendered per package inside the existing cell Button wrapper.
 
-- [ ] TDD (fixture sections still green incl. new cases; override matrix; PackageView derivation; cellTemplate render via helper-level tests) → `swift test` green. Commit: `feat(sdk-swift): paywall overrides, cell templates and expanded variables`.
+- [x] TDD (fixture sections still green incl. new cases; override matrix; PackageView derivation; cellTemplate render via helper-level tests) → `swift test` green. Commit: `feat(sdk-swift): paywall overrides, cell templates and expanded variables`.
 
 ---
 
@@ -95,7 +95,7 @@ Decoder: `NodeOverride`/`OverrideCondition` (unknown kind → decodes to `.unkno
 
 **Files:** dashboard `components/paywall-builder/*` (properties-panel overrides section, layer-tree shows `cellTemplate` as a nested branch under packageList, add-node into cellTemplate, top-bar introEligible preview toggle, canvas passes eligibility/selected preview state); `apps/api/src/routes/dashboard/paywalls.ts` gate: blocking check becomes `issues.some(i => !WARNING_CODES.has(i.code))` with `WARNING_CODES = {LOCALE_KEY_GAP, OVERRIDE_SELECTED_OUTSIDE_CELL, INTRO_VARIABLE_UNGUARDED}` (+ test). tree-ops extended for cellTemplate paths (insert/remove/move inside it; pure tests).
 
-- [ ] TDD tree-ops/gate; UI build green + pure-helper tests. Commit: `feat(dashboard): overrides and cell-template editing in the paywall builder`.
+- [x] TDD tree-ops/gate; UI build green + pure-helper tests. Commit: `feat(dashboard): overrides and cell-template editing in the paywall builder`.
 
 ---
 
@@ -103,7 +103,7 @@ Decoder: `NodeOverride`/`OverrideCondition` (unknown kind → decodes to `.unkno
 
 **Files:** `apps/api/src/routes/v1/events.ts` (aggregate routing by `paywall_` prefix; superRefine requires paywallContext for `paywall_close` too; subscriber-resolution branch broadened to the prefix), extract the placements row-walk into `apps/api/src/lib/placement-resolution.ts` (`resolvePlacement(projectId, placement, attributes, locale)` returning the envelope `data`; route delegates — behavior byte-identical, existing 11 tests are the net), new `GET /dashboard/projects/:projectId/paywalls/fallback-export` (all ACTIVE placements resolved with `attributes = {}`, spec's file format, Content-Disposition; products-read capability) + export↔live parity integration test + close-event tests.
 
-- [ ] TDD → green + tsc. Commit: `feat(api): paywall_close routing and fallback-file export`.
+- [x] TDD → green + tsc. Commit: `feat(api): paywall_close routing and fallback-file export`.
 
 ---
 
@@ -111,7 +111,7 @@ Decoder: `NodeOverride`/`OverrideCondition` (unknown kind → decodes to `.unkno
 
 **Files:** `packages/db/clickhouse/migrations/0020_paywall_event_kind.sql` (ALTER raw_paywall_events ADD COLUMN kind LowCardinality(String) DEFAULT 'view'; recreate `mv_paywall_events_to_raw` extracting kind from the shaped message; recreate `mv_paywall_daily` filtering `kind = 'view'` — BOTH with the pause-consumer header note), dispatcher `shapePaywallEventMessage`: kind from eventType suffix + kind joins the deterministic-id hash input (documented: in-flight old-format retries across the deploy may double once — acceptable), verify inventory, extend `outbox-dispatcher-paywall-shaping.test.ts` + the CH round-trip test with a `paywall_close` row.
 
-- [ ] TDD → migrate+verify green via testcontainers round-trip (local CH env known-broken; harness is the gate). Commit: `feat(db): paywall event kind column and close-event ingestion`.
+- [x] TDD → migrate+verify green via testcontainers round-trip (local CH env known-broken; harness is the gate). Commit: `feat(db): paywall event kind column and close-event ingestion`.
 
 ---
 
@@ -129,7 +129,7 @@ Ladder in `get_paywall`: network → cache → fallback (parse-once at set time,
 
 **Files:** `packages/core-rs/src/events/queue.rs` (+cache repo lane), UDL (`enqueue_paywall_event(envelope_json)`, drain wiring on configure/foreground/enqueue — single in-flight, peek→POST→delete-on-2xx, keep on 5xx/network, bound 100 drop-oldest), façades: `logPaywallShown`/NEW `logPaywallClosed` switch from inline `track()` to the queue (all four surfaces; renderers' auto-calls included — Swift/Kotlin/RN renderer close paths emit `paywall_close`).
 
-- [ ] TDD (kill-safety: enqueue → new store instance → drain posts; 5xx retains; 2xx deletes; bound; single-flight) → all gates. Commit: `feat(sdk): durable at-least-once paywall event queue + logPaywallClosed`.
+- [x] TDD (kill-safety: enqueue → new store instance → drain posts; 5xx retains; 2xx deletes; bound; single-flight) → all gates. Commit: `feat(sdk): durable at-least-once paywall event queue + logPaywallClosed`.
 
 ---
 
@@ -137,7 +137,7 @@ Ladder in `get_paywall`: network → cache → fallback (parse-once at set time,
 
 **Files:** `apps/api/src/services/analytics-router.ts` (experiment_results += `attributed_conversions` via raw_revenue_events experimentKey/variantId — query-time only), `computeExperimentResults` passthrough, dashboard experiment results component shows "attributed" column for PAYWALL-type experiments (others unchanged) + i18n.
 
-- [ ] TDD (query-shape/mocked + CH round-trip extension if cheap) → green. Commit: `feat(analytics): attributed variant conversions for paywall experiments`.
+- [x] TDD (query-shape/mocked + CH round-trip extension if cheap) → green. Commit: `feat(analytics): attributed variant conversions for paywall experiments`.
 
 ---
 
