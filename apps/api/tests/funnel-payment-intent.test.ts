@@ -1193,7 +1193,7 @@ describe("POST payment-intent — the per-session lock", () => {
   // request holds the key and is working from a newer read — cancelling
   // its objects or overwriting its row is the exact race the lock exists
   // to close, and both requests would believe they were serialized.
-  it("cancels nothing and writes nothing when the lock is lost mid-flight", async () => {
+  it("touches nothing of the holder's and writes nothing when the lock is lost mid-flight", async () => {
     findPurchaseBySession.mockResolvedValue({
       id: "purchase_1",
       sessionId: "sess_1",
@@ -1218,12 +1218,159 @@ describe("POST payment-intent — the per-session lock", () => {
 
     expect(res.status).toBe(409);
     expect(JSON.stringify(await res.json())).toContain("PAYMENT_IN_FLIGHT");
-    expect(subscriptionsCancel).not.toHaveBeenCalled();
+    // The superseded object belongs to the world the CURRENT holder is
+    // working from — it may be the very object the holder decides to keep.
+    expect(subscriptionsCancel).not.toHaveBeenCalledWith("sub_old");
     expect(paymentIntentsCancel).not.toHaveBeenCalled();
     expect(upsertPurchase).not.toHaveBeenCalled();
     // And the holder's key is left exactly as it was — releasing it would
     // hand the session to a third request mid-flight.
     expect(lockStore.get("funnel:payment:sess_1")).toBe("a-later-holders-token");
+  });
+
+  // Abandoning the subscription this request just created is the same
+  // "a trial bills at period end" hazard the cancel guard above exists to
+  // remove: it is live, on a Customer this request usually SHARES with
+  // the one that won the lock, and once a payment method lands on that
+  // shared customer it can bill. Cancelling it is provably safe — its
+  // client_secret was never returned to any caller (this request 409s)
+  // and no row references it, so it cannot be a payment that should stand.
+  it("cancels the subscription it created itself when the lock is lost", async () => {
+    subscriptionsCreate.mockImplementationOnce(async () => {
+      lockStore.set("funnel:payment:sess_1", "a-later-holders-token");
+      return {
+        id: "sub_1",
+        pending_setup_intent: null,
+        latest_invoice: { payment_intent: { id: "pi_1", client_secret: "pi_secret" } },
+      };
+    });
+
+    const res = await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
+
+    expect(res.status).toBe(409);
+    expect(subscriptionsCancel).toHaveBeenCalledWith("sub_1");
+    // Not routed through the superseded-object guard: that guard asks
+    // whether someone else's object has been paid for, a question that
+    // does not arise for an object created seconds ago inside this
+    // request. Retrieving would only be a way to get the answer wrong.
+    expect(subscriptionsRetrieve).not.toHaveBeenCalled();
+    // Cancelling the subscription voids its invoice and with it that
+    // invoice's PaymentIntent, so retrying the PI would only throw on an
+    // already-dead object.
+    expect(paymentIntentsCancel).not.toHaveBeenCalled();
+    expect(upsertPurchase).not.toHaveBeenCalled();
+  });
+
+  // The trial is the case that matters most: nothing is captured now, so
+  // an abandoned `trialing` subscription sits quietly on the shared
+  // customer until the trial ends and then bills.
+  it("cancels the trial subscription it created itself when the lock is lost", async () => {
+    // This block's fixture only knows `$rov_monthly`; give that package a
+    // trial rather than introducing a second identifier, since the
+    // identifier is not what is under test here.
+    resolvePricesForPackages.mockResolvedValue({
+      $rov_monthly: {
+        packageIdentifier: "$rov_monthly",
+        priceId: "price_m",
+        unitAmount: 4999,
+        currency: "usd",
+        interval: "month",
+        intervalCount: 1,
+        trialDays: 7,
+      },
+    });
+    subscriptionsCreate.mockImplementationOnce(async () => {
+      lockStore.set("funnel:payment:sess_1", "a-later-holders-token");
+      return {
+        id: "sub_trial_1",
+        pending_setup_intent: { client_secret: "seti_secret" },
+        latest_invoice: null,
+      };
+    });
+
+    const res = await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
+
+    expect(res.status).toBe(409);
+    expect(subscriptionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ trial_period_days: 7 }),
+    );
+    expect(subscriptionsCancel).toHaveBeenCalledWith("sub_trial_1");
+  });
+
+  it("cancels the one-time payment intent it created itself when the lock is lost", async () => {
+    // `interval: null` is what routes this down the PaymentIntent branch.
+    resolvePricesForPackages.mockResolvedValue({
+      $rov_monthly: {
+        packageIdentifier: "$rov_monthly",
+        priceId: "price_m",
+        unitAmount: 9900,
+        currency: "usd",
+        interval: null,
+        intervalCount: null,
+        trialDays: null,
+      },
+    });
+    paymentIntentsCreate.mockImplementationOnce(async () => {
+      lockStore.set("funnel:payment:sess_1", "a-later-holders-token");
+      return { id: "pi_2", client_secret: "pi_secret_2" };
+    });
+
+    const res = await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
+
+    expect(res.status).toBe(409);
+    expect(paymentIntentsCancel).toHaveBeenCalledWith("pi_2");
+    expect(subscriptionsCancel).not.toHaveBeenCalled();
+    expect(upsertPurchase).not.toHaveBeenCalled();
+  });
+
+  // The Customer is the one thing that must NOT be touched: on a repeat
+  // POST it is the customer this request REUSED, which the request holding
+  // the lock is also building on.
+  it("leaves the customer alone when the lock is lost", async () => {
+    findPurchaseBySession.mockResolvedValue({
+      id: "purchase_1",
+      sessionId: "sess_1",
+      projectId: "proj_1",
+      status: "pending",
+      stripeCustomerId: "cus_existing",
+      stripeSubscriptionId: null,
+      stripePaymentIntentId: null,
+    });
+    subscriptionsCreate.mockImplementationOnce(async () => {
+      lockStore.set("funnel:payment:sess_1", "a-later-holders-token");
+      return {
+        id: "sub_1",
+        pending_setup_intent: null,
+        latest_invoice: { payment_intent: { id: "pi_1", client_secret: "pi_secret" } },
+      };
+    });
+
+    await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
+
+    // customers.update was the reuse call; nothing may have deleted or
+    // re-pointed it afterwards. `delete` is not even on the facade.
+    expect(customersUpdate).toHaveBeenCalledWith("cus_existing", {
+      email: "a@b.co",
+    });
+    expect(subscriptionsCancel).toHaveBeenCalledWith("sub_1");
+  });
+
+  it("still 409s when cancelling its own subscription fails", async () => {
+    subscriptionsCreate.mockImplementationOnce(async () => {
+      lockStore.set("funnel:payment:sess_1", "a-later-holders-token");
+      return {
+        id: "sub_1",
+        pending_setup_intent: null,
+        latest_invoice: { payment_intent: { id: "pi_1", client_secret: "pi_secret" } },
+      };
+    });
+    subscriptionsCancel.mockRejectedValueOnce(new Error("stripe is down"));
+
+    const res = await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
+
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).toContain("PAYMENT_IN_FLIGHT");
+    expect(upsertPurchase).not.toHaveBeenCalled();
   });
 
   // Failing closed on a Redis outage is correct and stays. Reporting it as

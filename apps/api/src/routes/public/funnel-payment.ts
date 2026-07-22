@@ -305,6 +305,71 @@ async function cancelSuperseded(
 }
 
 /**
+ * Cancel the Stripe objects *this request* created, moments ago, after it
+ * discovered it no longer holds the lock.
+ *
+ * Abandoning them is not harmless. A `default_incomplete` subscription
+ * created here is live on the connected account, usually on the very
+ * Customer the request that won the lock is also building on — and once a
+ * payment method lands on that shared customer, an abandoned trial bills
+ * at period end. That is the same hazard `isSubscriptionCancellable`
+ * exists to prevent, arriving by a different door.
+ *
+ * Why this needs no such guard, and must not borrow it: that guard answers
+ * "has someone already paid for this object?", which is a real question
+ * about a *previous attempt's* object and an unreadable answer there means
+ * do not touch it. It does not arise here. These ids came back from
+ * `subscriptions.create` / `paymentIntents.create` a few lines above; the
+ * request is about to 409, so their `client_secret` was returned to
+ * nobody; and no row references them, so no other request can reach them.
+ * There is no way for one of these to be a payment that should stand.
+ *
+ * The Customer is deliberately untouched. On a repeat POST it is the
+ * customer this request *reused*, which the lock holder is also using, so
+ * it is the one object here that is not exclusively ours. An unreferenced
+ * Customer bills nothing on its own.
+ *
+ * Best-effort: this request is failing either way, and a cancel that
+ * fails leaves an id in the log for a human rather than a broken response
+ * for the visitor.
+ */
+async function cancelOwnObjects(
+  account: AccountScopedStripe,
+  created: { subscriptionId: string | null; paymentIntentId: string | null },
+  sessionId: string,
+): Promise<void> {
+  let subscriptionCancelled = false;
+
+  if (created.subscriptionId) {
+    try {
+      await account.subscriptions.cancel(created.subscriptionId);
+      subscriptionCancelled = true;
+    } catch (err) {
+      log.error("could not cancel the subscription this request created", {
+        sessionId,
+        subscriptionId: created.subscriptionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Cancelling the subscription voids its open invoice, which cancels
+  // that invoice's PaymentIntent — the very id held here. Same reason as
+  // in `cancelSuperseded`: retrying would throw on a dead object.
+  if (created.paymentIntentId && !subscriptionCancelled) {
+    try {
+      await account.paymentIntents.cancel(created.paymentIntentId);
+    } catch (err) {
+      log.error("could not cancel the payment intent this request created", {
+        sessionId,
+        paymentIntentId: created.paymentIntentId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
+/**
  * Merge newly orphaned ids into the row's existing `rawPayload`, keeping
  * anything a previous attempt recorded. Never overwrite the array: each
  * entry is a Stripe object nobody else references, and dropping one loses
@@ -553,17 +618,30 @@ export const funnelPaymentRoute = new Hono()
       // continuing would cancel what it just created and overwrite its row
       // with our stale ids: precisely the race the lock exists to close.
       if (!(await lock.stillHeld())) {
-        // There is nothing we can safely write. `upsertPending` is the
+        // There is nothing we can safely *write*. `upsertPending` is the
         // only write this endpoint has and it would clobber the current
         // holder's row, which is the thing being avoided — so the ids go
-        // to the log instead, at error level, because they are live
-        // objects on the connected account referenced by no row anywhere.
-        log.error("lock lost mid-flight; abandoning newly created stripe objects", {
+        // to the log instead, at error level.
+        log.error("lock lost mid-flight; cancelling the stripe objects we created", {
           sessionId: sid,
           customerId,
           subscriptionId: stripeSubscriptionId,
           paymentIntentId: stripePaymentIntentId,
         });
+        // Logging them is not enough on its own: an abandoned
+        // `default_incomplete` subscription is live on a customer the
+        // lock holder is usually sharing, and an abandoned trial bills at
+        // period end. These two ids are exclusively ours and unreachable
+        // by anyone else, so cancelling them cannot destroy a payment
+        // that should stand — see `cancelOwnObjects`.
+        await cancelOwnObjects(
+          account,
+          {
+            subscriptionId: stripeSubscriptionId,
+            paymentIntentId: stripePaymentIntentId,
+          },
+          sid,
+        );
         return LOCK_LOST;
       }
 
