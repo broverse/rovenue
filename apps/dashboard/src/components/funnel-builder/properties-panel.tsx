@@ -29,6 +29,7 @@ import {
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import { RuleEditor } from "./rule-editor";
 import { ColorSwatchInput } from "./color-swatch-input";
+import { useProjectPaywalls } from "../../lib/hooks/useProjectPaywalls";
 
 const PROGRESS_STYLES: ReadonlyArray<{ value: ProgressStyle; label: string }> = [
   { value: "solid", label: "Solid" },
@@ -74,6 +75,13 @@ export const PropertiesPanel = component(({ editLocale, defaultLocale }: Propert
   // selected page flips from undefined to set between renders.
   const vm = useService(FunnelDraftViewModel);
   const { data: products = [] } = useProjectProducts(vm.projectId);
+  const { data: paywallsData } = useProjectPaywalls(vm.projectId);
+  // Only paywalls with a builderConfig can render via <PaywallRenderer> —
+  // the publish gate rejects a paywallId reference otherwise, so hide
+  // the ones that can't actually be picked.
+  const builderPaywalls = (paywallsData?.paywalls ?? []).filter(
+    (pw) => pw.builderConfig != null,
+  );
 
   const page = vm.selectedPage;
   if (!page) {
@@ -580,6 +588,26 @@ export const PropertiesPanel = component(({ editLocale, defaultLocale }: Propert
 
         {page.type === "paywall" && (
           <>
+            <Section title="Builder paywall">
+              <select
+                value={page.paywallId ?? ""}
+                onChange={(e) =>
+                  set({ paywallId: e.currentTarget.value || undefined })
+                }
+                className="h-8 w-full rounded border border-rv-divider bg-rv-c2 px-2 text-[12px] text-foreground outline-none focus:border-rv-accent-500"
+              >
+                <option value="">None (legacy fields)</option>
+                {builderPaywalls.map((pw) => (
+                  <option key={pw.id} value={pw.id}>
+                    {pw.name} · {pw.identifier}
+                  </option>
+                ))}
+              </select>
+              <div className="mt-1.5 text-[11px] leading-relaxed text-rv-mute-500">
+                Renders this page with the paywall builder instead of the fields below. Only
+                paywalls with a saved builder design are listed.
+              </div>
+            </Section>
             <Section title="Product">
               <select
                 value={page.productId ?? ""}

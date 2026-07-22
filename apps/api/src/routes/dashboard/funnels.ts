@@ -363,6 +363,35 @@ export const funnelsRoute = new Hono()
       }
     }
 
+    // Paywall pages MAY reference a project paywall (`paywallId`) to render
+    // via the shared <PaywallRenderer> instead of the legacy flat fields.
+    // Pages without a paywallId are untouched/legacy-valid and skip this
+    // check entirely — no DB round trip for funnels that don't use it.
+    const referencedPaywallIds = [
+      ...new Set(
+        pages
+          .filter((p) => p.type === "paywall" && !!p.paywallId)
+          .map((p) => p.paywallId as string),
+      ),
+    ];
+    if (referencedPaywallIds.length > 0) {
+      const referenced = await drizzle.paywallRepo.findPaywallsByIds(
+        drizzle.db,
+        projectId,
+        referencedPaywallIds,
+      );
+      const byId = new Map(referenced.map((pw) => [pw.id, pw]));
+      const renderable = referencedPaywallIds.every((id) => {
+        const pw = byId.get(id);
+        return pw != null && pw.builderConfig != null;
+      });
+      if (!renderable) {
+        throw new HTTPException(400, {
+          message: JSON.stringify({ code: "PAYWALL_NOT_RENDERABLE" }),
+        });
+      }
+    }
+
     const result = await drizzle.db.transaction(async (tx) => {
       const versionNo = await drizzle.funnelVersionRepo.nextVersionNo(tx, funnelId);
       const version = await drizzle.funnelVersionRepo.insert(tx, {

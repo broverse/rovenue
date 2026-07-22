@@ -13,6 +13,8 @@
 // =============================================================
 
 import { useEffect, useMemo, useState } from "react";
+import { PaywallRenderer, type RendererOffering } from "@rovenue/paywall-renderer";
+import type { BuilderConfig } from "@rovenue/shared/paywall";
 import { PagePreview } from "../components/funnel-builder/page-preview";
 import {
   advanceSession,
@@ -21,11 +23,26 @@ import {
   RunnerApiError,
   startSession,
   type AdvanceResponse,
+  type HydratedFunnelOffering,
   type PublishedFunnelConfig,
 } from "./runner-api";
 import { writeFunnelTokenToClipboard } from "./clipboard";
 import { type LocaleCode } from "@rovenue/shared/i18n";
 import { useRunnerLocale } from "./use-runner-locale";
+
+/** Maps the server-hydrated offering shape into the renderer's minimal contract. */
+function toRunnerOffering(offering: HydratedFunnelOffering | null): RendererOffering | null {
+  if (!offering) return null;
+  return {
+    identifier: offering.identifier,
+    packages: offering.packages.map((p) => ({
+      packageIdentifier: p.packageIdentifier,
+      displayName: p.displayName,
+      metadata: p.metadata,
+      storeIds: p.storeIds,
+    })),
+  };
+}
 
 type Status =
   | { kind: "loading" }
@@ -164,6 +181,16 @@ export function FunnelRunner({ slug }: { slug: string }) {
     return <CenteredMessage title="No page" />;
   }
 
+  // A paywall page MAY reference a project paywall built with the shared
+  // paywall builder (`paywallId`). Only render it that way when the
+  // server actually hydrated it into `paywalls` — a paywallId whose
+  // paywall was deleted/cleared since publish falls back to the page's
+  // legacy flat fields, unchanged from today.
+  const builderPaywall =
+    currentPage.type === "paywall" && currentPage.paywallId
+      ? state.config.paywalls[currentPage.paywallId]
+      : undefined;
+
   // Full viewport — no max-width, no centered column. The published
   // funnel fills the whole window on every breakpoint.
   return (
@@ -171,15 +198,31 @@ export function FunnelRunner({ slug }: { slug: string }) {
       className="h-[100dvh] w-screen overflow-hidden"
       style={{ background: state.config.theme.bg }}
     >
-      <PagePreview
-        page={currentPage}
-        theme={state.config.theme}
-        pages={state.config.pages}
-        onAdvance={handleAdvance}
-        chrome="full"
-        locale={locale}
-        defaultLocale={localeConfig.defaultLocale}
-      />
+      {builderPaywall ? (
+        <PaywallRenderer
+          config={builderPaywall.builderConfig as BuilderConfig}
+          offering={toRunnerOffering(builderPaywall.offering)}
+          locale={locale}
+          colorScheme="light"
+          priceView={undefined}
+          // Same purchase/CTA path the legacy paywall page uses today —
+          // handleAdvance's `currentPage.type === "paywall"` branch mints
+          // a claim token via the (dev-mode-stub) /claim-token endpoint.
+          // Restore is deliberately omitted (no onRestore) — hidden by
+          // design in <PaywallRenderer> when the handler is absent.
+          onPurchase={() => void handleAdvance()}
+        />
+      ) : (
+        <PagePreview
+          page={currentPage}
+          theme={state.config.theme}
+          pages={state.config.pages}
+          onAdvance={handleAdvance}
+          chrome="full"
+          locale={locale}
+          defaultLocale={localeConfig.defaultLocale}
+        />
+      )}
     </div>
   );
 }

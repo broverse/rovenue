@@ -55,6 +55,28 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return envelope.data;
 }
 
+// Mirrors apps/api/src/lib/offering-hydration.ts's hydrateOffering() return
+// shape — this is a browser-side client, so we keep it structurally loose
+// rather than importing an API-only type.
+export interface HydratedFunnelOffering {
+  identifier: string;
+  isDefault: boolean;
+  packages: Array<{
+    packageIdentifier: string;
+    displayName: string;
+    metadata?: unknown;
+    storeIds?: Record<string, string>;
+    [key: string]: unknown;
+  }>;
+  metadata: unknown;
+}
+
+export interface HydratedFunnelPaywall {
+  builderConfig: unknown;
+  configFormatVersion: number;
+  offering: HydratedFunnelOffering | null;
+}
+
 export interface PublishedFunnelConfig {
   id: string;
   slug: string;
@@ -64,6 +86,11 @@ export interface PublishedFunnelConfig {
   pages: Page[];
   theme: Theme;
   settings: Record<string, unknown>;
+  // Builder paywalls referenced by `paywallId` on a paywall page, keyed by
+  // that id. A paywallId present on a page but absent here means the
+  // referenced paywall was deleted/cleared since publish — fall back to
+  // the page's legacy flat fields.
+  paywalls: Record<string, HydratedFunnelPaywall>;
 }
 
 export interface SessionStartResponse {

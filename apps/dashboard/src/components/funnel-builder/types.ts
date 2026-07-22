@@ -242,6 +242,12 @@ export type Page = {
   max_selections?: number;
   duration?: number;
   productId?: string;
+  // Optional reference to a project paywall (with a builder `builderConfig`)
+  // to render via the shared <PaywallRenderer> instead of the legacy flat
+  // fields above (headline/benefits/productId/trial). See
+  // apps/dashboard/src/runner/funnel-runner.tsx and
+  // components/funnel-builder/properties-panel.tsx (paywall section picker).
+  paywallId?: string;
   trial?: number;
   mediaKind?: "none" | "image" | "video";
   mediaUrl?: string;

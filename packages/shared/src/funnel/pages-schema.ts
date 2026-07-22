@@ -110,6 +110,12 @@ export const pageSchema = z
     // Paywall / feature / success
     headline: z.string().optional(),
     productId: z.string().optional(),
+    // Optional reference to a project paywall (packages/shared/src/paywall)
+    // whose `builderConfig` should render this page via the shared
+    // <PaywallRenderer> instead of the legacy flat fields above. See
+    // apps/api/src/routes/dashboard/funnels.ts (publish gate) and
+    // apps/api/src/routes/public/funnels.ts (serve hydration).
+    paywallId: z.string().optional(),
     trial: z.number().optional(),
     benefits: z.array(z.string()).optional(),
     features: z.array(z.string()).optional(),

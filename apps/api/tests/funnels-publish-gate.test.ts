@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const chargesEnabled = vi.hoisted(() => vi.fn());
 const findFunnelById = vi.hoisted(() => vi.fn());
+const findPaywallsByIds = vi.hoisted(() => vi.fn(async () => []));
 const nextVersionNo = vi.hoisted(() => vi.fn(async () => 1));
 const insertVersion = vi.hoisted(() => vi.fn(async () => ({ id: "ver_1", versionNo: 1 })));
 const setCurrentVersion = vi.hoisted(() => vi.fn());
@@ -83,6 +84,10 @@ vi.mock("@rovenue/db", async (importOriginal) => {
       },
       funnelRepo: { findById: findFunnelById, setCurrentVersion },
       funnelVersionRepo: { nextVersionNo, insert: insertVersion },
+      paywallRepo: {
+        ...actual.drizzle.paywallRepo,
+        findPaywallsByIds,
+      },
     },
   };
 });
@@ -94,6 +99,11 @@ const paywallPages = [
 ];
 const noPaywallPages = [
   { id: "p1", type: "info", title: "Hi" },
+  { id: "p3", type: "success", headline: "Done" },
+];
+const paywallPagesWithBuilderRef = [
+  { id: "p1", type: "info", title: "Hi" },
+  { id: "p2", type: "paywall", headline: "Unlock", paywallId: "pw_1" },
   { id: "p3", type: "success", headline: "Done" },
 ];
 
@@ -120,6 +130,8 @@ describe("funnel publish paywall gate", () => {
   beforeEach(() => {
     chargesEnabled.mockReset();
     findFunnelById.mockReset();
+    findPaywallsByIds.mockReset();
+    findPaywallsByIds.mockResolvedValue([]);
     insertVersion.mockClear();
     auditFn.mockClear();
     validateOverride.value = null;
@@ -183,5 +195,56 @@ describe("funnel publish paywall gate", () => {
     chargesEnabled.mockResolvedValue(false);
     const res = await publish();
     expect(res.status).toBe(400);
+  });
+});
+
+describe("funnel publish builder-paywall gate (PAYWALL_NOT_RENDERABLE)", () => {
+  beforeEach(() => {
+    chargesEnabled.mockReset();
+    chargesEnabled.mockResolvedValue(true);
+    findFunnelById.mockReset();
+    findPaywallsByIds.mockReset();
+    findPaywallsByIds.mockResolvedValue([]);
+    insertVersion.mockClear();
+    auditFn.mockClear();
+    validateOverride.value = null;
+  });
+
+  it("rejects with PAYWALL_NOT_RENDERABLE when the referenced paywall has no builderConfig", async () => {
+    findFunnelById.mockResolvedValue(funnel(paywallPagesWithBuilderRef));
+    findPaywallsByIds.mockResolvedValue([
+      { id: "pw_1", builderConfig: null },
+    ]);
+    const res = await publish();
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toContain("PAYWALL_NOT_RENDERABLE");
+    expect(insertVersion).not.toHaveBeenCalled();
+  });
+
+  it("rejects with PAYWALL_NOT_RENDERABLE when the referenced paywall no longer exists", async () => {
+    findFunnelById.mockResolvedValue(funnel(paywallPagesWithBuilderRef));
+    findPaywallsByIds.mockResolvedValue([]); // deleted / not found
+    const res = await publish();
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toContain("PAYWALL_NOT_RENDERABLE");
+    expect(insertVersion).not.toHaveBeenCalled();
+  });
+
+  it("publishes when the referenced paywall has a non-null builderConfig", async () => {
+    findFunnelById.mockResolvedValue(funnel(paywallPagesWithBuilderRef));
+    findPaywallsByIds.mockResolvedValue([
+      { id: "pw_1", builderConfig: { formatVersion: 2 } },
+    ]);
+    const res = await publish();
+    expect(res.status).toBe(200);
+    expect(insertVersion).toHaveBeenCalled();
+  });
+
+  it("skips the paywall-reference lookup entirely for legacy pages with no paywallId", async () => {
+    findFunnelById.mockResolvedValue(funnel(paywallPages)); // no paywallId anywhere
+    const res = await publish();
+    expect(res.status).toBe(200);
+    expect(findPaywallsByIds).not.toHaveBeenCalled();
+    expect(insertVersion).toHaveBeenCalled();
   });
 });

@@ -46,6 +46,18 @@ vi.mock("../../services/custom-domains/host-resolver", () => ({
   resolveHost: vi.fn().mockResolvedValue(null),
 }));
 
+// hydrateOffering's own logic (packages -> products) is covered elsewhere
+// (offering-hydration + placements tests) — here we only need to assert
+// that the serve route WIRES the referenced offering into it.
+vi.mock("../../lib/offering-hydration", () => ({
+  hydrateOffering: vi.fn().mockResolvedValue({
+    identifier: "off_1",
+    isDefault: true,
+    packages: [],
+    metadata: {},
+  }),
+}));
+
 vi.mock("@rovenue/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@rovenue/db")>();
   return {
@@ -62,6 +74,12 @@ vi.mock("@rovenue/db", async (importOriginal) => {
           currentVersionId: "version-id",
           slug: "test-funnel",
         }),
+      },
+      paywallRepo: {
+        findPaywallsByIds: vi.fn().mockResolvedValue([]),
+      },
+      offeringRepo: {
+        findOfferingById: vi.fn().mockResolvedValue(null),
       },
       funnelVersionRepo: {
         findById: vi.fn().mockResolvedValue({
@@ -117,9 +135,17 @@ vi.mock("../../middleware/rate-limit", () => ({
 // ---------------------------------------------------------------------------
 import { readPublishedConfig } from "../../services/funnel/runtime-cache";
 import { drizzle } from "@rovenue/db";
+import { hydrateOffering } from "../../lib/offering-hydration";
 import { publicFunnelsRoute } from "./funnels";
 
 const readPublishedConfigMock = readPublishedConfig as ReturnType<typeof vi.fn>;
+const findPaywallsByIdsMock = drizzle.paywallRepo.findPaywallsByIds as ReturnType<
+  typeof vi.fn
+>;
+const findOfferingByIdMock = drizzle.offeringRepo.findOfferingById as ReturnType<
+  typeof vi.fn
+>;
+const hydrateOfferingMock = hydrateOffering as ReturnType<typeof vi.fn>;
 
 // Stub published config returned by the cache (avoids DB hit on session create).
 const STUB_CONFIG = {
@@ -321,5 +347,113 @@ describe("W4.3f/g: rv_funnel_sid cookie Secure flag", () => {
     } finally {
       (env as Record<string, unknown>).NODE_ENV = originalNodeEnv;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 7: GET /funnels/:slug hydrates a `paywalls` map for pages carrying
+// a `paywallId` (referencing a project paywall built with the builder).
+// ---------------------------------------------------------------------------
+
+describe("GET /funnels/:slug — paywalls hydration map", () => {
+  beforeEach(() => {
+    findPaywallsByIdsMock.mockReset();
+    findPaywallsByIdsMock.mockResolvedValue([]);
+    findOfferingByIdMock.mockReset();
+    findOfferingByIdMock.mockResolvedValue(null);
+    hydrateOfferingMock.mockReset();
+    hydrateOfferingMock.mockResolvedValue({
+      identifier: "off_1",
+      isDefault: true,
+      packages: [],
+      metadata: {},
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns an empty paywalls map when no page carries a paywallId", async () => {
+    readPublishedConfigMock.mockResolvedValue(STUB_CONFIG); // pages: [{id:"page-1", elements:[]}]
+    const app = buildApp();
+    const res = await app.request("/public/funnels/test-funnel");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { paywalls: Record<string, unknown> } };
+    expect(body.data.paywalls).toEqual({});
+    expect(findPaywallsByIdsMock).not.toHaveBeenCalled();
+  });
+
+  it("hydrates a referenced builder paywall (builderConfig + offering) into the map", async () => {
+    readPublishedConfigMock.mockResolvedValue({
+      ...STUB_CONFIG,
+      pages: [{ id: "page-1", type: "paywall", paywallId: "pw_1" }],
+    });
+    findPaywallsByIdsMock.mockResolvedValue([
+      {
+        id: "pw_1",
+        builderConfig: { formatVersion: 2, root: {} },
+        configFormatVersion: 2,
+        offeringId: "off_1",
+      },
+    ]);
+    findOfferingByIdMock.mockResolvedValue({
+      identifier: "off_1",
+      isDefault: true,
+      packages: [],
+      metadata: {},
+    });
+
+    const app = buildApp();
+    const res = await app.request("/public/funnels/test-funnel");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: {
+        paywalls: Record<
+          string,
+          { builderConfig: unknown; configFormatVersion: number; offering: unknown }
+        >;
+      };
+    };
+    expect(body.data.paywalls["pw_1"]).toEqual({
+      builderConfig: { formatVersion: 2, root: {} },
+      configFormatVersion: 2,
+      offering: { identifier: "off_1", isDefault: true, packages: [], metadata: {} },
+    });
+    expect(findPaywallsByIdsMock).toHaveBeenCalledWith(
+      drizzle.db,
+      "project-id",
+      ["pw_1"],
+    );
+  });
+
+  it("omits a paywallId whose paywall row was deleted since publish (no 500)", async () => {
+    readPublishedConfigMock.mockResolvedValue({
+      ...STUB_CONFIG,
+      pages: [{ id: "page-1", type: "paywall", paywallId: "pw_gone" }],
+    });
+    findPaywallsByIdsMock.mockResolvedValue([]); // deleted
+
+    const app = buildApp();
+    const res = await app.request("/public/funnels/test-funnel");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { paywalls: Record<string, unknown> } };
+    expect(body.data.paywalls).toEqual({});
+  });
+
+  it("omits a paywallId whose builderConfig was cleared since publish (no 500)", async () => {
+    readPublishedConfigMock.mockResolvedValue({
+      ...STUB_CONFIG,
+      pages: [{ id: "page-1", type: "paywall", paywallId: "pw_cleared" }],
+    });
+    findPaywallsByIdsMock.mockResolvedValue([
+      { id: "pw_cleared", builderConfig: null, configFormatVersion: 1, offeringId: "off_1" },
+    ]);
+
+    const app = buildApp();
+    const res = await app.request("/public/funnels/test-funnel");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { paywalls: Record<string, unknown> } };
+    expect(body.data.paywalls).toEqual({});
   });
 });

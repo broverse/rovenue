@@ -40,6 +40,7 @@ import { emitFunnelEvent } from "../../services/funnel/outbox";
 import { resolveHost } from "../../services/custom-domains/host-resolver";
 import { endpointRateLimit } from "../../middleware/rate-limit";
 import { env } from "../../lib/env";
+import { hydrateOffering } from "../../lib/offering-hydration";
 
 // ---------------------------------------------------------------------------
 // Bounded recursive answer schema (F16).
@@ -67,6 +68,68 @@ interface PublishedRuntimeConfig {
   pages: Array<Record<string, unknown>>;
   theme: Record<string, unknown>;
   settings: Record<string, unknown>;
+}
+
+// Shape for one entry in the `paywalls` map served alongside the funnel
+// config — everything a <PaywallRenderer> needs for the paywall page(s)
+// that reference a project paywall via `paywallId`.
+interface HydratedPaywallEntry {
+  builderConfig: unknown;
+  configFormatVersion: number;
+  offering: Awaited<ReturnType<typeof hydrateOffering>> | null;
+}
+
+function collectPaywallIds(pages: Array<Record<string, unknown>>): string[] {
+  const ids = new Set<string>();
+  for (const p of pages) {
+    if (p.type === "paywall" && typeof p.paywallId === "string" && p.paywallId) {
+      ids.add(p.paywallId);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * Hydrates every distinct `paywallId` referenced by a paywall page into
+ * `{ builderConfig, configFormatVersion, offering }`, deduped across the
+ * whole funnel. A paywallId whose paywall was deleted or had its
+ * `builderConfig` cleared since publish is OMITTED from the map rather
+ * than failing the serve — the runner falls back to the page's legacy
+ * flat fields when a paywallId is present but missing here.
+ */
+async function hydrateFunnelPaywalls(
+  funnelId: string,
+  pages: Array<Record<string, unknown>>,
+): Promise<Record<string, HydratedPaywallEntry>> {
+  const paywallIds = collectPaywallIds(pages);
+  if (paywallIds.length === 0) return {};
+
+  const funnel = await drizzle.funnelRepo.findById(drizzle.db, funnelId);
+  if (!funnel) return {};
+
+  const rows = await drizzle.paywallRepo.findPaywallsByIds(
+    drizzle.db,
+    funnel.projectId,
+    paywallIds,
+  );
+
+  const result: Record<string, HydratedPaywallEntry> = {};
+  for (const paywall of rows) {
+    if (paywall.builderConfig == null) continue;
+    const offering = paywall.offeringId
+      ? await drizzle.offeringRepo.findOfferingById(
+          drizzle.db,
+          funnel.projectId,
+          paywall.offeringId,
+        )
+      : null;
+    result[paywall.id] = {
+      builderConfig: paywall.builderConfig,
+      configFormatVersion: paywall.configFormatVersion,
+      offering: offering ? await hydrateOffering(funnel.projectId, offering) : null,
+    };
+  }
+  return result;
 }
 
 function stripBranchingRules(
@@ -142,14 +205,18 @@ export const publicFunnelsRoute = new Hono()
   .get("/funnels/:slug", async (c) => {
     const slug = c.req.param("slug");
     const cached = await readPublishedConfig<PublishedRuntimeConfig>(slug);
-    if (cached) return c.json({ data: cached });
-
-    const config = await loadPublishedConfigFromDb(slug);
+    const config = cached ?? (await loadPublishedConfigFromDb(slug));
     if (!config) {
       throw new HTTPException(404, { message: "Funnel not found" });
     }
-    await writePublishedConfig(slug, config);
-    return c.json({ data: config });
+    if (!cached) {
+      await writePublishedConfig(slug, config);
+    }
+    // Hydrated fresh on every request (not cached alongside the config
+    // bundle) — paywall/offering data can change between publishes and a
+    // paywall may be deleted after this funnel was published.
+    const paywalls = await hydrateFunnelPaywalls(config.id, config.pages);
+    return c.json({ data: { ...config, paywalls } });
   })
 
   // ---------------------------------------------------------------
