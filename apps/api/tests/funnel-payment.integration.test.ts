@@ -307,21 +307,36 @@ const OFFERING_ID = `ofr_pay_${RUN}`;
 const ACCESS_ID = `acc_pay_${RUN}`;
 const ACCESS_IDENTIFIER = `pro_${RUN}`;
 
+// A SECOND paywall page, with its own paywall and its own offering. It
+// sells the one-time package and nothing else, which is what makes the
+// page-scoped resolution observable end to end: the monthly package is
+// real, and reachable only from the first page.
+const PAYWALL_PAGE_B_ID = `pg_paywall_b_${RUN}`;
+const PAYWALL_B_ID = `pwl_pay_b_${RUN}`;
+const OFFERING_B_ID = `ofr_pay_b_${RUN}`;
+
 const PRODUCT_ID = `prd_pay_${RUN}`;
 const TRIAL_PRODUCT_ID = `prd_trial_${RUN}`;
+const ONE_TIME_PRODUCT_ID = `prd_once_${RUN}`;
 const PRICE_ID = `price_monthly_${RUN}`;
 const TRIAL_PRICE_ID = `price_trial_${RUN}`;
+const ONE_TIME_PRICE_ID = `price_once_${RUN}`;
 const PACKAGE_IDENTIFIER = "$rov_monthly";
 const TRIAL_PACKAGE_IDENTIFIER = "$rov_trial";
+const ONE_TIME_PACKAGE_IDENTIFIER = "$rov_lifetime";
 const PRICE_UNIT_AMOUNT = 4900;
+const ONE_TIME_UNIT_AMOUNT = 12900;
 
 // Session A walks the whole browser path; session B closes the tab and is
-// completed by the webhook alone.
+// completed by the webhook alone; session C buys the one-time package on
+// the second paywall page.
 const SESSION_A = `fss_paid_${RUN}`;
 const SESSION_B = `fss_tab_${RUN}`;
-const SESSION_IDS = [SESSION_A, SESSION_B];
+const SESSION_C = `fss_once_${RUN}`;
+const SESSION_IDS = [SESSION_A, SESSION_B, SESSION_C];
 
 const DEVICE_ID = `rov_device_${RUN}`;
+const ONE_TIME_DEVICE_ID = `rov_device_once_${RUN}`;
 const BUYER_EMAIL = `buyer-${RUN}@example.test`;
 
 // A run-unique client ip so the endpoint rate limiter (30/min, real
@@ -345,6 +360,10 @@ async function startPayment(
   sessionId: string,
   packageIdentifier: string,
   email = BUYER_EMAIL,
+  // The paywall page the buyer is on. Required by the endpoint, and the
+  // thing the package is resolved through — the second-paywall case
+  // below overrides it.
+  pageId: string = PAYWALL_PAGE_ID,
 ) {
   const app = await publicApp();
   return app.request(`/public/funnel-sessions/${sessionId}/payment-intent`, {
@@ -353,7 +372,11 @@ async function startPayment(
       "content-type": "application/json",
       "x-forwarded-for": CLIENT_IP,
     },
-    body: JSON.stringify({ package_identifier: packageIdentifier, email }),
+    body: JSON.stringify({
+      package_identifier: packageIdentifier,
+      page_id: pageId,
+      email,
+    }),
   });
 }
 
@@ -432,6 +455,7 @@ async function tokenRows(sessionId: string) {
 
 // The token is returned exactly once, by whichever caller wins the mint.
 let claimToken = "";
+let oneTimeClaimToken = "";
 
 describe("funnel on-page payment — real Postgres", () => {
   beforeAll(async () => {
@@ -482,25 +506,57 @@ describe("funnel on-page payment — real Postgres", () => {
         displayName: "Pro Trial",
         accessIds: [ACCESS_ID],
       },
+      {
+        id: ONE_TIME_PRODUCT_ID,
+        projectId: PROJECT_ID,
+        identifier: `pro_lifetime_${RUN}`,
+        type: "NON_CONSUMABLE",
+        storeIds: { stripe: ONE_TIME_PRICE_ID },
+        displayName: "Pro Lifetime",
+        accessIds: [ACCESS_ID],
+      },
     ]);
 
-    await db.insert(offerings).values({
-      id: OFFERING_ID,
-      projectId: PROJECT_ID,
-      identifier: `default_${RUN}`,
-      packages: [
-        { identifier: PACKAGE_IDENTIFIER, productId: PRODUCT_ID, order: 0 },
-        { identifier: TRIAL_PACKAGE_IDENTIFIER, productId: TRIAL_PRODUCT_ID, order: 1 },
-      ],
-    });
+    await db.insert(offerings).values([
+      {
+        id: OFFERING_ID,
+        projectId: PROJECT_ID,
+        identifier: `default_${RUN}`,
+        packages: [
+          { identifier: PACKAGE_IDENTIFIER, productId: PRODUCT_ID, order: 0 },
+          { identifier: TRIAL_PACKAGE_IDENTIFIER, productId: TRIAL_PRODUCT_ID, order: 1 },
+        ],
+      },
+      {
+        id: OFFERING_B_ID,
+        projectId: PROJECT_ID,
+        identifier: `lifetime_${RUN}`,
+        packages: [
+          {
+            identifier: ONE_TIME_PACKAGE_IDENTIFIER,
+            productId: ONE_TIME_PRODUCT_ID,
+            order: 0,
+          },
+        ],
+      },
+    ]);
 
-    await db.insert(paywalls).values({
-      id: PAYWALL_ID,
-      projectId: PROJECT_ID,
-      identifier: `paywall_${RUN}`,
-      name: "Funnel Paywall",
-      offeringId: OFFERING_ID,
-    });
+    await db.insert(paywalls).values([
+      {
+        id: PAYWALL_ID,
+        projectId: PROJECT_ID,
+        identifier: `paywall_${RUN}`,
+        name: "Funnel Paywall",
+        offeringId: OFFERING_ID,
+      },
+      {
+        id: PAYWALL_B_ID,
+        projectId: PROJECT_ID,
+        identifier: `paywall_b_${RUN}`,
+        name: "Funnel Paywall B",
+        offeringId: OFFERING_B_ID,
+      },
+    ]);
 
     await db.insert(funnels).values({
       id: FUNNEL_ID,
@@ -513,10 +569,14 @@ describe("funnel on-page payment — real Postgres", () => {
       funnelId: FUNNEL_ID,
       versionNo: 1,
       // The published page tree is what makes a package chargeable: the
-      // endpoint resolves the named package through THIS paywall.
+      // endpoint resolves the named package through the paywall of the
+      // page named in the request, and TWO paywall pages is a legal
+      // funnel — so which one is charged is a real question here, not a
+      // hypothetical.
       pagesJson: [
         { id: `pg_q_${RUN}`, type: "question" },
         { id: PAYWALL_PAGE_ID, type: "paywall", paywallId: PAYWALL_ID },
+        { id: PAYWALL_PAGE_B_ID, type: "paywall", paywallId: PAYWALL_B_ID },
       ],
       themeJson: {},
       settingsJson: {
@@ -542,6 +602,14 @@ describe("funnel on-page payment — real Postgres", () => {
         anonId: `anon_b_${RUN}`,
         state: "in_progress",
       },
+      {
+        id: SESSION_C,
+        funnelId: FUNNEL_ID,
+        funnelVersionId: VERSION_ID,
+        projectId: PROJECT_ID,
+        anonId: `anon_c_${RUN}`,
+        state: "in_progress",
+      },
     ]);
 
     // The Prices as the connected account reports them. Everything the
@@ -558,6 +626,14 @@ describe("funnel on-page payment — real Postgres", () => {
       unit_amount: 2900,
       currency: "usd",
       recurring: { interval: "month", interval_count: 1, trial_period_days: 7 },
+    });
+    // `recurring: null` is what makes this the one-time path: no
+    // subscription is created, only a PaymentIntent.
+    stripeStub.prices.set(ONE_TIME_PRICE_ID, {
+      id: ONE_TIME_PRICE_ID,
+      unit_amount: ONE_TIME_UNIT_AMOUNT,
+      currency: "usd",
+      recurring: null,
     });
   }, 60_000);
 
@@ -870,5 +946,206 @@ describe("funnel on-page payment — real Postgres", () => {
 
     expect(await tokenRows(SESSION_B)).toHaveLength(1);
     expect((await purchaseRow(SESSION_B))!.status).toBe("paid");
+  }, 30_000);
+
+  // =============================================================
+  // The one-time path — session C, on the SECOND paywall page
+  // =============================================================
+  //
+  // Two defects met here, so one session exercises both.
+  //
+  // A non-recurring package is charged through a bare PaymentIntent.
+  // There is no subscription, so the webhook's
+  // `upsertPurchaseFromSubscription` — the only thing that writes a
+  // `purchases` row or grants access — never runs, and
+  // `payment_intent.succeeded` is not in its DOMAIN_SYNC map. The buyer
+  // paid, /confirm answered 200, a token was minted, and the claim
+  // merged a subscriber that owned nothing.
+  //
+  // And this package is sold from the funnel's SECOND paywall page,
+  // whose offering the first page's does not contain. Resolving through
+  // "the first paywall page in the version" could only ever charge the
+  // monthly subscription here.
+
+  it("400s when the package belongs to a different paywall page's offering", async () => {
+    // Real package, real product, real price — sold on page A. Naming it
+    // while standing on page B must not charge page A's product.
+    const res = await startPayment(
+      SESSION_C,
+      PACKAGE_IDENTIFIER,
+      BUYER_EMAIL,
+      PAYWALL_PAGE_B_ID,
+    );
+
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toContain(
+      "Package is not in this funnel's offering",
+    );
+    expect(await purchaseRow(SESSION_C)).toBeNull();
+  }, 30_000);
+
+  it("400s for a page id that is not a paywall page in this version", async () => {
+    const res = await startPayment(
+      SESSION_C,
+      ONE_TIME_PACKAGE_IDENTIFIER,
+      BUYER_EMAIL,
+      `pg_q_${RUN}`,
+    );
+
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toContain(
+      "Page is not a paywall page in this funnel",
+    );
+    expect(await purchaseRow(SESSION_C)).toBeNull();
+  }, 30_000);
+
+  it("creates a bare PaymentIntent priced from the second page's own Price", async () => {
+    const before = stripeStub.subscriptions.size;
+
+    const res = await startPayment(
+      SESSION_C,
+      ONE_TIME_PACKAGE_IDENTIFIER,
+      BUYER_EMAIL,
+      PAYWALL_PAGE_B_ID,
+    );
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as { data: { mode: string; client_secret: string } };
+    expect(body.data.mode).toBe("payment");
+
+    // No subscription was created for a one-time price — which is the
+    // whole reason nothing downstream granted anything.
+    expect(stripeStub.subscriptions.size).toBe(before);
+
+    const row = await purchaseRow(SESSION_C);
+    expect(row!.status).toBe("pending");
+    expect(row!.stripeSubscriptionId).toBeNull();
+    expect(row!.stripePaymentIntentId).toEqual(expect.any(String));
+    // THE page-resolution assertion: the second page's product, at the
+    // second page's price, not the first's.
+    expect(row!.productId).toBe(ONE_TIME_PRODUCT_ID);
+    expect(row!.amountCents).toBe(ONE_TIME_UNIT_AMOUNT);
+  }, 30_000);
+
+  // THE regression test for the one-time grant. Before this, everything
+  // below the token was empty and nothing said so.
+  it("writes a purchase and an active entitlement once the intent succeeds", async () => {
+    const row = await purchaseRow(SESSION_C);
+    const intent = stripeStub.paymentIntents.get(row!.stripePaymentIntentId!)!;
+    intent.status = "succeeded";
+
+    const res = await confirm(SESSION_C);
+    expect(res.status).toBe(200);
+
+    const paid = await purchaseRow(SESSION_C);
+    expect(paid!.status).toBe("paid");
+    expect(paid!.subscriberId).toEqual(expect.any(String));
+
+    const db = getDb();
+    const purchaseRows = await db
+      .select()
+      .from(purchases)
+      .where(eq(purchases.subscriberId, paid!.subscriberId!));
+    expect(purchaseRows).toHaveLength(1);
+    expect(purchaseRows[0]!.productId).toBe(ONE_TIME_PRODUCT_ID);
+    expect(purchaseRows[0]!.status).toBe("ACTIVE");
+    expect(purchaseRows[0]!.store).toBe("STRIPE");
+    // Anchored on the PaymentIntent, which is the only natural key a
+    // one-time purchase has.
+    expect(purchaseRows[0]!.storeTransactionId).toBe(paid!.stripePaymentIntentId);
+    // A one-time purchase does not lapse.
+    expect(purchaseRows[0]!.expiresDate).toBeNull();
+    expect(purchaseRows[0]!.priceAmount).toBe("129.0000");
+
+    const accessRows = await db
+      .select()
+      .from(subscriberAccess)
+      .where(eq(subscriberAccess.subscriberId, paid!.subscriberId!));
+    expect(accessRows).toHaveLength(1);
+    expect(accessRows[0]!.accessId).toBe(ACCESS_ID);
+    expect(accessRows[0]!.isActive).toBe(true);
+    expect(accessRows[0]!.expiresDate).toBeNull();
+
+    const [body] = [(await res.json()) as { data: { token: string } }];
+    oneTimeClaimToken = body.data.token;
+  }, 30_000);
+
+  // A retried /confirm must not produce a second purchase row: the
+  // upsert is keyed on (store, storeTransactionId), and the completion
+  // short-circuits on `paid` anyway.
+  it("does not write a second purchase when /confirm is repeated", async () => {
+    const res = await confirm(SESSION_C);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { data: Record<string, unknown> }).data.already_issued).toBe(
+      true,
+    );
+
+    const paid = await purchaseRow(SESSION_C);
+    const purchaseRows = await getDb()
+      .select()
+      .from(purchases)
+      .where(eq(purchases.subscriberId, paid!.subscriberId!));
+    expect(purchaseRows).toHaveLength(1);
+  }, 30_000);
+
+  it("returns a non-empty entitlements array when the one-time buyer claims", async () => {
+    const res = await claim(ONE_TIME_DEVICE_ID, oneTimeClaimToken);
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      data: { subscriber_id: string; entitlements: string[] };
+    };
+    // The failure this whole sub-project exists to prevent: 200 all the
+    // way through, and an empty array at the end of it.
+    expect(body.data.entitlements).toEqual([ACCESS_IDENTIFIER]);
+
+    const [installed] = await getDb()
+      .select()
+      .from(subscribers)
+      .where(eq(subscribers.rovenueId, ONE_TIME_DEVICE_ID));
+    expect(body.data.subscriber_id).toBe(installed!.id);
+  }, 30_000);
+
+  // =============================================================
+  // upsertPending against a row that is already paid
+  // =============================================================
+  //
+  // The endpoint's PAYMENT_ALREADY_RECORDED guard reads the row inside
+  // the Redis lock, but up to six Stripe round-trips sit between that
+  // read and the write — and the third writer of the paid transition,
+  // the webhook's backstop, takes no lock at all. So the row can turn
+  // paid underneath a request that is about to upsert it. The condition
+  // that stops the reset lives in the statement itself.
+
+  it("leaves an already-paid row untouched", async () => {
+    const before = await purchaseRow(SESSION_A);
+    expect(before!.status).toBe("paid");
+
+    const saved = await drizzle.funnelPurchaseRepo.upsertPending(getDb(), {
+      sessionId: SESSION_A,
+      projectId: PROJECT_ID,
+      productId: ONE_TIME_PRODUCT_ID,
+      amountCents: 1,
+      currency: "eur",
+      stripeCustomerId: "cus_clobber",
+      stripeSubscriptionId: "sub_clobber",
+      stripePaymentIntentId: "pi_clobber",
+      emailHash: "0".repeat(64),
+    });
+
+    // No row updated, so RETURNING yields nothing. A successful no-op.
+    expect(saved).toBeNull();
+
+    const after = await purchaseRow(SESSION_A);
+    expect(after!.status).toBe("paid");
+    expect(after!.stripeCustomerId).toBe(before!.stripeCustomerId);
+    expect(after!.stripeSubscriptionId).toBe(before!.stripeSubscriptionId);
+    expect(after!.stripePaymentIntentId).toBe(before!.stripePaymentIntentId);
+    expect(after!.productId).toBe(before!.productId);
+    expect(after!.amountCents).toBe(before!.amountCents);
+    expect(after!.currency).toBe(before!.currency);
+    expect(after!.emailHash).toBe(before!.emailHash);
+    expect(after!.subscriberId).toBe(before!.subscriberId);
+    expect(after!.paidAt).toEqual(before!.paidAt);
   }, 30_000);
 });

@@ -166,6 +166,13 @@ vi.mock("../src/lib/redis", () => ({
   },
 }));
 
+// The paywall page every fixture below publishes. `page_id` is a
+// REQUIRED field on the request body — the server charges the paywall of
+// the page the buyer is actually on, not the first paywall page it can
+// find — so the post() helpers default it, and only the cases that are
+// about page resolution pass one of their own.
+const PAYWALL_PAGE_ID = "page_paywall";
+
 describe("POST /public/funnel-sessions/:sessionId/payment-intent", () => {
   const original = { ...process.env };
 
@@ -280,7 +287,7 @@ describe("POST /public/funnel-sessions/:sessionId/payment-intent", () => {
     return app.request("/public/funnel-sessions/sess_1/payment-intent", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ page_id: PAYWALL_PAGE_ID, ...body }),
     });
   }
 
@@ -722,7 +729,7 @@ describe("POST payment-intent — a second attempt on the same session", () => {
     return app.request("/public/funnel-sessions/sess_1/payment-intent", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ page_id: PAYWALL_PAGE_ID, ...body }),
     });
   }
 
@@ -975,7 +982,7 @@ describe("POST payment-intent — cancelling a superseded object", () => {
     return app.request("/public/funnel-sessions/sess_1/payment-intent", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ page_id: PAYWALL_PAGE_ID, ...body }),
     });
   }
 
@@ -1223,7 +1230,7 @@ describe("POST payment-intent — the reused customer", () => {
     return app.request("/public/funnel-sessions/sess_1/payment-intent", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ page_id: PAYWALL_PAGE_ID, ...body }),
     });
   }
 
@@ -1363,7 +1370,7 @@ describe("POST payment-intent — the per-session lock", () => {
     return app.request("/public/funnel-sessions/sess_1/payment-intent", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ page_id: PAYWALL_PAGE_ID, ...body }),
     });
   }
 
@@ -1628,5 +1635,252 @@ describe("POST payment-intent — the per-session lock", () => {
 
     const next = await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
     expect(next.status).toBe(200);
+  });
+});
+
+// =============================================================
+// Which paywall page gets charged
+// =============================================================
+//
+// A funnel may legally contain several paywall pages — the validator
+// requires at least one, the branching evaluator says so in its own
+// comment, and the dashboard filters them plural. Each references its own
+// paywall, hence its own offering, hence its own products and prices, and
+// the runner shows the price of the page the buyer is standing on.
+//
+// The request body used to carry no page id at all, and the server took
+// the FIRST paywall page in the version. On any page but the first that
+// charged the wrong product at the wrong price, with a 200 — or 400'd
+// with a message that reads like a smuggling attempt. `page_id` is what
+// closes it, and it is required: falling back to the first page for a
+// client that does not send one would keep the bug alive exactly where
+// nobody can see it.
+
+describe("POST payment-intent — the page the buyer is on", () => {
+  const original = { ...process.env };
+
+  const FIRST_PAGE = "page_paywall_first";
+  const SECOND_PAGE = "page_paywall_second";
+
+  beforeEach(() => {
+    vi.resetModules();
+    process.env = { ...original };
+    process.env.STRIPE_PLATFORM_PUBLISHABLE_KEY_TEST = "pk_test_123";
+
+    findSessionById.mockReset().mockResolvedValue({
+      id: "sess_1",
+      projectId: "proj_1",
+      funnelId: "funnel_1",
+      funnelVersionId: "version_1",
+      state: "in_progress",
+    });
+
+    // Two paywall pages, each with its own paywall → offering → product
+    // → price. Nothing about the second is reachable from the first.
+    findVersionById.mockReset().mockResolvedValue({
+      id: "version_1",
+      pagesJson: [
+        { id: "page_question", type: "question" },
+        { id: FIRST_PAGE, type: "paywall", paywallId: "pw_first" },
+        { id: SECOND_PAGE, type: "paywall", paywallId: "pw_second" },
+      ],
+    });
+    findPaywallById.mockReset().mockImplementation(
+      async (_db: unknown, projectId: string, id: string) => {
+        const byId: Record<string, unknown> = {
+          pw_first: { id: "pw_first", projectId, offeringId: "off_first" },
+          pw_second: { id: "pw_second", projectId, offeringId: "off_second" },
+        };
+        return byId[id] ?? null;
+      },
+    );
+    findOfferingById.mockReset().mockImplementation(
+      async (_db: unknown, _projectId: string, id: string) => {
+        const byId: Record<string, unknown> = {
+          off_first: {
+            identifier: "first",
+            isDefault: true,
+            packages: [
+              { identifier: "$rov_cheap", productId: "prod_cheap", order: 0, isPromoted: false },
+            ],
+            metadata: {},
+          },
+          off_second: {
+            identifier: "second",
+            isDefault: false,
+            packages: [
+              { identifier: "$rov_dear", productId: "prod_dear", order: 0, isPromoted: false },
+            ],
+            metadata: {},
+          },
+        };
+        return byId[id] ?? null;
+      },
+    );
+    findProductsByIds.mockReset().mockImplementation(
+      async (_db: unknown, _projectId: string, ids: string[]) => {
+        const byId: Record<string, { id: string; storeIds: Record<string, string> }> = {
+          prod_cheap: { id: "prod_cheap", storeIds: { stripe: "price_cheap" } },
+          prod_dear: { id: "prod_dear", storeIds: { stripe: "price_dear" } },
+        };
+        return ids.map((id) => byId[id]).filter((p): p is NonNullable<typeof p> => Boolean(p));
+      },
+    );
+    upsertPurchase.mockReset().mockResolvedValue({ id: "purchase_1" });
+    findPurchaseBySession.mockReset().mockResolvedValue(null);
+
+    chargesEnabled.mockReset().mockResolvedValue(true);
+    customersCreate.mockReset().mockResolvedValue({ id: "cus_1" });
+    customersUpdate.mockReset().mockResolvedValue({ id: "cus_existing" });
+    subscriptionsCreate.mockClear();
+    paymentIntentsCreate.mockClear();
+    subscriptionsCancel.mockClear();
+    paymentIntentsCancel.mockClear();
+    subscriptionsRetrieve
+      .mockReset()
+      .mockResolvedValue({ id: "sub_old", status: "incomplete" });
+    paymentIntentsRetrieve
+      .mockReset()
+      .mockResolvedValue({ id: "pi_old", status: "requires_payment_method" });
+    requireConnectedStripe.mockClear();
+    lockStore.clear();
+    redisDown.value = false;
+
+    resolvePricesForPackages.mockReset().mockImplementation(
+      async (_projectId: string, packages: Array<{ packageIdentifier: string }>) => {
+        const prices: Record<string, unknown> = {
+          $rov_cheap: {
+            packageIdentifier: "$rov_cheap",
+            priceId: "price_cheap",
+            unitAmount: 900,
+            currency: "usd",
+            interval: null,
+            intervalCount: null,
+            trialDays: null,
+          },
+          $rov_dear: {
+            packageIdentifier: "$rov_dear",
+            priceId: "price_dear",
+            unitAmount: 9900,
+            currency: "usd",
+            interval: null,
+            intervalCount: null,
+            trialDays: null,
+          },
+        };
+        const out: Record<string, unknown> = {};
+        for (const p of packages) {
+          if (prices[p.packageIdentifier]) out[p.packageIdentifier] = prices[p.packageIdentifier];
+        }
+        return out;
+      },
+    );
+  });
+
+  async function post(body: Record<string, unknown>) {
+    const { createApp } = await import("../src/app");
+    const app = createApp();
+    return app.request("/public/funnel-sessions/sess_1/payment-intent", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("charges the first page's price when the buyer is on the first page", async () => {
+    const res = await post({
+      package_identifier: "$rov_cheap",
+      page_id: FIRST_PAGE,
+      email: "a@b.co",
+    });
+
+    expect(res.status).toBe(200);
+    expect(paymentIntentsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 900 }),
+    );
+  });
+
+  // THE regression test. Before `page_id` this charged 900 — the first
+  // page's product — while the buyer was reading 9900 on the second.
+  it("charges the SECOND page's price when the buyer is on the second page", async () => {
+    const res = await post({
+      package_identifier: "$rov_dear",
+      page_id: SECOND_PAGE,
+      email: "a@b.co",
+    });
+
+    expect(res.status).toBe(200);
+    expect(paymentIntentsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 9900 }),
+    );
+    // And the price came from that page's own product, not the first's.
+    expect(resolvePricesForPackages).toHaveBeenCalledWith("proj_1", [
+      { packageIdentifier: "$rov_dear", stripePriceId: "price_dear" },
+    ]);
+    // Attribution follows the page too, or every funnel report about the
+    // second paywall reads as traffic to the first.
+    const params = paymentIntentsCreate.mock.calls[0][0];
+    const context = JSON.parse(params.metadata.rovenue_presented_context);
+    expect(context).toEqual({ placementId: SECOND_PAGE, paywallId: "pw_second" });
+  });
+
+  // The guard that must survive naming a page: the package still has to
+  // appear in THAT page's offering. `$rov_cheap` is real, and sold — on
+  // the other page.
+  it("400s for a package that belongs to a different page's offering", async () => {
+    const res = await post({
+      package_identifier: "$rov_cheap",
+      page_id: SECOND_PAGE,
+      email: "a@b.co",
+    });
+
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toContain(
+      "Package is not in this funnel's offering",
+    );
+    expect(paymentIntentsCreate).not.toHaveBeenCalled();
+    expect(customersCreate).not.toHaveBeenCalled();
+  });
+
+  it("400s when page_id names a page that is not a paywall", async () => {
+    const res = await post({
+      package_identifier: "$rov_cheap",
+      page_id: "page_question",
+      email: "a@b.co",
+    });
+
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toContain(
+      "Page is not a paywall page in this funnel",
+    );
+    expect(paymentIntentsCreate).not.toHaveBeenCalled();
+  });
+
+  // The page tree of the session's OWN version is the whole namespace, so
+  // a page id from another funnel (or from a draft) reaches nothing.
+  it("400s when page_id is not in this version at all", async () => {
+    const res = await post({
+      package_identifier: "$rov_cheap",
+      page_id: "page_from_another_funnel",
+      email: "a@b.co",
+    });
+
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toContain(
+      "Page is not a paywall page in this funnel",
+    );
+    expect(findPaywallById).not.toHaveBeenCalled();
+  });
+
+  // Rejecting rather than falling back to the first paywall page is the
+  // deliberate choice: a silent fallback is the bug, and it would live on
+  // for precisely the clients that cannot report it.
+  it("400s when page_id is missing rather than guessing a page", async () => {
+    const res = await post({ package_identifier: "$rov_cheap", email: "a@b.co" });
+
+    expect(res.status).toBe(400);
+    expect(paymentIntentsCreate).not.toHaveBeenCalled();
+    expect(customersCreate).not.toHaveBeenCalled();
+    expect(upsertPurchase).not.toHaveBeenCalled();
   });
 });

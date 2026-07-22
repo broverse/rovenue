@@ -350,6 +350,10 @@ export function FunnelRunner({ slug }: { slug: string }) {
         <PaymentStep
           sessionId={state.sessionId}
           packageIdentifier={payingPackage}
+          // The page whose paywall is being checked out. The server
+          // resolves the package through this page, so what is charged
+          // is what `priceView` below is showing.
+          pageId={currentPage.id}
           priceLabel={priceView?.[payingPackage]?.price}
           onPaid={handlePaid}
           onCancel={() => setPayingPackage(null)}

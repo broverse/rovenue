@@ -209,9 +209,16 @@ export function claimToken(sessionId: string): Promise<ClaimTokenResponse> {
   );
 }
 
+/**
+ * `page_id` is the paywall page the buyer is looking at, and it is
+ * required. A funnel may contain several paywall pages; the server has
+ * no other way to know which one's paywall — and therefore which
+ * offering and which price — to charge, and guessing meant charging the
+ * first page's product while the buyer read the second page's number.
+ */
 export function createPaymentIntent(
   sessionId: string,
-  body: { package_identifier: string; email: string },
+  body: { package_identifier: string; page_id: string; email: string },
 ): Promise<FunnelPaymentIntentResponse> {
   return request<FunnelPaymentIntentResponse>(
     `/public/funnel-sessions/${encodeURIComponent(sessionId)}/payment-intent`,

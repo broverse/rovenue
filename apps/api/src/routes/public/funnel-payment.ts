@@ -37,8 +37,26 @@ import type { PresentedContext } from "../../lib/presented-context";
 
 const log = logger.child("route:funnel-payment");
 
+// `page_id` is REQUIRED, and that is a deliberate break with any client
+// built before it existed.
+//
+// A funnel may legally contain several paywall pages — the validator
+// requires at least one, the branching evaluator says so in as many
+// words, and the dashboard lists them plural. The runner renders
+// `currentPage.paywallId` and shows that page's price, so the only way
+// the server can charge what the buyer is looking at is to be told which
+// page they are on. Defaulting to "the first paywall page in the
+// version" is what this field replaces: on a second paywall page it
+// charged the FIRST page's product at the first page's price while the
+// buyer read the second's number, and did it with a 200.
+//
+// Falling back to that when the field is absent would keep the bug alive
+// for exactly the clients that cannot report it. A missing `page_id`
+// therefore 400s like any other malformed body: loud, and impossible to
+// mistake for a successful purchase of the wrong thing.
 const bodySchema = z.object({
   package_identifier: z.string().min(1),
+  page_id: z.string().min(1),
   email: z.string().email(),
 });
 
@@ -54,27 +72,43 @@ interface PaywallContext {
 }
 
 /**
- * Resolve `packageIdentifier` through the funnel's published paywall:
- * load the current version, find its paywall page, load the referenced
- * paywall and its offering, then find the package by identifier. This is
- * what stops a client naming an arbitrary price — the identifier must
- * appear in the offering this funnel actually references, or the
- * request 400s before any Stripe call is made.
+ * Resolve `packageIdentifier` through the paywall page the buyer is
+ * actually on: load the current version, take THAT page, load the
+ * paywall it references and its offering, then find the package by
+ * identifier. This is what stops a client naming an arbitrary price —
+ * the identifier must appear in the offering that page references, or
+ * the request 400s before any Stripe call is made.
+ *
+ * `pageId` is looked up in the version's own page tree, so it is not a
+ * way to reach anything: a page id from another funnel, from a draft, or
+ * one naming a question page rather than a paywall is refused here.
  */
 async function resolvePaywallContext(
   session: { projectId: string; funnelVersionId: string },
   packageIdentifier: string,
+  pageId: string,
 ): Promise<PaywallContext> {
   const version = await drizzle.funnelVersionRepo.findById(
     drizzle.db,
     session.funnelVersionId,
   );
   const pages = (version?.pagesJson as Array<Record<string, unknown>>) ?? [];
-  const paywallPage = pages.find(
-    (p) => p.type === "paywall" && typeof p.paywallId === "string" && p.paywallId,
-  ) as { id: string; paywallId: string } | undefined;
+  const page = pages.find((p) => p.id === pageId);
+  const paywallPage =
+    page &&
+    page.type === "paywall" &&
+    typeof page.paywallId === "string" &&
+    page.paywallId
+      ? (page as { id: string; paywallId: string })
+      : undefined;
   if (!paywallPage) {
-    throw new HTTPException(400, { message: "Funnel has no paywall page" });
+    // One message for "no such page in this version", "that page is not a
+    // paywall" and "that paywall page references no paywall": all three
+    // are the same thing to a buyer, and telling an anonymous caller
+    // which page ids exist in a published funnel serves nobody.
+    throw new HTTPException(400, {
+      message: "Page is not a paywall page in this funnel",
+    });
   }
 
   const paywall = await drizzle.paywallRepo.findPaywallById(
@@ -661,7 +695,11 @@ export const funnelPaymentRoute = new Hono()
     if (!parsed.success) {
       throw new HTTPException(400, { message: "Invalid payment request" });
     }
-    const { package_identifier: packageIdentifier, email } = parsed.data;
+    const {
+      package_identifier: packageIdentifier,
+      page_id: pageId,
+      email,
+    } = parsed.data;
 
     const session = await drizzle.funnelSessionRepo.findById(drizzle.db, sid);
     if (!session) throw new HTTPException(404, { message: "Session not found" });
@@ -675,7 +713,11 @@ export const funnelPaymentRoute = new Hono()
       });
     }
 
-    const context = await resolvePaywallContext(session, packageIdentifier);
+    const context = await resolvePaywallContext(
+      session,
+      packageIdentifier,
+      pageId,
+    );
     const prices = await resolvePricesForPackages(session.projectId, [
       { packageIdentifier, stripePriceId: context.stripePriceId },
     ]);
@@ -737,6 +779,12 @@ export const funnelPaymentRoute = new Hono()
       // row is terminal for this endpoint — it is never re-driven, and
       // the visitor is told to stop rather than silently having the
       // record of what they bought overwritten.
+      //
+      // `upsertPending` now refuses a non-pending row in SQL too, which
+      // is what covers the row turning paid AFTER this read (see the
+      // /confirm handler's lock comment). This check still earns its
+      // place: it is the only thing that tells the visitor, and it bails
+      // before a Customer and a live payment object exist on Stripe.
       if (
         existing &&
         existing.projectId === session.projectId &&
@@ -1047,8 +1095,18 @@ export const funnelPaymentRoute = new Hono()
       // `status: "pending"`, so if it were allowed to finish its
       // read-modify-write against a row this handler is turning `paid`,
       // it would reset that row and replace its Stripe ids — erasing the
-      // record of a charge that really happened. Sharing the key makes
-      // the two mutually exclusive.
+      // record of a charge that really happened. Sharing the key keeps
+      // these two handlers off each other.
+      //
+      // It does NOT make the paid transition and `upsertPending`
+      // mutually exclusive, and it never did: the third writer of that
+      // transition — the Connect webhook's `backstopFunnelSession` —
+      // takes no lock at all, so a webhook can turn the row `paid` while
+      // a payment-intent POST is parked mid-flight on Stripe with the
+      // key in hand. What actually enforces it is `upsertPending`'s
+      // `ON CONFLICT DO UPDATE … WHERE status = 'pending'`, in SQL,
+      // which holds regardless of which writer wins. See
+      // packages/db/src/drizzle/repositories/funnel-purchases.ts.
       //
       // NOT nested inside anything: `withLock` is not re-entrant, so this
       // is the outermost and only acquisition on this path.

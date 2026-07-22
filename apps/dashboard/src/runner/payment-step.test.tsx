@@ -73,6 +73,7 @@ function renderStep(
     <PaymentStep
       sessionId="sess_1"
       packageIdentifier="monthly"
+      pageId="page_paywall_1"
       onPaid={onPaid}
       onCancel={onCancel}
       // No waiting in tests; the production default backs off for real.
@@ -111,6 +112,7 @@ describe("<PaymentStep>", () => {
     await waitFor(() =>
       expect(api.createPaymentIntent).toHaveBeenCalledWith("sess_1", {
         package_identifier: "monthly",
+        page_id: "page_paywall_1",
         email: "buyer@example.com",
       }),
     );
@@ -122,6 +124,9 @@ describe("<PaymentStep>", () => {
     await waitFor(() =>
       expect(api.createPaymentIntent).toHaveBeenCalledWith("sess_1", {
         package_identifier: "monthly",
+        // The paywall page the checkout was opened from: it is what the
+        // server resolves the package (and therefore the price) through.
+        page_id: "page_paywall_1",
         email: "known@example.com",
       }),
     );

@@ -57,6 +57,13 @@ export interface PaymentStepProps {
   sessionId: string;
   packageIdentifier: string;
   /**
+   * The paywall page this checkout was opened from. The server resolves
+   * the package through THIS page's paywall, so a funnel with more than
+   * one paywall page charges what the buyer is actually looking at
+   * rather than whichever paywall page happens to come first.
+   */
+  pageId: string;
+  /**
    * Address the funnel already collected, if it has one. Absent means
    * we have to ask: the payment-intent endpoint requires an email (it
    * is what the Stripe receipt and the magic-link claim recovery are
@@ -198,6 +205,7 @@ export async function settleFunnelPayment(
 export function PaymentStep({
   sessionId,
   packageIdentifier,
+  pageId,
   email: collectedEmail,
   priceLabel,
   onPaid,
@@ -223,6 +231,7 @@ export function PaymentStep({
         setIntent(
           await createPaymentIntent(sessionId, {
             package_identifier: packageIdentifier,
+            page_id: pageId,
             email: address,
           }),
         );
@@ -235,7 +244,7 @@ export function PaymentStep({
         setCreating(false);
       }
     },
-    [sessionId, packageIdentifier],
+    [sessionId, packageIdentifier, pageId],
   );
 
   useEffect(() => {
