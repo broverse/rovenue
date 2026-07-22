@@ -4,6 +4,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::entitlements::types::{Entitlement, EntitlementWire};
 
+/// Paywall-attribution snapshot carried on a receipt POST — mirrors
+/// `presentedContextSchema` in apps/api/src/lib/presented-context.ts. Opaque
+/// (never validated server-side); a stale/fabricated value can never fail a
+/// purchase, so `revision` is deliberately NOT sent (the server schema
+/// doesn't have a field for it).
+#[derive(Debug, Serialize)]
+pub struct PresentedContextWire<'a> {
+    #[serde(rename = "placementId")]
+    pub placement_id: &'a str,
+    #[serde(rename = "paywallId")]
+    pub paywall_id: &'a str,
+    #[serde(rename = "variantId", skip_serializing_if = "Option::is_none")]
+    pub variant_id: Option<&'a str>,
+    #[serde(rename = "experimentKey", skip_serializing_if = "Option::is_none")]
+    pub experiment_key: Option<&'a str>,
+}
+
 /// Body of POST /v1/receipts/{apple|google}.
 #[derive(Debug, Serialize)]
 pub struct ReceiptBody<'a> {
@@ -29,6 +46,10 @@ pub struct ReceiptBody<'a> {
         skip_serializing_if = "Option::is_none"
     )]
     pub obfuscated_profile_id: Option<&'a str>,
+    /// The paywall/experiment attribution snapshot stamped by the last
+    /// `get_paywall()` call, cleared from core state after a successful post.
+    #[serde(rename = "presentedContext", skip_serializing_if = "Option::is_none")]
+    pub presented_context: Option<PresentedContextWire<'a>>,
 }
 
 /// Wire model for the receipt response body (inside the `data` envelope).

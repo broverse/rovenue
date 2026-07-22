@@ -34,6 +34,7 @@ fn post_google_success() {
             "idem_google_001",
             None,
             None,
+            None,
         )
         .unwrap();
     assert_eq!(result.subscriber_id, "sub_2");

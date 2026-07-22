@@ -48,7 +48,12 @@ impl ObserverBus {
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || s.on_change(ev)))
                 .is_err()
             {
-                if let Some(l) = self.logger.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                if let Some(l) = self
+                    .logger
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .as_ref()
+                {
                     l.warn("observer.on_change panicked; skipping");
                 }
             }
@@ -72,7 +77,6 @@ impl ObserverBus {
 mod panic_tests {
     use super::*;
     use crate::logging::{LogLevel, LogRecord, LogSink, Logger};
-    use std::collections::BTreeMap;
     use std::sync::{
         atomic::{AtomicU32, Ordering},
         Arc,

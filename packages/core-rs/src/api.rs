@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::attributes::buffer::AttributeBuffer;
@@ -15,9 +15,10 @@ use crate::funnel::{
 };
 use crate::identify::IdentifyClient;
 use crate::identity::{IdentityManager, User};
-use crate::logging::{LogLevel, Logger, LogSink};
+use crate::logging::{LogLevel, LogSink, Logger};
 use crate::observer::{Observer, ObserverBus};
 use crate::offerings::{CoreOfferings, OfferingsClient};
+use crate::placements::{CorePaywall, CorePresentedContext, PlacementsClient};
 use crate::polling::PollingScheduler;
 use crate::purchases::{AppleOfferSignature, PurchasesClient};
 use crate::receipts::types::ReceiptPostOutcome;
@@ -58,6 +59,11 @@ pub struct RovenueCore {
     funnel: Arc<FunnelClient>,
     funnel_bus: Arc<FunnelClaimBus>,
     offerings: Arc<OfferingsClient>,
+    placements: Arc<PlacementsClient>,
+    /// Last paywall-attribution snapshot returned by `get_paywall`, stamped
+    /// onto the next receipt POST's `presentedContext` and cleared on a
+    /// successful post. Session-ish state, alongside `identity`/`sessions`.
+    presented_context: Mutex<Option<CorePresentedContext>>,
     remote_config: Arc<RemoteConfigReader>,
     exposure: Arc<ExposureTracker>,
     identify: Arc<IdentifyClient>,
@@ -129,6 +135,11 @@ impl RovenueCore {
         let offerings = Arc::new(
             OfferingsClient::new(Arc::clone(&http), Arc::clone(&store))
                 .with_clock(Arc::clone(&clock)),
+        );
+        let placements = Arc::new(
+            PlacementsClient::new(Arc::clone(&http), Arc::clone(&store))
+                .with_clock(Arc::clone(&clock))
+                .with_logger(Arc::clone(&logger)),
         );
         let remote_config = Arc::new(
             RemoteConfigReader::new(Arc::clone(&http), Arc::clone(&store), Arc::clone(&identity))
@@ -228,6 +239,8 @@ impl RovenueCore {
             funnel,
             funnel_bus,
             offerings,
+            placements,
+            presented_context: Mutex::new(None),
             remote_config,
             exposure,
             identify,
@@ -347,6 +360,10 @@ impl RovenueCore {
             self.attributes.clear()?;
             // Entitlements and credits are stateless scope-keyed readers (no in-memory
             // cache); the new rovenue_id scope naturally reads empty, so no clear call.
+            // Drop any pending paywall-attribution snapshot: it was drawn for the
+            // outgoing identity's subscriber id and must not attribute a
+            // purchase made under the fresh anonymous rovenue_id.
+            self.clear_presented_context();
             Ok(())
         })();
         match &result {
@@ -392,7 +409,12 @@ impl RovenueCore {
     }
 
     pub fn refresh_entitlements(&self) -> RovenueResult<()> {
-        self.log_op(LogLevel::Info, "refresh_entitlements", "refresh_entitlements", &[]);
+        self.log_op(
+            LogLevel::Info,
+            "refresh_entitlements",
+            "refresh_entitlements",
+            &[],
+        );
         let result = self.entitlements.refresh();
         match &result {
             Ok(_) => self.log_op(
@@ -487,20 +509,32 @@ impl RovenueCore {
         product_id: String,
         app_account_token: Option<String>,
     ) -> RovenueResult<ReceiptResult> {
-        self.log_op(LogLevel::Info, "post_apple_receipt", "post_apple_receipt", &[]);
+        self.log_op(
+            LogLevel::Info,
+            "post_apple_receipt",
+            "post_apple_receipt",
+            &[],
+        );
         let result = (|| -> RovenueResult<ReceiptResult> {
             // Wire identity (server resolves the body appUserId as a rovenueId);
             // `scope` namespaces the local receipt cache write in finish_receipt.
             let scope = self.identity.current_user_scope();
             let wire_id = self.identity.rovenue_id();
             let key = IdempotencyKey::for_receipt("apple", &receipt);
+            // Peek (don't clear yet) the last paywall-attribution snapshot —
+            // only cleared once the POST actually succeeds.
+            let presented_context = self.peek_presented_context();
             let outcome = self.receipts.post_apple(
                 &receipt,
                 &wire_id,
                 &product_id,
                 key.as_str(),
                 app_account_token.as_deref(),
+                presented_context.as_ref(),
             )?;
+            if presented_context.is_some() {
+                self.clear_presented_context();
+            }
             Ok(self.finish_receipt(&scope, outcome))
         })();
         match &result {
@@ -530,13 +564,21 @@ impl RovenueCore {
         obfuscated_account_id: Option<String>,
         obfuscated_profile_id: Option<String>,
     ) -> RovenueResult<ReceiptResult> {
-        self.log_op(LogLevel::Info, "post_google_receipt", "post_google_receipt", &[]);
+        self.log_op(
+            LogLevel::Info,
+            "post_google_receipt",
+            "post_google_receipt",
+            &[],
+        );
         let result = (|| -> RovenueResult<ReceiptResult> {
             // Wire identity (server resolves the body appUserId as a rovenueId);
             // `scope` namespaces the local receipt cache write in finish_receipt.
             let scope = self.identity.current_user_scope();
             let wire_id = self.identity.rovenue_id();
             let key = IdempotencyKey::for_receipt("google", &receipt);
+            // Peek (don't clear yet) the last paywall-attribution snapshot —
+            // only cleared once the POST actually succeeds.
+            let presented_context = self.peek_presented_context();
             let outcome = self.receipts.post_google(
                 &receipt,
                 &wire_id,
@@ -544,7 +586,11 @@ impl RovenueCore {
                 key.as_str(),
                 obfuscated_account_id.as_deref(),
                 obfuscated_profile_id.as_deref(),
+                presented_context.as_ref(),
             )?;
+            if presented_context.is_some() {
+                self.clear_presented_context();
+            }
             Ok(self.finish_receipt(&scope, outcome))
         })();
         match &result {
@@ -692,7 +738,12 @@ impl RovenueCore {
     /// Claim a known funnel token. On success refreshes entitlements (the claim
     /// response carries none), records `claimed` state, fires the callback.
     pub fn claim_funnel_token(&self, token: String) -> RovenueResult<FunnelClaimResult> {
-        self.log_op(LogLevel::Info, "claim_funnel_token", "claim_funnel_token", &[]);
+        self.log_op(
+            LogLevel::Info,
+            "claim_funnel_token",
+            "claim_funnel_token",
+            &[],
+        );
         let anon_id = self.identity.rovenue_id();
         let inner = self.funnel.claim_funnel_token(&token, &anon_id);
         let result = self.finish_claim(inner);
@@ -748,10 +799,10 @@ impl RovenueCore {
     /// link returns to the app (deep link → claim_funnel_token).
     pub fn claim_via_email(&self, email: String) -> RovenueResult<()> {
         self.log_op(LogLevel::Info, "claim_via_email", "claim_via_email", &[]);
-        let result = (|| -> RovenueResult<()> {
+        let result: RovenueResult<()> = {
             let install_id = self.install_id();
             self.funnel.claim_via_email(&email, &install_id)
-        })();
+        };
         match &result {
             Ok(_) => self.log_op(LogLevel::Info, "claim_via_email ok", "claim_via_email", &[]),
             Err(e) => self.log_op(
@@ -787,6 +838,24 @@ impl RovenueCore {
                 let _ = repo.set_claim_state(&install_id, "failed", None, now);
                 Err(e)
             }
+        }
+    }
+
+    /// Read (without clearing) the paywall-attribution snapshot stamped by
+    /// the last `get_paywall()` call, if any.
+    fn peek_presented_context(&self) -> Option<CorePresentedContext> {
+        self.presented_context
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+    }
+
+    /// Drop the stored paywall-attribution snapshot — called once it has
+    /// actually been attached to a successful receipt POST, so it isn't
+    /// re-sent on a later, unrelated purchase.
+    fn clear_presented_context(&self) {
+        if let Ok(mut guard) = self.presented_context.lock() {
+            *guard = None;
         }
     }
 
@@ -880,10 +949,10 @@ impl RovenueCore {
             "get_or_create_app_account_token",
             &[],
         );
-        let result = (|| -> RovenueResult<String> {
+        let result: RovenueResult<String> = {
             let scope = self.identity.current_user_scope();
             self.account_tokens.get_or_create(&scope)
-        })();
+        };
         match &result {
             Ok(_) => self.log_op(
                 LogLevel::Info,
@@ -922,11 +991,57 @@ impl RovenueCore {
         result
     }
 
+    /// Resolve `GET /v1/placements/{placement_id}?locale=` into the paywall
+    /// (drawing an experiment variant when applicable) the caller should
+    /// render. `Ok(None)` means the placement resolved to nothing — NOT an
+    /// error (see `PlacementsClient::get_paywall`). On success, the returned
+    /// paywall's attribution snapshot is stamped into core state so the next
+    /// receipt POST carries it as `presentedContext`.
+    pub fn get_paywall(
+        &self,
+        placement_id: String,
+        locale: Option<String>,
+    ) -> RovenueResult<Option<CorePaywall>> {
+        self.log_op(LogLevel::Info, "get_paywall", "get_paywall", &[]);
+        let result = (|| -> RovenueResult<Option<CorePaywall>> {
+            // Wire identity (the server resolves it as a rovenueId; also the
+            // stable bucketing key for the client-side experiment draw).
+            let wire_id = self.identity.rovenue_id();
+            let paywall =
+                self.placements
+                    .get_paywall(&placement_id, locale.as_deref(), &wire_id)?;
+            if let Some(ctx) = paywall.as_ref().and_then(|p| p.presented_context.clone()) {
+                if let Ok(mut guard) = self.presented_context.lock() {
+                    *guard = Some(ctx);
+                }
+            }
+            Ok(paywall)
+        })();
+        match &result {
+            Ok(_) => self.log_op(LogLevel::Info, "get_paywall ok", "get_paywall", &[]),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "get_paywall failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "get_paywall",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
+    }
+
     // ---- Remote Config (feature flags + experiment assignments) ----
 
     /// Force an immediate Remote Config fetch from `/v1/config`.
     pub fn refresh_remote_config(&self) -> RovenueResult<()> {
-        self.log_op(LogLevel::Info, "refresh_remote_config", "refresh_remote_config", &[]);
+        self.log_op(
+            LogLevel::Info,
+            "refresh_remote_config",
+            "refresh_remote_config",
+            &[],
+        );
         let result = self.remote_config.refresh();
         match &result {
             Ok(_) => self.log_op(
@@ -1528,7 +1643,9 @@ mod tests {
             got.iter()
                 .any(|r| r.fields.get("op").map(|o| o == "identify").unwrap_or(false)),
             "expected an op=identify record, got: {:?}",
-            got.iter().map(|r| (&r.message, &r.fields)).collect::<Vec<_>>()
+            got.iter()
+                .map(|r| (&r.message, &r.fields))
+                .collect::<Vec<_>>()
         );
         // ...and the app_user_id never appears in any message or field.
         for r in got.iter() {
@@ -1538,7 +1655,9 @@ mod tests {
                 r.message
             );
             assert!(
-                r.fields.values().all(|v| !v.contains("user_should_not_appear")),
+                r.fields
+                    .values()
+                    .all(|v| !v.contains("user_should_not_appear")),
                 "PII leaked in fields: {:?}",
                 r.fields
             );
@@ -1561,6 +1680,10 @@ mod tests {
         core.register_log_sink(Box::new(Collector(recs.clone())));
         // Assert the sink wiring is live by emitting a warn directly.
         core.logger.warn("test-warn");
-        assert!(recs.lock().unwrap().iter().any(|r| r.message == "test-warn"));
+        assert!(recs
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.message == "test-warn"));
     }
 }

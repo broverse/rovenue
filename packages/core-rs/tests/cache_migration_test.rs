@@ -6,7 +6,7 @@ fn opens_fresh_db_runs_all_migrations() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("rovenue.db");
     let store = CacheStore::open(&path).expect("open fresh db");
-    assert_eq!(store.schema_version().unwrap(), 9);
+    assert_eq!(store.schema_version().unwrap(), 10);
 }
 
 #[test]
@@ -15,7 +15,7 @@ fn reopens_existing_db_idempotently() {
     let path = dir.path().join("rovenue.db");
     let _a = CacheStore::open(&path).unwrap();
     let b = CacheStore::open(&path).expect("reopen existing");
-    assert_eq!(b.schema_version().unwrap(), 9);
+    assert_eq!(b.schema_version().unwrap(), 10);
 }
 
 #[test]
@@ -28,7 +28,7 @@ fn migration_v8_creates_virtual_currency_and_exposure_tables() {
             Ok(v)
         })
         .unwrap();
-    assert_eq!(version, 9, "LATEST schema version should be 9");
+    assert_eq!(version, 10, "LATEST schema version should be 10");
 
     // both new tables must exist and be writable
     store
@@ -66,6 +66,7 @@ fn creates_expected_tables() {
         "experiment_exposure",
         "funnel_install",
         "funnel_claim_state",
+        "placements_cache",
     ] {
         let exists = store.has_table(table).unwrap();
         assert!(exists, "table `{table}` must exist after migrations");

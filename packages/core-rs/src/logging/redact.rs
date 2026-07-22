@@ -1,15 +1,21 @@
 use std::collections::HashMap;
 
 const SENSITIVE_KEY_TOKENS: &[&str] = &[
-    "token", "receipt", "email", "app_user_id", "authorization",
-    "signature", "jws", "password", "secret",
+    "token",
+    "receipt",
+    "email",
+    "app_user_id",
+    "authorization",
+    "signature",
+    "jws",
+    "password",
+    "secret",
 ];
 
 /// Known credential prefixes (case-insensitive) — any token starting with
 /// one of these is treated as a credential and masked.
-const CREDENTIAL_PREFIXES: &[&str] = &[
-    "pk_", "sk_", "rk_", "user_", "sub_", "rcpt", "cus_", "tok_",
-];
+const CREDENTIAL_PREFIXES: &[&str] =
+    &["pk_", "sk_", "rk_", "user_", "sub_", "rcpt", "cus_", "tok_"];
 
 /// Minimum length for an opaque run of `[A-Za-z0-9_\-]` characters that
 /// should be treated as a secret identifier / key.
@@ -35,7 +41,11 @@ fn is_secret_token(word: &str) -> bool {
     {
         let parts: Vec<&str> = word.split('.').collect();
         if parts.len() >= 3
-            && parts.iter().all(|p| p.len() >= 4 && p.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-'))
+            && parts.iter().all(|p| {
+                p.len() >= 4
+                    && p.chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+            })
         {
             return true;
         }
@@ -43,7 +53,9 @@ fn is_secret_token(word: &str) -> bool {
 
     // 4. Long opaque run: ≥ 20 chars, only [A-Za-z0-9_\-].
     if word.len() >= OPAQUE_TOKEN_MIN_LEN
-        && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
         return true;
     }
@@ -84,10 +96,8 @@ fn redact_bearer(s: &str) -> String {
     let mut tokens = s.split(' ').peekable();
     while let Some(tok) = tokens.next() {
         result.push_str(tok);
-        if tok == "Bearer" {
-            if tokens.next().is_some() {
-                result.push_str(" [redacted]");
-            }
+        if tok == "Bearer" && tokens.next().is_some() {
+            result.push_str(" [redacted]");
         }
         if tokens.peek().is_some() {
             result.push(' ');
@@ -104,7 +114,10 @@ mod tests {
     fn fields_with_sensitive_keys_are_masked() {
         let mut f = HashMap::new();
         f.insert("status".to_string(), "401".to_string());
-        f.insert("authorization".to_string(), "Bearer pk_live_abc".to_string());
+        f.insert(
+            "authorization".to_string(),
+            "Bearer pk_live_abc".to_string(),
+        );
         f.insert("app_user_id".to_string(), "user_42".to_string());
         f.insert("receipt_data".to_string(), "MIIxyz".to_string());
         let out = redact_fields(f);
@@ -169,10 +182,7 @@ mod tests {
     #[test]
     fn message_does_not_over_redact_normal_words() {
         // Short plain words, numbers, HTTP status phrases must pass through.
-        let cases = [
-            "request timed out after 3 attempts",
-            "status 404 not found",
-        ];
+        let cases = ["request timed out after 3 attempts", "status 404 not found"];
         for case in &cases {
             let m = redact_message(case);
             assert_eq!(m, *case, "normal message was over-redacted: {m}");

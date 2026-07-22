@@ -1,0 +1,46 @@
+{ "data": {
+  "placement": { "identifier": "onboarding", "revision": 5 },
+  "paywall": null,
+  "experiment": {
+    "id": "exp_1",
+    "key": "onboarding-price-test",
+    "variants": [
+      {
+        "variantId": "a",
+        "weight": 0.34,
+        "paywall": {
+          "id": "pw_a",
+          "identifier": "paywall_a",
+          "name": "A",
+          "configFormatVersion": 1,
+          "remoteConfig": null,
+          "offering": null
+        }
+      },
+      {
+        "variantId": "b",
+        "weight": 0.33,
+        "paywall": {
+          "id": "pw_b",
+          "identifier": "paywall_b",
+          "name": "B",
+          "configFormatVersion": 1,
+          "remoteConfig": null,
+          "offering": null
+        }
+      },
+      {
+        "variantId": "c",
+        "weight": 0.33,
+        "paywall": {
+          "id": "pw_c",
+          "identifier": "paywall_c",
+          "name": "C",
+          "configFormatVersion": 1,
+          "remoteConfig": null,
+          "offering": null
+        }
+      }
+    ]
+  }
+} }

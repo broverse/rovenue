@@ -27,7 +27,14 @@ fn post_apple_success() {
 
     let c = ReceiptClient::new(http(&server.url()));
     let result = c
-        .post_apple("<jws>", "anon_99", "pro_monthly", "idem_apple_001", None)
+        .post_apple(
+            "<jws>",
+            "anon_99",
+            "pro_monthly",
+            "idem_apple_001",
+            None,
+            None,
+        )
         .unwrap();
     assert_eq!(result.subscriber_id, "sub_1");
     assert_eq!(result.app_user_id, "anon_99");
@@ -46,8 +53,41 @@ fn post_apple_403_is_fatal() {
 
     let c = ReceiptClient::new(http(&server.url()));
     let err = c
-        .post_apple("<jws>", "anon_99", "pro", "idem_x", None)
+        .post_apple("<jws>", "anon_99", "pro", "idem_x", None, None)
         .unwrap_err();
     assert_eq!(err.kind, rovenue::ErrorKind::Forbidden);
+    m.assert();
+}
+
+#[test]
+fn post_apple_sends_presented_context_when_set() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("POST", "/v1/receipts/apple")
+        .match_body(
+            r#"{"receipt":"<jws>","appUserId":"anon_99","productId":"pro_monthly","presentedContext":{"placementId":"plc_onboarding","paywallId":"pw_1","variantId":"var_b","experimentKey":"exp_key"}}"#,
+        )
+        .with_status(200)
+        .with_body(r#"{"data":{"subscriber":{"id":"sub_1","appUserId":"anon_99"},"access":{},"virtualCurrencyBalances":{}}}"#)
+        .create();
+
+    let ctx = rovenue::placements::CorePresentedContext {
+        placement_id: "plc_onboarding".into(),
+        paywall_id: "pw_1".into(),
+        variant_id: Some("var_b".into()),
+        experiment_key: Some("exp_key".into()),
+        revision: 3,
+    };
+
+    let c = ReceiptClient::new(http(&server.url()));
+    c.post_apple(
+        "<jws>",
+        "anon_99",
+        "pro_monthly",
+        "idem_apple_ctx",
+        None,
+        Some(&ctx),
+    )
+    .unwrap();
     m.assert();
 }

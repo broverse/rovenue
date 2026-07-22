@@ -8,7 +8,9 @@ use crate::transport::api::ApiEnvelope;
 use crate::transport::http_client::HttpClient;
 use crate::transport::types::HttpRequest;
 
-use super::types::{CoreOffering, CoreOfferingProduct, CoreOfferings, OfferingsResponse};
+use super::types::{
+    CoreOffering, CoreOfferingProduct, CoreOfferings, OfferingWire, OfferingsResponse,
+};
 
 /// Cache key for the (single, project-scoped) offerings payload.
 const OFFERINGS_RESOURCE: &str = "offerings";
@@ -80,31 +82,34 @@ impl OfferingsClient {
 }
 
 fn map_response(resp: OfferingsResponse) -> CoreOfferings {
-    let offerings: Vec<CoreOffering> = resp
-        .offerings
-        .into_iter()
-        .map(|o| CoreOffering {
-            identifier: o.identifier,
-            is_default: o.is_default,
-            packages: o
-                .packages
-                .into_iter()
-                .map(|p| CoreOfferingProduct {
-                    package_identifier: p.package_identifier,
-                    identifier: p.identifier,
-                    product_type: p.product_type,
-                    display_name: p.display_name,
-                    apple_product_id: p.store_ids.apple,
-                    google_product_id: p.store_ids.google,
-                    android_base_plan_id: p.android_base_plan_id,
-                    android_offer_id: p.android_offer_id,
-                })
-                .collect(),
-        })
-        .collect();
+    let offerings: Vec<CoreOffering> = resp.offerings.into_iter().map(map_offering).collect();
     let current = offerings
         .iter()
         .find(|o| o.is_default)
         .map(|o| o.identifier.clone());
     CoreOfferings { current, offerings }
+}
+
+/// Shared wire→FFI mapping for a single offering, reused by the placements
+/// client (a placement's `paywall.offering` is the exact same
+/// `OfferingWire` shape `GET /v1/offerings` returns per-item).
+pub(crate) fn map_offering(o: OfferingWire) -> CoreOffering {
+    CoreOffering {
+        identifier: o.identifier,
+        is_default: o.is_default,
+        packages: o
+            .packages
+            .into_iter()
+            .map(|p| CoreOfferingProduct {
+                package_identifier: p.package_identifier,
+                identifier: p.identifier,
+                product_type: p.product_type,
+                display_name: p.display_name,
+                apple_product_id: p.store_ids.apple,
+                google_product_id: p.store_ids.google,
+                android_base_plan_id: p.android_base_plan_id,
+                android_offer_id: p.android_offer_id,
+            })
+            .collect(),
+    }
 }

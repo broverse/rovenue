@@ -1,11 +1,12 @@
 use std::sync::Arc;
 
 use crate::error::{RovenueError, RovenueResult};
+use crate::placements::CorePresentedContext;
 use crate::transport::api::ApiEnvelope;
 use crate::transport::http_client::HttpClient;
 use crate::transport::types::HttpPostRequest;
 
-use super::types::{ReceiptBody, ReceiptPostOutcome, ReceiptResponse};
+use super::types::{PresentedContextWire, ReceiptBody, ReceiptPostOutcome, ReceiptResponse};
 
 pub struct ReceiptClient {
     http: Arc<HttpClient>,
@@ -16,6 +17,7 @@ impl ReceiptClient {
         Self { http }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn post_apple(
         &self,
         receipt: &str,
@@ -23,6 +25,7 @@ impl ReceiptClient {
         product_id: &str,
         idempotency_key: &str,
         app_account_token: Option<&str>,
+        presented_context: Option<&CorePresentedContext>,
     ) -> RovenueResult<ReceiptPostOutcome> {
         self.post(
             "/v1/receipts/apple",
@@ -33,9 +36,11 @@ impl ReceiptClient {
             app_account_token,
             None,
             None,
+            presented_context,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn post_google(
         &self,
         receipt: &str,
@@ -44,6 +49,7 @@ impl ReceiptClient {
         idempotency_key: &str,
         obfuscated_account_id: Option<&str>,
         obfuscated_profile_id: Option<&str>,
+        presented_context: Option<&CorePresentedContext>,
     ) -> RovenueResult<ReceiptPostOutcome> {
         self.post(
             "/v1/receipts/google",
@@ -54,6 +60,7 @@ impl ReceiptClient {
             None,
             obfuscated_account_id,
             obfuscated_profile_id,
+            presented_context,
         )
     }
 
@@ -68,7 +75,14 @@ impl ReceiptClient {
         app_account_token: Option<&str>,
         obfuscated_account_id: Option<&str>,
         obfuscated_profile_id: Option<&str>,
+        presented_context: Option<&CorePresentedContext>,
     ) -> RovenueResult<ReceiptPostOutcome> {
+        let presented_context_wire = presented_context.map(|c| PresentedContextWire {
+            placement_id: &c.placement_id,
+            paywall_id: &c.paywall_id,
+            variant_id: c.variant_id.as_deref(),
+            experiment_key: c.experiment_key.as_deref(),
+        });
         let body = ReceiptBody {
             receipt,
             app_user_id,
@@ -76,6 +90,7 @@ impl ReceiptClient {
             app_account_token,
             obfuscated_account_id,
             obfuscated_profile_id,
+            presented_context: presented_context_wire,
         };
         let resp = self
             .http
@@ -123,7 +138,7 @@ mod tests {
         );
         let client = ReceiptClient::new(http);
         let outcome = client
-            .post_apple("rcpt", "u1", "pro_monthly", "idem_rcpt_x", None)
+            .post_apple("rcpt", "u1", "pro_monthly", "idem_rcpt_x", None, None)
             .expect("post ok");
         assert_eq!(outcome.subscriber_id, "sub_1");
         let access = outcome.access.expect("access present");

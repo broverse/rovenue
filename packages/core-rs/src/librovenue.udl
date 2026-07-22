@@ -116,6 +116,31 @@ dictionary CoreOfferings {
     sequence<CoreOffering> offerings;
 };
 
+// Paywall-attribution snapshot for the paywall a `get_paywall` call
+// resolved — round-tripped opaquely as `presentedContext` on the next
+// receipt/purchase POST (see apps/api/src/lib/presented-context.ts).
+dictionary CorePresentedContext {
+    string placement_id;
+    string paywall_id;
+    string? variant_id;
+    string? experiment_key;
+    i64 revision;
+};
+
+dictionary CorePaywall {
+    string placement_identifier;
+    i64 placement_revision;
+    string? paywall_identifier;
+    string? paywall_name;
+    i64 config_format_version;
+    // Raw JSON string of the resolved locale's `data` object — NOT a
+    // record/HashMap (known uniffi record→HashMap gotcha); façades decode it.
+    string? remote_config_json;
+    string? remote_config_locale;
+    CoreOffering? offering;
+    CorePresentedContext? presented_context;
+};
+
 enum SessionEventKind {
     "Open",
     "Background",
@@ -191,6 +216,9 @@ interface RovenueCore {
 
     [Throws=RovenueErrorFfi]
     CoreOfferings get_offerings();
+
+    [Throws=RovenueErrorFfi]
+    CorePaywall? get_paywall(string placement_id, string? locale);
 
     [Throws=RovenueErrorFfi]
     void refresh_remote_config();

@@ -143,6 +143,16 @@ CREATE TABLE funnel_claim_state (
 UPDATE schema_meta SET version = 9;
 "#;
 
+pub const MIGRATION_V10: &str = r#"
+CREATE TABLE placements_cache (
+    resource TEXT PRIMARY KEY,
+    body TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
+
+UPDATE schema_meta SET version = 10;
+"#;
+
 pub const MIGRATIONS: &[&str] = &[
     MIGRATION_V1,
     MIGRATION_V2,
@@ -153,5 +163,6 @@ pub const MIGRATIONS: &[&str] = &[
     MIGRATION_V7,
     MIGRATION_V8,
     MIGRATION_V9,
+    MIGRATION_V10,
 ];
-pub const LATEST: u32 = 9;
+pub const LATEST: u32 = 10;

@@ -1,0 +1,24 @@
+{ "data": {
+  "placement": { "identifier": "onboarding", "revision": 3 },
+  "paywall": {
+    "id": "pw_1",
+    "identifier": "default_paywall",
+    "name": "Default",
+    "configFormatVersion": 1,
+    "remoteConfig": { "locale": "en", "data": { "title": "Go Pro" } },
+    "offering": {
+      "identifier": "default",
+      "isDefault": true,
+      "packages": [
+        {
+          "packageIdentifier": "$rov_monthly",
+          "identifier": "pro_monthly",
+          "type": "SUBSCRIPTION",
+          "displayName": "Pro Monthly",
+          "storeIds": { "apple": "com.x.pro.monthly", "google": "pro_monthly" }
+        }
+      ]
+    }
+  },
+  "experiment": null
+} }
