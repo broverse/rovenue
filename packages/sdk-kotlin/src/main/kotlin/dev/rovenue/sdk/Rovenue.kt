@@ -35,13 +35,18 @@ import dev.rovenue.sdk.internal.ObserverBridge
 import dev.rovenue.sdk.internal.PlayBillingStore
 import dev.rovenue.sdk.internal.PlayPurchaseFlow
 import dev.rovenue.sdk.internal.PurchaseReconciler
+import dev.rovenue.sdk.internal.buildPaywallResult
+import dev.rovenue.sdk.internal.encodeEventEnvelope
 import dev.rovenue.sdk.internal.hydrateOfferings
+import dev.rovenue.sdk.internal.mapPaywall
+import dev.rovenue.sdk.internal.paywallViewEnvelope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.SharedFlow
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -545,6 +550,59 @@ class Rovenue private constructor(
             return offerings
         } catch (e: Throwable) {
             throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
+        }
+    }
+
+    /** Resolve a placement to a paywall — either a direct assignment or the
+     *  winning variant of a client-drawn PAYWALL experiment (the core does
+     *  the draw + best-effort exposure beacon). `null` means the placement
+     *  resolved to nothing (retired, `target: none`, unknown identifier) —
+     *  not an error; a shipped app must not crash because a placement was
+     *  retired server-side.
+     *
+     *  Resilient like [getOfferings]: if the offering's live price query
+     *  fails, the paywall is still returned with null price fields. */
+    @Throws(RovenueException::class)
+    suspend fun getPaywall(placementId: String, locale: String? = null): Paywall? {
+        try {
+            val ffi = dispatcher.run { core.getPaywall(placementId, locale) }
+            val coreOffering = ffi?.offering
+            val offering = if (coreOffering != null) {
+                val wrapped = CoreOfferings(current = null, offerings = listOf(coreOffering))
+                val context = appContext
+                val hydrated = if (context != null) {
+                    runCatching { hydrateOfferings(wrapped, PlayBillingStore(context)) }
+                        .getOrElse { hydrateOfferings(wrapped, NoPriceStore) }
+                } else {
+                    hydrateOfferings(wrapped, NoPriceStore)
+                }
+                hydrated.all[coreOffering.identifier]
+            } else {
+                null
+            }
+            return buildPaywallResult(ffi, offering)
+        } catch (e: Throwable) {
+            throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
+        }
+    }
+
+    /** Report that [paywall] was actually shown to the subscriber. Builds a
+     *  `paywall_view` event (sourced from [Paywall.presentedContext]) and
+     *  enqueues it via [track] — the same at-least-once `POST /v1/events`
+     *  sender every other SDK-emitted event goes through; this does not
+     *  open a new network path. Best-effort: fire-and-forget on the SDK's
+     *  background scope, matching the RC/Adapty `logShown`/`logPaywallShown`
+     *  contract (not `suspend` — a paywall-impression beacon must never
+     *  block or fail the caller's UI code). */
+    fun logPaywallShown(paywall: Paywall) {
+        val envelope = paywallViewEnvelope(
+            paywall = paywall,
+            eventId = "evt_${UUID.randomUUID()}",
+            occurredAt = Instant.now().toString(),
+        ) ?: return
+        val json = encodeEventEnvelope(envelope)
+        scope.launch {
+            runCatching { track(json) }
         }
     }
 

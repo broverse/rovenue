@@ -65,11 +65,46 @@ public struct IdentityContext: Codable, Equatable {
 }
 
 // -------------------------------------------------------------
+// PaywallContext
+// -------------------------------------------------------------
+
+/// `paywall_view` attribution payload — mirrors the core's
+/// `PaywallContext` / the server's `paywallContext` envelope key
+/// (apps/api/src/routes/v1/events.ts, `.strict()`).
+public struct PaywallContext: Codable, Equatable {
+    public var paywallId: String
+    public var placementId: String
+    public var placementRevision: Int64
+    public var variantId: String?
+    public var experimentKey: String?
+
+    public init(
+        paywallId: String,
+        placementId: String,
+        placementRevision: Int64,
+        variantId: String? = nil,
+        experimentKey: String? = nil
+    ) {
+        self.paywallId = paywallId
+        self.placementId = placementId
+        self.placementRevision = placementRevision
+        self.variantId = variantId
+        self.experimentKey = experimentKey
+    }
+}
+
+// -------------------------------------------------------------
 // EventEnvelope
 // -------------------------------------------------------------
 
 /// Top-level event payload sent to the Rovenue ingest endpoint.
 public struct EventEnvelope: Codable, Equatable {
+    /// Wire format version. Normally left `nil` — the native core stamps it.
+    public var version: UInt8?
+    /// Stable, client-generated id reused across retries so downstream
+    /// fan-out can dedupe. `logPaywallShown` sets this explicitly; other
+    /// callers normally leave it `nil` and let the core generate one.
+    public var eventId: String?
     /// e.g. "Purchase", "TrialStarted", "CreditGranted"
     public var eventType: String
     /// ISO-8601 UTC timestamp, e.g. "2026-05-28T10:00:00Z"
@@ -82,8 +117,12 @@ public struct EventEnvelope: Codable, Equatable {
     public var currency: String?
     public var eventSourceUrl: String?
     public var identityContext: IdentityContext?
+    /// `paywall_view` attribution payload. Absent for every other event type.
+    public var paywallContext: PaywallContext?
 
     public init(
+        version: UInt8? = nil,
+        eventId: String? = nil,
         eventType: String,
         occurredAt: String,
         subscriberId: String? = nil,
@@ -91,8 +130,11 @@ public struct EventEnvelope: Codable, Equatable {
         amount: String? = nil,
         currency: String? = nil,
         eventSourceUrl: String? = nil,
-        identityContext: IdentityContext? = nil
+        identityContext: IdentityContext? = nil,
+        paywallContext: PaywallContext? = nil
     ) {
+        self.version = version
+        self.eventId = eventId
         self.eventType = eventType
         self.occurredAt = occurredAt
         self.subscriberId = subscriberId
@@ -101,5 +143,6 @@ public struct EventEnvelope: Codable, Equatable {
         self.currency = currency
         self.eventSourceUrl = eventSourceUrl
         self.identityContext = identityContext
+        self.paywallContext = paywallContext
     }
 }

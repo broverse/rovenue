@@ -124,6 +124,45 @@ data class Offerings(
     val all: Map<String, Offering>,
 )
 
+// -------------------------------------------------------------
+// Placements / Paywalls
+// -------------------------------------------------------------
+
+/**
+ * Paywall-attribution snapshot for the paywall a [Rovenue.getPaywall] call
+ * resolved. Round-tripped opaquely into the purchase attribution path, and
+ * the source [Rovenue.logPaywallShown] builds its `paywall_view` event
+ * from — mirrors the core's `CorePresentedContext`.
+ */
+data class PresentedContext(
+    val placementId: String,
+    val paywallId: String,
+    val variantId: String?,
+    val experimentKey: String?,
+    val revision: Long,
+)
+
+/**
+ * A resolved placement: either a direct paywall assignment or the winning
+ * variant of a client-drawn PAYWALL experiment. The SDK ships no renderer
+ * (Adapty remote-config model, Phase A) — callers read [remoteConfig] and
+ * build their own UI, then call [Rovenue.logPaywallShown] once it's on screen.
+ */
+data class Paywall(
+    val placementIdentifier: String,
+    val placementRevision: Long,
+    val paywallIdentifier: String?,
+    val paywallName: String?,
+    val configFormatVersion: Long,
+    /** Decoded from the core's raw `remoteConfigJson` string. `null` when
+     *  the paywall has no remote config for the resolved locale, or when
+     *  the JSON fails to decode as an object. */
+    val remoteConfig: Map<String, Any?>?,
+    val remoteConfigLocale: String?,
+    val offering: Offering?,
+    val presentedContext: PresentedContext?,
+)
+
 /** The outcome of a successful, validated purchase. */
 data class PurchaseResult(
     val entitlements: List<Entitlement>,

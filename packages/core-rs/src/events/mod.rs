@@ -7,7 +7,7 @@ pub mod envelope;
 pub mod identity_context;
 
 pub use client::EventsClient;
-pub use envelope::EventEnvelope;
+pub use envelope::{EventEnvelope, PaywallContext};
 pub use identity_context::IdentityContext;
 
 /// Wire version embedded in outbox_events rows so consumers can

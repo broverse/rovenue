@@ -30,7 +30,7 @@ pub use api::RovenueCore;
 pub use config::Config;
 pub use entitlements::Entitlement;
 pub use error::{ErrorKind, RovenueError, RovenueErrorFfi, RovenueResult};
-pub use events::{EventEnvelope, IdentityContext, EVENT_WIRE_VERSION};
+pub use events::{EventEnvelope, IdentityContext, PaywallContext, EVENT_WIRE_VERSION};
 pub use funnel::{
     ClaimInstallParams, FunnelClaimBus, FunnelClaimListener, FunnelClaimResult, FunnelClient,
 };

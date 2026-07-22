@@ -1,6 +1,7 @@
 import { getNative } from "../core/native";
 import { mapNativeError } from "../errors";
 import type { Offerings, Offering, Package, PurchaseResult, StoreProduct, PackageType, SubscriptionOption } from "../types";
+import type { OfferingDTO } from "../specs/RovenueModule.types";
 
 async function call<T>(fn: () => Promise<T>): Promise<T> {
   try { return await fn(); } catch (e: any) {
@@ -22,20 +23,27 @@ function packageTypeFromSlot(slot: string): PackageType {
   }
 }
 
+/** Maps a single native `OfferingDTO` to the public `Offering` domain type.
+ *  Shared by `getOfferings` and `paywalls.getPaywall` (a resolved paywall
+ *  carries at most one offering). */
+export function mapOfferingDTO(o: OfferingDTO): Offering {
+  return {
+    identifier: o.identifier,
+    isDefault: o.isDefault,
+    packages: o.packages.map((p) => ({
+      identifier: p.identifier,
+      packageType: packageTypeFromSlot(p.identifier),
+      product: p.product as StoreProduct,
+    })),
+  };
+}
+
 export async function getOfferings(): Promise<Offerings> {
   const dto = await call(() => getNative().getOfferings());
   const all: Record<string, Offering> = {};
   let current: Offering | null = null;
   for (const o of dto.offerings) {
-    const offering: Offering = {
-      identifier: o.identifier,
-      isDefault: o.isDefault,
-      packages: o.packages.map((p) => ({
-        identifier: p.identifier,
-        packageType: packageTypeFromSlot(p.identifier),
-        product: p.product as StoreProduct,
-      })),
-    };
+    const offering = mapOfferingDTO(o);
     all[o.identifier] = offering;
     if (o.identifier === dto.current) current = offering;
   }

@@ -49,6 +49,24 @@ data class IdentityContext(
 )
 
 // -------------------------------------------------------------
+// PaywallContext
+// -------------------------------------------------------------
+
+/**
+ * `paywall_view` attribution payload — mirrors the core's `PaywallContext`
+ * / the server's `paywallContext` envelope key
+ * (apps/api/src/routes/v1/events.ts, `.strict()`).
+ */
+@Serializable
+data class PaywallContext(
+    val paywallId: String,
+    val placementId: String,
+    val placementRevision: Long,
+    val variantId: String? = null,
+    val experimentKey: String? = null,
+)
+
+// -------------------------------------------------------------
 // EventEnvelope
 // -------------------------------------------------------------
 
@@ -57,6 +75,12 @@ data class IdentityContext(
  */
 @Serializable
 data class EventEnvelope(
+    /** Wire format version. Normally left null — the native core stamps it. */
+    val version: Int? = null,
+    /** Stable, client-generated id reused across retries so downstream
+     *  fan-out can dedupe. [Rovenue.logPaywallShown] sets this explicitly;
+     *  other callers normally leave it null and let the core generate one. */
+    val eventId: String? = null,
     /** e.g. "Purchase", "TrialStarted", "CreditGranted" */
     val eventType: String,
     /** ISO-8601 UTC timestamp, e.g. "2026-05-28T10:00:00Z" */
@@ -69,4 +93,6 @@ data class EventEnvelope(
     val currency: String? = null,
     val eventSourceUrl: String? = null,
     val identityContext: IdentityContext? = null,
+    /** `paywall_view` attribution payload. Absent for every other event type. */
+    val paywallContext: PaywallContext? = null,
 )

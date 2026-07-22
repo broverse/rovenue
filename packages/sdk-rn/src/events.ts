@@ -22,6 +22,19 @@ export interface IdentityContext {
   countryCode?: string;
 }
 
+/**
+ * `paywall_view` attribution payload — mirrors the core's `PaywallContext`
+ * / the server's `paywallContext` envelope key
+ * (apps/api/src/routes/v1/events.ts, `.strict()`).
+ */
+export interface PaywallContext {
+  paywallId: string;
+  placementId: string;
+  placementRevision: number;
+  variantId?: string;
+  experimentKey?: string;
+}
+
 export interface EventEnvelope {
   /** Wire format version (EVENT_WIRE_VERSION). Stamped by the native core. */
   version?: number;
@@ -41,6 +54,8 @@ export interface EventEnvelope {
   currency?: string;
   eventSourceUrl?: string;
   identityContext?: IdentityContext;
+  /** `paywall_view` attribution payload. Absent for every other event type. */
+  paywallContext?: PaywallContext;
 }
 
 // =============================================================

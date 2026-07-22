@@ -2,7 +2,7 @@
 // M7.1 — EventEnvelope + IdentityContext round-trip tests
 // =============================================================
 
-use rovenue::{EventEnvelope, IdentityContext};
+use rovenue::{EventEnvelope, IdentityContext, PaywallContext};
 use serde_json::Value;
 
 /// 1. Full round-trip: all 9 IdentityContext fields present.
@@ -30,6 +30,7 @@ fn full_identity_context_round_trip() {
             city: Some("Istanbul".to_string()),
             country_code: Some("TR".to_string()),
         }),
+        paywall_context: None,
     };
 
     let json_str = serde_json::to_string(&envelope).expect("serialise");
@@ -77,6 +78,7 @@ fn envelope_without_identity_context_omits_key() {
         currency: None,
         event_source_url: None,
         identity_context: None,
+        paywall_context: None,
     };
 
     let json_str = serde_json::to_string(&envelope).expect("serialise");
@@ -118,6 +120,7 @@ fn version_and_event_id_round_trip() {
         currency: None,
         event_source_url: None,
         identity_context: None,
+        paywall_context: None,
     };
 
     let json_str = serde_json::to_string(&envelope).expect("serialise");
@@ -146,6 +149,7 @@ fn version_and_event_id_round_trip() {
         currency: None,
         event_source_url: None,
         identity_context: None,
+        paywall_context: None,
     };
     let bare_v: Value =
         serde_json::from_str(&serde_json::to_string(&bare).expect("serialise")).expect("parse");
@@ -156,5 +160,70 @@ fn version_and_event_id_round_trip() {
     assert!(
         bare_v.get("eventId").is_none(),
         "eventId must be absent when None"
+    );
+}
+
+/// 5. `paywallContext` (the `logPaywallShown` attribution payload) round-trips
+///    camelCase, and is omitted entirely when absent — same contract as
+///    `identityContext`. Regression guard: before `EventEnvelope` gained this
+///    field, an unknown `paywallContext` key on the wire JSON was silently
+///    dropped by serde on decode, so `track()` would have re-serialised an
+///    envelope missing the very payload `logPaywallShown` exists to send.
+#[test]
+fn paywall_context_round_trip() {
+    let envelope = EventEnvelope {
+        version: Some(1),
+        event_id: Some("evt_pw_1".to_string()),
+        event_type: "paywall_view".to_string(),
+        occurred_at: "2026-05-28T10:00:00Z".to_string(),
+        subscriber_id: None,
+        product_id: None,
+        amount: None,
+        currency: None,
+        event_source_url: None,
+        identity_context: None,
+        paywall_context: Some(PaywallContext {
+            paywall_id: "pw_1".to_string(),
+            placement_id: "plc_1".to_string(),
+            placement_revision: 3,
+            variant_id: Some("var_a".to_string()),
+            experiment_key: Some("exp_1".to_string()),
+        }),
+    };
+
+    let json_str = serde_json::to_string(&envelope).expect("serialise");
+    let v: Value = serde_json::from_str(&json_str).expect("parse");
+
+    let pc = &v["paywallContext"];
+    assert_eq!(pc["paywallId"], "pw_1");
+    assert_eq!(pc["placementId"], "plc_1");
+    assert_eq!(pc["placementRevision"], 3);
+    assert_eq!(pc["variantId"], "var_a");
+    assert_eq!(pc["experimentKey"], "exp_1");
+
+    let decoded: EventEnvelope = serde_json::from_str(&json_str).expect("deserialise");
+    let ctx = decoded.paywall_context.expect("paywall_context present");
+    assert_eq!(ctx.paywall_id, "pw_1");
+    assert_eq!(ctx.variant_id.as_deref(), Some("var_a"));
+
+    // Absent entirely for a non-paywall event.
+    let no_ctx = EventEnvelope {
+        version: None,
+        event_id: None,
+        event_type: "purchase".to_string(),
+        occurred_at: "2026-05-28T10:00:00Z".to_string(),
+        subscriber_id: None,
+        product_id: None,
+        amount: None,
+        currency: None,
+        event_source_url: None,
+        identity_context: None,
+        paywall_context: None,
+    };
+    let no_ctx_v: Value =
+        serde_json::from_str(&serde_json::to_string(&no_ctx).expect("serialise")).expect("parse");
+    assert!(
+        no_ctx_v.get("paywallContext").is_none(),
+        "paywallContext must be absent when None"
     );
 }

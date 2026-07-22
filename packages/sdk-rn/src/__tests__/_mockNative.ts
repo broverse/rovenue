@@ -12,6 +12,7 @@ import { vi } from "vitest";
 import type {
   EntitlementDTO,
   LogEntryDTO,
+  PaywallDTO,
   RovenueModuleSpec,
   UserDTO,
 } from "../specs/RovenueModule.types";
@@ -107,6 +108,7 @@ export function makeMockNative(): MockNative {
       mock.__emit("VIRTUAL_CURRENCIES_CHANGED");
     }),
     getOfferings: vi.fn(async () => ({ current: null, offerings: [] })),
+    getPaywall: vi.fn(async (_placementId: string, _locale?: string): Promise<PaywallDTO | null> => null),
     purchase: vi.fn(async () => ({ entitlements: [], virtualCurrencies: {}, productId: "", storeTransactionId: "" })),
     restorePurchases: vi.fn(async () => ({ entitlements: [], virtualCurrencies: {}, productId: "", storeTransactionId: "" })),
     refreshRemoteConfig: vi.fn(async () => {

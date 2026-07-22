@@ -91,6 +91,37 @@ export type Offerings = {
   all: Record<string, Offering>;
 };
 
+/** Paywall-attribution snapshot for the paywall a `getPaywall(placementId)`
+ *  call resolved. Round-tripped opaquely into the purchase attribution
+ *  path, and the source `logPaywallShown(paywall)` builds its
+ *  `paywall_view` event from. */
+export type PresentedContext = {
+  placementId: string;
+  paywallId: string;
+  variantId: string | null;
+  experimentKey: string | null;
+  revision: number;
+};
+
+/** A resolved placement: either a direct paywall assignment or the winning
+ *  variant of a client-drawn PAYWALL experiment. The SDK ships no renderer
+ *  (Adapty remote-config model, Phase A) — read `remoteConfig` and build
+ *  your own UI, then call `logPaywallShown(paywall)` once it's on screen. */
+export type Paywall = {
+  placementIdentifier: string;
+  placementRevision: number;
+  paywallIdentifier: string | null;
+  paywallName: string | null;
+  configFormatVersion: number;
+  /** Parsed from the native side's raw `remoteConfigJson` string. `null`
+   *  when the paywall has no remote config for the resolved locale, or the
+   *  JSON fails to parse as an object. */
+  remoteConfig: Record<string, unknown> | null;
+  remoteConfigLocale: string | null;
+  offering: Offering | null;
+  presentedContext: PresentedContext | null;
+};
+
 export type PurchaseResult = {
   entitlements: Entitlement[];
   virtualCurrencies: Record<string, number>;

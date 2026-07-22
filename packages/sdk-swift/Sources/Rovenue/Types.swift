@@ -236,6 +236,69 @@ public struct Offerings: Sendable, Equatable {
     }
 }
 
+// MARK: - Placements / Paywalls
+
+/// Paywall-attribution snapshot for the paywall a `getPaywall(placementId:)`
+/// call resolved. Round-tripped opaquely into `purchase()`'s attribution
+/// path, and the source `logPaywallShown(_:)` builds its `paywall_view`
+/// event from — mirrors the core's `CorePresentedContext`.
+public struct PresentedContext: Sendable, Equatable {
+    public let placementId: String
+    public let paywallId: String
+    public let variantId: String?
+    public let experimentKey: String?
+    public let revision: Int64
+
+    public init(placementId: String, paywallId: String, variantId: String?, experimentKey: String?, revision: Int64) {
+        self.placementId = placementId
+        self.paywallId = paywallId
+        self.variantId = variantId
+        self.experimentKey = experimentKey
+        self.revision = revision
+    }
+}
+
+/// A resolved placement: either a direct paywall assignment or the winning
+/// variant of a client-drawn PAYWALL experiment. The SDK ships no renderer
+/// (Adapty remote-config model, Phase A) — callers read `remoteConfig` and
+/// build their own UI, then call `logPaywallShown(_:)` once it's on screen.
+public struct Paywall {
+    public let placementIdentifier: String
+    public let placementRevision: Int64
+    public let paywallIdentifier: String?
+    public let paywallName: String?
+    public let configFormatVersion: Int64
+    /// Decoded from the core's raw `remoteConfigJson` string via
+    /// `JSONSerialization`. `nil` when the paywall has no remote config for
+    /// the resolved locale, or when the JSON fails to decode as an object.
+    public let remoteConfig: [String: Any]?
+    public let remoteConfigLocale: String?
+    public let offering: Offering?
+    public let presentedContext: PresentedContext?
+
+    public init(
+        placementIdentifier: String,
+        placementRevision: Int64,
+        paywallIdentifier: String?,
+        paywallName: String?,
+        configFormatVersion: Int64,
+        remoteConfig: [String: Any]?,
+        remoteConfigLocale: String?,
+        offering: Offering?,
+        presentedContext: PresentedContext?
+    ) {
+        self.placementIdentifier = placementIdentifier
+        self.placementRevision = placementRevision
+        self.paywallIdentifier = paywallIdentifier
+        self.paywallName = paywallName
+        self.configFormatVersion = configFormatVersion
+        self.remoteConfig = remoteConfig
+        self.remoteConfigLocale = remoteConfigLocale
+        self.offering = offering
+        self.presentedContext = presentedContext
+    }
+}
+
 /// The result of a completed purchase: refreshed entitlements + virtual-currency balances,
 /// plus the product / store-transaction identifiers for the purchase that ran.
 ///

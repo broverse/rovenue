@@ -93,6 +93,28 @@ export type OfferingsDTO = {
   offerings: OfferingDTO[];
 };
 
+export type PresentedContextDTO = {
+  placementId: string;
+  paywallId: string;
+  variantId: string | null;
+  experimentKey: string | null;
+  revision: number;
+};
+
+export type PaywallDTO = {
+  placementIdentifier: string;
+  placementRevision: number;
+  paywallIdentifier: string | null;
+  paywallName: string | null;
+  configFormatVersion: number;
+  /** Raw JSON string of the resolved locale's remote-config `data` object;
+   *  the JS layer parses it. `null` when the paywall has no remote config. */
+  remoteConfigJson: string | null;
+  remoteConfigLocale: string | null;
+  offering: OfferingDTO | null;
+  presentedContext: PresentedContextDTO | null;
+};
+
 export type ExperimentAssignmentDTO = {
   experimentId: string;
   key: string;
@@ -153,6 +175,11 @@ export interface RovenueModuleSpec {
 
   // Purchases
   getOfferings(): Promise<OfferingsDTO>;
+  // Placements — resolve a placement to a paywall (direct assignment, or
+  // the winning variant of a client-drawn PAYWALL experiment). `null` means
+  // the placement resolved to nothing (retired / target:none / unknown
+  // identifier) — not an error.
+  getPaywall(placementId: string, locale?: string): Promise<PaywallDTO | null>;
   purchase(productId: string, productType: ProductTypeDTO, promotionalOfferId?: string, basePlanId?: string, offerId?: string): Promise<PurchaseResultDTO>;
   restorePurchases(): Promise<PurchaseResultDTO>;
 

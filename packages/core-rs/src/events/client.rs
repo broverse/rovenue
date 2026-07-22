@@ -52,6 +52,7 @@ mod tests {
                 email: Some("a@b.com".into()),
                 ..Default::default()
             }),
+            paywall_context: None,
         }
     }
 

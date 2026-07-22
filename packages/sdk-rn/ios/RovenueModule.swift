@@ -201,6 +201,19 @@ public class RovenueModule: Module {
                 throw RovenueCodedError(e)
             }
         }
+        AsyncFunction("getPaywall") { (placementId: String, locale: String?) -> [String: Any?]? in
+            guard #available(iOS 15.0, macOS 12.0, *) else {
+                throw StoreProblemFallbackException("Placements require iOS 15 / macOS 12 or newer")
+            }
+            do {
+                guard let p = try await Rovenue.shared.getPaywall(placementId: placementId, locale: locale) else {
+                    return nil
+                }
+                return Self.dtoFromPaywall(p)
+            } catch let e as RovenueError {
+                throw RovenueCodedError(e)
+            }
+        }
         AsyncFunction("purchase") { (productId: String, productType: String, promotionalOfferId: String?, basePlanId: String?, offerId: String?) -> [String: Any?] in
             // basePlanId/offerId select a Play subscription offer on Android; ignored on iOS.
             guard #available(iOS 15.0, macOS 12.0, *) else {
@@ -587,23 +600,60 @@ public class RovenueModule: Module {
     }
 
     @available(iOS 15.0, macOS 12.0, *)
+    private static func dtoFromOffering(_ off: Offering) -> [String: Any] {
+        [
+            "identifier": off.identifier,
+            "isDefault": off.isDefault,
+            "packages": off.packages.map { pkg in
+                [
+                    "identifier":  pkg.identifier,
+                    "packageType": packageTypeString(pkg.packageType),
+                    "product":     dtoFromStoreProduct(pkg.product),
+                ] as [String: Any]
+            },
+        ]
+    }
+
+    @available(iOS 15.0, macOS 12.0, *)
     private static func dtoFromOfferings(_ o: Offerings) -> [String: Any] {
-        let offerings: [[String: Any]] = o.all.values.map { off in
-            [
-                "identifier": off.identifier,
-                "isDefault": off.isDefault,
-                "packages": off.packages.map { pkg in
-                    [
-                        "identifier":  pkg.identifier,
-                        "packageType": packageTypeString(pkg.packageType),
-                        "product":     dtoFromStoreProduct(pkg.product),
-                    ] as [String: Any]
-                },
-            ]
-        }
+        let offerings: [[String: Any]] = o.all.values.map(dtoFromOffering)
         return [
             "current": o.current?.identifier as Any,
             "offerings": offerings,
+        ]
+    }
+
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func dtoFromPresentedContext(_ c: PresentedContext) -> [String: Any?] {
+        [
+            "placementId": c.placementId,
+            "paywallId": c.paywallId,
+            "variantId": c.variantId,
+            "experimentKey": c.experimentKey,
+            "revision": c.revision,
+        ]
+    }
+
+    @available(iOS 15.0, macOS 12.0, *)
+    private static func dtoFromPaywall(_ p: Paywall) -> [String: Any?] {
+        [
+            "placementIdentifier": p.placementIdentifier,
+            "placementRevision": p.placementRevision,
+            "paywallIdentifier": p.paywallIdentifier,
+            "paywallName": p.paywallName,
+            "configFormatVersion": p.configFormatVersion,
+            // Re-serialize the already-decoded [String: Any] rather than
+            // round-tripping the raw string — Paywall's decode already
+            // handled the nil-safety; JS re-parses this JSON string itself
+            // (see paywalls.ts parseRemoteConfig), matching remoteConfigJson
+            // key across all three façades' DTOs.
+            "remoteConfigJson": p.remoteConfig.flatMap { dict -> String? in
+                guard let data = try? JSONSerialization.data(withJSONObject: dict) else { return nil }
+                return String(data: data, encoding: .utf8)
+            },
+            "remoteConfigLocale": p.remoteConfigLocale,
+            "offering": p.offering.map(dtoFromOffering),
+            "presentedContext": p.presentedContext.map(dtoFromPresentedContext),
         ]
     }
 

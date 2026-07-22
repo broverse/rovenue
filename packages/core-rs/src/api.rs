@@ -1597,6 +1597,34 @@ mod tests {
         assert!(err.kind == ErrorKind::InvalidArgument);
     }
 
+    /// Regression guard for the façade `logPaywallShown` path (Task 9): a
+    /// `paywallContext` key on the envelope MUST survive the
+    /// deserialize-into-`EventEnvelope`-then-reserialize round trip inside
+    /// `track()`. Before `EventEnvelope` gained a `paywall_context` field,
+    /// serde silently dropped this unknown key — the POST body would have
+    /// been missing `paywallContext` entirely despite the caller supplying
+    /// it, defeating the whole point of `logPaywallShown`.
+    #[test]
+    #[serial_test::serial]
+    fn track_forwards_paywall_context() {
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("POST", "/v1/events")
+            .match_body(mockito::Matcher::PartialJsonString(
+                r#"{"eventType":"paywall_view","paywallContext":{"paywallId":"pw_1","placementId":"plc_1","placementRevision":3,"variantId":"var_a","experimentKey":"exp_1"}}"#.into(),
+            ))
+            .with_status(202)
+            .create();
+
+        let core = make_core(&server.url());
+        core.track(
+            r#"{"eventType":"paywall_view","occurredAt":"2026-06-20T10:00:00Z","eventId":"evt_stable","paywallContext":{"paywallId":"pw_1","placementId":"plc_1","placementRevision":3,"variantId":"var_a","experimentKey":"exp_1"}}"#.into(),
+        )
+        .expect("track ok");
+
+        m.assert();
+    }
+
     #[test]
     #[serial_test::serial]
     fn stale_read_triggers_single_coalesced_refresh() {

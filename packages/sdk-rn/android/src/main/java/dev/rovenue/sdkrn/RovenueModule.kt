@@ -171,6 +171,13 @@ class RovenueModule : Module() {
                 throw codedError(e)
             }
         }
+        AsyncFunction("getPaywall") Coroutine { placementId: String, locale: String? ->
+            try {
+                Rovenue.shared.getPaywall(placementId, locale)?.let(::dtoFromPaywall)
+            } catch (e: Throwable) {
+                throw codedError(e)
+            }
+        }
         AsyncFunction("purchase") Coroutine { productId: String, productType: String, promotionalOfferId: String?, basePlanId: String?, offerId: String? ->
             // promotionalOfferId is iOS-only (ignored here). basePlanId/offerId select a Play subscription offer.
             // Play Billing needs the foreground Activity to launch the flow.
@@ -476,21 +483,52 @@ class RovenueModule : Module() {
         "pricePerYearString"          to p.pricePerYearString,
     )
 
-    private fun dtoFromOfferings(o: Offerings): Map<String, Any?> = mapOf(
-        "current" to o.current?.identifier,
-        "offerings" to o.all.values.map { off ->
+    private fun dtoFromOffering(off: dev.rovenue.sdk.Offering): Map<String, Any?> = mapOf(
+        "identifier" to off.identifier,
+        "isDefault"  to off.isDefault,
+        "packages"   to off.packages.map { pkg ->
             mapOf(
-                "identifier" to off.identifier,
-                "isDefault"  to off.isDefault,
-                "packages"   to off.packages.map { pkg ->
-                    mapOf(
-                        "identifier"  to pkg.identifier,
-                        "packageType" to packageTypeString(pkg.packageType),
-                        "product"     to dtoFromStoreProduct(pkg.product),
-                    )
-                },
+                "identifier"  to pkg.identifier,
+                "packageType" to packageTypeString(pkg.packageType),
+                "product"     to dtoFromStoreProduct(pkg.product),
             )
         },
+    )
+
+    private fun dtoFromOfferings(o: Offerings): Map<String, Any?> = mapOf(
+        "current" to o.current?.identifier,
+        "offerings" to o.all.values.map(::dtoFromOffering),
+    )
+
+    private fun dtoFromPresentedContext(c: dev.rovenue.sdk.PresentedContext): Map<String, Any?> = mapOf(
+        "placementId" to c.placementId,
+        "paywallId" to c.paywallId,
+        "variantId" to c.variantId,
+        "experimentKey" to c.experimentKey,
+        "revision" to c.revision.toDouble(),
+    )
+
+    /** Recursively converts a decoded remote-config value (Map/List/scalar,
+     *  as produced by [dev.rovenue.sdk.internal.decodeRemoteConfig]) into an
+     *  `org.json` value so it can be re-serialized to the wire JSON string
+     *  the DTO carries — JS re-parses it (see paywalls.ts parseRemoteConfig). */
+    private fun Any?.toJsonValue(): Any = when (this) {
+        null -> JSONObject.NULL
+        is Map<*, *> -> JSONObject().also { obj -> forEach { (k, v) -> obj.put(k.toString(), v.toJsonValue()) } }
+        is List<*> -> org.json.JSONArray().also { arr -> forEach { arr.put(it.toJsonValue()) } }
+        else -> this
+    }
+
+    private fun dtoFromPaywall(p: dev.rovenue.sdk.Paywall): Map<String, Any?> = mapOf(
+        "placementIdentifier" to p.placementIdentifier,
+        "placementRevision" to p.placementRevision.toDouble(),
+        "paywallIdentifier" to p.paywallIdentifier,
+        "paywallName" to p.paywallName,
+        "configFormatVersion" to p.configFormatVersion.toDouble(),
+        "remoteConfigJson" to p.remoteConfig?.let { (it as Any?).toJsonValue().toString() },
+        "remoteConfigLocale" to p.remoteConfigLocale,
+        "offering" to p.offering?.let(::dtoFromOffering),
+        "presentedContext" to p.presentedContext?.let(::dtoFromPresentedContext),
     )
 
     private fun dtoFromPurchaseResult(r: PurchaseResult): Map<String, Any?> = mapOf(

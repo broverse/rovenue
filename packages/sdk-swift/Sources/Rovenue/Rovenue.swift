@@ -604,6 +604,87 @@ public final class Rovenue: @unchecked Sendable {
         return Offerings(current: current, all: all)
     }
 
+    /// Hydrate a single `CoreOffering` with live StoreKit price metadata —
+    /// the `getPaywall` counterpart to `getOfferings`'s batch hydration.
+    /// A dedicated (unbatched) StoreKit lookup is fine here since a resolved
+    /// paywall carries at most one offering.
+    @available(iOS 15.0, macOS 12.0, *)
+    private func hydrateOffering(_ o: CoreOffering) async -> Offering {
+        let appleIds = o.packages.compactMap { $0.appleProductId }
+        let skProducts = await StoreKitAppleStore().products(for: Array(Set(appleIds)))
+
+        func buildProduct(_ p: CoreOfferingProduct) async -> StoreProduct {
+            guard let product = p.appleProductId.flatMap({ skProducts[$0] }) else {
+                return mapAppleStoreProduct(core: p, period: nil, introOffer: nil,
+                    promoOffers: [], groupId: nil, isFamilyShareable: false, description: nil,
+                    priceString: nil, price: nil, currencyCode: nil, isEligible: nil, raw: nil,
+                    formatCurrency: { _ in nil })
+            }
+            let offers = appleOfferInputs(from: product)
+            let isEligible = try? await product.subscription?.isEligibleForIntroOffer
+            let priceString = product.displayPrice
+            let price = product.price
+            let currencyCode = product.priceFormatStyle.currencyCode
+            let fmtStyle = product.priceFormatStyle
+            let formatCurrency: (Decimal) -> String? = { $0.formatted(fmtStyle) }
+            return mapAppleStoreProduct(core: p, period: offers.period, introOffer: offers.intro,
+                promoOffers: offers.promos, groupId: offers.groupId,
+                isFamilyShareable: product.isFamilyShareable, description: product.description,
+                priceString: priceString, price: price, currencyCode: currencyCode,
+                isEligible: isEligible, raw: product, formatCurrency: formatCurrency)
+        }
+
+        var packages: [Package] = []
+        for pkg in o.packages {
+            packages.append(Package(identifier: pkg.packageIdentifier, packageType: packageType(forSlot: pkg.packageIdentifier),
+                                    product: await buildProduct(pkg)))
+        }
+        return Offering(identifier: o.identifier, isDefault: o.isDefault, packages: packages)
+    }
+
+    /// Resolve a placement to a paywall — either a direct assignment or the
+    /// winning variant of a client-drawn PAYWALL experiment (the core does
+    /// the draw + best-effort exposure beacon). `nil` means the placement
+    /// resolved to nothing (retired, `target: none`, unknown identifier) —
+    /// not an error; a shipped app must not crash because a placement was
+    /// retired server-side.
+    @available(iOS 15.0, macOS 12.0, *)
+    public func getPaywall(placementId: String, locale: String? = nil) async throws -> Paywall? {
+        let ffi: CorePaywall?
+        do {
+            ffi = try await dispatcher.run { [core] in
+                do { return try core.getPaywall(placementId: placementId, locale: locale) }
+                catch let err as RovenueErrorFfi { throw mapError(err) }
+            }
+        } catch {
+            throw error
+        }
+        guard let ffi else { return nil }
+        let offering: Offering? = if let o = ffi.offering { await hydrateOffering(o) } else { nil }
+        return mapPaywall(ffi, offering: offering)
+    }
+
+    /// Report that `paywall` was actually shown to the subscriber. Builds a
+    /// `paywall_view` event (sourced from `paywall.presentedContext`) and
+    /// enqueues it via `track(envelopeJson:)` — the same at-least-once
+    /// `POST /v1/events` sender every other SDK-emitted event goes through;
+    /// this does not open a new network path. Best-effort: fire-and-forget,
+    /// matching the RC/Adapty `logShown`/`logPaywallShown` contract (no
+    /// `async throws` — a paywall-impression beacon must never block or
+    /// fail the caller's UI code).
+    public func logPaywallShown(_ paywall: Paywall) {
+        guard let envelope = paywallViewEnvelope(
+            paywall: paywall,
+            eventId: "evt_\(UUID().uuidString.lowercased())",
+            occurredAt: ISO8601DateFormatter().string(from: Date())
+        ) else { return }
+        guard let data = try? JSONEncoder().encode(envelope),
+              let json = String(data: data, encoding: .utf8) else { return }
+        Task { [weak self] in
+            try? await self?.track(envelopeJson: json)
+        }
+    }
+
     /// Purchase the product backing a `Package`, optionally with a signed promotional offer.
     @available(iOS 15.0, macOS 12.0, *)
     public func purchase(_ package: Package, promotionalOffer: Discount? = nil) async throws -> PurchaseResult {

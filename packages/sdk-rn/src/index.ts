@@ -26,6 +26,8 @@ export type {
   ChangeEvent,
   RemoteConfig,
   ExperimentAssignment,
+  Paywall,
+  PresentedContext,
 } from "./types";
 
 export {
@@ -50,6 +52,7 @@ import { currentUser, identify, logOut } from "./api/identity";
 import { entitlement, entitlementsAll, refreshEntitlements } from "./api/entitlements";
 import { virtualCurrencies, virtualCurrency, refreshVirtualCurrencies } from "./api/virtualCurrencies";
 import { getOfferings, purchase, restorePurchases } from "./api/purchases";
+import { getPaywall, logPaywallShown } from "./api/paywalls";
 import { track } from "./api/events";
 import {
   refreshRemoteConfig,
@@ -88,6 +91,8 @@ export const Rovenue = {
   getOfferings,
   purchase,
   restorePurchases,
+  getPaywall,
+  logPaywallShown,
   track,
   refreshRemoteConfig,
   getRemoteConfig,
