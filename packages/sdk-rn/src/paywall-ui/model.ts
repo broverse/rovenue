@@ -13,9 +13,20 @@
 //    non-object localization table, non-stack root) fails the WHOLE
 //    decode — `decodeBuilderConfig` returns null.
 //
+// Phase D2 (overrides/cellTemplate): every known node type carries an
+// optional `overrides?: NodeOverride[]`; `packageList` also gains an
+// optional `cellTemplate?: BuilderNode`. An `overrides` entry whose
+// `when.kind` is outside the two known literals decodes to the
+// RETAINED-but-never-matching sentinel `{ kind: "unknown" }` — this is
+// LENIENT (does not fail the config), mirroring the `.unknown` case in
+// the Swift/Kotlin decoders. A structural/non-whitelisted prop key
+// under a KNOWN kind (e.g. `type` inside `introEligible`'s `props`)
+// fails the WHOLE config decode, same as any other structural defect.
+//
 // The strict authoring schema lives in @rovenue/shared/paywall; this
-// decoder is deliberately looser on unknown types only. Input is the
-// ALREADY-PARSED object (`paywall.builderConfig`), not a JSON string.
+// decoder is deliberately looser on unknown types/override kinds only.
+// Input is the ALREADY-PARSED object (`paywall.builderConfig`), not a
+// JSON string.
 // =============================================================
 
 export type ThemePair = { light: string; dark?: string };
@@ -32,6 +43,31 @@ export type ButtonAction =
   | { kind: "restore" }
   | { kind: "url"; url: string };
 
+// -------------------------------------------------------------
+// Overrides (Phase D2) — conditional prop swaps evaluated at render
+// time (see ./overrides.ts's `applyOverrides`). Mirrors
+// packages/shared/src/paywall/schema.ts's OverrideCondition/NodeOverride,
+// adapted for this lenient decoder: an unrecognized `when.kind` decodes
+// to the `{ kind: "unknown" }` sentinel — RETAINED in the array but never
+// active — instead of failing the decode.
+// -------------------------------------------------------------
+
+export type OverrideCondition =
+  | { kind: "introEligible" }
+  | { kind: "selected" }
+  | { kind: "unknown" };
+
+export type NodeOverride = {
+  when: OverrideCondition;
+  /**
+   * Present (and validated against the node type's whitelist) ONLY for a
+   * KNOWN when.kind. Deliberately left `undefined` — not decoded or
+   * validated at all — for an unknown when.kind, since such an entry can
+   * never become active (see applyOverrides).
+   */
+  props?: Record<string, unknown>;
+};
+
 export type BuilderNode =
   | {
       type: "stack";
@@ -44,14 +80,56 @@ export type BuilderNode =
       size?: SizeSpec;
       background?: ThemePair;
       cornerRadius?: number;
+      overrides?: NodeOverride[];
       fallback?: BuilderNode;
     }
-  | { type: "text"; id: string; key: string; role: TextRole; color?: ThemePair; align?: HAlign; fallback?: BuilderNode }
-  | { type: "image"; id: string; url: ThemePair; height?: number; cornerRadius?: number; alt?: string; fallback?: BuilderNode }
-  | { type: "button"; id: string; labelKey: string; style: ButtonVisualStyle; action: ButtonAction; fallback?: BuilderNode }
-  | { type: "packageList"; id: string; packageIds: string[]; defaultSelected?: string; cellLayout: CellLayout; fallback?: BuilderNode }
-  | { type: "purchaseButton"; id: string; labelKey: string; fallback?: BuilderNode }
-  | { type: "spacer"; id: string; size?: number; fallback?: BuilderNode }
+  | {
+      type: "text";
+      id: string;
+      key: string;
+      role: TextRole;
+      color?: ThemePair;
+      align?: HAlign;
+      overrides?: NodeOverride[];
+      fallback?: BuilderNode;
+    }
+  | {
+      type: "image";
+      id: string;
+      url: ThemePair;
+      height?: number;
+      cornerRadius?: number;
+      alt?: string;
+      overrides?: NodeOverride[];
+      fallback?: BuilderNode;
+    }
+  | {
+      type: "button";
+      id: string;
+      labelKey: string;
+      style: ButtonVisualStyle;
+      action: ButtonAction;
+      overrides?: NodeOverride[];
+      fallback?: BuilderNode;
+    }
+  | {
+      type: "packageList";
+      id: string;
+      packageIds: string[];
+      defaultSelected?: string;
+      cellLayout: CellLayout;
+      /**
+       * Optional subtree rendered once per effective package, with
+       * cell-scoped variables, replacing the built-in (name + price)
+       * cell. Absent -> current built-in cell (backward compatible).
+       * Recursive, exactly like `fallback`.
+       */
+      cellTemplate?: BuilderNode;
+      overrides?: NodeOverride[];
+      fallback?: BuilderNode;
+    }
+  | { type: "purchaseButton"; id: string; labelKey: string; overrides?: NodeOverride[]; fallback?: BuilderNode }
+  | { type: "spacer"; id: string; size?: number; overrides?: NodeOverride[]; fallback?: BuilderNode }
   | { type: "unknown"; id: string; fallback?: BuilderNode };
 
 export type BuilderConfigModel = {
@@ -133,6 +211,111 @@ function parseNodeSize(v: unknown): NodeSize {
   throw new DecodeError('NodeSize must be "fit", "fill", or a number');
 }
 
+// -------------------------------------------------------------
+// Overrides decode — per-node-type whitelist of override-able prop
+// keys, HARDCODED here mirroring packages/shared/src/paywall/schema.ts's
+// `OVERRIDABLE_PROP_KEYS` (the single source of truth for the whitelist —
+// keep the two tables in sync by hand).
+// -------------------------------------------------------------
+
+type KnownNodeType = Exclude<BuilderNode["type"], "unknown">;
+
+const OVERRIDABLE_PROP_KEYS: Record<KnownNodeType, readonly string[]> = {
+  stack: ["spacing", "align", "background", "cornerRadius"],
+  text: ["key", "color", "align"],
+  image: ["cornerRadius"],
+  button: ["labelKey", "style"],
+  packageList: [],
+  purchaseButton: ["labelKey"],
+  spacer: [],
+};
+
+function setIfDefined(target: Record<string, unknown>, key: string, value: unknown): void {
+  if (value !== undefined) target[key] = value;
+}
+
+/**
+ * Decodes+validates one override entry's `props` against `type`'s
+ * whitelist, with each key typed per its base-node field. Any
+ * non-whitelisted key (including a structural field like `type`) throws
+ * — propagating up through `parseOverrideEntry`/`parseNode` and failing
+ * the WHOLE config decode, per the reject fixture ("structural key 'type'
+ * inside override props on a known when.kind").
+ */
+function parseOverrideProps(type: KnownNodeType, o: Obj): Record<string, unknown> {
+  const allowed = new Set(OVERRIDABLE_PROP_KEYS[type]);
+  for (const key of Object.keys(o)) {
+    if (!allowed.has(key)) {
+      throw new DecodeError(`"${key}" is not an overridable prop for the "${type}" node type.`);
+    }
+  }
+  const props: Record<string, unknown> = {};
+  switch (type) {
+    case "stack":
+      setIfDefined(props, "spacing", optionalNumber(o, "spacing"));
+      setIfDefined(props, "align", optionalEnum(o, "align", ["start", "center", "end"] as const));
+      setIfDefined(
+        props,
+        "background",
+        o.background === undefined || o.background === null
+          ? undefined
+          : parseThemePair(o.background, "override.background"),
+      );
+      setIfDefined(props, "cornerRadius", optionalNumber(o, "cornerRadius"));
+      break;
+    case "text":
+      setIfDefined(props, "key", optionalString(o, "key"));
+      setIfDefined(
+        props,
+        "color",
+        o.color === undefined || o.color === null ? undefined : parseThemePair(o.color, "override.color"),
+      );
+      setIfDefined(props, "align", optionalEnum(o, "align", ["start", "center", "end"] as const));
+      break;
+    case "image":
+      setIfDefined(props, "cornerRadius", optionalNumber(o, "cornerRadius"));
+      break;
+    case "button":
+      setIfDefined(props, "labelKey", optionalString(o, "labelKey"));
+      setIfDefined(props, "style", optionalEnum(o, "style", ["primary", "secondary", "plain"] as const));
+      break;
+    case "purchaseButton":
+      setIfDefined(props, "labelKey", optionalString(o, "labelKey"));
+      break;
+    case "packageList":
+    case "spacer":
+      // Empty whitelist — already validated above (any key present threw);
+      // nothing left to decode.
+      break;
+  }
+  return props;
+}
+
+/**
+ * Decodes a single `overrides[]` entry. An unknown `when.kind` decodes to
+ * the RETAINED-but-never-matching sentinel (`props` left `undefined`,
+ * deliberately not decoded/validated) — the acceptLenient fixture pins
+ * this. A KNOWN kind's `props` IS decoded/validated via
+ * `parseOverrideProps`, whose failure propagates up and fails the whole
+ * config decode — the reject fixture pins this.
+ */
+function parseOverrideEntry(o: Obj, type: KnownNodeType): NodeOverride {
+  const whenObj = asObject(o.when, "override.when");
+  const kind = requireString(whenObj, "kind");
+  if (kind !== "introEligible" && kind !== "selected") {
+    return { when: { kind: "unknown" } };
+  }
+  const props = parseOverrideProps(type, asObject(o.props, "override.props"));
+  return { when: { kind }, props };
+}
+
+function parseOverridesArray(o: Obj, type: KnownNodeType): NodeOverride[] | undefined {
+  const raw = o.overrides;
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw)) throw new DecodeError("overrides must be an array");
+  return raw.map((entry) => parseOverrideEntry(asObject(entry, "override"), type));
+}
+
 function parseConfig(o: Obj): BuilderConfigModel {
   if (o.formatVersion !== 2) throw new DecodeError("formatVersion must be the literal 2");
   const defaultLocale = requireString(o, "defaultLocale");
@@ -204,6 +387,7 @@ function parseNode(o: Obj): BuilderNode {
           ? undefined
           : parseThemePair(o.background, "stack.background"),
         cornerRadius: optionalNumber(o, "cornerRadius"),
+        overrides: parseOverridesArray(o, "stack"),
         fallback,
       };
     }
@@ -215,6 +399,7 @@ function parseNode(o: Obj): BuilderNode {
         role: requireEnum(o, "role", ["title", "subtitle", "body", "caption"] as const),
         color: o.color === undefined || o.color === null ? undefined : parseThemePair(o.color, "text.color"),
         align: optionalEnum(o, "align", ["start", "center", "end"] as const),
+        overrides: parseOverridesArray(o, "text"),
         fallback,
       };
     case "image":
@@ -225,6 +410,7 @@ function parseNode(o: Obj): BuilderNode {
         height: optionalNumber(o, "height"),
         cornerRadius: optionalNumber(o, "cornerRadius"),
         alt: optionalString(o, "alt"),
+        overrides: parseOverridesArray(o, "image"),
         fallback,
       };
     case "button": {
@@ -241,6 +427,7 @@ function parseNode(o: Obj): BuilderNode {
         labelKey: requireString(o, "labelKey"),
         style: requireEnum(o, "style", ["primary", "secondary", "plain"] as const),
         action: parsedAction,
+        overrides: parseOverridesArray(o, "button"),
         fallback,
       };
     }
@@ -251,22 +438,41 @@ function parseNode(o: Obj): BuilderNode {
         if (typeof v !== "string") throw new DecodeError("packageIds entries must be strings");
         return v;
       });
+      const cellTemplate = o.cellTemplate === undefined || o.cellTemplate === null
+        ? undefined
+        : parseNode(asObject(o.cellTemplate, "cellTemplate"));
       return {
         type,
         id,
         packageIds,
         defaultSelected: optionalString(o, "defaultSelected"),
         cellLayout: requireEnum(o, "cellLayout", ["row", "column"] as const),
+        cellTemplate,
+        overrides: parseOverridesArray(o, "packageList"),
         fallback,
       };
     }
     case "purchaseButton":
-      return { type, id, labelKey: requireString(o, "labelKey"), fallback };
+      return {
+        type,
+        id,
+        labelKey: requireString(o, "labelKey"),
+        overrides: parseOverridesArray(o, "purchaseButton"),
+        fallback,
+      };
     case "spacer":
-      return { type, id, size: optionalNumber(o, "size"), fallback };
+      return {
+        type,
+        id,
+        size: optionalNumber(o, "size"),
+        overrides: parseOverridesArray(o, "spacer"),
+        fallback,
+      };
     default:
       // Lenient branch: unknown types keep id + fallback and never fail
       // the decode; the fallback subtree above was still parsed strictly.
+      // No `overrides` field exists on this case (mirrors Swift's
+      // `.unknown(id:fallback:)` / Kotlin's `BuilderNode.Unknown`).
       return { type: "unknown", id, fallback };
   }
 }

@@ -10,6 +10,16 @@
 // Variables ({{price}} …) resolve against real store pricing from
 // the hydrated offering. Builder paywalls auto-track: one
 // logPaywallShown per distinct paywall content per mounted view.
+//
+// Phase D2 (overrides/cellTemplate): every node passes through
+// `applyOverrides` BEFORE any style/text resolution, mirroring the web
+// renderer's `renderNode` and the Swift/Kotlin `BuilderNodeView.body` —
+// `introEligible` is derived NATIVELY from the relevant package's
+// `product.isEligibleForIntroOffer` (RN has the enriched StoreProduct
+// already hydrated, no separate `priceView`/`eligibility` prop needed);
+// `selected` is only ever active for nodes inside a `packageList`'s
+// `cellTemplate` subtree, which threads a `CellScope` (packageId + its
+// resolved PackageView) in place of the pre-D2 bare `PackageView`.
 // =============================================================
 
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
@@ -27,6 +37,7 @@ import {
   type PackageView,
 } from "./helpers";
 import { decodeBuilderConfig, type BuilderConfigModel, type BuilderNode } from "./model";
+import { activeOverrideConditions, applyOverrides } from "./overrides";
 
 export type RovenuePaywallViewProps = {
   paywall: Paywall;
@@ -54,6 +65,16 @@ type Ctx = {
   onRestore?: () => void;
   onUrl?: (url: string) => void;
 };
+
+/**
+ * The package a `cellTemplate` subtree is currently scoped to — carries
+ * both the identifier (needed to evaluate the `selected` override
+ * condition against the live global selection) and its resolved
+ * `PackageView` (needed for `{{variable}}` substitution). `null` outside
+ * any `cellTemplate` subtree. Mirrors the Swift/Kotlin siblings' CellScope
+ * / nodes.tsx's `insideCellTemplate` + `cellPackageId` pair.
+ */
+type CellScope = { packageId: string; view: PackageView };
 
 export function RovenuePaywallView(props: RovenuePaywallViewProps): ReactElement | null {
   const { paywall } = props;
@@ -123,7 +144,7 @@ export function RovenuePaywallView(props: RovenuePaywallViewProps): ReactElement
         ...(config.background ? { backgroundColor: themeValue(config.background, dark) } : {}),
       }}
     >
-      <NodeView node={config.root} ctx={ctx} cellPackage={null} />
+      <NodeView node={config.root} ctx={ctx} cell={null} />
     </View>
   );
 }
@@ -132,14 +153,14 @@ export function RovenuePaywallView(props: RovenuePaywallViewProps): ReactElement
 // Node rendering
 // -------------------------------------------------------------
 
-function label(ctx: Ctx, key: string, cellPackage: PackageView | null): string {
+function label(ctx: Ctx, key: string, cell: CellScope | null): string {
   const text = resolveText(ctx.config, ctx.locale, key) ?? "";
   const pkg =
-    cellPackage ??
+    cell?.view ??
     (() => {
       if (!ctx.selectedPackageId) return null;
       const found = ctx.offering?.packages.find((p) => p.identifier === ctx.selectedPackageId);
-      return found ? packageView(found.product, found.product.displayName) : null;
+      return found ? packageView(found.product, found.product.displayName, ctx.offering) : null;
     })();
   return resolveVariables(text, pkg);
 }
@@ -154,41 +175,48 @@ const TEXT_ROLE_STYLE = {
 function NodeView({
   node,
   ctx,
-  cellPackage,
+  cell,
 }: {
   node: BuilderNode;
   ctx: Ctx;
-  cellPackage: PackageView | null;
+  cell: CellScope | null;
 }): ReactElement | null {
-  switch (node.type) {
+  // Every node passes through `applyOverrides` here, BEFORE any
+  // style/text resolution happens below — `resolved` (not the original
+  // `node`) is what gets dispatched. Mirrors nodes.tsx's `renderNode` /
+  // the Swift/Kotlin siblings' `BuilderNodeView.body`.
+  const active = activeOverrideConditions(cell?.packageId ?? null, ctx.selectedPackageId, ctx.offering);
+  const resolved = applyOverrides(node, active);
+
+  switch (resolved.type) {
     case "stack": {
       const align =
-        node.align === "center" ? "center" : node.align === "end" ? "flex-end" : "flex-start";
+        resolved.align === "center" ? "center" : resolved.align === "end" ? "flex-end" : "flex-start";
       return (
         <View
-          testID={`rov-node-${node.id}`}
+          testID={`rov-node-${resolved.id}`}
           style={{
-            flexDirection: node.axis === "h" ? "row" : "column",
-            ...(node.axis === "z" ? { position: "relative" } : {}),
-            gap: node.spacing,
+            flexDirection: resolved.axis === "h" ? "row" : "column",
+            ...(resolved.axis === "z" ? { position: "relative" } : {}),
+            gap: resolved.spacing,
             alignItems: align,
-            paddingTop: node.padding?.t,
-            paddingRight: node.padding?.r,
-            paddingBottom: node.padding?.b,
-            paddingLeft: node.padding?.l,
-            ...(node.size?.width === "fill" ? { alignSelf: "stretch" } : {}),
-            ...(typeof node.size?.width === "number" ? { width: node.size.width } : {}),
-            ...(typeof node.size?.height === "number" ? { height: node.size.height } : {}),
-            ...(node.background
-              ? { backgroundColor: themeValue(node.background, ctx.dark) }
+            paddingTop: resolved.padding?.t,
+            paddingRight: resolved.padding?.r,
+            paddingBottom: resolved.padding?.b,
+            paddingLeft: resolved.padding?.l,
+            ...(resolved.size?.width === "fill" ? { alignSelf: "stretch" } : {}),
+            ...(typeof resolved.size?.width === "number" ? { width: resolved.size.width } : {}),
+            ...(typeof resolved.size?.height === "number" ? { height: resolved.size.height } : {}),
+            ...(resolved.background
+              ? { backgroundColor: themeValue(resolved.background, ctx.dark) }
               : {}),
-            ...(node.cornerRadius ? { borderRadius: node.cornerRadius } : {}),
+            ...(resolved.cornerRadius ? { borderRadius: resolved.cornerRadius } : {}),
           }}
         >
-          {node.children.map((child, index) => (
+          {resolved.children.map((child, index) => (
             // Positional keys — never node.id (duplicate user-authored ids
             // reach clients unvalidated; React duplicate keys are UB).
-            <NodeView key={index} node={child} ctx={ctx} cellPackage={cellPackage} />
+            <NodeView key={index} node={child} ctx={ctx} cell={cell} />
           ))}
         </View>
       );
@@ -196,70 +224,71 @@ function NodeView({
     case "text":
       return (
         <Text
-          testID={`rov-node-${node.id}`}
+          testID={`rov-node-${resolved.id}`}
           style={{
-            ...TEXT_ROLE_STYLE[node.role],
-            ...(node.color ? { color: themeValue(node.color, ctx.dark) } : {}),
+            ...TEXT_ROLE_STYLE[resolved.role],
+            ...(resolved.color ? { color: themeValue(resolved.color, ctx.dark) } : {}),
             textAlign:
-              node.align === "center" ? "center" : node.align === "end" ? "right" : "left",
+              resolved.align === "center" ? "center" : resolved.align === "end" ? "right" : "left",
           }}
         >
-          {label(ctx, node.key, cellPackage)}
+          {label(ctx, resolved.key, cell)}
         </Text>
       );
     case "image":
       return (
         <Image
-          testID={`rov-node-${node.id}`}
-          source={{ uri: themeValue(node.url, ctx.dark) }}
-          accessibilityLabel={node.alt ? label(ctx, node.alt, cellPackage) : undefined}
+          testID={`rov-node-${resolved.id}`}
+          source={{ uri: themeValue(resolved.url, ctx.dark) }}
+          accessibilityLabel={resolved.alt ? label(ctx, resolved.alt, cell) : undefined}
           style={{
-            ...(node.height ? { height: node.height } : {}),
-            ...(node.cornerRadius ? { borderRadius: node.cornerRadius } : {}),
+            ...(resolved.height ? { height: resolved.height } : {}),
+            ...(resolved.cornerRadius ? { borderRadius: resolved.cornerRadius } : {}),
             alignSelf: "stretch",
           }}
         />
       );
     case "button": {
-      if (node.action.kind === "restore" && !ctx.onRestore) {
-        return node.fallback ? (
-          <NodeView node={node.fallback} ctx={ctx} cellPackage={cellPackage} />
+      if (resolved.action.kind === "restore" && !ctx.onRestore) {
+        return resolved.fallback ? (
+          <NodeView node={resolved.fallback} ctx={ctx} cell={cell} />
         ) : null;
       }
-      const action = node.action;
+      const action = resolved.action;
       const onPress = () => {
         if (action.kind === "close") ctx.onClose?.();
         else if (action.kind === "restore") ctx.onRestore?.();
         else ctx.onUrl?.(action.url);
       };
       return (
-        <Pressable testID={`rov-node-${node.id}`} onPress={onPress}>
+        <Pressable testID={`rov-node-${resolved.id}`} onPress={onPress}>
           <Text
             style={{
               fontSize: 15,
-              fontWeight: node.style === "primary" ? ("600" as const) : ("400" as const),
-              opacity: node.style === "plain" ? 0.7 : 1,
+              fontWeight: resolved.style === "primary" ? ("600" as const) : ("400" as const),
+              opacity: resolved.style === "plain" ? 0.7 : 1,
             }}
           >
-            {label(ctx, node.labelKey, cellPackage)}
+            {label(ctx, resolved.labelKey, cell)}
           </Text>
         </Pressable>
       );
     }
     case "packageList": {
-      const ids = effectivePackageIds(node, ctx.offering);
+      const ids = effectivePackageIds(resolved, ctx.offering);
       const cells = ids.flatMap((id) => {
         const pkg = ctx.offering?.packages.find((p) => p.identifier === id);
         return pkg ? [pkg] : [];
       });
       return (
         <View
-          testID={`rov-node-${node.id}`}
-          style={{ flexDirection: node.cellLayout === "row" ? "row" : "column", gap: 8 }}
+          testID={`rov-node-${resolved.id}`}
+          style={{ flexDirection: resolved.cellLayout === "row" ? "row" : "column", gap: 8 }}
         >
           {cells.map((pkg, index) => {
-            const view = packageView(pkg.product, pkg.product.displayName);
+            const view = packageView(pkg.product, pkg.product.displayName, ctx.offering);
             const selected = ctx.selectedPackageId === pkg.identifier;
+            const cellScope: CellScope = { packageId: pkg.identifier, view };
             return (
               <Pressable
                 key={index}
@@ -267,17 +296,30 @@ function NodeView({
                 accessibilityState={{ selected }}
                 onPress={() => ctx.select(pkg.identifier)}
               >
-                <View
-                  style={{
-                    padding: 10,
-                    borderRadius: 10,
-                    borderWidth: selected ? 2 : 1,
-                    borderColor: selected ? "#3B82F6" : "rgba(120,120,128,0.35)",
-                  }}
-                >
-                  <Text style={{ fontWeight: "600" as const }}>{view.packageName}</Text>
-                  <Text style={{ fontSize: 12 }}>{view.pricePerPeriod}</Text>
-                </View>
+                {resolved.cellTemplate ? (
+                  // Render the template subtree once per package, INSIDE
+                  // the same Pressable cell wrapper (testID/aria semantics
+                  // unchanged) — the cell-scoped CellScope is what makes
+                  // `{{price}}` etc. inside the template resolve to THIS
+                  // cell's package rather than the globally selected one,
+                  // and what makes a `selected`-condition override inside
+                  // the template match only the currently-selected cell.
+                  <NodeView node={resolved.cellTemplate} ctx={ctx} cell={cellScope} />
+                ) : (
+                  // No cellTemplate -> built-in cell (name + price),
+                  // unchanged from before overrides/cellTemplate existed.
+                  <View
+                    style={{
+                      padding: 10,
+                      borderRadius: 10,
+                      borderWidth: selected ? 2 : 1,
+                      borderColor: selected ? "#3B82F6" : "rgba(120,120,128,0.35)",
+                    }}
+                  >
+                    <Text style={{ fontWeight: "600" as const }}>{view.packageName}</Text>
+                    <Text style={{ fontSize: 12 }}>{view.pricePerPeriod}</Text>
+                  </View>
+                )}
               </Pressable>
             );
           })}
@@ -288,7 +330,7 @@ function NodeView({
       const enabled = ctx.selectedPackageId !== null && !ctx.isPurchasing;
       return (
         <Pressable
-          testID={`rov-node-${node.id}`}
+          testID={`rov-node-${resolved.id}`}
           disabled={!enabled}
           accessibilityState={{ disabled: !enabled }}
           onPress={ctx.startPurchase}
@@ -304,7 +346,7 @@ function NodeView({
             }}
           >
             <Text style={{ color: "#FFFFFF", fontWeight: "600" as const, textAlign: "center" }}>
-              {label(ctx, node.labelKey, null)}
+              {label(ctx, resolved.labelKey, null)}
             </Text>
           </View>
         </Pressable>
@@ -313,13 +355,13 @@ function NodeView({
     case "spacer":
       return (
         <View
-          testID={`rov-node-${node.id}`}
-          style={node.size ? { width: node.size, height: node.size } : { flex: 1 }}
+          testID={`rov-node-${resolved.id}`}
+          style={resolved.size ? { width: resolved.size, height: resolved.size } : { flex: 1 }}
         />
       );
     case "unknown":
-      return node.fallback ? (
-        <NodeView node={node.fallback} ctx={ctx} cellPackage={cellPackage} />
+      return resolved.fallback ? (
+        <NodeView node={resolved.fallback} ctx={ctx} cell={cell} />
       ) : null;
   }
 }

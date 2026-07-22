@@ -202,3 +202,133 @@ describe("RovenuePaywallView", () => {
     ).toBe("true");
   });
 });
+
+// -------------------------------------------------------------
+// Phase D2 — overrides / cellTemplate / expanded variables
+// -------------------------------------------------------------
+
+describe("RovenuePaywallView — overrides and cellTemplate (Phase D2)", () => {
+  function offeringWithEligibility(monthlyEligible: boolean): Offering {
+    return {
+      identifier: "default",
+      isDefault: true,
+      packages: [
+        {
+          identifier: "$rov_monthly",
+          packageType: "monthly",
+          product: product({ isEligibleForIntroOffer: monthlyEligible }),
+        },
+        {
+          identifier: "$rov_annual",
+          packageType: "annual",
+          product: product({
+            id: "com.x.pro.annual",
+            displayName: "Pro Annual",
+            priceString: "$39.99",
+            subscriptionPeriod: { value: 1, unit: "year", iso8601: "P1Y" },
+            isEligibleForIntroOffer: false,
+          }),
+        },
+      ],
+    } as Offering;
+  }
+
+  const overridesConfig = {
+    formatVersion: 2,
+    defaultLocale: "en",
+    localizations: {
+      en: {
+        title: "Go Pro",
+        title_intro: "Try it free!",
+        cell_name: "{{packageName}}",
+        cell_name_selected: "✓ {{packageName}}",
+      },
+    },
+    root: {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: [
+        {
+          type: "text",
+          id: "t1",
+          key: "title",
+          role: "title",
+          overrides: [{ when: { kind: "introEligible" }, props: { key: "title_intro" } }],
+        },
+        {
+          type: "packageList",
+          id: "pl",
+          packageIds: [],
+          cellLayout: "column",
+          cellTemplate: {
+            type: "text",
+            id: "cell_text",
+            key: "cell_name",
+            role: "body",
+            overrides: [{ when: { kind: "selected" }, props: { key: "cell_name_selected" } }],
+          },
+        },
+        { type: "purchaseButton", id: "pb", labelKey: "title" },
+      ],
+    },
+  };
+
+  it("applies an introEligible override using the SELECTED package's native isEligibleForIntroOffer", () => {
+    render(
+      <RovenuePaywallView
+        paywall={paywall({ builderConfig: overridesConfig, offering: offeringWithEligibility(true) })}
+      />,
+    );
+    expect(screen.getByTestId("rov-node-t1").textContent).toBe("Try it free!");
+  });
+
+  it("does NOT apply an introEligible override when the selected package isn't eligible", () => {
+    render(
+      <RovenuePaywallView
+        paywall={paywall({ builderConfig: overridesConfig, offering: offeringWithEligibility(false) })}
+      />,
+    );
+    expect(screen.getByTestId("rov-node-t1").textContent).toBe("Go Pro");
+  });
+
+  it("re-evaluates the introEligible override when selection changes to a different package", () => {
+    render(
+      <RovenuePaywallView
+        paywall={paywall({ builderConfig: overridesConfig, offering: offeringWithEligibility(true) })}
+      />,
+    );
+    expect(screen.getByTestId("rov-node-t1").textContent).toBe("Try it free!");
+    fireEvent.click(screen.getByTestId("rov-cell-$rov_annual"));
+    expect(screen.getByTestId("rov-node-t1").textContent).toBe("Go Pro");
+  });
+
+  it("renders a packageList cellTemplate per cell inside the existing Pressable, cell-scoped variables", () => {
+    render(
+      <RovenuePaywallView
+        paywall={paywall({ builderConfig: overridesConfig, offering: offeringWithEligibility(false) })}
+      />,
+    );
+    // Existing cell testIDs/selection semantics are unchanged.
+    const monthlyCell = screen.getByTestId("rov-cell-$rov_monthly");
+    const annualCell = screen.getByTestId("rov-cell-$rov_annual");
+    expect(monthlyCell.getAttribute("aria-selected")).toBe("true");
+    expect(annualCell.getAttribute("aria-selected")).toBe("false");
+
+    // The template renders INSIDE each cell; {{packageName}} resolves to
+    // THAT cell's own package (not the globally selected one), and the
+    // `selected`-condition override is active only for the selected cell.
+    const cellTexts = screen.getAllByTestId("rov-node-cell_text");
+    expect(cellTexts).toHaveLength(2);
+    expect(cellTexts[0]!.textContent).toBe("✓ Pro Monthly"); // selected cell
+    expect(cellTexts[1]!.textContent).toBe("Pro Annual"); // unselected cell
+  });
+
+  it("falls back to the built-in cell (name + price) when a packageList has no cellTemplate", () => {
+    // Baseline paywall() config has no cellTemplate — backward compatible.
+    render(<RovenuePaywallView paywall={paywall()} />);
+    const monthlyCell = screen.getByTestId("rov-cell-$rov_monthly");
+    expect(monthlyCell.textContent).toContain("Pro Monthly");
+    expect(monthlyCell.textContent).toContain("$9.99/month");
+  });
+});
