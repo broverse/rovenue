@@ -130,3 +130,60 @@ shape returned by [`getOfferings()`](/docs/guides/processing-purchases) —
 pass any of its packages straight into `purchase(pkg)`. Placements do not
 replace offerings; they decide *which* paywall (and therefore which
 offering) a given subscriber sees at a given location.
+
+## Builder paywalls (web)
+
+In Phase B, paywalls can carry a **`builderConfig`** — a platform-neutral
+component tree authored visually in the dashboard (Paywalls → Open builder).
+This config appears in the placement payload with `configFormatVersion: 2`
+when non-null; the `?locale` query parameter continues to slice only the
+`remoteConfig` field, so builder localizations ship whole.
+
+Web apps render builder paywalls using the `@rovenue/paywall-renderer`
+package:
+
+```tsx
+import { PaywallRenderer } from '@rovenue/paywall-renderer';
+
+const paywall = await getPaywall('onboarding_end', 'en');
+if (paywall?.builderConfig) {
+  // Render the builder paywall
+  <PaywallRenderer
+    config={paywall.builderConfig}
+    offering={paywall.offering}
+    locale="en"
+    colorScheme="light"
+    priceView={/* formatted price strings per package */}
+    onPurchase={(packageId) => { /* handle purchase */ }}
+    onClose={() => { /* dismiss */ }}
+    onRestore={() => { /* handle restore */ }}
+    onUrl={(url) => { /* open link */ }}
+  />
+} else if (paywall?.remoteConfig) {
+  // Fall back to remote-config paywall for Phase A
+}
+```
+
+**Props contract:**
+- `config` — the builder config from the paywall payload
+- `offering` — the paywall's offering (hydrated packages with displayName,
+  metadata, storeIds)
+- `locale` (optional) — which localization of text keys to resolve (defaults
+  to config's defaultLocale)
+- `colorScheme` — "light" or "dark" for theme-aware rendering
+- `priceView` (optional) — formatted price strings keyed by packageIdentifier
+  (`{ price: string; pricePerPeriod: string; period: string }`); enables
+  `{{price}}` and other variables in text; dashboard preview passes
+  placeholder views; web consumers supply real store-formatted prices
+- `onPurchase` — callback when the user taps a package and confirms purchase
+- `onClose`, `onRestore`, `onUrl` (optional) — action callbacks; restore
+  button is hidden when `onRestore` is not supplied
+- `data-rov-node` attributes — every rendered node carries a stable ID for
+  testing and custom styling; this is a documented feature
+
+<Callout type="info">
+Native SDKs (Swift, Kotlin, React Native) do not render builder paywalls
+until Phase C. They currently skip the `builderConfig` field and continue
+rendering `remoteConfig` only. Plan for multi-phase rollout: Phase B ships
+the builder and web rendering; native support follows.
+</Callout>
