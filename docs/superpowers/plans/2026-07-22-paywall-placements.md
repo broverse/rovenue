@@ -540,5 +540,5 @@ Model every component on `components/offerings/` (list + form dialog + actions m
 - [x] `pnpm test` — all NEW placements suites green; api suite carries ~41 pre-existing failures from stale shared test-DB rows (reproduced on clean main via git stash — not regressions)
 - [x] `cargo test && cargo fmt --check && cargo clippy` in `packages/core-rs` (fmt required clearing pre-existing drift — commit after f450984a)
 - [x] `./gradlew testDebugUnitTest` in `packages/sdk-kotlin` — green
-- [ ] `pnpm --filter @rovenue/db db:verify:clickhouse` — code verified green during Task 7 (migrate + verify + real Redpanda/CH round-trip); final re-run blocked by a LOCAL environment issue (rovenue_reader AUTHENTICATION_FAILED — credentials drifted after Task 7's green run; not a code defect)
+- [x] `pnpm --filter @rovenue/db db:verify:clickhouse` — green (2026-07-22). The earlier "AUTHENTICATION_FAILED" was NOT a credential drift: `deploy/clickhouse/users.d/rovenue.xml` allow-lists 127.0.0.1/::1/172.16-12/10-8, and Docker-Desktop host traffic arrives from 192.168.65.1 → IP_ADDRESS_NOT_ALLOWED, which ClickHouse reports to clients as a password error. Run host-side CH tooling through the compose network (and with the WRITE user `rovenue`, not `.env`'s read-only `rovenue_reader`).
 - [x] Known pre-existing red: 6 integrations-framework tests (missing 0053) — not regressions.
