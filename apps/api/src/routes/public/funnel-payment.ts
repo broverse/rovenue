@@ -9,6 +9,8 @@ import { ok } from "../../lib/response";
 import { LockUnavailableError, withLock } from "../../lib/redis-lock";
 import { chargesEnabled, requireConnectedStripe } from "../../lib/stripe-platform";
 import { resolvePricesForPackages } from "../../services/stripe/price-resolver";
+import { buildClaimLinks } from "../../services/funnel/claim-links";
+import { completeFunnelPurchase } from "../../services/funnel/complete-purchase";
 import { packagesSchema, parseStoreIds } from "../../lib/offering-hydration";
 import type { AccountScopedStripe } from "../../lib/stripe-account-scoped";
 import type { PresentedContext } from "../../lib/presented-context";
@@ -326,7 +328,44 @@ function mergeOrphaned(
   return { ...base, orphaned_stripe_objects: merged };
 }
 
-export const funnelPaymentRoute = new Hono().post(
+/**
+ * Has the money actually moved?
+ *
+ * The browser calls `/confirm` after `stripe.confirmPayment` resolves,
+ * but the endpoint is anonymous and takes nothing but a session id, so
+ * the client's word is not evidence of anything. Stripe is asked instead.
+ *
+ * The subscription is authoritative whenever there is one: it is the
+ * object that decides whether the buyer has access, and a recurring
+ * purchase carries both ids. `trialing` counts — the trial path
+ * deliberately captures nothing now, so waiting for a payment would mean
+ * never issuing a token for a free trial at all.
+ */
+async function isSettled(
+  account: AccountScopedStripe,
+  purchase: {
+    stripeSubscriptionId: string | null;
+    stripePaymentIntentId: string | null;
+  },
+): Promise<boolean> {
+  if (purchase.stripeSubscriptionId) {
+    const subscription = await account.subscriptions.retrieve(
+      purchase.stripeSubscriptionId,
+    );
+    return subscription.status === "active" || subscription.status === "trialing";
+  }
+  if (purchase.stripePaymentIntentId) {
+    const intent = await account.paymentIntents.retrieve(
+      purchase.stripePaymentIntentId,
+    );
+    return intent.status === "succeeded";
+  }
+  // A row with neither id records nothing that could have settled.
+  return false;
+}
+
+export const funnelPaymentRoute = new Hono()
+  .post(
   "/funnel-sessions/:sessionId/payment-intent",
   endpointRateLimit({ name: "funnel:payment-intent", max: 30 }),
   async (c) => {
@@ -603,4 +642,104 @@ export const funnelPaymentRoute = new Hono().post(
 
     return c.json(ok(result));
   },
-);
+  )
+
+  // ---------------------------------------------------------------
+  // POST /funnel-sessions/:sessionId/confirm
+  //
+  // The browser's half of the completion. The Connect webhook (Task 8)
+  // performs the identical transition for the buyer who closed the tab,
+  // so both call one shared service and either may win.
+  // ---------------------------------------------------------------
+  .post(
+    "/funnel-sessions/:sessionId/confirm",
+    endpointRateLimit({ name: "funnel:confirm", max: 30 }),
+    async (c) => {
+      const sid = c.req.param("sessionId");
+      const session = await drizzle.funnelSessionRepo.findById(drizzle.db, sid);
+      if (!session) throw new HTTPException(404, { message: "Session not found" });
+
+      // Same key as the payment-intent endpoint, deliberately. That
+      // endpoint's `upsertPending` conflicts on `sessionId` and forces
+      // `status: "pending"`, so if it were allowed to finish its
+      // read-modify-write against a row this handler is turning `paid`,
+      // it would reset that row and replace its Stripe ids — erasing the
+      // record of a charge that really happened. Sharing the key makes
+      // the two mutually exclusive.
+      //
+      // NOT nested inside anything: `withLock` is not re-entrant, so this
+      // is the outermost and only acquisition on this path.
+      const result = await withLock(`funnel:payment:${sid}`, 30_000, async () => {
+        const purchase = await drizzle.funnelPurchaseRepo.findBySession(
+          drizzle.db,
+          sid,
+        );
+        if (!purchase) {
+          throw new HTTPException(409, { message: "No payment started" });
+        }
+        if (!purchase.stripeCustomerId) {
+          // Only the dev-mode stub in routes/public/funnels.ts writes a
+          // purchase with no customer, and that path mints its own token.
+          throw new HTTPException(409, { message: "No payment started" });
+        }
+
+        // The browser's word is not evidence. Ask Stripe.
+        const { account } = await requireConnectedStripe(session.projectId);
+        if (!(await isSettled(account, purchase))) {
+          throw new HTTPException(409, { message: "Payment is not complete" });
+        }
+
+        // No `stillHeld()` fence here, unlike the sibling endpoint. There
+        // is nothing this can destroy: the transition is idempotent and
+        // the real serializer is the unique index on
+        // `funnel_claim_tokens.session_id`, which lets exactly one caller
+        // mint. Bailing on a lost lock would 409 a visitor who has
+        // demonstrably paid and withhold the token they need — strictly
+        // worse than proceeding, which is safe.
+        return completeFunnelPurchase({
+          sessionId: sid,
+          stripeCustomerId: purchase.stripeCustomerId,
+          stripeSubscriptionId: purchase.stripeSubscriptionId,
+          stripePaymentIntentId: purchase.stripePaymentIntentId,
+        });
+      }).catch((err: unknown) => {
+        // Only the acquisition failure is remapped; anything the section
+        // itself threw keeps its own status. See the sibling endpoint.
+        if (err instanceof LockUnavailableError) {
+          log.error("could not take the funnel payment lock", {
+            sessionId: sid,
+            error: err.message,
+          });
+          throw new HTTPException(503, {
+            message: JSON.stringify({
+              code: "PAYMENT_TEMPORARILY_UNAVAILABLE",
+              message: "Payment is temporarily unavailable, please try again",
+            }),
+          });
+        }
+        throw err;
+      });
+
+      if (result === null) {
+        throw new HTTPException(409, {
+          message: JSON.stringify({
+            code: "PAYMENT_IN_FLIGHT",
+            message: "A payment attempt for this session is already in flight",
+          }),
+        });
+      }
+
+      // The plaintext exists exactly once. A repeat call says so plainly
+      // rather than inventing a token the client cannot use.
+      if (result.alreadyIssued) {
+        return c.json(ok({ already_issued: true as const }));
+      }
+
+      return c.json(
+        ok({
+          already_issued: false as const,
+          ...(await buildClaimLinks(session, result.token)),
+        }),
+      );
+    },
+  );

@@ -37,6 +37,7 @@ import {
 } from "../../services/funnel/branching-evaluator";
 import { generateClaimToken, hashToken } from "../../services/funnel/token";
 import { emitFunnelEvent } from "../../services/funnel/outbox";
+import { buildClaimLinks } from "../../services/funnel/claim-links";
 import { resolveHost } from "../../services/custom-domains/host-resolver";
 import { endpointRateLimit } from "../../middleware/rate-limit";
 import { env } from "../../lib/env";
@@ -552,28 +553,7 @@ export const publicFunnelsRoute = new Hono()
       throw new HTTPException(410, { message: "Token already issued" });
     }
 
-    const version = await drizzle.funnelVersionRepo.findById(
-      drizzle.db,
-      session.funnelVersionId,
-    );
-    const settings = (version?.settingsJson ?? {}) as {
-      deep_link_scheme?: string;
-      universal_link_domain?: string;
-    };
-    const deepLink = settings.deep_link_scheme
-      ? `${settings.deep_link_scheme}://onboarding-complete?token=${plaintext}&project=${session.projectId}`
-      : null;
-    const universalLink = settings.universal_link_domain
-      ? `https://${settings.universal_link_domain}/universal/funnels/open/${plaintext}`
-      : null;
-
-    return c.json({
-      data: {
-        token: plaintext,
-        deep_link_url: deepLink,
-        universal_link_url: universalLink,
-      },
-    });
+    return c.json({ data: await buildClaimLinks(session, plaintext) });
   });
 
 export { invalidatePublishedConfig };
