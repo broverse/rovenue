@@ -1,5 +1,6 @@
 import { drizzle } from "@rovenue/db";
 import { logger } from "../../lib/logger";
+import { isUniqueViolationOf } from "../../lib/pg-errors";
 import { emitFunnelEvent } from "./outbox";
 import { generateClaimToken, hashToken } from "./token";
 
@@ -16,9 +17,6 @@ import { generateClaimToken, hashToken } from "./token";
 const log = logger.child("funnel-complete-purchase");
 
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
-/** Postgres `unique_violation`. */
-const UNIQUE_VIOLATION = "23505";
 
 /**
  * The unique constraint on `funnel_claim_tokens.session_id`, created by
@@ -37,25 +35,12 @@ const UNIQUE_VIOLATION = "23505";
 const SESSION_ID_UNIQUE = "funnel_claim_tokens_session_id_unique";
 
 /**
- * Drizzle does not rethrow the driver's error: it wraps it in a
- * `DrizzleQueryError` ("Failed query: …") and hangs the `pg` error off
- * `.cause`. So neither `code` nor `constraint` is on the object we
- * catch, and a check against the top-level error alone silently never
- * matches — every real race would surface as a 500. Walk the chain.
- * The bound is only there so a self-referential `cause` cannot spin.
+ * Drizzle does not rethrow the driver's error — it wraps it and hangs
+ * the `pg` error off `.cause`, so the code and the constraint live one
+ * level down. `isUniqueViolationOf` walks that chain; see lib/pg-errors.
  */
 function isSessionTokenRace(err: unknown): boolean {
-  for (let e = err, depth = 0; e != null && depth < 5; depth += 1) {
-    const candidate = e as { code?: unknown; constraint?: unknown; cause?: unknown };
-    if (
-      candidate.code === UNIQUE_VIOLATION &&
-      candidate.constraint === SESSION_ID_UNIQUE
-    ) {
-      return true;
-    }
-    e = candidate.cause;
-  }
-  return false;
+  return isUniqueViolationOf(err, SESSION_ID_UNIQUE);
 }
 
 export type CompleteResult =
