@@ -268,6 +268,34 @@ export async function findSubscriberById(
 }
 
 /**
+ * Same lookup, but holding a row lock until the surrounding transaction
+ * ends.
+ *
+ * Advisory locks only serialise callers that agree on a key, and the
+ * writers that retire a subscriber do not all agree — `transferSubscriber`
+ * and the receipt paths key on appUserId, `identify` keys on rovenueId but
+ * only ever locks the survivor. A caller about to move assets off one
+ * subscriber and onto another therefore cannot rely on an advisory key to
+ * keep either row still. `FOR UPDATE` blocks against the UPDATE itself, so
+ * it holds regardless of which key the other writer chose.
+ *
+ * Lock the rows in a deterministic order (sort the ids) when taking more
+ * than one, or two transactions holding one each will deadlock.
+ */
+export async function findSubscriberByIdForUpdate(
+  db: DbOrTx,
+  id: string,
+): Promise<Subscriber | null> {
+  const rows = await db
+    .select()
+    .from(subscribers)
+    .where(eq(subscribers.id, id))
+    .limit(1)
+    .for("update");
+  return rows[0] ?? null;
+}
+
+/**
  * Lookup by (projectId, appleAppAccountToken). Used by the Refund
  * Shield CONSUMPTION_REQUEST handler to resolve the owning subscriber
  * from the JWS `appAccountToken` field without needing the original

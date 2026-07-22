@@ -28,7 +28,7 @@ import { HTTPException } from "hono/http-exception";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { type Db, drizzle } from "@rovenue/db";
+import { type Db, type Subscriber, drizzle } from "@rovenue/db";
 import {
   reassignAllAssets,
   safeSyncAccessAfterMerge,
@@ -115,7 +115,10 @@ function readIp(c: import("hono").Context): string {
  * them. A throw rolls the claim back, leaves the token reclaimable, and
  * turns a silent loss into a 500 someone will see.
  *
- * Returns whether anything was moved.
+ * Returns whether assets were reassigned. Note that `false` does not mean
+ * nothing was written: the already-merged-into-this-claimer branch still
+ * repoints the purchase row before returning false, because the assets
+ * are already where they belong and only the pointer is stale.
  */
 async function mergeFunnelPurchaseSubscriber(
   tx: Db,
@@ -186,13 +189,33 @@ async function mergeFunnelPurchaseSubscriber(
   ].sort();
   await drizzle.lockRepo.advisoryXactLock2(tx, keys[0]!, keys[1]!);
 
-  // Re-read under the lock: a concurrent merge may have retired this row
-  // between the read above and the lock, and the guards below have to
-  // judge the state we are actually about to move.
-  const source = await drizzle.subscriberRepo.findSubscriberById(
-    tx,
-    purchase.subscriberId,
-  );
+  // Re-read both rows under a ROW lock, not just the advisory one.
+  //
+  // The advisory keys above only serialise callers that pick the same
+  // key, and the writers that can retire a subscriber do not:
+  // `transferSubscriber` and the receipt paths key on appUserId, and
+  // `identify` keys on rovenueId but only ever locks the survivor, never
+  // the row it soft-deletes. So the advisory pair contends with nothing
+  // that can retire either of these two rows, and on its own it would
+  // narrow the window to already-committed merges rather than close it.
+  // `SELECT ... FOR UPDATE` blocks against the UPDATE itself, whichever
+  // key the other writer chose.
+  //
+  // Taken in sorted-id order so two claims touching the same pair queue
+  // instead of deadlocking. The other writers reach these rows through
+  // single-row UPDATEs, so they cannot hold one of our pair while
+  // waiting on the other.
+  const lockIds = [purchase.subscriberId, claimer.id].sort();
+  const locked = new Map<string, Subscriber>();
+  for (const id of lockIds) {
+    const row = await drizzle.subscriberRepo.findSubscriberByIdForUpdate(
+      tx,
+      id,
+    );
+    if (row) locked.set(id, row);
+  }
+
+  const source = locked.get(purchase.subscriberId) ?? null;
   if (!source) {
     log.error("funnel purchase points at a missing subscriber", {
       projectId,
@@ -203,20 +226,17 @@ async function mergeFunnelPurchaseSubscriber(
       `Funnel purchase for session ${sessionId} points at missing subscriber ${purchase.subscriberId}`,
     );
   }
-  // The claimer gets the same treatment, for the same reason. It was
+  // The claimer needs the same protection, for the same reason. It was
   // resolved at route level, on the pooled connection, before this
-  // transaction even opened — a concurrent identify/transferSubscriber
-  // holding these locks first can have merged it away in the meantime.
-  // Moving every asset onto a row that is now soft-deleted, and
-  // repointing the purchase at it, would leave the buyer with nothing:
-  // `resolveSubscriberByRovenueId` sends their SDK to the survivor,
-  // which is not where any of it landed. Re-read by id under the lock so
-  // the guards below — and the merge, the purchase repoint and the
-  // response that follow — judge the row as it actually is now.
-  const target = await drizzle.subscriberRepo.findSubscriberById(
-    tx,
-    claimer.id,
-  );
+  // transaction even opened, so a concurrent identify/transferSubscriber
+  // can have merged it away in the meantime. Moving every asset onto a
+  // row that is now soft-deleted, and repointing the purchase at it,
+  // would leave the buyer with nothing: `resolveSubscriberByRovenueId`
+  // sends their SDK to the survivor, which is not where any of it
+  // landed. The row lock above is what makes the guards below — and the
+  // merge, the purchase repoint and the response that follow — judge a
+  // row that cannot change underneath them.
+  const target = locked.get(claimer.id) ?? null;
   if (!target) {
     log.error("the claiming subscriber vanished before the merge", {
       projectId,
@@ -291,7 +311,7 @@ async function mergeFunnelPurchaseSubscriber(
       mergedInto: source.mergedInto,
     });
     throw new Error(
-      `Funnel purchase subscriber ${source.id} was already merged into ${source.mergedInto ?? "nothing"}, not ${claimer.id}`,
+      `Funnel purchase subscriber ${source.id} was already merged into ${source.mergedInto ?? "nothing"}, not ${target.id}`,
     );
   }
 

@@ -165,6 +165,10 @@ vi.mock("@rovenue/db", async (importOriginal) => {
         resolveSubscriberByRovenueId: resolveSubscriber,
         upsertSubscriber,
         findSubscriberById,
+        // The route reads both rows through the FOR UPDATE variant now.
+        // Same spy, so the call-order assertions below still describe the
+        // reads the route actually makes.
+        findSubscriberByIdForUpdate: findSubscriberById,
       },
       accessRepo: { findActiveAccess },
       accessCatalogRepo: { findByIds: findAccessByIds },
@@ -549,10 +553,14 @@ describe("POST /v1/subscribers/claim-funnel-token — convergence", () => {
   //
   // The claimer is resolved at route level, on the pooled connection,
   // before the claim transaction opens. A concurrent identify or
-  // transferSubscriber that takes these same advisory locks first can
-  // merge it away inside that window. Every guard below therefore has to
-  // read it again UNDER the lock — the source already does, and the
-  // claimer is the other half of the same pair.
+  // transferSubscriber can merge it away inside that window.
+  //
+  // The advisory locks do NOT stop that on their own: transferSubscriber
+  // and the receipt paths key on appUserId, and identify keys on
+  // rovenueId but only ever locks the survivor, never the row it
+  // soft-deletes. What holds the pair still is the `FOR UPDATE` row lock
+  // on both re-reads, which blocks against the UPDATE whichever key the
+  // other writer picked. Every guard below judges those re-read rows.
 
   it("fails the claim when the claimer was merged away before the lock", async () => {
     // The race, precisely: the route resolved a live claimer, and by the
