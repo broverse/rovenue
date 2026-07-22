@@ -684,15 +684,28 @@ export const funnelPaymentRoute = new Hono()
       throw new HTTPException(400, { message: "Package has no usable price" });
     }
 
-    // Checked before anything exists on Stripe. Left at the end it would
-    // 503 only after a Customer, a subscription/PaymentIntent and a
-    // purchase row had already been created and orphaned.
-    const publishableKey = env.STRIPE_PLATFORM_PUBLISHABLE_KEY;
-    if (!publishableKey) {
-      throw new HTTPException(503, { message: "Stripe Connect is not configured" });
-    }
+    const { account, accountId, livemode } = await requireConnectedStripe(
+      session.projectId,
+    );
 
-    const { account, accountId } = await requireConnectedStripe(session.projectId);
+    // The publishable key has to match the mode the account is connected
+    // in. The client secret we are about to mint comes from the live or
+    // test platform key depending on `livemode`, and Stripe.js rejects a
+    // secret that belongs to the other mode — so handing a test-mode
+    // project the live key breaks payment for every one of its funnels.
+    // That is also why STRIPE_PLATFORM_PUBLISHABLE_KEY_TEST exists.
+    //
+    // Checked before anything exists on Stripe: left until after the
+    // Customer and the subscription/PaymentIntent, a 503 here would
+    // orphan both.
+    const publishableKey = livemode
+      ? env.STRIPE_PLATFORM_PUBLISHABLE_KEY
+      : env.STRIPE_PLATFORM_PUBLISHABLE_KEY_TEST;
+    if (!publishableKey) {
+      throw new HTTPException(503, {
+        message: `Stripe Connect is not configured for ${livemode ? "live" : "test"} mode`,
+      });
+    }
 
     // Everything from the `findBySession` read to the `upsertPending`
     // write is one read-modify-write with Stripe round-trips in the

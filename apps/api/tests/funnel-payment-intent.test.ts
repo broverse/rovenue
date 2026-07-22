@@ -107,22 +107,23 @@ const subscriptionsRetrieve = vi.hoisted(() =>
 const paymentIntentsRetrieve = vi.hoisted(() =>
   vi.fn(async () => ({ id: "pi_old", status: "requires_payment_method" })),
 );
+const connectedAccount = vi.hoisted(() => ({
+  customers: { create: customersCreate, update: customersUpdate },
+  subscriptions: {
+    create: subscriptionsCreate,
+    cancel: subscriptionsCancel,
+    retrieve: subscriptionsRetrieve,
+  },
+  paymentIntents: {
+    create: paymentIntentsCreate,
+    cancel: paymentIntentsCancel,
+    retrieve: paymentIntentsRetrieve,
+  },
+  setupIntents: { update: setupIntentsUpdate },
+}));
 const requireConnectedStripe = vi.hoisted(() =>
   vi.fn(async () => ({
-    account: {
-      customers: { create: customersCreate, update: customersUpdate },
-      subscriptions: {
-        create: subscriptionsCreate,
-        cancel: subscriptionsCancel,
-        retrieve: subscriptionsRetrieve,
-      },
-      paymentIntents: {
-        create: paymentIntentsCreate,
-        cancel: paymentIntentsCancel,
-        retrieve: paymentIntentsRetrieve,
-      },
-      setupIntents: { update: setupIntentsUpdate },
-    },
+    account: connectedAccount,
     accountId: "acct_1",
     livemode: false,
   })),
@@ -171,7 +172,7 @@ describe("POST /public/funnel-sessions/:sessionId/payment-intent", () => {
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...original };
-    process.env.STRIPE_PLATFORM_PUBLISHABLE_KEY = "pk_test_123";
+    process.env.STRIPE_PLATFORM_PUBLISHABLE_KEY_TEST = "pk_test_123";
 
     findSessionById.mockReset().mockResolvedValue({
       id: "sess_1",
@@ -445,6 +446,45 @@ describe("POST /public/funnel-sessions/:sessionId/payment-intent", () => {
     );
   });
 
+  // The publishable key has to match the mode the account is connected
+  // in: Stripe.js rejects a client secret minted by the other mode's
+  // platform key, so handing a test-mode project the live key breaks
+  // payment for every one of its funnels. The default stub is
+  // `livemode: false`, which is why the suite sets the _TEST variable.
+  it("returns the test publishable key for a test-mode account", async () => {
+    const res = await post({ package_identifier: "$rov_lifetime", email: "a@b.co" });
+    const body = (await res.json()) as { data: { publishable_key: string } };
+    expect(body.data.publishable_key).toBe("pk_test_123");
+  });
+
+  it("returns the live publishable key for a live-mode account", async () => {
+    process.env.STRIPE_PLATFORM_PUBLISHABLE_KEY = "pk_live_456";
+    requireConnectedStripe.mockResolvedValueOnce({
+      account: connectedAccount,
+      accountId: "acct_1",
+      livemode: true,
+    });
+
+    const res = await post({ package_identifier: "$rov_lifetime", email: "a@b.co" });
+    const body = (await res.json()) as { data: { publishable_key: string } };
+    expect(body.data.publishable_key).toBe("pk_live_456");
+  });
+
+  it("503s naming the mode when that mode's publishable key is unset", async () => {
+    requireConnectedStripe.mockResolvedValueOnce({
+      account: connectedAccount,
+      accountId: "acct_1",
+      livemode: true,
+    });
+
+    const res = await post({ package_identifier: "$rov_lifetime", email: "a@b.co" });
+
+    expect(res.status).toBe(503);
+    expect(JSON.stringify(await res.json())).toContain("live");
+    // Nothing may exist on Stripe when we bail for configuration.
+    expect(customersCreate).not.toHaveBeenCalled();
+  });
+
   // THE contract test for this task.
   it("ignores an amount supplied by the client", async () => {
     await post({
@@ -590,7 +630,7 @@ describe("POST payment-intent — a second attempt on the same session", () => {
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...original };
-    process.env.STRIPE_PLATFORM_PUBLISHABLE_KEY = "pk_test_123";
+    process.env.STRIPE_PLATFORM_PUBLISHABLE_KEY_TEST = "pk_test_123";
 
     findSessionById.mockReset().mockResolvedValue({
       id: "sess_1",
@@ -860,7 +900,7 @@ describe("POST payment-intent — cancelling a superseded object", () => {
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...original };
-    process.env.STRIPE_PLATFORM_PUBLISHABLE_KEY = "pk_test_123";
+    process.env.STRIPE_PLATFORM_PUBLISHABLE_KEY_TEST = "pk_test_123";
 
     findSessionById.mockReset().mockResolvedValue({
       id: "sess_1",
@@ -1108,7 +1148,7 @@ describe("POST payment-intent — the reused customer", () => {
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...original };
-    process.env.STRIPE_PLATFORM_PUBLISHABLE_KEY = "pk_test_123";
+    process.env.STRIPE_PLATFORM_PUBLISHABLE_KEY_TEST = "pk_test_123";
 
     findSessionById.mockReset().mockResolvedValue({
       id: "sess_1",
@@ -1255,7 +1295,7 @@ describe("POST payment-intent — the per-session lock", () => {
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...original };
-    process.env.STRIPE_PLATFORM_PUBLISHABLE_KEY = "pk_test_123";
+    process.env.STRIPE_PLATFORM_PUBLISHABLE_KEY_TEST = "pk_test_123";
 
     findSessionById.mockReset().mockResolvedValue({
       id: "sess_1",
