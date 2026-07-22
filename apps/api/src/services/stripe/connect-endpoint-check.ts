@@ -12,14 +12,12 @@ import { STRIPE_EVENT_TYPE } from "./stripe-types";
 // the funnel backstop depends on?
 // =============================================================
 //
-// The one-time funnel path is completed for a tab-closing buyer by
-// `payment_intent.succeeded` and nothing else — a bare PaymentIntent
-// carries no subscription and no invoice, so it is the only object in
-// that flow holding `rovenue_funnel_session_id`. If the operator's
-// platform Connect endpoint does not have that event type selected, the
-// backstop is simply never invoked and the failure is completely silent:
-// the buyer is charged, no token is minted, and no code path anywhere
-// notices. This turns that into one loud line at boot.
+// Two of the funnel's event subscriptions are load-bearing in a way the
+// rest are not: nothing anywhere notices their absence. Each is the only
+// object in its flow carrying the funnel's own metadata, so an endpoint
+// missing one does not error, retry or degrade — it simply never invokes
+// the code that was supposed to run. This turns that into one loud line
+// at boot.
 //
 // Deliberately advisory. It logs and returns; it never throws, never
 // blocks the listener, and no-ops entirely when Connect is unconfigured
@@ -40,12 +38,23 @@ const log = logger.child("stripe-connect-endpoint-check");
 const CONNECT_WEBHOOK_PATH = "/webhooks/stripe/connect";
 
 /**
- * Events the endpoint must carry. Everything else the pipeline handles
- * is a nice-to-have from the funnel's point of view; without these a
- * buyer who closes the tab is left with a charge and no entitlement.
+ * Events the endpoint must carry, each with what breaks silently
+ * without it. The consequence travels with the event because the
+ * operator reading this line at boot is the person who has to decide
+ * whether it is worth acting on, and "missing event X" alone does not
+ * tell them.
  */
-const REQUIRED_EVENTS: readonly string[] = [
-  STRIPE_EVENT_TYPE.PAYMENT_INTENT_SUCCEEDED,
+const REQUIRED_EVENTS: readonly { type: string; consequence: string }[] = [
+  {
+    type: STRIPE_EVENT_TYPE.PAYMENT_INTENT_SUCCEEDED,
+    consequence:
+      "a one-time funnel buyer who closes the tab is charged and never completed: the PaymentIntent is the only object in that flow carrying the funnel session id, so nothing else can complete them",
+  },
+  {
+    type: STRIPE_EVENT_TYPE.SETUP_INTENT_SUCCEEDED,
+    consequence:
+      "a funnel trial's card is never written onto its subscription as the default payment method, so a buyer who attaches one can still be refused by /confirm in the window where Stripe has cleared pending_setup_intent but not yet written default_payment_method",
+  },
 ];
 
 /** Stripe's "everything" selector counts as having any given event. */
@@ -92,7 +101,7 @@ async function checkMode(mode: ConnectMode): Promise<void> {
       {
         mode,
         expectedPath: CONNECT_WEBHOOK_PATH,
-        requiredEvents: REQUIRED_EVENTS,
+        requiredEvents: REQUIRED_EVENTS.map((e) => e.type),
         enabledEndpoints: enabled.map((e) => e.url),
       },
     );
@@ -100,12 +109,13 @@ async function checkMode(mode: ConnectMode): Promise<void> {
   }
 
   for (const event of REQUIRED_EVENTS) {
-    if (candidates.some((e) => coversEvent(e, event))) continue;
+    if (candidates.some((e) => coversEvent(e, event.type))) continue;
     log.error(
-      "platform Connect webhook endpoint is not subscribed to a required event; buyers who close the tab will never be completed",
+      "platform Connect webhook endpoint is not subscribed to a required event",
       {
         mode,
-        missingEvent: event,
+        missingEvent: event.type,
+        consequence: event.consequence,
         endpoints: candidates.map((e) => e.url),
       },
     );
