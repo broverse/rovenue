@@ -9,6 +9,7 @@ import { ok } from "../../lib/response";
 import { LockUnavailableError, withLock } from "../../lib/redis-lock";
 import { chargesEnabled, requireConnectedStripe } from "../../lib/stripe-platform";
 import { resolvePricesForPackages } from "../../services/stripe/price-resolver";
+import { hasPaidOrAttachedACard } from "../../services/stripe/payment-settled";
 import { buildClaimLinks } from "../../services/funnel/claim-links";
 import { completeFunnelPurchase } from "../../services/funnel/complete-purchase";
 import { hashEmail } from "../../services/funnel/token";
@@ -403,9 +404,16 @@ function mergeOrphaned(
  *
  * The subscription is authoritative whenever there is one: it is the
  * object that decides whether the buyer has access, and a recurring
- * purchase carries both ids. `trialing` counts — the trial path
- * deliberately captures nothing now, so waiting for a payment would mean
- * never issuing a token for a free trial at all.
+ * purchase carries both ids.
+ *
+ * The subscription answer is NOT computed here. It comes from
+ * `hasPaidOrAttachedACard`, the same function the Connect webhook's
+ * backstop calls — because these two are the only ways a claim token
+ * gets minted, and two independent readings of "has this person paid"
+ * are exactly how a `trialing` subscription (which Stripe parks there the
+ * moment a visitor picks a trial package, before any card) came to count
+ * as proof of payment on this side while the webhook correctly refused
+ * it. See services/stripe/payment-settled.ts.
  */
 async function isSettled(
   account: AccountScopedStripe,
@@ -418,7 +426,7 @@ async function isSettled(
     const subscription = await account.subscriptions.retrieve(
       purchase.stripeSubscriptionId,
     );
-    return subscription.status === "active" || subscription.status === "trialing";
+    return hasPaidOrAttachedACard(subscription);
   }
   if (purchase.stripePaymentIntentId) {
     const intent = await account.paymentIntents.retrieve(

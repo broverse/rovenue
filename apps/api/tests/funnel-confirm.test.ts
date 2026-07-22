@@ -73,6 +73,23 @@ vi.mock("../src/lib/stripe-platform", () => ({
   requireConnectedStripe,
 }));
 
+// The settlement predicate is wrapped, not stubbed: these tests must
+// exercise the REAL rule (that is the point of the trial cases below)
+// while still proving the route reaches for the shared function instead
+// of carrying its own copy. A stub here would let the route and the
+// webhook drift apart again without a single test turning red.
+const settledPredicate = vi.hoisted(() => vi.fn());
+vi.mock("../src/services/stripe/payment-settled", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/services/stripe/payment-settled")>();
+  return {
+    ...actual,
+    hasPaidOrAttachedACard: settledPredicate.mockImplementation(
+      actual.hasPaidOrAttachedACard,
+    ),
+  };
+});
+
 // Same in-memory Redis as funnel-payment-intent.test.ts: SET NX refuses an
 // existing key and the release script deletes only on a token match. The
 // Lua itself is never executed here — src/lib/redis-lock.integration.test.ts
@@ -136,6 +153,7 @@ describe("POST /public/funnel-sessions/:sessionId/confirm", () => {
     upsertSubscriber.mockReset().mockResolvedValue({ id: "subscriber_1" });
     outboxInsert.mockReset().mockResolvedValue(undefined);
 
+    settledPredicate.mockClear();
     subscriptionsRetrieve.mockReset().mockResolvedValue({ id: "sub_1", status: "active" });
     paymentIntentsRetrieve
       .mockReset()
@@ -207,10 +225,40 @@ describe("POST /public/funnel-sessions/:sessionId/confirm", () => {
     expect(setSessionState).toHaveBeenCalledWith(expect.anything(), "sess_1", "paid");
   });
 
-  it("treats a trialing subscription as settled — nothing is due yet", async () => {
+  // THE exploit this endpoint shipped with. The subscription is created
+  // at payment-intent time, and a trial package puts it at `trialing`
+  // immediately — before the card form is touched. Both endpoints are
+  // anonymous and take nothing but a session id, so anyone who walked the
+  // funnel could have taken a claim token here for free.
+  it("409s and mints nothing for a trialing subscription with no payment method", async () => {
     purchase.stripeSubscriptionId = "sub_1";
     purchase.stripePaymentIntentId = null;
-    subscriptionsRetrieve.mockResolvedValue({ id: "sub_1", status: "trialing" });
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "trialing",
+      default_payment_method: null,
+      pending_setup_intent: "seti_1",
+    });
+
+    const res = await confirm();
+
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).toContain("Payment is not complete");
+    expect(insertClaimToken).not.toHaveBeenCalled();
+    expect(markPaid).not.toHaveBeenCalled();
+    expect(setSessionState).not.toHaveBeenCalled();
+  });
+
+  // A trial still has to be claimable — it captures nothing now, so the
+  // card is the commitment, and the card is what Stripe records here.
+  it("treats a trialing subscription with a card attached as settled", async () => {
+    purchase.stripeSubscriptionId = "sub_1";
+    purchase.stripePaymentIntentId = null;
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "trialing",
+      default_payment_method: "pm_1",
+    });
 
     const res = await confirm();
 
@@ -224,6 +272,25 @@ describe("POST /public/funnel-sessions/:sessionId/confirm", () => {
     subscriptionsRetrieve.mockResolvedValue({ id: "sub_1", status: "active" });
 
     expect((await confirm()).status).toBe(200);
+  });
+
+  // The route must not carry its own reading of "has this person paid".
+  // The webhook's backstop asserts the mirror image of this in
+  // src/services/stripe/stripe-webhook.funnel.test.ts; between them, one
+  // function decides and both call it.
+  it("asks the shared settlement predicate, not a local copy", async () => {
+    purchase.stripeSubscriptionId = "sub_1";
+    purchase.stripePaymentIntentId = null;
+    const subscription = {
+      id: "sub_1",
+      status: "trialing",
+      default_payment_method: "pm_1",
+    };
+    subscriptionsRetrieve.mockResolvedValue(subscription);
+
+    await confirm();
+
+    expect(settledPredicate).toHaveBeenCalledWith(subscription);
   });
 
   it("409s for a subscription that is still incomplete", async () => {
