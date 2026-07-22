@@ -43,15 +43,32 @@ export function connectClientId(mode: ConnectMode): string | null {
 }
 
 /**
- * True when the deployment can run the live Connect flow at all.
- *
- * Deliberately only inspects live-mode env vars: answers "can the LIVE Connect
- * flow run", not "is either mode usable". This asymmetry is intentional so
- * callers can distinguish between "live Connect is available" (gating UI/flows)
- * vs "any mode is configured" (for initialization checks).
+ * True when the given mode has both a Connect client id and a platform
+ * secret key configured, so its OAuth flow can actually run. A self-hosted
+ * deployment that has only filled in the `_TEST` variables is fully usable
+ * for `mode: "test"` even though `isConnectConfigured()` below would answer
+ * differently — gate a specific flow (the connect route, a specific
+ * webhook) on this, keyed to the mode actually being requested.
+ */
+export function isConnectConfiguredForMode(mode: ConnectMode): boolean {
+  const clientId = connectClientId(mode);
+  const secretKey = platformKey(mode === "live");
+  return Boolean(clientId && secretKey);
+}
+
+/**
+ * True when AT LEAST ONE mode (live or test) is usable — i.e. either
+ * `isConnectConfiguredForMode("live")` or `isConnectConfiguredForMode("test")`.
+ * This answers "is Connect usable on this deployment at all", which is the
+ * right question for initialization-style checks and for the
+ * `platformConfigured` flag the dashboard uses to decide whether to render
+ * the Connect card at all. It is deliberately NOT the right check for
+ * gating a specific mode's flow — a deployment can have only test-mode
+ * configured and still be fully usable for that mode, so use
+ * `isConnectConfiguredForMode(mode)` for anything mode-specific.
  */
 export function isConnectConfigured(): boolean {
-  return Boolean(env.STRIPE_CONNECT_CLIENT_ID && env.STRIPE_PLATFORM_SECRET_KEY);
+  return isConnectConfiguredForMode("live") || isConnectConfiguredForMode("test");
 }
 
 /**

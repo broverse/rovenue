@@ -3,8 +3,10 @@ import { HTTPException } from "hono/http-exception";
 import { MemberRole } from "@rovenue/db";
 
 const findActiveByProject = vi.hoisted(() => vi.fn());
+const findActiveByAccountId = vi.hoisted(() => vi.fn());
 const insertConnection = vi.hoisted(() => vi.fn(async (_tx, v) => ({ id: "conn_1", ...v })));
 const markDisconnected = vi.hoisted(() => vi.fn());
+const updateAccountState = vi.hoisted(() => vi.fn(async () => undefined));
 const oauthToken = vi.hoisted(() => vi.fn());
 const oauthDeauthorize = vi.hoisted(() => vi.fn());
 const accountsRetrieve = vi.hoisted(() => vi.fn());
@@ -21,6 +23,10 @@ const assertProjectAccess = vi.hoisted(() => vi.fn());
 // the first time this module was imported. Controlling them as regular
 // mocks sidesteps that and keeps every test's env explicit.
 const isConnectConfiguredMock = vi.hoisted(() => vi.fn(() => true));
+// The connect route gates on the REQUESTED mode, so this is what it calls.
+const isConnectConfiguredForModeMock = vi.hoisted(() =>
+  vi.fn((mode: "live" | "test") => mode === "live"),
+);
 const connectClientIdMock = vi.hoisted(() =>
   vi.fn((mode: "live" | "test") => (mode === "live" ? "ca_live" : null)),
 );
@@ -61,8 +67,10 @@ vi.mock("@rovenue/db", async (importOriginal) => {
       },
       stripeConnectionRepo: {
         findActiveByProject,
+        findActiveByAccountId,
         insert: insertConnection,
         markDisconnected,
+        updateAccountState,
       },
     },
   };
@@ -90,6 +98,7 @@ vi.mock("../src/lib/stripe-platform", async (importOriginal) => {
   return {
     ...actual,
     isConnectConfigured: isConnectConfiguredMock,
+    isConnectConfiguredForMode: isConnectConfiguredForModeMock,
     connectClientId: connectClientIdMock,
     getConnectPlatformStripe: () => ({
       oauth: { token: oauthToken, deauthorize: oauthDeauthorize },
@@ -113,10 +122,13 @@ describe("Stripe Connect routes", () => {
     // env readers in ../src/lib/stripe-platform never run in this
     // suite and these two vars would be dead weight.
     findActiveByProject.mockReset().mockResolvedValue(null);
+    // No other project holds the account unless a test says so.
+    findActiveByAccountId.mockReset().mockResolvedValue(null);
     insertConnection
       .mockReset()
       .mockImplementation(async (_tx, v) => ({ id: "conn_1", ...v }));
     markDisconnected.mockReset();
+    updateAccountState.mockReset().mockResolvedValue(undefined);
     oauthToken.mockReset();
     // Without this reset the disconnect test's queued rejection leaks
     // into whichever test runs next and asserts on deauthorize.
@@ -125,6 +137,9 @@ describe("Stripe Connect routes", () => {
     auditFn.mockReset();
     assertProjectAccess.mockReset().mockResolvedValue(undefined);
     isConnectConfiguredMock.mockReset().mockReturnValue(true);
+    isConnectConfiguredForModeMock
+      .mockReset()
+      .mockImplementation((mode: "live" | "test") => mode === "live");
     connectClientIdMock
       .mockReset()
       .mockImplementation((mode: "live" | "test") =>
@@ -145,7 +160,7 @@ describe("Stripe Connect routes", () => {
 
   describe("GET …/stripe/connect", () => {
     it("503s when the platform is unconfigured", async () => {
-      isConnectConfiguredMock.mockReturnValue(false);
+      isConnectConfiguredForModeMock.mockReturnValue(false);
       const app = await buildApp();
       const res = await app.request(connectPath);
       expect(res.status).toBe(503);
@@ -158,10 +173,12 @@ describe("Stripe Connect routes", () => {
       expect(res.status).toBe(409);
     });
 
-    it("400s when ?mode=test but no test client id is set", async () => {
+    it("503s when ?mode=test but that mode is not configured", async () => {
+      // Mode-aware: a deployment with only live vars set must refuse the
+      // test flow specifically, not refuse everything.
       const app = await buildApp();
       const res = await app.request(`${connectPath}?mode=test`);
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(503);
     });
 
     it("403s for a non-OWNER", async () => {
@@ -445,6 +462,50 @@ describe("Stripe Connect routes", () => {
           stripe_user_id: "acct_new",
         });
       });
+
+      // Webhooks for one Stripe account can only route to one project
+      // (findActiveByAccountId tie-breaks on most-recent). Letting a second
+      // project link the same account would silently freeze the first one's
+      // subscription state, so the second link is refused outright.
+      it("refuses an account already linked to a different project", async () => {
+        oauthToken.mockResolvedValue(GOOD_TOKEN);
+        accountsRetrieve.mockResolvedValue(GOOD_ACCOUNT);
+
+        const res = await runCallback(() => {
+          findActiveByAccountId.mockResolvedValue({
+            id: "conn_other",
+            projectId: "proj_other",
+            stripeAccountId: "acct_new",
+          });
+        });
+
+        expect(res.status).toBe(302);
+        expect(res.headers.get("location")).toContain("stripe=account_in_use");
+        expect(insertConnection).not.toHaveBeenCalled();
+        // The authorization we just obtained is revoked rather than left
+        // dangling with no local row to disconnect it from.
+        expect(oauthDeauthorize).toHaveBeenCalledWith({
+          client_id: "ca_live",
+          stripe_user_id: "acct_new",
+        });
+      });
+
+      it("allows reconnecting the same account to the SAME project", async () => {
+        oauthToken.mockResolvedValue(GOOD_TOKEN);
+        accountsRetrieve.mockResolvedValue(GOOD_ACCOUNT);
+
+        const res = await runCallback(() => {
+          // Same project — not a conflict, and must not be revoked.
+          findActiveByAccountId.mockResolvedValue({
+            id: "conn_same",
+            projectId: "proj_1",
+            stripeAccountId: "acct_new",
+          });
+        });
+
+        expect(res.headers.get("location")).not.toContain("account_in_use");
+        expect(oauthDeauthorize).not.toHaveBeenCalled();
+      });
     });
   });
 
@@ -542,6 +603,96 @@ describe("Stripe Connect routes", () => {
           },
         },
       });
+    });
+
+    // The whole product gates paywall publishing on chargesEnabled, and the
+    // ordinary case is connecting BEFORE Stripe finishes verifying you — so
+    // the row is born false. Without a refresh here, the only thing that can
+    // ever flip it is an account.updated webhook the operator may not have
+    // subscribed to, and the project is stuck with no in-product remedy.
+    it("re-reads a stale row from Stripe before answering", async () => {
+      findActiveByProject.mockResolvedValue({
+        id: "conn_1",
+        projectId: "proj_1",
+        stripeAccountId: "acct_1",
+        livemode: true,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        country: null,
+        defaultCurrency: null,
+        connectedAt: new Date("2026-01-01T00:00:00.000Z"),
+        lastSyncedAt: new Date("2026-01-01T00:00:00.000Z"),
+      });
+      accountsRetrieve.mockResolvedValue({
+        charges_enabled: true,
+        payouts_enabled: true,
+        capabilities: { card_payments: "active" },
+        country: "TR",
+        default_currency: "try",
+      });
+
+      const app = await buildApp();
+      const res = await app.request(connectionPath);
+
+      expect(accountsRetrieve).toHaveBeenCalledWith("acct_1");
+      expect(updateAccountState).toHaveBeenCalledWith(
+        expect.anything(),
+        "conn_1",
+        expect.objectContaining({ chargesEnabled: true }),
+      );
+      const body = (await res.json()) as {
+        data: { connection: { chargesEnabled: boolean } };
+      };
+      // The response reflects the refresh, not the stale row.
+      expect(body.data.connection.chargesEnabled).toBe(true);
+    });
+
+    it("serves the stored row when Stripe is unreachable", async () => {
+      findActiveByProject.mockResolvedValue({
+        id: "conn_1",
+        projectId: "proj_1",
+        stripeAccountId: "acct_1",
+        livemode: true,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+        country: null,
+        defaultCurrency: null,
+        connectedAt: new Date("2026-01-01T00:00:00.000Z"),
+        lastSyncedAt: new Date("2026-01-01T00:00:00.000Z"),
+      });
+      accountsRetrieve.mockRejectedValue(new Error("stripe is down"));
+
+      const app = await buildApp();
+      const res = await app.request(connectionPath);
+
+      // A status read must degrade, not fail: the connection still exists.
+      expect(res.status).toBe(200);
+      expect(updateAccountState).not.toHaveBeenCalled();
+      const body = (await res.json()) as {
+        data: { connection: { chargesEnabled: boolean } };
+      };
+      expect(body.data.connection.chargesEnabled).toBe(false);
+    });
+
+    it("does not re-read a row that was just synced", async () => {
+      findActiveByProject.mockResolvedValue({
+        id: "conn_1",
+        projectId: "proj_1",
+        stripeAccountId: "acct_1",
+        livemode: true,
+        chargesEnabled: true,
+        payoutsEnabled: true,
+        country: "TR",
+        defaultCurrency: "try",
+        connectedAt: new Date("2026-01-01T00:00:00.000Z"),
+        lastSyncedAt: new Date(),
+      });
+
+      const app = await buildApp();
+      await app.request(connectionPath);
+
+      // Opening the page repeatedly must not hammer Stripe.
+      expect(accountsRetrieve).not.toHaveBeenCalled();
     });
   });
 });

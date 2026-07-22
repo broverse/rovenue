@@ -189,6 +189,31 @@ export const stripeOAuthRoute = new Hono().get("/callback", async (c) => {
       );
     }
 
+    // The partial unique index only guards (project_id, one active row) —
+    // it does nothing to stop the SAME Stripe account being connected to a
+    // SECOND project. findActiveByAccountId can only be checked here,
+    // after the token exchange has told us which account this is. If
+    // another project already holds this account, webhooks for it would
+    // otherwise route to whichever project connected most recently
+    // (findActiveByAccountId's tie-break), silently freezing the other
+    // project's subscription state. Decision: reject the second
+    // connection outright rather than let it race.
+    const conflicting = await drizzle.stripeConnectionRepo.findActiveByAccountId(
+      drizzle.db,
+      accountId,
+    );
+    if (conflicting && conflicting.projectId !== state.projectId) {
+      log.info("stripe oauth: account already connected to a different project", {
+        projectId: state.projectId,
+        otherProjectId: conflicting.projectId,
+      });
+      await bestEffortDeauthorize(stripe, state.mode, accountId, state.projectId);
+      return c.redirect(
+        dashboardRedirect(state.projectId, "stripe=account_in_use"),
+        302,
+      );
+    }
+
     const account = await stripe.accounts.retrieve(accountId);
 
     await drizzle.db.transaction(async (tx) => {

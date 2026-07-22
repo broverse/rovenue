@@ -44,13 +44,15 @@ describe("StripeConnectCard", () => {
     await waitFor(() => {
       expect(screen.getByTestId("stripe-platform-unconfigured")).toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: /connect/i })).toBeNull();
+    // NOT getByRole(/connect/i): with no i18next instance t() returns the raw
+    // key, and stores.stripe.connect.DISconnect matches that regex too.
+    expect(screen.queryByTestId("stripe-connect-button")).toBeNull();
   });
 
   it("offers a connect action when no account is linked", async () => {
     arrange({ platformConfigured: true, testModeAvailable: true, connection: null });
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
+      expect(screen.getByTestId("stripe-connect-button")).toBeInTheDocument();
     });
     expect(screen.queryByText(/acct_/)).toBeNull();
   });
@@ -58,7 +60,7 @@ describe("StripeConnectCard", () => {
   it("hides the test-mode option when the platform has no test client id", async () => {
     arrange({ platformConfigured: true, testModeAvailable: false, connection: null });
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
+      expect(screen.getByTestId("stripe-connect-button")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("stripe-connect-test-mode")).toBeNull();
   });

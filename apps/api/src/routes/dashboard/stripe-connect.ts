@@ -11,6 +11,7 @@ import {
   connectClientId,
   getConnectPlatformStripe,
   isConnectConfigured,
+  isConnectConfiguredForMode,
   type ConnectMode,
 } from "../../lib/stripe-platform";
 import { createOAuthState } from "../../services/stripe/oauth-state";
@@ -33,6 +34,55 @@ function redirectUri(): string {
   return `${base}/stripe/oauth/callback`;
 }
 
+// Below this age, `GET .../connection` re-reads the account from Stripe
+// before answering rather than trusting the stored row. Without this, a
+// project that connected before Stripe finished verifying it is stuck
+// forever with `charges_enabled: false` unless the operator's webhook
+// endpoint happens to have `account.updated` selected — there is
+// otherwise no path that ever re-checks. Threshold is short enough that
+// the status genuinely reflects Stripe, but long enough that repeatedly
+// opening the page doesn't hammer the Stripe API.
+const CONNECTION_STALE_MS = 60_000;
+
+type StripeConnectionRow = NonNullable<
+  Awaited<ReturnType<typeof drizzle.stripeConnectionRepo.findActiveByProject>>
+>;
+
+/**
+ * Best-effort refresh of a connection row from Stripe when it looks stale.
+ * A Stripe outage (or any failure) must degrade to serving the row we
+ * already have, not fail the whole status read — this is a read path, not
+ * the source of truth for whether the connection exists.
+ */
+async function refreshIfStale(row: StripeConnectionRow): Promise<StripeConnectionRow> {
+  const lastChecked = row.lastSyncedAt ?? row.connectedAt;
+  if (Date.now() - lastChecked.getTime() < CONNECTION_STALE_MS) {
+    return row;
+  }
+
+  const stripe = getConnectPlatformStripe(row.livemode);
+  if (!stripe) return row;
+
+  try {
+    const account = await stripe.accounts.retrieve(row.stripeAccountId);
+    const state = {
+      chargesEnabled: Boolean(account.charges_enabled),
+      payoutsEnabled: Boolean(account.payouts_enabled),
+      capabilities: account.capabilities ?? {},
+      country: account.country ?? null,
+      defaultCurrency: account.default_currency ?? null,
+    };
+    await drizzle.stripeConnectionRepo.updateAccountState(drizzle.db, row.id, state);
+    return { ...row, ...state, lastSyncedAt: new Date() };
+  } catch (err) {
+    log.warn("stripe account refresh failed; serving the stored row", {
+      projectId: row.projectId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return row;
+  }
+}
+
 export const stripeConnectRoute = new Hono()
   .use("*", requireDashboardAuth)
 
@@ -44,17 +94,24 @@ export const stripeConnectRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id, MemberRole.OWNER);
 
-    if (!isConnectConfigured()) {
+    const mode: ConnectMode = c.req.query("mode") === "test" ? "test" : "live";
+
+    // Mode-aware on purpose: isConnectConfigured() answers "is ANY mode
+    // usable", which would 503 a deployment that has only test vars set
+    // the moment it asked for ?mode=test. Gate on the mode actually
+    // requested instead.
+    if (!isConnectConfiguredForMode(mode)) {
       throw new HTTPException(503, {
-        message: "Stripe Connect is not configured on this deployment",
+        message: `Stripe Connect ${mode} mode is not configured on this deployment`,
       });
     }
 
-    const mode: ConnectMode = c.req.query("mode") === "test" ? "test" : "live";
     const clientId = connectClientId(mode);
     if (!clientId) {
-      throw new HTTPException(400, {
-        message: `Stripe Connect ${mode} mode is not configured`,
+      // Defensive only — isConnectConfiguredForMode(mode) already implies
+      // this is non-null. Keeps the type narrow without a non-null assert.
+      throw new HTTPException(503, {
+        message: `Stripe Connect ${mode} mode is not configured on this deployment`,
       });
     }
 
@@ -86,10 +143,11 @@ export const stripeConnectRoute = new Hono()
     const user = c.get("user");
     await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
 
-    const row = await drizzle.stripeConnectionRepo.findActiveByProject(
+    const stored = await drizzle.stripeConnectionRepo.findActiveByProject(
       drizzle.db,
       projectId,
     );
+    const row = stored ? await refreshIfStale(stored) : null;
     return c.json(
       ok({
         platformConfigured: isConnectConfigured(),

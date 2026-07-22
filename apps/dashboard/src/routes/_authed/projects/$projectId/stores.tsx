@@ -14,7 +14,17 @@ import { cn } from "../../../../lib/cn";
 const STORES: CredentialStore[] = ["apple", "google"];
 
 /** The four outcomes the OAuth callback redirects the stores page with. */
-const STRIPE_OUTCOMES = ["connected", "declined", "error", "already_connected"] as const;
+const STRIPE_OUTCOMES = [
+  "connected",
+  "declined",
+  "error",
+  "already_connected",
+  // The Stripe account the customer authorised is already linked to a
+  // different Rovenue project. We revoked the authorisation rather than
+  // create a second link, because webhooks for one account can only be
+  // routed to one project.
+  "account_in_use",
+] as const;
 type StripeOutcome = (typeof STRIPE_OUTCOMES)[number];
 
 type StoresSearch = {
@@ -106,6 +116,7 @@ const OUTCOME_KEY: Record<StripeOutcome, string> = {
   declined: "declined",
   error: "error",
   already_connected: "alreadyConnected",
+  account_in_use: "accountInUse",
 };
 
 function StripeCallbackBanner({
@@ -119,9 +130,11 @@ function StripeCallbackBanner({
   // `declined` is the customer backing out of Stripe's consent screen, not
   // an error — and `already_connected` just means another attempt won a
   // race, so both read as informational rather than a failure.
+  // `account_in_use` IS a failure: nothing got connected and the customer
+  // has to pick a different Stripe account.
   const tone: "success" | "danger" | "info" = outcome === "connected"
     ? "success"
-    : outcome === "error"
+    : outcome === "error" || outcome === "account_in_use"
       ? "danger"
       : "info";
   const Icon = tone === "success" ? CheckCircle2 : tone === "danger" ? XCircle : Info;

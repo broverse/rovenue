@@ -145,7 +145,10 @@ export type AuditResource =
 
 export interface AuditEntry {
   projectId: string;
-  userId: string;
+  // Null for actions not initiated from a dashboard session — e.g. a
+  // Stripe-side webhook revoking a Connect authorization. The column is
+  // nullable at the DB level for exactly this case.
+  userId: string | null;
   action: AuditAction;
   resource: AuditResource;
   resourceId: string;
@@ -214,7 +217,7 @@ function hashRow(canonical: string): string {
 
 interface CanonicalPayload {
   projectId: string;
-  userId: string;
+  userId: string | null;
   action: string;
   resource: string;
   resourceId: string;

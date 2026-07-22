@@ -9,6 +9,7 @@ const updateAccountState = vi.hoisted(() => vi.fn());
 const enqueueWebhookEvent = vi.hoisted(() =>
   vi.fn(async () => ({ id: "job_1" })),
 );
+const auditFn = vi.hoisted(() => vi.fn(async () => undefined));
 
 // The replay guard talks to Redis for real; Redis is not running in
 // this test environment. Stub it with the same in-memory Map + real
@@ -43,7 +44,7 @@ vi.mock("@rovenue/db", async (importOriginal) => {
     ...actual,
     drizzle: {
       ...actual.drizzle,
-      db: {},
+      db: { transaction: async (fn: (tx: unknown) => unknown) => fn({}) },
       stripeConnectionRepo: {
         findActiveByAccountId,
         markDisconnected,
@@ -54,6 +55,13 @@ vi.mock("@rovenue/db", async (importOriginal) => {
 });
 
 vi.mock("../src/services/webhook-processor", () => ({ enqueueWebhookEvent }));
+
+// The deauthorized branch now audits inside a transaction; the real
+// audit() would hit tx.execute on the stubbed handle above.
+vi.mock("../src/lib/audit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/audit")>();
+  return { ...actual, audit: auditFn };
+});
 
 describe("POST /webhooks/stripe/connect", () => {
   const original = { ...process.env };
@@ -213,6 +221,16 @@ describe("POST /webhooks/stripe/connect", () => {
       expect.anything(),
       "conn_1",
       "stripe_deauthorized",
+    );
+    // Revoking Rovenue's authority to move money must leave a trace in
+    // the append-only audit chain regardless of which side triggered it.
+    expect(auditFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "stripe.disconnected",
+        userId: null,
+        projectId: "proj_1",
+      }),
+      expect.anything(),
     );
     expect(enqueueWebhookEvent).not.toHaveBeenCalled();
   });

@@ -131,6 +131,7 @@ export function StripeConnectCard({ projectId }: Props) {
               variant="solid-primary"
               size="sm"
               type="button"
+              data-testid="stripe-connect-button"
               onClick={handleConnect}
             >
               {t("stores.stripe.connect.connectButton")}

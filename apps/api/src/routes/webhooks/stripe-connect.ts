@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type Stripe from "stripe";
 import { drizzle } from "@rovenue/db";
+import { audit, extractRequestContext } from "../../lib/audit";
 import { webhookReplayGuard } from "../../middleware/webhook-replay-guard";
 import { enqueueWebhookEvent } from "../../services/webhook-processor";
 import { env } from "../../lib/env";
@@ -97,11 +98,35 @@ export const stripeConnectWebhookRoute = new Hono().post(
     // subscription pipeline — they are about the link, not about a
     // customer's purchase.
     if (event.type === "account.application.deauthorized") {
-      await drizzle.stripeConnectionRepo.markDisconnected(
-        drizzle.db,
-        connection.id,
-        "stripe_deauthorized",
-      );
+      // Audited like the dashboard-initiated disconnect: this revokes
+      // Rovenue's authority to move money on the customer's behalf, and
+      // the audit log is an append-only per-project hash chain sold as a
+      // compliance record. A revocation that leaves no trace there is a
+      // hole in that record regardless of which side triggered it.
+      // `userId` is null because no dashboard session did this.
+      await drizzle.db.transaction(async (tx) => {
+        await drizzle.stripeConnectionRepo.markDisconnected(
+          tx,
+          connection.id,
+          "stripe_deauthorized",
+        );
+        await audit(
+          {
+            projectId,
+            userId: null,
+            action: "stripe.disconnected",
+            resource: "project",
+            resourceId: projectId,
+            before: {
+              accountId: connection.stripeAccountId,
+              livemode: connection.livemode,
+            },
+            after: { reason: "stripe_deauthorized" },
+            ...extractRequestContext(c),
+          },
+          tx,
+        );
+      });
       log.info("stripe account deauthorized from Stripe's side", { projectId });
       return c.json(ok({ status: "disconnected" as const }), 202);
     }

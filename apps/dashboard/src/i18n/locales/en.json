@@ -294,7 +294,8 @@
           "connected": "Stripe account connected.",
           "declined": "Stripe connection cancelled \u2014 you can try again anytime.",
           "error": "Something went wrong connecting Stripe. Please try again.",
-          "alreadyConnected": "This project is already connected to Stripe."
+          "alreadyConnected": "This project is already connected to Stripe.",
+          "accountInUse": "That Stripe account is already connected to another Rovenue project, so nothing was connected here. Each Stripe account can be linked to one project only — connect a different account, or disconnect it from the other project first."
         }
       }
     }

@@ -120,6 +120,10 @@ async function beginConnect(): Promise<string> {
   );
   expect(location.searchParams.get("response_type")).toBe("code");
   expect(location.searchParams.get("scope")).toBe("read_write");
+  // This suite sets a real STRIPE_CONNECT_CLIENT_ID and does NOT mock the
+  // config helpers, so it is the only place the env -> client_id chain is
+  // exercised end to end. Every other suite mocks connectClientId out.
+  expect(location.searchParams.get("client_id")).toBe("ca_live_test");
   const state = location.searchParams.get("state") ?? "";
   expect(state).toMatch(/^[A-Za-z0-9_-]{43}$/);
   return state;

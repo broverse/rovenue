@@ -341,10 +341,46 @@ same Stripe account the customer will reconnect, so product mappings and the
 `findProductByStoreId` lookup in `stripe-webhook.ts:597-609` keep working
 untouched once reconnected.
 
-Operator checklist, in order: register the Connect platform in Stripe and note
-the live and test `ca_` client ids; add the platform webhook endpoint with
-"listen to Connect events" enabled and capture its `whsec_`; set the
-environment group from §6; deploy; notify customers to reconnect.
+**Funnel publishing stops too, not just webhooks.** `validateFunnelGraph`
+rejects any funnel without a paywall page (`MISSING_PAYWALL`, unconditional),
+so *every* publishable funnel has one — and §10's gate requires the project to
+be connected **and** for Stripe to have enabled charges. After deploy no
+project can publish any funnel until it reconnects and Stripe finishes
+verifying the account, which is not instant for a newly connected account.
+Plan the announcement around that, not just around the webhook gap.
+
+**One Stripe account maps to at most one project.** Webhooks are routed by
+`event.account`, so a second project linking the same account could only have
+its events delivered to one of them. The callback therefore refuses the second
+link and revokes the authorization it just obtained, redirecting with
+`stripe=account_in_use`. A customer running two Rovenue projects needs two
+Stripe accounts.
+
+### Operator checklist
+
+1. Register the Connect platform in Stripe (**Connect → Settings**) and note
+   the live and test `ca_` client ids.
+2. Set the redirect URI to `<PUBLIC_BASE_URL>/stripe/oauth/callback` for both
+   modes.
+3. Add a platform webhook endpoint at `<PUBLIC_BASE_URL>/webhooks/stripe/connect`
+   with **"Listen to events on Connected accounts"** enabled, and subscribe to:
+   `customer.subscription.created`, `customer.subscription.updated`,
+   `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`,
+   `charge.refunded`, `account.updated`, `account.application.deauthorized`.
+   Capture the signing secret.
+   **`account.updated` is not optional.** It is how a connection's
+   `charges_enabled` and capabilities are refreshed after Stripe finishes
+   verification. `GET /dashboard/projects/:id/stripe/connection` also re-reads
+   a stale row directly from Stripe as a backstop, but without this event the
+   state only refreshes when someone opens that page.
+4. Set the environment group from §6. **`PUBLIC_BASE_URL` is part of this** —
+   it builds the OAuth `redirect_uri`, which must match what you registered in
+   step 2 byte for byte. It defaults to `http://localhost:3000`, so a forgotten
+   value produces a Stripe-side `redirect_uri_mismatch` rather than a boot
+   failure.
+5. Deploy and run `pnpm db:migrate`.
+6. Notify every project owner that they must reconnect Stripe, and that funnel
+   publishing stays blocked until Stripe clears verification.
 
 ## 13. Error handling
 

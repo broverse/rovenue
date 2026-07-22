@@ -6,8 +6,10 @@ export interface StripeConnectionSummary {
   livemode: boolean;
   chargesEnabled: boolean;
   payoutsEnabled: boolean;
-  country: string;
-  defaultCurrency: string;
+  // Nullable in the database, so nullable here — Stripe does not always
+  // populate them, and `unwrap<T>()` types the path, not the payload.
+  country: string | null;
+  defaultCurrency: string | null;
   connectedAt: string;
 }
 
