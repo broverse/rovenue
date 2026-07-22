@@ -146,18 +146,32 @@ export const placementsRoute = new Hono().get("/:identifier", async (c) => {
     );
     if (!experiment || experiment.type !== "PAYWALL" || experiment.status !== "RUNNING") continue;
     const variants = (experiment.variants as Array<{ id: string; weight: number; value: unknown }>) ?? [];
-    const hydrated: Array<{ variantId: string; weight: number; paywall: Awaited<ReturnType<typeof hydratePaywall>> }> = [];
-    for (const v of variants) {
+    // Batch the variant paywall lookups (SDK hot path — the per-variant
+    // sequential fetches were an N+1 flagged in the whole-phase review),
+    // then hydrate in parallel. Order follows the variants array.
+    const variantRefs = variants.flatMap((v) => {
       const paywallId = (v.value as { paywallId?: string } | null)?.paywallId;
-      if (!paywallId) continue;
-      const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, project.id, paywallId);
-      if (!paywall || !paywall.isActive) continue;
-      hydrated.push({
-        variantId: v.id,
-        weight: v.weight,
-        paywall: await hydratePaywall(project.id, paywall, requestedLocale),
-      });
-    }
+      return paywallId ? [{ variantId: v.id, weight: v.weight, paywallId }] : [];
+    });
+    const variantPaywalls = await drizzle.paywallRepo.findPaywallsByIds(
+      drizzle.db,
+      project.id,
+      variantRefs.map((r) => r.paywallId),
+    );
+    const paywallById = new Map(variantPaywalls.map((p) => [p.id, p] as const));
+    const hydrated = (
+      await Promise.all(
+        variantRefs.map(async (ref) => {
+          const paywall = paywallById.get(ref.paywallId);
+          if (!paywall || !paywall.isActive) return null;
+          return {
+            variantId: ref.variantId,
+            weight: ref.weight,
+            paywall: await hydratePaywall(project.id, paywall, requestedLocale),
+          };
+        }),
+      )
+    ).filter((v): v is NonNullable<typeof v> => v !== null);
     if (hydrated.length === 0) continue; // legacy inline-config experiment → next row
     return c.json(
       ok({
