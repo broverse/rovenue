@@ -11,6 +11,8 @@ import {
   featureFlags,
   offerings,
   outgoingWebhooks,
+  paywalls,
+  placements,
   productCurrencyGrants,
   products,
   projectMembers,
@@ -50,6 +52,11 @@ const DEMO_ACCESS_PREMIUM_ID = "acs_demo_premium000000000";
 const DEMO_ACCESS_ANALYTICS_ID = "acs_demo_analytics0000000";
 const DEMO_AUDIENCE_ALL_ID = "aud_demo_all";
 const DEMO_AUDIENCE_TR_ID = "aud_demo_tr";
+const DEMO_PACKAGE_PRO = "pro_monthly";
+const DEMO_PACKAGE_CREDITS = "credits_100";
+const DEMO_PAYWALL_DEFAULT_ID = "pwl_demo_default";
+const DEMO_PAYWALL_PROMO_ID = "pwl_demo_promo";
+const DEMO_PLACEMENT_ID = "plc_demo_onboarding";
 const DEMO_FLAG_ID = "ff_demo_onboarding";
 const DEMO_EXPERIMENT_ID = "exp_demo_paywall";
 const DEMO_CURRENCY_GOLD_ID = "vc_demo_gold";
@@ -234,17 +241,22 @@ async function main() {
     .values({
       id: DEMO_OFFERING_ID,
       projectId: DEMO_PROJECT_ID,
-      accessId: DEMO_ACCESS_PREMIUM_ID,
       identifier: DEFAULT_OFFERING,
       isDefault: true,
-      products: [
+      // Package slots (migration 0074 replaced the old `products` jsonb +
+      // `accessId` column). Identifiers are what a paywall's builderConfig
+      // `packageList.packageIds` references — keep them in sync with
+      // DEMO_PACKAGE_* below.
+      packages: [
         {
+          identifier: DEMO_PACKAGE_PRO,
           productId: DEMO_PRODUCT_PRO_ID,
           order: 1,
           isPromoted: true,
           metadata: {},
         },
         {
+          identifier: DEMO_PACKAGE_CREDITS,
           productId: DEMO_PRODUCT_CREDITS_ID,
           order: 2,
           isPromoted: false,
@@ -280,6 +292,173 @@ async function main() {
       description: "Subscribers with attributes.country = TR",
       rules: { country: { $eq: "TR" } },
       isDefault: false,
+    })
+    .onConflictDoNothing();
+
+  // =============================================================
+  // Paywalls — one builder paywall (configFormatVersion 2, the
+  // component tree the web/native renderers decode) and one
+  // remote-config-only paywall (format 1, the pre-builder path).
+  // Both hang off the default offering, so packageList ids must be
+  // the offering's package slot identifiers.
+  // =============================================================
+  const demoBuilderConfig = {
+    formatVersion: 2,
+    defaultLocale: "en",
+    localizations: {
+      en: {
+        "hero.title": "Go Pro",
+        "hero.subtitle": "Unlock every feature, cancel anytime.",
+        "cta.purchase": "Start free trial",
+        "cta.restore": "Restore purchases",
+        "cta.terms": "Terms & Privacy",
+      },
+      tr: {
+        "hero.title": "Pro'ya geç",
+        "hero.subtitle": "Tüm özellikler açılsın, istediğin an iptal et.",
+        "cta.purchase": "Ücretsiz denemeyi başlat",
+        "cta.restore": "Satın alımları geri yükle",
+        "cta.terms": "Şartlar ve Gizlilik",
+      },
+    },
+    background: { light: "#FFFFFF", dark: "#0B0B0F" },
+    root: {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      spacing: 16,
+      align: "center",
+      padding: { t: 24, r: 20, b: 32, l: 20 },
+      size: { width: "fill", height: "fill" },
+      children: [
+        {
+          type: "image",
+          id: "hero-image",
+          url: {
+            light: "https://placehold.co/600x320/EEF2FF/1E1B4B.png",
+            dark: "https://placehold.co/600x320/1E1B4B/EEF2FF.png",
+          },
+          height: 160,
+          cornerRadius: 12,
+          alt: "Demo paywall hero",
+        },
+        {
+          type: "text",
+          id: "hero-title",
+          key: "hero.title",
+          role: "title",
+          align: "center",
+        },
+        {
+          type: "text",
+          id: "hero-subtitle",
+          key: "hero.subtitle",
+          role: "subtitle",
+          align: "center",
+          color: { light: "#4B5563", dark: "#9CA3AF" },
+        },
+        { type: "spacer", id: "hero-spacer", size: 8 },
+        {
+          type: "packageList",
+          id: "packages",
+          packageIds: [DEMO_PACKAGE_PRO, DEMO_PACKAGE_CREDITS],
+          defaultSelected: DEMO_PACKAGE_PRO,
+          cellLayout: "column",
+        },
+        {
+          type: "purchaseButton",
+          id: "purchase-cta",
+          labelKey: "cta.purchase",
+        },
+        {
+          type: "button",
+          id: "restore-cta",
+          labelKey: "cta.restore",
+          style: "plain",
+          action: { kind: "restore" },
+        },
+        {
+          type: "button",
+          id: "terms-cta",
+          labelKey: "cta.terms",
+          style: "plain",
+          action: { kind: "url", url: "https://example.com/terms" },
+        },
+      ],
+    },
+  };
+
+  await db
+    .insert(paywalls)
+    .values({
+      id: DEMO_PAYWALL_DEFAULT_ID,
+      projectId: DEMO_PROJECT_ID,
+      identifier: "demo_default",
+      name: "Demo Default Paywall",
+      offeringId: DEMO_OFFERING_ID,
+      remoteConfig: {
+        defaultLocale: "en",
+        locales: {
+          en: { headline: "Go Pro", cta: "Start free trial" },
+          tr: { headline: "Pro'ya geç", cta: "Ücretsiz denemeyi başlat" },
+        },
+      },
+      // Server-derived in the API: 2 whenever builderConfig is present.
+      configFormatVersion: 2,
+      builderConfig: demoBuilderConfig,
+      isActive: true,
+      metadata: { source: "seed" },
+    })
+    .onConflictDoNothing();
+
+  await db
+    .insert(paywalls)
+    .values({
+      id: DEMO_PAYWALL_PROMO_ID,
+      projectId: DEMO_PROJECT_ID,
+      identifier: "demo_promo",
+      name: "Demo Promo Paywall (remote config only)",
+      offeringId: DEMO_OFFERING_ID,
+      remoteConfig: {
+        defaultLocale: "tr",
+        locales: {
+          tr: {
+            headline: "Sana özel %40 indirim",
+            cta: "İndirimi kullan",
+            badge: "TR",
+          },
+          en: { headline: "40% off, just for you", cta: "Claim discount", badge: "TR" },
+        },
+      },
+      configFormatVersion: 1,
+      builderConfig: null,
+      isActive: true,
+      metadata: { source: "seed" },
+    })
+    .onConflictDoNothing();
+
+  // =============================================================
+  // Placement — ordered rows, first match wins. The all-users row
+  // (audienceId null) must be last; see placementRowsSchema.
+  // =============================================================
+  await db
+    .insert(placements)
+    .values({
+      id: DEMO_PLACEMENT_ID,
+      projectId: DEMO_PROJECT_ID,
+      identifier: "onboarding",
+      name: "Onboarding",
+      rows: [
+        {
+          audienceId: DEMO_AUDIENCE_TR_ID,
+          target: { type: "paywall", paywallId: DEMO_PAYWALL_PROMO_ID },
+        },
+        {
+          audienceId: null,
+          target: { type: "paywall", paywallId: DEMO_PAYWALL_DEFAULT_ID },
+        },
+      ],
+      isActive: true,
     })
     .onConflictDoNothing();
 
@@ -593,6 +772,8 @@ async function main() {
   console.log(`  subscribers: ${SUBSCRIBER_COUNT}`);
   console.log(`  experiments: 1 (paywall_price_test, RUNNING)`);
   console.log(`  flags:       1 (new_onboarding)`);
+  console.log(`  paywalls:    2 (demo_default [builder], demo_promo [remote config])`);
+  console.log(`  placements:  1 (onboarding → TR:demo_promo, all:demo_default)`);
 }
 
 main()
