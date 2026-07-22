@@ -22,6 +22,36 @@ export async function findBySession(
   return rows[0] ?? null;
 }
 
+/**
+ * The funnel purchase that recorded this Stripe subscription, if any.
+ *
+ * The Connect webhook's backstop needs a session id from an
+ * `invoice.paid`, and Stripe copies subscription metadata onto neither
+ * the invoice nor its PaymentIntent — so the id has to come from
+ * somewhere else. This row IS that mapping: the payment-intent endpoint
+ * wrote the subscription id here at creation time, and
+ * `funnel_purchases_stripe_sub_idx` covers the lookup. Asking Stripe
+ * instead would mean an extra API round-trip on EVERY paid invoice in
+ * every project, funnel or not, just to discover that almost all of them
+ * carry no funnel metadata.
+ *
+ * Not unique at the database level (`session_id` is), but at most one row
+ * can hold a given subscription id in practice: `upsertPending` conflicts
+ * on `session_id`, so a visitor who changes package overwrites the id on
+ * the same row rather than leaving a second one behind.
+ */
+export async function findByStripeSubscriptionId(
+  db: Db,
+  stripeSubscriptionId: string,
+): Promise<FunnelPurchase | null> {
+  const rows = await db
+    .select()
+    .from(funnelPurchases)
+    .where(eq(funnelPurchases.stripeSubscriptionId, stripeSubscriptionId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function markPaid(
   db: Db,
   id: string,
