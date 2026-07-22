@@ -6,6 +6,13 @@ import { drizzle } from "@rovenue/db";
 import { flattenAttributes } from "@rovenue/shared";
 import { evaluateExperiments } from "../../services/experiment-engine";
 import { ok } from "../../lib/response";
+import {
+  packagesSchema,
+  parseStoreIds,
+  type OfferingProductEntry,
+  type PackageSlot,
+  hydrateProducts,
+} from "../../lib/offering-hydration";
 
 // =============================================================
 // /v1/offerings
@@ -26,78 +33,6 @@ import { ok } from "../../lib/response";
 
 const SUBSCRIBER_HEADER = "x-rovenue-user-id";
 const EXPERIMENT_HEADER = "x-rovenue-experiment";
-
-// Shape of each item in Offering.packages JSON array
-const packageSchema = z.object({
-  identifier: z.string(),
-  productId: z.string(),
-  order: z.number().int().nonnegative().default(0),
-  isPromoted: z.boolean().default(false),
-  metadata: z.record(z.unknown()).optional(),
-});
-const packagesSchema = z.array(packageSchema);
-
-const storeIdsSchema = z.object({
-  apple: z.string().optional(),
-  google: z.string().optional(),
-  stripe: z.string().optional(),
-}).passthrough();
-
-function parseStoreIds(raw: unknown): Record<string, string> {
-  const parsed = storeIdsSchema.safeParse(raw);
-  return parsed.success ? (parsed.data as Record<string, string>) : {};
-}
-
-interface OfferingProductEntry {
-  packageIdentifier: string; // the package slot id ($rov_monthly…) from the offering
-  identifier: string;        // the product's own identifier (unchanged, additive)
-  type: string;
-  displayName: string;
-  order: number;
-  isPromoted: boolean;
-  accessIds: string[];
-  storeIds: Record<string, string>;
-  androidBasePlanId: string | null;
-  androidOfferId: string | null;
-  metadata: unknown;
-}
-
-type PackageSlot = z.infer<typeof packageSchema>;
-
-function hydrateProducts(
-  memberships: PackageSlot[],
-  productById: Map<string, {
-    identifier: string;
-    type: string;
-    displayName: string;
-    accessIds: string[];
-    isActive: boolean;
-    storeIds: unknown;
-    androidBasePlanId: string | null;
-    androidOfferId: string | null;
-  }>,
-): OfferingProductEntry[] {
-  return [...memberships]
-    .sort((a, b) => a.order - b.order)
-    .map((entry): OfferingProductEntry | null => {
-      const product = productById.get(entry.productId);
-      if (!product || !product.isActive) return null;
-      return {
-        packageIdentifier: entry.identifier,
-        identifier: product.identifier,
-        type: product.type,
-        displayName: product.displayName,
-        order: entry.order,
-        isPromoted: entry.isPromoted,
-        accessIds: product.accessIds,
-        storeIds: parseStoreIds(product.storeIds),
-        androidBasePlanId: product.androidBasePlanId ?? null,
-        androidOfferId: product.androidOfferId ?? null,
-        metadata: entry.metadata ?? {},
-      };
-    })
-    .filter((p): p is OfferingProductEntry => p !== null);
-}
 
 interface OfferingExperimentOverride {
   targetIdentifier: string;
