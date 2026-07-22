@@ -34,6 +34,13 @@ export type PaywallRendererProps = {
    * placeholder views, web consumers pass real store-formatted prices).
    */
   priceView?: Record<string, PackageView>;
+  /**
+   * Package -> intro-offer eligibility, keyed by packageIdentifier. Drives
+   * `overrides` with `when.kind === "introEligible"`. A package absent from
+   * this map is treated as NOT eligible — same as the prop being omitted
+   * entirely (eligibility is opt-in, never assumed).
+   */
+  eligibility?: Record<string, boolean>;
   onPurchase: (packageIdentifier: string) => void;
   onClose?: () => void;
   onRestore?: () => void;

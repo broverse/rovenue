@@ -1,5 +1,6 @@
-import { Fragment, type ReactElement } from "react";
+import { Fragment, type CSSProperties, type ReactElement } from "react";
 import {
+  applyOverrides,
   resolveText,
   resolveVariables,
   type BuilderConfig,
@@ -32,15 +33,47 @@ export type RenderCtx = {
   locale: string;
   colorScheme: "light" | "dark";
   priceView?: Record<string, PackageView>;
+  /** Package -> intro-offer eligibility, keyed by packageIdentifier. Absent -> not eligible. */
+  eligibility?: Record<string, boolean>;
   /** Live selection state, lifted into `PaywallRenderer`'s useState. */
   selectedPackageId: string | null;
   selectedPackage: PackageView | null;
+  /**
+   * True for every node inside a `packageList.cellTemplate` subtree
+   * (set once per cell when the template is rendered, then inherited
+   * unchanged by descendants). `overrides` with `when.kind === "selected"`
+   * can only ever be active when this is true — see `activeOverrideConditions`.
+   */
+  insideCellTemplate: boolean;
+  /**
+   * The package the current cellTemplate cell is scoped to. Null outside
+   * any cellTemplate subtree. Drives both the "relevant package" for
+   * `introEligible` overrides and the `selected` override (cellPackageId
+   * === selectedPackageId) while `insideCellTemplate` is true.
+   */
+  cellPackageId: string | null;
   onSelectPackage: (packageIdentifier: string) => void;
   onPurchase: (packageIdentifier: string) => void;
   onClose?: () => void;
   onRestore?: () => void;
   onUrl?: (url: string) => void;
 };
+
+/**
+ * The `{ introEligible, selected }` condition set active for `node`'s
+ * position in the tree, per `RenderCtx`. Relevance follows the same rule
+ * as `{{variable}}` resolution: cell-scoped inside a cellTemplate subtree
+ * (the cell's own package), selected-scoped everywhere else (the globally
+ * selected package). `selected` is only ever true inside a cellTemplate
+ * subtree, for the cell whose package is the current global selection.
+ */
+function activeOverrideConditions(ctx: RenderCtx): { introEligible: boolean; selected: boolean } {
+  const relevantPackageId = ctx.insideCellTemplate ? ctx.cellPackageId : ctx.selectedPackageId;
+  const introEligible = relevantPackageId !== null ? (ctx.eligibility?.[relevantPackageId] ?? false) : false;
+  const selected =
+    ctx.insideCellTemplate && ctx.cellPackageId !== null && ctx.cellPackageId === ctx.selectedPackageId;
+  return { introEligible, selected };
+}
 
 /**
  * Resolve a package's `{{variable}}` substitution values. `packageName`
@@ -78,6 +111,16 @@ export function resolvePackageView(
     price: view?.price ?? "",
     pricePerPeriod: view?.pricePerPeriod ?? "",
     period: view?.period ?? "",
+    // Optional Phase D3 fields pass through as-is (undefined when absent from
+    // `priceView`) — `resolveVariables` leaves a KNOWN variable verbatim when
+    // its backing field is undefined, same signal as an unconfigured one.
+    pricePerDay: view?.pricePerDay,
+    pricePerWeek: view?.pricePerWeek,
+    pricePerMonth: view?.pricePerMonth,
+    pricePerYear: view?.pricePerYear,
+    introPrice: view?.introPrice,
+    introPeriod: view?.introPeriod,
+    relativeDiscount: view?.relativeDiscount,
   };
 }
 
@@ -204,6 +247,20 @@ function renderButton(node: ButtonNode, ctx: RenderCtx): ReactElement | null {
   );
 }
 
+function cellWrapperStyle(isSelected: boolean): CSSProperties {
+  return {
+    cursor: "pointer",
+    display: "flex",
+    flexDirection: "column",
+    gap: "2px",
+    padding: "10px 12px",
+    borderRadius: "8px",
+    border: isSelected ? "2px solid #111111" : "1px solid #cccccc",
+    background: "transparent",
+    textAlign: "left",
+  };
+}
+
 function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement {
   const packageIds = effectivePackageIds(node.packageIds, ctx.offering);
   return (
@@ -217,8 +274,37 @@ function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement 
       }}
     >
       {packageIds.map((packageId, index) => {
-        const view = resolvePackageView(ctx.offering, ctx.priceView, packageId);
         const isSelected = packageId === ctx.selectedPackageId;
+
+        // With a cellTemplate: render the template subtree once per package,
+        // INSIDE the same pressable cell wrapper (aria-pressed/selection/click
+        // unchanged) — cell-scoped `ctx.selectedPackage` is what makes
+        // `{{price}}` etc. inside the template resolve to THIS cell's
+        // package rather than the globally selected one.
+        if (node.cellTemplate) {
+          const cellCtx: RenderCtx = {
+            ...ctx,
+            insideCellTemplate: true,
+            cellPackageId: packageId,
+            selectedPackage: resolvePackageView(ctx.offering, ctx.priceView, packageId),
+          };
+          return (
+            <button
+              type="button"
+              key={index}
+              data-rov-package={packageId}
+              aria-pressed={isSelected}
+              onClick={() => ctx.onSelectPackage(packageId)}
+              style={cellWrapperStyle(isSelected)}
+            >
+              {renderNode(node.cellTemplate, cellCtx)}
+            </button>
+          );
+        }
+
+        // No cellTemplate -> built-in cell (name + price), unchanged from
+        // before overrides/cellTemplate existed.
+        const view = resolvePackageView(ctx.offering, ctx.priceView, packageId);
         return (
           <button
             type="button"
@@ -226,17 +312,7 @@ function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement 
             data-rov-package={packageId}
             aria-pressed={isSelected}
             onClick={() => ctx.onSelectPackage(packageId)}
-            style={{
-              cursor: "pointer",
-              display: "flex",
-              flexDirection: "column",
-              gap: "2px",
-              padding: "10px 12px",
-              borderRadius: "8px",
-              border: isSelected ? "2px solid #111111" : "1px solid #cccccc",
-              background: "transparent",
-              textAlign: "left",
-            }}
+            style={cellWrapperStyle(isSelected)}
           >
             <span style={{ fontSize: "14px", fontWeight: 600 }}>{view?.packageName ?? packageId}</span>
             {view?.price ? <span style={{ fontSize: "12px" }}>{view.price}</span> : null}
@@ -283,28 +359,36 @@ function renderSpacer(node: SpacerNode, ctx: RenderCtx): ReactElement {
   return <div data-rov-node={node.id} style={{ width: size, height: size, flexShrink: 0 }} />;
 }
 
-/** Recursive dispatcher: known node type -> its component; unknown type or a thrown error -> `fallback` if present, else nothing. Never throws. */
+/** Recursive dispatcher: known node type -> its component; unknown type or a thrown error -> `fallback` if present, else nothing. Never throws.
+ *
+ * Every node passes through `applyOverrides` here, BEFORE any style/text
+ * resolution happens in the per-type renderers below — `resolved` (not the
+ * original `node`) is what gets dispatched. `applyOverrides` only ever
+ * touches a node's own overridable VISUAL props (see `OVERRIDABLE_PROP_KEYS`
+ * in shared), so `resolved.type` always equals `node.type` and the switch
+ * below narrows exactly as it did before overrides existed. */
 export function renderNode(node: PaywallNode, ctx: RenderCtx): ReactElement | null {
+  const resolved = applyOverrides(node, activeOverrideConditions(ctx));
   try {
-    switch (node.type) {
+    switch (resolved.type) {
       case "stack":
-        return renderStack(node, ctx);
+        return renderStack(resolved, ctx);
       case "text":
-        return renderText(node, ctx);
+        return renderText(resolved, ctx);
       case "image":
-        return renderImage(node, ctx);
+        return renderImage(resolved, ctx);
       case "button":
-        return renderButton(node, ctx);
+        return renderButton(resolved, ctx);
       case "packageList":
-        return renderPackageList(node, ctx);
+        return renderPackageList(resolved, ctx);
       case "purchaseButton":
-        return renderPurchaseButton(node, ctx);
+        return renderPurchaseButton(resolved, ctx);
       case "spacer":
-        return renderSpacer(node, ctx);
+        return renderSpacer(resolved, ctx);
       default:
-        return renderFallbackOrNull(node, ctx);
+        return renderFallbackOrNull(resolved, ctx);
     }
   } catch {
-    return renderFallbackOrNull(node, ctx);
+    return renderFallbackOrNull(resolved, ctx);
   }
 }

@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
-import type { BuilderConfig, PackageView, PaywallNode } from "@rovenue/shared/paywall";
+import type { BuilderConfig, OverrideCondition, PackageView, PaywallNode } from "@rovenue/shared/paywall";
 import { PaywallRenderer } from "./renderer";
 import type { RendererOffering } from "./types";
 
@@ -478,6 +478,352 @@ describe("PaywallRenderer", () => {
       expect(annualCell.textContent).toContain("$39.99");
       const monthlyCell = container.querySelector('[data-rov-package="monthly"]') as HTMLElement;
       expect(monthlyCell.textContent).toContain("$4.99");
+    });
+
+    it("resolves new optional priceView fields, leaving an absent field's placeholder verbatim", () => {
+      const config = baseConfig({
+        localizations: {
+          en: {
+            title: "Go Pro",
+            subtitle: "Unlock everything",
+            close: "Close",
+            purchase: "Subscribe for {{price}}",
+            promo: "{{pricePerMonth}} monthly, then {{introPrice}} intro, save {{relativeDiscount}}",
+          },
+        },
+        root: {
+          type: "stack",
+          id: "root",
+          axis: "v",
+          children: [
+            { type: "text", id: "promo", key: "promo", role: "body" },
+            {
+              type: "packageList",
+              id: "packages",
+              packageIds: ["monthly", "annual"],
+              defaultSelected: "annual",
+              cellLayout: "row",
+            },
+            { type: "purchaseButton", id: "purchase", labelKey: "purchase" },
+          ],
+        },
+      });
+      const richPriceView: Record<string, PackageView> = {
+        annual: {
+          packageName: "Annual",
+          price: "$39.99",
+          pricePerPeriod: "$3.33/mo",
+          period: "year",
+          pricePerMonth: "$3.33",
+          relativeDiscount: "33%",
+          // introPrice intentionally absent -> its placeholder stays verbatim.
+        },
+      };
+      const { getByText } = render(
+        <PaywallRenderer
+          config={config}
+          offering={offering}
+          priceView={richPriceView}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      expect(getByText("$3.33 monthly, then {{introPrice}} intro, save 33%")).toBeInTheDocument();
+    });
+  });
+
+  describe("overrides + eligibility", () => {
+    function eligibilityConfig(): BuilderConfig {
+      return baseConfig({
+        localizations: {
+          en: {
+            title: "Go Pro",
+            title_eligible: "Try Free Then Go Pro",
+            subtitle: "Unlock everything",
+            close: "Close",
+            purchase: "Subscribe for {{price}}",
+          },
+        },
+        root: {
+          type: "stack",
+          id: "root",
+          axis: "v",
+          children: [
+            {
+              type: "text",
+              id: "title",
+              key: "title",
+              role: "title",
+              overrides: [{ when: { kind: "introEligible" }, props: { key: "title_eligible" } }],
+            },
+            {
+              type: "packageList",
+              id: "packages",
+              packageIds: ["monthly", "annual"],
+              defaultSelected: "annual",
+              cellLayout: "row",
+            },
+            { type: "purchaseButton", id: "purchase", labelKey: "purchase" },
+          ],
+        },
+      });
+    }
+
+    it("applies an introEligible override's swapped text key when the selected package is eligible", () => {
+      const { getByText, queryByText } = render(
+        <PaywallRenderer
+          config={eligibilityConfig()}
+          offering={offering}
+          eligibility={{ annual: true }}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      expect(getByText("Try Free Then Go Pro")).toBeInTheDocument();
+      expect(queryByText("Go Pro")).toBeNull();
+    });
+
+    it("does not apply the override when the selected package is not eligible", () => {
+      const { getByText } = render(
+        <PaywallRenderer
+          config={eligibilityConfig()}
+          offering={offering}
+          eligibility={{ monthly: true }}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      // "annual" is selected (defaultSelected) but eligibility only covers "monthly".
+      expect(getByText("Go Pro")).toBeInTheDocument();
+    });
+
+    it("treats eligibility as false for everyone when the prop is absent", () => {
+      const { getByText } = render(
+        <PaywallRenderer
+          config={eligibilityConfig()}
+          offering={offering}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      expect(getByText("Go Pro")).toBeInTheDocument();
+    });
+
+    it("re-evaluates introEligible against the newly selected package after a click", () => {
+      const { getByText, container } = render(
+        <PaywallRenderer
+          config={eligibilityConfig()}
+          offering={offering}
+          eligibility={{ monthly: true }}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      expect(getByText("Go Pro")).toBeInTheDocument();
+      fireEvent.click(container.querySelector('[data-rov-package="monthly"]') as HTMLButtonElement);
+      expect(getByText("Try Free Then Go Pro")).toBeInTheDocument();
+    });
+
+    it("skips an override with an unknown when.kind defensively", () => {
+      const config = eligibilityConfig();
+      const titleNode = config.root.children.find((c) => c.type === "text")!;
+      titleNode.overrides = [
+        {
+          when: { kind: "somethingFuture" } as unknown as OverrideCondition,
+          props: { key: "title_eligible" },
+        },
+      ];
+      const { getByText } = render(
+        <PaywallRenderer
+          config={config}
+          offering={offering}
+          eligibility={{ annual: true }}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      // an unknown condition kind is never active, regardless of eligibility.
+      expect(getByText("Go Pro")).toBeInTheDocument();
+    });
+
+    it("never activates a selected-condition override on a node outside any cellTemplate subtree", () => {
+      const config = eligibilityConfig();
+      const purchaseNode = config.root.children.find(
+        (c): c is Extract<PaywallNode, { type: "purchaseButton" }> => c.type === "purchaseButton",
+      )!;
+      purchaseNode.overrides = [{ when: { kind: "selected" }, props: { labelKey: "close" } }];
+      const { getByText } = render(
+        <PaywallRenderer
+          config={config}
+          offering={offering}
+          priceView={priceView}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      // base labelKey "purchase" resolves normally; "selected" never activates outside cellTemplate.
+      expect(getByText("Subscribe for $39.99")).toBeInTheDocument();
+    });
+  });
+
+  describe("cellTemplate", () => {
+    function cellTemplateConfig(): BuilderConfig {
+      return {
+        formatVersion: 2,
+        defaultLocale: "en",
+        localizations: {
+          en: { cell_name: "{{packageName}}", cell_price: "{{price}}" },
+        },
+        root: {
+          type: "stack",
+          id: "root",
+          axis: "v",
+          children: [
+            {
+              type: "packageList",
+              id: "packages",
+              packageIds: ["monthly", "annual"],
+              defaultSelected: "annual",
+              cellLayout: "row",
+              cellTemplate: {
+                type: "stack",
+                id: "cell_root",
+                axis: "v",
+                overrides: [
+                  { when: { kind: "selected" }, props: { background: { light: "#EEF2FF" } } },
+                ],
+                children: [
+                  { type: "text", id: "cell_name", key: "cell_name", role: "body" },
+                  { type: "text", id: "cell_price", key: "cell_price", role: "caption" },
+                ],
+              },
+            },
+          ],
+        },
+      };
+    }
+
+    it("renders the cellTemplate subtree once per effective package, with cell-scoped variables", () => {
+      const { container } = render(
+        <PaywallRenderer
+          config={cellTemplateConfig()}
+          offering={offering}
+          priceView={priceView}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      const monthlyCell = container.querySelector('[data-rov-package="monthly"]') as HTMLElement;
+      const annualCell = container.querySelector('[data-rov-package="annual"]') as HTMLElement;
+      expect(monthlyCell.textContent).toContain("Monthly");
+      expect(monthlyCell.textContent).toContain("$4.99");
+      expect(annualCell.textContent).toContain("Annual");
+      expect(annualCell.textContent).toContain("$39.99");
+    });
+
+    it("keeps aria-pressed/selection/click behavior unchanged for cellTemplate cells", () => {
+      const { container } = render(
+        <PaywallRenderer
+          config={cellTemplateConfig()}
+          offering={offering}
+          priceView={priceView}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      const monthlyCell = container.querySelector('[data-rov-package="monthly"]') as HTMLButtonElement;
+      const annualCell = container.querySelector('[data-rov-package="annual"]') as HTMLButtonElement;
+      expect(annualCell.getAttribute("aria-pressed")).toBe("true");
+      expect(monthlyCell.getAttribute("aria-pressed")).toBe("false");
+      fireEvent.click(monthlyCell);
+      expect(monthlyCell.getAttribute("aria-pressed")).toBe("true");
+      expect(annualCell.getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("applies a selected-condition override only to the currently-selected cell's subtree", () => {
+      const { container } = render(
+        <PaywallRenderer
+          config={cellTemplateConfig()}
+          offering={offering}
+          priceView={priceView}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      const monthlyCellRoot = container.querySelector(
+        '[data-rov-package="monthly"] [data-rov-node="cell_root"]',
+      ) as HTMLElement;
+      const annualCellRoot = container.querySelector(
+        '[data-rov-package="annual"] [data-rov-node="cell_root"]',
+      ) as HTMLElement;
+      // "annual" is defaultSelected -> its cell_root subtree gets the override background.
+      expect(annualCellRoot.style.backgroundColor).toBe("rgb(238, 242, 255)"); // #EEF2FF
+      expect(monthlyCellRoot.style.backgroundColor).toBe("");
+    });
+
+    it("applies overrides in array order (later wins) when both introEligible and selected are active", () => {
+      const config: BuilderConfig = {
+        formatVersion: 2,
+        defaultLocale: "en",
+        localizations: { en: { cell_name: "Plan" } },
+        root: {
+          type: "stack",
+          id: "root",
+          axis: "v",
+          children: [
+            {
+              type: "packageList",
+              id: "packages",
+              packageIds: ["monthly", "annual"],
+              defaultSelected: "annual",
+              cellLayout: "row",
+              cellTemplate: {
+                type: "text",
+                id: "cell_name",
+                key: "cell_name",
+                role: "body",
+                overrides: [
+                  { when: { kind: "introEligible" }, props: { align: "start" } },
+                  { when: { kind: "selected" }, props: { align: "end" } },
+                ],
+              },
+            },
+          ],
+        },
+      };
+      const { container } = render(
+        <PaywallRenderer
+          config={config}
+          offering={offering}
+          eligibility={{ annual: true }}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      const annualText = container.querySelector(
+        '[data-rov-package="annual"] [data-rov-node="cell_name"]',
+      ) as HTMLElement;
+      const monthlyText = container.querySelector(
+        '[data-rov-package="monthly"] [data-rov-node="cell_name"]',
+      ) as HTMLElement;
+      // annual: introEligible AND selected both active -> later ("selected" -> "end"/"right") wins.
+      expect(annualText.style.textAlign).toBe("right");
+      // monthly: neither active (not eligible, not selected) -> no override applied.
+      expect(monthlyText.style.textAlign).toBe("");
+    });
+
+    it("without cellTemplate, renders the built-in cell exactly as before (backward-compat)", () => {
+      const { container } = render(
+        <PaywallRenderer
+          config={baseConfig()}
+          offering={offering}
+          priceView={priceView}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      const monthlyCell = container.querySelector('[data-rov-package="monthly"]') as HTMLElement;
+      expect(monthlyCell.outerHTML).toMatchInlineSnapshot(`"<button type="button" data-rov-package="monthly" aria-pressed="false" style="cursor: pointer; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 8px; border: 1px solid rgb(204, 204, 204); background: transparent; text-align: left;"><span style="font-size: 14px; font-weight: 600;">Monthly</span><span style="font-size: 12px;">$4.99</span></button>"`);
     });
   });
 });
