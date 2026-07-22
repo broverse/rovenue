@@ -46,22 +46,94 @@ function toRunnerOffering(offering: HydratedFunnelOffering | null): RendererOffe
 }
 
 /**
- * Renders a server-resolved amount.
+ * How many minor units STRIPE scales `unit_amount` by — which is not
+ * always how the currency is written.
+ *
+ * CLDR (what `Intl` exposes) describes presentation; Stripe defines the
+ * scaling of `unit_amount`, and for two currencies they disagree. ISK
+ * and UGX both became zero-decimal in ISO 4217, and Intl duly reports 0
+ * fraction digits for each — but Stripe still requires them as
+ * two-decimal values for backwards compatibility: "to charge 5 ISK,
+ * provide an `amount` value of `500`", and the same sentence verbatim
+ * for UGX (https://docs.stripe.com/currencies — Special cases). An
+ * Intl-derived divisor would render that 5 ISK charge as "ISK 500":
+ * displayed price a hundred times the money actually taken.
+ *
+ * HUF and TWD also have special-case rows, but those constrain PAYOUTS
+ * only ("Stripe treats HUF as a zero-decimal currency for payouts, even
+ * though you can charge two-decimal amounts") — as charge currencies
+ * they are ordinary two-decimal, which the default already gives.
+ *
+ * Only the DIVISOR comes from this table. Intl still decides how the
+ * divided number is written, which is why ISK 5 prints as "ISK 5".
+ */
+const STRIPE_ZERO_DECIMAL_CURRENCIES = new Set([
+  "BIF",
+  "CLP",
+  "DJF",
+  "GNF",
+  "JPY",
+  "KMF",
+  "KRW",
+  "MGA",
+  "PYG",
+  "RWF",
+  "VND",
+  "VUV",
+  "XAF",
+  "XOF",
+  "XPF",
+  // UGX is deliberately NOT here. Stripe lists it among the
+  // zero-decimal currencies and then overrides itself in the
+  // special-cases table; the override is the one that governs
+  // `unit_amount`, so UGX falls through to the default of 2.
+]);
+
+const STRIPE_THREE_DECIMAL_CURRENCIES = new Set([
+  "BHD",
+  "JOD",
+  "KWD",
+  "OMR",
+  "TND",
+]);
+
+export function stripeMinorUnitExponent(currency: string): number {
+  const code = currency.toUpperCase();
+  if (STRIPE_THREE_DECIMAL_CURRENCIES.has(code)) return 3;
+  if (STRIPE_ZERO_DECIMAL_CURRENCIES.has(code)) return 0;
+  return 2;
+}
+
+/**
+ * Renders a server-resolved amount, or null if it cannot be rendered.
  *
  * The NUMBER is Stripe's, read server-side and shipped verbatim — the
  * browser only chooses how to draw it, so what the page shows and what
- * the card is charged cannot drift. Even the minor-unit divisor comes
- * from Intl's own currency data rather than a hardcoded 100: JPY has no
- * minor units, and dividing it by 100 would advertise a price a hundred
- * times too small.
+ * the card is charged cannot drift.
+ *
+ * `Intl.NumberFormat` throws `RangeError` on a currency or locale it
+ * doesn't accept, and this runs during render: unguarded, one bad
+ * three-letter code would take the whole page down to the router's
+ * error boundary. `locale` in particular reaches us through an
+ * unvalidated cast of the published funnel's `locales`, so `"en_US"` in
+ * someone's config is enough. Answering null degrades that one price
+ * instead — the same outcome a package the server couldn't price
+ * already has.
  */
-function formatAmount(unitAmount: number, currency: string, locale: string): string {
-  const fmt = new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: currency.toUpperCase(),
-  });
-  const digits = fmt.resolvedOptions().maximumFractionDigits ?? 2;
-  return fmt.format(unitAmount / 10 ** digits);
+export function formatAmount(
+  unitAmount: number,
+  currency: string,
+  locale: string,
+): string | null {
+  const amount = unitAmount / 10 ** stripeMinorUnitExponent(currency);
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: currency.toUpperCase(),
+    }).format(amount);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -70,7 +142,7 @@ function formatAmount(unitAmount: number, currency: string, locale: string): str
  * package the server could not price is simply absent — the renderer
  * then leaves its placeholders verbatim rather than inventing a number.
  */
-function toPriceView(
+export function toPriceView(
   offering: HydratedFunnelOffering | null,
   prices: Record<string, ResolvedFunnelPrice> | undefined,
   locale: string,
@@ -82,6 +154,9 @@ function toPriceView(
   const out: Record<string, PackageView> = {};
   for (const [identifier, price] of Object.entries(prices)) {
     const amount = formatAmount(price.unitAmount, price.currency, locale);
+    // Unformattable: leave the package out entirely rather than show a
+    // half-built view. The renderer keeps its placeholders verbatim.
+    if (amount === null) continue;
     const period = !price.interval
       ? ""
       : price.intervalCount && price.intervalCount > 1
@@ -101,10 +176,11 @@ type Status =
   | { kind: "loading" }
   | { kind: "error"; message: string; code?: string }
   | { kind: "ready" }
-  // `tokenIssued: false` means the money moved but the plaintext claim
-  // token had already been handed out (the Connect webhook completed
-  // this session first). Still a success — just a different next step.
-  | { kind: "done"; reason: "end" | "paywall_paid"; tokenIssued?: boolean }
+  | { kind: "done"; reason: "end" }
+  // The whole outcome is kept, not just a flag: the success screen has
+  // to render the deep link the /confirm response carried and write the
+  // token to the clipboard from that click.
+  | { kind: "done"; reason: "paywall_paid"; outcome: FunnelPaymentOutcome }
   | { kind: "paywall_pending"; pageId: string };
 
 interface State {
@@ -195,17 +271,14 @@ export function FunnelRunner({ slug }: { slug: string }) {
     }
   };
 
-  // The money has moved. The token — when there is one to hand out —
-  // goes to the clipboard so a fresh install can pick it up without a
-  // deep link (NativeLink-style deferred handoff).
-  const handlePaid = async (outcome: FunnelPaymentOutcome) => {
-    if (outcome.token) await writeFunnelTokenToClipboard(outcome.token);
+  // The money has moved. Nothing is written to the clipboard here: by
+  // this point we are seconds past the buyer's tap (confirmPayment plus
+  // up to ~7s of /confirm retries), transient user activation is long
+  // gone, and Safari would reject the write silently. The handoff moves
+  // to the success screen's CTA, where the gesture is real.
+  const handlePaid = (outcome: FunnelPaymentOutcome) => {
     setPayingPackage(null);
-    setStatus({
-      kind: "done",
-      reason: "paywall_paid",
-      tokenIssued: outcome.token !== null,
-    });
+    setStatus({ kind: "done", reason: "paywall_paid", outcome });
   };
 
   if (status.kind === "loading") {
@@ -220,16 +293,12 @@ export function FunnelRunner({ slug }: { slug: string }) {
     );
   }
   if (status.kind === "done") {
-    return (
+    return status.reason === "paywall_paid" ? (
+      <PaidMessage outcome={status.outcome} />
+    ) : (
       <CenteredMessage
-        title={status.reason === "paywall_paid" ? "You're all set" : "All done"}
-        body={
-          status.reason !== "paywall_paid"
-            ? "You've reached the end of this funnel."
-            : status.tokenIssued
-              ? "Payment received. Open the app to finish setting up your account."
-              : "Payment received. Open the app and restore your purchase with the email you paid with."
-        }
+        title="All done"
+        body="You've reached the end of this funnel."
       />
     );
   }
@@ -282,7 +351,7 @@ export function FunnelRunner({ slug }: { slug: string }) {
           sessionId={state.sessionId}
           packageIdentifier={payingPackage}
           priceLabel={priceView?.[payingPackage]?.price}
-          onPaid={(outcome) => void handlePaid(outcome)}
+          onPaid={handlePaid}
           onCancel={() => setPayingPackage(null)}
         />
       ) : builderPaywall ? (
@@ -312,12 +381,77 @@ export function FunnelRunner({ slug }: { slug: string }) {
   );
 }
 
-function CenteredMessage({ title, body }: { title: string; body?: string }) {
+/**
+ * The screen a paying buyer lands on.
+ *
+ * The CTA is the point of it. `/confirm` hands back a deep link and a
+ * universal link alongside the token, and this is the one place where a
+ * click is a genuine user gesture — so the clipboard write (the
+ * deferred handoff a fresh install reads on first launch) happens
+ * inside that click rather than seconds earlier where the browser would
+ * refuse it.
+ *
+ * No token means the Connect webhook completed the session first and
+ * handed the plaintext out already. The money moved; the route back in
+ * is a restore, and the copy says exactly that.
+ */
+function PaidMessage({ outcome }: { outcome: FunnelPaymentOutcome }) {
+  const openUrl = outcome.deepLinkUrl ?? outcome.universalLinkUrl;
+  const token = outcome.token;
+  const handOff = () => {
+    if (token) void writeFunnelTokenToClipboard(token);
+  };
+
+  return (
+    <CenteredMessage
+      title="You're all set"
+      body={
+        token
+          ? "Payment received. Open the app to finish setting up your account."
+          : "Payment received. Open the app and restore your purchase with the email you paid with."
+      }
+    >
+      {token &&
+        (openUrl ? (
+          <a
+            href={openUrl}
+            onClick={handOff}
+            className="mt-4 inline-block rounded-lg bg-zinc-900 px-5 py-3 text-[14px] font-semibold text-white no-underline"
+          >
+            Open the app
+          </a>
+        ) : (
+          // No link configured for this project — the clipboard is the
+          // only handoff left, and it still needs the gesture.
+          <button
+            type="button"
+            onClick={handOff}
+            className="mt-4 inline-block rounded-lg bg-zinc-900 px-5 py-3 text-[14px] font-semibold text-white"
+          >
+            Copy my access code
+          </button>
+        ))}
+    </CenteredMessage>
+  );
+}
+
+function CenteredMessage({
+  title,
+  body,
+  children,
+}: {
+  title: string;
+  body?: string;
+  children?: React.ReactNode;
+}) {
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-white p-6 text-center text-rv-mute-700">
       <div className="max-w-md">
-        <h1 className="m-0 text-[20px] font-semibold text-foreground">{title}</h1>
+        {/* Explicitly dark: `text-foreground` is #fafafa, which on this
+            white card renders the headline invisible. */}
+        <h1 className="m-0 text-[20px] font-semibold text-zinc-900">{title}</h1>
         {body && <p className="mt-2 text-[13px] leading-relaxed">{body}</p>}
+        {children}
       </div>
     </div>
   );
