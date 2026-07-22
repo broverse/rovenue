@@ -214,7 +214,10 @@ export const placementsDashboardRoute = new Hono()
       throw new HTTPException(404, { message: "Placement not found" });
     }
 
-    const metrics = await computePlacementMetrics(id, projectId);
+    // ClickHouse rows key on the placement's business identifier (the SDK's
+    // presentedContext carries placement.identifier, not the DB id) — passing
+    // the route's DB id here would match zero rows forever.
+    const metrics = await computePlacementMetrics(placement.identifier, projectId);
     return c.json(ok(metrics));
   })
   .patch("/:id", validate("json", updateBodySchema), async (c) => {

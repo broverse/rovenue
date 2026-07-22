@@ -297,6 +297,25 @@ describe("POST /v1/events — paywall_view", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it("rejects a paywall_view with NO paywallContext at all → 400 (superRefine)", async () => {
+    // Without this guard the event would flow to ClickHouse as an
+    // all-empty ('','') row — Rovenue SDKs always attach the context
+    // or skip the event, so a missing context is a client bug.
+    const app = buildEventsApp();
+    const res = await app.request("/v1/events", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${PUBLIC_KEY}`,
+      },
+      body: JSON.stringify({
+        eventType: "paywall_view",
+        occurredAt: new Date().toISOString(),
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
 });
 
 // =============================================================

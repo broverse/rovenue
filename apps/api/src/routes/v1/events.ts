@@ -94,7 +94,19 @@ export const eventEnvelopeSchema = z
       })
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((body, ctx) => {
+    // A paywall_view without its attribution payload would flow to the
+    // ClickHouse pipeline as an all-empty ('','') row — reject it up-front.
+    // Rovenue SDKs always attach paywallContext (or skip the event entirely).
+    if (body.eventType === "paywall_view" && !body.paywallContext) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["paywallContext"],
+        message: "paywallContext is required for paywall_view events",
+      });
+    }
+  });
 
 export type EventEnvelopeBody = z.infer<typeof eventEnvelopeSchema>;
 
