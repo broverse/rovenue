@@ -63,21 +63,38 @@ async function checkMode(mode: ConnectMode): Promise<void> {
   const stripe = getConnectPlatformStripe(mode === "live");
   if (!stripe) return;
 
-  const endpoints = await stripe.webhookEndpoints.list({ limit: 100 });
-  const enabled = endpoints.data.filter((e) => e.status === "enabled");
+  // Paginated, not a single page. A platform with more than one page of
+  // endpoints would otherwise have the Connect one fall off the end of
+  // `limit: 100` and be reported missing — or, worse under the old
+  // fallback, have some unrelated endpoint answer for it.
+  const all = await stripe.webhookEndpoints
+    .list({ limit: 100 })
+    .autoPagingToArray({ limit: 1000 });
+  const enabled = all.filter((e) => e.status === "enabled");
 
-  // Prefer the endpoints that are unmistakably ours. Stripe does not
+  // Only the endpoints that are unmistakably ours count. Stripe does not
   // report on a retrieved endpoint whether it was created with
-  // `connect: true`, so the URL is the only discriminator available —
-  // and when a proxy has rewritten the path there is nothing to match,
-  // so fall back to every enabled endpoint rather than crying wolf.
-  const byPath = enabled.filter((e) => e.url.includes(CONNECT_WEBHOOK_PATH));
-  const candidates = byPath.length > 0 ? byPath : enabled;
+  // `connect: true`, so the URL is the only discriminator available.
+  const candidates = enabled.filter((e) => e.url.includes(CONNECT_WEBHOOK_PATH));
 
   if (candidates.length === 0) {
-    log.error(
-      "no enabled Stripe webhook endpoint found on the platform account; funnel purchases will not be backstopped",
-      { mode },
+    // Deliberately NOT "fall back to every enabled endpoint". That
+    // fallback could PASS on the wrong endpoint entirely: a platform
+    // billing endpoint subscribed to `payment_intent.succeeded` for
+    // Rovenue's own subscriptions would satisfy a check the actual
+    // Connect endpoint fails, and the silent gap this whole module
+    // exists to surface would stay silent — while looking verified.
+    // "Could not verify" is the only honest answer, and it is a
+    // different line from "verified and missing" so an operator behind
+    // a path-rewriting proxy can tell the two apart.
+    log.warn(
+      "could not identify the platform's Connect webhook endpoint by URL; funnel backstop coverage is UNVERIFIED",
+      {
+        mode,
+        expectedPath: CONNECT_WEBHOOK_PATH,
+        requiredEvents: REQUIRED_EVENTS,
+        enabledEndpoints: enabled.map((e) => e.url),
+      },
     );
     return;
   }
@@ -89,7 +106,6 @@ async function checkMode(mode: ConnectMode): Promise<void> {
       {
         mode,
         missingEvent: event,
-        matchedByPath: byPath.length > 0,
         endpoints: candidates.map((e) => e.url),
       },
     );
