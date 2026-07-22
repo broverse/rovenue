@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { normalizeFunnelSettings } from "./settings-normalize";
 
 describe("normalizeFunnelSettings", () => {
@@ -69,5 +70,18 @@ describe("normalizeFunnelSettings", () => {
     const result = normalizeFunnelSettings(input);
     expect(Object.prototype.hasOwnProperty.call(result, "__proto__")).toBe(true);
     expect((result as any)["__proto__"]).toEqual({ polluted: true });
+  });
+
+  // The two tests above are unit-level only. Over HTTP the key never
+  // reaches this function: the route validates the body with
+  // `z.record(z.unknown())`, which drops `__proto__` on the way in. Pinned
+  // here so nobody reads "never silently dropped" as an end-to-end promise
+  // and goes looking for the bug in the normalizer.
+  it("is bypassed for __proto__ over HTTP — zod drops the key first", () => {
+    const parsed = z
+      .record(z.unknown())
+      .parse(JSON.parse('{"__proto__": {"polluted": true}, "devMode": true}'));
+    expect(Object.getOwnPropertyNames(parsed)).toEqual(["devMode"]);
+    expect(normalizeFunnelSettings(parsed)).toEqual({ dev_mode: true });
   });
 });

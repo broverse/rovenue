@@ -22,6 +22,13 @@ CAMEL_TO_SNAKE.androidUrl = "play_store_url";
  * Unrecognised keys pass through untouched — this is a rename, not a
  * whitelist, so a future setting is never silently dropped. An explicit
  * snake_case key always wins over its camelCase twin.
+ *
+ * One key cannot survive the round trip regardless of what this function
+ * does: the route parses the body with `z.record(z.unknown())`, and zod
+ * drops `__proto__` before the handler ever runs. The null-prototype maps
+ * below still matter — they keep a direct caller from turning that key
+ * into `Object.prototype` — but a settings field must never be named
+ * `__proto__`, because over HTTP it is gone before we see it.
  */
 export function normalizeFunnelSettings(raw: unknown): Record<string, unknown> {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
