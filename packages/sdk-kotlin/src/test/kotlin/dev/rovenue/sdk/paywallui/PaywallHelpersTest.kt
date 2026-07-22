@@ -1,18 +1,34 @@
 package dev.rovenue.sdk.paywallui
 
+import dev.rovenue.sdk.IntroPrice
 import dev.rovenue.sdk.Offering
 import dev.rovenue.sdk.Package
 import dev.rovenue.sdk.PackageType
+import dev.rovenue.sdk.PaymentMode
 import dev.rovenue.sdk.Period
 import dev.rovenue.sdk.PeriodUnit
 import dev.rovenue.sdk.ProductCategory
 import dev.rovenue.sdk.ProductType
 import dev.rovenue.sdk.StoreProduct
 import org.junit.jupiter.api.Test
+import java.text.NumberFormat
+import java.util.Currency
+import java.util.Locale
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+
+/** Mirrors [packageView]'s own currency formatting exactly (Locale.US
+ *  `NumberFormat.getCurrencyInstance`) — self-consistent the same way
+ *  PaywallViewModelHelpersTests.swift's `Decimal(...).formatted(.currency(
+ *  code:))` calls are: the expectation is computed with the SAME formatting
+ *  API the implementation uses, not a hardcoded string. */
+private fun formatUsdForTest(amount: Double): String {
+    val formatter = NumberFormat.getCurrencyInstance(Locale.US)
+    formatter.currency = Currency.getInstance("USD")
+    return formatter.format(amount)
+}
 
 class PaywallHelpersTest {
     private fun product(
@@ -60,6 +76,125 @@ class PaywallHelpersTest {
         val noPrice = packageView(product(priceString = null), "NoPrice")
         assertEquals("", noPrice.price)
         assertEquals("/month", noPrice.pricePerPeriod) // "" + "/month"
+    }
+
+    // ----- packageView Phase D3 optional fields (identical formula to Swift) -----
+
+    @Test
+    fun `pricePerWeek month year pass through verbatim from product`() {
+        val p = product(period = Period(1, PeriodUnit.YEAR, "P1Y")).copy(
+            priceString = "\$39.99",
+            pricePerWeekString = "\$0.77", pricePerMonthString = "\$3.33", pricePerYearString = "\$39.99",
+        )
+        val view = packageView(p, "Annual")
+        assertEquals("\$0.77", view.pricePerWeek)
+        assertEquals("\$3.33", view.pricePerMonth)
+        assertEquals("\$39.99", view.pricePerYear)
+    }
+
+    @Test
+    fun `pricePerDay derived from numeric pricePerWeek and currencyCode`() {
+        val p = product(priceString = "\$0.77", period = Period(1, PeriodUnit.WEEK, "P1W"))
+            .copy(currencyCode = "USD", pricePerWeek = 0.77)
+        val view = packageView(p, "Weekly")
+        assertNotNull(view.pricePerDay)
+        assertEquals(formatUsdForTest(0.77 / 7.0), view.pricePerDay)
+    }
+
+    @Test
+    fun `pricePerDay null without numeric pricePerWeek`() {
+        val p = product(priceString = "\$0.77", period = Period(1, PeriodUnit.WEEK, "P1W")).copy(currencyCode = "USD")
+        val view = packageView(p, "Weekly")
+        assertNull(view.pricePerDay)
+    }
+
+    @Test
+    fun `pricePerDay null without currencyCode`() {
+        val p = product(priceString = "\$0.77", period = Period(1, PeriodUnit.WEEK, "P1W")).copy(pricePerWeek = 0.77)
+        val view = packageView(p, "Weekly")
+        assertNull(view.pricePerDay)
+    }
+
+    @Test
+    fun `introPrice and period from StoreProduct introPrice`() {
+        val intro = IntroPrice(
+            price = 0.99, priceString = "\$0.99", currencyCode = "USD",
+            period = Period(1, PeriodUnit.WEEK, "P1W"), cycles = 1, paymentMode = PaymentMode.FREE_TRIAL,
+        )
+        val p = product(priceString = "\$39.99", period = Period(1, PeriodUnit.YEAR, "P1Y")).copy(introPrice = intro)
+        val view = packageView(p, "Annual")
+        assertEquals("\$0.99", view.introPrice)
+        assertEquals("week", view.introPeriod)
+    }
+
+    @Test
+    fun `introPrice and period null without intro offer`() {
+        val p = product(priceString = "\$39.99", period = Period(1, PeriodUnit.YEAR, "P1Y"))
+        val view = packageView(p, "Annual")
+        assertNull(view.introPrice)
+        assertNull(view.introPeriod)
+    }
+
+    @Test
+    fun `relativeDiscount null without offering`() {
+        val p = product(priceString = "\$39.99", period = Period(1, PeriodUnit.YEAR, "P1Y")).copy(pricePerYear = 39.99)
+        val view = packageView(p, "Annual", offering = null)
+        assertNull(view.relativeDiscount)
+    }
+
+    @Test
+    fun `relativeDiscount null with fewer than two comparable packages`() {
+        val annual = product(priceString = "\$39.99", period = Period(1, PeriodUnit.YEAR, "P1Y")).copy(pricePerYear = 39.99)
+        val monthlyNoNumericPrice = product(priceString = "\$4.99", period = Period(1, PeriodUnit.MONTH, "P1M"))
+        val o = Offering(
+            identifier = "default", isDefault = true,
+            packages = listOf(
+                Package("annual", PackageType.ANNUAL, annual),
+                Package("monthly", PackageType.MONTHLY, monthlyNoNumericPrice),
+            ),
+        )
+        val view = packageView(annual, "Annual", offering = o)
+        assertNull(view.relativeDiscount, "only 1 package has a numeric pricePerYear")
+    }
+
+    @Test
+    fun `relativeDiscount computed across comparable offering packages, matches Swift`() {
+        // Annual is the cheapest per-year; monthly (\$4.99*12=\$59.88/yr
+        // equivalent) is the most expensive -> annual's discount vs. the max.
+        val annual = product(priceString = "\$39.99", period = Period(1, PeriodUnit.YEAR, "P1Y")).copy(pricePerYear = 39.99)
+        val monthly = product(priceString = "\$4.99", period = Period(1, PeriodUnit.MONTH, "P1M")).copy(pricePerYear = 59.88)
+        val o = Offering(
+            identifier = "default", isDefault = true,
+            packages = listOf(Package("annual", PackageType.ANNUAL, annual), Package("monthly", PackageType.MONTHLY, monthly)),
+        )
+        val annualView = packageView(annual, "Annual", offering = o)
+        // round((1 - 39.99/59.88) * 100) = round(33.22...) = 33 — MUST match
+        // the Swift implementation's PaywallViewModelHelpersTests expectation
+        // for the identical inputs (see PackageViewMapping.swift's doc).
+        assertEquals("33%", annualView.relativeDiscount)
+
+        val monthlyView = packageView(monthly, "Monthly", offering = o)
+        // The max-priced package has 0% discount relative to itself.
+        assertEquals("0%", monthlyView.relativeDiscount)
+    }
+
+    @Test
+    fun `relativeDiscount null for product with no numeric pricePerYear`() {
+        val annual = product(priceString = "\$39.99", period = Period(1, PeriodUnit.YEAR, "P1Y")).copy(pricePerYear = 39.99)
+        val monthly = product(priceString = "\$4.99", period = Period(1, PeriodUnit.MONTH, "P1M")).copy(pricePerYear = 59.88)
+        val lifetime = product(priceString = "\$99.99", period = null).copy(
+            productCategory = ProductCategory.NON_SUBSCRIPTION, type = ProductType.NON_CONSUMABLE,
+        )
+        val o = Offering(
+            identifier = "default", isDefault = true,
+            packages = listOf(
+                Package("annual", PackageType.ANNUAL, annual),
+                Package("monthly", PackageType.MONTHLY, monthly),
+                Package("lifetime", PackageType.LIFETIME, lifetime),
+            ),
+        )
+        val view = packageView(lifetime, "Lifetime", offering = o)
+        assertNull(view.relativeDiscount)
     }
 
     // ----- effectivePackageIds / initialSelection -----

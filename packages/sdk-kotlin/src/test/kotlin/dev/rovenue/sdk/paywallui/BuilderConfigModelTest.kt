@@ -49,13 +49,27 @@ class BuilderConfigModelTest {
     }
 
     @Test
-    fun `every acceptLenient fixture decodes with unknown nodes retained`() {
+    fun `every acceptLenient fixture decodes`() {
+        // Not every acceptLenient entry contains an Unknown NODE — the
+        // "override with unknown when.kind" entry is lenient about an
+        // override CONDITION kind instead (see the dedicated test below),
+        // so this only asserts the shared "decodes, never null" contract;
+        // node-retention is asserted per-entry.
         for (el in section("acceptLenient")) {
             val entry = el.jsonObject
+            assertNotNull(decodeBuilderConfig(configJson(entry)), "acceptLenient should decode: ${name(entry)}")
+        }
+    }
+
+    @Test
+    fun `unknown node type entries retain an Unknown node`() {
+        for (el in section("acceptLenient")) {
+            val entry = el.jsonObject
+            if (name(entry).startsWith("override with unknown when.kind")) continue
             val config = decodeBuilderConfig(configJson(entry))
             assertNotNull(config, "acceptLenient should decode: ${name(entry)}")
             assertTrue(
-                containsUnknown(config!!.root),
+                containsUnknown(config.root),
                 "expected an Unknown node in: ${name(entry)}",
             )
         }
@@ -67,7 +81,7 @@ class BuilderConfigModelTest {
         val config = decodeBuilderConfig(configJson(entry))!!
         val unknown = firstUnknown(config.root)
         assertNotNull(unknown, "unknown node present")
-        assertNotNull(unknown!!.fallback, "fallback retained on the unknown node")
+        assertNotNull(unknown.fallback, "fallback retained on the unknown node")
         assertTrue(unknown.fallback is BuilderNode.Text)
     }
 
@@ -109,10 +123,93 @@ class BuilderConfigModelTest {
                     price = it["price"]!!.jsonPrimitive.content,
                     pricePerPeriod = it["pricePerPeriod"]!!.jsonPrimitive.content,
                     period = it["period"]!!.jsonPrimitive.content,
+                    pricePerDay = it["pricePerDay"]?.jsonPrimitive?.content,
+                    pricePerWeek = it["pricePerWeek"]?.jsonPrimitive?.content,
+                    pricePerMonth = it["pricePerMonth"]?.jsonPrimitive?.content,
+                    pricePerYear = it["pricePerYear"]?.jsonPrimitive?.content,
+                    introPrice = it["introPrice"]?.jsonPrimitive?.content,
+                    introPeriod = it["introPeriod"]?.jsonPrimitive?.content,
+                    relativeDiscount = it["relativeDiscount"]?.jsonPrimitive?.content,
                 )
             }
             assertEquals(expected, resolveVariables(text, pkg), "text=$text")
         }
+    }
+
+    // ---- Phase D2: overrides / cellTemplate -------------------------------
+
+    private fun entryNamed(sectionName: String, name: String): JsonObject =
+        section(sectionName).map { it.jsonObject }.first { name(it) == name }
+
+    private fun entryWithNamePrefix(sectionName: String, prefix: String): JsonObject =
+        section(sectionName).map { it.jsonObject }.first { name(it).startsWith(prefix) }
+
+    @Test
+    fun `override with unknown when-kind is retained but never matching`() {
+        // Pins render-fixtures.json's acceptLenient case: the strict schema
+        // rejects the whole config, but platform decoders decode leniently,
+        // skipping ONLY this override entry's activation (never its
+        // presence) per the unknown-condition-kind rule.
+        val entry = entryWithNamePrefix("acceptLenient", "override with unknown when.kind")
+        val config = decodeBuilderConfig(configJson(entry))!!
+        val root = config.root
+        val title = root.children[0] as BuilderNode.Text
+        val overrides = title.overrides!!
+        assertEquals(2, overrides.size, "the unknown-kind entry is RETAINED, not dropped")
+        assertEquals(OverrideConditionKind.INTRO_ELIGIBLE, overrides[0].whenKind)
+        assertEquals(HAlign.CENTER, overrides[0].props?.align)
+        assertEquals(OverrideConditionKind.UNKNOWN, overrides[1].whenKind, "\"sizeClass\" is not a known condition kind")
+        assertNull(overrides[1].props, "props are not decoded/validated for an unknown when.kind")
+
+        // Never matches, regardless of the active condition set.
+        val result = applyOverrides(title, OverrideActiveConditions(introEligible = true, selected = true))
+        assertEquals(HAlign.CENTER, result.align, "only the KNOWN introEligible override is ever active")
+    }
+
+    @Test
+    fun `structural key inside known-kind override props fails whole config decode`() {
+        // Pins render-fixtures.json's reject case: `type` inside a
+        // `when.kind: "introEligible"` override's `props` must fail the
+        // WHOLE config decode (not just be dropped/ignored), since
+        // introEligible IS a known kind.
+        val entry = entryNamed("reject", "structural key 'type' inside override props on a known when.kind")
+        assertNull(decodeBuilderConfig(configJson(entry)))
+    }
+
+    @Test
+    fun `packageList cellTemplate decodes recursively`() {
+        val entry = entryNamed(
+            "accept",
+            "packageList with cellTemplate (visual nodes only, selected-condition badge)",
+        )
+        val config = decodeBuilderConfig(configJson(entry))!!
+        val list = config.root.children[0] as BuilderNode.PackageList
+        val cellRoot = list.cellTemplate as BuilderNode.Stack
+        assertEquals("cell_root", cellRoot.id)
+        assertEquals(3, cellRoot.children.size)
+        val cellRootOverrides = cellRoot.overrides!!
+        assertEquals(OverrideConditionKind.SELECTED, cellRootOverrides.first().whenKind)
+        assertEquals(ThemePair("#EEF2FF", null), cellRootOverrides.first().props?.background)
+        val badge = cellRoot.children[1] as BuilderNode.Text
+        assertEquals(ThemePair("#4338CA", null), badge.overrides?.first()?.props?.color)
+    }
+
+    @Test
+    fun `overrides across node types decode with typed props`() {
+        val entry = entryNamed(
+            "accept",
+            "overrides: introEligible + selected across node types, incl. a text key-swap",
+        )
+        val config = decodeBuilderConfig(configJson(entry))!!
+        val root = config.root
+        assertEquals(4.0, root.overrides?.first()?.props?.spacing)
+
+        val title = root.children[1] as BuilderNode.Text
+        assertEquals("title_key_intro", title.overrides?.first()?.props?.key)
+
+        val cta = root.children[2] as BuilderNode.Button
+        assertEquals("cta_key_selected", cta.overrides?.first()?.props?.labelKey)
+        assertEquals(ButtonVisualStyle.SECONDARY, cta.overrides?.first()?.props?.style)
     }
 
     @Test

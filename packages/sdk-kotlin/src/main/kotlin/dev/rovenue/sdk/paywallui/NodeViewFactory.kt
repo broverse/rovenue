@@ -147,7 +147,7 @@ fun relevantPackageView(cell: PackageView?, selectedPackageId: String?, offering
     if (cell != null) return cell
     val id = selectedPackageId ?: return null
     val pkg = offering?.packageBy(id) ?: return null
-    return packageView(pkg.product, pkg.product.displayName)
+    return packageView(pkg.product, pkg.product.displayName, offering)
 }
 
 // ---------------------------------------------------------------
@@ -312,35 +312,55 @@ internal class PaywallRenderContext(
     val onUrl: ((String) -> Unit)?,
     val loadImage: (ImageView, String) -> Unit,
 ) {
-    /** Localized + variable-resolved label. [cellPackage] scopes variables
-     *  to a package cell; elsewhere the selected package wins. */
-    fun label(key: String, cellPackage: PackageView?): String {
+    /** Localized + variable-resolved label. [cell] scopes variables to a
+     *  package cell; elsewhere the selected package wins. */
+    fun label(key: String, cell: CellScope?): String {
         val text = resolveText(config, locale, key) ?: ""
-        val pkg = relevantPackageView(cellPackage, selectedPackageId, offering)
+        val pkg = relevantPackageView(cell?.view, selectedPackageId, offering)
         return resolveVariables(text, pkg)
     }
 }
 
+/**
+ * The package a `cellTemplate` subtree is currently scoped to — carries
+ * both the identifier (needed to evaluate the `selected` override
+ * condition against the live global selection) and its resolved
+ * [PackageView] (needed for `{{variable}}` substitution). `null` outside
+ * any `cellTemplate` subtree. Mirrors the Swift renderer's `CellScope` +
+ * nodes.tsx's `insideCellTemplate` + `cellPackageId` pair, bundled into one
+ * value since they always travel together.
+ */
+internal data class CellScope(val packageId: String, val view: PackageView)
+
 /** Builds the android.view.View tree for a [BuilderNode] subtree. */
 internal object NodeViewFactory {
 
-    fun build(context: Context, node: BuilderNode, ctx: PaywallRenderContext, cellPackage: PackageView?): View? =
-        when (node) {
-            is BuilderNode.Stack -> buildStack(context, node, ctx, cellPackage)
-            is BuilderNode.Text -> buildText(context, node, ctx, cellPackage)
-            is BuilderNode.Image -> buildImage(context, node, ctx, cellPackage)
-            is BuilderNode.Button -> buildButton(context, node, ctx, cellPackage)
-            is BuilderNode.PackageList -> buildPackageList(context, node, ctx)
-            is BuilderNode.PurchaseButton -> buildPurchaseButton(context, node, ctx)
+    fun build(context: Context, node: BuilderNode, ctx: PaywallRenderContext, cell: CellScope?): View? {
+        // Every node passes through `applyOverrides` here, BEFORE any
+        // style/text resolution happens in the per-type builders below —
+        // `resolved` (not the original `node`) is what gets dispatched.
+        // Mirrors the Swift renderer's `BuilderNodeView.body` and
+        // nodes.tsx's `renderNode`.
+        val active = activeOverrideConditions(
+            cellPackageId = cell?.packageId, selectedPackageId = ctx.selectedPackageId, offering = ctx.offering,
+        )
+        return when (val resolved = applyOverrides(node, active)) {
+            is BuilderNode.Stack -> buildStack(context, resolved, ctx, cell)
+            is BuilderNode.Text -> buildText(context, resolved, ctx, cell)
+            is BuilderNode.Image -> buildImage(context, resolved, ctx, cell)
+            is BuilderNode.Button -> buildButton(context, resolved, ctx, cell)
+            is BuilderNode.PackageList -> buildPackageList(context, resolved, ctx)
+            is BuilderNode.PurchaseButton -> buildPurchaseButton(context, resolved, ctx)
             is BuilderNode.Spacer -> View(context)
-            is BuilderNode.Unknown -> node.fallback?.let { build(context, it, ctx, cellPackage) }
+            is BuilderNode.Unknown -> resolved.fallback?.let { build(context, it, ctx, cell) }
         }
+    }
 
     private fun buildStack(
         context: Context,
         node: BuilderNode.Stack,
         ctx: PaywallRenderContext,
-        cellPackage: PackageView?,
+        cell: CellScope?,
     ): View {
         val group: ViewGroup = when (node.axis) {
             Axis.V -> LinearLayout(context).apply {
@@ -372,7 +392,7 @@ internal object NodeViewFactory {
         }
 
         node.children.forEachIndexed { index, child ->
-            val childView = build(context, child, ctx, cellPackage) ?: return@forEachIndexed
+            val childView = build(context, child, ctx, cell) ?: return@forEachIndexed
             val dimen = childLayoutFor(node.axis, child)
             val lp = when (node.axis) {
                 Axis.Z -> FrameLayout.LayoutParams(
@@ -400,11 +420,11 @@ internal object NodeViewFactory {
         context: Context,
         node: BuilderNode.Text,
         ctx: PaywallRenderContext,
-        cellPackage: PackageView?,
+        cell: CellScope?,
     ): TextView {
         val style = textStyleFor(node.role)
         return TextView(context).apply {
-            text = ctx.label(node.key, cellPackage)
+            text = ctx.label(node.key, cell)
             textSize = style.sizeSp
             setTypeface(typeface, if (style.bold) Typeface.BOLD else Typeface.NORMAL)
             gravity = textGravity(node.align)
@@ -416,12 +436,12 @@ internal object NodeViewFactory {
         context: Context,
         node: BuilderNode.Image,
         ctx: PaywallRenderContext,
-        cellPackage: PackageView?,
+        cell: CellScope?,
     ): ImageView {
         val iv = ImageView(context).apply {
             scaleType = ImageView.ScaleType.FIT_CENTER
             adjustViewBounds = true
-            contentDescription = node.alt?.let { ctx.label(it, cellPackage) }
+            contentDescription = node.alt?.let { ctx.label(it, cell) }
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 node.height?.let { dp(context, it) } ?: ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -444,11 +464,11 @@ internal object NodeViewFactory {
         context: Context,
         node: BuilderNode.Button,
         ctx: PaywallRenderContext,
-        cellPackage: PackageView?,
+        cell: CellScope?,
     ): View? {
         if (!actionButtonVisible(node.action, hasRestoreHandler = ctx.onRestore != null)) return null
         return Button(context).apply {
-            text = ctx.label(node.labelKey, cellPackage)
+            text = ctx.label(node.labelKey, cell)
             isAllCaps = false
             setTypeface(typeface, if (node.style == ButtonVisualStyle.PRIMARY) Typeface.BOLD else Typeface.NORMAL)
             alpha = if (node.style == ButtonVisualStyle.PLAIN) 0.7f else 1f
@@ -466,7 +486,7 @@ internal object NodeViewFactory {
             orientation = if (row) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
         }
         cells.forEach { pkg ->
-            val cell = buildPackageCell(context, pkg, ctx)
+            val cellView = buildPackageCell(context, pkg, ctx, node.cellTemplate)
             val margin = dp(context, 4.0)
             val lp = LinearLayout.LayoutParams(
                 if (row) 0 else LinearLayout.LayoutParams.MATCH_PARENT,
@@ -475,7 +495,7 @@ internal object NodeViewFactory {
                 if (row) weight = 1f
                 setMargins(margin, margin, margin, margin)
             }
-            container.addView(cell, lp)
+            container.addView(cellView, lp)
         }
         return container
     }
@@ -484,9 +504,34 @@ internal object NodeViewFactory {
         context: Context,
         pkg: dev.rovenue.sdk.Package,
         ctx: PaywallRenderContext,
+        template: BuilderNode?,
     ): View {
-        val view = packageView(pkg.product, pkg.product.displayName)
         val selected = ctx.selectedPackageId == pkg.identifier
+
+        // A cellTemplate REPLACES the built-in (name + price) cell content,
+        // rendered INSIDE the same pressable/selectable cell wrapper — the
+        // cell-scoped CellScope is what makes `{{price}}` etc. inside the
+        // template resolve to THIS cell's package rather than the globally
+        // selected one, and what makes a `selected`-condition override
+        // inside the template match only the currently-selected cell.
+        if (template != null) {
+            val view = packageView(pkg.product, pkg.product.displayName, ctx.offering)
+            val cell = CellScope(packageId = pkg.identifier, view = view)
+            val templateView = build(context, template, ctx, cell) ?: View(context)
+            return FrameLayout(context).apply {
+                isClickable = true
+                isFocusable = true
+                // The `isSelected`-state flag is this renderer's aria-equivalent
+                // (mirrors Swift's `.accessibilityAddTraits(.isSelected)`).
+                isSelected = selected
+                addView(templateView)
+                setOnClickListener { ctx.select(pkg.identifier) }
+            }
+        }
+
+        // No cellTemplate -> built-in cell (name + price), unchanged from
+        // before overrides/cellTemplate existed.
+        val view = packageView(pkg.product, pkg.product.displayName, ctx.offering)
         val nameText = TextView(context).apply {
             text = view.packageName
             textSize = 15f
@@ -501,8 +546,6 @@ internal object NodeViewFactory {
             orientation = LinearLayout.VERTICAL
             isClickable = true
             isFocusable = true
-            // The `isSelected`-state flag is this renderer's aria-equivalent
-            // (mirrors Swift's `.accessibilityAddTraits(.isSelected)`).
             isSelected = selected
             setPadding(pad, pad, pad, pad)
             background = GradientDrawable().apply {

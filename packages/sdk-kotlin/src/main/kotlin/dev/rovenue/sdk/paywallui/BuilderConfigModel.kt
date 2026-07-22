@@ -48,6 +48,77 @@ sealed class ButtonAction {
     data class Url(val url: String) : ButtonAction()
 }
 
+// =============================================================
+// Overrides (Phase D2) — Kotlin mirror of the Swift
+// BuilderConfigModel.swift's "Overrides" section and the shared
+// cross-platform contract in packages/shared/src/paywall/schema.ts
+// (`OverrideCondition`/`NodeOverride`/`OVERRIDABLE_PROP_KEYS`). Every
+// node payload gains an optional `overrides: List<NodeOverride<...>>`;
+// conditions are evaluated at render time (see PaywallOverrides.kt's
+// `activeOverrideConditions` + `applyOverrides`).
+//
+// Decode leniency, matching render-fixtures.json's `_comment`: an
+// unknown `when.kind` string decodes to [OverrideConditionKind.UNKNOWN]
+// — retained but never matching, NOT a config failure (acceptLenient-
+// pinned). A structural/unknown key inside `props` of a KNOWN kind
+// (introEligible/selected) fails the WHOLE config decode (reject-
+// pinned) — enforced by `validateOverridePropKeys` inside each
+// `parseXOverrideProps` function below.
+// =============================================================
+
+/** The `when.kind` of a single override entry. [UNKNOWN] covers any string
+ *  outside the two known literals — decoding never throws for this field
+ *  alone; see `parseOverrideList`. */
+enum class OverrideConditionKind { INTRO_ELIGIBLE, SELECTED, UNKNOWN }
+
+/**
+ * A single node-type's whitelist of override-able prop keys — the node's
+ * own OPTIONAL VISUAL fields only. This is the Kotlin mirror of
+ * packages/shared/src/paywall/schema.ts's `OVERRIDABLE_PROP_KEYS`, the
+ * single source of truth; keep the two tables in sync by hand.
+ */
+private object OverridablePropKeys {
+    val stack: Set<String> = setOf("spacing", "align", "background", "cornerRadius")
+    val text: Set<String> = setOf("key", "color", "align")
+    val image: Set<String> = setOf("cornerRadius")
+    val button: Set<String> = setOf("labelKey", "style")
+    val packageList: Set<String> = emptySet()
+    val purchaseButton: Set<String> = setOf("labelKey")
+    val spacer: Set<String> = emptySet()
+}
+
+/** A single conditional prop swap: `{ when: { kind }, props }`. [T] is the
+ *  node type's own override-props class (e.g. [StackOverrideProps]). */
+data class NodeOverride<T>(val whenKind: OverrideConditionKind, val props: T?)
+
+data class StackOverrideProps(
+    val spacing: Double? = null,
+    val align: HAlign? = null,
+    val background: ThemePair? = null,
+    val cornerRadius: Double? = null,
+)
+
+data class TextOverrideProps(
+    val key: String? = null,
+    val color: ThemePair? = null,
+    val align: HAlign? = null,
+)
+
+data class ImageOverrideProps(val cornerRadius: Double? = null)
+
+data class ButtonOverrideProps(val labelKey: String? = null, val style: ButtonVisualStyle? = null)
+
+/** Empty whitelist (`OVERRIDABLE_PROP_KEYS.packageList == []`) — no fields
+ *  to merge; an `overrides` array on this type can only ever carry
+ *  `props: {}`, so applying it is always a no-op. */
+object PackageListOverrideProps
+
+data class PurchaseButtonOverrideProps(val labelKey: String? = null)
+
+/** Empty whitelist (`OVERRIDABLE_PROP_KEYS.spacer == []`) — same as
+ *  [PackageListOverrideProps], always a no-op. */
+object SpacerOverrideProps
+
 sealed class BuilderNode {
     abstract val id: String
     abstract val fallback: BuilderNode?
@@ -62,6 +133,7 @@ sealed class BuilderNode {
         val size: SizeSpec? = null,
         val background: ThemePair? = null,
         val cornerRadius: Double? = null,
+        val overrides: List<NodeOverride<StackOverrideProps>>? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
@@ -71,6 +143,7 @@ sealed class BuilderNode {
         val role: TextRole,
         val color: ThemePair? = null,
         val align: HAlign? = null,
+        val overrides: List<NodeOverride<TextOverrideProps>>? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
@@ -80,6 +153,7 @@ sealed class BuilderNode {
         val height: Double? = null,
         val cornerRadius: Double? = null,
         val alt: String? = null,
+        val overrides: List<NodeOverride<ImageOverrideProps>>? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
@@ -88,6 +162,7 @@ sealed class BuilderNode {
         val labelKey: String,
         val style: ButtonVisualStyle,
         val action: ButtonAction,
+        val overrides: List<NodeOverride<ButtonOverrideProps>>? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
@@ -96,18 +171,26 @@ sealed class BuilderNode {
         val packageIds: List<String>,
         val defaultSelected: String? = null,
         val cellLayout: CellLayout,
+        /** Optional subtree rendered once per effective package, with
+         *  cell-scoped variables, replacing the built-in (name + price)
+         *  cell. Absent -> current built-in cell (backward compatible).
+         *  Recursive, exactly like [fallback]. */
+        val cellTemplate: BuilderNode? = null,
+        val overrides: List<NodeOverride<PackageListOverrideProps>>? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
     data class PurchaseButton(
         override val id: String,
         val labelKey: String,
+        val overrides: List<NodeOverride<PurchaseButtonOverrideProps>>? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
     data class Spacer(
         override val id: String,
         val size: Double? = null,
+        val overrides: List<NodeOverride<SpacerOverrideProps>>? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
@@ -199,6 +282,7 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             },
             background = obj["background"]?.letObject(::parseThemePair),
             cornerRadius = obj.optionalDouble("cornerRadius"),
+            overrides = obj.parseOverrideList(::parseStackOverrideProps),
             fallback = fallback,
         )
         "text" -> BuilderNode.Text(
@@ -213,6 +297,7 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             ),
             color = obj["color"]?.letObject(::parseThemePair),
             align = obj.optionalAlign(),
+            overrides = obj.parseOverrideList(::parseTextOverrideProps),
             fallback = fallback,
         )
         "image" -> BuilderNode.Image(
@@ -222,6 +307,7 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             height = obj.optionalDouble("height"),
             cornerRadius = obj.optionalDouble("cornerRadius"),
             alt = obj.optionalString("alt"),
+            overrides = obj.parseOverrideList(::parseImageOverrideProps),
             fallback = fallback,
         )
         "button" -> BuilderNode.Button(
@@ -238,6 +324,7 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             action = parseAction(
                 obj["action"] as? JsonObject ?: throw BuilderDecodeException("button.action required"),
             ),
+            overrides = obj.parseOverrideList(::parseButtonOverrideProps),
             fallback = fallback,
         )
         "packageList" -> BuilderNode.PackageList(
@@ -254,19 +341,124 @@ private fun parseNode(obj: JsonObject): BuilderNode {
                 "cellLayout",
                 mapOf("row" to CellLayout.ROW, "column" to CellLayout.COLUMN),
             ),
+            cellTemplate = obj["cellTemplate"]?.letObject(::parseNode),
+            overrides = obj.parseOverrideList(::parsePackageListOverrideProps),
             fallback = fallback,
         )
         "purchaseButton" -> BuilderNode.PurchaseButton(
             id = id,
             labelKey = obj.requireString("labelKey"),
+            overrides = obj.parseOverrideList(::parsePurchaseButtonOverrideProps),
             fallback = fallback,
         )
-        "spacer" -> BuilderNode.Spacer(id = id, size = obj.optionalDouble("size"), fallback = fallback)
+        "spacer" -> BuilderNode.Spacer(
+            id = id,
+            size = obj.optionalDouble("size"),
+            overrides = obj.parseOverrideList(::parseSpacerOverrideProps),
+            fallback = fallback,
+        )
         // Lenient branch: unknown types keep id + fallback and never fail
         // the decode. The fallback subtree itself is still parsed strictly.
         else -> BuilderNode.Unknown(id = id, fallback = fallback)
     }
 }
+
+// ----- overrides -----
+
+/** Throws when [props] carries any key outside [allowed] — the defensive
+ *  check that makes a structural key (e.g. `"type"`) inside a KNOWN
+ *  when.kind's `props` fail the whole config decode, per
+ *  render-fixtures.json's reject-pinned case. */
+private fun validateOverridePropKeys(props: JsonObject, allowed: Set<String>) {
+    for (key in props.keys) {
+        if (key !in allowed) {
+            throw BuilderDecodeException("\"$key\" is not an overridable prop for this node type.")
+        }
+    }
+}
+
+private fun parseStackOverrideProps(props: JsonObject): StackOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.stack)
+    return StackOverrideProps(
+        spacing = props.optionalDouble("spacing"),
+        align = props.optionalAlign(),
+        background = props["background"]?.letObject(::parseThemePair),
+        cornerRadius = props.optionalDouble("cornerRadius"),
+    )
+}
+
+private fun parseTextOverrideProps(props: JsonObject): TextOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.text)
+    return TextOverrideProps(
+        key = props.optionalString("key"),
+        color = props["color"]?.letObject(::parseThemePair),
+        align = props.optionalAlign(),
+    )
+}
+
+private fun parseImageOverrideProps(props: JsonObject): ImageOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.image)
+    return ImageOverrideProps(cornerRadius = props.optionalDouble("cornerRadius"))
+}
+
+private fun parseButtonOverrideProps(props: JsonObject): ButtonOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.button)
+    return ButtonOverrideProps(
+        labelKey = props.optionalString("labelKey"),
+        style = props["style"]?.let {
+            val prim = it as? JsonPrimitive ?: throw BuilderDecodeException("style must be a string")
+            when (prim.content) {
+                "primary" -> ButtonVisualStyle.PRIMARY
+                "secondary" -> ButtonVisualStyle.SECONDARY
+                "plain" -> ButtonVisualStyle.PLAIN
+                else -> throw BuilderDecodeException("style has invalid value \"${prim.content}\"")
+            }
+        },
+    )
+}
+
+private fun parsePackageListOverrideProps(props: JsonObject): PackageListOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.packageList)
+    return PackageListOverrideProps
+}
+
+private fun parsePurchaseButtonOverrideProps(props: JsonObject): PurchaseButtonOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.purchaseButton)
+    return PurchaseButtonOverrideProps(labelKey = props.optionalString("labelKey"))
+}
+
+private fun parseSpacerOverrideProps(props: JsonObject): SpacerOverrideProps {
+    validateOverridePropKeys(props, OverridablePropKeys.spacer)
+    return SpacerOverrideProps
+}
+
+/**
+ * Decodes a node's `overrides` array, if present. An unknown `when.kind`
+ * decodes to [OverrideConditionKind.UNKNOWN] with `props` left `null` —
+ * this entry is retained in the array but can never become active (see
+ * `applyOverrides` in PaywallOverrides.kt), and its `props` value is
+ * deliberately NOT parsed/validated (lenient — matches the acceptLenient
+ * fixture, which pairs an unknown kind with otherwise-valid props). A
+ * KNOWN kind's `props` IS parsed via [parseProps], which throws on any
+ * non-whitelisted key — that failure propagates up and fails the WHOLE
+ * config decode, per the reject fixture.
+ */
+private fun <T> JsonObject.parseOverrideList(parseProps: (JsonObject) -> T): List<NodeOverride<T>>? {
+    val raw = this["overrides"] ?: return null
+    val arr = raw as? JsonArray ?: throw BuilderDecodeException("overrides must be an array")
+    return arr.map { el ->
+        val entry = el as? JsonObject ?: throw BuilderDecodeException("override entry must be an object")
+        val whenObj = entry["when"] as? JsonObject ?: throw BuilderDecodeException("override.when must be an object")
+        when (whenObj.requireString("kind")) {
+            "introEligible" -> NodeOverride(OverrideConditionKind.INTRO_ELIGIBLE, parseProps(entry.requirePropsObject()))
+            "selected" -> NodeOverride(OverrideConditionKind.SELECTED, parseProps(entry.requirePropsObject()))
+            else -> NodeOverride(OverrideConditionKind.UNKNOWN, null)
+        }
+    }
+}
+
+private fun JsonObject.requirePropsObject(): JsonObject =
+    this["props"] as? JsonObject ?: throw BuilderDecodeException("override.props must be an object")
 
 private fun parseAction(obj: JsonObject): ButtonAction = when (val kind = obj.requireString("kind")) {
     "close" -> ButtonAction.Close

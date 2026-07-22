@@ -165,7 +165,7 @@ class RovenuePaywallView @JvmOverloads constructor(
             loadImage = { imageView, url -> loadImageInto(imageView, url, scopeForImageLoads()) },
         )
 
-        val rootView = NodeViewFactory.build(context, cfg.root, ctx, cellPackage = null) ?: return
+        val rootView = NodeViewFactory.build(context, cfg.root, ctx, cell = null) ?: return
         addView(rootView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
