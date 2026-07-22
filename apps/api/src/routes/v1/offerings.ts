@@ -1,16 +1,13 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { z } from "zod";
 import { drizzle } from "@rovenue/db";
 import { flattenAttributes } from "@rovenue/shared";
 import { evaluateExperiments } from "../../services/experiment-engine";
 import { ok } from "../../lib/response";
 import {
   packagesSchema,
-  parseStoreIds,
   type OfferingProductEntry,
-  type PackageSlot,
   hydrateProducts,
 } from "../../lib/offering-hydration";
 
