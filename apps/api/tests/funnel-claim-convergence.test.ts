@@ -54,7 +54,7 @@ const world = vi.hoisted(() => ({
   pending: [] as Array<{ from: string; to: string }>,
   /** Marks pushed in the order they happened, for the ordering assertion. */
   timeline: [] as string[],
-  /** Every findAllAccessBySubscriber call: which handle, committed yet? */
+  /** Every findActiveAccess call: which handle, committed yet? */
   reads: [] as Array<{ handle: unknown; afterCommit: boolean }>,
   committedYet: false,
   reset() {
@@ -96,7 +96,7 @@ const world = vi.hoisted(() => ({
       return snapshot.get(subscriberId) ?? [];
     }
     throw new Error(
-      `findAllAccessBySubscriber was handed an unknown db handle: ${JSON.stringify(handle)}`,
+      `findActiveAccess was handed an unknown db handle: ${JSON.stringify(handle)}`,
     );
   },
 }));
@@ -120,10 +120,12 @@ const resolveSubscriber = vi.hoisted(() => vi.fn());
 const upsertSubscriber = vi.hoisted(() => vi.fn());
 const findSubscriberById = vi.hoisted(() => vi.fn());
 const findPurchaseBySession = vi.hoisted(() => vi.fn());
+const setPurchaseSubscriber = vi.hoisted(() => vi.fn());
 const listAnswersBySession = vi.hoisted(() => vi.fn());
-const findAllAccessBySubscriber = vi.hoisted(() => vi.fn());
+const findActiveAccess = vi.hoisted(() => vi.fn());
 const findAccessByIds = vi.hoisted(() => vi.fn());
 const outboxInsert = vi.hoisted(() => vi.fn());
+const advisoryXactLock2 = vi.hoisted(() => vi.fn());
 
 vi.mock("@rovenue/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@rovenue/db")>();
@@ -135,15 +137,19 @@ vi.mock("@rovenue/db", async (importOriginal) => {
       funnelClaimTokenRepo: { findByHash, tryClaim },
       funnelSessionRepo: { findById: findSessionById, setState: setSessionState },
       funnelAnswerRepo: { listBySession: listAnswersBySession },
-      funnelPurchaseRepo: { findBySession: findPurchaseBySession },
+      funnelPurchaseRepo: {
+        findBySession: findPurchaseBySession,
+        setSubscriber: setPurchaseSubscriber,
+      },
       subscriberRepo: {
         resolveSubscriberByRovenueId: resolveSubscriber,
         upsertSubscriber,
         findSubscriberById,
       },
-      accessRepo: { findAllAccessBySubscriber },
+      accessRepo: { findActiveAccess },
       accessCatalogRepo: { findByIds: findAccessByIds },
       outboxRepo: { insert: outboxInsert },
+      lockRepo: { advisoryXactLock2 },
     },
   };
 });
@@ -234,12 +240,20 @@ describe("POST /v1/subscribers/claim-funnel-token — convergence", () => {
       funnelId: "fnl_1",
       funnelVersionId: "fnv_1",
     });
-    resolveSubscriber
-      .mockReset()
-      .mockResolvedValue({ id: "sub_installed", projectId: "proj_1" });
-    upsertSubscriber
-      .mockReset()
-      .mockResolvedValue({ id: "sub_installed", projectId: "proj_1" });
+    resolveSubscriber.mockReset().mockResolvedValue({
+      id: "sub_installed",
+      projectId: "proj_1",
+      rovenueId: "a1",
+    });
+    upsertSubscriber.mockReset().mockResolvedValue({
+      id: "sub_installed",
+      projectId: "proj_1",
+      rovenueId: "a1",
+    });
+    advisoryXactLock2.mockReset().mockImplementation(async () => {
+      world.timeline.push("lock");
+    });
+    setPurchaseSubscriber.mockReset().mockResolvedValue(undefined);
     findSubscriberById.mockReset().mockResolvedValue({
       id: "sub_synthetic",
       projectId: "proj_1",
@@ -274,13 +288,25 @@ describe("POST /v1/subscribers/claim-funnel-token — convergence", () => {
         },
       );
 
-    findAllAccessBySubscriber
+    // `findActiveAccess` filters in SQL — active AND not past expiry —
+    // so the fake applies the same rule rather than handing the caller
+    // every historical row.
+    findActiveAccess
       .mockReset()
-      .mockImplementation(async (handle: unknown, subscriberId: string) => {
-        world.timeline.push("read");
-        world.reads.push({ handle, afterCommit: world.committedYet });
-        return world.view(handle, subscriberId);
-      });
+      .mockImplementation(
+        async (handle: unknown, subscriberId: string, now: Date) => {
+          world.timeline.push("read");
+          world.reads.push({ handle, afterCommit: world.committedYet });
+          return world
+            .view(handle, subscriberId)
+            .filter(
+              (row) =>
+                row.isActive &&
+                (!row.expiresDate ||
+                  row.expiresDate.getTime() > now.getTime()),
+            );
+        },
+      );
 
     // Access ids are internal row ids; the entitlement surface reports
     // the catalog identifier (see lib/access-response.ts).
@@ -362,21 +388,33 @@ describe("POST /v1/subscribers/claim-funnel-token — convergence", () => {
   // `subscriberId` / `id`) — the projectId is used only to stamp the
   // credit-ledger rows. It therefore CANNOT refuse a cross-project move;
   // the caller has to.
+  //
+  // Each of these describes state that cannot exist unless the data is
+  // corrupt, and each one FAILS LOUDLY rather than skipping. Skipping
+  // would spend the token, complete the session and answer
+  // `200 { entitlements: [] }` — a buyer who paid, permanently stranded
+  // with nothing, and no retry left to reach them. The 500 rolls the
+  // claim back and keeps the token reclaimable.
 
-  it("refuses to merge a subscriber belonging to another project", async () => {
+  it("fails the claim rather than merging a subscriber from another project", async () => {
     findSubscriberById.mockResolvedValue({
       id: "sub_synthetic",
       projectId: "proj_OTHER",
+      rovenueId: "stripe:cus_1",
       deletedAt: null,
     });
 
     const res = await claim();
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
     expect(reassignAllAssets).not.toHaveBeenCalled();
+    // The claim never completed — the token is still reclaimable and no
+    // "you're done" event went out against assets that never moved.
+    expect(setSessionState).not.toHaveBeenCalled();
+    expect(outboxInsert).not.toHaveBeenCalled();
   });
 
-  it("refuses to merge when the purchase row belongs to another project", async () => {
+  it("fails the claim when the purchase row belongs to another project", async () => {
     findPurchaseBySession.mockResolvedValue({
       id: "pur_1",
       projectId: "proj_OTHER",
@@ -386,34 +424,102 @@ describe("POST /v1/subscribers/claim-funnel-token — convergence", () => {
 
     const res = await claim();
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
     expect(reassignAllAssets).not.toHaveBeenCalled();
+    expect(setSessionState).not.toHaveBeenCalled();
+    expect(outboxInsert).not.toHaveBeenCalled();
   });
 
-  it("refuses to merge when the purchase points at a subscriber that is gone", async () => {
+  it("fails the claim when the purchase points at a subscriber that is gone", async () => {
     findSubscriberById.mockResolvedValue(null);
 
     const res = await claim();
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
     expect(reassignAllAssets).not.toHaveBeenCalled();
+    expect(setSessionState).not.toHaveBeenCalled();
   });
 
-  it("refuses to merge a subscriber that was already merged away", async () => {
+  it("fails the claim when the subscriber was merged into somebody else", async () => {
     // Re-merging a soft-deleted row would repoint its `mergedInto` at
     // this claimer and corrupt the chain `resolveSubscriberByRovenueId`
-    // walks — while moving nothing, since its assets already left.
+    // walks — while moving nothing, since its assets already left. And
+    // the buyer's purchase is now on a third party's row, which is not
+    // something to answer 200 to.
     findSubscriberById.mockResolvedValue({
       id: "sub_synthetic",
       projectId: "proj_1",
+      rovenueId: "stripe:cus_1",
       deletedAt: new Date(),
       mergedInto: "sub_somewhere_else",
     });
 
     const res = await claim();
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
     expect(reassignAllAssets).not.toHaveBeenCalled();
+    expect(setSessionState).not.toHaveBeenCalled();
+  });
+
+  it("stays silent when the subscriber was already merged into THIS claimer", async () => {
+    // The one benign shape of the same check: an earlier claim already
+    // put these assets exactly where this one wants them. That is
+    // idempotency, and it must answer 200 with the real entitlements.
+    findSubscriberById.mockResolvedValue({
+      id: "sub_synthetic",
+      projectId: "proj_1",
+      rovenueId: "stripe:cus_1",
+      deletedAt: new Date(),
+      mergedInto: "sub_installed",
+    });
+    grant("sub_installed", "acc_pro");
+
+    const res = await claim();
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: { entitlements: string[] } };
+    expect(body.data.entitlements).toEqual(["pro"]);
+    expect(reassignAllAssets).not.toHaveBeenCalled();
+    expect(safeSyncAccessAfterMerge).not.toHaveBeenCalled();
+  });
+
+  // =============================================================
+  // Advisory locks
+  // =============================================================
+
+  it("holds both subscribers' advisory locks before moving anything", async () => {
+    // `reassignAllAssets`'s docblock requires it: its credit block reads
+    // the target balance and then INSERTs `toBal + balance` into an
+    // append-only ledger, so a lost update there can never be repaired.
+    // The keys are identify.ts's construction so a concurrent identify
+    // queues on the same lock instead of a parallel scheme.
+    await claim();
+
+    expect(advisoryXactLock2).toHaveBeenCalledWith(
+      txHandle,
+      "proj_1:rov:a1",
+      "proj_1:rov:stripe:cus_1",
+    );
+    expect(world.timeline.indexOf("lock")).toBeLessThan(
+      world.timeline.indexOf("merge"),
+    );
+  });
+
+  // =============================================================
+  // The funnel purchase row
+  // =============================================================
+
+  it("repoints the funnel purchase at the claimer in the same transaction", async () => {
+    // The merge soft-deletes the synthetic; a `funnel_purchases` row left
+    // pointing at it sends every report that joins the column to a
+    // retired subscriber.
+    await claim();
+
+    expect(setPurchaseSubscriber).toHaveBeenCalledWith(
+      txHandle,
+      "pur_1",
+      "sub_installed",
+    );
   });
 
   // =============================================================
@@ -481,7 +587,7 @@ describe("POST /v1/subscribers/claim-funnel-token — convergence", () => {
       data: { entitlements: string[] };
     };
 
-    expect(world.timeline).toEqual(["merge", "commit", "read"]);
+    expect(world.timeline).toEqual(["lock", "merge", "commit", "read"]);
     expect(world.reads).toEqual([{ handle: dbHandle, afterCommit: true }]);
     // ...and the data proves it was not a read of pre-merge state.
     expect(body.data.entitlements).toEqual(["pro"]);
@@ -569,7 +675,7 @@ describe("POST /v1/subscribers/claim-funnel-token — convergence", () => {
     expect(res.status).toBe(500);
     // The claim never completed, so nothing downstream of it ran.
     expect(safeSyncAccessAfterMerge).not.toHaveBeenCalled();
-    expect(findAllAccessBySubscriber).not.toHaveBeenCalled();
+    expect(findActiveAccess).not.toHaveBeenCalled();
   });
 
   it("rejects a token issued to a different project", async () => {

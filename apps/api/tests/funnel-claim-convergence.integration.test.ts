@@ -248,11 +248,15 @@ describe("POST /v1/subscribers/claim-funnel-token — real Postgres", () => {
     expect(accessRows[0]!.accessId).toBe(ACCESS_ID);
     expect(accessRows[0]!.isActive).toBe(true);
 
+    // The funnel purchase follows the assets. Leaving it on the
+    // synthetic would point every funnel report that joins
+    // `funnel_purchases.subscriber_id` at a row this same transaction
+    // soft-deleted.
     const [funnelPurchase] = await db
       .select()
       .from(funnelPurchases)
       .where(eq(funnelPurchases.id, FUNNEL_PURCHASE_ID));
-    expect(funnelPurchase!.subscriberId).toBe(SYNTHETIC_ID);
+    expect(funnelPurchase!.subscriberId).toBe(installed!.id);
 
     // --- the synthetic row is retired, pointing at the survivor --
     const [synthetic] = await db

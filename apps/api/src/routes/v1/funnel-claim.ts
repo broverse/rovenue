@@ -33,6 +33,7 @@ import {
   reassignAllAssets,
   safeSyncAccessAfterMerge,
 } from "../../services/subscriber-transfer";
+import { getActiveAccess } from "../../services/access-engine";
 import { logger } from "../../lib/logger";
 import {
   generateClaimToken,
@@ -104,13 +105,23 @@ function readIp(c: import("hono").Context): string {
  * retry, rather than being marked claimed against assets that never
  * moved.
  *
+ * Only two conditions here are legitimate and silent: a purchase with no
+ * subscriber (the dev-mode stub) and a purchase already sitting on the
+ * claimer. Every other guard below describes state that cannot exist
+ * unless the data is corrupt, and each one THROWS. Returning false there
+ * would spend the token, complete the session, emit both claimed events
+ * and answer `200 { entitlements: [] }` — a paying buyer permanently
+ * stranded behind one log line, with no retry and nothing that reaches
+ * them. A throw rolls the claim back, leaves the token reclaimable, and
+ * turns a silent loss into a 500 someone will see.
+ *
  * Returns whether anything was moved.
  */
 async function mergeFunnelPurchaseSubscriber(
   tx: Db,
   projectId: string,
   sessionId: string,
-  claimer: { id: string; projectId: string },
+  claimer: { id: string; projectId: string; rovenueId: string },
 ): Promise<boolean> {
   const purchase = await drizzle.funnelPurchaseRepo.findBySession(tx, sessionId);
   // No purchase, or one with no subscriber: the dev-mode stub in
@@ -136,20 +147,61 @@ async function mergeFunnelPurchaseSubscriber(
       sessionId,
       purchaseProjectId: purchase.projectId,
     });
-    return false;
+    throw new Error(
+      `Funnel purchase for session ${sessionId} belongs to project ${purchase.projectId}, not ${projectId}`,
+    );
   }
 
+  // Read once to learn the source's identity, purely so the lock keys
+  // below can be built; every decision is made on the post-lock read.
+  const anchor = await drizzle.subscriberRepo.findSubscriberById(
+    tx,
+    purchase.subscriberId,
+  );
+  if (!anchor) {
+    log.error("funnel purchase points at a missing subscriber", {
+      projectId,
+      sessionId,
+      subscriberId: purchase.subscriberId,
+    });
+    throw new Error(
+      `Funnel purchase for session ${sessionId} points at missing subscriber ${purchase.subscriberId}`,
+    );
+  }
+
+  // `reassignAllAssets`'s contract: the caller must already hold the
+  // advisory locks for BOTH subscribers. It is not decorative — the
+  // credit block does `findLatestBalance` then
+  // `insertCreditLedger({ balance: toBal + balance })`, a read-then-write
+  // against a table with a DB-enforced append-only trigger, so a lost
+  // update there cannot be repaired by a later UPDATE.
+  //
+  // The keys use identify.ts's construction byte-for-byte
+  // (`${projectId}:rov:${rovenueId}`, sorted to avoid ordering deadlocks)
+  // so a concurrent identify/transfer on either row serialises against
+  // the same locks rather than a parallel scheme of our own.
+  const keys = [
+    `${projectId}:rov:${anchor.rovenueId}`,
+    `${projectId}:rov:${claimer.rovenueId}`,
+  ].sort();
+  await drizzle.lockRepo.advisoryXactLock2(tx, keys[0]!, keys[1]!);
+
+  // Re-read under the lock: a concurrent merge may have retired this row
+  // between the read above and the lock, and the guards below have to
+  // judge the state we are actually about to move.
   const source = await drizzle.subscriberRepo.findSubscriberById(
     tx,
     purchase.subscriberId,
   );
   if (!source) {
-    log.warn("funnel purchase points at a missing subscriber", {
+    log.error("funnel purchase points at a missing subscriber", {
       projectId,
       sessionId,
       subscriberId: purchase.subscriberId,
     });
-    return false;
+    throw new Error(
+      `Funnel purchase for session ${sessionId} points at missing subscriber ${purchase.subscriberId}`,
+    );
   }
   if (source.projectId !== projectId || claimer.projectId !== projectId) {
     log.error("refusing a cross-project subscriber merge at claim", {
@@ -158,20 +210,37 @@ async function mergeFunnelPurchaseSubscriber(
       sourceProjectId: source.projectId,
       claimerProjectId: claimer.projectId,
     });
-    return false;
+    throw new Error(
+      `Refusing a cross-project subscriber merge at claim for session ${sessionId}`,
+    );
   }
   // Already merged away. Its assets left with the earlier merge, so
   // there is nothing to move — and re-merging would repoint its
   // `mergedInto` at this claimer, corrupting the chain that
   // `resolveSubscriberByRovenueId` walks.
+  //
+  // Merged into THIS claimer is the one benign shape: the assets are
+  // already exactly where this claim wants them, which is idempotency,
+  // not corruption. Merged into anyone else means the buyer's purchase
+  // is on a third party's row and answering 200 would hide that.
   if (source.deletedAt) {
-    log.warn("funnel purchase subscriber was already merged; skipping", {
+    if (source.mergedInto === claimer.id) {
+      log.info("funnel purchase subscriber already merged into this claimer", {
+        projectId,
+        sessionId,
+        subscriberId: source.id,
+      });
+      return false;
+    }
+    log.error("funnel purchase subscriber was merged into someone else", {
       projectId,
       sessionId,
       subscriberId: source.id,
       mergedInto: source.mergedInto,
     });
-    return false;
+    throw new Error(
+      `Funnel purchase subscriber ${source.id} was already merged into ${source.mergedInto ?? "nothing"}, not ${claimer.id}`,
+    );
   }
 
   await reassignAllAssets(
@@ -180,6 +249,11 @@ async function mergeFunnelPurchaseSubscriber(
     { id: source.id, label: source.appUserId ?? source.rovenueId },
     { id: claimer.id, label: "funnel claim" },
   );
+  // The merge soft-deletes `source`; leaving this column on it would
+  // point every funnel report that joins `funnel_purchases.subscriber_id`
+  // at a retired row. Same transaction as the merge, so the two cannot
+  // disagree.
+  await drizzle.funnelPurchaseRepo.setSubscriber(tx, purchase.id, claimer.id);
   log.info("merged funnel purchase subscriber into the claiming subscriber", {
     projectId,
     sessionId,
@@ -218,26 +292,15 @@ async function buildClaimResponse(
     funnel_answers[a.questionId] = payload?.value;
   }
 
-  const access = await drizzle.accessRepo.findAllAccessBySubscriber(
-    drizzle.db,
-    subscriberId,
-  );
-  // "Live" access is active AND not past its expiry — the same rule
-  // accessRepo.findActiveAccess applies in SQL. The rows are deduped
-  // because a merge can leave the survivor holding two rows for one
-  // accessId (one from each side) until syncAccess collapses them.
-  const now = Date.now();
-  const liveAccessIds = [
-    ...new Set(
-      access
-        .filter(
-          (row) =>
-            row.isActive &&
-            (!row.expiresDate || row.expiresDate.getTime() > now),
-        )
-        .map((row) => row.accessId),
-    ),
-  ];
+  // "Live" access is active AND not past its expiry, deduped per
+  // accessId keeping the later expiry — a merge can leave the survivor
+  // holding two rows for one accessId (one from each side) until
+  // syncAccess collapses them. `getActiveAccess` is that rule: the
+  // active/unexpired half runs in SQL (accessRepo.findActiveAccess) so
+  // this stops pulling every historical row for the subscriber, and it
+  // is the same path buildAccessResponse uses for
+  // GET /v1/me/entitlements — one copy, no drift.
+  const liveAccessIds = Object.keys(await getActiveAccess(subscriberId));
 
   // `subscriber_access.accessId` is the access ROW id; every
   // entitlement surface the SDK sees reports the catalog `identifier`

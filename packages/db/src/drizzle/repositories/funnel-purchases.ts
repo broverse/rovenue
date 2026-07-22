@@ -52,6 +52,27 @@ export async function findByStripeSubscriptionId(
   return rows[0] ?? null;
 }
 
+/**
+ * Repoint a funnel purchase at a different subscriber.
+ *
+ * The buyer paid before they had an install, so this row was written
+ * against the synthetic `stripe:<customer>` subscriber. When the claim
+ * merges that synthetic into the installed subscriber, the synthetic is
+ * soft-deleted as merged — leaving this column pointing at a retired row
+ * that every funnel report joining it would land on. The claim moves it
+ * in the same transaction as the merge.
+ */
+export async function setSubscriber(
+  db: Db,
+  id: string,
+  subscriberId: string,
+): Promise<void> {
+  await db
+    .update(funnelPurchases)
+    .set({ subscriberId })
+    .where(eq(funnelPurchases.id, id));
+}
+
 export async function markPaid(
   db: Db,
   id: string,
