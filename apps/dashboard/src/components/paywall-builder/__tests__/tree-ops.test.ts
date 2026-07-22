@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PaywallNode, StackNode, TextNode } from "@rovenue/shared/paywall";
+import type { PackageListNode, PaywallNode, StackNode, TextNode } from "@rovenue/shared/paywall";
 import {
   findNode,
   findParent,
@@ -336,5 +336,146 @@ describe("newNode", () => {
     let calls = 0;
     const node = newNode("text", () => `x${++calls}`);
     expect(node.id).toBe("x1");
+  });
+});
+
+// =============================================================
+// cellTemplate traversal (Phase D2) — a packageList's `cellTemplate`
+// is a single node slot (like `fallback`), so the cellTemplate ROOT
+// itself is not addressable by insert/remove/move (no parent+index),
+// but everything INSIDE it (a normal stack subtree) is addressable
+// exactly like any other part of the tree.
+// =============================================================
+
+// Fixture tree:
+// root (stack v)
+//   pl1 (packageList)
+//     cellTemplate: cell_root (stack v)
+//       cell_name (text)
+//       cell_price (text)
+function cellTemplateFixture(): StackNode {
+  return {
+    type: "stack",
+    id: "root",
+    axis: "v",
+    children: [
+      {
+        type: "packageList",
+        id: "pl1",
+        packageIds: [],
+        cellLayout: "column",
+        cellTemplate: {
+          type: "stack",
+          id: "cell_root",
+          axis: "v",
+          children: [
+            { type: "text", id: "cell_name", key: "k_name", role: "body" },
+            { type: "text", id: "cell_price", key: "k_price", role: "caption" },
+          ],
+        },
+      },
+    ],
+  };
+}
+
+describe("cellTemplate traversal", () => {
+  describe("findNode", () => {
+    it("finds the cellTemplate root", () => {
+      const root = cellTemplateFixture();
+      expect(findNode(root, "cell_root")?.id).toBe("cell_root");
+    });
+
+    it("finds a node nested inside the cellTemplate subtree", () => {
+      const root = cellTemplateFixture();
+      expect(findNode(root, "cell_price")?.id).toBe("cell_price");
+    });
+  });
+
+  describe("findParent", () => {
+    it("returns null for the cellTemplate root (not addressable by index, like a fallback slot)", () => {
+      const root = cellTemplateFixture();
+      expect(findParent(root, "cell_root")).toBeNull();
+    });
+
+    it("returns parent + index for a node inside the cellTemplate subtree", () => {
+      const root = cellTemplateFixture();
+      const result = findParent(root, "cell_price");
+      expect(result?.parent.id).toBe("cell_root");
+      expect(result?.index).toBe(1);
+    });
+  });
+
+  describe("insertNode", () => {
+    it("inserts into the cellTemplate subtree's own stack children", () => {
+      const root = cellTemplateFixture();
+      const node: PaywallNode = { type: "spacer", id: "cell_sp", size: 4 };
+      const next = insertNode(root, "cell_root", node, 1);
+      const cellRoot = findNode(next, "cell_root") as StackNode;
+      expect(cellRoot.children.map((c) => c.id)).toEqual(["cell_name", "cell_sp", "cell_price"]);
+    });
+
+    it("does not mutate the input tree", () => {
+      const root = cellTemplateFixture();
+      const original = JSON.parse(JSON.stringify(root));
+      insertNode(root, "cell_root", { type: "spacer", id: "cell_sp" }, 0);
+      expect(root).toEqual(original);
+    });
+  });
+
+  describe("removeNode", () => {
+    it("removes a node from inside the cellTemplate subtree", () => {
+      const root = cellTemplateFixture();
+      const next = removeNode(root, "cell_name");
+      const cellRoot = findNode(next, "cell_root") as StackNode;
+      expect(cellRoot.children.map((c) => c.id)).toEqual(["cell_price"]);
+    });
+
+    it("is a no-op for the cellTemplate root itself (not addressable)", () => {
+      const root = cellTemplateFixture();
+      const next = removeNode(root, "cell_root");
+      expect(next).toBe(root);
+    });
+  });
+
+  describe("moveNode", () => {
+    it("moves a node within the cellTemplate subtree's siblings", () => {
+      const root = cellTemplateFixture();
+      const next = moveNode(root, "cell_price", -1);
+      const cellRoot = findNode(next, "cell_root") as StackNode;
+      expect(cellRoot.children.map((c) => c.id)).toEqual(["cell_price", "cell_name"]);
+    });
+  });
+
+  describe("updateNode", () => {
+    it("merges a patch into a node inside the cellTemplate subtree", () => {
+      const root = cellTemplateFixture();
+      const next = updateNode<TextNode>(root, "cell_price", { role: "title" });
+      expect((findNode(next, "cell_price") as TextNode).role).toBe("title");
+    });
+
+    it("merges a patch into the cellTemplate root itself (editable like any other node)", () => {
+      const root = cellTemplateFixture();
+      const next = updateNode<StackNode>(root, "cell_root", { spacing: 6 });
+      expect((findNode(next, "cell_root") as StackNode).spacing).toBe(6);
+    });
+
+    it("can replace a packageList's whole cellTemplate", () => {
+      const root = cellTemplateFixture();
+      const next = updateNode<PackageListNode>(root, "pl1", { cellTemplate: undefined });
+      expect((findNode(next, "pl1") as PackageListNode).cellTemplate).toBeUndefined();
+    });
+
+    it("preserves structural sharing for a sibling packageList untouched by a cellTemplate edit", () => {
+      const root: StackNode = {
+        ...cellTemplateFixture(),
+        children: [
+          ...cellTemplateFixture().children,
+          { type: "spacer", id: "sp_sibling", size: 8 },
+        ],
+      };
+      const spBefore = findNode(root, "sp_sibling");
+      const next = updateNode<TextNode>(root, "cell_name", { role: "title" });
+      expect(findNode(next, "sp_sibling")).toBe(spBefore);
+    });
   });
 });

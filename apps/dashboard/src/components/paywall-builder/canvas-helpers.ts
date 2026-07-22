@@ -63,6 +63,25 @@ export function placeholderPriceView(offering: RendererOffering | null): Record<
   return out;
 }
 
+/**
+ * Every package in `offering` mapped to the same `previewEligible` flag —
+ * the canvas's `eligibility` input for `PaywallRenderer` (drives
+ * `overrides` with `when.kind === "introEligible"`). The builder preview
+ * has no real per-user entitlement/eligibility signal, so it's a single
+ * top-bar toggle applied uniformly rather than per-package.
+ */
+export function buildEligibilityMap(
+  offering: RendererOffering | null,
+  previewEligible: boolean,
+): Record<string, boolean> {
+  if (!offering) return {};
+  const out: Record<string, boolean> = {};
+  for (const pkg of offering.packages) {
+    out[pkg.packageIdentifier] = previewEligible;
+  }
+  return out;
+}
+
 export type Rect = { left: number; top: number; width: number; height: number };
 
 /**

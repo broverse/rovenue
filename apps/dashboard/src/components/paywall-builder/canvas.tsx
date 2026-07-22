@@ -9,7 +9,13 @@ import { cn } from "../../lib/cn";
 import { rpc, unwrap } from "../../lib/api";
 import { useOfferingById } from "../../lib/hooks/useProjectOfferings";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
-import { computeSelectionRect, placeholderPriceView, toRendererOffering, type Rect } from "./canvas-helpers";
+import {
+  buildEligibilityMap,
+  computeSelectionRect,
+  placeholderPriceView,
+  toRendererOffering,
+  type Rect,
+} from "./canvas-helpers";
 import type { CanvasDevice } from "./types";
 
 // Device chrome — same frame dimensions/style as funnel-builder's
@@ -78,6 +84,10 @@ export const Canvas = component(() => {
     [offeringQuery.data, displayNameById],
   );
   const priceView = useMemo(() => placeholderPriceView(offering), [offering]);
+  const eligibility = useMemo(
+    () => buildEligibilityMap(offering, vm.previewEligible),
+    [offering, vm.previewEligible],
+  );
 
   // The renderer's package selection is one-shot (useState initializer) —
   // remount it whenever `config`'s identity changes so structural edits
@@ -239,6 +249,7 @@ export const Canvas = component(() => {
                 locale={vm.editLocale}
                 colorScheme={vm.colorScheme}
                 priceView={priceView}
+                eligibility={eligibility}
                 onPurchase={noop}
                 onClose={noop}
                 onRestore={noop}

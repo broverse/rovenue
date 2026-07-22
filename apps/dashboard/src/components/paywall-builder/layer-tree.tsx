@@ -41,9 +41,11 @@ export const LayerTree = component(() => {
             key={row.node.id}
             node={row.node}
             depth={row.depth}
+            parentId={row.parentId}
             index={row.index}
             siblingCount={row.siblingCount}
             isRoot={row.parentId === null}
+            isCellTemplateRoot={row.isCellTemplateRoot}
             preview={rowPreview(row.node, localeTable)}
           />
         ))}
@@ -55,16 +57,20 @@ export const LayerTree = component(() => {
 function LayerRow({
   node,
   depth,
+  parentId,
   index,
   siblingCount,
   isRoot,
+  isCellTemplateRoot,
   preview,
 }: {
   node: PaywallNode;
   depth: number;
+  parentId: string | null;
   index: number;
   siblingCount: number;
   isRoot: boolean;
+  isCellTemplateRoot: boolean;
   preview: string | null;
 }) {
   const vm = useService(PaywallBuilderViewModel);
@@ -73,6 +79,10 @@ function LayerRow({
   const Icon = NODE_ICON[node.type];
   const selected = vm.selectedNodeId === node.id;
   const label = t(`paywalls.builder.nodeTypes.${node.type}`, NODE_TYPE_LABEL[node.type]);
+  // A cellTemplate root has no parent+index (see tree-ops' addressability
+  // model) — move/reorder controls don't apply to it; "delete" instead
+  // clears the whole template off its packageList via setCellTemplate.
+  const movable = !isRoot && !isCellTemplateRoot;
 
   return (
     <div
@@ -88,6 +98,11 @@ function LayerRow({
         className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
       >
         <Icon size={13} className="flex-shrink-0 text-rv-mute-500" />
+        {isCellTemplateRoot && (
+          <span className="flex-shrink-0 rounded bg-rv-c3 px-1 py-0.5 font-rv-mono text-[9px] font-semibold uppercase tracking-wider text-rv-mute-600">
+            {t("paywalls.builder.layers.cellTemplate", "Cell template")}
+          </span>
+        )}
         <span className="min-w-0 flex-1 truncate text-[12px] text-foreground">
           {label}
           {preview && <span className="ml-1 text-rv-mute-500">{preview}</span>}
@@ -116,7 +131,7 @@ function LayerRow({
             )}
           </div>
         )}
-        {!isRoot && (
+        {movable && (
           <>
             <button
               type="button"
@@ -136,15 +151,27 @@ function LayerRow({
             >
               <ChevronDown size={11} />
             </button>
-            <button
-              type="button"
-              title={t("paywalls.builder.layers.delete", "Delete")}
-              onClick={() => vm.removeNode(node.id)}
-              className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-rv-mute-500 transition hover:bg-rv-danger/15 hover:text-rv-danger"
-            >
-              <Trash2 size={11} />
-            </button>
           </>
+        )}
+        {!isRoot && !isCellTemplateRoot && (
+          <button
+            type="button"
+            title={t("paywalls.builder.layers.delete", "Delete")}
+            onClick={() => vm.removeNode(node.id)}
+            className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-rv-mute-500 transition hover:bg-rv-danger/15 hover:text-rv-danger"
+          >
+            <Trash2 size={11} />
+          </button>
+        )}
+        {isCellTemplateRoot && parentId && (
+          <button
+            type="button"
+            title={t("paywalls.builder.layers.cellTemplateRemove", "Remove cell template")}
+            onClick={() => vm.setCellTemplate(parentId, "none")}
+            className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-rv-mute-500 transition hover:bg-rv-danger/15 hover:text-rv-danger"
+          >
+            <Trash2 size={11} />
+          </button>
         )}
       </div>
     </div>

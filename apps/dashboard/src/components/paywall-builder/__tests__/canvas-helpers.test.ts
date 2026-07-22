@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { DashboardOfferingRow } from "@rovenue/shared";
-import { computeSelectionRect, placeholderPriceView, toRendererOffering } from "../canvas-helpers";
+import {
+  buildEligibilityMap,
+  computeSelectionRect,
+  placeholderPriceView,
+  toRendererOffering,
+} from "../canvas-helpers";
 
 function offeringFixture(): DashboardOfferingRow {
   return {
@@ -58,6 +63,26 @@ describe("placeholderPriceView", () => {
     // Distinct presets across packages (not all identical).
     const prices = Object.values(view).map((v) => v.price);
     expect(new Set(prices).size).toBeGreaterThan(1);
+  });
+});
+
+describe("buildEligibilityMap", () => {
+  it("returns an empty object when there's no offering", () => {
+    expect(buildEligibilityMap(null, true)).toEqual({});
+  });
+
+  it("maps every package identifier to the same previewEligible flag", () => {
+    const offering = toRendererOffering(offeringFixture(), new Map())!;
+    expect(buildEligibilityMap(offering, true)).toEqual({
+      $rov_monthly: true,
+      $rov_annual: true,
+      $rov_weekly: true,
+    });
+    expect(buildEligibilityMap(offering, false)).toEqual({
+      $rov_monthly: false,
+      $rov_annual: false,
+      $rov_weekly: false,
+    });
   });
 });
 

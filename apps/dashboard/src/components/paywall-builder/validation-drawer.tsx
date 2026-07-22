@@ -91,6 +91,14 @@ function issueTitle(issue: BuilderIssue, t: (key: string, fallback: string) => s
       return t("paywalls.builder.validation.codeMissingPurchase", "Missing purchase button");
     case "LOCALE_KEY_GAP":
       return t("paywalls.builder.validation.codeLocaleGap", "Missing translation");
+    case "SCHEMA_INVALID":
+      return t("paywalls.builder.validation.codeSchemaInvalid", "Invalid config");
+    case "CELL_TEMPLATE_BAD_NODE":
+      return t("paywalls.builder.validation.codeCellTemplateBadNode", "Unsupported node in cell template");
+    case "OVERRIDE_BAD_PROP":
+      return t("paywalls.builder.validation.codeOverrideBadProp", "Non-overridable prop");
+    case "OVERRIDE_SELECTED_OUTSIDE_CELL":
+      return t("paywalls.builder.validation.codeOverrideSelectedOutsideCell", "Override never matches");
     default:
       return issue.code;
   }

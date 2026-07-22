@@ -4,7 +4,18 @@ import { Container } from "impair";
 import { container as tsyringeContainer } from "tsyringe";
 import { PaywallBuilderViewModel } from "./paywall-builder.vm";
 import { PaywallBuilderApi, type PaywallBuilderDetailDto } from "../../../lib/services/paywall-builder-api";
-import { emptyBuilderConfig, type BuilderConfig } from "@rovenue/shared/paywall";
+import { findNode } from "../tree-ops";
+import {
+  emptyBuilderConfig,
+  type BuilderConfig,
+  type PackageListNode,
+  type PaywallNode,
+  type TextNode,
+} from "@rovenue/shared/paywall";
+
+function treeOpsFindNode(vm: PaywallBuilderViewModel, id: string): PaywallNode | null {
+  return findNode(vm.config.root, id);
+}
 
 function fakeConfig(): BuilderConfig {
   const config = emptyBuilderConfig("en");
@@ -198,6 +209,129 @@ describe("PaywallBuilderViewModel", () => {
     vm.addNode("packageList", "root");
     vm.updateNode(vm.config.root.children[1].id, { packageIds: ["pkg_unknown"] });
     expect(vm.errorIssues.some((i) => i.code === "FOREIGN_PACKAGE_ID")).toBe(true);
+  });
+
+  // ----- Preview eligibility toggle -----
+  it("previewEligible defaults false and toggles/sets", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    expect(vm.previewEligible).toBe(false);
+    vm.togglePreviewEligible();
+    expect(vm.previewEligible).toBe(true);
+    vm.setPreviewEligible(false);
+    expect(vm.previewEligible).toBe(false);
+  });
+
+  // ----- Overrides -----
+  it("addOverride appends an empty-props override of the given kind", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    vm.addOverride("t1", "introEligible");
+    const node = treeOpsFindNode(vm, "t1");
+    expect(node?.overrides).toEqual([{ when: { kind: "introEligible" }, props: {} }]);
+  });
+
+  it("addOverride is a no-op for an unknown node id", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    const before = vm.config;
+
+    vm.addOverride("nope", "selected");
+    expect(vm.config).toBe(before);
+  });
+
+  it("updateOverrideProps shallow-merges props into the override at index", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    vm.addOverride("t1", "introEligible");
+    vm.updateOverrideProps("t1", 0, { key: "t1_alt_key" });
+    const node = treeOpsFindNode(vm, "t1") as TextNode;
+    expect(node.overrides).toEqual([{ when: { kind: "introEligible" }, props: { key: "t1_alt_key" } }]);
+
+    vm.updateOverrideProps("t1", 0, { align: "center" });
+    const node2 = treeOpsFindNode(vm, "t1") as TextNode;
+    expect(node2.overrides?.[0]?.props).toEqual({ key: "t1_alt_key", align: "center" });
+  });
+
+  it("updateOverrideProps is a no-op for an out-of-range index", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    const before = vm.config;
+
+    vm.updateOverrideProps("t1", 0, { key: "x" });
+    expect(vm.config).toBe(before);
+  });
+
+  it("removeOverride removes the override at index", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    vm.addOverride("t1", "introEligible");
+    vm.addOverride("t1", "selected");
+    vm.removeOverride("t1", 0);
+    const node = treeOpsFindNode(vm, "t1") as TextNode;
+    expect(node.overrides).toEqual([{ when: { kind: "selected" }, props: {} }]);
+  });
+
+  // ----- cellTemplate -----
+  it("setCellTemplate('default') seeds a name+price stack and registers loc keys", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    const plId = vm.addNode("packageList", "root");
+    vm.setCellTemplate(plId, "default");
+
+    const pl = treeOpsFindNode(vm, plId) as PackageListNode;
+    expect(pl.cellTemplate?.type).toBe("stack");
+    if (pl.cellTemplate?.type !== "stack") throw new Error("expected stack");
+    expect(pl.cellTemplate.children).toHaveLength(2);
+    const [nameNode, priceNode] = pl.cellTemplate.children as TextNode[];
+    expect(vm.config.localizations.en[nameNode.key]).toBe("{{packageName}}");
+    expect(vm.config.localizations.en[priceNode.key]).toBe("{{price}}");
+  });
+
+  it("setCellTemplate('none') clears an existing cellTemplate", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    const plId = vm.addNode("packageList", "root");
+    vm.setCellTemplate(plId, "default");
+    expect((treeOpsFindNode(vm, plId) as PackageListNode).cellTemplate).toBeDefined();
+
+    vm.setCellTemplate(plId, "none");
+    expect((treeOpsFindNode(vm, plId) as PackageListNode).cellTemplate).toBeUndefined();
+  });
+
+  it("setCellTemplate is a no-op when the id isn't a packageList", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+    const before = vm.config;
+
+    vm.setCellTemplate("t1", "default");
+    expect(vm.config).toBe(before);
+  });
+
+  // ----- Warning-code split (mirrors the API gate's WARNING_CODES) -----
+  it("classifies OVERRIDE_SELECTED_OUTSIDE_CELL as a warning, not a blocking error", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    vm.addOverride("t1", "selected"); // t1 isn't inside any cellTemplate
+    expect(vm.errorIssues.some((i) => i.code === "OVERRIDE_SELECTED_OUTSIDE_CELL")).toBe(false);
+    expect(vm.warningIssues.some((i) => i.code === "OVERRIDE_SELECTED_OUTSIDE_CELL")).toBe(true);
   });
 
   // ----- Save -----

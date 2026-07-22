@@ -19,6 +19,15 @@ import type { PaywallNode, StackNode } from "@rovenue/shared/paywall";
 // NOT addressable by those three ops; `findNode`/`updateNode` still
 // reach into fallback subtrees since they only need the node
 // itself, not a parent list.
+//
+// A `packageList.cellTemplate` (Phase D2) is the same kind of single
+// node slot as `fallback` — the cellTemplate ROOT itself has no
+// parent+index and is therefore not insertable/removable/moveable
+// (the VM's `setCellTemplate` action owns creating/clearing it
+// wholesale). Everything INSIDE that subtree — normally a stack with
+// its own `children` — is fully addressable exactly like any other
+// part of the tree, so every op below also recurses into
+// `packageList.cellTemplate` alongside `fallback`.
 // =============================================================
 
 /** Depth-first search for `id`, walking stack children AND fallback slots. */
@@ -33,6 +42,10 @@ function search(node: PaywallNode, id: string): PaywallNode | null {
       const found = search(child, id);
       if (found) return found;
     }
+  }
+  if (node.type === "packageList" && node.cellTemplate) {
+    const found = search(node.cellTemplate, id);
+    if (found) return found;
   }
   if (node.fallback) {
     const found = search(node.fallback, id);
@@ -61,6 +74,10 @@ function searchParent(node: PaywallNode, id: string): { parent: StackNode; index
       const found = searchParent(child, id);
       if (found) return found;
     }
+  }
+  if (node.type === "packageList" && node.cellTemplate) {
+    const found = searchParent(node.cellTemplate, id);
+    if (found) return found;
   }
   if (node.fallback) {
     const found = searchParent(node.fallback, id);
@@ -95,6 +112,14 @@ function transformNode(
     // Spread the narrowed `node` (not the widened `next`) so the result
     // stays a well-typed StackNode rather than an ambiguous union member.
     if (childrenChanged) next = { ...node, children: nextChildren };
+  }
+
+  if (node.type === "packageList" && node.cellTemplate) {
+    const nextCellTemplate = transformNode(node.cellTemplate, targetId, transform);
+    // Same narrowed-`node` rationale as the stack branch above.
+    if (nextCellTemplate !== node.cellTemplate) {
+      next = { ...node, cellTemplate: nextCellTemplate };
+    }
   }
 
   if (next.fallback) {

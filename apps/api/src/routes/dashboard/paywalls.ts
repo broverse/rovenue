@@ -106,11 +106,27 @@ function extractOfferingPackageIds(offering: { packages: unknown }): string[] {
  * columns actually persisted. `null` clears it (revert to format 1);
  * a non-null value must pass both the Zod node-tree schema and
  * validateBuilderConfig against the paywall's (possibly new) offering
- * — any non-LOCALE_KEY_GAP issue is a 400, mirroring the PAYWALL_IN_USE
- * JSON-in-message HTTPException convention used by DELETE below.
+ * — any issue whose code isn't in `WARNING_CODES` is a 400, mirroring
+ * the PAYWALL_IN_USE JSON-in-message HTTPException convention used by
+ * DELETE below.
  */
 const MAX_BUILDER_DEPTH = 32;
 const MAX_BUILDER_NODES = 500;
+
+// BuilderIssue codes that don't block a builderConfig PATCH — the config
+// still saves (200) and the dashboard renders these as warnings rather
+// than errors. Kept as `Set<string>`, not `Set<BuilderIssue["code"]>`:
+// INTRO_VARIABLE_UNGUARDED is spec'd (Phase D variable-guard warning) but
+// not yet emitted by validateBuilderConfig — forward-tolerant so this gate
+// doesn't need touching again the moment the validator adds it. Manually
+// kept in sync with the dashboard VM's identical WARNING_CODES set
+// (apps/dashboard/src/components/paywall-builder/vm/paywall-builder.vm.ts)
+// — there's no shared export for it.
+const WARNING_CODES = new Set<string>([
+  "LOCALE_KEY_GAP",
+  "OVERRIDE_SELECTED_OUTSIDE_CELL",
+  "INTRO_VARIABLE_UNGUARDED",
+]);
 
 /**
  * Iterative (explicit-stack) walk over a raw candidate builder-config,
@@ -196,7 +212,7 @@ function prepareBuilderConfigPatch(
   }
 
   const issues = validateBuilderConfig(parsed.data, { offeringPackageIds });
-  if (issues.some((issue) => issue.code !== "LOCALE_KEY_GAP")) {
+  if (issues.some((issue) => !WARNING_CODES.has(issue.code))) {
     throw new HTTPException(400, {
       message: JSON.stringify({ code: "INVALID_BUILDER_CONFIG", issues }),
     });

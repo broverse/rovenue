@@ -1249,7 +1249,9 @@
         "add": "Add node",
         "moveUp": "Move up",
         "moveDown": "Move down",
-        "delete": "Delete"
+        "delete": "Delete",
+        "cellTemplate": "Cell template",
+        "cellTemplateRemove": "Remove cell template"
       },
       "canvas": {
         "zoomOut": "Zoom out",
@@ -1318,7 +1320,18 @@
         "padding": "Padding",
         "sizeFit": "Fit",
         "sizeFill": "Fill",
-        "sizeCustom": "Px"
+        "sizeCustom": "Px",
+        "overrides": "Overrides",
+        "overridesHint": "Swap props when a package is intro-eligible, or when it's the selected package inside a cell template.",
+        "overridesEmpty": "No overrides yet.",
+        "overrideAddIntroEligible": "Intro eligible",
+        "overrideAddSelected": "Selected (in cell)",
+        "overrideRemove": "Remove override",
+        "cellTemplate": "Cell template",
+        "cellTemplateHint": "Replace the built-in name + price cell with a custom subtree, editable in the layer tree.",
+        "cellTemplateActive": "Custom template active",
+        "cellTemplateRemove": "Remove cell template",
+        "cellTemplateAdd": "Add default template"
       },
       "topbar": {
         "close": "Close builder",
@@ -1336,7 +1349,10 @@
         "autosaveHint": "Autosaved on every change",
         "autosaveSaving": "saving",
         "autosaveError": "retrying",
-        "autosaveSaved": "saved"
+        "autosaveSaved": "saved",
+        "previewEligible": "Eligible",
+        "previewIneligible": "Ineligible",
+        "previewEligibleHint": "Preview as intro-offer eligible / ineligible"
       },
       "locales": {
         "title": "Locales",
@@ -1357,6 +1373,10 @@
         "codeForeignPackage": "Unknown package reference",
         "codeMissingPurchase": "Missing purchase button",
         "codeLocaleGap": "Missing translation",
+        "codeSchemaInvalid": "Invalid config",
+        "codeCellTemplateBadNode": "Unsupported node in cell template",
+        "codeOverrideBadProp": "Non-overridable prop",
+        "codeOverrideSelectedOutsideCell": "Override never matches",
         "locale": "Locale"
       }
     }

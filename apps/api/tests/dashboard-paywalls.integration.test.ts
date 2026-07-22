@@ -537,6 +537,44 @@ describe("PATCH /projects/:projectId/paywalls/:id — builderConfig", () => {
     expect(data.paywall.configFormatVersion).toBe(2);
   });
 
+  it("accepts a config whose only issue is an OVERRIDE_SELECTED_OUTSIDE_CELL warning", async () => {
+    const { userId, cookie } = await createUserAndSession("bc-override-warn");
+    const project = await seedProject("bc-override-warn");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const offering = await seedOffering(project.id, "bc-override-warn", [monthlyPackageSlot]);
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/paywalls`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "bc-override-warn-paywall",
+        name: "Builder Config Override Warning",
+        offeringId: offering.id,
+        remoteConfig: validRemoteConfig,
+      }),
+    });
+    const { data: createData } = (await createRes.json()) as { data: { paywall: { id: string } } };
+    const paywallId = createData.paywall.id;
+
+    // A "selected" override outside any cellTemplate subtree never
+    // matches at render time — WARNING, not blocking (see WARNING_CODES
+    // in paywalls.ts and the "selected" override docs in validate.ts).
+    const warnConfig = validBuilderConfig();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (warnConfig.root.children[0] as any).overrides = [{ when: { kind: "selected" }, props: {} }];
+
+    const patchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ builderConfig: warnConfig }),
+    });
+    expect(patchRes.status).toBe(200);
+    const { data } = (await patchRes.json()) as { data: { paywall: Record<string, unknown> } };
+    expect(data.paywall.configFormatVersion).toBe(2);
+  });
+
   it("clears builderConfig and reverts configFormatVersion to 1 when builderConfig: null", async () => {
     const { userId, cookie } = await createUserAndSession("bc-clear");
     const project = await seedProject("bc-clear");

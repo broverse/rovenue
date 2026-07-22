@@ -3,7 +3,13 @@ import {
   type Cleanup, Props,
 } from "impair";
 import { createId } from "@paralleldrive/cuid2";
-import type { BuilderConfig, BuilderIssue, PaywallNode } from "@rovenue/shared/paywall";
+import type {
+  BuilderConfig,
+  BuilderIssue,
+  OverrideCondition,
+  PackageListNode,
+  PaywallNode,
+} from "@rovenue/shared/paywall";
 import { emptyBuilderConfig, validateBuilderConfig } from "@rovenue/shared/paywall";
 import {
   PaywallBuilderApi,
@@ -12,6 +18,20 @@ import {
 import * as treeOps from "../tree-ops";
 import { PRESETS } from "../presets";
 import type { CanvasDevice, ColorScheme } from "../types";
+
+// Same warning-code set as the API gate (apps/api/src/routes/dashboard/paywalls.ts)
+// — a builderConfig PATCH still saves (200) when every issue's code is in
+// here; the dashboard mirrors that by rendering them as warnings rather
+// than blocking errors. Kept as `Set<string>`, not `Set<BuilderIssue["code"]>`
+// — INTRO_VARIABLE_UNGUARDED is spec'd but not yet emitted by
+// validateBuilderConfig, so this stays forward-tolerant instead of a type
+// error the moment the validator adds it. Manually kept in sync with the
+// API gate (no shared export for it — see that file's comment).
+const WARNING_CODES = new Set<string>([
+  "LOCALE_KEY_GAP",
+  "OVERRIDE_SELECTED_OUTSIDE_CELL",
+  "INTRO_VARIABLE_UNGUARDED",
+]);
 
 export interface PaywallBuilderProps {
   projectId: string;
@@ -39,6 +59,20 @@ export class PaywallBuilderViewModel {
 
   toggleColorScheme() {
     this.colorScheme = this.colorScheme === "light" ? "dark" : "light";
+  }
+
+  // Canvas preview: which `introEligible` override branch the whole
+  // canvas previews as. There's no real per-user eligibility signal in
+  // the builder, so it's a single top-bar toggle applied to every
+  // package uniformly (see canvas-helpers.buildEligibilityMap).
+  @state previewEligible = false;
+
+  setPreviewEligible(v: boolean) {
+    this.previewEligible = v;
+  }
+
+  togglePreviewEligible() {
+    this.previewEligible = !this.previewEligible;
   }
 
   // Canvas preview UI state — mirrors FunnelDraftViewModel's canvas
@@ -211,6 +245,88 @@ export class PaywallBuilderViewModel {
     return this.selectedNodeId ? treeOps.findNode(this.config.root, this.selectedNodeId) : null;
   }
 
+  // ----- Overrides (Phase D2) -----
+  /** Appends a fresh, empty-props override of `kind` to `nodeId`. */
+  addOverride(nodeId: string, kind: OverrideCondition["kind"]) {
+    const node = treeOps.findNode(this.config.root, nodeId);
+    if (!node) return;
+    const overrides = [...(node.overrides ?? []), { when: { kind }, props: {} }];
+    this.updateNode(nodeId, { overrides });
+  }
+
+  removeOverride(nodeId: string, index: number) {
+    const node = treeOps.findNode(this.config.root, nodeId);
+    if (!node?.overrides) return;
+    const overrides = node.overrides.filter((_, i) => i !== index);
+    this.updateNode(nodeId, { overrides });
+  }
+
+  /** Shallow-merges `props` into the override at `index` — same merge semantics as `updateNode`. */
+  updateOverrideProps(nodeId: string, index: number, props: Record<string, unknown>) {
+    const node = treeOps.findNode(this.config.root, nodeId);
+    if (!node?.overrides?.[index]) return;
+    const overrides = node.overrides.map((o, i) =>
+      i === index ? { ...o, props: { ...o.props, ...props } } : o,
+    );
+    this.updateNode(nodeId, { overrides });
+  }
+
+  // ----- cellTemplate (Phase D2) -----
+  /**
+   * `"none"` clears a packageList's cellTemplate. `"default"` seeds a
+   * starter template (a stack with a name text + a price text, both
+   * using cell-scoped `{{packageName}}`/`{{price}}` variables) — no-op
+   * if `packageListId` doesn't resolve to a packageList node.
+   */
+  setCellTemplate(packageListId: string, mode: "default" | "none") {
+    const node = treeOps.findNode(this.config.root, packageListId);
+    if (!node || node.type !== "packageList") return;
+
+    if (mode === "none") {
+      this.updateNode<PackageListNode>(packageListId, { cellTemplate: undefined });
+      return;
+    }
+
+    const idGen = () => createId().slice(0, 8);
+    const nameId = idGen();
+    const priceId = idGen();
+    const nameKey = `cell_name_${nameId}`;
+    const priceKey = `cell_price_${priceId}`;
+    const template: PaywallNode = {
+      type: "stack",
+      id: idGen(),
+      axis: "v",
+      spacing: 4,
+      children: [
+        { type: "text", id: nameId, key: nameKey, role: "body" },
+        { type: "text", id: priceId, key: priceKey, role: "caption" },
+      ],
+    };
+    this.registerLocKeysWithDefaults({
+      [nameKey]: "{{packageName}}",
+      [priceKey]: "{{price}}",
+    });
+    this.updateNode<PackageListNode>(packageListId, { cellTemplate: template });
+  }
+
+  /**
+   * Registers `entries` (key -> initial text) in the DEFAULT locale table
+   * only, when not already present. Unlike `registerFreshLocKeys` (which
+   * stubs every locale with `""` for freshly-added, user-authored nodes),
+   * these keys carry a meaningful starter value — `resolveText` already
+   * falls back to the default locale for any locale missing the key, so
+   * leaving other locales unset is intentional (surfaces as an existing,
+   * warning-only LOCALE_KEY_GAP, same as the hero/comparison presets).
+   */
+  private registerLocKeysWithDefaults(entries: Record<string, string>) {
+    const defaultTable = { ...(this.config.localizations[this.config.defaultLocale] ?? {}) };
+    for (const [key, value] of Object.entries(entries)) {
+      if (!(key in defaultTable)) defaultTable[key] = value;
+    }
+    const localizations = { ...this.config.localizations, [this.config.defaultLocale]: defaultTable };
+    this.config = { ...this.config, localizations };
+  }
+
   // ----- Localization text -----
   setLocaleText(key: string, locale: string, value: string) {
     if (!this.locales.includes(locale)) return;
@@ -283,10 +399,10 @@ export class PaywallBuilderViewModel {
   }
 
   @derived get errorIssues() {
-    return this.validationIssues.filter((i) => i.code !== "LOCALE_KEY_GAP");
+    return this.validationIssues.filter((i) => !WARNING_CODES.has(i.code));
   }
   @derived get warningIssues() {
-    return this.validationIssues.filter((i) => i.code === "LOCALE_KEY_GAP");
+    return this.validationIssues.filter((i) => WARNING_CODES.has(i.code));
   }
 
   @derived get isDirty() {

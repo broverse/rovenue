@@ -64,6 +64,64 @@ describe("flattenTree", () => {
   it("handles an empty stack", () => {
     const root: StackNode = { type: "stack", id: "root", axis: "v", children: [] };
     const rows = flattenTree(root);
-    expect(rows).toEqual([{ node: root, depth: 0, parentId: null, index: 0, siblingCount: 1 }]);
+    expect(rows).toEqual([
+      { node: root, depth: 0, parentId: null, index: 0, siblingCount: 1, isCellTemplateRoot: false },
+    ]);
+  });
+});
+
+// =============================================================
+// cellTemplate branch (Phase D2) — unlike a `fallback` slot,
+// cellTemplate SHOULD show up in the layer tree, as a labeled
+// nested branch under its packageList, so the fixture below (and
+// its assertions) intentionally diverge from the fallback-exclusion
+// tests above.
+// =============================================================
+
+function cellTemplateFixture(): StackNode {
+  return {
+    type: "stack",
+    id: "root",
+    axis: "v",
+    children: [
+      {
+        type: "packageList",
+        id: "pl1",
+        packageIds: [],
+        cellLayout: "column",
+        cellTemplate: {
+          type: "stack",
+          id: "cell_root",
+          axis: "v",
+          children: [{ type: "text", id: "cell_name", key: "k_name", role: "body" }],
+        },
+      },
+    ],
+  };
+}
+
+describe("flattenTree — cellTemplate branch", () => {
+  it("includes the cellTemplate subtree, nested under its packageList", () => {
+    const rows = flattenTree(cellTemplateFixture());
+    expect(rows.map((r) => r.node.id)).toEqual(["root", "pl1", "cell_root", "cell_name"]);
+  });
+
+  it("marks only the cellTemplate root with isCellTemplateRoot", () => {
+    const rows = flattenTree(cellTemplateFixture());
+    const byId = Object.fromEntries(rows.map((r) => [r.node.id, r.isCellTemplateRoot]));
+    expect(byId).toEqual({ root: false, pl1: false, cell_root: true, cell_name: false });
+  });
+
+  it("computes depth for the cellTemplate subtree relative to the packageList", () => {
+    const rows = flattenTree(cellTemplateFixture());
+    const depthById = Object.fromEntries(rows.map((r) => [r.node.id, r.depth]));
+    expect(depthById).toEqual({ root: 0, pl1: 1, cell_root: 2, cell_name: 3 });
+  });
+
+  it("parents the cellTemplate root on its packageList; its own children parent normally", () => {
+    const rows = flattenTree(cellTemplateFixture());
+    const byId = Object.fromEntries(rows.map((r) => [r.node.id, r]));
+    expect(byId.cell_root).toMatchObject({ parentId: "pl1", index: 0, siblingCount: 1 });
+    expect(byId.cell_name).toMatchObject({ parentId: "cell_root", index: 0, siblingCount: 1 });
   });
 });

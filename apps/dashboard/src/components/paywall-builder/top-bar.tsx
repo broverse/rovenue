@@ -3,6 +3,8 @@ import { component, useService } from "impair";
 import { Link } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import {
+  BadgeCheck,
+  BadgeX,
   ChevronDown,
   Languages,
   Monitor,
@@ -85,6 +87,26 @@ export const TopBar = component(({ projectId, onOpenValidation }: Props) => {
           className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
         >
           {vm.colorScheme === "light" ? <Sun size={13} /> : <Moon size={13} />}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => vm.togglePreviewEligible()}
+          title={t(
+            "paywalls.builder.topbar.previewEligibleHint",
+            "Preview as intro-offer eligible / ineligible",
+          )}
+          className={cn(
+            "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition",
+            vm.previewEligible
+              ? "border-rv-success/40 bg-rv-success/10 text-rv-success hover:bg-rv-success/20"
+              : "border-rv-divider bg-rv-c2 text-rv-mute-600 hover:bg-rv-c3 hover:text-foreground",
+          )}
+        >
+          {vm.previewEligible ? <BadgeCheck size={13} /> : <BadgeX size={13} />}
+          {vm.previewEligible
+            ? t("paywalls.builder.topbar.previewEligible", "Eligible")
+            : t("paywalls.builder.topbar.previewIneligible", "Ineligible")}
         </button>
 
         {vm.errorIssues.length > 0 ? (
