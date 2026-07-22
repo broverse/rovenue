@@ -143,9 +143,10 @@ Web apps render builder paywalls using the `@rovenue/paywall-renderer`
 package:
 
 On the web there is no SDK façade yet — fetch the placement over REST with
-your public API key and pass the payload straight into the renderer (the
-native SDKs' `getPaywall()` deliberately does **not** expose `builderConfig`;
-it lives only on the wire payload):
+your public API key and pass the payload straight into the renderer. (On
+iOS/Android/React Native you don't do any of this: `getPaywall()` returns
+the paywall with its builder config and the platform renderers below draw
+it directly.)
 
 ```tsx
 import { PaywallRenderer } from '@rovenue/paywall-renderer';
