@@ -1,0 +1,24 @@
+{ "data": {
+  "placement": { "identifier": "onboarding", "revision": 4 },
+  "paywall": {
+    "id": "pw_2",
+    "identifier": "builder_paywall",
+    "name": "Builder",
+    "configFormatVersion": 2,
+    "remoteConfig": null,
+    "builderConfig": {
+      "formatVersion": 2,
+      "defaultLocale": "en",
+      "localizations": { "en": { "t": "Go Pro" } },
+      "root": { "type": "stack", "id": "root", "axis": "v", "children": [
+        { "type": "text", "id": "t1", "key": "t", "role": "title" }
+      ] }
+    },
+    "offering": {
+      "identifier": "default",
+      "isDefault": true,
+      "packages": []
+    }
+  },
+  "experiment": null
+} }

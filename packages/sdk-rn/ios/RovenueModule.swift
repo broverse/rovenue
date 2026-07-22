@@ -652,6 +652,7 @@ public class RovenueModule: Module {
                 return String(data: data, encoding: .utf8)
             },
             "remoteConfigLocale": p.remoteConfigLocale,
+            "builderConfigJson": p.builderConfigJson,
             "offering": p.offering.map(dtoFromOffering),
             "presentedContext": p.presentedContext.map(dtoFromPresentedContext),
         ]

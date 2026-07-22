@@ -226,6 +226,7 @@ fn build_paywall(
         config_format_version: paywall.config_format_version,
         remote_config_json,
         remote_config_locale,
+        builder_config_json: paywall.builder_config.map(|v| v.to_string()),
         offering: paywall.offering.map(map_offering),
         presented_context,
     }

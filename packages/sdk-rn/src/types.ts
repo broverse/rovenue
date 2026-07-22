@@ -118,6 +118,10 @@ export type Paywall = {
    *  JSON fails to parse as an object. */
   remoteConfig: Record<string, unknown> | null;
   remoteConfigLocale: string | null;
+  /** Parsed from the native side's raw `builderConfigJson` string — the
+   *  Phase-B builder component tree. `null` for remote-config-only
+   *  paywalls or when the JSON fails to parse as an object. */
+  builderConfig: Record<string, unknown> | null;
   offering: Offering | null;
   presentedContext: PresentedContext | null;
 };

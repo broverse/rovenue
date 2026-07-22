@@ -64,6 +64,7 @@ class PaywallMappingTest {
 
     private fun corePaywall(
         remoteConfigJson: String? = """{"title":"Go Pro"}""",
+        builderConfigJson: String? = null,
         offering: dev.rovenue.sdk.generated.CoreOffering? = null,
         presentedContext: CorePresentedContext? = corePresentedContext(),
     ) = CorePaywall(
@@ -74,9 +75,23 @@ class PaywallMappingTest {
         configFormatVersion = 1L,
         remoteConfigJson = remoteConfigJson,
         remoteConfigLocale = "en",
+        builderConfigJson = builderConfigJson,
         offering = offering,
         presentedContext = presentedContext,
     )
+
+    @Test
+    fun `mapPaywall carries builderConfigJson verbatim`() {
+        val json = """{"formatVersion":2,"root":{"type":"stack","id":"r","axis":"v","children":[]}}"""
+        val paywall = mapPaywall(corePaywall(builderConfigJson = json), offering = null)
+        assertEquals(json, paywall.builderConfigJson)
+    }
+
+    @Test
+    fun `mapPaywall builderConfigJson null when absent`() {
+        val paywall = mapPaywall(corePaywall(), offering = null)
+        assertEquals(null, paywall.builderConfigJson)
+    }
 
     @Test
     fun `mapPaywall maps all scalar fields`() {

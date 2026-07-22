@@ -137,6 +137,8 @@ dictionary CorePaywall {
     // record/HashMap (known uniffi record→HashMap gotcha); façades decode it.
     string? remote_config_json;
     string? remote_config_locale;
+    // Phase-B builder component tree, raw JSON (same rationale).
+    string? builder_config_json;
     CoreOffering? offering;
     CorePresentedContext? presented_context;
 };

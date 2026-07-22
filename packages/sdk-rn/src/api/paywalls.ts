@@ -49,6 +49,7 @@ export function mapPaywallDTO(dto: PaywallDTO): Paywall {
     configFormatVersion: dto.configFormatVersion,
     remoteConfig: parseRemoteConfig(dto.remoteConfigJson),
     remoteConfigLocale: dto.remoteConfigLocale,
+    builderConfig: parseRemoteConfig(dto.builderConfigJson),
     offering: dto.offering ? mapOfferingDTO(dto.offering) : null,
     presentedContext: dto.presentedContext ? mapPresentedContext(dto.presentedContext) : null,
   };

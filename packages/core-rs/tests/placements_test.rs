@@ -57,6 +57,8 @@ fn get_paywall_maps_direct_paywall_to_ffi() {
         paywall.remote_config_json.as_deref(),
         Some(r#"{"title":"Go Pro"}"#)
     );
+    // Fixture predates builderConfig — absent field must decode as None.
+    assert_eq!(paywall.builder_config_json, None);
 
     let offering = paywall.offering.expect("offering present");
     assert_eq!(offering.identifier, "default");
@@ -192,6 +194,43 @@ fn serves_cache_on_network_failure() {
         cached.presented_context.unwrap().variant_id.as_deref(),
         Some("c")
     );
+}
+
+/// builderConfig (Phase B/C) rides CorePaywall as a raw JSON string — both
+/// on a live fetch and when re-resolved from the offline cache.
+#[test]
+fn builder_config_round_trips_live_and_from_cache() {
+    const BUILDER_BODY: &str = include_str!("fixtures/placement_paywall_builder_response.json");
+    let cache = store();
+
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/v1/placements/onboarding")
+        .with_status(200)
+        .with_body(BUILDER_BODY)
+        .create();
+    let online = PlacementsClient::new(Arc::new(http_client(&server.url())), Arc::clone(&cache));
+    let live = online
+        .get_paywall("onboarding", None, "sub_1")
+        .unwrap()
+        .expect("resolves");
+    m.assert();
+
+    let json = live.builder_config_json.expect("builder config present");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    assert_eq!(parsed["formatVersion"], 2);
+    assert_eq!(parsed["root"]["children"][0]["key"], "t");
+    assert_eq!(live.config_format_version, 2);
+
+    let offline = PlacementsClient::new(
+        Arc::new(http_client("http://127.0.0.1:1")),
+        Arc::clone(&cache),
+    );
+    let cached = offline
+        .get_paywall("onboarding", None, "sub_1")
+        .unwrap()
+        .expect("served from cache");
+    assert_eq!(cached.builder_config_json, Some(json));
 }
 
 #[test]

@@ -28,6 +28,7 @@ function makePaywallDTO(overrides: Partial<PaywallDTO> = {}): PaywallDTO {
     configFormatVersion: 1,
     remoteConfigJson: JSON.stringify({ title: "Go Pro" }),
     remoteConfigLocale: "en",
+    builderConfigJson: null,
     offering: OFFERING_DTO,
     presentedContext: {
       placementId: "plc_1",
@@ -92,6 +93,18 @@ describe("mapPaywallDTO", () => {
   it("passes through a null offering as null", () => {
     const paywall = mapPaywallDTO(makePaywallDTO({ offering: null }));
     expect(paywall.offering).toBeNull();
+  });
+
+  it("parses builderConfigJson into builderConfig and defaults to null", () => {
+    const tree = { formatVersion: 2, root: { type: "stack", id: "r", axis: "v", children: [] } };
+    const withBuilder = mapPaywallDTO(
+      makePaywallDTO({ builderConfigJson: JSON.stringify(tree) }),
+    );
+    expect(withBuilder.builderConfig).toEqual(tree);
+    expect(mapPaywallDTO(makePaywallDTO({})).builderConfig).toBeNull();
+    expect(
+      mapPaywallDTO(makePaywallDTO({ builderConfigJson: "not-json{" })).builderConfig,
+    ).toBeNull();
   });
 
   it("yields a null remoteConfig when remoteConfigJson is null", () => {

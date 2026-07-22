@@ -42,6 +42,11 @@ pub struct PaywallWire {
     pub config_format_version: i64,
     #[serde(rename = "remoteConfig")]
     pub remote_config: Option<RemoteConfigWire>,
+    /// Phase-B builder component tree — arbitrary JSON, present only when
+    /// the paywall has one. `default` so responses/cache entries predating
+    /// the field keep decoding.
+    #[serde(rename = "builderConfig", default)]
+    pub builder_config: Option<serde_json::Value>,
     pub offering: Option<OfferingWire>,
 }
 
@@ -99,6 +104,10 @@ pub struct CorePaywall {
     /// decode it on their side.
     pub remote_config_json: Option<String>,
     pub remote_config_locale: Option<String>,
+    /// Raw JSON string of the Phase-B builder component tree (same
+    /// string-not-record rationale as `remote_config_json`); native
+    /// renderers decode it, older façades simply ignore it.
+    pub builder_config_json: Option<String>,
     pub offering: Option<crate::offerings::types::CoreOffering>,
     pub presented_context: Option<CorePresentedContext>,
 }

@@ -161,6 +161,11 @@ data class Paywall(
     val remoteConfigLocale: String?,
     val offering: Offering?,
     val presentedContext: PresentedContext?,
+    /** Raw JSON of the Phase-B builder component tree (`configFormatVersion`
+     *  2 paywalls). Consumed by the native paywall renderer; `null` for
+     *  remote-config-only paywalls. Defaulted so existing positional
+     *  constructions keep compiling. */
+    val builderConfigJson: String? = null,
 )
 
 /** The outcome of a successful, validated purchase. */

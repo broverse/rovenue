@@ -47,6 +47,7 @@ final class PaywallMappingTests: XCTestCase {
 
     private func makeCorePaywall(
         remoteConfigJson: String? = #"{"title":"Go Pro"}"#,
+        builderConfigJson: String? = nil,
         offering: CoreOffering? = nil,
         includePresentedContext: Bool = true,
         variantId: String? = "var_a",
@@ -60,11 +61,23 @@ final class PaywallMappingTests: XCTestCase {
             configFormatVersion: 1,
             remoteConfigJson: remoteConfigJson,
             remoteConfigLocale: "en",
+            builderConfigJson: builderConfigJson,
             offering: offering,
             presentedContext: includePresentedContext
                 ? makeCorePresentedContext(variantId: variantId, experimentKey: experimentKey)
                 : nil
         )
+    }
+
+    func test_mapPaywall_carriesBuilderConfigJsonVerbatim() {
+        let json = #"{"formatVersion":2,"root":{"type":"stack","id":"r","axis":"v","children":[]}}"#
+        let paywall = mapPaywall(makeCorePaywall(builderConfigJson: json), offering: nil)
+        XCTAssertEqual(paywall.builderConfigJson, json)
+    }
+
+    func test_mapPaywall_builderConfigJsonNilWhenAbsent() {
+        let paywall = mapPaywall(makeCorePaywall(), offering: nil)
+        XCTAssertNil(paywall.builderConfigJson)
     }
 
     func test_mapPaywall_mapsAllScalarFields() {

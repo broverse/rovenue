@@ -273,6 +273,10 @@ public struct Paywall {
     /// the resolved locale, or when the JSON fails to decode as an object.
     public let remoteConfig: [String: Any]?
     public let remoteConfigLocale: String?
+    /// Raw JSON of the Phase-B builder component tree (`configFormatVersion`
+    /// 2 paywalls). Consumed by `RovenuePaywallView`; `nil` for
+    /// remote-config-only paywalls.
+    public let builderConfigJson: String?
     public let offering: Offering?
     public let presentedContext: PresentedContext?
 
@@ -284,6 +288,7 @@ public struct Paywall {
         configFormatVersion: Int64,
         remoteConfig: [String: Any]?,
         remoteConfigLocale: String?,
+        builderConfigJson: String? = nil,
         offering: Offering?,
         presentedContext: PresentedContext?
     ) {
@@ -294,6 +299,7 @@ public struct Paywall {
         self.configFormatVersion = configFormatVersion
         self.remoteConfig = remoteConfig
         self.remoteConfigLocale = remoteConfigLocale
+        self.builderConfigJson = builderConfigJson
         self.offering = offering
         self.presentedContext = presentedContext
     }

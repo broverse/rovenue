@@ -527,6 +527,7 @@ class RovenueModule : Module() {
         "configFormatVersion" to p.configFormatVersion.toDouble(),
         "remoteConfigJson" to p.remoteConfig?.let { (it as Any?).toJsonValue().toString() },
         "remoteConfigLocale" to p.remoteConfigLocale,
+        "builderConfigJson" to p.builderConfigJson,
         "offering" to p.offering?.let(::dtoFromOffering),
         "presentedContext" to p.presentedContext?.let(::dtoFromPresentedContext),
     )

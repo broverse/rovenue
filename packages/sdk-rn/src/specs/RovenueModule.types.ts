@@ -111,6 +111,9 @@ export type PaywallDTO = {
    *  the JS layer parses it. `null` when the paywall has no remote config. */
   remoteConfigJson: string | null;
   remoteConfigLocale: string | null;
+  /** Raw JSON string of the Phase-B builder component tree; `null` for
+   *  remote-config-only paywalls. */
+  builderConfigJson: string | null;
   offering: OfferingDTO | null;
   presentedContext: PresentedContextDTO | null;
 };
