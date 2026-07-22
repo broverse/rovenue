@@ -50,14 +50,24 @@ describe("normalizeFunnelSettings", () => {
   });
 
   it("preserves __proto__ as an own property (string value)", () => {
-    const result = normalizeFunnelSettings({ __proto__: "some-string" });
+    // JSON.parse creates objects with __proto__ as a real enumerable own property
+    const input = JSON.parse('{"__proto__": "some-string"}') as Record<
+      string,
+      unknown
+    >;
+    const result = normalizeFunnelSettings(input);
     expect(Object.prototype.hasOwnProperty.call(result, "__proto__")).toBe(true);
-    expect(result.__proto__).toBe("some-string");
+    expect((result as any)["__proto__"]).toBe("some-string");
   });
 
   it("preserves __proto__ as an own property (object value)", () => {
-    const result = normalizeFunnelSettings({ __proto__: { polluted: true } });
+    // JSON.parse creates objects with __proto__ as a real enumerable own property
+    const input = JSON.parse('{"__proto__": {"polluted": true}}') as Record<
+      string,
+      unknown
+    >;
+    const result = normalizeFunnelSettings(input);
     expect(Object.prototype.hasOwnProperty.call(result, "__proto__")).toBe(true);
-    expect(result.__proto__).toEqual({ polluted: true });
+    expect((result as any)["__proto__"]).toEqual({ polluted: true });
   });
 });

@@ -10,13 +10,12 @@
 // their camelCase keys until their funnel is next saved, which is why
 // readers must keep tolerating both for now.
 
-const CAMEL_TO_SNAKE: Record<string, string> = {
-  devMode: "dev_mode",
-  universalLinkDomain: "universal_link_domain",
-  deepLinkScheme: "deep_link_scheme",
-  iosUrl: "app_store_url",
-  androidUrl: "play_store_url",
-};
+const CAMEL_TO_SNAKE: Record<string, string> = Object.create(null);
+CAMEL_TO_SNAKE.devMode = "dev_mode";
+CAMEL_TO_SNAKE.universalLinkDomain = "universal_link_domain";
+CAMEL_TO_SNAKE.deepLinkScheme = "deep_link_scheme";
+CAMEL_TO_SNAKE.iosUrl = "app_store_url";
+CAMEL_TO_SNAKE.androidUrl = "play_store_url";
 
 /**
  * Rewrites known camelCase settings keys to their snake_case names.
