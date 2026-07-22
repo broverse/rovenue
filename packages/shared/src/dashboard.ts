@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import type { AttributeMap, SubscriberAttributes } from "./attributes";
 import type { WebhookEventCategory } from "./webhook-events";
+import type { PlacementRows } from "./placements";
 
 export type MemberRoleName =
   | "OWNER"
@@ -1696,6 +1697,62 @@ export interface DashboardPaywallUpdateInput {
   builderConfig?: unknown;
   isActive?: boolean;
   metadata?: Record<string, unknown>;
+}
+
+// =============================================================
+// Placements — dashboard wire types
+// =============================================================
+//
+// A placement is an ordered list of audience-targeted rows the SDK
+// evaluates to resolve which paywall (or experiment, or nothing) a
+// subscriber sees (see `./placements/schema` for `rows`' shape).
+// `identifier` is immutable after creation (mirrors paywalls);
+// `revision` is bumped server-side every time `rows` changes.
+
+export interface DashboardPlacementRow {
+  id: string;
+  projectId: string;
+  identifier: string;
+  name: string;
+  revision: number;
+  rows: PlacementRows;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DashboardPlacementsListResponse {
+  placements: DashboardPlacementRow[];
+}
+
+export interface DashboardPlacementCreateInput {
+  identifier: string;
+  name: string;
+  rows?: PlacementRows;
+  isActive?: boolean;
+}
+
+export interface DashboardPlacementUpdateInput {
+  name?: string;
+  rows?: PlacementRows;
+  isActive?: boolean;
+}
+
+/**
+ * `GET /dashboard/projects/:projectId/placements/:id/metrics` — daily
+ * paywall-view rollup (`mv_paywall_daily_target`) plus a query-time
+ * purchase join (subscriber's first placement view -> their next
+ * purchase-class revenue event), mirroring the exposure->conversion
+ * join `analytics-router.ts` already runs for experiment results.
+ * Zeroed out (not omitted) when ClickHouse is unconfigured so the
+ * dashboard card always has a shape to render.
+ */
+export interface DashboardPlacementMetricsResponse {
+  views: number;
+  uniqueViews: number;
+  purchases: number;
+  /** `purchases / uniqueViews`, or `null` when `uniqueViews` is 0. */
+  conversionRate: number | null;
 }
 
 // =============================================================

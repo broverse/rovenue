@@ -9,6 +9,7 @@ import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { ok } from "../../lib/response";
+import { computePlacementMetrics } from "../../services/placement-metrics";
 
 // =============================================================
 // Dashboard: Placements CRUD
@@ -188,6 +189,33 @@ export const placementsDashboardRoute = new Hono()
       throw new HTTPException(404, { message: "Placement not found" });
     }
     return c.json(ok({ placement: row }));
+  })
+  // ----- GET /dashboard/projects/:projectId/placements/:id/metrics -----
+  //
+  // Views/unique-views (mv_paywall_daily_target) + a query-time purchase
+  // join — see services/placement-metrics.ts. Degrades to all-zero (not
+  // a 5xx) when ClickHouse is unconfigured, matching the analytics-router
+  // convention local dev relies on.
+  .get("/:id/metrics", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing identifier" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+    const placement = await drizzle.placementRepo.findPlacementById(
+      drizzle.db,
+      projectId,
+      id,
+    );
+    if (!placement) {
+      throw new HTTPException(404, { message: "Placement not found" });
+    }
+
+    const metrics = await computePlacementMetrics(id, projectId);
+    return c.json(ok(metrics));
   })
   .patch("/:id", validate("json", updateBodySchema), async (c) => {
     const projectId = c.req.param("projectId");

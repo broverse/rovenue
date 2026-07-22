@@ -16,8 +16,8 @@ import {
   Hash,
   KeyRound,
   Layers,
+  LayoutTemplate,
   Package,
-  Palette,
   Pause,
   Play,
   Plus,
@@ -30,11 +30,7 @@ import {
   Users,
   Wand2,
 } from "lucide-react";
-import type {
-  DashboardExperimentType,
-  ExperimentListItem,
-  PaywallConfig,
-} from "@rovenue/shared";
+import type { DashboardExperimentType, ExperimentListItem } from "@rovenue/shared";
 import { Button } from "../../../../../ui/button";
 import { Input } from "../../../../../ui/input";
 import { NativeSelect } from "../../../../../ui/native-select";
@@ -45,6 +41,7 @@ import { ApiError } from "../../../../../lib/api";
 import { useProject } from "../../../../../lib/hooks/useProject";
 import { useAudiences } from "../../../../../lib/hooks/useProjectAdmin";
 import { useProjectOfferings } from "../../../../../lib/hooks/useProjectOfferings";
+import { useProjectPaywalls } from "../../../../../lib/hooks/useProjectPaywalls";
 import {
   useCreateExperiment,
   usePauseExperiment,
@@ -92,17 +89,6 @@ const FLAG_SUBTYPES: ReadonlyArray<{ value: FlagSubtype; labelKey: string }> = [
   { value: "number", labelKey: "experiments.new.flag.subtypes.number" },
 ];
 
-const DEFAULT_PAYWALL: PaywallConfig = {
-  title: "Unlock Pro",
-  subtitle: "Get every feature, ad-free",
-  ctaText: "Start free trial",
-  ctaColor: "#0066ff",
-  layout: "vertical",
-  showBadge: false,
-  backgroundImage: null,
-  showTestimonial: false,
-};
-
 interface DraftVariant {
   id: string;
   name: string;
@@ -111,7 +97,10 @@ interface DraftVariant {
   // restores the user's previous choice instead of wiping them.
   flag: { boolValue: boolean; strValue: string; numValue: number };
   offeringId: string;
-  paywall: PaywallConfig;
+  // PAYWALL experiments reference a paywall by id — the server enforces
+  // `value: { paywallId }` (apps/api/src/routes/dashboard/experiments.ts
+  // `assertPaywallVariantsValid`), not an inline remote-config object.
+  paywallId: string;
   element: string;
 }
 
@@ -127,7 +116,7 @@ function makeVariant(idx: number): DraftVariant {
       numValue: isControl ? 0 : 1,
     },
     offeringId: "",
-    paywall: { ...DEFAULT_PAYWALL, title: isControl ? "Unlock Pro" : "Unlock Pro" },
+    paywallId: "",
     element: JSON.stringify({ label: isControl ? "control" : "variant" }, null, 2),
   };
 }
@@ -267,10 +256,11 @@ function seedDraftVariant(
   } else if (type === "OFFERING") {
     draft.offeringId = String(stored.value ?? "");
   } else if (type === "PAYWALL") {
-    draft.paywall = {
-      ...DEFAULT_PAYWALL,
-      ...((stored.value as Partial<PaywallConfig>) ?? {}),
-    };
+    const value = stored.value as { paywallId?: unknown } | null | undefined;
+    draft.paywallId =
+      value && typeof value === "object" && typeof value.paywallId === "string"
+        ? value.paywallId
+        : "";
   } else if (type === "ELEMENT") {
     draft.element = JSON.stringify(stored.value, null, 2);
   }
@@ -293,6 +283,8 @@ export function NewExperimentPage({
     useAudiences(projectId);
   const offeringsQuery = useProjectOfferings(projectId);
   const offerings = offeringsQuery.data?.offerings ?? [];
+  const paywallsQuery = useProjectPaywalls(projectId);
+  const paywalls = paywallsQuery.data?.paywalls ?? [];
   const create = useCreateExperiment();
   const update = useUpdateExperiment();
   const start = useStartExperiment();
@@ -375,15 +367,8 @@ export function NewExperimentPage({
     );
   };
 
-  const updateVariantPaywall = (
-    idx: number,
-    patch: Partial<PaywallConfig>,
-  ) => {
-    setVariants((prev) =>
-      prev.map((v, i) =>
-        i === idx ? { ...v, paywall: { ...v.paywall, ...patch } } : v,
-      ),
-    );
+  const updateVariantPaywallId = (idx: number, paywallId: string) => {
+    setVariants((prev) => prev.map((v, i) => (i === idx ? { ...v, paywallId } : v)));
   };
 
   const setVariantWeight = (idx: number, next: number) =>
@@ -511,6 +496,21 @@ export function NewExperimentPage({
           return;
         }
         seenOfferings.add(offering);
+      }
+    }
+
+    if (type === "PAYWALL") {
+      // Mirrors the server-side check (assertPaywallVariantsValid): every
+      // variant's value must be `{ paywallId }` with a non-empty id.
+      const missing = parsedVariants.find((v) => {
+        const value = v.value as { paywallId?: unknown };
+        return typeof value.paywallId !== "string" || value.paywallId.length === 0;
+      });
+      if (missing) {
+        setFormError(
+          t("experiments.new.errors.paywallMissing", "Pick a paywall for every variant."),
+        );
+        return;
       }
     }
 
@@ -781,6 +781,27 @@ export function NewExperimentPage({
               </div>
             )}
 
+          {type === "PAYWALL" && paywalls.length === 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-rv-warning/30 bg-rv-warning/10 px-3 py-2 text-[12px] text-rv-warning">
+              <AlertCircle size={13} className="mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="leading-snug">
+                  {t(
+                    "experiments.new.paywall.noneTitle",
+                    "This project has no paywalls yet.",
+                  )}
+                </p>
+                <Link
+                  to="/projects/$projectId/paywalls"
+                  params={{ projectId }}
+                  className="mt-1 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
+                >
+                  {t("experiments.new.paywall.createCta", "Create a paywall")} →
+                </Link>
+              </div>
+            </div>
+          )}
+
           <Field
             icon={<Users size={11} />}
             label={t("experiments.new.fields.audience")}
@@ -940,13 +961,15 @@ export function NewExperimentPage({
                       offerings={offerings}
                       offeringsLoading={offeringsQuery.isLoading}
                       takenOfferings={takenOfferings}
+                      paywalls={paywalls}
+                      paywallsLoading={paywallsQuery.isLoading}
                       jsonError={elementErrors[idx] ?? null}
                       onFlagChange={(patch) => updateVariantFlag(idx, patch)}
                       onOfferingChange={(id) =>
                         updateVariant(idx, { offeringId: id })
                       }
-                      onPaywallChange={(patch) =>
-                        updateVariantPaywall(idx, patch)
+                      onPaywallIdChange={(paywallId) =>
+                        updateVariantPaywallId(idx, paywallId)
                       }
                       onElementChange={(next) =>
                         updateVariant(idx, { element: next })
@@ -1123,7 +1146,7 @@ function extractVariantValue(
     return Number.isFinite(v.flag.numValue) ? v.flag.numValue : 0;
   }
   if (type === "OFFERING") return v.offeringId;
-  if (type === "PAYWALL") return { ...v.paywall };
+  if (type === "PAYWALL") return { paywallId: v.paywallId };
   // ELEMENT
   const parsed = validateJson(v.element);
   if (!parsed.ok) {
@@ -1143,10 +1166,12 @@ function VariantValueEditor({
   offerings,
   offeringsLoading,
   takenOfferings,
+  paywalls,
+  paywallsLoading,
   jsonError,
   onFlagChange,
   onOfferingChange,
-  onPaywallChange,
+  onPaywallIdChange,
   onElementChange,
 }: {
   type: DashboardExperimentType;
@@ -1155,10 +1180,12 @@ function VariantValueEditor({
   offerings: ReadonlyArray<{ id: string; identifier: string }>;
   offeringsLoading: boolean;
   takenOfferings: ReadonlySet<string>;
+  paywalls: ReadonlyArray<{ id: string; identifier: string; name: string }>;
+  paywallsLoading: boolean;
   jsonError: string | null;
   onFlagChange: (patch: Partial<DraftVariant["flag"]>) => void;
   onOfferingChange: (identifier: string) => void;
-  onPaywallChange: (patch: Partial<PaywallConfig>) => void;
+  onPaywallIdChange: (paywallId: string) => void;
   onElementChange: (next: string) => void;
 }) {
   if (type === "FLAG") {
@@ -1183,7 +1210,12 @@ function VariantValueEditor({
   }
   if (type === "PAYWALL") {
     return (
-      <PaywallValueEditor value={variant.paywall} onChange={onPaywallChange} />
+      <PaywallValueEditor
+        value={variant.paywallId}
+        paywalls={paywalls}
+        loading={paywallsLoading}
+        onChange={onPaywallIdChange}
+      />
     );
   }
   return (
@@ -1297,134 +1329,52 @@ function OfferingValueEditor({
 }
 
 // ---------- PAYWALL ----------
+//
+// PAYWALL experiments reference an existing paywall by id (server-
+// enforced `value: { paywallId }`, see assertPaywallVariantsValid in
+// apps/api/src/routes/dashboard/experiments.ts) — no more inline
+// remote-config editing here; that lives on the paywall itself
+// (components/paywalls/remote-config-editor.tsx).
 
 function PaywallValueEditor({
   value,
+  paywalls,
+  loading,
   onChange,
 }: {
-  value: PaywallConfig;
-  onChange: (patch: Partial<PaywallConfig>) => void;
+  value: string;
+  paywalls: ReadonlyArray<{ id: string; identifier: string; name: string }>;
+  loading: boolean;
+  onChange: (paywallId: string) => void;
 }) {
   const { t } = useTranslation();
   return (
-    <div className="rounded-md border border-rv-divider bg-rv-c1 p-3">
-      <div className="mb-2 inline-flex items-center gap-1 font-rv-mono text-[10px] uppercase tracking-wider text-rv-mute-500">
-        <Palette size={10} />
-        {t("experiments.new.paywall.heading")}
-      </div>
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-        <Field
-          label={t("experiments.new.paywall.title")}
-          dense
-        >
-          <Input
-            value={value.title}
-            onChange={(e) => onChange({ title: e.target.value })}
-          />
-        </Field>
-        <Field
-          label={t("experiments.new.paywall.subtitle")}
-          dense
-        >
-          <Input
-            value={value.subtitle}
-            onChange={(e) => onChange({ subtitle: e.target.value })}
-          />
-        </Field>
-        <Field label={t("experiments.new.paywall.ctaText")} dense>
-          <Input
-            value={value.ctaText}
-            onChange={(e) => onChange({ ctaText: e.target.value })}
-          />
-        </Field>
-        <Field label={t("experiments.new.paywall.ctaColor")} dense>
-          <div className="flex items-center gap-2">
-            <input
-              type="color"
-              value={value.ctaColor}
-              onChange={(e) => onChange({ ctaColor: e.target.value })}
-              className="size-9 cursor-pointer rounded border border-rv-divider bg-rv-c2"
-              aria-label={t("experiments.new.paywall.ctaColor")}
-            />
-            <Input
-              mono
-              value={value.ctaColor}
-              onChange={(e) => onChange({ ctaColor: e.target.value })}
-              placeholder="#0066ff"
-            />
-          </div>
-        </Field>
-        <Field label={t("experiments.new.paywall.layout")} dense>
-          <NativeSelect
-            value={value.layout}
-            onChange={(e) =>
-              onChange({
-                layout: e.target.value as PaywallConfig["layout"],
-              })
-            }
-          >
-            <option value="vertical">
-              {t("experiments.new.paywall.layoutOptions.vertical")}
-            </option>
-            <option value="horizontal">
-              {t("experiments.new.paywall.layoutOptions.horizontal")}
-            </option>
-          </NativeSelect>
-        </Field>
-        <Field label={t("experiments.new.paywall.backgroundImage")} dense optional>
-          <Input
-            mono
-            value={value.backgroundImage ?? ""}
-            onChange={(e) =>
-              onChange({
-                backgroundImage:
-                  e.target.value.trim().length > 0
-                    ? e.target.value
-                    : null,
-              })
-            }
-            placeholder="https://…"
-          />
-        </Field>
-      </div>
-      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-rv-divider pt-3">
-        <ToggleRow
-          label={t("experiments.new.paywall.showBadge")}
-          checked={value.showBadge}
-          onChange={(next) => onChange({ showBadge: next })}
-        />
-        {value.showBadge && (
-          <Input
-            value={value.badgeText ?? ""}
-            onChange={(e) => onChange({ badgeText: e.target.value })}
-            placeholder={t("experiments.new.paywall.badgePlaceholder")}
-            className="max-w-[200px]"
-          />
-        )}
-        <ToggleRow
-          label={t("experiments.new.paywall.showTestimonial")}
-          checked={value.showTestimonial}
-          onChange={(next) => onChange({ showTestimonial: next })}
-        />
-      </div>
-    </div>
-  );
-}
-
-function ToggleRow({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (next: boolean) => void;
-}) {
-  return (
-    <label className="inline-flex cursor-pointer items-center gap-2 text-[12px] text-rv-mute-700">
-      <Switch checked={checked} onChange={onChange} ariaLabel={label} />
-      <span>{label}</span>
-    </label>
+    <Field
+      icon={<LayoutTemplate size={11} />}
+      label={t("experiments.new.paywall.pickerLabel", "Paywall")}
+      description={t(
+        "experiments.new.paywall.pickerDescription",
+        "Which paywall this variant renders.",
+      )}
+      dense
+    >
+      <NativeSelect
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={loading || paywalls.length === 0}
+      >
+        <option value="">
+          {paywalls.length === 0
+            ? t("experiments.new.paywall.empty", "No paywalls yet")
+            : t("experiments.new.paywall.pick", "Select a paywall…")}
+        </option>
+        {paywalls.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name} ({p.identifier})
+          </option>
+        ))}
+      </NativeSelect>
+    </Field>
   );
 }
 

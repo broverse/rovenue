@@ -29,6 +29,11 @@ export type AnalyticsQuery =
       projectId: string;
       /** Optional stratification dimensions. */
       groupBy?: Array<"country" | "platform">;
+    }
+  | {
+      kind: "placement_metrics";
+      placementId: string;
+      projectId: string;
     };
 
 export interface ExperimentVariantRow {
@@ -42,9 +47,27 @@ export interface ExperimentVariantRow {
   conversions: number;
 }
 
+/**
+ * String-typed UInt64 aggregates (matches engagement.ts / mrr-decomposition.ts —
+ * every field wrapped in `toString()` in the SQL so large counters never
+ * round-trip through the client's 64-bit-integer JSON handling; converted
+ * back to `Number` by the caller).
+ */
+export interface PlacementMetricsRow {
+  views: string;
+  unique_views: string;
+  purchases: string;
+}
+
+export async function runAnalyticsQuery(
+  q: Extract<AnalyticsQuery, { kind: "experiment_results" }>,
+): Promise<ExperimentVariantRow[]>;
+export async function runAnalyticsQuery(
+  q: Extract<AnalyticsQuery, { kind: "placement_metrics" }>,
+): Promise<PlacementMetricsRow[]>;
 export async function runAnalyticsQuery(
   q: AnalyticsQuery,
-): Promise<ExperimentVariantRow[]> {
+): Promise<ExperimentVariantRow[] | PlacementMetricsRow[]> {
   if (!isClickHouseConfigured()) {
     log.warn("analytics query requested but ClickHouse is unconfigured", {
       kind: q.kind,
@@ -97,9 +120,60 @@ export async function runAnalyticsQuery(
         `,
         { projectId: q.projectId, experimentId: q.experimentId },
       );
+    case "placement_metrics":
+      // views/unique_views come from the mv_paywall_daily_target rollup
+      // (0018_mv_paywall_daily.sql); purchases is a query-time join against
+      // raw_paywall_events (no placementId on raw_revenue_events — the
+      // dashboard-facing paywall attribution only flows into the paywall-
+      // events pipeline, not the revenue one) mirroring the
+      // exposure->conversion join above: each subscriber's FIRST view of
+      // this placement is matched against their next purchase-class
+      // revenue event. `v` and `c` are each a plain (non-GROUP BY) scalar
+      // aggregate — deliberately, since GROUP BY on a constant emits ZERO
+      // rows for zero matching input rows, whereas a bare aggregate always
+      // emits exactly one row of zeros (see summary.ts). Cross-joined
+      // (both are always single-row) rather than keyed.
+      return queryAnalytics<PlacementMetricsRow>(
+        q.projectId,
+        `
+          SELECT
+            toString(v.views)                AS views,
+            toString(v.unique_views)          AS unique_views,
+            toString(c.purchases)             AS purchases
+          FROM (
+            SELECT
+              sum(views)                 AS views,
+              uniqMerge(subscribersHll)  AS unique_views
+            FROM rovenue.mv_paywall_daily_target
+            WHERE projectId = {projectId:String}
+              AND placementId = {placementId:String}
+          ) v
+          CROSS JOIN (
+            SELECT uniq(e.subscriberId) AS purchases
+            FROM (
+              SELECT subscriberId, min(occurredAt) AS firstViewedAt
+              FROM rovenue.raw_paywall_events
+              WHERE projectId = {projectId:String}
+                AND placementId = {placementId:String}
+              GROUP BY subscriberId
+            ) e
+            INNER JOIN rovenue.raw_revenue_events r
+              ON r.subscriberId = e.subscriberId
+            WHERE r.projectId = {projectId:String}
+              AND r.type IN ('INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION')
+              AND r.eventDate >= e.firstViewedAt
+          ) c
+        `,
+        { projectId: q.projectId, placementId: q.placementId },
+      );
     default: {
-      const _exhaustive: never = q.kind;
-      throw new Error(`unhandled analytics kind: ${String(_exhaustive)}`);
+      // Exhaustiveness check on `q` itself, not `q.kind` — property access
+      // on a value TS has narrowed to `never` types as `any` rather than
+      // `never`, which defeats this check (verified against tsc 5.9.3;
+      // the TS handbook's own exhaustiveness example assigns the whole
+      // discriminant-bearing value, not one of its properties).
+      const _exhaustive: never = q;
+      throw new Error(`unhandled analytics kind: ${JSON.stringify(_exhaustive)}`);
     }
   }
 }
