@@ -2549,6 +2549,17 @@ export const projectStripeConnections = pgTable(
     disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),
     disconnectReason: text("disconnect_reason"),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    // Whether Apple Pay will actually be offered on the funnel-serving
+    // domain for THIS account — Stripe's own per-wallet verdict, not
+    // "we called the API". See migration 0092 and
+    // apps/api/src/services/stripe/apple-pay-domain.ts.
+    // 'unregistered' | 'active' | 'inactive' | 'failed'.
+    applePayDomainStatus: text("apple_pay_domain_status")
+      .notNull()
+      .default("unregistered"),
+    applePayDomainCheckedAt: timestamp("apple_pay_domain_checked_at", {
+      withTimezone: true,
+    }),
   },
   (t) => ({
     // At most one live connection per project. Partial so historical

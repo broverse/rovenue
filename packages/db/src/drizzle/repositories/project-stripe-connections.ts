@@ -8,6 +8,22 @@ import {
 
 export type DisconnectReason = "user" | "stripe_deauthorized";
 
+/**
+ * Stripe's verdict for Apple Pay on the funnel-serving domain, for this
+ * connected account.
+ *
+ * `inactive` is the value that earns this column its keep: the domain
+ * object exists on the account, but Stripe reports the Apple Pay wallet
+ * as not eligible there (verification has not succeeded), so the payment
+ * sheet will show a card form and no Apple Pay button. Collapsing that
+ * into "registered" would record a status that lies.
+ */
+export type ApplePayDomainStatus =
+  | "unregistered"
+  | "active"
+  | "inactive"
+  | "failed";
+
 export interface AccountState {
   chargesEnabled: boolean;
   payoutsEnabled: boolean;
@@ -84,6 +100,28 @@ export async function markDisconnected(
         isNull(projectStripeConnections.disconnectedAt),
       ),
     );
+}
+
+/**
+ * Record the Apple Pay domain outcome. `checkedAt` is stamped on every
+ * write, including a `failed` one, so an operator can tell "never tried"
+ * (`unregistered`, null) from "tried and it did not work".
+ *
+ * Not restricted to live rows: the connection is looked up by id by the
+ * caller that just wrote or read it.
+ */
+export async function updateApplePayDomainStatus(
+  db: Db,
+  id: string,
+  status: ApplePayDomainStatus,
+): Promise<void> {
+  await db
+    .update(projectStripeConnections)
+    .set({
+      applePayDomainStatus: status,
+      applePayDomainCheckedAt: new Date(),
+    })
+    .where(eq(projectStripeConnections.id, id));
 }
 
 export async function updateAccountState(

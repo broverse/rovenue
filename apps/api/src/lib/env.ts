@@ -139,6 +139,33 @@ const envSchema = z
     STRIPE_PLATFORM_PUBLISHABLE_KEY: z.string().min(1).optional(),
     STRIPE_PLATFORM_PUBLISHABLE_KEY_TEST: z.string().min(1).optional(),
     STRIPE_CONNECT_WEBHOOK_SECRET: z.string().min(1).optional(),
+    // ---- Funnel paywall serving domain (Apple Pay) ------------------------
+    // The host a published funnel paywall page is served from. Stripe only
+    // offers Apple Pay when THIS host is registered as a payment method
+    // domain on the connected account taking the charge, so the value has
+    // to be the origin the browser actually loaded the page from — today
+    // that is the dashboard origin (`app.rovenue.io`, which serves
+    // `/f/<slug>`).
+    //
+    // Deliberately has NO default and is NOT derived from DASHBOARD_URL.
+    // Registering the wrong host succeeds at the API level and then Apple
+    // Pay silently never appears, which is precisely the failure this
+    // registration exists to prevent — so an operator states the host or
+    // no registration happens at all (`registerApplePayDomain` returns
+    // "skipped" and logs).
+    //
+    // Bare hostname only: no scheme, no port, no path, no trailing dot —
+    // Stripe's `domain_name` is a hostname and "https://app.rovenue.io/"
+    // would register a domain that can never verify.
+    FUNNEL_PAYMENT_DOMAIN: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .regex(
+        /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/,
+        "bare hostname only (no scheme, port, path or trailing dot), e.g. app.rovenue.io",
+      )
+      .optional(),
     // ---- Email transport selection -----------------------------
     // EMAIL_PROVIDER picks the Mailer impl. "resend" is the default
     // (uses RESEND_API_KEY below; falls back to SES when the key is

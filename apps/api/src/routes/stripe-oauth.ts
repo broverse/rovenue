@@ -11,6 +11,7 @@ import {
   getConnectPlatformStripe,
   type ConnectMode,
 } from "../lib/stripe-platform";
+import { registerApplePayDomain } from "../services/stripe/apple-pay-domain";
 import { consumeOAuthState } from "../services/stripe/oauth-state";
 
 // =============================================================
@@ -330,5 +331,23 @@ export const stripeOAuthRoute = new Hono().get("/callback", async (c) => {
   }
 
   log.info("stripe account connected", { projectId: state.projectId, livemode });
+
+  // Register the funnel-serving host for Apple Pay on the account we just
+  // connected. Deliberately OUTSIDE the try above: a failure in there
+  // takes the deauthorize-and-report path, and losing a connection the
+  // customer just made because a wallet could not be enabled would be a
+  // wildly disproportionate trade. `registerApplePayDomain` is documented
+  // never to throw; the guard is here so that contract being broken later
+  // still cannot break connect. The connection row is already committed,
+  // so it reads its own write.
+  try {
+    await registerApplePayDomain(state.projectId);
+  } catch (err) {
+    log.error("apple pay domain registration threw; connect continues", {
+      projectId: state.projectId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   return c.redirect(dashboardRedirect(state.projectId, "stripe=connected"), 302);
 });
