@@ -312,6 +312,16 @@ export const funnelTemplateScope = pgEnum("FunnelTemplateScope", [
   "user",
 ]);
 
+// =============================================================
+// Paywall versioning pgEnums
+// =============================================================
+
+export const paywallStatus = pgEnum("PaywallStatus", [
+  "draft",
+  "published",
+  "archived",
+]);
+
 export const funnelDeferredPlatform = pgEnum("FunnelDeferredPlatform", [
   "ios",
 ]);

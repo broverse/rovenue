@@ -48,6 +48,7 @@ import {
   notificationDeliveryStatus,
   notificationSuppressionReason,
   outgoingWebhookStatus,
+  paywallStatus,
   productType,
   purchaseStatus,
   pushPlatform,
@@ -746,6 +747,10 @@ export const paywalls = pgTable(
     configFormatVersion: integer("configFormatVersion").notNull().default(1),
     builderConfig: jsonb("builderConfig"), // reserved for Phase B, null in Phase A
     isActive: boolean("isActive").notNull().default(true),
+    status: paywallStatus("status").notNull().default("draft"),
+    // FK is declared in SQL only (0093) — a Drizzle `.references()` here
+    // would create a circular table reference with paywallVersions.
+    publishedVersionId: text("publishedVersionId"),
     metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
     createdAt: timestamp("createdAt", { withTimezone: true })
       .notNull()
@@ -760,6 +765,52 @@ export const paywalls = pgTable(
     ).on(t.projectId, t.identifier),
   }),
 );
+
+// =============================================================
+// paywall_versions — immutable published snapshots
+// =============================================================
+//
+// `paywalls.builderConfig` is the DRAFT (the builder's autosave
+// target). Publishing snapshots the draft here and points
+// `paywalls.publishedVersionId` at the new row. `/v1/placements`
+// serves the snapshot, never the draft — see
+// apps/api/src/lib/placement-resolution.ts.
+//
+// The snapshot deliberately includes `offeringId`: reverting or
+// re-pointing the draft at a different offering must not retroactively
+// change what an already-published version resolves against.
+
+export const paywallVersions = pgTable(
+  "paywall_versions",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    paywallId: text("paywallId")
+      .notNull()
+      .references(() => paywalls.id, { onDelete: "cascade" }),
+    versionNo: integer("versionNo").notNull(),
+    builderConfig: jsonb("builderConfig"),
+    remoteConfig: jsonb("remoteConfig").notNull(),
+    offeringId: text("offeringId").notNull(),
+    configFormatVersion: integer("configFormatVersion").notNull().default(1),
+    /** Optional human label from "Name this version…". */
+    label: text("label"),
+    publishedAt: timestamp("publishedAt", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    publishedBy: text("publishedBy").references(() => user.id, {
+      onDelete: "set null",
+    }),
+  },
+  (t) => ({
+    paywallVersionUnique: uniqueIndex("paywall_versions_paywallId_versionNo_key").on(
+      t.paywallId,
+      t.versionNo,
+    ),
+  }),
+);
+
+export type PaywallVersion = typeof paywallVersions.$inferSelect;
+export type NewPaywallVersion = typeof paywallVersions.$inferInsert;
 
 // =============================================================
 // placements
