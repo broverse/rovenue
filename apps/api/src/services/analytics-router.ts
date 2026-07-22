@@ -122,17 +122,16 @@ export async function runAnalyticsQuery(
       );
     case "placement_metrics":
       // views/unique_views come from the mv_paywall_daily_target rollup
-      // (0018_mv_paywall_daily.sql); purchases is a query-time join against
-      // raw_paywall_events (no placementId on raw_revenue_events — the
-      // dashboard-facing paywall attribution only flows into the paywall-
-      // events pipeline, not the revenue one) mirroring the
-      // exposure->conversion join above: each subscriber's FIRST view of
-      // this placement is matched against their next purchase-class
-      // revenue event. `v` and `c` are each a plain (non-GROUP BY) scalar
-      // aggregate — deliberately, since GROUP BY on a constant emits ZERO
-      // rows for zero matching input rows, whereas a bare aggregate always
-      // emits exactly one row of zeros (see summary.ts). Cross-joined
-      // (both are always single-row) rather than keyed.
+      // (0018_mv_paywall_daily.sql). purchases is PRECISE attribution:
+      // raw_revenue_events carries the purchase's presentedContext
+      // (placementId column, 0019_revenue_presented_context.sql), so we
+      // count unique converting subscribers attributed to THIS placement
+      // directly — no viewer-overlap heuristic. Rows ingested before 0019
+      // carry '' and simply don't match. `v` and `c` are each a plain
+      // (non-GROUP BY) scalar aggregate — deliberately, since GROUP BY on
+      // a constant emits ZERO rows for zero matching input rows, whereas a
+      // bare aggregate always emits exactly one row of zeros (see
+      // summary.ts). Cross-joined (both are always single-row).
       return queryAnalytics<PlacementMetricsRow>(
         q.projectId,
         `
@@ -149,19 +148,11 @@ export async function runAnalyticsQuery(
               AND placementId = {placementId:String}
           ) v
           CROSS JOIN (
-            SELECT uniq(e.subscriberId) AS purchases
-            FROM (
-              SELECT subscriberId, min(occurredAt) AS firstViewedAt
-              FROM rovenue.raw_paywall_events
-              WHERE projectId = {projectId:String}
-                AND placementId = {placementId:String}
-              GROUP BY subscriberId
-            ) e
-            INNER JOIN rovenue.raw_revenue_events r
-              ON r.subscriberId = e.subscriberId
-            WHERE r.projectId = {projectId:String}
-              AND r.type IN ('INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION')
-              AND r.eventDate >= e.firstViewedAt
+            SELECT uniq(subscriberId) AS purchases
+            FROM rovenue.raw_revenue_events
+            WHERE projectId = {projectId:String}
+              AND placementId = {placementId:String}
+              AND type IN ('INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION')
           ) c
         `,
         { projectId: q.projectId, placementId: q.placementId },

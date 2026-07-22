@@ -126,6 +126,7 @@ beforeAll(async () => {
     topics: [
       { topic: "rovenue.exposures", numPartitions: 3 },
       { topic: "rovenue.paywall_events", numPartitions: 3 },
+      { topic: "rovenue.revenue", numPartitions: 3 },
     ],
   });
   await kafkaAdmin.disconnect();
@@ -385,6 +386,104 @@ describe("CH Kafka Engine parity", () => {
     }>;
     expect(Number(rollupRow?.v ?? 0)).toBe(1);
     expect(Number(rollupRow?.u ?? 0)).toBe(1);
+
+    await ch.close();
+  }, 180_000);
+
+  it("revenue outbox row extracts presentedContext into raw_revenue_events columns (0019)", async () => {
+    const db = getDb();
+    await db.execute(
+      sql`DELETE FROM outbox_events WHERE id LIKE 'evt_rev_ctx_parity_%'`,
+    );
+
+    const projectId = `prj_rev_ctx_${Date.now()}`;
+    const presentedContext = {
+      placementId: "plc_onboarding",
+      paywallId: "pw_1",
+      variantId: "var_b",
+      experimentKey: "exp_key_1",
+    };
+
+    // Mirrors the revenue-events repo's outbox co-write payload
+    // (packages/db/src/drizzle/repositories/revenue-events.ts) — the
+    // ACTIVE emit path, including the optional metadata.presentedContext.
+    const basePayload = {
+      projectId,
+      subscriberId: `sub_rev_ctx_${Date.now()}`,
+      purchaseId: "pur_1",
+      productId: "prod_1",
+      type: "INITIAL",
+      store: "APP_STORE",
+      amount: "9.9900",
+      amountUsd: "9.9900",
+      currency: "USD",
+      eventDate: "2026-07-20T10:00:00.000Z",
+    };
+
+    const withCtxId = `evt_rev_ctx_parity_a_${Date.now()}`;
+    const withoutCtxId = `evt_rev_ctx_parity_b_${Date.now()}`;
+    await drizzle.outboxRepo.insert(db, {
+      id: withCtxId,
+      aggregateType: "REVENUE_EVENT",
+      aggregateId: "rev_ctx_a",
+      eventType: "revenue.event.recorded",
+      payload: {
+        revenueEventId: "rev_ctx_a",
+        ...basePayload,
+        metadata: { presentedContext },
+      },
+    });
+    await drizzle.outboxRepo.insert(db, {
+      id: withoutCtxId,
+      aggregateType: "REVENUE_EVENT",
+      aggregateId: "rev_ctx_b",
+      eventType: "revenue.event.recorded",
+      payload: { revenueEventId: "rev_ctx_b", ...basePayload },
+    });
+
+    const ch = createClient({
+      url: chUrl,
+      username: "rovenue",
+      password: "rovenue_test",
+      database: "rovenue",
+    });
+
+    await waitFor(async () => {
+      const res = await ch.query({
+        query: `SELECT count() AS c FROM rovenue.raw_revenue_events FINAL WHERE projectId = '${projectId}'`,
+        format: "JSONEachRow",
+      });
+      const rows = (await res.json()) as Array<{ c: string | number }>;
+      return Number(rows[0]?.c ?? 0) === 2;
+    }, 90_000);
+
+    const res = await ch.query({
+      query: `SELECT revenueEventId, placementId, paywallId, variantId, experimentKey FROM rovenue.raw_revenue_events FINAL WHERE projectId = '${projectId}' ORDER BY revenueEventId`,
+      format: "JSONEachRow",
+    });
+    const rows = (await res.json()) as Array<{
+      revenueEventId: string;
+      placementId: string;
+      paywallId: string;
+      variantId: string;
+      experimentKey: string;
+    }>;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      revenueEventId: "rev_ctx_a",
+      placementId: presentedContext.placementId,
+      paywallId: presentedContext.paywallId,
+      variantId: presentedContext.variantId,
+      experimentKey: presentedContext.experimentKey,
+    });
+    // No presentedContext → empty-string columns, never a broken row.
+    expect(rows[1]).toMatchObject({
+      revenueEventId: "rev_ctx_b",
+      placementId: "",
+      paywallId: "",
+      variantId: "",
+      experimentKey: "",
+    });
 
     await ch.close();
   }, 180_000);

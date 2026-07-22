@@ -272,15 +272,14 @@ existing subscription/revenue pipeline. Implications adopted by this spec:
   and unique views by `(project, placement, paywall, variant, day)`.
 - Conversion = join with `revenue_events` on presented-context metadata
   (query-time, idempotent-view pattern — no new rollup tables).
-- **Phase-A amendment (post-review):** presented-context attribution is
-  fully persisted on the Postgres side (purchases + revenue-event
-  metadata), but the ClickHouse revenue MV does not yet extract it — so the
-  Phase-A dashboard metric is a **subscriber-overlap proxy** ("viewer later
-  purchased anything", first-view-then-purchase ordered), labeled
-  "Viewer → buyer rate (approx.)" in the UI. Precise per-placement/variant
-  attribution requires extending `raw_revenue_events` + `mv_revenue_to_raw`
-  with presentedContext columns — a spec'd follow-up that must respect the
-  live-MV-recreate deploy procedure (pause consumer / backfill).
+- **Amendment (post-review, implemented):** `raw_revenue_events` carries
+  first-class `placementId`/`paywallId`/`variantId`/`experimentKey` columns
+  extracted from the outbox payload's `metadata.presentedContext`
+  (migration `0019_revenue_presented_context.sql`), so placement conversion
+  is counted by **precise attribution**, not a viewer-overlap proxy.
+  Pre-0019 rows carry `''` and are not counted. The migration recreates
+  `mv_revenue_to_raw` — live deployments must follow the pause-consumer /
+  backfill procedure documented in the migration header.
 - Dashboard Phase A: a simple metrics card on the placement detail page
   (views, unique views, purchases, CR); experiment results stay on the
   existing experiments screens.

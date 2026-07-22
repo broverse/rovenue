@@ -43,11 +43,11 @@ export function PlacementMetricsCard({ projectId, placementId }: Props) {
           value={isPending ? "—" : formatCount(data?.purchases ?? 0)}
         />
         <Stat
-          // Deliberately labeled as approximate: purchases are matched by
-          // "viewer later bought anything", not by presentedContext — the
-          // precise per-variant attribution needs the revenue MV to carry
-          // presentedContext (spec'd follow-up).
-          label={t("placements.metrics.conversionRate", "Viewer → buyer rate (approx.)")}
+          // Precise attribution since CH migration 0019: purchases are
+          // counted from raw_revenue_events.placementId (presentedContext),
+          // not a viewer-overlap heuristic. Pre-0019 revenue rows carry no
+          // placement and are simply not counted.
+          label={t("placements.metrics.conversionRate", "Conversion rate")}
           value={
             isPending
               ? "—"
