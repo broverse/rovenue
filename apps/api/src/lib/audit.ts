@@ -96,6 +96,11 @@ export type AuditAction =
   | "funnel.published"
   | "funnel.reverted"
   | "funnel.from_template"
+  // --- paywalls ---
+  | "paywall.published"
+  | "paywall.reverted"
+  | "paywall.draft_discarded"
+  | "paywall.version_labeled"
   // --- custom domains ---
   | "custom_domain.created"
   | "custom_domain.verified"
@@ -137,6 +142,7 @@ export type AuditResource =
   | "invitation"
   | "billing_subscription"
   | "funnel"
+  | "paywall"
   | "custom_domain"
   | "integration_connection"
   | "refund_shield_response"

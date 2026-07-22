@@ -1739,6 +1739,8 @@ export interface DashboardPaywallRow {
   configFormatVersion: number;
   builderConfig: unknown;
   isActive: boolean;
+  status: "draft" | "published" | "archived";
+  publishedVersionId: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -1746,6 +1748,48 @@ export interface DashboardPaywallRow {
 
 export interface DashboardPaywallsListResponse {
   paywalls: DashboardPaywallRow[];
+}
+
+/** One row of a paywall's publish history. `builderConfig`/`remoteConfig`
+ * are omitted from the list shape — the version menu only needs metadata;
+ * the full snapshot comes from the detail endpoint. */
+export interface DashboardPaywallVersionRow {
+  id: string;
+  versionNo: number;
+  label: string | null;
+  offeringId: string;
+  configFormatVersion: number;
+  publishedAt: string;
+  publishedBy: string | null;
+  /** True when `paywalls.publishedVersionId` points at this row. */
+  isLive: boolean;
+}
+
+export interface DashboardPaywallVersionsResponse {
+  versions: DashboardPaywallVersionRow[];
+}
+
+export interface DashboardPaywallVersionDetailResponse {
+  version: DashboardPaywallVersionRow & {
+    builderConfig: unknown;
+    remoteConfig: PaywallRemoteConfig;
+  };
+}
+
+/** One field-level change between two builder configs. Mirrors
+ * `BuilderConfigDiffEntry` from `@rovenue/shared/paywall`. */
+export interface DashboardPaywallDiffResponse {
+  from: { versionNo: number | null; label: string | null };
+  to: { versionNo: number | null; label: string | null };
+  entries: Array<{
+    kind: "added" | "removed" | "changed";
+    scope: "config" | "node" | "localization";
+    nodeId: string | null;
+    nodeType: string | null;
+    field: string;
+    from: string | null;
+    to: string | null;
+  }>;
 }
 
 export interface DashboardPaywallCreateInput {
