@@ -129,9 +129,9 @@ Public API exactly per spec §4. LinearLayout (v/h) / FrameLayout (z); TextView/
 
 ## Verification (after all tasks)
 
-- [ ] `pnpm build --force` green; `pnpm --filter @rovenue/shared test`
-- [ ] `cargo test && cargo fmt --check && cargo clippy` in packages/core-rs; bindings regen clean, none committed
-- [ ] `swift test` in packages/sdk-swift (all suites)
-- [ ] `./gradlew testDebugUnitTest` in packages/sdk-kotlin
-- [ ] RN vitest + tsc (DTO passthrough)
+- [x] `pnpm build --force` — 9/9 green; `@rovenue/shared` 267/267 (2026-07-22)
+- [x] `cargo test` 31 suites ok + `fmt --check` + `clippy -D warnings` clean; bindings regen clean, none committed
+- [x] `swift test` — All tests passed (incl. 32 decoder/helper + render-support tests)
+- [x] `./gradlew testDebugUnitTest` — 154 tests green (+ `assembleRelease`)
+- [x] RN vitest 157/157 + tsc clean (DTO passthrough)
 - [ ] Manual smoke (simulator/device — headless-blocked): present RovenuePaywallView from a placement with a builder paywall on both platforms; recommended alongside the RN-presentation follow-up session
