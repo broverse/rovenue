@@ -1,0 +1,603 @@
+{
+  "_comment": "Cross-platform contract for builder-paywall decoding + text/variable semantics. The TS authoring schema is STRICT (unknown node types are rejected: acceptLenient entries FAIL it). Platform decoders (Swift Codable, Kotlin kotlinx-serialization) are lenient by design: unknown node types decode to an unknown node retaining id+fallback and render the fallback (or nothing). reject entries must fail EVERYWHERE (schema AND platform decoders → null). Generated from the real TS implementations; frozen — regenerate only by re-running the generator against packages/shared/src/paywall.",
+  "accept": [
+    {
+      "name": "canonical every-node multi-locale",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "title_1": "Go Pro",
+            "sub_1": "Unlock everything",
+            "cta_1": "Continue — {{price}}",
+            "close_1": "Not now",
+            "restore_1": "Restore",
+            "empty_1": ""
+          },
+          "tr": {
+            "title_1": "Pro'ya geç",
+            "cta_1": "Devam — {{price}}",
+            "empty_1": ""
+          }
+        },
+        "background": {
+          "light": "#FFFFFF",
+          "dark": "#0B0B0F"
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "spacing": 16,
+          "align": "center",
+          "padding": {
+            "t": 24,
+            "r": 16,
+            "b": 24,
+            "l": 16
+          },
+          "size": {
+            "width": "fill",
+            "height": "fill"
+          },
+          "children": [
+            {
+              "type": "image",
+              "id": "img_1",
+              "url": {
+                "light": "https://cdn.example.com/hero.png",
+                "dark": "https://cdn.example.com/hero-dark.png"
+              },
+              "height": 180,
+              "cornerRadius": 12,
+              "alt": "title_1"
+            },
+            {
+              "type": "text",
+              "id": "t_title",
+              "key": "title_1",
+              "role": "title",
+              "color": {
+                "light": "#0F172A",
+                "dark": "#F8FAFC"
+              },
+              "align": "center"
+            },
+            {
+              "type": "text",
+              "id": "t_sub",
+              "key": "sub_1",
+              "role": "subtitle"
+            },
+            {
+              "type": "spacer",
+              "id": "sp_1",
+              "size": 8
+            },
+            {
+              "type": "packageList",
+              "id": "pl_1",
+              "packageIds": [],
+              "cellLayout": "column"
+            },
+            {
+              "type": "purchaseButton",
+              "id": "pb_1",
+              "labelKey": "cta_1"
+            },
+            {
+              "type": "stack",
+              "id": "row_1",
+              "axis": "h",
+              "spacing": 12,
+              "children": [
+                {
+                  "type": "button",
+                  "id": "b_close",
+                  "labelKey": "close_1",
+                  "style": "plain",
+                  "action": {
+                    "kind": "close"
+                  }
+                },
+                {
+                  "type": "button",
+                  "id": "b_restore",
+                  "labelKey": "restore_1",
+                  "style": "plain",
+                  "action": {
+                    "kind": "restore"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "three-level nested stacks with z overlay",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "t": "Hi"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "v",
+          "children": [
+            {
+              "type": "stack",
+              "id": "z1",
+              "axis": "z",
+              "children": [
+                {
+                  "type": "image",
+                  "id": "i1",
+                  "url": {
+                    "light": "https://x/1.png"
+                  }
+                },
+                {
+                  "type": "stack",
+                  "id": "v2",
+                  "axis": "v",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "t1",
+                      "key": "t",
+                      "role": "body"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "node carrying a valid fallback",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "a": "A",
+            "b": "B"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "v",
+          "children": [
+            {
+              "type": "text",
+              "id": "t1",
+              "key": "a",
+              "role": "title",
+              "fallback": {
+                "type": "text",
+                "id": "t1_fb",
+                "key": "b",
+                "role": "body"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "theme pair without dark",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "t": "x"
+          }
+        },
+        "background": {
+          "light": "#FafaFA"
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "v",
+          "background": {
+            "light": "#EEE"
+          },
+          "children": [
+            {
+              "type": "text",
+              "id": "t",
+              "key": "t",
+              "role": "caption",
+              "color": {
+                "light": "#333"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "explicit packageIds with defaultSelected",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "buy": "Buy"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "v",
+          "children": [
+            {
+              "type": "packageList",
+              "id": "pl",
+              "packageIds": [
+                "$rov_monthly",
+                "$rov_annual"
+              ],
+              "defaultSelected": "$rov_annual",
+              "cellLayout": "row"
+            },
+            {
+              "type": "purchaseButton",
+              "id": "pb",
+              "labelKey": "buy"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "url and restore buttons, spacer flexible",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "terms": "Terms",
+            "restore": "Restore"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "h",
+          "children": [
+            {
+              "type": "button",
+              "id": "b1",
+              "labelKey": "terms",
+              "style": "secondary",
+              "action": {
+                "kind": "url",
+                "url": "https://example.com/terms"
+              }
+            },
+            {
+              "type": "spacer",
+              "id": "sp"
+            },
+            {
+              "type": "button",
+              "id": "b2",
+              "labelKey": "restore",
+              "style": "primary",
+              "action": {
+                "kind": "restore"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "acceptLenient": [
+    {
+      "name": "unknown node type with valid fallback (platform decoders keep id+fallback; strict schema rejects)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "t": "Hello"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "v",
+          "children": [
+            {
+              "type": "countdown",
+              "id": "cd_1",
+              "endsAt": "2027-01-01T00:00:00Z",
+              "fallback": {
+                "type": "text",
+                "id": "cd_fb",
+                "key": "t",
+                "role": "body"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "unknown node type without fallback (platforms render nothing)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "v",
+          "children": [
+            {
+              "type": "video",
+              "id": "vid_1",
+              "url": {
+                "light": "https://x/v.mp4"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "reject": [
+    {
+      "name": "bad axis enum",
+      "reason": "axis must be v|h|z",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "diagonal",
+          "children": []
+        }
+      }
+    },
+    {
+      "name": "missing node id",
+      "reason": "every node requires id",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "t": "x"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "v",
+          "children": [
+            {
+              "type": "text",
+              "key": "t",
+              "role": "body"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "formatVersion 1",
+      "reason": "formatVersion must be the literal 2",
+      "config": {
+        "formatVersion": 1,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {}
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "v",
+          "children": []
+        }
+      }
+    },
+    {
+      "name": "malformed node inside fallback",
+      "reason": "fallback subtrees are validated recursively",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "t": "x"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "v",
+          "children": [
+            {
+              "type": "text",
+              "id": "t1",
+              "key": "t",
+              "role": "body",
+              "fallback": {
+                "type": "stack",
+                "id": "fb",
+                "axis": "sideways",
+                "children": []
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "non-object localization value",
+      "reason": "localizations values must be string tables",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": "nope"
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "v",
+          "children": []
+        }
+      }
+    },
+    {
+      "name": "root is not a stack",
+      "reason": "root must be a stack node",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "t": "x"
+          }
+        },
+        "root": {
+          "type": "text",
+          "id": "t",
+          "key": "t",
+          "role": "body"
+        }
+      }
+    }
+  ],
+  "variables": [
+    {
+      "text": "Continue — {{price}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "Continue — $39.99"
+    },
+    {
+      "text": "{{packageName}}: {{price}} ({{pricePerPeriod}})",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "Pro Annual: $39.99 ($39.99/year)"
+    },
+    {
+      "text": "Billed every {{period}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "Billed every year"
+    },
+    {
+      "text": "No vars here",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "No vars here"
+    },
+    {
+      "text": "{{unknownVar}} stays",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "{{unknownVar}} stays"
+    },
+    {
+      "text": "Continue — {{price}}",
+      "pkg": null,
+      "expected": "Continue — {{price}}"
+    },
+    {
+      "text": "",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": ""
+    },
+    {
+      "text": "{{price}}{{price}}",
+      "pkg": {
+        "packageName": "Pro Annual",
+        "price": "$39.99",
+        "pricePerPeriod": "$39.99/year",
+        "period": "year"
+      },
+      "expected": "$39.99$39.99"
+    },
+    {
+      "text": "mixed {{period}} and {{nope}}",
+      "pkg": null,
+      "expected": "mixed {{period}} and {{nope}}"
+    }
+  ],
+  "resolveText": [
+    {
+      "locale": "tr",
+      "key": "title_1",
+      "expected": "Pro'ya geç"
+    },
+    {
+      "locale": "tr",
+      "key": "sub_1",
+      "expected": "Unlock everything"
+    },
+    {
+      "locale": "de",
+      "key": "title_1",
+      "expected": "Go Pro"
+    },
+    {
+      "locale": "en",
+      "key": "missing_key",
+      "expected": null
+    },
+    {
+      "locale": "tr",
+      "key": "empty_1",
+      "expected": ""
+    }
+  ]
+}
