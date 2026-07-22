@@ -30,7 +30,37 @@ import { STRIPE_SUBSCRIPTION_STATUS } from "./stripe-types";
  */
 export interface SettlementSubscription {
   status: Stripe.Subscription["status"];
-  default_payment_method?: Stripe.Subscription["default_payment_method"];
+  /**
+   * REQUIRED, deliberately. Both callers already hold this field — the
+   * webhook has the whole subscription object and `/confirm` retrieves
+   * it — and a missing one is indistinguishable from a null one at
+   * runtime: the predicate would answer `false` and refuse a buyer who
+   * paid, which reads exactly like a legitimate refusal. Making it
+   * required moves that mistake from a silent 409 to a compile error.
+   */
+  default_payment_method: Stripe.Subscription["default_payment_method"];
+  /**
+   * Status of the subscription's `pending_setup_intent`, when the caller
+   * has it expanded.
+   *
+   * OPTIONAL, and the asymmetry with the field above is deliberate. Only
+   * `/confirm` can supply it: it makes a retrieve of its own, so it can
+   * ask for `expand: ["pending_setup_intent"]` and pay nothing extra.
+   * The webhook is handed the event's subscription object, where this is
+   * a bare id — reading its status would mean a Stripe round-trip on
+   * EVERY subscription event of every connected account, which would put
+   * network I/O inside the one predicate that is currently pure. A pure
+   * predicate is what makes it safe to share; the moment it does I/O the
+   * two call sites start having reasons to fork it again.
+   *
+   * The asymmetry is safe because it can only ever ADD a true. Omitting
+   * it never turns a settled subscription unsettled at the webhook: the
+   * webhook's job is to backstop the buyer who left, and a trial it
+   * cannot yet prove is left for the next event on that subscription (or
+   * for `/confirm`, which CAN prove it). Omitting `default_payment_method`
+   * by contrast would remove the only signal either caller has.
+   */
+  pendingSetupIntentStatus?: Stripe.SetupIntent.Status | null;
 }
 
 /**
@@ -51,23 +81,39 @@ export interface SettlementSubscription {
  *
  * `active` means an invoice was actually paid (or a trial converted).
  * For `trialing` the money signal does not exist by design — the trial
- * captures nothing now — so the equivalent commitment is the card, which
- * Stripe records on the subscription as `default_payment_method` once
- * the pending setup intent succeeds.
+ * captures nothing now — so the equivalent commitment is the card, and
+ * there are two independent records of it:
  *
- * If Stripe ever stopped setting `default_payment_method` there, this
- * returns false: the webhook simply does not backstop the trial from a
- * subscription event, and `/confirm` answers 409. The buyer still
- * reaches their token from the `invoice.paid` at trial conversion.
- * Silence is the correct failure — a false positive here hands out
- * entitlements to a visitor who only reached the paywall.
+ *   - `default_payment_method` on the subscription. Note this is NOT
+ *     free: Stripe's `payment_settings.save_default_payment_method`
+ *     defaults to `off`, so the funnel asks for `on_subscription` at
+ *     create time. Even then the SDK's own wording is "when a
+ *     subscription *payment* succeeds", which for a trial does not
+ *     happen until conversion — so this field alone cannot be relied on
+ *     at the moment the browser finishes.
+ *   - the `pending_setup_intent` reaching `succeeded`. That is the very
+ *     object the visitor just confirmed in the card form, so it is true
+ *     the instant they finish and depends on nothing Stripe does later.
+ *
+ * Either one is a card. Requiring both would refuse real buyers; the
+ * pair is what stops this gate being an assumption about Stripe's
+ * timing.
+ *
+ * What still returns false, and must: a `trialing` subscription with
+ * neither — no card, no confirmed setup intent. That is the state the
+ * funnel puts a trial package into the moment a visitor picks it, before
+ * the card form is touched, and treating it as proof of payment hands
+ * entitlements to someone who never paid and never will.
  */
 export function hasPaidOrAttachedACard(
   subscription: SettlementSubscription,
 ): boolean {
   if (subscription.status === STRIPE_SUBSCRIPTION_STATUS.ACTIVE) return true;
   if (subscription.status === STRIPE_SUBSCRIPTION_STATUS.TRIALING) {
-    return subscription.default_payment_method != null;
+    return (
+      subscription.default_payment_method != null ||
+      subscription.pendingSetupIntentStatus === "succeeded"
+    );
   }
   // incomplete / incomplete_expired / past_due / unpaid / canceled /
   // paused: nothing here says this buyer paid for THIS session.

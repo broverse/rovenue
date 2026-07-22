@@ -266,6 +266,52 @@ describe("POST /public/funnel-sessions/:sessionId/confirm", () => {
     expect(insertClaimToken).toHaveBeenCalledTimes(1);
   });
 
+  // THE other failure direction, and the reason this endpoint expands the
+  // setup intent. `default_payment_method` is written when a subscription
+  // PAYMENT succeeds, which for a trial is weeks away — so a genuine trial
+  // buyer standing at the end of the card form has no card on the
+  // subscription and would be refused forever. The setup intent they just
+  // confirmed is the signal that is true right now.
+  it("treats a trialing subscription with a succeeded setup intent as settled", async () => {
+    purchase.stripeSubscriptionId = "sub_1";
+    purchase.stripePaymentIntentId = null;
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "trialing",
+      default_payment_method: null,
+      pending_setup_intent: { id: "seti_1", status: "succeeded" },
+    });
+
+    const res = await confirm();
+
+    expect(res.status).toBe(200);
+    expect(insertClaimToken).toHaveBeenCalledTimes(1);
+    // Expanded through the account-scoped facade's params argument — a
+    // bare id would carry no status to read.
+    expect(subscriptionsRetrieve).toHaveBeenCalledWith("sub_1", {
+      expand: ["pending_setup_intent"],
+    });
+  });
+
+  it("409s when the expanded setup intent has not been confirmed", async () => {
+    purchase.stripeSubscriptionId = "sub_1";
+    purchase.stripePaymentIntentId = null;
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "trialing",
+      default_payment_method: null,
+      pending_setup_intent: {
+        id: "seti_1",
+        status: "requires_payment_method",
+      },
+    });
+
+    const res = await confirm();
+
+    expect(res.status).toBe(409);
+    expect(insertClaimToken).not.toHaveBeenCalled();
+  });
+
   it("treats an active subscription as settled", async () => {
     purchase.stripeSubscriptionId = "sub_1";
     purchase.stripePaymentIntentId = null;
@@ -281,16 +327,20 @@ describe("POST /public/funnel-sessions/:sessionId/confirm", () => {
   it("asks the shared settlement predicate, not a local copy", async () => {
     purchase.stripeSubscriptionId = "sub_1";
     purchase.stripePaymentIntentId = null;
-    const subscription = {
+    subscriptionsRetrieve.mockResolvedValue({
       id: "sub_1",
       status: "trialing",
       default_payment_method: "pm_1",
-    };
-    subscriptionsRetrieve.mockResolvedValue(subscription);
+      pending_setup_intent: { id: "seti_1", status: "succeeded" },
+    });
 
     await confirm();
 
-    expect(settledPredicate).toHaveBeenCalledWith(subscription);
+    expect(settledPredicate).toHaveBeenCalledWith({
+      status: "trialing",
+      default_payment_method: "pm_1",
+      pendingSetupIntentStatus: "succeeded",
+    });
   });
 
   it("409s for a subscription that is still incomplete", async () => {
@@ -304,16 +354,51 @@ describe("POST /public/funnel-sessions/:sessionId/confirm", () => {
     expect(insertClaimToken).not.toHaveBeenCalled();
   });
 
-  // The subscription is authoritative when both ids are present: it is the
+  // The subscription is asked FIRST when both ids are present: it is the
   // object that actually decides whether the buyer has access.
-  it("asks about the subscription rather than the invoice's intent when both exist", async () => {
+  it("asks about the subscription before the invoice's intent", async () => {
     purchase.stripeSubscriptionId = "sub_1";
     purchase.stripePaymentIntentId = "pi_1";
-    subscriptionsRetrieve.mockResolvedValue({ id: "sub_1", status: "incomplete" });
+    subscriptionsRetrieve.mockResolvedValue({ id: "sub_1", status: "active" });
+
+    expect((await confirm()).status).toBe(200);
+    expect(paymentIntentsRetrieve).not.toHaveBeenCalled();
+  });
+
+  // ...but a subscription that says no is not the last word. Stripe lags
+  // `incomplete → active` behind the invoice's payment, and the row holds
+  // that invoice's PaymentIntent. A `succeeded` intent is money that
+  // moved, so falling through can only add a true.
+  it("falls through to the invoice's intent when the subscription has not caught up", async () => {
+    purchase.stripeSubscriptionId = "sub_1";
+    purchase.stripePaymentIntentId = "pi_1";
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "incomplete",
+      default_payment_method: null,
+    });
     paymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "succeeded" });
 
+    expect((await confirm()).status).toBe(200);
+    expect(paymentIntentsRetrieve).toHaveBeenCalledWith("pi_1");
+    expect(insertClaimToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("409s when neither the subscription nor its intent has settled", async () => {
+    purchase.stripeSubscriptionId = "sub_1";
+    purchase.stripePaymentIntentId = "pi_1";
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "incomplete",
+      default_payment_method: null,
+    });
+    paymentIntentsRetrieve.mockResolvedValue({
+      id: "pi_1",
+      status: "requires_payment_method",
+    });
+
     expect((await confirm()).status).toBe(409);
-    expect(paymentIntentsRetrieve).not.toHaveBeenCalled();
+    expect(insertClaimToken).not.toHaveBeenCalled();
   });
 
   // The plaintext exists exactly once. The second caller is told so

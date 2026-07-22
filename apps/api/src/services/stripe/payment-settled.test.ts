@@ -12,7 +12,9 @@ import { hasPaidOrAttachedACard } from "./payment-settled";
 
 describe("hasPaidOrAttachedACard", () => {
   it("counts an active subscription as settled", () => {
-    expect(hasPaidOrAttachedACard({ status: "active" })).toBe(true);
+    expect(
+      hasPaidOrAttachedACard({ status: "active", default_payment_method: null }),
+    ).toBe(true);
   });
 
   // An active subscription has a paid invoice behind it; the payment
@@ -35,8 +37,42 @@ describe("hasPaidOrAttachedACard", () => {
     ).toBe(false);
   });
 
-  it("does NOT count a trialing subscription whose field is absent", () => {
-    expect(hasPaidOrAttachedACard({ status: "trialing" })).toBe(false);
+  // The other half of the same bug: refusing a buyer who DID pay. The
+  // funnel's trial subscription is created with no payment method, and
+  // `default_payment_method` is only written when a subscription payment
+  // succeeds — weeks away for a trial. The setup intent the visitor just
+  // confirmed is the signal that is true the moment they finish.
+  it("counts a trialing subscription whose setup intent succeeded", () => {
+    expect(
+      hasPaidOrAttachedACard({
+        status: "trialing",
+        default_payment_method: null,
+        pendingSetupIntentStatus: "succeeded",
+      }),
+    ).toBe(true);
+  });
+
+  it("does NOT count a trialing subscription with an unconfirmed setup intent", () => {
+    expect(
+      hasPaidOrAttachedACard({
+        status: "trialing",
+        default_payment_method: null,
+        pendingSetupIntentStatus: "requires_payment_method",
+      }),
+    ).toBe(false);
+  });
+
+  // The webhook cannot expand the setup intent (see the module), so it
+  // passes nothing here. That must read as "no such signal", never as a
+  // signal in its own right.
+  it("does NOT count a trialing subscription when no setup intent is supplied", () => {
+    expect(
+      hasPaidOrAttachedACard({
+        status: "trialing",
+        default_payment_method: null,
+        pendingSetupIntentStatus: undefined,
+      }),
+    ).toBe(false);
   });
 
   it("counts a trialing subscription once a card is attached", () => {
@@ -67,7 +103,11 @@ describe("hasPaidOrAttachedACard", () => {
     "paused",
   ] as const)("does NOT count a %s subscription", (status) => {
     expect(
-      hasPaidOrAttachedACard({ status, default_payment_method: "pm_1" }),
+      hasPaidOrAttachedACard({
+        status,
+        default_payment_method: "pm_1",
+        pendingSetupIntentStatus: "succeeded",
+      }),
     ).toBe(false);
   });
 });

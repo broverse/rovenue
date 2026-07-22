@@ -305,6 +305,20 @@ describe("POST /public/funnel-sessions/:sessionId/payment-intent", () => {
     expect(body.data.client_secret).toBe("pi_secret");
   });
 
+  // Stripe's default is `save_default_payment_method: "off"`, which means
+  // the card the visitor just entered is never recorded on the
+  // subscription — so a converted trial has nothing to bill the next
+  // period with, and any gate that reads `default_payment_method` refuses
+  // a buyer who paid. Asked for at create time, by construction.
+  it("asks Stripe to save the payment method on the subscription", async () => {
+    await post({ package_identifier: "$rov_trial", email: "a@b.co" });
+    expect(subscriptionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payment_settings: { save_default_payment_method: "on_subscription" },
+      }),
+    );
+  });
+
   it("uses setup mode when the price carries a trial", async () => {
     // trialDays: 7 -> no payment is captured now
     const body = (await post({ package_identifier: "$rov_trial", email: "a@b.co" }).then((r) =>

@@ -402,9 +402,18 @@ function mergeOrphaned(
  * but the endpoint is anonymous and takes nothing but a session id, so
  * the client's word is not evidence of anything. Stripe is asked instead.
  *
- * The subscription is authoritative whenever there is one: it is the
- * object that decides whether the buyer has access, and a recurring
- * purchase carries both ids.
+ * The subscription is asked FIRST whenever there is one: it is the object
+ * that decides whether the buyer has access, and a recurring purchase
+ * carries both ids.
+ *
+ * But a subscription that says "no" is not the end of the answer. On the
+ * non-trial recurring path the row also holds the opening invoice's
+ * PaymentIntent, and Stripe lags the subscription's `incomplete → active`
+ * behind that invoice's payment — so the intent can read `succeeded`
+ * while the subscription has not caught up. Falling through to it can
+ * only ever add a `true`, and a `succeeded` intent is money that moved,
+ * so the risk this removes (refusing a buyer who paid) has no matching
+ * risk on the other side.
  *
  * The subscription answer is NOT computed here. It comes from
  * `hasPaidOrAttachedACard`, the same function the Connect webhook's
@@ -414,6 +423,13 @@ function mergeOrphaned(
  * moment a visitor picks a trial package, before any card) came to count
  * as proof of payment on this side while the webhook correctly refused
  * it. See services/stripe/payment-settled.ts.
+ *
+ * What this side supplies that the webhook cannot: the setup intent's
+ * status. `pending_setup_intent` is the object the visitor confirmed
+ * moments ago, so it is authoritative here with no dependence on when
+ * Stripe gets around to writing `default_payment_method`. Reading it
+ * costs nothing — the retrieve was happening anyway and `expand` is a
+ * params field, which is why the facade takes one.
  */
 async function isSettled(
   account: AccountScopedStripe,
@@ -425,8 +441,34 @@ async function isSettled(
   if (purchase.stripeSubscriptionId) {
     const subscription = await account.subscriptions.retrieve(
       purchase.stripeSubscriptionId,
+      { expand: ["pending_setup_intent"] },
     );
-    return hasPaidOrAttachedACard(subscription);
+    const setupIntent = subscription.pending_setup_intent;
+    if (
+      hasPaidOrAttachedACard({
+        status: subscription.status,
+        default_payment_method: subscription.default_payment_method,
+        // A bare id would mean the expand did not come back; there is
+        // nothing to read from it and `undefined` is the honest answer.
+        pendingSetupIntentStatus:
+          setupIntent && typeof setupIntent === "object"
+            ? setupIntent.status
+            : undefined,
+      })
+    ) {
+      return true;
+    }
+    if (subscription.status === "trialing" && setupIntent == null) {
+      // Neither signal AND no setup intent left to read. Either the
+      // visitor never entered a card, or Stripe cleared the intent on
+      // success without writing `default_payment_method` — and those two
+      // are indistinguishable from here. We refuse, which is right for
+      // the first and wrong for the second, so it must not be silent.
+      log.warn("trialing subscription proves nothing: no card, no setup intent", {
+        subscriptionId: purchase.stripeSubscriptionId,
+      });
+    }
+    // Fall through: the invoice's PaymentIntent may already say yes.
   }
   if (purchase.stripePaymentIntentId) {
     const intent = await account.paymentIntents.retrieve(
@@ -578,6 +620,20 @@ export const funnelPaymentRoute = new Hono()
           customer: customerId,
           items: [{ price: price.priceId }],
           payment_behavior: "default_incomplete",
+          // Stripe's default is `off`, which means the card the visitor
+          // just entered is never recorded on the subscription. That is
+          // wrong on its own terms long before any gate reads it: a
+          // subscription with no default payment method has nothing to
+          // bill the second period with. Asking for `on_subscription`
+          // makes Stripe write it when a subscription payment succeeds —
+          // immediately on the non-trial recurring path, and at
+          // conversion on the trial path.
+          //
+          // It is deliberately not the whole answer for trials. "When a
+          // subscription payment succeeds" is Stripe's own wording, and a
+          // trial's first payment is weeks away, so `/confirm` also reads
+          // the setup intent — see `isSettled` and payment-settled.ts.
+          payment_settings: { save_default_payment_method: "on_subscription" },
           ...(price.trialDays ? { trial_period_days: price.trialDays } : {}),
           expand: ["latest_invoice.payment_intent", "pending_setup_intent"],
           metadata,
