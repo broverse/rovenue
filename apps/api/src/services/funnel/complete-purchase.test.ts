@@ -179,7 +179,36 @@ describe("completeFunnelPurchase", () => {
   // — the loser's INSERT raises 23505 and its whole transaction (markPaid
   // included) rolls back, harmlessly, because the winner already
   // committed. That must read as "already issued", not as a 500.
+  // The shape drizzle actually throws. It does NOT rethrow the pg error:
+  // it wraps it in a DrizzleQueryError whose message is "Failed query: …"
+  // and hangs the driver error off `.cause`, so `code` and `constraint`
+  // are one level down. Building the fixture this way is the whole point
+  // — a fixture that puts them on the top-level error passes against an
+  // implementation that would 500 on every real race.
+  function drizzleWrapped(constraint: string): Error {
+    const pgError = Object.assign(
+      new Error(`duplicate key value violates unique constraint "${constraint}"`),
+      { code: "23505", constraint, severity: "ERROR" },
+    );
+    return Object.assign(
+      new Error("Failed query: insert into \"funnel_claim_tokens\" ...\nparams: ..."),
+      { cause: pgError },
+    );
+  }
+
   it("treats a 23505 on the token insert as already issued rather than an error", async () => {
+    insertClaimToken.mockRejectedValue(
+      drizzleWrapped("funnel_claim_tokens_session_id_unique"),
+    );
+
+    const result = await completeFunnelPurchase(INPUT);
+
+    expect(result).toEqual({ alreadyIssued: true });
+    expect(result).not.toHaveProperty("token");
+  });
+
+  // A driver that hands the error over unwrapped must still be read.
+  it("treats an unwrapped 23505 on session_id as already issued too", async () => {
     insertClaimToken.mockRejectedValue(
       Object.assign(
         new Error(
@@ -192,7 +221,6 @@ describe("completeFunnelPurchase", () => {
     const result = await completeFunnelPurchase(INPUT);
 
     expect(result).toEqual({ alreadyIssued: true });
-    expect(result).not.toHaveProperty("token");
   });
 
   // That INSERT can violate three unique constraints. Only session_id
@@ -205,14 +233,9 @@ describe("completeFunnelPurchase", () => {
     "funnel_claim_tokens_token_hash_unique",
     "funnel_claim_tokens_pkey",
   ])("rethrows a 23505 on %s rather than claiming already issued", async (constraint) => {
-    insertClaimToken.mockRejectedValue(
-      Object.assign(
-        new Error(`duplicate key value violates unique constraint "${constraint}"`),
-        { code: "23505", constraint },
-      ),
-    );
+    insertClaimToken.mockRejectedValue(drizzleWrapped(constraint));
 
-    await expect(completeFunnelPurchase(INPUT)).rejects.toThrow("duplicate key");
+    await expect(completeFunnelPurchase(INPUT)).rejects.toThrow("Failed query");
   });
 
   it("rethrows any other database error", async () => {

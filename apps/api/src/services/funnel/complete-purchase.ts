@@ -36,9 +36,26 @@ const UNIQUE_VIOLATION = "23505";
  */
 const SESSION_ID_UNIQUE = "funnel_claim_tokens_session_id_unique";
 
+/**
+ * Drizzle does not rethrow the driver's error: it wraps it in a
+ * `DrizzleQueryError` ("Failed query: …") and hangs the `pg` error off
+ * `.cause`. So neither `code` nor `constraint` is on the object we
+ * catch, and a check against the top-level error alone silently never
+ * matches — every real race would surface as a 500. Walk the chain.
+ * The bound is only there so a self-referential `cause` cannot spin.
+ */
 function isSessionTokenRace(err: unknown): boolean {
-  const e = err as { code?: string; constraint?: string } | null;
-  return e?.code === UNIQUE_VIOLATION && e.constraint === SESSION_ID_UNIQUE;
+  for (let e = err, depth = 0; e != null && depth < 5; depth += 1) {
+    const candidate = e as { code?: unknown; constraint?: unknown; cause?: unknown };
+    if (
+      candidate.code === UNIQUE_VIOLATION &&
+      candidate.constraint === SESSION_ID_UNIQUE
+    ) {
+      return true;
+    }
+    e = candidate.cause;
+  }
+  return false;
 }
 
 export type CompleteResult =

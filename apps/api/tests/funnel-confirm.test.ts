@@ -268,15 +268,19 @@ describe("POST /public/funnel-sessions/:sessionId/confirm", () => {
   // webhook running at once, not an error.
   it("reports already_issued when the token insert loses a 23505 race", async () => {
     insertClaimToken.mockRejectedValue(
-      Object.assign(
-        new Error(
-          'duplicate key value violates unique constraint "funnel_claim_tokens_session_id_unique"',
+      // The shape drizzle really throws: a DrizzleQueryError wrapper with
+      // the pg error on `.cause`. The service matches the constraint as
+      // well as the SQLSTATE — a 23505 on token_hash or the pkey is a
+      // generator collision, not a race, and must not read as
+      // already_issued.
+      Object.assign(new Error("Failed query: insert into ..."), {
+        cause: Object.assign(
+          new Error(
+            'duplicate key value violates unique constraint "funnel_claim_tokens_session_id_unique"',
+          ),
+          { code: "23505", constraint: "funnel_claim_tokens_session_id_unique" },
         ),
-        // The service matches the constraint as well as the SQLSTATE — a
-        // 23505 on token_hash or the pkey is a generator collision, not a
-        // race, and must not be reported as already_issued.
-        { code: "23505", constraint: "funnel_claim_tokens_session_id_unique" },
-      ),
+      }),
     );
 
     const res = await confirm();
