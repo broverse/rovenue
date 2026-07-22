@@ -109,11 +109,11 @@ export const placements = pgTable(
 );
 ```
 
-- [ ] **Step 1:** Write failing integration tests (testcontainers, follow an existing repo `.integration.test.ts` bootstrap): create/list/find by identifier; `updatePlacement` with `rows` bumps `revision` 1→2; `deletePaywall` throws when a placement row references it; unique `(projectId, identifier)` violation surfaces.
-- [ ] **Step 2:** Run: `pnpm --filter @rovenue/db test -- placements` → FAIL (tables missing).
-- [ ] **Step 3:** Add schema tables, run `pnpm db:migrate:generate`, trim regenerated stale DDL if any, verify journal entry, `pnpm db:migrate`.
-- [ ] **Step 4:** Implement both repositories (copy `offerings.ts` repo structure; the reference check in `deletePaywall` scans `placements.rows` with a qualified `sql` containment query — `WHERE "placements"."projectId" = ... AND "placements"."rows" @> ...` is not expressible with `@>` for nested arrays of variants shapes, so instead: `SELECT 1 FROM placements WHERE "placements"."projectId" = ${projectId} AND EXISTS (SELECT 1 FROM jsonb_array_elements("placements"."rows") r WHERE r->'target'->>'paywallId' = ${id})` — plus a scan of `experiments.variants` for `type=PAYWALL`: `EXISTS (SELECT 1 FROM jsonb_array_elements("experiments"."variants") v WHERE v->'value'->>'paywallId' = ${id})`).
-- [ ] **Step 5:** Run tests → PASS. Commit: `feat(db): paywalls and placements tables + repositories`.
+- [x] **Step 1:** Write failing integration tests (testcontainers, follow an existing repo `.integration.test.ts` bootstrap): create/list/find by identifier; `updatePlacement` with `rows` bumps `revision` 1→2; `deletePaywall` throws when a placement row references it; unique `(projectId, identifier)` violation surfaces.
+- [x] **Step 2:** Run: `pnpm --filter @rovenue/db test -- placements` → FAIL (tables missing).
+- [x] **Step 3:** Add schema tables, run `pnpm db:migrate:generate`, trim regenerated stale DDL if any, verify journal entry, `pnpm db:migrate`.
+- [x] **Step 4:** Implement both repositories (copy `offerings.ts` repo structure; the reference check in `deletePaywall` scans `placements.rows` with a qualified `sql` containment query — `WHERE "placements"."projectId" = ... AND "placements"."rows" @> ...` is not expressible with `@>` for nested arrays of variants shapes, so instead: `SELECT 1 FROM placements WHERE "placements"."projectId" = ${projectId} AND EXISTS (SELECT 1 FROM jsonb_array_elements("placements"."rows") r WHERE r->'target'->>'paywallId' = ${id})` — plus a scan of `experiments.variants` for `type=PAYWALL`: `EXISTS (SELECT 1 FROM jsonb_array_elements("experiments"."variants") v WHERE v->'value'->>'paywallId' = ${id})`).
+- [x] **Step 5:** Run tests → PASS. Commit: `feat(db): paywalls and placements tables + repositories`.
 
 ---
 
@@ -176,9 +176,9 @@ Vectors fixture — generated ONCE by a throwaway script calling the real `assig
 }
 ```
 
-- [ ] **Step 1:** Write `bucketing-vectors.test.ts`: loads the JSON, asserts `assignBucket(c.subscriberId, c.seed) === c.expectedBucket` and `selectVariant(bucket, c.variants).id === c.expectedVariantId` for every case. Also unit tests for `placementRowsSchema` refinements (double-null rejected, null-not-last rejected, happy path).
-- [ ] **Step 2:** Generate the fixture with a one-off node script in the scratchpad (import from `packages/shared/src/experiments/bucketing.ts`, print JSON, paste). Run: `pnpm --filter @rovenue/shared test -- bucketing-vectors` → PASS.
-- [ ] **Step 3:** Commit: `feat(shared): placement row schema + cross-language bucketing vectors`.
+- [x] **Step 1:** Write `bucketing-vectors.test.ts`: loads the JSON, asserts `assignBucket(c.subscriberId, c.seed) === c.expectedBucket` and `selectVariant(bucket, c.variants).id === c.expectedVariantId` for every case. Also unit tests for `placementRowsSchema` refinements (double-null rejected, null-not-last rejected, happy path).
+- [x] **Step 2:** Generate the fixture with a one-off node script in the scratchpad (import from `packages/shared/src/experiments/bucketing.ts`, print JSON, paste). Run: `pnpm --filter @rovenue/shared test -- bucketing-vectors` → PASS.
+- [x] **Step 3:** Commit: `feat(shared): placement row schema + cross-language bucketing vectors`.
 
 ---
 
@@ -203,9 +203,9 @@ export async function hydrateOffering(projectId: string, offering: { identifier;
 // hydrateOffering = parse packages → offeringRepo.findProductsByIds → hydrateProducts (single-offering convenience)
 ```
 
-- [ ] **Step 1:** Move `packageSchema/packagesSchema/storeIdsSchema/parseStoreIds/OfferingProductEntry/hydrateProducts` verbatim; add `hydrateOffering`. Rewire `offerings.ts` imports.
-- [ ] **Step 2:** Run existing offerings tests + `pnpm --filter @rovenue/api build` (or `tsc`) → PASS/green.
-- [ ] **Step 3:** Commit: `refactor(api): extract offering hydration into lib for reuse`.
+- [x] **Step 1:** Move `packageSchema/packagesSchema/storeIdsSchema/parseStoreIds/OfferingProductEntry/hydrateProducts` verbatim; add `hydrateOffering`. Rewire `offerings.ts` imports.
+- [x] **Step 2:** Run existing offerings tests + `pnpm --filter @rovenue/api build` (or `tsc`) → PASS/green.
+- [x] **Step 3:** Commit: `refactor(api): extract offering hydration into lib for reuse`.
 
 ---
 
@@ -341,10 +341,10 @@ export const placementsRoute = new Hono().get("/:identifier", async (c) => {
 
 (`audienceRepo.findByIds` and `offeringRepo.findOfferingById` — add to the respective repos if missing, same style as siblings.)
 
-- [ ] **Step 1:** Write failing integration tests: anonymous hits all-users row; attribute-matched audience row wins over later rows; `target:none` short-circuits; dangling paywall ref falls through to next row; RUNNING PAYWALL experiment returns variants with weights; DRAFT experiment row skipped; unknown placement → empty envelope 200; locale fallback to defaultLocale.
-- [ ] **Step 2:** Run → FAIL. **Step 3:** Implement route + mount + missing repo helpers. **Step 4:** Run → PASS.
-- [ ] **Step 5:** Add `/v1/placements` to edge-cache `CACHEABLE_PREFIXES` (`deploy/cloudflare/edge-cache/src/index.ts`) and confirm `purgeProjectCatalogCache` call sites will cover placement/paywall mutations (dashboard routes come in Task 6 — the purge call is added there).
-- [ ] **Step 6:** Commit: `feat(api): GET /v1/placements/:identifier resolution endpoint`.
+- [x] **Step 1:** Write failing integration tests: anonymous hits all-users row; attribute-matched audience row wins over later rows; `target:none` short-circuits; dangling paywall ref falls through to next row; RUNNING PAYWALL experiment returns variants with weights; DRAFT experiment row skipped; unknown placement → empty envelope 200; locale fallback to defaultLocale.
+- [x] **Step 2:** Run → FAIL. **Step 3:** Implement route + mount + missing repo helpers. **Step 4:** Run → PASS.
+- [x] **Step 5:** Add `/v1/placements` to edge-cache `CACHEABLE_PREFIXES` (`deploy/cloudflare/edge-cache/src/index.ts`) and confirm `purgeProjectCatalogCache` call sites will cover placement/paywall mutations (dashboard routes come in Task 6 — the purge call is added there).
+- [x] **Step 6:** Commit: `feat(api): GET /v1/placements/:identifier resolution endpoint`.
 
 ---
 
@@ -387,9 +387,9 @@ await drizzle.experimentAssignmentRepo.insertAssignmentsSkipDuplicates(drizzle.d
 }]);
 ```
 
-- [ ] **Step 1:** Failing tests: expose with variantId creates assignment row exactly once across two calls; `paywall_view` envelope lands in outbox with `aggregateType: "PAYWALL_EVENT"`; Apple receipt with `presentedContext` persists it on the purchase row and revenue-event metadata; malformed `rovenue_presented_context` metadata is ignored without failing webhook processing.
-- [ ] **Step 2:** Run → FAIL. **Step 3:** Implement (envelope is `.strict()` — the new key must be added to the schema; check `insertAssignmentsSkipDuplicates` signature in the repo first and match it). Migration for `purchases.presentedContext`. **Step 4:** Run → PASS.
-- [ ] **Step 5:** Commit: `feat(api): paywall_view events, lazy exposure assignments, receipt attribution`.
+- [x] **Step 1:** Failing tests: expose with variantId creates assignment row exactly once across two calls; `paywall_view` envelope lands in outbox with `aggregateType: "PAYWALL_EVENT"`; Apple receipt with `presentedContext` persists it on the purchase row and revenue-event metadata; malformed `rovenue_presented_context` metadata is ignored without failing webhook processing.
+- [x] **Step 2:** Run → FAIL. **Step 3:** Implement (envelope is `.strict()` — the new key must be added to the schema; check `insertAssignmentsSkipDuplicates` signature in the repo first and match it). Migration for `purchases.presentedContext`. **Step 4:** Run → PASS.
+- [x] **Step 5:** Commit: `feat(api): paywall_view events, lazy exposure assignments, receipt attribution`.
 
 ---
 
@@ -406,8 +406,8 @@ Follow `apps/api/src/routes/dashboard/offerings.ts` verbatim for auth (`requireD
 - Placements: `GET /` · `POST /` · `PATCH /:id` (rows validated with `placementRowsSchema` PLUS project-ownership checks: every audienceId/paywallId/experimentId exists in project; experiment targets must be `type=PAYWALL` — 400 `{ code: "INVALID_ROW_REF" }` otherwise) · `DELETE /:id`.
 - Experiment write path: where dashboard experiments are created/updated (locate `grep -rl "PAYWALL" apps/api/src/routes/dashboard`), enforce `type=PAYWALL` variants carry `value: { paywallId }` referencing a project paywall.
 
-- [ ] **Step 1:** Failing tests: create/patch/delete happy paths; cross-project offeringId rejected; row referencing foreign experiment rejected; rows PATCH bumps revision; purge called (spy/mocked like existing offerings dashboard tests).
-- [ ] **Step 2:** Run → FAIL. **Step 3:** Implement. **Step 4:** Run → PASS. **Step 5:** Commit: `feat(api): dashboard CRUD for paywalls and placements`.
+- [x] **Step 1:** Failing tests: create/patch/delete happy paths; cross-project offeringId rejected; row referencing foreign experiment rejected; rows PATCH bumps revision; purge called (spy/mocked like existing offerings dashboard tests).
+- [x] **Step 2:** Run → FAIL. **Step 3:** Implement. **Step 4:** Run → PASS. **Step 5:** Commit: `feat(api): dashboard CRUD for paywalls and placements`.
 
 ---
 
@@ -419,7 +419,7 @@ Follow `apps/api/src/routes/dashboard/offerings.ts` verbatim for auth (`requireD
 - Create: `packages/db/clickhouse/migrations/00NN+1_mv_paywall_daily.sql` — MV aggregating `(project_id, placement_id, paywall_id, variant_id, day)` → views + uniq state for unique views (use `AggregateFunction(uniq, String)` — the SummingMergeTree+AggregateFunction(uniq) combo is verified correct in this codebase; do NOT refactor to AggregatingMergeTree)
 - Test: extend the CH verify path; integration test asserting a `paywall_view` outbox row round-trips (follow whichever existing test drives exposures through testcontainers Kafka+CH; remember integration tests must mutate `env`, not `process.env`, and never write `FINAL AS alias` — use `AS e FINAL`)
 
-- [ ] **Step 1:** Write the migration SQL (no comment-prefixed statements). **Step 2:** `pnpm --filter @rovenue/db db:clickhouse:migrate && pnpm --filter @rovenue/db db:verify:clickhouse` → green. **Step 3:** Integration test → PASS. **Step 4:** Commit: `feat(db): ClickHouse paywall events pipeline`.
+- [x] **Step 1:** Write the migration SQL (no comment-prefixed statements). **Step 2:** `pnpm --filter @rovenue/db db:clickhouse:migrate && pnpm --filter @rovenue/db db:verify:clickhouse` → green. **Step 3:** Integration test → PASS. **Step 4:** Commit: `feat(db): ClickHouse paywall events pipeline`.
 - Note: fresh MV+topic — the "pause consumer before MV recreate" gotcha applies only to RE-creating live MVs; creation is safe.
 
 ---
@@ -478,9 +478,9 @@ pub fn select_variant_index(bucket: u32, weights: &[f64]) -> usize {
 
 Client: clone `offerings/client.rs` shape — GET `/v1/placements/{id}?locale=`, decode the Task-4 envelope into wire types, cache raw JSON under `placement:{id}` on success, serve cache on `NetworkUnavailable|Timeout`. When the response carries `experiment`: draw with `assign_bucket(subscriber_id, experiment.key)` + `select_variant_index`, fire-and-forget `POST /v1/experiments/{id}/expose` with `{variantId, subscriberId, placementId}` (best-effort: log-and-ignore all errors), return the drawn variant's paywall with `presented_context` populated. Subscriber id source: the same identity the SDK sends on wire (`rovenue_id()` — NEVER `current_user_scope`). Store the returned `presented_context` in core state (`Mutex<Option<CorePresentedContext>>` on the SDK singleton, same place session state lives) so the receipt-submission path attaches it as `presentedContext` on the next purchase POST and clears it after a successful post.
 
-- [ ] **Step 1:** Failing vector test (`cargo test -p librovenue bucketing`). **Step 2:** Implement bucketing → vectors PASS (this is the cross-language contract gate).
-- [ ] **Step 3:** Client + cache tests (mock transport like offerings tests) → PASS. **Step 4:** UDL + `npm run sdk:bindings` regenerates cleanly; `cargo fmt && cargo clippy` green (CI blocks on these).
-- [ ] **Step 5:** Commit: `feat(core): get_paywall placements client with deterministic variant draw`.
+- [x] **Step 1:** Failing vector test (`cargo test -p librovenue bucketing`). **Step 2:** Implement bucketing → vectors PASS (this is the cross-language contract gate).
+- [x] **Step 3:** Client + cache tests (mock transport like offerings tests) → PASS. **Step 4:** UDL + `npm run sdk:bindings` regenerates cleanly; `cargo fmt && cargo clippy` green (CI blocks on these).
+- [x] **Step 5:** Commit: `feat(core): get_paywall placements client with deterministic variant draw`.
 
 ---
 
@@ -494,7 +494,7 @@ Client: clone `offerings/client.rs` shape — GET `/v1/placements/{id}?locale=`,
 
 **Interfaces (Consumes):** Task 8 `CorePaywall`/`get_paywall`. **Produces:** `logPaywallShown` builds a `paywall_view` event `{ eventType: "paywall_view", occurredAt, eventId: <stable client id>, paywallContext: { paywallId, placementId, placementRevision, variantId?, experimentKey? } }` and enqueues it through the existing at-least-once session-telemetry dispatcher (peek→post→delete-on-2xx — do NOT drain-then-discard).
 
-- [ ] **Step 1:** Kotlin failing tests (DTO mapping, null paywall passthrough, logPaywallShown enqueues envelope). **Step 2:** Implement all three façades. **Step 3:** `./gradlew testDebugUnitTest` PASS; RN DTO tests PASS; Swift tests PASS. **Step 4:** Commit: `feat(sdk): getPaywall(placementId) + logPaywallShown across façades`.
+- [x] **Step 1:** Kotlin failing tests (DTO mapping, null paywall passthrough, logPaywallShown enqueues envelope). **Step 2:** Implement all three façades. **Step 3:** `./gradlew testDebugUnitTest` PASS; RN DTO tests PASS; Swift tests PASS. **Step 4:** Commit: `feat(sdk): getPaywall(placementId) + logPaywallShown across façades`.
 
 ---
 
@@ -507,7 +507,7 @@ Client: clone `offerings/client.rs` shape — GET `/v1/placements/{id}?locale=`,
 
 Model every component on `components/offerings/` (list + form dialog + actions menu). `remote-config-editor.tsx`: locale tabs (add/remove locale, default-locale select — reuse the `funnel-builder` `locale-switcher`/`localized-input` interaction patterns, not the components themselves unless they import cleanly) + per-locale JSON textarea with `JSON.parse` validation and error display. i18n via react-i18next like siblings.
 
-- [ ] **Step 1:** Implement route + components + hooks. **Step 2:** `pnpm --filter @rovenue/dashboard build` green; manual smoke via `pnpm dev` (create paywall → appears in list → edit remoteConfig locale → persists). **Step 3:** Commit: `feat(dashboard): paywalls CRUD with per-locale remote-config editor`.
+- [x] **Step 1:** Implement route + components + hooks. **Step 2:** `pnpm --filter @rovenue/dashboard build` green; manual smoke via `pnpm dev` (create paywall → appears in list → edit remoteConfig locale → persists). **Step 3:** Commit: `feat(dashboard): paywalls CRUD with per-locale remote-config editor`.
 
 ---
 
@@ -519,7 +519,7 @@ Model every component on `components/offerings/` (list + form dialog + actions m
 
 `placement-editor.tsx`: ordered row cards with move-up/move-down buttons (drag-reorder optional; buttons are sufficient and match a YAGNI cut), per row: audience select (existing audiences hooks; a "All users" pseudo-option = `audienceId: null`, only selectable on the last row), target picker = segmented control paywall/experiment/none feeding a paywall select (`useProjectPaywalls`) or experiment select (existing experiments hooks filtered `type === "PAYWALL" && status === "RUNNING" || "DRAFT"`). Save PATCHes `rows`; surface the returned bumped `revision`. Also: in the experiment edit form, when `type=PAYWALL`, replace the variant `value` free-JSON input with a paywall picker writing `{ paywallId }`.
 
-- [ ] **Step 1:** Implement. **Step 2:** Build green + manual smoke (compose a placement with 2 rows + all-users fallback, reorder, save, revision bumps). **Step 3:** Placement detail metrics card: views/unique-views/purchases/CR from a new small API endpoint `GET /dashboard/projects/:projectId/placements/:id/metrics` querying `mv_paywall_daily` + revenue join (follow `apps/api/src/services/metrics/*` + `analytics-router.ts` conventions; graceful zeros when ClickHouse env is blank). **Step 4:** Commit: `feat(dashboard): placements editor with audience rows and metrics card`.
+- [x] **Step 1:** Implement. **Step 2:** Build green + manual smoke (compose a placement with 2 rows + all-users fallback, reorder, save, revision bumps). **Step 3:** Placement detail metrics card: views/unique-views/purchases/CR from a new small API endpoint `GET /dashboard/projects/:projectId/placements/:id/metrics` querying `mv_paywall_daily` + revenue join (follow `apps/api/src/services/metrics/*` + `analytics-router.ts` conventions; graceful zeros when ClickHouse env is blank). **Step 4:** Commit: `feat(dashboard): placements editor with audience rows and metrics card`.
 
 ---
 
@@ -530,7 +530,7 @@ Model every component on `components/offerings/` (list + form dialog + actions m
 - Modify: `docs/superpowers/plans/2026-07-22-paywall-placements.md` — check off tasks
 - Modify: `CLAUDE.md` — one line under Architecture: placements → paywalls resolution, client-side variant draw
 
-- [ ] **Step 1:** Write docs following existing Fumadocs page structure. **Step 2:** `pnpm --filter docs build` green. **Step 3:** Commit: `docs: placements + paywalls SDK guide`.
+- [x] **Step 1:** Write docs following existing Fumadocs page structure. **Step 2:** `pnpm --filter docs build` green. **Step 3:** Commit: `docs: placements + paywalls SDK guide`.
 
 ---
 

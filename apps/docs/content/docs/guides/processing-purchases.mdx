@@ -12,6 +12,10 @@ presenting them, triggering StoreKit 2 (iOS) or Play Billing 6 (Android), and
 validating the receipt server-side — all in a single `purchase(pkg)` call. Your
 app only decides which package to present.
 
+To let the dashboard decide *which* offering a subscriber sees at a given
+location — per audience, with A/B tests — see
+[Placements & Paywalls](/docs/guides/placements-and-paywalls).
+
 <Callout type="info">
 Rovenue handles receipt validation server-side before resolving the purchase
 promise. Your app receives verified entitlements and updated virtual-currency balances

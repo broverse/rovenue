@@ -1,0 +1,132 @@
+---
+title: Placements & Paywalls
+description: Resolve a placement to a remote-config paywall, run A/B tests, and track views — without shipping an app update.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A **placement** is a named location in your app — `onboarding_end`,
+`settings_upsell`, `feature_gate` — where a paywall may appear. Your code asks
+for the placement by its identifier; the dashboard decides what to show there:
+which paywall, to which audience, or which A/B-test variant. Change the
+paywall, retarget the audience, or start a test without shipping an update.
+
+A **paywall** in Phase A is a *remote-config paywall*: you author free-form
+JSON per locale in the dashboard and render the UI yourself. Rovenue serves
+the config, the offering (products and packages), the experiment assignment,
+and wires up analytics and purchase attribution automatically.
+
+<Callout type="info">
+`getPaywall` returns `null` when the placement resolves to nothing — it was
+retired, targeted to "show nothing", or the identifier is unknown. This is
+deliberate: a shipped app must never crash because a placement changed
+server-side. Always handle the `null` branch.
+</Callout>
+
+### Types on this page
+
+```ts
+type Paywall = {
+  placementIdentifier: string;          // the placement you asked for
+  placementRevision: number;            // bumps on every dashboard edit
+  paywallIdentifier: string | null;     // dashboard identifier of the paywall
+  paywallName: string | null;
+  configFormatVersion: number;
+  remoteConfig: Record<string, unknown> | null; // your JSON, resolved for the locale
+  remoteConfigLocale: string | null;    // which locale was resolved
+  offering: Offering | null;            // standard offering with packages
+  presentedContext: PresentedContext | null; // attribution — handled for you
+};
+```
+
+## Fetch a placement
+
+<Tabs items={['Swift', 'Kotlin', 'React Native']}>
+<Tab value="Swift">
+
+```swift
+if let paywall = try await Rovenue.shared.getPaywall(placementId: "onboarding_end", locale: "en") {
+    // Render your paywall UI from paywall.remoteConfig + paywall.offering
+    showPaywall(paywall)
+    Rovenue.shared.logPaywallShown(paywall)
+} else {
+    // Placement resolved to nothing — continue without a paywall
+}
+```
+
+</Tab>
+<Tab value="Kotlin">
+
+```kotlin
+val paywall = Rovenue.getPaywall(placementId = "onboarding_end", locale = "en")
+if (paywall != null) {
+    showPaywall(paywall) // render from paywall.remoteConfig + paywall.offering
+    Rovenue.logPaywallShown(paywall)
+}
+```
+
+</Tab>
+<Tab value="React Native">
+
+```ts
+import { getPaywall, logPaywallShown } from '@rovenue/react-native';
+
+const paywall = await getPaywall('onboarding_end', 'en');
+if (paywall) {
+  // render from paywall.remoteConfig + paywall.offering
+  logPaywallShown(paywall);
+}
+```
+
+</Tab>
+</Tabs>
+
+The optional `locale` selects which localization of the remote config you
+receive. If the requested locale isn't configured, the paywall's default
+locale is served; `remoteConfigLocale` tells you which one you got.
+
+## How a placement resolves
+
+In the dashboard a placement is an ordered list of audience rows. The first
+row whose audience matches the subscriber wins:
+
+1. **Paywall** — that paywall is returned directly.
+2. **A/B test** — a running `PAYWALL` experiment; the SDK deterministically
+   draws a variant (same subscriber + same experiment ⇒ same variant, every
+   time, on every device, even offline from cache) and returns that variant's
+   paywall. Exposure is reported automatically.
+3. **Nothing** — `getPaywall` returns `null` for this audience.
+
+An "All users" row at the bottom acts as the catch-all; without one,
+non-matching subscribers get `null`.
+
+## Tracking and attribution
+
+- Call `logPaywallShown(paywall)` when the paywall actually becomes visible.
+  This emits a `paywall_view` event; views and unique views appear on the
+  placement's page in the dashboard.
+- Purchase attribution is automatic: the paywall carries a
+  `presentedContext` snapshot, and the SDK attaches it to the next purchase.
+  Revenue is credited to the placement, paywall, and variant that converted
+  the subscriber. You never construct or send this yourself.
+
+<Callout type="warn">
+`logPaywallShown` is a best-effort analytics beacon — it never throws and
+never blocks your UI. Call it once per presentation, not per render.
+</Callout>
+
+## Offline behavior
+
+The last successful response for each placement is cached on device. On
+network failure the cached response is served, and because variant selection
+is deterministic, a cached A/B test still yields the same variant the server
+would have assigned.
+
+## Relationship to offerings
+
+A paywall references an offering; `paywall.offering` is the same hydrated
+shape returned by [`getOfferings()`](/docs/guides/processing-purchases) —
+pass any of its packages straight into `purchase(pkg)`. Placements do not
+replace offerings; they decide *which* paywall (and therefore which
+offering) a given subscriber sees at a given location.
