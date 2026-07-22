@@ -3041,7 +3041,9 @@ This is a breaking change. Perform in order:
 
 1. In the Stripe Dashboard, open **Connect → Settings** and register the platform. Note the live and test OAuth client ids (`ca_…`).
 2. Set the redirect URI to `<PUBLIC_BASE_URL>/stripe/oauth/callback` for both modes.
-3. Add a platform webhook endpoint pointing at `<PUBLIC_BASE_URL>/webhooks/stripe/connect` with **"Listen to events on Connected accounts"** enabled. Subscribe to the event types the existing dispatcher handles (`customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`, `charge.refunded`) plus `account.updated` and `account.application.deauthorized`. Capture the signing secret.
+3. Add a platform webhook endpoint pointing at `<PUBLIC_BASE_URL>/webhooks/stripe/connect` with **"Listen to events on Connected accounts"** enabled. Subscribe to the event types the existing dispatcher handles (`customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`, `charge.refunded`, `payment_intent.succeeded`) plus `account.updated` and `account.application.deauthorized`. Capture the signing secret.
+
+   `payment_intent.succeeded` is required by the funnel backstop, not by subscription state: a funnel package on a one-time price is charged through a bare PaymentIntent, and that event is the only one a buyer who closes the tab after paying ever produces. Leaving it unsubscribed loses those buyers' claim tokens silently.
 4. Fill the `STRIPE_CONNECT_*` / `STRIPE_PLATFORM_*` environment group from §6 of the spec.
 5. Deploy and run `pnpm db:migrate`.
 6. Notify every project owner that they must reconnect Stripe. Until they do, that project receives no Stripe webhooks and its subscription state, entitlements and revenue events stay frozen at their last known values; refunds and scheduled cancellations fail with an explicit error.
