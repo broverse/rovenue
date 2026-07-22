@@ -40,12 +40,16 @@ export async function markPaid(
  *
  * `status` is deliberately absent from `row` — this is the one path that
  * creates a purchase row before payment succeeds, so the status it writes
- * can never be anything but "pending". A caller that means to write some
- * other status gets a compile error here rather than a silent override.
+ * can never be anything but "pending". The `status?: never` intersection
+ * is what makes that a compile error rather than a silent override:
+ * `Omit<..., "status">` alone only rejects an object *literal* carrying a
+ * status (excess-property checking), while a variable already typed
+ * `NewFunnelPurchase` stays structurally assignable to it and would have
+ * its status quietly dropped here.
  */
 export async function upsertPending(
   db: Db,
-  row: Omit<NewFunnelPurchase, "status">,
+  row: Omit<NewFunnelPurchase, "status"> & { status?: never },
 ): Promise<FunnelPurchase> {
   const [saved] = await db
     .insert(funnelPurchases)

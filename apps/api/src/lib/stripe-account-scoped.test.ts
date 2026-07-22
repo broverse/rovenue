@@ -98,6 +98,7 @@ function stubClientWide() {
   const fns = {
     pricesRetrieve: vi.fn(async () => ({ id: "price_1" })),
     customersCreate: vi.fn(async () => ({ id: "cus_1" })),
+    customersUpdate: vi.fn(async () => ({ id: "cus_1" })),
     paymentIntentsCreate: vi.fn(async () => ({ id: "pi_1" })),
     paymentIntentsRetrieve: vi.fn(async () => ({ id: "pi_1" })),
     paymentIntentsCancel: vi.fn(async () => ({ id: "pi_1", status: "canceled" })),
@@ -109,7 +110,7 @@ function stubClientWide() {
   };
   const stripe = {
     prices: { retrieve: fns.pricesRetrieve },
-    customers: { create: fns.customersCreate },
+    customers: { create: fns.customersCreate, update: fns.customersUpdate },
     paymentIntents: {
       create: fns.paymentIntentsCreate,
       retrieve: fns.paymentIntentsRetrieve,
@@ -139,6 +140,23 @@ describe("withAccount — payment resources", () => {
     await withAccount(stripe, "acct_x").customers.create({ email: "a@b.c" });
     expect(customersCreate).toHaveBeenCalledWith(
       { email: "a@b.c" },
+      { stripeAccount: "acct_x" },
+    );
+  });
+
+  // The funnel reuse path calls this to (a) push a corrected email onto a
+  // customer the previous attempt created and (b) prove that customer still
+  // exists on the account currently connected. Unbound it would look up the
+  // id on Rovenue's own account, where it either 404s or — far worse —
+  // matches an unrelated platform customer and rewrites their email.
+  it("binds stripeAccount to customers.update", async () => {
+    const { stripe, customersUpdate } = stubClientWide();
+    await withAccount(stripe, "acct_x").customers.update("cus_1", {
+      email: "new@b.co",
+    });
+    expect(customersUpdate).toHaveBeenCalledWith(
+      "cus_1",
+      { email: "new@b.co" },
       { stripeAccount: "acct_x" },
     );
   });

@@ -49,6 +49,11 @@ export interface AccountScopedStripe {
       params: Stripe.CustomerCreateParams,
       options?: ScopedRequestOptions,
     ): Promise<Stripe.Response<Stripe.Customer>>;
+    update(
+      id: string,
+      params: Stripe.CustomerUpdateParams,
+      options?: ScopedRequestOptions,
+    ): Promise<Stripe.Response<Stripe.Customer>>;
   };
   readonly paymentIntents: {
     create(
@@ -127,6 +132,8 @@ export function withAccount(
     customers: {
       create: (params, options) =>
         stripe.customers.create(params, { ...options, ...bound }),
+      update: (id, params, options) =>
+        stripe.customers.update(id, params, { ...options, ...bound }),
     },
     paymentIntents: {
       create: (params, options) =>
