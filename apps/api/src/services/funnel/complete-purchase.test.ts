@@ -22,6 +22,15 @@ const markPaid = vi.hoisted(() => vi.fn());
 const insertClaimToken = vi.hoisted(() => vi.fn());
 const upsertSubscriber = vi.hoisted(() => vi.fn());
 const outboxInsert = vi.hoisted(() => vi.fn());
+// The one-time grant's collaborators. A funnel package with a
+// non-recurring price is charged through a bare PaymentIntent, so there
+// is no subscription for the Stripe webhook to build a purchase from —
+// this transaction is the only thing that can write one.
+const findProductsByIds = vi.hoisted(() => vi.fn());
+const upsertPurchase = vi.hoisted(() => vi.fn());
+const findAccessByPurchaseAndAccessId = vi.hoisted(() => vi.fn());
+const createAccess = vi.hoisted(() => vi.fn());
+const setAccessActiveAndExpiry = vi.hoisted(() => vi.fn());
 
 // A sentinel the assertions can compare against by identity: every write
 // must be handed THIS object, not `drizzle.db`, or it is not in the
@@ -43,6 +52,13 @@ vi.mock("@rovenue/db", async (importOriginal) => {
       funnelClaimTokenRepo: { insert: insertClaimToken },
       subscriberRepo: { upsertSubscriber },
       outboxRepo: { insert: outboxInsert },
+      offeringRepo: { findProductsByIds },
+      purchaseRepo: { upsertPurchase },
+      accessRepo: {
+        findAccessByPurchaseAndAccessId,
+        createAccess,
+        setAccessActiveAndExpiry,
+      },
     },
   };
 });
@@ -85,6 +101,13 @@ describe("completeFunnelPurchase", () => {
     insertClaimToken.mockReset().mockResolvedValue({ id: "token_1" });
     upsertSubscriber.mockReset().mockResolvedValue({ id: "subscriber_1" });
     outboxInsert.mockReset().mockResolvedValue(undefined);
+    findProductsByIds
+      .mockReset()
+      .mockResolvedValue([{ id: "prod_1", accessIds: ["access_1"] }]);
+    upsertPurchase.mockReset().mockResolvedValue({ id: "purchase_row_1" });
+    findAccessByPurchaseAndAccessId.mockReset().mockResolvedValue(null);
+    createAccess.mockReset().mockResolvedValue(undefined);
+    setAccessActiveAndExpiry.mockReset().mockResolvedValue(undefined);
   });
 
   it("marks the purchase paid, moves the session to paid and mints one token", async () => {
@@ -308,5 +331,162 @@ describe("completeFunnelPurchase", () => {
   it("throws when no purchase was ever started for the session", async () => {
     findPurchaseBySession.mockResolvedValue(null);
     await expect(completeFunnelPurchase(INPUT)).rejects.toThrow(/no purchase/);
+  });
+
+  // =============================================================
+  // The one-time purchase
+  // =============================================================
+  //
+  // A funnel package with a non-recurring price is charged through a bare
+  // `paymentIntents.create`. There is no subscription, so the Stripe
+  // webhook's `upsertPurchaseFromSubscription` — the ONLY path that
+  // writes a `purchases` row or grants access — never runs, and
+  // `payment_intent.succeeded` is deliberately absent from its
+  // DOMAIN_SYNC map. The buyer paid, `/confirm` answered 200, the claim
+  // merged a synthetic subscriber that owned nothing, and `entitlements`
+  // came back empty with nothing logged anywhere. This transaction is the
+  // only place that can write it, so it does.
+
+  const ONE_TIME_INPUT = {
+    sessionId: "sess_1",
+    stripeCustomerId: "cus_1",
+    stripeSubscriptionId: null as string | null,
+    stripePaymentIntentId: "pi_onetime_1" as string | null,
+  };
+
+  /** The pending row a one-time attempt leaves behind. */
+  function oneTimePurchaseRow(patch: Record<string, unknown> = {}) {
+    return {
+      id: "purchase_1",
+      sessionId: "sess_1",
+      projectId: "proj_1",
+      status: "pending",
+      emailHash: PURCHASE_EMAIL_HASH,
+      productId: "prod_1",
+      amountCents: 9900,
+      currency: "usd",
+      ...patch,
+    };
+  }
+
+  it("writes a purchases row for a one-time funnel purchase", async () => {
+    findPurchaseBySession.mockResolvedValue(oneTimePurchaseRow());
+
+    const result = await completeFunnelPurchase(ONE_TIME_INPUT);
+
+    expect(result.alreadyIssued).toBe(false);
+    expect(upsertPurchase).toHaveBeenCalledTimes(1);
+    const [handle, args] = upsertPurchase.mock.calls[0] as [
+      unknown,
+      {
+        store: string;
+        storeTransactionId: string;
+        create: Record<string, unknown>;
+      },
+    ];
+    // In the caller's transaction, like every other write here.
+    expect(handle).toBe(TX);
+    // The PaymentIntent is the natural key, which is what makes a
+    // retried /confirm and a redelivered webhook converge on one row
+    // rather than inserting a second.
+    expect(args.store).toBe("STRIPE");
+    expect(args.storeTransactionId).toBe("pi_onetime_1");
+    expect(args.create).toMatchObject({
+      projectId: "proj_1",
+      subscriberId: "subscriber_1",
+      productId: "prod_1",
+      storeTransactionId: "pi_onetime_1",
+      originalTransactionId: "pi_onetime_1",
+      status: "ACTIVE",
+      isTrial: false,
+      // A one-time purchase does not lapse.
+      expiresDate: null,
+      autoRenewStatus: false,
+      environment: "PRODUCTION",
+      // Minor units on the funnel row, decimal string on the purchase.
+      priceAmount: "99",
+      priceCurrency: "USD",
+    });
+  });
+
+  it("grants the product's access on the synthetic subscriber", async () => {
+    findPurchaseBySession.mockResolvedValue(oneTimePurchaseRow());
+    findProductsByIds.mockResolvedValue([
+      { id: "prod_1", accessIds: ["access_1", "access_2"] },
+    ]);
+
+    await completeFunnelPurchase(ONE_TIME_INPUT);
+
+    expect(createAccess).toHaveBeenCalledTimes(2);
+    expect(createAccess).toHaveBeenCalledWith(TX, {
+      subscriberId: "subscriber_1",
+      purchaseId: "purchase_row_1",
+      accessId: "access_1",
+      isActive: true,
+      expiresDate: null,
+      store: "STRIPE",
+    });
+  });
+
+  // Idempotent: a retried /confirm must reactivate the row it already
+  // wrote rather than insert a duplicate entitlement.
+  it("reactivates an existing access row instead of creating a second", async () => {
+    findPurchaseBySession.mockResolvedValue(oneTimePurchaseRow());
+    findAccessByPurchaseAndAccessId.mockResolvedValue({ id: "access_row_1" });
+
+    await completeFunnelPurchase(ONE_TIME_INPUT);
+
+    expect(setAccessActiveAndExpiry).toHaveBeenCalledWith(
+      TX,
+      "access_row_1",
+      true,
+      null,
+    );
+    expect(createAccess).not.toHaveBeenCalled();
+  });
+
+  // The other half of the rule. A recurring package's purchase row and
+  // access are written by the Connect webhook's subscription handler;
+  // doing it here as well would write the same purchase twice, under two
+  // different natural keys.
+  it("writes NO purchases row for a recurring purchase", async () => {
+    await completeFunnelPurchase(INPUT);
+
+    expect(upsertPurchase).not.toHaveBeenCalled();
+    expect(createAccess).not.toHaveBeenCalled();
+    expect(findProductsByIds).not.toHaveBeenCalled();
+  });
+
+  // Nothing about a missing product may abort the transaction: that would
+  // roll back the paid transition and leave a buyer who really paid with
+  // no claim token and a /confirm that 500s on every retry. The token is
+  // still minted; the gap is loud in the log instead.
+  it.each([
+    ["no product on the row", { productId: null }],
+    ["a product that no longer exists", {}],
+  ])("still mints the token when there is %s", async (_label, patch) => {
+    findPurchaseBySession.mockResolvedValue(oneTimePurchaseRow(patch));
+    findProductsByIds.mockResolvedValue([]);
+
+    const result = await completeFunnelPurchase(ONE_TIME_INPUT);
+
+    expect(result.alreadyIssued).toBe(false);
+    if (result.alreadyIssued) throw new Error("unreachable");
+    expect(result.token).toEqual(expect.any(String));
+    expect(upsertPurchase).not.toHaveBeenCalled();
+    expect(insertClaimToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("still mints the token when the row records neither stripe object", async () => {
+    findPurchaseBySession.mockResolvedValue(oneTimePurchaseRow());
+
+    const result = await completeFunnelPurchase({
+      ...ONE_TIME_INPUT,
+      stripePaymentIntentId: null,
+    });
+
+    expect(result.alreadyIssued).toBe(false);
+    expect(upsertPurchase).not.toHaveBeenCalled();
+    expect(insertClaimToken).toHaveBeenCalledTimes(1);
   });
 });

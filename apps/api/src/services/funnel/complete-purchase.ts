@@ -1,4 +1,10 @@
-import { drizzle } from "@rovenue/db";
+import {
+  type Db,
+  Environment,
+  PurchaseStatus,
+  Store,
+  drizzle,
+} from "@rovenue/db";
 import { logger } from "../../lib/logger";
 import { isUniqueViolationOf } from "../../lib/pg-errors";
 import { emitFunnelEvent } from "./outbox";
@@ -46,6 +52,155 @@ function isSessionTokenRace(err: unknown): boolean {
 export type CompleteResult =
   | { alreadyIssued: false; token: string }
   | { alreadyIssued: true };
+
+/**
+ * Write the `purchases` row and the entitlement for a ONE-TIME funnel
+ * purchase, in the caller's transaction.
+ *
+ * Why this exists here and only for the one-time case. A recurring
+ * package is bought through a Stripe Subscription, and the Connect
+ * webhook's `customer.subscription.*` handler is what creates the
+ * purchase row and grants access for it. A non-recurring package is
+ * charged through a bare `paymentIntents.create` — there is no
+ * subscription, `payment_intent.succeeded` is deliberately absent from
+ * the webhook's DOMAIN_SYNC map, and nothing else in the codebase builds
+ * a purchase from a PaymentIntent. So before this, the one-time buyer
+ * paid, `/confirm` returned 200, a claim token was minted, and the claim
+ * merged a synthetic subscriber that owned nothing: `entitlements: []`,
+ * with no error anywhere.
+ *
+ * Guarded on `stripeSubscriptionId == null` at the call site so the
+ * recurring path keeps using the webhook's machinery untouched and
+ * nothing is ever written twice.
+ *
+ * The shape follows `upsertPurchaseFromSubscription` and `grantAccess`
+ * in services/stripe/stripe-webhook.ts rather than inventing its own:
+ * same store, same `upsertPurchase` (idempotent on
+ * store+storeTransactionId, so a redelivered webhook and a retried
+ * `/confirm` converge), same read-then-insert on `subscriber_access`.
+ * The differences are all one-time facts: no `expiresDate` (a one-time
+ * purchase does not lapse), `autoRenewStatus: false`, `isTrial: false`.
+ *
+ * NOTHING HERE THROWS on missing data. A funnel purchase row with no
+ * `productId`, no PaymentIntent id, or a product that has since been
+ * deleted cannot be granted whatever we do — and throwing would abort
+ * the transaction, roll back the paid transition, and leave a buyer who
+ * really paid with no claim token and a `/confirm` that 500s on every
+ * retry. Loud logs and a minted token beat a silent 500 loop; the buyer
+ * keeps a path to their purchase and an operator has the ids to fix it.
+ */
+async function grantOneTimePurchase(
+  tx: Db,
+  args: {
+    projectId: string;
+    sessionId: string;
+    funnelPurchaseId: string;
+    productId: string | null;
+    amountCents: number | null;
+    currency: string | null;
+    subscriberId: string;
+    stripePaymentIntentId: string | null;
+  },
+): Promise<void> {
+  if (!args.stripePaymentIntentId) {
+    // No subscription AND no PaymentIntent: the row records nothing that
+    // could have been charged, so there is no natural key to anchor a
+    // purchase on. Only the dev-mode stub in routes/public/funnels.ts
+    // writes such a row, and it mints its own token.
+    log.error("one-time funnel purchase has no payment intent to record", {
+      sessionId: args.sessionId,
+      funnelPurchaseId: args.funnelPurchaseId,
+    });
+    return;
+  }
+  if (!args.productId) {
+    log.error("one-time funnel purchase has no product to grant", {
+      sessionId: args.sessionId,
+      funnelPurchaseId: args.funnelPurchaseId,
+      paymentIntentId: args.stripePaymentIntentId,
+    });
+    return;
+  }
+
+  const [product] = await drizzle.offeringRepo.findProductsByIds(
+    tx,
+    args.projectId,
+    [args.productId],
+  );
+  if (!product) {
+    log.error("one-time funnel purchase names a product that no longer exists", {
+      sessionId: args.sessionId,
+      projectId: args.projectId,
+      productId: args.productId,
+    });
+    return;
+  }
+
+  const purchasedAt = new Date();
+  // Drizzle decimal columns round-trip as strings, and the funnel row
+  // stores minor units — same conversion the webhook does.
+  const priceAmount =
+    args.amountCents != null ? (args.amountCents / 100).toString() : null;
+  const priceCurrency = args.currency ? args.currency.toUpperCase() : null;
+
+  const purchase = await drizzle.purchaseRepo.upsertPurchase(tx, {
+    store: Store.STRIPE,
+    storeTransactionId: args.stripePaymentIntentId,
+    create: {
+      projectId: args.projectId,
+      subscriberId: args.subscriberId,
+      productId: args.productId,
+      store: Store.STRIPE,
+      storeTransactionId: args.stripePaymentIntentId,
+      originalTransactionId: args.stripePaymentIntentId,
+      status: PurchaseStatus.ACTIVE,
+      isTrial: false,
+      purchaseDate: purchasedAt,
+      originalPurchaseDate: purchasedAt,
+      // A one-time purchase never expires. `grantAccess` below passes the
+      // same null through to the access row.
+      expiresDate: null,
+      environment: Environment.PRODUCTION,
+      priceAmount,
+      priceCurrency,
+      autoRenewStatus: false,
+      verifiedAt: purchasedAt,
+    },
+    update: {
+      status: PurchaseStatus.ACTIVE,
+      verifiedAt: purchasedAt,
+    },
+  });
+
+  for (const accessId of product.accessIds) {
+    const existing = await drizzle.accessRepo.findAccessByPurchaseAndAccessId(
+      tx,
+      args.subscriberId,
+      purchase.id,
+      accessId,
+    );
+    if (existing) {
+      await drizzle.accessRepo.setAccessActiveAndExpiry(tx, existing.id, true, null);
+    } else {
+      await drizzle.accessRepo.createAccess(tx, {
+        subscriberId: args.subscriberId,
+        purchaseId: purchase.id,
+        accessId,
+        isActive: true,
+        expiresDate: null,
+        store: Store.STRIPE,
+      });
+    }
+  }
+
+  log.info("granted a one-time funnel purchase", {
+    sessionId: args.sessionId,
+    projectId: args.projectId,
+    purchaseId: purchase.id,
+    subscriberId: args.subscriberId,
+    accessCount: product.accessIds.length,
+  });
+}
 
 export async function completeFunnelPurchase(input: {
   sessionId: string;
@@ -129,6 +284,28 @@ export async function completeFunnelPurchase(input: {
         sessionId: input.sessionId,
       });
       return { alreadyIssued: true };
+    }
+
+    // Only the one-time path. A recurring package's purchase row and
+    // entitlement are written by the Connect webhook's subscription
+    // handler; running this for it too would write the same purchase
+    // twice under two different natural keys. See grantOneTimePurchase.
+    //
+    // Placed AFTER the token insert on purpose: the insert is what
+    // decides the confirm/webhook race, so by here we know this
+    // transaction is the one that will commit, and the loser has already
+    // returned without touching purchases or subscriber_access.
+    if (!input.stripeSubscriptionId) {
+      await grantOneTimePurchase(tx as Db, {
+        projectId: session.projectId,
+        sessionId: input.sessionId,
+        funnelPurchaseId: purchase.id,
+        productId: purchase.productId,
+        amountCents: purchase.amountCents,
+        currency: purchase.currency,
+        subscriberId: subscriber.id,
+        stripePaymentIntentId: input.stripePaymentIntentId,
+      });
     }
 
     const payload = {
