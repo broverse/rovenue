@@ -514,6 +514,37 @@ importers:
         specifier: ^3.2.6
         version: 3.2.6(@types/debug@4.1.13)(@types/node@25.9.3)(happy-dom@20.10.6)(jsdom@25.0.1)(lightningcss@1.32.0)(msw@2.13.4(@types/node@25.9.3)(typescript@5.9.3))(terser@5.46.1)
 
+  packages/paywall-renderer:
+    dependencies:
+      '@rovenue/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@testing-library/jest-dom':
+        specifier: ^6.6.0
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: ^16.1.0
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.17
+      jsdom:
+        specifier: ^25.0.0
+        version: 25.0.1
+      react:
+        specifier: ^19.0.0
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.7(react@19.2.7)
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.6
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@25.9.3)(happy-dom@20.10.6)(jsdom@25.0.1)(lightningcss@1.32.0)(msw@2.13.4(@types/node@25.9.3)(typescript@5.9.3))(terser@5.46.1)
+
   packages/sdk-rn:
     dependencies:
       '@rovenue/shared':
