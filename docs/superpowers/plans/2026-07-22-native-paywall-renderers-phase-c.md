@@ -32,9 +32,9 @@
 
 Fixture sections (per spec §2): `accept` (≥6 named configs: every node type incl. nested stacks, a node with a valid `fallback`, an unknown-type node whose `fallback` is valid — NOTE the TS schema REJECTS unknown types, so unknown-type cases live in a dedicated `acceptLenient` section consumed only by the platform decoders, with a comment explaining the asymmetry: platform decoders are lenient-by-design, the authoring schema is strict), `reject` (≥5: bad axis, missing id, formatVersion 1, malformed fallback child, non-object localization), `variables` (≥8 vectors incl. all four vars, unknown var verbatim, null pkg verbatim, multi-var strings), `resolveText` (≥4 against `accept[0]`: exact locale hit, fallback to default, missing key → null, empty-string value round-trips as "").
 
-- [ ] **Step 1 (TDD):** render-fixtures.test.ts — loads the JSON; every `accept` config passes `builderConfigSchema.safeParse`; every `reject` fails; every `variables` vector matches `resolveVariables`; every `resolveText` vector matches `resolveText`; `acceptLenient` entries FAIL the strict schema (asserting the asymmetry is intentional). Run → FAIL (file missing).
-- [ ] **Step 2:** Generate the fixture with a scratchpad script executing the real TS helpers (accept configs authored by hand, expected values computed — same discipline as bucketing-vectors). Paste, freeze.
-- [ ] **Step 3:** `pnpm --filter @rovenue/shared test` green. Commit: `feat(shared): cross-platform paywall render fixtures`.
+- [x] **Step 1 (TDD):** render-fixtures.test.ts — loads the JSON; every `accept` config passes `builderConfigSchema.safeParse`; every `reject` fails; every `variables` vector matches `resolveVariables`; every `resolveText` vector matches `resolveText`; `acceptLenient` entries FAIL the strict schema (asserting the asymmetry is intentional). Run → FAIL (file missing).
+- [x] **Step 2:** Generate the fixture with a scratchpad script executing the real TS helpers (accept configs authored by hand, expected values computed — same discipline as bucketing-vectors). Paste, freeze.
+- [x] **Step 3:** `pnpm --filter @rovenue/shared test` green. Commit: `feat(shared): cross-platform paywall render fixtures`.
 
 ---
 
@@ -48,7 +48,7 @@ Fixture sections (per spec §2): `accept` (≥6 named configs: every node type i
 
 **Interfaces (Produces):** `CorePaywall.builder_config_json` / Swift `Paywall.builderConfigJson` / Kotlin `Paywall.builderConfigJson` / RN `Paywall.builderConfig: Record<string,unknown> | null` — consumed by Tasks 3-7.
 
-- [ ] **Step 1 (TDD):** extend the Rust placements test + the three façade mapping tests (present → carried verbatim; absent → null) → RED. **Step 2:** implement + regen bindings. **Step 3:** cargo test/fmt/clippy green; `swift test`, `./gradlew testDebugUnitTest`, RN vitest+tsc green. **Step 4:** Commit: `feat(sdk): builderConfig plumbed through core to all façades`.
+- [x] **Step 1 (TDD):** extend the Rust placements test + the three façade mapping tests (present → carried verbatim; absent → null) → RED. **Step 2:** implement + regen bindings. **Step 3:** cargo test/fmt/clippy green; `swift test`, `./gradlew testDebugUnitTest`, RN vitest+tsc green. **Step 4:** Commit: `feat(sdk): builderConfig plumbed through core to all façades`.
 
 ---
 
@@ -76,7 +76,7 @@ func initialSelection(_ root: BuilderNode, offering: Offering?) -> String?
 ```
 Fixture loading: `URL(fileURLWithPath: #filePath)` → walk up to `packages/shared/src/paywall/render-fixtures.json` (tests only; the fixture is NOT bundled in the library).
 
-- [ ] **Step 1 (TDD):** tests — every fixture `accept` + `acceptLenient` decodes (lenient unknown-type keeps fallback); every `reject` yields nil OR decodes-with-unknown ONLY where the defect is an unknown type (assert per-case per a `lenientExpectation` field in the fixture if needed — coordinate: if the fixture lacks it, add it in packages/shared with a matching vitest update, that's in-contract); all `variables` + `resolveText` vectors match; PackageView mapping table (sub month/year/week/day, non-sub, nil product); selection-init cases mirroring the web renderer tests. → RED. **Step 2:** implement. **Step 3:** `swift test` green. **Step 4:** Commit: `feat(sdk-swift): builder-config decoder and paywall view-model helpers`.
+- [x] **Step 1 (TDD):** tests — every fixture `accept` + `acceptLenient` decodes (lenient unknown-type keeps fallback); every `reject` yields nil OR decodes-with-unknown ONLY where the defect is an unknown type (assert per-case per a `lenientExpectation` field in the fixture if needed — coordinate: if the fixture lacks it, add it in packages/shared with a matching vitest update, that's in-contract); all `variables` + `resolveText` vectors match; PackageView mapping table (sub month/year/week/day, non-sub, nil product); selection-init cases mirroring the web renderer tests. → RED. **Step 2:** implement. **Step 3:** `swift test` green. **Step 4:** Commit: `feat(sdk-swift): builder-config decoder and paywall view-model helpers`.
 
 ---
 
@@ -88,7 +88,7 @@ Fixture loading: `URL(fileURLWithPath: #filePath)` → walk up to `packages/shar
 
 Public API exactly per spec §3. Rendering: VStack/HStack/ZStack, theme pairs via `colorSchemeOverride ?? environment`, AsyncImage for images, package cells as Buttons with selection state, purchase button calls the SDK's existing package-purchase API (LOCATE it in Rovenue.swift — the purchases section; wire the selected packageIdentifier → offering package → that call; completion → onPurchaseCompleted/onPurchaseFailed), auto `logPaywallShown` once in onAppear (guard a @State flag), restore hidden when onRestore nil, url buttons call onUrl only (never open). No builderConfigJson → EmptyView.
 
-- [ ] **Step 1:** implement (TDD where logic is pure — extract + test action-routing/purchase-enabled helpers first). **Step 2:** `swift test` green (all suites); the package must still compile for macOS too (guard iOS-only APIs with #if canImport(UIKit) where needed). **Step 3:** Commit: `feat(sdk-swift): native SwiftUI renderer for builder paywalls`.
+- [x] **Step 1:** implement (TDD where logic is pure — extract + test action-routing/purchase-enabled helpers first). **Step 2:** `swift test` green (all suites); the package must still compile for macOS too (guard iOS-only APIs with #if canImport(UIKit) where needed). **Step 3:** Commit: `feat(sdk-swift): native SwiftUI renderer for builder paywalls`.
 
 ---
 
@@ -100,7 +100,7 @@ Public API exactly per spec §3. Rendering: VStack/HStack/ZStack, theme pairs vi
 
 Mirror of Task 3 in Kotlin: kotlinx-serialization polymorphic-by-`type` decoding with a lenient unknown branch (custom JsonContentPolymorphicSerializer — unknown `type` → UnknownNode(id, fallback)), `decodeBuilderConfig(json): BuilderConfigModel?` never throws, resolveText/resolveVariables ports, PackageView mapping per spec, effectivePackageIds/initialSelection. Fixture via `File("../shared/src/paywall/render-fixtures.json")` relative to the gradle project dir (packages/sdk-kotlin) — verify the relative path in the test, fail loud with a clear message if missing.
 
-- [ ] **Step 1 (TDD):** same case matrix as Swift Task 3 → RED. **Step 2:** implement. **Step 3:** `./gradlew testDebugUnitTest` green. **Step 4:** Commit: `feat(sdk-kotlin): builder-config decoder and paywall helpers`.
+- [x] **Step 1 (TDD):** same case matrix as Swift Task 3 → RED. **Step 2:** implement. **Step 3:** `./gradlew testDebugUnitTest` green. **Step 4:** Commit: `feat(sdk-kotlin): builder-config decoder and paywall helpers`.
 
 ---
 
@@ -112,7 +112,7 @@ Mirror of Task 3 in Kotlin: kotlinx-serialization polymorphic-by-`type` decoding
 
 Public API exactly per spec §4. LinearLayout (v/h) / FrameLayout (z); TextView/ImageView(+minimal URL loader on a background coroutine, no Coil)/Button widgets styled programmatically from the schema (theme pair chosen by `options.darkMode ?? (configuration.uiMode night flag)`); package cells clickable with selected-state background; purchase via the existing purchase API (LOCATE the activity-based purchase entry in Rovenue.kt; resolve activity from context, onPurchaseFailed with a clear error when the context has none); auto logPaywallShown on first `onAttachedToWindow`; restore hidden when handler null; bind() with null builderConfigJson clears to empty.
 
-- [ ] **Step 1:** implement with logic extracted into testable pure functions where possible (style computation, action routing). **Step 2:** `./gradlew testDebugUnitTest` green + `./gradlew assembleRelease` (or the module's compile task) green. **Step 3:** Commit: `feat(sdk-kotlin): native Android Views renderer for builder paywalls`.
+- [x] **Step 1:** implement with logic extracted into testable pure functions where possible (style computation, action routing). **Step 2:** `./gradlew testDebugUnitTest` green + `./gradlew assembleRelease` (or the module's compile task) green. **Step 3:** Commit: `feat(sdk-kotlin): native Android Views renderer for builder paywalls`.
 
 ---
 
@@ -123,7 +123,7 @@ Public API exactly per spec §4. LinearLayout (v/h) / FrameLayout (z); TextView/
 - Modify: `CLAUDE.md` placements line — "native renderers (SwiftUI + Android Views) read the same schema"
 - Modify: this plan — check off tasks; Verification section stays
 
-- [ ] **Step 1:** write + `pnpm --filter docs build` green. **Step 2:** Commit: `docs: native builder-paywall rendering guide`.
+- [x] **Step 1:** write + `pnpm --filter docs build` green. **Step 2:** Commit: `docs: native builder-paywall rendering guide`.
 
 ---
 

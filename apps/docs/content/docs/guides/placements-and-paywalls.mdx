@@ -188,9 +188,67 @@ if (data.paywall?.builderConfig) {
 - `data-rov-node` attributes — every rendered node carries a stable ID for
   testing and custom styling; this is a documented feature
 
+## Native rendering (iOS & Android)
+
+Builder paywalls render **natively** — no webview — with variables like
+`{{price}}` fed by real store pricing (StoreKit / Play Billing). Both
+renderers auto-track the view (`paywall_view`) on first appearance; you do
+not call `logPaywallShown` for builder paywalls. Semantics match the web
+renderer: unknown components render their fallback (or nothing), the
+restore button is hidden when you supply no restore handler, and URLs are
+handed to your callback — the renderer never opens them itself.
+
+<Tabs items={['Swift', 'Kotlin']}>
+<Tab value="Swift">
+
+```swift
+import SwiftUI
+import Rovenue
+
+// SwiftUI — embed anywhere (sheet, full screen…). Renders nothing when
+// the paywall has no builderConfig.
+RovenuePaywallView(
+    paywall: paywall,                       // from getPaywall(placementId:)
+    locale: "en",
+    onPurchaseCompleted: { result in dismiss() },
+    onPurchaseFailed: { error in /* keep the paywall up, show a toast */ },
+    onClose: { dismiss() },
+    onRestore: { Task { try? await Rovenue.shared.restorePurchases() } },
+    onUrl: { url in /* scheme-check, then open */ }
+)
+```
+
+</Tab>
+<Tab value="Kotlin">
+
+```kotlin
+import dev.rovenue.sdk.paywallui.RovenuePaywallView
+import dev.rovenue.sdk.paywallui.PaywallViewOptions
+
+// Android Views — host in any Activity-backed layout. bind() with a
+// paywall lacking builderConfig clears the view.
+val view = RovenuePaywallView(context)
+view.bind(
+    paywall, // from Rovenue.getPaywall(placementId)
+    PaywallViewOptions(
+        locale = "en",
+        onPurchaseCompleted = { result -> finishPaywall() },
+        onPurchaseFailed = { error -> /* keep the paywall up */ },
+        onClose = { finishPaywall() },
+        onUrl = { url -> /* scheme-check, then open */ },
+    ),
+)
+```
+
+</Tab>
+</Tabs>
+
+Purchases are wired internally: the renderer maps the selected package to
+the store product and runs the SDK's normal purchase + server-validation
+flow; you only receive the completed/failed callbacks. Purchase attribution
+(`presentedContext`) is attached automatically, as everywhere else.
+
 <Callout type="info">
-Native SDKs (Swift, Kotlin, React Native) do not render builder paywalls
-until Phase C. They currently skip the `builderConfig` field and continue
-rendering `remoteConfig` only. Plan for multi-phase rollout: Phase B ships
-the builder and web rendering; native support follows.
+React Native exposes `paywall.builderConfig` (parsed JSON) for custom
+rendering; the native presentation bridge for RN is a follow-up.
 </Callout>
