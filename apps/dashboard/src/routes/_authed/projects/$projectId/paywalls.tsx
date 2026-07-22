@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { createFileRoute, useParams } from "@tanstack/react-router";
+import { createFileRoute, Outlet, useChildMatches, useParams } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import { LayoutTemplate, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "../../../../ui/button";
@@ -27,7 +27,13 @@ export const Route = createFileRoute("/_authed/projects/$projectId/paywalls")({
 function PaywallsRoute() {
   const { projectId } = useParams({ from: "/_authed/projects/$projectId/paywalls" });
   const { data: project } = useProject(projectId);
+  // When `paywalls/$paywallId/builder` is active, defer fully to the child
+  // so the builder's full-bleed UI replaces the list rather than the list
+  // swallowing the navigation (dot-notation child routes render in the
+  // parent's Outlet — same pattern as funnels.tsx).
+  const childMatches = useChildMatches();
   if (!project) return null;
+  if (childMatches.length > 0) return <Outlet />;
   return <PaywallsPage projectId={projectId} />;
 }
 
