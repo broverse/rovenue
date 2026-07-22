@@ -22,6 +22,51 @@ import { invalidateExperimentCache } from "../../services/experiment-engine";
 import { computeExperimentResults } from "../../services/experiment-results";
 import { invalidateFlagCache } from "../../services/flag-engine";
 
+/**
+ * PAYWALL experiments reference paywalls by id rather than carrying an
+ * inline config: every variant's `value` must be `{ paywallId }` and
+ * that id must belong to the project. Enforced on both create and
+ * DRAFT-update (variant `value` is immutable once RUNNING, so there is
+ * nothing to re-check on the RUNNING weight-only update path).
+ */
+async function assertPaywallVariantsValid(
+  projectId: string,
+  type: ExperimentType,
+  variants: ReadonlyArray<{ value?: unknown }>,
+): Promise<void> {
+  if (type !== "PAYWALL") return;
+
+  const paywallIds: string[] = [];
+  for (const variant of variants) {
+    const value = variant.value as { paywallId?: unknown } | null | undefined;
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      typeof value.paywallId !== "string" ||
+      value.paywallId.length === 0
+    ) {
+      throw new HTTPException(400, {
+        message: "PAYWALL experiment variants must carry value: { paywallId }",
+      });
+    }
+    paywallIds.push(value.paywallId);
+  }
+
+  const uniqueIds = [...new Set(paywallIds)];
+  const found = await drizzle.paywallRepo.findPaywallsByIds(
+    drizzle.db,
+    projectId,
+    uniqueIds,
+  );
+  const foundIds = new Set(found.map((p) => p.id));
+  const missing = uniqueIds.filter((id) => !foundIds.has(id));
+  if (missing.length > 0) {
+    throw new HTTPException(400, {
+      message: `Unknown paywallId(s) in PAYWALL experiment variants: ${missing.join(", ")}`,
+    });
+  }
+}
+
 function inferPromotedFlagType(
   experimentType: ExperimentType,
   value: unknown,
@@ -129,6 +174,12 @@ export const experimentsRoute = new Hono()
         message: "audienceId does not belong to this project",
       });
     }
+
+    await assertPaywallVariantsValid(
+      body.projectId,
+      body.type as ExperimentType,
+      body.variants,
+    );
 
     // Backend-assigned, immutable key. Retry on the (projectId, key)
     // unique index in the astronomically-unlikely event of a cuid2 clash.
@@ -289,6 +340,11 @@ export const experimentsRoute = new Hono()
           key: existing.key,
           variants: body.variants,
         });
+      }
+
+      if (body.variants) {
+        const finalType = (body.type ?? existing.type) as ExperimentType;
+        await assertPaywallVariantsValid(existing.projectId, finalType, body.variants);
       }
 
       updates = {

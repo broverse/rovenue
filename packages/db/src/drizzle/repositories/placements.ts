@@ -23,6 +23,19 @@ export async function listPlacements(
     .orderBy(placements.identifier);
 }
 
+export async function findPlacementById(
+  db: Db,
+  projectId: string,
+  id: string,
+): Promise<Placement | null> {
+  const rows = await db
+    .select()
+    .from(placements)
+    .where(and(eq(placements.projectId, projectId), eq(placements.id, id)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function findPlacementByIdentifier(
   db: Db,
   projectId: string,

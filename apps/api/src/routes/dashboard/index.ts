@@ -28,6 +28,8 @@ import { membersRoute } from "./members";
 import { metricsRoute } from "./metrics";
 import { overviewRoute } from "./overview";
 import { offeringsDashboardRoute } from "./offerings";
+import { paywallsDashboardRoute } from "./paywalls";
+import { placementsDashboardRoute } from "./placements";
 import { productsDashboardRoute } from "./products";
 import { projectsRoute } from "./projects";
 import { queriesRoute } from "./queries";
@@ -91,6 +93,8 @@ export const dashboardRoute = new Hono()
   .route("/projects/:projectId/metrics", metricsRoute)
   .route("/projects/:projectId/overview", overviewRoute)
   .route("/projects/:projectId/offerings", offeringsDashboardRoute)
+  .route("/projects/:projectId/paywalls", paywallsDashboardRoute)
+  .route("/projects/:projectId/placements", placementsDashboardRoute)
   .route("/projects/:projectId/products", productsDashboardRoute)
   .route("/projects/:projectId/queries", queriesRoute)
   .route("/projects/:projectId/refund-shield", refundShieldRoute)
