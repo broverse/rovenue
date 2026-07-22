@@ -213,6 +213,40 @@ function prepareBuilderConfigPatch(
   return { builderConfig: parsed.data, configFormatVersion: 2 };
 }
 
+/** Parse a `:versionNo` path segment, 400ing on anything non-positive-integer. */
+function parseVersionNo(raw: string | undefined): number {
+  const n = Number(raw);
+  if (!raw || !Number.isInteger(n) || n < 1) {
+    throw new HTTPException(400, { message: "versionNo must be a positive integer" });
+  }
+  return n;
+}
+
+/** Metadata-only projection of a version row, shared by list and detail. */
+function toVersionRow(
+  v: {
+    id: string;
+    versionNo: number;
+    label: string | null;
+    offeringId: string;
+    configFormatVersion: number;
+    publishedAt: Date;
+    publishedBy: string | null;
+  },
+  livePublishedVersionId: string | null,
+) {
+  return {
+    id: v.id,
+    versionNo: v.versionNo,
+    label: v.label,
+    offeringId: v.offeringId,
+    configFormatVersion: v.configFormatVersion,
+    publishedAt: v.publishedAt.toISOString(),
+    publishedBy: v.publishedBy,
+    isLive: v.id === livePublishedVersionId,
+  };
+}
+
 export const paywallsDashboardRoute = new Hono()
   .use("*", requireDashboardAuth)
   .get("/", async (c) => {
@@ -490,6 +524,56 @@ export const paywallsDashboardRoute = new Hono()
 
     purgeProjectCatalogCache(projectId);
     return c.json(ok(result));
+  })
+  .get("/:id/versions", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing identifier" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+    const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
+    if (!paywall) {
+      throw new HTTPException(404, { message: "Paywall not found" });
+    }
+    const rows = await drizzle.paywallVersionRepo.listByPaywall(drizzle.db, id);
+    return c.json(
+      ok({ versions: rows.map((v) => toVersionRow(v, paywall.publishedVersionId)) }),
+    );
+  })
+  .get("/:id/versions/:versionNo", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing identifier" });
+    }
+    const versionNo = parseVersionNo(c.req.param("versionNo"));
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+    const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
+    if (!paywall) {
+      throw new HTTPException(404, { message: "Paywall not found" });
+    }
+    const version = await drizzle.paywallVersionRepo.findByVersionNo(
+      drizzle.db,
+      id,
+      versionNo,
+    );
+    if (!version) {
+      throw new HTTPException(404, { message: "Version not found" });
+    }
+    return c.json(
+      ok({
+        version: {
+          ...toVersionRow(version, paywall.publishedVersionId),
+          builderConfig: version.builderConfig,
+          remoteConfig: version.remoteConfig,
+        },
+      }),
+    );
   })
   .delete("/:id", async (c) => {
     const projectId = c.req.param("projectId");

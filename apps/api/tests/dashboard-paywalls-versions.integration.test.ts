@@ -211,3 +211,83 @@ describe("POST /paywalls/:id/publish", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("GET /paywalls/:id/versions", () => {
+  it("lists newest first and flags the live version", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("list", VALID_CONFIG);
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
+      method: "POST",
+      headers: { cookie },
+    });
+
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/versions`,
+      { headers: { cookie } },
+    );
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+    expect(data.versions.map((v: { versionNo: number }) => v.versionNo)).toEqual([2, 1]);
+    expect(data.versions[0].isLive).toBe(true);
+    expect(data.versions[1].isLive).toBe(false);
+    expect(data.versions[0].publishedBy).toBe(userId);
+    // The list shape carries metadata only.
+    expect(data.versions[0].builderConfig).toBeUndefined();
+  });
+
+  it("returns an empty array for a never-published paywall", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("nover", VALID_CONFIG);
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/versions`,
+      { headers: { cookie } },
+    );
+    const { data } = await res.json();
+    expect(data.versions).toEqual([]);
+  });
+});
+
+describe("GET /paywalls/:id/versions/:versionNo", () => {
+  it("returns the full snapshot", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("detail", VALID_CONFIG);
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
+      method: "POST",
+      headers: { cookie },
+    });
+
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/versions/1`,
+      { headers: { cookie } },
+    );
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+    expect(data.version.versionNo).toBe(1);
+    expect(data.version.builderConfig).toEqual(VALID_CONFIG);
+    expect(data.version.remoteConfig).toEqual({ defaultLocale: "en", locales: { en: {} } });
+  });
+
+  it("404s on an unknown versionNo", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("detail404", VALID_CONFIG);
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/versions/99`,
+      { headers: { cookie } },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("400s on a non-numeric versionNo", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("detail400", VALID_CONFIG);
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/versions/abc`,
+      { headers: { cookie } },
+    );
+    expect(res.status).toBe(400);
+  });
+});
