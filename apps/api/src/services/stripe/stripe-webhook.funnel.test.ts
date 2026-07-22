@@ -91,6 +91,23 @@ vi.mock("../subscription-transition-guard", () => ({
   guardStatusWrite: vi.fn(async () => ({ apply: true, from: null })),
 }));
 
+// Wrapped, not stubbed. The trial cases below must run the REAL rule,
+// and the wrapper is what proves the backstop reaches for the shared
+// function rather than keeping its own copy — the copy /confirm used to
+// keep is precisely how a trial with no card came to count as paid on
+// one side and not the other.
+const settledPredicate = vi.hoisted(() => vi.fn());
+vi.mock("./payment-settled", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("./payment-settled")>();
+  return {
+    ...actual,
+    hasPaidOrAttachedACard: settledPredicate.mockImplementation(
+      actual.hasPaidOrAttachedACard,
+    ),
+  };
+});
+
 import { processStripeEvent } from "./stripe-webhook";
 
 const PROJECT_ID = "prj_1";
@@ -313,6 +330,71 @@ describe("processStripeEvent — funnel session backstop", () => {
       status: "active",
       metadata: { rovenue_funnel_session_id: "sess_1" },
     }));
+
+    expect(completeFunnelPurchase).not.toHaveBeenCalled();
+  });
+
+  // The mirror of the assertion in tests/funnel-confirm.test.ts: both
+  // ends of the completion ask ONE function whether the buyer paid.
+  test("asks the shared settlement predicate, not a local copy", async () => {
+    await run(subscriptionEvent("customer.subscription.created", {
+      status: "trialing",
+      default_payment_method: null,
+      metadata: { rovenue_funnel_session_id: "sess_1" },
+    }));
+
+    expect(settledPredicate).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "trialing" }),
+    );
+    expect(completeFunnelPurchase).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------
+  // Containment
+  // ---------------------------------------------------------------
+
+  // The backstop runs before the domain sync so a sync failure cannot
+  // swallow it. That ordering must not buy the buyer's safety net with
+  // the account owner's billing state: a funnel-side throw is logged and
+  // the switch below still runs.
+  test("a failing backstop does not fail the event or skip the domain sync", async () => {
+    drizzleMock.funnelPurchaseRepo.findBySession.mockRejectedValue(
+      new Error("funnel_sessions partition unavailable"),
+    );
+
+    const result = await run(subscriptionEvent("customer.subscription.updated", {
+      status: "active",
+      metadata: { rovenue_funnel_session_id: "sess_1" },
+    }));
+
+    expect(result.status).toBe("processed");
+    expect(drizzleMock.purchaseRepo.upsertPurchase).toHaveBeenCalled();
+    expect(
+      drizzleMock.webhookEventRepo.updateWebhookEvent,
+    ).toHaveBeenCalledWith(
+      expect.anything(),
+      "whe_1",
+      expect.objectContaining({ status: "PROCESSED" }),
+    );
+  });
+
+  // Every renewal invoice for the life of a funnel-sold subscription
+  // arrives here. `completeFunnelPurchase` would open a transaction and
+  // re-read the partitioned funnel_sessions table only to discover the
+  // row is already paid — the row in hand says so for free.
+  test("does not re-enter the completion service for an already-paid row", async () => {
+    drizzleMock.funnelPurchaseRepo.findByStripeSubscriptionId.mockResolvedValue({
+      ...PENDING_PURCHASE,
+      status: "paid",
+    });
+
+    await run({
+      id: "evt_invoice_renewal",
+      type: "invoice.paid",
+      data: {
+        object: { id: "in_2", subscription: "sub_1", amount_paid: 4900 },
+      },
+    } as unknown as Stripe.Event);
 
     expect(completeFunnelPurchase).not.toHaveBeenCalled();
   });

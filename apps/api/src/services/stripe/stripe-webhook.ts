@@ -21,6 +21,7 @@ import {
   STRIPE_INVOICE_BILLING_REASON,
   STRIPE_SUBSCRIPTION_STATUS,
 } from "./stripe-types";
+import { hasPaidOrAttachedACard } from "./payment-settled";
 import { guardStatusWrite } from "../subscription-transition-guard";
 
 const log = logger.child("stripe-webhook");
@@ -155,7 +156,25 @@ async function dispatch(ctx: DispatchContext): Promise<void> {
   // closed the tab, which is the one case this exists for. Nothing below
   // depends on it having run, and it is idempotent, so the ordering costs
   // nothing on the ordinary path.
-  await backstopFunnelSession(ctx);
+  //
+  // Running first must not mean running *instead*. An unhandled throw
+  // here propagates out of `processStripeEvent`, marks the event FAILED
+  // and skips the switch below — so a funnel-side failure would take the
+  // account owner's purchase/revenue sync down with it, for an event that
+  // has nothing to do with the funnel beyond arriving on the same
+  // subscription. The buyer keeps two other routes to their token
+  // (`/confirm`, and the next event on this subscription), so the
+  // asymmetric cost is clear: log loudly and carry on.
+  try {
+    await backstopFunnelSession(ctx);
+  } catch (err) {
+    log.error("funnel backstop failed; continuing with the domain sync", {
+      eventId: ctx.event.id,
+      eventType: ctx.event.type,
+      projectId: ctx.projectId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   switch (ctx.event.type) {
     case STRIPE_EVENT_TYPE.CUSTOMER_SUBSCRIPTION_CREATED:
@@ -210,40 +229,11 @@ type FunnelPurchaseLookup =
   | { by: "session"; sessionId: string; stripeObjectId: string }
   | { by: "subscription"; subscriptionId: string };
 
-/**
- * Has the buyer behind this subscription actually paid, or at least
- * handed over a card?
- *
- * This is the whole trap. The funnel creates subscriptions with
- * `payment_behavior: "default_incomplete"`, and when the package has a
- * trial Stripe puts the subscription straight into `trialing` with a
- * pending setup intent — so `customer.subscription.created` fires the
- * instant the visitor reaches the paywall, BEFORE any card is entered.
- * Completing on the event alone would mint a claim token and grant
- * entitlements to someone who never paid and never will.
- *
- * `active` means an invoice was actually paid (or a trial converted).
- * For `trialing` the money signal does not exist by design — the trial
- * captures nothing now — so the equivalent commitment is the card, which
- * Stripe records on the subscription as `default_payment_method` once the
- * pending setup intent succeeds. That is the same bar
- * `/confirm`'s `isSettled` applies, reached without trusting the client.
- *
- * If Stripe ever stopped setting `default_payment_method` there, this
- * returns false and the trial simply is not backstopped from a
- * subscription event: the buyer still gets their token from `/confirm`,
- * and failing that from the `invoice.paid` at trial conversion. Silence
- * is the correct failure — a false positive here hands out entitlements.
- */
-function hasPaidOrAttachedACard(subscription: Stripe.Subscription): boolean {
-  if (subscription.status === STRIPE_SUBSCRIPTION_STATUS.ACTIVE) return true;
-  if (subscription.status === STRIPE_SUBSCRIPTION_STATUS.TRIALING) {
-    return subscription.default_payment_method != null;
-  }
-  // incomplete / incomplete_expired / past_due / unpaid / canceled /
-  // paused: nothing here says this buyer paid for THIS session.
-  return false;
-}
+// Whether a subscription proves payment is decided by
+// `hasPaidOrAttachedACard` in ./payment-settled — the SAME function
+// `/confirm`'s `isSettled` calls, imported rather than reimplemented so
+// the browser's path and this one cannot answer differently. See that
+// module for why `trialing` alone is not proof of anything.
 
 function funnelLookupFor(event: Stripe.Event): FunnelPurchaseLookup | null {
   switch (event.type) {
@@ -326,6 +316,16 @@ async function backstopFunnelSession(ctx: DispatchContext): Promise<void> {
     return;
   }
 
+  // Already completed — by `/confirm`, by an earlier event, or by the
+  // previous delivery of this one. `completeFunnelPurchase` reads the
+  // same status and returns `alreadyIssued`, so this changes no outcome;
+  // it is here to stop paying for that answer. Without it EVERY renewal
+  // invoice of EVERY funnel-sold subscription opens a transaction and
+  // reads the partitioned `funnel_sessions` table for the whole life of
+  // that subscription, before the billing sync below even starts. The row
+  // is already in hand, so the check is free.
+  if (purchase.status === "paid") return;
+
   // The event has to be about the very Stripe object this row records.
   // A visitor who changes package leaves the superseded subscription or
   // intent live for a moment; without this, a late event from that
@@ -336,9 +336,22 @@ async function backstopFunnelSession(ctx: DispatchContext): Promise<void> {
     lookup.stripeObjectId !== purchase.stripeSubscriptionId &&
     lookup.stripeObjectId !== purchase.stripePaymentIntentId
   ) {
-    log.info("stripe object does not match the session's current attempt", {
+    // `warn`, not `info`. Reaching here on a settlement-proving event
+    // means someone's money moved on a Stripe object this session no
+    // longer references, and nothing downstream will complete them: the
+    // row above is still `pending` and points elsewhere. That is a human
+    // to refund or reconcile by hand, so every id needed to find them is
+    // in the line.
+    log.warn("paid stripe object does not match the session's current attempt", {
       sessionId: purchase.sessionId,
+      projectId: purchase.projectId,
+      funnelPurchaseId: purchase.id,
+      eventId: ctx.event.id,
+      eventType: ctx.event.type,
       stripeObjectId: lookup.stripeObjectId,
+      stripeCustomerId: purchase.stripeCustomerId,
+      rowSubscriptionId: purchase.stripeSubscriptionId,
+      rowPaymentIntentId: purchase.stripePaymentIntentId,
     });
     return;
   }
