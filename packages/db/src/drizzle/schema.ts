@@ -832,6 +832,11 @@ export const purchases = pgTable(
     }),
     ownershipType: text("ownershipType"),
     verifiedAt: timestamp("verifiedAt", { withTimezone: true }),
+    // Opaque paywall-attribution snapshot the SDK/webhook supplied at
+    // purchase time: { placementId, paywallId, variantId?, experimentKey? }.
+    // Never validated against live placement/paywall/experiment rows —
+    // attribution must not fail a purchase — so this is jsonb, not FKs.
+    presentedContext: jsonb("presentedContext").$type<Record<string, unknown>>(),
     createdAt: timestamp("createdAt", { withTimezone: true })
       .notNull()
       .defaultNow(),

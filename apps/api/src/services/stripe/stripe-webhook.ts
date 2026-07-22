@@ -11,6 +11,7 @@ import {
   revenueDedupeKind,
 } from "@rovenue/db";
 import { logger } from "../../lib/logger";
+import { parsePresentedContextMetadata } from "../../lib/presented-context";
 import { convertToUsd } from "../fx";
 import { maybeEmitRefundDetected } from "../notifications/refund-emit";
 import {
@@ -275,6 +276,9 @@ async function applySubscriptionDeleted(ctx: DispatchContext): Promise<void> {
     store: Store.STRIPE,
     eventDate: ctx.event.created ? new Date(ctx.event.created * 1000) : new Date(),
     dedupeKey: `stripe:${ctx.event.id}:cancel`,
+    metadata: purchase.presentedContext
+      ? { presentedContext: purchase.presentedContext }
+      : undefined,
   });
 }
 
@@ -342,6 +346,9 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
     eventDate,
     // One paid invoice → one purchase-class revenue event; dedups replay.
     dedupeKey: `stripe:${invoice.id}:${revenueDedupeKind(type)}`,
+    metadata: purchase.presentedContext
+      ? { presentedContext: purchase.presentedContext }
+      : undefined,
   });
 }
 
@@ -479,6 +486,9 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
     // Stripe redelivers the same event id; this dedups replay while letting
     // distinct refund events (each a new event id) record independently.
     dedupeKey: `stripe:${ctx.event.id}:refund`,
+    metadata: purchase.presentedContext
+      ? { presentedContext: purchase.presentedContext }
+      : undefined,
   });
 
   await maybeEmitRefundDetected(drizzle.db, {
@@ -584,6 +594,11 @@ async function upsertPurchaseFromSubscription(
   const cancellationDate = subscription.canceled_at
     ? new Date(subscription.canceled_at * 1000)
     : null;
+  // Defensive parse: malformed/absent metadata never fails the webhook —
+  // it just means no attribution gets recorded for this purchase.
+  const presentedContext = parsePresentedContextMetadata(
+    subscription.metadata?.rovenue_presented_context,
+  );
 
   const purchase = await drizzle.purchaseRepo.upsertPurchase(db, {
     store: Store.STRIPE,
@@ -607,6 +622,7 @@ async function upsertPurchaseFromSubscription(
       autoRenewStatus: !subscription.cancel_at_period_end,
       cancellationDate,
       verifiedAt: new Date(),
+      presentedContext,
     },
     update: {
       ...(applyStatus ? { status } : {}),
@@ -617,6 +633,10 @@ async function upsertPurchaseFromSubscription(
       autoRenewStatus: !subscription.cancel_at_period_end,
       cancellationDate,
       verifiedAt: new Date(),
+      // Only overwrite when this delivery actually carries attribution —
+      // a later renewal/status-only update without the metadata must not
+      // null out the original purchase's attribution.
+      ...(presentedContext && { presentedContext }),
     },
   });
 

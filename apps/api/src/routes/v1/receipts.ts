@@ -15,6 +15,7 @@ import { endpointRateLimit } from "../../middleware/rate-limit";
 import { buildAccessResponse } from "../../lib/access-response";
 import { ok } from "../../lib/response";
 import { logger } from "../../lib/logger";
+import { presentedContextSchema } from "../../lib/presented-context";
 
 // =============================================================
 // /v1/receipts — receipt verification + entitlement grant
@@ -33,6 +34,10 @@ export const receiptBodySchema = z.object({
   receipt: z.string().min(1),
   appUserId: z.string().min(1),
   productId: z.string().min(1),
+  // Paywall-attribution snapshot from the placement that served the SDK's
+  // purchase flow. Opaque — never validated against live rows here, so a
+  // stale/fabricated value can never fail the purchase.
+  presentedContext: presentedContextSchema.optional(),
 });
 
 export type ReceiptBody = z.infer<typeof receiptBodySchema>;
@@ -56,6 +61,7 @@ async function handleReceipt(
     receipt: body.receipt,
     productId: body.productId,
     appUserId: body.appUserId,
+    presentedContext: body.presentedContext,
   });
 
   await syncAccess(subscriber.id);

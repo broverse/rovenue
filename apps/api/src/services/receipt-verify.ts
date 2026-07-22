@@ -40,6 +40,7 @@ import type {
 import { guardStatusWrite } from "./subscription-transition-guard";
 import { convertToUsd } from "./fx";
 import { reassignAllAssets, safeSyncAccessAfterMerge } from "./subscriber-transfer";
+import type { PresentedContext } from "../lib/presented-context";
 
 const log = logger.child("receipt-verify");
 
@@ -55,6 +56,13 @@ export interface VerifyReceiptArgs {
   receipt: string;
   productId: string;
   appUserId: string;
+  /**
+   * Paywall-attribution snapshot from the placement that served the SDK's
+   * purchase flow. Persisted onto the purchase row as-is and folded into
+   * the co-located revenue event's outbox metadata; never validated
+   * against live placement/paywall/experiment rows.
+   */
+  presentedContext?: PresentedContext | null;
 }
 
 export interface VerifyReceiptResult {
@@ -234,6 +242,7 @@ async function verifyAppleReceipt(
         priceCurrency: transaction.currency ?? null,
         ownershipType: transaction.inAppOwnershipType,
         verifiedAt: new Date(),
+        presentedContext: args.presentedContext ?? null,
       },
       update: {
         ...(guard.apply ? { status } : {}),
@@ -246,6 +255,11 @@ async function verifyAppleReceipt(
         ...(transaction.currency != null && {
           priceCurrency: transaction.currency,
         }),
+        // Only overwrite an already-recorded attribution when this call
+        // actually supplies one — a later renewal-triggering verify (no
+        // presentedContext) must not null out the original purchase's
+        // attribution.
+        ...(args.presentedContext && { presentedContext: args.presentedContext }),
         verifiedAt: new Date(),
       },
     });
@@ -274,6 +288,9 @@ async function verifyAppleReceipt(
       currency: transaction.currency,
       amountUsd: amountUsd.toString(),
       store: Store.APP_STORE,
+      metadata: args.presentedContext
+        ? { presentedContext: args.presentedContext }
+        : undefined,
       eventDate: new Date(transaction.purchaseDate),
       dedupeKey: `apple:${transaction.transactionId}:${revenueDedupeKind(type)}`,
     });
@@ -392,6 +409,7 @@ async function verifyGoogleSubscriptionReceipt(
         autoRenewStatus:
           lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null,
         verifiedAt: new Date(),
+        presentedContext: args.presentedContext ?? null,
       },
       update: {
         ...(guard.apply ? { status: PurchaseStatus.ACTIVE } : {}),
@@ -399,6 +417,7 @@ async function verifyGoogleSubscriptionReceipt(
         autoRenewStatus:
           lineItem?.autoRenewingPlan?.autoRenewEnabled ?? null,
         verifiedAt: new Date(),
+        ...(args.presentedContext && { presentedContext: args.presentedContext }),
       },
     });
   })) as unknown as Purchase;
@@ -456,9 +475,11 @@ async function verifyGoogleProductReceipt(
       originalPurchaseDate: new Date(purchaseTimeMs),
       environment: Environment.PRODUCTION,
       verifiedAt: new Date(),
+      presentedContext: args.presentedContext ?? null,
     },
     update: {
       verifiedAt: new Date(),
+      ...(args.presentedContext && { presentedContext: args.presentedContext }),
     },
   })) as unknown as Purchase;
 

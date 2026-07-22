@@ -65,6 +65,7 @@ const SUBSCRIBER_HEADER = "x-rovenue-user-id";
 export const exposeBodySchema = z.object({
   variantId: z.string().min(1),
   subscriberId: z.string().min(1),
+  placementId: z.string().min(1).optional(),
   platform: z.enum(["ios", "android", "web"]).optional(),
   country: z.string().length(2).optional(),
   exposedAt: z.string().datetime().optional(),
@@ -182,6 +183,22 @@ export const experimentsRoute = new Hono()
         },
       );
 
+      // Client-side draw: persist the assignment lazily so results/assignment
+      // queries keep working without a fetch-time write. Idempotent by design
+      // (onConflictDoNothing on (experimentId, subscriberId)) — a retried or
+      // duplicate expose call for the same subscriber is a no-op here.
+      await drizzle.experimentAssignmentRepo.insertAssignmentsSkipDuplicates(
+        drizzle.db,
+        [
+          {
+            experimentId,
+            subscriberId: subscriber.id,
+            variantId: input.variantId,
+            hashVersion: 1,
+          },
+        ],
+      );
+
       try {
         await getDb().transaction(async (tx) => {
           await eventBus.publishExposure(tx, {
@@ -192,6 +209,7 @@ export const experimentsRoute = new Hono()
             platform: input.platform,
             country: input.country,
             exposedAt: input.exposedAt ? new Date(input.exposedAt) : undefined,
+            placementId: input.placementId,
           });
         });
       } catch (err) {

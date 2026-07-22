@@ -114,6 +114,14 @@ export interface CreateRevenueEventInput {
    * behavior for callers without a stable key.
    */
   dedupeKey?: string | null;
+  /**
+   * Free-form extra context folded into the co-located REVENUE_EVENT
+   * outbox row's payload only — `revenue_events` has no metadata column,
+   * so this never round-trips through a read of the OLTP row. Used today
+   * to carry the purchase's `presentedContext` (paywall attribution) to
+   * the CH revenue pipeline.
+   */
+  metadata?: Record<string, unknown> | null;
 }
 
 /**
@@ -229,6 +237,7 @@ async function insertRevenueRow(
       amountUsd: inserted.amountUsd,
       currency: inserted.currency,
       eventDate: inserted.eventDate.toISOString(),
+      ...(input.metadata ? { metadata: input.metadata } : {}),
     },
   });
 

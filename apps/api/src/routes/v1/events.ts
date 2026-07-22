@@ -78,6 +78,21 @@ export const eventEnvelopeSchema = z
     currency: z.string().length(3).optional(),
     eventSourceUrl: z.string().url().optional(),
     identityContext: identityContextSchema.optional(),
+    // Present on `paywall_view` (and future paywall-lifecycle) events so
+    // the CH paywall funnel can attribute a view to the placement/paywall
+    // (and, when the placement resolved to an experiment row, the variant)
+    // that served it. Opaque strings — never validated against live rows,
+    // mirroring receipt `presentedContext` (attribution must not fail the
+    // event write).
+    paywallContext: z
+      .object({
+        paywallId: z.string().min(1),
+        placementId: z.string().min(1),
+        placementRevision: z.number().int().positive(),
+        variantId: z.string().min(1).optional(),
+        experimentKey: z.string().min(1).optional(),
+      })
+      .optional(),
   })
   .strict();
 
@@ -89,7 +104,8 @@ export type EventEnvelopeBody = z.infer<typeof eventEnvelopeSchema>;
 
 function deriveAggregateType(
   eventType: string,
-): "REVENUE_EVENT" | "BILLING" {
+): "REVENUE_EVENT" | "BILLING" | "PAYWALL_EVENT" {
+  if (eventType === "paywall_view") return "PAYWALL_EVENT";
   return eventType.startsWith("revenue.") ? "REVENUE_EVENT" : "BILLING";
 }
 

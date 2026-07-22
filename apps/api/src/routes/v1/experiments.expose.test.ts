@@ -23,6 +23,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 const publishExposureMock = vi.fn();
 const findByIdInProjectMock = vi.fn();
 const upsertSubscriberMock = vi.fn();
+const insertAssignmentsSkipDuplicatesMock = vi.fn();
 const transactionMock = vi.fn(async (cb: (tx: unknown) => unknown) =>
   cb({ __tx: true }),
 );
@@ -35,6 +36,12 @@ vi.mock("@rovenue/db", () => ({
     },
     subscriberRepo: {
       upsertSubscriber: (...args: unknown[]) => upsertSubscriberMock(...args),
+    },
+    // Lazy assignment persist (Task 5) — the expose handler calls this
+    // right after subscriber resolution, before publishExposure.
+    experimentAssignmentRepo: {
+      insertAssignmentsSkipDuplicates: (...args: unknown[]) =>
+        insertAssignmentsSkipDuplicatesMock(...args),
     },
   },
   getDb: () => ({ transaction: transactionMock }),
@@ -76,6 +83,8 @@ describe("POST /v1/experiments/:id/expose — tenant ownership", () => {
     publishExposureMock.mockResolvedValue(undefined);
     findByIdInProjectMock.mockReset();
     upsertSubscriberMock.mockReset();
+    insertAssignmentsSkipDuplicatesMock.mockReset();
+    insertAssignmentsSkipDuplicatesMock.mockResolvedValue(undefined);
     transactionMock.mockClear();
     upsertSubscriberMock.mockImplementation(async (_db: unknown, input: any) => ({
       id: `resolved_${input.rovenueId}`,
@@ -144,6 +153,17 @@ describe("POST /v1/experiments/:id/expose — tenant ownership", () => {
       subscriberId: "resolved_foreign_sub_xyz",
     });
     expect(published.subscriberId).not.toBe("foreign_sub_xyz");
+
+    // Lazy assignment persisted with the RESOLVED subscriber id too.
+    expect(insertAssignmentsSkipDuplicatesMock).toHaveBeenCalledTimes(1);
+    expect(insertAssignmentsSkipDuplicatesMock.mock.calls[0]?.[1]).toEqual([
+      {
+        experimentId: "exp_owned",
+        subscriberId: "resolved_foreign_sub_xyz",
+        variantId: "variant_a",
+        hashVersion: 1,
+      },
+    ]);
   });
 });
 
@@ -153,6 +173,8 @@ describe("POST /v1/experiments/:id/expose — variant + status validation", () =
     publishExposureMock.mockResolvedValue(undefined);
     findByIdInProjectMock.mockReset();
     upsertSubscriberMock.mockReset();
+    insertAssignmentsSkipDuplicatesMock.mockReset();
+    insertAssignmentsSkipDuplicatesMock.mockResolvedValue(undefined);
     transactionMock.mockClear();
     upsertSubscriberMock.mockImplementation(async (_db: unknown, input: any) => ({
       id: `resolved_${input.rovenueId}`,

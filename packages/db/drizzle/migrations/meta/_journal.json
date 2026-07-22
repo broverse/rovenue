@@ -624,6 +624,13 @@
       "when": 1784678227902,
       "tag": "0088_flimsy_sentry",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1784680707519,
+      "tag": "0089_dear_night_thrasher",
+      "breakpoints": true
     }
   ]
 }

@@ -19,6 +19,12 @@ export interface PublishExposureInput {
   platform?: string | null;
   country?: string | null;
   exposedAt?: Date;
+  /**
+   * Set when the exposure was triggered by a /v1/placements resolve — lets
+   * CH correlate placement-driven exposures. Purely informational: the
+   * placement is never re-validated here.
+   */
+  placementId?: string | null;
 }
 
 async function publishExposure(
@@ -33,6 +39,7 @@ async function publishExposure(
     platform: input.platform ?? null,
     country: input.country ?? null,
     exposedAt: (input.exposedAt ?? new Date()).toISOString(),
+    placementId: input.placementId ?? null,
   };
   await drizzle.outboxRepo.insert(tx, {
     aggregateType: "EXPOSURE",

@@ -41,6 +41,11 @@ vi.mock("@rovenue/db", () => ({
       upsertSubscriber: vi.fn(async () => ({ id: "sub_stub" })),
     },
     outboxRepo: { insert: vi.fn(async () => undefined) },
+    // Lazy assignment persist (Task 5) — the expose handler calls this
+    // right after subscriber resolution, before publishExposure.
+    experimentAssignmentRepo: {
+      insertAssignmentsSkipDuplicates: vi.fn(async () => undefined),
+    },
   },
 }));
 

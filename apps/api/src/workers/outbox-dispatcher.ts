@@ -100,6 +100,7 @@ const AGGREGATE_TO_TOPIC: Record<OutboxEvent["aggregateType"], string> = {
   BILLING: "rovenue.billing",
   NOTIFICATION: "rovenue.notifications",
   FUNNEL: "rovenue.funnel",
+  PAYWALL_EVENT: "rovenue.paywall_events",
 };
 
 // =============================================================

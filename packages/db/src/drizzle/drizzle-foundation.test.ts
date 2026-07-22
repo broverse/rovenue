@@ -390,6 +390,7 @@ describe("outboxEvents", () => {
       "BILLING",
       "NOTIFICATION",
       "FUNNEL",
+      "PAYWALL_EVENT",
     ]);
   });
 
