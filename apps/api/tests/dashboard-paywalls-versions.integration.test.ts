@@ -305,3 +305,110 @@ describe("GET /paywalls/:id/versions/:versionNo", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("revert / discard-draft / label", () => {
+  it("revert copies a snapshot back into the draft without republishing", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("revert", VALID_CONFIG);
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
+      method: "POST",
+      headers: { cookie },
+    });
+
+    // Edit the draft: change the title string.
+    const edited = {
+      ...VALID_CONFIG,
+      localizations: { en: { title: "Edited", cta: "Buy" } },
+    };
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ builderConfig: edited }),
+    });
+
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/versions/1/revert`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+    expect(data.paywall.builderConfig).toEqual(VALID_CONFIG);
+    // Reverting touches the draft only — the live version is unchanged.
+    expect(data.paywall.publishedVersionId).not.toBeNull();
+    const versions = await (
+      await app.request(`/projects/${projectId}/paywalls/${paywall.id}/versions`, {
+        headers: { cookie },
+      })
+    ).json();
+    expect(versions.data.versions).toHaveLength(1);
+  });
+
+  it("discard-draft resets the draft to the live version", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("discard", VALID_CONFIG);
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        builderConfig: {
+          ...VALID_CONFIG,
+          localizations: { en: { title: "Scratch", cta: "Buy" } },
+        },
+      }),
+    });
+
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/discard-draft`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+    expect(data.paywall.builderConfig).toEqual(VALID_CONFIG);
+  });
+
+  it("discard-draft 400s when nothing has been published", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("discard-none", VALID_CONFIG);
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/discard-draft`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(JSON.parse(body.error.message).code).toBe("PAYWALL_NO_PUBLISHED_VERSION");
+  });
+
+  it("PATCH versions/:n sets and clears the label", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("label", VALID_CONFIG);
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
+      method: "POST",
+      headers: { cookie },
+    });
+
+    const set = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/versions/1`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ label: "Q3 launch" }),
+      },
+    );
+    expect(set.status).toBe(200);
+    expect((await set.json()).data.version.label).toBe("Q3 launch");
+
+    const clear = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/versions/1`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ label: null }),
+      },
+    );
+    expect((await clear.json()).data.version.label).toBeNull();
+  });
+});

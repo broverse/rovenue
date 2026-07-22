@@ -213,6 +213,10 @@ function prepareBuilderConfigPatch(
   return { builderConfig: parsed.data, configFormatVersion: 2 };
 }
 
+const versionLabelBodySchema = z.object({
+  label: z.string().trim().min(1).max(120).nullable(),
+});
+
 /** Parse a `:versionNo` path segment, 400ing on anything that is not a
  * canonical positive integer (rejects "", "0", negatives, "1.5", "1e2",
  * "0x10", and whitespace-padded values — a bare Number() would admit the
@@ -576,6 +580,152 @@ export const paywallsDashboardRoute = new Hono()
         },
       }),
     );
+  })
+  .post("/:id/versions/:versionNo/revert", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing identifier" });
+    }
+    const versionNo = parseVersionNo(c.req.param("versionNo"));
+    const user = c.get("user");
+    await assertProjectCapability(projectId, user.id, "products:write");
+
+    const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
+    if (!paywall) {
+      throw new HTTPException(404, { message: "Paywall not found" });
+    }
+    const version = await drizzle.paywallVersionRepo.findByVersionNo(
+      drizzle.db,
+      id,
+      versionNo,
+    );
+    if (!version) {
+      throw new HTTPException(404, { message: "Version not found" });
+    }
+
+    // Revert restores the DRAFT only. The live version is untouched until
+    // the author publishes again — same semantics as funnels' revert.
+    const updated = await drizzle.db.transaction(async (tx) => {
+      const row = await drizzle.paywallRepo.updatePaywall(tx, projectId, id, {
+        builderConfig: version.builderConfig,
+        remoteConfig: version.remoteConfig,
+        offeringId: version.offeringId,
+        configFormatVersion: version.configFormatVersion,
+      });
+      if (!row) {
+        throw new HTTPException(404, { message: "Paywall not found" });
+      }
+      await audit(
+        {
+          projectId,
+          userId: user.id,
+          action: "paywall.reverted",
+          resource: "paywall",
+          resourceId: id,
+          after: { versionNo, versionId: version.id },
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
+      return row;
+    });
+
+    return c.json(ok({ paywall: updated }));
+  })
+  .post("/:id/discard-draft", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing identifier" });
+    }
+    const user = c.get("user");
+    await assertProjectCapability(projectId, user.id, "products:write");
+
+    const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
+    if (!paywall) {
+      throw new HTTPException(404, { message: "Paywall not found" });
+    }
+    if (!paywall.publishedVersionId) {
+      throw new HTTPException(400, {
+        message: JSON.stringify({
+          code: "PAYWALL_NO_PUBLISHED_VERSION",
+          message: "Nothing has been published yet — there is no state to discard back to.",
+        }),
+      });
+    }
+    const live = await drizzle.paywallVersionRepo.findById(
+      drizzle.db,
+      paywall.publishedVersionId,
+    );
+    if (!live) {
+      throw new HTTPException(404, { message: "Published version not found" });
+    }
+
+    const updated = await drizzle.db.transaction(async (tx) => {
+      const row = await drizzle.paywallRepo.updatePaywall(tx, projectId, id, {
+        builderConfig: live.builderConfig,
+        remoteConfig: live.remoteConfig,
+        offeringId: live.offeringId,
+        configFormatVersion: live.configFormatVersion,
+      });
+      if (!row) {
+        throw new HTTPException(404, { message: "Paywall not found" });
+      }
+      await audit(
+        {
+          projectId,
+          userId: user.id,
+          action: "paywall.draft_discarded",
+          resource: "paywall",
+          resourceId: id,
+          after: { versionNo: live.versionNo, versionId: live.id },
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
+      return row;
+    });
+
+    return c.json(ok({ paywall: updated }));
+  })
+  .patch("/:id/versions/:versionNo", validate("json", versionLabelBodySchema), async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing identifier" });
+    }
+    const versionNo = parseVersionNo(c.req.param("versionNo"));
+    const user = c.get("user");
+    await assertProjectCapability(projectId, user.id, "products:write");
+    const { label } = c.req.valid("json");
+
+    const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
+    if (!paywall) {
+      throw new HTTPException(404, { message: "Paywall not found" });
+    }
+
+    const version = await drizzle.db.transaction(async (tx) => {
+      const row = await drizzle.paywallVersionRepo.setLabel(tx, id, versionNo, label);
+      if (!row) {
+        throw new HTTPException(404, { message: "Version not found" });
+      }
+      await audit(
+        {
+          projectId,
+          userId: user.id,
+          action: "paywall.version_labeled",
+          resource: "paywall",
+          resourceId: id,
+          after: { versionNo, label },
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
+      return row;
+    });
+
+    return c.json(ok({ version: toVersionRow(version, paywall.publishedVersionId) }));
   })
   .delete("/:id", async (c) => {
     const projectId = c.req.param("projectId");
