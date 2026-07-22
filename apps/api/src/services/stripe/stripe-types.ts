@@ -11,6 +11,20 @@ export const STRIPE_EVENT_TYPE = {
   INVOICE_PAID: "invoice.paid",
   INVOICE_PAYMENT_FAILED: "invoice.payment_failed",
   CHARGE_REFUNDED: "charge.refunded",
+  /**
+   * Carries no subscription and no invoice, so it drives no purchase
+   * state — it exists for the funnel backstop alone. A funnel package on
+   * a ONE-TIME price is charged through a bare PaymentIntent, and that
+   * intent is the only object in the flow carrying
+   * `rovenue_funnel_session_id`. Without this event a buyer who closes
+   * the tab after a one-time purchase would never be completed by
+   * anything.
+   *
+   * Operational prerequisite: the platform's Connect webhook endpoint
+   * must have this event type selected, alongside the subscription and
+   * invoice ones.
+   */
+  PAYMENT_INTENT_SUCCEEDED: "payment_intent.succeeded",
 } as const;
 export type StripeEventType =
   (typeof STRIPE_EVENT_TYPE)[keyof typeof STRIPE_EVENT_TYPE];

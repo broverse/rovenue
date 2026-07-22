@@ -14,6 +14,7 @@ import { logger } from "../../lib/logger";
 import type { AccountScopedStripe } from "../../lib/stripe-account-scoped";
 import { parsePresentedContextMetadata } from "../../lib/presented-context";
 import { convertToUsd } from "../fx";
+import { completeFunnelPurchase } from "../funnel/complete-purchase";
 import { maybeEmitRefundDetected } from "../notifications/refund-emit";
 import {
   STRIPE_EVENT_TYPE,
@@ -147,6 +148,15 @@ interface DispatchContext {
 }
 
 async function dispatch(ctx: DispatchContext): Promise<void> {
+  // Deliberately BEFORE the domain sync, not after it. The sync throws
+  // when the paid price maps to no Rovenue product, and `applyInvoicePaid`
+  // returns early when the subscription maps to no purchase row — either
+  // would swallow the backstop for a buyer who has genuinely paid and
+  // closed the tab, which is the one case this exists for. Nothing below
+  // depends on it having run, and it is idempotent, so the ordering costs
+  // nothing on the ordinary path.
+  await backstopFunnelSession(ctx);
+
   switch (ctx.event.type) {
     case STRIPE_EVENT_TYPE.CUSTOMER_SUBSCRIPTION_CREATED:
     case STRIPE_EVENT_TYPE.CUSTOMER_SUBSCRIPTION_UPDATED:
@@ -159,9 +169,203 @@ async function dispatch(ctx: DispatchContext): Promise<void> {
       return applyInvoicePaymentFailed(ctx);
     case STRIPE_EVENT_TYPE.CHARGE_REFUNDED:
       return applyChargeRefunded(ctx);
+    case STRIPE_EVENT_TYPE.PAYMENT_INTENT_SUCCEEDED:
+      // Handled entirely by the backstop above: a bare PaymentIntent
+      // carries no subscription and no invoice, so there is no purchase
+      // state to sync from it.
+      return;
     default:
       log.debug("no state change for event type", { type: ctx.event.type });
   }
+}
+
+// =============================================================
+// Funnel backstop
+// =============================================================
+//
+// A visitor pays on a funnel page and the browser calls
+// `/funnel-sessions/:id/confirm`, which mints their claim token. A buyer
+// who closes the tab before that request lands has still paid, and would
+// otherwise be left with a charge, no token and no entitlement. The
+// Connect webhook already receives their events, so it performs the same
+// transition through the same service.
+//
+// What this is NOT: a second idempotency mechanism. Racing `confirm` is
+// settled inside `completeFunnelPurchase` (one unique index on
+// `funnel_claim_tokens.session_id` decides who mints); event-level replay
+// is settled by `claimWebhookEvent` above. Everything below is about one
+// question only — has this buyer actually paid?
+
+const FUNNEL_SESSION_METADATA_KEY = "rovenue_funnel_session_id";
+
+/**
+ * How to find the funnel purchase row this event is about.
+ *
+ * The subscription and the one-time PaymentIntent both carry the session
+ * id in their own metadata. An invoice carries neither it nor anything
+ * Stripe copies it onto, so that path resolves through the subscription
+ * id the purchase row already persists.
+ */
+type FunnelPurchaseLookup =
+  | { by: "session"; sessionId: string; stripeObjectId: string }
+  | { by: "subscription"; subscriptionId: string };
+
+/**
+ * Has the buyer behind this subscription actually paid, or at least
+ * handed over a card?
+ *
+ * This is the whole trap. The funnel creates subscriptions with
+ * `payment_behavior: "default_incomplete"`, and when the package has a
+ * trial Stripe puts the subscription straight into `trialing` with a
+ * pending setup intent — so `customer.subscription.created` fires the
+ * instant the visitor reaches the paywall, BEFORE any card is entered.
+ * Completing on the event alone would mint a claim token and grant
+ * entitlements to someone who never paid and never will.
+ *
+ * `active` means an invoice was actually paid (or a trial converted).
+ * For `trialing` the money signal does not exist by design — the trial
+ * captures nothing now — so the equivalent commitment is the card, which
+ * Stripe records on the subscription as `default_payment_method` once the
+ * pending setup intent succeeds. That is the same bar
+ * `/confirm`'s `isSettled` applies, reached without trusting the client.
+ *
+ * If Stripe ever stopped setting `default_payment_method` there, this
+ * returns false and the trial simply is not backstopped from a
+ * subscription event: the buyer still gets their token from `/confirm`,
+ * and failing that from the `invoice.paid` at trial conversion. Silence
+ * is the correct failure — a false positive here hands out entitlements.
+ */
+function hasPaidOrAttachedACard(subscription: Stripe.Subscription): boolean {
+  if (subscription.status === STRIPE_SUBSCRIPTION_STATUS.ACTIVE) return true;
+  if (subscription.status === STRIPE_SUBSCRIPTION_STATUS.TRIALING) {
+    return subscription.default_payment_method != null;
+  }
+  // incomplete / incomplete_expired / past_due / unpaid / canceled /
+  // paused: nothing here says this buyer paid for THIS session.
+  return false;
+}
+
+function funnelLookupFor(event: Stripe.Event): FunnelPurchaseLookup | null {
+  switch (event.type) {
+    case STRIPE_EVENT_TYPE.CUSTOMER_SUBSCRIPTION_CREATED:
+    case STRIPE_EVENT_TYPE.CUSTOMER_SUBSCRIPTION_UPDATED: {
+      const subscription = event.data.object as Stripe.Subscription;
+      const sessionId = subscription.metadata?.[FUNNEL_SESSION_METADATA_KEY];
+      if (!sessionId) return null;
+      if (!hasPaidOrAttachedACard(subscription)) {
+        log.info("funnel subscription not settled yet; not completing", {
+          sessionId,
+          subscriptionId: subscription.id,
+          status: subscription.status,
+        });
+        return null;
+      }
+      return { by: "session", sessionId, stripeObjectId: subscription.id };
+    }
+
+    case STRIPE_EVENT_TYPE.INVOICE_PAID: {
+      const invoice = event.data.object as Stripe.Invoice;
+      // A subscription that starts on a trial is invoiced for 0 and that
+      // invoice is marked paid immediately — `invoice.paid` fires before
+      // the visitor has entered a card, exactly like the `trialing`
+      // subscription event does. Only an invoice that actually moved
+      // money says anything about this buyer.
+      if ((invoice.amount_paid ?? 0) <= 0) return null;
+      const subscriptionId =
+        typeof invoice.subscription === "string"
+          ? invoice.subscription
+          : invoice.subscription?.id;
+      if (!subscriptionId) return null;
+      return { by: "subscription", subscriptionId };
+    }
+
+    case STRIPE_EVENT_TYPE.PAYMENT_INTENT_SUCCEEDED: {
+      // The one-time path. `succeeded` is the money actually captured,
+      // and the intent is the object the payment-intent endpoint put the
+      // metadata on. Invoice-driven intents (the recurring path) do not
+      // carry it — Stripe does not copy subscription metadata onto them —
+      // so they fall out here and are completed by their own events.
+      const intent = event.data.object as Stripe.PaymentIntent;
+      const sessionId = intent.metadata?.[FUNNEL_SESSION_METADATA_KEY];
+      if (!sessionId) return null;
+      return { by: "session", sessionId, stripeObjectId: intent.id };
+    }
+
+    default:
+      return null;
+  }
+}
+
+async function backstopFunnelSession(ctx: DispatchContext): Promise<void> {
+  const lookup = funnelLookupFor(ctx.event);
+  if (!lookup) return;
+
+  const purchase =
+    lookup.by === "session"
+      ? await drizzle.funnelPurchaseRepo.findBySession(
+          drizzle.db,
+          lookup.sessionId,
+        )
+      : await drizzle.funnelPurchaseRepo.findByStripeSubscriptionId(
+          drizzle.db,
+          lookup.subscriptionId,
+        );
+
+  // Overwhelmingly the ordinary case on the invoice path: a paid invoice
+  // for a subscription no funnel ever sold. Nothing to say about it.
+  if (!purchase) return;
+
+  // One endpoint serves every connected account, and metadata is written
+  // by the account, not by us. A project must not be able to complete
+  // another project's session by naming it.
+  if (purchase.projectId !== ctx.projectId) {
+    log.warn("funnel purchase belongs to another project; ignoring", {
+      sessionId: purchase.sessionId,
+      eventProjectId: ctx.projectId,
+    });
+    return;
+  }
+
+  // The event has to be about the very Stripe object this row records.
+  // A visitor who changes package leaves the superseded subscription or
+  // intent live for a moment; without this, a late event from that
+  // abandoned object would complete the session against a package the
+  // buyer no longer chose (`upsertPending` has already replaced the ids).
+  if (
+    lookup.by === "session" &&
+    lookup.stripeObjectId !== purchase.stripeSubscriptionId &&
+    lookup.stripeObjectId !== purchase.stripePaymentIntentId
+  ) {
+    log.info("stripe object does not match the session's current attempt", {
+      sessionId: purchase.sessionId,
+      stripeObjectId: lookup.stripeObjectId,
+    });
+    return;
+  }
+
+  // Only the dev-mode stub in routes/public/funnels.ts writes a purchase
+  // with no customer, and that path mints its own token. Same guard the
+  // `/confirm` handler applies.
+  if (!purchase.stripeCustomerId) return;
+
+  // The row's own ids, not the event's — byte for byte what `/confirm`
+  // passes. Handing over the event's ids instead would let a
+  // subscription event null out the payment-intent column the row
+  // already holds (`markPaid` writes what it is given).
+  const result = await completeFunnelPurchase({
+    sessionId: purchase.sessionId,
+    stripeCustomerId: purchase.stripeCustomerId,
+    stripeSubscriptionId: purchase.stripeSubscriptionId,
+    stripePaymentIntentId: purchase.stripePaymentIntentId,
+  });
+
+  log.info("funnel session completed from the connect webhook", {
+    sessionId: purchase.sessionId,
+    eventType: ctx.event.type,
+    // The token itself is never logged; whether one was minted here is
+    // the only interesting half.
+    alreadyIssued: result.alreadyIssued,
+  });
 }
 
 // =============================================================
