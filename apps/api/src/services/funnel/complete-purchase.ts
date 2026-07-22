@@ -20,8 +20,25 @@ const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Postgres `unique_violation`. */
 const UNIQUE_VIOLATION = "23505";
 
-function isUniqueViolation(err: unknown): boolean {
-  return (err as { code?: string } | null)?.code === UNIQUE_VIOLATION;
+/**
+ * The unique constraint on `funnel_claim_tokens.session_id`, created by
+ * migration 0050_funnel_core.sql and left in place by 0051 (which drops
+ * only the FK into the now-partitioned funnel_sessions).
+ *
+ * The INSERT below can violate three different unique constraints —
+ * this one, `funnel_claim_tokens_token_hash_unique`, and the primary
+ * key. Only this one means "another caller already issued the token for
+ * this session"; the other two mean the token generator or the id
+ * generator collided, which is not a race we may swallow. Reporting
+ * those as `alreadyIssued` would roll back the paid transition and
+ * leave a buyer who really paid sitting at `pending` with no token, so
+ * they must surface as errors.
+ */
+const SESSION_ID_UNIQUE = "funnel_claim_tokens_session_id_unique";
+
+function isSessionTokenRace(err: unknown): boolean {
+  const e = err as { code?: string; constraint?: string } | null;
+  return e?.code === UNIQUE_VIOLATION && e.constraint === SESSION_ID_UNIQUE;
 }
 
 export type CompleteResult =
@@ -92,7 +109,7 @@ export async function completeFunnelPurchase(input: {
         expiresAt: new Date(Date.now() + TOKEN_TTL_MS),
       });
     } catch (err) {
-      if (!isUniqueViolation(err)) throw err;
+      if (!isSessionTokenRace(err)) throw err;
       log.info("lost the claim-token insert race; another caller issued it", {
         sessionId: input.sessionId,
       });

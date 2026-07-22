@@ -185,7 +185,7 @@ describe("completeFunnelPurchase", () => {
         new Error(
           'duplicate key value violates unique constraint "funnel_claim_tokens_session_id_unique"',
         ),
-        { code: "23505" },
+        { code: "23505", constraint: "funnel_claim_tokens_session_id_unique" },
       ),
     );
 
@@ -193,6 +193,26 @@ describe("completeFunnelPurchase", () => {
 
     expect(result).toEqual({ alreadyIssued: true });
     expect(result).not.toHaveProperty("token");
+  });
+
+  // That INSERT can violate three unique constraints. Only session_id
+  // means "someone else already issued this session's token". A collision
+  // on token_hash or on the primary key means a generator collided, and
+  // swallowing it as `alreadyIssued` would roll back the paid transition
+  // and strand a real payer at `pending` with no token — so the code
+  // matches the constraint, not just the SQLSTATE.
+  it.each([
+    "funnel_claim_tokens_token_hash_unique",
+    "funnel_claim_tokens_pkey",
+  ])("rethrows a 23505 on %s rather than claiming already issued", async (constraint) => {
+    insertClaimToken.mockRejectedValue(
+      Object.assign(
+        new Error(`duplicate key value violates unique constraint "${constraint}"`),
+        { code: "23505", constraint },
+      ),
+    );
+
+    await expect(completeFunnelPurchase(INPUT)).rejects.toThrow("duplicate key");
   });
 
   it("rethrows any other database error", async () => {
