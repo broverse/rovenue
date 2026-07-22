@@ -105,6 +105,46 @@ final class BuilderConfigModelTests: XCTestCase {
         XCTAssertEqual(list.cellLayout, .row)
     }
 
+    func testPackageListCellTemplateDecodesRecursively() throws {
+        let entries = try XCTUnwrap(fixtures["accept"] as? [[String: Any]])
+        let entry = try XCTUnwrap(entries.first {
+            ($0["name"] as? String) == "packageList with cellTemplate (visual nodes only, selected-condition badge)"
+        })
+        let config = try XCTUnwrap(entry["config"])
+        let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
+        guard case .stack(let root) = decoded.root, case .packageList(let list) = root.children[0] else {
+            return XCTFail("expected root.children[0] to be .packageList")
+        }
+        guard case .stack(let cellRoot) = list.cellTemplate?.node else {
+            return XCTFail("expected cellTemplate to decode as .stack")
+        }
+        XCTAssertEqual(cellRoot.id, "cell_root")
+        XCTAssertEqual(cellRoot.children.count, 3)
+        let cellRootOverrides = try XCTUnwrap(cellRoot.overrides)
+        XCTAssertEqual(cellRootOverrides.first?.when, .selected)
+        XCTAssertEqual(cellRootOverrides.first?.props?.background, ThemePair(light: "#EEF2FF", dark: nil))
+        guard case .text(let badge) = cellRoot.children[1] else { return XCTFail("expected children[1] to be .text") }
+        XCTAssertEqual(badge.overrides?.first?.props?.color, ThemePair(light: "#4338CA", dark: nil))
+    }
+
+    func testOverridesAcrossNodeTypesDecodeWithTypedProps() throws {
+        let entries = try XCTUnwrap(fixtures["accept"] as? [[String: Any]])
+        let entry = try XCTUnwrap(entries.first {
+            ($0["name"] as? String) == "overrides: introEligible + selected across node types, incl. a text key-swap"
+        })
+        let config = try XCTUnwrap(entry["config"])
+        let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
+        guard case .stack(let root) = decoded.root else { return XCTFail("root must be .stack") }
+        XCTAssertEqual(root.overrides?.first?.props?.spacing, 4)
+
+        guard case .text(let title) = root.children[1] else { return XCTFail("children[1] must be .text") }
+        XCTAssertEqual(title.overrides?.first?.props?.key, "title_key_intro")
+
+        guard case .button(let cta) = root.children[2] else { return XCTFail("children[2] must be .button") }
+        XCTAssertEqual(cta.overrides?.first?.props?.labelKey, "cta_key_selected")
+        XCTAssertEqual(cta.overrides?.first?.props?.style, .secondary)
+    }
+
     func testThemePairWithoutDark() throws {
         let entries = try XCTUnwrap(fixtures["accept"] as? [[String: Any]])
         let entry = try XCTUnwrap(entries.first { ($0["name"] as? String) == "theme pair without dark" })
@@ -161,6 +201,45 @@ final class BuilderConfigModelTests: XCTestCase {
         }
         XCTAssertEqual(id, "vid_1")
         XCTAssertNil(fallback)
+    }
+
+    func testOverrideWithUnknownWhenKindIsRetainedButNeverMatching() throws {
+        // Pins render-fixtures.json's acceptLenient case: the strict schema
+        // rejects the whole config, but platform decoders decode leniently,
+        // skipping ONLY this override entry's activation (never its
+        // presence) per the unknown-condition-kind rule.
+        let entries = try XCTUnwrap(fixtures["acceptLenient"] as? [[String: Any]])
+        let entry = try XCTUnwrap(entries.first {
+            ($0["name"] as? String)?.hasPrefix("override with unknown when.kind") == true
+        })
+        let config = try XCTUnwrap(entry["config"])
+        let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
+        guard case .stack(let root) = decoded.root, case .text(let title) = root.children[0] else {
+            return XCTFail("expected root.children[0] to be .text")
+        }
+        let overrides = try XCTUnwrap(title.overrides)
+        XCTAssertEqual(overrides.count, 2, "the unknown-kind entry is RETAINED, not dropped")
+        XCTAssertEqual(overrides[0].when, .introEligible)
+        XCTAssertEqual(overrides[0].props?.align, .center)
+        XCTAssertEqual(overrides[1].when, .unknown, "\"sizeClass\" is not a known condition kind")
+        XCTAssertNil(overrides[1].props, "props are not decoded/validated for an unknown when.kind")
+
+        // Never matches, regardless of the active condition set.
+        let result = applyOverrides(title, active: OverrideActiveConditions(introEligible: true, selected: true))
+        XCTAssertEqual(result.align, .center, "only the KNOWN introEligible override is ever active")
+    }
+
+    func testStructuralKeyInsideKnownKindOverridePropsFailsWholeConfigDecode() throws {
+        // Pins render-fixtures.json's reject case: `type` inside a
+        // `when.kind: "introEligible"` override's `props` must fail the
+        // WHOLE config decode (not just be dropped/ignored), since
+        // introEligible IS a known kind.
+        let entries = try XCTUnwrap(fixtures["reject"] as? [[String: Any]])
+        let entry = try XCTUnwrap(entries.first {
+            ($0["name"] as? String) == "structural key 'type' inside override props on a known when.kind"
+        })
+        let config = try XCTUnwrap(entry["config"])
+        XCTAssertNil(decodeBuilderConfig(RenderFixtures.jsonString(for: config)))
     }
 
     func testEveryAcceptLenientFixtureDecodes() throws {
@@ -240,5 +319,12 @@ private func packageView(fromFixture value: Any?) -> PackageView? {
         packageName: dict["packageName"] as? String ?? "",
         price: dict["price"] as? String ?? "",
         pricePerPeriod: dict["pricePerPeriod"] as? String ?? "",
-        period: dict["period"] as? String ?? "")
+        period: dict["period"] as? String ?? "",
+        pricePerDay: dict["pricePerDay"] as? String,
+        pricePerWeek: dict["pricePerWeek"] as? String,
+        pricePerMonth: dict["pricePerMonth"] as? String,
+        pricePerYear: dict["pricePerYear"] as? String,
+        introPrice: dict["introPrice"] as? String,
+        introPeriod: dict["introPeriod"] as? String,
+        relativeDiscount: dict["relativeDiscount"] as? String)
 }

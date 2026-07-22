@@ -76,5 +76,5 @@ public func relevantPackageView(
     guard let id = selectedPackageId,
           let pkg = offering?.packages.first(where: { $0.identifier == id })
     else { return nil }
-    return packageView(from: pkg.product, displayName: pkg.product.displayName)
+    return packageView(from: pkg.product, displayName: pkg.product.displayName, offering: offering)
 }

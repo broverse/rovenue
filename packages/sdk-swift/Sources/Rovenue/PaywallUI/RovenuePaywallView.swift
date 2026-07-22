@@ -101,7 +101,7 @@ public struct RovenuePaywallView: View {
                let rgba = parseHexColor(themeValue(bg, dark: dark)) {
                 color(rgba).ignoresSafeArea()
             }
-            BuilderNodeView(node: config.root, ctx: ctx, cellPackage: nil)
+            BuilderNodeView(node: config.root, ctx: ctx, cell: nil)
         }
     }
 
@@ -145,14 +145,26 @@ struct PaywallRenderContext {
     let onRestore: (() -> Void)?
     let onUrl: ((URL) -> Void)?
 
-    /// Localized + variable-resolved label. `cellPackage` scopes variables
-    /// to a package cell; elsewhere the selected package wins.
-    func label(_ key: String, cellPackage: PackageView?) -> String {
+    /// Localized + variable-resolved label. `cell` scopes variables to a
+    /// package cell; elsewhere the selected package wins.
+    func label(_ key: String, cell: CellScope?) -> String {
         let text = resolveText(config, locale: locale, key: key) ?? ""
         let pkg = relevantPackageView(
-            cell: cellPackage, selectedPackageId: selectedPackageId, offering: offering)
+            cell: cell?.view, selectedPackageId: selectedPackageId, offering: offering)
         return resolveVariables(text, pkg: pkg)
     }
+}
+
+/// The package a `cellTemplate` subtree is currently scoped to — carries
+/// both the identifier (needed to evaluate the `selected` override
+/// condition against the live global selection) and its resolved
+/// `PackageView` (needed for `{{variable}}` substitution). `nil` outside any
+/// `cellTemplate` subtree. Mirrors nodes.tsx's `insideCellTemplate` +
+/// `cellPackageId` pair, bundled into one value since they always travel
+/// together.
+struct CellScope {
+    let packageId: String
+    let view: PackageView
 }
 
 // MARK: - Node views
@@ -160,14 +172,21 @@ struct PaywallRenderContext {
 struct BuilderNodeView: View {
     let node: BuilderNode
     let ctx: PaywallRenderContext
-    let cellPackage: PackageView?
+    let cell: CellScope?
 
     var body: some View {
-        switch node {
-        case .stack(let p): StackNodeView(props: p, ctx: ctx, cellPackage: cellPackage)
+        // Every node passes through `applyOverrides` here, BEFORE any
+        // style/text resolution happens in the per-type views below —
+        // `resolved` (not the original `node`) is what gets dispatched.
+        // Mirrors nodes.tsx's `renderNode`.
+        let active = activeOverrideConditions(
+            cellPackageId: cell?.packageId, selectedPackageId: ctx.selectedPackageId, offering: ctx.offering)
+        let resolved = applyOverrides(node, active: active)
+        switch resolved {
+        case .stack(let p): StackNodeView(props: p, ctx: ctx, cell: cell)
         case .text(let p): textView(p)
         case .image(let p): imageView(p)
-        case .button(let p): ActionButtonView(props: p, ctx: ctx, cellPackage: cellPackage)
+        case .button(let p): ActionButtonView(props: p, ctx: ctx, cell: cell)
         case .packageList(let p): PackageListView(props: p, ctx: ctx)
         case .purchaseButton(let p): PurchaseButtonView(props: p, ctx: ctx)
         case .spacer(let p):
@@ -178,14 +197,14 @@ struct BuilderNodeView: View {
             }
         case .unknown(_, let fallback):
             if let fallback {
-                BuilderNodeView(node: fallback.node, ctx: ctx, cellPackage: cellPackage)
+                BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
             }
         }
     }
 
     @ViewBuilder
     private func textView(_ p: TextProps) -> some View {
-        let base = Text(ctx.label(p.key, cellPackage: cellPackage))
+        let base = Text(ctx.label(p.key, cell: cell))
             .font(font(for: p.role))
             .multilineTextAlignment(textAlignment(p.align))
         if let pair = p.color, let rgba = parseHexColor(themeValue(pair, dark: ctx.dark)) {
@@ -206,7 +225,7 @@ struct BuilderNodeView: View {
             }
             .frame(height: p.height.map { CGFloat($0) })
             .cornerRadius(CGFloat(p.cornerRadius ?? 0))
-            .accessibilityLabel(p.alt.map { ctx.label($0, cellPackage: cellPackage) } ?? "")
+            .accessibilityLabel(p.alt.map { ctx.label($0, cell: cell) } ?? "")
         }
     }
 
@@ -231,7 +250,7 @@ struct BuilderNodeView: View {
 struct StackNodeView: View {
     let props: StackProps
     let ctx: PaywallRenderContext
-    let cellPackage: PackageView?
+    let cell: CellScope?
 
     var body: some View {
         styled(stackContent)
@@ -257,7 +276,7 @@ struct StackNodeView: View {
         // duplicate ForEach ids are undefined behavior in SwiftUI. Position
         // is the correct identity for a full-remount renderer.
         ForEach(Array(props.children.enumerated()), id: \.offset) { entry in
-            BuilderNodeView(node: entry.element, ctx: ctx, cellPackage: cellPackage)
+            BuilderNodeView(node: entry.element, ctx: ctx, cell: cell)
         }
     }
 
@@ -328,12 +347,12 @@ struct StackNodeView: View {
 struct ActionButtonView: View {
     let props: ButtonProps
     let ctx: PaywallRenderContext
-    let cellPackage: PackageView?
+    let cell: CellScope?
 
     var body: some View {
         if actionButtonVisible(props.action, hasRestoreHandler: ctx.onRestore != nil) {
             Button(action: perform) {
-                Text(ctx.label(props.labelKey, cellPackage: cellPackage))
+                Text(ctx.label(props.labelKey, cell: cell))
                     .font(props.style == .primary ? .body.weight(.semibold) : .body)
             }
             .buttonStyle(.plain)
@@ -371,31 +390,53 @@ struct PackageListView: View {
         }
     }
 
+    @ViewBuilder
     private func cellViews(_ cells: [Package]) -> some View {
         // Positional identity for the same reason as stack children: the
         // cell list is derived from user-authored packageIds, which the
         // client never re-validates for uniqueness.
         ForEach(Array(cells.enumerated()), id: \.offset) { cellEntry in
             let pkg = cellEntry.element
-            let view = packageView(from: pkg.product, displayName: pkg.product.displayName)
             let selected = ctx.selectedPackageId == pkg.identifier
-            Button {
-                ctx.select(pkg.identifier)
-            } label: {
-                VStack(spacing: 2) {
-                    Text(view.packageName).font(.body.weight(.semibold))
-                    Text(view.pricePerPeriod).font(.caption)
+            if let template = props.cellTemplate {
+                // Render the template subtree once per package, INSIDE the
+                // same pressable cell wrapper (selection/click unchanged) —
+                // the cell-scoped `CellScope` is what makes `{{price}}` etc.
+                // inside the template resolve to THIS cell's package rather
+                // than the globally selected one, and what makes a
+                // `selected`-condition override inside the template match
+                // only the currently-selected cell.
+                let view = packageView(from: pkg.product, displayName: pkg.product.displayName, offering: ctx.offering)
+                let cell = CellScope(packageId: pkg.identifier, view: view)
+                Button {
+                    ctx.select(pkg.identifier)
+                } label: {
+                    BuilderNodeView(node: template.node, ctx: ctx, cell: cell)
                 }
-                .padding(10)
-                .frame(maxWidth: .infinity)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(selected ? Color.accentColor : Color.secondary.opacity(0.35),
-                                lineWidth: selected ? 2 : 1)
-                )
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? [.isSelected] : [])
+            } else {
+                // No cellTemplate -> built-in cell (name + price), unchanged
+                // from before overrides/cellTemplate existed.
+                let view = packageView(from: pkg.product, displayName: pkg.product.displayName, offering: ctx.offering)
+                Button {
+                    ctx.select(pkg.identifier)
+                } label: {
+                    VStack(spacing: 2) {
+                        Text(view.packageName).font(.body.weight(.semibold))
+                        Text(view.pricePerPeriod).font(.caption)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(selected ? Color.accentColor : Color.secondary.opacity(0.35),
+                                    lineWidth: selected ? 2 : 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? [.isSelected] : [])
             }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(selected ? [.isSelected] : [])
         }
     }
 }
@@ -408,7 +449,7 @@ struct PurchaseButtonView: View {
         let enabled = purchaseEnabled(
             selectedPackageId: ctx.selectedPackageId, isPurchasing: ctx.isPurchasing)
         Button(action: ctx.purchase) {
-            Text(ctx.label(props.labelKey, cellPackage: nil))
+            Text(ctx.label(props.labelKey, cell: nil))
                 .font(.body.weight(.semibold))
                 .padding(.vertical, 12)
                 .frame(maxWidth: .infinity)

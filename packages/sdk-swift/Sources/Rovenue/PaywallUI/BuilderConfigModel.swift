@@ -120,6 +120,224 @@ public enum ButtonAction: Decodable, Equatable, Sendable {
     }
 }
 
+// MARK: - Overrides (Phase D2)
+//
+// Cross-platform contract: packages/shared/src/paywall/schema.ts's
+// `OverrideCondition`/`NodeOverride`/`OVERRIDABLE_PROP_KEYS`. Every node
+// payload gains an optional `overrides: [NodeOverride<...>]`; conditions are
+// evaluated at render time (see PaywallOverrides.swift's
+// `activeOverrideConditions` + `applyOverrides`).
+//
+// Decode leniency, matching render-fixtures.json's `_comment`: an unknown
+// `when.kind` string decodes to `.unknown` — retained but never matching,
+// NOT a config failure (acceptLenient-pinned). Malformed/structural keys
+// inside `props` of a KNOWN kind (introEligible/selected) fail the WHOLE
+// config decode (reject-pinned) — that validation happens per node type in
+// each `*OverrideProps` struct below via `validateOverridePropKeys`.
+
+/// The `when.kind` of a single override entry. `.unknown` covers any string
+/// outside the two known literals — decoding never throws for this field
+/// alone; see `NodeOverride.init(from:)`.
+public enum OverrideConditionKind: Equatable, Sendable {
+    case introEligible
+    case selected
+    case unknown
+}
+
+/// A single node-type's whitelist of override-able prop keys — the node's
+/// own OPTIONAL VISUAL fields only. This is the Swift mirror of
+/// packages/shared/src/paywall/schema.ts's `OVERRIDABLE_PROP_KEYS`, the
+/// single source of truth; keep the two tables in sync by hand.
+enum OverridablePropKeys {
+    static let stack: Set<String> = ["spacing", "align", "background", "cornerRadius"]
+    static let text: Set<String> = ["key", "color", "align"]
+    static let image: Set<String> = ["cornerRadius"]
+    static let button: Set<String> = ["labelKey", "style"]
+    static let packageList: Set<String> = []
+    static let purchaseButton: Set<String> = ["labelKey"]
+    static let spacer: Set<String> = []
+}
+
+/// A `CodingKey` that accepts ANY string, used to enumerate every key
+/// actually present in a JSON object (`container.allKeys`) — Swift's normal
+/// `CodingKeys` enums only ever see keys they already know about, so this is
+/// how `validateOverridePropKeys` can detect a stray/structural key that a
+/// closed `CodingKeys` decode would otherwise silently ignore.
+private struct DynamicCodingKey: CodingKey {
+    let stringValue: String
+    init?(stringValue: String) { self.stringValue = stringValue }
+    var intValue: Int? { nil }
+    init?(intValue: Int) { nil }
+}
+
+/// Throws when `decoder`'s keyed container carries any key outside
+/// `allowed` — the defensive check that makes a structural key (e.g.
+/// `"type"`) inside a KNOWN when.kind's `props` fail the whole config
+/// decode, per render-fixtures.json's reject-pinned case.
+private func validateOverridePropKeys(_ decoder: Decoder, allowed: Set<String>) throws {
+    let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+    for key in container.allKeys where !allowed.contains(key.stringValue) {
+        throw DecodingError.dataCorruptedError(
+            forKey: key, in: container,
+            debugDescription: "\"\(key.stringValue)\" is not an overridable prop for this node type.")
+    }
+}
+
+public struct StackOverrideProps: Decodable, Equatable, Sendable {
+    public let spacing: Double?
+    public let align: HAlign?
+    public let background: ThemePair?
+    public let cornerRadius: Double?
+
+    public init(spacing: Double? = nil, align: HAlign? = nil, background: ThemePair? = nil, cornerRadius: Double? = nil) {
+        self.spacing = spacing; self.align = align; self.background = background; self.cornerRadius = cornerRadius
+    }
+
+    private enum CodingKeys: String, CodingKey { case spacing, align, background, cornerRadius }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.stack)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        spacing = try container.decodeIfPresent(Double.self, forKey: .spacing)
+        align = try container.decodeIfPresent(HAlign.self, forKey: .align)
+        background = try container.decodeIfPresent(ThemePair.self, forKey: .background)
+        cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
+    }
+}
+
+public struct TextOverrideProps: Decodable, Equatable, Sendable {
+    public let key: String?
+    public let color: ThemePair?
+    public let align: HAlign?
+
+    public init(key: String? = nil, color: ThemePair? = nil, align: HAlign? = nil) {
+        self.key = key; self.color = color; self.align = align
+    }
+
+    private enum CodingKeys: String, CodingKey { case key, color, align }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.text)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = try container.decodeIfPresent(String.self, forKey: .key)
+        color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
+        align = try container.decodeIfPresent(HAlign.self, forKey: .align)
+    }
+}
+
+public struct ImageOverrideProps: Decodable, Equatable, Sendable {
+    public let cornerRadius: Double?
+
+    public init(cornerRadius: Double? = nil) {
+        self.cornerRadius = cornerRadius
+    }
+
+    private enum CodingKeys: String, CodingKey { case cornerRadius }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.image)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
+    }
+}
+
+public struct ButtonOverrideProps: Decodable, Equatable, Sendable {
+    public let labelKey: String?
+    public let style: ButtonVisualStyle?
+
+    public init(labelKey: String? = nil, style: ButtonVisualStyle? = nil) {
+        self.labelKey = labelKey; self.style = style
+    }
+
+    private enum CodingKeys: String, CodingKey { case labelKey, style }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.button)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        labelKey = try container.decodeIfPresent(String.self, forKey: .labelKey)
+        style = try container.decodeIfPresent(ButtonVisualStyle.self, forKey: .style)
+    }
+}
+
+/// Empty whitelist (`OVERRIDABLE_PROP_KEYS.packageList == []`) — no fields
+/// exist to override on this type; `props` can only ever be `{}`.
+public struct PackageListOverrideProps: Decodable, Equatable, Sendable {
+    public init() {}
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.packageList)
+    }
+}
+
+public struct PurchaseButtonOverrideProps: Decodable, Equatable, Sendable {
+    public let labelKey: String?
+
+    public init(labelKey: String? = nil) {
+        self.labelKey = labelKey
+    }
+
+    private enum CodingKeys: String, CodingKey { case labelKey }
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.purchaseButton)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        labelKey = try container.decodeIfPresent(String.self, forKey: .labelKey)
+    }
+}
+
+/// Empty whitelist (`OVERRIDABLE_PROP_KEYS.spacer == []`) — same shape as
+/// `PackageListOverrideProps`; its only optional field (`size`) is
+/// structural per spec, not overridable.
+public struct SpacerOverrideProps: Decodable, Equatable, Sendable {
+    public init() {}
+
+    public init(from decoder: Decoder) throws {
+        try validateOverridePropKeys(decoder, allowed: OverridablePropKeys.spacer)
+    }
+}
+
+/// A single conditional prop swap: `{ when: { kind }, props }`. `Props` is
+/// the node type's own override-props struct (e.g. `StackOverrideProps`).
+///
+/// Decode rules (mirrors schema.ts's strict schema + the platform-lenient
+/// counterpart per render-fixtures.json): an unknown `when.kind` decodes to
+/// `.unknown` with `props` left `nil` — this entry is retained in the array
+/// but can never become active (see `applyOverrides`), and its `props`
+/// value is deliberately NOT validated/decoded (lenient — matches the
+/// acceptLenient fixture, which pairs an unknown kind with otherwise-valid
+/// props). A KNOWN kind's `props` IS decoded via `Props.init(from:)`, which
+/// throws on any non-whitelisted key — that failure propagates up through
+/// this initializer and fails the WHOLE config decode, per the reject fixture.
+public struct NodeOverride<Props: Decodable & Equatable & Sendable>: Decodable, Equatable, Sendable {
+    public let when: OverrideConditionKind
+    public let props: Props?
+
+    public init(when: OverrideConditionKind, props: Props?) {
+        self.when = when
+        self.props = props
+    }
+
+    private enum CodingKeys: String, CodingKey { case when, props }
+    private enum WhenCodingKeys: String, CodingKey { case kind }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let whenContainer = try container.nestedContainer(keyedBy: WhenCodingKeys.self, forKey: .when)
+        let kindRaw = try whenContainer.decode(String.self, forKey: .kind)
+        switch kindRaw {
+        case "introEligible":
+            self.when = .introEligible
+            self.props = try container.decode(Props.self, forKey: .props)
+        case "selected":
+            self.when = .selected
+            self.props = try container.decode(Props.self, forKey: .props)
+        default:
+            self.when = .unknown
+            self.props = nil
+        }
+    }
+}
+
 // MARK: - Node payloads
 //
 // Each mirrors the field set of its schema.ts counterpart. `fallback` is
@@ -137,6 +355,7 @@ public struct StackProps: Decodable {
     public let size: SizeSpec?
     public let background: ThemePair?
     public let cornerRadius: Double?
+    public let overrides: [NodeOverride<StackOverrideProps>]?
     public let fallback: BuilderNodeBox?
 
     // Explicit memberwise init: conforming to `Decodable` alone suppresses
@@ -144,10 +363,11 @@ public struct StackProps: Decodable {
     // programmatically-built trees) still need to construct these directly.
     public init(id: String, axis: Axis, children: [BuilderNode], spacing: Double? = nil, align: HAlign? = nil,
                 padding: Padding? = nil, size: SizeSpec? = nil, background: ThemePair? = nil,
-                cornerRadius: Double? = nil, fallback: BuilderNodeBox? = nil) {
+                cornerRadius: Double? = nil, overrides: [NodeOverride<StackOverrideProps>]? = nil,
+                fallback: BuilderNodeBox? = nil) {
         self.id = id; self.axis = axis; self.children = children; self.spacing = spacing; self.align = align
         self.padding = padding; self.size = size; self.background = background
-        self.cornerRadius = cornerRadius; self.fallback = fallback
+        self.cornerRadius = cornerRadius; self.overrides = overrides; self.fallback = fallback
     }
 }
 
@@ -157,12 +377,13 @@ public struct TextProps: Decodable {
     public let role: TextRole
     public let color: ThemePair?
     public let align: HAlign?
+    public let overrides: [NodeOverride<TextOverrideProps>]?
     public let fallback: BuilderNodeBox?
 
     public init(id: String, key: String, role: TextRole, color: ThemePair? = nil, align: HAlign? = nil,
-                fallback: BuilderNodeBox? = nil) {
+                overrides: [NodeOverride<TextOverrideProps>]? = nil, fallback: BuilderNodeBox? = nil) {
         self.id = id; self.key = key; self.role = role; self.color = color; self.align = align
-        self.fallback = fallback
+        self.overrides = overrides; self.fallback = fallback
     }
 }
 
@@ -172,12 +393,14 @@ public struct ImageProps: Decodable {
     public let height: Double?
     public let cornerRadius: Double?
     public let alt: String?
+    public let overrides: [NodeOverride<ImageOverrideProps>]?
     public let fallback: BuilderNodeBox?
 
     public init(id: String, url: ThemePair, height: Double? = nil, cornerRadius: Double? = nil,
-                alt: String? = nil, fallback: BuilderNodeBox? = nil) {
+                alt: String? = nil, overrides: [NodeOverride<ImageOverrideProps>]? = nil,
+                fallback: BuilderNodeBox? = nil) {
         self.id = id; self.url = url; self.height = height; self.cornerRadius = cornerRadius
-        self.alt = alt; self.fallback = fallback
+        self.alt = alt; self.overrides = overrides; self.fallback = fallback
     }
 }
 
@@ -186,12 +409,13 @@ public struct ButtonProps: Decodable {
     public let labelKey: String
     public let style: ButtonVisualStyle
     public let action: ButtonAction
+    public let overrides: [NodeOverride<ButtonOverrideProps>]?
     public let fallback: BuilderNodeBox?
 
     public init(id: String, labelKey: String, style: ButtonVisualStyle, action: ButtonAction,
-                fallback: BuilderNodeBox? = nil) {
+                overrides: [NodeOverride<ButtonOverrideProps>]? = nil, fallback: BuilderNodeBox? = nil) {
         self.id = id; self.labelKey = labelKey; self.style = style; self.action = action
-        self.fallback = fallback
+        self.overrides = overrides; self.fallback = fallback
     }
 }
 
@@ -200,32 +424,44 @@ public struct PackageListProps: Decodable {
     public let packageIds: [String]
     public let defaultSelected: String?
     public let cellLayout: CellLayout
+    /// Optional subtree rendered once per effective package, with
+    /// cell-scoped variables, replacing the built-in (name + price) cell.
+    /// Absent -> current built-in cell (backward compatible). Recursive via
+    /// `BuilderNodeBox`, exactly like `fallback`.
+    public let cellTemplate: BuilderNodeBox?
+    public let overrides: [NodeOverride<PackageListOverrideProps>]?
     public let fallback: BuilderNodeBox?
 
     public init(id: String, packageIds: [String], defaultSelected: String? = nil, cellLayout: CellLayout,
+                cellTemplate: BuilderNodeBox? = nil, overrides: [NodeOverride<PackageListOverrideProps>]? = nil,
                 fallback: BuilderNodeBox? = nil) {
         self.id = id; self.packageIds = packageIds; self.defaultSelected = defaultSelected
-        self.cellLayout = cellLayout; self.fallback = fallback
+        self.cellLayout = cellLayout; self.cellTemplate = cellTemplate
+        self.overrides = overrides; self.fallback = fallback
     }
 }
 
 public struct PurchaseButtonProps: Decodable {
     public let id: String
     public let labelKey: String
+    public let overrides: [NodeOverride<PurchaseButtonOverrideProps>]?
     public let fallback: BuilderNodeBox?
 
-    public init(id: String, labelKey: String, fallback: BuilderNodeBox? = nil) {
-        self.id = id; self.labelKey = labelKey; self.fallback = fallback
+    public init(id: String, labelKey: String, overrides: [NodeOverride<PurchaseButtonOverrideProps>]? = nil,
+                fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.labelKey = labelKey; self.overrides = overrides; self.fallback = fallback
     }
 }
 
 public struct SpacerProps: Decodable {
     public let id: String
     public let size: Double?
+    public let overrides: [NodeOverride<SpacerOverrideProps>]?
     public let fallback: BuilderNodeBox?
 
-    public init(id: String, size: Double? = nil, fallback: BuilderNodeBox? = nil) {
-        self.id = id; self.size = size; self.fallback = fallback
+    public init(id: String, size: Double? = nil, overrides: [NodeOverride<SpacerOverrideProps>]? = nil,
+                fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.size = size; self.overrides = overrides; self.fallback = fallback
     }
 }
 
