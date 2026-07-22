@@ -335,6 +335,7 @@ describe("CH Kafka Engine parity", () => {
       paywallContext.paywallId,
       paywallContext.placementId,
       clientEventId,
+      "view",
     );
 
     const ch = createClient({
@@ -354,7 +355,7 @@ describe("CH Kafka Engine parity", () => {
     }, 90_000);
 
     const rawRes = await ch.query({
-      query: `SELECT projectId, subscriberId, paywallId, placementId, placementRevision, variantId, experimentKey FROM rovenue.raw_paywall_events FINAL WHERE eventId = '${expectedEventId}'`,
+      query: `SELECT projectId, subscriberId, paywallId, placementId, placementRevision, variantId, experimentKey, kind FROM rovenue.raw_paywall_events FINAL WHERE eventId = '${expectedEventId}'`,
       format: "JSONEachRow",
     });
     const [raw] = (await rawRes.json()) as Array<{
@@ -365,6 +366,7 @@ describe("CH Kafka Engine parity", () => {
       placementRevision: string | number;
       variantId: string | null;
       experimentKey: string | null;
+      kind: string;
     }>;
     expect(raw).toMatchObject({
       projectId,
@@ -373,6 +375,7 @@ describe("CH Kafka Engine parity", () => {
       placementId: paywallContext.placementId,
       variantId: paywallContext.variantId,
       experimentKey: paywallContext.experimentKey,
+      kind: "view",
     });
     expect(Number(raw!.placementRevision)).toBe(paywallContext.placementRevision);
 
@@ -386,6 +389,104 @@ describe("CH Kafka Engine parity", () => {
     }>;
     expect(Number(rollupRow?.v ?? 0)).toBe(1);
     expect(Number(rollupRow?.u ?? 0)).toBe(1);
+
+    await ch.close();
+  }, 180_000);
+
+  it("paywall_close outbox row lands with kind='close' and is excluded from mv_paywall_daily_target (0020)", async () => {
+    const { paywallEventId } = await import(
+      "../src/workers/outbox-dispatcher"
+    );
+
+    const db = getDb();
+    await db.execute(
+      sql`DELETE FROM outbox_events WHERE id LIKE 'evt_paywall_close_parity_%'`,
+    );
+
+    const viewId = `evt_paywall_close_parity_view_${Date.now()}`;
+    const closeId = `evt_paywall_close_parity_close_${Date.now()}`;
+    const projectId = `prj_pw_close_parity_${Date.now()}`;
+    const subscriberId = `sub_pw_close_parity_${Date.now()}`;
+    const viewClientEventId = createId();
+    const closeClientEventId = createId();
+    const occurredAt = "2026-07-20T10:05:00.000Z";
+    const paywallContext = {
+      paywallId: "pw_default",
+      placementId: "plc_onboarding_close",
+      placementRevision: 1,
+      variantId: "var_treatment",
+      experimentKey: "exp_key_1",
+    };
+
+    // A view AND a close for the same placement — the view must still
+    // be counted in the daily rollup, the close must not.
+    await drizzle.outboxRepo.insert(db, {
+      id: viewId,
+      aggregateType: "PAYWALL_EVENT",
+      aggregateId: projectId,
+      eventType: "paywall_view",
+      payload: {
+        eventId: viewClientEventId,
+        eventType: "paywall_view",
+        occurredAt,
+        subscriberId,
+        paywallContext,
+      },
+    });
+    await drizzle.outboxRepo.insert(db, {
+      id: closeId,
+      aggregateType: "PAYWALL_EVENT",
+      aggregateId: projectId,
+      eventType: "paywall_close",
+      payload: {
+        eventId: closeClientEventId,
+        eventType: "paywall_close",
+        occurredAt,
+        subscriberId,
+        paywallContext,
+      },
+    });
+
+    const expectedCloseEventId = paywallEventId(
+      projectId,
+      subscriberId,
+      paywallContext.paywallId,
+      paywallContext.placementId,
+      closeClientEventId,
+      "close",
+    );
+
+    const ch = createClient({
+      url: chUrl,
+      username: "rovenue",
+      password: "rovenue_test",
+      database: "rovenue",
+    });
+
+    await waitFor(async () => {
+      const res = await ch.query({
+        query: `SELECT count() AS c FROM rovenue.raw_paywall_events FINAL WHERE eventId = '${expectedCloseEventId}'`,
+        format: "JSONEachRow",
+      });
+      const rows = (await res.json()) as Array<{ c: string | number }>;
+      return Number(rows[0]?.c ?? 0) === 1;
+    }, 90_000);
+
+    const closeRes = await ch.query({
+      query: `SELECT kind FROM rovenue.raw_paywall_events FINAL WHERE eventId = '${expectedCloseEventId}'`,
+      format: "JSONEachRow",
+    });
+    const [closeRow] = (await closeRes.json()) as Array<{ kind: string }>;
+    expect(closeRow?.kind).toBe("close");
+
+    // Rollup: exactly one VIEW counted for this placement, the close
+    // is excluded by mv_paywall_daily's `WHERE kind = 'view'` filter.
+    const rollup = await ch.query({
+      query: `SELECT sum(views) AS v FROM rovenue.mv_paywall_daily_target WHERE projectId = '${projectId}' AND placementId = '${paywallContext.placementId}'`,
+      format: "JSONEachRow",
+    });
+    const [rollupRow] = (await rollup.json()) as Array<{ v: string | number }>;
+    expect(Number(rollupRow?.v ?? 0)).toBe(1);
 
     await ch.close();
   }, 180_000);

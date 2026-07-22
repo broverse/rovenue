@@ -84,6 +84,7 @@ describe("shapePaywallEventMessage", () => {
       "pw_default",
       "plc_onboarding",
       "client_evt_1",
+      "view",
     );
     expect(parsed.eventId).toBe(expectedEventId);
     expect(parsed.eventType).toBe("paywall_view");
@@ -97,6 +98,7 @@ describe("shapePaywallEventMessage", () => {
       variantId: "var_treatment",
       experimentKey: "exp_key_1",
       occurredAt: "2026-07-20T10:00:00.000Z",
+      kind: "view",
     });
   });
 
@@ -132,6 +134,7 @@ describe("shapePaywallEventMessage", () => {
       "pw_default",
       "plc_onboarding",
       row.id,
+      "view",
     );
     expect(JSON.parse(value).eventId).toBe(expected);
   });
@@ -152,5 +155,46 @@ describe("shapePaywallEventMessage", () => {
     expect(key).toBe("prj_1");
     const parsed = JSON.parse(value) as { payload: Record<string, unknown> };
     expect(parsed.payload.subscriberId).toBe("");
+  });
+
+  // ===========================================================
+  // kind (0020) — eventType suffix, forward-tolerant
+  // ===========================================================
+
+  it("sets payload.kind to 'view' for a paywall_view row", () => {
+    const row = buildRow({ eventType: "paywall_view" });
+    const { value } = shapePaywallEventMessage(row);
+    const parsed = JSON.parse(value) as { payload: Record<string, unknown> };
+    expect(parsed.payload.kind).toBe("view");
+  });
+
+  it("sets payload.kind to 'close' for a paywall_close row", () => {
+    const row = buildRow({ eventType: "paywall_close" });
+    const { value } = shapePaywallEventMessage(row);
+    const parsed = JSON.parse(value) as { payload: Record<string, unknown> };
+    expect(parsed.payload.kind).toBe("close");
+  });
+
+  it("passes an unrecognized paywall_* suffix through as-is (forward-tolerant)", () => {
+    const row = buildRow({ eventType: "paywall_impression" });
+    const { value } = shapePaywallEventMessage(row);
+    const parsed = JSON.parse(value) as { payload: Record<string, unknown> };
+    expect(parsed.payload.kind).toBe("impression");
+  });
+
+  it("produces a DIFFERENT eventId for paywall_view vs paywall_close sharing the same clientEventId (kind joins the hash input)", () => {
+    const viewRow = buildRow({ eventType: "paywall_view" });
+    const closeRow = buildRow({ eventType: "paywall_close" });
+    const viewEventId = JSON.parse(shapePaywallEventMessage(viewRow).value).eventId;
+    const closeEventId = JSON.parse(shapePaywallEventMessage(closeRow).value).eventId;
+    expect(viewEventId).not.toBe(closeEventId);
+  });
+});
+
+describe("paywallEventId kind divergence", () => {
+  it("changes when kind changes, all other inputs held equal", () => {
+    const view = paywallEventId("prj_1", "sub_1", "pw_1", "plc_1", "evt_1", "view");
+    const close = paywallEventId("prj_1", "sub_1", "pw_1", "plc_1", "evt_1", "close");
+    expect(view).not.toBe(close);
   });
 });

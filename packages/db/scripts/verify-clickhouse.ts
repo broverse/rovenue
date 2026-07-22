@@ -198,6 +198,29 @@ async function main(): Promise<void> {
     drift++;
   }
 
+  // ---------- Per-column assertions (migration 0020) ----------
+  //
+  // raw_paywall_events must carry kind added by migration 0020
+  // (paywall event kind — distinguishes paywall_view from
+  // paywall_close within the same rollup).
+  const kindColRows = await client.query({
+    query: `
+      SELECT name FROM system.columns
+      WHERE database = 'rovenue' AND table = 'raw_paywall_events' AND name = 'kind'
+    `,
+    format: "JSONEachRow",
+  });
+  const kindCols = (await kindColRows.json()) as Array<{ name: string }>;
+  const hasKind = kindCols.length > 0;
+  console.log(
+    `Column assertions (migration 0020):\n  ${
+      hasKind ? "✓" : "✗"
+    } raw_paywall_events.kind`,
+  );
+  if (!hasKind) {
+    drift++;
+  }
+
   await client.close();
 
   if (drift > 0) {

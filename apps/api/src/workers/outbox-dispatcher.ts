@@ -131,6 +131,21 @@ const AGGREGATE_TO_TOPIC: Record<OutboxEvent["aggregateType"], string> = {
 // pattern in routes/v1/sdk-sessions.ts) — instead of r.id. Falls back to
 // r.id when the SDK omitted a client eventId (still unique, just loses
 // cross-retry dedup for that one row).
+//
+// `kind` (0020) — derived from the outbox row's eventType by stripping
+// the `paywall_` prefix (`paywall_view` -> "view", `paywall_close` ->
+// "close"; an unrecognized `paywall_*` suffix passes through as-is,
+// forward-tolerant of future paywall lifecycle events). kind joins the
+// eventId hash input so a `paywall_view` and a `paywall_close` sharing
+// the same clientEventId (e.g. one SDK-generated id per paywall
+// presentation, used for both its view and close) get DISTINCT
+// eventIds instead of colliding in raw_paywall_events' ReplacingMergeTree.
+// One-time cost at this migration's deploy: any old-format message
+// already in flight in Kafka when the CH-side migration lands (produced
+// pre-deploy, so lacking `kind`) computes a DIFFERENT eventId than a
+// same-content message produced post-deploy would — an in-flight
+// dispatcher-level retry across that exact window could double-count
+// once. Accepted per spec (see migration 0020's header note).
 
 interface PaywallEventClientEnvelope {
   eventId?: string;
@@ -151,9 +166,10 @@ export function paywallEventId(
   paywallId: string,
   placementId: string,
   clientEventId: string,
+  kind: string,
 ): string {
   return createHash("sha256")
-    .update(`${projectId}:${subscriberId}:${paywallId}:${placementId}:${clientEventId}`)
+    .update(`${projectId}:${subscriberId}:${paywallId}:${placementId}:${clientEventId}:${kind}`)
     .digest("hex");
 }
 
@@ -172,6 +188,9 @@ export function shapePaywallEventMessage(row: OutboxEvent): {
   const experimentKey = ctx?.experimentKey ?? null;
   const clientEventId = envelope.eventId ?? row.id;
   const occurredAt = envelope.occurredAt ?? row.createdAt.toISOString();
+  const kind = row.eventType.startsWith("paywall_")
+    ? row.eventType.slice("paywall_".length)
+    : row.eventType;
 
   const eventId = paywallEventId(
     projectId,
@@ -179,6 +198,7 @@ export function shapePaywallEventMessage(row: OutboxEvent): {
     paywallId,
     placementId,
     clientEventId,
+    kind,
   );
 
   return {
@@ -197,6 +217,7 @@ export function shapePaywallEventMessage(row: OutboxEvent): {
         variantId,
         experimentKey,
         occurredAt,
+        kind,
       },
     }),
   };
