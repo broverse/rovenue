@@ -97,18 +97,42 @@ export async function markPaid(
  * status (excess-property checking), while a variable already typed
  * `NewFunnelPurchase` stays structurally assignable to it and would have
  * its status quietly dropped here.
+ *
+ * THE UPDATE ONLY FIRES ON A ROW THAT IS STILL `pending`, and that
+ * condition is in SQL rather than in a caller's read-then-write.
+ *
+ * Why it has to be here. Three writers can turn a row `paid`:
+ * `/confirm`, the Connect webhook's backstop, and a redelivery of
+ * either. The payment endpoint holds a Redis lock and re-reads the row
+ * inside it, but the backstop takes no lock at all — and between that
+ * in-lock re-read and this statement sit up to six Stripe round-trips.
+ * A backstop landing in that window used to reset `status` to `pending`
+ * and replace the Stripe ids on a row that had just been marked paid:
+ * the buyer kept their entitlement (token, subscriberId and paidAt all
+ * survive `set`), but the purchase record then described an attempt that
+ * was never the one charged. `WHERE status = 'pending'` closes it at the
+ * one place every writer passes through, whoever wins.
+ *
+ * Consequently this returns `null` when the conflicting row was NOT
+ * pending: `ON CONFLICT DO UPDATE … WHERE false` updates nothing and
+ * `RETURNING` yields no row. That is a successful no-op, not an error —
+ * the row that is already paid is the one worth keeping.
  */
 export async function upsertPending(
   db: Db,
   row: Omit<NewFunnelPurchase, "status"> & { status?: never },
-): Promise<FunnelPurchase> {
+): Promise<FunnelPurchase | null> {
   const [saved] = await db
     .insert(funnelPurchases)
     .values({ ...row, status: "pending" })
     .onConflictDoUpdate({
       target: funnelPurchases.sessionId,
       set: { ...row, status: "pending" },
+      // Guards the row that already records a real payment. Unqualified
+      // in Postgres' own terms this reads the EXISTING row (the proposed
+      // one is `excluded.*`), which is exactly what has to be tested.
+      setWhere: eq(funnelPurchases.status, "pending"),
     })
     .returning();
-  return saved;
+  return saved ?? null;
 }
