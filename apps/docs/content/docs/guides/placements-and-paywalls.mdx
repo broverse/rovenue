@@ -142,25 +142,32 @@ when non-null; the `?locale` query parameter continues to slice only the
 Web apps render builder paywalls using the `@rovenue/paywall-renderer`
 package:
 
+On the web there is no SDK façade yet — fetch the placement over REST with
+your public API key and pass the payload straight into the renderer (the
+native SDKs' `getPaywall()` deliberately does **not** expose `builderConfig`;
+it lives only on the wire payload):
+
 ```tsx
 import { PaywallRenderer } from '@rovenue/paywall-renderer';
 
-const paywall = await getPaywall('onboarding_end', 'en');
-if (paywall?.builderConfig) {
-  // Render the builder paywall
+const res = await fetch(`${API_URL}/v1/placements/onboarding_end`, {
+  headers: { Authorization: `Bearer ${PUBLIC_KEY}` },
+});
+const { data } = await res.json();
+
+if (data.paywall?.builderConfig) {
   <PaywallRenderer
-    config={paywall.builderConfig}
-    offering={paywall.offering}
+    config={data.paywall.builderConfig}
+    offering={data.paywall.offering}
     locale="en"
     colorScheme="light"
     priceView={/* formatted price strings per package */}
     onPurchase={(packageId) => { /* handle purchase */ }}
     onClose={() => { /* dismiss */ }}
-    onRestore={() => { /* handle restore */ }}
     onUrl={(url) => { /* open link */ }}
   />
-} else if (paywall?.remoteConfig) {
-  // Fall back to remote-config paywall for Phase A
+} else if (data.paywall?.remoteConfig) {
+  // Fall back to rendering the remote-config JSON yourself
 }
 ```
 
