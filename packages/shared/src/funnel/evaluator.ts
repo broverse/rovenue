@@ -47,6 +47,11 @@ export function evaluateNext(input: EvalInput): EvalResult {
   return resolveGoto("sequential", page.id, pagesOrder, pagesById);
 }
 
+// Resolve the literal "paywall" goto to an actual page id. The literal form
+// carries no page id; a funnel may legally contain multiple paywall pages.
+// To keep routing deterministic (same funnel always routes the same way), we
+// pick the first paywall page in page order. Authors who want a specific paywall
+// should target it by id instead of using the literal.
 function firstPaywallId(
   pagesOrder: string[],
   pagesById: PageGraph,

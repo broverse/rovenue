@@ -228,4 +228,20 @@ describe("evaluateNext", () => {
       }),
     ).toEqual({ next: "paywall" });
   });
+
+  it("resolves literal 'paywall' to the first paywall page when multiple exist", () => {
+    const testPages: PageGraph = new Map([
+      ["pg_info", { id: "pg_info", type: "info", config: {}, default_next: "paywall" }],
+      ["pg_pay1", { id: "pg_pay1", type: "paywall", config: {} }],
+      ["pg_pay2", { id: "pg_pay2", type: "paywall", config: {} }],
+    ]);
+    expect(
+      evaluateNext({
+        page: { id: "pg_info", type: "info", config: {}, default_next: "paywall" },
+        pagesOrder: ["pg_info", "pg_pay1", "pg_pay2"],
+        answers: new Map(),
+        pagesById: testPages,
+      }),
+    ).toEqual({ next: "page", pageId: "pg_pay1" });
+  });
 });
