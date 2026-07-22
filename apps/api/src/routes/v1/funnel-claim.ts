@@ -27,11 +27,13 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { drizzle } from "@rovenue/db";
 import {
   generateClaimToken,
+  hashEmail,
   hashToken,
+  normalizeEmail,
   safeEqualHash,
 } from "../../services/funnel/token";
 import { parseInstallReferrer } from "../../services/funnel/install-referrer";
@@ -302,8 +304,10 @@ export const funnelClaimRoute = new Hono()
       const project = c.get("project");
       const { email, install_id } = c.req.valid("json");
 
-      const normalized = email.trim().toLowerCase();
-      const emailHash = createHash("sha256").update(normalized).digest("hex");
+      // Both derivations come from services/funnel/token so this endpoint
+      // and the payment-intent route that writes the hash cannot drift.
+      const normalized = normalizeEmail(email);
+      const emailHash = hashEmail(email);
 
       const tokenRow = await drizzle.funnelClaimTokenRepo.findByEmailHash(
         drizzle.db,

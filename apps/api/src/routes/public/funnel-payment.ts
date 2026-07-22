@@ -11,6 +11,7 @@ import { chargesEnabled, requireConnectedStripe } from "../../lib/stripe-platfor
 import { resolvePricesForPackages } from "../../services/stripe/price-resolver";
 import { buildClaimLinks } from "../../services/funnel/claim-links";
 import { completeFunnelPurchase } from "../../services/funnel/complete-purchase";
+import { hashEmail } from "../../services/funnel/token";
 import { packagesSchema, parseStoreIds } from "../../lib/offering-hydration";
 import type { AccountScopedStripe } from "../../lib/stripe-account-scoped";
 import type { PresentedContext } from "../../lib/presented-context";
@@ -668,6 +669,25 @@ export const funnelPaymentRoute = new Hono()
         stripeCustomerId: customerId,
         stripeSubscriptionId,
         stripePaymentIntentId,
+        // This is the only moment the buyer's address is in our hands:
+        // `completeFunnelPurchase` is handed a session id and Stripe ids
+        // and nothing else, and the row it reads has no email. Parking
+        // the digest here lets that transaction copy it onto the claim
+        // token without a Stripe round-trip inside a database
+        // transaction — and the token's copy is what makes the
+        // magic-link recovery path reachable for a buyer who installs
+        // days later on another device with no session id.
+        //
+        // The digest only. `hashEmail` is the same derivation
+        // `/v1/sdk/claim-via-email` looks up by, imported from the same
+        // module so the two cannot drift; storing the plaintext would
+        // defeat the point of the token table holding a hash.
+        //
+        // Re-derived on every attempt rather than carried from the
+        // superseded row: a visitor who mistyped their address and
+        // re-submits is correcting where the magic link goes, exactly as
+        // `customers.update` above corrects where the receipt goes.
+        emailHash: hashEmail(email),
         // Written only when there is something to record, so the column
         // keeps whatever it already held on the ordinary path.
         ...(orphaned.length > 0

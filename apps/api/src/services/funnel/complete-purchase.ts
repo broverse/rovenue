@@ -108,6 +108,19 @@ export async function completeFunnelPurchase(input: {
         tokenHash: hashToken(plaintext),
         sessionId: input.sessionId,
         projectId: session.projectId,
+        // Carried across from the purchase row, which is where the
+        // payment-intent route parked it — this transaction never sees
+        // the address itself, and asking Stripe for it would put a
+        // network call inside an open transaction. Without this copy the
+        // magic-link path has nothing to match on, which is the entire
+        // reason a buyer who never returns to the tab can be reached at
+        // all.
+        //
+        // `?? null` and not a throw: rows written before migration 0091
+        // carry no hash, and a buyer who has genuinely paid must still
+        // get their token. They simply lose the email fallback and keep
+        // the session-id and deferred-match paths.
+        emailHash: purchase.emailHash ?? null,
         expiresAt: new Date(Date.now() + TOKEN_TTL_MS),
       });
     } catch (err) {
