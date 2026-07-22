@@ -12,4 +12,11 @@
 	@assets path /assets/*
 	header @assets Cache-Control "public, max-age=31536000, immutable"
 	header /index.html Cache-Control "no-cache"
+	# Stripe's Apple Pay domain association file (shipped in the Vite
+	# public/ dir). This origin serves the funnel paywall at /f/<slug>,
+	# and Stripe will not mark Apple Pay active on a payment method
+	# domain that does not serve this file. The file is extensionless, so
+	# without this header Caddy sends no Content-Type at all; Stripe's own
+	# payment hosts serve it as application/octet-stream.
+	header /.well-known/apple-developer-merchantid-domain-association Content-Type "application/octet-stream"
 }
