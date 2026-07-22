@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { drizzle, getDb, type OutboxEvent } from "@rovenue/db";
 import { assertTopic, disconnectKafka, getProducer } from "../lib/kafka";
 import { logger } from "../lib/logger";
@@ -104,6 +105,104 @@ const AGGREGATE_TO_TOPIC: Record<OutboxEvent["aggregateType"], string> = {
 };
 
 // =============================================================
+// PAYWALL_EVENT payload shaping
+// =============================================================
+//
+// POST /v1/events stores the raw client envelope as the outbox
+// payload (routes/v1/events.ts): `{ eventId?, subscriberId?,
+// occurredAt, paywallContext: { paywallId, placementId,
+// placementRevision, variantId?, experimentKey? }, ... }`. Before
+// publishing we reshape it into a FLAT object mirroring
+// publishExposure()'s payload shape in event-bus.ts, matching CH
+// migration 0017's raw_paywall_events columns 1:1 so the MV can
+// JSONExtract* straight off the top level (same convention as
+// raw_exposures / raw_credit_ledger / raw_sdk_session_events).
+//
+// The envelope's `eventId` is normally the OUTBOX ROW's own stable
+// id (r.id), which already dedups a dispatcher-level crash-replay
+// (same DB row re-claimed after a crash between Kafka ack and
+// markPublished — see the module doc comment above). That does NOT
+// cover an SDK-level retry: a lost 202 response can make the SDK
+// POST /v1/events again, producing a SECOND, DISTINCT outbox row for
+// the same logical paywall view. To collapse that case too, PAYWALL_EVENT
+// rows get a content-derived eventId — sha256 of the fields that
+// identify "this view" (project + subscriber + paywall + placement +
+// the SDK's own client-generated eventId, mirroring the sessionEventId()
+// pattern in routes/v1/sdk-sessions.ts) — instead of r.id. Falls back to
+// r.id when the SDK omitted a client eventId (still unique, just loses
+// cross-retry dedup for that one row).
+
+interface PaywallEventClientEnvelope {
+  eventId?: string;
+  subscriberId?: string;
+  occurredAt?: string;
+  paywallContext?: {
+    paywallId: string;
+    placementId: string;
+    placementRevision: number;
+    variantId?: string;
+    experimentKey?: string;
+  };
+}
+
+export function paywallEventId(
+  projectId: string,
+  subscriberId: string,
+  paywallId: string,
+  placementId: string,
+  clientEventId: string,
+): string {
+  return createHash("sha256")
+    .update(`${projectId}:${subscriberId}:${paywallId}:${placementId}:${clientEventId}`)
+    .digest("hex");
+}
+
+export function shapePaywallEventMessage(row: OutboxEvent): {
+  key: string;
+  value: string;
+} {
+  const envelope = (row.payload ?? {}) as PaywallEventClientEnvelope;
+  const projectId = row.aggregateId; // routes/v1/events.ts sets aggregateId: project.id
+  const subscriberId = envelope.subscriberId ?? "";
+  const ctx = envelope.paywallContext;
+  const paywallId = ctx?.paywallId ?? "";
+  const placementId = ctx?.placementId ?? "";
+  const placementRevision = ctx?.placementRevision ?? 0;
+  const variantId = ctx?.variantId ?? null;
+  const experimentKey = ctx?.experimentKey ?? null;
+  const clientEventId = envelope.eventId ?? row.id;
+  const occurredAt = envelope.occurredAt ?? row.createdAt.toISOString();
+
+  const eventId = paywallEventId(
+    projectId,
+    subscriberId,
+    paywallId,
+    placementId,
+    clientEventId,
+  );
+
+  return {
+    key: subscriberId || projectId,
+    value: JSON.stringify({
+      eventId,
+      eventType: row.eventType,
+      aggregateId: row.aggregateId,
+      createdAt: row.createdAt.toISOString(),
+      payload: {
+        projectId,
+        subscriberId,
+        paywallId,
+        placementId,
+        placementRevision,
+        variantId,
+        experimentKey,
+        occurredAt,
+      },
+    }),
+  };
+}
+
+// =============================================================
 // Per-topic backoff state
 // =============================================================
 //
@@ -204,16 +303,20 @@ export async function runOnce(
     Array.from(byTopic.entries()).map(async ([topic, rows]) => {
       await producer.send({
         topic,
-        messages: rows.map((r) => ({
-          key: r.aggregateId,
-          value: JSON.stringify({
-            eventId: r.id,
-            eventType: r.eventType,
-            aggregateId: r.aggregateId,
-            createdAt: r.createdAt.toISOString(),
-            payload: r.payload,
-          }),
-        })),
+        messages: rows.map((r) =>
+          topic === AGGREGATE_TO_TOPIC.PAYWALL_EVENT
+            ? shapePaywallEventMessage(r)
+            : {
+                key: r.aggregateId,
+                value: JSON.stringify({
+                  eventId: r.id,
+                  eventType: r.eventType,
+                  aggregateId: r.aggregateId,
+                  createdAt: r.createdAt.toISOString(),
+                  payload: r.payload,
+                }),
+              },
+        ),
       });
       return { topic, rows };
     }),

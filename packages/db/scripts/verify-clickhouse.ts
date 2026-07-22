@@ -92,6 +92,12 @@ const EXPECTED_TABLES: ReadonlyArray<{ name: string; engine: string }> = [
   // Plan 3 / 0016 — Refund Shield idempotent session views (replaces SummingMergeTree rollup)
   { name: "v_sdk_sessions_daily", engine: "View" },
   { name: "v_sdk_sessions_lifetime_subscriber", engine: "View" },
+  // 0017/0018 — paywall-placements paywall_view events + daily rollup
+  { name: "paywall_events_queue", engine: "Kafka" },
+  { name: "raw_paywall_events", engine: "ReplacingMergeTree" },
+  { name: "mv_paywall_events_to_raw", engine: "MaterializedView" },
+  { name: "mv_paywall_daily", engine: "MaterializedView" },
+  { name: "mv_paywall_daily_target", engine: "SummingMergeTree" },
 ];
 
 interface TableRow {

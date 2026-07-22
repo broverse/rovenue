@@ -70,6 +70,7 @@ import {
   stopOutboxDispatcher,
 } from "../src/workers/outbox-dispatcher";
 import { getResolvedBrokers } from "../src/lib/kafka";
+import { createId } from "@paralleldrive/cuid2";
 
 const execFileP = promisify(execFile);
 
@@ -122,7 +123,10 @@ beforeAll(async () => {
   }).admin();
   await kafkaAdmin.connect();
   await kafkaAdmin.createTopics({
-    topics: [{ topic: "rovenue.exposures", numPartitions: 3 }],
+    topics: [
+      { topic: "rovenue.exposures", numPartitions: 3 },
+      { topic: "rovenue.paywall_events", numPartitions: 3 },
+    ],
   });
   await kafkaAdmin.disconnect();
 
@@ -279,6 +283,108 @@ describe("CH Kafka Engine parity", () => {
     });
     const rollupRows = (await rollup.json()) as Array<{ e: string | number }>;
     expect(Number(rollupRows[0]?.e ?? 0)).toBe(1);
+
+    await ch.close();
+  }, 180_000);
+
+  it("paywall_view outbox row round-trips to raw_paywall_events and mv_paywall_daily_target", async () => {
+    const { paywallEventId } = await import(
+      "../src/workers/outbox-dispatcher"
+    );
+
+    const db = getDb();
+    await db.execute(
+      sql`DELETE FROM outbox_events WHERE id LIKE 'evt_paywall_parity_%'`,
+    );
+
+    const id = `evt_paywall_parity_${Date.now()}`;
+    const projectId = `prj_pw_parity_${Date.now()}`;
+    const subscriberId = `sub_pw_parity_${Date.now()}`;
+    const clientEventId = createId();
+    const occurredAt = "2026-07-20T10:00:00.000Z";
+    const paywallContext = {
+      paywallId: "pw_default",
+      placementId: "plc_onboarding",
+      placementRevision: 1,
+      variantId: "var_treatment",
+      experimentKey: "exp_key_1",
+    };
+
+    // Mirrors exactly what POST /v1/events writes for a `paywall_view`
+    // event (routes/v1/events.ts): the raw client envelope, aggregateId
+    // = project.id, no flattening at write time — flattening happens
+    // in the dispatcher (shapePaywallEventMessage).
+    await drizzle.outboxRepo.insert(db, {
+      id,
+      aggregateType: "PAYWALL_EVENT",
+      aggregateId: projectId,
+      eventType: "paywall_view",
+      payload: {
+        eventId: clientEventId,
+        eventType: "paywall_view",
+        occurredAt,
+        subscriberId,
+        paywallContext,
+      },
+    });
+
+    const expectedEventId = paywallEventId(
+      projectId,
+      subscriberId,
+      paywallContext.paywallId,
+      paywallContext.placementId,
+      clientEventId,
+    );
+
+    const ch = createClient({
+      url: chUrl,
+      username: "rovenue",
+      password: "rovenue_test",
+      database: "rovenue",
+    });
+
+    await waitFor(async () => {
+      const res = await ch.query({
+        query: `SELECT count() AS c FROM rovenue.raw_paywall_events FINAL WHERE eventId = '${expectedEventId}'`,
+        format: "JSONEachRow",
+      });
+      const rows = (await res.json()) as Array<{ c: string | number }>;
+      return Number(rows[0]?.c ?? 0) === 1;
+    }, 90_000);
+
+    const rawRes = await ch.query({
+      query: `SELECT projectId, subscriberId, paywallId, placementId, placementRevision, variantId, experimentKey FROM rovenue.raw_paywall_events FINAL WHERE eventId = '${expectedEventId}'`,
+      format: "JSONEachRow",
+    });
+    const [raw] = (await rawRes.json()) as Array<{
+      projectId: string;
+      subscriberId: string;
+      paywallId: string;
+      placementId: string;
+      placementRevision: string | number;
+      variantId: string | null;
+      experimentKey: string | null;
+    }>;
+    expect(raw).toMatchObject({
+      projectId,
+      subscriberId,
+      paywallId: paywallContext.paywallId,
+      placementId: paywallContext.placementId,
+      variantId: paywallContext.variantId,
+      experimentKey: paywallContext.experimentKey,
+    });
+    expect(Number(raw!.placementRevision)).toBe(paywallContext.placementRevision);
+
+    const rollup = await ch.query({
+      query: `SELECT sum(views) AS v, uniqMerge(subscribersHll) AS u FROM rovenue.mv_paywall_daily_target WHERE projectId = '${projectId}' AND placementId = '${paywallContext.placementId}'`,
+      format: "JSONEachRow",
+    });
+    const [rollupRow] = (await rollup.json()) as Array<{
+      v: string | number;
+      u: string | number;
+    }>;
+    expect(Number(rollupRow?.v ?? 0)).toBe(1);
+    expect(Number(rollupRow?.u ?? 0)).toBe(1);
 
     await ch.close();
   }, 180_000);
