@@ -387,7 +387,7 @@ Builder paywalls support variable substitution in text. Variables are surrounded
 | `{{introPeriod}}` | string | iOS, Android | Intro offer period (e.g., "3 days", "1 month"). |
 | `{{relativeDiscount}}` | string | Web, iOS, Android, RN | Discount percentage (e.g., "33%") relative to the yearly price; absent if N/A. |
 
-Native platforms (iOS/Android) derive these from real store pricing (StoreKit, Play Billing). Web requires optional `priceView` props passed to the renderer. If a platform does not supply a variable's value, the placeholder remains unchanged in the rendered text (e.g., "Save {{relativeDiscount}}" shows literally if the discount is unknown).
+Native platforms (iOS/Android) derive these from real store pricing (StoreKit, Play Billing). Web requires optional `priceView` props passed to the renderer. If a platform does not supply a variable's value, the placeholder remains unchanged in the rendered text (e.g., "Save `{{relativeDiscount}}`" shows literally if the discount is unknown).
 
 ## Events
 
