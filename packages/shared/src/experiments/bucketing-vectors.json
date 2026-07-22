@@ -1,0 +1,217 @@
+{
+  "bucketCount": 10000,
+  "cases": [
+    {
+      "subscriberId": "ckvt3m8qc0000356mekq0v1x2",
+      "seed": "onboarding-price-test",
+      "expectedBucket": 7655,
+      "variants": [
+        {
+          "id": "a",
+          "weight": 0.34
+        },
+        {
+          "id": "b",
+          "weight": 0.33
+        },
+        {
+          "id": "c",
+          "weight": 0.33
+        }
+      ],
+      "expectedVariantId": "c"
+    },
+    {
+      "subscriberId": "clp5h6t8q0001j3x8x3z0v2y9",
+      "seed": "canary-rollout",
+      "expectedBucket": 4552,
+      "variants": [
+        {
+          "id": "control",
+          "weight": 0.1
+        },
+        {
+          "id": "treatment",
+          "weight": 0.9
+        }
+      ],
+      "expectedVariantId": "treatment"
+    },
+    {
+      "subscriberId": "cm9z4g2k0002p8x7e6r3l1v5d",
+      "seed": "ab-test-ui",
+      "expectedBucket": 9617,
+      "variants": [
+        {
+          "id": "old",
+          "weight": 0.5
+        },
+        {
+          "id": "new",
+          "weight": 0.5
+        }
+      ],
+      "expectedVariantId": "new"
+    },
+    {
+      "subscriberId": "用户_12345",
+      "seed": "unicode-test",
+      "expectedBucket": 9549,
+      "variants": [
+        {
+          "id": "variant_1",
+          "weight": 0.5
+        },
+        {
+          "id": "variant_2",
+          "weight": 0.5
+        }
+      ],
+      "expectedVariantId": "variant_2"
+    },
+    {
+      "subscriberId": "ckvt3m8qc0000356mekq0v1x3",
+      "seed": "single-variant",
+      "expectedBucket": 2453,
+      "variants": [
+        {
+          "id": "only",
+          "weight": 1
+        }
+      ],
+      "expectedVariantId": "only"
+    },
+    {
+      "subscriberId": "boundary-search-1539",
+      "seed": "boundary-test",
+      "expectedBucket": 6700,
+      "variants": [
+        {
+          "id": "x",
+          "weight": 0.34
+        },
+        {
+          "id": "y",
+          "weight": 0.33
+        },
+        {
+          "id": "z",
+          "weight": 0.33
+        }
+      ],
+      "expectedVariantId": "z"
+    },
+    {
+      "subscriberId": "boundary-search-1682",
+      "seed": "boundary-test",
+      "expectedBucket": 6700,
+      "variants": [
+        {
+          "id": "x",
+          "weight": 0.34
+        },
+        {
+          "id": "y",
+          "weight": 0.33
+        },
+        {
+          "id": "z",
+          "weight": 0.33
+        }
+      ],
+      "expectedVariantId": "z"
+    },
+    {
+      "subscriberId": "boundary-search-3495",
+      "seed": "boundary-test",
+      "expectedBucket": 3400,
+      "variants": [
+        {
+          "id": "x",
+          "weight": 0.34
+        },
+        {
+          "id": "y",
+          "weight": 0.33
+        },
+        {
+          "id": "z",
+          "weight": 0.33
+        }
+      ],
+      "expectedVariantId": "y"
+    },
+    {
+      "subscriberId": "clp5h6t8q0001j3x8x3z0v2ya",
+      "seed": "feature-flag",
+      "expectedBucket": 6359,
+      "variants": [
+        {
+          "id": "old_feature",
+          "weight": 0.7
+        },
+        {
+          "id": "new_feature",
+          "weight": 0.3
+        }
+      ],
+      "expectedVariantId": "old_feature"
+    },
+    {
+      "subscriberId": "cm9z4g2k0002p8x7e6r3l1v5e",
+      "seed": "multi-variant",
+      "expectedBucket": 1351,
+      "variants": [
+        {
+          "id": "v1",
+          "weight": 0.25
+        },
+        {
+          "id": "v2",
+          "weight": 0.25
+        },
+        {
+          "id": "v3",
+          "weight": 0.25
+        },
+        {
+          "id": "v4",
+          "weight": 0.25
+        }
+      ],
+      "expectedVariantId": "v1"
+    },
+    {
+      "subscriberId": "user_🎉_test",
+      "seed": "emoji-test",
+      "expectedBucket": 8086,
+      "variants": [
+        {
+          "id": "emoji_a",
+          "weight": 0.5
+        },
+        {
+          "id": "emoji_b",
+          "weight": 0.5
+        }
+      ],
+      "expectedVariantId": "emoji_b"
+    },
+    {
+      "subscriberId": "ckvt3m8qc0000356mekq0v1x4",
+      "seed": "tiny-weight",
+      "expectedBucket": 3818,
+      "variants": [
+        {
+          "id": "rare",
+          "weight": 0.01
+        },
+        {
+          "id": "common",
+          "weight": 0.99
+        }
+      ],
+      "expectedVariantId": "common"
+    }
+  ]
+}
