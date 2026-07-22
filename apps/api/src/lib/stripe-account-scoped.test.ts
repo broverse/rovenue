@@ -100,16 +100,26 @@ function stubClientWide() {
     customersCreate: vi.fn(async () => ({ id: "cus_1" })),
     paymentIntentsCreate: vi.fn(async () => ({ id: "pi_1" })),
     paymentIntentsRetrieve: vi.fn(async () => ({ id: "pi_1" })),
+    paymentIntentsCancel: vi.fn(async () => ({ id: "pi_1", status: "canceled" })),
     subscriptionsCreate: vi.fn(async () => ({ id: "sub_1" })),
     subscriptionsRetrieve: vi.fn(async () => ({ id: "sub_1" })),
+    subscriptionsCancel: vi.fn(async () => ({ id: "sub_1", status: "canceled" })),
     domainsCreate: vi.fn(async () => ({ id: "pmd_1" })),
     domainsList: vi.fn(async () => ({ data: [] })),
   };
   const stripe = {
     prices: { retrieve: fns.pricesRetrieve },
     customers: { create: fns.customersCreate },
-    paymentIntents: { create: fns.paymentIntentsCreate, retrieve: fns.paymentIntentsRetrieve },
-    subscriptions: { create: fns.subscriptionsCreate, retrieve: fns.subscriptionsRetrieve },
+    paymentIntents: {
+      create: fns.paymentIntentsCreate,
+      retrieve: fns.paymentIntentsRetrieve,
+      cancel: fns.paymentIntentsCancel,
+    },
+    subscriptions: {
+      create: fns.subscriptionsCreate,
+      retrieve: fns.subscriptionsRetrieve,
+      cancel: fns.subscriptionsCancel,
+    },
     paymentMethodDomains: { create: fns.domainsCreate, list: fns.domainsList },
   } as unknown as Stripe;
   return { stripe, ...fns };
@@ -157,6 +167,26 @@ describe("withAccount — payment resources", () => {
       { stripeAccount: "acct_x" },
     );
     expect(subscriptionsRetrieve).toHaveBeenCalledWith("sub_1", {
+      stripeAccount: "acct_x",
+    });
+  });
+
+  // Cancels clean up the Stripe objects a superseded funnel payment
+  // attempt left behind. Unbound they would cancel nothing on the
+  // connected account and 404 (or worse, hit a same-id object on the
+  // platform account), so the binding matters here too.
+  it("binds stripeAccount to paymentIntents.cancel", async () => {
+    const { stripe, paymentIntentsCancel } = stubClientWide();
+    await withAccount(stripe, "acct_x").paymentIntents.cancel("pi_1");
+    expect(paymentIntentsCancel).toHaveBeenCalledWith("pi_1", {
+      stripeAccount: "acct_x",
+    });
+  });
+
+  it("binds stripeAccount to subscriptions.cancel", async () => {
+    const { stripe, subscriptionsCancel } = stubClientWide();
+    await withAccount(stripe, "acct_x").subscriptions.cancel("sub_1");
+    expect(subscriptionsCancel).toHaveBeenCalledWith("sub_1", {
       stripeAccount: "acct_x",
     });
   });

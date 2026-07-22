@@ -9,6 +9,7 @@ import { ok } from "../../lib/response";
 import { chargesEnabled, requireConnectedStripe } from "../../lib/stripe-platform";
 import { resolvePricesForPackages } from "../../services/stripe/price-resolver";
 import { packagesSchema, parseStoreIds } from "../../lib/offering-hydration";
+import type { AccountScopedStripe } from "../../lib/stripe-account-scoped";
 import type { PresentedContext } from "../../lib/presented-context";
 
 // =============================================================
@@ -28,11 +29,7 @@ const log = logger.child("route:funnel-payment");
 
 const bodySchema = z.object({
   package_identifier: z.string().min(1),
-  // zod's built-in `.email()` refuses single-letter TLDs (e.g. rejects
-  // "a@b.c" as invalid), which is stricter than this endpoint needs — a
-  // funnel visitor's real address should never be rejected on TLD length.
-  // This just requires the shape local@domain.tld.
-  email: z.string().regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Invalid email"),
+  email: z.string().email(),
 });
 
 interface PaywallContext {
@@ -88,7 +85,12 @@ async function resolvePaywallContext(
     ? packageSlots.data.find((p) => p.identifier === packageIdentifier)
     : undefined;
   if (!slot) {
-    throw new HTTPException(400, { message: "Package has no usable price" });
+    // Distinct from the "no usable price" 400 below: this one means the
+    // client named a package the funnel's offering does not contain,
+    // which is the smuggling attempt, not a configuration gap.
+    throw new HTTPException(400, {
+      message: "Package is not in this funnel's offering",
+    });
   }
 
   const [product] = await drizzle.offeringRepo.findProductsByIds(
@@ -111,6 +113,63 @@ async function resolvePaywallContext(
       paywallId: paywall.id,
     },
   };
+}
+
+/**
+ * Cancel what a previous attempt on this session left on Stripe.
+ *
+ * A visitor who changes package posts here again, and `upsertPending`
+ * overwrites the single row for the session — so without this the old
+ * `default_incomplete` subscription or PaymentIntent stays confirmable
+ * against a row that now records a different product and amount.
+ *
+ * Best-effort by design: the new client secret is already valid and the
+ * visitor is waiting on it, so a cleanup failure is a log line, never a
+ * failed payment.
+ */
+async function cancelSuperseded(
+  account: AccountScopedStripe,
+  previous: {
+    stripeSubscriptionId: string | null;
+    stripePaymentIntentId: string | null;
+  },
+  next: { subscriptionId: string | null; paymentIntentId: string | null },
+  sessionId: string,
+): Promise<void> {
+  const staleSubscription =
+    previous.stripeSubscriptionId &&
+    previous.stripeSubscriptionId !== next.subscriptionId
+      ? previous.stripeSubscriptionId
+      : null;
+  const stalePaymentIntent =
+    previous.stripePaymentIntentId &&
+    previous.stripePaymentIntentId !== next.paymentIntentId
+      ? previous.stripePaymentIntentId
+      : null;
+
+  if (staleSubscription) {
+    try {
+      await account.subscriptions.cancel(staleSubscription);
+    } catch (err) {
+      log.warn("failed to cancel superseded subscription", {
+        sessionId,
+        subscriptionId: staleSubscription,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (stalePaymentIntent) {
+    try {
+      await account.paymentIntents.cancel(stalePaymentIntent);
+    } catch (err) {
+      log.warn("failed to cancel superseded payment intent", {
+        sessionId,
+        paymentIntentId: stalePaymentIntent,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 }
 
 export const funnelPaymentRoute = new Hono().post(
@@ -145,8 +204,26 @@ export const funnelPaymentRoute = new Hono().post(
       throw new HTTPException(400, { message: "Package has no usable price" });
     }
 
+    // Checked before anything exists on Stripe. Left at the end it would
+    // 503 only after a Customer, a subscription/PaymentIntent and a
+    // purchase row had already been created and orphaned.
+    const publishableKey = env.STRIPE_PLATFORM_PUBLISHABLE_KEY;
+    if (!publishableKey) {
+      throw new HTTPException(503, { message: "Stripe Connect is not configured" });
+    }
+
     const { account, accountId } = await requireConnectedStripe(session.projectId);
-    const customer = await account.customers.create({ email });
+
+    // A repeat POST for this session is a visitor changing package. Reuse
+    // the Customer that attempt created rather than stranding it — but
+    // only while the row is still pending; a paid row is not ours to touch.
+    const existing = await drizzle.funnelPurchaseRepo.findBySession(drizzle.db, sid);
+    const superseded =
+      existing && existing.status === "pending" ? existing : null;
+
+    const customerId =
+      superseded?.stripeCustomerId ??
+      (await account.customers.create({ email })).id;
 
     const metadata = {
       rovenue_funnel_session_id: sid,
@@ -162,7 +239,7 @@ export const funnelPaymentRoute = new Hono().post(
 
     if (price.interval) {
       const subscription = await account.subscriptions.create({
-        customer: customer.id,
+        customer: customerId,
         items: [{ price: price.priceId }],
         payment_behavior: "default_incomplete",
         ...(price.trialDays ? { trial_period_days: price.trialDays } : {}),
@@ -189,7 +266,7 @@ export const funnelPaymentRoute = new Hono().post(
       const intent = await account.paymentIntents.create({
         amount: price.unitAmount,
         currency: price.currency,
-        customer: customer.id,
+        customer: customerId,
         automatic_payment_methods: { enabled: true },
         metadata,
       });
@@ -203,22 +280,27 @@ export const funnelPaymentRoute = new Hono().post(
       throw new HTTPException(502, { message: "Stripe did not return a client secret" });
     }
 
+    // The new secret is valid from here on, so the old one must stop
+    // being confirmable before the row that describes it is overwritten.
+    if (superseded) {
+      await cancelSuperseded(
+        account,
+        superseded,
+        { subscriptionId: stripeSubscriptionId, paymentIntentId: stripePaymentIntentId },
+        sid,
+      );
+    }
+
     await drizzle.funnelPurchaseRepo.upsertPending(drizzle.db, {
       sessionId: sid,
       projectId: session.projectId,
       productId: context.productId,
-      status: "pending",
       amountCents: price.unitAmount,
       currency: price.currency,
-      stripeCustomerId: customer.id,
+      stripeCustomerId: customerId,
       stripeSubscriptionId,
       stripePaymentIntentId,
     });
-
-    const publishableKey = env.STRIPE_PLATFORM_PUBLISHABLE_KEY;
-    if (!publishableKey) {
-      throw new HTTPException(503, { message: "Stripe Connect is not configured" });
-    }
 
     return c.json(
       ok({

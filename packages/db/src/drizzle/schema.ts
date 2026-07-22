@@ -2398,6 +2398,7 @@ export const funnelPurchases = pgTable(
       t.paidAt,
     ),
     stripeSubIdx: index("funnel_purchases_stripe_sub_idx").on(t.stripeSubscriptionId),
+    stripePiIdx: index("funnel_purchases_stripe_pi_idx").on(t.stripePaymentIntentId),
   }),
 );
 

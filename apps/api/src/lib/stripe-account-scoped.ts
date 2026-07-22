@@ -59,6 +59,10 @@ export interface AccountScopedStripe {
       id: string,
       options?: ScopedRequestOptions,
     ): Promise<Stripe.Response<Stripe.PaymentIntent>>;
+    cancel(
+      id: string,
+      options?: ScopedRequestOptions,
+    ): Promise<Stripe.Response<Stripe.PaymentIntent>>;
   };
   readonly subscriptions: {
     update(
@@ -71,6 +75,10 @@ export interface AccountScopedStripe {
       options?: ScopedRequestOptions,
     ): Promise<Stripe.Response<Stripe.Subscription>>;
     retrieve(
+      id: string,
+      options?: ScopedRequestOptions,
+    ): Promise<Stripe.Response<Stripe.Subscription>>;
+    cancel(
       id: string,
       options?: ScopedRequestOptions,
     ): Promise<Stripe.Response<Stripe.Subscription>>;
@@ -125,6 +133,8 @@ export function withAccount(
         stripe.paymentIntents.create(params, { ...options, ...bound }),
       retrieve: (id, options) =>
         stripe.paymentIntents.retrieve(id, { ...options, ...bound }),
+      cancel: (id, options) =>
+        stripe.paymentIntents.cancel(id, { ...options, ...bound }),
     },
     subscriptions: {
       update: (id, params, options) =>
@@ -133,6 +143,8 @@ export function withAccount(
         stripe.subscriptions.create(params, { ...options, ...bound }),
       retrieve: (id, options) =>
         stripe.subscriptions.retrieve(id, { ...options, ...bound }),
+      cancel: (id, options) =>
+        stripe.subscriptions.cancel(id, { ...options, ...bound }),
     },
     invoices: {
       retrieve: (id, options) =>
