@@ -47,22 +47,38 @@ export function evaluateNext(input: EvalInput): EvalResult {
   return resolveGoto("sequential", page.id, pagesOrder, pagesById);
 }
 
+function firstPaywallId(
+  pagesOrder: string[],
+  pagesById: PageGraph,
+): string | null {
+  for (const id of pagesOrder) {
+    if (pagesById.get(id)?.type === "paywall") return id;
+  }
+  return null;
+}
+
 function resolveGoto(
   goto: string | "paywall" | "end" | "sequential",
   fromId: string,
   pagesOrder: string[],
   pagesById: PageGraph,
 ): EvalResult {
-  if (goto === "paywall") return { next: "paywall" };
+  if (goto === "paywall") {
+    // The literal goto names no page. Resolve it to the funnel's paywall
+    // page so the session's currentPageId can actually move there; the
+    // id-less form survives only for a funnel with no paywall page,
+    // which the publish validator already rejects.
+    const paywallId = firstPaywallId(pagesOrder, pagesById);
+    return paywallId ? { next: "page", pageId: paywallId } : { next: "paywall" };
+  }
   if (goto === "end") return { next: "end" };
   if (goto === "sequential") {
     const idx = pagesOrder.indexOf(fromId);
     if (idx === -1 || idx === pagesOrder.length - 1) return { next: "end" };
-    const nextId = pagesOrder[idx + 1];
-    if (pagesById.get(nextId)?.type === "paywall") return { next: "paywall" };
-    return { next: "page", pageId: nextId };
+    // A paywall page is a page like any other — it has an id and the
+    // client needs it to render the paywall.
+    return { next: "page", pageId: pagesOrder[idx + 1] };
   }
-  if (pagesById.get(goto)?.type === "paywall") return { next: "paywall" };
   return { next: "page", pageId: goto };
 }
 

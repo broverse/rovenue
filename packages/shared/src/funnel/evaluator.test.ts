@@ -66,7 +66,7 @@ describe("evaluateNext", () => {
         answers: new Map(),
         pagesById: pages,
       }),
-    ).toEqual({ next: "paywall" });
+    ).toEqual({ next: "page", pageId: "pg_pay" });
   });
 
   it("'any' rule short-circuits on first match", () => {

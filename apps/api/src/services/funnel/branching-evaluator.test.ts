@@ -66,7 +66,7 @@ describe("evaluateNext", () => {
         answers: new Map(),
         pagesById: pages,
       }),
-    ).toEqual({ next: "paywall" });
+    ).toEqual({ next: "page", pageId: "pg_pay" });
   });
 
   it("'any' rule short-circuits on first match", () => {
@@ -167,5 +167,65 @@ describe("evaluateNext", () => {
         pagesById: pages,
       }),
     ).toEqual({ next: "end" });
+  });
+
+  it("returns the paywall page id on sequential fall-through", () => {
+    const testPages: PageGraph = new Map([
+      ["pg_info", { id: "pg_info", type: "info", config: {} }],
+      ["pg_pay", { id: "pg_pay", type: "paywall", config: {} }],
+    ]);
+    expect(
+      evaluateNext({
+        page: { id: "pg_info", type: "info", config: {} },
+        pagesOrder: ["pg_info", "pg_pay"],
+        answers: new Map(),
+        pagesById: testPages,
+      }),
+    ).toEqual({ next: "page", pageId: "pg_pay" });
+  });
+
+  it("returns the paywall page id for an explicit goto by id", () => {
+    const testPages: PageGraph = new Map([
+      ["pg_info", { id: "pg_info", type: "info", config: {}, default_next: "pg_pay" }],
+      ["pg_other", { id: "pg_other", type: "info", config: {} }],
+      ["pg_pay", { id: "pg_pay", type: "paywall", config: {} }],
+    ]);
+    expect(
+      evaluateNext({
+        page: { id: "pg_info", type: "info", config: {}, default_next: "pg_pay" },
+        pagesOrder: ["pg_info", "pg_other", "pg_pay"],
+        answers: new Map(),
+        pagesById: testPages,
+      }),
+    ).toEqual({ next: "page", pageId: "pg_pay" });
+  });
+
+  it("resolves the literal `paywall` goto to the funnel's paywall page", () => {
+    const testPages: PageGraph = new Map([
+      ["pg_info", { id: "pg_info", type: "info", config: {}, default_next: "paywall" }],
+      ["pg_pay", { id: "pg_pay", type: "paywall", config: {} }],
+    ]);
+    expect(
+      evaluateNext({
+        page: { id: "pg_info", type: "info", config: {}, default_next: "paywall" },
+        pagesOrder: ["pg_info", "pg_pay"],
+        answers: new Map(),
+        pagesById: testPages,
+      }),
+    ).toEqual({ next: "page", pageId: "pg_pay" });
+  });
+
+  it("keeps the id-less form only when the funnel has no paywall page", () => {
+    const testPages: PageGraph = new Map([
+      ["pg_info", { id: "pg_info", type: "info", config: {}, default_next: "paywall" }],
+    ]);
+    expect(
+      evaluateNext({
+        page: { id: "pg_info", type: "info", config: {}, default_next: "paywall" },
+        pagesOrder: ["pg_info"],
+        answers: new Map(),
+        pagesById: testPages,
+      }),
+    ).toEqual({ next: "paywall" });
   });
 });
