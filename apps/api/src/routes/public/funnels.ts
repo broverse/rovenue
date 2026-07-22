@@ -41,6 +41,10 @@ import { resolveHost } from "../../services/custom-domains/host-resolver";
 import { endpointRateLimit } from "../../middleware/rate-limit";
 import { env } from "../../lib/env";
 import { hydrateOffering } from "../../lib/offering-hydration";
+import {
+  resolvePricesForPackages,
+  type ResolvedPrice,
+} from "../../services/stripe/price-resolver";
 
 // ---------------------------------------------------------------------------
 // Bounded recursive answer schema (F16).
@@ -63,6 +67,7 @@ const answerValueSchema: z.ZodType<unknown> = z.lazy(() =>
 
 interface PublishedRuntimeConfig {
   id: string;
+  projectId: string;
   slug: string;
   version_id: string;
   pages: Array<Record<string, unknown>>;
@@ -132,6 +137,28 @@ async function hydrateFunnelPaywalls(
   return result;
 }
 
+/**
+ * Real prices for every hydrated paywall's packages, keyed
+ * paywallId -> packageIdentifier. Separate from the paywalls map so a
+ * Stripe outage degrades to "no prices" rather than "no paywall".
+ */
+async function resolveFunnelPrices(
+  projectId: string,
+  paywalls: Record<string, HydratedPaywallEntry>,
+): Promise<Record<string, Record<string, ResolvedPrice>>> {
+  const out: Record<string, Record<string, ResolvedPrice>> = {};
+  for (const [paywallId, entry] of Object.entries(paywalls)) {
+    const packages = (entry.offering?.packages ?? []).map((p) => ({
+      packageIdentifier: p.packageIdentifier,
+      stripePriceId:
+        (p.storeIds as { stripe?: string } | undefined)?.stripe ?? null,
+    }));
+    if (packages.length === 0) continue;
+    out[paywallId] = await resolvePricesForPackages(projectId, packages);
+  }
+  return out;
+}
+
 function stripBranchingRules(
   pages: Array<Record<string, unknown>>,
 ): Array<Record<string, unknown>> {
@@ -167,6 +194,7 @@ async function loadPublishedConfigFromDb(
 
   return {
     id: funnel.id,
+    projectId: funnel.projectId,
     slug: funnel.slug,
     version_id: version.id,
     pages: stripBranchingRules(pagesArr),
@@ -216,7 +244,8 @@ export const publicFunnelsRoute = new Hono()
     // bundle) — paywall/offering data can change between publishes and a
     // paywall may be deleted after this funnel was published.
     const paywalls = await hydrateFunnelPaywalls(config.id, config.pages);
-    return c.json({ data: { ...config, paywalls } });
+    const prices = await resolveFunnelPrices(config.projectId, paywalls);
+    return c.json({ data: { ...config, paywalls, prices } });
   })
 
   // ---------------------------------------------------------------
