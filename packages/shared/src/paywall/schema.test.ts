@@ -171,6 +171,33 @@ describe("builderConfigSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("rejects a malformed node nested inside a fallback", () => {
+    const result = builderConfigSchema.safeParse({
+      formatVersion: 2,
+      defaultLocale: "en",
+      localizations: { en: {} },
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "image",
+            id: "hero",
+            url: { light: "https://x/hero.png" },
+            fallback: {
+              type: "stack",
+              id: "hero_fallback",
+              axis: "diagonal",
+              children: [],
+            },
+          },
+        ],
+      },
+    });
+    expect(result.success).toBe(false);
+  });
 });
 
 describe("emptyBuilderConfig", () => {

@@ -62,6 +62,27 @@ describe("validateBuilderConfig", () => {
     expect(codesOf(issues)).toContain("DUPLICATE_NODE_ID");
   });
 
+  it("reports DUPLICATE_NODE_ID when one id lives inside a fallback subtree", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "spacer", id: "dup", size: 4 },
+          {
+            type: "image",
+            id: "hero",
+            url: { light: "https://x/hero.png" },
+            fallback: { type: "spacer", id: "dup", size: 8 },
+          },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    expect(codesOf(issues)).toContain("DUPLICATE_NODE_ID");
+  });
+
   it("reports UNKNOWN_LOC_KEY when a text/button/purchaseButton key is missing from defaultLocale", () => {
     const config = baseConfig({
       root: {
