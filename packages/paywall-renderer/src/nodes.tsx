@@ -15,7 +15,12 @@ import {
   type TextNode,
 } from "@rovenue/shared/paywall";
 import type { RendererOffering } from "./types";
-import { resolveThemeColor, resolveThemeUrl, stackContainerStyle, Z_OVERLAY_CHILD_STYLE } from "./styles";
+import {
+  resolveTextColor,
+  resolveThemeUrl,
+  stackContainerStyle,
+  Z_OVERLAY_CHILD_STYLE,
+} from "./styles";
 
 // =============================================================
 // Node rendering + interactivity. Presentational plus a thin layer
@@ -181,7 +186,7 @@ function renderText(node: TextNode, ctx: RenderCtx): ReactElement | null {
       data-rov-node={node.id}
       style={{
         margin: 0,
-        color: resolveThemeColor(node.color, ctx.colorScheme),
+        color: resolveTextColor(node.color, ctx.colorScheme),
         textAlign: node.align ? ALIGN_TO_TEXT[node.align] : undefined,
         ...roleStyle,
       }}
@@ -314,8 +319,22 @@ function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement 
             onClick={() => ctx.onSelectPackage(packageId)}
             style={cellWrapperStyle(isSelected)}
           >
-            <span style={{ fontSize: "14px", fontWeight: 600 }}>{view?.packageName ?? packageId}</span>
-            {view?.price ? <span style={{ fontSize: "12px" }}>{view.price}</span> : null}
+            <span
+              style={{
+                fontSize: "14px",
+                fontWeight: 600,
+                color: resolveTextColor(undefined, ctx.colorScheme),
+              }}
+            >
+              {view?.packageName ?? packageId}
+            </span>
+            {view?.price ? (
+              <span
+                style={{ fontSize: "12px", color: resolveTextColor(undefined, ctx.colorScheme) }}
+              >
+                {view.price}
+              </span>
+            ) : null}
           </button>
         );
       })}

@@ -16,6 +16,29 @@ export function resolveThemeColor(
   return color.light;
 }
 
+/**
+ * Ink used for text the config leaves uncoloured.
+ *
+ * The renderer paints its own backgrounds, so it must own its own text
+ * colour too: with no explicit `color`, text would inherit the HOST page's
+ * colour, and a host whose ambient colour is light (a dark-themed app
+ * embedding a light paywall — e.g. the dashboard's builder canvas) renders
+ * white-on-white. Found by a browser smoke of the builder, where every
+ * uncoloured node was invisible in the light preview.
+ */
+const DEFAULT_INK: Record<"light" | "dark", string> = {
+  light: "#0F172A",
+  dark: "#F8FAFC",
+};
+
+/** Configured colour for this scheme, else the self-contained default ink. */
+export function resolveTextColor(
+  color: ThemeColor | undefined,
+  colorScheme: "light" | "dark",
+): string {
+  return resolveThemeColor(color, colorScheme) ?? DEFAULT_INK[colorScheme];
+}
+
 /** Resolve a `{light, dark?}` image URL pair against the active colorScheme. Missing dark -> light. */
 export function resolveThemeUrl(
   url: { light: string; dark?: string },

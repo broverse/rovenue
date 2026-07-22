@@ -823,7 +823,73 @@ describe("PaywallRenderer", () => {
         />,
       );
       const monthlyCell = container.querySelector('[data-rov-package="monthly"]') as HTMLElement;
-      expect(monthlyCell.outerHTML).toMatchInlineSnapshot(`"<button type="button" data-rov-package="monthly" aria-pressed="false" style="cursor: pointer; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 8px; border: 1px solid rgb(204, 204, 204); background: transparent; text-align: left;"><span style="font-size: 14px; font-weight: 600;">Monthly</span><span style="font-size: 12px;">$4.99</span></button>"`);
+      expect(monthlyCell.outerHTML).toMatchInlineSnapshot(`"<button type="button" data-rov-package="monthly" aria-pressed="false" style="cursor: pointer; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 8px; border: 1px solid rgb(204, 204, 204); background: transparent; text-align: left;"><span style="font-size: 14px; font-weight: 600; color: rgb(15, 23, 42);">Monthly</span><span style="font-size: 12px; color: rgb(15, 23, 42);">$4.99</span></button>"`);
+    });
+  });
+
+  describe("default text ink (self-containment)", () => {
+    // Regression guard for a browser-smoke finding: with no `color` on a
+    // text node the renderer used to emit no colour at all, so text
+    // inherited the HOST page's colour — inside a dark-themed host (the
+    // dashboard's builder canvas) that meant white-on-white in the light
+    // preview. The renderer paints its own backgrounds, so it must paint
+    // its own ink too.
+    function uncolouredTitleConfig(): BuilderConfig {
+      return {
+        formatVersion: 2,
+        defaultLocale: "en",
+        localizations: { en: { t: "Go Pro" } },
+        root: {
+          type: "stack",
+          id: "root",
+          axis: "v",
+          children: [{ type: "text", id: "t1", key: "t", role: "title" }],
+        },
+      };
+    }
+
+    it("inks uncoloured text dark in the light scheme", () => {
+      const { container } = render(
+        <PaywallRenderer
+          config={uncolouredTitleConfig()}
+          offering={null}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      const title = container.querySelector('[data-rov-node="t1"]') as HTMLElement;
+      expect(title.style.color).toBe("rgb(15, 23, 42)");
+    });
+
+    it("inks uncoloured text light in the dark scheme", () => {
+      const { container } = render(
+        <PaywallRenderer
+          config={uncolouredTitleConfig()}
+          offering={null}
+          colorScheme="dark"
+          onPurchase={noop}
+        />,
+      );
+      const title = container.querySelector('[data-rov-node="t1"]') as HTMLElement;
+      expect(title.style.color).toBe("rgb(248, 250, 252)");
+    });
+
+    it("an explicit colour still wins over the default ink", () => {
+      const config = uncolouredTitleConfig();
+      (config.root.children[0] as { color?: unknown }).color = {
+        light: "#FF0000",
+        dark: "#00FF00",
+      };
+      const { container } = render(
+        <PaywallRenderer
+          config={config}
+          offering={null}
+          colorScheme="dark"
+          onPurchase={noop}
+        />,
+      );
+      const title = container.querySelector('[data-rov-node="t1"]') as HTMLElement;
+      expect(title.style.color).toBe("rgb(0, 255, 0)");
     });
   });
 });
