@@ -10,7 +10,11 @@ import type {
   PackageListNode,
   PaywallNode,
 } from "@rovenue/shared/paywall";
-import { emptyBuilderConfig, validateBuilderConfig } from "@rovenue/shared/paywall";
+import {
+  emptyBuilderConfig,
+  isBlockingIssue,
+  validateBuilderConfig,
+} from "@rovenue/shared/paywall";
 import {
   PaywallBuilderApi,
   type PaywallBuilderDetailDto,
@@ -19,19 +23,6 @@ import * as treeOps from "../tree-ops";
 import { PRESETS } from "../presets";
 import type { CanvasDevice, ColorScheme } from "../types";
 
-// Same warning-code set as the API gate (apps/api/src/routes/dashboard/paywalls.ts)
-// — a builderConfig PATCH still saves (200) when every issue's code is in
-// here; the dashboard mirrors that by rendering them as warnings rather
-// than blocking errors. Kept as `Set<string>`, not `Set<BuilderIssue["code"]>`
-// — INTRO_VARIABLE_UNGUARDED is spec'd but not yet emitted by
-// validateBuilderConfig, so this stays forward-tolerant instead of a type
-// error the moment the validator adds it. Manually kept in sync with the
-// API gate (no shared export for it — see that file's comment).
-const WARNING_CODES = new Set<string>([
-  "LOCALE_KEY_GAP",
-  "OVERRIDE_SELECTED_OUTSIDE_CELL",
-  "INTRO_VARIABLE_UNGUARDED",
-]);
 
 export interface PaywallBuilderProps {
   projectId: string;
@@ -399,10 +390,10 @@ export class PaywallBuilderViewModel {
   }
 
   @derived get errorIssues() {
-    return this.validationIssues.filter((i) => !WARNING_CODES.has(i.code));
+    return this.validationIssues.filter(isBlockingIssue);
   }
   @derived get warningIssues() {
-    return this.validationIssues.filter((i) => WARNING_CODES.has(i.code));
+    return this.validationIssues.filter((i) => !isBlockingIssue(i));
   }
 
   @derived get isDirty() {

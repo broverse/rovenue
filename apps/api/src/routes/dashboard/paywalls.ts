@@ -3,7 +3,11 @@ import { HTTPException } from "hono/http-exception";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { MemberRole, drizzle, type Offering } from "@rovenue/db";
-import { builderConfigSchema, validateBuilderConfig } from "@rovenue/shared/paywall";
+import {
+  builderConfigSchema,
+  isBlockingIssue,
+  validateBuilderConfig,
+} from "@rovenue/shared/paywall";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
@@ -102,32 +106,8 @@ function extractOfferingPackageIds(offering: { packages: unknown }): string[] {
   return parsed.success ? parsed.data.map((p) => p.identifier) : [];
 }
 
-/**
- * Validate + shape a client-supplied `builderConfig` into the pair of
- * columns actually persisted. `null` clears it (revert to format 1);
- * a non-null value must pass both the Zod node-tree schema and
- * validateBuilderConfig against the paywall's (possibly new) offering
- * — any issue whose code isn't in `WARNING_CODES` is a 400, mirroring
- * the PAYWALL_IN_USE JSON-in-message HTTPException convention used by
- * DELETE below.
- */
 const MAX_BUILDER_DEPTH = 32;
 const MAX_BUILDER_NODES = 500;
-
-// BuilderIssue codes that don't block a builderConfig PATCH — the config
-// still saves (200) and the dashboard renders these as warnings rather
-// than errors. Kept as `Set<string>`, not `Set<BuilderIssue["code"]>`:
-// INTRO_VARIABLE_UNGUARDED is spec'd (Phase D variable-guard warning) but
-// not yet emitted by validateBuilderConfig — forward-tolerant so this gate
-// doesn't need touching again the moment the validator adds it. Manually
-// kept in sync with the dashboard VM's identical WARNING_CODES set
-// (apps/dashboard/src/components/paywall-builder/vm/paywall-builder.vm.ts)
-// — there's no shared export for it.
-const WARNING_CODES = new Set<string>([
-  "LOCALE_KEY_GAP",
-  "OVERRIDE_SELECTED_OUTSIDE_CELL",
-  "INTRO_VARIABLE_UNGUARDED",
-]);
 
 /**
  * Iterative (explicit-stack) walk over a raw candidate builder-config,
@@ -159,6 +139,15 @@ function measureNodeTree(raw: unknown): { depth: number; nodes: number } {
   return { depth: maxDepth, nodes };
 }
 
+/**
+ * Validate + shape a client-supplied `builderConfig` into the pair of
+ * columns actually persisted. `null` clears it (revert to format 1); a
+ * non-null value must pass both the Zod node-tree schema and
+ * `validateBuilderConfig` against the paywall's (possibly new) offering.
+ * Any issue `isBlockingIssue` flags — i.e. anything outside the shared
+ * warning codes — becomes a 400 in the PAYWALL_IN_USE JSON-in-message
+ * HTTPException style used by DELETE below.
+ */
 function prepareBuilderConfigPatch(
   rawBuilderConfig: unknown,
   offeringPackageIds: string[],
@@ -213,7 +202,7 @@ function prepareBuilderConfigPatch(
   }
 
   const issues = validateBuilderConfig(parsed.data, { offeringPackageIds });
-  if (issues.some((issue) => !WARNING_CODES.has(issue.code))) {
+  if (issues.some(isBlockingIssue)) {
     throw new HTTPException(400, {
       message: JSON.stringify({ code: "INVALID_BUILDER_CONFIG", issues }),
     });
@@ -254,15 +243,17 @@ export const paywallsDashboardRoute = new Hono()
 
     const allPlacements = await drizzle.placementRepo.listPlacements(drizzle.db, projectId);
 
+    // Resolve every active placement concurrently — each resolution is an
+    // independent read fan-out (audiences, paywalls, offerings), so a
+    // project with many placements shouldn't pay for them serially.
+    const active = allPlacements.filter((p) => p.isActive);
+    const resolved = await Promise.all(
+      active.map((placement) => resolvePlacement(projectId, placement, {})),
+    );
     const placementsMap: Record<string, ResolvedPlacementData> = {};
-    for (const placement of allPlacements) {
-      if (!placement.isActive) continue;
-      placementsMap[placement.identifier] = await resolvePlacement(
-        projectId,
-        placement,
-        {},
-      );
-    }
+    active.forEach((placement, i) => {
+      placementsMap[placement.identifier] = resolved[i]!;
+    });
 
     const exportBody = {
       formatVersion: 1,

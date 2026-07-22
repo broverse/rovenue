@@ -34,6 +34,29 @@ export type BuilderIssue = {
 };
 
 /**
+ * Issue codes that do NOT block a save: the builderConfig still persists
+ * (the API answers 200) and the dashboard renders them as warnings rather
+ * than errors. Shared so the API gate and the builder view-model can never
+ * drift apart — they used to keep hand-synced copies.
+ *
+ * Deliberately `ReadonlySet<string>` rather than
+ * `ReadonlySet<BuilderIssue["code"]>`: `INTRO_VARIABLE_UNGUARDED` is spec'd
+ * (Phase D3's intro-variable lint) but not yet emitted by
+ * `validateBuilderConfig`, so membership stays forward-tolerant instead of
+ * becoming a type error the day the validator starts emitting it.
+ */
+export const WARNING_ISSUE_CODES: ReadonlySet<string> = new Set([
+  "LOCALE_KEY_GAP",
+  "OVERRIDE_SELECTED_OUTSIDE_CELL",
+  "INTRO_VARIABLE_UNGUARDED",
+]);
+
+/** True when an issue must block the save (i.e. it isn't a warning). */
+export function isBlockingIssue(issue: { code: string }): boolean {
+  return !WARNING_ISSUE_CODES.has(issue.code);
+}
+
+/**
  * Depth-first walk over every node in the tree, including `fallback` AND
  * `packageList.cellTemplate` subtrees. `insideCellTemplate` is true for the
  * cellTemplate root and everything beneath it (children/fallback), reset to

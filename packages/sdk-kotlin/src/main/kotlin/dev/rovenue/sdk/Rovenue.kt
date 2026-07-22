@@ -669,10 +669,8 @@ class Rovenue private constructor(
      * @throws RovenueException for a malformed fallback file.
      */
     @Throws(RovenueException::class, java.io.IOException::class)
-    fun setFallbackPlacements(context: Context, assetPath: String): UInt {
-        val json = context.assets.open(assetPath).use { it.readBytes().decodeToString() }
-        return setFallbackPlacements(json)
-    }
+    fun setFallbackPlacements(context: Context, assetPath: String): UInt =
+        setFallbackPlacements(dev.rovenue.sdk.internal.readAssetText(context, assetPath))
 
     /** Purchase the product backing a [Package], optionally selecting a specific [SubscriptionOption]. */
     suspend fun purchase(activity: Activity, pkg: Package, option: SubscriptionOption? = null): PurchaseResult =
