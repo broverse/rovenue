@@ -36,6 +36,10 @@ export interface ExperimentResults {
     variantId: string;
     exposures: number;
     uniqueUsers: number;
+    /** Precisely-attributed conversions (raw_revenue_events.experimentKey/
+     *  variantId) — 0 for non-PAYWALL experiment types, which don't carry
+     *  presentedContext. See analytics-router's `attributed_conversions`. */
+    attributedConversions: number;
   }>;
   conversion: ConversionAnalysis | null;
   revenue: RevenueAnalysis | null;
@@ -51,6 +55,7 @@ interface VariantAgg {
   exposures: number;
   uniqueUsers: number;
   conversions: number;
+  attributedConversions: number;
   revenueSeries: number[];
 }
 
@@ -69,6 +74,7 @@ export async function computeExperimentResults(
   const rows = await runAnalyticsQuery({
     kind: "experiment_results",
     experimentId,
+    experimentKey: experiment.key,
     projectId,
   });
 
@@ -118,6 +124,7 @@ export async function computeExperimentResults(
       variantId: v.variantId,
       exposures: v.exposures,
       uniqueUsers: v.uniqueUsers,
+      attributedConversions: v.attributedConversions,
     })),
     conversion,
     revenue,
@@ -135,6 +142,7 @@ function aggregate(rows: ExperimentVariantRow[]): Map<string, VariantAgg> {
       exposures: Number(r.exposures),
       uniqueUsers: Number(r.unique_users),
       conversions: Number(r.conversions),
+      attributedConversions: Number(r.attributed_conversions),
       // Per-user revenue series for analyzeRevenue is a separate enhancement;
       // conversion-rate analysis above is the shipped metric.
       revenueSeries: [],

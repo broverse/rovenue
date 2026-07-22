@@ -35,6 +35,22 @@ function groupFromType(t: DashboardExperimentType): ExperimentGroup {
   return "onboarding";
 }
 
+/**
+ * Column-visibility predicate for the variants table's "Attributed"
+ * column: PAYWALL-type experiments are the only ones whose purchases
+ * carry `presentedContext` (raw_revenue_events.experimentKey/variantId,
+ * CH migration 0019), so precise attribution only exists for them —
+ * OFFERING/FLAG experiment types keep the post-exposure heuristic
+ * `conversions` column as today.
+ *
+ * `group` (not the raw API `type`) is the signal available on this page:
+ * `mapApiExperiment` derives it via `groupFromType`, and PAYWALL is the
+ * only backend type that maps to the `"paywall"` group.
+ */
+export function isPaywallExperimentGroup(group: ExperimentGroup): boolean {
+  return group === "paywall";
+}
+
 function daysSince(iso: string | null): number {
   if (!iso) return 0;
   const ms = Date.now() - new Date(iso).getTime();

@@ -6,6 +6,7 @@ import { CumulativeChart } from "./cumulative-chart";
 import { ExperimentHero } from "./experiment-hero";
 import { ExperimentTimeline } from "./experiment-timeline";
 import { VariantsTable } from "./variants-table";
+import { isPaywallExperimentGroup } from "./format";
 import { CUMULATIVE_TREND, EXPERIMENT_DETAILS } from "./mock-data";
 import type { ExperimentSummary } from "./types";
 
@@ -42,6 +43,7 @@ export function ExperimentDetailPanel({
           <VariantsTable
             variants={detail.variants}
             metricNameKey={detail.metricNameKey}
+            showAttributed={isPaywallExperimentGroup(experiment.group)}
           />
           <CumulativeChart
             points={CUMULATIVE_TREND}

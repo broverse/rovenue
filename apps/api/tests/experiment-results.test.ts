@@ -22,6 +22,7 @@ vi.mock("@rovenue/db", () => ({
     experimentRepo: {
       findExperimentById: vi.fn(async (_db: unknown, id: string) => ({
         id,
+        key: "exp_1_key",
         projectId: "proj_test",
         status: "RUNNING",
       })),
@@ -61,12 +62,14 @@ describe("computeExperimentResults", () => {
         exposures: 1000,
         unique_users: 950,
         conversions: 100,
+        attributed_conversions: 80,
       },
       {
         variant_id: "treatment",
         exposures: 1005,
         unique_users: 960,
         conversions: 150,
+        attributed_conversions: 120,
       },
     ]);
 
@@ -84,5 +87,21 @@ describe("computeExperimentResults", () => {
     expect(res.conversion).not.toBeNull();
     expect(res.conversion!.controlRate).toBeCloseTo(100 / 950, 5);
     expect(res.conversion!.variantRate).toBeCloseTo(150 / 960, 5);
+    // Precisely-attributed conversions pass through untouched (a separate
+    // signal from the post-exposure heuristic `conversions`).
+    const byId = new Map(res.variants.map((v) => [v.variantId, v]));
+    expect(byId.get("control")!.attributedConversions).toBe(80);
+    expect(byId.get("treatment")!.attributedConversions).toBe(120);
+  });
+
+  it("passes the experiment's key (not id) as experimentKey to the analytics query", async () => {
+    mockRunAnalyticsQuery.mockResolvedValueOnce([]);
+    await computeExperimentResults("exp_1", "proj_test");
+    expect(mockRunAnalyticsQuery).toHaveBeenCalledWith({
+      kind: "experiment_results",
+      experimentId: "exp_1",
+      experimentKey: "exp_1_key",
+      projectId: "proj_test",
+    });
   });
 });

@@ -7,6 +7,12 @@ import type { Variant } from "./types";
 type Props = {
   variants: ReadonlyArray<Variant>;
   metricNameKey: string;
+  /**
+   * Shows the precisely-attributed conversions column — only meaningful
+   * for PAYWALL-type experiments (see `isPaywallExperimentGroup`). Other
+   * experiment types keep today's heuristic-only display.
+   */
+  showAttributed?: boolean;
 };
 
 /**
@@ -14,7 +20,11 @@ type Props = {
  * per variant. The CI bar maps -12..+12% to a 160px track with a 0
  * marker, range pill, and centerpoint dot.
  */
-export function VariantsTable({ variants, metricNameKey }: Props) {
+export function VariantsTable({
+  variants,
+  metricNameKey,
+  showAttributed = false,
+}: Props) {
   const { t } = useTranslation();
   return (
     <section className="overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">
@@ -33,6 +43,11 @@ export function VariantsTable({ variants, metricNameKey }: Props) {
               <Th width="30%">{t("experiments.variants.cols.variant")}</Th>
               <Th align="right">{t("experiments.variants.cols.users")}</Th>
               <Th align="right">{t("experiments.variants.cols.conversions")}</Th>
+              {showAttributed && (
+                <Th align="right">
+                  {t("experiments.variants.cols.attributed")}
+                </Th>
+              )}
               <Th align="right">{t("experiments.variants.cols.rate")}</Th>
               <Th align="right">{t("experiments.variants.cols.arpu")}</Th>
               <Th width="200px">{t("experiments.variants.cols.lift")}</Th>
@@ -66,6 +81,11 @@ export function VariantsTable({ variants, metricNameKey }: Props) {
                   </td>
                   <NumCell>{v.users.toLocaleString()}</NumCell>
                   <NumCell>{v.conversions.toLocaleString()}</NumCell>
+                  {showAttributed && (
+                    <NumCell>
+                      {(v.attributedConversions ?? 0).toLocaleString()}
+                    </NumCell>
+                  )}
                   <NumCell>{(v.rate * 100).toFixed(2)}%</NumCell>
                   <NumCell>${v.arpu.toFixed(2)}</NumCell>
                   <td className="px-3.5 py-3.5 align-middle">

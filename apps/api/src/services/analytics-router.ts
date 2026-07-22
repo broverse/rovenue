@@ -26,6 +26,14 @@ export type AnalyticsQuery =
   | {
       kind: "experiment_results";
       experimentId: string;
+      /**
+       * The experiment's stable slug (`experiments.key`), NOT the DB id.
+       * `raw_revenue_events.experimentKey`/`variantId` (CH migration 0019)
+       * are extracted from the SDK's `presentedContext` at purchase time
+       * and only ever carry the key — PAYWALL-flow purchases only,
+       * OFFERING/FLAG experiment purchases don't have presentedContext.
+       */
+      experimentKey: string;
       projectId: string;
       /** Optional stratification dimensions. */
       groupBy?: Array<"country" | "platform">;
@@ -45,6 +53,11 @@ export interface ExperimentVariantRow {
   /** Distinct exposed subscribers who had a purchase-class revenue event
    *  at or after their first exposure to this variant. */
   conversions: number;
+  /** Distinct converting subscribers PRECISELY attributed to this variant
+   *  via `raw_revenue_events.experimentKey`/`variantId` (the purchase's own
+   *  presentedContext) — no exposure-join heuristic. Only PAYWALL-flow
+   *  purchases carry this; 0 for OFFERING/FLAG experiment types. */
+  attributed_conversions: number;
 }
 
 /**
@@ -89,7 +102,8 @@ export async function runAnalyticsQuery(
             exp.variantId AS variant_id,
             exp.exposures AS exposures,
             exp.unique_users AS unique_users,
-            ifNull(c.conversions, 0) AS conversions
+            ifNull(c.conversions, 0) AS conversions,
+            ifNull(ac.attributed_conversions, 0) AS attributed_conversions
           FROM (
             SELECT
               variantId,
@@ -116,9 +130,27 @@ export async function runAnalyticsQuery(
               AND r.eventDate >= e.firstExposedAt
             GROUP BY e.variantId
           ) c ON exp.variantId = c.variantId
+          LEFT JOIN (
+            -- Precise attribution: raw_revenue_events carries the purchase's
+            -- own experimentKey/variantId (extracted from presentedContext,
+            -- 0019_revenue_presented_context.sql) — no exposure-join
+            -- heuristic, no viewer-overlap risk. Keyed by experimentKey (the
+            -- stable slug), not experimentId, because that's what the SDK's
+            -- presentedContext carries.
+            SELECT variantId, uniq(subscriberId) AS attributed_conversions
+            FROM rovenue.raw_revenue_events
+            WHERE projectId = {projectId:String}
+              AND experimentKey = {experimentKey:String}
+              AND type IN ('INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION')
+            GROUP BY variantId
+          ) ac ON exp.variantId = ac.variantId
           ORDER BY variant_id
         `,
-        { projectId: q.projectId, experimentId: q.experimentId },
+        {
+          projectId: q.projectId,
+          experimentId: q.experimentId,
+          experimentKey: q.experimentKey,
+        },
       );
     case "placement_metrics":
       // views/unique_views come from the mv_paywall_daily_target rollup

@@ -58,6 +58,13 @@ export type Variant = {
   allocation: number;
   users: number;
   conversions: number;
+  /**
+   * Precisely-attributed conversions (raw_revenue_events.experimentKey/
+   * variantId — the purchase's own presentedContext, no exposure-join
+   * heuristic). Only meaningful for PAYWALL-type experiments; undefined
+   * elsewhere, in which case the UI falls back gracefully.
+   */
+  attributedConversions?: number;
   /** 0..1 conversion rate. */
   rate: number;
   /** ARPU in dollars. */

@@ -2709,6 +2709,7 @@
         "variant": "Variant",
         "users": "Users",
         "conversions": "Conversions",
+        "attributed": "Attributed",
         "rate": "Rate",
         "arpu": "ARPU",
         "lift": "Lift · 95% CI"
