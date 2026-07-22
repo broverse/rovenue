@@ -229,6 +229,7 @@
       "groups": "Product groups",
       "offerings": "Offerings",
       "access": "Access Levels",
+      "paywalls": "Paywalls",
       "subscribers": "Customers",
       "subscriptions": "Subscriptions",
       "transactions": "Transactions",
@@ -1132,6 +1133,98 @@
       "defaultWarning": "This is the default offering. New subscribers without a matching offering will no longer fall back here.",
       "errors": {
         "generic": "Could not delete the offering. Please try again."
+      }
+    }
+  },
+  "paywalls": {
+    "title": "Paywalls",
+    "subtitle": "Per-locale remote-config documents the SDK renders against an offering.",
+    "actions": {
+      "new": "New paywall"
+    },
+    "search": {
+      "placeholder": "Search paywalls…",
+      "empty": "No paywalls match"
+    },
+    "card": {
+      "inactive": "Inactive",
+      "offering": "Offering"
+    },
+    "selectPrompt": "Select a paywall to view its details.",
+    "empty": {
+      "title": "No paywalls yet",
+      "body": "Create a paywall to bind a remote-config document to an offering for the SDK to render.",
+      "cta": "New paywall"
+    },
+    "detail": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "edit": "Edit",
+      "delete": "Delete",
+      "offering": "Offering",
+      "defaultLocale": "Default locale",
+      "configVersion": "Config version",
+      "locales": "Locales",
+      "defaultBadge": "default"
+    },
+    "form": {
+      "createTitle": "New paywall",
+      "editTitle": "Edit paywall",
+      "createSubtitle": "Bind a remote-config document to an offering for the SDK to render.",
+      "editSubtitle": "Update the paywall's config. The identifier stays fixed.",
+      "saveCreate": "Create paywall",
+      "savingCreate": "Creating…",
+      "saveEdit": "Save changes",
+      "savingEdit": "Saving…",
+      "name": {
+        "label": "Name",
+        "placeholder": "e.g. Onboarding paywall"
+      },
+      "identifier": {
+        "label": "Identifier",
+        "locked": "Can't be changed after creation.",
+        "hint": "Stable key referenced by placements and experiments. Set once and can't be changed after creation.",
+        "invalid": "Use lowercase letters, numbers, hyphens or underscores.",
+        "taken": "An existing paywall already uses this identifier."
+      },
+      "offering": {
+        "label": "Offering",
+        "hint": "Which offering this paywall's packages come from.",
+        "empty": "No offerings yet"
+      },
+      "active": {
+        "label": "Active",
+        "hint": "Inactive paywalls are excluded from placement/experiment resolution."
+      },
+      "remoteConfig": {
+        "label": "Remote config"
+      },
+      "errors": {
+        "generic": "Could not save the paywall. Please try again."
+      }
+    },
+    "remoteConfig": {
+      "tabsLabel": "Locales",
+      "hint": "JSON object rendered by the SDK for this locale. Falls back to the default locale's keys when a key is missing.",
+      "locale": {
+        "default": "Default locale",
+        "makeDefault": "Make {{locale}} the default locale",
+        "remove": "Remove {{locale}}",
+        "addLabel": "Add locale",
+        "addPlaceholder": "e.g. tr",
+        "invalid": "Use a locale code like en, en-US or pt-BR.",
+        "duplicate": "This locale is already added."
+      }
+    },
+    "delete": {
+      "title": "Delete paywall",
+      "subtitle": "Permanently remove this paywall's remote config.",
+      "confirmLabel": "Type {{identifier}} to confirm",
+      "confirm": "Delete paywall",
+      "deleting": "Deleting…",
+      "errors": {
+        "generic": "Could not delete the paywall. Please try again.",
+        "inUse": "This paywall is still referenced by a placement or a running experiment. Remove those references first."
       }
     }
   },

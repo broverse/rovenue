@@ -1643,6 +1643,62 @@ export interface DashboardOfferingUpdateInput {
 export type OfferingMembership = OfferingPackage;
 
 // =============================================================
+// Paywalls — dashboard wire types
+// =============================================================
+//
+// A paywall is a named, versioned remote-config document rendered
+// by the SDK against a specific offering (see /v1/placements).
+// `identifier` is immutable after creation (mirrors offerings).
+
+/** `{ defaultLocale, locales: { [locale]: object } }` — every locale
+ *  value must be a JSON object, and `defaultLocale` must be one of
+ *  the `locales` keys (enforced by the API's Zod schema). */
+export interface PaywallRemoteConfig {
+  defaultLocale: string;
+  locales: Record<string, Record<string, unknown>>;
+}
+
+export interface DashboardPaywallRow {
+  id: string;
+  projectId: string;
+  identifier: string;
+  name: string;
+  offeringId: string;
+  remoteConfig: PaywallRemoteConfig;
+  configFormatVersion: number;
+  builderConfig: unknown;
+  isActive: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DashboardPaywallsListResponse {
+  paywalls: DashboardPaywallRow[];
+}
+
+export interface DashboardPaywallCreateInput {
+  identifier: string;
+  name: string;
+  offeringId: string;
+  remoteConfig: PaywallRemoteConfig;
+  configFormatVersion?: number;
+  builderConfig?: unknown;
+  isActive?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface DashboardPaywallUpdateInput {
+  name?: string;
+  offeringId?: string;
+  remoteConfig?: PaywallRemoteConfig;
+  configFormatVersion?: number;
+  builderConfig?: unknown;
+  isActive?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+// =============================================================
 // Apps catalog connections overlay (Phase 4.2)
 // =============================================================
 //
