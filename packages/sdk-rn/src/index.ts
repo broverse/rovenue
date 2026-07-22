@@ -129,3 +129,13 @@ export type { RovenueConfig } from "./api/configure";
 export type { LogEntry } from "./api/log";
 export type { FunnelClaimResult, ClaimInstallParams } from "./api/funnel";
 export { extractFunnelToken } from "./api/funnel";
+
+// Builder-paywall rendering (React Native components; JS-side sibling of
+// the web renderer and the Swift/Kotlin native views).
+export {
+  RovenuePaywallView,
+  type RovenuePaywallViewProps,
+  decodeBuilderConfig,
+  type BuilderConfigModel,
+  type BuilderNode,
+} from "./paywall-ui";

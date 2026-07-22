@@ -27,3 +27,47 @@ export const AppState = {
 };
 
 export type NativeEventSubscription = { remove: () => void };
+
+// -------------------------------------------------------------
+// Minimal host-component stand-ins for the paywall-ui renderer
+// tests (@testing-library/react + happy-dom). They map the RN
+// props the renderer actually uses onto DOM equivalents: testID →
+// data-testid, onPress → onClick, disabled → disabled/aria.
+// -------------------------------------------------------------
+import { createElement, type ReactNode, type CSSProperties } from "react";
+
+type StubProps = {
+  children?: ReactNode;
+  testID?: string;
+  style?: CSSProperties | CSSProperties[];
+  onPress?: () => void;
+  disabled?: boolean;
+  accessibilityState?: { selected?: boolean; disabled?: boolean };
+  source?: { uri?: string };
+  accessibilityLabel?: string;
+};
+
+function domProps(p: StubProps): Record<string, unknown> {
+  return {
+    "data-testid": p.testID,
+    "aria-selected": p.accessibilityState?.selected,
+    "aria-label": p.accessibilityLabel,
+  };
+}
+
+export function View(p: StubProps) {
+  return createElement("div", domProps(p), p.children);
+}
+export function Text(p: StubProps) {
+  return createElement("span", domProps(p), p.children);
+}
+export function Pressable(p: StubProps) {
+  return createElement(
+    "button",
+    { ...domProps(p), onClick: p.disabled ? undefined : p.onPress, disabled: p.disabled },
+    p.children,
+  );
+}
+export function Image(p: StubProps) {
+  return createElement("img", { ...domProps(p), src: p.source?.uri });
+}
