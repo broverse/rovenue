@@ -17,10 +17,24 @@ import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { audit, extractRequestContext } from "../../lib/audit";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
+import { isUniqueViolationOf } from "../../lib/pg-errors";
 import { ok } from "../../lib/response";
 import { invalidateExperimentCache } from "../../services/experiment-engine";
 import { computeExperimentResults } from "../../services/experiment-results";
 import { invalidateFlagCache } from "../../services/flag-engine";
+
+/**
+ * The unique index behind the backend-assigned experiment key —
+ * `CREATE UNIQUE INDEX "experiments_projectId_key_key" ON "experiments"
+ * ("projectId","key")`, migration 0000_flippant_ezekiel.sql.
+ *
+ * The retry loops below regenerate the key and try again, which only
+ * helps for a collision on THIS index. Any other unique violation the
+ * insert could raise would still be there on the next attempt, so
+ * retrying it would just burn the attempt budget and report the wrong
+ * error; those must surface immediately.
+ */
+const EXPERIMENT_KEY_UNIQUE = "experiments_projectId_key_key";
 
 /**
  * PAYWALL experiments reference paywalls by id rather than carrying an
@@ -204,7 +218,10 @@ export const experimentsRoute = new Hono()
         );
         break;
       } catch (err) {
-        if ((err as { code?: string })?.code === "23505" && attempt < 4) {
+        // Drizzle wraps the driver error, so the code and the constraint
+        // are one level down `.cause` — read at the top level this never
+        // matched and the loop could never actually retry.
+        if (isUniqueViolationOf(err, EXPERIMENT_KEY_UNIQUE) && attempt < 4) {
           continue;
         }
         throw err;
@@ -753,7 +770,9 @@ export const experimentsRoute = new Hono()
         );
         break;
       } catch (err) {
-        if ((err as { code?: string })?.code === "23505" && attempt < 4) {
+        // Same wrapper, same consequence as on create: without the
+        // cause-walk a genuine key clash 500s instead of regenerating.
+        if (isUniqueViolationOf(err, EXPERIMENT_KEY_UNIQUE) && attempt < 4) {
           continue;
         }
         throw err;
