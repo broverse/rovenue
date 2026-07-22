@@ -91,6 +91,11 @@ export interface PublishedFunnelConfig {
   // referenced paywall was deleted/cleared since publish — fall back to
   // the page's legacy flat fields.
   paywalls: Record<string, HydratedFunnelPaywall>;
+  // Server-resolved Stripe prices, keyed paywallId -> packageIdentifier.
+  // Served separately from `paywalls` so a Stripe outage degrades to "no
+  // prices" rather than "no paywall" (apps/api/src/routes/public/
+  // funnels.ts). A package missing here has no displayable price.
+  prices: Record<string, Record<string, ResolvedFunnelPrice>>;
 }
 
 export interface SessionStartResponse {
@@ -114,6 +119,54 @@ export interface ClaimTokenResponse {
   deep_link_url: string | null;
   universal_link_url: string | null;
 }
+
+/**
+ * A price the SERVER read off Stripe (apps/api/src/services/stripe/
+ * price-resolver.ts). The browser never derives an amount of its own —
+ * the number shown and the number charged come from this one object.
+ * A package whose price could not be read is absent from the map.
+ */
+export interface ResolvedFunnelPrice {
+  packageIdentifier: string;
+  priceId: string;
+  /** Minor units, exactly as Stripe reports it. */
+  unitAmount: number;
+  /** Lowercase ISO-4217, as Stripe reports it. */
+  currency: string;
+  /** null for a one-time price. */
+  interval: "day" | "week" | "month" | "year" | null;
+  intervalCount: number | null;
+  trialDays: number | null;
+}
+
+/**
+ * What POST /funnel-sessions/:sid/payment-intent answers with.
+ *
+ * `mode` says which object the browser has to confirm: a trial package
+ * creates a subscription whose first step is a SetupIntent (card on
+ * file, nothing charged yet), everything else a PaymentIntent. The
+ * client secret belongs to whichever one it is, so the two must not be
+ * confirmed with the wrong call.
+ */
+export interface FunnelPaymentIntentResponse {
+  client_secret: string;
+  mode: "payment" | "setup";
+  publishable_key: string;
+  /** Connected account the Elements instance has to be scoped to. */
+  stripe_account: string;
+}
+
+/**
+ * What POST /funnel-sessions/:sid/confirm answers with.
+ *
+ * `already_issued: true` is a SUCCESS, not a failure: the Connect
+ * webhook completed this session first and handed the plaintext token
+ * to whoever asked before us. Only the hash is stored, so it cannot be
+ * returned a second time — but the money moved either way.
+ */
+export type FunnelConfirmResponse =
+  | { already_issued: false; token: string; deep_link_url: string | null; universal_link_url: string | null }
+  | { already_issued: true };
 
 export function getPublishedFunnel(slug: string): Promise<PublishedFunnelConfig> {
   return request<PublishedFunnelConfig>(`/public/funnels/${encodeURIComponent(slug)}`);
@@ -152,6 +205,33 @@ export function advanceSession(
 export function claimToken(sessionId: string): Promise<ClaimTokenResponse> {
   return request<ClaimTokenResponse>(
     `/public/funnel-sessions/${encodeURIComponent(sessionId)}/claim-token`,
+    { method: "POST" },
+  );
+}
+
+export function createPaymentIntent(
+  sessionId: string,
+  body: { package_identifier: string; email: string },
+): Promise<FunnelPaymentIntentResponse> {
+  return request<FunnelPaymentIntentResponse>(
+    `/public/funnel-sessions/${encodeURIComponent(sessionId)}/payment-intent`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+/**
+ * Settle the session against Stripe and mint the claim token.
+ *
+ * Answers 409 while the payment is not yet readable as settled — which
+ * on a trial can be the moments right after the browser finished
+ * confirming the card. Callers must treat that as "not yet" and retry;
+ * see `settleFunnelPayment` in payment-step.tsx.
+ */
+export function confirmFunnelPayment(
+  sessionId: string,
+): Promise<FunnelConfirmResponse> {
+  return request<FunnelConfirmResponse>(
+    `/public/funnel-sessions/${encodeURIComponent(sessionId)}/confirm`,
     { method: "POST" },
   );
 }

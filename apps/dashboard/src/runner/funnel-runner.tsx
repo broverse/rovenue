@@ -14,18 +14,19 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { PaywallRenderer, type RendererOffering } from "@rovenue/paywall-renderer";
-import type { BuilderConfig } from "@rovenue/shared/paywall";
+import type { BuilderConfig, PackageView } from "@rovenue/shared/paywall";
 import { PagePreview } from "../components/funnel-builder/page-preview";
 import {
   advanceSession,
-  claimToken,
   getPublishedFunnel,
   RunnerApiError,
   startSession,
   type AdvanceResponse,
   type HydratedFunnelOffering,
   type PublishedFunnelConfig,
+  type ResolvedFunnelPrice,
 } from "./runner-api";
+import { PaymentStep, type FunnelPaymentOutcome } from "./payment-step";
 import { writeFunnelTokenToClipboard } from "./clipboard";
 import { type LocaleCode } from "@rovenue/shared/i18n";
 import { useRunnerLocale } from "./use-runner-locale";
@@ -44,11 +45,66 @@ function toRunnerOffering(offering: HydratedFunnelOffering | null): RendererOffe
   };
 }
 
+/**
+ * Renders a server-resolved amount.
+ *
+ * The NUMBER is Stripe's, read server-side and shipped verbatim — the
+ * browser only chooses how to draw it, so what the page shows and what
+ * the card is charged cannot drift. Even the minor-unit divisor comes
+ * from Intl's own currency data rather than a hardcoded 100: JPY has no
+ * minor units, and dividing it by 100 would advertise a price a hundred
+ * times too small.
+ */
+function formatAmount(unitAmount: number, currency: string, locale: string): string {
+  const fmt = new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: currency.toUpperCase(),
+  });
+  const digits = fmt.resolvedOptions().maximumFractionDigits ?? 2;
+  return fmt.format(unitAmount / 10 ** digits);
+}
+
+/**
+ * Builds the `{{price}}` / `{{period}}` substitution map the renderer
+ * needs, from the prices the server resolved for THIS paywall. A
+ * package the server could not price is simply absent — the renderer
+ * then leaves its placeholders verbatim rather than inventing a number.
+ */
+function toPriceView(
+  offering: HydratedFunnelOffering | null,
+  prices: Record<string, ResolvedFunnelPrice> | undefined,
+  locale: string,
+): Record<string, PackageView> | undefined {
+  if (!prices || Object.keys(prices).length === 0) return undefined;
+  const names = new Map(
+    (offering?.packages ?? []).map((p) => [p.packageIdentifier, p.displayName]),
+  );
+  const out: Record<string, PackageView> = {};
+  for (const [identifier, price] of Object.entries(prices)) {
+    const amount = formatAmount(price.unitAmount, price.currency, locale);
+    const period = !price.interval
+      ? ""
+      : price.intervalCount && price.intervalCount > 1
+        ? `${price.intervalCount} ${price.interval}s`
+        : price.interval;
+    out[identifier] = {
+      packageName: names.get(identifier) ?? identifier,
+      price: amount,
+      pricePerPeriod: period ? `${amount}/${period}` : amount,
+      period,
+    };
+  }
+  return out;
+}
+
 type Status =
   | { kind: "loading" }
   | { kind: "error"; message: string; code?: string }
   | { kind: "ready" }
-  | { kind: "done"; reason: "end" | "paywall_paid" }
+  // `tokenIssued: false` means the money moved but the plaintext claim
+  // token had already been handed out (the Connect webhook completed
+  // this session first). Still a success — just a different next step.
+  | { kind: "done"; reason: "end" | "paywall_paid"; tokenIssued?: boolean }
   | { kind: "paywall_pending"; pageId: string };
 
 interface State {
@@ -61,6 +117,8 @@ export function FunnelRunner({ slug }: { slug: string }) {
   const [status, setStatus] = useState<Status>({ kind: "loading" });
   const [state, setState] = useState<State | null>(null);
   const [busy, setBusy] = useState(false);
+  // Non-null while the buyer is on the in-page checkout for that package.
+  const [payingPackage, setPayingPackage] = useState<string | null>(null);
 
   // Boot: fetch published config + open a session. Strict-mode safe via
   // the `cancelled` flag — if React mounts twice in dev, the second
@@ -111,15 +169,6 @@ export function FunnelRunner({ slug }: { slug: string }) {
     if (!state || !currentPage || busy) return;
     setBusy(true);
     try {
-      // Paywall takes a different path — in dev_mode the stub claim-token
-      // endpoint marks the session paid and issues a fake token, which is
-      // enough for end-to-end testing without Stripe.
-      if (currentPage.type === "paywall") {
-        const res = await claimToken(state.sessionId);
-        await writeFunnelTokenToClipboard(res.token);
-        setStatus({ kind: "done", reason: "paywall_paid" });
-        return;
-      }
       const res: AdvanceResponse = await advanceSession(
         state.sessionId,
         currentPage.id,
@@ -146,6 +195,19 @@ export function FunnelRunner({ slug }: { slug: string }) {
     }
   };
 
+  // The money has moved. The token — when there is one to hand out —
+  // goes to the clipboard so a fresh install can pick it up without a
+  // deep link (NativeLink-style deferred handoff).
+  const handlePaid = async (outcome: FunnelPaymentOutcome) => {
+    if (outcome.token) await writeFunnelTokenToClipboard(outcome.token);
+    setPayingPackage(null);
+    setStatus({
+      kind: "done",
+      reason: "paywall_paid",
+      tokenIssued: outcome.token !== null,
+    });
+  };
+
   if (status.kind === "loading") {
     return <CenteredMessage title="Loading…" />;
   }
@@ -162,9 +224,11 @@ export function FunnelRunner({ slug }: { slug: string }) {
       <CenteredMessage
         title={status.reason === "paywall_paid" ? "You're all set" : "All done"}
         body={
-          status.reason === "paywall_paid"
-            ? "Payment captured (dev stub). A claim token was issued for this session."
-            : "You've reached the end of this funnel."
+          status.reason !== "paywall_paid"
+            ? "You've reached the end of this funnel."
+            : status.tokenIssued
+              ? "Payment received. Open the app to finish setting up your account."
+              : "Payment received. Open the app and restore your purchase with the email you paid with."
         }
       />
     );
@@ -186,10 +250,23 @@ export function FunnelRunner({ slug }: { slug: string }) {
   // server actually hydrated it into `paywalls` — a paywallId whose
   // paywall was deleted/cleared since publish falls back to the page's
   // legacy flat fields, unchanged from today.
-  const builderPaywall =
+  const builderPaywallId =
     currentPage.type === "paywall" && currentPage.paywallId
-      ? state.config.paywalls[currentPage.paywallId]
+      ? currentPage.paywallId
       : undefined;
+  const builderPaywall = builderPaywallId
+    ? state.config.paywalls[builderPaywallId]
+    : undefined;
+
+  // Formatted from the server's own resolved prices, never from
+  // anything this page works out for itself.
+  const priceView = builderPaywall
+    ? toPriceView(
+        builderPaywall.offering,
+        builderPaywallId ? state.config.prices?.[builderPaywallId] : undefined,
+        locale,
+      )
+    : undefined;
 
   // Full viewport — no max-width, no centered column. The published
   // funnel fills the whole window on every breakpoint.
@@ -198,19 +275,27 @@ export function FunnelRunner({ slug }: { slug: string }) {
       className="h-[100dvh] w-screen overflow-hidden"
       style={{ background: state.config.theme.bg }}
     >
-      {builderPaywall ? (
+      {payingPackage ? (
+        // In-page checkout. It replaces the paywall rather than opening
+        // anywhere else: the whole point is that the buyer never leaves.
+        <PaymentStep
+          sessionId={state.sessionId}
+          packageIdentifier={payingPackage}
+          priceLabel={priceView?.[payingPackage]?.price}
+          onPaid={(outcome) => void handlePaid(outcome)}
+          onCancel={() => setPayingPackage(null)}
+        />
+      ) : builderPaywall ? (
         <PaywallRenderer
           config={builderPaywall.builderConfig as BuilderConfig}
           offering={toRunnerOffering(builderPaywall.offering)}
           locale={locale}
           colorScheme="light"
-          priceView={undefined}
-          // Same purchase/CTA path the legacy paywall page uses today —
-          // handleAdvance's `currentPage.type === "paywall"` branch mints
-          // a claim token via the (dev-mode-stub) /claim-token endpoint.
+          priceView={priceView}
+          // The CTA opens the in-page checkout for the selected package.
           // Restore is deliberately omitted (no onRestore) — hidden by
           // design in <PaywallRenderer> when the handler is absent.
-          onPurchase={() => void handleAdvance()}
+          onPurchase={(packageIdentifier) => setPayingPackage(packageIdentifier)}
         />
       ) : (
         <PagePreview
