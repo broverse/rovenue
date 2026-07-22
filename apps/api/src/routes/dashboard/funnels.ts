@@ -12,6 +12,7 @@ import { ok } from "../../lib/response";
 import { validateFunnelGraph } from "../../services/funnel/branching-validator";
 import { invalidatePublishedConfig } from "../../services/funnel/runtime-cache";
 import { chargesEnabled } from "../../lib/stripe-platform";
+import { normalizeFunnelSettings } from "../../services/funnel/settings-normalize";
 
 // =============================================================
 // Dashboard: Funnels CRUD + publish/duplicate/versions/revert
@@ -229,7 +230,12 @@ export const funnelsRoute = new Hono()
       patch.draftThemeJson = body.draft_theme_json;
     }
     if (body.draft_settings_json !== undefined) {
-      patch.draftSettingsJson = body.draft_settings_json;
+      // The dashboard sends camelCase; every reader in the API uses the
+      // snake_case names from settings-schema.ts. Translate here so
+      // `dev_mode` and the deep-link fields actually reach the runtime.
+      patch.draftSettingsJson = normalizeFunnelSettings(
+        body.draft_settings_json,
+      );
     }
     if (body.default_locale !== undefined) {
       patch.defaultLocale = body.default_locale;
