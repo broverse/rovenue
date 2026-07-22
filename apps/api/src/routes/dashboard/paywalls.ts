@@ -213,13 +213,15 @@ function prepareBuilderConfigPatch(
   return { builderConfig: parsed.data, configFormatVersion: 2 };
 }
 
-/** Parse a `:versionNo` path segment, 400ing on anything non-positive-integer. */
+/** Parse a `:versionNo` path segment, 400ing on anything that is not a
+ * canonical positive integer (rejects "", "0", negatives, "1.5", "1e2",
+ * "0x10", and whitespace-padded values — a bare Number() would admit the
+ * last three). */
 function parseVersionNo(raw: string | undefined): number {
-  const n = Number(raw);
-  if (!raw || !Number.isInteger(n) || n < 1) {
+  if (!raw || !/^[1-9][0-9]*$/.test(raw)) {
     throw new HTTPException(400, { message: "versionNo must be a positive integer" });
   }
-  return n;
+  return Number(raw);
 }
 
 /** Metadata-only projection of a version row, shared by list and detail. */

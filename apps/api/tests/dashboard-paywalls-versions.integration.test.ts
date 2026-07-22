@@ -246,6 +246,7 @@ describe("GET /paywalls/:id/versions", () => {
       `/projects/${projectId}/paywalls/${paywall.id}/versions`,
       { headers: { cookie } },
     );
+    expect(res.status).toBe(200);
     const { data } = await res.json();
     expect(data.versions).toEqual([]);
   });
@@ -267,8 +268,21 @@ describe("GET /paywalls/:id/versions/:versionNo", () => {
     expect(res.status).toBe(200);
     const { data } = await res.json();
     expect(data.version.versionNo).toBe(1);
+    expect(data.version.isLive).toBe(true);
     expect(data.version.builderConfig).toEqual(VALID_CONFIG);
     expect(data.version.remoteConfig).toEqual({ defaultLocale: "en", locales: { en: {} } });
+  });
+
+  it("400s on non-canonical numeric segments", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("detailcanon", VALID_CONFIG);
+    for (const seg of ["1e2", "0x10", "%201%20", "1.5"]) {
+      const res = await app.request(
+        `/projects/${projectId}/paywalls/${paywall.id}/versions/${seg}`,
+        { headers: { cookie } },
+      );
+      expect(res.status, `segment ${seg} should 400`).toBe(400);
+    }
   });
 
   it("404s on an unknown versionNo", async () => {
