@@ -40,18 +40,22 @@ export interface SettlementSubscription {
    */
   default_payment_method: Stripe.Subscription["default_payment_method"];
   /**
-   * Status of the subscription's `pending_setup_intent`, when the caller
-   * has it expanded.
+   * Status of the setup intent the visitor confirmed, when the caller
+   * can read one.
    *
    * OPTIONAL, and the asymmetry with the field above is deliberate. Only
    * `/confirm` can supply it: it makes a retrieve of its own, so it can
-   * ask for `expand: ["pending_setup_intent"]` and pay nothing extra.
-   * The webhook is handed the event's subscription object, where this is
-   * a bare id — reading its status would mean a Stripe round-trip on
-   * EVERY subscription event of every connected account, which would put
-   * network I/O inside the one predicate that is currently pure. A pure
-   * predicate is what makes it safe to share; the moment it does I/O the
-   * two call sites start having reasons to fork it again.
+   * ask for `expand: ["pending_setup_intent"]` and pay nothing extra —
+   * and when Stripe has already cleared that field it can retrieve the
+   * intent by the id the funnel purchase row stored at create time.
+   * Either way the READ happens in the caller and only the answer
+   * arrives here. The webhook is handed the event's subscription object,
+   * where this is a bare id — reading its status would mean a Stripe
+   * round-trip on EVERY subscription event of every connected account,
+   * which would put network I/O inside the one predicate that is
+   * currently pure. A pure predicate is what makes it safe to share; the
+   * moment it does I/O the two call sites start having reasons to fork
+   * it again.
    *
    * The asymmetry is safe because it can only ever ADD a true. Omitting
    * it never turns a settled subscription unsettled at the webhook: the
@@ -91,9 +95,12 @@ export interface SettlementSubscription {
  *     subscription *payment* succeeds", which for a trial does not
  *     happen until conversion — so this field alone cannot be relied on
  *     at the moment the browser finishes.
- *   - the `pending_setup_intent` reaching `succeeded`. That is the very
- *     object the visitor just confirmed in the card form, so it is true
- *     the instant they finish and depends on nothing Stripe does later.
+ *   - the setup intent reaching `succeeded`. That is the very object the
+ *     visitor just confirmed in the card form, so it is true the instant
+ *     they finish and depends on nothing Stripe does later. The caller
+ *     reads it from the subscription's `pending_setup_intent` while that
+ *     is still populated, and from the id it stored itself once it is
+ *     not — see `isSettled` in routes/public/funnel-payment.ts.
  *
  * Either one is a card. Requiring both would refuse real buyers; the
  * pair is what stops this gate being an assumption about Stripe's

@@ -378,6 +378,66 @@ describe("POST /public/funnel-sessions/:sessionId/payment-intent", () => {
     expect(body.data.client_secret).toBe("seti_secret");
   });
 
+  // The durable half of the same problem, and the one `/confirm`
+  // actually depends on. The stamp above only helps if the operator
+  // configured `setup_intent.succeeded`; this id is written by us, on our
+  // own row, in the request that created the intent — so a trial's
+  // settlement stops depending on Stripe still exposing
+  // `pending_setup_intent` when the browser gets around to confirming.
+  it("records the trial's setup intent id on the purchase row", async () => {
+    await post({ package_identifier: "$rov_trial", email: "a@b.co" });
+
+    expect(upsertPurchase).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        rawPayload: expect.objectContaining({ setup_intent_id: "seti_trial_1" }),
+      }),
+    );
+  });
+
+  // Best-effort stamp, mandatory record: the row must carry the id even
+  // when the metadata write Stripe rejected leaves the webhook unable to
+  // recognise the intent.
+  it("records the setup intent id even when the stamp fails", async () => {
+    setupIntentsUpdate.mockRejectedValueOnce(new Error("stripe is down"));
+
+    await post({ package_identifier: "$rov_trial", email: "a@b.co" });
+
+    expect(upsertPurchase).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        rawPayload: expect.objectContaining({ setup_intent_id: "seti_trial_1" }),
+      }),
+    );
+  });
+
+  // Per-attempt state, like the Stripe ids beside it. A visitor who
+  // confirmed a card for a trial package and then switched to a paid one
+  // must not have that superseded intent settle the attempt they ended
+  // up with.
+  it("clears a superseded attempt's setup intent id", async () => {
+    findPurchaseBySession.mockResolvedValue({
+      id: "purchase_1",
+      sessionId: "sess_1",
+      projectId: "proj_1",
+      status: "pending",
+      stripeCustomerId: "cus_existing",
+      stripeSubscriptionId: "sub_trial_1",
+      stripePaymentIntentId: null,
+      rawPayload: { setup_intent_id: "seti_trial_1", other_key: 1 },
+    });
+
+    await post({ package_identifier: "$rov_monthly", email: "a@b.co" });
+
+    const row = upsertPurchase.mock.calls[0][1] as {
+      rawPayload: Record<string, unknown>;
+    };
+    expect(row.rawPayload).not.toHaveProperty("setup_intent_id");
+    // Everything else in the column survives — it is a shared jsonb blob,
+    // not this feature's private object.
+    expect(row.rawPayload.other_key).toBe(1);
+  });
+
   it("creates a payment intent for a one-time price", async () => {
     await post({ package_identifier: "$rov_lifetime", email: "a@b.co" });
     expect(paymentIntentsCreate).toHaveBeenCalledWith(

@@ -97,10 +97,12 @@ export interface AccountScopedStripe {
   };
   readonly setupIntents: {
     /**
-     * Update only — the funnel never creates a SetupIntent, Stripe does
-     * (a trial subscription's `pending_setup_intent`). The one thing the
-     * funnel needs is to stamp its own metadata onto that intent at
-     * creation time, because the object Stripe hands back carries no
+     * Update and retrieve — never create. The funnel never creates a
+     * SetupIntent, Stripe does (a trial subscription's
+     * `pending_setup_intent`).
+     *
+     * `update` exists to stamp the funnel's own metadata onto that intent
+     * at creation time, because the object Stripe hands back carries no
      * pointer to the subscription it belongs to and nothing to say it is
      * a funnel object at all. Without the stamp, the
      * `setup_intent.succeeded` handler could not distinguish a funnel
@@ -112,6 +114,19 @@ export interface AccountScopedStripe {
     update(
       id: string,
       params: Stripe.SetupIntentUpdateParams,
+      options?: ScopedRequestOptions,
+    ): Promise<Stripe.Response<Stripe.SetupIntent>>;
+    /**
+     * `retrieve` exists because a trial's settlement signal has to be
+     * readable AFTER the fact. `/confirm` reads the subscription's
+     * `pending_setup_intent`, which Stripe may already have cleared by
+     * the time the browser gets there; the funnel therefore stores the
+     * intent's id on its own purchase row at create time and asks for it
+     * by id. That id is one we wrote ourselves, so this reads nothing the
+     * funnel does not already own.
+     */
+    retrieve(
+      id: string,
       options?: ScopedRequestOptions,
     ): Promise<Stripe.Response<Stripe.SetupIntent>>;
   };
@@ -190,6 +205,8 @@ export function withAccount(
     setupIntents: {
       update: (id, params, options) =>
         stripe.setupIntents.update(id, params, { ...options, ...bound }),
+      retrieve: (id, options) =>
+        stripe.setupIntents.retrieve(id, { ...options, ...bound }),
     },
     invoices: {
       retrieve: (id, options) =>

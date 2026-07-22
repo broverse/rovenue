@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import type Stripe from "stripe";
 import { drizzle } from "@rovenue/db";
 import { endpointRateLimit } from "../../middleware/rate-limit";
 import { env } from "../../lib/env";
@@ -10,7 +11,10 @@ import { LockUnavailableError, withLock } from "../../lib/redis-lock";
 import { chargesEnabled, requireConnectedStripe } from "../../lib/stripe-platform";
 import { resolvePricesForPackages } from "../../services/stripe/price-resolver";
 import { hasPaidOrAttachedACard } from "../../services/stripe/payment-settled";
-import { FUNNEL_METADATA_KEY } from "../../services/stripe/stripe-types";
+import {
+  FUNNEL_METADATA_KEY,
+  STRIPE_SUBSCRIPTION_STATUS,
+} from "../../services/stripe/stripe-types";
 import { buildClaimLinks } from "../../services/funnel/claim-links";
 import { completeFunnelPurchase } from "../../services/funnel/complete-purchase";
 import { hashEmail } from "../../services/funnel/token";
@@ -373,19 +377,57 @@ async function cancelOwnObjects(
 }
 
 /**
- * Merge newly orphaned ids into the row's existing `rawPayload`, keeping
- * anything a previous attempt recorded. Never overwrite the array: each
- * entry is a Stripe object nobody else references, and dropping one loses
- * the only pointer to it.
+ * Key under which the row remembers the SetupIntent this attempt created.
+ *
+ * `funnel_purchases.raw_payload` is a jsonb column the row already uses
+ * for `orphaned_stripe_objects`, so this needs no migration — and the id
+ * belongs on the row rather than in a column of its own because it is
+ * per-ATTEMPT state, overwritten (or cleared) every time the visitor
+ * changes package, exactly like the Stripe ids beside it.
  */
-function mergeOrphaned(
+const SETUP_INTENT_KEY = "setup_intent_id";
+
+/** The SetupIntent id this session's current attempt recorded, if any. */
+function storedSetupIntentId(rawPayload: unknown): string | null {
+  if (!rawPayload || typeof rawPayload !== "object" || Array.isArray(rawPayload)) {
+    return null;
+  }
+  const value = (rawPayload as Record<string, unknown>)[SETUP_INTENT_KEY];
+  return typeof value === "string" && value ? value : null;
+}
+
+/**
+ * The `rawPayload` this attempt should write, or `undefined` when it has
+ * nothing to change.
+ *
+ * Two things live in here and they merge differently:
+ *
+ *   - `orphaned_stripe_objects` ACCUMULATES. Each entry is a Stripe
+ *     object nobody else references, so dropping one loses the only
+ *     pointer to it. Never overwrite the array.
+ *   - `setup_intent_id` REPLACES, and is removed when this attempt has no
+ *     SetupIntent. It describes the attempt the row currently records,
+ *     and `/confirm` settles a trial on the status of the intent it names
+ *     — so leaving a superseded attempt's id behind would let a card the
+ *     visitor confirmed for a package they then abandoned settle the one
+ *     they ended up with.
+ *
+ * `undefined` rather than an unchanged object so the ordinary path (no
+ * orphans, no trial) leaves the column exactly as it found it.
+ */
+function nextRawPayload(
   rawPayload: unknown,
   orphaned: string[],
-): Record<string, unknown> {
+  setupIntentId: string | null,
+): Record<string, unknown> | undefined {
   const base =
     rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload)
       ? (rawPayload as Record<string, unknown>)
       : {};
+  if (orphaned.length === 0 && storedSetupIntentId(base) === setupIntentId) {
+    return undefined;
+  }
+
   const existing = Array.isArray(base.orphaned_stripe_objects)
     ? base.orphaned_stripe_objects.filter(
         (id): id is string => typeof id === "string",
@@ -393,7 +435,12 @@ function mergeOrphaned(
     : [];
   const merged = [...existing];
   for (const id of orphaned) if (!merged.includes(id)) merged.push(id);
-  return { ...base, orphaned_stripe_objects: merged };
+
+  const next = { ...base };
+  if (merged.length > 0) next.orphaned_stripe_objects = merged;
+  if (setupIntentId) next[SETUP_INTENT_KEY] = setupIntentId;
+  else delete next[SETUP_INTENT_KEY];
+  return next;
 }
 
 /**
@@ -426,17 +473,42 @@ function mergeOrphaned(
  * it. See services/stripe/payment-settled.ts.
  *
  * What this side supplies that the webhook cannot: the setup intent's
- * status. `pending_setup_intent` is the object the visitor confirmed
- * moments ago, so it is authoritative here with no dependence on when
- * Stripe gets around to writing `default_payment_method`. Reading it
- * costs nothing — the retrieve was happening anyway and `expand` is a
- * params field, which is why the facade takes one.
+ * status. That intent is the object the visitor confirmed moments ago,
+ * so it is authoritative here with no dependence on when Stripe gets
+ * around to writing `default_payment_method`.
+ *
+ * It is read from two places, in this order, and the second is the point
+ * of the whole arrangement:
+ *
+ *   1. the subscription's expanded `pending_setup_intent`. Free — the
+ *      retrieve was happening anyway and `expand` is a params field,
+ *      which is why the facade takes one.
+ *   2. the id THIS ROW stored when the subscription was created. Stripe
+ *      clears `pending_setup_intent` at some point after the intent
+ *      succeeds, so (1) is a signal that is true only for a while, and
+ *      every previous version of this gate depended on some other signal
+ *      with the same property: a field Stripe writes later, an object
+ *      Stripe clears immediately, a webhook that may not be configured.
+ *      An id we wrote down ourselves at the moment it existed expires
+ *      never, and retrieving by it answers "did this visitor attach a
+ *      card" the same way a minute later as a week later.
+ *
+ * Both feed the SAME shared predicate. This function decides nothing
+ * about settlement; it only decides which reads are worth making.
+ *
+ * On the round-trip: this runs inside the session lock, alongside two
+ * other Stripe retrieves that are already made there, and the handler
+ * deliberately does not fence on `stillHeld()` (see the call site) — so
+ * one more read changes nothing about how this path behaves under the
+ * lock. It is made only when it can change the answer: a trial, with no
+ * card, whose expanded intent came back unreadable.
  */
 async function isSettled(
   account: AccountScopedStripe,
   purchase: {
     stripeSubscriptionId: string | null;
     stripePaymentIntentId: string | null;
+    rawPayload?: unknown;
   },
 ): Promise<boolean> {
   if (purchase.stripeSubscriptionId) {
@@ -444,28 +516,63 @@ async function isSettled(
       purchase.stripeSubscriptionId,
       { expand: ["pending_setup_intent"] },
     );
-    const setupIntent = subscription.pending_setup_intent;
+
+    const expanded = subscription.pending_setup_intent;
+    let pendingSetupIntentStatus: Stripe.SetupIntent.Status | undefined;
+    if (expanded && typeof expanded === "object") {
+      pendingSetupIntentStatus = expanded.status;
+    } else if (
+      subscription.status === STRIPE_SUBSCRIPTION_STATUS.TRIALING &&
+      subscription.default_payment_method == null
+    ) {
+      // Nothing readable inline — either a bare id or, once Stripe has
+      // cleared the field, nothing at all — and no card on the
+      // subscription either, so the stored id is the only thing left that
+      // can prove this visitor committed. Skipped when there IS a card,
+      // where the predicate already answers true and this would be a
+      // round-trip that cannot change anything.
+      const storedId = storedSetupIntentId(purchase.rawPayload);
+      if (storedId) {
+        try {
+          const intent = await account.setupIntents.retrieve(storedId);
+          pendingSetupIntentStatus = intent.status;
+        } catch (err) {
+          // Refusing a buyer is the consequence, so this is an error, not
+          // a warning. Left unreadable rather than thrown: a 409 tells the
+          // browser to retry, a 500 tells it something is broken, and the
+          // warn below records that we could not tell.
+          log.error("could not read the funnel's stored setup intent", {
+            subscriptionId: purchase.stripeSubscriptionId,
+            setupIntentId: storedId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    }
+
     if (
       hasPaidOrAttachedACard({
         status: subscription.status,
         default_payment_method: subscription.default_payment_method,
-        // A bare id would mean the expand did not come back; there is
-        // nothing to read from it and `undefined` is the honest answer.
-        pendingSetupIntentStatus:
-          setupIntent && typeof setupIntent === "object"
-            ? setupIntent.status
-            : undefined,
+        pendingSetupIntentStatus,
       })
     ) {
       return true;
     }
-    if (subscription.status === "trialing" && setupIntent == null) {
-      // Neither signal AND no setup intent left to read. Either the
-      // visitor never entered a card, or Stripe cleared the intent on
-      // success without writing `default_payment_method` — and those two
-      // are indistinguishable from here. We refuse, which is right for
-      // the first and wrong for the second, so it must not be silent.
-      log.warn("trialing subscription proves nothing: no card, no setup intent", {
+
+    if (
+      subscription.status === STRIPE_SUBSCRIPTION_STATUS.TRIALING &&
+      pendingSetupIntentStatus === undefined
+    ) {
+      // A trial with no card and no READABLE setup intent — the expanded
+      // field was absent or came back as a bare id, and no stored id
+      // answered either. Either the visitor never entered a card, or we
+      // lost the only record of the one they did. We refuse, which is
+      // right for the first and wrong for the second, so it must not be
+      // silent. A trial whose intent we DID read and which says
+      // `requires_payment_method` is not this case: that refusal is
+      // correct and fully explained.
+      log.warn("trialing subscription proves nothing: no card, no readable setup intent", {
         subscriptionId: purchase.stripeSubscriptionId,
       });
     }
@@ -503,12 +610,13 @@ async function isSettled(
  * is what tells the handler this intent is about the attempt the row
  * still records.
  *
- * Best-effort by design. A failure here costs the durability of the
- * settlement signal, which is exactly the state everything worked in
- * before this existed (`/confirm` reads `pending_setup_intent`, and the
- * conversion invoice writes `default_payment_method` eventually) — so it
- * must not cost the visitor their payment, which is already live on
- * Stripe by this point and cannot be un-created cheaply.
+ * Best-effort by design, and cheaply so: a failure here costs the
+ * webhook's durable `default_payment_method` write — which matters for
+ * billing a converted trial — and costs `/confirm` nothing at all, since
+ * that path settles on the intent id stored on the purchase row, which
+ * this request writes whether or not the stamp lands. It must not cost
+ * the visitor their payment, which is already live on Stripe by this
+ * point and cannot be un-created cheaply.
  */
 async function stampSetupIntent(
   account: AccountScopedStripe,
@@ -677,6 +785,12 @@ export const funnelPaymentRoute = new Hono()
       let mode: "payment" | "setup";
       let stripeSubscriptionId: string | null = null;
       let stripePaymentIntentId: string | null = null;
+      // Recorded on the row below. `/confirm` settles a trial on this
+      // intent's status, and the row is the only place the id survives —
+      // Stripe clears `pending_setup_intent` off the subscription, and
+      // the stamp that lets the webhook recognise the intent is
+      // best-effort. Captured here, where the id indisputably exists.
+      let setupIntentId: string | null = null;
 
       if (price.interval) {
         const subscription = await account.subscriptions.create({
@@ -735,6 +849,7 @@ export const funnelPaymentRoute = new Hono()
           // A trial captures nothing now — the card is only stored.
           clientSecret = setup.client_secret;
           mode = "setup";
+          setupIntentId = setup.id ?? null;
           await stampSetupIntent(account, setup.id, sid, subscription.id, metadata);
         } else {
           clientSecret = invoice?.payment_intent?.client_secret ?? null;
@@ -811,6 +926,12 @@ export const funnelPaymentRoute = new Hono()
           )
         : [];
 
+      const rawPayload = nextRawPayload(
+        superseded?.rawPayload,
+        orphaned,
+        setupIntentId,
+      );
+
       await drizzle.funnelPurchaseRepo.upsertPending(drizzle.db, {
         sessionId: sid,
         projectId: session.projectId,
@@ -839,11 +960,11 @@ export const funnelPaymentRoute = new Hono()
         // re-submits is correcting where the magic link goes, exactly as
         // `customers.update` above corrects where the receipt goes.
         emailHash: hashEmail(email),
-        // Written only when there is something to record, so the column
-        // keeps whatever it already held on the ordinary path.
-        ...(orphaned.length > 0
-          ? { rawPayload: mergeOrphaned(superseded?.rawPayload, orphaned) }
-          : {}),
+        // Written only when there is something to record — a newly
+        // orphaned object, or a change to the SetupIntent this attempt
+        // owns — so the column keeps whatever it already held on the
+        // ordinary path.
+        ...(rawPayload ? { rawPayload } : {}),
       });
 
       return {
@@ -942,6 +1063,11 @@ export const funnelPaymentRoute = new Hono()
         }
 
         // The browser's word is not evidence. Ask Stripe.
+        //
+        // The whole row goes in, not just the two Stripe ids: a trial's
+        // settlement is decided on the SetupIntent this session recorded
+        // in `rawPayload`, and that id is on the row precisely so the
+        // answer does not depend on Stripe still exposing it.
         const { account } = await requireConnectedStripe(session.projectId);
         if (!(await isSettled(account, purchase))) {
           throw new HTTPException(409, { message: "Payment is not complete" });

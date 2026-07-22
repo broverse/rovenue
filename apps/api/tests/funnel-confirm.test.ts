@@ -33,6 +33,9 @@ const purchase = vi.hoisted(() => ({
   stripeSubscriptionId: null as string | null,
   stripePaymentIntentId: null as string | null,
   stripeCustomerId: "cus_1" as string | null,
+  // Where the payment-intent endpoint records the SetupIntent this
+  // attempt created, under the same key it writes orphan ids.
+  rawPayload: {} as Record<string, unknown>,
 }));
 
 const transaction = vi.hoisted(() =>
@@ -58,11 +61,13 @@ vi.mock("@rovenue/db", async (importOriginal) => {
 
 const subscriptionsRetrieve = vi.hoisted(() => vi.fn());
 const paymentIntentsRetrieve = vi.hoisted(() => vi.fn());
+const setupIntentsRetrieve = vi.hoisted(() => vi.fn());
 const requireConnectedStripe = vi.hoisted(() =>
   vi.fn(async () => ({
     account: {
       subscriptions: { retrieve: subscriptionsRetrieve },
       paymentIntents: { retrieve: paymentIntentsRetrieve },
+      setupIntents: { retrieve: setupIntentsRetrieve },
     },
     accountId: "acct_1",
     livemode: false,
@@ -123,6 +128,7 @@ describe("POST /public/funnel-sessions/:sessionId/confirm", () => {
     purchase.stripeSubscriptionId = null;
     purchase.stripePaymentIntentId = "pi_1";
     purchase.stripeCustomerId = "cus_1";
+    purchase.rawPayload = {};
 
     findSessionById.mockReset().mockResolvedValue({
       id: "sess_1",
@@ -158,6 +164,9 @@ describe("POST /public/funnel-sessions/:sessionId/confirm", () => {
     paymentIntentsRetrieve
       .mockReset()
       .mockResolvedValue({ id: "pi_1", status: "succeeded" });
+    setupIntentsRetrieve
+      .mockReset()
+      .mockResolvedValue({ id: "seti_1", status: "succeeded" });
     requireConnectedStripe.mockClear();
   });
 
@@ -305,6 +314,145 @@ describe("POST /public/funnel-sessions/:sessionId/confirm", () => {
         status: "requires_payment_method",
       },
     });
+
+    const res = await confirm();
+
+    expect(res.status).toBe(409);
+    expect(insertClaimToken).not.toHaveBeenCalled();
+  });
+
+  // =============================================================
+  // The stored setup intent id
+  // =============================================================
+  //
+  // Every earlier version of this gate read settlement from something
+  // that is only true for a while: a field Stripe writes weeks later, an
+  // object Stripe clears on success, a webhook the operator may not have
+  // configured. The payment-intent endpoint therefore writes the
+  // SetupIntent's id onto the purchase row at create time, and this
+  // endpoint asks Stripe for it by id — a fact recorded at the moment it
+  // happened, readable a minute later or a week later.
+
+  it("settles a trial from the stored setup intent when Stripe has cleared the pending one", async () => {
+    purchase.stripeSubscriptionId = "sub_1";
+    purchase.stripePaymentIntentId = null;
+    purchase.rawPayload = { setup_intent_id: "seti_stored" };
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "trialing",
+      default_payment_method: null,
+      pending_setup_intent: null,
+    });
+    setupIntentsRetrieve.mockResolvedValue({
+      id: "seti_stored",
+      status: "succeeded",
+    });
+
+    const res = await confirm();
+
+    expect(res.status).toBe(200);
+    expect(insertClaimToken).toHaveBeenCalledTimes(1);
+    expect(setupIntentsRetrieve).toHaveBeenCalledWith("seti_stored");
+    // Through the SAME predicate. The stored id changes which read
+    // produces the status, not who decides what the status means.
+    expect(settledPredicate).toHaveBeenCalledWith({
+      status: "trialing",
+      default_payment_method: null,
+      pendingSetupIntentStatus: "succeeded",
+    });
+  });
+
+  // The other direction, and it matters exactly as much: a stored id is
+  // not itself proof of anything. The visitor who reached the card form
+  // and never completed it has one too.
+  it("409s when the stored setup intent was never confirmed", async () => {
+    purchase.stripeSubscriptionId = "sub_1";
+    purchase.stripePaymentIntentId = null;
+    purchase.rawPayload = { setup_intent_id: "seti_stored" };
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "trialing",
+      default_payment_method: null,
+      pending_setup_intent: null,
+    });
+    setupIntentsRetrieve.mockResolvedValue({
+      id: "seti_stored",
+      status: "requires_payment_method",
+    });
+
+    const res = await confirm();
+
+    expect(res.status).toBe(409);
+    expect(insertClaimToken).not.toHaveBeenCalled();
+    expect(markPaid).not.toHaveBeenCalled();
+  });
+
+  it("409s for a trial with no card, no pending intent and no stored id", async () => {
+    purchase.stripeSubscriptionId = "sub_1";
+    purchase.stripePaymentIntentId = null;
+    purchase.rawPayload = {};
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "trialing",
+      default_payment_method: null,
+      pending_setup_intent: null,
+    });
+
+    const res = await confirm();
+
+    expect(res.status).toBe(409);
+    expect(insertClaimToken).not.toHaveBeenCalled();
+    // Nothing to ask about: there is no id to name.
+    expect(setupIntentsRetrieve).not.toHaveBeenCalled();
+  });
+
+  // A bare id is a `pending_setup_intent` that came back unexpanded —
+  // unreadable, exactly like an absent one. The stored id covers it.
+  it("falls back to the stored id when the pending intent is a bare id", async () => {
+    purchase.stripeSubscriptionId = "sub_1";
+    purchase.stripePaymentIntentId = null;
+    purchase.rawPayload = { setup_intent_id: "seti_stored" };
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "trialing",
+      default_payment_method: null,
+      pending_setup_intent: "seti_stored",
+    });
+
+    expect((await confirm()).status).toBe(200);
+    expect(setupIntentsRetrieve).toHaveBeenCalledWith("seti_stored");
+  });
+
+  // The round-trip is made only where it can change the answer. A card on
+  // the subscription already settles it.
+  it("does not retrieve the stored intent when the subscription carries a card", async () => {
+    purchase.stripeSubscriptionId = "sub_1";
+    purchase.stripePaymentIntentId = null;
+    purchase.rawPayload = { setup_intent_id: "seti_stored" };
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "trialing",
+      default_payment_method: "pm_1",
+      pending_setup_intent: null,
+    });
+
+    expect((await confirm()).status).toBe(200);
+    expect(setupIntentsRetrieve).not.toHaveBeenCalled();
+  });
+
+  // Unreadable is not settled — but it is also not a broken endpoint. A
+  // 409 tells the browser to try again; a 500 tells it to give up.
+  it("409s rather than 500s when the stored intent cannot be read", async () => {
+    purchase.stripeSubscriptionId = "sub_1";
+    purchase.stripePaymentIntentId = null;
+    purchase.rawPayload = { setup_intent_id: "seti_stored" };
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "trialing",
+      default_payment_method: null,
+      pending_setup_intent: null,
+    });
+    setupIntentsRetrieve.mockRejectedValue(new Error("No such setupintent"));
 
     const res = await confirm();
 
