@@ -128,7 +128,9 @@ impl HttpClient {
     /// Monotonically increasing correlation id for each logical request.
     /// Format: `req-{n}` where n starts at 0 and increments per call.
     fn next_correlation_id(&self) -> String {
-        let n = self.corr_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let n = self
+            .corr_counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         format!("req-{n}")
     }
 
@@ -629,7 +631,9 @@ mod tests {
         use std::sync::Mutex as StdMutex;
         struct Collector(std::sync::Arc<StdMutex<Vec<LogRecord>>>);
         impl LogSink for Collector {
-            fn on_log(&self, r: LogRecord) { self.0.lock().unwrap().push(r); }
+            fn on_log(&self, r: LogRecord) {
+                self.0.lock().unwrap().push(r);
+            }
         }
         let recs = std::sync::Arc::new(StdMutex::new(Vec::new()));
         let logger = std::sync::Arc::new(Logger::new(LogLevel::Debug));
@@ -643,15 +647,27 @@ mod tests {
         let _ = client.get_json::<serde_json::Value>(HttpRequest::new("/v1/entitlements"));
 
         let got = recs.lock().unwrap();
-        assert!(got.iter().any(|r| r.fields.get("path").map(|p| p == "/v1/entitlements").unwrap_or(false)),
-            "expected a record carrying the request path");
+        assert!(
+            got.iter().any(|r| r
+                .fields
+                .get("path")
+                .map(|p| p == "/v1/entitlements")
+                .unwrap_or(false)),
+            "expected a record carrying the request path"
+        );
         for r in got.iter() {
             for v in r.fields.values() {
                 assert!(!v.contains("pk_secret"), "api key leaked into trace: {v}");
             }
-            assert!(!r.message.contains("pk_secret"), "api key leaked into message: {}", r.message);
-            assert!(!r.fields.contains_key("Authorization") && !r.fields.contains_key("authorization"),
-                "Authorization must never be a logged field");
+            assert!(
+                !r.message.contains("pk_secret"),
+                "api key leaked into message: {}",
+                r.message
+            );
+            assert!(
+                !r.fields.contains_key("Authorization") && !r.fields.contains_key("authorization"),
+                "Authorization must never be a logged field"
+            );
         }
     }
 }

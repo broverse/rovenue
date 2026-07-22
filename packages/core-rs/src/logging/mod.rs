@@ -68,9 +68,7 @@ impl Logger {
             message: message(),
             fields: fields(),
         };
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-            sink.on_log(record)
-        }));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || sink.on_log(record)));
     }
 
     pub fn warn(&self, message: &str) {

@@ -116,7 +116,8 @@ mod tests {
         let _m = server
             .mock("POST", "/v1/purchases/apple-offer-signature")
             .match_body(mockito::Matcher::JsonString(
-                r#"{"productId":"prod_id","offerId":"offer_id","appAccountToken":"tok-abc"}"#.into(),
+                r#"{"productId":"prod_id","offerId":"offer_id","appAccountToken":"tok-abc"}"#
+                    .into(),
             ))
             .with_status(200)
             .with_header("content-type", "application/json")
