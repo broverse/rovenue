@@ -61,6 +61,20 @@ public struct RovenuePaywallView: View {
                     didLogShow = true
                     Rovenue.shared.logPaywallShown(paywall)
                 }
+                // @State survives re-inits at the same view identity, so a
+                // host swapping in a DIFFERENT paywall without .id() would
+                // otherwise keep the previous offering's selection and skip
+                // the new paywall's impression log (the Kotlin sibling's
+                // bind() resets the same way).
+                .onChange(of: paywallStateKey) { _ in
+                    selectedPackageId = self.config.flatMap {
+                        initialSelection($0.root, offering: paywall.offering)
+                    }
+                    didLogShow = false
+                    isPurchasing = false
+                    Rovenue.shared.logPaywallShown(paywall)
+                    didLogShow = true
+                }
         }
         // No/undecodable builderConfig → nothing. A shipped app must never
         // crash or show garbage because a paywall config regressed.
@@ -89,6 +103,13 @@ public struct RovenuePaywallView: View {
             }
             BuilderNodeView(node: config.root, ctx: ctx, cellPackage: nil)
         }
+    }
+
+    /// Identity of "which paywall is this view showing" for the swap-reset
+    /// onChange: identifier + config content (covers same-config paywalls
+    /// with different offerings and config edits on the same paywall).
+    private var paywallStateKey: String {
+        (paywall.paywallIdentifier ?? "") + "|" + (paywall.builderConfigJson ?? "")
     }
 
     private func startPurchase() {
@@ -230,8 +251,13 @@ struct StackNodeView: View {
     }
 
     private var children: some View {
-        ForEach(props.children, id: \.id) { child in
-            BuilderNodeView(node: child, ctx: ctx, cellPackage: cellPackage)
+        // Positional identity, NOT node.id: node ids are user-authored and
+        // only validated server-side at write time — a stale/hostile payload
+        // with duplicate sibling ids passes the lenient client decode, and
+        // duplicate ForEach ids are undefined behavior in SwiftUI. Position
+        // is the correct identity for a full-remount renderer.
+        ForEach(Array(props.children.enumerated()), id: \.offset) { entry in
+            BuilderNodeView(node: entry.element, ctx: ctx, cellPackage: cellPackage)
         }
     }
 
@@ -346,7 +372,11 @@ struct PackageListView: View {
     }
 
     private func cellViews(_ cells: [Package]) -> some View {
-        ForEach(cells, id: \.identifier) { pkg in
+        // Positional identity for the same reason as stack children: the
+        // cell list is derived from user-authored packageIds, which the
+        // client never re-validates for uniqueness.
+        ForEach(Array(cells.enumerated()), id: \.offset) { cellEntry in
+            let pkg = cellEntry.element
             let view = packageView(from: pkg.product, displayName: pkg.product.displayName)
             let selected = ctx.selectedPackageId == pkg.identifier
             Button {

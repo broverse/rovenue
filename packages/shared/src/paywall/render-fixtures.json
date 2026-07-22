@@ -304,6 +304,41 @@
           ]
         }
       }
+    },
+    {
+      "name": "duplicate sibling node ids (schema-legal: uniqueness is a validator concern, not a schema one; renderers must decode and render without crashing — keyed positionally, never by id)",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "t": "Twin"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "r",
+          "axis": "v",
+          "children": [
+            {
+              "type": "text",
+              "id": "dup_1",
+              "key": "t",
+              "role": "body"
+            },
+            {
+              "type": "text",
+              "id": "dup_1",
+              "key": "t",
+              "role": "caption"
+            },
+            {
+              "type": "spacer",
+              "id": "dup_1"
+            }
+          ]
+        }
+      }
     }
   ],
   "acceptLenient": [

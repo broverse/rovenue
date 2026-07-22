@@ -111,13 +111,18 @@ function renderStack(node: StackNode, ctx: RenderCtx): ReactElement {
   const style = stackContainerStyle(node, ctx.colorScheme);
   return (
     <div data-rov-node={node.id} style={style}>
-      {node.children.map((child) =>
+      {/* Positional keys, NOT node.id: ids are user-authored and only
+          validated for uniqueness server-side at write time — a stale or
+          hostile payload with duplicate sibling ids passes the client parse,
+          and duplicate React keys mean buggy reconciliation. Position is the
+          right identity for a full-remount renderer. */}
+      {node.children.map((child, index) =>
         node.axis === "z" ? (
-          <div key={child.id} style={Z_OVERLAY_CHILD_STYLE}>
+          <div key={index} style={Z_OVERLAY_CHILD_STYLE}>
             {renderNode(child, ctx)}
           </div>
         ) : (
-          <Fragment key={child.id}>{renderNode(child, ctx)}</Fragment>
+          <Fragment key={index}>{renderNode(child, ctx)}</Fragment>
         ),
       )}
     </div>
@@ -211,13 +216,13 @@ function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement 
         gap: "8px",
       }}
     >
-      {packageIds.map((packageId) => {
+      {packageIds.map((packageId, index) => {
         const view = resolvePackageView(ctx.offering, ctx.priceView, packageId);
         const isSelected = packageId === ctx.selectedPackageId;
         return (
           <button
             type="button"
-            key={packageId}
+            key={index}
             data-rov-package={packageId}
             aria-pressed={isSelected}
             onClick={() => ctx.onSelectPackage(packageId)}

@@ -417,6 +417,55 @@ describe("PATCH /projects/:projectId/paywalls/:id — builderConfig", () => {
     expect(data.paywall.builderConfig).toEqual(validBuilderConfig());
   });
 
+  it("400s (never 500s) on a hostile deeply-nested builderConfig — depth guard runs before the recursive parse", async () => {
+    const { userId, cookie } = await createUserAndSession("bc-deep");
+    const project = await seedProject("bc-deep");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const offering = await seedOffering(project.id, "bc-deep", [monthlyPackageSlot]);
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/paywalls`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "bc-deep-paywall",
+        name: "Builder Config Deep",
+        offeringId: offering.id,
+        remoteConfig: validRemoteConfig,
+      }),
+    });
+    const { data: createData } = (await createRes.json()) as { data: { paywall: { id: string } } };
+
+    // ~1000 nested stacks used to blow the call stack inside Zod's recursive
+    // safeParse — a RangeError safeParse does NOT contain — surfacing as a
+    // generic 500 instead of a validation 400.
+    let node: Record<string, unknown> = { type: "spacer", id: "leaf" };
+    for (let i = 0; i < 1000; i++) {
+      node = { type: "stack", id: `s${i}`, axis: "v", children: [node] };
+    }
+    const deepConfig = {
+      formatVersion: 2,
+      defaultLocale: "en",
+      localizations: { en: {} },
+      root: node,
+    };
+
+    const patchRes = await app.request(
+      `/projects/${project.id}/paywalls/${createData.paywall.id}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ builderConfig: deepConfig }),
+      },
+    );
+    expect(patchRes.status).toBe(400);
+    const { error } = (await patchRes.json()) as { error: { message: string } };
+    const parsed = JSON.parse(error.message) as { code: string; issues: Array<{ code: string }> };
+    expect(parsed.code).toBe("INVALID_BUILDER_CONFIG");
+    expect(parsed.issues[0]?.code).toBe("SCHEMA_INVALID");
+  });
+
   it("400s with INVALID_BUILDER_CONFIG + issues when a packageList references a foreign packageId", async () => {
     const { userId, cookie } = await createUserAndSession("bc-foreign");
     const project = await seedProject("bc-foreign");

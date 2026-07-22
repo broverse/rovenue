@@ -326,7 +326,10 @@ export class PaywallBuilderViewModel {
       if (this.saveController !== controller) return;
       this.syncFromDetail(detail);
       this.lastSavedAt = Date.now();
-      this.lastSavedSnapshot = snap;
+      // Snapshot AFTER syncFromDetail: Postgres jsonb re-orders object keys,
+      // so the pre-send snapshot would compare unequal to the server-returned
+      // config and flag a spurious isDirty right after "saved".
+      this.lastSavedSnapshot = this.snapshot();
       this.autosaveStatus = "saved";
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
@@ -348,7 +351,6 @@ export class PaywallBuilderViewModel {
     const controller = new AbortController();
     this.saveController = controller;
     this.autosaveStatus = "saving";
-    const snap = this.snapshot();
     try {
       const detail = await this.api.patchBuilderConfig(
         this.props.projectId,
@@ -361,7 +363,10 @@ export class PaywallBuilderViewModel {
       if (this.saveController !== controller) return;
       this.syncFromDetail(detail);
       this.lastSavedAt = Date.now();
-      this.lastSavedSnapshot = snap;
+      // Snapshot AFTER syncFromDetail: Postgres jsonb re-orders object keys,
+      // so the pre-send snapshot would compare unequal to the server-returned
+      // config and flag a spurious isDirty right after "saved".
+      this.lastSavedSnapshot = this.snapshot();
       this.autosaveStatus = "saved";
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
