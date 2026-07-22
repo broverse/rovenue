@@ -142,6 +142,13 @@ export * from "./billing";
 export * from "./funnel";
 
 // =============================================================
+// Paywall builder — node-tree schema, validator, and variable
+// resolution (dashboard visual builder + web renderer)
+// =============================================================
+
+export * from "./paywall";
+
+// =============================================================
 // Subscriber attributes — types, catalog, and helpers
 // =============================================================
 
