@@ -186,4 +186,125 @@ describe("GET /public/funnels/:slug — prices", () => {
     expect(body.data.prices).toEqual({});
     expect(resolvePricesForPackages).not.toHaveBeenCalled();
   });
+
+  it("does not leak projectId into the public response", async () => {
+    stageOnboardingFunnel();
+    resolvePricesForPackages.mockResolvedValue({
+      $rov_monthly: {
+        packageIdentifier: "$rov_monthly",
+        priceId: "price_m",
+        unitAmount: 4999,
+        currency: "usd",
+        interval: "month",
+        intervalCount: 1,
+        trialDays: null,
+      },
+    });
+    const app = await buildApp();
+    const res = await app.request("/public/funnels/onboarding");
+    const raw = await res.text();
+    expect(raw).not.toContain("projectId");
+    expect(raw).not.toContain("proj_1");
+  });
+
+  it("skips a paywall whose offering has no packages", async () => {
+    funnelRow.value = {
+      id: "fnl_3",
+      projectId: "proj_3",
+      slug: "empty-offering",
+      status: "published",
+      currentVersionId: "ver_3",
+    };
+    findVersionById.mockResolvedValue({
+      id: "ver_3",
+      pagesJson: [{ id: "p1", type: "paywall", paywallId: "pw_3" }],
+      themeJson: {},
+      settingsJson: {},
+    });
+    findFunnelById.mockResolvedValue({ id: "fnl_3", projectId: "proj_3" });
+    findPaywallsByIds.mockResolvedValue([
+      {
+        id: "pw_3",
+        builderConfig: { formatVersion: 2 },
+        configFormatVersion: 2,
+        offeringId: "off_3",
+      },
+    ]);
+    findOfferingById.mockResolvedValue({
+      identifier: "default",
+      isDefault: true,
+      packages: [],
+      metadata: {},
+    });
+    findProductsByIds.mockResolvedValue([]);
+
+    const app = await buildApp();
+    const res = await app.request("/public/funnels/empty-offering");
+    const body = (await res.json()) as { data: { prices: Record<string, unknown> } };
+
+    expect(resolvePricesForPackages).not.toHaveBeenCalled();
+    expect(body.data.prices).not.toHaveProperty("pw_3");
+    expect(body.data.prices).toEqual({});
+  });
+
+  it("passes a package with no storeIds.stripe through as stripePriceId: null", async () => {
+    funnelRow.value = {
+      id: "fnl_4",
+      projectId: "proj_4",
+      slug: "no-stripe-id",
+      status: "published",
+      currentVersionId: "ver_4",
+    };
+    findVersionById.mockResolvedValue({
+      id: "ver_4",
+      pagesJson: [{ id: "p1", type: "paywall", paywallId: "pw_4" }],
+      themeJson: {},
+      settingsJson: {},
+    });
+    findFunnelById.mockResolvedValue({ id: "fnl_4", projectId: "proj_4" });
+    findPaywallsByIds.mockResolvedValue([
+      {
+        id: "pw_4",
+        builderConfig: { formatVersion: 2 },
+        configFormatVersion: 2,
+        offeringId: "off_4",
+      },
+    ]);
+    findOfferingById.mockResolvedValue({
+      identifier: "default",
+      isDefault: true,
+      packages: [
+        {
+          identifier: "$rov_no_stripe",
+          productId: "prod_no_stripe",
+          order: 0,
+          isPromoted: false,
+        },
+      ],
+      metadata: {},
+    });
+    findProductsByIds.mockResolvedValue([
+      {
+        id: "prod_no_stripe",
+        identifier: "no_stripe_product",
+        type: "subscription",
+        displayName: "No Stripe",
+        accessIds: [],
+        isActive: true,
+        storeIds: { apple: "apple_id" },
+        androidBasePlanId: null,
+        androidOfferId: null,
+      },
+    ]);
+
+    const app = await buildApp();
+    await app.request("/public/funnels/no-stripe-id");
+
+    expect(resolvePricesForPackages).toHaveBeenCalledWith(
+      "proj_4",
+      expect.arrayContaining([
+        { packageIdentifier: "$rov_no_stripe", stripePriceId: null },
+      ]),
+    );
+  });
 });

@@ -67,7 +67,6 @@ const answerValueSchema: z.ZodType<unknown> = z.lazy(() =>
 
 interface PublishedRuntimeConfig {
   id: string;
-  projectId: string;
   slug: string;
   version_id: string;
   pages: Array<Record<string, unknown>>;
@@ -105,12 +104,15 @@ function collectPaywallIds(pages: Array<Record<string, unknown>>): string[] {
 async function hydrateFunnelPaywalls(
   funnelId: string,
   pages: Array<Record<string, unknown>>,
-): Promise<Record<string, HydratedPaywallEntry>> {
+): Promise<{
+  projectId: string | null;
+  paywalls: Record<string, HydratedPaywallEntry>;
+}> {
   const paywallIds = collectPaywallIds(pages);
-  if (paywallIds.length === 0) return {};
+  if (paywallIds.length === 0) return { projectId: null, paywalls: {} };
 
   const funnel = await drizzle.funnelRepo.findById(drizzle.db, funnelId);
-  if (!funnel) return {};
+  if (!funnel) return { projectId: null, paywalls: {} };
 
   const rows = await drizzle.paywallRepo.findPaywallsByIds(
     drizzle.db,
@@ -134,7 +136,7 @@ async function hydrateFunnelPaywalls(
       offering: offering ? await hydrateOffering(funnel.projectId, offering) : null,
     };
   }
-  return result;
+  return { projectId: funnel.projectId, paywalls: result };
 }
 
 /**
@@ -194,7 +196,6 @@ async function loadPublishedConfigFromDb(
 
   return {
     id: funnel.id,
-    projectId: funnel.projectId,
     slug: funnel.slug,
     version_id: version.id,
     pages: stripBranchingRules(pagesArr),
@@ -243,8 +244,13 @@ export const publicFunnelsRoute = new Hono()
     // Hydrated fresh on every request (not cached alongside the config
     // bundle) — paywall/offering data can change between publishes and a
     // paywall may be deleted after this funnel was published.
-    const paywalls = await hydrateFunnelPaywalls(config.id, config.pages);
-    const prices = await resolveFunnelPrices(config.projectId, paywalls);
+    const { projectId, paywalls } = await hydrateFunnelPaywalls(
+      config.id,
+      config.pages,
+    );
+    const prices = projectId
+      ? await resolveFunnelPrices(projectId, paywalls)
+      : {};
     return c.json({ data: { ...config, paywalls, prices } });
   })
 
