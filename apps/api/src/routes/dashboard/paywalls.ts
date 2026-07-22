@@ -179,23 +179,15 @@ export const paywallsDashboardRoute = new Hono()
     }
 
     if (body.identifier && body.identifier !== existingPaywall.identifier) {
-      const conflict = await drizzle.paywallRepo.findPaywallByIdentifier(
-        drizzle.db,
-        projectId,
-        body.identifier,
-      );
-      if (conflict) {
-        throw new HTTPException(409, {
-          message: `Paywall identifier already in use: ${body.identifier}`,
-        });
-      }
+      throw new HTTPException(400, {
+        message: "identifier is immutable once set",
+      });
     }
     if (body.offeringId) {
       await assertOfferingExists(projectId, body.offeringId);
     }
 
     const row = await drizzle.paywallRepo.updatePaywall(drizzle.db, projectId, id, {
-      ...(body.identifier !== undefined && { identifier: body.identifier }),
       ...(body.name !== undefined && { name: body.name }),
       ...(body.offeringId !== undefined && { offeringId: body.offeringId }),
       ...(body.remoteConfig !== undefined && {

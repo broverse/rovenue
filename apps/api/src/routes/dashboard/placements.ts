@@ -209,16 +209,9 @@ export const placementsDashboardRoute = new Hono()
     }
 
     if (body.identifier && body.identifier !== existingPlacement.identifier) {
-      const conflict = await drizzle.placementRepo.findPlacementByIdentifier(
-        drizzle.db,
-        projectId,
-        body.identifier,
-      );
-      if (conflict) {
-        throw new HTTPException(409, {
-          message: `Placement identifier already in use: ${body.identifier}`,
-        });
-      }
+      throw new HTTPException(400, {
+        message: "identifier is immutable once set",
+      });
     }
     if (body.rows) {
       await assertRowRefsOwnedByProject(projectId, body.rows);
@@ -229,7 +222,6 @@ export const placementsDashboardRoute = new Hono()
       projectId,
       id,
       {
-        ...(body.identifier !== undefined && { identifier: body.identifier }),
         ...(body.name !== undefined && { name: body.name }),
         ...(body.rows !== undefined && { rows: body.rows }),
         ...(body.isActive !== undefined && { isActive: body.isActive }),

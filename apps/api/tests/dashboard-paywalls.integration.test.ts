@@ -313,6 +313,37 @@ describe("PATCH /projects/:projectId/paywalls/:id — update paywall", () => {
     const { data } = (await patchRes.json()) as { data: { paywall: Record<string, unknown> } };
     expect(data.paywall.name).toBe("Patched Name");
   });
+
+  it("400s when trying to change identifier", async () => {
+    const { userId, cookie } = await createUserAndSession("patch-immutable");
+    const project = await seedProject("patch-immutable");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const offering = await seedOffering(project.id, "patch-immutable");
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/paywalls`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "immutable-test-paywall",
+        name: "Immutable Test",
+        offeringId: offering.id,
+        remoteConfig: validRemoteConfig,
+      }),
+    });
+    const { data: createData } = (await createRes.json()) as { data: { paywall: { id: string } } };
+    const paywallId = createData.paywall.id;
+
+    const patchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ identifier: "changed-identifier" }),
+    });
+    expect(patchRes.status).toBe(400);
+    const { error } = (await patchRes.json()) as { error: { message: string } };
+    expect(error.message).toContain("immutable");
+  });
 });
 
 describe("DELETE /projects/:projectId/paywalls/:id — delete paywall", () => {

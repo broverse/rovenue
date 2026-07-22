@@ -436,6 +436,35 @@ describe("PATCH /projects/:projectId/placements/:id — update placement rows", 
     const text = JSON.stringify(await patchRes.json());
     expect(text).toContain("INVALID_ROW_REF");
   });
+
+  it("400s when trying to change identifier", async () => {
+    const { userId, cookie } = await createUserAndSession("patch-immutable");
+    const project = await seedProject("patch-immutable");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/placements`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "immutable-test-placement",
+        name: "Immutable Test",
+        rows: [{ audienceId: null, target: { type: "none" } }],
+      }),
+    });
+    const { data: createData } = (await createRes.json()) as { data: { placement: { id: string } } };
+    const placementId = createData.placement.id;
+
+    const patchRes = await app.request(`/projects/${project.id}/placements/${placementId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ identifier: "changed-identifier" }),
+    });
+    expect(patchRes.status).toBe(400);
+    const { error } = (await patchRes.json()) as { error: { message: string } };
+    expect(error.message).toContain("immutable");
+  });
 });
 
 describe("DELETE /projects/:projectId/placements/:id — delete placement", () => {
