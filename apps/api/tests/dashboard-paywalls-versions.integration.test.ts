@@ -1,0 +1,213 @@
+// =============================================================
+// Paywall versioning endpoints — publish / versions / revert /
+// discard-draft / label / diff.
+//
+// Same harness as dashboard-paywalls.integration.test.ts: minimal Hono
+// app on the production mount path, real Postgres, real Better Auth
+// session cookie so requireDashboardAuth runs unmocked.
+// =============================================================
+
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { Hono } from "hono";
+import { eq } from "drizzle-orm";
+import { getDb, projects, offerings, drizzle } from "@rovenue/db";
+import { auth } from "../src/lib/auth";
+import { errorHandler } from "../src/middleware/error";
+
+const { purgeSpy } = vi.hoisted(() => ({ purgeSpy: vi.fn() }));
+vi.mock("../src/lib/edge-cache", () => ({
+  purgeProjectCatalogCache: (projectId: string) => purgeSpy(projectId),
+}));
+
+const { paywallsDashboardRoute } = await import("../src/routes/dashboard/paywalls");
+
+const RUN_ID = Date.now();
+const db = getDb();
+
+function buildApp() {
+  const app = new Hono();
+  app.onError(errorHandler);
+  return app.route("/projects/:projectId/paywalls", paywallsDashboardRoute);
+}
+
+let projectId: string;
+let offeringId: string;
+let cookie: string;
+let userId: string;
+
+const VALID_CONFIG = {
+  formatVersion: 2,
+  defaultLocale: "en",
+  localizations: { en: { title: "Hello", cta: "Buy" } },
+  root: {
+    type: "stack",
+    id: "root",
+    axis: "v",
+    children: [
+      { type: "text", id: "t1", key: "title", role: "title" },
+      { type: "packageList", id: "pl", packageIds: ["monthly"], cellLayout: "row" },
+      { type: "purchaseButton", id: "pb", labelKey: "cta" },
+    ],
+  },
+};
+
+beforeAll(async () => {
+  const email = `pwver_${RUN_ID}@rovenue.test`;
+  const password = "Test1234!pwver";
+  const signUp = await auth.api.signUpEmail({
+    body: { email, password, name: `PW Ver ${RUN_ID}` },
+  });
+  userId = signUp!.user!.id;
+  const signIn = await auth.api.signInEmail({
+    body: { email, password },
+    asResponse: true,
+  });
+  cookie = signIn.headers.get("set-cookie")!.split(";")[0]!;
+
+  // NOTE: `projects` has no `ownerId` column — membership is a separate
+  // `project_members` row, not derivable from the project itself (see
+  // dashboard-paywalls.integration.test.ts's seedMember helper). The task
+  // brief's inline snippet assumed an `ownerId` column; it does not exist,
+  // so we seed the project row plus an explicit ADMIN membership below.
+  const [project] = await db
+    .insert(projects)
+    .values({ name: `pwver-${RUN_ID}` })
+    .returning();
+  projectId = project!.id;
+
+  await db.insert(drizzle.schema.projectMembers).values({
+    projectId,
+    userId,
+    role: "ADMIN",
+  });
+
+  // NOTE: `offerings` has no `name` column (see the sibling repo test
+  // packages/db/.../paywalls.integration.test.ts, which seeds
+  // `{ projectId, identifier, packages: [] }` with no `name`). The brief's
+  // inline snippet included one; dropped here. Also, offering-hydration's
+  // packageSchema requires `productId: z.string()` (non-null) — a null
+  // productId fails that parse, extractOfferingPackageIds silently falls
+  // back to [], and every packageList node then 400s as FOREIGN_PACKAGE_ID.
+  // Use a real string id instead of the brief's `productId: null`.
+  const [offering] = await db
+    .insert(offerings)
+    .values({
+      projectId,
+      identifier: `off-${RUN_ID}`,
+      packages: [{ identifier: "monthly", productId: "prod_monthly" }],
+    })
+    .returning();
+  offeringId = offering!.id;
+});
+
+afterAll(async () => {
+  await db.delete(projects).where(eq(projects.id, projectId));
+});
+
+async function createPaywall(suffix: string, builderConfig: unknown) {
+  const app = buildApp();
+  const res = await app.request(`/projects/${projectId}/paywalls`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({
+      identifier: `pw-${suffix}-${RUN_ID}`,
+      name: `Paywall ${suffix}`,
+      offeringId,
+      remoteConfig: { defaultLocale: "en", locales: { en: {} } },
+      builderConfig,
+    }),
+  });
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  return body.data.paywall;
+}
+
+describe("POST /paywalls/:id/publish", () => {
+  it("snapshots the draft, points the paywall at it, and purges the cache", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("pub", VALID_CONFIG);
+    expect(paywall.status).toBe("draft");
+    expect(paywall.publishedVersionId).toBeNull();
+
+    purgeSpy.mockClear();
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/publish`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+
+    expect(data.version.versionNo).toBe(1);
+    expect(data.version.builderConfig).toEqual(VALID_CONFIG);
+    expect(data.version.offeringId).toBe(offeringId);
+    expect(data.paywall.status).toBe("published");
+    expect(data.paywall.publishedVersionId).toBe(data.version.id);
+    expect(purgeSpy).toHaveBeenCalledWith(projectId);
+  });
+
+  it("increments versionNo on the second publish", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("pub2", VALID_CONFIG);
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/publish`,
+      { method: "POST", headers: { cookie } },
+    );
+    const { data } = await res.json();
+    expect(data.version.versionNo).toBe(2);
+  });
+
+  it("rejects a paywall with no builderConfig", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("empty", null);
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/publish`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(JSON.parse(body.error.message).code).toBe("PAYWALL_EMPTY_DRAFT");
+  });
+
+  it("rejects a draft with blocking issues", async () => {
+    // MISSING_PURCHASE_BUTTON: a packageList with no purchaseButton anywhere.
+    const app = buildApp();
+    const paywall = await createPaywall("blocked", VALID_CONFIG);
+    // The create endpoint already blocks this, so seed the row directly.
+    await drizzle.paywallRepo.updatePaywall(db, projectId, paywall.id, {
+      builderConfig: {
+        ...VALID_CONFIG,
+        root: {
+          type: "stack",
+          id: "root",
+          axis: "v",
+          children: [
+            { type: "packageList", id: "pl", packageIds: ["monthly"], cellLayout: "row" },
+          ],
+        },
+      },
+      configFormatVersion: 2,
+    });
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/publish`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    const parsed = JSON.parse(body.error.message);
+    expect(parsed.code).toBe("PAYWALL_NOT_PUBLISHABLE");
+    expect(parsed.issues.some((i: { code: string }) => i.code === "MISSING_PURCHASE_BUTTON")).toBe(true);
+  });
+
+  it("404s for a paywall in another project", async () => {
+    const app = buildApp();
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/does-not-exist/publish`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(res.status).toBe(404);
+  });
+});

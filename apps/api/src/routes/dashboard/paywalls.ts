@@ -5,12 +5,14 @@ import { z } from "zod";
 import { MemberRole, drizzle, type Offering } from "@rovenue/db";
 import {
   builderConfigSchema,
+  diffBuilderConfigs,
   isBlockingIssue,
   validateBuilderConfig,
 } from "@rovenue/shared/paywall";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
+import { audit, extractRequestContext } from "../../lib/audit";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { packagesSchema } from "../../lib/offering-hydration";
 import { resolvePlacement, type ResolvedPlacementData } from "../../lib/placement-resolution";
@@ -397,6 +399,97 @@ export const paywallsDashboardRoute = new Hono()
     }
     purgeProjectCatalogCache(projectId);
     return c.json(ok({ paywall: row }));
+  })
+  // -----------------------------------------------------------
+  // Versioning — publish / versions / revert / discard / label / diff
+  //
+  // `paywalls.builderConfig` is THE DRAFT. Publishing snapshots it into
+  // paywall_versions and repoints `publishedVersionId`; /v1/placements
+  // serves that snapshot, never the draft.
+  // -----------------------------------------------------------
+
+  .post("/:id/publish", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing identifier" });
+    }
+    const user = c.get("user");
+    await assertProjectCapability(projectId, user.id, "products:write");
+
+    const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
+    if (!paywall) {
+      throw new HTTPException(404, { message: "Paywall not found" });
+    }
+    if (paywall.builderConfig === null) {
+      throw new HTTPException(400, {
+        message: JSON.stringify({
+          code: "PAYWALL_EMPTY_DRAFT",
+          message: "This paywall has no builder config to publish.",
+        }),
+      });
+    }
+
+    // Re-validate at publish time rather than trusting what PATCH let
+    // through: the offering's packages can change after the draft was
+    // last saved, which can turn a previously-clean draft into one with
+    // FOREIGN_PACKAGE_ID issues.
+    const offering = await loadOffering(projectId, paywall.offeringId);
+    const parsed = builderConfigSchema.safeParse(paywall.builderConfig);
+    if (!parsed.success) {
+      throw new HTTPException(400, {
+        message: JSON.stringify({
+          code: "PAYWALL_NOT_PUBLISHABLE",
+          issues: parsed.error.issues.map((issue) => ({
+            code: "SCHEMA_INVALID",
+            message: `${issue.path.join(".")}: ${issue.message}`,
+          })),
+        }),
+      });
+    }
+    const issues = validateBuilderConfig(parsed.data, {
+      offeringPackageIds: extractOfferingPackageIds(offering),
+    });
+    if (issues.some(isBlockingIssue)) {
+      throw new HTTPException(400, {
+        message: JSON.stringify({ code: "PAYWALL_NOT_PUBLISHABLE", issues }),
+      });
+    }
+
+    const result = await drizzle.db.transaction(async (tx) => {
+      const versionNo = await drizzle.paywallVersionRepo.nextVersionNo(tx, id);
+      const version = await drizzle.paywallVersionRepo.insert(tx, {
+        paywallId: id,
+        versionNo,
+        builderConfig: paywall.builderConfig,
+        remoteConfig: paywall.remoteConfig,
+        offeringId: paywall.offeringId,
+        configFormatVersion: paywall.configFormatVersion,
+        publishedBy: user.id,
+      });
+      const updated = await drizzle.paywallRepo.setPublishedVersion(
+        tx,
+        projectId,
+        id,
+        version.id,
+      );
+      await audit(
+        {
+          projectId,
+          userId: user.id,
+          action: "paywall.published",
+          resource: "paywall",
+          resourceId: id,
+          after: { versionNo, versionId: version.id, warnings: issues.length },
+          ...extractRequestContext(c),
+        },
+        tx,
+      );
+      return { version, paywall: updated };
+    });
+
+    purgeProjectCatalogCache(projectId);
+    return c.json(ok(result));
   })
   .delete("/:id", async (c) => {
     const projectId = c.req.param("projectId");
