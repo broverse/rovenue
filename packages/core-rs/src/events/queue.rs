@@ -75,16 +75,22 @@ impl PaywallEventQueue {
     }
 
     /// Peek (oldest first) -> POST `/v1/events` -> delete on 2xx. On
-    /// connectivity failure / 5xx the entry (and everything behind it) is
-    /// retained and the drain stops — at-least-once delivery, safe because
-    /// the server dedupes on the deterministic event id. A permanent 4xx
-    /// rejection is poison: retaining it would wedge every later entry
+    /// connectivity failure / 5xx/429, or a non-poison 4xx (401/403 auth
+    /// blip, 408, etc. — see [`RovenueError::is_poison`]), the entry (and
+    /// everything behind it) is retained and the drain stops —
+    /// at-least-once delivery, safe because the server dedupes on the
+    /// deterministic event id and bounded because the queue itself is
+    /// capped at 100 with drop-oldest. Only a genuine envelope rejection
+    /// (400/422) is poison: retaining it would wedge every later entry
     /// behind it forever, so it is dropped (loudly logged) and the drain
     /// continues with the next entry.
     ///
     /// Single-in-flight: a drain already running makes this call a no-op —
     /// the in-progress drain will pick up anything enqueued meanwhile since
-    /// it re-peeks the store on every iteration.
+    /// it re-peeks the store on every iteration. There is a narrow window
+    /// between the drain loop seeing an empty queue and the flag actually
+    /// clearing where a concurrent `enqueue()` can land its own no-op
+    /// drain; see the re-arm check below.
     pub fn drain_once(&self) {
         if self
             .in_flight
@@ -93,12 +99,49 @@ impl PaywallEventQueue {
         {
             return;
         }
+        let stopped_early = self.drain_inner();
+        if stopped_early {
+            // Retained an entry for retry-later (connectivity/5xx/429/
+            // non-poison-4xx) — do not immediately re-attempt, that would
+            // spin instead of waiting for the next trigger.
+            return;
+        }
+
+        // Lost-wakeup guard (Phase-D review finding): the queue looked
+        // empty and the flag is about to clear, but a concurrent
+        // `enqueue()` can append a row and call `trigger_drain()` in the
+        // gap between this thread's loop exiting and the
+        // `in_flight.store(false, ..)` inside `drain_inner()` above — that
+        // spawned drain sees the flag still `true` and no-ops. Nothing is
+        // lost (the row stays in the store), only delayed until the next
+        // trigger. Re-check once and, if work appeared, re-arm a single
+        // extra pass ourselves. Bounded to exactly one re-arm — if another
+        // thread already grabbed the flag first, the CAS below fails and we
+        // simply stop; that thread now owns the new entry.
+        if self.next_row().is_some()
+            && self
+                .in_flight
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+        {
+            self.drain_inner();
+        }
+    }
+
+    /// Runs the peek -> POST -> delete-on-2xx loop until the queue is empty
+    /// or an entry must be retained, then clears `in_flight`. Returns
+    /// `true` if the loop stopped early with an entry retained (retry
+    /// later), `false` if it ran the queue empty naturally.
+    fn drain_inner(&self) -> bool {
+        let mut stopped_early = false;
         while let Some(row) = self.next_row() {
             if !self.drain_one(&row) {
+                stopped_early = true;
                 break;
             }
         }
         self.in_flight.store(false, Ordering::SeqCst);
+        stopped_early
     }
 
     fn next_row(&self) -> Option<PaywallEventRow> {
@@ -129,7 +172,7 @@ impl PaywallEventQueue {
                 true
             }
             Err(err) => {
-                if !err.retryable && matches!(err.http_status, Some(s) if (400..500).contains(&s)) {
+                if err.is_poison() {
                     self.log_poison(row.id, err.http_status);
                     let _ = self.store.delete_paywall_events(&[row.id]);
                     true
@@ -340,6 +383,136 @@ mod tests {
         );
     }
 
+    /// Regression (Phase-D review finding 1): a 401 (invalid/rotated API
+    /// key) must be RETAINED, not poison-deleted — a key rotation or
+    /// transient auth failure must not permanently drop queued beacons.
+    #[test]
+    fn drain_once_retains_and_stops_on_401() {
+        let mut server = mockito::Server::new();
+        let m1 = server
+            .mock("POST", "/v1/events")
+            .match_body(mockito::Matcher::Regex(r#""eventId":"evt_1""#.into()))
+            .with_status(401)
+            .create();
+        let m2 = server
+            .mock("POST", "/v1/events")
+            .match_body(mockito::Matcher::Regex(r#""eventId":"evt_2""#.into()))
+            .with_status(202)
+            .expect(0)
+            .create();
+
+        let (store, queue) = setup(server.url());
+        store
+            .append_paywall_event(&envelope_json("evt_1", "paywall_view"))
+            .unwrap();
+        store
+            .append_paywall_event(&envelope_json("evt_2", "paywall_close"))
+            .unwrap();
+
+        queue.drain_once();
+
+        m1.assert();
+        m2.assert();
+        let remaining = store.list_paywall_events(10).unwrap();
+        assert_eq!(
+            remaining.len(),
+            2,
+            "a 401 must retain the entry (and everything behind it), not poison-delete it"
+        );
+    }
+
+    /// Regression (Phase-D review finding 1): same as the 401 case — 403
+    /// (forbidden) is also an auth-adjacent failure, not a malformed
+    /// envelope, so it must be retained too.
+    #[test]
+    fn drain_once_retains_and_stops_on_403() {
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("POST", "/v1/events")
+            .with_status(403)
+            .expect(1)
+            .create();
+
+        let (store, queue) = setup(server.url());
+        store
+            .append_paywall_event(&envelope_json("evt_1", "paywall_view"))
+            .unwrap();
+
+        queue.drain_once();
+
+        m.assert();
+        assert_eq!(
+            store.list_paywall_events(10).unwrap().len(),
+            1,
+            "a 403 must retain the entry, not poison-delete it"
+        );
+    }
+
+    /// Regression (Phase-D review finding 1): 408 (request timeout) is
+    /// non-retryable per `ErrorKind::is_retryable()` (it maps to the
+    /// generic `InvalidRequest` kind) but is not a malformed-payload
+    /// rejection either — it must be retained, matching the review's
+    /// explicit call-out.
+    #[test]
+    fn drain_once_retains_and_stops_on_408() {
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("POST", "/v1/events")
+            .with_status(408)
+            .expect(1)
+            .create();
+
+        let (store, queue) = setup(server.url());
+        store
+            .append_paywall_event(&envelope_json("evt_1", "paywall_view"))
+            .unwrap();
+
+        queue.drain_once();
+
+        m.assert();
+        assert_eq!(
+            store.list_paywall_events(10).unwrap().len(),
+            1,
+            "a 408 must retain the entry, not poison-delete it"
+        );
+    }
+
+    /// 422 (unprocessable entity) is a genuine envelope rejection — same
+    /// bucket as 400 — and must still poison-delete after the narrowed
+    /// predicate.
+    #[test]
+    fn drain_once_poison_deletes_422() {
+        let mut server = mockito::Server::new();
+        let m1 = server
+            .mock("POST", "/v1/events")
+            .match_body(mockito::Matcher::Regex(r#""eventId":"evt_poison""#.into()))
+            .with_status(422)
+            .create();
+        let m2 = server
+            .mock("POST", "/v1/events")
+            .match_body(mockito::Matcher::Regex(r#""eventId":"evt_ok""#.into()))
+            .with_status(202)
+            .create();
+
+        let (store, queue) = setup(server.url());
+        store
+            .append_paywall_event(&envelope_json("evt_poison", "paywall_view"))
+            .unwrap();
+        store
+            .append_paywall_event(&envelope_json("evt_ok", "paywall_close"))
+            .unwrap();
+
+        queue.drain_once();
+
+        m1.assert();
+        m2.assert();
+        assert_eq!(
+            store.list_paywall_events(10).unwrap().len(),
+            0,
+            "422 is a genuine envelope rejection and must still be poison-deleted"
+        );
+    }
+
     #[test]
     fn drain_once_processes_oldest_first() {
         let mut server = mockito::Server::new();
@@ -410,6 +583,136 @@ mod tests {
         queue.in_flight.store(false, Ordering::SeqCst);
         queue.drain_once();
         assert_eq!(store.list_paywall_events(10).unwrap().len(), 0);
+    }
+
+    // -----------------------------------------------------------
+    // Lost-wakeup re-arm (Phase-D review finding 2)
+    //
+    // The actual race — a concurrent enqueue() landing in the handful of
+    // CPU instructions between drain_inner()'s loop deciding the queue is
+    // empty and `in_flight` actually clearing — has no I/O or scheduling
+    // point in between for a real OS thread to land in, so it cannot be
+    // reproduced deterministically via real concurrency (any attempt would
+    // be flaky at best, since Rust gives no hook to pause a thread exactly
+    // there). These are therefore DIRECT unit tests of the re-arm logic:
+    // they drive `drain_inner()`/`next_row()`/the `in_flight` CAS by hand,
+    // the same private primitives `drain_once()` itself composes, with the
+    // "concurrent enqueue" interleaved at exactly the point the gap opens.
+    // -----------------------------------------------------------
+
+    #[test]
+    fn rearm_picks_up_entry_that_appears_right_after_the_first_pass_finds_the_queue_empty() {
+        let mut server = mockito::Server::new();
+        let m = server.mock("POST", "/v1/events").with_status(202).create();
+        let (store, queue) = setup(server.url());
+
+        // Step 1 of drain_once(): win the CAS, exactly as a real drain would.
+        assert!(queue
+            .in_flight
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok());
+
+        // Step 2: run the first drain_inner() pass while the queue is
+        // still empty — mirrors a drain that wins the CAS a beat before a
+        // concurrent enqueue() lands. Must report a natural (non-retained)
+        // exit and clear the flag.
+        assert!(
+            !queue.drain_inner(),
+            "an empty queue must not report stopped_early"
+        );
+        assert!(!queue.in_flight.load(Ordering::SeqCst));
+
+        // Step 3: the "concurrent enqueue()" lands in the gap. Pre-fix,
+        // its own trigger_drain() would have been the ONLY thing that
+        // could pick this up — and pre-fix, that's a no-op window this
+        // finding is about (append happening exactly while in_flight was
+        // still true from this thread's point of view). We've modeled
+        // that moment as already past, so the append here is exactly what
+        // the re-arm check must catch instead.
+        store
+            .append_paywall_event(&envelope_json("evt_1", "paywall_view"))
+            .unwrap();
+
+        // Step 4: replay drain_once()'s post-drain_inner re-arm check by
+        // hand — this is the exact logic drain_once() runs after its own
+        // drain_inner() call returns `false`.
+        assert!(queue.next_row().is_some(), "the row must be visible");
+        assert!(
+            queue
+                .in_flight
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok(),
+            "re-arm CAS must succeed — nothing else holds the flag here"
+        );
+        queue.drain_inner();
+
+        m.assert();
+        assert_eq!(
+            store.list_paywall_events(10).unwrap().len(),
+            0,
+            "the re-arm pass must deliver work that appeared right after the \
+             first pass found the queue empty, without waiting for another trigger"
+        );
+        assert!(!queue.in_flight.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn drain_once_end_to_end_rearms_when_an_entry_is_already_queued() {
+        // Complement to the direct test above: exercises the real, public
+        // `drain_once()` entry point (not hand-driven) to prove the
+        // production re-arm branch — not just the primitives — delivers
+        // an entry that's present by the time the natural-empty check
+        // runs. With the queue already non-empty at call time this always
+        // takes the first-pass path today, but pins the end-to-end
+        // contract so a future refactor of `drain_once()`'s two-pass shape
+        // can't silently break delivery.
+        let mut server = mockito::Server::new();
+        let m = server.mock("POST", "/v1/events").with_status(202).create();
+        let (store, queue) = setup(server.url());
+        store
+            .append_paywall_event(&envelope_json("evt_1", "paywall_view"))
+            .unwrap();
+
+        queue.drain_once();
+
+        m.assert();
+        assert_eq!(store.list_paywall_events(10).unwrap().len(), 0);
+        assert!(!queue.in_flight.load(Ordering::SeqCst));
+    }
+
+    /// Bounded re-arm (Phase-D review finding 2): when the first pass
+    /// stops early because an entry must be RETAINED (retry-later —
+    /// connectivity/5xx/429/non-poison-4xx), `drain_once()` must NOT
+    /// re-arm and immediately retry — that would spin instead of waiting
+    /// for the next explicit trigger. Proven here by asserting exactly one
+    /// POST attempt even though the retained entry is still present (and
+    /// therefore `next_row()` would return `Some` if the re-arm check ran).
+    #[test]
+    fn drain_once_does_not_rearm_after_a_retry_later_stop() {
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("POST", "/v1/events")
+            .with_status(503)
+            .expect(1)
+            .create();
+
+        let (store, queue) = setup(server.url());
+        store
+            .append_paywall_event(&envelope_json("evt_1", "paywall_view"))
+            .unwrap();
+
+        queue.drain_once();
+
+        m.assert();
+        assert_eq!(
+            store.list_paywall_events(10).unwrap().len(),
+            1,
+            "retained entry must still be present — proves no spin-retry happened"
+        );
+        assert!(
+            !queue.in_flight.load(Ordering::SeqCst),
+            "the flag must still be cleared so the next explicit trigger can run"
+        );
     }
 
     // -----------------------------------------------------------

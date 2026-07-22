@@ -60,13 +60,19 @@ impl SessionDispatcher {
                 })
             })
             .collect();
-        // Propagates on failure (5xx / network) WITHOUT deleting → retained.
-        // A permanent rejection (4xx other than 429) is the one exception:
-        // peek returns id ASC, so retaining a batch the server will never
-        // accept re-sends it every tick and head-of-line-blocks all newer
-        // telemetry until the FIFO cap evicts it. Drop it instead.
+        // Propagates on failure (5xx/network/429, or a non-poison 4xx —
+        // e.g. 401/403 auth blip, 408 — see `RovenueError::is_poison`)
+        // WITHOUT deleting → retained. A genuine envelope rejection
+        // (400/422) is the one exception: peek returns id ASC, so
+        // retaining a batch the server will never accept re-sends it every
+        // tick and head-of-line-blocks all newer telemetry until the FIFO
+        // cap evicts it. Drop it instead. Auth failures/key rotation must
+        // NOT drop telemetry — they're retried on the next tick until the
+        // key is fixed (shared predicate with `events::queue`, the durable
+        // paywall-event queue's twin drain site — see Phase-D review
+        // finding 1).
         if let Err(err) = self.http.post_sessions(&sub_id, &events) {
-            if !err.retryable && matches!(err.http_status, Some(s) if (400..500).contains(&s)) {
+            if err.is_poison() {
                 let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
                 self.buffer.delete(&ids)?;
             }
@@ -156,6 +162,109 @@ mod tests {
             buffer.peek(100).unwrap().len(),
             0,
             "a 4xx-rejected batch must be dropped, not poison the queue"
+        );
+    }
+
+    /// Regression (Phase-D review finding 1): a 401 (invalid/rotated API
+    /// key) must be RETAINED, not dropped — a key rotation or transient
+    /// auth failure must not permanently drop queued session telemetry.
+    #[test]
+    fn retains_batch_on_401() {
+        let mut server = mockito::Server::new();
+        let _m = server
+            .mock("POST", "/v1/sdk/sessions")
+            .with_status(401)
+            .with_body(r#"{"error":{"code":"INVALID_API_KEY"}}"#)
+            .create();
+
+        let (buffer, dispatcher) = setup(server.url());
+        buffer
+            .record(SessionEventKind::Open, "2026-05-28T10:00:00Z", None)
+            .unwrap();
+
+        let result = dispatcher.flush_once();
+        assert!(result.is_err(), "a 401 must still surface as an error");
+        assert_eq!(
+            buffer.peek(100).unwrap().len(),
+            1,
+            "a 401 must retain the batch, not drop it"
+        );
+    }
+
+    /// Same as the 401 case — 403 (forbidden) is auth-adjacent, not a
+    /// malformed batch, so it must be retained too.
+    #[test]
+    fn retains_batch_on_403() {
+        let mut server = mockito::Server::new();
+        let _m = server
+            .mock("POST", "/v1/sdk/sessions")
+            .with_status(403)
+            .with_body(r#"{"error":{"code":"FORBIDDEN"}}"#)
+            .create();
+
+        let (buffer, dispatcher) = setup(server.url());
+        buffer
+            .record(SessionEventKind::Open, "2026-05-28T10:00:00Z", None)
+            .unwrap();
+
+        let result = dispatcher.flush_once();
+        assert!(result.is_err(), "a 403 must still surface as an error");
+        assert_eq!(
+            buffer.peek(100).unwrap().len(),
+            1,
+            "a 403 must retain the batch, not drop it"
+        );
+    }
+
+    /// 408 (request timeout) is non-retryable per
+    /// `ErrorKind::is_retryable()` (maps to the generic `InvalidRequest`
+    /// kind) but is not a malformed-batch rejection either — must be
+    /// retained, matching the review's explicit call-out.
+    #[test]
+    fn retains_batch_on_408() {
+        let mut server = mockito::Server::new();
+        let _m = server
+            .mock("POST", "/v1/sdk/sessions")
+            .with_status(408)
+            .create();
+
+        let (buffer, dispatcher) = setup(server.url());
+        buffer
+            .record(SessionEventKind::Open, "2026-05-28T10:00:00Z", None)
+            .unwrap();
+
+        let result = dispatcher.flush_once();
+        assert!(result.is_err(), "a 408 must still surface as an error");
+        assert_eq!(
+            buffer.peek(100).unwrap().len(),
+            1,
+            "a 408 must retain the batch, not drop it"
+        );
+    }
+
+    /// 422 (unprocessable entity) is a genuine envelope rejection — same
+    /// bucket as 400 — and must still be dropped after the narrowed
+    /// predicate.
+    #[test]
+    fn discards_batch_on_422() {
+        let mut server = mockito::Server::new();
+        let _m = server
+            .mock("POST", "/v1/sdk/sessions")
+            .with_status(422)
+            .with_body(r#"{"error":{"code":"VALIDATION_ERROR"}}"#)
+            .create();
+
+        let (buffer, dispatcher) = setup(server.url());
+        buffer
+            .record(SessionEventKind::Open, "2026-05-28T10:00:00Z", None)
+            .unwrap();
+
+        let result = dispatcher.flush_once();
+        assert!(result.is_err(), "a 422 must still surface as an error");
+        assert_eq!(
+            buffer.peek(100).unwrap().len(),
+            0,
+            "422 is a genuine envelope rejection and must still be dropped"
         );
     }
 

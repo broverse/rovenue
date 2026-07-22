@@ -116,6 +116,28 @@ impl RovenueError {
             retryable: kind.is_retryable(),
         }
     }
+
+    /// Whether this error is a genuine envelope rejection a durable queue
+    /// should poison-delete rather than retain.
+    ///
+    /// Narrow on purpose: only 400 (bad request) and 422 (unprocessable
+    /// entity) mean the payload itself is malformed and the server will
+    /// never accept it, so retaining it would wedge everything queued
+    /// behind it forever. Every other 4xx — 401/403 (auth blip or key
+    /// rotation), 408 (timeout), 404, 409, etc. — is transient from the
+    /// queue's point of view and must be retained: a bad or rotated API
+    /// key must not permanently drop queued events, only pause delivery
+    /// until the key is fixed. Retryable kinds (5xx/network/429) are never
+    /// poison either way — the `!self.retryable` guard is redundant with
+    /// the status check today (400/422 both map to non-retryable
+    /// `InvalidRequest`) but keeps this correct if that mapping ever
+    /// changes.
+    ///
+    /// Shared by both durable-queue drain sites: `events::queue` and
+    /// `sessions::dispatcher`.
+    pub fn is_poison(&self) -> bool {
+        !self.retryable && matches!(self.http_status, Some(400) | Some(422))
+    }
 }
 
 impl RovenueError {
