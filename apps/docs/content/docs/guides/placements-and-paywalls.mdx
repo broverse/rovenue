@@ -248,7 +248,30 @@ the store product and runs the SDK's normal purchase + server-validation
 flow; you only receive the completed/failed callbacks. Purchase attribution
 (`presentedContext`) is attached automatically, as everywhere else.
 
+React Native renders builder paywalls with its own component —
+`RovenuePaywallView` from `@rovenue/react-native-sdk` — built on RN
+primitives with the same semantics as every other renderer:
+
+```tsx
+import { RovenuePaywallView, getPaywall } from '@rovenue/react-native-sdk';
+
+const paywall = await getPaywall('onboarding_end', 'en');
+// Renders nothing when the paywall has no builderConfig.
+<RovenuePaywallView
+  paywall={paywall}
+  locale="en"
+  colorScheme="dark"
+  onPurchaseCompleted={(result) => close()}
+  onPurchaseFailed={(error) => {/* keep the paywall up */}}
+  onClose={() => close()}
+  onUrl={(url) => {/* scheme-check, then open */}}
+/>
+```
+
 <Callout type="info">
-React Native exposes `paywall.builderConfig` (parsed JSON) for custom
-rendering; the native presentation bridge for RN is a follow-up.
+Purchases run through the SDK's normal `purchase(pkg)` flow with real
+store pricing feeding `{{price}}` variables, and the view auto-tracks its
+impression — same as the Swift and Kotlin renderers. An optional native
+presentation bridge (hosting the SwiftUI/Android views for pixel parity)
+may come later; it is no longer required to show builder paywalls in RN.
 </Callout>
