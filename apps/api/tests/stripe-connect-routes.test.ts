@@ -353,8 +353,26 @@ describe("Stripe Connect routes", () => {
         capabilities: { card_payments: "active" },
       };
 
-      function uniqueViolation() {
-        return Object.assign(new Error("duplicate key"), { code: "23505" });
+      /**
+       * A unique violation in the shape the route ACTUALLY receives.
+       *
+       * This used to be a bare `Object.assign(new Error(), { code })`,
+       * which production never produces: drizzle 0.45.2 rethrows every
+       * pg-core failure as a `DrizzleQueryError` and hangs the driver
+       * error off `.cause`. With the flat fixture these three tests
+       * passed against a route whose `err.code === "23505"` check could
+       * never match in production — the fixture was the only thing that
+       * ever satisfied it. Nesting it is what makes them load-bearing.
+       */
+      function uniqueViolation(constraint = "project_stripe_connections_active_uq") {
+        const driver = Object.assign(
+          new Error(`duplicate key value violates unique constraint "${constraint}"`),
+          { code: "23505", constraint },
+        );
+        return Object.assign(
+          new Error('Failed query: insert into "project_stripe_connections" ...'),
+          { cause: driver },
+        );
       }
 
       /**
@@ -442,6 +460,47 @@ describe("Stripe Connect routes", () => {
 
         expect(res.status).toBe(302);
         expect(res.headers.get("location")).toContain("stripe=already_connected");
+        expect(oauthDeauthorize).toHaveBeenCalledWith({
+          client_id: "ca_live",
+          stripe_user_id: "acct_new",
+        });
+      });
+
+      it("reconciles a violation buried under drizzle's wrapper, not just a flat one", async () => {
+        // The regression guard. `insertConnection` rejects with the real
+        // nested shape and nothing on the top-level error says 23505, so
+        // a route reading `err.code` directly falls straight through to
+        // the generic post-exchange path and answers stripe=error.
+        oauthToken.mockResolvedValue(GOOD_TOKEN);
+        accountsRetrieve.mockResolvedValue(GOOD_ACCOUNT);
+        const wrapped = uniqueViolation();
+        expect((wrapped as { code?: string }).code).toBeUndefined();
+        insertConnection.mockRejectedValue(wrapped);
+
+        const res = await runCallback(() => {
+          findActiveByProject.mockResolvedValue({
+            id: "conn_winner",
+            stripeAccountId: "acct_new",
+            livemode: true,
+          });
+        });
+
+        expect(res.headers.get("location")).toContain("stripe=already_connected");
+        expect(res.headers.get("location")).not.toContain("stripe=error");
+      });
+
+      it("does not reconcile a unique violation of some OTHER index", async () => {
+        // Only the active-connection index means "another connect flow
+        // won this project". A violation of anything else is an unknown
+        // failure, and the authorization must be revoked rather than
+        // reported as an already-connected project.
+        oauthToken.mockResolvedValue(GOOD_TOKEN);
+        accountsRetrieve.mockResolvedValue(GOOD_ACCOUNT);
+        insertConnection.mockRejectedValue(uniqueViolation("audit_logs_pkey"));
+
+        const res = await runCallback();
+
+        expect(res.headers.get("location")).toContain("stripe=error");
         expect(oauthDeauthorize).toHaveBeenCalledWith({
           client_id: "ca_live",
           stripe_user_id: "acct_new",

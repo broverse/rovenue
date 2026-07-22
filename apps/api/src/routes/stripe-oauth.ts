@@ -5,6 +5,7 @@ import { drizzle } from "@rovenue/db";
 import { audit, extractRequestContext } from "../lib/audit";
 import { env } from "../lib/env";
 import { logger } from "../lib/logger";
+import { isUniqueViolationOf } from "../lib/pg-errors";
 import {
   connectClientId,
   getConnectPlatformStripe,
@@ -40,6 +41,22 @@ const STATE_FORMAT = /^[A-Za-z0-9_-]{43}$/;
 // string the browser was redirected with) and unbounded. Bound it
 // before it goes in the log.
 const MAX_LOGGED_ERROR_PARAM_LENGTH = 100;
+
+/**
+ * The partial unique index that makes "one active connection per
+ * project" true, from migration 0086_stripe_connect.sql:
+ *
+ *   CREATE UNIQUE INDEX "project_stripe_connections_active_uq"
+ *     ON "project_stripe_connections" ("project_id")
+ *     WHERE "disconnected_at" IS NULL;
+ *
+ * Postgres reports the index name in `constraint` for partial unique
+ * indexes too, so this is matchable by name. Named rather than matched
+ * on the SQLSTATE alone because "another connect flow won this project"
+ * is the only unique violation whose answer is the reconciliation below;
+ * anything else must take the deauthorize-and-report path.
+ */
+const ACTIVE_CONNECTION_UNIQUE = "project_stripe_connections_active_uq";
 
 function dashboardRedirect(projectId: string | null, query: string): string {
   const base = env.DASHBOARD_URL.replace(/\/+$/, "");
@@ -248,7 +265,14 @@ export const stripeOAuthRoute = new Hono().get("/callback", async (c) => {
     // disconnected_at IS NULL): two concurrent connect flows both had
     // nonces issued before either callback returned, and the other one
     // won. Whether we may walk away depends on WHICH account won.
-    if ((err as { code?: string })?.code === "23505") {
+    //
+    // Drizzle wraps the driver error and hangs it off `.cause`, so the
+    // code is one level down. Read at the top level this never matched:
+    // the whole reconciliation below was unreachable and a routine
+    // double-connect escaped as a 500 in the middle of OAuth, leaving a
+    // live Stripe authorization with no local row and no way to revoke
+    // it from the dashboard.
+    if (isUniqueViolationOf(err, ACTIVE_CONNECTION_UNIQUE)) {
       // Guarded: this re-read runs inside the catch, so letting it throw
       // would escape to the generic JSON handler mid-OAuth.
       let winnerAccountId: string | null = null;
