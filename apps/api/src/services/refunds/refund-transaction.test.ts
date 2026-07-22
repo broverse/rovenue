@@ -17,7 +17,7 @@ beforeEach(() => {
   ordersRefund.mockReset();
   getConnectedStripe.mockReset();
   getConnectedStripe.mockResolvedValue({
-    stripe: { refunds: { create: refundsCreate } },
+    account: { refunds: { create: refundsCreate } },
     accountId: "acct_1",
     livemode: true,
   });
@@ -39,7 +39,7 @@ it("refunds a Stripe charge", async () => {
   const r = await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "STRIPE", storeTransactionId: "ch_123", status: "ACTIVE" } as any });
   expect(refundsCreate).toHaveBeenCalledWith(
     { charge: "ch_123" },
-    { idempotencyKey: "refund_pu", stripeAccount: "acct_1" },
+    { idempotencyKey: "refund_pu" },
   );
   expect(r).toEqual({ ok: true, store: "stripe", reference: "re_1" });
 });
@@ -49,13 +49,13 @@ it("uses payment_intent when ref starts with pi_", async () => {
   await refundTransaction({ projectId: "p", purchase: { id: "pu", store: "STRIPE", storeTransactionId: "pi_9", status: "ACTIVE" } as any });
   expect(refundsCreate).toHaveBeenCalledWith(
     { payment_intent: "pi_9" },
-    { idempotencyKey: "refund_pu", stripeAccount: "acct_1" },
+    { idempotencyKey: "refund_pu" },
   );
 });
 
 it("issues the refund against the connected account", async () => {
   getConnectedStripe.mockResolvedValue({
-    stripe: { refunds: { create: refundsCreate } },
+    account: { refunds: { create: refundsCreate } },
     accountId: "acct_1",
     livemode: true,
   });
@@ -69,7 +69,7 @@ it("issues the refund against the connected account", async () => {
   expect(r).toMatchObject({ ok: true, store: "stripe", reference: "re_1" });
   expect(refundsCreate).toHaveBeenCalledWith(
     { payment_intent: "pi_123" },
-    { idempotencyKey: "refund_pur_1", stripeAccount: "acct_1" },
+    { idempotencyKey: "refund_pur_1" },
   );
 });
 

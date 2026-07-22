@@ -149,11 +149,9 @@ async function dispatchToHandler(
       return processStripeEvent({
         projectId: data.projectId,
         event: data.event,
-        stripe: connected.stripe,
-        // Every Stripe call processStripeEvent's dispatch makes is
-        // routed through this so it acts on the customer's connected
-        // account, not Rovenue's platform account.
-        accountId: connected.accountId,
+        // Already bound to the customer's connected account, so nothing
+        // dispatch does can reach Rovenue's own Stripe account.
+        account: connected.account,
       });
     }
   }

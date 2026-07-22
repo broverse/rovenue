@@ -132,9 +132,10 @@ export async function refundTransaction(input: {
       const params = ref.startsWith("pi_")
         ? { payment_intent: ref }
         : { charge: ref };
-      const refund = await connected.stripe.refunds.create(params, {
+      // `connected.account` is already bound to the customer's Stripe
+      // account, so the refund cannot land on Rovenue's own.
+      const refund = await connected.account.refunds.create(params, {
         idempotencyKey: `refund_${purchase.id}`,
-        stripeAccount: connected.accountId,
       });
       success = { ok: true, store: "stripe", reference: refund.id };
     } else if (purchase.store === "PLAY_STORE") {

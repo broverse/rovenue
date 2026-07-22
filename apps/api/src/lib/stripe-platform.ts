@@ -2,6 +2,7 @@ import Stripe from "stripe";
 import { drizzle } from "@rovenue/db";
 import { env } from "./env";
 import { logger } from "./logger";
+import { withAccount, type AccountScopedStripe } from "./stripe-account-scoped";
 
 // =============================================================
 // Platform-Stripe client for Stripe Connect
@@ -102,7 +103,13 @@ export function _resetConnectPlatformStripeForTests(): void {
 }
 
 export interface ConnectedStripe {
-  readonly stripe: Stripe;
+  /**
+   * Account-scoped facade. Every method already carries
+   * `{ stripeAccount }`, so there is no call site at which it could be
+   * forgotten — see stripe-account-scoped.ts for why the raw client is
+   * deliberately not exposed here.
+   */
+  readonly account: AccountScopedStripe;
   readonly accountId: string;
   readonly livemode: boolean;
 }
@@ -121,10 +128,10 @@ async function fetchActiveConnection(projectId: string) {
  * status) can branch on it; write paths should use
  * `requireConnectedStripe` instead.
  *
- * Every Stripe call made with this client MUST pass
- * `{ stripeAccount: accountId }` as the request-options argument —
- * that header is what makes it a direct charge on the customer's
- * account rather than on Rovenue's platform account.
+ * The returned `account` facade already binds
+ * `{ stripeAccount: accountId }` to every call — that header is what
+ * makes an operation act on the customer's connected account rather
+ * than on Rovenue's platform account.
  */
 export async function getConnectedStripe(
   projectId: string,
@@ -142,7 +149,7 @@ export async function getConnectedStripe(
   }
 
   return {
-    stripe,
+    account: withAccount(stripe, connection.stripeAccountId),
     accountId: connection.stripeAccountId,
     livemode: connection.livemode,
   };

@@ -96,13 +96,11 @@ export async function cancelStripeSubscriptionAtPeriodEnd(
   if (!connected) {
     throw new Error(`Project ${projectId} has no active Stripe connection`);
   }
-  // `stripeAccount` is what makes this act on the customer's own account
-  // rather than on Rovenue's platform account.
-  await connected.stripe.subscriptions.update(
-    subscriptionId,
-    { cancel_at_period_end: true },
-    { stripeAccount: connected.accountId },
-  );
+  // `connected.account` is already bound to the customer's Stripe
+  // account, so this cannot cancel a subscription on Rovenue's own.
+  await connected.account.subscriptions.update(subscriptionId, {
+    cancel_at_period_end: true,
+  });
 }
 
 async function executeAction(

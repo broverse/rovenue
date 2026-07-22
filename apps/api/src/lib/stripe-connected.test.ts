@@ -39,21 +39,29 @@ describe("getConnectedStripe", () => {
     const result = await getConnectedStripe("p1");
     expect(result?.accountId).toBe("acct_1");
     expect(result?.livemode).toBe(true);
-    expect(result?.stripe).toBeDefined();
+    expect(result?.account).toBeDefined();
   });
 
-  it("selects the test client for a test-mode connection", async () => {
+  it("picks the platform client by the connection's livemode", async () => {
+    // Comparing the two facades would prove nothing — withAccount returns
+    // a fresh object every call. What actually pins mode dispatch is that
+    // removing ONE mode's key breaks only that mode.
+    envMock.STRIPE_PLATFORM_SECRET_KEY = undefined;
+    _resetConnectPlatformStripeForTests();
+
     findActiveByProject.mockResolvedValue({
       stripeAccountId: "acct_t",
       livemode: false,
     });
-    const testResult = await getConnectedStripe("p1");
+    expect(await getConnectedStripe("p1")).not.toBeNull();
+
     findActiveByProject.mockResolvedValue({
       stripeAccountId: "acct_l",
       livemode: true,
     });
-    const liveResult = await getConnectedStripe("p1");
-    expect(testResult?.stripe).not.toBe(liveResult?.stripe);
+    expect(await getConnectedStripe("p1")).toBeNull();
+
+    envMock.STRIPE_PLATFORM_SECRET_KEY = "sk_live_x";
   });
 
   it("returns null when the platform key for that mode is unset", async () => {
@@ -81,7 +89,7 @@ describe("requireConnectedStripe", () => {
     });
     const result = await requireConnectedStripe("proj_42");
     expect(result.accountId).toBe("acct_1");
-    expect(result.stripe).toBeDefined();
+    expect(result.account).toBeDefined();
   });
 });
 

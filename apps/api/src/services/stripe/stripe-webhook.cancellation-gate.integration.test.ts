@@ -105,8 +105,7 @@ describe("processStripeEvent — CANCELLATION gate on terminal row", () => {
     const result = await processStripeEvent({
       projectId: PROJECT_ID,
       event: makeDeletedEvent(),
-      stripe: {} as unknown as Stripe,
-      accountId: "acct_test",
+      account: {} as never,
     });
     expect(result.status).toBe("processed");
 

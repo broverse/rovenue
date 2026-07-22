@@ -51,7 +51,7 @@ describe("cancelStripeSubscriptionAtPeriodEnd", () => {
   it("cancels the subscription on the connected account", async () => {
     const subscriptionsUpdate = vi.fn(async () => ({}));
     getConnectedStripe.mockResolvedValue({
-      stripe: { subscriptions: { update: subscriptionsUpdate } },
+      account: { subscriptions: { update: subscriptionsUpdate } },
       accountId: "acct_1",
       livemode: true,
     });
@@ -59,13 +59,13 @@ describe("cancelStripeSubscriptionAtPeriodEnd", () => {
     await cancelStripeSubscriptionAtPeriodEnd("proj_1", "sub_123");
 
     expect(getConnectedStripe).toHaveBeenCalledWith("proj_1");
-    // Without `stripeAccount` this would cancel a subscription on
-    // Rovenue's own platform account instead of the customer's.
-    expect(subscriptionsUpdate).toHaveBeenCalledWith(
-      "sub_123",
-      { cancel_at_period_end: true },
-      { stripeAccount: "acct_1" },
-    );
+    // The header itself is bound inside withAccount (see
+    // lib/stripe-account-scoped.test.ts); what this pins is that the
+    // worker goes through the account-scoped facade at all, rather than
+    // reaching for a raw platform client.
+    expect(subscriptionsUpdate).toHaveBeenCalledWith("sub_123", {
+      cancel_at_period_end: true,
+    });
   });
 
   it("throws when the project has no active Stripe connection", async () => {

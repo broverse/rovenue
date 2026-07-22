@@ -107,8 +107,7 @@ describe("processStripeEvent — atomic claim short-circuit", () => {
     const result = await processStripeEvent({
       projectId: "prj_test",
       event,
-      stripe: {} as Stripe,
-      accountId: "acct_test",
+      account: {} as never,
     });
 
     expect(result).toEqual({ status: "duplicate", eventType: event.type });
@@ -143,8 +142,7 @@ describe("processStripeEvent — atomic claim short-circuit", () => {
     const result = await processStripeEvent({
       projectId: "prj_test",
       event,
-      stripe: {} as Stripe,
-      accountId: "acct_test",
+      account: {} as never,
     });
 
     expect(result.status).toBe("processed");
@@ -153,12 +151,11 @@ describe("processStripeEvent — atomic claim short-circuit", () => {
     expect(drizzleMock.webhookEventRepo.updateWebhookEvent).toHaveBeenCalledTimes(1);
   });
 
-  // The client handed to processStripeEvent is Rovenue's PLATFORM client.
-  // Omitting `stripeAccount` therefore does not fail loudly — it quietly
-  // reads from Rovenue's own Stripe account instead of the customer's.
-  // This is the only live Stripe API call on the dispatch path, so it is
-  // the one that has to be pinned.
-  test("passes stripeAccount on the invoice lookup", async () => {
+  // Dispatch's only live Stripe call. It goes through the account-scoped
+  // facade rather than a raw client, which is what makes it impossible
+  // for this path to reach Rovenue's own Stripe account — the header
+  // itself is pinned in stripe-account-scoped.test.ts, where it lives.
+  test("routes the invoice lookup through the account-scoped facade", async () => {
     drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValueOnce({
       outcome: "claimed",
       row: { id: "whe_2", retryCount: 0 },
@@ -176,12 +173,9 @@ describe("processStripeEvent — atomic claim short-circuit", () => {
     await processStripeEvent({
       projectId: "prj_test",
       event,
-      stripe: { invoices: { retrieve } } as unknown as Stripe,
-      accountId: "acct_x",
+      account: { invoices: { retrieve } } as never,
     });
 
-    expect(retrieve).toHaveBeenCalledWith("in_123", {
-      stripeAccount: "acct_x",
-    });
+    expect(retrieve).toHaveBeenCalledWith("in_123");
   });
 });

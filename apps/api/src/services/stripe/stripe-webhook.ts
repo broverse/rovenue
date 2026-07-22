@@ -11,6 +11,7 @@ import {
   revenueDedupeKind,
 } from "@rovenue/db";
 import { logger } from "../../lib/logger";
+import type { AccountScopedStripe } from "../../lib/stripe-account-scoped";
 import { parsePresentedContextMetadata } from "../../lib/presented-context";
 import { convertToUsd } from "../fx";
 import { maybeEmitRefundDetected } from "../notifications/refund-emit";
@@ -45,19 +46,16 @@ interface StripeDispatchOutcome {
 export interface ProcessStripeEventOptions {
   projectId: string;
   event: Stripe.Event;
-  stripe: Stripe;
   /**
-   * Stripe Connect account id for this project. Passed as `{ stripeAccount }`
-   * request options on every direct Stripe API call made during dispatch
-   * so the call acts on the customer's connected account rather than on
-   * Rovenue's platform account.
+   * Stripe surface already bound to this project's connected account.
    *
-   * Required on purpose: `stripe` here is the PLATFORM client, so omitting
-   * the header does not fail loudly — it quietly targets Rovenue's own
-   * account. Keeping this non-optional is what stops a future caller from
-   * introducing that silently.
+   * Deliberately NOT a raw `Stripe` client: that one is Rovenue's
+   * platform client, and a call missing `{ stripeAccount }` does not
+   * fail — it quietly runs against Rovenue's own account. The facade
+   * carries the header on every method, so dispatch has no way to make
+   * that mistake. See lib/stripe-account-scoped.ts.
    */
-  accountId: string;
+  account: AccountScopedStripe;
 }
 
 /**
@@ -68,7 +66,7 @@ export interface ProcessStripeEventOptions {
 export async function processStripeEvent(
   opts: ProcessStripeEventOptions,
 ): Promise<HandleStripeNotificationResult> {
-  const { event, projectId, stripe, accountId } = opts;
+  const { event, projectId, account } = opts;
 
   // Atomic single-flight claim — exactly one concurrent worker wins.
   const claim = await drizzle.webhookEventRepo.claimWebhookEvent(drizzle.db, {
@@ -96,7 +94,7 @@ export async function processStripeEvent(
 
   try {
     const outcome: StripeDispatchOutcome = {};
-    await dispatch({ projectId, event, stripe, accountId, outcome });
+    await dispatch({ projectId, event, account, outcome });
 
     await drizzle.webhookEventRepo.updateWebhookEvent(
       drizzle.db,
@@ -143,9 +141,8 @@ export async function processStripeEvent(
 interface DispatchContext {
   projectId: string;
   event: Stripe.Event;
-  stripe: Stripe;
-  /** See {@link ProcessStripeEventOptions.accountId}. */
-  accountId: string;
+  /** See {@link ProcessStripeEventOptions.account}. */
+  account: AccountScopedStripe;
   outcome: StripeDispatchOutcome;
 }
 
@@ -393,11 +390,7 @@ async function applyChargeRefunded(ctx: DispatchContext): Promise<void> {
     return;
   }
 
-  // `stripeAccount` targets the customer's connected account rather than
-  // Rovenue's platform account — see ProcessStripeEventOptions.accountId.
-  const invoice = await ctx.stripe.invoices.retrieve(invoiceId, {
-    stripeAccount: ctx.accountId,
-  });
+  const invoice = await ctx.account.invoices.retrieve(invoiceId);
   const subscriptionId =
     typeof invoice.subscription === "string"
       ? invoice.subscription
