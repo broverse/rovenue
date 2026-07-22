@@ -638,6 +638,13 @@
       "when": 1784680708519,
       "tag": "0090_funnel_purchase_payment",
       "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1784680709519,
+      "tag": "0091_funnel_purchase_email_hash",
+      "breakpoints": true
     }
   ]
 }

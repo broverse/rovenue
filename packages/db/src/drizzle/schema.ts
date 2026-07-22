@@ -2385,6 +2385,13 @@ export const funnelPurchases = pgTable(
     stripePaymentIntentId: text("stripe_payment_intent_id"),
     // Populated once the paid session resolves to a subscriber (Task 7).
     subscriberId: text("subscriber_id"),
+    // sha256 of the normalised buyer email, captured at payment-intent
+    // time and copied onto funnel_claim_tokens.email_hash when the
+    // purchase completes — that copy is what makes the magic-link
+    // recovery path reachable. Only the digest: the plaintext lives in
+    // Stripe. Nullable, because rows written before migration 0091 have
+    // none and must still complete.
+    emailHash: text("email_hash"),
     amountCents: integer("amount_cents"),
     currency: text("currency"),
     status: funnelPurchaseStatus("status").notNull().default("pending"),
