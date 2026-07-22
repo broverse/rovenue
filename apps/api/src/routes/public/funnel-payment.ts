@@ -747,7 +747,16 @@ export const funnelPaymentRoute = new Hono()
       //
       // NOT nested inside anything: `withLock` is not re-entrant, so this
       // is the outermost and only acquisition on this path.
-      const result = await withLock(`funnel:payment:${sid}`, 30_000, async () => {
+      //
+      // The 60s TTL deliberately matches the payment-intent endpoint's:
+      // two holders of the SAME key must not be able to expire at
+      // different times. This section also makes Stripe round-trips on a
+      // client with no per-request timeout, so a shorter TTL here would
+      // let a concurrent payment-intent POST take the key while this
+      // handler is still mid-flight, read `pending`, and `upsertPending`
+      // back over the row after this transaction turns it `paid` —
+      // exactly the clobber the shared key exists to prevent.
+      const result = await withLock(`funnel:payment:${sid}`, 60_000, async () => {
         const purchase = await drizzle.funnelPurchaseRepo.findBySession(
           drizzle.db,
           sid,
