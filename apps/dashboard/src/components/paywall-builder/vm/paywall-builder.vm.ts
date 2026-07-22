@@ -33,6 +33,14 @@ export class PaywallBuilderViewModel {
 
   @state colorScheme: ColorScheme = "light";
 
+  setColorScheme(scheme: ColorScheme) {
+    this.colorScheme = scheme;
+  }
+
+  toggleColorScheme() {
+    this.colorScheme = this.colorScheme === "light" ? "dark" : "light";
+  }
+
   // Canvas preview UI state — mirrors FunnelDraftViewModel's canvas
   // mechanics verbatim (same ZOOM_STEPS/WHEEL_THRESHOLD/wheel handler)
   // so the Task-6 UI can reuse the same CanvasEditor wiring.

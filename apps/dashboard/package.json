@@ -17,6 +17,7 @@
     "@internationalized/date": "^3.12.1",
     "@paralleldrive/cuid2": "^3.3.0",
     "@rovenue/api": "workspace:*",
+    "@rovenue/paywall-renderer": "workspace:*",
     "@rovenue/shared": "workspace:*",
     "@stripe/react-stripe-js": "^3",
     "@stripe/stripe-js": "^4",

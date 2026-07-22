@@ -1,4 +1,6 @@
 import { useTranslation } from "react-i18next";
+import { Link } from "@tanstack/react-router";
+import { LayoutTemplate } from "lucide-react";
 import { SearchInput } from "../../ui/search-input";
 import { cn } from "../../lib/cn";
 import type { Paywall } from "./types";
@@ -70,11 +72,9 @@ function PaywallCard({
 }) {
   const { t } = useTranslation();
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       className={cn(
-        "relative block w-full cursor-pointer border-b border-white/5 px-3.5 py-3 text-left transition hover:bg-rv-c2",
+        "group relative block w-full border-b border-white/5 transition hover:bg-rv-c2",
         active && "bg-rv-accent-500/10",
       )}
     >
@@ -84,20 +84,33 @@ function PaywallCard({
           className="absolute inset-y-0 left-0 w-0.5 bg-rv-accent-500"
         />
       )}
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">
-          {paywall.name}
-        </span>
-        {!paywall.isActive && (
-          <span className="shrink-0 rounded-sm bg-rv-c3 px-1.5 py-px font-rv-mono text-[9px] uppercase tracking-wider text-rv-mute-500">
-            {t("paywalls.card.inactive", "Inactive")}
+      <button type="button" onClick={onClick} className="block w-full cursor-pointer px-3.5 pb-2 pt-3 text-left">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">
+            {paywall.name}
           </span>
-        )}
+          {!paywall.isActive && (
+            <span className="shrink-0 rounded-sm bg-rv-c3 px-1.5 py-px font-rv-mono text-[9px] uppercase tracking-wider text-rv-mute-500">
+              {t("paywalls.card.inactive", "Inactive")}
+            </span>
+          )}
+        </div>
+        <div className="font-rv-mono text-[11px] text-rv-mute-500">{paywall.identifier}</div>
+        <div className="mt-1 truncate font-rv-mono text-[10px] text-rv-mute-400">
+          {t("paywalls.card.offering", "Offering")}: {offeringLabel}
+        </div>
+      </button>
+      <div className="flex justify-end px-3.5 pb-2.5">
+        <Link
+          to="/projects/$projectId/paywalls/$paywallId/builder"
+          params={{ projectId: paywall.projectId, paywallId: paywall.id }}
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex h-6 cursor-pointer items-center gap-1 rounded border border-rv-divider bg-rv-c1 px-1.5 font-rv-mono text-[10px] text-rv-mute-600 opacity-0 transition hover:border-rv-accent-500/40 hover:text-foreground group-hover:opacity-100"
+        >
+          <LayoutTemplate size={10} />
+          {t("paywalls.card.openBuilder", "Open builder")}
+        </Link>
       </div>
-      <div className="font-rv-mono text-[11px] text-rv-mute-500">{paywall.identifier}</div>
-      <div className="mt-1 truncate font-rv-mono text-[10px] text-rv-mute-400">
-        {t("paywalls.card.offering", "Offering")}: {offeringLabel}
-      </div>
-    </button>
+    </div>
   );
 }
