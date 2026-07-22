@@ -112,7 +112,17 @@ async function beginConnect(): Promise<string> {
   const res = await app.request(connectPath);
   expect(res.status).toBe(302);
   const location = new URL(res.headers.get("location") ?? "");
-  return location.searchParams.get("state") ?? "";
+  // Assert WHERE we send the customer, not just that we send them
+  // somewhere: a regression pointing the consent step at another host
+  // would still be a 302 carrying a state param.
+  expect(location.origin + location.pathname).toBe(
+    "https://connect.stripe.com/oauth/authorize",
+  );
+  expect(location.searchParams.get("response_type")).toBe("code");
+  expect(location.searchParams.get("scope")).toBe("read_write");
+  const state = location.searchParams.get("state") ?? "";
+  expect(state).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  return state;
 }
 
 async function activeRows() {
