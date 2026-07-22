@@ -28,6 +28,7 @@ import { Pool } from "pg";
 import { drizzle as drizzleClient } from "drizzle-orm/node-postgres";
 import { and, desc, eq } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
+import { drizzle } from "@rovenue/db";
 import type Stripe from "stripe";
 import { drizzle as drizzleNs } from "@rovenue/db";
 import { apiKeyAuth } from "../src/middleware/api-key-auth";
@@ -232,7 +233,7 @@ describe("POST /v1/experiments/:id/expose — lazy assignment", () => {
 // =============================================================
 
 describe("POST /v1/events — paywall_view", () => {
-  it("lands in the outbox with aggregateType PAYWALL_EVENT and the paywallContext intact", async () => {
+  it("lands in the outbox with aggregateType PAYWALL_EVENT, the paywallContext intact, and the subscriber RESOLVED to the owned id", async () => {
     const app = buildEventsApp();
     const subscriberId = `sub_${createId().slice(0, 8)}`;
     const body = {
@@ -270,15 +271,29 @@ describe("POST /v1/events — paywall_view", () => {
       .orderBy(desc(schema.outboxEvents.createdAt))
       .limit(5);
 
+    // The route resolves the wire rovenueId to the OWNED subscriber.id
+    // before the outbox write — CH paywall rows must share the identity
+    // space of raw_revenue_events (keyed by subscriber.id) or the placement
+    // purchases/CR join can never match (whole-phase review finding).
+    const owned = await drizzle.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy(
+      testDb,
+      { projectId: PROJECT_ID, key: subscriberId },
+    );
+    expect(owned).toBeTruthy();
+    expect(owned!.id).not.toBe(subscriberId);
+
     const row = rows.find(
-      (r) =>
-        (r.payload as Record<string, unknown>).subscriberId === subscriberId,
+      (r) => (r.payload as Record<string, unknown>).subscriberId === owned!.id,
     );
     expect(row).toBeDefined();
     expect(row!.aggregateType).toBe("PAYWALL_EVENT");
 
     const payload = row!.payload as Record<string, unknown>;
     expect(payload.paywallContext).toEqual(body.paywallContext);
+    // No row may carry the unresolved wire id.
+    expect(
+      rows.some((r) => (r.payload as Record<string, unknown>).subscriberId === subscriberId),
+    ).toBe(false);
   });
 
   it("rejects a paywallContext missing a required field → 400 (strict Zod)", async () => {

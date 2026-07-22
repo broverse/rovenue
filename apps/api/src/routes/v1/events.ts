@@ -137,12 +137,29 @@ export const eventsRoute = new Hono()
       const aggregateType = deriveAggregateType(body.eventType);
       const id = createId();
 
+      // paywall_view ONLY: resolve the SDK wire id (rovenueId) to the owned
+      // subscriber.id BEFORE the outbox write, so the ClickHouse paywall
+      // rows land in the same identity space as raw_revenue_events (which
+      // is keyed by subscriber.id everywhere) — otherwise the placement
+      // purchases/CR join can never match. Deliberately NOT done for other
+      // event types: their payloads flow raw into the integrations fan-out,
+      // which expects the wire identity untouched.
+      let payload: Record<string, unknown> = body as Record<string, unknown>;
+      if (body.eventType === "paywall_view" && body.subscriberId) {
+        const subscriber = await drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
+          projectId: project.id,
+          rovenueId: body.subscriberId,
+          createAttributes: {},
+        });
+        payload = { ...payload, subscriberId: subscriber.id };
+      }
+
       await drizzle.outboxRepo.insert(drizzle.db, {
         id,
         aggregateType,
         aggregateId: project.id,
         eventType: body.eventType,
-        payload: body as Record<string, unknown>,
+        payload,
       });
 
       return c.body(null, 202);
