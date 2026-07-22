@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "../client";
 import { audiences, type Audience } from "../schema";
 
@@ -44,6 +44,23 @@ export async function findAudienceById(
     .where(eq(audiences.id, id))
     .limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * Batch-load audiences by id, scoped to a project. Used by the placement
+ * resolution hot path to fetch every audience a placement's rows
+ * reference in a single round trip instead of one lookup per row.
+ */
+export async function findByIds(
+  db: Db,
+  projectId: string,
+  ids: string[],
+): Promise<Audience[]> {
+  if (ids.length === 0) return [];
+  return db
+    .select()
+    .from(audiences)
+    .where(and(eq(audiences.projectId, projectId), inArray(audiences.id, ids)));
 }
 
 export async function findAudienceInProject(

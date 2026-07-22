@@ -11,6 +11,7 @@ import { sdkSessionsRoute } from "./sdk-sessions";
 import { subscribersRoute } from "./subscribers";
 import { identifyRoute } from "./identify";
 import { offeringsRoute } from "./offerings";
+import { placementsRoute } from "./placements";
 import { purchasesRoute } from "./purchases";
 import { virtualCurrenciesV1Route } from "./virtual-currencies";
 
@@ -48,6 +49,7 @@ export const v1Route = new Hono()
   .route("/sdk/sessions", sdkSessionsRoute)
   .route("/subscribers", subscribersRoute)
   .route("/offerings", offeringsRoute)
+  .route("/placements", placementsRoute)
   .route("/purchases", purchasesRoute)
   .route("/virtual-currencies", virtualCurrenciesV1Route)
   // funnelClaimRoute owns `/subscribers/claim-funnel-token` and

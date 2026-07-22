@@ -34,7 +34,7 @@ interface Env {
   PURGE_SECRET: string;
 }
 
-const CACHEABLE_PREFIXES = ["/v1/offerings"];
+const CACHEABLE_PREFIXES = ["/v1/offerings", "/v1/placements"];
 const SUBSCRIBER_HEADER = "x-rovenue-user-id";
 const EXPERIMENT_HEADER = "x-rovenue-experiment";
 const PURGE_PATH = "/__edge/purge";
