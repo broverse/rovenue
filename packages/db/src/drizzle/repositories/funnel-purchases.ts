@@ -32,3 +32,27 @@ export async function markPaid(
     .set({ status: "paid", paidAt: new Date(), ...patch })
     .where(eq(funnelPurchases.id, id));
 }
+
+/**
+ * Insert-or-update the pending purchase row for a session. `sessionId`
+ * is unique per session, so a visitor who changes package before paying
+ * must update the existing row rather than 500 on the unique violation.
+ *
+ * `status` in `row` is accepted but always overridden to "pending" below
+ * — this is the one path that creates a purchase row before payment
+ * succeeds, so the status it writes can never be anything else.
+ */
+export async function upsertPending(
+  db: Db,
+  row: NewFunnelPurchase,
+): Promise<FunnelPurchase> {
+  const [saved] = await db
+    .insert(funnelPurchases)
+    .values({ ...row, status: "pending" })
+    .onConflictDoUpdate({
+      target: funnelPurchases.sessionId,
+      set: { ...row, status: "pending" },
+    })
+    .returning();
+  return saved;
+}

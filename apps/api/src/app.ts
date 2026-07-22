@@ -21,6 +21,7 @@ import { publicUnsubscribeRoute } from "./routes/public/unsubscribe";
 import { publicFunnelsRoute } from "./routes/public/funnels";
 import { publicFunnelUniversalRoute } from "./routes/public/funnel-universal";
 import { publicFunnelMagicRoute } from "./routes/public/funnel-magic";
+import { funnelPaymentRoute } from "./routes/public/funnel-payment";
 import { stripeOAuthRoute } from "./routes/stripe-oauth";
 import { registerAllIntentHandlers } from "./services/copilot/intent-handlers";
 
@@ -117,6 +118,7 @@ export function createApp() {
     .route("/invitations", publicInvitationsRoute)
     .route("/unsubscribe", publicUnsubscribeRoute)
     .route("/public", publicFunnelsRoute)
+    .route("/public", funnelPaymentRoute)
     .route("/public/magic", publicFunnelMagicRoute)
     .route("/universal", publicFunnelUniversalRoute)
     .route("/stripe/oauth", stripeOAuthRoute)

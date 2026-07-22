@@ -2380,6 +2380,11 @@ export const funnelPurchases = pgTable(
     stripeCheckoutSessionId: text("stripe_checkout_session_id"),
     stripeCustomerId: text("stripe_customer_id"),
     stripeSubscriptionId: text("stripe_subscription_id"),
+    // Set for a one-time price's PaymentIntent (the recurring path uses
+    // stripeSubscriptionId instead — Task 6).
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
+    // Populated once the paid session resolves to a subscriber (Task 7).
+    subscriberId: text("subscriber_id"),
     amountCents: integer("amount_cents"),
     currency: text("currency"),
     status: funnelPurchaseStatus("status").notNull().default("pending"),
