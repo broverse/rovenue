@@ -892,4 +892,60 @@ describe("PaywallRenderer", () => {
       expect(title.style.color).toBe("rgb(0, 255, 0)");
     });
   });
+
+  describe("built-in cell selection affordance", () => {
+    // Regression guard for a browser-smoke finding: the selected cell's
+    // border was a hardcoded near-black, so on a dark background it vanished
+    // while the lighter unselected borders stood out — selection read
+    // inverted. Renderer-owned chrome must follow the scheme like everything
+    // else the renderer paints.
+    function cellsConfig(): BuilderConfig {
+      return {
+        formatVersion: 2,
+        defaultLocale: "en",
+        localizations: { en: { buy: "Buy" } },
+        root: {
+          type: "stack",
+          id: "root",
+          axis: "v",
+          children: [
+            { type: "packageList", id: "pl", packageIds: [], cellLayout: "column" },
+            { type: "purchaseButton", id: "pb", labelKey: "buy" },
+          ],
+        },
+      };
+    }
+
+    it("keeps the selected border brighter than the unselected one in dark mode", () => {
+      const { container } = render(
+        <PaywallRenderer
+          config={cellsConfig()}
+          offering={offering}
+          priceView={priceView}
+          colorScheme="dark"
+          onPurchase={noop}
+        />,
+      );
+      const selected = container.querySelector('[aria-pressed="true"]') as HTMLElement;
+      const unselected = container.querySelector('[aria-pressed="false"]') as HTMLElement;
+      expect(selected.style.border).toBe("2px solid rgb(248, 250, 252)");
+      expect(unselected.style.border).toBe("1px solid rgb(63, 63, 70)");
+    });
+
+    it("leaves the light-mode borders as they were", () => {
+      const { container } = render(
+        <PaywallRenderer
+          config={cellsConfig()}
+          offering={offering}
+          priceView={priceView}
+          colorScheme="light"
+          onPurchase={noop}
+        />,
+      );
+      const selected = container.querySelector('[aria-pressed="true"]') as HTMLElement;
+      const unselected = container.querySelector('[aria-pressed="false"]') as HTMLElement;
+      expect(selected.style.border).toBe("2px solid rgb(17, 17, 17)");
+      expect(unselected.style.border).toBe("1px solid rgb(204, 204, 204)");
+    });
+  });
 });

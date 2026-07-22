@@ -252,7 +252,10 @@ function renderButton(node: ButtonNode, ctx: RenderCtx): ReactElement | null {
   );
 }
 
-function cellWrapperStyle(isSelected: boolean): CSSProperties {
+function cellWrapperStyle(
+  isSelected: boolean,
+  colorScheme: "light" | "dark",
+): CSSProperties {
   return {
     cursor: "pointer",
     display: "flex",
@@ -260,11 +263,26 @@ function cellWrapperStyle(isSelected: boolean): CSSProperties {
     gap: "2px",
     padding: "10px 12px",
     borderRadius: "8px",
-    border: isSelected ? "2px solid #111111" : "1px solid #cccccc",
+    border: isSelected
+      ? `2px solid ${SELECTED_CELL_BORDER[colorScheme]}`
+      : `1px solid ${UNSELECTED_CELL_BORDER[colorScheme]}`,
     background: "transparent",
     textAlign: "left",
   };
 }
+
+// Scheme-aware because the built-in cell is renderer-owned chrome, not
+// config: the selected border used to be a hardcoded near-black, which on a
+// dark background vanished while the lighter UNSELECTED borders stood out —
+// the selection affordance read inverted. Light values are unchanged.
+const SELECTED_CELL_BORDER: Record<"light" | "dark", string> = {
+  light: "#111111",
+  dark: "#F8FAFC",
+};
+const UNSELECTED_CELL_BORDER: Record<"light" | "dark", string> = {
+  light: "#cccccc",
+  dark: "#3F3F46",
+};
 
 function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement {
   const packageIds = effectivePackageIds(node.packageIds, ctx.offering);
@@ -300,7 +318,7 @@ function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement 
               data-rov-package={packageId}
               aria-pressed={isSelected}
               onClick={() => ctx.onSelectPackage(packageId)}
-              style={cellWrapperStyle(isSelected)}
+              style={cellWrapperStyle(isSelected, ctx.colorScheme)}
             >
               {renderNode(node.cellTemplate, cellCtx)}
             </button>
@@ -317,7 +335,7 @@ function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement 
             data-rov-package={packageId}
             aria-pressed={isSelected}
             onClick={() => ctx.onSelectPackage(packageId)}
-            style={cellWrapperStyle(isSelected)}
+            style={cellWrapperStyle(isSelected, ctx.colorScheme)}
           >
             <span
               style={{
