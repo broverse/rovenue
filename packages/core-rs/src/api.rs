@@ -18,7 +18,7 @@ use crate::identity::{IdentityManager, User};
 use crate::logging::{LogLevel, LogSink, Logger};
 use crate::observer::{Observer, ObserverBus};
 use crate::offerings::{CoreOfferings, OfferingsClient};
-use crate::placements::{CorePaywall, CorePresentedContext, PlacementsClient};
+use crate::placements::{parse_fallback_file, CorePaywall, CorePresentedContext, PlacementsClient};
 use crate::polling::PollingScheduler;
 use crate::purchases::{AppleOfferSignature, PurchasesClient};
 use crate::receipts::types::ReceiptPostOutcome;
@@ -1026,6 +1026,46 @@ impl RovenueCore {
                     crate::logging::redact::redact_message(&e.message)
                 ),
                 "get_paywall",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
+    }
+
+    /// Parse a spec D1 bundled fallback-placements file (once, replacing any
+    /// previously-loaded set) so `get_paywall` can serve placements offline
+    /// when both network and disk cache miss. Returns the count of entries
+    /// actually loaded — an individual entry that fails to decode is
+    /// skipped (logged), not fatal; a wholesale-malformed file, or one whose
+    /// `formatVersion` isn't literal `1`, is a distinct `InvalidArgument`
+    /// error surfaced immediately (see `placements::fallback::parse_fallback_file`).
+    pub fn set_fallback_placements(&self, json: String) -> RovenueResult<u32> {
+        self.log_op(
+            LogLevel::Info,
+            "set_fallback_placements",
+            "set_fallback_placements",
+            &[],
+        );
+        let result = (|| -> RovenueResult<u32> {
+            let entries = parse_fallback_file(&json, Some(&self.logger))?;
+            let count = entries.len() as u32;
+            self.placements.set_fallback(entries);
+            Ok(count)
+        })();
+        match &result {
+            Ok(count) => self.log_op(
+                LogLevel::Info,
+                "set_fallback_placements ok",
+                "set_fallback_placements",
+                &[("count", &count.to_string())],
+            ),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "set_fallback_placements failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "set_fallback_placements",
                 &[("kind", &format!("{:?}", e.kind))],
             ),
         }

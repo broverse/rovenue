@@ -109,6 +109,7 @@ export function makeMockNative(): MockNative {
     }),
     getOfferings: vi.fn(async () => ({ current: null, offerings: [] })),
     getPaywall: vi.fn(async (_placementId: string, _locale?: string): Promise<PaywallDTO | null> => null),
+    setFallbackPlacements: vi.fn(async (_json: string): Promise<number> => 0),
     purchase: vi.fn(async () => ({ entitlements: [], virtualCurrencies: {}, productId: "", storeTransactionId: "" })),
     restorePurchases: vi.fn(async () => ({ entitlements: [], virtualCurrencies: {}, productId: "", storeTransactionId: "" })),
     refreshRemoteConfig: vi.fn(async () => {

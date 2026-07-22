@@ -51,7 +51,8 @@ final class PaywallMappingTests: XCTestCase {
         offering: CoreOffering? = nil,
         includePresentedContext: Bool = true,
         variantId: String? = "var_a",
-        experimentKey: String? = "exp_1"
+        experimentKey: String? = "exp_1",
+        servedFromFallback: Bool = false
     ) -> CorePaywall {
         CorePaywall(
             placementIdentifier: "plc_1",
@@ -65,7 +66,8 @@ final class PaywallMappingTests: XCTestCase {
             offering: offering,
             presentedContext: includePresentedContext
                 ? makeCorePresentedContext(variantId: variantId, experimentKey: experimentKey)
-                : nil
+                : nil,
+            servedFromFallback: servedFromFallback
         )
     }
 
@@ -120,6 +122,16 @@ final class PaywallMappingTests: XCTestCase {
         let offering = Offering(identifier: "default", isDefault: true, packages: [])
         let paywall = mapPaywall(makeCorePaywall(), offering: offering)
         XCTAssertEqual(paywall.offering?.identifier, "default")
+    }
+
+    func test_mapPaywall_servedFromFallbackDefaultsFalse() {
+        let paywall = mapPaywall(makeCorePaywall(), offering: nil)
+        XCTAssertFalse(paywall.servedFromFallback)
+    }
+
+    func test_mapPaywall_servedFromFallbackPassedThroughVerbatim() {
+        let paywall = mapPaywall(makeCorePaywall(servedFromFallback: true), offering: nil)
+        XCTAssertTrue(paywall.servedFromFallback)
     }
 
     // ------------------------------------------------------------------

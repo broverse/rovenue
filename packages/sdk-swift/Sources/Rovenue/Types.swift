@@ -279,6 +279,11 @@ public struct Paywall {
     public let builderConfigJson: String?
     public let offering: Offering?
     public let presentedContext: PresentedContext?
+    /// `true` only when this paywall was resolved from the bundled
+    /// fallback-placements file (both network and disk cache missed) —
+    /// see `Rovenue.setFallbackPlacements`. `false` otherwise. Defaulted so
+    /// existing positional/named constructions keep compiling.
+    public let servedFromFallback: Bool
 
     public init(
         placementIdentifier: String,
@@ -290,7 +295,8 @@ public struct Paywall {
         remoteConfigLocale: String?,
         builderConfigJson: String? = nil,
         offering: Offering?,
-        presentedContext: PresentedContext?
+        presentedContext: PresentedContext?,
+        servedFromFallback: Bool = false
     ) {
         self.placementIdentifier = placementIdentifier
         self.placementRevision = placementRevision
@@ -302,6 +308,7 @@ public struct Paywall {
         self.builderConfigJson = builderConfigJson
         self.offering = offering
         self.presentedContext = presentedContext
+        self.servedFromFallback = servedFromFallback
     }
 }
 

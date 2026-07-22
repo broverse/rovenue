@@ -124,6 +124,10 @@ export type Paywall = {
   builderConfig: Record<string, unknown> | null;
   offering: Offering | null;
   presentedContext: PresentedContext | null;
+  /** `true` only when this paywall was resolved from the bundled
+   *  fallback-placements file (both network and disk cache missed) — see
+   *  `Rovenue.setFallbackPlacements`. `false` otherwise. */
+  servedFromFallback: boolean;
 };
 
 export type PurchaseResult = {

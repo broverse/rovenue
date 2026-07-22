@@ -121,7 +121,7 @@ Decoder: `NodeOverride`/`OverrideCondition` (unknown kind → decodes to `.unkno
 
 Ladder in `get_paywall`: network → cache → fallback (parse-once at set time, held in memory keyed by placement identifier; entries decode through the EXISTING PlacementsResponse path) → propagate original error / None. Cache always beats fallback. Experiment entries: draw + expose exactly as live (deterministic).
 
-- [ ] TDD (format-version reject w/ distinct error; ladder order; cache-beats-fallback; draw determinism from fallback; served_from_fallback flags) → cargo+fmt+clippy, bindings regen, all façade gates. Commit: `feat(sdk): bundled fallback placements file`.
+- [x] TDD (format-version reject w/ distinct error; ladder order; cache-beats-fallback; draw determinism from fallback; served_from_fallback flags) → cargo+fmt+clippy, bindings regen, all façade gates. Commit: `feat(sdk): bundled fallback placements file`.
 
 ---
 

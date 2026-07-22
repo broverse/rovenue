@@ -67,6 +67,7 @@ class PaywallMappingTest {
         builderConfigJson: String? = null,
         offering: dev.rovenue.sdk.generated.CoreOffering? = null,
         presentedContext: CorePresentedContext? = corePresentedContext(),
+        servedFromFallback: Boolean = false,
     ) = CorePaywall(
         placementIdentifier = "plc_1",
         placementRevision = 3L,
@@ -78,6 +79,7 @@ class PaywallMappingTest {
         builderConfigJson = builderConfigJson,
         offering = offering,
         presentedContext = presentedContext,
+        servedFromFallback = servedFromFallback,
     )
 
     @Test
@@ -132,6 +134,18 @@ class PaywallMappingTest {
         val offering = Offering(identifier = "default", isDefault = true, packages = emptyList())
         val paywall = mapPaywall(corePaywall(), offering = offering)
         assertEquals("default", paywall.offering?.identifier)
+    }
+
+    @Test
+    fun `mapPaywall servedFromFallback defaults false`() {
+        val paywall = mapPaywall(corePaywall(), offering = null)
+        assertFalse(paywall.servedFromFallback)
+    }
+
+    @Test
+    fun `mapPaywall passes servedFromFallback through verbatim`() {
+        val paywall = mapPaywall(corePaywall(servedFromFallback = true), offering = null)
+        assertTrue(paywall.servedFromFallback)
     }
 
     // ------------------------------------------------------------------

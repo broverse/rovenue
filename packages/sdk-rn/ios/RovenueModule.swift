@@ -214,6 +214,14 @@ public class RovenueModule: Module {
                 throw RovenueCodedError(e)
             }
         }
+        AsyncFunction("setFallbackPlacements") { (json: String) -> Double in
+            do {
+                let n = try Rovenue.shared.setFallbackPlacements(json: json)
+                return Double(n)
+            } catch let e as RovenueError {
+                throw RovenueCodedError(e)
+            }
+        }
         AsyncFunction("purchase") { (productId: String, productType: String, promotionalOfferId: String?, basePlanId: String?, offerId: String?) -> [String: Any?] in
             // basePlanId/offerId select a Play subscription offer on Android; ignored on iOS.
             guard #available(iOS 15.0, macOS 12.0, *) else {
@@ -655,6 +663,7 @@ public class RovenueModule: Module {
             "builderConfigJson": p.builderConfigJson,
             "offering": p.offering.map(dtoFromOffering),
             "presentedContext": p.presentedContext.map(dtoFromPresentedContext),
+            "servedFromFallback": p.servedFromFallback,
         ]
     }
 

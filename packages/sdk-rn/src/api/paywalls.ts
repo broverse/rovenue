@@ -52,6 +52,7 @@ export function mapPaywallDTO(dto: PaywallDTO): Paywall {
     builderConfig: parseRemoteConfig(dto.builderConfigJson),
     offering: dto.offering ? mapOfferingDTO(dto.offering) : null,
     presentedContext: dto.presentedContext ? mapPresentedContext(dto.presentedContext) : null,
+    servedFromFallback: dto.servedFromFallback,
   };
 }
 
@@ -66,6 +67,20 @@ export function mapPaywallDTO(dto: PaywallDTO): Paywall {
 export async function getPaywall(placementId: string, locale?: string): Promise<Paywall | null> {
   const dto = await call(() => getNative().getPaywall(placementId, locale));
   return dto ? mapPaywallDTO(dto) : null;
+}
+
+/**
+ * Parse a spec D1 bundled fallback-placements file (once, replacing any
+ * previously-loaded set) so `getPaywall` can serve placements offline when
+ * both the network and disk cache miss. Resolves to the count of placement
+ * entries actually loaded — an individual entry that fails to decode is
+ * skipped natively, not fatal. Rejects with a distinct `invalidArgument`
+ * error when the file doesn't parse or its `formatVersion` isn't literal
+ * `1` — an integrator who bundles a stale/mismatched export must see this
+ * loudly, at call time.
+ */
+export async function setFallbackPlacements(json: string): Promise<number> {
+  return call(() => getNative().setFallbackPlacements(json));
 }
 
 /** Builds the `paywall_view` event envelope `logPaywallShown` enqueues.

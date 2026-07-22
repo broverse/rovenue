@@ -241,6 +241,202 @@ fn propagates_error_when_no_cache() {
 }
 
 // =============================================================
+// Bundled fallback file (spec D1) — resolve ladder: network -> disk cache ->
+// fallback map -> original error. Cache always beats fallback; the fallback
+// is only ever consulted on the same connectivity-class branch the disk
+// cache already sits on (auth/server errors propagate unchanged, same as
+// today). See src/placements/fallback.rs for the file-parsing tests
+// (format-version rejection, partial-file skip behavior).
+// =============================================================
+
+/// Minimal PlacementsResponse-shaped JSON — a direct (non-experiment)
+/// paywall assignment, distinguishable from the live/cache fixtures by its
+/// own identifiers so tests can assert exactly which layer served a result.
+const FALLBACK_DIRECT_ENTRY: &str = r#"{"placement":{"identifier":"onboarding","revision":9},"paywall":{"id":"pw_fallback","identifier":"fallback_paywall","name":"Fallback","configFormatVersion":1,"remoteConfig":null,"offering":null},"experiment":null}"#;
+
+#[test]
+fn fallback_serves_paywall_when_network_and_cache_both_miss() {
+    let offline = PlacementsClient::new(Arc::new(http_client("http://127.0.0.1:1")), store());
+    offline.set_fallback(std::collections::HashMap::from([(
+        "onboarding".to_string(),
+        FALLBACK_DIRECT_ENTRY.to_string(),
+    )]));
+
+    let paywall = offline
+        .get_paywall("onboarding", None, "sub_1")
+        .unwrap()
+        .expect("served from the bundled fallback map");
+
+    assert_eq!(
+        paywall.paywall_identifier.as_deref(),
+        Some("fallback_paywall")
+    );
+    assert!(
+        paywall.served_from_fallback,
+        "fallback-branch result must set served_from_fallback"
+    );
+}
+
+#[test]
+fn network_beats_fallback() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/v1/placements/onboarding")
+        .with_status(200)
+        .with_body(DIRECT_PAYWALL_BODY)
+        .create();
+
+    let client = PlacementsClient::new(Arc::new(http_client(&server.url())), store());
+    client.set_fallback(std::collections::HashMap::from([(
+        "onboarding".to_string(),
+        FALLBACK_DIRECT_ENTRY.to_string(),
+    )]));
+
+    let paywall = client
+        .get_paywall("onboarding", None, "sub_1")
+        .unwrap()
+        .expect("resolved");
+    m.assert();
+
+    assert_eq!(
+        paywall.paywall_identifier.as_deref(),
+        Some("default_paywall"),
+        "a successful live fetch must win over a loaded fallback entry"
+    );
+    assert!(!paywall.served_from_fallback);
+}
+
+#[test]
+fn cache_beats_fallback() {
+    let cache = store();
+
+    // Prime the disk cache with a live fetch.
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/v1/placements/onboarding")
+        .with_status(200)
+        .with_body(DIRECT_PAYWALL_BODY)
+        .create();
+    let online = PlacementsClient::new(Arc::new(http_client(&server.url())), Arc::clone(&cache));
+    online.get_paywall("onboarding", None, "sub_1").unwrap();
+    m.assert();
+
+    // A second client, sharing the now-primed cache, offline, with a
+    // fallback entry ALSO loaded for the same identifier.
+    let offline = PlacementsClient::new(
+        Arc::new(http_client("http://127.0.0.1:1")),
+        Arc::clone(&cache),
+    );
+    offline.set_fallback(std::collections::HashMap::from([(
+        "onboarding".to_string(),
+        FALLBACK_DIRECT_ENTRY.to_string(),
+    )]));
+
+    let paywall = offline
+        .get_paywall("onboarding", None, "sub_1")
+        .unwrap()
+        .expect("resolved from cache");
+
+    assert_eq!(
+        paywall.paywall_identifier.as_deref(),
+        Some("default_paywall"),
+        "the disk cache must win over a loaded fallback entry"
+    );
+    assert!(!paywall.served_from_fallback);
+}
+
+#[test]
+fn auth_error_does_not_consult_fallback() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/v1/placements/onboarding")
+        .with_status(401)
+        .with_body(r#"{"error":{"code":"INVALID_API_KEY","message":"bad key"}}"#)
+        .create();
+
+    let client = PlacementsClient::new(Arc::new(http_client(&server.url())), store());
+    client.set_fallback(std::collections::HashMap::from([(
+        "onboarding".to_string(),
+        FALLBACK_DIRECT_ENTRY.to_string(),
+    )]));
+
+    let err = client
+        .get_paywall("onboarding", None, "sub_1")
+        .expect_err("auth errors must propagate, never fall back");
+    m.assert();
+
+    assert_eq!(err.kind, rovenue::error::ErrorKind::InvalidApiKey);
+}
+
+#[test]
+fn fallback_experiment_draws_the_same_deterministic_variant_as_live() {
+    // Reuse the live experiment fixture's inner payload verbatim as the
+    // bundled fallback entry — same weights/variant order — so a
+    // deterministic draw for the same subscriber must select the same
+    // variant offline as it did live.
+    let inner: serde_json::Value = serde_json::from_str(EXPERIMENT_BODY).unwrap();
+    let fallback_entry = inner["data"].to_string();
+
+    let offline = PlacementsClient::new(Arc::new(http_client("http://127.0.0.1:1")), store());
+    offline.set_fallback(std::collections::HashMap::from([(
+        "onboarding".to_string(),
+        fallback_entry,
+    )]));
+
+    let paywall = offline
+        .get_paywall("onboarding", None, EXPERIMENT_SUBSCRIBER_ID)
+        .unwrap()
+        .expect("experiment resolved from fallback");
+
+    // Same bucket 7655 / weights a:.34 b:.33 c:.33 as
+    // get_paywall_experiment_draws_deterministic_variant_and_fires_expose.
+    assert_eq!(paywall.paywall_identifier.as_deref(), Some("paywall_c"));
+    assert_eq!(
+        paywall.presented_context.unwrap().variant_id.as_deref(),
+        Some("c")
+    );
+    assert!(paywall.served_from_fallback);
+}
+
+// =============================================================
+// RovenueCore::set_fallback_placements — the FFI-facing entry point that
+// parses a spec D1 file once and loads it into the PlacementsClient above.
+// =============================================================
+
+#[test]
+fn core_set_fallback_placements_rejects_wrong_format_version() {
+    let core = test_core_with_base_url("http://127.0.0.1:1");
+    let json = r#"{"formatVersion":2,"generatedAt":1,"projectId":"p","placements":{}}"#;
+    let err = core
+        .set_fallback_placements(json.to_string())
+        .expect_err("wrong formatVersion must be a distinct, loud error");
+    assert_eq!(err.kind, rovenue::error::ErrorKind::InvalidArgument);
+    assert!(err.message.contains("formatVersion"));
+}
+
+#[test]
+fn core_set_fallback_placements_loads_partial_file_and_powers_get_paywall() {
+    let core = test_core_with_base_url("http://127.0.0.1:1");
+    let json = format!(
+        r#"{{"formatVersion":1,"generatedAt":1,"projectId":"p","placements":{{"onboarding":{FALLBACK_DIRECT_ENTRY},"bad":{{"placement":"not-an-object"}}}}}}"#
+    );
+    let loaded = core
+        .set_fallback_placements(json)
+        .expect("partially-valid file still loads its good entries");
+    assert_eq!(loaded, 1, "the malformed \"bad\" entry must be skipped");
+
+    let paywall = core
+        .get_paywall("onboarding".into(), None)
+        .unwrap()
+        .expect("served from the fallback set just loaded");
+    assert_eq!(
+        paywall.paywall_identifier.as_deref(),
+        Some("fallback_paywall")
+    );
+    assert!(paywall.served_from_fallback);
+}
+
+// =============================================================
 // RovenueCore facade: get_paywall stamps presented_context into core state,
 // and a subsequent successful receipt POST carries + clears it.
 // =============================================================

@@ -87,6 +87,7 @@ internal fun mapPaywall(core: CorePaywall, offering: Offering?): Paywall = Paywa
     offering = offering,
     presentedContext = core.presentedContext?.let(::mapPresentedContext),
     builderConfigJson = core.builderConfigJson,
+    servedFromFallback = core.servedFromFallback,
 )
 
 /**

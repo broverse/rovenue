@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
@@ -33,6 +34,14 @@ pub struct PlacementsClient {
     store: Arc<CacheStore>,
     clock: Arc<dyn Clock>,
     logger: Option<Arc<Logger>>,
+    /// In-memory bundled-fallback-file map: `identifier -> raw
+    /// PlacementsResponse JSON string`, loaded (once, wholesale-replaced)
+    /// by `set_fallback` (see `RovenueCore::set_fallback_placements` /
+    /// `placements::fallback::parse_fallback_file`). Decoded lazily per
+    /// `get_paywall` call — same raw-string-storage rationale as the disk
+    /// cache (see `fallback.rs` doc comment): `PlacementsResponse` isn't
+    /// `Clone`.
+    fallback: Mutex<HashMap<String, String>>,
 }
 
 impl PlacementsClient {
@@ -42,6 +51,7 @@ impl PlacementsClient {
             store,
             clock: Arc::new(SystemClock),
             logger: None,
+            fallback: Mutex::new(HashMap::new()),
         }
     }
 
@@ -58,6 +68,18 @@ impl PlacementsClient {
         self
     }
 
+    /// Replace the in-memory bundled-fallback-file map wholesale (called
+    /// once by `RovenueCore::set_fallback_placements`, after
+    /// `fallback::parse_fallback_file` has already validated the file and
+    /// decoded each entry once to confirm it parses as `PlacementsResponse`
+    /// — the raw strings stored here are re-decoded lazily per
+    /// `get_paywall` call, same as the disk cache).
+    pub fn set_fallback(&self, entries: HashMap<String, String>) {
+        if let Ok(mut guard) = self.fallback.lock() {
+            *guard = entries;
+        }
+    }
+
     /// Fetch + resolve `GET /v1/placements/{identifier}?locale=`.
     ///
     /// `Ok(None)` means the placement resolved to nothing — unknown/inactive
@@ -68,7 +90,12 @@ impl PlacementsClient {
     /// On a successful live fetch the raw response JSON is cached under
     /// `placement:{identifier}`. On `NetworkUnavailable`/`Timeout` the last
     /// cached response (if any) is re-resolved instead (a fresh bucket draw
-    /// runs against the cached experiment payload); other errors propagate.
+    /// runs against the cached experiment payload). If there's no cached
+    /// response either, the bundled fallback map (see `set_fallback`) is
+    /// consulted as a last resort — cache always beats fallback, and the
+    /// fallback is only ever consulted on this same connectivity-class
+    /// branch (never for auth/server errors, which propagate exactly as
+    /// before). Any other error propagates unchanged.
     pub fn get_paywall(
         &self,
         identifier: &str,
@@ -94,30 +121,61 @@ impl PlacementsClient {
                         self.clock.now_unix_ms(),
                     );
                 }
-                Ok(self.resolve(body.data, subscriber_id))
+                Ok(self.resolve(body.data, subscriber_id, false))
             }
             Err(e) if matches!(e.kind, ErrorKind::NetworkUnavailable | ErrorKind::Timeout) => {
                 match PlacementsCacheRepo::new(&self.store).get(&cache_key)? {
                     Some(raw) => {
                         let parsed: PlacementsResponse =
                             serde_json::from_str(&raw).map_err(|_| RovenueError::Internal())?;
-                        Ok(self.resolve(parsed, subscriber_id))
+                        Ok(self.resolve(parsed, subscriber_id, false))
                     }
-                    None => Err(e),
+                    None => match self.fallback_raw(identifier) {
+                        Some(raw) => match serde_json::from_str::<PlacementsResponse>(&raw) {
+                            Ok(parsed) => Ok(self.resolve(parsed, subscriber_id, true)),
+                            // A stored fallback entry that fails to
+                            // re-decode is unreachable in practice (it was
+                            // already validated by parse_fallback_file
+                            // before being stored), but must not panic —
+                            // fall through to the original network error.
+                            Err(_) => Err(e),
+                        },
+                        None => Err(e),
+                    },
                 }
             }
             Err(e) => Err(e),
         }
     }
 
+    fn fallback_raw(&self, identifier: &str) -> Option<String> {
+        self.fallback
+            .lock()
+            .ok()
+            .and_then(|guard| guard.get(identifier).cloned())
+    }
+
     /// Resolve the decoded wire response into a `CorePaywall`, drawing a
     /// variant (and firing the best-effort expose beacon) when the response
     /// carries an `experiment` branch instead of a direct `paywall`.
-    fn resolve(&self, resp: PlacementsResponse, subscriber_id: &str) -> Option<CorePaywall> {
+    /// `served_from_fallback` is stamped verbatim onto the result — `true`
+    /// only for the bundled-fallback-file branch of `get_paywall`.
+    fn resolve(
+        &self,
+        resp: PlacementsResponse,
+        subscriber_id: &str,
+        served_from_fallback: bool,
+    ) -> Option<CorePaywall> {
         let placement = resp.placement?;
 
         if let Some(paywall) = resp.paywall {
-            return Some(build_paywall(placement, paywall, None, None));
+            return Some(build_paywall(
+                placement,
+                paywall,
+                None,
+                None,
+                served_from_fallback,
+            ));
         }
 
         let experiment = resp.experiment?;
@@ -143,6 +201,7 @@ impl PlacementsClient {
             variant.paywall,
             Some(variant.variant_id),
             Some(key),
+            served_from_fallback,
         ))
     }
 
@@ -204,6 +263,7 @@ fn build_paywall(
     paywall: PaywallWire,
     variant_id: Option<String>,
     experiment_key: Option<String>,
+    served_from_fallback: bool,
 ) -> CorePaywall {
     let (remote_config_json, remote_config_locale) = match paywall.remote_config {
         Some(rc) => (Some(rc.data.to_string()), Some(rc.locale)),
@@ -229,5 +289,6 @@ fn build_paywall(
         builder_config_json: paywall.builder_config.map(|v| v.to_string()),
         offering: paywall.offering.map(map_offering),
         presented_context,
+        served_from_fallback,
     }
 }

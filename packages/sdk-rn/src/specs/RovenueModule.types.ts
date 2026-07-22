@@ -116,6 +116,10 @@ export type PaywallDTO = {
   builderConfigJson: string | null;
   offering: OfferingDTO | null;
   presentedContext: PresentedContextDTO | null;
+  /** `true` only when this paywall was resolved from the bundled
+   *  fallback-placements file (both network and disk cache missed) — see
+   *  `setFallbackPlacements`. `false` otherwise. */
+  servedFromFallback: boolean;
 };
 
 export type ExperimentAssignmentDTO = {
@@ -183,6 +187,12 @@ export interface RovenueModuleSpec {
   // the placement resolved to nothing (retired / target:none / unknown
   // identifier) — not an error.
   getPaywall(placementId: string, locale?: string): Promise<PaywallDTO | null>;
+  // Bundled fallback file (spec D1) — parses `json` once (replacing any
+  // previously-loaded set) so getPaywall can serve placements offline when
+  // both network and disk cache miss. Resolves to the count of placement
+  // entries actually loaded; rejects with a distinct INVALID_ARGUMENT error
+  // when the file doesn't parse or its formatVersion isn't literal 1.
+  setFallbackPlacements(json: string): Promise<number>;
   purchase(productId: string, productType: ProductTypeDTO, promotionalOfferId?: string, basePlanId?: string, offerId?: string): Promise<PurchaseResultDTO>;
   restorePurchases(): Promise<PurchaseResultDTO>;
 

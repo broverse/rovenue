@@ -3,7 +3,8 @@ import type { OfferingDTO, PaywallDTO } from "../specs/RovenueModule.types";
 
 const getPaywall = vi.fn(async (_placementId: string, _locale?: string): Promise<PaywallDTO | null> => null);
 const track = vi.fn(async () => {});
-vi.mock("../core/native", () => ({ getNative: () => ({ getPaywall, track }) }));
+const setFallbackPlacements = vi.fn(async (_json: string): Promise<number> => 0);
+vi.mock("../core/native", () => ({ getNative: () => ({ getPaywall, track, setFallbackPlacements }) }));
 
 import {
   getPaywall as getPaywallApi,
@@ -11,6 +12,7 @@ import {
   mapPaywallDTO,
   buildPaywallViewEnvelope,
   parseRemoteConfig,
+  setFallbackPlacements as setFallbackPlacementsApi,
 } from "./paywalls";
 
 const OFFERING_DTO: OfferingDTO = {
@@ -37,6 +39,7 @@ function makePaywallDTO(overrides: Partial<PaywallDTO> = {}): PaywallDTO {
       experimentKey: "exp_1",
       revision: 3,
     },
+    servedFromFallback: false,
     ...overrides,
   };
 }
@@ -116,6 +119,16 @@ describe("mapPaywallDTO", () => {
     const paywall = mapPaywallDTO(makePaywallDTO());
     expect(paywall.offering).toEqual({ identifier: "default", isDefault: true, packages: [] });
   });
+
+  it("maps servedFromFallback verbatim (false by default)", () => {
+    const paywall = mapPaywallDTO(makePaywallDTO());
+    expect(paywall.servedFromFallback).toBe(false);
+  });
+
+  it("maps servedFromFallback verbatim (true from the fallback branch)", () => {
+    const paywall = mapPaywallDTO(makePaywallDTO({ servedFromFallback: true }));
+    expect(paywall.servedFromFallback).toBe(true);
+  });
 });
 
 describe("getPaywall", () => {
@@ -132,6 +145,27 @@ describe("getPaywall", () => {
     getPaywall.mockResolvedValueOnce(null);
     const paywall = await getPaywallApi("retired_placement");
     expect(paywall).toBeNull();
+  });
+});
+
+describe("setFallbackPlacements", () => {
+  beforeEach(() => setFallbackPlacements.mockClear());
+
+  it("forwards the raw json to the native bridge and returns the loaded count", async () => {
+    setFallbackPlacements.mockResolvedValueOnce(3);
+    const count = await setFallbackPlacementsApi('{"formatVersion":1}');
+    expect(setFallbackPlacements).toHaveBeenCalledWith('{"formatVersion":1}');
+    expect(count).toBe(3);
+  });
+
+  it("propagates a mapped native error (e.g. formatVersion mismatch) rather than swallowing it", async () => {
+    setFallbackPlacements.mockRejectedValueOnce({
+      code: "invalidArgument",
+      message: "unsupported fallback placements formatVersion 2 (expected 1)",
+    });
+    await expect(setFallbackPlacementsApi('{"formatVersion":2}')).rejects.toMatchObject({
+      kind: "InvalidArgument",
+    });
   });
 });
 

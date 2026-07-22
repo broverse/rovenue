@@ -166,6 +166,11 @@ data class Paywall(
      *  remote-config-only paywalls. Defaulted so existing positional
      *  constructions keep compiling. */
     val builderConfigJson: String? = null,
+    /** `true` only when this paywall was resolved from the bundled
+     *  fallback-placements file (both network and disk cache missed) — see
+     *  [dev.rovenue.sdk.Rovenue.setFallbackPlacements]. `false` otherwise.
+     *  Defaulted so existing positional/named constructions keep compiling. */
+    val servedFromFallback: Boolean = false,
 )
 
 /** The outcome of a successful, validated purchase. */

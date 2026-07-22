@@ -110,4 +110,9 @@ pub struct CorePaywall {
     pub builder_config_json: Option<String>,
     pub offering: Option<crate::offerings::types::CoreOffering>,
     pub presented_context: Option<CorePresentedContext>,
+    /// `true` only when this paywall was resolved from the in-memory
+    /// bundled-fallback-file map (network AND disk cache both missed) —
+    /// see `PlacementsClient::get_paywall`. `false` for every other
+    /// resolution path (live network, disk cache).
+    pub served_from_fallback: bool,
 }

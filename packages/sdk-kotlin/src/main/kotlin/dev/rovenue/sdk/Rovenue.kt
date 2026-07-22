@@ -606,6 +606,40 @@ class Rovenue private constructor(
         }
     }
 
+    /**
+     * Parse a spec D1 bundled fallback-placements file (once, replacing any
+     * previously-loaded set) into memory so [getPaywall] can serve
+     * placements offline when both the network and disk cache miss.
+     * Not `suspend` — parsing is CPU-only, no I/O on this call itself
+     * (mirrors [installId]/[hasResolvedFunnelClaim], not the
+     * dispatcher-routed network-touching methods above).
+     *
+     * @throws RovenueException with `.invalidArgument` kind — loudly, at
+     *   call time — if [json] doesn't parse or its `formatVersion` isn't
+     *   literal `1`. An individual placement entry that fails to decode is
+     *   skipped (not fatal) and doesn't count toward the returned total.
+     * @return the number of placement entries actually loaded.
+     */
+    @Throws(RovenueException::class)
+    fun setFallbackPlacements(json: String): UInt = try {
+        core.setFallbackPlacements(json = json)
+    } catch (e: RovenueErrorFfi.Generic) {
+        throw RovenueException.from(e)
+    }
+
+    /**
+     * Convenience overload: reads [assetPath] from the app's `assets/` via
+     * [context] and forwards its contents to [setFallbackPlacements].
+     *
+     * @throws java.io.IOException if the asset can't be read.
+     * @throws RovenueException for a malformed fallback file.
+     */
+    @Throws(RovenueException::class, java.io.IOException::class)
+    fun setFallbackPlacements(context: Context, assetPath: String): UInt {
+        val json = context.assets.open(assetPath).use { it.readBytes().decodeToString() }
+        return setFallbackPlacements(json)
+    }
+
     /** Purchase the product backing a [Package], optionally selecting a specific [SubscriptionOption]. */
     suspend fun purchase(activity: Activity, pkg: Package, option: SubscriptionOption? = null): PurchaseResult =
         purchase(activity, pkg.product, option)

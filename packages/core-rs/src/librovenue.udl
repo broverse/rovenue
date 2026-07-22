@@ -141,6 +141,9 @@ dictionary CorePaywall {
     string? builder_config_json;
     CoreOffering? offering;
     CorePresentedContext? presented_context;
+    // true only when resolved from the in-memory bundled-fallback-file map
+    // (network AND disk cache both missed) — false everywhere else.
+    boolean served_from_fallback;
 };
 
 enum SessionEventKind {
@@ -221,6 +224,16 @@ interface RovenueCore {
 
     [Throws=RovenueErrorFfi]
     CorePaywall? get_paywall(string placement_id, string? locale);
+
+    // Parse a spec D1 bundled fallback-placements file (once) into memory so
+    // get_paywall can serve placements offline when both network and disk
+    // cache miss (connectivity-class errors only — see get_paywall). Throws
+    // a distinct InvalidArgument error when the file doesn't parse as JSON
+    // or formatVersion isn't literal 1; an individual placement entry that
+    // fails to decode is skipped (logged), not fatal. Returns the count of
+    // entries actually loaded. Replaces any previously-loaded fallback set.
+    [Throws=RovenueErrorFfi]
+    u32 set_fallback_placements(string json);
 
     [Throws=RovenueErrorFfi]
     void refresh_remote_config();

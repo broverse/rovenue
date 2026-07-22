@@ -672,6 +672,48 @@ public final class Rovenue: @unchecked Sendable {
     /// matching the RC/Adapty `logShown`/`logPaywallShown` contract (no
     /// `async throws` — a paywall-impression beacon must never block or
     /// fail the caller's UI code).
+    /// Parse a spec D1 bundled fallback-placements file (once, replacing any
+    /// previously-loaded set) into memory so `getPaywall` can serve
+    /// placements offline when both the network and disk cache miss.
+    /// Synchronous — parsing is CPU-only, no I/O on this call itself
+    /// (mirrors `installId()`/`hasResolvedFunnelClaim()`, not the
+    /// dispatcher-routed network-touching methods above).
+    ///
+    /// Throws `RovenueError(kind: .invalidArgument, …)` — loudly, at call
+    /// time — if the file doesn't parse as JSON or its `formatVersion`
+    /// isn't literal `1`. An individual placement entry that fails to
+    /// decode is skipped (not fatal) and doesn't count toward the returned
+    /// total.
+    ///
+    /// - Returns: the number of placement entries actually loaded.
+    @discardableResult
+    public func setFallbackPlacements(json: String) throws -> UInt32 {
+        do {
+            return try core.setFallbackPlacements(json: json)
+        } catch let e as RovenueErrorFfi {
+            throw mapError(e)
+        }
+    }
+
+    /// Convenience overload: reads `fileURL` (e.g. a bundled app resource)
+    /// and forwards its contents to `setFallbackPlacements(json:)`.
+    ///
+    /// - Throws: whatever `Data(contentsOf:)` throws for an unreadable
+    ///   file, `RovenueError(kind: .invalidArgument, …)` if the file isn't
+    ///   valid UTF-8, or whatever `setFallbackPlacements(json:)` throws for
+    ///   a malformed fallback file.
+    @discardableResult
+    public func setFallbackPlacements(fileURL: URL) throws -> UInt32 {
+        let data = try Data(contentsOf: fileURL)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw RovenueError(
+                kind: .invalidArgument,
+                message: "Fallback placements file is not valid UTF-8: \(fileURL.lastPathComponent)"
+            )
+        }
+        return try setFallbackPlacements(json: json)
+    }
+
     public func logPaywallShown(_ paywall: Paywall) {
         guard let envelope = paywallViewEnvelope(
             paywall: paywall,

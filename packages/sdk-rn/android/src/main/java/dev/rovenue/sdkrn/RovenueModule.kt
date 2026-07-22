@@ -178,6 +178,13 @@ class RovenueModule : Module() {
                 throw codedError(e)
             }
         }
+        AsyncFunction("setFallbackPlacements") Coroutine { json: String ->
+            try {
+                Rovenue.shared.setFallbackPlacements(json).toDouble()
+            } catch (e: Throwable) {
+                throw codedError(e)
+            }
+        }
         AsyncFunction("purchase") Coroutine { productId: String, productType: String, promotionalOfferId: String?, basePlanId: String?, offerId: String? ->
             // promotionalOfferId is iOS-only (ignored here). basePlanId/offerId select a Play subscription offer.
             // Play Billing needs the foreground Activity to launch the flow.
@@ -530,6 +537,7 @@ class RovenueModule : Module() {
         "builderConfigJson" to p.builderConfigJson,
         "offering" to p.offering?.let(::dtoFromOffering),
         "presentedContext" to p.presentedContext?.let(::dtoFromPresentedContext),
+        "servedFromFallback" to p.servedFromFallback,
     )
 
     private fun dtoFromPurchaseResult(r: PurchaseResult): Map<String, Any?> = mapOf(

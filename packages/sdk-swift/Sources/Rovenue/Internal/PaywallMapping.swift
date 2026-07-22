@@ -36,7 +36,8 @@ func mapPaywall(_ core: CorePaywall, offering: Offering?) -> Paywall {
         remoteConfigLocale: core.remoteConfigLocale,
         builderConfigJson: core.builderConfigJson,
         offering: offering,
-        presentedContext: core.presentedContext.map(mapPresentedContext)
+        presentedContext: core.presentedContext.map(mapPresentedContext),
+        servedFromFallback: core.servedFromFallback
     )
 }
 

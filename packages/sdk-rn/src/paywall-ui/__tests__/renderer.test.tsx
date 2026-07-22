@@ -121,6 +121,7 @@ function paywall(overrides: Partial<Paywall> = {}): Paywall {
       experimentKey: null,
       revision: 1,
     },
+    servedFromFallback: false,
     ...overrides,
   } as Paywall;
 }
