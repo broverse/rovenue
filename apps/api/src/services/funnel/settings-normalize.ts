@@ -27,7 +27,7 @@ const CAMEL_TO_SNAKE: Record<string, string> = {
 export function normalizeFunnelSettings(raw: unknown): Record<string, unknown> {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
   const input = raw as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = Object.create(null);
 
   for (const [key, value] of Object.entries(input)) {
     const target = CAMEL_TO_SNAKE[key];

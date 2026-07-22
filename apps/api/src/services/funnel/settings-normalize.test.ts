@@ -35,10 +35,29 @@ describe("normalizeFunnelSettings", () => {
     expect(normalizeFunnelSettings({ somethingNew: 1 })).toEqual({
       somethingNew: 1,
     });
+    expect(normalizeFunnelSettings({ futureFeature: "value", anotherKey: 42 })).toEqual({
+      futureFeature: "value",
+      anotherKey: 42,
+    });
+    expect(
+      normalizeFunnelSettings({ devMode: true, unknownSetting: "preserved" }),
+    ).toEqual({ dev_mode: true, unknownSetting: "preserved" });
   });
 
   it("returns {} for a non-object", () => {
     expect(normalizeFunnelSettings(null)).toEqual({});
     expect(normalizeFunnelSettings("nope")).toEqual({});
+  });
+
+  it("preserves __proto__ as an own property (string value)", () => {
+    const result = normalizeFunnelSettings({ __proto__: "some-string" });
+    expect(Object.prototype.hasOwnProperty.call(result, "__proto__")).toBe(true);
+    expect(result.__proto__).toBe("some-string");
+  });
+
+  it("preserves __proto__ as an own property (object value)", () => {
+    const result = normalizeFunnelSettings({ __proto__: { polluted: true } });
+    expect(Object.prototype.hasOwnProperty.call(result, "__proto__")).toBe(true);
+    expect(result.__proto__).toEqual({ polluted: true });
   });
 });
