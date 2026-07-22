@@ -196,9 +196,6 @@ ALTER TABLE "paywall_versions"
 CREATE UNIQUE INDEX "paywall_versions_paywallId_versionNo_key"
   ON "paywall_versions" ("paywallId", "versionNo");
 
-CREATE INDEX "paywall_versions_paywallId_idx"
-  ON "paywall_versions" ("paywallId");
-
 ALTER TABLE "paywalls"
   ADD COLUMN "status" "PaywallStatus" DEFAULT 'draft' NOT NULL;
 
