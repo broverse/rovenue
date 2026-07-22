@@ -38,18 +38,58 @@ export interface AccountScopedStripe {
       options?: ScopedRequestOptions,
     ): Promise<Stripe.Refund>;
   };
+  readonly prices: {
+    retrieve(
+      id: string,
+      options?: ScopedRequestOptions,
+    ): Promise<Stripe.Response<Stripe.Price>>;
+  };
+  readonly customers: {
+    create(
+      params: Stripe.CustomerCreateParams,
+      options?: ScopedRequestOptions,
+    ): Promise<Stripe.Response<Stripe.Customer>>;
+  };
+  readonly paymentIntents: {
+    create(
+      params: Stripe.PaymentIntentCreateParams,
+      options?: ScopedRequestOptions,
+    ): Promise<Stripe.Response<Stripe.PaymentIntent>>;
+    retrieve(
+      id: string,
+      options?: ScopedRequestOptions,
+    ): Promise<Stripe.Response<Stripe.PaymentIntent>>;
+  };
   readonly subscriptions: {
     update(
       id: string,
       params: Stripe.SubscriptionUpdateParams,
       options?: ScopedRequestOptions,
     ): Promise<Stripe.Subscription>;
+    create(
+      params: Stripe.SubscriptionCreateParams,
+      options?: ScopedRequestOptions,
+    ): Promise<Stripe.Response<Stripe.Subscription>>;
+    retrieve(
+      id: string,
+      options?: ScopedRequestOptions,
+    ): Promise<Stripe.Response<Stripe.Subscription>>;
   };
   readonly invoices: {
     retrieve(
       id: string,
       options?: ScopedRequestOptions,
     ): Promise<Stripe.Response<Stripe.Invoice>>;
+  };
+  readonly paymentMethodDomains: {
+    create(
+      params: Stripe.PaymentMethodDomainCreateParams,
+      options?: ScopedRequestOptions,
+    ): Promise<Stripe.Response<Stripe.PaymentMethodDomain>>;
+    list(
+      params: Stripe.PaymentMethodDomainListParams,
+      options?: ScopedRequestOptions,
+    ): Promise<Stripe.Response<Stripe.ApiList<Stripe.PaymentMethodDomain>>>;
   };
 }
 
@@ -72,13 +112,37 @@ export function withAccount(
       create: (params, options) =>
         stripe.refunds.create(params, { ...options, ...bound }),
     },
+    prices: {
+      retrieve: (id, options) =>
+        stripe.prices.retrieve(id, { ...options, ...bound }),
+    },
+    customers: {
+      create: (params, options) =>
+        stripe.customers.create(params, { ...options, ...bound }),
+    },
+    paymentIntents: {
+      create: (params, options) =>
+        stripe.paymentIntents.create(params, { ...options, ...bound }),
+      retrieve: (id, options) =>
+        stripe.paymentIntents.retrieve(id, { ...options, ...bound }),
+    },
     subscriptions: {
       update: (id, params, options) =>
         stripe.subscriptions.update(id, params, { ...options, ...bound }),
+      create: (params, options) =>
+        stripe.subscriptions.create(params, { ...options, ...bound }),
+      retrieve: (id, options) =>
+        stripe.subscriptions.retrieve(id, { ...options, ...bound }),
     },
     invoices: {
       retrieve: (id, options) =>
         stripe.invoices.retrieve(id, { ...options, ...bound }),
+    },
+    paymentMethodDomains: {
+      create: (params, options) =>
+        stripe.paymentMethodDomains.create(params, { ...options, ...bound }),
+      list: (params, options) =>
+        stripe.paymentMethodDomains.list(params, { ...options, ...bound }),
     },
   };
 }

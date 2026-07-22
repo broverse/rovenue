@@ -93,3 +93,86 @@ describe("withAccount", () => {
     });
   });
 });
+
+function stubClientWide() {
+  const fns = {
+    pricesRetrieve: vi.fn(async () => ({ id: "price_1" })),
+    customersCreate: vi.fn(async () => ({ id: "cus_1" })),
+    paymentIntentsCreate: vi.fn(async () => ({ id: "pi_1" })),
+    paymentIntentsRetrieve: vi.fn(async () => ({ id: "pi_1" })),
+    subscriptionsCreate: vi.fn(async () => ({ id: "sub_1" })),
+    subscriptionsRetrieve: vi.fn(async () => ({ id: "sub_1" })),
+    domainsCreate: vi.fn(async () => ({ id: "pmd_1" })),
+    domainsList: vi.fn(async () => ({ data: [] })),
+  };
+  const stripe = {
+    prices: { retrieve: fns.pricesRetrieve },
+    customers: { create: fns.customersCreate },
+    paymentIntents: { create: fns.paymentIntentsCreate, retrieve: fns.paymentIntentsRetrieve },
+    subscriptions: { create: fns.subscriptionsCreate, retrieve: fns.subscriptionsRetrieve },
+    paymentMethodDomains: { create: fns.domainsCreate, list: fns.domainsList },
+  } as unknown as Stripe;
+  return { stripe, ...fns };
+}
+
+describe("withAccount — payment resources", () => {
+  it("binds stripeAccount to prices.retrieve", async () => {
+    const { stripe, pricesRetrieve } = stubClientWide();
+    await withAccount(stripe, "acct_x").prices.retrieve("price_1");
+    expect(pricesRetrieve).toHaveBeenCalledWith("price_1", {
+      stripeAccount: "acct_x",
+    });
+  });
+
+  it("binds stripeAccount to customers.create", async () => {
+    const { stripe, customersCreate } = stubClientWide();
+    await withAccount(stripe, "acct_x").customers.create({ email: "a@b.c" });
+    expect(customersCreate).toHaveBeenCalledWith(
+      { email: "a@b.c" },
+      { stripeAccount: "acct_x" },
+    );
+  });
+
+  it("binds stripeAccount to paymentIntents.create and .retrieve", async () => {
+    const { stripe, paymentIntentsCreate, paymentIntentsRetrieve } = stubClientWide();
+    const acct = withAccount(stripe, "acct_x");
+    await acct.paymentIntents.create({ amount: 100, currency: "usd" });
+    await acct.paymentIntents.retrieve("pi_1");
+    expect(paymentIntentsCreate).toHaveBeenCalledWith(
+      { amount: 100, currency: "usd" },
+      { stripeAccount: "acct_x" },
+    );
+    expect(paymentIntentsRetrieve).toHaveBeenCalledWith("pi_1", {
+      stripeAccount: "acct_x",
+    });
+  });
+
+  it("binds stripeAccount to subscriptions.create and .retrieve", async () => {
+    const { stripe, subscriptionsCreate, subscriptionsRetrieve } = stubClientWide();
+    const acct = withAccount(stripe, "acct_x");
+    await acct.subscriptions.create({ customer: "cus_1", items: [] });
+    await acct.subscriptions.retrieve("sub_1");
+    expect(subscriptionsCreate).toHaveBeenCalledWith(
+      { customer: "cus_1", items: [] },
+      { stripeAccount: "acct_x" },
+    );
+    expect(subscriptionsRetrieve).toHaveBeenCalledWith("sub_1", {
+      stripeAccount: "acct_x",
+    });
+  });
+
+  it("binds stripeAccount to paymentMethodDomains", async () => {
+    const { stripe, domainsCreate, domainsList } = stubClientWide();
+    const acct = withAccount(stripe, "acct_x");
+    await acct.paymentMethodDomains.create({ domain_name: "app.rovenue.io" });
+    await acct.paymentMethodDomains.list({ domain_name: "app.rovenue.io" });
+    expect(domainsCreate).toHaveBeenCalledWith(
+      { domain_name: "app.rovenue.io" },
+      { stripeAccount: "acct_x" },
+    );
+    expect(domainsList).toHaveBeenCalledWith(
+      { domain_name: "app.rovenue.io" },
+      { stripeAccount: "acct_x" },
+    );
+  });
+});
