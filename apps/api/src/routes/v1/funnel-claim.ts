@@ -28,7 +28,12 @@ import { HTTPException } from "hono/http-exception";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
-import { drizzle } from "@rovenue/db";
+import { type Db, drizzle } from "@rovenue/db";
+import {
+  reassignAllAssets,
+  safeSyncAccessAfterMerge,
+} from "../../services/subscriber-transfer";
+import { logger } from "../../lib/logger";
 import {
   generateClaimToken,
   hashEmail,
@@ -42,6 +47,8 @@ import { hashIp } from "../../services/funnel/fingerprint";
 import { selectUniqueCandidate } from "../../services/funnel/deferred-match";
 import { redis } from "../../lib/redis";
 import { mailer } from "../../lib/mailer";
+
+const log = logger.child("funnel-claim");
 
 // =============================================================
 // Body schemas
@@ -77,6 +84,122 @@ function readIp(c: import("hono").Context): string {
   );
 }
 
+/**
+ * Claim-time convergence: move the funnel purchase onto the subscriber
+ * that is actually claiming.
+ *
+ * The buyer paid before they had an app install, so
+ * `completeFunnelPurchase` anchored a synthetic subscriber on the Stripe
+ * customer (`stripe:<customer>`) and hung the purchase, its access rows
+ * and its revenue events off that. The device arriving here is a
+ * different row. Without this the buyer installs the app and finds
+ * nothing they paid for.
+ *
+ * MUST be called inside the claim transaction, AFTER `tryClaim` has
+ * returned a winner. `tryClaim` is `UPDATE ... WHERE claimed_at IS NULL
+ * RETURNING`, so exactly one caller ever proceeds past it — running the
+ * merge under that same transaction is what makes a replayed claim
+ * unable to move assets twice. It also means a merge that throws rolls
+ * the claim back with it: the token stays unclaimed and the SDK can
+ * retry, rather than being marked claimed against assets that never
+ * moved.
+ *
+ * Returns whether anything was moved.
+ */
+async function mergeFunnelPurchaseSubscriber(
+  tx: Db,
+  projectId: string,
+  sessionId: string,
+  claimer: { id: string; projectId: string },
+): Promise<boolean> {
+  const purchase = await drizzle.funnelPurchaseRepo.findBySession(tx, sessionId);
+  // No purchase, or one with no subscriber: the dev-mode stub in
+  // routes/public/funnels.ts inserts a paid purchase row directly, with
+  // no Stripe customer and therefore no synthetic subscriber. There is
+  // nothing to move, and a developer testing the claim flow end-to-end
+  // must not get an error for it.
+  if (!purchase?.subscriberId) return false;
+  if (purchase.subscriberId === claimer.id) return false;
+
+  // Cross-project defence. `reassignAllAssets` takes a projectId but
+  // cannot enforce it: every statement it issues is keyed on subscriber
+  // id alone (reassignPurchases / reassignRevenueEvents /
+  // reassignSubscriberAccess / softDeleteSubscriberAsMerged all filter
+  // on `subscriberId` or `id`), and the projectId is used only to stamp
+  // the credit-ledger rows it writes. Handing it a subscriber from
+  // another project would move that project's purchases — one person's
+  // purchase to someone else — so the check has to happen here, before
+  // anything moves.
+  if (purchase.projectId !== projectId) {
+    log.error("funnel purchase belongs to a different project; refusing merge", {
+      projectId,
+      sessionId,
+      purchaseProjectId: purchase.projectId,
+    });
+    return false;
+  }
+
+  const source = await drizzle.subscriberRepo.findSubscriberById(
+    tx,
+    purchase.subscriberId,
+  );
+  if (!source) {
+    log.warn("funnel purchase points at a missing subscriber", {
+      projectId,
+      sessionId,
+      subscriberId: purchase.subscriberId,
+    });
+    return false;
+  }
+  if (source.projectId !== projectId || claimer.projectId !== projectId) {
+    log.error("refusing a cross-project subscriber merge at claim", {
+      projectId,
+      sessionId,
+      sourceProjectId: source.projectId,
+      claimerProjectId: claimer.projectId,
+    });
+    return false;
+  }
+  // Already merged away. Its assets left with the earlier merge, so
+  // there is nothing to move — and re-merging would repoint its
+  // `mergedInto` at this claimer, corrupting the chain that
+  // `resolveSubscriberByRovenueId` walks.
+  if (source.deletedAt) {
+    log.warn("funnel purchase subscriber was already merged; skipping", {
+      projectId,
+      sessionId,
+      subscriberId: source.id,
+      mergedInto: source.mergedInto,
+    });
+    return false;
+  }
+
+  await reassignAllAssets(
+    tx,
+    projectId,
+    { id: source.id, label: source.appUserId ?? source.rovenueId },
+    { id: claimer.id, label: "funnel claim" },
+  );
+  log.info("merged funnel purchase subscriber into the claiming subscriber", {
+    projectId,
+    sessionId,
+    from: source.id,
+    to: claimer.id,
+  });
+  return true;
+}
+
+/**
+ * The claim payload.
+ *
+ * MUST be called AFTER the claim transaction has committed. The
+ * entitlements it reports are the ones the merge inside that
+ * transaction moved onto `subscriberId`, and `drizzle.db` is a
+ * different connection from the transaction's `tx` — it cannot see
+ * uncommitted writes. Called with that transaction still open it
+ * returns an empty array on every claim, which looks exactly like a
+ * buyer who has no entitlements.
+ */
 async function buildClaimResponse(
   sessionId: string,
   subscriberId: string,
@@ -94,7 +217,42 @@ async function buildClaimResponse(
     const payload = a.answerJson as { value: unknown } | null;
     funnel_answers[a.questionId] = payload?.value;
   }
-  return { subscriber_id: subscriberId, entitlements: [], funnel_answers };
+
+  const access = await drizzle.accessRepo.findAllAccessBySubscriber(
+    drizzle.db,
+    subscriberId,
+  );
+  // "Live" access is active AND not past its expiry — the same rule
+  // accessRepo.findActiveAccess applies in SQL. The rows are deduped
+  // because a merge can leave the survivor holding two rows for one
+  // accessId (one from each side) until syncAccess collapses them.
+  const now = Date.now();
+  const liveAccessIds = [
+    ...new Set(
+      access
+        .filter(
+          (row) =>
+            row.isActive &&
+            (!row.expiresDate || row.expiresDate.getTime() > now),
+        )
+        .map((row) => row.accessId),
+    ),
+  ];
+
+  // `subscriber_access.accessId` is the access ROW id; every
+  // entitlement surface the SDK sees reports the catalog `identifier`
+  // instead (lib/access-response.ts does the same translation for
+  // GET /v1/me/entitlements). Returning internal ids here would hand
+  // callers strings that match nothing they can check against. A
+  // catalog row that has since been deleted drops out, as it does
+  // there.
+  const catalog = await drizzle.accessCatalogRepo.findByIds(
+    drizzle.db,
+    liveAccessIds,
+  );
+  const entitlements = catalog.map((row) => row.identifier).sort();
+
+  return { subscriber_id: subscriberId, entitlements, funnel_answers };
 }
 
 async function sendFunnelMagicLink(
@@ -180,13 +338,23 @@ export const funnelClaimRoute = new Hono()
         tokenRow.sessionId,
       );
 
-      const claimed = await drizzle.db.transaction(async (tx) => {
+      const outcome = await drizzle.db.transaction(async (tx) => {
         const winner = await drizzle.funnelClaimTokenRepo.tryClaim(
           tx,
           tokenRow.id,
           subscriber.id,
         );
-        if (!winner) return false;
+        if (!winner) return { claimed: false, merged: false };
+
+        // Single use is decided by the UPDATE above; everything below
+        // inherits it. In particular the merge cannot run twice for one
+        // token, because a second caller never gets a `winner`.
+        const merged = await mergeFunnelPurchaseSubscriber(
+          tx,
+          tokenRow.projectId,
+          tokenRow.sessionId,
+          subscriber,
+        );
 
         // Flip session to completed so /state stops reporting it as
         // still in flight.
@@ -215,12 +383,25 @@ export const funnelClaimRoute = new Hono()
             },
           );
         }
-        return true;
+        return { claimed: true, merged };
       });
 
-      if (!claimed) {
+      if (!outcome.claimed) {
         // Lost the race — someone else just claimed it.
         throw new HTTPException(409, { message: "Token already claimed" });
+      }
+
+      // Post-commit, in this order, and neither may move earlier:
+      //
+      //  * syncAccess opens its OWN transaction and takes an advisory
+      //    lock on the subscriber — running it inside the claim
+      //    transaction would block on rows that transaction still
+      //    holds. It collapses the duplicate accessId rows a merge
+      //    leaves behind, so the snapshot below reads a reconciled set.
+      //  * buildClaimResponse reads through `drizzle.db`, a different
+      //    connection, which cannot see the merge until it commits.
+      if (outcome.merged) {
+        await safeSyncAccessAfterMerge(subscriber.id);
       }
 
       const body = await buildClaimResponse(tokenRow.sessionId, subscriber.id);
