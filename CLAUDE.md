@@ -41,7 +41,7 @@ docker-compose.yml   root file — full stack; COMPOSE_PROFILES=observability fo
 
 - `pnpm dev` / `pnpm build` / `pnpm test`
 - `pnpm db:migrate` · `pnpm db:migrate:generate` · `pnpm db:seed`
-- `pnpm --filter @rovenue/db db:clickhouse:migrate` · `db:verify:clickhouse`
+- `pnpm --filter @rovenue/db db:clickhouse:migrate` · `db:verify:clickhouse` — **run these from inside the compose network, not the host.** `deploy/clickhouse/users.d/rovenue.xml` allow-lists only loopback + `172.16/12` + `10/8`, and Docker-Desktop host traffic arrives from `192.168.65.1`, which ClickHouse rejects as `IP_ADDRESS_NOT_ALLOWED` and reports to clients as *"password is incorrect"* — the credentials are fine. Use the compose `migrate` service, or bridge for a one-off: `docker run -d --rm --name ch-devfwd --network rovenue_default -p 8125:8125 alpine/socat tcp-listen:8125,fork,reuseaddr tcp-connect:clickhouse:8123`, then run with `CLICKHOUSE_URL=http://localhost:8125 CLICKHOUSE_USER=rovenue` (the write user — `.env`'s `rovenue_reader` is read-only and cannot run DDL) and `docker rm -f ch-devfwd` after.
 - `docker compose up` — full stack; prefix `COMPOSE_PROFILES=observability` for Grafana/Prometheus/Loki (Grafana on :3300)
 
 ## Env
