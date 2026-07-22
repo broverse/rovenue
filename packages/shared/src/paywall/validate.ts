@@ -1,4 +1,4 @@
-import type { BuilderConfig, PaywallNode, StackNode } from "./schema";
+import { OVERRIDABLE_PROP_KEYS, type BuilderConfig, type PaywallNode, type StackNode } from "./schema";
 
 // =============================================================
 // Cross-node-tree validation for a builder config: things Zod's
@@ -22,25 +22,59 @@ export type BuilderIssue = {
     // the structural Zod parse (or exceeds depth/size bounds) — not by
     // validateBuilderConfig itself, which only sees parsed configs. In the
     // union so the dashboard renders API issue lists fully typed.
-    | "SCHEMA_INVALID";
+    | "SCHEMA_INVALID"
+    // Phase D2 — overrides / cellTemplate.
+    | "CELL_TEMPLATE_BAD_NODE"
+    | "OVERRIDE_BAD_PROP"
+    | "OVERRIDE_SELECTED_OUTSIDE_CELL";
   nodeId?: string;
   locale?: string;
   key?: string;
   message: string;
 };
 
-/** Depth-first walk over every node in the tree, including fallbacks. */
-function walkNodes(node: PaywallNode, visit: (node: PaywallNode) => void): void {
-  visit(node);
+/**
+ * Depth-first walk over every node in the tree, including `fallback` AND
+ * `packageList.cellTemplate` subtrees. `insideCellTemplate` is true for the
+ * cellTemplate root and everything beneath it (children/fallback), reset to
+ * false only outside any cellTemplate — a nested cellTemplate (unusual but
+ * not forbidden) simply stays `true`.
+ */
+function walkNodes(
+  node: PaywallNode,
+  visit: (node: PaywallNode, insideCellTemplate: boolean) => void,
+  insideCellTemplate = false,
+): void {
+  visit(node, insideCellTemplate);
   if (node.type === "stack") {
-    for (const child of node.children) walkNodes(child, visit);
+    for (const child of node.children) walkNodes(child, visit, insideCellTemplate);
   }
-  if (node.fallback) walkNodes(node.fallback, visit);
+  if (node.type === "packageList" && node.cellTemplate) {
+    walkNodes(node.cellTemplate, visit, true);
+  }
+  if (node.fallback) walkNodes(node.fallback, visit, insideCellTemplate);
+}
+
+/**
+ * `key`/`labelKey` values carried by a node's `overrides` — an override
+ * that swaps a text/button node's key introduces a NEW localization key
+ * that must be collected/checked exactly like the node's base key.
+ */
+function overrideLocKeys(node: PaywallNode): string[] {
+  const keys: string[] = [];
+  for (const override of node.overrides ?? []) {
+    const key = override.props["key"];
+    if (typeof key === "string") keys.push(key);
+    const labelKey = override.props["labelKey"];
+    if (typeof labelKey === "string") keys.push(labelKey);
+  }
+  return keys;
 }
 
 /**
  * Every localization key referenced by a text/button/purchaseButton node
- * anywhere in the tree (including inside `fallback` subtrees), deduped.
+ * anywhere in the tree (including inside `fallback` and `cellTemplate`
+ * subtrees), PLUS any `key`/`labelKey` introduced by an override, deduped.
  */
 export function collectLocalizationKeys(root: StackNode): string[] {
   const seen = new Set<string>();
@@ -49,6 +83,7 @@ export function collectLocalizationKeys(root: StackNode): string[] {
     if (node.type === "button" || node.type === "purchaseButton") {
       seen.add(node.labelKey);
     }
+    for (const key of overrideLocKeys(node)) seen.add(key);
   });
   return [...seen];
 }
@@ -60,8 +95,11 @@ export function validateBuilderConfig(
   const issues: BuilderIssue[] = [];
   const offeringSet = new Set(opts.offeringPackageIds);
 
-  const allNodes: PaywallNode[] = [];
-  walkNodes(config.root, (node) => allNodes.push(node));
+  const nodesWithCtx: Array<{ node: PaywallNode; insideCellTemplate: boolean }> = [];
+  walkNodes(config.root, (node, insideCellTemplate) => {
+    nodesWithCtx.push({ node, insideCellTemplate });
+  });
+  const allNodes: PaywallNode[] = nodesWithCtx.map((n) => n.node);
 
   // DUPLICATE_NODE_ID — across the whole tree.
   const idCounts = new Map<string, number>();
@@ -80,19 +118,26 @@ export function validateBuilderConfig(
 
   const defaultLocaleTable = config.localizations[config.defaultLocale] ?? {};
 
-  // UNKNOWN_LOC_KEY — text/button/purchaseButton key missing from defaultLocale.
+  // UNKNOWN_LOC_KEY — text/button/purchaseButton key (base or override-provided)
+  // missing from defaultLocale.
   for (const node of allNodes) {
-    let key: string | undefined;
-    if (node.type === "text") key = node.key;
-    if (node.type === "button" || node.type === "purchaseButton") key = node.labelKey;
-    if (key === undefined) continue;
-    if (!(key in defaultLocaleTable)) {
-      issues.push({
-        code: "UNKNOWN_LOC_KEY",
-        nodeId: node.id,
-        key,
-        message: `Key "${key}" (node "${node.id}") is not present in the default locale ("${config.defaultLocale}") table.`,
-      });
+    const keysToCheck: string[] = [];
+    if (node.type === "text") keysToCheck.push(node.key);
+    if (node.type === "button" || node.type === "purchaseButton") keysToCheck.push(node.labelKey);
+    keysToCheck.push(...overrideLocKeys(node));
+
+    const checked = new Set<string>();
+    for (const key of keysToCheck) {
+      if (checked.has(key)) continue;
+      checked.add(key);
+      if (!(key in defaultLocaleTable)) {
+        issues.push({
+          code: "UNKNOWN_LOC_KEY",
+          nodeId: node.id,
+          key,
+          message: `Key "${key}" (node "${node.id}") is not present in the default locale ("${config.defaultLocale}") table.`,
+        });
+      }
     }
   }
 
@@ -129,6 +174,53 @@ export function validateBuilderConfig(
     });
   }
 
+  // CELL_TEMPLATE_BAD_NODE — packageList/purchaseButton anywhere inside a
+  // cellTemplate subtree (renderers can't nest a package cell / purchase
+  // action inside a per-cell template).
+  // OVERRIDE_SELECTED_OUTSIDE_CELL — a `selected`-condition override on a
+  // node that isn't inside any cellTemplate subtree; renderers never match
+  // `selected` there, so it's a warning rather than blocking.
+  for (const { node, insideCellTemplate } of nodesWithCtx) {
+    if (insideCellTemplate && (node.type === "packageList" || node.type === "purchaseButton")) {
+      issues.push({
+        code: "CELL_TEMPLATE_BAD_NODE",
+        nodeId: node.id,
+        message: `Node "${node.id}" (type "${node.type}") is not allowed inside a cellTemplate subtree.`,
+      });
+    }
+    if (!insideCellTemplate) {
+      for (const override of node.overrides ?? []) {
+        if (override.when.kind === "selected") {
+          issues.push({
+            code: "OVERRIDE_SELECTED_OUTSIDE_CELL",
+            nodeId: node.id,
+            message: `Node "${node.id}" has a "selected" override but is not inside any cellTemplate subtree; it will never match.`,
+          });
+        }
+      }
+    }
+  }
+
+  // OVERRIDE_BAD_PROP — defensive re-check on already-parsed configs: the
+  // strict authoring schema rejects structural/unknown prop keys at parse
+  // time, so this is normally unreachable, but guards configs built/edited
+  // outside the schema (e.g. programmatically) before they reach a renderer.
+  for (const node of allNodes) {
+    const allowed = new Set(OVERRIDABLE_PROP_KEYS[node.type]);
+    for (const override of node.overrides ?? []) {
+      for (const propKey of Object.keys(override.props)) {
+        if (!allowed.has(propKey)) {
+          issues.push({
+            code: "OVERRIDE_BAD_PROP",
+            nodeId: node.id,
+            key: propKey,
+            message: `Node "${node.id}" (type "${node.type}") has an override prop "${propKey}" that is not overridable for this node type.`,
+          });
+        }
+      }
+    }
+  }
+
   // LOCALE_KEY_GAP — per (non-default locale, key present in defaultLocale but missing there).
   const defaultKeys = Object.keys(defaultLocaleTable);
   for (const [locale, table] of Object.entries(config.localizations)) {
@@ -158,4 +250,31 @@ export function resolveText(
   if (direct !== undefined) return direct;
   const fallback = config.localizations[config.defaultLocale]?.[key];
   return fallback !== undefined ? fallback : null;
+}
+
+/**
+ * Applies a node's `overrides` for the given active condition set: base
+ * props, then every override whose `when.kind` is active, in array order
+ * (later wins), merged shallowly. Unknown `when.kind` values (possible when
+ * called on lenient-decoded data in TS consumers) are simply never active,
+ * so they're skipped without special-casing. Pure — never mutates `node` —
+ * and returns the SAME object reference when no override is active, so
+ * callers on a hot render path can cheaply skip re-render via identity.
+ */
+export function applyOverrides<T extends PaywallNode>(
+  node: T,
+  active: { introEligible: boolean; selected: boolean },
+): T {
+  const overrides = node.overrides;
+  if (!overrides || overrides.length === 0) return node;
+
+  let merged: T | null = null;
+  for (const override of overrides) {
+    const isActive =
+      (override.when.kind === "introEligible" && active.introEligible) ||
+      (override.when.kind === "selected" && active.selected);
+    if (!isActive) continue;
+    merged = { ...(merged ?? node), ...override.props } as T;
+  }
+  return merged ?? node;
 }

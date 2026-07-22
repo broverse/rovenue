@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyOverrides,
   collectLocalizationKeys,
   resolveText,
   validateBuilderConfig,
   type BuilderIssue,
 } from "./validate";
-import type { BuilderConfig, StackNode } from "./schema";
+import type { BuilderConfig, PaywallNode, StackNode, TextNode } from "./schema";
 
 function baseConfig(overrides: Partial<BuilderConfig> = {}): BuilderConfig {
   return {
@@ -210,5 +211,349 @@ describe("resolveText", () => {
 
   it("returns null when neither the locale nor defaultLocale has the key", () => {
     expect(resolveText(config, "tr", "nope")).toBeNull();
+  });
+});
+
+describe("validateBuilderConfig — cellTemplate / overrides (Phase D2)", () => {
+  it("reports CELL_TEMPLATE_BAD_NODE when a packageList sits inside a cellTemplate subtree", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "packageList",
+            id: "outer",
+            packageIds: ["pkg_monthly"],
+            cellLayout: "row",
+            cellTemplate: {
+              type: "packageList",
+              id: "inner",
+              packageIds: ["pkg_annual"],
+              cellLayout: "row",
+            },
+          },
+          { type: "purchaseButton", id: "purchase", labelKey: "cta_key" },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const bad = issues.find((i) => i.code === "CELL_TEMPLATE_BAD_NODE");
+    expect(bad).toBeDefined();
+    expect(bad?.nodeId).toBe("inner");
+  });
+
+  it("reports CELL_TEMPLATE_BAD_NODE when a purchaseButton is nested (2 levels deep) inside a cellTemplate subtree", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "packageList",
+            id: "outer",
+            packageIds: ["pkg_monthly"],
+            cellLayout: "row",
+            cellTemplate: {
+              type: "stack",
+              id: "cell_root",
+              axis: "v",
+              children: [{ type: "purchaseButton", id: "cell_purchase", labelKey: "cta_key" }],
+            },
+          },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const bad = issues.find((i) => i.code === "CELL_TEMPLATE_BAD_NODE");
+    expect(bad).toBeDefined();
+    expect(bad?.nodeId).toBe("cell_purchase");
+  });
+
+  it("does NOT report CELL_TEMPLATE_BAD_NODE for a packageList/purchaseButton outside any cellTemplate", () => {
+    const issues = validateBuilderConfig(baseConfig(), { offeringPackageIds });
+    expect(issues.map((i) => i.code)).not.toContain("CELL_TEMPLATE_BAD_NODE");
+  });
+
+  it("reports DUPLICATE_NODE_ID when one id lives inside a cellTemplate subtree and clashes outside it", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          { type: "spacer", id: "dup", size: 4 },
+          {
+            type: "packageList",
+            id: "packages",
+            packageIds: ["pkg_monthly"],
+            cellLayout: "row",
+            cellTemplate: { type: "spacer", id: "dup", size: 8 },
+          },
+          { type: "purchaseButton", id: "purchase", labelKey: "cta_key" },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    expect(issues.map((i) => i.code)).toContain("DUPLICATE_NODE_ID");
+  });
+
+  it("reports OVERRIDE_SELECTED_OUTSIDE_CELL for a 'selected' override on a node not inside any cellTemplate", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "text",
+            id: "title",
+            key: "title_key",
+            role: "title",
+            overrides: [{ when: { kind: "selected" }, props: { key: "title_key" } }],
+          },
+          { type: "purchaseButton", id: "purchase", labelKey: "cta_key" },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const warning = issues.find((i) => i.code === "OVERRIDE_SELECTED_OUTSIDE_CELL");
+    expect(warning).toBeDefined();
+    expect(warning?.nodeId).toBe("title");
+  });
+
+  it("does NOT report OVERRIDE_SELECTED_OUTSIDE_CELL for a 'selected' override on a node inside a cellTemplate", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "packageList",
+            id: "packages",
+            packageIds: ["pkg_monthly"],
+            cellLayout: "row",
+            cellTemplate: {
+              type: "text",
+              id: "cell_text",
+              key: "title_key",
+              role: "body",
+              overrides: [{ when: { kind: "selected" }, props: { key: "cta_key" } }],
+            },
+          },
+          { type: "purchaseButton", id: "purchase", labelKey: "cta_key" },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    expect(issues.map((i) => i.code)).not.toContain("OVERRIDE_SELECTED_OUTSIDE_CELL");
+  });
+
+  it("does NOT report OVERRIDE_SELECTED_OUTSIDE_CELL for an 'introEligible' override outside any cellTemplate", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "text",
+            id: "title",
+            key: "title_key",
+            role: "title",
+            overrides: [{ when: { kind: "introEligible" }, props: { key: "title_key" } }],
+          },
+          { type: "purchaseButton", id: "purchase", labelKey: "cta_key" },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    expect(issues.map((i) => i.code)).not.toContain("OVERRIDE_SELECTED_OUTSIDE_CELL");
+  });
+
+  it("reports OVERRIDE_BAD_PROP defensively when a parsed config (bypassing the schema) carries a structural prop key", () => {
+    // Simulates a config built outside the strict authoring schema — e.g.
+    // programmatically, or decoded leniently — where a structural field
+    // slipped into an override's props. validateBuilderConfig re-checks
+    // this even though the strict schema would normally reject it at parse.
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "text",
+            id: "title",
+            key: "title_key",
+            role: "title",
+            overrides: [{ when: { kind: "introEligible" }, props: { type: "spacer" } }],
+          },
+          { type: "purchaseButton", id: "purchase", labelKey: "cta_key" },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const bad = issues.find((i) => i.code === "OVERRIDE_BAD_PROP");
+    expect(bad).toBeDefined();
+    expect(bad?.nodeId).toBe("title");
+    expect(bad?.key).toBe("type");
+  });
+
+  it("reports UNKNOWN_LOC_KEY for a key introduced only via an override", () => {
+    const config = baseConfig({
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "text",
+            id: "title",
+            key: "title_key",
+            role: "title",
+            overrides: [{ when: { kind: "introEligible" }, props: { key: "override_ghost_key" } }],
+          },
+          { type: "purchaseButton", id: "purchase", labelKey: "cta_key" },
+        ],
+      },
+    });
+    const issues = validateBuilderConfig(config, { offeringPackageIds });
+    const gap = issues.find((i) => i.code === "UNKNOWN_LOC_KEY" && i.key === "override_ghost_key");
+    expect(gap).toBeDefined();
+    expect(gap?.nodeId).toBe("title");
+  });
+});
+
+describe("collectLocalizationKeys — overrides + cellTemplate", () => {
+  it("includes key/labelKey values introduced by overrides, and keys from inside a cellTemplate subtree", () => {
+    const root: StackNode = {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: [
+        {
+          type: "text",
+          id: "title",
+          key: "title_key",
+          role: "title",
+          overrides: [{ when: { kind: "introEligible" }, props: { key: "intro_title_key" } }],
+        },
+        {
+          type: "packageList",
+          id: "packages",
+          packageIds: [],
+          cellLayout: "row",
+          cellTemplate: { type: "text", id: "cell_text", key: "cell_key", role: "caption" },
+        },
+      ],
+    };
+    const keys = collectLocalizationKeys(root);
+    expect(keys.sort()).toEqual(["cell_key", "intro_title_key", "title_key"]);
+  });
+});
+
+describe("applyOverrides", () => {
+  const baseText: TextNode = {
+    type: "text",
+    id: "t1",
+    key: "title_key",
+    role: "title",
+    color: { light: "#000" },
+    align: "start",
+  };
+
+  it("returns the SAME object reference when the node has no overrides", () => {
+    const result = applyOverrides(baseText, { introEligible: false, selected: false });
+    expect(result).toBe(baseText);
+  });
+
+  it("returns the SAME object reference when overrides exist but none are active", () => {
+    const node: TextNode = {
+      ...baseText,
+      overrides: [{ when: { kind: "introEligible" }, props: { align: "center" } }],
+    };
+    const result = applyOverrides(node, { introEligible: false, selected: false });
+    expect(result).toBe(node);
+  });
+
+  it("merges a matching introEligible override's props over the base (shallow, later wins n/a with one override)", () => {
+    const node: TextNode = {
+      ...baseText,
+      overrides: [
+        { when: { kind: "introEligible" }, props: { key: "intro_key", align: "center" } },
+      ],
+    };
+    const result = applyOverrides(node, { introEligible: true, selected: false });
+    expect(result).not.toBe(node);
+    expect(result).toEqual({ ...baseText, key: "intro_key", align: "center", overrides: node.overrides });
+  });
+
+  it("merges a matching selected override's props", () => {
+    const node: TextNode = {
+      ...baseText,
+      overrides: [{ when: { kind: "selected" }, props: { align: "end" } }],
+    };
+    const result = applyOverrides(node, { introEligible: false, selected: true });
+    expect(result.align).toBe("end");
+  });
+
+  it("applies overrides in array order with later entries winning on shared keys", () => {
+    const node: TextNode = {
+      ...baseText,
+      overrides: [
+        { when: { kind: "introEligible" }, props: { align: "center" } },
+        { when: { kind: "introEligible" }, props: { align: "end" } },
+      ],
+    };
+    const result = applyOverrides(node, { introEligible: true, selected: false });
+    expect(result.align).toBe("end");
+  });
+
+  it("does not deep-merge — a later override's prop value wholly replaces the earlier one", () => {
+    const node: TextNode = {
+      ...baseText,
+      overrides: [
+        { when: { kind: "introEligible" }, props: { color: { light: "#111" } } },
+        { when: { kind: "introEligible" }, props: { color: { light: "#222" } } },
+      ],
+    };
+    const result = applyOverrides(node, { introEligible: true, selected: false });
+    expect(result.color).toEqual({ light: "#222" });
+  });
+
+  it("leaves untouched base props intact when only some props are overridden", () => {
+    const node: TextNode = {
+      ...baseText,
+      overrides: [{ when: { kind: "introEligible" }, props: { align: "end" } }],
+    };
+    const result = applyOverrides(node, { introEligible: true, selected: false });
+    expect(result.key).toBe(baseText.key);
+    expect(result.color).toEqual(baseText.color);
+  });
+
+  it("skips an override with an unknown when.kind (lenient-decoded data) without throwing", () => {
+    const node = {
+      ...baseText,
+      overrides: [
+        { when: { kind: "sizeClass" }, props: { align: "end" } },
+      ] as unknown as TextNode["overrides"],
+    } as TextNode;
+    const result = applyOverrides(node, { introEligible: true, selected: true });
+    expect(result).toBe(node);
+  });
+
+  it("is generic over any PaywallNode subtype — works on a packageList node too", () => {
+    const node: PaywallNode = {
+      type: "packageList",
+      id: "p1",
+      packageIds: [],
+      cellLayout: "row",
+    };
+    const result = applyOverrides(node, { introEligible: false, selected: false });
+    expect(result).toBe(node);
   });
 });

@@ -17,6 +17,19 @@ export type ThemeColor = { light: string; dark?: string };
 
 export type NodeSize = "fit" | "fill" | number;
 
+// -------------------------------------------------------------
+// Overrides (Phase D2) — conditional prop swaps evaluated at render
+// time. Every node type gains an optional `overrides` array; only
+// the node's own OPTIONAL VISUAL fields are overridable (see
+// `OVERRIDABLE_PROP_KEYS` below) — structural fields (type, id,
+// children, axis, packageIds, defaultSelected, cellLayout, action,
+// url, size, padding, cellTemplate) are never overridable.
+// -------------------------------------------------------------
+
+export type OverrideCondition = { kind: "introEligible" } | { kind: "selected" };
+
+export type NodeOverride = { when: OverrideCondition; props: Record<string, unknown> };
+
 export type StackNode = {
   type: "stack";
   id: string;
@@ -28,6 +41,7 @@ export type StackNode = {
   size?: { width?: NodeSize; height?: NodeSize };
   background?: ThemeColor;
   cornerRadius?: number;
+  overrides?: NodeOverride[];
   fallback?: PaywallNode;
 };
 
@@ -38,6 +52,7 @@ export type TextNode = {
   role: "title" | "subtitle" | "body" | "caption";
   color?: ThemeColor;
   align?: "start" | "center" | "end";
+  overrides?: NodeOverride[];
   fallback?: PaywallNode;
 };
 
@@ -48,6 +63,7 @@ export type ImageNode = {
   height?: number;
   cornerRadius?: number;
   alt?: string;
+  overrides?: NodeOverride[];
   fallback?: PaywallNode;
 };
 
@@ -57,6 +73,7 @@ export type ButtonNode = {
   labelKey: string;
   style: "primary" | "secondary" | "plain";
   action: { kind: "close" } | { kind: "url"; url: string } | { kind: "restore" };
+  overrides?: NodeOverride[];
   fallback?: PaywallNode;
 };
 
@@ -66,6 +83,16 @@ export type PackageListNode = {
   packageIds: string[];
   defaultSelected?: string;
   cellLayout: "row" | "column";
+  /**
+   * Optional subtree rendered once per effective package, with
+   * cell-scoped variables, replacing the built-in (name + price)
+   * cell. Absent → current built-in cell (backward compatible).
+   * `packageList`/`purchaseButton` nodes are invalid anywhere inside
+   * this subtree — enforced by the validator (CELL_TEMPLATE_BAD_NODE),
+   * not the schema, since the shape is a normal PaywallNode.
+   */
+  cellTemplate?: PaywallNode;
+  overrides?: NodeOverride[];
   fallback?: PaywallNode;
 };
 
@@ -73,6 +100,7 @@ export type PurchaseButtonNode = {
   type: "purchaseButton";
   id: string;
   labelKey: string;
+  overrides?: NodeOverride[];
   fallback?: PaywallNode;
 };
 
@@ -80,6 +108,7 @@ export type SpacerNode = {
   type: "spacer";
   id: string;
   size?: number;
+  overrides?: NodeOverride[];
   fallback?: PaywallNode;
 };
 
@@ -91,6 +120,22 @@ export type PaywallNode =
   | PackageListNode
   | PurchaseButtonNode
   | SpacerNode;
+
+/**
+ * Per node-type whitelist of override-able prop keys — the node's own
+ * OPTIONAL visual fields only. Used by both the strict authoring schema
+ * (rejects any other key at parse time) and the validator's defensive
+ * re-check (`OVERRIDE_BAD_PROP`) on already-parsed configs.
+ */
+export const OVERRIDABLE_PROP_KEYS: Record<PaywallNode["type"], readonly string[]> = {
+  stack: ["spacing", "align", "background", "cornerRadius"],
+  text: ["key", "color", "align"],
+  image: ["cornerRadius"],
+  button: ["labelKey", "style"],
+  packageList: [],
+  purchaseButton: ["labelKey"],
+  spacer: [],
+};
 
 export type BuilderConfig = {
   formatVersion: 2;
@@ -124,6 +169,40 @@ const nodeSizeSchema: z.ZodType<NodeSize> = z.union([
 let paywallNodeSchemaRef: z.ZodType<PaywallNode>;
 const lazyPaywallNodeSchema: z.ZodType<PaywallNode> = z.lazy(() => paywallNodeSchemaRef);
 
+const overrideConditionSchema: z.ZodType<OverrideCondition> = z.union([
+  z.object({ kind: z.literal("introEligible") }),
+  z.object({ kind: z.literal("selected") }),
+]);
+
+/**
+ * Builds the strict `overrides` array schema for one node type: `when.kind`
+ * restricted to the two known literals (via `overrideConditionSchema`),
+ * `props` keys restricted to that type's own optional visual fields —
+ * any other key (including structural fields) fails the parse.
+ */
+function overridesArraySchema(allowedKeys: readonly string[]): z.ZodType<NodeOverride[]> {
+  const allowed = new Set(allowedKeys);
+  const propsSchema: z.ZodType<Record<string, unknown>> = z
+    .record(z.string(), z.unknown())
+    .superRefine((props, ctx) => {
+      for (const key of Object.keys(props)) {
+        if (!allowed.has(key)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `"${key}" is not an overridable prop for this node type.`,
+            path: [key],
+          });
+        }
+      }
+    });
+  return z.array(
+    z.object({
+      when: overrideConditionSchema,
+      props: propsSchema,
+    }),
+  );
+}
+
 const stackNodeSchema: z.ZodType<StackNode> = z.object({
   type: z.literal("stack"),
   id: z.string().min(1),
@@ -147,6 +226,7 @@ const stackNodeSchema: z.ZodType<StackNode> = z.object({
     .optional(),
   background: themeColorSchema.optional(),
   cornerRadius: z.number().optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.stack).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
 });
 
@@ -157,6 +237,7 @@ const textNodeSchema: z.ZodType<TextNode> = z.object({
   role: z.enum(["title", "subtitle", "body", "caption"]),
   color: themeColorSchema.optional(),
   align: z.enum(["start", "center", "end"]).optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.text).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
 });
 
@@ -167,6 +248,7 @@ const imageNodeSchema: z.ZodType<ImageNode> = z.object({
   height: z.number().optional(),
   cornerRadius: z.number().optional(),
   alt: z.string().optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.image).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
 });
 
@@ -182,6 +264,7 @@ const buttonNodeSchema: z.ZodType<ButtonNode> = z.object({
   labelKey: z.string(),
   style: z.enum(["primary", "secondary", "plain"]),
   action: buttonActionSchema,
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.button).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
 });
 
@@ -191,6 +274,8 @@ const packageListNodeSchema: z.ZodType<PackageListNode> = z.object({
   packageIds: z.array(z.string()),
   defaultSelected: z.string().optional(),
   cellLayout: z.enum(["row", "column"]),
+  cellTemplate: lazyPaywallNodeSchema.optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.packageList).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
 });
 
@@ -198,6 +283,7 @@ const purchaseButtonNodeSchema: z.ZodType<PurchaseButtonNode> = z.object({
   type: z.literal("purchaseButton"),
   id: z.string().min(1),
   labelKey: z.string(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.purchaseButton).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
 });
 
@@ -205,6 +291,7 @@ const spacerNodeSchema: z.ZodType<SpacerNode> = z.object({
   type: z.literal("spacer"),
   id: z.string().min(1),
   size: z.number().optional(),
+  overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.spacer).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
 });
 
