@@ -17,6 +17,7 @@ import { convertToUsd } from "../fx";
 import { completeFunnelPurchase } from "../funnel/complete-purchase";
 import { maybeEmitRefundDetected } from "../notifications/refund-emit";
 import {
+  FUNNEL_METADATA_KEY,
   STRIPE_EVENT_TYPE,
   STRIPE_INVOICE_BILLING_REASON,
   STRIPE_SUBSCRIPTION_STATUS,
@@ -149,10 +150,12 @@ interface DispatchContext {
 }
 
 /**
- * The account owner's own billing sync, by event type.
+ * The work an event carries BESIDES the funnel backstop, by event type.
+ * For every event but one that work is the account owner's own billing
+ * sync, which is what this table was named for.
  *
- * A lookup rather than a `switch` so that "does this event have a domain
- * sync to protect?" is answered by the same table that runs it. The
+ * A lookup rather than a `switch` so that "does this event have work of
+ * its own to protect?" is answered by the same table that runs it. The
  * containment rule below turns on that question, and a `switch` would let
  * the two drift apart the first time a case was added — the failure mode
  * being silent, permanent loss of a buyer's completion.
@@ -160,6 +163,14 @@ interface DispatchContext {
  * `payment_intent.succeeded` is deliberately absent: a bare PaymentIntent
  * carries no subscription and no invoice, so there is no purchase state
  * to sync from it. The funnel backstop is the entire work for that event.
+ *
+ * `setup_intent.succeeded` is present although it syncs no billing state
+ * either, and the entry is honest on the table's own terms: it really is
+ * work that must still run when the backstop fails. That direction never
+ * arises in practice — the backstop's lookup has no case for the event,
+ * so it returns before touching anything and cannot fail — and the
+ * converse direction is handled inside the entry itself, which contains
+ * its own failures rather than turning them into a failed event.
  */
 const DOMAIN_SYNC: Readonly<
   Partial<Record<string, (ctx: DispatchContext) => Promise<void>>>
@@ -170,6 +181,7 @@ const DOMAIN_SYNC: Readonly<
   [STRIPE_EVENT_TYPE.INVOICE_PAID]: applyInvoicePaid,
   [STRIPE_EVENT_TYPE.INVOICE_PAYMENT_FAILED]: applyInvoicePaymentFailed,
   [STRIPE_EVENT_TYPE.CHARGE_REFUNDED]: applyChargeRefunded,
+  [STRIPE_EVENT_TYPE.SETUP_INTENT_SUCCEEDED]: persistFunnelPaymentMethod,
 };
 
 async function dispatch(ctx: DispatchContext): Promise<void> {
@@ -246,7 +258,11 @@ async function dispatch(ctx: DispatchContext): Promise<void> {
 // is settled by `claimWebhookEvent` above. Everything below is about one
 // question only — has this buyer actually paid?
 
-const FUNNEL_SESSION_METADATA_KEY = "rovenue_funnel_session_id";
+// The key itself lives in ./stripe-types alongside the event types,
+// because the funnel's payment endpoint writes it and this file reads
+// it: a literal at each end is a rename away from a webhook that
+// silently stops recognising its own objects.
+const FUNNEL_SESSION_METADATA_KEY = FUNNEL_METADATA_KEY.SESSION_ID;
 
 /**
  * How to find the funnel purchase row this event is about.
@@ -417,6 +433,151 @@ async function backstopFunnelSession(ctx: DispatchContext): Promise<void> {
     // The token itself is never logged; whether one was minted here is
     // the only interesting half.
     alreadyIssued: result.alreadyIssued,
+  });
+}
+
+// =============================================================
+// Setup-intent persistence
+// =============================================================
+//
+// The gap this closes. A trial package's card is attached through the
+// subscription's `pending_setup_intent`, and settlement is judged from
+// two signals: `default_payment_method` on the subscription, and that
+// intent reaching `succeeded`. Stripe CLEARS `pending_setup_intent` when
+// it succeeds — so if it clears before `default_payment_method` has been
+// written (that write is tied to a subscription *payment*, which on a
+// trial is weeks away), a `/confirm` arriving in the window sees neither
+// signal and refuses a buyer who really did attach a card.
+//
+// The fix is to stop depending on a transient object: write the card
+// Stripe just confirmed onto the subscription as its
+// `default_payment_method` ourselves, which is also Stripe's own
+// documented recommendation for this deferred-payment flow. The field is
+// durable, so the signal cannot evaporate between the two reads. The
+// settlement predicate is untouched — this makes its first input true
+// EARLIER and more reliably; it does not lower the bar.
+//
+// Completion is left to the events that already do it: writing
+// `default_payment_method` produces a `customer.subscription.updated`,
+// which the backstop above reads through the same shared predicate. This
+// handler mints nothing.
+
+/** Statuses on which a subscription can no longer usefully be written. */
+const SUBSCRIPTION_TERMINAL: ReadonlySet<string> = new Set([
+  STRIPE_SUBSCRIPTION_STATUS.CANCELED,
+  STRIPE_SUBSCRIPTION_STATUS.INCOMPLETE_EXPIRED,
+]);
+
+/**
+ * Persist a funnel trial's confirmed card as the subscription's default
+ * payment method.
+ *
+ * Contains its own failures on purpose. Everything it does is a repair
+ * of a signal that already has two other routes — `/confirm` reads the
+ * live subscription, and the conversion invoice writes the same field
+ * eventually — so no buyer is stranded by a failure here, and there is
+ * nothing in this event a retry could rescue that those do not already
+ * cover. Letting it throw would mark the event FAILED and, on the way,
+ * take down nothing else (this is the whole handler) while burning
+ * Stripe's redeliveries on a call that is failing for a reason a retry
+ * will not change (a subscription in a state that refuses the write).
+ */
+async function persistFunnelPaymentMethod(ctx: DispatchContext): Promise<void> {
+  try {
+    await writeConfirmedCardOntoSubscription(ctx);
+  } catch (err) {
+    log.error("could not persist the funnel setup intent's payment method", {
+      eventId: ctx.event.id,
+      projectId: ctx.projectId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+async function writeConfirmedCardOntoSubscription(
+  ctx: DispatchContext,
+): Promise<void> {
+  const intent = ctx.event.data.object as Stripe.SetupIntent;
+
+  // Ours-ness, established by metadata WE stamped onto this very object
+  // when the subscription was created (see routes/public/funnel-payment).
+  // A SetupIntent carries no pointer back to the subscription it belongs
+  // to, so the alternative would be inferring the link from a shared
+  // customer — and this endpoint receives every SetupIntent on every
+  // connected account, including ones an account owner created for their
+  // own purposes. Writing a default payment method onto a subscription
+  // on the strength of an inference is an intrusion into a customer's
+  // account, so an unstamped intent is simply not ours and we leave it
+  // alone. This is also the entire filter: nothing below runs for one.
+  const sessionId = intent.metadata?.[FUNNEL_METADATA_KEY.SESSION_ID];
+  const subscriptionId = intent.metadata?.[FUNNEL_METADATA_KEY.SUBSCRIPTION_ID];
+  if (!sessionId || !subscriptionId) return;
+
+  const paymentMethodId =
+    typeof intent.payment_method === "string"
+      ? intent.payment_method
+      : intent.payment_method?.id;
+  if (!paymentMethodId) {
+    // A succeeded SetupIntent with no payment method should not exist.
+    log.warn("funnel setup intent succeeded with no payment method", {
+      sessionId,
+      setupIntentId: intent.id,
+    });
+    return;
+  }
+
+  const purchase = await drizzle.funnelPurchaseRepo.findBySession(
+    drizzle.db,
+    sessionId,
+  );
+  if (!purchase) return;
+
+  // Same rule the backstop applies: metadata is written by the account,
+  // not by us, so a project must not be able to name another project's
+  // session and have us act on its subscription.
+  if (purchase.projectId !== ctx.projectId) {
+    log.warn("funnel setup intent names another project's session; ignoring", {
+      sessionId,
+      eventProjectId: ctx.projectId,
+    });
+    return;
+  }
+
+  // The intent must be about the attempt the row still records. A
+  // visitor who changed package leaves the superseded subscription's
+  // setup intent live for a moment, and confirming it there must not
+  // put that card on the subscription they actually chose — the
+  // superseded one is cancelled by the payment endpoint's cleanup.
+  if (purchase.stripeSubscriptionId !== subscriptionId) {
+    log.info("funnel setup intent belongs to a superseded attempt; ignoring", {
+      sessionId,
+      setupIntentId: intent.id,
+      intentSubscriptionId: subscriptionId,
+      rowSubscriptionId: purchase.stripeSubscriptionId,
+    });
+    return;
+  }
+
+  // Read before write, for the two cases where writing is wrong rather
+  // than merely redundant: the subscription may already carry a default
+  // payment method (this event is redeliverable for days, and by then
+  // the customer may have moved to a different card — replaying an old
+  // intent must not roll that back), and it may have been cancelled
+  // (the funnel's own cleanup cancels superseded attempts), where Stripe
+  // would reject the update anyway. Both make this a no-op, which is
+  // what idempotent means here.
+  const subscription = await ctx.account.subscriptions.retrieve(subscriptionId);
+  if (subscription.default_payment_method != null) return;
+  if (SUBSCRIPTION_TERMINAL.has(subscription.status)) return;
+
+  await ctx.account.subscriptions.update(subscriptionId, {
+    default_payment_method: paymentMethodId,
+  });
+
+  log.info("persisted the funnel trial's card on the subscription", {
+    sessionId,
+    subscriptionId,
+    projectId: ctx.projectId,
   });
 }
 

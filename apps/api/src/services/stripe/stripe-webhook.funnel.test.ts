@@ -141,13 +141,62 @@ function subscriptionEvent(
   } as unknown as Stripe.Event;
 }
 
+// The account-scoped Stripe facade. Only the setup-intent path calls it,
+// and its calls ARE the assertions there: `subscriptions.update` is the
+// durable write, and every "ignore this intent" case is proved by that
+// mock never being reached.
+const subscriptionsRetrieve = vi.fn(
+  async (): Promise<{
+    id: string;
+    status: string;
+    default_payment_method: string | null;
+  }> => ({
+    id: "sub_1",
+    status: "trialing",
+    default_payment_method: null,
+  }),
+);
+const subscriptionsUpdate = vi.fn(async () => ({ id: "sub_1" }));
+const account = {
+  subscriptions: {
+    retrieve: subscriptionsRetrieve,
+    update: subscriptionsUpdate,
+  },
+} as unknown as Parameters<typeof processStripeEvent>[0]["account"];
+
 function run(event: Stripe.Event) {
   return processStripeEvent({
     projectId: PROJECT_ID,
     event,
-    account: {} as never,
+    account,
   });
 }
+
+/**
+ * A `setup_intent.succeeded` for a funnel trial's card, carrying the
+ * metadata the payment endpoint stamped onto the intent at subscription
+ * -create time.
+ */
+function setupIntentEvent(metadata: Record<string, string>): Stripe.Event {
+  return {
+    id: `evt_seti_${Math.random()}`,
+    type: "setup_intent.succeeded",
+    data: {
+      object: {
+        id: "seti_1",
+        customer: "cus_1",
+        status: "succeeded",
+        payment_method: "pm_1",
+        metadata,
+      },
+    },
+  } as unknown as Stripe.Event;
+}
+
+const STAMPED = {
+  rovenue_funnel_session_id: "sess_1",
+  rovenue_funnel_subscription_id: "sub_1",
+};
 
 describe("processStripeEvent — funnel session backstop", () => {
   beforeEach(() => {
@@ -474,5 +523,149 @@ describe("processStripeEvent — funnel session backstop", () => {
     }));
 
     expect(completeFunnelPurchase).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================
+// setup_intent.succeeded — the trial card, made durable
+// =============================================================
+//
+// Stripe clears `pending_setup_intent` the moment it succeeds. If it
+// clears before `default_payment_method` is written, `/confirm` sees
+// neither settlement signal and refuses a buyer who really did attach a
+// card. These tests pin the write that closes that window, and — the
+// larger half — everything it must refuse to touch: a SetupIntent is a
+// thing account owners create for their own flows, and this endpoint
+// receives all of them.
+describe("processStripeEvent — setup_intent.succeeded", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValue({
+      outcome: "claimed" as const,
+      row: { id: "whe_1" },
+    });
+    drizzleMock.funnelPurchaseRepo.findBySession.mockResolvedValue(
+      PENDING_PURCHASE,
+    );
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "trialing",
+      default_payment_method: null,
+    });
+  });
+
+  test("writes the confirmed card onto the funnel subscription", async () => {
+    const result = await run(setupIntentEvent(STAMPED));
+
+    expect(subscriptionsUpdate).toHaveBeenCalledWith("sub_1", {
+      default_payment_method: "pm_1",
+    });
+    expect(result.status).toBe("processed");
+    // It repairs a signal; it does not mint anything. The
+    // `customer.subscription.updated` this write produces is what
+    // reaches the backstop, through the same shared predicate.
+    expect(completeFunnelPurchase).not.toHaveBeenCalled();
+  });
+
+  // The whole containment rule for this handler, and the reason it is a
+  // metadata match rather than a customer lookup: an account owner's own
+  // SetupIntent must not have its payment method written onto anything.
+  test("ignores a setup intent that is not a funnel one", async () => {
+    await run(setupIntentEvent({}));
+
+    expect(drizzleMock.funnelPurchaseRepo.findBySession).not.toHaveBeenCalled();
+    expect(subscriptionsRetrieve).not.toHaveBeenCalled();
+    expect(subscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  // Stamped with a session but no subscription: there is no way to know
+  // which subscription to write to, and guessing is the intrusion.
+  test("ignores a stamped intent with no subscription id", async () => {
+    await run(setupIntentEvent({ rovenue_funnel_session_id: "sess_1" }));
+
+    expect(subscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  test("ignores a session id belonging to another project", async () => {
+    drizzleMock.funnelPurchaseRepo.findBySession.mockResolvedValue({
+      ...PENDING_PURCHASE,
+      projectId: "prj_other",
+    });
+
+    await run(setupIntentEvent(STAMPED));
+
+    expect(subscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  // The visitor changed package. The superseded attempt's setup intent
+  // must not put its card on the subscription they actually chose.
+  test("ignores a setup intent from a superseded attempt", async () => {
+    drizzleMock.funnelPurchaseRepo.findBySession.mockResolvedValue({
+      ...PENDING_PURCHASE,
+      stripeSubscriptionId: "sub_current",
+    });
+
+    await run(setupIntentEvent(STAMPED));
+
+    expect(subscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  // Redelivery. Stripe retries this event for days, and by then the
+  // customer may be on a different card — replaying an old intent must
+  // not roll that back.
+  test("does not overwrite a default payment method that already exists", async () => {
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "trialing",
+      default_payment_method: "pm_newer",
+    });
+
+    await run(setupIntentEvent(STAMPED));
+
+    expect(subscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  test("does not write to a cancelled subscription", async () => {
+    subscriptionsRetrieve.mockResolvedValue({
+      id: "sub_1",
+      status: "canceled",
+      default_payment_method: null,
+    });
+
+    await run(setupIntentEvent(STAMPED));
+
+    expect(subscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  // Tolerance. The write is a repair of a signal that has two other
+  // routes (`/confirm` reads the live subscription; the conversion
+  // invoice writes the same field), so a failure must cost the event
+  // nothing — a FAILED row here buys no buyer anything and burns
+  // Stripe's redeliveries.
+  test("a failing write does not fail the event", async () => {
+    subscriptionsUpdate.mockRejectedValue(
+      new Error("subscription is in an invalid state") as never,
+    );
+
+    const result = await run(setupIntentEvent(STAMPED));
+
+    expect(result.status).toBe("processed");
+    expect(
+      drizzleMock.webhookEventRepo.updateWebhookEvent,
+    ).toHaveBeenCalledWith(
+      expect.anything(),
+      "whe_1",
+      expect.objectContaining({ status: "PROCESSED" }),
+    );
+  });
+
+  test("a failing purchase lookup does not fail the event", async () => {
+    drizzleMock.funnelPurchaseRepo.findBySession.mockRejectedValue(
+      new Error("funnel_purchases unavailable"),
+    );
+
+    const result = await run(setupIntentEvent(STAMPED));
+
+    expect(result.status).toBe("processed");
   });
 });
