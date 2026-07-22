@@ -38,6 +38,10 @@ const { drizzleMock } = vi.hoisted(() => {
     // Touched by the domain sync that runs after the backstop; stubbed
     // so these tests exercise the backstop alone.
     subscriberRepo: {
+      // Resolve-then-create: the webhook must never write onto a
+      // subscriber a funnel claim already retired (see
+      // stripe-webhook.merged-anchor.test.ts). No merged row here.
+      resolveSubscriberByRovenueId: vi.fn(async () => null),
       upsertSubscriber: vi.fn(async () => ({ id: "sub_row_1" })),
     },
     purchaseExtRepo: {

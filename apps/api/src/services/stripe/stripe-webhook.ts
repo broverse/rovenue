@@ -1007,6 +1007,25 @@ async function resolveSubscriber(
     subscription.metadata?.appUserId ??
     `stripe:${customerId}`;
 
+  // Resolve FIRST, create only when there is no row at all — the same
+  // order routes/v1/funnel-claim.ts uses on the way in.
+  //
+  // `upsertSubscriber` conflicts on (projectId, rovenueId) and returns the
+  // matching row REGARDLESS of `deletedAt`. `stripe:<customer>` is exactly
+  // the anchor a funnel purchase's synthetic subscriber is created with,
+  // and the claim merges that synthetic into the buyer's installed
+  // subscriber and soft-deletes it. Upserting straight onto the anchor
+  // would therefore resolve every later subscription event — renewal,
+  // trial conversion, status change — back to the retired row and grant
+  // its access there, while the buyer's real subscriber never gets
+  // another one. `resolveSubscriberByRovenueId` walks the `mergedInto`
+  // chain to the live survivor instead.
+  const resolved = await drizzle.subscriberRepo.resolveSubscriberByRovenueId(
+    drizzle.db,
+    { projectId: ctx.projectId, rovenueId: appUserId },
+  );
+  if (resolved) return resolved;
+
   return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
     projectId: ctx.projectId,
     rovenueId: appUserId,
