@@ -422,7 +422,9 @@ Follow `apps/api/src/routes/dashboard/offerings.ts` verbatim for auth (`requireD
 - [ ] **Step 1:** Write the migration SQL (no comment-prefixed statements). **Step 2:** `pnpm --filter @rovenue/db db:clickhouse:migrate && pnpm --filter @rovenue/db db:verify:clickhouse` → green. **Step 3:** Integration test → PASS. **Step 4:** Commit: `feat(db): ClickHouse paywall events pipeline`.
 - Note: fresh MV+topic — the "pause consumer before MV recreate" gotcha applies only to RE-creating live MVs; creation is safe.
 
----### Task 8: Rust core — placements module (fetch, draw, cache, context)
+---
+
+### Task 8: Rust core — placements module (fetch, draw, cache, context)
 
 **Files:**
 - Create: `packages/core-rs/src/placements/{mod.rs,types.rs,client.rs,bucketing.rs}`
