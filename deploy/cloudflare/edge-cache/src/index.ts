@@ -117,13 +117,22 @@ function shouldStore(request: Request, response: Response): boolean {
 // -------------------------------------------------------------
 
 function buildCacheKey(url: URL, keyHash: string, version: string): Request {
-  // Synthetic, normalized key. Only accessId is a meaningful cache
-  // dimension on these endpoints; dropping other query params stops
-  // junk params from fragmenting the cache.
+  // Synthetic, normalized key. accessId and locale are the only
+  // meaningful cache dimensions on these endpoints; dropping other
+  // query params stops junk params from fragmenting the cache.
+  //
+  // locale is normalized (lowercased, absent/empty collapse to the
+  // same "none" marker) so `?locale=en` and `?locale=EN` share a key
+  // while an unset locale doesn't fragment from an explicit empty one.
+  // /v1/placements/:identifier?locale=xx returns locale-dependent
+  // content — without this, differently-localized paywalls would
+  // collide on one cache entry for up to EDGE_TTL_SECONDS.
   const keyUrl = new URL("https://edge-cache.rovenue.internal");
   keyUrl.pathname = url.pathname;
   const accessId = url.searchParams.get("accessId");
   if (accessId) keyUrl.searchParams.set("accessId", accessId);
+  const locale = url.searchParams.get("locale")?.trim().toLowerCase() || "none";
+  keyUrl.searchParams.set("locale", locale);
   keyUrl.searchParams.set("k", keyHash);
   keyUrl.searchParams.set("v", version);
   return new Request(keyUrl.toString(), { method: "GET" });
