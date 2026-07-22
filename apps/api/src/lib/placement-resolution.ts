@@ -38,25 +38,44 @@ type PaywallRow = NonNullable<
   Awaited<ReturnType<typeof drizzle.paywallRepo.findPaywallById>>
 >;
 
-async function hydratePaywall(projectId: string, paywall: PaywallRow, requestedLocale?: string) {
+type PaywallVersionRow = NonNullable<
+  Awaited<ReturnType<typeof drizzle.paywallVersionRepo.findById>>
+>;
+
+/**
+ * Hydrate the PUBLISHED snapshot, never `paywalls.builderConfig`.
+ *
+ * `paywalls.builderConfig` is the builder's private draft — serving it
+ * here is exactly the P0 defect this split fixed. Identifier and name
+ * come from the live row (identifier is immutable, name is cosmetic);
+ * everything the device actually renders comes from `version`, including
+ * `offeringId`, so re-pointing the draft at another offering can't
+ * retroactively change what a published version resolves against.
+ */
+async function hydratePaywall(
+  projectId: string,
+  paywall: PaywallRow,
+  version: PaywallVersionRow,
+  requestedLocale?: string,
+) {
   const offering = await drizzle.offeringRepo.findOfferingById(
     drizzle.db,
     projectId,
-    paywall.offeringId,
+    version.offeringId,
   );
-  const { locale, data } = resolveLocale(paywall.remoteConfig, requestedLocale);
+  const { locale, data } = resolveLocale(version.remoteConfig, requestedLocale);
   return {
     id: paywall.id,
     identifier: paywall.identifier,
     name: paywall.name,
-    configFormatVersion: paywall.configFormatVersion,
+    configFormatVersion: version.configFormatVersion,
     remoteConfig: locale ? { locale, data } : null,
     // builderConfig ships whole (all localizations) — ?locale only slices
     // remoteConfig above. Field is present ONLY when non-null: the Rust
     // SDK wire fixtures decode this payload, and adding a field is safe
     // (serde ignores unknown fields) but an always-present `null` isn't
     // worth the wire-size cost for paywalls that don't use the builder.
-    ...(paywall.builderConfig !== null && { builderConfig: paywall.builderConfig }),
+    ...(version.builderConfig !== null && { builderConfig: version.builderConfig }),
     offering: offering ? await hydrateOffering(projectId, offering) : null,
   };
 }
@@ -125,9 +144,17 @@ export async function resolvePlacement(
         row.target.paywallId,
       );
       if (!paywall || !paywall.isActive) continue; // dangling ref → next row
+      // No published version → treat exactly like an inactive paywall.
+      // A draft must never resolve on a device.
+      if (!paywall.publishedVersionId) continue;
+      const version = await drizzle.paywallVersionRepo.findById(
+        drizzle.db,
+        paywall.publishedVersionId,
+      );
+      if (!version) continue;
       return {
         placement: placementInfo,
-        paywall: await hydratePaywall(projectId, paywall, requestedLocale),
+        paywall: await hydratePaywall(projectId, paywall, version, requestedLocale),
         experiment: null,
       };
     }
@@ -152,15 +179,27 @@ export async function resolvePlacement(
       variantRefs.map((r) => r.paywallId),
     );
     const paywallById = new Map(variantPaywalls.map((p) => [p.id, p] as const));
+
+    // Second batched lookup so the variant fan-out still costs two
+    // queries, not one per variant.
+    const versionIds = variantPaywalls
+      .map((p) => p.publishedVersionId)
+      .filter((v): v is string => v !== null);
+    const versions = await drizzle.paywallVersionRepo.findByIds(drizzle.db, versionIds);
+    const versionById = new Map(versions.map((v) => [v.id, v] as const));
+
     const hydrated = (
       await Promise.all(
         variantRefs.map(async (ref) => {
           const paywall = paywallById.get(ref.paywallId);
           if (!paywall || !paywall.isActive) return null;
+          if (!paywall.publishedVersionId) return null;
+          const version = versionById.get(paywall.publishedVersionId);
+          if (!version) return null;
           return {
             variantId: ref.variantId,
             weight: ref.weight,
-            paywall: await hydratePaywall(projectId, paywall, requestedLocale),
+            paywall: await hydratePaywall(projectId, paywall, version, requestedLocale),
           };
         }),
       )

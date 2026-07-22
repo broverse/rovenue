@@ -108,8 +108,14 @@ async function seedOffering(projectId: string, suffix = "") {
   return { id: row!.id };
 }
 
+// Seeds a paywall AND publishes it (paywall_versions row + publishedVersionId)
+// so it actually resolves through resolvePlacement — after the draft/publish
+// split, an unpublished paywall resolves to null just like an inactive one,
+// so a paywall-parity test needs a real published snapshot to compare
+// against, not a vacuous null-equals-null pass.
 async function seedPaywall(projectId: string, offeringId: string, suffix = "") {
   const db = getDb();
+  const remoteConfig = { defaultLocale: "en", locales: { en: { title: `Title ${suffix}` } } };
   const [row] = await db
     .insert(drizzle.schema.paywalls)
     .values({
@@ -117,9 +123,18 @@ async function seedPaywall(projectId: string, offeringId: string, suffix = "") {
       identifier: `paywall_${RUN_ID}${suffix}`,
       name: `Paywall ${suffix}`,
       offeringId,
-      remoteConfig: { defaultLocale: "en", locales: { en: { title: `Title ${suffix}` } } },
+      remoteConfig,
     })
     .returning();
+  const version = await drizzle.paywallVersionRepo.insert(db, {
+    paywallId: row!.id,
+    versionNo: 1,
+    builderConfig: null,
+    remoteConfig,
+    offeringId,
+    configFormatVersion: 1,
+  });
+  await drizzle.paywallRepo.setPublishedVersion(db, projectId, row!.id, version.id);
   return { id: row!.id };
 }
 
@@ -251,6 +266,15 @@ describe("GET /dashboard/projects/:projectId/paywalls/fallback-export", () => {
       [directPlacement.identifier, experimentPlacement.identifier].sort(),
     );
     expect(exportBody.placements[inactivePlacement.identifier]).toBeUndefined();
+
+    // Guard against a vacuous null-equals-null parity pass: the direct
+    // placement's paywall must actually resolve to the published snapshot,
+    // not just match the (also-null) live response.
+    const directEntry = exportBody.placements[directPlacement.identifier] as {
+      paywall: { remoteConfig: { data: { title: string } } } | null;
+    };
+    expect(directEntry.paywall).not.toBeNull();
+    expect(directEntry.paywall!.remoteConfig.data.title).toBe("Title parity-direct");
 
     const v1App = buildV1App();
     for (const identifier of [directPlacement.identifier, experimentPlacement.identifier]) {

@@ -81,6 +81,37 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
       findOfferingById: vi.fn(async () => null),
       findProductsByIds: vi.fn(async () => []),
     },
+    paywallVersionRepo: {
+      // Generic stub: echoes the requested version id back so any
+      // paywall with a non-null publishedVersionId resolves to a version
+      // (tests that care about the version's content override this).
+      findById: vi.fn(async (_db: unknown, id: string) => ({
+        id,
+        paywallId: "pw_1",
+        versionNo: 1,
+        builderConfig: null,
+        remoteConfig: {},
+        offeringId: "off_1",
+        configFormatVersion: 1,
+        label: null,
+        publishedAt: new Date(),
+        publishedBy: null,
+      })),
+      findByIds: vi.fn(async (_db: unknown, ids: string[]) =>
+        ids.map((id) => ({
+          id,
+          paywallId: "pw_1",
+          versionNo: 1,
+          builderConfig: null,
+          remoteConfig: {},
+          offeringId: "off_1",
+          configFormatVersion: 1,
+          label: null,
+          publishedAt: new Date(),
+          publishedBy: null,
+        })),
+      ),
+    },
     subscriberRepo: {
       resolveSubscriberByRovenueIdOrLegacy: vi.fn(async () => null),
     },
@@ -189,6 +220,9 @@ function makePaywall(overrides: Record<string, unknown> = {}) {
     builderConfig: null,
     isActive: true,
     metadata: {},
+    // Published (non-null) by default — an unpublished paywall (null)
+    // is covered by its own dedicated test below.
+    publishedVersionId: "ver_1",
     ...overrides,
   };
 }
@@ -293,6 +327,43 @@ describe("GET /v1/placements/:identifier", () => {
         (id === "pw_fallback"
           ? makePaywall({ id: "pw_fallback", identifier: "pw_fallback" })
           : null) as any,
+    );
+    vi.mocked(drizzleMock.offeringRepo.findOfferingById).mockResolvedValue(
+      makeOffering() as any,
+    );
+
+    const res = await app.request(withAuth("/v1/placements/onboarding"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.paywall.identifier).toBe("pw_fallback");
+  });
+
+  it("falls through to the next row when the targeted paywall has no published version (draft-only)", async () => {
+    vi.mocked(drizzleMock.placementRepo.findPlacementByIdentifier).mockResolvedValue(
+      makePlacement({
+        rows: [
+          { audienceId: "aud_all", target: { type: "paywall", paywallId: "pw_draft_only" } },
+          { audienceId: null, target: { type: "paywall", paywallId: "pw_fallback" } },
+        ],
+      }) as any,
+    );
+    vi.mocked(drizzleMock.audienceRepo.findByIds).mockResolvedValue([
+      { id: "aud_all", rules: {} },
+    ] as any);
+    vi.mocked(drizzleMock.paywallRepo.findPaywallById).mockImplementation(
+      async (_db, _projectId, id) => {
+        if (id === "pw_draft_only") {
+          // Active, but never published — publishedVersionId is null.
+          return makePaywall({
+            id: "pw_draft_only",
+            identifier: "pw_draft_only",
+            publishedVersionId: null,
+          }) as any;
+        }
+        return id === "pw_fallback"
+          ? (makePaywall({ id: "pw_fallback", identifier: "pw_fallback" }) as any)
+          : null;
+      },
     );
     vi.mocked(drizzleMock.offeringRepo.findOfferingById).mockResolvedValue(
       makeOffering() as any,
@@ -412,6 +483,18 @@ describe("GET /v1/placements/:identifier", () => {
     vi.mocked(drizzleMock.paywallRepo.findPaywallById).mockResolvedValue(
       makePaywall({ builderConfig, configFormatVersion: 2 }) as any,
     );
+    vi.mocked(drizzleMock.paywallVersionRepo.findById).mockResolvedValue({
+      id: "ver_1",
+      paywallId: "pw_1",
+      versionNo: 1,
+      builderConfig,
+      remoteConfig: {},
+      offeringId: "off_1",
+      configFormatVersion: 2,
+      label: null,
+      publishedAt: new Date(),
+      publishedBy: null,
+    } as any);
     vi.mocked(drizzleMock.offeringRepo.findOfferingById).mockResolvedValue(
       makeOffering() as any,
     );
@@ -432,6 +515,22 @@ describe("GET /v1/placements/:identifier", () => {
     vi.mocked(drizzleMock.paywallRepo.findPaywallById).mockResolvedValue(
       makePaywall() as any, // builderConfig: null, configFormatVersion: 1 by default
     );
+    // Explicitly reset the version stub — mockResolvedValue set by an
+    // earlier test persists across tests (vi.clearAllMocks() clears call
+    // history, not implementation), so this can't rely on the generic
+    // default in the hoisted mock.
+    vi.mocked(drizzleMock.paywallVersionRepo.findById).mockResolvedValue({
+      id: "ver_1",
+      paywallId: "pw_1",
+      versionNo: 1,
+      builderConfig: null,
+      remoteConfig: {},
+      offeringId: "off_1",
+      configFormatVersion: 1,
+      label: null,
+      publishedAt: new Date(),
+      publishedBy: null,
+    } as any);
     vi.mocked(drizzleMock.offeringRepo.findOfferingById).mockResolvedValue(
       makeOffering() as any,
     );
@@ -449,17 +548,28 @@ describe("GET /v1/placements/:identifier", () => {
         rows: [{ audienceId: null, target: { type: "paywall", paywallId: "pw_1" } }],
       }) as any,
     );
+    const remoteConfig = {
+      defaultLocale: "en",
+      locales: {
+        en: { title: "Hello" },
+        tr: { title: "Merhaba" },
+      },
+    };
     vi.mocked(drizzleMock.paywallRepo.findPaywallById).mockResolvedValue(
-      makePaywall({
-        remoteConfig: {
-          defaultLocale: "en",
-          locales: {
-            en: { title: "Hello" },
-            tr: { title: "Merhaba" },
-          },
-        },
-      }) as any,
+      makePaywall({ remoteConfig }) as any,
     );
+    vi.mocked(drizzleMock.paywallVersionRepo.findById).mockResolvedValue({
+      id: "ver_1",
+      paywallId: "pw_1",
+      versionNo: 1,
+      builderConfig: null,
+      remoteConfig,
+      offeringId: "off_1",
+      configFormatVersion: 1,
+      label: null,
+      publishedAt: new Date(),
+      publishedBy: null,
+    } as any);
     vi.mocked(drizzleMock.offeringRepo.findOfferingById).mockResolvedValue(
       makeOffering() as any,
     );
