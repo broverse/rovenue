@@ -7,6 +7,7 @@ import { MemberRole, drizzle } from "@rovenue/db";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { audit, extractRequestContext } from "../../lib/audit";
+import { isUniqueViolationOf } from "../../lib/pg-errors";
 import { ok } from "../../lib/response";
 import {
   CANONICAL_EDGE_HOST,
@@ -37,6 +38,19 @@ const attachBodySchema = z.object({
   funnelId: z.string().min(1),
   hostname: z.string().min(3).max(253),
 });
+
+/**
+ * The two unique indexes the attach INSERT can violate, both from
+ * migration 0053_bored_multiple_man.sql:
+ *
+ *   CREATE UNIQUE INDEX "custom_domains_hostname_unique" ON ("hostname")
+ *   CREATE UNIQUE INDEX "custom_domains_funnel_unique"   ON ("funnel_id")
+ *
+ * They carry different meanings for the customer, so the catch below
+ * distinguishes them instead of matching the SQLSTATE alone.
+ */
+const HOSTNAME_UNIQUE = "custom_domains_hostname_unique";
+const FUNNEL_UNIQUE = "custom_domains_funnel_unique";
 
 function freshToken(): string {
   return randomBytes(32).toString("hex");
@@ -140,9 +154,20 @@ export const customDomainsRoute = new Hono()
       return c.json(ok(serialize(created)), 201);
     } catch (err) {
       // Catch the unique_violation that beats us to the punch under
-      // concurrent claims — Postgres SQLSTATE 23505.
-      if ((err as { code?: string })?.code === "23505") {
+      // concurrent claims. Drizzle wraps the driver error and hangs it
+      // off `.cause`, so the code sits one level down — read at the top
+      // level this never matched and the race 500'd instead of 409'ing.
+      //
+      // Matched by constraint, not by code: this INSERT can also violate
+      // `custom_domains_funnel_unique`, which means "that funnel already
+      // has a domain", not "that hostname is taken". Reporting the wrong
+      // one of those would send the customer chasing a hostname that was
+      // never the problem.
+      if (isUniqueViolationOf(err, HOSTNAME_UNIQUE)) {
         throw new HTTPException(409, { message: "hostname_taken" });
+      }
+      if (isUniqueViolationOf(err, FUNNEL_UNIQUE)) {
+        throw new HTTPException(409, { message: "funnel_already_has_domain" });
       }
       throw err;
     }
