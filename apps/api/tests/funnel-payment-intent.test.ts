@@ -1,4 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+// Pure functions with no env or db dependency, so a static import is safe
+// alongside this file's vi.resetModules() harness. Imported rather than
+// re-implemented on purpose: these assertions are about the route writing
+// the value the CLAIM side looks up by, and a local copy of the
+// derivation here would agree with itself while the two sides drifted.
+import { hashEmail } from "../src/services/funnel/token";
 
 // =============================================================
 // POST /public/funnel-sessions/:sessionId/payment-intent
@@ -359,6 +365,61 @@ describe("POST /public/funnel-sessions/:sessionId/payment-intent", () => {
         stripePaymentIntentId: "pi_1",
       }),
     );
+  });
+
+  // =============================================================
+  // The email hash
+  // =============================================================
+  //
+  // This is the only moment the buyer's address is in our hands:
+  // completeFunnelPurchase gets a session id and Stripe ids and nothing
+  // else. If it is not captured here it is not captured anywhere, and the
+  // magic link — the only way back for someone who pays and installs days
+  // later on a different device — has nothing to match on.
+
+  it("stores a hash of the email on the purchase row", async () => {
+    await post({ package_identifier: "$rov_monthly", email: "Buyer@Example.com" });
+
+    const row = upsertPurchase.mock.calls[0][1] as { emailHash: string };
+    // Equality with hashEmail is the whole point: that is the function
+    // POST /v1/sdk/claim-via-email derives its findByEmailHash argument
+    // with. A different-but-stable hash here would look fine in isolation
+    // and never match a single lookup.
+    expect(row.emailHash).toBe(hashEmail("Buyer@Example.com"));
+    expect(row.emailHash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("stores a hash rather than the address itself", async () => {
+    await post({ package_identifier: "$rov_monthly", email: "buyer@example.com" });
+
+    const row = upsertPurchase.mock.calls[0][1] as Record<string, unknown>;
+    const serialized = JSON.stringify(row);
+    // The plaintext lives in Stripe and nowhere in our database — the
+    // claim table holds a digest so a dump is not a mailing list, and a
+    // plaintext column on the purchase row would undo that.
+    expect(serialized).not.toContain("buyer@example.com");
+    expect(serialized).not.toContain("example.com");
+    expect(Object.keys(row)).not.toContain("email");
+  });
+
+  // Casing is what a human varies between the checkout form and the app's
+  // recovery form, and the claim endpoint lowercases before hashing. If
+  // the two normalisations differ the lookup silently misses — the exact
+  // failure mode being fixed.
+  //
+  // Padding is deliberately NOT exercised here: both this route and
+  // /v1/sdk/claim-via-email validate with `z.string().email()`, which
+  // rejects a leading or trailing space with a 400 before any hashing
+  // happens. The trim inside `normalizeEmail` is belt-and-braces for a
+  // future caller with looser validation, and is pinned in
+  // src/services/funnel/token.test.ts where it is reachable.
+  it("hashes the same value for addresses differing only by case", async () => {
+    await post({ package_identifier: "$rov_monthly", email: "Buyer@Example.COM" });
+    await post({ package_identifier: "$rov_monthly", email: "buyer@example.com" });
+
+    const first = upsertPurchase.mock.calls[0][1] as { emailHash: string };
+    const second = upsertPurchase.mock.calls[1][1] as { emailHash: string };
+    expect(first.emailHash).toBe(second.emailHash);
   });
 
   it("409s when the session is already paid", async () => {

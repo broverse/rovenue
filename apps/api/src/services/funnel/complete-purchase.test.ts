@@ -48,7 +48,13 @@ vi.mock("@rovenue/db", async (importOriginal) => {
 });
 
 const { completeFunnelPurchase } = await import("./complete-purchase");
-const { hashToken } = await import("./token");
+const { hashEmail, hashToken } = await import("./token");
+
+// What the payment-intent route parked on the purchase row. Derived with
+// the real `hashEmail` rather than a made-up string so the fixture is the
+// value `POST /v1/sdk/claim-via-email` would actually look up by.
+const BUYER_EMAIL = "buyer@example.com";
+const PURCHASE_EMAIL_HASH = hashEmail(BUYER_EMAIL);
 
 const INPUT = {
   sessionId: "sess_1",
@@ -73,6 +79,7 @@ describe("completeFunnelPurchase", () => {
       sessionId: "sess_1",
       projectId: "proj_1",
       status: "pending",
+      emailHash: PURCHASE_EMAIL_HASH,
     });
     markPaid.mockReset().mockResolvedValue(undefined);
     insertClaimToken.mockReset().mockResolvedValue({ id: "token_1" });
@@ -115,6 +122,53 @@ describe("completeFunnelPurchase", () => {
     expect(row.projectId).toBe("proj_1");
     expect(row.expiresAt.getTime()).toBeGreaterThan(Date.now());
   });
+
+  // The magic link is the only recovery path for a buyer who pays and
+  // never returns to the tab — different device, days later, no session
+  // id. `findByEmailHash` is how that buyer is found, and it reads
+  // funnel_claim_tokens.email_hash, so the hash the payment-intent route
+  // parked on the purchase row has to make this hop or the whole path is
+  // dead. It was dead before this: nothing ever wrote the column.
+  it("copies the purchase's emailHash onto the claim token", async () => {
+    await completeFunnelPurchase(INPUT);
+
+    const row = insertClaimToken.mock.calls[0]?.[1] as { emailHash: string | null };
+    expect(row.emailHash).toBe(PURCHASE_EMAIL_HASH);
+    // A digest, not the address — the token table holds a hash precisely
+    // so a database leak is not an email leak.
+    expect(JSON.stringify(row)).not.toContain(BUYER_EMAIL);
+    expect(row.emailHash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  // Purchase rows written before migration 0091 have no hash. Those
+  // buyers really paid, so the token must still be minted; they simply
+  // lose the email fallback. Making the hash a precondition here would
+  // strand them at `pending` with no token at all.
+  it.each([null, undefined])(
+    "still completes and still mints a token when emailHash is %s",
+    async (missing) => {
+      findPurchaseBySession.mockResolvedValue({
+        id: "purchase_1",
+        sessionId: "sess_1",
+        projectId: "proj_1",
+        status: "pending",
+        emailHash: missing,
+      });
+
+      const result = await completeFunnelPurchase(INPUT);
+
+      expect(result.alreadyIssued).toBe(false);
+      if (result.alreadyIssued) throw new Error("unreachable");
+      expect(result.token).toEqual(expect.any(String));
+      expect(insertClaimToken).toHaveBeenCalledTimes(1);
+      const row = insertClaimToken.mock.calls[0]?.[1] as { emailHash: string | null };
+      // Normalised to null rather than left `undefined`, so the insert
+      // writes an explicit NULL instead of relying on column defaults.
+      expect(row.emailHash).toBeNull();
+      expect(markPaid).toHaveBeenCalled();
+      expect(setSessionState).toHaveBeenCalledWith(TX, "sess_1", "paid");
+    },
+  );
 
   it("anchors a synthetic subscriber on the stripe customer", async () => {
     await completeFunnelPurchase(INPUT);
