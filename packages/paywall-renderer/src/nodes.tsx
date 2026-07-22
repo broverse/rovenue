@@ -52,6 +52,18 @@ export type RenderCtx = {
  * found in `offering`; a found package with no matching `priceView` entry
  * still resolves (price fields "" rather than throwing).
  */
+/**
+ * Resolve effective package IDs: when packageIds is empty (meaning "all offering packages"),
+ * return all identifiers from the offering; otherwise return the specified packageIds.
+ */
+export function effectivePackageIds(
+  packageIds: string[],
+  offering: RendererOffering | null,
+): string[] {
+  if (packageIds.length > 0) return packageIds;
+  return offering?.packages.map((p) => p.packageIdentifier) ?? [];
+}
+
 export function resolvePackageView(
   offering: RendererOffering | null,
   priceView: Record<string, PackageView> | undefined,
@@ -188,6 +200,7 @@ function renderButton(node: ButtonNode, ctx: RenderCtx): ReactElement | null {
 }
 
 function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement {
+  const packageIds = effectivePackageIds(node.packageIds, ctx.offering);
   return (
     <div
       data-rov-node={node.id}
@@ -198,7 +211,7 @@ function renderPackageList(node: PackageListNode, ctx: RenderCtx): ReactElement 
         gap: "8px",
       }}
     >
-      {node.packageIds.map((packageId) => {
+      {packageIds.map((packageId) => {
         const view = resolvePackageView(ctx.offering, ctx.priceView, packageId);
         const isSelected = packageId === ctx.selectedPackageId;
         return (

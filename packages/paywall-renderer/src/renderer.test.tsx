@@ -237,6 +237,34 @@ describe("PaywallRenderer", () => {
     ).not.toThrow();
   });
 
+  describe("packageList rendering", () => {
+    it("renders all offering packages when packageIds is empty", () => {
+      const config = baseConfig();
+      const packages = config.root.children.find(
+        (c): c is Extract<PaywallNode, { type: "packageList" }> => c.type === "packageList",
+      )!;
+      packages.packageIds = [];
+      const { container } = render(
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" onPurchase={noop} />,
+      );
+      expect(container.querySelector('[data-rov-package="monthly"]')).not.toBeNull();
+      expect(container.querySelector('[data-rov-package="annual"]')).not.toBeNull();
+    });
+
+    it("renders only specified packageIds when packageIds is non-empty", () => {
+      const config = baseConfig();
+      const packages = config.root.children.find(
+        (c): c is Extract<PaywallNode, { type: "packageList" }> => c.type === "packageList",
+      )!;
+      packages.packageIds = ["monthly"];
+      const { container } = render(
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" onPurchase={noop} />,
+      );
+      expect(container.querySelector('[data-rov-package="monthly"]')).not.toBeNull();
+      expect(container.querySelector('[data-rov-package="annual"]')).toBeNull();
+    });
+  });
+
   describe("selection", () => {
     it("defaults to the packageList's defaultSelected when present", () => {
       const { container } = render(
@@ -276,6 +304,22 @@ describe("PaywallRenderer", () => {
       const button = container.querySelector('[data-rov-node="purchase"]') as HTMLButtonElement;
       // selected via offering.packages[0] ("monthly") -> purchaseButton enabled.
       expect(button.disabled).toBe(false);
+    });
+
+    it("falls back to the offering's first package when packageIds is empty", () => {
+      const config = baseConfig();
+      const packages = config.root.children.find(
+        (c): c is Extract<PaywallNode, { type: "packageList" }> => c.type === "packageList",
+      )!;
+      packages.packageIds = [];
+      packages.defaultSelected = undefined;
+      const { container } = render(
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" onPurchase={noop} />,
+      );
+      // Selection should be "monthly" (offering.packages[0])
+      expect(container.querySelector('[data-rov-package="monthly"]')?.getAttribute("aria-pressed")).toBe(
+        "true",
+      );
     });
 
     it("resolves to null when there is no packageList and no offering", () => {
@@ -346,6 +390,23 @@ describe("PaywallRenderer", () => {
       expect(purchaseButton.disabled).toBe(true);
       fireEvent.click(purchaseButton);
       expect(onPurchase).not.toHaveBeenCalled();
+    });
+
+    it("fires onPurchase with the first offering package when packageIds is empty", () => {
+      const onPurchase = vi.fn();
+      const config = baseConfig();
+      const packages = config.root.children.find(
+        (c): c is Extract<PaywallNode, { type: "packageList" }> => c.type === "packageList",
+      )!;
+      packages.packageIds = [];
+      packages.defaultSelected = undefined;
+      const { container } = render(
+        <PaywallRenderer config={config} offering={offering} colorScheme="light" onPurchase={onPurchase} />,
+      );
+      const purchaseButton = container.querySelector('[data-rov-node="purchase"]') as HTMLButtonElement;
+      fireEvent.click(purchaseButton);
+      // Should fire with the first offering package ("monthly")
+      expect(onPurchase).toHaveBeenCalledWith("monthly");
     });
   });
 

@@ -1,7 +1,7 @@
 import { useState, type JSX } from "react";
 import type { PackageListNode, PaywallNode } from "@rovenue/shared/paywall";
 import type { PaywallRendererProps, RendererOffering } from "./types";
-import { renderNode, resolvePackageView, type RenderCtx } from "./nodes";
+import { effectivePackageIds, renderNode, resolvePackageView, type RenderCtx } from "./nodes";
 import { resolveThemeColor } from "./styles";
 
 // =============================================================
@@ -28,17 +28,14 @@ function findFirstPackageList(node: PaywallNode): PackageListNode | null {
 
 /**
  * Initial selection, in order: the first packageList's defaultSelected,
- * else its first packageId, else (no packageList in the tree at all) the
- * offering's first package, else null.
+ * else the first effective package ID (rendering all offering packages when packageIds is empty),
+ * else null.
  */
 function initialSelectedPackageId(root: PaywallNode, offering: RendererOffering | null): string | null {
   const packageList = findFirstPackageList(root);
-  return (
-    packageList?.defaultSelected ??
-    packageList?.packageIds[0] ??
-    offering?.packages[0]?.packageIdentifier ??
-    null
-  );
+  if (packageList?.defaultSelected) return packageList.defaultSelected;
+  const effectiveIds = effectivePackageIds(packageList?.packageIds ?? [], offering);
+  return effectiveIds[0] ?? null;
 }
 
 export function PaywallRenderer(props: PaywallRendererProps): JSX.Element {
