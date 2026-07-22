@@ -43,10 +43,10 @@ export function PlacementMetricsCard({ projectId, placementId }: Props) {
           value={isPending ? "—" : formatCount(data?.purchases ?? 0)}
         />
         <Stat
-          {/* Deliberately labeled as approximate: purchases are matched by
-              "viewer later bought anything", not by presentedContext — the
-              precise per-variant attribution needs the revenue MV to carry
-              presentedContext (spec'd follow-up). */}
+          // Deliberately labeled as approximate: purchases are matched by
+          // "viewer later bought anything", not by presentedContext — the
+          // precise per-variant attribution needs the revenue MV to carry
+          // presentedContext (spec'd follow-up).
           label={t("placements.metrics.conversionRate", "Viewer → buyer rate (approx.)")}
           value={
             isPending
