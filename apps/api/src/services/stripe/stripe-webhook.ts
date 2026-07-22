@@ -148,7 +148,33 @@ interface DispatchContext {
   outcome: StripeDispatchOutcome;
 }
 
+/**
+ * The account owner's own billing sync, by event type.
+ *
+ * A lookup rather than a `switch` so that "does this event have a domain
+ * sync to protect?" is answered by the same table that runs it. The
+ * containment rule below turns on that question, and a `switch` would let
+ * the two drift apart the first time a case was added — the failure mode
+ * being silent, permanent loss of a buyer's completion.
+ *
+ * `payment_intent.succeeded` is deliberately absent: a bare PaymentIntent
+ * carries no subscription and no invoice, so there is no purchase state
+ * to sync from it. The funnel backstop is the entire work for that event.
+ */
+const DOMAIN_SYNC: Readonly<
+  Partial<Record<string, (ctx: DispatchContext) => Promise<void>>>
+> = {
+  [STRIPE_EVENT_TYPE.CUSTOMER_SUBSCRIPTION_CREATED]: syncSubscription,
+  [STRIPE_EVENT_TYPE.CUSTOMER_SUBSCRIPTION_UPDATED]: syncSubscription,
+  [STRIPE_EVENT_TYPE.CUSTOMER_SUBSCRIPTION_DELETED]: applySubscriptionDeleted,
+  [STRIPE_EVENT_TYPE.INVOICE_PAID]: applyInvoicePaid,
+  [STRIPE_EVENT_TYPE.INVOICE_PAYMENT_FAILED]: applyInvoicePaymentFailed,
+  [STRIPE_EVENT_TYPE.CHARGE_REFUNDED]: applyChargeRefunded,
+};
+
 async function dispatch(ctx: DispatchContext): Promise<void> {
+  const sync = DOMAIN_SYNC[ctx.event.type];
+
   // Deliberately BEFORE the domain sync, not after it. The sync throws
   // when the paid price maps to no Rovenue product, and `applyInvoicePaid`
   // returns early when the subscription maps to no purchase row — either
@@ -157,17 +183,37 @@ async function dispatch(ctx: DispatchContext): Promise<void> {
   // depends on it having run, and it is idempotent, so the ordering costs
   // nothing on the ordinary path.
   //
-  // Running first must not mean running *instead*. An unhandled throw
-  // here propagates out of `processStripeEvent`, marks the event FAILED
-  // and skips the switch below — so a funnel-side failure would take the
-  // account owner's purchase/revenue sync down with it, for an event that
-  // has nothing to do with the funnel beyond arriving on the same
-  // subscription. The buyer keeps two other routes to their token
-  // (`/confirm`, and the next event on this subscription), so the
-  // asymmetric cost is clear: log loudly and carry on.
+  // Running first must not mean running *instead* — but only where there
+  // is something to run instead OF. The containment below is therefore
+  // conditional on `sync`:
+  //
+  //   With a sync: swallow. A funnel-side throw would otherwise take the
+  //   account owner's purchase/revenue sync down with it, for an event
+  //   that has nothing to do with the funnel beyond arriving on the same
+  //   subscription — and this buyer really does keep other routes to
+  //   their token, because more events are coming on that subscription
+  //   and `/confirm` can still read its state.
+  //
+  //   Without one (`payment_intent.succeeded`): RETHROW. The backstop is
+  //   the whole job, so swallowing marks the event PROCESSED — and a
+  //   PROCESSED row makes `claimWebhookEvent` answer `duplicate`, which
+  //   consumes Stripe's redelivery AND BullMQ's retry in one go. One
+  //   transient database blip would permanently strand a one-time buyer
+  //   who paid and closed the tab: no subscription, no later event, no
+  //   browser to call `/confirm`. Failing the event is what keeps the
+  //   retries alive, and a retried event is idempotent all the way down.
   try {
     await backstopFunnelSession(ctx);
   } catch (err) {
+    if (!sync) {
+      log.error("funnel backstop failed and nothing else handles this event", {
+        eventId: ctx.event.id,
+        eventType: ctx.event.type,
+        projectId: ctx.projectId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
     log.error("funnel backstop failed; continuing with the domain sync", {
       eventId: ctx.event.id,
       eventType: ctx.event.type,
@@ -176,26 +222,11 @@ async function dispatch(ctx: DispatchContext): Promise<void> {
     });
   }
 
-  switch (ctx.event.type) {
-    case STRIPE_EVENT_TYPE.CUSTOMER_SUBSCRIPTION_CREATED:
-    case STRIPE_EVENT_TYPE.CUSTOMER_SUBSCRIPTION_UPDATED:
-      return syncSubscription(ctx);
-    case STRIPE_EVENT_TYPE.CUSTOMER_SUBSCRIPTION_DELETED:
-      return applySubscriptionDeleted(ctx);
-    case STRIPE_EVENT_TYPE.INVOICE_PAID:
-      return applyInvoicePaid(ctx);
-    case STRIPE_EVENT_TYPE.INVOICE_PAYMENT_FAILED:
-      return applyInvoicePaymentFailed(ctx);
-    case STRIPE_EVENT_TYPE.CHARGE_REFUNDED:
-      return applyChargeRefunded(ctx);
-    case STRIPE_EVENT_TYPE.PAYMENT_INTENT_SUCCEEDED:
-      // Handled entirely by the backstop above: a bare PaymentIntent
-      // carries no subscription and no invoice, so there is no purchase
-      // state to sync from it.
-      return;
-    default:
-      log.debug("no state change for event type", { type: ctx.event.type });
+  if (!sync) {
+    log.debug("no state change for event type", { type: ctx.event.type });
+    return;
   }
+  return sync(ctx);
 }
 
 // =============================================================
@@ -316,21 +347,17 @@ async function backstopFunnelSession(ctx: DispatchContext): Promise<void> {
     return;
   }
 
-  // Already completed — by `/confirm`, by an earlier event, or by the
-  // previous delivery of this one. `completeFunnelPurchase` reads the
-  // same status and returns `alreadyIssued`, so this changes no outcome;
-  // it is here to stop paying for that answer. Without it EVERY renewal
-  // invoice of EVERY funnel-sold subscription opens a transaction and
-  // reads the partitioned `funnel_sessions` table for the whole life of
-  // that subscription, before the billing sync below even starts. The row
-  // is already in hand, so the check is free.
-  if (purchase.status === "paid") return;
-
   // The event has to be about the very Stripe object this row records.
   // A visitor who changes package leaves the superseded subscription or
   // intent live for a moment; without this, a late event from that
   // abandoned object would complete the session against a package the
   // buyer no longer chose (`upsertPending` has already replaced the ids).
+  //
+  // Checked BEFORE the already-paid short-circuit below. A mismatch on an
+  // already-paid row is the double-charge case — money moved on a
+  // superseded object *and* on the current one — and short-circuiting
+  // first would make the loudest signal we have for it return silently.
+  // Both checks read the row already in hand, so the ordering is free.
   if (
     lookup.by === "session" &&
     lookup.stripeObjectId !== purchase.stripeSubscriptionId &&
@@ -339,13 +366,15 @@ async function backstopFunnelSession(ctx: DispatchContext): Promise<void> {
     // `warn`, not `info`. Reaching here on a settlement-proving event
     // means someone's money moved on a Stripe object this session no
     // longer references, and nothing downstream will complete them: the
-    // row above is still `pending` and points elsewhere. That is a human
-    // to refund or reconcile by hand, so every id needed to find them is
-    // in the line.
+    // row points elsewhere. That is a human to refund or reconcile by
+    // hand, so every id needed to find them is in the line — including
+    // the row's status, which says which of the two cases this is
+    // (`pending` = a stranded payment, `paid` = a probable double charge).
     log.warn("paid stripe object does not match the session's current attempt", {
       sessionId: purchase.sessionId,
       projectId: purchase.projectId,
       funnelPurchaseId: purchase.id,
+      purchaseStatus: purchase.status,
       eventId: ctx.event.id,
       eventType: ctx.event.type,
       stripeObjectId: lookup.stripeObjectId,
@@ -355,6 +384,16 @@ async function backstopFunnelSession(ctx: DispatchContext): Promise<void> {
     });
     return;
   }
+
+  // Already completed — by `/confirm`, by an earlier event, or by the
+  // previous delivery of this one. `completeFunnelPurchase` reads the
+  // same status and returns `alreadyIssued`, so this changes no outcome;
+  // it is here to stop paying for that answer. Without it EVERY renewal
+  // invoice of EVERY funnel-sold subscription opens a transaction and
+  // reads the partitioned `funnel_sessions` table for the whole life of
+  // that subscription, before the billing sync below even starts. The row
+  // is already in hand, so the check is free.
+  if (purchase.status === "paid") return;
 
   // Only the dev-mode stub in routes/public/funnels.ts writes a purchase
   // with no customer, and that path mints its own token. Same guard the

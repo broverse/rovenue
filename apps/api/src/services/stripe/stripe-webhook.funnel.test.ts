@@ -378,6 +378,51 @@ describe("processStripeEvent — funnel session backstop", () => {
     );
   });
 
+  // The mirror image, and the reason containment is conditional. There is
+  // no domain sync for `payment_intent.succeeded` — the backstop IS the
+  // work — so swallowing a failure here would mark the event PROCESSED,
+  // and a PROCESSED row makes `claimWebhookEvent` answer `duplicate`:
+  // Stripe's redelivery AND BullMQ's retry both consumed by one
+  // transient blip, permanently stranding a buyer who paid and closed the
+  // tab. There is no subscription and no later event to save them.
+  test("a failing backstop leaves a one-time payment event retryable", async () => {
+    drizzleMock.funnelPurchaseRepo.findBySession.mockRejectedValue(
+      new Error("funnel_sessions partition unavailable"),
+    );
+
+    const event = {
+      id: "evt_pi_fail",
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: "pi_1",
+          customer: "cus_1",
+          metadata: { rovenue_funnel_session_id: "sess_1" },
+        },
+      },
+    } as unknown as Stripe.Event;
+
+    await expect(run(event)).rejects.toThrow(
+      "funnel_sessions partition unavailable",
+    );
+
+    // FAILED, not PROCESSED: the row a retry must be allowed to reclaim.
+    expect(
+      drizzleMock.webhookEventRepo.updateWebhookEvent,
+    ).toHaveBeenCalledWith(
+      expect.anything(),
+      "whe_1",
+      expect.objectContaining({ status: "FAILED" }),
+    );
+    expect(
+      drizzleMock.webhookEventRepo.updateWebhookEvent,
+    ).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "whe_1",
+      expect.objectContaining({ status: "PROCESSED" }),
+    );
+  });
+
   // Every renewal invoice for the life of a funnel-sold subscription
   // arrives here. `completeFunnelPurchase` would open a transaction and
   // re-read the partitioned funnel_sessions table only to discover the
