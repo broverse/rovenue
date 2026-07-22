@@ -1214,7 +1214,27 @@ export async function upsertPending(
 }
 ```
 
-`funnel_purchases` has no `stripe_payment_intent_id` column; add it in the migration from Task 10 (nullable text) so both writes land in one migration.
+**This task owns its own migration.** `funnel_purchases` has neither
+`stripe_payment_intent_id` nor `subscriber_id` (Task 7 needs the latter), and
+Tasks 6-7 write both — so the migration cannot wait for Task 10.
+
+Create `packages/db/drizzle/migrations/<NNNN>_funnel_purchase_payment.sql`:
+
+```sql
+ALTER TABLE "funnel_purchases"
+  ADD COLUMN IF NOT EXISTS "stripe_payment_intent_id" text;
+ALTER TABLE "funnel_purchases"
+  ADD COLUMN IF NOT EXISTS "subscriber_id" text;
+```
+
+**Pick `<NNNN>` by listing `packages/db/drizzle/migrations/` and taking the next
+number after the highest that exists — do NOT hardcode it.** Another author
+commits to this repo in parallel and has already taken numbers this plan was
+written before. Add the matching `meta/_journal.json` entry (`idx` = the same
+number, `tag` = the filename without `.sql`, `version: "7"`, `breakpoints: true`,
+`when` greater than the previous entry): **the migrator resolves which files run
+from the journal, so a hand-written `.sql` without an entry is silently never
+applied.** Mirror both columns in `packages/db/src/drizzle/schema.ts`.
 
 Mount in `apps/api/src/app.ts` next to the other public routes:
 
@@ -1230,7 +1250,7 @@ Expected: PASS, 10 tests; typecheck clean.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add apps/api/src/routes/public/funnel-payment.ts apps/api/src/app.ts packages/db/src/drizzle/repositories/funnel-purchases.ts apps/api/tests/funnel-payment-intent.test.ts
+git add apps/api/src/routes/public/funnel-payment.ts apps/api/src/app.ts packages/db/src/drizzle/repositories/funnel-purchases.ts packages/db/src/drizzle/schema.ts packages/db/drizzle/migrations/*_funnel_purchase_payment.sql packages/db/drizzle/migrations/meta/_journal.json apps/api/tests/funnel-payment-intent.test.ts
 git commit -m "feat(api): create funnel payment intents server-side on the connected account"
 ```
 
@@ -1376,9 +1396,8 @@ export async function completeFunnelPurchase(input: {
 }
 ```
 
-`funnel_purchases` needs a `subscriber_id` column for the anchor; add it to the
-Task 10 migration alongside `stripe_payment_intent_id`, and mirror both in
-`packages/db/src/drizzle/schema.ts`.
+`funnel_purchases.subscriber_id` is the anchor column; Task 6's migration
+already added it.
 
 - [ ] **Step 4: Add the confirm route**
 
@@ -1682,7 +1701,7 @@ git commit -m "fix(api): merge the funnel purchase's subscriber on claim and ret
 
 **Files:**
 - Create: `apps/api/src/services/stripe/apple-pay-domain.ts`
-- Create: `packages/db/drizzle/migrations/0089_funnel_payment.sql` (+ its `meta/_journal.json` entry)
+- Create: `packages/db/drizzle/migrations/<NNNN>_apple_pay_domain.sql` (+ its `meta/_journal.json` entry)
 - Modify: `packages/db/src/drizzle/schema.ts`, `packages/db/src/drizzle/repositories/project-stripe-connections.ts`, `apps/api/src/routes/stripe-oauth.ts`
 - Test: `apps/api/src/services/stripe/apple-pay-domain.test.ts`
 
@@ -1692,18 +1711,24 @@ git commit -m "fix(api): merge the funnel purchase's subscriber on claim and ret
 
 - [ ] **Step 1: Write the migration**
 
-`0089_funnel_payment.sql` adds three columns and its journal entry (`idx: 89`, `tag: "0089_funnel_payment"`, `version: "7"`, `breakpoints: true`, `when` greater than the previous entry). **The migrator resolves which files run from the journal — a hand-written `.sql` without an entry is silently never applied.**
+Adds the two Apple Pay columns. The `funnel_purchases` columns are NOT here —
+Task 6 already added them, because Tasks 6-7 write to them.
 
 ```sql
 ALTER TABLE "project_stripe_connections"
   ADD COLUMN IF NOT EXISTS "apple_pay_domain_status" text NOT NULL DEFAULT 'unregistered';
 ALTER TABLE "project_stripe_connections"
   ADD COLUMN IF NOT EXISTS "apple_pay_domain_checked_at" timestamptz;
-ALTER TABLE "funnel_purchases"
-  ADD COLUMN IF NOT EXISTS "stripe_payment_intent_id" text;
 ```
 
-Mirror all three in `packages/db/src/drizzle/schema.ts`.
+**Pick the migration number by listing `packages/db/drizzle/migrations/` and
+taking the next after the highest that exists — do NOT hardcode it.** Another
+author commits here in parallel. Add the matching `meta/_journal.json` entry
+(`idx` = that number, `tag` = the filename without `.sql`, `version: "7"`,
+`breakpoints: true`, `when` greater than the previous entry): **the migrator
+resolves which files run from the journal, so a `.sql` without an entry is
+silently never applied.** Mirror both columns in
+`packages/db/src/drizzle/schema.ts`.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -1726,7 +1751,7 @@ Expected: migration applies; tests PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/db/drizzle/migrations/0089_funnel_payment.sql packages/db/drizzle/migrations/meta/_journal.json packages/db/src/drizzle/schema.ts packages/db/src/drizzle/repositories/project-stripe-connections.ts apps/api/src/services/stripe/apple-pay-domain.ts apps/api/src/services/stripe/apple-pay-domain.test.ts apps/api/src/routes/stripe-oauth.ts
+git add packages/db/drizzle/migrations/*_apple_pay_domain.sql packages/db/drizzle/migrations/meta/_journal.json packages/db/src/drizzle/schema.ts packages/db/src/drizzle/repositories/project-stripe-connections.ts apps/api/src/services/stripe/apple-pay-domain.ts apps/api/src/services/stripe/apple-pay-domain.test.ts apps/api/src/routes/stripe-oauth.ts
 git commit -m "feat(api): register the funnel domain for Apple Pay on connect"
 ```
 
@@ -1825,7 +1850,9 @@ git commit -m "test(api): end-to-end funnel on-page payment integration test"
 
 1. Serve Stripe's payment-method-domain verification file from `app.rovenue.io` at the well-known path Stripe checks. **Without it, registration reports the domain unverified and Apple Pay silently does not appear** — the card form still works, so this fails quietly and must be asserted after deploy.
 2. Set `STRIPE_PLATFORM_PUBLISHABLE_KEY` and `STRIPE_PLATFORM_PUBLISHABLE_KEY_TEST`. They were declared in B1 and never read; the payment step cannot mount without them.
-3. Run `pnpm db:migrate` for `0089_funnel_payment`.
+3. Run `pnpm db:migrate` for the two migrations this plan adds
+   (`*_funnel_purchase_payment` from Task 6 and `*_apple_pay_domain` from
+   Task 10).
 4. Run the Apple Pay reconcile for accounts connected before this ships.
 
 Existing funnels keep working untouched until republished: a paywall page only takes payment when it references a paywall with a builder config and the project can take charges.
