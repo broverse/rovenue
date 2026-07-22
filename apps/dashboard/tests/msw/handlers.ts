@@ -151,6 +151,49 @@ export const handlers = [
     }),
   ),
 
+  http.get(`${BASE}/dashboard/experiments/:id`, ({ params }) =>
+    HttpResponse.json({
+      data: {
+        experiment: {
+          id: params.id,
+          projectId: "proj_1",
+          name: "Paywall v2 pricing",
+          description: null,
+          type: "PAYWALL",
+          key: "paywall_v2_pricing",
+          audienceId: "aud_default",
+          status: "RUNNING",
+          variants: [
+            { id: "control", name: "Control", value: null, weight: 0.5 },
+            { id: "variant_a", name: "Variant A", value: null, weight: 0.5 },
+          ],
+          metrics: null,
+          mutualExclusionGroup: null,
+          startedAt: "2026-04-01T00:00:00Z",
+          completedAt: null,
+          winnerVariantId: null,
+          createdAt: "2026-03-25T00:00:00Z",
+          updatedAt: "2026-04-01T00:00:00Z",
+        },
+        summary: { totalUsers: 0, conversions: 0, conversionRate: 0 },
+      },
+    }),
+  ),
+
+  http.get(`${BASE}/dashboard/experiments/:id/results`, ({ params }) =>
+    HttpResponse.json({
+      data: {
+        experimentId: params.id,
+        status: "RUNNING",
+        variants: [],
+        conversion: null,
+        revenue: null,
+        srm: null,
+        sampleSize: null,
+      },
+    }),
+  ),
+
   http.get(`${BASE}/dashboard/feature-flags`, () =>
     HttpResponse.json({
       data: {

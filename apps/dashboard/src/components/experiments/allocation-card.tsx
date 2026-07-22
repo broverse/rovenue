@@ -1,16 +1,16 @@
 import { useTranslation } from "react-i18next";
 import { variantColor } from "./format";
-import type { Variant } from "./types";
+import type { AllocationSlice } from "./types";
 
 type Props = {
-  variants: ReadonlyArray<Variant>;
+  variants: ReadonlyArray<AllocationSlice>;
 };
 
 const PIE_R = 38;
 const PIE_CENTER = 45;
 const TO_RAD = (deg: number) => ((deg - 90) * Math.PI) / 180;
 
-const arcs = (variants: ReadonlyArray<Variant>) => {
+const arcs = (variants: ReadonlyArray<AllocationSlice>) => {
   let start = 0;
   return variants.map((v) => {
     const end = start + v.allocation * 360;

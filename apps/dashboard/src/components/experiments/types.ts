@@ -49,70 +49,33 @@ export type ExperimentSummary = {
   leadingVariant: string | null;
 };
 
-/** A single arm of an experiment. */
-export type Variant = {
-  id: string;
-  label: string;
-  description: string;
-  /** 0..1 share of traffic. */
-  allocation: number;
-  users: number;
-  conversions: number;
-  /**
-   * Precisely-attributed conversions (raw_revenue_events.experimentKey/
-   * variantId — the purchase's own presentedContext, no exposure-join
-   * heuristic). Only meaningful for PAYWALL-type experiments; undefined
-   * elsewhere, in which case the UI falls back gracefully.
-   */
-  attributedConversions?: number;
-  /** 0..1 conversion rate. */
-  rate: number;
-  /** ARPU in dollars. */
-  arpu: number;
-  mrr: number;
-  /** Lift vs control in percent (signed). 0 for control. */
-  lift: number;
-  ciLow: number;
-  ciHigh: number;
-  isControl: boolean;
-  /** Token from the design palette: `default`, `primary`, `violet`. */
-  colorToken: VariantColorToken;
-};
-
 export type VariantColorToken = "default" | "primary" | "violet";
 
-export type TimelineEntry = {
-  whenKey: string;
-  whenValues?: Readonly<Record<string, string | number>>;
-  titleKey: string;
-  subKey: string;
-  subValues?: Readonly<Record<string, string | number>>;
-  /** Dot tint — uses CSS variables. */
-  tone: "primary" | "success" | "warning" | "muted";
+/**
+ * One variant's row for the live results table / funnel — built from
+ * `ExperimentResultsResponse.variants[]` (see `mapResultsVariants` in
+ * `format.ts`). `attributedConversions` is `null` when the experiment
+ * type doesn't carry PAYWALL `presentedContext` (see
+ * `isPaywallExperimentGroup`) — genuinely not tracked for that type,
+ * never a fabricated zero.
+ */
+export type ResultVariantRow = {
+  variantId: string;
+  exposures: number;
+  uniqueUsers: number;
+  attributedConversions: number | null;
+  colorToken: VariantColorToken;
+  isControl: boolean;
 };
 
-export type FunnelStage = {
-  stageKey: string;
-  subKey: string;
-  ctrl: number;
-  a: number;
-  b: number;
-};
-
-export type ExperimentDetail = {
-  metricNameKey: string;
-  metricDescriptionKey: string;
-  owner: string;
-  segments: ReadonlyArray<string>;
-  allocationKey: string;
-  variants: ReadonlyArray<Variant>;
-  timeline: ReadonlyArray<TimelineEntry>;
-  funnel: ReadonlyArray<FunnelStage>;
-};
-
-export type CumulativePoint = {
-  day: number;
-  ctrl: number;
-  a: number;
-  b: number;
+/**
+ * Minimal slice `AllocationCard` needs to draw the traffic pie —
+ * derived from the experiment's own variant definitions (`weight`),
+ * not the results endpoint.
+ */
+export type AllocationSlice = {
+  id: string;
+  /** 0..1 share of traffic. */
+  allocation: number;
+  colorToken: VariantColorToken;
 };

@@ -1,30 +1,28 @@
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/cn";
-import { ciGeometry, variantColor } from "./format";
-import { LiftPill } from "./lift-pill";
-import type { Variant } from "./types";
+import { variantColor } from "./format";
+import type { ResultVariantRow } from "./types";
 
 type Props = {
-  variants: ReadonlyArray<Variant>;
-  metricNameKey: string;
+  variants: ReadonlyArray<ResultVariantRow>;
   /**
-   * Shows the precisely-attributed conversions column — only meaningful
-   * for PAYWALL-type experiments (see `isPaywallExperimentGroup`). Other
-   * experiment types keep today's heuristic-only display.
+   * Shows the precisely-attributed conversions + derived-rate columns —
+   * only meaningful for PAYWALL-type experiments (see
+   * `isPaywallExperimentGroup`). Other experiment types have no
+   * per-variant conversion signal in the live payload at all, so the
+   * columns are hidden rather than shown empty.
    */
-  showAttributed?: boolean;
+  showAttributed: boolean;
 };
 
 /**
- * Variant comparison table — primary metric, ARPU and a 95% CI bar
- * per variant. The CI bar maps -12..+12% to a 160px track with a 0
- * marker, range pill, and centerpoint dot.
+ * Live variant comparison table — exposures, exposed users, and (when
+ * gated) precisely-attributed conversions + the rate derived from
+ * them. Every number here comes straight off `ExperimentResultsResponse`;
+ * there's no per-variant ARPU/lift/CI in that payload, so those columns
+ * from the old mock table are gone rather than fabricated.
  */
-export function VariantsTable({
-  variants,
-  metricNameKey,
-  showAttributed = false,
-}: Props) {
+export function VariantsTable({ variants, showAttributed }: Props) {
   const { t } = useTranslation();
   return (
     <section className="overflow-hidden rounded-lg border border-rv-divider bg-rv-c1">
@@ -32,79 +30,63 @@ export function VariantsTable({
         <h3 className="m-0 text-[14px] font-semibold">
           {t("experiments.variants.title")}
         </h3>
-        <span className="font-rv-mono text-[11px] text-rv-mute-500">
-          {t("experiments.variants.subtitle", { metric: t(metricNameKey) })}
-        </span>
       </header>
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-[12px]">
           <thead>
             <tr>
               <Th width="30%">{t("experiments.variants.cols.variant")}</Th>
+              <Th align="right">{t("experiments.variants.cols.exposures")}</Th>
               <Th align="right">{t("experiments.variants.cols.users")}</Th>
-              <Th align="right">{t("experiments.variants.cols.conversions")}</Th>
               {showAttributed && (
                 <Th align="right">
                   {t("experiments.variants.cols.attributed")}
                 </Th>
               )}
-              <Th align="right">{t("experiments.variants.cols.rate")}</Th>
-              <Th align="right">{t("experiments.variants.cols.arpu")}</Th>
-              <Th width="200px">{t("experiments.variants.cols.lift")}</Th>
+              {showAttributed && (
+                <Th align="right">{t("experiments.variants.cols.rate")}</Th>
+              )}
             </tr>
           </thead>
           <tbody>
             {variants.map((v) => {
-              const ci = ciGeometry(v.ciLow, v.ciHigh);
+              const rate =
+                showAttributed &&
+                v.attributedConversions !== null &&
+                v.uniqueUsers > 0
+                  ? (v.attributedConversions / v.uniqueUsers) * 100
+                  : null;
               return (
-                <tr key={v.id} className="border-b border-white/[0.04] last:border-b-0">
+                <tr
+                  key={v.variantId}
+                  className="border-b border-white/[0.04] last:border-b-0"
+                >
                   <td className="px-3.5 py-3.5 align-middle">
                     <div className="flex items-center gap-2.5">
                       <span
                         className="size-2.5 flex-shrink-0 rounded-[3px]"
                         style={{ background: variantColor(v.colorToken) }}
                       />
-                      <div>
-                        <div className="font-rv-mono text-[13px] font-medium">
-                          {v.id}
-                          {v.isControl && (
-                            <span className="ml-1.5 font-rv-mono text-[10px] font-normal text-rv-mute-500">
-                              · {t("experiments.variants.control")}
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-0.5 text-[11px] text-rv-mute-500">
-                          {v.description}
-                        </div>
+                      <div className="font-rv-mono text-[13px] font-medium">
+                        {v.variantId}
+                        {v.isControl && (
+                          <span className="ml-1.5 font-rv-mono text-[10px] font-normal text-rv-mute-500">
+                            · {t("experiments.variants.control")}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </td>
-                  <NumCell>{v.users.toLocaleString()}</NumCell>
-                  <NumCell>{v.conversions.toLocaleString()}</NumCell>
+                  <NumCell>{v.exposures.toLocaleString()}</NumCell>
+                  <NumCell>{v.uniqueUsers.toLocaleString()}</NumCell>
                   {showAttributed && (
                     <NumCell>
                       {(v.attributedConversions ?? 0).toLocaleString()}
                     </NumCell>
                   )}
-                  <NumCell>{(v.rate * 100).toFixed(2)}%</NumCell>
-                  <NumCell>${v.arpu.toFixed(2)}</NumCell>
-                  <td className="px-3.5 py-3.5 align-middle">
-                    {v.isControl ? (
-                      <LiftPill value={0}>
-                        — {t("experiments.variants.baseline")}
-                      </LiftPill>
-                    ) : (
-                      <div className="flex items-center gap-2.5">
-                        <LiftPill value={v.lift} />
-                        <CiBar
-                          left={ci.left}
-                          width={ci.width}
-                          zero={ci.zero}
-                          tone={v.lift > 0 ? "up" : "down"}
-                        />
-                      </div>
-                    )}
-                  </td>
+                  {showAttributed && (
+                    <NumCell>{rate === null ? "—" : `${rate.toFixed(2)}%`}</NumCell>
+                  )}
                 </tr>
               );
             })}
@@ -140,40 +122,5 @@ function NumCell({ children }: { children: React.ReactNode }) {
     <td className="px-3.5 py-3.5 text-right align-middle font-rv-mono tabular-nums">
       {children}
     </td>
-  );
-}
-
-type CiBarProps = {
-  left: number;
-  width: number;
-  zero: number;
-  tone: "up" | "down";
-};
-
-/**
- * Confidence interval bar — 1-px axis, 1-px zero marker, a colored
- * range pill, and a 2-px center point. All offsets arrive as percent
- * so the bar scales with the table column width.
- */
-function CiBar({ left, width, zero, tone }: CiBarProps) {
-  return (
-    <div className="relative h-7 w-40">
-      <div className="absolute left-0 right-0 top-1/2 h-px bg-rv-divider" />
-      <div
-        className="absolute bottom-1 top-1 w-px bg-rv-mute-400"
-        style={{ left: `${zero}%` }}
-      />
-      <div
-        className={cn(
-          "absolute top-1/2 -mt-1 h-2 rounded-[2px]",
-          tone === "up" ? "bg-rv-success/70" : "bg-rv-danger/70",
-        )}
-        style={{ left: `${left}%`, width: `${width}%` }}
-      />
-      <div
-        className="absolute top-1/2 -mt-[7px] h-3.5 w-0.5 rounded-[1px] bg-white"
-        style={{ left: `${left + width / 2}%` }}
-      />
-    </div>
   );
 }

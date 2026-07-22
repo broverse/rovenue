@@ -476,6 +476,76 @@ export interface DuplicateExperimentResponse {
 }
 
 // =============================================================
+// Experiment results (live, ClickHouse-backed)
+// =============================================================
+//
+// Wire shape for `/dashboard/experiments/:id/results`. Mirrors
+// `ExperimentResults` from apps/api/src/services/experiment-results.ts
+// (and the analysis types from lib/experiment-stats.ts it composes),
+// so the dashboard doesn't hand-duplicate the shape and can rely on
+// `unwrap<ExperimentResultsResponse>` like every other typed hook.
+
+export type ExperimentConfidenceLabel =
+  | "99%"
+  | "95%"
+  | "90%"
+  | "not significant";
+
+export interface ExperimentConversionAnalysis {
+  controlRate: number;
+  variantRate: number;
+  absoluteLift: number;
+  relativeLift: number;
+  zScore: number;
+  pValue: number;
+  isSignificant: boolean;
+  confidenceLevel: number;
+  confidenceLabel: ExperimentConfidenceLabel;
+}
+
+export interface ExperimentRevenueAnalysis {
+  controlMean: number;
+  variantMean: number;
+  lift: number;
+  tStatistic: number;
+  pValue: number;
+  isSignificant: boolean;
+}
+
+export interface ExperimentSRMResult {
+  chi2: number;
+  df: number;
+  pValue: number;
+  isMismatch: boolean;
+  message: string;
+}
+
+export interface ExperimentResultsVariant {
+  variantId: string;
+  exposures: number;
+  uniqueUsers: number;
+  /** Precisely-attributed conversions (raw_revenue_events.experimentKey/
+   *  variantId) — 0 for non-PAYWALL experiment types, which don't carry
+   *  presentedContext. */
+  attributedConversions: number;
+}
+
+export interface ExperimentResultsResponse {
+  experimentId: string;
+  status: DashboardExperimentStatus;
+  /** Empty when ClickHouse is unconfigured or no exposures were
+   *  recorded yet — never a zero-filled row per configured variant. */
+  variants: ExperimentResultsVariant[];
+  conversion: ExperimentConversionAnalysis | null;
+  revenue: ExperimentRevenueAnalysis | null;
+  srm: ExperimentSRMResult | null;
+  sampleSize: {
+    required: number;
+    reached: boolean;
+  } | null;
+}
+
+// =============================================================
 // Feature flags
 // =============================================================
 //

@@ -2489,9 +2489,13 @@
       "total": "TOTAL"
     },
     "detail": {
-      "comingSoon": "Detailed analytics (variants, funnel, timeline) ship in Phase 3 — once results are aggregated for this experiment they'll appear here.",
       "back": "Back to experiments",
-      "notFound": "Experiment not found, or you don't have access to it."
+      "notFound": "Experiment not found, or you don't have access to it.",
+      "resultsError": "Could not load live results for this experiment. Try refreshing the page.",
+      "noDataTitle": "No results yet",
+      "noDataDescription": "No exposures have been recorded for this experiment yet. Once the SDK starts reporting events (and ClickHouse is configured), variant results will appear here.",
+      "cumulativeUnavailableTitle": "Cumulative trend",
+      "cumulativeUnavailableDescription": "Day-by-day cumulative rate isn't available from live results yet — this card will populate once a time-series endpoint ships."
     },
     "new": {
       "back": "Back to experiments",
@@ -2702,68 +2706,26 @@
     },
     "variants": {
       "title": "Variants",
-      "subtitle": "Metric: {{metric}} · CI shown at 95%",
       "control": "control",
-      "baseline": "baseline",
       "cols": {
         "variant": "Variant",
+        "exposures": "Exposures",
         "users": "Users",
-        "conversions": "Conversions",
         "attributed": "Attributed",
-        "rate": "Rate",
-        "arpu": "ARPU",
-        "lift": "Lift · 95% CI"
+        "rate": "Rate"
       }
-    },
-    "cumulative": {
-      "title": "Cumulative {{metric}}",
-      "subtitle": "Daily cumulative rate per variant — shaded region is 95% CI band"
     },
     "funnel": {
       "title": "Conversion funnel",
       "stages": {
-        "viewed": {
-          "title": "Paywall viewed",
-          "sub": "Sees the onboarding paywall"
+        "exposures": {
+          "title": "Exposures"
         },
-        "cta": {
-          "title": "CTA tapped",
-          "sub": "Tapped \"Start trial\""
+        "uniqueUsers": {
+          "title": "Exposed users"
         },
-        "trial": {
-          "title": "Trial started",
-          "sub": "Entered payment sheet & confirmed"
-        },
-        "paid": {
-          "title": "Trial → paid",
-          "sub": "Converted to paid sub after trial"
-        }
-      }
-    },
-    "timeline": {
-      "title": "Timeline",
-      "daysAgo": "{{days}} days ago",
-      "justNow": "just now",
-      "entries": {
-        "started": {
-          "title": "Experiment started",
-          "sub": "furkan · auto-ramp disabled · initial 100% allocation"
-        },
-        "srm": {
-          "title": "SRM check passed",
-          "sub": "Chi-square p=0.42 · allocation healthy"
-        },
-        "guardrail": {
-          "title": "Guardrail alert: refund rate",
-          "sub": "Variant A +12% refund rate · dismissed, within tolerance"
-        },
-        "sample": {
-          "title": "Sample size target reached",
-          "sub": "9k+ per variant · continuing for seasonality control"
-        },
-        "latest": {
-          "title": "Latest reading",
-          "sub": "Variant B leading at 64% confidence · 80% target"
+        "attributed": {
+          "title": "Attributed conversions"
         }
       }
     },
@@ -2771,17 +2733,20 @@
       "title": "Allocation",
       "traffic": "traffic"
     },
-    "configuration": {
-      "title": "Configuration",
+    "analysis": {
+      "title": "Analysis",
       "metric": "Metric",
-      "owner": "Owner",
-      "allocationKey": "Allocation key",
-      "segments": "Segments",
-      "duration": "Duration",
-      "alpha": "Alpha (α)",
-      "mde": "Min. detectable effect",
+      "conversion": "Conversion lift",
+      "conversionUnavailable": "Needs exactly 2 variants with recorded data",
       "srm": "SRM check",
-      "srmPassed": "passed · p=0.42"
+      "srmPassed": "passed · p={{pValue}}",
+      "srmMismatch": "mismatch · p={{pValue}}",
+      "srmUnavailable": "Not enough data yet",
+      "sampleSize": "Sample size",
+      "sampleSizeProgress": "{{required}} required · {{reached}}",
+      "sampleSizeReached": "reached",
+      "sampleSizeNotReached": "not reached",
+      "sampleSizeUnavailable": "Not available yet"
     },
     "metric": {
       "trialStartRate": {

@@ -2,11 +2,13 @@ import type {
   DashboardExperimentStatus,
   DashboardExperimentType,
   ExperimentListItem,
+  ExperimentResultsResponse,
 } from "@rovenue/shared";
 import type {
   ExperimentGroup,
   ExperimentStatus,
   ExperimentSummary,
+  ResultVariantRow,
   VariantColorToken,
 } from "./types";
 
@@ -140,27 +142,118 @@ export const variantColor = (token: VariantColorToken): string => {
   return "var(--color-rv-mute-500)";
 };
 
-/** CSS color for each timeline tone. */
-export const timelineDotColor = (
-  tone: "primary" | "success" | "warning" | "muted",
-): string => {
-  if (tone === "primary") return "var(--color-rv-accent-500)";
-  if (tone === "success") return "var(--color-rv-success)";
-  if (tone === "warning") return "var(--color-rv-warning)";
-  return "var(--color-rv-mute-400)";
+// =============================================================
+// Live results (/dashboard/experiments/:id/results) → view-model
+// =============================================================
+//
+// The results endpoint degrades to `variants: []` whenever ClickHouse
+// is unconfigured OR the experiment genuinely has zero exposures yet
+// (see apps/api/src/services/experiment-results.ts — the CH query only
+// ever returns a row for a variant that had at least one exposure
+// event). That single fact is what lets the mapping below stay honest:
+// there is no "populate every configured variant, zero-fill the rest"
+// step anywhere, so the UI can never mistake "no data" for "a real 0%
+// result".
+
+const VARIANT_COLOR_CYCLE: ReadonlyArray<VariantColorToken> = [
+  "default",
+  "primary",
+  "violet",
+];
+
+function colorForIndex(i: number): VariantColorToken {
+  return VARIANT_COLOR_CYCLE[i % VARIANT_COLOR_CYCLE.length]!;
+}
+
+/**
+ * Maps the live results payload to per-variant table/funnel rows.
+ * `attributedConversions` is only surfaced when `showAttributed` (the
+ * PAYWALL-gated column from D-12) — other experiment types never
+ * carried that signal, so gating doubles as row-shaping: components
+ * never receive a real-looking 0 for data that was never tracked.
+ */
+export function mapResultsVariants(
+  results: Pick<ExperimentResultsResponse, "variants"> | null | undefined,
+  showAttributed: boolean,
+): ResultVariantRow[] {
+  const rows = results?.variants ?? [];
+  return rows.map((v, i) => ({
+    variantId: v.variantId,
+    exposures: v.exposures,
+    uniqueUsers: v.uniqueUsers,
+    attributedConversions: showAttributed ? v.attributedConversions : null,
+    colorToken: colorForIndex(i),
+    // Best-effort: the wire type carries no explicit "is control" flag,
+    // but `control` is the conventional id (see new-experiment's
+    // variantId placeholder) — purely cosmetic (badge suffix), never
+    // used to pick which numbers to show.
+    isControl: v.variantId === "control",
+  }));
+}
+
+/**
+ * True once the results endpoint has at least one variant row — the
+ * "no exposures yet" (or "ClickHouse unconfigured") case is an empty
+ * array, never zero-value rows, so this is the single honest gate for
+ * every live card on the detail panel.
+ */
+export function hasLiveResultsData(
+  results: Pick<ExperimentResultsResponse, "variants"> | null | undefined,
+): boolean {
+  return (results?.variants.length ?? 0) > 0;
+}
+
+export type FunnelSeriesStage = {
+  key: "exposures" | "uniqueUsers" | "attributed";
+  labelKey: string;
+  values: ReadonlyArray<{
+    variantId: string;
+    value: number;
+    colorToken: VariantColorToken;
+  }>;
 };
 
 /**
- * Maps a signed lift to a -12..+12 percent CI bar geometry. Returns the
- * left offset, width, and zero-line position as percentages so the bar
- * can render as plain `style={{ left, width }}`.
+ * Builds the funnel's stages from live variant rows: exposures →
+ * exposed users always, plus an attributed-conversions stage only when
+ * `showAttributed` — there is no viewed/CTA/trial per-step breakdown in
+ * the results payload, so the funnel reflects exactly the three counts
+ * the API actually returns rather than inventing intermediate steps.
  */
-export const ciGeometry = (lo: number, hi: number) => {
-  const min = -12;
-  const max = 12;
-  const clamp = (v: number) => Math.min(max, Math.max(min, v));
-  const scale = (v: number) => ((clamp(v) - min) / (max - min)) * 100;
-  const left = scale(lo);
-  const right = scale(hi);
-  return { left, width: right - left, zero: scale(0) };
-};
+export function buildFunnelStages(
+  variants: ReadonlyArray<ResultVariantRow>,
+  showAttributed: boolean,
+): FunnelSeriesStage[] {
+  const stages: FunnelSeriesStage[] = [
+    {
+      key: "exposures",
+      labelKey: "experiments.funnel.stages.exposures.title",
+      values: variants.map((v) => ({
+        variantId: v.variantId,
+        value: v.exposures,
+        colorToken: v.colorToken,
+      })),
+    },
+    {
+      key: "uniqueUsers",
+      labelKey: "experiments.funnel.stages.uniqueUsers.title",
+      values: variants.map((v) => ({
+        variantId: v.variantId,
+        value: v.uniqueUsers,
+        colorToken: v.colorToken,
+      })),
+    },
+  ];
+  if (showAttributed) {
+    stages.push({
+      key: "attributed",
+      labelKey: "experiments.funnel.stages.attributed.title",
+      values: variants.map((v) => ({
+        variantId: v.variantId,
+        value: v.attributedConversions ?? 0,
+        colorToken: v.colorToken,
+      })),
+    });
+  }
+  return stages;
+}

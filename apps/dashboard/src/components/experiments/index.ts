@@ -1,32 +1,27 @@
 export { AllocationCard } from "./allocation-card";
-export { ConfigurationCard } from "./configuration-card";
 export { ConversionFunnel } from "./conversion-funnel";
-export { CumulativeChart } from "./cumulative-chart";
+export { ExperimentAnalysisCard } from "./experiment-analysis-card";
 export { ExperimentDetailPanel } from "./experiment-detail-panel";
 export { ExperimentHero } from "./experiment-hero";
 export { ExperimentStatusChip } from "./experiment-status-chip";
 export { ExperimentStatusDot } from "./experiment-status-dot";
-export { ExperimentTimeline } from "./experiment-timeline";
 export { ExperimentsList } from "./experiments-list";
 export { LiftPill } from "./lift-pill";
-export { mapApiExperiment } from "./format";
-export { VariantsTable } from "./variants-table";
 export {
-  CUMULATIVE_TREND,
-  EXPERIMENTS,
-  EXPERIMENTS_KPI,
-  EXPERIMENT_DETAILS,
-  SCOPE_COUNTS,
-} from "./mock-data";
+  buildFunnelStages,
+  hasLiveResultsData,
+  isPaywallExperimentGroup,
+  mapApiExperiment,
+  mapResultsVariants,
+} from "./format";
+export type { FunnelSeriesStage } from "./format";
+export { VariantsTable } from "./variants-table";
 export type {
-  CumulativePoint,
-  ExperimentDetail,
+  AllocationSlice,
   ExperimentGroup,
   ExperimentScope,
   ExperimentStatus,
   ExperimentSummary,
-  FunnelStage,
-  TimelineEntry,
-  Variant,
+  ResultVariantRow,
   VariantColorToken,
 } from "./types";
