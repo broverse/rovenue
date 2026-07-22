@@ -196,7 +196,7 @@ Layout mirrors funnel-builder's shell: left `layer-tree` (indented node rows, ty
 
 ## Verification (after all tasks)
 
-- [ ] `pnpm build --force` — all packages green (renderer joins the graph)
-- [ ] `pnpm --filter @rovenue/shared test` + `--filter @rovenue/paywall-renderer test` + dashboard vitest + api new suites
-- [ ] `cargo test -p librovenue` unchanged-green (no core changes expected — placements wire additions must not break serde decoding; the existing placements_test fixtures prove it)
-- [ ] Builder smoke: create paywall → open builder → apply preset → edit text in two locales → save → placement resolve returns builderConfig (manual, or documented as headless-blocked)
+- [x] `pnpm build --force` — 9/9 green incl. the new renderer package (2026-07-22)
+- [x] `pnpm --filter @rovenue/shared test` (238/238) + `--filter @rovenue/paywall-renderer test` (22/22) + dashboard paywall-builder suites (139 across VM/tree-ops/UI helpers) + api new suites (publish gate 9/9, public funnels 14/14, paywalls/placements 27/27)
+- [x] `cargo test -p librovenue` unchanged-green — core untouched, placement wire additions are serde-tolerated
+- [ ] Builder smoke: headless-blocked (no browser in this environment) — manual pass recommended: create paywall → Open builder → apply preset → edit text in two locales → save → placement resolve returns builderConfig
