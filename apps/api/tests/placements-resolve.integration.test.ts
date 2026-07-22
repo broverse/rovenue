@@ -69,6 +69,7 @@ const { dbMock, drizzleMock } = vi.hoisted(() => {
     },
     paywallRepo: {
       findPaywallById: vi.fn(async () => null),
+      findPaywallsByIds: vi.fn(async () => []),
     },
     audienceRepo: {
       findByIds: vi.fn(async () => []),
@@ -319,9 +320,11 @@ describe("GET /v1/placements/:identifier", () => {
         { id: "var_b", weight: 50, value: { paywallId: "pw_b" } },
       ],
     } as any);
-    vi.mocked(drizzleMock.paywallRepo.findPaywallById).mockImplementation(
-      async (_db, _projectId, id) =>
-        makePaywall({ id, identifier: id }) as any,
+    // The route batches variant paywall lookups (findPaywallsByIds), not
+    // per-variant findPaywallById.
+    vi.mocked(drizzleMock.paywallRepo.findPaywallsByIds).mockImplementation(
+      async (_db, _projectId, ids) =>
+        (ids as string[]).map((id) => makePaywall({ id, identifier: id })) as any,
     );
     vi.mocked(drizzleMock.offeringRepo.findOfferingById).mockResolvedValue(
       makeOffering() as any,
