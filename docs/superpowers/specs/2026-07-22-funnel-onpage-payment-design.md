@@ -168,7 +168,12 @@ and emit `funnel.session.paid` and `funnel.claim_token.issued`. Returns the
 same `{ token, deep_link_url, universal_link_url }` shape the existing
 claim-token endpoint returns.
 
-Calling it twice returns the same token rather than minting a second one.
+Calling it twice mints no second token. It cannot return the first one
+either: only the token's hash is stored, so the plaintext exists exactly once,
+in the first response. A repeat call answers `200` with
+`{ already_issued: true }` and no token, and the client is expected to have
+kept what it was given. A client that lost it recovers through the email magic
+link, which is the same path a user who never came back uses.
 
 ### Webhook backstop
 
@@ -263,7 +268,7 @@ belongs with whoever owns the funnel analytics surface.
 | Package identifier not in the paywall's offering | 400 — the client cannot name an arbitrary price |
 | Card declined / authentication failed | Stay on the page, surface Stripe's own message, allow retry against the same intent |
 | `confirm` called before the intent succeeded | 409, session unchanged |
-| `confirm` called twice | Same token returned, no second token minted |
+| `confirm` called twice | `200 { already_issued: true }` with no token; no second token minted. The plaintext only ever exists in the first response — only its hash is stored |
 | Tab closed after paying | Webhook performs the same transition |
 | Session already `paid` | `payment-intent` 409s; `confirm` returns the existing token |
 
