@@ -101,6 +101,26 @@ const world = vi.hoisted(() => ({
   },
 }));
 
+/** The subscribers table, by id. `findSubscriberById` reads THIS rather
+ *  than a single canned row, because the route now reads two different
+ *  subscribers through it — the source and the claimer — and a test that
+ *  answers the same row to both cannot tell the two reads apart. Tests
+ *  that want a different shape mutate the map. */
+const subscriberRows = vi.hoisted(
+  () =>
+    new Map<
+      string,
+      {
+        id: string;
+        projectId: string;
+        rovenueId: string;
+        appUserId?: string | null;
+        deletedAt: Date | null;
+        mergedInto?: string | null;
+      }
+    >(),
+);
+
 const transaction = vi.hoisted(() =>
   vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
     const result = await fn(txHandle);
@@ -254,13 +274,28 @@ describe("POST /v1/subscribers/claim-funnel-token — convergence", () => {
       world.timeline.push("lock");
     });
     setPurchaseSubscriber.mockReset().mockResolvedValue(undefined);
-    findSubscriberById.mockReset().mockResolvedValue({
+    subscriberRows.clear();
+    subscriberRows.set("sub_synthetic", {
       id: "sub_synthetic",
       projectId: "proj_1",
       rovenueId: "stripe:cus_1",
       appUserId: "stripe:cus_1",
       deletedAt: null,
+      mergedInto: null,
     });
+    subscriberRows.set("sub_installed", {
+      id: "sub_installed",
+      projectId: "proj_1",
+      rovenueId: "a1",
+      appUserId: null,
+      deletedAt: null,
+      mergedInto: null,
+    });
+    findSubscriberById
+      .mockReset()
+      .mockImplementation(
+        async (_handle: unknown, id: string) => subscriberRows.get(id) ?? null,
+      );
     findPurchaseBySession.mockReset().mockResolvedValue({
       id: "pur_1",
       projectId: "proj_1",
@@ -397,7 +432,7 @@ describe("POST /v1/subscribers/claim-funnel-token — convergence", () => {
   // claim back and keeps the token reclaimable.
 
   it("fails the claim rather than merging a subscriber from another project", async () => {
-    findSubscriberById.mockResolvedValue({
+    subscriberRows.set("sub_synthetic", {
       id: "sub_synthetic",
       projectId: "proj_OTHER",
       rovenueId: "stripe:cus_1",
@@ -431,7 +466,7 @@ describe("POST /v1/subscribers/claim-funnel-token — convergence", () => {
   });
 
   it("fails the claim when the purchase points at a subscriber that is gone", async () => {
-    findSubscriberById.mockResolvedValue(null);
+    subscriberRows.delete("sub_synthetic");
 
     const res = await claim();
 
@@ -446,7 +481,7 @@ describe("POST /v1/subscribers/claim-funnel-token — convergence", () => {
     // walks — while moving nothing, since its assets already left. And
     // the buyer's purchase is now on a third party's row, which is not
     // something to answer 200 to.
-    findSubscriberById.mockResolvedValue({
+    subscriberRows.set("sub_synthetic", {
       id: "sub_synthetic",
       projectId: "proj_1",
       rovenueId: "stripe:cus_1",
@@ -465,7 +500,7 @@ describe("POST /v1/subscribers/claim-funnel-token — convergence", () => {
     // The one benign shape of the same check: an earlier claim already
     // put these assets exactly where this one wants them. That is
     // idempotency, and it must answer 200 with the real entitlements.
-    findSubscriberById.mockResolvedValue({
+    subscriberRows.set("sub_synthetic", {
       id: "sub_synthetic",
       projectId: "proj_1",
       rovenueId: "stripe:cus_1",
@@ -481,6 +516,119 @@ describe("POST /v1/subscribers/claim-funnel-token — convergence", () => {
     expect(body.data.entitlements).toEqual(["pro"]);
     expect(reassignAllAssets).not.toHaveBeenCalled();
     expect(safeSyncAccessAfterMerge).not.toHaveBeenCalled();
+  });
+
+  it("still repoints the purchase when the subscriber was already merged into this claimer", async () => {
+    // Idempotent for the assets does not mean idempotent for this
+    // column: whatever merged the synthetic away — a transferSubscriber
+    // or an identify — moved the access rows without touching
+    // `funnel_purchases.subscriber_id`, so it is still on the row that
+    // merge retired. This branch returns before the repoint below it, so
+    // it has to do its own.
+    subscriberRows.set("sub_synthetic", {
+      id: "sub_synthetic",
+      projectId: "proj_1",
+      rovenueId: "stripe:cus_1",
+      deletedAt: new Date(),
+      mergedInto: "sub_installed",
+    });
+
+    const res = await claim();
+
+    expect(res.status).toBe(200);
+    expect(setPurchaseSubscriber).toHaveBeenCalledWith(
+      txHandle,
+      "pur_1",
+      "sub_installed",
+    );
+  });
+
+  // =============================================================
+  // The claimer, judged post-lock
+  // =============================================================
+  //
+  // The claimer is resolved at route level, on the pooled connection,
+  // before the claim transaction opens. A concurrent identify or
+  // transferSubscriber that takes these same advisory locks first can
+  // merge it away inside that window. Every guard below therefore has to
+  // read it again UNDER the lock — the source already does, and the
+  // claimer is the other half of the same pair.
+
+  it("fails the claim when the claimer was merged away before the lock", async () => {
+    // The race, precisely: the route resolved a live claimer, and by the
+    // time the lock is granted a concurrent merge has retired it. Using
+    // the pre-lock row moves every asset onto a soft-deleted subscriber
+    // and repoints the purchase at it, while
+    // `resolveSubscriberByRovenueId` sends the SDK to the survivor — the
+    // buyer ends up with nothing. This test passes ONLY if the claimer
+    // is re-read after `advisoryXactLock2`.
+    advisoryXactLock2.mockImplementation(async () => {
+      world.timeline.push("lock");
+      subscriberRows.set("sub_installed", {
+        id: "sub_installed",
+        projectId: "proj_1",
+        rovenueId: "a1",
+        deletedAt: new Date(),
+        mergedInto: "sub_survivor",
+      });
+    });
+
+    const res = await claim();
+
+    expect(res.status).toBe(500);
+    expect(reassignAllAssets).not.toHaveBeenCalled();
+    expect(setPurchaseSubscriber).not.toHaveBeenCalled();
+    // Nothing was spent: the token stays reclaimable, and the retry
+    // resolves the survivor and merges onto that instead.
+    expect(setSessionState).not.toHaveBeenCalled();
+    expect(outboxInsert).not.toHaveBeenCalled();
+  });
+
+  it("fails the claim when the claimer is gone by the time the lock is held", async () => {
+    advisoryXactLock2.mockImplementation(async () => {
+      world.timeline.push("lock");
+      subscriberRows.delete("sub_installed");
+    });
+
+    const res = await claim();
+
+    expect(res.status).toBe(500);
+    expect(reassignAllAssets).not.toHaveBeenCalled();
+    expect(setSessionState).not.toHaveBeenCalled();
+  });
+
+  it("fails the claim when the claimer belongs to another project", async () => {
+    // Same exposure as the source-side check: `reassignAllAssets` is
+    // keyed on subscriber id alone and would happily move this project's
+    // purchase onto another project's row.
+    subscriberRows.set("sub_installed", {
+      id: "sub_installed",
+      projectId: "proj_OTHER",
+      rovenueId: "a1",
+      deletedAt: null,
+    });
+
+    const res = await claim();
+
+    expect(res.status).toBe(500);
+    expect(reassignAllAssets).not.toHaveBeenCalled();
+    expect(setPurchaseSubscriber).not.toHaveBeenCalled();
+    expect(setSessionState).not.toHaveBeenCalled();
+  });
+
+  it("reads the claimer under the lock, not before it", async () => {
+    // The ordering the guards above depend on: a read taken before
+    // `advisoryXactLock2` returns is a read of state a concurrent merge
+    // can still change.
+    await claim();
+
+    const claimerRead = findSubscriberById.mock.calls.findIndex(
+      (call) => call[1] === "sub_installed",
+    );
+    expect(claimerRead).toBeGreaterThanOrEqual(0);
+    expect(
+      findSubscriberById.mock.invocationCallOrder[claimerRead]!,
+    ).toBeGreaterThan(advisoryXactLock2.mock.invocationCallOrder[0]!);
   });
 
   // =============================================================

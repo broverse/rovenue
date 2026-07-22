@@ -203,15 +203,61 @@ async function mergeFunnelPurchaseSubscriber(
       `Funnel purchase for session ${sessionId} points at missing subscriber ${purchase.subscriberId}`,
     );
   }
-  if (source.projectId !== projectId || claimer.projectId !== projectId) {
+  // The claimer gets the same treatment, for the same reason. It was
+  // resolved at route level, on the pooled connection, before this
+  // transaction even opened — a concurrent identify/transferSubscriber
+  // holding these locks first can have merged it away in the meantime.
+  // Moving every asset onto a row that is now soft-deleted, and
+  // repointing the purchase at it, would leave the buyer with nothing:
+  // `resolveSubscriberByRovenueId` sends their SDK to the survivor,
+  // which is not where any of it landed. Re-read by id under the lock so
+  // the guards below — and the merge, the purchase repoint and the
+  // response that follow — judge the row as it actually is now.
+  const target = await drizzle.subscriberRepo.findSubscriberById(
+    tx,
+    claimer.id,
+  );
+  if (!target) {
+    log.error("the claiming subscriber vanished before the merge", {
+      projectId,
+      sessionId,
+      claimerId: claimer.id,
+    });
+    throw new Error(
+      `Claiming subscriber ${claimer.id} no longer exists for session ${sessionId}`,
+    );
+  }
+  if (
+    source.projectId !== projectId ||
+    claimer.projectId !== projectId ||
+    target.projectId !== projectId
+  ) {
     log.error("refusing a cross-project subscriber merge at claim", {
       projectId,
       sessionId,
       sourceProjectId: source.projectId,
       claimerProjectId: claimer.projectId,
+      targetProjectId: target.projectId,
     });
     throw new Error(
       `Refusing a cross-project subscriber merge at claim for session ${sessionId}`,
+    );
+  }
+  // Retired between the route's read and this lock. Unlike the source
+  // side there is no benign shape of this: whichever row the concurrent
+  // merge made the survivor, it is not the one this claim is about to
+  // write to, and the SDK will be resolved to that survivor on its next
+  // read. Throwing rolls the claim back and leaves the token reclaimable,
+  // so the retry resolves the survivor and merges onto it instead.
+  if (target.deletedAt) {
+    log.error("the claiming subscriber was merged away before the merge", {
+      projectId,
+      sessionId,
+      claimerId: target.id,
+      mergedInto: target.mergedInto,
+    });
+    throw new Error(
+      `Claiming subscriber ${target.id} was merged into ${target.mergedInto ?? "nothing"} before the claim for session ${sessionId} could move anything`,
     );
   }
   // Already merged away. Its assets left with the earlier merge, so
@@ -224,7 +270,13 @@ async function mergeFunnelPurchaseSubscriber(
   // not corruption. Merged into anyone else means the buyer's purchase
   // is on a third party's row and answering 200 would hide that.
   if (source.deletedAt) {
-    if (source.mergedInto === claimer.id) {
+    if (source.mergedInto === target.id) {
+      // The assets are already here, but the purchase row may not be:
+      // the earlier merge could have been a transferSubscriber/identify
+      // that moved the access rows without knowing this column exists.
+      // Repointing it is idempotent and keeps every funnel report that
+      // joins `funnel_purchases.subscriber_id` off the retired row.
+      await drizzle.funnelPurchaseRepo.setSubscriber(tx, purchase.id, target.id);
       log.info("funnel purchase subscriber already merged into this claimer", {
         projectId,
         sessionId,
@@ -247,18 +299,18 @@ async function mergeFunnelPurchaseSubscriber(
     tx,
     projectId,
     { id: source.id, label: source.appUserId ?? source.rovenueId },
-    { id: claimer.id, label: "funnel claim" },
+    { id: target.id, label: "funnel claim" },
   );
   // The merge soft-deletes `source`; leaving this column on it would
   // point every funnel report that joins `funnel_purchases.subscriber_id`
   // at a retired row. Same transaction as the merge, so the two cannot
   // disagree.
-  await drizzle.funnelPurchaseRepo.setSubscriber(tx, purchase.id, claimer.id);
+  await drizzle.funnelPurchaseRepo.setSubscriber(tx, purchase.id, target.id);
   log.info("merged funnel purchase subscriber into the claiming subscriber", {
     projectId,
     sessionId,
     from: source.id,
-    to: claimer.id,
+    to: target.id,
   });
   return true;
 }
