@@ -9,6 +9,7 @@ import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
 import { packagesSchema } from "../../lib/offering-hydration";
+import { resolvePlacement, type ResolvedPlacementData } from "../../lib/placement-resolution";
 import { ok } from "../../lib/response";
 
 // =============================================================
@@ -233,6 +234,48 @@ export const paywallsDashboardRoute = new Hono()
 
     const rows = await drizzle.paywallRepo.listPaywalls(drizzle.db, projectId);
     return c.json(ok({ paywalls: rows }));
+  })
+  // ===========================================================
+  // Bundled fallback file export (spec D1) — every ACTIVE placement,
+  // resolved anonymously (attributes = {}, no locale — the honest
+  // offline approximation a first-launch SDK with no network/cache
+  // would fall back to). Read-level access, mirroring the GET list
+  // route above. NOTE: registered before `/:id` so the literal
+  // "fallback-export" segment can never be swallowed by that param
+  // route.
+  // ===========================================================
+  .get("/fallback-export", async (c) => {
+    const projectId = c.req.param("projectId");
+    if (!projectId) {
+      throw new HTTPException(400, { message: "Missing projectId" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+    const allPlacements = await drizzle.placementRepo.listPlacements(drizzle.db, projectId);
+
+    const placementsMap: Record<string, ResolvedPlacementData> = {};
+    for (const placement of allPlacements) {
+      if (!placement.isActive) continue;
+      placementsMap[placement.identifier] = await resolvePlacement(
+        projectId,
+        placement,
+        {},
+      );
+    }
+
+    const exportBody = {
+      formatVersion: 1,
+      generatedAt: Date.now(),
+      projectId,
+      placements: placementsMap,
+    };
+
+    c.header(
+      "Content-Disposition",
+      'attachment; filename="rovenue-fallback.json"',
+    );
+    return c.json(exportBody);
   })
   .post("/", validate("json", createBodySchema), async (c) => {
     const projectId = c.req.param("projectId");

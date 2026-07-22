@@ -96,14 +96,16 @@ export const eventEnvelopeSchema = z
   })
   .strict()
   .superRefine((body, ctx) => {
-    // A paywall_view without its attribution payload would flow to the
+    // A paywall_* event without its attribution payload would flow to the
     // ClickHouse pipeline as an all-empty ('','') row — reject it up-front.
     // Rovenue SDKs always attach paywallContext (or skip the event entirely).
-    if (body.eventType === "paywall_view" && !body.paywallContext) {
+    // Covers paywall_view AND paywall_close (and any future paywall_*
+    // lifecycle event) — see deriveAggregateType below for the same prefix.
+    if (body.eventType.startsWith("paywall_") && !body.paywallContext) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["paywallContext"],
-        message: "paywallContext is required for paywall_view events",
+        message: "paywallContext is required for paywall_* events",
       });
     }
   });
@@ -117,7 +119,7 @@ export type EventEnvelopeBody = z.infer<typeof eventEnvelopeSchema>;
 function deriveAggregateType(
   eventType: string,
 ): "REVENUE_EVENT" | "BILLING" | "PAYWALL_EVENT" {
-  if (eventType === "paywall_view") return "PAYWALL_EVENT";
+  if (eventType.startsWith("paywall_")) return "PAYWALL_EVENT";
   return eventType.startsWith("revenue.") ? "REVENUE_EVENT" : "BILLING";
 }
 
@@ -137,15 +139,16 @@ export const eventsRoute = new Hono()
       const aggregateType = deriveAggregateType(body.eventType);
       const id = createId();
 
-      // paywall_view ONLY: resolve the SDK wire id (rovenueId) to the owned
-      // subscriber.id BEFORE the outbox write, so the ClickHouse paywall
-      // rows land in the same identity space as raw_revenue_events (which
-      // is keyed by subscriber.id everywhere) — otherwise the placement
-      // purchases/CR join can never match. Deliberately NOT done for other
-      // event types: their payloads flow raw into the integrations fan-out,
-      // which expects the wire identity untouched.
+      // paywall_* events ONLY (paywall_view, paywall_close, ...): resolve the
+      // SDK wire id (rovenueId) to the owned subscriber.id BEFORE the outbox
+      // write, so the ClickHouse paywall rows land in the same identity
+      // space as raw_revenue_events (which is keyed by subscriber.id
+      // everywhere) — otherwise the placement purchases/CR join can never
+      // match. Deliberately NOT done for other event types: their payloads
+      // flow raw into the integrations fan-out, which expects the wire
+      // identity untouched.
       let payload: Record<string, unknown> = body as Record<string, unknown>;
-      if (body.eventType === "paywall_view" && body.subscriberId) {
+      if (body.eventType.startsWith("paywall_") && body.subscriberId) {
         const subscriber = await drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
           projectId: project.id,
           rovenueId: body.subscriberId,

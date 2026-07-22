@@ -334,6 +334,93 @@ describe("POST /v1/events — paywall_view", () => {
 });
 
 // =============================================================
+// 2b. paywall_close → PAYWALL_EVENT outbox row (spec D4: the
+// `paywall_` prefix routing/superRefine/subscriber-resolution
+// broaden identically for paywall_view and paywall_close).
+// =============================================================
+
+describe("POST /v1/events — paywall_close", () => {
+  it("lands in the outbox with aggregateType PAYWALL_EVENT, the paywallContext intact, and the subscriber RESOLVED to the owned id", async () => {
+    const app = buildEventsApp();
+    const subscriberId = `sub_${createId().slice(0, 8)}`;
+    const body = {
+      eventType: "paywall_close",
+      occurredAt: new Date().toISOString(),
+      subscriberId,
+      paywallContext: {
+        paywallId: "pw_default",
+        placementId: "plc_onboarding",
+        placementRevision: 1,
+        variantId: "var_treatment",
+        experimentKey: "exp_key_1",
+      },
+    };
+
+    const res = await app.request("/v1/events", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${PUBLIC_KEY}`,
+      },
+      body: JSON.stringify(body),
+    });
+    expect(res.status).toBe(202);
+
+    const rows = await testDb
+      .select()
+      .from(schema.outboxEvents)
+      .where(
+        and(
+          eq(schema.outboxEvents.aggregateId, PROJECT_ID),
+          eq(schema.outboxEvents.eventType, "paywall_close"),
+        ),
+      )
+      .orderBy(desc(schema.outboxEvents.createdAt))
+      .limit(5);
+
+    // Same identity-resolution requirement as paywall_view: the wire
+    // rovenueId must be resolved to the owned subscriber.id BEFORE the
+    // outbox write so CH paywall rows share raw_revenue_events' identity
+    // space.
+    const owned = await drizzle.subscriberRepo.resolveSubscriberByRovenueIdOrLegacy(
+      testDb,
+      { projectId: PROJECT_ID, key: subscriberId },
+    );
+    expect(owned).toBeTruthy();
+    expect(owned!.id).not.toBe(subscriberId);
+
+    const row = rows.find(
+      (r) => (r.payload as Record<string, unknown>).subscriberId === owned!.id,
+    );
+    expect(row).toBeDefined();
+    expect(row!.aggregateType).toBe("PAYWALL_EVENT");
+
+    const payload = row!.payload as Record<string, unknown>;
+    expect(payload.paywallContext).toEqual(body.paywallContext);
+    // No row may carry the unresolved wire id.
+    expect(
+      rows.some((r) => (r.payload as Record<string, unknown>).subscriberId === subscriberId),
+    ).toBe(false);
+  });
+
+  it("rejects a paywall_close with NO paywallContext at all → 400 (superRefine)", async () => {
+    const app = buildEventsApp();
+    const res = await app.request("/v1/events", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${PUBLIC_KEY}`,
+      },
+      body: JSON.stringify({
+        eventType: "paywall_close",
+        occurredAt: new Date().toISOString(),
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+// =============================================================
 // 3. Apple receipt presentedContext → purchase row + revenue metadata
 // =============================================================
 
