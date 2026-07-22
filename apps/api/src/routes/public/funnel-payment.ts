@@ -10,6 +10,7 @@ import { LockUnavailableError, withLock } from "../../lib/redis-lock";
 import { chargesEnabled, requireConnectedStripe } from "../../lib/stripe-platform";
 import { resolvePricesForPackages } from "../../services/stripe/price-resolver";
 import { hasPaidOrAttachedACard } from "../../services/stripe/payment-settled";
+import { FUNNEL_METADATA_KEY } from "../../services/stripe/stripe-types";
 import { buildClaimLinks } from "../../services/funnel/claim-links";
 import { completeFunnelPurchase } from "../../services/funnel/complete-purchase";
 import { hashEmail } from "../../services/funnel/token";
@@ -480,6 +481,68 @@ async function isSettled(
   return false;
 }
 
+/**
+ * Mark the subscription's pending SetupIntent as ours.
+ *
+ * Stripe creates this object, not us, so it arrives carrying nothing
+ * that identifies it: a SetupIntent has `customer`, `payment_method` and
+ * `metadata`, and no pointer whatsoever to the subscription whose
+ * `pending_setup_intent` it is. The Connect webhook receives
+ * `setup_intent.succeeded` for every SetupIntent on the connected
+ * account — including ones the account owner creates for their own
+ * flows — and the only honest way to tell those apart from a funnel
+ * trial's card is a mark we put there ourselves. Stamping it here is
+ * what lets that handler act on exactly the intents it owns and ignore
+ * every other one, rather than inferring ownership from a shared
+ * customer and writing a payment method onto a subscription that is none
+ * of our business.
+ *
+ * The subscription id rides along because the handler needs to know
+ * WHICH subscription to write the card onto, and because a visitor who
+ * changes package leaves a superseded intent live for a moment — the id
+ * is what tells the handler this intent is about the attempt the row
+ * still records.
+ *
+ * Best-effort by design. A failure here costs the durability of the
+ * settlement signal, which is exactly the state everything worked in
+ * before this existed (`/confirm` reads `pending_setup_intent`, and the
+ * conversion invoice writes `default_payment_method` eventually) — so it
+ * must not cost the visitor their payment, which is already live on
+ * Stripe by this point and cannot be un-created cheaply.
+ */
+async function stampSetupIntent(
+  account: AccountScopedStripe,
+  setupIntentId: string | undefined,
+  sessionId: string,
+  subscriptionId: string,
+  metadata: Record<string, string>,
+): Promise<void> {
+  if (!setupIntentId) {
+    // The expand did not come back as an object. Nothing to stamp, and
+    // nothing else on this path depends on it.
+    log.warn("subscription's pending setup intent came back without an id", {
+      sessionId,
+      subscriptionId,
+    });
+    return;
+  }
+  try {
+    await account.setupIntents.update(setupIntentId, {
+      metadata: {
+        ...metadata,
+        [FUNNEL_METADATA_KEY.SUBSCRIPTION_ID]: subscriptionId,
+      },
+    });
+  } catch (err) {
+    log.error("could not stamp the funnel setup intent; the webhook will not be able to persist this card", {
+      sessionId,
+      subscriptionId,
+      setupIntentId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 export const funnelPaymentRoute = new Hono()
   .post(
   "/funnel-sessions/:sessionId/payment-intent",
@@ -604,7 +667,7 @@ export const funnelPaymentRoute = new Hono()
       }
 
       const metadata = {
-        rovenue_funnel_session_id: sid,
+        [FUNNEL_METADATA_KEY.SESSION_ID]: sid,
         rovenue_project_id: session.projectId,
         rovenue_funnel_id: session.funnelId,
         rovenue_presented_context: JSON.stringify(context.presentedContext),
@@ -634,13 +697,36 @@ export const funnelPaymentRoute = new Hono()
           // trial's first payment is weeks away, so `/confirm` also reads
           // the setup intent — see `isSettled` and payment-settled.ts.
           payment_settings: { save_default_payment_method: "on_subscription" },
+          // `trial_settings.end_behavior.missing_payment_method` is left
+          // at Stripe's default (`create_invoice`) deliberately, and the
+          // durable `default_payment_method` write added by
+          // `setup_intent.succeeded` does NOT make `cancel` safe.
+          //
+          // `cancel` would be right if "no default payment method at
+          // trial end" meant "this visitor never entered a card". It now
+          // usually does — but the write that makes it so is best-effort
+          // in three independent ways: the operator's Connect endpoint
+          // must have `setup_intent.succeeded` selected (checked at boot,
+          // and the check can only warn), the stamp below must have
+          // landed, and the webhook's `subscriptions.update` must have
+          // succeeded. Each failure produces exactly the state `cancel`
+          // reads as "never paid", for a buyer holding a confirmed card.
+          //
+          // The two outcomes are not symmetric. `create_invoice` on a
+          // trial nobody funded produces an unpaid invoice on the account
+          // owner's Stripe: visible, dunned, cancellable by hand.
+          // `cancel` on a buyer whose card we simply failed to record
+          // destroys a live subscription irreversibly, on someone else's
+          // Stripe account, weeks after the funnel could still explain
+          // it. Rovenue does not get to make that trade for the account
+          // owner on a signal it writes best-effort.
           ...(price.trialDays ? { trial_period_days: price.trialDays } : {}),
           expand: ["latest_invoice.payment_intent", "pending_setup_intent"],
           metadata,
         });
         stripeSubscriptionId = subscription.id;
         const setup = subscription.pending_setup_intent as
-          | { client_secret?: string | null }
+          | { id?: string; client_secret?: string | null }
           | null;
         const invoice = subscription.latest_invoice as
           | { payment_intent?: { id?: string; client_secret?: string | null } | null }
@@ -649,6 +735,7 @@ export const funnelPaymentRoute = new Hono()
           // A trial captures nothing now — the card is only stored.
           clientSecret = setup.client_secret;
           mode = "setup";
+          await stampSetupIntent(account, setup.id, sid, subscription.id, metadata);
         } else {
           clientSecret = invoice?.payment_intent?.client_secret ?? null;
           stripePaymentIntentId = invoice?.payment_intent?.id ?? null;

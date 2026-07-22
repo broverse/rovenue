@@ -69,7 +69,14 @@ const subscriptionsCreate = vi.hoisted(() =>
     if (params.trial_period_days) {
       return {
         id: "sub_trial_1",
-        pending_setup_intent: { client_secret: "seti_secret" },
+        // The id matters as much as the secret: it is what the route
+        // stamps its metadata onto, and the stamp is the only link the
+        // webhook has back from a succeeded SetupIntent to this
+        // subscription.
+        pending_setup_intent: {
+          id: "seti_trial_1",
+          client_secret: "seti_secret",
+        },
         latest_invoice: null,
       };
     }
@@ -86,6 +93,9 @@ const paymentIntentsCreate = vi.hoisted(() =>
   vi.fn(async () => ({ id: "pi_2", client_secret: "pi_secret_2" })),
 );
 const customersUpdate = vi.hoisted(() => vi.fn(async () => ({ id: "cus_existing" })));
+const setupIntentsUpdate = vi.hoisted(() =>
+  vi.fn(async () => ({ id: "seti_trial_1" })),
+);
 const subscriptionsCancel = vi.hoisted(() => vi.fn(async () => ({ id: "sub_old" })));
 const paymentIntentsCancel = vi.hoisted(() => vi.fn(async () => ({ id: "pi_old" })));
 // Nothing is cancelled unmeasured any more: the route retrieves first and
@@ -111,6 +121,7 @@ const requireConnectedStripe = vi.hoisted(() =>
         cancel: paymentIntentsCancel,
         retrieve: paymentIntentsRetrieve,
       },
+      setupIntents: { update: setupIntentsUpdate },
     },
     accountId: "acct_1",
     livemode: false,
@@ -328,6 +339,43 @@ describe("POST /public/funnel-sessions/:sessionId/payment-intent", () => {
       expect.objectContaining({ trial_period_days: 7 }),
     );
     expect(body.data.mode).toBe("setup");
+  });
+
+  // The SetupIntent is created by Stripe, not by us, and carries nothing
+  // that identifies it: no pointer to the subscription whose
+  // `pending_setup_intent` it is, and nothing to say it is a funnel
+  // object rather than something the account owner set up themselves.
+  // The Connect webhook receives `setup_intent.succeeded` for all of
+  // them, and this stamp is the only thing that lets it tell one from
+  // the other — without it, the handler that makes a trial's card
+  // durable has no safe way to act at all.
+  it("stamps the funnel's metadata onto the trial's setup intent", async () => {
+    await post({ package_identifier: "$rov_trial", email: "a@b.co" });
+
+    expect(setupIntentsUpdate).toHaveBeenCalledWith(
+      "seti_trial_1",
+      {
+        metadata: expect.objectContaining({
+          rovenue_funnel_session_id: "sess_1",
+          rovenue_funnel_subscription_id: "sub_trial_1",
+        }),
+      },
+    );
+  });
+
+  // Best-effort: the visitor's payment objects are already live on
+  // Stripe by this point, and losing the durability of a settlement
+  // signal is not worth failing a purchase over — that failure mode is
+  // just the behaviour that existed before the stamp did.
+  it("still returns the client secret when the stamp fails", async () => {
+    setupIntentsUpdate.mockRejectedValueOnce(new Error("stripe is down"));
+
+    const res = await post({ package_identifier: "$rov_trial", email: "a@b.co" });
+    const body = (await res.json()) as { data: { mode: string; client_secret: string } };
+
+    expect(res.status).toBe(200);
+    expect(body.data.mode).toBe("setup");
+    expect(body.data.client_secret).toBe("seti_secret");
   });
 
   it("creates a payment intent for a one-time price", async () => {

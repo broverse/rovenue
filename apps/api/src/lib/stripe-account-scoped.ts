@@ -95,6 +95,26 @@ export interface AccountScopedStripe {
       options?: ScopedRequestOptions,
     ): Promise<Stripe.Response<Stripe.Subscription>>;
   };
+  readonly setupIntents: {
+    /**
+     * Update only — the funnel never creates a SetupIntent, Stripe does
+     * (a trial subscription's `pending_setup_intent`). The one thing the
+     * funnel needs is to stamp its own metadata onto that intent at
+     * creation time, because the object Stripe hands back carries no
+     * pointer to the subscription it belongs to and nothing to say it is
+     * a funnel object at all. Without the stamp, the
+     * `setup_intent.succeeded` handler could not distinguish a funnel
+     * trial's card from a SetupIntent the account owner created for
+     * their own purposes — and writing a default payment method onto
+     * someone else's subscription is a real intrusion into a customer's
+     * account.
+     */
+    update(
+      id: string,
+      params: Stripe.SetupIntentUpdateParams,
+      options?: ScopedRequestOptions,
+    ): Promise<Stripe.Response<Stripe.SetupIntent>>;
+  };
   readonly invoices: {
     retrieve(
       id: string,
@@ -166,6 +186,10 @@ export function withAccount(
         }),
       cancel: (id, options) =>
         stripe.subscriptions.cancel(id, { ...options, ...bound }),
+    },
+    setupIntents: {
+      update: (id, params, options) =>
+        stripe.setupIntents.update(id, params, { ...options, ...bound }),
     },
     invoices: {
       retrieve: (id, options) =>
