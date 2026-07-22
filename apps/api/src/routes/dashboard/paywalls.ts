@@ -751,7 +751,7 @@ export const paywallsDashboardRoute = new Hono()
       raw: string | undefined,
       fallback: "draft" | "live",
     ): Promise<{ versionNo: number | null; label: string | null; config: unknown }> {
-      const spec = raw ?? (fallback === "draft" ? "draft" : "live");
+      const spec = raw ?? fallback;
       if (spec === "draft") {
         return { versionNo: null, label: null, config: paywall!.builderConfig };
       }

@@ -498,6 +498,7 @@ describe("GET /paywalls/:id/diff", () => {
     const { data } = await res.json();
     expect(data.from.versionNo).toBeNull();
     // No published side → everything in the draft reads as added.
+    expect(data.entries.length).toBeGreaterThan(0);
     expect(data.entries.every((e: { kind: string }) => e.kind === "added")).toBe(true);
   });
 

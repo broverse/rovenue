@@ -2136,6 +2136,7 @@ describe("GET /paywalls/:id/diff", () => {
     const { data } = await res.json();
     expect(data.from.versionNo).toBeNull();
     // No published side → everything in the draft reads as added.
+    expect(data.entries.length).toBeGreaterThan(0);
     expect(data.entries.every((e: { kind: string }) => e.kind === "added")).toBe(true);
   });
 
@@ -2185,7 +2186,7 @@ In `apps/api/src/routes/dashboard/paywalls.ts`, add this handler after the `PATC
       raw: string | undefined,
       fallback: "draft" | "live",
     ): Promise<{ versionNo: number | null; label: string | null; config: unknown }> {
-      const spec = raw ?? (fallback === "draft" ? "draft" : "live");
+      const spec = raw ?? fallback;
       if (spec === "draft") {
         return { versionNo: null, label: null, config: paywall!.builderConfig };
       }
