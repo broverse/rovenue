@@ -412,3 +412,102 @@ describe("revert / discard-draft / label", () => {
     expect((await clear.json()).data.version.label).toBeNull();
   });
 });
+
+describe("GET /paywalls/:id/diff", () => {
+  it("defaults to live-published → draft", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("diff", VALID_CONFIG);
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        builderConfig: {
+          ...VALID_CONFIG,
+          localizations: { en: { title: "Changed", cta: "Buy" } },
+        },
+      }),
+    });
+
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/diff`,
+      { headers: { cookie } },
+    );
+    expect(res.status).toBe(200);
+    const { data } = await res.json();
+    expect(data.from.versionNo).toBe(1);
+    expect(data.to.versionNo).toBeNull();
+    expect(data.entries).toContainEqual({
+      kind: "changed",
+      scope: "localization",
+      nodeId: null,
+      nodeType: null,
+      field: "en.title",
+      from: '"Hello"',
+      to: '"Changed"',
+    });
+  });
+
+  it("accepts explicit version numbers on both sides", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("diff2", VALID_CONFIG);
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        builderConfig: { ...VALID_CONFIG, root: { ...VALID_CONFIG.root, spacing: 20 } },
+      }),
+    });
+    await app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
+      method: "POST",
+      headers: { cookie },
+    });
+
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/diff?from=1&to=2`,
+      { headers: { cookie } },
+    );
+    const { data } = await res.json();
+    expect(data.from.versionNo).toBe(1);
+    expect(data.to.versionNo).toBe(2);
+    expect(data.entries).toContainEqual({
+      kind: "added",
+      scope: "node",
+      nodeId: "root",
+      nodeType: "stack",
+      field: "spacing",
+      from: null,
+      to: "20",
+    });
+  });
+
+  it("returns an empty diff when nothing has been published", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("diff-none", VALID_CONFIG);
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/diff`,
+      { headers: { cookie } },
+    );
+    const { data } = await res.json();
+    expect(data.from.versionNo).toBeNull();
+    // No published side → everything in the draft reads as added.
+    expect(data.entries.every((e: { kind: string }) => e.kind === "added")).toBe(true);
+  });
+
+  it("404s on an unknown version number", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("diff404", VALID_CONFIG);
+    const res = await app.request(
+      `/projects/${projectId}/paywalls/${paywall.id}/diff?from=42`,
+      { headers: { cookie } },
+    );
+    expect(res.status).toBe(404);
+  });
+});

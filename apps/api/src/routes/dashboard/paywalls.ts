@@ -727,6 +727,80 @@ export const paywallsDashboardRoute = new Hono()
 
     return c.json(ok({ version: toVersionRow(version, paywall.publishedVersionId) }));
   })
+  .get("/:id/diff", async (c) => {
+    const projectId = c.req.param("projectId");
+    const id = c.req.param("id");
+    if (!projectId || !id) {
+      throw new HTTPException(400, { message: "Missing identifier" });
+    }
+    const user = c.get("user");
+    await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+
+    const paywall = await drizzle.paywallRepo.findPaywallById(drizzle.db, projectId, id);
+    if (!paywall) {
+      throw new HTTPException(404, { message: "Paywall not found" });
+    }
+
+    /**
+     * Resolve one side of the diff. `"draft"` (and the default for `to`)
+     * means the live `paywalls.builderConfig`; a number means that
+     * published version; the default for `from` is whatever is currently
+     * live, which is the comparison the diff modal actually shows.
+     */
+    async function resolveSide(
+      raw: string | undefined,
+      fallback: "draft" | "live",
+    ): Promise<{ versionNo: number | null; label: string | null; config: unknown }> {
+      const spec = raw ?? (fallback === "draft" ? "draft" : "live");
+      if (spec === "draft") {
+        return { versionNo: null, label: null, config: paywall!.builderConfig };
+      }
+      if (spec === "live") {
+        if (!paywall!.publishedVersionId) {
+          return { versionNo: null, label: null, config: null };
+        }
+        const live = await drizzle.paywallVersionRepo.findById(
+          drizzle.db,
+          paywall!.publishedVersionId,
+        );
+        if (!live) return { versionNo: null, label: null, config: null };
+        return { versionNo: live.versionNo, label: live.label, config: live.builderConfig };
+      }
+      const versionNo = parseVersionNo(spec);
+      const version = await drizzle.paywallVersionRepo.findByVersionNo(
+        drizzle.db,
+        id!,
+        versionNo,
+      );
+      if (!version) {
+        throw new HTTPException(404, { message: "Version not found" });
+      }
+      return {
+        versionNo: version.versionNo,
+        label: version.label,
+        config: version.builderConfig,
+      };
+    }
+
+    const from = await resolveSide(c.req.query("from"), "live");
+    const to = await resolveSide(c.req.query("to"), "draft");
+
+    // Both sides are already schema-validated (PATCH and publish both
+    // parse before persisting), so a plain cast is safe here; a defensive
+    // re-parse would double the work on a read-only endpoint.
+    const entries = diffBuilderConfigs(
+      (from.config as Parameters<typeof diffBuilderConfigs>[0]) ?? null,
+      (to.config as Parameters<typeof diffBuilderConfigs>[1]) ?? null,
+    );
+
+    return c.json(
+      ok({
+        from: { versionNo: from.versionNo, label: from.label },
+        to: { versionNo: to.versionNo, label: to.label },
+        entries,
+      }),
+    );
+  })
   .delete("/:id", async (c) => {
     const projectId = c.req.param("projectId");
     const id = c.req.param("id");
