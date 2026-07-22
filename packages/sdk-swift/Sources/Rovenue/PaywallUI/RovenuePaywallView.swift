@@ -92,7 +92,10 @@ public struct RovenuePaywallView: View {
             isPurchasing: isPurchasing,
             select: { selectedPackageId = $0 },
             purchase: startPurchase,
-            onClose: onClose,
+            onClose: {
+                Rovenue.shared.logPaywallClosed(paywall)
+                onClose?()
+            },
             onRestore: onRestore,
             onUrl: onUrl
         )

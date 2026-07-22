@@ -6,7 +6,7 @@ fn opens_fresh_db_runs_all_migrations() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("rovenue.db");
     let store = CacheStore::open(&path).expect("open fresh db");
-    assert_eq!(store.schema_version().unwrap(), 10);
+    assert_eq!(store.schema_version().unwrap(), 11);
 }
 
 #[test]
@@ -15,7 +15,7 @@ fn reopens_existing_db_idempotently() {
     let path = dir.path().join("rovenue.db");
     let _a = CacheStore::open(&path).unwrap();
     let b = CacheStore::open(&path).expect("reopen existing");
-    assert_eq!(b.schema_version().unwrap(), 10);
+    assert_eq!(b.schema_version().unwrap(), 11);
 }
 
 #[test]
@@ -28,7 +28,7 @@ fn migration_v8_creates_virtual_currency_and_exposure_tables() {
             Ok(v)
         })
         .unwrap();
-    assert_eq!(version, 10, "LATEST schema version should be 10");
+    assert_eq!(version, 11, "LATEST schema version should be 11");
 
     // both new tables must exist and be writable
     store
@@ -67,6 +67,7 @@ fn creates_expected_tables() {
         "funnel_install",
         "funnel_claim_state",
         "placements_cache",
+        "paywall_events",
     ] {
         let exists = store.has_table(table).unwrap();
         assert!(exists, "table `{table}` must exist after migrations");
@@ -85,6 +86,21 @@ fn migration_v9_creates_funnel_tables() {
             )?;
             c.execute(
                 "INSERT INTO funnel_claim_state (install_id, state, created_at_ms) VALUES ('inst_1', 'claimed', 1)",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn migration_v11_creates_paywall_events_table() {
+    let store = CacheStore::open_in_memory().unwrap();
+    // the durable paywall_* event queue (spec D4) — must exist and be writable
+    store
+        .with_conn(|c| {
+            c.execute(
+                "INSERT INTO paywall_events (envelope_json) VALUES ('{\"eventType\":\"paywall_view\"}')",
                 [],
             )?;
             Ok(())

@@ -3,14 +3,19 @@ import type { OfferingDTO, PaywallDTO } from "../specs/RovenueModule.types";
 
 const getPaywall = vi.fn(async (_placementId: string, _locale?: string): Promise<PaywallDTO | null> => null);
 const track = vi.fn(async () => {});
+const enqueuePaywallEvent = vi.fn(async () => {});
 const setFallbackPlacements = vi.fn(async (_json: string): Promise<number> => 0);
-vi.mock("../core/native", () => ({ getNative: () => ({ getPaywall, track, setFallbackPlacements }) }));
+vi.mock("../core/native", () => ({
+  getNative: () => ({ getPaywall, track, enqueuePaywallEvent, setFallbackPlacements }),
+}));
 
 import {
   getPaywall as getPaywallApi,
   logPaywallShown,
+  logPaywallClosed,
   mapPaywallDTO,
   buildPaywallViewEnvelope,
+  buildPaywallCloseEnvelope,
   parseRemoteConfig,
   setFallbackPlacements as setFallbackPlacementsApi,
 } from "./paywalls";
@@ -219,17 +224,64 @@ describe("buildPaywallViewEnvelope", () => {
   });
 });
 
-describe("logPaywallShown", () => {
-  beforeEach(() => track.mockClear());
+describe("buildPaywallCloseEnvelope", () => {
+  it("builds the expected paywall_close envelope shape", () => {
+    const paywall = mapPaywallDTO(makePaywallDTO());
+    const env = buildPaywallCloseEnvelope(paywall, "evt_stable_1", "2026-06-20T10:00:00Z");
 
-  it("enqueues the paywall_view envelope via the native track() bridge — no new sender", async () => {
+    expect(env).toEqual({
+      version: 1,
+      eventId: "evt_stable_1",
+      eventType: "paywall_close",
+      occurredAt: "2026-06-20T10:00:00Z",
+      paywallContext: {
+        paywallId: "pw_1",
+        placementId: "plc_1",
+        placementRevision: 3,
+        variantId: "var_a",
+        experimentKey: "exp_1",
+      },
+    });
+  });
+
+  it("returns undefined when the paywall has no presentedContext", () => {
+    const paywall = mapPaywallDTO(makePaywallDTO({ presentedContext: null }));
+    expect(buildPaywallCloseEnvelope(paywall, "evt_x", "2026-06-20T10:00:00Z")).toBeUndefined();
+  });
+
+  it("omits optional variantId/experimentKey when absent", () => {
+    const paywall = mapPaywallDTO(
+      makePaywallDTO({
+        presentedContext: {
+          placementId: "plc_1",
+          paywallId: "pw_1",
+          variantId: null,
+          experimentKey: null,
+          revision: 3,
+        },
+      }),
+    );
+    const env = buildPaywallCloseEnvelope(paywall, "evt_x", "2026-06-20T10:00:00Z");
+    expect(env?.paywallContext?.variantId).toBeUndefined();
+    expect(env?.paywallContext?.experimentKey).toBeUndefined();
+  });
+});
+
+describe("logPaywallShown", () => {
+  beforeEach(() => {
+    track.mockClear();
+    enqueuePaywallEvent.mockClear();
+  });
+
+  it("enqueues the paywall_view envelope via the native enqueuePaywallEvent() bridge — durable queue, not track()", async () => {
     const paywall = mapPaywallDTO(makePaywallDTO());
     logPaywallShown(paywall);
     // Fire-and-forget: flush the microtask queue so the async native call lands.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(track).toHaveBeenCalledTimes(1);
-    const env = JSON.parse(track.mock.calls[0][0] as string);
+    expect(track).not.toHaveBeenCalled();
+    expect(enqueuePaywallEvent).toHaveBeenCalledTimes(1);
+    const env = JSON.parse(enqueuePaywallEvent.mock.calls[0][0] as string);
     expect(env.eventType).toBe("paywall_view");
     expect(env.version).toBe(1);
     expect(typeof env.eventId).toBe("string");
@@ -246,10 +298,44 @@ describe("logPaywallShown", () => {
     expect("identityContext" in env).toBe(false);
   });
 
-  it("is a no-op (never calls track) when the paywall has no presentedContext", async () => {
+  it("is a no-op (never calls enqueuePaywallEvent) when the paywall has no presentedContext", async () => {
     const paywall = mapPaywallDTO(makePaywallDTO({ presentedContext: null }));
     logPaywallShown(paywall);
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(enqueuePaywallEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("logPaywallClosed", () => {
+  beforeEach(() => {
+    track.mockClear();
+    enqueuePaywallEvent.mockClear();
+  });
+
+  it("enqueues the paywall_close envelope via the native enqueuePaywallEvent() bridge", async () => {
+    const paywall = mapPaywallDTO(makePaywallDTO());
+    logPaywallClosed(paywall);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
     expect(track).not.toHaveBeenCalled();
+    expect(enqueuePaywallEvent).toHaveBeenCalledTimes(1);
+    const env = JSON.parse(enqueuePaywallEvent.mock.calls[0][0] as string);
+    expect(env.eventType).toBe("paywall_close");
+    expect(env.version).toBe(1);
+    expect(typeof env.eventId).toBe("string");
+    expect(env.paywallContext).toEqual({
+      paywallId: "pw_1",
+      placementId: "plc_1",
+      placementRevision: 3,
+      variantId: "var_a",
+      experimentKey: "exp_1",
+    });
+  });
+
+  it("is a no-op (never calls enqueuePaywallEvent) when the paywall has no presentedContext", async () => {
+    const paywall = mapPaywallDTO(makePaywallDTO({ presentedContext: null }));
+    logPaywallClosed(paywall);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(enqueuePaywallEvent).not.toHaveBeenCalled();
   });
 });

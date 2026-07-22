@@ -5,10 +5,12 @@
 pub mod client;
 pub mod envelope;
 pub mod identity_context;
+pub mod queue;
 
 pub use client::EventsClient;
 pub use envelope::{EventEnvelope, PaywallContext};
 pub use identity_context::IdentityContext;
+pub use queue::PaywallEventQueue;
 
 /// Wire version embedded in outbox_events rows so consumers can
 /// detect schema drift without inspecting the payload shape.

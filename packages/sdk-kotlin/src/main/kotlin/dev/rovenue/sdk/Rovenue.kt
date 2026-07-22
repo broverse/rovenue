@@ -39,6 +39,7 @@ import dev.rovenue.sdk.internal.buildPaywallResult
 import dev.rovenue.sdk.internal.encodeEventEnvelope
 import dev.rovenue.sdk.internal.hydrateOfferings
 import dev.rovenue.sdk.internal.mapPaywall
+import dev.rovenue.sdk.internal.paywallCloseEnvelope
 import dev.rovenue.sdk.internal.paywallViewEnvelope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -522,6 +523,20 @@ class Rovenue private constructor(
         }
     }
 
+    /**
+     * Enqueue a `paywall_*` event envelope onto the core's durable,
+     * process-kill-safe queue. [envelopeJson] must be a valid JSON string
+     * matching the `EventEnvelope` schema (see `EventEnvelope.kt`).
+     */
+    @Throws(RovenueException::class)
+    suspend fun enqueuePaywallEvent(envelopeJson: String) {
+        try {
+            dispatcher.run { core.enqueuePaywallEvent(envelopeJson) }
+        } catch (e: Throwable) {
+            throw if (e is RovenueErrorFfi.Generic) RovenueException.from(e) else e
+        }
+    }
+
     // ---------------------------------------------------------------
     // Offerings & purchasing
     // ---------------------------------------------------------------
@@ -588,12 +603,12 @@ class Rovenue private constructor(
 
     /** Report that [paywall] was actually shown to the subscriber. Builds a
      *  `paywall_view` event (sourced from [Paywall.presentedContext]) and
-     *  enqueues it via [track] — the same at-least-once `POST /v1/events`
-     *  sender every other SDK-emitted event goes through; this does not
-     *  open a new network path. Best-effort: fire-and-forget on the SDK's
-     *  background scope, matching the RC/Adapty `logShown`/`logPaywallShown`
-     *  contract (not `suspend` — a paywall-impression beacon must never
-     *  block or fail the caller's UI code). */
+     *  enqueues it via [enqueuePaywallEvent] — the core's durable,
+     *  process-kill-safe `paywall_*` event queue. Best-effort:
+     *  fire-and-forget on the SDK's background scope, matching the
+     *  RC/Adapty `logShown`/`logPaywallShown` contract (not `suspend` — a
+     *  paywall-impression beacon must never block or fail the caller's UI
+     *  code). */
     fun logPaywallShown(paywall: Paywall) {
         val envelope = paywallViewEnvelope(
             paywall = paywall,
@@ -602,7 +617,26 @@ class Rovenue private constructor(
         ) ?: return
         val json = encodeEventEnvelope(envelope)
         scope.launch {
-            runCatching { track(json) }
+            runCatching { enqueuePaywallEvent(json) }
+        }
+    }
+
+    /** Report that [paywall] was closed/dismissed by the subscriber. Builds
+     *  a `paywall_close` event (sourced from [Paywall.presentedContext]) and
+     *  enqueues it via [enqueuePaywallEvent] — the core's durable,
+     *  process-kill-safe `paywall_*` event queue. Best-effort:
+     *  fire-and-forget on the SDK's background scope (not `suspend` — a
+     *  paywall-dismissal beacon must never block or fail the caller's UI
+     *  code). */
+    fun logPaywallClosed(paywall: Paywall) {
+        val envelope = paywallCloseEnvelope(
+            paywall = paywall,
+            eventId = "evt_${UUID.randomUUID()}",
+            occurredAt = Instant.now().toString(),
+        ) ?: return
+        val json = encodeEventEnvelope(envelope)
+        scope.launch {
+            runCatching { enqueuePaywallEvent(json) }
         }
     }
 

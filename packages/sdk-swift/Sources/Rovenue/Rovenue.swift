@@ -460,6 +460,25 @@ public final class Rovenue: @unchecked Sendable {
         }
     }
 
+    /// Enqueue a pre-serialised `paywall_*` event envelope onto the Rust
+    /// core's durable, process-kill-safe queue (as opposed to `track`'s
+    /// in-memory session-event buffer). The caller is responsible for
+    /// building the JSON envelope; this method forwards it verbatim to the
+    /// Rust core, which persists it before returning.
+    public func enqueuePaywallEvent(envelopeJson: String) async throws {
+        do {
+            try await dispatcher.run { [core] in
+                do {
+                    try core.enqueuePaywallEvent(envelopeJson: envelopeJson)
+                } catch let err as RovenueErrorFfi {
+                    throw mapError(err)
+                }
+            }
+        } catch {
+            throw error
+        }
+    }
+
     /// Force an immediate flush of buffered session events. Returns the
     /// number of events drained. Normally callers don't invoke this — the
     /// Rust core's 30s poll covers it.
@@ -723,7 +742,20 @@ public final class Rovenue: @unchecked Sendable {
         guard let data = try? JSONEncoder().encode(envelope),
               let json = String(data: data, encoding: .utf8) else { return }
         Task { [weak self] in
-            try? await self?.track(envelopeJson: json)
+            try? await self?.enqueuePaywallEvent(envelopeJson: json)
+        }
+    }
+
+    public func logPaywallClosed(_ paywall: Paywall) {
+        guard let envelope = paywallCloseEnvelope(
+            paywall: paywall,
+            eventId: "evt_\(UUID().uuidString.lowercased())",
+            occurredAt: ISO8601DateFormatter().string(from: Date())
+        ) else { return }
+        guard let data = try? JSONEncoder().encode(envelope),
+              let json = String(data: data, encoding: .utf8) else { return }
+        Task { [weak self] in
+            try? await self?.enqueuePaywallEvent(envelopeJson: json)
         }
     }
 

@@ -6,6 +6,7 @@ import dev.rovenue.sdk.internal.buildPaywallResult
 import dev.rovenue.sdk.internal.decodeRemoteConfig
 import dev.rovenue.sdk.internal.encodeEventEnvelope
 import dev.rovenue.sdk.internal.mapPaywall
+import dev.rovenue.sdk.internal.paywallCloseEnvelope
 import dev.rovenue.sdk.internal.paywallViewEnvelope
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
@@ -223,6 +224,75 @@ class PaywallMappingTest {
     fun `encodeEventEnvelope round-trips paywallContext with all fields present`() {
         val paywall = mapPaywall(corePaywall(), offering = null)
         val env = paywallViewEnvelope(paywall, eventId = "evt_full", occurredAt = "2026-06-20T10:00:00Z")!!
+        val json = encodeEventEnvelope(env)
+
+        assertTrue(json.contains("\"paywallId\":\"pw_1\""))
+        assertTrue(json.contains("\"placementId\":\"plc_1\""))
+        assertTrue(json.contains("\"placementRevision\":3"))
+        assertTrue(json.contains("\"variantId\":\"var_a\""))
+        assertTrue(json.contains("\"experimentKey\":\"exp_1\""))
+    }
+
+    // ------------------------------------------------------------------
+    // paywallCloseEnvelope + encodeEventEnvelope — logPaywallClosed's payload
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `paywallCloseEnvelope builds the expected shape`() {
+        val paywall = mapPaywall(corePaywall(), offering = null)
+        val env = paywallCloseEnvelope(paywall, eventId = "evt_stable_1", occurredAt = "2026-06-20T10:00:00Z")
+
+        assertEquals(1, env?.version)
+        assertEquals("evt_stable_1", env?.eventId)
+        assertEquals("paywall_close", env?.eventType)
+        assertEquals("2026-06-20T10:00:00Z", env?.occurredAt)
+        assertEquals("pw_1", env?.paywallContext?.paywallId)
+        assertEquals("plc_1", env?.paywallContext?.placementId)
+        assertEquals(3L, env?.paywallContext?.placementRevision)
+        assertEquals("var_a", env?.paywallContext?.variantId)
+        assertEquals("exp_1", env?.paywallContext?.experimentKey)
+        assertNull(env?.subscriberId)
+        assertNull(env?.productId)
+        assertNull(env?.amount)
+    }
+
+    @Test
+    fun `paywallCloseEnvelope eventId is stable across repeated calls, not regenerated`() {
+        val paywall = mapPaywall(corePaywall(), offering = null)
+        val first = paywallCloseEnvelope(paywall, eventId = "evt_fixed", occurredAt = "2026-06-20T10:00:00Z")
+        val second = paywallCloseEnvelope(paywall, eventId = "evt_fixed", occurredAt = "2026-06-20T10:00:01Z")
+        assertEquals(first?.eventId, second?.eventId)
+    }
+
+    @Test
+    fun `paywallCloseEnvelope returns null when paywall has no presentedContext`() {
+        val paywall = mapPaywall(corePaywall(presentedContext = null), offering = null)
+        assertNull(paywallCloseEnvelope(paywall, eventId = "evt_x", occurredAt = "2026-06-20T10:00:00Z"))
+    }
+
+    @Test
+    fun `logPaywallClosed envelope, once encoded, omits optional attribution fields when absent and is strict-schema-safe`() {
+        val paywall = mapPaywall(
+            corePaywall(presentedContext = corePresentedContext(variantId = null, experimentKey = null)),
+            offering = null,
+        )
+        val env = paywallCloseEnvelope(paywall, eventId = "evt_x", occurredAt = "2026-06-20T10:00:00Z")!!
+        val json = encodeEventEnvelope(env)
+
+        assertTrue(json.contains("\"eventType\":\"paywall_close\""))
+        assertTrue(json.contains("\"paywallContext\""))
+        assertFalse(json.contains("variantId"), "variantId must be omitted, not null, when absent")
+        assertFalse(json.contains("experimentKey"), "experimentKey must be omitted, not null, when absent")
+        // No extra top-level keys the server's `.strict()` eventEnvelopeSchema would reject.
+        assertFalse(json.contains("subscriberId"))
+        assertFalse(json.contains("productId"))
+        assertFalse(json.contains("identityContext"))
+    }
+
+    @Test
+    fun `encodeEventEnvelope round-trips paywallContext (close) with all fields present`() {
+        val paywall = mapPaywall(corePaywall(), offering = null)
+        val env = paywallCloseEnvelope(paywall, eventId = "evt_full", occurredAt = "2026-06-20T10:00:00Z")!!
         val json = encodeEventEnvelope(env)
 
         assertTrue(json.contains("\"paywallId\":\"pw_1\""))

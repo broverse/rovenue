@@ -263,6 +263,9 @@ interface RovenueCore {
     void track(string envelope_json);
 
     [Throws=RovenueErrorFfi]
+    void enqueue_paywall_event(string envelope_json);
+
+    [Throws=RovenueErrorFfi]
     void set_attributes(record<DOMString, string?> attributes);
 
     [Throws=RovenueErrorFfi]

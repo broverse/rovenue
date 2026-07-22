@@ -8,7 +8,7 @@ use crate::cache::{CacheStore, ExposureRepo, FunnelRepo};
 use crate::config::Config;
 use crate::entitlements::{Entitlement, EntitlementReader};
 use crate::error::{RovenueError, RovenueResult};
-use crate::events::EventsClient;
+use crate::events::{EventsClient, PaywallEventQueue};
 use crate::exposure::ExposureTracker;
 use crate::funnel::{
     ClaimInstallParams, FunnelClaimBus, FunnelClaimListener, FunnelClaimResult, FunnelClient,
@@ -56,6 +56,7 @@ pub struct RovenueCore {
     receipts: Arc<ReceiptClient>,
     purchases: Arc<PurchasesClient>,
     events: Arc<EventsClient>,
+    paywall_events: Arc<PaywallEventQueue>,
     funnel: Arc<FunnelClient>,
     funnel_bus: Arc<FunnelClaimBus>,
     offerings: Arc<OfferingsClient>,
@@ -130,6 +131,10 @@ impl RovenueCore {
         let receipts = Arc::new(ReceiptClient::new(Arc::clone(&http)));
         let purchases = Arc::new(PurchasesClient::new(Arc::clone(&http)));
         let events = Arc::new(EventsClient::new(Arc::clone(&http)));
+        let paywall_events = Arc::new(
+            PaywallEventQueue::new(Arc::clone(&store), Arc::clone(&events))
+                .with_logger(Arc::clone(&logger)),
+        );
         let funnel = Arc::new(FunnelClient::new(Arc::clone(&http)));
         let funnel_bus = Arc::new(FunnelClaimBus::default().with_logger(Arc::clone(&logger)));
         let offerings = Arc::new(
@@ -236,6 +241,7 @@ impl RovenueCore {
             receipts,
             purchases,
             events,
+            paywall_events,
             funnel,
             funnel_bus,
             offerings,
@@ -258,6 +264,13 @@ impl RovenueCore {
         // (both observe the same pending state before mark_synced → double
         // POST). The foreground "identify_reconcile" scheduler tick registered
         // above is the sole retry path for a pending offline identify().
+        //
+        // The paywall-event queue is different: it has its own single-flight
+        // guard (no shared mutable state with anything else), so a configure-
+        // time drain trigger is safe and covers events left behind by a
+        // process kill during a previous session (spec D4). Non-blocking —
+        // `trigger_drain` spawns a background thread.
+        core.paywall_events.trigger_drain();
         Ok(core)
     }
 
@@ -456,6 +469,10 @@ impl RovenueCore {
         if foreground {
             // Refresh now instead of waiting out the remaining poll interval.
             self.scheduler.reset_cadence();
+            // Spec D4 drain trigger. Non-blocking — spawns a background
+            // thread, so a caller invoking this synchronously from e.g.
+            // applicationDidBecomeActive never stalls on network I/O.
+            self.paywall_events.trigger_drain();
         }
     }
 
@@ -702,6 +719,72 @@ impl RovenueCore {
                     crate::logging::redact::redact_message(&e.message)
                 ),
                 "track",
+                &[("kind", &format!("{:?}", e.kind))],
+            ),
+        }
+        result
+    }
+
+    /// Enqueue a `paywall_*` event (`paywall_view` / `paywall_close`) into
+    /// the durable, process-kill-safe queue (spec D4) instead of posting
+    /// inline like `track()` does. `envelope_json` is the camelCase wire
+    /// envelope built by the façade (`logPaywallShown`/`logPaywallClosed`
+    /// and the renderers' auto-emit calls). Rejected as `InvalidArgument`
+    /// when `envelope_json` doesn't parse or `eventType` doesn't start with
+    /// `paywall_` — this is intentionally not a general-purpose queued
+    /// `track()`.
+    ///
+    /// Stamps `version`/`eventId`/`subscriberId` here (exactly like
+    /// `track()`) BEFORE persisting, so the queued envelope carries a
+    /// stable identity and dedupe key that survives a `log_out()` between
+    /// enqueue and drain. Bounded at 100 entries (drop-oldest); drained on
+    /// configure/foreground/after this call (see `PaywallEventQueue`).
+    pub fn enqueue_paywall_event(&self, envelope_json: String) -> RovenueResult<()> {
+        self.log_op(
+            LogLevel::Info,
+            "enqueue_paywall_event",
+            "enqueue_paywall_event",
+            &[],
+        );
+        let result = (|| -> RovenueResult<()> {
+            let mut envelope: crate::events::EventEnvelope =
+                serde_json::from_str(&envelope_json)
+                    .map_err(|_| RovenueError::InvalidArgument())?;
+
+            if !is_plausible_iso8601(&envelope.occurred_at) {
+                return Err(RovenueError::InvalidArgument());
+            }
+
+            envelope.version = Some(crate::events::EVENT_WIRE_VERSION);
+            if envelope.event_id.is_none() {
+                envelope.event_id = Some(format!("evt_{}", cuid2::create_id()));
+            }
+
+            // Attribute to the stable rovenue_id device key — the server
+            // resolves the subscriberId as a rovenueId, so the app_user_id
+            // would route to an orphan row (mirrors track()).
+            let wire_id = self.identity.rovenue_id();
+            if envelope.subscriber_id.is_none() && !wire_id.is_empty() {
+                envelope.subscriber_id = Some(wire_id);
+            }
+
+            let stamped = serde_json::to_string(&envelope).map_err(|_| RovenueError::Internal())?;
+            self.paywall_events.enqueue(&stamped)
+        })();
+        match &result {
+            Ok(_) => self.log_op(
+                LogLevel::Info,
+                "enqueue_paywall_event ok",
+                "enqueue_paywall_event",
+                &[],
+            ),
+            Err(e) => self.log_op(
+                LogLevel::Error,
+                &format!(
+                    "enqueue_paywall_event failed: {}",
+                    crate::logging::redact::redact_message(&e.message)
+                ),
+                "enqueue_paywall_event",
                 &[("kind", &format!("{:?}", e.kind))],
             ),
         }
@@ -1663,6 +1746,84 @@ mod tests {
         .expect("track ok");
 
         m.assert();
+    }
+
+    // -----------------------------------------------------------
+    // enqueue_paywall_event (spec D4 — durable paywall_* queue). The full
+    // drain-discipline matrix (2xx delete / 5xx retain+stop / 4xx poison /
+    // bound-100 / single-flight / kill-safety) is covered directly against
+    // `PaywallEventQueue` in events/queue.rs; these tests only cover the
+    // RovenueCore-level wiring (validation, stamping, end-to-end drain).
+    // -----------------------------------------------------------
+
+    #[test]
+    #[serial_test::serial]
+    fn enqueue_paywall_event_rejects_malformed_json() {
+        let core = make_core("http://127.0.0.1:1");
+        let err = core.enqueue_paywall_event("not json".into()).unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidArgument);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn enqueue_paywall_event_rejects_non_paywall_event_types() {
+        let core = make_core("http://127.0.0.1:1");
+        let err = core
+            .enqueue_paywall_event(
+                r#"{"eventType":"purchase","occurredAt":"2026-06-20T10:00:00Z"}"#.into(),
+            )
+            .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidArgument);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn enqueue_paywall_event_rejects_malformed_occurred_at() {
+        let core = make_core("http://127.0.0.1:1");
+        let err = core
+            .enqueue_paywall_event(
+                r#"{"eventType":"paywall_view","occurredAt":"not-a-date"}"#.into(),
+            )
+            .unwrap_err();
+        assert_eq!(err.kind, ErrorKind::InvalidArgument);
+    }
+
+    /// End-to-end: enqueue_paywall_event stamps version/eventId/subscriberId
+    /// (mirroring track()) BEFORE persisting, then the configure-time /
+    /// post-enqueue drain trigger actually posts it to /v1/events — proves
+    /// the whole RovenueCore -> PaywallEventQueue -> EventsClient wiring,
+    /// not just the queue in isolation.
+    #[test]
+    #[serial_test::serial]
+    fn enqueue_paywall_event_stamps_and_drains_end_to_end() {
+        let mut server = mockito::Server::new();
+        let m = server
+            .mock("POST", "/v1/events")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::PartialJsonString(
+                    r#"{"version":1,"eventType":"paywall_close"}"#.into(),
+                ),
+                mockito::Matcher::Regex(r#""eventId":"evt_"#.into()),
+                mockito::Matcher::Regex(r#""subscriberId":"rov_"#.into()),
+            ]))
+            .with_status(202)
+            .create();
+
+        let core = make_core(&server.url());
+        core.enqueue_paywall_event(
+            r#"{"eventType":"paywall_close","occurredAt":"2026-06-20T10:00:00Z","paywallContext":{"paywallId":"pw_1","placementId":"plc_1","placementRevision":3}}"#.into(),
+        )
+        .expect("enqueue ok");
+
+        let mut drained = false;
+        for _ in 0..50 {
+            if m.matched() {
+                drained = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(drained, "the background drain must post the queued event");
     }
 
     #[test]

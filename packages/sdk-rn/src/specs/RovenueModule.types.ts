@@ -231,6 +231,8 @@ export interface RovenueModuleSpec {
 
   // Generic event emission (`POST /v1/events`).
   track(envelopeJson: string): Promise<void>;
+  // Durable at-least-once paywall_* event queue (spec D4).
+  enqueuePaywallEvent(envelopeJson: string): Promise<void>;
 
   // Subscriber attributes — batch set + reserved-key setters + durable flush.
   setAttributes(attributes: Record<string, string | null>): Promise<void>;

@@ -16,6 +16,12 @@ pub struct SessionEventRow {
 }
 
 #[derive(Debug, Clone)]
+pub struct PaywallEventRow {
+    pub id: i64,
+    pub envelope_json: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct AttributeMutationRow {
     pub id: i64,
     pub key: String,
@@ -217,6 +223,67 @@ impl CacheStore {
         Ok(())
     }
 
+    /// Durable `paywall_*` event queue (spec D4). Bounded at 100 entries —
+    /// drop-oldest — so a stuck queue (e.g. permanent connectivity loss)
+    /// cannot grow disk usage unboundedly.
+    pub fn append_paywall_event(&self, envelope_json: &str) -> RovenueResult<()> {
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
+        guard
+            .execute(
+                "INSERT INTO paywall_events (envelope_json) VALUES (?1)",
+                [envelope_json],
+            )
+            .map_err(|_| RovenueError::Storage())?;
+        // FIFO trim — keep newest 100 (bounded drop-oldest, per spec D4).
+        guard
+            .execute(
+                "DELETE FROM paywall_events WHERE id NOT IN \
+                 (SELECT id FROM paywall_events ORDER BY id DESC LIMIT 100)",
+                [],
+            )
+            .map_err(|_| RovenueError::Storage())?;
+        Ok(())
+    }
+
+    /// Oldest-first — the drain discipline is peek -> POST -> delete-on-2xx.
+    pub fn list_paywall_events(&self, limit: usize) -> RovenueResult<Vec<PaywallEventRow>> {
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
+        let mut stmt = guard
+            .prepare(
+                "SELECT id, envelope_json FROM paywall_events \
+                 ORDER BY id ASC LIMIT ?1",
+            )
+            .map_err(|_| RovenueError::Storage())?;
+        let rows = stmt
+            .query_map([limit as i64], |r| {
+                Ok(PaywallEventRow {
+                    id: r.get(0)?,
+                    envelope_json: r.get(1)?,
+                })
+            })
+            .map_err(|_| RovenueError::Storage())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| RovenueError::Storage())?;
+        Ok(rows)
+    }
+
+    pub fn delete_paywall_events(&self, ids: &[i64]) -> RovenueResult<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
+        let placeholders = std::iter::repeat_n("?", ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!("DELETE FROM paywall_events WHERE id IN ({placeholders})");
+        let params: Vec<&dyn rusqlite::ToSql> =
+            ids.iter().map(|i| i as &dyn rusqlite::ToSql).collect();
+        guard
+            .execute(&sql, params.as_slice())
+            .map_err(|_| RovenueError::Storage())?;
+        Ok(())
+    }
+
     pub fn append_attribute_mutation(&self, key: &str, value: Option<&str>) -> RovenueResult<()> {
         let guard = self.conn.lock().map_err(|_| RovenueError::Storage())?;
         guard
@@ -330,6 +397,27 @@ mod tests {
         let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
         store.delete_session_events(&ids).unwrap();
         assert_eq!(store.list_session_events(2000).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn paywall_events_fifo_drop_at_cap() {
+        let store = CacheStore::open_in_memory().unwrap();
+        for i in 0..105 {
+            store
+                .append_paywall_event(&format!(
+                    r#"{{"eventType":"paywall_view","occurredAt":"2026-05-28T10:00:00Z","eventId":"evt_{i}"}}"#
+                ))
+                .unwrap();
+        }
+        let rows = store.list_paywall_events(2000).unwrap();
+        // FIFO drop: at cap 100, the oldest 5 are gone — newest 100 remain,
+        // oldest-first order preserved.
+        assert_eq!(rows.len(), 100);
+        assert!(rows[0].envelope_json.contains("\"evt_5\""));
+        assert!(rows[99].envelope_json.contains("\"evt_104\""));
+        let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+        store.delete_paywall_events(&ids).unwrap();
+        assert_eq!(store.list_paywall_events(2000).unwrap().len(), 0);
     }
 
     #[test]

@@ -24,7 +24,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { Image, Pressable, Text, View } from "react-native";
-import { logPaywallShown } from "../api/paywalls";
+import { logPaywallShown, logPaywallClosed } from "../api/paywalls";
 import { purchase } from "../api/purchases";
 import type { Offering, Paywall, PurchaseResult } from "../types";
 import {
@@ -131,7 +131,10 @@ export function RovenuePaywallView(props: RovenuePaywallViewProps): ReactElement
         .catch((error) => props.onPurchaseFailed?.(error))
         .finally(() => setIsPurchasing(false));
     },
-    onClose: props.onClose,
+    onClose: () => {
+      logPaywallClosed(paywall);
+      props.onClose?.();
+    },
     onRestore: props.onRestore,
     onUrl: props.onUrl,
   };

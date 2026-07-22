@@ -256,6 +256,9 @@ class RovenueModule : Module() {
         AsyncFunction("track") Coroutine { envelopeJson: String ->
             try { Rovenue.shared.track(envelopeJson) } catch (e: Throwable) { throw codedError(e) }
         }
+        AsyncFunction("enqueuePaywallEvent") Coroutine { envelopeJson: String ->
+            try { Rovenue.shared.enqueuePaywallEvent(envelopeJson) } catch (e: Throwable) { throw codedError(e) }
+        }
 
         // ---------------- Funnel Claim ----------------
         AsyncFunction("installId") Coroutine { ->

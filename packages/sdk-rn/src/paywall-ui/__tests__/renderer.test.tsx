@@ -12,6 +12,7 @@ import type { Offering, Paywall, StoreProduct } from "../../types";
 
 const purchaseMock = vi.hoisted(() => vi.fn(async () => ({ ok: true }) as never));
 const logShownMock = vi.hoisted(() => vi.fn());
+const logClosedMock = vi.hoisted(() => vi.fn());
 vi.mock("../../api/purchases", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   purchase: purchaseMock,
@@ -19,6 +20,7 @@ vi.mock("../../api/purchases", async (importOriginal) => ({
 vi.mock("../../api/paywalls", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   logPaywallShown: logShownMock,
+  logPaywallClosed: logClosedMock,
 }));
 
 import { RovenuePaywallView } from "../RovenuePaywallView";
@@ -95,6 +97,13 @@ const builderConfig = {
         action: { kind: "restore" },
       },
       {
+        type: "button",
+        id: "b_close",
+        labelKey: "close",
+        style: "plain",
+        action: { kind: "close" },
+      },
+      {
         type: "unknownWidget",
         id: "uw",
         fallback: { type: "text", id: "uw_fb", key: "close", role: "caption" },
@@ -130,6 +139,7 @@ beforeEach(() => {
   cleanup();
   purchaseMock.mockClear();
   logShownMock.mockClear();
+  logClosedMock.mockClear();
 });
 
 describe("RovenuePaywallView", () => {
@@ -171,6 +181,21 @@ describe("RovenuePaywallView", () => {
   it("hides restore buttons when no onRestore handler is supplied", () => {
     render(<RovenuePaywallView paywall={paywall()} />);
     expect(screen.queryByTestId("rov-node-b_restore")).toBeNull();
+  });
+
+  it("firing the close action logs the close event and invokes the host onClose callback", () => {
+    const onClose = vi.fn();
+    render(<RovenuePaywallView paywall={paywall()} onClose={onClose} />);
+    fireEvent.click(screen.getByTestId("rov-node-b_close"));
+    expect(logClosedMock).toHaveBeenCalledTimes(1);
+    expect(logClosedMock).toHaveBeenCalledWith(paywall());
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("firing the close action auto-emits logPaywallClosed even when no onClose prop is supplied", () => {
+    render(<RovenuePaywallView paywall={paywall()} />);
+    fireEvent.click(screen.getByTestId("rov-node-b_close"));
+    expect(logClosedMock).toHaveBeenCalledTimes(1);
   });
 
   it("renders nothing for a paywall without builderConfig", () => {

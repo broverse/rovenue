@@ -65,3 +65,28 @@ func paywallViewEnvelope(paywall: Paywall, eventId: String, occurredAt: String) 
         )
     )
 }
+
+// MARK: - logPaywallClosed envelope
+
+/// Builds the `paywall_close` event envelope `logPaywallClosed` enqueues.
+/// Returns `nil` when the paywall carries no `presentedContext` — this is
+/// analytics, not a critical path, so a paywall resolved from a payload
+/// that (for whatever reason) has no attribution snapshot is silently
+/// skipped rather than sending a `paywallContext`-less envelope the
+/// server's `.strict()` schema would reject anyway.
+func paywallCloseEnvelope(paywall: Paywall, eventId: String, occurredAt: String) -> EventEnvelope? {
+    guard let ctx = paywall.presentedContext else { return nil }
+    return EventEnvelope(
+        version: 1,
+        eventId: eventId,
+        eventType: "paywall_close",
+        occurredAt: occurredAt,
+        paywallContext: PaywallContext(
+            paywallId: ctx.paywallId,
+            placementId: ctx.placementId,
+            placementRevision: ctx.revision,
+            variantId: ctx.variantId,
+            experimentKey: ctx.experimentKey
+        )
+    )
+}

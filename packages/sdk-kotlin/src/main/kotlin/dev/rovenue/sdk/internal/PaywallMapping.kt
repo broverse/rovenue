@@ -124,3 +124,28 @@ internal fun paywallViewEnvelope(paywall: Paywall, eventId: String, occurredAt: 
         ),
     )
 }
+
+/**
+ * Builds the `paywall_close` event envelope [dev.rovenue.sdk.Rovenue.logPaywallClosed]
+ * enqueues. Returns `null` when the paywall carries no `presentedContext` —
+ * this is analytics, not a critical path, so a paywall resolved from a
+ * payload that (for whatever reason) has no attribution snapshot is
+ * silently skipped rather than sending a `paywallContext`-less envelope
+ * the server's `.strict()` schema would reject anyway.
+ */
+internal fun paywallCloseEnvelope(paywall: Paywall, eventId: String, occurredAt: String): EventEnvelope? {
+    val ctx = paywall.presentedContext ?: return null
+    return EventEnvelope(
+        version = 1,
+        eventId = eventId,
+        eventType = "paywall_close",
+        occurredAt = occurredAt,
+        paywallContext = PaywallContext(
+            paywallId = ctx.paywallId,
+            placementId = ctx.placementId,
+            placementRevision = ctx.revision,
+            variantId = ctx.variantId,
+            experimentKey = ctx.experimentKey,
+        ),
+    )
+}

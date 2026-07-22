@@ -111,12 +111,39 @@ export function buildPaywallViewEnvelope(
   };
 }
 
+/** Builds the `paywall_close` event envelope `logPaywallClosed` enqueues.
+ *  Exact sibling of `buildPaywallViewEnvelope` — see its doc comment for
+ *  the `undefined` rationale. */
+export function buildPaywallCloseEnvelope(
+  paywall: Paywall,
+  eventId: string,
+  occurredAt: string,
+): EventEnvelope | undefined {
+  const ctx = paywall.presentedContext;
+  if (!ctx) return undefined;
+  return {
+    version: 1,
+    eventId,
+    eventType: "paywall_close",
+    occurredAt,
+    paywallContext: {
+      paywallId: ctx.paywallId,
+      placementId: ctx.placementId,
+      placementRevision: ctx.revision,
+      variantId: ctx.variantId ?? undefined,
+      experimentKey: ctx.experimentKey ?? undefined,
+    },
+  };
+}
+
 /**
  * Report that `paywall` was actually shown to the subscriber. Builds a
  * `paywall_view` event (sourced from `paywall.presentedContext`) and
- * enqueues it via the native `track(envelopeJson)` bridge method — the same
- * at-least-once `POST /v1/events` sender every other SDK-emitted event goes
- * through; this does not open a new network path. Best-effort:
+ * enqueues it via the native `enqueuePaywallEvent(envelopeJson)` bridge
+ * method — this persists the event into the Rust core's durable on-disk
+ * queue and triggers a background drain (spec D4), so the impression
+ * survives a process kill instead of being lost like a fire-and-forget
+ * inline POST would be. Best-effort from the caller's perspective:
  * fire-and-forget (mirrors `sessionTracker.ts`'s
  * `getNative().recordSessionEvent(...).catch(() => {})` pattern) — a
  * paywall-impression beacon must never block or fail the caller's UI code.
@@ -129,6 +156,30 @@ export function logPaywallShown(paywall: Paywall): void {
   );
   if (!envelope) return;
   getNative()
-    .track(serializeEnvelope(envelope))
+    .enqueuePaywallEvent(serializeEnvelope(envelope))
+    .catch(() => {});
+}
+
+/**
+ * Report that `paywall` was closed by the subscriber. Builds a
+ * `paywall_close` event (sourced from `paywall.presentedContext`) and
+ * enqueues it via the native `enqueuePaywallEvent(envelopeJson)` bridge
+ * method — this persists the event into the Rust core's durable on-disk
+ * queue and triggers a background drain (spec D4), so the close event
+ * survives a process kill instead of being lost like a fire-and-forget
+ * inline POST would be. Best-effort from the caller's perspective:
+ * fire-and-forget (mirrors `sessionTracker.ts`'s
+ * `getNative().recordSessionEvent(...).catch(() => {})` pattern) — a
+ * paywall-close beacon must never block or fail the caller's UI code.
+ */
+export function logPaywallClosed(paywall: Paywall): void {
+  const envelope = buildPaywallCloseEnvelope(
+    paywall,
+    `evt_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`,
+    new Date().toISOString(),
+  );
+  if (!envelope) return;
+  getNative()
+    .enqueuePaywallEvent(serializeEnvelope(envelope))
     .catch(() => {});
 }

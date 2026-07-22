@@ -289,6 +289,9 @@ public class RovenueModule: Module {
         AsyncFunction("track") { (envelopeJson: String) in
             try await rovenueCall { try await Rovenue.shared.track(envelopeJson: envelopeJson) }
         }
+        AsyncFunction("enqueuePaywallEvent") { (envelopeJson: String) in
+            try await rovenueCall { try await Rovenue.shared.enqueuePaywallEvent(envelopeJson: envelopeJson) }
+        }
 
         // ---------------- Funnel Claim ----------------
         AsyncFunction("installId") { () -> String in

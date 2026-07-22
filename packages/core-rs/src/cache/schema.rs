@@ -153,6 +153,16 @@ CREATE TABLE placements_cache (
 UPDATE schema_meta SET version = 10;
 "#;
 
+pub const MIGRATION_V11: &str = r#"
+CREATE TABLE paywall_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    envelope_json TEXT NOT NULL
+);
+CREATE INDEX idx_paywall_events_id ON paywall_events(id);
+
+UPDATE schema_meta SET version = 11;
+"#;
+
 pub const MIGRATIONS: &[&str] = &[
     MIGRATION_V1,
     MIGRATION_V2,
@@ -164,5 +174,6 @@ pub const MIGRATIONS: &[&str] = &[
     MIGRATION_V8,
     MIGRATION_V9,
     MIGRATION_V10,
+    MIGRATION_V11,
 ];
-pub const LATEST: u32 = 10;
+pub const LATEST: u32 = 11;

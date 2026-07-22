@@ -159,7 +159,10 @@ class RovenuePaywallView @JvmOverloads constructor(
                 render()
             },
             purchase = ::startPurchase,
-            onClose = options.onClose,
+            onClose = {
+                paywall?.let { Rovenue.shared.logPaywallClosed(it) }
+                options.onClose?.invoke()
+            },
             onRestore = options.onRestore,
             onUrl = options.onUrl,
             loadImage = { imageView, url -> loadImageInto(imageView, url, scopeForImageLoads()) },
