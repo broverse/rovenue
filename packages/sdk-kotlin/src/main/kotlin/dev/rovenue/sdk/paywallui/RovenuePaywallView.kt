@@ -50,22 +50,10 @@ import kotlinx.coroutines.launch
  * a future perf pass doesn't "fix" it into a stale-label bug.
  *
  * Testing note: this class's Android-view-construction path (and
- * [NodeViewFactory]'s) is manually smoked, not unit-tested. Robolectric is
- * declared as a `testImplementation` dependency in this module but is NOT
- * actually wired for use: JUnit4's `org.junit.Test`/`@RunWith` (which
- * `RobolectricTestRunner` requires) aren't resolvable on the unit-test
- * COMPILE classpath here (only on the runtime classpath, transitively, via
- * `org.robolectric:junit`), and the module's `Test` tasks run
- * `useJUnitPlatform()` with no `junit-vintage-engine`, so a JUnit4-style
- * `@RunWith(RobolectricTestRunner::class)` test class would silently not
- * be discovered/run even if it compiled. Making Robolectric actually
- * usable here would require adding `testImplementation("junit:junit:...")`
- * + `testRuntimeOnly("org.junit.vintage:junit-vintage-engine:...")` —
- * out of scope per this task's "no new dependencies" constraint. All
- * LOGIC (color parsing, style/layout computation, action routing,
- * darkMode resolution, purchase-enabled/visibility rules) is instead
- * extracted into the pure, plain-JVM-testable functions in
- * [NodeViewFactory]'s top half — see `NodeViewFactoryTest.kt`.
+ * [NodeViewFactory]'s) is manually smoked, not unit-tested — all render
+ * LOGIC lives in pure, JVM-tested helpers. The unusable Robolectric
+ * dependency this module once declared has been removed (the JUnit5-
+ * platform test tasks could never discover its JUnit4-style tests).
  */
 class RovenuePaywallView @JvmOverloads constructor(
     context: Context,
@@ -79,6 +67,7 @@ class RovenuePaywallView @JvmOverloads constructor(
     private var selectedPackageId: String? = null
     private var isPurchasing: Boolean = false
     private var didLogShow: Boolean = false
+    private var lastBoundContentKey: String? = null
 
     // Cancelled on detach — backs ONLY image loads (no point fetching a
     // bitmap for a view no longer on screen).
@@ -100,12 +89,22 @@ class RovenuePaywallView @JvmOverloads constructor(
      * re-binding after a placement refetch); each call fully re-renders.
      */
     fun bind(paywall: Paywall, options: PaywallViewOptions = PaywallViewOptions()) {
+        // Canonical log-once semantics (aligned with the Swift renderer's
+        // paywallStateKey): one impression per DISTINCT paywall content per
+        // view instance. Re-binding the same paywall (e.g. a placement
+        // refetch returning identical content) does NOT re-log.
+        val contentKey = (paywall.paywallIdentifier ?: "") + "|" + (paywall.builderConfigJson ?: "")
+        val contentChanged = contentKey != lastBoundContentKey
+        lastBoundContentKey = contentKey
+
         this.paywall = paywall
         this.options = options
         this.config = paywall.builderConfigJson?.let(::decodeBuilderConfig)
-        this.selectedPackageId = config?.let { initialSelection(it.root, paywall.offering) }
+        if (contentChanged) {
+            this.selectedPackageId = config?.let { initialSelection(it.root, paywall.offering) }
+            this.didLogShow = false
+        }
         this.isPurchasing = false
-        this.didLogShow = false
         render()
         if (isAttachedToWindow) maybeLogShown()
     }

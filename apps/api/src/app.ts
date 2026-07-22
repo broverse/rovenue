@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { env } from "./lib/env";
 import { errorHandler } from "./middleware/error";
@@ -73,6 +74,12 @@ export function createApp() {
   const app = new Hono()
     .use("*", requestIdMiddleware)
     .use("*", requestLoggerMiddleware)
+    // Defense-in-depth against oversized/hostile bodies (whole-phase review
+    // follow-up). 1 MiB comfortably clears every legitimate payload — the
+    // largest are Apple JWS receipt chains (tens of KB) and builder
+    // configs (bounded to 500 nodes well below this) — while capping
+    // memory per request. 413 on breach.
+    .use("*", bodyLimit({ maxSize: 1024 * 1024 }))
     .use(
       "*",
       cors({

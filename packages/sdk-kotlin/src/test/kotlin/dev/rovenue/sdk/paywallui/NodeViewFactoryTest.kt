@@ -17,14 +17,9 @@ import kotlin.test.assertTrue
 /**
  * Pure-logic tests for the Android Views renderer's style/layout/action
  * computation, extracted out of [NodeViewFactory] and [RovenuePaywallView]
- * specifically so they're testable WITHOUT an Android runtime (Robolectric
- * is declared as a testImplementation dependency but is not actually wired
- * for use in this module: JUnit4's `org.junit.Test`/`@RunWith` aren't on
- * the compile classpath — only reachable via the runtime classpath — and
- * there's no junit-vintage-engine for the JUnit5-platform `Test` tasks
- * (`useJUnitPlatform()`) to discover JUnit4-style Robolectric tests; wiring
- * it up would mean adding `junit:junit` + `junit-vintage-engine`, which is
- * out of scope ("NO new dependencies"). View construction itself is
+ * specifically so they're testable WITHOUT an Android runtime (the module deliberately has no
+ * Android-runtime test framework; the once-declared-but-unusable
+ * Robolectric dependency has been removed). View construction itself is
  * manually smoked instead — see RovenuePaywallView.kt's class doc.
  */
 class NodeViewFactoryTest {

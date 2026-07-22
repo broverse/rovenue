@@ -111,6 +111,22 @@ export const Canvas = component(() => {
   );
 
   const [ring, setRing] = useState<Rect | null>(null);
+  // Bumped by viewport scroll / window resize so the ring re-anchors —
+  // without this it drifts off the selected node until a zoom/device/
+  // selection change forces a recompute (whole-phase review follow-up).
+  const [ringTick, setRingTick] = useState(0);
+
+  useLayoutEffect(() => {
+    const container = viewportRef.current;
+    const bump = () => setRingTick((t) => t + 1);
+    container?.addEventListener("scroll", bump, { passive: true });
+    window.addEventListener("resize", bump);
+    return () => {
+      container?.removeEventListener("scroll", bump);
+      window.removeEventListener("resize", bump);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rendererKey]);
 
   useLayoutEffect(() => {
     const container = viewportRef.current;
@@ -139,7 +155,7 @@ export const Canvas = component(() => {
       ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vm.selectedNodeId, rendererKey, vm.canvasZoom, vm.canvasDevice]);
+  }, [vm.selectedNodeId, rendererKey, vm.canvasZoom, vm.canvasDevice, ringTick]);
 
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {

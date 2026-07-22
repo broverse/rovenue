@@ -17,7 +17,12 @@ export type BuilderIssue = {
     | "UNKNOWN_LOC_KEY"
     | "FOREIGN_PACKAGE_ID"
     | "MISSING_PURCHASE_BUTTON"
-    | "LOCALE_KEY_GAP";
+    | "LOCALE_KEY_GAP"
+    // Emitted by the API's builderConfig write path when the payload fails
+    // the structural Zod parse (or exceeds depth/size bounds) — not by
+    // validateBuilderConfig itself, which only sees parsed configs. In the
+    // union so the dashboard renders API issue lists fully typed.
+    | "SCHEMA_INVALID";
   nodeId?: string;
   locale?: string;
   key?: string;
