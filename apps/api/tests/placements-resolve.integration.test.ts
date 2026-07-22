@@ -394,6 +394,52 @@ describe("GET /v1/placements/:identifier", () => {
     expect(body.data).toEqual({ placement: null, paywall: null, experiment: null });
   });
 
+  it("includes builderConfig verbatim + configFormatVersion when the paywall has one", async () => {
+    const builderConfig = {
+      formatVersion: 2,
+      defaultLocale: "en",
+      localizations: { en: { title: "Go Pro" } },
+      root: { type: "stack", id: "root", axis: "v", children: [] },
+    };
+    vi.mocked(drizzleMock.placementRepo.findPlacementByIdentifier).mockResolvedValue(
+      makePlacement({
+        rows: [{ audienceId: null, target: { type: "paywall", paywallId: "pw_1" } }],
+      }) as any,
+    );
+    vi.mocked(drizzleMock.paywallRepo.findPaywallById).mockResolvedValue(
+      makePaywall({ builderConfig, configFormatVersion: 2 }) as any,
+    );
+    vi.mocked(drizzleMock.offeringRepo.findOfferingById).mockResolvedValue(
+      makeOffering() as any,
+    );
+
+    const res = await app.request(withAuth("/v1/placements/onboarding"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.paywall.builderConfig).toEqual(builderConfig);
+    expect(body.data.paywall.configFormatVersion).toBe(2);
+  });
+
+  it("omits builderConfig when the paywall's builderConfig is null", async () => {
+    vi.mocked(drizzleMock.placementRepo.findPlacementByIdentifier).mockResolvedValue(
+      makePlacement({
+        rows: [{ audienceId: null, target: { type: "paywall", paywallId: "pw_1" } }],
+      }) as any,
+    );
+    vi.mocked(drizzleMock.paywallRepo.findPaywallById).mockResolvedValue(
+      makePaywall() as any, // builderConfig: null, configFormatVersion: 1 by default
+    );
+    vi.mocked(drizzleMock.offeringRepo.findOfferingById).mockResolvedValue(
+      makeOffering() as any,
+    );
+
+    const res = await app.request(withAuth("/v1/placements/onboarding"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.paywall.configFormatVersion).toBe(1);
+    expect("builderConfig" in body.data.paywall).toBe(false);
+  });
+
   it("falls back to remoteConfig.defaultLocale when the requested locale is absent", async () => {
     vi.mocked(drizzleMock.placementRepo.findPlacementByIdentifier).mockResolvedValue(
       makePlacement({

@@ -2,11 +2,13 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
-import { MemberRole, drizzle } from "@rovenue/db";
+import { MemberRole, drizzle, type Offering } from "@rovenue/db";
+import { builderConfigSchema, validateBuilderConfig } from "@rovenue/shared/paywall";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
 import { assertProjectAccess } from "../../lib/project-access";
 import { assertProjectCapability } from "../../lib/capabilities";
 import { purgeProjectCatalogCache } from "../../lib/edge-cache";
+import { packagesSchema } from "../../lib/offering-hydration";
 import { ok } from "../../lib/response";
 
 // =============================================================
@@ -40,13 +42,16 @@ const remoteConfigSchema = z
     }
   });
 
+// configFormatVersion is intentionally NOT a client-settable field here —
+// it's server-derived from whether builderConfig is present (see
+// prepareBuilderConfigPatch below). Any configFormatVersion sent by the
+// client is silently stripped by zod's default object parsing.
 const createBodySchema = z.object({
   identifier: z.string().trim().min(1).max(160).regex(PAYWALL_IDENTIFIER_RE),
   name: z.string().trim().min(1).max(200),
   offeringId: z.string().min(1),
   remoteConfig: remoteConfigSchema,
-  configFormatVersion: z.number().int().min(1).optional(),
-  builderConfig: z.unknown().optional(),
+  builderConfig: z.unknown().nullable().optional(),
   isActive: z.boolean().optional(),
   metadata: z.record(z.unknown()).optional(),
 });
@@ -63,8 +68,7 @@ const updateBodySchema = z
     name: z.string().trim().min(1).max(200).optional(),
     offeringId: z.string().min(1).optional(),
     remoteConfig: remoteConfigSchema.optional(),
-    configFormatVersion: z.number().int().min(1).optional(),
-    builderConfig: z.unknown().optional(),
+    builderConfig: z.unknown().nullable().optional(),
     isActive: z.boolean().optional(),
     metadata: z.record(z.unknown()).optional(),
   })
@@ -72,10 +76,10 @@ const updateBodySchema = z
     message: "At least one field is required",
   });
 
-async function assertOfferingExists(
+async function loadOffering(
   projectId: string,
   offeringId: string,
-): Promise<void> {
+): Promise<Offering> {
   const offering = await drizzle.offeringRepo.findOfferingById(
     drizzle.db,
     projectId,
@@ -86,6 +90,54 @@ async function assertOfferingExists(
       message: `Unknown offeringId: ${offeringId}`,
     });
   }
+  return offering;
+}
+
+/** Package slot identifiers from an offering's `packages` jsonb — see
+ * apps/api/src/lib/offering-hydration.ts for how the hydration path
+ * reads the same column. */
+function extractOfferingPackageIds(offering: { packages: unknown }): string[] {
+  const parsed = packagesSchema.safeParse(offering.packages);
+  return parsed.success ? parsed.data.map((p) => p.identifier) : [];
+}
+
+/**
+ * Validate + shape a client-supplied `builderConfig` into the pair of
+ * columns actually persisted. `null` clears it (revert to format 1);
+ * a non-null value must pass both the Zod node-tree schema and
+ * validateBuilderConfig against the paywall's (possibly new) offering
+ * — any non-LOCALE_KEY_GAP issue is a 400, mirroring the PAYWALL_IN_USE
+ * JSON-in-message HTTPException convention used by DELETE below.
+ */
+function prepareBuilderConfigPatch(
+  rawBuilderConfig: unknown,
+  offeringPackageIds: string[],
+): { builderConfig: unknown; configFormatVersion: number } {
+  if (rawBuilderConfig === null) {
+    return { builderConfig: null, configFormatVersion: 1 };
+  }
+
+  const parsed = builderConfigSchema.safeParse(rawBuilderConfig);
+  if (!parsed.success) {
+    throw new HTTPException(400, {
+      message: JSON.stringify({
+        code: "INVALID_BUILDER_CONFIG",
+        issues: parsed.error.issues.map((issue) => ({
+          code: "SCHEMA_INVALID",
+          message: `${issue.path.join(".")}: ${issue.message}`,
+        })),
+      }),
+    });
+  }
+
+  const issues = validateBuilderConfig(parsed.data, { offeringPackageIds });
+  if (issues.some((issue) => issue.code !== "LOCALE_KEY_GAP")) {
+    throw new HTTPException(400, {
+      message: JSON.stringify({ code: "INVALID_BUILDER_CONFIG", issues }),
+    });
+  }
+
+  return { builderConfig: parsed.data, configFormatVersion: 2 };
 }
 
 export const paywallsDashboardRoute = new Hono()
@@ -120,7 +172,15 @@ export const paywallsDashboardRoute = new Hono()
         message: `Paywall identifier already in use: ${body.identifier}`,
       });
     }
-    await assertOfferingExists(projectId, body.offeringId);
+    const offering = await loadOffering(projectId, body.offeringId);
+
+    const builderPatch =
+      body.builderConfig !== undefined
+        ? prepareBuilderConfigPatch(
+            body.builderConfig,
+            extractOfferingPackageIds(offering),
+          )
+        : null;
 
     const row = await drizzle.paywallRepo.createPaywall(drizzle.db, {
       projectId,
@@ -128,11 +188,9 @@ export const paywallsDashboardRoute = new Hono()
       name: body.name,
       offeringId: body.offeringId,
       remoteConfig: body.remoteConfig,
-      ...(body.configFormatVersion !== undefined && {
-        configFormatVersion: body.configFormatVersion,
-      }),
-      ...(body.builderConfig !== undefined && {
-        builderConfig: body.builderConfig,
+      ...(builderPatch !== null && {
+        builderConfig: builderPatch.builderConfig,
+        configFormatVersion: builderPatch.configFormatVersion,
       }),
       ...(body.isActive !== undefined && { isActive: body.isActive }),
       metadata: body.metadata ?? {},
@@ -183,8 +241,27 @@ export const paywallsDashboardRoute = new Hono()
         message: "identifier is immutable once set",
       });
     }
+
+    // If offeringId is also changing in this request, builderConfig
+    // validation runs against the NEW offering, not the paywall's
+    // current one.
+    let newOffering: Offering | null = null;
     if (body.offeringId) {
-      await assertOfferingExists(projectId, body.offeringId);
+      newOffering = await loadOffering(projectId, body.offeringId);
+    }
+
+    let builderPatch: ReturnType<typeof prepareBuilderConfigPatch> | null = null;
+    if (body.builderConfig !== undefined) {
+      if (body.builderConfig === null) {
+        builderPatch = prepareBuilderConfigPatch(null, []);
+      } else {
+        const offeringForValidation =
+          newOffering ?? (await loadOffering(projectId, existingPaywall.offeringId));
+        builderPatch = prepareBuilderConfigPatch(
+          body.builderConfig,
+          extractOfferingPackageIds(offeringForValidation),
+        );
+      }
     }
 
     const row = await drizzle.paywallRepo.updatePaywall(drizzle.db, projectId, id, {
@@ -193,11 +270,9 @@ export const paywallsDashboardRoute = new Hono()
       ...(body.remoteConfig !== undefined && {
         remoteConfig: body.remoteConfig,
       }),
-      ...(body.configFormatVersion !== undefined && {
-        configFormatVersion: body.configFormatVersion,
-      }),
-      ...(body.builderConfig !== undefined && {
-        builderConfig: body.builderConfig,
+      ...(builderPatch !== null && {
+        builderConfig: builderPatch.builderConfig,
+        configFormatVersion: builderPatch.configFormatVersion,
       }),
       ...(body.isActive !== undefined && { isActive: body.isActive }),
       ...(body.metadata !== undefined && { metadata: body.metadata }),

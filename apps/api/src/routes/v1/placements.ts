@@ -64,6 +64,12 @@ async function hydratePaywall(projectId: string, paywall: PaywallRow, requestedL
     name: paywall.name,
     configFormatVersion: paywall.configFormatVersion,
     remoteConfig: locale ? { locale, data } : null,
+    // builderConfig ships whole (all localizations) — ?locale only slices
+    // remoteConfig above. Field is present ONLY when non-null: the Rust
+    // SDK wire fixtures decode this payload, and adding a field is safe
+    // (serde ignores unknown fields) but an always-present `null` isn't
+    // worth the wire-size cost for paywalls that don't use the builder.
+    ...(paywall.builderConfig !== null && { builderConfig: paywall.builderConfig }),
     offering: offering ? await hydrateOffering(projectId, offering) : null,
   };
 }

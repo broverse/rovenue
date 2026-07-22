@@ -85,14 +85,18 @@ async function seedMember({
   });
 }
 
-async function seedOffering(projectId: string, suffix = "") {
+async function seedOffering(
+  projectId: string,
+  suffix = "",
+  packages: unknown[] = [],
+) {
   const db = getDb();
   const [row] = await db
     .insert(drizzle.schema.offerings)
     .values({
       projectId,
       identifier: `offering_${RUN_ID}${suffix}`,
-      packages: [],
+      packages,
     })
     .returning();
   return { id: row!.id };
@@ -102,6 +106,38 @@ const validRemoteConfig = {
   defaultLocale: "en",
   locales: { en: { title: "Go Pro" } },
 };
+
+// Minimal offering package slot — validateBuilderConfig only needs the
+// `identifier` field; productId doesn't need to resolve to a real product.
+const monthlyPackageSlot = {
+  identifier: "pkg_monthly",
+  productId: "prod_monthly",
+  order: 0,
+  isPromoted: false,
+};
+
+function validBuilderConfig() {
+  return {
+    formatVersion: 2,
+    defaultLocale: "en",
+    localizations: { en: { title: "Go Pro", buy: "Buy Now" } },
+    root: {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: [
+        { type: "text", id: "title", key: "title", role: "title" },
+        {
+          type: "packageList",
+          id: "pkgs",
+          packageIds: ["pkg_monthly"],
+          cellLayout: "column",
+        },
+        { type: "purchaseButton", id: "buy", labelKey: "buy" },
+      ],
+    },
+  };
+}
 
 const seededProjectIds: string[] = [];
 function trackProject(id: string) {
@@ -343,6 +379,185 @@ describe("PATCH /projects/:projectId/paywalls/:id — update paywall", () => {
     expect(patchRes.status).toBe(400);
     const { error } = (await patchRes.json()) as { error: { message: string } };
     expect(error.message).toContain("immutable");
+  });
+});
+
+describe("PATCH /projects/:projectId/paywalls/:id — builderConfig", () => {
+  it("accepts a valid builderConfig and sets configFormatVersion to 2", async () => {
+    const { userId, cookie } = await createUserAndSession("bc-valid");
+    const project = await seedProject("bc-valid");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const offering = await seedOffering(project.id, "bc-valid", [monthlyPackageSlot]);
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/paywalls`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "bc-valid-paywall",
+        name: "Builder Config Valid",
+        offeringId: offering.id,
+        remoteConfig: validRemoteConfig,
+      }),
+    });
+    const { data: createData } = (await createRes.json()) as { data: { paywall: { id: string } } };
+    const paywallId = createData.paywall.id;
+
+    const patchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ builderConfig: validBuilderConfig() }),
+    });
+    expect(patchRes.status).toBe(200);
+    const { data } = (await patchRes.json()) as {
+      data: { paywall: Record<string, unknown> };
+    };
+    expect(data.paywall.configFormatVersion).toBe(2);
+    expect(data.paywall.builderConfig).toEqual(validBuilderConfig());
+  });
+
+  it("400s with INVALID_BUILDER_CONFIG + issues when a packageList references a foreign packageId", async () => {
+    const { userId, cookie } = await createUserAndSession("bc-foreign");
+    const project = await seedProject("bc-foreign");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const offering = await seedOffering(project.id, "bc-foreign", [monthlyPackageSlot]);
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/paywalls`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "bc-foreign-paywall",
+        name: "Builder Config Foreign",
+        offeringId: offering.id,
+        remoteConfig: validRemoteConfig,
+      }),
+    });
+    const { data: createData } = (await createRes.json()) as { data: { paywall: { id: string } } };
+    const paywallId = createData.paywall.id;
+
+    const badConfig = validBuilderConfig();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (badConfig.root.children[1] as any).packageIds = ["pkg_unknown"];
+
+    const patchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ builderConfig: badConfig }),
+    });
+    expect(patchRes.status).toBe(400);
+    const { error } = (await patchRes.json()) as { error: { message: string } };
+    const parsed = JSON.parse(error.message) as { code: string; issues: Array<{ code: string }> };
+    expect(parsed.code).toBe("INVALID_BUILDER_CONFIG");
+    expect(parsed.issues.some((i) => i.code === "FOREIGN_PACKAGE_ID")).toBe(true);
+  });
+
+  it("accepts a config whose only issues are LOCALE_KEY_GAP warnings", async () => {
+    const { userId, cookie } = await createUserAndSession("bc-gap");
+    const project = await seedProject("bc-gap");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const offering = await seedOffering(project.id, "bc-gap", [monthlyPackageSlot]);
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/paywalls`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "bc-gap-paywall",
+        name: "Builder Config Gap",
+        offeringId: offering.id,
+        remoteConfig: validRemoteConfig,
+      }),
+    });
+    const { data: createData } = (await createRes.json()) as { data: { paywall: { id: string } } };
+    const paywallId = createData.paywall.id;
+
+    const gapConfig = validBuilderConfig();
+    gapConfig.localizations = { ...gapConfig.localizations, tr: {} };
+
+    const patchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ builderConfig: gapConfig }),
+    });
+    expect(patchRes.status).toBe(200);
+    const { data } = (await patchRes.json()) as { data: { paywall: Record<string, unknown> } };
+    expect(data.paywall.configFormatVersion).toBe(2);
+  });
+
+  it("clears builderConfig and reverts configFormatVersion to 1 when builderConfig: null", async () => {
+    const { userId, cookie } = await createUserAndSession("bc-clear");
+    const project = await seedProject("bc-clear");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const offering = await seedOffering(project.id, "bc-clear", [monthlyPackageSlot]);
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/paywalls`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "bc-clear-paywall",
+        name: "Builder Config Clear",
+        offeringId: offering.id,
+        remoteConfig: validRemoteConfig,
+      }),
+    });
+    const { data: createData } = (await createRes.json()) as { data: { paywall: { id: string } } };
+    const paywallId = createData.paywall.id;
+
+    const setRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ builderConfig: validBuilderConfig() }),
+    });
+    expect(setRes.status).toBe(200);
+    const { data: setData } = (await setRes.json()) as { data: { paywall: Record<string, unknown> } };
+    expect(setData.paywall.configFormatVersion).toBe(2);
+
+    const clearRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ builderConfig: null }),
+    });
+    expect(clearRes.status).toBe(200);
+    const { data: clearData } = (await clearRes.json()) as { data: { paywall: Record<string, unknown> } };
+    expect(clearData.paywall.builderConfig).toBeNull();
+    expect(clearData.paywall.configFormatVersion).toBe(1);
+  });
+
+  it("ignores a client-supplied configFormatVersion — server derives it", async () => {
+    const { userId, cookie } = await createUserAndSession("bc-ignoreversion");
+    const project = await seedProject("bc-ignoreversion");
+    trackProject(project.id);
+    await seedMember({ projectId: project.id, userId, role: "ADMIN" });
+    const offering = await seedOffering(project.id, "bc-ignoreversion", [monthlyPackageSlot]);
+
+    const app = buildApp();
+    const createRes = await app.request(`/projects/${project.id}/paywalls`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        identifier: "bc-ignoreversion-paywall",
+        name: "Builder Config Ignore Version",
+        offeringId: offering.id,
+        remoteConfig: validRemoteConfig,
+      }),
+    });
+    const { data: createData } = (await createRes.json()) as { data: { paywall: { id: string } } };
+    const paywallId = createData.paywall.id;
+
+    const patchRes = await app.request(`/projects/${project.id}/paywalls/${paywallId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ builderConfig: validBuilderConfig(), configFormatVersion: 99 }),
+    });
+    expect(patchRes.status).toBe(200);
+    const { data } = (await patchRes.json()) as { data: { paywall: Record<string, unknown> } };
+    expect(data.paywall.configFormatVersion).toBe(2);
   });
 });
 
