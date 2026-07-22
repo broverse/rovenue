@@ -79,6 +79,7 @@ import {
   scheduleRefundShieldResponder,
 } from "./workers/refund-shield-responder";
 import { bootIntegrations } from "./integrations-boot";
+import { checkConnectWebhookEvents } from "./services/stripe/connect-endpoint-check";
 
 // Start the in-process webhook worker alongside the HTTP server. For
 // horizontal scaling, move this to a separate process using the same
@@ -250,6 +251,16 @@ scheduleRefundShieldResponder().catch((err: unknown) => {
 // Integrations fanout + delivery pipeline (Kafka → BullMQ → worker).
 // bootIntegrations() no-ops gracefully when KAFKA_BROKERS is unset.
 const integrationsHandle = bootIntegrations();
+
+// Advisory: the funnel's one-time backstop depends on the platform's
+// Connect endpoint having `payment_intent.succeeded` selected, and
+// nothing else in the process would ever notice its absence. No-ops when
+// Connect is unconfigured; never blocks or fails startup.
+void checkConnectWebhookEvents().catch((err: unknown) => {
+  logger.error("connect webhook endpoint check failed", {
+    err: err instanceof Error ? err.message : String(err),
+  });
+});
 
 // Shutdown handler — signals the outbox dispatcher loop to exit
 // so the Kafka producer disconnects cleanly before the process
