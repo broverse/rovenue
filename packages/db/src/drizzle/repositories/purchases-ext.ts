@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, lte, or, sql } from "drizzle-orm";
 import type { Db } from "../client";
-import { products, purchases, type Purchase } from "../schema";
+import { products, purchases, subscribers, type Purchase } from "../schema";
 
 // =============================================================
 // Extended purchase reads — used by webhook handlers + workers
@@ -36,6 +36,44 @@ export async function findPurchaseByStoreTransaction(
     )
     .limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * Like `findPurchaseByStoreTransaction`, but also reports whether the
+ * owning subscriber has been GDPR-erased.
+ *
+ * A separate function rather than a widened `findPurchaseByStoreTransaction`
+ * because that one has nine callers across the Apple, Google, Stripe and
+ * receipt-verify paths and only the Stripe invoice path needs this. One
+ * LEFT JOIN, so the erasure check costs no extra round-trip.
+ */
+export async function findStripePurchaseWithSubscriberState(
+  db: Db,
+  projectId: string,
+  subscriptionId: string,
+): Promise<{ purchase: Purchase; subscriberDeletedAt: Date | null } | null> {
+  const rows = await db
+    .select({
+      purchase: purchases,
+      subscriberDeletedAt: subscribers.deletedAt,
+    })
+    .from(purchases)
+    .leftJoin(subscribers, eq(purchases.subscriberId, subscribers.id))
+    .where(
+      and(
+        eq(purchases.projectId, projectId),
+        eq(purchases.store, "STRIPE"),
+        eq(purchases.storeTransactionId, subscriptionId),
+      ),
+    )
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    purchase: row.purchase,
+    subscriberDeletedAt: row.subscriberDeletedAt ?? null,
+  };
 }
 
 /**

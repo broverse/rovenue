@@ -49,6 +49,7 @@ const { drizzleMock } = vi.hoisted(() => {
     },
     purchaseExtRepo: {
       findPurchaseByStoreTransaction: vi.fn(async () => null),
+      findStripePurchaseWithSubscriberState: vi.fn(async () => null),
     },
     purchaseRepo: {
       upsertPurchase: vi.fn(async () => ({ id: "pur_1", expiresDate: null })),

@@ -46,6 +46,8 @@ export type AuditAction =
   // --- stripe connect ---
   | "stripe.connected"
   | "stripe.disconnected"
+  // --- gdpr ---
+  | "subscriber.erased_revenue_received"
   // --- product / group ---
   | "product.created"
   | "product.updated"

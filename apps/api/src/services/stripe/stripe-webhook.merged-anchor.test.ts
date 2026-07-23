@@ -116,6 +116,7 @@ const { drizzleMock, subscribers } = vi.hoisted(() => {
     },
     purchaseExtRepo: {
       findPurchaseByStoreTransaction: vi.fn(async () => null),
+      findStripePurchaseWithSubscriberState: vi.fn(async () => null as unknown),
     },
     purchaseRepo: {
       upsertPurchase: vi.fn(async () => ({
@@ -166,6 +167,11 @@ vi.mock("../notifications/refund-emit", () => ({
 vi.mock("../subscription-transition-guard", () => ({
   guardStatusWrite: vi.fn(async () => ({ apply: true, from: null })),
 }));
+
+const mockAudit = vi.hoisted(() =>
+  vi.fn(async (..._args: unknown[]) => undefined),
+);
+vi.mock("../../lib/audit", () => ({ audit: mockAudit }));
 
 import { processStripeEvent } from "./stripe-webhook";
 
@@ -334,5 +340,93 @@ describe("processStripeEvent — the funnel claim retired the anchor", () => {
       expect.anything(),
       expect.objectContaining({ subscriberId: INSTALLED.id }),
     );
+  });
+});
+
+// =============================================================
+// applyInvoicePaid — revenue landing on a GDPR-erased subscriber
+// =============================================================
+//
+// GDPR erasure anonymises the subscriber row and cancels their live
+// Stripe subscriptions, but an `invoice.paid` already in flight during
+// that window — or arriving after a cancel that failed — still reaches
+// here. The money was genuinely collected, so the revenue event is
+// written regardless; what must not happen silently is the write
+// landing on an already-erased row, so that gets a system-actor audit
+// entry.
+
+const ERASURE_SUBSCRIPTION_ID = "sub_stripe_erasure_1";
+
+const basePurchase = {
+  id: "pur_erasure_1",
+  subscriberId: "sub_live_1",
+  productId: "prod_1",
+  isTrial: false,
+  priceCurrency: "USD",
+  presentedContext: null,
+};
+
+const mockFindStripePurchaseWithSubscriberState =
+  drizzleMock.purchaseExtRepo.findStripePurchaseWithSubscriberState;
+const mockCreateRevenueEvent = drizzleMock.revenueEventRepo.createRevenueEvent;
+
+function invoicePaidEvent(): Stripe.Event {
+  return {
+    id: "evt_invoice_paid_erasure_1",
+    type: "invoice.paid",
+    data: {
+      object: {
+        id: "in_erasure_1",
+        subscription: ERASURE_SUBSCRIPTION_ID,
+        amount_paid: 4900,
+        currency: "usd",
+        billing_reason: "subscription_cycle",
+        created: Math.floor(Date.now() / 1000),
+      },
+    },
+  } as unknown as Stripe.Event;
+}
+
+function dispatchInvoicePaid() {
+  return run(invoicePaidEvent());
+}
+
+describe("applyInvoicePaid — erased subscriber", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  test("still records the revenue and writes a system audit row", async () => {
+    // Purchase resolves, and the owning subscriber is GDPR-erased.
+    mockFindStripePurchaseWithSubscriberState.mockResolvedValue({
+      purchase: basePurchase,
+      subscriberDeletedAt: new Date("2026-07-20T00:00:00Z"),
+    });
+
+    await dispatchInvoicePaid();
+
+    // The money was collected: the revenue event is NOT skipped.
+    expect(mockCreateRevenueEvent).toHaveBeenCalledTimes(1);
+
+    // ...and the anomaly is recorded with a system actor.
+    expect(mockAudit).toHaveBeenCalledTimes(1);
+    expect(mockAudit.mock.calls[0]?.[0]).toMatchObject({
+      userId: "system",
+      action: "subscriber.erased_revenue_received",
+      resource: "purchase",
+      resourceId: basePurchase.id,
+    });
+  });
+
+  test("does not audit when the subscriber is live", async () => {
+    mockFindStripePurchaseWithSubscriberState.mockResolvedValue({
+      purchase: basePurchase,
+      subscriberDeletedAt: null,
+    });
+
+    await dispatchInvoicePaid();
+
+    expect(mockCreateRevenueEvent).toHaveBeenCalledTimes(1);
+    expect(mockAudit).not.toHaveBeenCalled();
   });
 });

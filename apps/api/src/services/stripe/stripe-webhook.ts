@@ -12,6 +12,7 @@ import {
   revenueDedupeKind,
 } from "@rovenue/db";
 import { logger } from "../../lib/logger";
+import { audit, type AuditTx } from "../../lib/audit";
 import type { AccountScopedStripe } from "../../lib/stripe-account-scoped";
 import { parsePresentedContextMetadata } from "../../lib/presented-context";
 import { convertToUsd } from "../fx";
@@ -788,16 +789,17 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
     return;
   }
 
-  const purchase = await drizzle.purchaseExtRepo.findPurchaseByStoreTransaction(
-    drizzle.db,
-    ctx.projectId,
-    Store.STRIPE,
-    subscriptionId,
-  );
-  if (!purchase) {
+  const found =
+    await drizzle.purchaseExtRepo.findStripePurchaseWithSubscriberState(
+      drizzle.db,
+      ctx.projectId,
+      subscriptionId,
+    );
+  if (!found) {
     log.warn("invoice.paid for unknown purchase", { subscriptionId });
     return;
   }
+  const { purchase, subscriberDeletedAt } = found;
 
   ctx.outcome.subscriberId = purchase.subscriberId;
   ctx.outcome.purchaseId = purchase.id;
@@ -827,7 +829,7 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
     ? new Date(invoice.created * 1000)
     : new Date();
 
-  await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, {
+  const revenueInput = {
     projectId: ctx.projectId,
     subscriberId: purchase.subscriberId,
     purchaseId: purchase.id,
@@ -843,6 +845,51 @@ async function applyInvoicePaid(ctx: DispatchContext): Promise<void> {
     metadata: purchase.presentedContext
       ? { presentedContext: purchase.presentedContext }
       : undefined,
+  };
+
+  if (!subscriberDeletedAt) {
+    await drizzle.revenueEventRepo.createRevenueEvent(drizzle.db, revenueInput);
+    return;
+  }
+
+  // The subscriber was GDPR-erased but an invoice still settled — either
+  // in flight while erasure cancelled the subscription, or after that
+  // cancel failed. The money was genuinely collected, so the revenue event
+  // stands: the row it points at is already anonymous, and dropping it
+  // would understate MRR/LTV for no privacy gain. What it must not do is
+  // pass unnoticed, so the anomaly is recorded on the audit chain with a
+  // system actor (same shape as apple-webhook's transition_rejected rows)
+  // and the two writes share one transaction.
+  log.warn("revenue settled on an erased subscriber", {
+    projectId: ctx.projectId,
+    subscriberId: purchase.subscriberId,
+    purchaseId: purchase.id,
+    invoiceId: invoice.id,
+    erasedAt: subscriberDeletedAt.toISOString(),
+  });
+
+  await drizzle.db.transaction(async (tx) => {
+    await drizzle.revenueEventRepo.createRevenueEvent(tx, revenueInput);
+    await audit(
+      {
+        projectId: ctx.projectId,
+        userId: "system",
+        action: "subscriber.erased_revenue_received",
+        resource: "purchase",
+        resourceId: purchase.id,
+        before: null,
+        after: {
+          subscriberId: purchase.subscriberId,
+          invoiceId: invoice.id,
+          erasedAt: subscriberDeletedAt.toISOString(),
+          amountUsd: amountUsd.toString(),
+          currency,
+        },
+        ipAddress: null,
+        userAgent: null,
+      },
+      tx as unknown as AuditTx,
+    );
   });
 }
 
