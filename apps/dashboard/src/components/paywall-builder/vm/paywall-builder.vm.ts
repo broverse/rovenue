@@ -24,7 +24,7 @@ import {
   type PaywallBuilderDetailDto,
 } from "../../../lib/services/paywall-builder-api";
 import * as treeOps from "../tree-ops";
-import { PRESETS } from "../presets";
+import { PRESETS, type PresetId } from "../presets";
 import type { CanvasDevice, ColorScheme } from "../types";
 import {
   DEFAULT_DEVICE_ID,
@@ -420,7 +420,7 @@ export class PaywallBuilderViewModel {
   }
 
   // ----- Presets -----
-  applyPreset(id: "hero" | "comparison") {
+  applyPreset(id: PresetId) {
     const preset = PRESETS.find((p) => p.id === id);
     if (!preset) return;
     const config = preset.build(this.defaultLocale || "en");

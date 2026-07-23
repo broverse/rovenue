@@ -96,11 +96,22 @@ function buildComparisonPreset(defaultLocale: string): BuilderConfig {
   };
 }
 
-export const PRESETS: Array<{
-  id: "hero" | "comparison";
-  name: string;
-  build: (defaultLocale: string) => BuilderConfig;
-}> = [
-  { id: "hero", name: "Hero", build: buildHeroPreset },
-  { id: "comparison", name: "Comparison", build: buildComparisonPreset },
-];
+export const PRESETS = [
+  {
+    id: "hero",
+    name: "Hero",
+    tag: "Highest converting",
+    description: "Full-bleed image, plan list, sticky purchase button.",
+    build: buildHeroPreset,
+  },
+  {
+    id: "comparison",
+    name: "Comparison",
+    tag: "Feature-rich",
+    description: "Title, plan list and a caption for the fine print.",
+    build: buildComparisonPreset,
+  },
+] as const;
+
+/** Preset ids derived from the table, so adding a preset needs no type edit. */
+export type PresetId = (typeof PRESETS)[number]["id"];
