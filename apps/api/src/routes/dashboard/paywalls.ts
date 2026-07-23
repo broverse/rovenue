@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { validate } from "../../lib/validate";
 import { z } from "zod";
+import { sql } from "drizzle-orm";
 import { MemberRole, drizzle, type Offering } from "@rovenue/db";
 import {
   builderConfigSchema,
@@ -497,6 +498,14 @@ export const paywallsDashboardRoute = new Hono()
     }
 
     const result = await drizzle.db.transaction(async (tx) => {
+      // Serialize concurrent publishes of THIS paywall. nextVersionNo is
+      // read-then-insert, so without this two publishes could read the same
+      // MAX(versionNo) and both insert N+1 — the unique (paywallId,
+      // versionNo) index would then 500 the loser. The advisory lock is
+      // transaction-scoped (auto-released on commit/rollback) and keyed on
+      // the paywall id, so it blocks only same-paywall publishes; other
+      // paywalls are unaffected.
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${id}))`);
       const versionNo = await drizzle.paywallVersionRepo.nextVersionNo(tx, id);
       const version = await drizzle.paywallVersionRepo.insert(tx, {
         paywallId: id,

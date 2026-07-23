@@ -512,3 +512,35 @@ describe("GET /paywalls/:id/diff", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("POST /paywalls/:id/publish — concurrency", () => {
+  it("serializes concurrent publishes of one paywall without version collisions", async () => {
+    const app = buildApp();
+    const paywall = await createPaywall("concurrent", VALID_CONFIG);
+
+    // Fire many publishes of the SAME paywall at once. Without a
+    // per-paywall lock, nextVersionNo (read-then-insert) lets two
+    // transactions read the same MAX(versionNo) and both insert N+1 —
+    // the unique (paywallId, versionNo) index then 500s the loser.
+    const N = 10;
+    const results = await Promise.all(
+      Array.from({ length: N }, () =>
+        app.request(`/projects/${projectId}/paywalls/${paywall.id}/publish`, {
+          method: "POST",
+          headers: { cookie },
+        }),
+      ),
+    );
+
+    // Every publish must succeed — no unique-index collision surfaced as 500.
+    for (const res of results) expect(res.status).toBe(200);
+
+    const bodies = await Promise.all(results.map((r) => r.json()));
+    const versionNos = bodies
+      .map((b) => b.data.version.versionNo as number)
+      .sort((a, b) => a - b);
+
+    // Exactly 1..N, each exactly once — the lock made nextVersionNo monotonic.
+    expect(versionNos).toEqual(Array.from({ length: N }, (_, i) => i + 1));
+  });
+});
