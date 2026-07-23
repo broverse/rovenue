@@ -3196,6 +3196,11 @@
       "star": "Star this chart",
       "unstar": "Unstar this chart"
     },
+    "series": {
+      "emptyTitle": "No data for this chart yet",
+      "emptyBody": "This chart isn't wired to a data source. Pick another chart from the library.",
+      "loadError": "Couldn't load this chart"
+    },
     "mrr": {
       "headLabel": "Current month · MRR",
       "momDelta": "MoM · {{value}}",

@@ -13,6 +13,7 @@ import {
   HourDayHeatmap,
   MrrChartPanel,
   NewChartDialog,
+  SeriesChartPanel,
   SqlPreviewCard,
   type ChartType,
   type RangeOption,
@@ -174,12 +175,21 @@ function ChartsPage({ projectId }: { projectId: string }) {
             onToggleCompare={() => setCompare((c) => !c)}
           />
 
-          <MrrChartPanel
-            projectId={projectId}
-            chartType={chartType}
-            compare={compare}
-            range={range}
-          />
+          {chartId === "mrr" ? (
+            <MrrChartPanel
+              projectId={projectId}
+              chartType={chartType}
+              compare={compare}
+              range={range}
+            />
+          ) : (
+            <SeriesChartPanel
+              projectId={projectId}
+              chartId={chartId}
+              chartType={chartType}
+              range={range}
+            />
+          )}
 
           <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
             <ChannelDonut projectId={projectId} />

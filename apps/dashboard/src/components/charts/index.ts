@@ -11,6 +11,7 @@ export { MrrChartPanel } from "./mrr-chart-panel";
 export { RevenueKpisCard } from "./revenue-kpis-card";
 export { NewAnnotationDialog } from "./new-annotation-dialog";
 export { NewChartDialog } from "./new-chart-dialog";
+export { SeriesChartPanel } from "./series-chart-panel";
 export { SqlPreviewCard } from "./sql-preview-card";
 export {
   ANNOTATIONS,
