@@ -8,6 +8,7 @@ import {
   builderConfigSchema,
   diffBuilderConfigs,
   isBlockingIssue,
+  isPublishBlockingIssue,
   validateBuilderConfig,
 } from "@rovenue/shared/paywall";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
@@ -491,7 +492,7 @@ export const paywallsDashboardRoute = new Hono()
     const issues = validateBuilderConfig(parsed.data, {
       offeringPackageIds: extractOfferingPackageIds(offering),
     });
-    if (issues.some(isBlockingIssue)) {
+    if (issues.some(isPublishBlockingIssue)) {
       throw new HTTPException(400, {
         message: JSON.stringify({ code: "PAYWALL_NOT_PUBLISHABLE", issues }),
       });

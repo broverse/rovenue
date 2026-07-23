@@ -16,7 +16,7 @@ import type {
 } from "@rovenue/shared";
 import {
   emptyBuilderConfig,
-  isBlockingIssue,
+  isPublishBlockingIssue,
   validateBuilderConfig,
 } from "@rovenue/shared/paywall";
 import {
@@ -440,10 +440,10 @@ export class PaywallBuilderViewModel {
   }
 
   @derived get errorIssues() {
-    return this.validationIssues.filter(isBlockingIssue);
+    return this.validationIssues.filter(isPublishBlockingIssue);
   }
   @derived get warningIssues() {
-    return this.validationIssues.filter((i) => !isBlockingIssue(i));
+    return this.validationIssues.filter((i) => !isPublishBlockingIssue(i));
   }
 
   @derived get isDirty() {
