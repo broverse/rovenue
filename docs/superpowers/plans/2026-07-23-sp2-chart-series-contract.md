@@ -411,6 +411,11 @@ Expected: FAIL — `readChartSeries` is not exported from `./charts`.
 
 - [ ] **Step 3: Implement the readers**
 
+**Superseded during implementation.** The `SUPPORTED_SERIES_IDS` set below was
+replaced in a fix round by a `switch (chartId)` whose `default` returns
+`supported: false`. Two mechanisms deciding support could disagree; one cannot.
+The shipped code is the switch — read `charts.ts` rather than this snippet.
+
 Append to `apps/api/src/services/metrics/charts.ts`:
 
 ```ts
@@ -906,5 +911,5 @@ git commit -m "docs(sp2): record SP2 verification results"
 - Task 1's `buildRatePoints` exists specifically so the rate arithmetic is provable without ClickHouse. A reviewer should reject any implementation that moves the zero-denominator rule back into SQL, where no test can reach it.
 - `value: null` and `value: 0` mean different things. Reject any code or test that conflates them.
 - Task 2 Step 6 (hand-running the SQL) is the only check on query correctness in this whole plan. A task report that omits the actual query output is incomplete.
-- `MrrChartPanel` must be unmodified. Reject a diff that touches it.
+- `MrrChartPanel` must not be FUNCTIONALLY modified — its bespoke split-request window logic fixed a real "Couldn't load MRR" bug and must stay byte-identical. Amended after the fact: a later fix round added the `export` keyword to its `RANGE_MONTHS` declaration so the duplicate in `series-chart-panel.tsx` could be deleted. That is permitted; the original wording ("reject a diff that touches it") was too broad and would have forced two copies of the same mapping to drift apart.
 - Every task carries a mutation-check step. A report that omits the mutation-check outcome is incomplete regardless of how many tests pass.

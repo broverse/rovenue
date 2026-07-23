@@ -146,8 +146,15 @@ Together the pair decomposes the funnel: reach × conversion.
 ### Shared query shape
 
 Each reader joins numerator and denominator per day, emitting one point per day
-in the window. A day present in neither side is omitted; a day with a zero
-denominator emits `value: null` with its `numerator`/`denominator` intact.
+in the window. A day with a zero denominator emits `value: null` with its
+`numerator`/`denominator` intact.
+
+**Corrected (final review).** An earlier draft of this paragraph also said "a day
+present in neither side is omitted", which contradicted the sentence beside it
+and is not what shipped. Every day in the window gets a point, including days
+absent from both inputs (`numerator: 0, denominator: 0, value: null`). The
+panel's gap rendering and its x-axis spacing both depend on that: an omitted day
+would compress the axis and silently misplace every point after it.
 
 Attribution follows the pattern `placement_metrics` already established
 (`apps/api/src/services/analytics-router.ts:155-190`): the numerator uses the
