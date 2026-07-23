@@ -23,6 +23,7 @@ Spec: `docs/superpowers/specs/2026-07-23-sp1-correctness-repo-health-design.md`
 - `@rovenue/db` tests do not auto-load `.env`. Export `DATABASE_URL` before running them; `apps/api` tests do load it.
 - Local Postgres for integration tests: `postgresql://rovenue:rovenue@localhost:5433/rovenue` (container `rovenue-db-1`).
 - **Every fix must be mutation-checked**: after the test passes, revert the production change, confirm the test goes red, then restore. A test that passes on unfixed code proves nothing.
+- **No magic values.** Any literal that carries meaning — a threshold, a scale, a z-layer, a style constant, a retry count — is hoisted into a named constant next to its siblings. Structured data tables (fixtures, lookup maps) are not magic values and stay as they are.
 
 ---
 
@@ -795,13 +796,28 @@ pnpm build --filter @rovenue/api
 
 Expected: clean.
 
-- [ ] **Step 3: Re-measure the integration sweep**
+- [ ] **Step 3: Diagnose the red integration files**
+
+Task 1 established that fixing `deleteProject` turns **zero** integration files green: almost every teardown calls `db.delete(projects)` directly on the pool and never goes through `deleteProject` at all. The "13 red files, credit_ledger teardown class" figure from the follow-up ledger is therefore unverified and its stated cause is wrong.
+
+This step replaces the assumption with a measurement.
+
+Note the vitest CLI filter is substring-match, not glob — `'src/**/*.integration.test.ts'` returns "No test files found". Filter on a path substring and post-filter:
 
 ```bash
-pnpm --filter @rovenue/api exec vitest run --reporter=basic 'src/**/*.integration.test.ts'
+pnpm --filter @rovenue/api exec vitest run --reporter=basic "src/" 2>&1 | tee /tmp/sweep.txt
+grep -E "^ ?(FAIL|✗)" /tmp/sweep.txt | sort -u
 ```
 
-Compare against the baseline captured in Task 1 Step 8. State how many files Task 1 turned green, and name every file still red together with the reason. If a file is red for a reason unrelated to this plan, say so explicitly rather than folding it into a total.
+For every red file, determine and record the actual failure cause. Classify each into one of:
+
+1. **credit_ledger append-only teardown** — the trigger rejects a cascading `DELETE` because the teardown never authorises it. These are the files a follow-up task could fix by switching the teardown to `withLedgerDeleteAuthorized` (already used correctly in six files, e.g. `apps/api/src/routes/dashboard/credits.integration.test.ts:115`).
+2. **Shared-fixture collision** — sibling files hardcoding the same literal id, e.g. `storeTransactionId: "ch_test_123"`. Ordering-dependent, unrelated to this plan.
+3. **Something else** — name it.
+
+Re-run any file that changes status across runs at least three times before classifying it; a status that varies between runs is a flake, not a fix or a regression.
+
+Report the counts per class with file names. Do **not** state a total that mixes classes, and do not repeat the "13" figure unless you measured it.
 
 - [ ] **Step 4: Append the ledger entry**
 
