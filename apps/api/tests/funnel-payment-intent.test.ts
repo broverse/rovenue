@@ -492,6 +492,26 @@ describe("POST /public/funnel-sessions/:sessionId/payment-intent", () => {
     expect(customersCreate).not.toHaveBeenCalled();
   });
 
+  it("409s and cancels its own objects when the session was already paid", async () => {
+    // `upsertPending` refuses a non-pending row in SQL and returns null:
+    // a concurrent /confirm or the webhook backstop completed this session
+    // while we were talking to Stripe. The PaymentIntent we just created
+    // is orphaned and must not stay confirmable.
+    upsertPurchase.mockResolvedValueOnce(null);
+
+    const res = await post({
+      package_identifier: "$rov_lifetime",
+      email: "a@b.co",
+    });
+
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).toContain(
+      "PAYMENT_ALREADY_RECORDED",
+    );
+    // The object this request created was cancelled, not left confirmable.
+    expect(paymentIntentsCancel).toHaveBeenCalledWith("pi_2");
+  });
+
   // THE contract test for this task.
   it("ignores an amount supplied by the client", async () => {
     await post({

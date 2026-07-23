@@ -69,6 +69,13 @@ const bodySchema = z.object({
 // legitimately produces, and never with `withLock`'s own `null`.
 const LOCK_LOST = Symbol("funnel-payment-lock-lost");
 
+// Returned when `upsertPending` refuses the write because the row is
+// already `paid` — a concurrent /confirm or the webhook backstop won
+// while this attempt was creating its Stripe objects. Those objects are
+// now orphaned, and their client_secret was never returned to anyone, so
+// the section cancels them before signalling this.
+const ALREADY_PAID = Symbol("funnel-payment-already-paid");
+
 interface PaywallContext {
   productId: string;
   stripePriceId: string | null;
@@ -997,7 +1004,7 @@ export const funnelPaymentRoute = new Hono()
         setupIntentId,
       );
 
-      await drizzle.funnelPurchaseRepo.upsertPending(drizzle.db, {
+      const saved = await drizzle.funnelPurchaseRepo.upsertPending(drizzle.db, {
         sessionId: sid,
         projectId: session.projectId,
         productId: context.productId,
@@ -1031,6 +1038,21 @@ export const funnelPaymentRoute = new Hono()
         // ordinary path.
         ...(rawPayload ? { rawPayload } : {}),
       });
+
+      // `upsertPending` refuses a non-pending row in SQL, so `null` means
+      // this session was already completed while we were talking to
+      // Stripe. Handing back `clientSecret` would let the buyer confirm a
+      // payment against a session that is already paid — a second charge.
+      // The objects we just created are ours and unreturned, so cancel
+      // them (same safety as the lock-lost path) and 409.
+      if (!saved) {
+        await cancelOwnObjects(
+          account,
+          { subscriptionId: stripeSubscriptionId, paymentIntentId: stripePaymentIntentId },
+          sid,
+        );
+        return ALREADY_PAID;
+      }
 
       return {
         client_secret: clientSecret,
@@ -1071,6 +1093,17 @@ export const funnelPaymentRoute = new Hono()
         message: JSON.stringify({
           code: "PAYMENT_IN_FLIGHT",
           message: "A payment attempt for this session is already in flight",
+        }),
+      });
+    }
+
+    // This session was already paid; the section cancelled the objects it
+    // created. The browser should stop trying to pay and move to claiming.
+    if (result === ALREADY_PAID) {
+      throw new HTTPException(409, {
+        message: JSON.stringify({
+          code: "PAYMENT_ALREADY_RECORDED",
+          message: "This purchase is already complete",
         }),
       });
     }
