@@ -6,6 +6,7 @@ import { LayerTree } from "./layer-tree";
 import { Canvas } from "./canvas";
 import { PropertiesPanel } from "./properties-panel";
 import { ValidationDrawer } from "./validation-drawer";
+import { DiffModal } from "./diff-modal";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 
 type Props = {
@@ -16,6 +17,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
   const [showValidation, setShowValidation] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
 
   if (vm.isLoading) {
     return (
@@ -41,11 +43,10 @@ export const BuilderShell = component(({ projectId }: Props) => {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-rv-bg text-foreground">
-      {/* TODO(task-12): wire the real diff-modal opener; this is a temporary no-op. */}
       <TopBar
         projectId={projectId}
         onOpenValidation={() => setShowValidation(true)}
-        onOpenDiff={() => {}}
+        onOpenDiff={() => setShowDiff(true)}
       />
       <main className="flex flex-1 overflow-hidden">
         <LayerTree />
@@ -53,6 +54,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
         <PropertiesPanel />
       </main>
       {showValidation && <ValidationDrawer onClose={() => setShowValidation(false)} />}
+      {showDiff && <DiffModal onClose={() => setShowDiff(false)} />}
     </div>
   );
 });
