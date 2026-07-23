@@ -15,6 +15,10 @@ export type BuilderIssue = {
   code:
     | "DUPLICATE_NODE_ID"
     | "UNKNOWN_LOC_KEY"
+    // The key exists in the default locale but its value is blank. A normal
+    // in-progress authoring state, so it must NOT block the save — only the
+    // publish. See ISSUE_SEVERITY.
+    | "EMPTY_LOC_VALUE"
     | "FOREIGN_PACKAGE_ID"
     | "MISSING_PURCHASE_BUTTON"
     | "LOCALE_KEY_GAP"
@@ -59,6 +63,7 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
   LOCALE_KEY_GAP: "warning",
   OVERRIDE_SELECTED_OUTSIDE_CELL: "warning",
   INTRO_VARIABLE_UNGUARDED: "warning",
+  EMPTY_LOC_VALUE: "publish",
 };
 
 /** Anything unlisted blocks the save — the strictest tier, so a code added

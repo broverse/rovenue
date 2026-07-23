@@ -84,7 +84,9 @@ function issueTitle(issue: BuilderIssue, t: (key: string, fallback: string) => s
     case "DUPLICATE_NODE_ID":
       return t("paywalls.builder.validation.codeDuplicateId", "Duplicate node id");
     case "UNKNOWN_LOC_KEY":
-      return t("paywalls.builder.validation.codeUnknownKey", "Missing default-locale text");
+      return t("paywalls.builder.validation.codeUnknownKey", "Unknown localization key");
+    case "EMPTY_LOC_VALUE":
+      return t("paywalls.builder.validation.codeEmptyLocValue", "Blank default-locale text");
     case "FOREIGN_PACKAGE_ID":
       return t("paywalls.builder.validation.codeForeignPackage", "Unknown package reference");
     case "MISSING_PURCHASE_BUTTON":
