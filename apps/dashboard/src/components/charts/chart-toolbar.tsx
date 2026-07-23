@@ -22,6 +22,12 @@ type Props = {
   onRangeChange: (next: RangeOption) => void;
   compare: boolean;
   onToggleCompare: () => void;
+  /** Comparison is bespoke to MrrChartPanel — SeriesChartPanel has no
+   * `compare` prop, so the toggle would otherwise sit there doing
+   * nothing on every other chart. Disable it and explain why via
+   * `compareDisabledReason` instead of leaving a dead control live. */
+  compareDisabled?: boolean;
+  compareDisabledReason?: string;
 };
 
 export function ChartToolbar({
@@ -35,6 +41,8 @@ export function ChartToolbar({
   onRangeChange,
   compare,
   onToggleCompare,
+  compareDisabled = false,
+  compareDisabledReason,
 }: Props) {
   const { t } = useTranslation();
 
@@ -78,6 +86,8 @@ export function ChartToolbar({
         size="sm"
         onClick={onToggleCompare}
         aria-pressed={compare}
+        disabled={compareDisabled}
+        title={compareDisabled ? compareDisabledReason : undefined}
         className="h-7"
       >
         <Check size={12} className={compare ? "opacity-100" : "opacity-30"} />

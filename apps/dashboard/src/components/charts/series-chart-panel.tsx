@@ -37,13 +37,69 @@ const MIN_Y_MAX = 1;
 const Y_HEADROOM = 1.1;
 
 const DAYS_PER_MONTH = 30;
-// Cap mirrors the API's own clamp (WINDOW_MAX_DAYS in
-// apps/api/src/services/metrics/charts.ts) so "All" doesn't request
-// a window the server would silently truncate anyway.
+// Cap mirrors the API's own clamp (WINDOW_MAX_DAYS / windowQuerySchema's
+// `.max()` in apps/api/src/routes/dashboard/charts.ts, sourced from
+// __chartsConstants in apps/api/src/services/metrics/charts.ts). The
+// server does NOT silently truncate an over-cap request — it 400s —
+// so this client-side clamp exists to keep "All" (24mo ≈ 720d) from
+// ever reaching the server as a request the API will reject outright.
 const MAX_WINDOW_DAYS = 365;
+
+// How many gridlines / y-axis labels to draw — mirrors MrrChartPanel's
+// 5-tick convention (see mrr-chart-panel.tsx) so both panels read as
+// the same product.
+const Y_TICK_FRACTIONS = [0, 0.25, 0.5, 0.75, 1] as const;
+// How many x-axis date labels to draw. Unlike MrrChartPanel (which
+// labels every month, at most 24), this panel can have up to
+// MAX_WINDOW_DAYS daily points — labelling every day would be
+// unreadable, so we sample a fixed, small number of evenly-spaced
+// ticks instead.
+const X_TICK_COUNT = 6;
+
+// Label styling/positioning — lifted from MrrChartPanel's axis-label
+// conventions (same font size, same gutter offsets) so the two panels
+// look like the same product.
+const AXIS_LABEL_FONT_SIZE = 10;
+const Y_LABEL_GUTTER_OFFSET = 10; // distance left of PAD_L, text-anchor "end"
+const Y_LABEL_BASELINE_NUDGE = 3; // vertical nudge so the label centers on the gridline
+const X_LABEL_BOTTOM_OFFSET = 16; // distance up from the svg's bottom edge
+
+// Decimal places for a "percent" unit's axis/tooltip label, e.g. "0.4%".
+const PERCENT_DECIMALS = 1;
 
 export function rangeToWindowDays(range: RangeOption): number {
   return Math.min(RANGE_MONTHS[range] * DAYS_PER_MONTH, MAX_WINDOW_DAYS);
+}
+
+/** Whether `range`'s nominal span exceeds what the server will serve
+ * (currently only "All", whose 24mo nominal span is ~720d). Used to
+ * tell the user the truncated window they're actually getting instead
+ * of silently showing "All" over a shorter span. */
+export function isRangeWindowTruncated(range: RangeOption): boolean {
+  return RANGE_MONTHS[range] * DAYS_PER_MONTH > MAX_WINDOW_DAYS;
+}
+
+/** Format a bucket's ISO timestamp as a short UTC date label, e.g. "Jul 3". */
+function formatDayLabel(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** Pick up to `tickCount` evenly-spaced indices into a 0..count-1
+ * range, always including the first and last index. Used to sample a
+ * readable number of x-axis labels out of up to 365 daily points. */
+function pickTickIndices(count: number, tickCount: number): number[] {
+  if (count <= 0) return [];
+  if (count <= tickCount) return Array.from({ length: count }, (_, i) => i);
+  const step = (count - 1) / (tickCount - 1);
+  const seen = new Set<number>();
+  for (let i = 0; i < tickCount; i++) {
+    seen.add(Math.round(i * step));
+  }
+  return [...seen].sort((a, b) => a - b);
 }
 
 type Props = {
@@ -90,6 +146,11 @@ export function SeriesChartPanel({ projectId, chartId, chartType, range }: Props
 
   const plotted = useMemo(() => runs.flat(), [runs]);
 
+  // A supported chart whose every day came back null (e.g. a brand
+  // new project) is distinct from `supported: false` — the reader
+  // exists, it just has nothing to say about this window.
+  const hasVisibleData = plotted.length > 0;
+
   const yMax =
     Math.max(...plotted.map((p) => p.value), MIN_Y_MAX) * Y_HEADROOM;
 
@@ -98,7 +159,26 @@ export function SeriesChartPanel({ projectId, chartId, chartType, range }: Props
   const y = (v: number) => PAD_T + (1 - v / yMax) * INNER_H;
 
   const formatValue = (v: number) =>
-    unit === "percent" ? `${v.toFixed(1)}%` : formatCount(v);
+    unit === "percent" ? `${v.toFixed(PERCENT_DECIMALS)}%` : formatCount(v);
+
+  // Axis labels: y is the same 5-fraction ticks as the gridlines,
+  // formatted per-unit so a percent series never looks like a count
+  // series. x is a small, fixed sample of the day labels — see
+  // pickTickIndices.
+  const yAxisTicks = useMemo(
+    () =>
+      Y_TICK_FRACTIONS.map((frac) => ({
+        frac,
+        value: (1 - frac) * yMax,
+      })),
+    [yMax],
+  );
+  const xAxisTickIndices = useMemo(
+    () => pickTickIndices(points.length, X_TICK_COUNT),
+    [points.length],
+  );
+
+  const windowTruncated = isRangeWindowTruncated(range);
 
   if (error) {
     return (
@@ -144,12 +224,20 @@ export function SeriesChartPanel({ projectId, chartId, chartType, range }: Props
 
   return (
     <section className="rounded-lg border border-rv-divider bg-rv-c1 px-5 py-4">
+      {windowTruncated && (
+        <p
+          data-testid="series-chart-window-note"
+          className="mb-2 text-[11px] text-rv-mute-500"
+        >
+          {t("charts.series.windowCapped", { days: windowDays })}
+        </p>
+      )}
       <svg
         viewBox={`0 0 ${W} ${H}`}
         preserveAspectRatio="none"
         className="block h-[240px] w-full"
       >
-        {[0, 0.25, 0.5, 0.75, 1].map((g) => {
+        {Y_TICK_FRACTIONS.map((g) => {
           const gy = PAD_T + g * INNER_H;
           return (
             <line
@@ -163,6 +251,50 @@ export function SeriesChartPanel({ projectId, chartId, chartType, range }: Props
             />
           );
         })}
+
+        {yAxisTicks.map(({ frac, value }) => (
+          <text
+            key={frac}
+            data-testid={`series-chart-ylabel-${frac}`}
+            x={PAD_L - Y_LABEL_GUTTER_OFFSET}
+            y={PAD_T + frac * INNER_H + Y_LABEL_BASELINE_NUDGE}
+            fontSize={AXIS_LABEL_FONT_SIZE}
+            fill="var(--color-rv-mute-500)"
+            textAnchor="end"
+            fontFamily="var(--font-rv-mono)"
+          >
+            {formatValue(value)}
+          </text>
+        ))}
+
+        {xAxisTickIndices.map((i) => (
+          <text
+            key={i}
+            data-testid={`series-chart-xlabel-${i}`}
+            x={x(i)}
+            y={H - X_LABEL_BOTTOM_OFFSET}
+            fontSize={AXIS_LABEL_FONT_SIZE}
+            fill="var(--color-rv-mute-500)"
+            textAnchor="middle"
+            fontFamily="var(--font-rv-mono)"
+          >
+            {formatDayLabel(points[i]!.bucket)}
+          </text>
+        ))}
+
+        {!hasVisibleData && (
+          <text
+            data-testid="series-chart-no-data"
+            x={PAD_L + INNER_W / 2}
+            y={PAD_T + INNER_H / 2}
+            fontSize={AXIS_LABEL_FONT_SIZE}
+            fill="var(--color-rv-mute-500)"
+            textAnchor="middle"
+            fontFamily="var(--font-rv-mono)"
+          >
+            {t("charts.series.noDataInWindow")}
+          </text>
+        )}
 
         {chartType === "bar" ? (
           points.map((p, i) => {

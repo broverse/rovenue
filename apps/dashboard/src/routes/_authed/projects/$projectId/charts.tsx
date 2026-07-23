@@ -173,6 +173,16 @@ export function ChartsPage({ projectId }: { projectId: string }) {
             onRangeChange={setRange}
             compare={compare}
             onToggleCompare={() => setCompare((c) => !c)}
+            // Comparison is bespoke to MrrChartPanel (see
+            // mrr-chart-panel.tsx) — every other chart has no
+            // `compare` prop, so leaving the toggle live there would
+            // be a dead control (SP2 finding).
+            compareDisabled={chartId !== "mrr"}
+            compareDisabledReason={
+              chartId !== "mrr"
+                ? t("charts.toolbar.compareUnavailable")
+                : undefined
+            }
           />
 
           {chartId === "mrr" ? (

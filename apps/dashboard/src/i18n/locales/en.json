@@ -1320,6 +1320,11 @@
         "zoomReset": "Reset zoom (1×)",
         "zoomIn": "Zoom in",
         "fit": "Fit to canvas (1×)",
+        "platformIos": "iOS",
+        "platformAndroid": "Android",
+        "devices": "{{platform}} devices",
+        "allSizes": "All sizes",
+        "safeArea": "Safe area",
         "previewBadge": "Preview — placeholder prices"
       },
       "properties": {
@@ -1398,6 +1403,9 @@
       "topbar": {
         "close": "Close builder",
         "loading": "Paywall builder",
+        "publishFailed": "Publish failed",
+        "localization": "Localization matrix",
+        "start": "Start from a layout",
         "devicePhone": "Phone",
         "deviceTablet": "Tablet",
         "deviceDesktop": "Desktop",
@@ -1407,6 +1415,13 @@
         "warnings_one": "{{count}} warning",
         "warnings_other": "{{count}} warnings",
         "noIssues": "No issues",
+        "inSyncHint": "The draft matches what devices are being served",
+        "inSync": "in sync",
+        "publishHint": "Publish over-the-air",
+        "publishBlocked": "Resolve blocking issues before publishing",
+        "publishing": "Publishing…",
+        "publish": "Publish",
+        "versions": "Version history",
         "autosaveErrorHint": "Save failed — retrying",
         "autosaveHint": "Autosaved on every change",
         "autosaveSaving": "saving",
@@ -3192,6 +3207,7 @@
       "chartType": "Chart type",
       "range": "Range",
       "compare": "Compare",
+      "compareUnavailable": "Comparison to the previous period is only available on the MRR chart.",
       "more": "More options",
       "star": "Star this chart",
       "unstar": "Unstar this chart"
@@ -3199,7 +3215,9 @@
     "series": {
       "emptyTitle": "No data for this chart yet",
       "emptyBody": "This chart isn't wired to a data source. Pick another chart from the library.",
-      "loadError": "Couldn't load this chart"
+      "loadError": "Couldn't load this chart",
+      "noDataInWindow": "No data in this window",
+      "windowCapped": "Showing the last {{days}} days — the longest window this chart supports."
     },
     "mrr": {
       "headLabel": "Current month · MRR",

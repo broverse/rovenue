@@ -460,6 +460,18 @@ async function readPaywallViewers(
  * 100% on days with a lot of force-kills — that is this known gap,
  * not a bug in the arithmetic. Do not "fix" it by loosening the
  * source view; see 0016's migration comment for why it's FINAL-only.
+ *
+ * CAVEAT (partial day): `to` is always the current, in-progress UTC
+ * day when the caller asks for "up to today" (which every chart
+ * window does). A paywall view fires immediately, so it lands in
+ * today's numerator right away; a session only finalises this
+ * denominator once it backgrounds/closes, which for a still-open
+ * session on today's date hasn't happened yet. So today's bucket of
+ * `paywall_view_rate` is biased high for the same session-lag reason
+ * as the force-kill gap above — it's a live, undercounted denominator
+ * against a live numerator, not a data-quality bug. It self-corrects
+ * once the day is no longer "today". Do not drop the partial day from
+ * the window to "fix" it — see the same guidance as above.
  */
 async function readActiveSubscribers(
   projectId: string,
