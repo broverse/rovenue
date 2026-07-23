@@ -92,7 +92,7 @@ The card renders the blocks as stacked bars/blocks with `rv-*` tokens. Only the 
 
 ## 5. When the modal opens
 
-- **Automatically** when the builder mounts and the tree is empty (`config.root.children.length === 0`) — the moment right after creating a paywall. Auto-open is evaluated **once per mount** (a `useState` initialiser, not a reactive effect), so dismissing it stays dismissed for that session and it can't re-open while the author works.
+- **Automatically** when the builder mounts and the tree is empty (`config.root.children.length === 0`) — the moment right after creating a paywall. Auto-open is **latched**: decided exactly once, at the first render after the paywall finishes loading, and never re-derived. The latch is not a stylistic choice — `BuilderShell`'s hooks run before its `isLoading` early return and the view model's `config` starts as `emptyBuilderConfig()`, so deciding at mount would open the gallery on every paywall; and re-deriving reactively would re-open it the moment the author deletes the last node or dismisses it.
 - **Manually** from a top-bar button, which opens the same modal at any time.
 - **Because `applyPreset` replaces the entire config**, picking a template while the tree is non-empty would silently destroy work. On a non-empty tree a card click therefore arms a confirm state on that card ("Replace your current design?" with a confirm/cancel) instead of applying immediately. On an empty tree it applies directly — there is nothing to lose.
 - **"Blank canvas"** is the last card. Choosing it simply closes the modal; it never needs a confirm because it changes nothing.
