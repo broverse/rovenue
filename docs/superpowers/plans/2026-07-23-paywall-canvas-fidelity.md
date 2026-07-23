@@ -561,7 +561,9 @@ In the canvas bar (`<div className="flex items-center gap-2 border-b …">`), af
                 vm.canvasPlatform === p ? "bg-rv-c4 text-foreground" : "text-rv-mute-600 hover:text-foreground",
               )}
             >
-              {p === "ios" ? "iOS" : "Android"}
+              {p === "ios"
+                ? t("paywalls.builder.canvas.platformIos", "iOS")
+                : t("paywalls.builder.canvas.platformAndroid", "Android")}
             </button>
           ))}
         </div>
