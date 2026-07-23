@@ -8,6 +8,7 @@ import type {
   ChartHeatmapCell,
   ChartHeatmapResponse,
   ChartSeriesPoint,
+  ChartSeriesResponse,
 } from "@rovenue/shared";
 import {
   ClickHouseUnavailableError,
@@ -370,4 +371,145 @@ export function buildRatePoints(
   }
 
   return points;
+}
+
+// =============================================================
+// Generic chart series — paywall reach and conversion
+// =============================================================
+//
+// Two of the sixteen catalog charts are wired. Every other id
+// answers `supported: false` so the dashboard renders an empty
+// state rather than another chart's data.
+
+/** Revenue event types that count as a purchase for attribution. */
+const PURCHASE_EVENT_TYPES = "'INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION'";
+
+/** Catalog ids this service can serve today. */
+const SUPPORTED_SERIES_IDS: ReadonlySet<string> = new Set([
+  "paywall_view_rate",
+  "paywall_purchase",
+]);
+
+/** Daily unique subscribers who saw any paywall in this project. */
+async function readPaywallViewers(
+  projectId: string,
+  from: string,
+  to: string,
+): Promise<DailyCountRow[]> {
+  // NOTE: select the bare `day` column, not `toString(day) AS day` —
+  // re-aliasing it to its own name trips ClickHouse's GROUP BY/ORDER BY
+  // alias substitution against the WHERE clause's Date-typed comparison
+  // (NO_COMMON_TYPE: String vs Date), confirmed by hand against dev
+  // ClickHouse. JSONEachRow already serializes a Date column as a
+  // quoted string ("2026-07-22"), matching DailyCountRow.day: string,
+  // so the cast was redundant anyway.
+  return queryAnalytics<DailyCountRow>(
+    projectId,
+    `
+      SELECT
+        day,
+        toString(uniqMerge(subscribersHll))    AS n
+      FROM rovenue.mv_paywall_daily_target
+      WHERE projectId = {projectId:String}
+        AND day >= {from:Date}
+        AND day <= {to:Date}
+      GROUP BY day
+      ORDER BY day
+    `,
+    { projectId, from, to },
+  );
+}
+
+export async function readChartSeries(
+  projectId: string,
+  chartId: string,
+  windowDays: number,
+): Promise<ChartSeriesResponse> {
+  const w = buildWindow(windowDays);
+  const base = {
+    chartId,
+    from: w.from.toISOString(),
+    to: w.to.toISOString(),
+  };
+
+  if (!SUPPORTED_SERIES_IDS.has(chartId)) {
+    // Not an error: most of the catalog simply has no reader yet.
+    return { ...base, unit: "count", points: [], supported: false };
+  }
+
+  assertClickHouseReady();
+  const from = toDateOnly(w.from);
+  const to = toDateOnly(w.to);
+
+  if (chartId === "paywall_view_rate") {
+    // Reach: what share of the day's active subscribers saw a paywall.
+    const viewers = await readPaywallViewers(projectId, from, to);
+    // NOTE: `sdk_sessions_daily_tbl` (0010) was dropped by migration
+    // 0016_sdk_sessions_idempotent.sql — the SummingMergeTree rollup
+    // double-counted replayed outbox events, same failure mode as the
+    // revenue rollups (see 0012). `v_sdk_sessions_daily` is the
+    // query-time-deduped replacement (FINAL over raw_sdk_session_events)
+    // and is what every current caller reads from.
+    //
+    // Select the bare `day` column (not `toString(day) AS day`) — see
+    // readPaywallViewers for why the re-alias trips ClickHouse's
+    // GROUP BY/ORDER BY substitution against the WHERE clause.
+    const actives = await queryAnalytics<DailyCountRow>(
+      projectId,
+      `
+        SELECT
+          day,
+          toString(uniq(subscriberId))   AS n
+        FROM rovenue.v_sdk_sessions_daily
+        WHERE projectId = {projectId:String}
+          AND day >= {from:Date}
+          AND day <= {to:Date}
+        GROUP BY day
+        ORDER BY day
+      `,
+      { projectId, from, to },
+    );
+    return {
+      ...base,
+      unit: "percent",
+      points: buildRatePoints(viewers, actives, w.from, w.to),
+      supported: true,
+    };
+  }
+
+  // paywall_purchase — conversion: what share of paywall viewers bought.
+  //
+  // Precise attribution, mirroring analytics-router's placement_metrics:
+  // raw_revenue_events carries the purchase's originating paywallId
+  // (migration 0019), so no viewer-overlap heuristic is needed.
+  //
+  // KNOWN HORIZON: rows written before 0019 carry paywallId = '' and
+  // cannot match, so this chart under-reports for dates before that
+  // migration was deployed. That is the data, not a bug — do not
+  // "fix" it by dropping the filter, which would attribute every
+  // purchase to a paywall.
+  const purchasers = await queryAnalytics<DailyCountRow>(
+    projectId,
+    `
+      SELECT
+        toString(toDate(eventDate))       AS day,
+        toString(uniq(subscriberId))      AS n
+      FROM rovenue.raw_revenue_events
+      WHERE projectId = {projectId:String}
+        AND toDate(eventDate) >= {from:Date}
+        AND toDate(eventDate) <= {to:Date}
+        AND paywallId != ''
+        AND type IN (${PURCHASE_EVENT_TYPES})
+      GROUP BY day
+      ORDER BY day
+    `,
+    { projectId, from, to },
+  );
+  const viewers = await readPaywallViewers(projectId, from, to);
+  return {
+    ...base,
+    unit: "percent",
+    points: buildRatePoints(purchasers, viewers, w.from, w.to),
+    supported: true,
+  };
 }
