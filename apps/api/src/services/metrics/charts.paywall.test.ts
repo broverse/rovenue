@@ -84,7 +84,36 @@ describe("readChartSeries", () => {
     expect(purchasersSql).toContain("raw_revenue_events");
     // Pre-0019 rows carry '' and must not be counted as attributed.
     expect(purchasersSql).toContain("paywallId != ''");
-    expect(purchasersSql).toContain("TRIAL_CONVERSION");
+    // Numerator is INITIAL only — RENEWAL/REACTIVATION recur long
+    // after the view that earned them, and TRIAL_CONVERSION has the
+    // same lag (trial starts are already INITIAL events), so counting
+    // any of them against *today's* viewers inflates this same-day
+    // rate past 100%. See PURCHASE_NUMERATOR_EVENT_TYPE in charts.ts.
+    expect(purchasersSql).toContain("type = 'INITIAL'");
+    expect(purchasersSql).not.toContain("RENEWAL");
+    expect(purchasersSql).not.toContain("TRIAL_CONVERSION");
+    expect(purchasersSql).not.toContain("REACTIVATION");
+  });
+
+  it("paywall_purchase's numerator excludes RENEWAL rows even when they carry the original paywallId", async () => {
+    // Guards Finding 1: a renewal keeps the subscription's original
+    // presentedContext/paywallId (Stripe copies it forward at
+    // creation and never clears it), so a purchaser query that
+    // doesn't restrict `type` would count month-2+ renewals against
+    // today's viewers and blow past 100%. This test only inspects
+    // the emitted SQL (no live ClickHouse in this suite) — the
+    // positive-branch proof against real data lives in the task
+    // report's hand-run section.
+    queryAnalyticsMock
+      .mockResolvedValueOnce([{ day: "2026-07-02", n: "1" }]) // purchasers
+      .mockResolvedValueOnce([{ day: "2026-07-02", n: "5" }]); // viewers
+
+    await readChartSeries("proj_1", "paywall_purchase", 7);
+
+    const purchasersSql = (
+      queryAnalyticsMock.mock.calls[0] as [string, string, unknown]
+    )[1];
+    expect(purchasersSql).toMatch(/type\s*=\s*'INITIAL'/);
   });
 
   it("throws when ClickHouse is not configured", async () => {
