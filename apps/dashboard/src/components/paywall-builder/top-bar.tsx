@@ -27,12 +27,21 @@ type Props = {
   onOpenValidation: () => void;
   onOpenDiff: () => void;
   onOpenLocalization: () => void;
+  onOpenStart: () => void;
 };
 
-export const TopBar = component(({ projectId, onOpenValidation, onOpenDiff, onOpenLocalization }: Props) => {
+export const TopBar = component(({
+  projectId,
+  onOpenValidation,
+  onOpenDiff,
+  onOpenLocalization,
+  onOpenStart,
+}: Props) => {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
   const [versionsOpen, setVersionsOpen] = useState(false);
+  // Temporary: Task 4 replaces this with the real start button.
+  void onOpenStart;
 
   const locRows = buildMatrixRows(vm.config);
   const baseGapCount = localeCompletion(vm.config, locRows, vm.defaultLocale).missingKeys.length;

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
 import { TopBar } from "./top-bar";
@@ -8,6 +8,8 @@ import { PropertiesPanel } from "./properties-panel";
 import { ValidationDrawer } from "./validation-drawer";
 import { DiffModal } from "./diff-modal";
 import { LocalizationModal } from "./localization-modal";
+import { StartModal } from "./start-modal";
+import { shouldAutoOpenStart } from "./start-model";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 
 type Props = {
@@ -20,6 +22,14 @@ export const BuilderShell = component(({ projectId }: Props) => {
   const [showValidation, setShowValidation] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
   const [showLocalization, setShowLocalization] = useState(false);
+  const [showStart, setShowStart] = useState(false);
+  /** Auto-open is decided exactly once, at the first render after the paywall loads. */
+  const startDecided = useRef(false);
+  useEffect(() => {
+    if (startDecided.current || vm.isLoading || !vm.paywall) return;
+    startDecided.current = true;
+    if (shouldAutoOpenStart(vm.config)) setShowStart(true);
+  }, [vm.isLoading, vm.paywall, vm.config]);
 
   if (vm.isLoading) {
     return (
@@ -50,6 +60,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
         onOpenValidation={() => setShowValidation(true)}
         onOpenDiff={() => setShowDiff(true)}
         onOpenLocalization={() => setShowLocalization(true)}
+        onOpenStart={() => setShowStart(true)}
       />
       <main className="flex flex-1 overflow-hidden">
         <LayerTree />
@@ -59,6 +70,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
       {showValidation && <ValidationDrawer onClose={() => setShowValidation(false)} />}
       {showDiff && <DiffModal onClose={() => setShowDiff(false)} />}
       {showLocalization && <LocalizationModal onClose={() => setShowLocalization(false)} />}
+      {showStart && <StartModal onClose={() => setShowStart(false)} />}
     </div>
   );
 });
