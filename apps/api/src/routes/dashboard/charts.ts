@@ -10,6 +10,7 @@ import { ok } from "../../lib/response";
 import {
   __chartsConstants,
   readChannels,
+  readChartSeries,
   readFilterOptions,
   readFunnel,
   readHeatmap,
@@ -35,6 +36,7 @@ import type {
 //   GET    /channels             store-share donut (CH)
 //   GET    /funnel               INITIAL → trial → paid → renewal
 //   GET    /heatmap              DOW × hour grid
+//   GET    /series/:chartId      chartId → { points, unit, supported }
 //
 //   GET    /saved-views          list (per-user)
 //   POST   /saved-views          create
@@ -372,6 +374,24 @@ export const chartsRoute = new Hono()
     const { windowDays } = c.req.valid("query");
     return c.json(ok(await readHeatmap(projectId, windowDays)));
   })
+  .get(
+    "/series/:chartId",
+    validate("query", windowQuerySchema),
+    async (c) => {
+      const projectId = c.req.param("projectId");
+      if (!projectId) {
+        throw new HTTPException(400, { message: "Missing projectId" });
+      }
+      const chartId = c.req.param("chartId");
+      if (!chartId) {
+        throw new HTTPException(400, { message: "Missing chartId" });
+      }
+      const user = c.get("user");
+      await assertProjectAccess(projectId, user.id, MemberRole.CUSTOMER_SUPPORT);
+      const { windowDays } = c.req.valid("query");
+      return c.json(ok(await readChartSeries(projectId, chartId, windowDays)));
+    },
+  )
   // ------------------------------------------------------------
   // Saved views CRUD (per-user)
   // ------------------------------------------------------------
