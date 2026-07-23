@@ -564,5 +564,81 @@ describe("PaywallBuilderViewModel", () => {
       expect(vm.config.root.children).toEqual([]);
       expect(vm.isDirty).toBe(false);
     });
+
+    // Regression for the final whole-branch review's Important finding: an
+    // autosave clears isDirty (draft == SERVER) but leaves the cached diff
+    // reflecting the PRE-save draft, so hasUnpublishedChanges must not
+    // collapse to false and light the "in sync" chip while the draft still
+    // differs from what devices are served.
+    it("hasUnpublishedChanges stays true after an autosaved edit (no in-sync lie)", async () => {
+      const published = () =>
+        fakeDetail({ status: "published", publishedVersionId: "pwv_1" });
+      // Hold the post-save diff refetch open so we can observe the exact
+      // window the bug lived in: isDirty already cleared by the save, but
+      // the fresh diff not yet landed. A never-resolving promise leaves
+      // loadDiff pending, so `diffStale` stays set.
+      const heldDiff = new Promise<typeof EMPTY_DIFF>(() => {});
+      const vm = makeVm({
+        get: vi.fn().mockResolvedValue(published()),
+        // Persisting the edit returns a still-published detail (the draft
+        // changed, publish state did not).
+        patchBuilderConfig: vi.fn().mockResolvedValue(published()),
+        listVersions: vi.fn().mockResolvedValue([LIVE_VERSION]),
+        diff: vi
+          .fn()
+          .mockResolvedValueOnce(EMPTY_DIFF) // initial load → in sync
+          .mockReturnValueOnce(heldDiff), // post-save refetch → held open
+      });
+      await vm.load(() => {});
+
+      // Freshly loaded published paywall with an empty diff → in sync.
+      expect(vm.hasUnpublishedChanges).toBe(false);
+
+      vm.addNode("spacer", "root");
+      expect(vm.isDirty).toBe(true);
+      expect(vm.hasUnpublishedChanges).toBe(true);
+
+      await vm.saveNow();
+
+      // The edit is now persisted → isDirty is cleared, and the cached diff
+      // is stale (the refetch is still in flight). Pre-fix this read false
+      // ("in sync" lie); the diffStale flag keeps it truthful until a fresh
+      // diff lands.
+      expect(vm.isDirty).toBe(false);
+      expect(vm.hasUnpublishedChanges).toBe(true);
+    });
+
+    it("canPublish gates on hasUnpublishedChanges (no identical-version spam)", async () => {
+      // In-sync published paywall: nothing to publish → canPublish false.
+      const inSync = makeVm({
+        get: vi.fn().mockResolvedValue(
+          fakeDetail({ status: "published", publishedVersionId: "pwv_1" }),
+        ),
+        patchBuilderConfig: vi.fn(),
+        listVersions: vi.fn().mockResolvedValue([LIVE_VERSION]),
+        diff: vi.fn().mockResolvedValue(EMPTY_DIFF),
+      });
+      await inSync.load(() => {});
+      expect(inSync.errorIssues).toEqual([]);
+      expect(inSync.hasUnpublishedChanges).toBe(false);
+      expect(inSync.canPublish).toBe(false);
+
+      // An edit makes it publishable again.
+      inSync.addNode("spacer", "root");
+      expect(inSync.canPublish).toBe(true);
+
+      // Never-published paywall always has changes → first publish enabled.
+      const fresh = makeVm({
+        get: vi.fn().mockResolvedValue(
+          fakeDetail({ status: "draft", publishedVersionId: null }),
+        ),
+        patchBuilderConfig: vi.fn(),
+        listVersions: vi.fn().mockResolvedValue([]),
+        diff: vi.fn().mockResolvedValue(EMPTY_DIFF),
+      });
+      await fresh.load(() => {});
+      expect(fresh.hasUnpublishedChanges).toBe(true);
+      expect(fresh.canPublish).toBe(true);
+    });
   });
 });

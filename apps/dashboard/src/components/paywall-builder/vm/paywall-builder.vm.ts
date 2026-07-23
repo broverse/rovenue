@@ -421,26 +421,44 @@ export class PaywallBuilderViewModel {
   }
 
   /**
-   * Publishing is gated on zero blocking issues. `config` is never null
-   * (syncFromDetail falls back to emptyBuilderConfig), so there is no
-   * null check here — the server's PAYWALL_EMPTY_DRAFT guard covers the
-   * "never saved anything" case.
+   * True from the moment a save persists a config change until a fresh
+   * server diff (`loadDiff`) reconfirms the draft-vs-published delta. An
+   * autosave clears `isDirty` (the draft now matches the SERVER) but the
+   * cached `diffResult` still reflects the pre-save draft, so without this
+   * flag `hasUnpublishedChanges` would briefly collapse to false and the
+   * "in sync" chip would lie. Set synchronously in the save success path
+   * (the exact point staleness is introduced), cleared only when the
+   * refetched diff lands — so there is never a tick where isDirty=false,
+   * diffStale=false AND diffResult is stale.
+   */
+  private diffStale = false;
+
+  /**
+   * Publishing is gated on zero blocking issues AND there being something
+   * to publish (`hasUnpublishedChanges`) — an in-sync draft would otherwise
+   * mint an identical vN+1 on every click. A never-published paywall always
+   * has changes (its `publishedVersionId === null` branch), so first-publish
+   * stays enabled. `config` is never null (syncFromDetail falls back to
+   * emptyBuilderConfig), so there is no null check here — the server's
+   * PAYWALL_EMPTY_DRAFT guard covers the "never saved anything" case.
    */
   @derived get canPublish(): boolean {
     return (
       !this.isLoading &&
       this.errorIssues.length === 0 &&
-      this.publishState !== "publishing"
+      this.publishState !== "publishing" &&
+      this.hasUnpublishedChanges
     );
   }
 
   /** True when the draft differs from what devices are currently served.
    * A never-published paywall (publishedVersionId === null) always has
    * unpublished changes — nothing has shipped. Otherwise: dirty local
-   * edits, or a non-empty server diff. NOT an updatedAt comparison —
-   * publishing bumps updatedAt, which would always read as "changed". */
+   * edits, a just-saved change whose diff hasn't been reconfirmed yet
+   * (`diffStale`), or a non-empty server diff. NOT an updatedAt comparison
+   * — publishing bumps updatedAt, which would always read as "changed". */
   @derived get hasUnpublishedChanges(): boolean {
-    if (this.isDirty) return true;
+    if (this.isDirty || this.diffStale) return true;
     if (this.publishedVersionId === null) return true;
     return (this.diffResult?.entries.length ?? 0) > 0;
   }
@@ -483,6 +501,7 @@ export class PaywallBuilderViewModel {
       // config and flag a spurious isDirty right after "saved".
       this.lastSavedSnapshot = this.snapshot();
       this.autosaveStatus = "saved";
+      this.refreshDiffAfterSave();
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
       if (this.saveController !== controller) return;
@@ -490,6 +509,19 @@ export class PaywallBuilderViewModel {
     } finally {
       if (this.saveController === controller) this.saveController = null;
     }
+  }
+
+  /**
+   * A save changed the persisted draft, so the cached diff is stale. Mark
+   * it (keeps `hasUnpublishedChanges` truthful — see `diffStale`) and
+   * refetch; `loadDiff` clears the flag when the fresh delta lands.
+   * Fire-and-forget and NON-FATAL: on a failed refetch `diffStale` stays
+   * true, so the UI conservatively keeps reporting unpublished changes
+   * rather than falsely showing "in sync".
+   */
+  private refreshDiffAfterSave() {
+    this.diffStale = true;
+    void this.loadDiff().catch(() => {});
   }
 
   /** Force-flush the current config to the backend, bypassing the autosave throttle. */
@@ -520,6 +552,7 @@ export class PaywallBuilderViewModel {
       // config and flag a spurious isDirty right after "saved".
       this.lastSavedSnapshot = this.snapshot();
       this.autosaveStatus = "saved";
+      this.refreshDiffAfterSave();
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
       if (this.saveController !== controller) return;
@@ -532,6 +565,9 @@ export class PaywallBuilderViewModel {
   async discardDraft() {
     const detail = await this.api.get(this.props.projectId, this.props.paywallId);
     this.applyServer(detail);
+    // Re-fetching the draft doesn't change it, but the versions/diff reads
+    // may have moved since the builder loaded — keep them current.
+    await this.refreshPublishState();
   }
 
   async loadVersions() {
@@ -540,6 +576,8 @@ export class PaywallBuilderViewModel {
 
   async loadDiff() {
     this.diffResult = await this.api.diff(this.props.projectId, this.props.paywallId);
+    // The cached diff now reflects the current persisted draft.
+    this.diffStale = false;
   }
 
   /** Refresh both publish-state reads together; used on load and after

@@ -2947,26 +2947,51 @@ Add the derived getters next to the existing `isDirty`:
 
 ```ts
   /**
-   * Publishing is gated on zero blocking issues. `config` is never null
-   * (syncFromDetail falls back to emptyBuilderConfig), so there is no
-   * null check here — the server's PAYWALL_EMPTY_DRAFT guard covers the
-   * "never saved anything" case.
+   * True from a save until the next `loadDiff` reconfirms the delta. An
+   * autosave clears `isDirty` (draft == SERVER) but the cached `diffResult`
+   * still reflects the pre-save draft, so without this `hasUnpublishedChanges`
+   * would briefly collapse to false and the "in sync" chip would lie. Set
+   * synchronously in the save success path, cleared only when the refetched
+   * diff lands.
+   */
+  private diffStale = false;
+
+  /**
+   * Publishing is gated on zero blocking issues AND `hasUnpublishedChanges`
+   * (an in-sync draft would otherwise mint an identical vN+1). A never-
+   * published paywall always has changes (its `publishedVersionId === null`
+   * branch), so first-publish stays enabled. `config` is never null
+   * (syncFromDetail falls back to emptyBuilderConfig), so there is no null
+   * check here — the server's PAYWALL_EMPTY_DRAFT guard covers "never saved".
    */
   @derived get canPublish(): boolean {
     return (
       !this.isLoading &&
       this.errorIssues.length === 0 &&
-      this.publishState !== "publishing"
+      this.publishState !== "publishing" &&
+      this.hasUnpublishedChanges
     );
   }
 
   /** True when the draft differs from what devices are currently served. */
   @derived get hasUnpublishedChanges(): boolean {
-    if (this.isDirty) return true;
+    if (this.isDirty || this.diffStale) return true;
     if (this.publishedVersionId === null) return true;
     // Unknown until the first diff lands — report "no changes" rather
     // than flashing a false warning chip on load.
     return (this.diffResult?.entries.length ?? 0) > 0;
+  }
+
+  /**
+   * A save changed the persisted draft, so the cached diff is stale. Mark
+   * it and refetch; `loadDiff` clears the flag when the fresh delta lands.
+   * Fire-and-forget and NON-FATAL: on a failed refetch `diffStale` stays
+   * true, so the UI conservatively keeps reporting unpublished changes.
+   * Call at the end of the success path in BOTH `autosave` and `saveNow`.
+   */
+  private refreshDiffAfterSave() {
+    this.diffStale = true;
+    void this.loadDiff().catch(() => {});
   }
 ```
 
@@ -2979,6 +3004,8 @@ Add the action methods at the end of the class:
 
   async loadDiff() {
     this.diffResult = await this.api.diff(this.props.projectId, this.props.paywallId);
+    // The cached diff now reflects the current persisted draft.
+    this.diffStale = false;
   }
 
   /** Refresh both publish-state reads together; used on load and after
