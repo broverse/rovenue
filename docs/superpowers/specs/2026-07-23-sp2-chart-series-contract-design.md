@@ -156,12 +156,33 @@ following the conventions of its siblings there. New strings are added to
 Every behaviour below must be mutation-checked: after the test passes, revert the
 production change, confirm the test goes red, restore.
 
-**Readers** — ClickHouse integration tests (testcontainers, the pattern used by
-existing `*.integration.test.ts` in this repo). Seed known paywall view and
-revenue events across several days, then assert the exact daily rates. One case
-per reader must cover a **zero-denominator day and assert `value === null`, not
-`0`** — that distinction is the whole point of the nullable field and a test
-asserting `0` would lock in the bug.
+**Readers.** Corrected while planning: this repo has **no ClickHouse
+testcontainer harness**, and CLAUDE.md documents that host-to-ClickHouse traffic
+is rejected by the container's IP allow-list. The established convention for
+ClickHouse-backed metrics tests is to mock the module boundary
+(`analytics-router.test.ts`, `placement-metrics.test.ts`,
+`refund-shield-responder.test.ts`). Building a live-ClickHouse harness would be a
+larger piece of work than this feature.
+
+A mocked boundary cannot prove the SQL is correct, so the design keeps the part
+that *can* be proven out of the SQL:
+
+- **`buildRatePoints(numeratorRows, denominatorRows, window)` is a pure
+  function** in the charts service, taking already-fetched rows and returning
+  `ChartSeriesPoint[]`. All the arithmetic that matters — per-day alignment, the
+  ratio, and the zero-denominator rule — lives here and is tested directly with
+  real data structures and no mocks. One case must cover a **zero-denominator day
+  and assert `value === null`, not `0`**; that distinction is the whole point of
+  the nullable field, and a test asserting `0` would lock in the bug.
+- **Query shape** is tested with the mocked ClickHouse boundary, per repo
+  convention: assert the bound parameters and that the SQL projects the expected
+  columns, without pinning the full SQL text.
+
+**Stated limitation, not a hidden one:** no automated test executes this SQL
+against ClickHouse. A query that is syntactically valid but semantically wrong
+would pass. The implementer must therefore run both queries once by hand against
+the dev ClickHouse and record the output in the task report. CLAUDE.md carries
+the socat recipe for reaching ClickHouse from the host.
 
 **Endpoint** — route tests covering: a supported id returns points and
 `supported: true`; an unknown or unwired id returns 200 with `supported: false`
