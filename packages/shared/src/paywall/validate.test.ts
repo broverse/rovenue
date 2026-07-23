@@ -727,7 +727,10 @@ describe("issue severity", () => {
       "INTRO_VARIABLE_UNGUARDED",
       "SOME_CODE_ADDED_LATER",
     ]) {
-      if (isBlockingIssue({ code })) expect(isPublishBlockingIssue({ code })).toBe(true);
+      // Unconditional: a guarded `if (isBlockingIssue) expect(...)` would run
+      // zero assertions — and still pass — the day every code in this list is
+      // reclassified as a warning.
+      expect(!isBlockingIssue({ code }) || isPublishBlockingIssue({ code })).toBe(true);
     }
   });
 
