@@ -93,4 +93,48 @@ describe("deleteProject — credit_ledger cascade", () => {
       .where(eq(creditLedger.projectId, P));
     expect(ledgerRows.length).toBe(0);
   });
+
+  it("succeeds when called with the pool, not a transaction", async () => {
+    const db = getDb();
+
+    // Distinct ids so this case is independent of the one above.
+    const P2 = `prj_del_pool_${RUN_ID}`;
+    const S2 = `sub_del_pool_${RUN_ID}`;
+    const C2 = `vc_del_pool_${RUN_ID}`;
+
+    await db.insert(projects).values({ id: P2, name: "del-pool-project" });
+    await db.insert(subscribers).values({
+      id: S2,
+      projectId: P2,
+      rovenueId: `rv_del_pool_${RUN_ID}`,
+    });
+    await db
+      .insert(virtualCurrencies)
+      .values({ id: C2, projectId: P2, code: "COIN", name: "Coin" });
+    await db.insert(creditLedger).values({
+      projectId: P2,
+      subscriberId: S2,
+      currencyId: C2,
+      type: "PURCHASE",
+      amount: 100,
+      balance: 100,
+    });
+
+    // The whole point: no explicit transaction here. `SET LOCAL` inside
+    // deleteProject must still take effect, which it only can if the
+    // function opens its own transaction.
+    await expect(deleteProject(db, P2)).resolves.toBeUndefined();
+
+    const projectRows = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(eq(projects.id, P2));
+    expect(projectRows.length).toBe(0);
+
+    const ledgerRows = await db
+      .select({ id: creditLedger.id })
+      .from(creditLedger)
+      .where(eq(creditLedger.projectId, P2));
+    expect(ledgerRows.length).toBe(0);
+  });
 });

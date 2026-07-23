@@ -297,23 +297,27 @@ export async function updateProjectWebhookSecret(
 }
 
 /**
- * Delete a project. Cascades to members, api_keys, audiences, etc.
- * The audit row MUST be written FIRST so the fk (audit.projectId →
- * project.id) still resolves.
+ * Delete a project and everything that cascades from it.
  *
- * Sets `rovenue.allow_ledger_delete` for the current transaction so the
- * append-only trigger permits the cascading DELETE on `credit_ledger`.
- * MUST be called inside an open transaction. `SET LOCAL` only takes effect
- * within a transaction; outside one the cascading DELETE on `credit_ledger`
- * would be rejected by the append-only trigger. The dashboard DELETE route
- * wraps this in `drizzle.db.transaction`.
+ * Opens its own transaction unconditionally. `credit_ledger` is
+ * append-only and its trigger only honours
+ * `rovenue.allow_ledger_delete` when the setting is transaction-local,
+ * and `SET LOCAL` outside a transaction is discarded with a warning the
+ * driver does not surface — so a pool-called version silently lost its
+ * own authorisation and the cascade was rejected.
+ *
+ * Called from inside an existing transaction, Drizzle emits a SAVEPOINT
+ * and `SET LOCAL` still applies to the enclosing transaction, so the
+ * dashboard call site (routes/dashboard/projects.ts) is unaffected.
  */
 export async function deleteProject(
   db: DbOrTx,
   id: string,
 ): Promise<void> {
-  await db.execute(sql`SET LOCAL "rovenue.allow_ledger_delete" = 'on'`);
-  await db.delete(projects).where(eq(projects.id, id));
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL "rovenue.allow_ledger_delete" = 'on'`);
+    await tx.delete(projects).where(eq(projects.id, id));
+  });
 }
 
 // --- credential writes ---
