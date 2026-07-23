@@ -126,6 +126,25 @@ state; a domain stuck at `issuing` because a Stripe call failed is a broken one.
 
 No registration happens on the `failed` transition.
 
+**Found while planning — the connection-status write must not follow.**
+`registerApplePayDomain` ends by calling
+`stripeConnectionRepo.updateApplePayDomainStatus(db, connection.id, status)`
+(`apple-pay-domain.ts:136-141`). That column lives on the **connection** row, one
+per project, while a project can now have many registered domains. Left as-is, a
+custom domain's verdict would overwrite the canonical domain's, so the dashboard
+would report Apple Pay as broken on the canonical host because some customer's
+domain had not finished Apple's checks.
+
+The column keeps its existing meaning — the status of the canonical
+`FUNNEL_PAYMENT_DOMAIN` — and the write is guarded on
+`domainName === env.FUNNEL_PAYMENT_DOMAIN` rather than gated by a new parameter,
+so the rule is visible at the only place that could break it.
+
+A custom domain's own Apple Pay status is therefore not persisted; it is logged
+at the same level the canonical path already logs. Surfacing it per-domain in the
+dashboard needs a column on `custom_domains` and is deliberately left out of this
+sub-project.
+
 ## Item 5 — non-funnel routes on a custom host
 
 SPA fallback means `https://customer-domain.com/login` returns `index.html` and
