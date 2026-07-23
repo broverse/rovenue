@@ -34,26 +34,48 @@ export type BuilderIssue = {
 };
 
 /**
- * Issue codes that do NOT block a save: the builderConfig still persists
- * (the API answers 200) and the dashboard renders them as warnings rather
- * than errors. Shared so the API gate and the builder view-model can never
- * drift apart — they used to keep hand-synced copies.
+ * How far an issue stops the author:
+ * - `save`    — the builderConfig cannot even persist. A broken config.
+ * - `publish` — persists fine, but must not ship to devices. A legitimate
+ *               work-in-progress, e.g. copy nobody has written yet.
+ * - `warning` — blocks nothing.
  *
- * Deliberately `ReadonlySet<string>` rather than
- * `ReadonlySet<BuilderIssue["code"]>`: `INTRO_VARIABLE_UNGUARDED` is spec'd
- * (Phase D3's intro-variable lint) but not yet emitted by
- * `validateBuilderConfig`, so membership stays forward-tolerant instead of
- * becoming a type error the day the validator starts emitting it.
+ * The tiers are ordered: everything that blocks a save also blocks a publish.
  */
-export const WARNING_ISSUE_CODES: ReadonlySet<string> = new Set([
-  "LOCALE_KEY_GAP",
-  "OVERRIDE_SELECTED_OUTSIDE_CELL",
-  "INTRO_VARIABLE_UNGUARDED",
-]);
+export type IssueSeverity = "save" | "publish" | "warning";
 
-/** True when an issue must block the save (i.e. it isn't a warning). */
+/**
+ * The single severity table. A code appears at most once, so the tiers cannot
+ * overlap — the earlier shape (a warning set plus a publish set, each predicate
+ * a negation over them) let a code land in both and silently degrade to a
+ * warning, i.e. the strictest-looking mistake produced the loosest behaviour.
+ *
+ * Deliberately keyed `string` rather than `BuilderIssue["code"]`:
+ * `INTRO_VARIABLE_UNGUARDED` is spec'd (Phase D3's intro-variable lint) but not
+ * yet emitted by `validateBuilderConfig`, so membership stays forward-tolerant
+ * instead of becoming a type error the day the validator starts emitting it.
+ */
+const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
+  LOCALE_KEY_GAP: "warning",
+  OVERRIDE_SELECTED_OUTSIDE_CELL: "warning",
+  INTRO_VARIABLE_UNGUARDED: "warning",
+};
+
+/** Anything unlisted blocks the save — the strictest tier, so a code added
+ * later fails closed until it is deliberately classified. */
+export function issueSeverity(issue: { code: string }): IssueSeverity {
+  return ISSUE_SEVERITY[issue.code] ?? "save";
+}
+
+/** True when an issue must block the SAVE (the API's builderConfig PATCH). */
 export function isBlockingIssue(issue: { code: string }): boolean {
-  return !WARNING_ISSUE_CODES.has(issue.code);
+  return issueSeverity(issue) === "save";
+}
+
+/** True when an issue must block a PUBLISH — every save-blocker, plus the
+ * publish-only tier. */
+export function isPublishBlockingIssue(issue: { code: string }): boolean {
+  return issueSeverity(issue) !== "warning";
 }
 
 /**

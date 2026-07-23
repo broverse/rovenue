@@ -5,6 +5,8 @@ import {
   collectLocalizationUsages,
   isBlockingIssue,
   isMissingLocaleValue,
+  isPublishBlockingIssue,
+  issueSeverity,
   resolveText,
   validateBuilderConfig,
   type BuilderIssue,
@@ -689,5 +691,48 @@ describe("blank localization values count as missing", () => {
       { offeringPackageIds: [] },
     );
     expect(issues.some((i) => i.code === "LOCALE_KEY_GAP")).toBe(false);
+  });
+});
+
+describe("issue severity", () => {
+  it("classifies every currently-emitted code", () => {
+    expect(issueSeverity({ code: "DUPLICATE_NODE_ID" })).toBe("save");
+    expect(issueSeverity({ code: "UNKNOWN_LOC_KEY" })).toBe("save");
+    expect(issueSeverity({ code: "FOREIGN_PACKAGE_ID" })).toBe("save");
+    expect(issueSeverity({ code: "MISSING_PURCHASE_BUTTON" })).toBe("save");
+    expect(issueSeverity({ code: "SCHEMA_INVALID" })).toBe("save");
+    expect(issueSeverity({ code: "CELL_TEMPLATE_BAD_NODE" })).toBe("save");
+    expect(issueSeverity({ code: "OVERRIDE_BAD_PROP" })).toBe("save");
+    expect(issueSeverity({ code: "LOCALE_KEY_GAP" })).toBe("warning");
+    expect(issueSeverity({ code: "OVERRIDE_SELECTED_OUTSIDE_CELL" })).toBe("warning");
+    expect(issueSeverity({ code: "INTRO_VARIABLE_UNGUARDED" })).toBe("warning");
+  });
+
+  it("defaults an unclassified code to the strictest tier", () => {
+    expect(issueSeverity({ code: "SOME_CODE_ADDED_LATER" })).toBe("save");
+    expect(isBlockingIssue({ code: "SOME_CODE_ADDED_LATER" })).toBe(true);
+  });
+
+  it("keeps the tiers ordered: everything that blocks a save blocks a publish", () => {
+    for (const code of [
+      "DUPLICATE_NODE_ID",
+      "UNKNOWN_LOC_KEY",
+      "FOREIGN_PACKAGE_ID",
+      "MISSING_PURCHASE_BUTTON",
+      "SCHEMA_INVALID",
+      "CELL_TEMPLATE_BAD_NODE",
+      "OVERRIDE_BAD_PROP",
+      "LOCALE_KEY_GAP",
+      "OVERRIDE_SELECTED_OUTSIDE_CELL",
+      "INTRO_VARIABLE_UNGUARDED",
+      "SOME_CODE_ADDED_LATER",
+    ]) {
+      if (isBlockingIssue({ code })) expect(isPublishBlockingIssue({ code })).toBe(true);
+    }
+  });
+
+  it("warnings block neither gate", () => {
+    expect(isBlockingIssue({ code: "LOCALE_KEY_GAP" })).toBe(false);
+    expect(isPublishBlockingIssue({ code: "LOCALE_KEY_GAP" })).toBe(false);
   });
 });
