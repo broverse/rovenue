@@ -10,6 +10,10 @@ import type {
   PackageListNode,
   PaywallNode,
 } from "@rovenue/shared/paywall";
+import type {
+  DashboardPaywallDiffResponse,
+  DashboardPaywallVersionRow,
+} from "@rovenue/shared";
 import {
   emptyBuilderConfig,
   isBlockingIssue,
@@ -34,6 +38,17 @@ export class PaywallBuilderViewModel {
   @state isLoading = true;
   @state error: Error | null = null;
   @state paywall: PaywallBuilderDetailDto | null = null;
+
+  @state status: "draft" | "published" | "archived" = "draft";
+  @state publishedVersionId: string | null = null;
+  @state versions: DashboardPaywallVersionRow[] = [];
+  @state publishState: "idle" | "publishing" | "error" = "idle";
+  @state publishError: string | null = null;
+  /** Server-computed published→draft diff. `entries.length === 0` is the
+   * authoritative "the draft matches what devices are served" signal —
+   * cheaper and more honest than reconstructing it from local snapshots,
+   * because the server owns both sides. */
+  @state diffResult: DashboardPaywallDiffResponse | null = null;
 
   @state config: BuilderConfig = emptyBuilderConfig();
   @state selectedNodeId: string | null = null;
@@ -153,6 +168,9 @@ export class PaywallBuilderViewModel {
       const detail = await this.api.get(this.props.projectId, this.props.paywallId);
       if (this.disposed) return;
       this.applyServer(detail);
+      // Version list + diff drive the publish group's chips. Fire and
+      // forget: a failure here must not fail the builder's load.
+      void this.refreshPublishState();
     } catch (err) {
       if (this.disposed) return;
       // eslint-disable-next-line no-console
@@ -168,6 +186,8 @@ export class PaywallBuilderViewModel {
   /** Syncs `paywall`/`config`/locale state from a server DTO. Does NOT touch save bookkeeping. */
   private syncFromDetail(detail: PaywallBuilderDetailDto) {
     this.paywall = detail;
+    this.status = detail.status;
+    this.publishedVersionId = detail.publishedVersionId;
     this.config = detail.builderConfig ?? emptyBuilderConfig(detail.defaultLocale);
     this.defaultLocale = this.config.defaultLocale;
     this.locales = Object.keys(this.config.localizations);
@@ -400,6 +420,34 @@ export class PaywallBuilderViewModel {
     return this.snapshot() !== this.lastSavedSnapshot;
   }
 
+  /**
+   * Publishing is gated on zero blocking issues. `config` is never null
+   * (syncFromDetail falls back to emptyBuilderConfig), so there is no
+   * null check here — the server's PAYWALL_EMPTY_DRAFT guard covers the
+   * "never saved anything" case.
+   */
+  @derived get canPublish(): boolean {
+    return (
+      !this.isLoading &&
+      this.errorIssues.length === 0 &&
+      this.publishState !== "publishing"
+    );
+  }
+
+  /**
+   * True when the draft differs from what devices are currently served.
+   * Unsaved local edits (`isDirty`) always count; once saved, the
+   * server-computed diff's entry count is the sole signal — deliberately
+   * NOT `publishedVersionId === null` or an `updatedAt` comparison, since
+   * publishing bumps `updatedAt` and would always read as "changed".
+   */
+  @derived get hasUnpublishedChanges(): boolean {
+    if (this.isDirty) return true;
+    // Unknown until the first diff lands — report "no changes" rather
+    // than flashing a false warning chip on load.
+    return (this.diffResult?.entries.length ?? 0) > 0;
+  }
+
   // ----- Autosave + manual save -----
   // Reset a sticky "error" status the moment the user edits anything
   // again — see FunnelDraftViewModel.clearAutosaveError for rationale.
@@ -487,5 +535,77 @@ export class PaywallBuilderViewModel {
   async discardDraft() {
     const detail = await this.api.get(this.props.projectId, this.props.paywallId);
     this.applyServer(detail);
+  }
+
+  async loadVersions() {
+    this.versions = await this.api.listVersions(this.props.projectId, this.props.paywallId);
+  }
+
+  async loadDiff() {
+    this.diffResult = await this.api.diff(this.props.projectId, this.props.paywallId);
+  }
+
+  /** Refresh both publish-state reads together; used on load and after
+   * every publish / revert / discard. */
+  private async refreshPublishState() {
+    try {
+      await Promise.all([this.loadVersions(), this.loadDiff()]);
+    } catch {
+      // Non-fatal: the publish group degrades to "unknown", the builder
+      // itself keeps working.
+    }
+  }
+
+  async publish() {
+    if (!this.canPublish) return;
+    this.publishState = "publishing";
+    this.publishError = null;
+    try {
+      // Flush first: publish snapshots what the SERVER holds, so an
+      // edit still sitting behind the 30s autosave throttle would
+      // silently not ship.
+      await this.saveNow();
+      await this.api.publish(this.props.projectId, this.props.paywallId);
+      this.status = "published";
+      await this.refreshPublishState();
+      this.publishState = "idle";
+    } catch (err) {
+      this.publishState = "error";
+      this.publishError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  async revertTo(versionNo: number) {
+    const detail = await this.api.revert(
+      this.props.projectId,
+      this.props.paywallId,
+      versionNo,
+    );
+    this.applyServer(detail);
+    await this.refreshPublishState();
+  }
+
+  /**
+   * Reset the draft to the live published version, server-side. Distinct
+   * from `discardDraft()` above, which only re-fetches to drop unsaved
+   * local edits.
+   */
+  async discardToPublished() {
+    const detail = await this.api.discardToPublished(
+      this.props.projectId,
+      this.props.paywallId,
+    );
+    this.applyServer(detail);
+    await this.refreshPublishState();
+  }
+
+  async labelVersion(versionNo: number, label: string | null) {
+    await this.api.labelVersion(
+      this.props.projectId,
+      this.props.paywallId,
+      versionNo,
+      label,
+    );
+    await this.loadVersions();
   }
 }

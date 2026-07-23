@@ -38,6 +38,8 @@ function fakeDetail(overrides: Partial<PaywallBuilderDetailDto> = {}): PaywallBu
     offeringPackageIds: ["pkg_monthly", "pkg_annual"],
     updatedAt: "",
     createdAt: "",
+    status: "draft",
+    publishedVersionId: null,
     ...overrides,
   };
 }
@@ -393,5 +395,169 @@ describe("PaywallBuilderViewModel", () => {
 
     await vi.advanceTimersByTimeAsync(30_001);
     expect(patchBuilderConfig.mock.calls.length).toBeGreaterThanOrEqual(beforeWindow);
+  });
+
+  // ----- Publish / versions -----
+  describe("publish flow", () => {
+    function blockingConfig(): BuilderConfig {
+      // packageList with no purchaseButton anywhere → MISSING_PURCHASE_BUTTON
+      const config = emptyBuilderConfig("en");
+      config.root.children.push({
+        type: "packageList",
+        id: "pl",
+        packageIds: ["pkg_monthly"],
+        cellLayout: "row",
+      });
+      return config;
+    }
+
+    const LIVE_VERSION = {
+      id: "pwv_1",
+      versionNo: 3,
+      label: null,
+      offeringId: "off_1",
+      configFormatVersion: 2,
+      publishedAt: "2026-07-23T00:00:00.000Z",
+      publishedBy: "u_1",
+      isLive: true,
+    };
+
+    const EMPTY_DIFF = {
+      from: { versionNo: 3, label: null },
+      to: { versionNo: null, label: null },
+      entries: [],
+    };
+
+    it("canPublish is false while blocking issues exist", async () => {
+      const vm = makeVm({
+        get: vi.fn().mockResolvedValue(fakeDetail({ builderConfig: blockingConfig() })),
+        patchBuilderConfig: vi.fn(),
+        listVersions: vi.fn().mockResolvedValue([]),
+        diff: vi.fn().mockResolvedValue(EMPTY_DIFF),
+      });
+      await vm.load(() => {});
+
+      expect(vm.errorIssues.length).toBeGreaterThan(0);
+      expect(vm.canPublish).toBe(false);
+    });
+
+    it("canPublish is true for a clean draft", async () => {
+      const vm = makeVm({
+        get: vi.fn().mockResolvedValue(fakeDetail()),
+        patchBuilderConfig: vi.fn(),
+        listVersions: vi.fn().mockResolvedValue([]),
+        diff: vi.fn().mockResolvedValue(EMPTY_DIFF),
+      });
+      await vm.load(() => {});
+
+      expect(vm.errorIssues).toEqual([]);
+      expect(vm.canPublish).toBe(true);
+    });
+
+    it("publish() flushes the autosave, calls the API and refreshes versions", async () => {
+      const publish = vi.fn().mockResolvedValue({ versionNo: 3 });
+      const listVersions = vi.fn().mockResolvedValue([LIVE_VERSION]);
+      const diff = vi.fn().mockResolvedValue(EMPTY_DIFF);
+      const patchBuilderConfig = vi.fn().mockResolvedValue(fakeDetail());
+      const vm = makeVm({
+        get: vi.fn().mockResolvedValue(fakeDetail()),
+        patchBuilderConfig,
+        publish,
+        listVersions,
+        diff,
+      });
+      await vm.load(() => {});
+
+      // Dirty the draft so saveNow() actually fires.
+      vm.addNode("spacer", "root");
+      await vm.publish();
+
+      expect(patchBuilderConfig).toHaveBeenCalled();
+      expect(publish).toHaveBeenCalledWith("p_1", "pw_1");
+      expect(vm.versions[0]?.versionNo).toBe(3);
+      expect(vm.status).toBe("published");
+      expect(vm.publishState).toBe("idle");
+      expect(vm.hasUnpublishedChanges).toBe(false);
+    });
+
+    it("publish() surfaces the server's blocking-issue error", async () => {
+      const vm = makeVm({
+        get: vi.fn().mockResolvedValue(fakeDetail()),
+        patchBuilderConfig: vi.fn(),
+        publish: vi.fn().mockRejectedValue(new Error("PAYWALL_NOT_PUBLISHABLE")),
+        listVersions: vi.fn().mockResolvedValue([]),
+        diff: vi.fn().mockResolvedValue(EMPTY_DIFF),
+      });
+      await vm.load(() => {});
+
+      await vm.publish();
+
+      expect(vm.publishState).toBe("error");
+      expect(vm.publishError).toContain("PAYWALL_NOT_PUBLISHABLE");
+    });
+
+    it("hasUnpublishedChanges is true when the diff is non-empty", async () => {
+      const vm = makeVm({
+        get: vi.fn().mockResolvedValue(fakeDetail({ status: "published", publishedVersionId: "pwv_1" })),
+        patchBuilderConfig: vi.fn(),
+        listVersions: vi.fn().mockResolvedValue([LIVE_VERSION]),
+        diff: vi.fn().mockResolvedValue({
+          from: { versionNo: 3, label: null },
+          to: { versionNo: null, label: null },
+          entries: [
+            {
+              kind: "changed",
+              scope: "localization",
+              nodeId: null,
+              nodeType: null,
+              field: "en.t1_key",
+              from: '"Hi"',
+              to: '"Hello"',
+            },
+          ],
+        }),
+      });
+      await vm.load(() => {});
+
+      expect(vm.hasUnpublishedChanges).toBe(true);
+    });
+
+    it("discardToPublished() replaces the working tree with the server's response", async () => {
+      const resetConfig = emptyBuilderConfig("en");
+      resetConfig.localizations.en.t1_key = "Live";
+      const vm = makeVm({
+        get: vi.fn().mockResolvedValue(fakeDetail()),
+        patchBuilderConfig: vi.fn(),
+        discardToPublished: vi.fn().mockResolvedValue(fakeDetail({ builderConfig: resetConfig })),
+        listVersions: vi.fn().mockResolvedValue([LIVE_VERSION]),
+        diff: vi.fn().mockResolvedValue(EMPTY_DIFF),
+      });
+      await vm.load(() => {});
+
+      await vm.discardToPublished();
+
+      expect(vm.config.localizations.en?.t1_key).toBe("Live");
+      expect(vm.config.root.children).toEqual([]);
+      expect(vm.isDirty).toBe(false);
+    });
+
+    it("revertTo() applies the server response and reloads the version list", async () => {
+      const listVersions = vi.fn().mockResolvedValue([LIVE_VERSION]);
+      const revert = vi.fn().mockResolvedValue(fakeDetail());
+      const vm = makeVm({
+        get: vi.fn().mockResolvedValue(fakeDetail()),
+        patchBuilderConfig: vi.fn(),
+        revert,
+        listVersions,
+        diff: vi.fn().mockResolvedValue(EMPTY_DIFF),
+      });
+      await vm.load(() => {});
+      listVersions.mockClear();
+
+      await vm.revertTo(2);
+
+      expect(revert).toHaveBeenCalledWith("p_1", "pw_1", 2);
+      expect(listVersions).toHaveBeenCalled();
+    });
   });
 });

@@ -1,7 +1,12 @@
 import { injectable } from "impair";
 import { rpc, unwrap } from "../api";
 import type { BuilderConfig } from "@rovenue/shared/paywall";
-import type { DashboardOfferingRow, DashboardPaywallRow } from "@rovenue/shared";
+import type {
+  DashboardOfferingRow,
+  DashboardPaywallRow,
+  DashboardPaywallDiffResponse,
+  DashboardPaywallVersionRow,
+} from "@rovenue/shared";
 
 // =============================================================
 // Thin RPC wrapper the paywall builder VM depends on. Mirrors
@@ -34,6 +39,8 @@ export interface PaywallBuilderDetailDto {
   offeringPackageIds: string[];
   updatedAt: string;
   createdAt: string;
+  status: "draft" | "published" | "archived";
+  publishedVersionId: string | null;
 }
 
 function toDetailDto(
@@ -53,6 +60,8 @@ function toDetailDto(
     offeringPackageIds,
     updatedAt: row.updatedAt,
     createdAt: row.createdAt,
+    status: row.status,
+    publishedVersionId: row.publishedVersionId,
   };
 }
 
@@ -113,5 +122,106 @@ export class PaywallBuilderApi {
         ? previousOfferingPackageIds
         : await this.fetchOfferingPackageIds(projectId, paywall.offeringId, signal);
     return toDetailDto(paywall, offeringPackageIds);
+  }
+
+  async publish(
+    projectId: string,
+    paywallId: string,
+    signal?: AbortSignal,
+  ): Promise<{ versionNo: number }> {
+    const { version } = await unwrap<{ version: { versionNo: number } }>(
+      rpc.dashboard.projects[":projectId"].paywalls[":id"].publish.$post(
+        { param: { projectId, id: paywallId } },
+        { init: { signal } },
+      ),
+    );
+    return { versionNo: version.versionNo };
+  }
+
+  async listVersions(
+    projectId: string,
+    paywallId: string,
+    signal?: AbortSignal,
+  ): Promise<DashboardPaywallVersionRow[]> {
+    const { versions } = await unwrap<{ versions: DashboardPaywallVersionRow[] }>(
+      rpc.dashboard.projects[":projectId"].paywalls[":id"].versions.$get(
+        { param: { projectId, id: paywallId } },
+        { init: { signal } },
+      ),
+    );
+    return versions;
+  }
+
+  async revert(
+    projectId: string,
+    paywallId: string,
+    versionNo: number,
+    signal?: AbortSignal,
+  ): Promise<PaywallBuilderDetailDto> {
+    const { paywall } = await unwrap<{ paywall: DashboardPaywallRow }>(
+      rpc.dashboard.projects[":projectId"].paywalls[":id"].versions[":versionNo"].revert.$post(
+        { param: { projectId, id: paywallId, versionNo: String(versionNo) } },
+        { init: { signal } },
+      ),
+    );
+    const offeringPackageIds = await this.fetchOfferingPackageIds(
+      projectId,
+      paywall.offeringId,
+      signal,
+    );
+    return toDetailDto(paywall, offeringPackageIds);
+  }
+
+  /** Server-side reset of the draft back to the live published version.
+   * Distinct from `PaywallBuilderViewModel.discardDraft()`, which merely
+   * re-fetches to throw away unsaved LOCAL edits. */
+  async discardToPublished(
+    projectId: string,
+    paywallId: string,
+    signal?: AbortSignal,
+  ): Promise<PaywallBuilderDetailDto> {
+    const { paywall } = await unwrap<{ paywall: DashboardPaywallRow }>(
+      rpc.dashboard.projects[":projectId"].paywalls[":id"]["discard-draft"].$post(
+        { param: { projectId, id: paywallId } },
+        { init: { signal } },
+      ),
+    );
+    const offeringPackageIds = await this.fetchOfferingPackageIds(
+      projectId,
+      paywall.offeringId,
+      signal,
+    );
+    return toDetailDto(paywall, offeringPackageIds);
+  }
+
+  async labelVersion(
+    projectId: string,
+    paywallId: string,
+    versionNo: number,
+    label: string | null,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await unwrap<{ version: DashboardPaywallVersionRow }>(
+      rpc.dashboard.projects[":projectId"].paywalls[":id"].versions[":versionNo"].$patch(
+        {
+          param: { projectId, id: paywallId, versionNo: String(versionNo) },
+          json: { label } as never,
+        },
+        { init: { signal } },
+      ),
+    );
+  }
+
+  async diff(
+    projectId: string,
+    paywallId: string,
+    signal?: AbortSignal,
+  ): Promise<DashboardPaywallDiffResponse> {
+    return unwrap<DashboardPaywallDiffResponse>(
+      rpc.dashboard.projects[":projectId"].paywalls[":id"].diff.$get(
+        { param: { projectId, id: paywallId } },
+        { init: { signal } },
+      ),
+    );
   }
 }
