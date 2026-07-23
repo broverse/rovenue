@@ -12,6 +12,7 @@ import {
   Moon,
   Plus,
   Sun,
+  Table2,
   Trash2,
   TriangleAlert,
   X,
@@ -19,6 +20,7 @@ import {
 import { cn } from "../../lib/cn";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import { VersionMenu } from "./version-menu";
+import { buildMatrixRows, localeCompletion } from "./localization-model";
 
 type Props = {
   projectId: string;
@@ -31,8 +33,12 @@ export const TopBar = component(({ projectId, onOpenValidation, onOpenDiff, onOp
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
   const [versionsOpen, setVersionsOpen] = useState(false);
-  // Temporary: Task 5 replaces this with the real localization button.
-  void onOpenLocalization;
+
+  const locRows = buildMatrixRows(vm.config);
+  const baseGapCount = localeCompletion(vm.config, locRows, vm.defaultLocale).missingKeys.length;
+  const otherGapCount = vm.locales
+    .filter((l) => l !== vm.defaultLocale)
+    .reduce((n, l) => n + localeCompletion(vm.config, locRows, l).missingKeys.length, 0);
 
   return (
     <header className="flex h-14 flex-shrink-0 items-center justify-between border-b border-rv-divider bg-rv-c1 px-4">
@@ -67,6 +73,22 @@ export const TopBar = component(({ projectId, onOpenValidation, onOpenDiff, onOp
           </button>
         )}
         <LocaleSwitcher />
+        <button
+          type="button"
+          onClick={onOpenLocalization}
+          title={t("paywalls.builder.topbar.localization", "Localization matrix")}
+          className="relative flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
+        >
+          <Table2 size={13} />
+          {(baseGapCount > 0 || otherGapCount > 0) && (
+            <span
+              className={cn(
+                "absolute right-1 top-1 h-1.5 w-1.5 rounded-full",
+                baseGapCount > 0 ? "bg-rv-danger" : "bg-rv-warning",
+              )}
+            />
+          )}
+        </button>
 
         <button
           type="button"
