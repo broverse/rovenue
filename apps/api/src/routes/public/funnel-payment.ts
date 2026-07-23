@@ -975,16 +975,16 @@ export const funnelPaymentRoute = new Hono()
       }
 
       // Everything above this line is additive: a Customer, and one
-      // unconfirmed Stripe object nobody else references.
+      // unconfirmed Stripe object nobody else references. Everything below
+      // it writes the single row for this session.
       //
-      // This check is an OPTIMISATION, not the safety mechanism. If our
-      // TTL expired while we waited on Stripe, another request now holds
-      // the lock and is redoing this work from a newer `existing` read.
-      // Bailing here avoids a pointless `cancelSuperseded` and lets us
-      // clean up the Stripe objects we created while we still know their
-      // ids. What actually prevents us from clobbering the current
-      // holder's row is the fencing token in `upsertPending`'s ON CONFLICT
-      // guard, which is atomic with the write; this check is not.
+      // This check and the fencing token are BOTH load-bearing, and each
+      // covers what the other cannot. The fence decides that two writers
+      // can never both succeed with the same derived token; it does not
+      // decide WHICH of them wins. This check is what settles that, by
+      // bailing out the holder that has already lost the lock. Removing
+      // either one reopens a real race — see the block below for the
+      // interleaving this specific bail prevents.
       if (!(await lock.stillHeld())) {
         // Our TTL expired; another request now holds the lock and is
         // rebuilding this row from a newer `existing` read. If we wrote
