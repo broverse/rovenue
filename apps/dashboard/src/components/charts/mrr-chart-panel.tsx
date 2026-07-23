@@ -43,7 +43,7 @@ const MONTH_NAMES = [
   "Dec",
 ] as const;
 
-const RANGE_MONTHS: Record<RangeOption, number> = {
+export const RANGE_MONTHS: Record<RangeOption, number> = {
   "1M": 1,
   "3M": 3,
   "6M": 6,

@@ -53,7 +53,7 @@ function entryLabel(
   return entry.kind === "system" ? t(`charts.items.${entry.id}`) : entry.name;
 }
 
-function ChartsPage({ projectId }: { projectId: string }) {
+export function ChartsPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const openInQueries = () =>

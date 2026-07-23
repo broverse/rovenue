@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useChartSeries } from "../../lib/hooks/useChartSeries";
 import { formatCount } from "./format";
+import { RANGE_MONTHS } from "./mrr-chart-panel";
 import type { ChartType, RangeOption } from "./types";
 
 // =============================================================
@@ -41,24 +42,8 @@ const DAYS_PER_MONTH = 30;
 // a window the server would silently truncate anyway.
 const MAX_WINDOW_DAYS = 365;
 
-// Mirrors `RANGE_MONTHS` in mrr-chart-panel.tsx (months per range
-// option) — not imported from there, because that file is off
-// limits for edits (it owns bespoke split-request window logic that
-// must be left untouched, per SP2 Task 4) and the constant isn't
-// exported. The series endpoint clamps windowDays to
-// MAX_WINDOW_DAYS server-side regardless, so an approximate
-// months→days conversion here is harmless.
-const RANGE_TO_MONTHS: Record<RangeOption, number> = {
-  "1M": 1,
-  "3M": 3,
-  "6M": 6,
-  "12M": 12,
-  YTD: 12,
-  All: 24,
-};
-
 export function rangeToWindowDays(range: RangeOption): number {
-  return Math.min(RANGE_TO_MONTHS[range] * DAYS_PER_MONTH, MAX_WINDOW_DAYS);
+  return Math.min(RANGE_MONTHS[range] * DAYS_PER_MONTH, MAX_WINDOW_DAYS);
 }
 
 type Props = {
