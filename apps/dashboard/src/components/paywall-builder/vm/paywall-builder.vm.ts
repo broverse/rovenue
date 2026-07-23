@@ -26,6 +26,12 @@ import {
 import * as treeOps from "../tree-ops";
 import { PRESETS } from "../presets";
 import type { CanvasDevice, ColorScheme } from "../types";
+import {
+  DEFAULT_DEVICE_ID,
+  deviceById,
+  devicesForPlatform,
+  type DevicePlatform,
+} from "../device-catalog";
 
 
 export interface PaywallBuilderProps {
@@ -84,14 +90,38 @@ export class PaywallBuilderViewModel {
   // Canvas preview UI state — mirrors FunnelDraftViewModel's canvas
   // mechanics verbatim (same ZOOM_STEPS/WHEEL_THRESHOLD/wheel handler)
   // so the Task-6 UI can reuse the same CanvasEditor wiring.
-  @state canvasDevice: CanvasDevice = "phone";
+  @state canvasDevice: CanvasDevice = DEFAULT_DEVICE_ID;
+  @state showSafeArea = false;
+  @state showAllSizes = false;
   @state canvasZoom = 1;
   private canvasWheelAcc = 0;
   private static readonly ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
   private static readonly WHEEL_THRESHOLD = 120;
 
-  setCanvasDevice(d: CanvasDevice) {
-    this.canvasDevice = d;
+  setCanvasDevice(id: string) {
+    this.canvasDevice = id;
+  }
+  /** The platform of the currently-previewed device. */
+  @derived get canvasPlatform(): DevicePlatform {
+    return deviceById(this.canvasDevice).platform;
+  }
+  /** Switch platforms by selecting that platform's first catalog device,
+   * so the platform segment and device picker stay consistent. */
+  setCanvasPlatform(p: DevicePlatform) {
+    const first = devicesForPlatform(p)[0];
+    if (first) this.canvasDevice = first.id;
+  }
+  toggleSafeArea() {
+    this.showSafeArea = !this.showSafeArea;
+  }
+  setSafeArea(v: boolean) {
+    this.showSafeArea = v;
+  }
+  toggleAllSizes() {
+    this.showAllSizes = !this.showAllSizes;
+  }
+  setAllSizes(v: boolean) {
+    this.showAllSizes = v;
   }
   setCanvasZoom(z: number) {
     this.canvasZoom = Math.max(0.25, Math.min(3, z));

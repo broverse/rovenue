@@ -397,6 +397,45 @@ describe("PaywallBuilderViewModel", () => {
     expect(patchBuilderConfig.mock.calls.length).toBeGreaterThanOrEqual(beforeWindow);
   });
 
+  // ----- Canvas device state -----
+  describe("canvas device state", () => {
+    it("defaults to the iPhone 15 Pro and derives its platform", () => {
+      const vm = makeVm({});
+      expect(vm.canvasDevice).toBe("iphone15");
+      expect(vm.canvasPlatform).toBe("ios");
+      expect(vm.showSafeArea).toBe(false);
+      expect(vm.showAllSizes).toBe(false);
+    });
+
+    it("setCanvasDevice updates the id and the derived platform", () => {
+      const vm = makeVm({});
+      vm.setCanvasDevice("pixel8");
+      expect(vm.canvasDevice).toBe("pixel8");
+      expect(vm.canvasPlatform).toBe("android");
+    });
+
+    it("setCanvasPlatform lands on that platform's first device", () => {
+      const vm = makeVm({});
+      vm.setCanvasPlatform("android");
+      expect(vm.canvasDevice).toBe("pixel8");
+      expect(vm.canvasPlatform).toBe("android");
+      vm.setCanvasPlatform("ios");
+      expect(vm.canvasDevice).toBe("iphone15");
+    });
+
+    it("toggles safe-area and all-sizes", () => {
+      const vm = makeVm({});
+      vm.toggleSafeArea();
+      expect(vm.showSafeArea).toBe(true);
+      vm.setSafeArea(false);
+      expect(vm.showSafeArea).toBe(false);
+      vm.toggleAllSizes();
+      expect(vm.showAllSizes).toBe(true);
+      vm.setAllSizes(false);
+      expect(vm.showAllSizes).toBe(false);
+    });
+  });
+
   // ----- Publish / versions -----
   describe("publish flow", () => {
     function blockingConfig(): BuilderConfig {
