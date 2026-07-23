@@ -14,8 +14,19 @@ function PaywallBuilderRoute() {
   });
   const { data: project } = useProject(projectId);
   if (!project) return null;
+  // Keyed on the paywall's identity so navigating between two builder URLs
+  // remounts the whole subtree. Without it the builder keeps showing the
+  // PREVIOUS paywall: TanStack Router only remounts on a param change when
+  // `remountDeps` is configured (it isn't, anywhere), and impair's
+  // ServiceProvider mutates its reactive props in place while caching the
+  // container and the view-model instance — so `@onMount load()` never
+  // re-runs and nothing refetches.
   return (
-    <PaywallBuilderProvider projectId={projectId} paywallId={paywallId}>
+    <PaywallBuilderProvider
+      key={`${projectId}/${paywallId}`}
+      projectId={projectId}
+      paywallId={paywallId}
+    >
       <BuilderShell projectId={projectId} />
     </PaywallBuilderProvider>
   );
