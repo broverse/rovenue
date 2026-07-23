@@ -157,14 +157,14 @@ function messageOf(err: unknown): string {
  * Settle the session, tolerating the window in which Stripe has taken
  * the money but our server cannot yet read it as settled.
  *
- * EVERY 409 is retried, deliberately. The API maps all 409s to the same
- * envelope code (`HTTP_ERROR`, see apps/api/src/middleware/error.ts) and
- * the "not settled yet" one — `Payment is not complete` — carries no
- * machine-readable code at all, only prose. Two of the three 409s this
- * endpoint can answer with are genuinely transient ("not complete",
- * "a payment attempt is already in flight"); the third ("No payment
- * started") is terminal, but matching English message text to tell them
- * apart would be worse than spending three extra requests on it.
+ * EVERY 409 is retried, deliberately. The "not settled yet" one now
+ * carries `PAYMENT_NOT_SETTLED_YET` and the in-flight one
+ * `PAYMENT_IN_FLIGHT` — both genuinely transient — while the terminal
+ * "No payment started" 409 carries no code. Retrying all of them is kept
+ * anyway: "No payment started" is unreachable from this UI (the pending
+ * row always exists by confirm time), so the few wasted requests cost
+ * nothing, and retry-all can never fail-fast on a payer whose settlement
+ * Stripe is merely slow to report.
  */
 export async function settleFunnelPayment(
   sessionId: string,

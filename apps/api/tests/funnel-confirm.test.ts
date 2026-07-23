@@ -210,7 +210,9 @@ describe("POST /public/funnel-sessions/:sessionId/confirm", () => {
     const res = await confirm();
 
     expect(res.status).toBe(409);
-    expect(JSON.stringify(await res.json())).toContain("Payment is not complete");
+    // Coded so a client can tell "Stripe hasn't reported settlement yet"
+    // (retryable) apart from a terminal 409.
+    expect(JSON.stringify(await res.json())).toContain("PAYMENT_NOT_SETTLED_YET");
     expect(insertClaimToken).not.toHaveBeenCalled();
     expect(markPaid).not.toHaveBeenCalled();
     expect(setSessionState).not.toHaveBeenCalled();

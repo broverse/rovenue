@@ -1198,7 +1198,16 @@ export const funnelPaymentRoute = new Hono()
           throw err;
         }
         if (!(await isSettled(account, purchase))) {
-          throw new HTTPException(409, { message: "Payment is not complete" });
+          // Coded so the browser can tell this transient "Stripe hasn't
+          // reported settlement yet" apart from a terminal 409 (e.g. no
+          // payment started). The runner retries this one with backoff; a
+          // terminal 409 it should not.
+          throw new HTTPException(409, {
+            message: JSON.stringify({
+              code: "PAYMENT_NOT_SETTLED_YET",
+              message: "Payment is not complete",
+            }),
+          });
         }
 
         // No `stillHeld()` fence here, unlike the sibling endpoint. There
