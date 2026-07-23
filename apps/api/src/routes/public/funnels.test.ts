@@ -58,6 +58,11 @@ vi.mock("../../lib/offering-hydration", () => ({
   }),
 }));
 
+vi.mock("../../lib/stripe-platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/stripe-platform")>()),
+  chargesEnabled: vi.fn(async () => true),
+}));
+
 vi.mock("@rovenue/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@rovenue/db")>();
   return {
@@ -379,8 +384,13 @@ describe("GET /funnels/:slug — paywalls hydration map", () => {
     const app = buildApp();
     const res = await app.request("/public/funnels/test-funnel");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { data: { paywalls: Record<string, unknown> } };
+    const body = (await res.json()) as {
+      data: { paywalls: Record<string, unknown>; charges_enabled: boolean };
+    };
     expect(body.data.paywalls).toEqual({});
+    // No project resolved (no paywall pages) → charges_enabled is false, so
+    // the runner never opens a checkout for a funnel it can't charge on.
+    expect(body.data.charges_enabled).toBe(false);
     expect(findPaywallsByIdsMock).not.toHaveBeenCalled();
   });
 

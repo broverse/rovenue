@@ -46,6 +46,7 @@ import {
   resolvePricesForPackages,
   type ResolvedPrice,
 } from "../../services/stripe/price-resolver";
+import { chargesEnabled } from "../../lib/stripe-platform";
 
 // ---------------------------------------------------------------------------
 // Bounded recursive answer schema (F16).
@@ -249,10 +250,20 @@ export const publicFunnelsRoute = new Hono()
       config.id,
       config.pages,
     );
-    const prices = projectId
-      ? await resolveFunnelPrices(projectId, paywalls)
-      : {};
-    return c.json({ data: { ...config, paywalls, prices } });
+    // Resolved fresh alongside prices (not cached in the config bundle):
+    // a project can connect or disconnect Stripe between publishes. The
+    // runner uses it to keep the buyer out of a checkout that would only
+    // fail — a paywall whose project can't take charges shows an
+    // unavailable state instead of a purchase button that 503s.
+    const [prices, chargesOk] = projectId
+      ? await Promise.all([
+          resolveFunnelPrices(projectId, paywalls),
+          chargesEnabled(projectId),
+        ])
+      : [{}, false];
+    return c.json({
+      data: { ...config, paywalls, prices, charges_enabled: chargesOk },
+    });
   })
 
   // ---------------------------------------------------------------

@@ -181,7 +181,12 @@ type Status =
   // to render the deep link the /confirm response carried and write the
   // token to the clipboard from that click.
   | { kind: "done"; reason: "paywall_paid"; outcome: FunnelPaymentOutcome }
-  | { kind: "paywall_pending"; pageId: string };
+  | { kind: "paywall_pending"; pageId: string }
+  // The buyer tapped purchase on a package that can't be charged — the
+  // project disconnected Stripe, or the price didn't resolve. Shown
+  // instead of opening a checkout that would only fail with a raw
+  // server error the buyer should never read.
+  | { kind: "unavailable" };
 
 interface State {
   config: PublishedFunnelConfig;
@@ -292,6 +297,14 @@ export function FunnelRunner({ slug }: { slug: string }) {
       />
     );
   }
+  if (status.kind === "unavailable") {
+    return (
+      <CenteredMessage
+        title="This purchase isn't available right now"
+        body="Please try again in a little while."
+      />
+    );
+  }
   if (status.kind === "done") {
     return status.reason === "paywall_paid" ? (
       <PaidMessage outcome={status.outcome} />
@@ -365,10 +378,24 @@ export function FunnelRunner({ slug }: { slug: string }) {
           locale={locale}
           colorScheme="light"
           priceView={priceView}
-          // The CTA opens the in-page checkout for the selected package.
+          // The CTA opens the in-page checkout for the selected package —
+          // but only when it can actually be charged. A project that
+          // disconnected Stripe, or a package whose price didn't resolve,
+          // would 503/400 with a raw server message the buyer should never
+          // see; show an unavailable screen instead of opening checkout.
           // Restore is deliberately omitted (no onRestore) — hidden by
           // design in <PaywallRenderer> when the handler is absent.
-          onPurchase={(packageIdentifier) => setPayingPackage(packageIdentifier)}
+          onPurchase={(packageIdentifier) => {
+            const priced =
+              builderPaywallId != null &&
+              state.config.prices?.[builderPaywallId]?.[packageIdentifier] !=
+                null;
+            if (!state.config.charges_enabled || !priced) {
+              setStatus({ kind: "unavailable" });
+              return;
+            }
+            setPayingPackage(packageIdentifier);
+          }}
         />
       ) : (
         <PagePreview

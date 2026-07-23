@@ -96,6 +96,10 @@ export interface PublishedFunnelConfig {
   // prices" rather than "no paywall" (apps/api/src/routes/public/
   // funnels.ts). A package missing here has no displayable price.
   prices: Record<string, Record<string, ResolvedFunnelPrice>>;
+  // Whether the funnel's project can take card payments right now
+  // (connected + charges_enabled). Resolved fresh per request. False
+  // means the purchase CTA must not open checkout — it would only fail.
+  charges_enabled: boolean;
 }
 
 export interface SessionStartResponse {

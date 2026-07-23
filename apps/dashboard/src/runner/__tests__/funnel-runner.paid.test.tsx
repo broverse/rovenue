@@ -80,7 +80,23 @@ const config = {
       },
     },
   },
-  prices: {},
+  // The purchase CTA now only opens checkout when the project can charge
+  // and the package has a resolved price — these tests exercise the paid
+  // flow, so both are present.
+  charges_enabled: true,
+  prices: {
+    pw1: {
+      monthly: {
+        packageIdentifier: "monthly",
+        priceId: "price_1",
+        unitAmount: 900,
+        currency: "usd",
+        interval: "month",
+        intervalCount: 1,
+        trialDays: null,
+      },
+    },
+  },
 };
 
 async function payWith(o: FunnelPaymentOutcome) {
@@ -177,5 +193,34 @@ describe("FunnelRunner — the screen a paying buyer lands on", () => {
     const heading = screen.getByRole("heading", { name: "You're all set" });
     expect(heading.className).not.toMatch(/\btext-foreground\b/);
     expect(heading.className).toMatch(/\btext-zinc-900\b/);
+  });
+
+  it("shows an unavailable screen instead of checkout when charges are off", async () => {
+    vi.mocked(api.getPublishedFunnel).mockResolvedValue({
+      ...config,
+      charges_enabled: false,
+    } as never);
+    const user = userEvent.setup();
+    render(<FunnelRunner slug="demo" />);
+
+    await user.click(await screen.findByRole("button", { name: /buy monthly/i }));
+
+    await screen.findByText("This purchase isn't available right now");
+    // Checkout never opened — no Pay button reached.
+    expect(screen.queryByRole("button", { name: /^pay$/i })).toBeNull();
+  });
+
+  it("shows an unavailable screen when the package has no resolved price", async () => {
+    vi.mocked(api.getPublishedFunnel).mockResolvedValue({
+      ...config,
+      prices: {},
+    } as never);
+    const user = userEvent.setup();
+    render(<FunnelRunner slug="demo" />);
+
+    await user.click(await screen.findByRole("button", { name: /buy monthly/i }));
+
+    await screen.findByText("This purchase isn't available right now");
+    expect(screen.queryByRole("button", { name: /^pay$/i })).toBeNull();
   });
 });
