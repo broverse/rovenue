@@ -1,6 +1,7 @@
 import type Stripe from "stripe";
 import {
   type Db,
+  type Subscriber,
   Environment,
   PurchaseStatus,
   RevenueEventType,
@@ -638,6 +639,12 @@ async function writeConfirmedCardOntoSubscription(
 async function syncSubscription(ctx: DispatchContext): Promise<void> {
   const subscription = ctx.event.data.object as Stripe.Subscription;
   const subscriber = await resolveSubscriber(ctx, subscription);
+  if (!subscriber) {
+    // Dead-ended anchor (GDPR erasure / broken merge chain). Writing a
+    // purchase or granting access would re-populate a subscriber that must
+    // stay gone. resolveSubscriber has already logged why.
+    return;
+  }
   const status = mapStripeSubscriptionStatus(subscription.status);
 
   // FINDING 1: guarded read + upsert in one tx so the FOR UPDATE lock
@@ -1019,7 +1026,7 @@ function mapStripeSubscriptionStatus(
 async function resolveSubscriber(
   ctx: DispatchContext,
   subscription: Stripe.Subscription,
-) {
+): Promise<Subscriber | null> {
   const customerId =
     typeof subscription.customer === "string"
       ? subscription.customer
@@ -1048,6 +1055,33 @@ async function resolveSubscriber(
     { projectId: ctx.projectId, rovenueId: appUserId },
   );
   if (resolved) return resolved;
+
+  // `resolveSubscriberByRovenueId` returns null in two very different
+  // cases, and the difference decides whether we may write here:
+  //
+  //   - No row exists at all → the first subscription event for a fresh
+  //     funnel purchase. Create the anchor.
+  //   - A row exists but is soft-deleted and dead-ended — no live
+  //     `mergedInto` survivor. `upsertSubscriber` conflicts on
+  //     (projectId, rovenueId) and hands that dead row straight back, so
+  //     granting onto it would resurrect a GDPR-erased subscriber (erasure
+  //     soft-deletes with rovenueId intact and no `mergedInto`) or write
+  //     onto a retired anchor whose chain is broken. Skip the sync; a
+  //     forgotten subscriber must not be re-populated by a renewal, and
+  //     failing the event would only retry forever.
+  const existing = await drizzle.subscriberRepo.findSubscriberByRovenueId(
+    drizzle.db,
+    { projectId: ctx.projectId, rovenueId: appUserId },
+  );
+  if (existing) {
+    log.warn("stripe subscription resolves to a dead subscriber; skipping", {
+      projectId: ctx.projectId,
+      rovenueId: appUserId,
+      subscriberId: existing.id,
+      subscriptionId: subscription.id,
+    });
+    return null;
+  }
 
   return drizzle.subscriberRepo.upsertSubscriber(drizzle.db, {
     projectId: ctx.projectId,

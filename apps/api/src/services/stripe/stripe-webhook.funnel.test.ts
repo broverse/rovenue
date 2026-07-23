@@ -42,6 +42,9 @@ const { drizzleMock } = vi.hoisted(() => {
       // subscriber a funnel claim already retired (see
       // stripe-webhook.merged-anchor.test.ts). No merged row here.
       resolveSubscriberByRovenueId: vi.fn(async () => null),
+      // Default: no pre-existing row, so resolveSubscriber creates a fresh
+      // anchor. A test that wants the erased/dead-end path overrides this.
+      findSubscriberByRovenueId: vi.fn(async () => null),
       upsertSubscriber: vi.fn(async () => ({ id: "sub_row_1" })),
     },
     purchaseExtRepo: {

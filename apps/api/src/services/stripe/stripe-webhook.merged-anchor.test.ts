@@ -80,6 +80,15 @@ const { drizzleMock, subscribers } = vi.hoisted(() => {
           return row?.deletedAt ? null : (row ?? null);
         },
       ),
+      // Raw lookup — returns the row regardless of `deletedAt`. Used to
+      // tell "no row, create fresh" apart from "dead-ended row, skip".
+      findSubscriberByRovenueId: vi.fn(
+        async (_db: unknown, args: { projectId: string; rovenueId: string }) =>
+          [...subscribers.values()].find(
+            (s) =>
+              s.projectId === args.projectId && s.rovenueId === args.rovenueId,
+          ) ?? null,
+      ),
       // ON CONFLICT (projectId, rovenueId) DO UPDATE ... RETURNING —
       // which is blind to `deletedAt`. This is the trap.
       upsertSubscriber: vi.fn(
@@ -274,6 +283,30 @@ describe("processStripeEvent — the funnel claim retired the anchor", () => {
       expect.anything(),
       expect.objectContaining({ subscriberId: "sub_new_0" }),
     );
+  });
+
+  test("skips entirely when the anchor is erased with no live survivor", async () => {
+    // GDPR erasure soft-deletes the row with `rovenueId` intact and NO
+    // `mergedInto`, so the merge walk dead-ends at null. Upserting onto
+    // (projectId, rovenueId) would hand that erased row straight back and
+    // re-populate it with a purchase + access on every renewal. The sync
+    // must write nothing and still ack the event.
+    subscribers.clear();
+    subscribers.set("sub_erased", {
+      id: "sub_erased",
+      projectId: PROJECT_ID,
+      rovenueId: "stripe:cus_funnel",
+      appUserId: "stripe:cus_funnel",
+      deletedAt: new Date("2026-07-02T00:00:00Z"),
+      mergedInto: null,
+    });
+
+    const result = await run(subscriptionEvent("customer.subscription.updated"));
+    expect(result).toMatchObject({ status: "processed" });
+
+    expect(drizzleMock.subscriberRepo.upsertSubscriber).not.toHaveBeenCalled();
+    expect(drizzleMock.purchaseRepo.upsertPurchase).not.toHaveBeenCalled();
+    expect(drizzleMock.accessRepo.createAccess).not.toHaveBeenCalled();
   });
 
   test("an explicit app_user_id in metadata resolves through the merge too", async () => {

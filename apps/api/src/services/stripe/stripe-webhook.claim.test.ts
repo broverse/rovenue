@@ -30,6 +30,7 @@ const { drizzleMock } = vi.hoisted(() => {
       // Resolve-then-create; nothing merged in these fixtures, so the
       // resolve misses and the upsert below is what answers.
       resolveSubscriberByRovenueId: vi.fn(async () => null),
+      findSubscriberByRovenueId: vi.fn(async () => null),
       upsertSubscriber: vi.fn(),
       findSubscriberById: vi.fn(async () => null),
     },
