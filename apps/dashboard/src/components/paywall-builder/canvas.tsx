@@ -123,7 +123,11 @@ export const Canvas = component(() => {
   useLayoutEffect(() => {
     const container = viewportRef.current;
     const id = vm.selectedNodeId;
-    if (!container || !id) {
+    // All-sizes mounts one renderer per frame, so every `data-rov-node` id
+    // exists N times and `querySelector` would anchor the ring to the FIRST
+    // frame regardless of which one was clicked. Suppress it rather than
+    // point at the wrong device.
+    if (!container || !id || vm.showAllSizes) {
       setRing(null);
       return;
     }
@@ -147,7 +151,9 @@ export const Canvas = component(() => {
       ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vm.selectedNodeId, rendererKey, vm.canvasZoom, vm.canvasDevice, ringTick]);
+    // `showAllSizes` belongs here too: toggling it swaps a single centred
+    // frame for an N-frame row at a different scale, so every node moves.
+  }, [vm.selectedNodeId, rendererKey, vm.canvasZoom, vm.canvasDevice, vm.showAllSizes, ringTick]);
 
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -161,6 +167,14 @@ export const Canvas = component(() => {
 
   const zoom = vm.canvasZoom;
   const spec = deviceById(vm.canvasDevice);
+  // The paywall's own background is painted edge-to-edge behind the frame
+  // chrome, matching the SDK (which lets the background ignore safe areas
+  // and only insets content). Undefined → the frame's scheme default.
+  const screenBackground = vm.config.background
+    ? vm.colorScheme === "dark"
+      ? (vm.config.background.dark ?? vm.config.background.light)
+      : vm.config.background.light
+    : undefined;
 
   // Factored so the single-device and all-sizes branches share one renderer
   // element; each DeviceFrame is a distinct parent, so React mounts an
@@ -322,7 +336,13 @@ export const Canvas = component(() => {
         className="relative flex flex-1 items-center justify-center overflow-auto bg-gradient-to-b from-rv-c1 to-rv-bg p-8"
       >
         {!vm.showAllSizes && (
-          <DeviceFrame spec={spec} scale={zoom} scheme={vm.colorScheme} showSafeArea={vm.showSafeArea}>
+          <DeviceFrame
+            spec={spec}
+            scale={zoom}
+            scheme={vm.colorScheme}
+            showSafeArea={vm.showSafeArea}
+            screenBackground={screenBackground}
+          >
             {renderPaywall}
           </DeviceFrame>
         )}
@@ -336,6 +356,7 @@ export const Canvas = component(() => {
                 scale={ALL_SIZES_SCALE}
                 scheme={vm.colorScheme}
                 showSafeArea={vm.showSafeArea}
+                screenBackground={screenBackground}
                 label
               >
                 {renderPaywall}

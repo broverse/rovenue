@@ -6,8 +6,10 @@ import type { CanvasDeviceSpec } from "./device-catalog";
 // scattered as arbitrary Tailwind values / raw literals.
 /** Chassis corner radius, logical points. */
 const CHASSIS_RADIUS = 38;
-/** Screen background per scheme (light uses the renderer's own white). */
+/** Default screen background per scheme, used when the paywall itself
+ * declares no background (`screenBackground` prop overrides both). */
 const DARK_SCREEN_BG = "#0B0B0F";
+const LIGHT_SCREEN_BG = "#FFFFFF";
 /** Status-bar placeholder clock — the canonical Apple marketing time. */
 const STATUS_BAR_CLOCK = "9:41";
 /** Decorative status-bar glyph clusters (signal · wifi · battery). The iOS
@@ -29,6 +31,15 @@ type Props = {
   scale: number;
   scheme: "light" | "dark";
   showSafeArea: boolean;
+  /**
+   * The paywall's own background, painted EDGE-TO-EDGE behind the chrome.
+   * On device the SDK lets the background ignore the safe areas and only
+   * insets content (see RovenuePaywallView's `.ignoresSafeArea()`), so
+   * without this the preview would show blank strips under the status bar
+   * and home indicator that don't exist on a real phone. Falls back to the
+   * scheme's default screen colour when the paywall sets no background.
+   */
+  screenBackground?: string;
   /** Show the device label + dimensions above the frame (all-sizes grid). */
   label?: boolean;
   children: ReactNode;
@@ -41,8 +52,17 @@ type Props = {
  * home indicator — the same inset the SDK applies on device. All layout
  * is in logical points; `scale` only scales the visual.
  */
-export function DeviceFrame({ spec, scale, scheme, showSafeArea, label, children }: Props) {
+export function DeviceFrame({
+  spec,
+  scale,
+  scheme,
+  showSafeArea,
+  screenBackground,
+  label,
+  children,
+}: Props) {
   const dark = scheme === "dark";
+  const screenBg = screenBackground ?? (dark ? DARK_SCREEN_BG : LIGHT_SCREEN_BG);
   return (
     <div style={{ width: spec.w * scale }}>
       {label && (
@@ -63,7 +83,7 @@ export function DeviceFrame({ spec, scale, scheme, showSafeArea, label, children
         >
           <div
             className="relative h-full w-full overflow-hidden"
-            style={dark ? { backgroundColor: DARK_SCREEN_BG } : { backgroundColor: "#FFFFFF" }}
+            style={{ backgroundColor: screenBg }}
           >
             {/* status bar */}
             <div
