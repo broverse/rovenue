@@ -436,6 +436,34 @@ describe("PaywallBuilderViewModel", () => {
     });
   });
 
+  // ----- Blank default-locale copy -----
+  describe("blank default-locale copy", () => {
+    function detailWithBlankTitle() {
+      const config = fakeConfig();
+      config.localizations.en.t1_key = "";
+      return fakeDetail({ builderConfig: config });
+    }
+
+    it("surfaces the blank string as an error and blocks publish", async () => {
+      const get = vi.fn().mockResolvedValue(detailWithBlankTitle());
+      const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+      await vm.load(() => {});
+
+      expect(vm.errorIssues.map((i) => i.code)).toContain("EMPTY_LOC_VALUE");
+      expect(vm.canPublish).toBe(false);
+    });
+
+    it("clears once the string is written", async () => {
+      const get = vi.fn().mockResolvedValue(detailWithBlankTitle());
+      const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+      await vm.load(() => {});
+
+      vm.setLocaleText("t1_key", "en", "Unlock everything");
+
+      expect(vm.errorIssues).toEqual([]);
+    });
+  });
+
   // ----- Publish / versions -----
   describe("publish flow", () => {
     function blockingConfig(): BuilderConfig {
