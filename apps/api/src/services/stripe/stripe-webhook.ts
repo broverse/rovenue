@@ -671,7 +671,30 @@ async function syncSubscription(ctx: DispatchContext): Promise<void> {
 
   // A rejected transition means the row stays terminal; access must
   // follow the prior state, not the replayed event.
-  if (statusApplied && ACCESS_GRANTING_STATUSES.has(status)) {
+  //
+  // A funnel subscription is created speculatively at package selection —
+  // `default_incomplete`, before any card — so `customer.subscription.created`
+  // fires while it sits at `incomplete` (→ GRACE_PERIOD) or `trialing`
+  // (→ TRIAL). Granting then would put entitlement on the pre-payment
+  // (synthetic) subscriber before a single cent or card exists, inflating
+  // trial/grace counts on every abandoned click and — if `cancelSuperseded`
+  // later fails on a package switch — risking the abandoned package's access
+  // being merged onto the buyer at claim time. For those two initial states
+  // require the same proof of payment `/confirm` and the backstop require
+  // (`hasPaidOrAttachedACard`): the grant then lands on the
+  // `customer.subscription.updated` that `setup_intent.succeeded` triggers
+  // once the card is attached. `past_due`/`unpaid` are NOT gated — they only
+  // occur after a subscription was active, so their GRACE_PERIOD access is a
+  // real lapse to keep, not a speculative grant to withhold.
+  const isSpeculativeInitialState =
+    subscription.status === STRIPE_SUBSCRIPTION_STATUS.INCOMPLETE ||
+    subscription.status === STRIPE_SUBSCRIPTION_STATUS.TRIALING;
+  const grantsAccess =
+    statusApplied &&
+    ACCESS_GRANTING_STATUSES.has(status) &&
+    (!isSpeculativeInitialState || hasPaidOrAttachedACard(subscription));
+
+  if (grantsAccess) {
     await grantAccess({
       subscriberId: subscriber.id,
       purchaseId: purchase.id,

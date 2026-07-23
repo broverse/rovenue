@@ -718,3 +718,81 @@ describe("processStripeEvent — setup_intent.succeeded", () => {
     );
   });
 });
+
+// The backstop decides whether to COMPLETE the funnel session; the block
+// above covers that. `syncSubscription` runs in the same dispatch and
+// decides whether to GRANT access on the (pre-claim, synthetic)
+// subscriber the subscription resolves to. A funnel subscription is
+// created speculatively before any card, so `customer.subscription.created`
+// arrives at `incomplete`/`trialing` — and access must NOT land then, or
+// every abandoned click would leave a live entitlement on a subscriber
+// that never paid. The grant follows the same proof of payment the
+// backstop uses.
+describe("processStripeEvent — access grant gate (syncSubscription)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    drizzleMock.webhookEventRepo.claimWebhookEvent.mockResolvedValue({
+      outcome: "claimed" as const,
+      row: { id: "whe_1" },
+    });
+    // A non-empty access set so a grant is observable through createAccess.
+    // (The hoisted stub infers `accessIds: never[]`; widen it here.)
+    drizzleMock.offeringRepo.findProductByStoreId.mockResolvedValue({
+      id: "prod_1",
+      accessIds: ["acc_pro"] as string[],
+    } as never);
+    // No funnel completion in these cases; keep the backstop out of the way.
+    drizzleMock.funnelPurchaseRepo.findBySession.mockResolvedValue(null);
+    drizzleMock.funnelPurchaseRepo.findByStripeSubscriptionId.mockResolvedValue(
+      null,
+    );
+  });
+
+  test("grants access once the subscription is active", async () => {
+    await run(subscriptionEvent("customer.subscription.updated", {
+      status: "active",
+      metadata: { rovenue_funnel_session_id: "sess_1" },
+    }));
+
+    expect(drizzleMock.accessRepo.createAccess).toHaveBeenCalled();
+    expect(
+      drizzleMock.accessRepo.revokeAccessByPurchaseId,
+    ).not.toHaveBeenCalled();
+  });
+
+  test("grants a trial only once the card is attached", async () => {
+    await run(subscriptionEvent("customer.subscription.updated", {
+      status: "trialing",
+      default_payment_method: "pm_1",
+      metadata: { rovenue_funnel_session_id: "sess_1" },
+    }));
+
+    expect(drizzleMock.accessRepo.createAccess).toHaveBeenCalled();
+  });
+
+  test("does NOT grant on a trialing subscription with no card", async () => {
+    await run(subscriptionEvent("customer.subscription.created", {
+      status: "trialing",
+      default_payment_method: null,
+      pending_setup_intent: "seti_1",
+      metadata: { rovenue_funnel_session_id: "sess_1" },
+    }));
+
+    expect(drizzleMock.accessRepo.createAccess).not.toHaveBeenCalled();
+    expect(
+      drizzleMock.accessRepo.revokeAccessByPurchaseId,
+    ).toHaveBeenCalledWith(expect.anything(), "pur_1");
+  });
+
+  test("does NOT grant on an incomplete subscription awaiting first payment", async () => {
+    await run(subscriptionEvent("customer.subscription.created", {
+      status: "incomplete",
+      metadata: { rovenue_funnel_session_id: "sess_1" },
+    }));
+
+    expect(drizzleMock.accessRepo.createAccess).not.toHaveBeenCalled();
+    expect(
+      drizzleMock.accessRepo.revokeAccessByPurchaseId,
+    ).toHaveBeenCalledWith(expect.anything(), "pur_1");
+  });
+});
