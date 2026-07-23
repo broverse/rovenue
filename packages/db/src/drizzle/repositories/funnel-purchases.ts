@@ -147,12 +147,16 @@ export async function upsertPending(
       //
       // 1. status = 'pending' protects a row that already records a real
       //    payment.
-      // 2. fence_token < excluded.fence_token rejects a writer whose lock
-      //    was taken over mid-flight. Every writer increments the token it
-      //    read under the lock, so a holder that lost the lock carries a
-      //    token the winner has already used — `n < n` is false and the
-      //    stale write is refused by SQL rather than by a hopeful
-      //    `stillHeld()` check that cannot be atomic with the write.
+      // 2. fence_token < excluded.fence_token rejects whichever writer
+      //    arrives SECOND. Every writer increments the token it read under
+      //    the lock, so the loser carries a token the winner has already
+      //    used — `n < n` is false and its write is refused by SQL,
+      //    atomically with the write itself.
+      //
+      //    Note this refuses the second arrival, not specifically a stale
+      //    one: it guarantees two writers never both land, not that the
+      //    newest wins. The caller's `stillHeld()` check is what biases
+      //    the race toward the fresher holder, and it is still required.
       setWhere: and(
         eq(funnelPurchases.status, "pending"),
         sql`"funnel_purchases"."fence_token" < excluded."fence_token"`,

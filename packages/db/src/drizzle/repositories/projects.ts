@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { Db } from "../client";
+import { withLedgerDeleteAuthorized } from "./credit-ledger";
 import {
   memberRole,
   projectMembers,
@@ -299,12 +300,15 @@ export async function updateProjectWebhookSecret(
 /**
  * Delete a project and everything that cascades from it.
  *
- * Opens its own transaction unconditionally. `credit_ledger` is
- * append-only and its trigger only honours
- * `rovenue.allow_ledger_delete` when the setting is transaction-local,
- * and `SET LOCAL` outside a transaction is discarded with a warning the
- * driver does not surface — so a pool-called version silently lost its
- * own authorisation and the cascade was rejected.
+ * Delegates to `withLedgerDeleteAuthorized`, which opens a transaction
+ * unconditionally, so the GUC name lives in exactly one place.
+ *
+ * The transaction is not optional. `credit_ledger` is append-only and its
+ * trigger only honours `rovenue.allow_ledger_delete` when the setting is
+ * transaction-local, and `SET LOCAL` outside a transaction is discarded
+ * with a warning the driver does not surface — so an earlier version that
+ * issued the two statements bare silently lost its own authorisation
+ * whenever it was handed the pool, and the cascade was rejected.
  *
  * Called from inside an existing transaction, Drizzle emits a SAVEPOINT
  * and `SET LOCAL` still applies to the enclosing transaction, so the
@@ -314,8 +318,7 @@ export async function deleteProject(
   db: DbOrTx,
   id: string,
 ): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL "rovenue.allow_ledger_delete" = 'on'`);
+  await withLedgerDeleteAuthorized(db, async (tx) => {
     await tx.delete(projects).where(eq(projects.id, id));
   });
 }

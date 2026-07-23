@@ -225,7 +225,9 @@ const fenceToken = (existing?.fenceToken ?? 0) + 1;
 
 Why it is monotonic: every writer reads and increments while holding the lock. If A reads 5 and its TTL expires, B reads 5 and writes 6; A's write of 6 then fails `6 < 6` and is rejected. If A writes 6 first, B reads 6 and writes 7. Two writers can never both succeed with the same token.
 
-A rejected write already lands on a tested path: `upsertPending` returns `null`, and the endpoint cancels its own Stripe objects and answers `409 PAYMENT_ALREADY_RECORDED` (commit `55a185cf`).
+A rejected write already lands on a tested path: `upsertPending` returns `null`, and the endpoint cancels its own Stripe objects and answers a 409.
+
+**Superseded during implementation (fix round 1).** This paragraph assumed the existing `409 PAYMENT_ALREADY_RECORDED` path (commit `55a185cf`) was the right landing place. It is not: `null` now has two causes, and a fenced-out writer's session is still `pending` and **unpaid**, so telling that buyer "already recorded" is a lie. The shipped code re-reads the row and branches — already-paid keeps `PAYMENT_ALREADY_RECORDED`, fence-loss answers `PAYMENT_IN_FLIGHT`.
 
 - [ ] **Step 1: Write the migration**
 

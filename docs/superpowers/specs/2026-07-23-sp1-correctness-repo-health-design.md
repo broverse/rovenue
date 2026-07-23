@@ -160,8 +160,12 @@ Postgres, not trusted to notice it is stale.
 
 Monotonicity argument: every writer reads and increments while holding the lock.
 If A reads 5 and its TTL expires, B reads 5 and writes 6; A's write of 6 fails
-`6 < 6` and is rejected. If A writes 6 first, B reads 6 and writes 7, so the
-newer holder always wins. Two writers can never both succeed with the same token.
+`6 < 6` and is rejected. Two writers can never both succeed with the same token.
+
+This guarantees that only one writer lands — **not** that the newest one does.
+If A writes 6 before B does, A's stale write is the one that passes and B is
+refused. Which writer wins is settled by the `stillHeld()` check, not by the
+fence; see §4 below.
 
 `upsertPending` already returns `null` when its guard rejects, and commit
 `55a185cf` already maps that to a `409 PAYMENT_ALREADY_RECORDED` after cancelling

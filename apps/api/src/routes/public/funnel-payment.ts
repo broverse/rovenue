@@ -831,8 +831,14 @@ export const funnelPaymentRoute = new Hono()
       // just read *under the lock*: if our TTL expires and a newer holder
       // writes first, it will have consumed this same number, so our write
       // fails the `fence_token < excluded.fence_token` guard and is
-      // refused by SQL. This is what makes the write safe — not the
-      // `stillHeld()` check further down, which cannot be atomic with it.
+      // refused by SQL.
+      //
+      // That guard is what stops two writers BOTH landing. It does not
+      // decide which of them lands: if we get there first, the row still
+      // reads the value we both derived from, our stale write passes, and
+      // the fresher holder is the one refused. The `stillHeld()` check
+      // further down is what settles that — see its comment. Both are
+      // load-bearing.
       const fenceToken = (existing?.fenceToken ?? 0) + 1;
 
       const superseded =
