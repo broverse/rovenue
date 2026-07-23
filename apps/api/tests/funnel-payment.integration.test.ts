@@ -1121,6 +1121,11 @@ describe("funnel on-page payment — real Postgres", () => {
     const before = await purchaseRow(SESSION_A);
     expect(before!.status).toBe("paid");
 
+    // A token strictly greater than the row's own is deliberate: it makes
+    // sure the fence guard (`fence_token < excluded.fence_token`) would
+    // ITSELF let this write through, so the `null` this test asserts can
+    // only be coming from the status guard — the thing this test is
+    // actually about — rather than coincidentally from a fence rejection.
     const saved = await drizzle.funnelPurchaseRepo.upsertPending(getDb(), {
       sessionId: SESSION_A,
       projectId: PROJECT_ID,
@@ -1131,6 +1136,7 @@ describe("funnel on-page payment — real Postgres", () => {
       stripeSubscriptionId: "sub_clobber",
       stripePaymentIntentId: "pi_clobber",
       emailHash: "0".repeat(64),
+      fenceToken: before!.fenceToken + 1,
     });
 
     // No row updated, so RETURNING yields nothing. A successful no-op.

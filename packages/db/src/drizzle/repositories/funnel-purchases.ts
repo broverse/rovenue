@@ -98,6 +98,17 @@ export async function markPaid(
  * `NewFunnelPurchase` stays structurally assignable to it and would have
  * its status quietly dropped here.
  *
+ * `fenceToken` is required rather than optional, even though the column
+ * has `.default(0)` at the database level. Omitting it from a Drizzle
+ * `values()` call emits `default` for that column AND drops it from the
+ * generated `SET` list entirely — so the guard below becomes
+ * `fence_token < excluded.fence_token` evaluated as `stored < 0`, which is
+ * false for every existing row. A caller that forgets the token would get
+ * `null` back forever, silently disabling the fence rather than erroring
+ * — on the money path, that is a permanent spurious "already recorded".
+ * Requiring the field in the type is what makes that a compile error
+ * instead of a runtime footgun nothing else would catch.
+ *
  * THE UPDATE ONLY FIRES ON A ROW THAT IS STILL `pending`, and that
  * condition is in SQL rather than in a caller's read-then-write.
  *
@@ -120,7 +131,10 @@ export async function markPaid(
  */
 export async function upsertPending(
   db: Db,
-  row: Omit<NewFunnelPurchase, "status"> & { status?: never },
+  row: Omit<NewFunnelPurchase, "status" | "fenceToken"> & {
+    status?: never;
+    fenceToken: number;
+  },
 ): Promise<FunnelPurchase | null> {
   const [saved] = await db
     .insert(funnelPurchases)

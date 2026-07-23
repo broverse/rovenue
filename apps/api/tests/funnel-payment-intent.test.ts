@@ -498,6 +498,21 @@ describe("POST /public/funnel-sessions/:sessionId/payment-intent", () => {
     // while we were talking to Stripe. The PaymentIntent we just created
     // is orphaned and must not stay confirmable.
     upsertPurchase.mockResolvedValueOnce(null);
+    // `null` alone is ambiguous now, so the handler re-reads the row to
+    // tell "already paid" apart from "fence lost". The first read (still
+    // pending, before Stripe) is the suite's usual default; queue this
+    // scenario's SECOND read — the post-`upsertPending` re-read — as the
+    // paid row that makes this "already paid", not "fence lost".
+    findPurchaseBySession.mockResolvedValueOnce(null);
+    findPurchaseBySession.mockResolvedValueOnce({
+      id: "purchase_1",
+      sessionId: "sess_1",
+      projectId: "proj_1",
+      status: "paid",
+      stripeCustomerId: "cus_existing",
+      stripeSubscriptionId: null,
+      stripePaymentIntentId: "pi_won",
+    });
 
     const res = await post({
       package_identifier: "$rov_lifetime",
@@ -509,6 +524,39 @@ describe("POST /public/funnel-sessions/:sessionId/payment-intent", () => {
       "PAYMENT_ALREADY_RECORDED",
     );
     // The object this request created was cancelled, not left confirmable.
+    expect(paymentIntentsCancel).toHaveBeenCalledWith("pi_2");
+  });
+
+  it("409s PAYMENT_IN_FLIGHT, not PAYMENT_ALREADY_RECORDED, when the fence rejects a stale writer", async () => {
+    // Same SQL outcome as the "already paid" test above — `upsertPending`
+    // returns null — but for the OTHER reason: a newer holder already
+    // consumed this token, and the row the re-read finds is still
+    // `pending` (nobody has actually been charged). Handing back
+    // PAYMENT_ALREADY_RECORDED here would tell an uncharged buyer their
+    // purchase is done.
+    upsertPurchase.mockResolvedValueOnce(null);
+    findPurchaseBySession.mockResolvedValueOnce(null);
+    findPurchaseBySession.mockResolvedValueOnce({
+      id: "purchase_1",
+      sessionId: "sess_1",
+      projectId: "proj_1",
+      status: "pending",
+      stripeCustomerId: "cus_existing",
+      stripeSubscriptionId: null,
+      stripePaymentIntentId: "pi_winner",
+    });
+
+    const res = await post({
+      package_identifier: "$rov_lifetime",
+      email: "a@b.co",
+    });
+
+    expect(res.status).toBe(409);
+    const body = JSON.stringify(await res.json());
+    expect(body).toContain("PAYMENT_IN_FLIGHT");
+    expect(body).not.toContain("PAYMENT_ALREADY_RECORDED");
+    // The object this request created is still orphaned and must not be
+    // left confirmable, exactly as on the already-paid branch.
     expect(paymentIntentsCancel).toHaveBeenCalledWith("pi_2");
   });
 

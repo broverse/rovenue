@@ -771,8 +771,11 @@ export const funnelPaymentRoute = new Hono()
     // 60s rather than 30s is defence in depth only. The shared Connect
     // client sets no per-request timeout, so the SDK default is 80s plus
     // retries and this section makes up to six Stripe round-trips — no
-    // fixed TTL survives that worst case. The ownership fence below, not
-    // the number, is what makes this correct.
+    // fixed TTL survives that worst case. That is fine: correctness does
+    // not come from this number. It comes from the fencing token enforced
+    // in `upsertPending`'s SQL guard, which refuses a stale writer no
+    // matter how long its lock lived — this TTL only bounds how long a
+    // lost race sits unresolved before that guard is reached.
     const result = await withLock(`funnel:payment:${sid}`, 60_000, async (lock) => {
       // A repeat POST for this session is a visitor changing package.
       // Reuse the Customer that attempt created rather than stranding it —
@@ -968,10 +971,12 @@ export const funnelPaymentRoute = new Hono()
       // holder's row is the fencing token in `upsertPending`'s ON CONFLICT
       // guard, which is atomic with the write; this check is not.
       if (!(await lock.stillHeld())) {
-        // There is nothing we can safely *write*. `upsertPending` is the
-        // only write this endpoint has and it would clobber the current
-        // holder's row, which is the thing being avoided — so the ids go
-        // to the log instead, at error level.
+        // There is nothing useful to write here. `upsertPending` would
+        // refuse this write anyway — our fence token is exactly what the
+        // newer holder already consumed — so attempting it would just
+        // waste a round-trip on a write SQL was always going to reject.
+        // The ids go to the log instead, at error level, since that
+        // write is the only durable record they would otherwise get.
         log.error("lock lost mid-flight; cancelling the stripe objects we created", {
           sessionId: sid,
           customerId,
@@ -1051,19 +1056,44 @@ export const funnelPaymentRoute = new Hono()
         ...(rawPayload ? { rawPayload } : {}),
       });
 
-      // `upsertPending` refuses a non-pending row in SQL, so `null` means
-      // this session was already completed while we were talking to
-      // Stripe. Handing back `clientSecret` would let the buyer confirm a
-      // payment against a session that is already paid — a second charge.
-      // The objects we just created are ours and unreturned, so cancel
-      // them (same safety as the lock-lost path) and 409.
+      // `upsertPending` returns `null` for either of two SQL guard
+      // failures, and they are NOT the same answer to the buyer. The
+      // status guard refuses a row that is genuinely already paid — that
+      // session really is done. The fence guard refuses OUR write because
+      // a newer holder already consumed this token — that session's
+      // payment is still in flight under someone else's attempt, and
+      // handing back "already recorded" here would be a lie: this buyer
+      // has not been charged. Only a re-read tells the two apart, so do
+      // that rather than assume. This is a rare path, so the extra read
+      // is cheap; if the winner finishes between our write and this read,
+      // "already recorded" is simply true by the time we say it.
+      //
+      // The objects we just created are ours and unreturned either way,
+      // so cancel them first (same safety as the lock-lost path).
       if (!saved) {
         await cancelOwnObjects(
           account,
           { subscriptionId: stripeSubscriptionId, paymentIntentId: stripePaymentIntentId },
           sid,
         );
-        return ALREADY_PAID;
+        const current = await drizzle.funnelPurchaseRepo.findBySession(drizzle.db, sid);
+        if (current && current.status !== "pending") {
+          return ALREADY_PAID;
+        }
+        // The status guard would have let this write through — the row
+        // is still `pending`. Only the fence guard could have refused it:
+        // another attempt for this session is ahead of ours, mid-flight.
+        // Same underlying condition as the lock-lost branch above, so log
+        // it the same way: this is the race this task exists to catch,
+        // and it must leave a trace.
+        log.error("fence lost mid-flight; cancelling the stripe objects we created", {
+          sessionId: sid,
+          customerId,
+          subscriptionId: stripeSubscriptionId,
+          paymentIntentId: stripePaymentIntentId,
+          fenceToken,
+        });
+        return LOCK_LOST;
       }
 
       return {
