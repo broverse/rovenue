@@ -764,6 +764,47 @@ describe("absent vs blank default-locale values", () => {
   });
 });
 
+describe("LOCALE_KEY_GAP scoping", () => {
+  const tree = {
+    type: "stack" as const,
+    id: "root",
+    axis: "v" as const,
+    children: [{ type: "text" as const, id: "t1", key: "title", role: "title" as const }],
+  };
+
+  it("still reports a key that IS written in the default locale and missing elsewhere", () => {
+    const issues = validateBuilderConfig(
+      { formatVersion: 2, defaultLocale: "en", localizations: { en: { title: "Hi" }, de: {} }, root: tree },
+      { offeringPackageIds: [] },
+    );
+    const gap = issues.find((i) => i.code === "LOCALE_KEY_GAP");
+    expect(gap?.locale).toBe("de");
+    expect(gap?.key).toBe("title");
+  });
+
+  it("says nothing about an ORPHANED key no node references", () => {
+    const issues = validateBuilderConfig(
+      {
+        formatVersion: 2,
+        defaultLocale: "en",
+        localizations: { en: { title: "Hi", ghost: "Leftover" }, de: { title: "Hallo" } },
+        root: tree,
+      },
+      { offeringPackageIds: [] },
+    );
+    expect(issues.filter((i) => i.key === "ghost")).toEqual([]);
+  });
+
+  it("does not claim a key is 'set in the default locale' when it is blank there", () => {
+    const issues = validateBuilderConfig(
+      { formatVersion: 2, defaultLocale: "en", localizations: { en: { title: "" }, de: {} }, root: tree },
+      { offeringPackageIds: [] },
+    );
+    expect(issues.filter((i) => i.code === "LOCALE_KEY_GAP")).toEqual([]);
+    expect(issues.map((i) => i.code)).toContain("EMPTY_LOC_VALUE");
+  });
+});
+
 describe("issue severity", () => {
   it("classifies every currently-emitted code", () => {
     expect(issueSeverity({ code: "DUPLICATE_NODE_ID" })).toBe("save");

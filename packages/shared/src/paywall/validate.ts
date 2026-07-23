@@ -315,11 +315,21 @@ export function validateBuilderConfig(
     }
   }
 
-  // LOCALE_KEY_GAP — per (non-default locale, key present in defaultLocale but missing there).
-  const defaultKeys = Object.keys(defaultLocaleTable);
+  // LOCALE_KEY_GAP — per (non-default locale, key the TREE uses that is written
+  // in the default locale but missing there).
+  //
+  // Scoped to tree usage, not to the whole default-locale table: `removeNode`
+  // never prunes `localizations`, so deleting a node orphans its key forever,
+  // and no builder UI can delete a localization key. A table-scoped loop warned
+  // about those orphans while the localization matrix — which lists tree usages
+  // — had no row for them: an unclearable warning with nothing to act on.
+  const usedKeys = [...new Set(collectLocalizationUsages(config.root).map((u) => u.key))];
   for (const [locale, table] of Object.entries(config.localizations)) {
     if (locale === config.defaultLocale) continue;
-    for (const key of defaultKeys) {
+    for (const key of usedKeys) {
+      // Already reported against the default locale by UNKNOWN_LOC_KEY /
+      // EMPTY_LOC_VALUE — and the message below would be a lie.
+      if (isMissingLocaleValue(defaultLocaleTable[key])) continue;
       if (isMissingLocaleValue(table[key])) {
         issues.push({
           code: "LOCALE_KEY_GAP",
