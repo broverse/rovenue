@@ -190,12 +190,12 @@ export function validateBuilderConfig(
     for (const key of keysToCheck) {
       if (checked.has(key)) continue;
       checked.add(key);
-      if (!(key in defaultLocaleTable)) {
+      if (isMissingLocaleValue(defaultLocaleTable[key])) {
         issues.push({
           code: "UNKNOWN_LOC_KEY",
           nodeId: node.id,
           key,
-          message: `Key "${key}" (node "${node.id}") is not present in the default locale ("${config.defaultLocale}") table.`,
+          message: `Key "${key}" (node "${node.id}") has no text in the default locale ("${config.defaultLocale}").`,
         });
       }
     }
@@ -286,12 +286,12 @@ export function validateBuilderConfig(
   for (const [locale, table] of Object.entries(config.localizations)) {
     if (locale === config.defaultLocale) continue;
     for (const key of defaultKeys) {
-      if (!(key in table)) {
+      if (isMissingLocaleValue(table[key])) {
         issues.push({
           code: "LOCALE_KEY_GAP",
           locale,
           key,
-          message: `Locale "${locale}" is missing key "${key}" present in the default locale.`,
+          message: `Locale "${locale}" has no text for key "${key}", which is set in the default locale.`,
         });
       }
     }

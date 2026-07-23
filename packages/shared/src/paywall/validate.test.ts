@@ -3,6 +3,7 @@ import {
   applyOverrides,
   collectLocalizationKeys,
   collectLocalizationUsages,
+  isBlockingIssue,
   isMissingLocaleValue,
   resolveText,
   validateBuilderConfig,
@@ -629,5 +630,64 @@ describe("isMissingLocaleValue", () => {
   it("treats any real text as present", () => {
     expect(isMissingLocaleValue("x")).toBe(false);
     expect(isMissingLocaleValue(" x ")).toBe(false);
+  });
+});
+
+describe("blank localization values count as missing", () => {
+  function configWith(localizations: Record<string, Record<string, string>>): BuilderConfig {
+    return {
+      formatVersion: 2,
+      defaultLocale: "en",
+      localizations,
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [{ type: "text", id: "t1", key: "title", role: "title" }],
+      },
+    };
+  }
+
+  it("a blank default-locale value is a blocking UNKNOWN_LOC_KEY", () => {
+    const issues = validateBuilderConfig(configWith({ en: { title: "" } }), {
+      offeringPackageIds: [],
+    });
+    const unknown = issues.filter((i) => i.code === "UNKNOWN_LOC_KEY");
+    expect(unknown).toHaveLength(1);
+    expect(unknown[0]).toMatchObject({ nodeId: "t1", key: "title" });
+    expect(isBlockingIssue(unknown[0]!)).toBe(true);
+  });
+
+  it("a whitespace-only default-locale value is also blocking", () => {
+    const issues = validateBuilderConfig(configWith({ en: { title: "   " } }), {
+      offeringPackageIds: [],
+    });
+    expect(issues.some((i) => i.code === "UNKNOWN_LOC_KEY")).toBe(true);
+  });
+
+  it("a filled default-locale value emits no UNKNOWN_LOC_KEY", () => {
+    const issues = validateBuilderConfig(configWith({ en: { title: "Hello" } }), {
+      offeringPackageIds: [],
+    });
+    expect(issues.some((i) => i.code === "UNKNOWN_LOC_KEY")).toBe(false);
+  });
+
+  it("a blank non-default value is a non-blocking LOCALE_KEY_GAP", () => {
+    const issues = validateBuilderConfig(
+      configWith({ en: { title: "Hello" }, de: { title: "" } }),
+      { offeringPackageIds: [] },
+    );
+    const gaps = issues.filter((i) => i.code === "LOCALE_KEY_GAP");
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]).toMatchObject({ locale: "de", key: "title" });
+    expect(isBlockingIssue(gaps[0]!)).toBe(false);
+  });
+
+  it("a filled non-default value emits no gap", () => {
+    const issues = validateBuilderConfig(
+      configWith({ en: { title: "Hello" }, de: { title: "Hallo" } }),
+      { offeringPackageIds: [] },
+    );
+    expect(issues.some((i) => i.code === "LOCALE_KEY_GAP")).toBe(false);
   });
 });
