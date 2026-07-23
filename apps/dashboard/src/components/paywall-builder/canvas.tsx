@@ -88,6 +88,10 @@ export const Canvas = component(() => {
       viewportRef.current = el;
       if (!el) return;
       const onWheel = (e: WheelEvent) => {
+        // All-sizes renders at a fixed scale, so zoom is meaningless there —
+        // let the wheel scroll the grid natively instead of hijacking it
+        // (preventDefault here would make the row unscrollable).
+        if (vm.showAllSizes) return;
         e.preventDefault();
         e.stopPropagation();
         vm.handleCanvasWheel(e.deltaY, e.ctrlKey);
@@ -340,7 +344,11 @@ export const Canvas = component(() => {
           </div>
         )}
 
-        {ring && (
+        {/* Selection ring is a single-frame affordance: all-sizes repeats every
+            node id across N frames, and the lookup takes the FIRST match, so the
+            ring would land on a different frame than the one clicked. Selection
+            itself still works (the properties panel edits the right node). */}
+        {ring && !vm.showAllSizes && (
           <div
             aria-hidden="true"
             className="pointer-events-none absolute rounded-sm ring-2 ring-rv-accent-500 ring-offset-1 ring-offset-transparent"
