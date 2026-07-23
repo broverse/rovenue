@@ -849,4 +849,13 @@ describe("issue severity", () => {
     expect(isBlockingIssue({ code: "LOCALE_KEY_GAP" })).toBe(false);
     expect(isPublishBlockingIssue({ code: "LOCALE_KEY_GAP" })).toBe(false);
   });
+
+  it("never resolves a code to an inherited Object.prototype property", () => {
+    // A plain `ISSUE_SEVERITY[issue.code]` lookup resolves "constructor" to
+    // the Object constructor function — truthy, so the `?? "save"` fallback
+    // never kicks in — which would fail OPEN on the save gate instead of
+    // defaulting to the strictest tier.
+    expect(issueSeverity({ code: "constructor" })).toBe("save");
+    expect(isBlockingIssue({ code: "constructor" })).toBe(true);
+  });
 });

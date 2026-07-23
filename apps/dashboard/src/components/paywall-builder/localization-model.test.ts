@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BuilderConfig } from "@rovenue/shared/paywall";
+import { validateBuilderConfig, type BuilderConfig } from "@rovenue/shared/paywall";
 import { buildMatrixRows, isCellMissing, localeCompletion } from "./localization-model";
 
 function config(): BuilderConfig {
@@ -38,6 +38,22 @@ describe("isCellMissing", () => {
     expect(isCellMissing(c, "cta", "de")).toBe(true);
     expect(isCellMissing(c, "title", "fr")).toBe(true);
     expect(isCellMissing(c, "title", "de")).toBe(false);
+  });
+});
+
+describe("isCellMissing agrees with the validator's EMPTY_LOC_VALUE", () => {
+  it("marks the same cell missing whether asked via the matrix or via validateBuilderConfig", () => {
+    // Blank (not absent) default-locale value: the config's own default
+    // locale, "en", has a present-but-blank "title" entry.
+    const c = config();
+    c.localizations[c.defaultLocale]!["title"] = "";
+
+    // Matrix side: the localization matrix's own missing-cell check.
+    expect(isCellMissing(c, "title", c.defaultLocale)).toBe(true);
+
+    // Gate side: the shared validator, on the exact same input.
+    const issues = validateBuilderConfig(c, { offeringPackageIds: [] });
+    expect(issues.some((i) => i.code === "EMPTY_LOC_VALUE" && i.key === "title")).toBe(true);
   });
 });
 

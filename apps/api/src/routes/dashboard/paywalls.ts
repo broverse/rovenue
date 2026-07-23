@@ -148,9 +148,15 @@ function measureNodeTree(raw: unknown): { depth: number; nodes: number } {
  * columns actually persisted. `null` clears it (revert to format 1); a
  * non-null value must pass both the Zod node-tree schema and
  * `validateBuilderConfig` against the paywall's (possibly new) offering.
- * Any issue `isBlockingIssue` flags — i.e. anything outside the shared
- * warning codes — becomes a 400 in the PAYWALL_IN_USE JSON-in-message
- * HTTPException style used by DELETE below.
+ *
+ * `validateBuilderConfig` issues come in three severity tiers (see
+ * `IssueSeverity` in the shared validator) — `save`, `publish`, and
+ * `warning`. This is the SAVE gate: only `save`-tier issues (`isBlockingIssue`)
+ * become a 400 here, in the PAYWALL_IN_USE JSON-in-message HTTPException style
+ * used by DELETE below. `publish`-tier issues — e.g. `EMPTY_LOC_VALUE`, a
+ * legitimate work-in-progress like copy nobody has written yet — persist fine
+ * and are instead caught by the publish route. `warning`-tier issues block
+ * neither gate.
  */
 function prepareBuilderConfigPatch(
   rawBuilderConfig: unknown,

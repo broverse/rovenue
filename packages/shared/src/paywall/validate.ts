@@ -67,9 +67,18 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
 };
 
 /** Anything unlisted blocks the save — the strictest tier, so a code added
- * later fails closed until it is deliberately classified. */
+ * later fails closed until it is deliberately classified.
+ *
+ * `Object.hasOwn`-guarded like `UNKNOWN_LOC_KEY`'s defaultLocaleTable lookup
+ * above: an unguarded `ISSUE_SEVERITY[issue.code]` also resolves inherited
+ * `Object` prototype properties (`issue.code === "constructor"` returns the
+ * `Object` constructor function, a truthy non-"save" value), which would fail
+ * OPEN on the save gate — `isBlockingIssue` returns `false` for a code that
+ * was never classified, the opposite of the fail-closed default this function
+ * documents.
+ */
 export function issueSeverity(issue: { code: string }): IssueSeverity {
-  return ISSUE_SEVERITY[issue.code] ?? "save";
+  return Object.hasOwn(ISSUE_SEVERITY, issue.code) ? ISSUE_SEVERITY[issue.code]! : "save";
 }
 
 /** True when an issue must block the SAVE (the API's builderConfig PATCH). */
