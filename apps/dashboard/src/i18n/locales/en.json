@@ -1455,6 +1455,74 @@
         "codeOverrideBadProp": "Non-overridable prop",
         "codeOverrideSelectedOutsideCell": "Override never matches",
         "locale": "Locale"
+      },
+      "diff": {
+        "title": "Published v{{from}} → draft",
+        "loading": "Comparing…",
+        "subtitle_one": "{{count}} change ships when you publish.",
+        "subtitle_other": "{{count}} changes ship when you publish.",
+        "none": "The draft matches the published version.",
+        "close": "Close",
+        "publish": "Publish these changes",
+        "scope": {
+          "config": "config",
+          "node": "node",
+          "localization": "localization"
+        }
+      },
+      "localization": {
+        "title": "Localization",
+        "subtitle": "Every string the paywall uses, in every locale it ships in. Blank cells are untranslated.",
+        "close": "Close",
+        "empty": "This paywall has no text yet. Add a text or button node to translate.",
+        "stringCol": "String",
+        "base": "base",
+        "viaOverrideHint": "This key is introduced by a conditional override, so it only renders when that condition holds.",
+        "viaOverride": "override",
+        "alsoUsedBy": "Also used by: {{ids}}",
+        "jump": "Select the node using this string",
+        "untranslated": "untranslated",
+        "blocking_one": "{{count}} blank string in the base locale blocks publishing.",
+        "blocking_other": "{{count}} blank strings in the base locale block publishing.",
+        "warnings_one": "{{count}} untranslated string — it falls back to the base locale.",
+        "warnings_other": "{{count}} untranslated strings — they fall back to the base locale.",
+        "complete": "Every string is translated.",
+        "done": "Done"
+      },
+      "start": {
+        "title": "Start a paywall",
+        "subtitle": "Begin from a layout and edit everything after — or start from a blank canvas.",
+        "close": "Close",
+        "confirmReplaceLocalized_one": "Click again to replace your current design — this also deletes {{count}} other locale and all its translations.",
+        "confirmReplaceLocalized_other": "Click again to replace your current design — this also deletes {{count}} other locales and all their translations.",
+        "confirmReplace": "Click again to replace your current design.",
+        "blankThumb": "Empty",
+        "blankTag": "Start empty",
+        "blankName": "Blank canvas",
+        "blankDescription": "Build from scratch.",
+        "footerHint": "Everything is editable after you pick one.",
+        "presets": {
+          "hero": {
+            "tag": "Highest converting",
+            "name": "Hero",
+            "description": "Full-bleed image, plan list, sticky purchase button."
+          },
+          "comparison": {
+            "tag": "Feature-rich",
+            "name": "Comparison",
+            "description": "Title, plan list and a caption for the fine print."
+          }
+        }
+      },
+      "versions": {
+        "title": "Version history",
+        "empty": "Nothing published yet.",
+        "labelPlaceholder": "Name this version…",
+        "unnamed": "Unnamed version",
+        "live": "live",
+        "revert": "Revert draft to this version",
+        "diff": "Diff draft vs published",
+        "discard": "Discard draft changes"
       }
     }
   },
