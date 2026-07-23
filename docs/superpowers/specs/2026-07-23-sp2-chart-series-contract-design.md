@@ -119,10 +119,27 @@ The share of paywall viewers who purchased that day. The label is
 paid") uses for a conversion rate.
 
 - Numerator: `uniq(subscriberId)` per day from `rovenue.raw_revenue_events` where
-  `paywallId != ''` and
-  `type IN ('INITIAL','RENEWAL','TRIAL_CONVERSION','REACTIVATION')`.
+  `paywallId != ''` and `type = 'INITIAL'`.
 - Denominator: `uniqMerge(subscribersHll)` per day from
   `mv_paywall_daily_target`.
+
+**Corrected during implementation.** This spec originally took the event-type
+list `('INITIAL','RENEWAL','TRIAL_CONVERSION','REACTIVATION')` from
+`analytics-router.ts`'s `placement_metrics`. That is a **lifetime** total for one
+placement, where renewals are defensible. This chart is a **same-day rate**, so
+the list was wrong in a way that made the chart unusable: on Stripe,
+`presentedContext` persists for the subscription's life
+(`stripe-webhook.ts:1182`), so month-2+ renewals carry a non-empty `paywallId`
+and land in the numerator against a denominator of people who viewed a paywall
+*today*. Two hundred renewals against twenty viewers renders 1000% on a percent
+panel.
+
+`TRIAL_CONVERSION` is excluded for the same reason rather than the obvious one: a
+trial started from a paywall on day 1 converts on day 8 and would land in day 8's
+numerator against day 8's viewers, who are different people. `INITIAL` is the
+only type that co-occurs with the view, and it already covers trial *starts* at
+the paywall — a trial start is an `INITIAL` carrying `isTrial`, distinct from the
+later `TRIAL_CONVERSION`.
 
 Together the pair decomposes the funnel: reach × conversion.
 

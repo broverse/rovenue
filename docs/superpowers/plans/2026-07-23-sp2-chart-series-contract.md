@@ -387,7 +387,9 @@ describe("readChartSeries", () => {
     expect(purchasersSql).toContain("raw_revenue_events");
     // Pre-0019 rows carry '' and must not be counted as attributed.
     expect(purchasersSql).toContain("paywallId != ''");
-    expect(purchasersSql).toContain("TRIAL_CONVERSION");
+    expect(purchasersSql).toContain("INITIAL");
+    // A same-day rate must NOT count events that recur after the view.
+    expect(purchasersSql).not.toContain("RENEWAL");
   });
 
   it("throws when ClickHouse is not configured", async () => {
@@ -421,7 +423,15 @@ Append to `apps/api/src/services/metrics/charts.ts`:
 // state rather than another chart's data.
 
 /** Revenue event types that count as a purchase for attribution. */
-const PURCHASE_EVENT_TYPES = "'INITIAL', 'RENEWAL', 'TRIAL_CONVERSION', 'REACTIVATION'";
+// Only INITIAL. This is a SAME-DAY rate, so an event that recurs long
+// after the view that earned it inflates the numerator against a
+// denominator of today's viewers: on Stripe presentedContext persists for
+// the subscription's life, so RENEWAL/REACTIVATION would put month-2+
+// renewals here (200 renewals over 20 viewers renders 1000%).
+// TRIAL_CONVERSION is excluded for the same lag reason — a trial started
+// from a paywall on day 1 converts on day 8. INITIAL already covers trial
+// STARTS at the paywall (an INITIAL carrying isTrial).
+const ATTRIBUTED_PURCHASE_EVENT_TYPE = "INITIAL";
 
 /** Catalog ids this service can serve today. */
 const SUPPORTED_SERIES_IDS: ReadonlySet<string> = new Set([
@@ -521,7 +531,7 @@ export async function readChartSeries(
         AND toDate(eventDate) >= {from:Date}
         AND toDate(eventDate) <= {to:Date}
         AND paywallId != ''
-        AND type IN (${PURCHASE_EVENT_TYPES})
+        AND type = '${ATTRIBUTED_PURCHASE_EVENT_TYPE}'
       GROUP BY day
       ORDER BY day
     `,
