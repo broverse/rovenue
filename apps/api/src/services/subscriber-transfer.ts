@@ -60,6 +60,16 @@ function deriveAnonymousId(projectId: string, appUserId: string): string {
  * MUST run inside a transaction that already holds the advisory locks for
  * both subscribers. Returns the number of credits moved. Reused by both
  * `transferSubscriber` (secret-key) and `bindAppUserId` (identify).
+ *
+ * Every underlying reassignment filters on subscriber id alone — none of
+ * them scopes to `projectId`, which otherwise only stamps credit-ledger
+ * rows. So a caller that passes a cross-project pair would silently move
+ * one project's assets onto another's subscriber. Only the funnel claim
+ * path guards this itself; the others rely on it never happening. Make it
+ * a property of this function instead: read both rows and refuse unless
+ * both belong to `projectId`. Merges are infrequent, so the two reads are
+ * cheap, and this can only ever fire on corrupt input — no legitimate
+ * caller crosses a project boundary.
  */
 export async function reassignAllAssets(
   tx: Db,
@@ -67,6 +77,21 @@ export async function reassignAllAssets(
   from: { id: string; label: string },
   to: { id: string; label: string },
 ): Promise<number> {
+  const [fromRow, toRow] = await Promise.all([
+    drizzle.subscriberRepo.findSubscriberById(tx, from.id),
+    drizzle.subscriberRepo.findSubscriberById(tx, to.id),
+  ]);
+  if (!fromRow || fromRow.projectId !== projectId) {
+    throw new Error(
+      `reassignAllAssets: source ${from.id} (${from.label}) is not in project ${projectId}`,
+    );
+  }
+  if (!toRow || toRow.projectId !== projectId) {
+    throw new Error(
+      `reassignAllAssets: target ${to.id} (${to.label}) is not in project ${projectId}`,
+    );
+  }
+
   await drizzle.subscriberRepo.reassignPurchases(tx, from.id, to.id);
   await drizzle.subscriberRepo.reassignRevenueEvents(tx, from.id, to.id);
   await drizzle.subscriberRepo.reassignSubscriberAccess(tx, from.id, to.id);

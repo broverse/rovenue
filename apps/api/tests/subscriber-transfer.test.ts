@@ -104,6 +104,9 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
       args: { projectId: string; rovenueId: string },
     ) => findByRovenueId(args.projectId, args.rovenueId),
   );
+  const findSubscriberById = vi.fn(
+    async (_tx: unknown, id: string) => subscriberStore[id] ?? null,
+  );
   const findAllBalances = vi.fn(
     async (_tx: unknown, _subscriberId: string) =>
       [] as Array<{ currencyId: string; balance: number }>,
@@ -122,6 +125,7 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
       subscriberRepo: {
         findSubscriberByAppUserId,
         findSubscriberByRovenueId,
+        findSubscriberById,
         reassignPurchases,
         reassignRevenueEvents,
         reassignSubscriberAccess,
@@ -163,6 +167,7 @@ vi.mock("@rovenue/db", () => ({
 
 import {
   anonymizeSubscriber,
+  reassignAllAssets,
   transferSubscriber,
 } from "../src/services/subscriber-transfer";
 
@@ -417,5 +422,49 @@ describe("anonymizeSubscriber", () => {
     await expect(
       anonymizeSubscriber("proj_a", "missing@example.com", "user_admin"),
     ).rejects.toThrow(/not found/);
+  });
+});
+
+describe("reassignAllAssets — cross-project guard", () => {
+  test("refuses to move assets across a project boundary", async () => {
+    setupSubscribers(
+      { id: "sub_from", projectId: "proj_a" },
+      { id: "sub_to", projectId: "proj_b" },
+    );
+
+    await expect(
+      reassignAllAssets(
+        drizzleMock.db as never,
+        "proj_a",
+        { id: "sub_from", label: "source" },
+        { id: "sub_to", label: "target" },
+      ),
+    ).rejects.toThrow(/not in project proj_a/);
+
+    // Nothing moved.
+    expect(drizzleMock.subscriberRepo.reassignPurchases).not.toHaveBeenCalled();
+    expect(
+      drizzleMock.subscriberRepo.reassignSubscriberAccess,
+    ).not.toHaveBeenCalled();
+  });
+
+  test("moves assets when both subscribers share the project", async () => {
+    setupSubscribers(
+      { id: "sub_from", projectId: "proj_a" },
+      { id: "sub_to", projectId: "proj_a" },
+    );
+
+    await reassignAllAssets(
+      drizzleMock.db as never,
+      "proj_a",
+      { id: "sub_from", label: "source" },
+      { id: "sub_to", label: "target" },
+    );
+
+    expect(drizzleMock.subscriberRepo.reassignPurchases).toHaveBeenCalledWith(
+      expect.anything(),
+      "sub_from",
+      "sub_to",
+    );
   });
 });
