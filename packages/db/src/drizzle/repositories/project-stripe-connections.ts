@@ -141,3 +141,19 @@ export async function updateAccountState(
     })
     .where(eq(projectStripeConnections.id, id));
 }
+
+/**
+ * Every active (non-disconnected) connection, for the Apple Pay domain
+ * backfill: the one-off reconcile registers the funnel domain on accounts
+ * that connected before that registration existed. `registerApplePayDomain`
+ * is idempotent, so re-running over the whole set is safe and converges the
+ * stored status.
+ */
+export async function findAllActive(
+  db: Db,
+): Promise<ProjectStripeConnection[]> {
+  return db
+    .select()
+    .from(projectStripeConnections)
+    .where(isNull(projectStripeConnections.disconnectedAt));
+}
