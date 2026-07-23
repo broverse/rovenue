@@ -560,6 +560,48 @@ describe("POST /public/funnel-sessions/:sessionId/payment-intent", () => {
     expect(paymentIntentsCancel).toHaveBeenCalledWith("pi_2");
   });
 
+  it("409s PAYMENT_IN_FLIGHT, not a 500, when the post-refusal re-read itself throws", async () => {
+    // A transient database error on the re-read must not turn a
+    // deterministic 409 into a 500 for a buyer who was NOT charged by
+    // this request. Falls back to the fence-lost outcome, same as an
+    // unreadable "not found" result.
+    upsertPurchase.mockResolvedValueOnce(null);
+    findPurchaseBySession.mockResolvedValueOnce(null);
+    findPurchaseBySession.mockRejectedValueOnce(new Error("boom"));
+
+    const res = await post({
+      package_identifier: "$rov_lifetime",
+      email: "a@b.co",
+    });
+
+    expect(res.status).toBe(409);
+    const body = JSON.stringify(await res.json());
+    expect(body).toContain("PAYMENT_IN_FLIGHT");
+  });
+
+  it("409s PAYMENT_IN_FLIGHT, not a 500, when the post-refusal re-read finds no row at all", async () => {
+    // Same SQL outcome as the two tests above — `upsertPending` returns
+    // null — but this pins the `!current` half of
+    // `if (!current || current.status !== "pending")`: the re-read comes
+    // back with no row whatsoever (not merely a pending one). That must
+    // still fall through to the fence-lost outcome, not be mistaken for
+    // "already paid" — nothing here proves this buyer was charged.
+    upsertPurchase.mockResolvedValueOnce(null);
+    findPurchaseBySession.mockResolvedValueOnce(null);
+    findPurchaseBySession.mockResolvedValueOnce(null);
+
+    const res = await post({
+      package_identifier: "$rov_lifetime",
+      email: "a@b.co",
+    });
+
+    expect(res.status).toBe(409);
+    const body = JSON.stringify(await res.json());
+    expect(body).toContain("PAYMENT_IN_FLIGHT");
+    expect(body).not.toContain("PAYMENT_ALREADY_RECORDED");
+    expect(paymentIntentsCancel).toHaveBeenCalledWith("pi_2");
+  });
+
   // THE contract test for this task.
   it("ignores an amount supplied by the client", async () => {
     await post({

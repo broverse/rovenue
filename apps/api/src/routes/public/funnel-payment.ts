@@ -64,9 +64,21 @@ const bodySchema = z.object({
   email: z.string().email(),
 });
 
-// Returned by the locked section when it finds it no longer holds the
-// lock. A symbol so it can never collide with a value the section
-// legitimately produces, and never with `withLock`'s own `null`.
+// Returned by the locked section on either of two conditions, both of
+// which mean a newer attempt for this session is ahead of ours:
+//
+//   1. `stillHeld()` says our lock has already expired — a newer holder
+//      is presumably rebuilding this row right now.
+//   2. `stillHeld()` said we were still the holder, but `upsertPending`'s
+//      SQL fence guard refused our write anyway — a newer holder's write
+//      landed first and consumed the token we derived ours from.
+//
+// One symbol covers both because the sole consumer below treats them
+// identically: it maps LOCK_LOST to a 409 `PAYMENT_IN_FLIGHT`, which the
+// runner treats as transient and retries — and a retry reads the
+// advanced token and wins either way. A symbol so it can never collide
+// with a value the section legitimately produces, and never with
+// `withLock`'s own `null`.
 const LOCK_LOST = Symbol("funnel-payment-lock-lost");
 
 // Returned when `upsertPending` refuses the write because the row is
@@ -773,9 +785,12 @@ export const funnelPaymentRoute = new Hono()
     // retries and this section makes up to six Stripe round-trips — no
     // fixed TTL survives that worst case. That is fine: correctness does
     // not come from this number. It comes from the fencing token enforced
-    // in `upsertPending`'s SQL guard, which refuses a stale writer no
-    // matter how long its lock lived — this TTL only bounds how long a
-    // lost race sits unresolved before that guard is reached.
+    // in `upsertPending`'s SQL guard, which refuses whichever writer
+    // arrives SECOND — not necessarily the stale one — so two writers can
+    // never both succeed with the same derived token. `stillHeld()` below
+    // is what biases that race toward the fresher holder; this TTL only
+    // bounds how long a lost race sits unresolved before the guard is
+    // reached.
     const result = await withLock(`funnel:payment:${sid}`, 60_000, async (lock) => {
       // A repeat POST for this session is a visitor changing package.
       // Reuse the Customer that attempt created rather than stranding it —
@@ -971,10 +986,18 @@ export const funnelPaymentRoute = new Hono()
       // holder's row is the fencing token in `upsertPending`'s ON CONFLICT
       // guard, which is atomic with the write; this check is not.
       if (!(await lock.stillHeld())) {
-        // There is nothing useful to write here. `upsertPending` would
-        // refuse this write anyway — our fence token is exactly what the
-        // newer holder already consumed — so attempting it would just
-        // waste a round-trip on a write SQL was always going to reject.
+        // Our TTL expired; another request now holds the lock and is
+        // rebuilding this row from a newer `existing` read. If we wrote
+        // anyway, we would usually WIN that race, not lose it: the newer
+        // holder is still mid-flight on its own Stripe calls, so the row
+        // still reads the value we both derived our fence token from, and
+        // `upsertPending`'s guard (`stored < ours`) lets our stale write
+        // through. That would strand the fresher holder's soon-to-be
+        // -created objects and 409 its buyer instead of ours — the fence
+        // guard alone cannot stop this, because it only refuses whichever
+        // writer arrives second, and without bailing here we would
+        // typically arrive first. Bailing is what keeps that ordering
+        // from being reachable.
         // The ids go to the log instead, at error level, since that
         // write is the only durable record they would otherwise get.
         log.error("lock lost mid-flight; cancelling the stripe objects we created", {
@@ -1076,7 +1099,26 @@ export const funnelPaymentRoute = new Hono()
           { subscriptionId: stripeSubscriptionId, paymentIntentId: stripePaymentIntentId },
           sid,
         );
-        const current = await drizzle.funnelPurchaseRepo.findBySession(drizzle.db, sid);
+        // This re-read can itself fail, and it must not be allowed to
+        // turn a deterministic 409 into a 500: the buyer standing at this
+        // branch was NOT charged by this request either way. If we can't
+        // tell "already paid" from "fence lost" apart, we fall back to
+        // the fence-lost outcome (LOCK_LOST -> 409 PAYMENT_IN_FLIGHT) —
+        // that is the safe direction because it is retryable, whereas
+        // telling an uncharged buyer their purchase is "already recorded"
+        // would be a lie they cannot recover from by retrying.
+        let current: Awaited<
+          ReturnType<typeof drizzle.funnelPurchaseRepo.findBySession>
+        >;
+        try {
+          current = await drizzle.funnelPurchaseRepo.findBySession(drizzle.db, sid);
+        } catch (err) {
+          log.error("could not re-read the purchase row after a refused write; falling back to fence-lost", {
+            sessionId: sid,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return LOCK_LOST;
+        }
         if (current && current.status !== "pending") {
           return ALREADY_PAID;
         }
@@ -1125,9 +1167,11 @@ export const funnelPaymentRoute = new Hono()
       throw err;
     });
 
-    // `null` = never acquired; LOCK_LOST = acquired, but expired before
-    // the work was safe to commit. Same answer either way: another attempt
-    // for this session is in flight, retry. The body carries a code
+    // `null` = never acquired; LOCK_LOST = acquired, but lost the race to
+    // a newer attempt for this session — either our TTL expired before
+    // the write, or `stillHeld()` said we were fine and the SQL fence
+    // guard refused the write anyway. Same answer either way: another
+    // attempt for this session is in flight, retry. The body carries a code
     // because the neighbouring 409s do, and a browser has no other way to
     // tell "retry in a moment" apart from "this session is done".
     if (result === null || result === LOCK_LOST) {
