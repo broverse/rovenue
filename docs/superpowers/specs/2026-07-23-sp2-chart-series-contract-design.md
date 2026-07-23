@@ -100,8 +100,17 @@ The share of active subscribers who saw a paywall that day.
 
 - Numerator: `uniqMerge(subscribersHll)` per day from
   `rovenue.mv_paywall_daily_target` (`0018_mv_paywall_daily.sql`).
-- Denominator: `uniq(subscriberId)` per day from `rovenue.sdk_sessions_daily_tbl`
-  (`0010_sdk_sessions_daily.sql`).
+- Denominator: `uniq(subscriberId)` per day from `rovenue.v_sdk_sessions_daily`.
+
+  **Corrected during implementation.** This spec originally named
+  `sdk_sessions_daily_tbl` from `0010_sdk_sessions_daily.sql`. That table no
+  longer exists: `0016_sdk_sessions_idempotent.sql` DROPs it and replaces it with
+  the query-time view `v_sdk_sessions_daily`, saying so in its own header
+  ("Callers that read `sdk_sessions_daily_tbl` must switch to
+  `v_sdk_sessions_daily`"). The error came from reading migration 0010 without
+  checking whether a later migration superseded it, and it survived every unit
+  test because the ClickHouse boundary is mocked — it was caught only by the
+  hand-run step, which is the argument for keeping that step.
 
 ### `paywall_purchase` — conversion, `unit: "percent"`
 

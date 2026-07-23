@@ -299,12 +299,17 @@ Two ClickHouse sources back these charts:
 
 - `rovenue.mv_paywall_daily_target` (`packages/db/clickhouse/migrations/0018_mv_paywall_daily.sql`) — columns `projectId`, `placementId`, `paywallId`, `variantId`, `day` (Date), `views` (UInt64), `subscribersHll` (`AggregateFunction(uniq, String)`). Unique viewers come from `uniqMerge(subscribersHll)`; the raw view count from `sum(views)`.
 - `rovenue.raw_revenue_events` — carries `paywallId` since `0019_revenue_presented_context.sql`.
-- `rovenue.sdk_sessions_daily_tbl` (`0010_sdk_sessions_daily.sql`) — `projectId`, `subscriberId`, `day`. Daily active subscribers are `uniq(subscriberId)` grouped by day.
+- `rovenue.v_sdk_sessions_daily` — `projectId`, `subscriberId`, `day`. Daily active subscribers are `uniq(subscriberId)` grouped by day. NOTE: `sdk_sessions_daily_tbl` (migration 0010) was DROPPED by `0016_sdk_sessions_idempotent.sql`, which replaced it with this view. Do not use the old table name.
 
 `paywall_view_rate` = daily unique paywall viewers ÷ daily active subscribers.
 `paywall_purchase` = daily unique paywall-attributed purchasers ÷ daily unique paywall viewers.
 
 Attribution follows the pattern `apps/api/src/services/analytics-router.ts:155-190` already established: the numerator uses the **precise** `paywallId` column, not a viewer-overlap heuristic.
+
+**ClickHouse alias trap.** Do not write `toString(day) AS day` in a query that
+also does `GROUP BY day`: ClickHouse substitutes the alias into the GROUP BY and
+fails with `NO_COMMON_TYPE`. Select the bare `day` column. (Found by hand-running
+the SQL; every mocked test passed with the broken form.)
 
 **Known horizon.** Revenue rows written before migration 0019 carry `paywallId = ''` and cannot match, so `paywall_purchase` under-reports for dates before that migration was deployed. This is a property of the data, not a defect — say so in the reader's comment so nobody reads the early flat region as a product collapse.
 
@@ -361,7 +366,7 @@ describe("readChartSeries", () => {
     ];
     expect(viewersCall[1]).toContain("mv_paywall_daily_target");
     expect(viewersCall[1]).toContain("uniqMerge(subscribersHll)");
-    expect(activesCall[1]).toContain("sdk_sessions_daily_tbl");
+    expect(activesCall[1]).toContain("v_sdk_sessions_daily");
     expect(viewersCall[2]).toMatchObject({ projectId: "proj_1" });
   });
 
@@ -434,7 +439,7 @@ async function readPaywallViewers(
     projectId,
     `
       SELECT
-        toString(day)                          AS day,
+        day,
         toString(uniqMerge(subscribersHll))    AS n
       FROM rovenue.mv_paywall_daily_target
       WHERE projectId = {projectId:String}
@@ -475,9 +480,9 @@ export async function readChartSeries(
       projectId,
       `
         SELECT
-          toString(day)                  AS day,
+          day,
           toString(uniq(subscriberId))   AS n
-        FROM rovenue.sdk_sessions_daily_tbl
+        FROM rovenue.v_sdk_sessions_daily
         WHERE projectId = {projectId:String}
           AND day >= {from:Date}
           AND day <= {to:Date}
