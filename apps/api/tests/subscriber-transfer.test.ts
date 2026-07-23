@@ -111,6 +111,9 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
     async (_tx: unknown, _subscriberId: string) =>
       [] as Array<{ currencyId: string; balance: number }>,
   );
+  const findActiveStripeSubscriptionIds = vi.fn(
+    async (_tx: unknown, _subscriberId: string) => [] as string[],
+  );
   const findLatestBalance = vi.fn(
     async (_tx: unknown, _subscriberId: string, _currencyId: string) =>
       null as null | { balance: number },
@@ -138,6 +141,9 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
         findLatestBalance,
         insertCreditLedger,
       },
+      purchaseRepo: {
+        findActiveStripeSubscriptionIds,
+      },
       lockRepo: {
         advisoryXactLock,
         advisoryXactLock2,
@@ -146,6 +152,11 @@ const { drizzleMock, subscriberStore } = vi.hoisted(() => {
     subscriberStore: subscriberData,
   };
 });
+
+// Connected-account Stripe for the erasure subscription-cancel step.
+const cancelSubscription = vi.hoisted(() => vi.fn(async () => ({ id: "sub" })));
+const getConnectedStripe = vi.hoisted(() => vi.fn());
+vi.mock("../src/lib/stripe-platform", () => ({ getConnectedStripe }));
 
 vi.mock("@rovenue/db", () => ({
   default: {},
@@ -182,6 +193,11 @@ beforeEach(() => {
   drizzleMock.creditLedgerRepo.findAllBalances.mockResolvedValue([]);
   drizzleMock.creditLedgerRepo.findLatestBalance.mockReset();
   drizzleMock.creditLedgerRepo.findLatestBalance.mockResolvedValue(null);
+  // Default: no live Stripe subscriptions, no connection.
+  drizzleMock.purchaseRepo.findActiveStripeSubscriptionIds.mockReset();
+  drizzleMock.purchaseRepo.findActiveStripeSubscriptionIds.mockResolvedValue([]);
+  getConnectedStripe.mockReset().mockResolvedValue(null);
+  cancelSubscription.mockClear();
 });
 
 function setupSubscribers(
@@ -422,6 +438,60 @@ describe("anonymizeSubscriber", () => {
     await expect(
       anonymizeSubscriber("proj_a", "missing@example.com", "user_admin"),
     ).rejects.toThrow(/not found/);
+  });
+
+  test("cancels the forgotten customer's live stripe subscriptions", async () => {
+    subscriberStore["sub_1"] = {
+      id: "sub_1",
+      projectId: "proj_a",
+      appUserId: "alice@example.com",
+      attributes: {},
+      deletedAt: null,
+    };
+    drizzleMock.purchaseRepo.findActiveStripeSubscriptionIds.mockResolvedValue([
+      "sub_stripe_1",
+      "sub_stripe_2",
+    ]);
+    getConnectedStripe.mockResolvedValue({
+      account: { subscriptions: { cancel: cancelSubscription } },
+      accountId: "acct_1",
+      livemode: true,
+    });
+
+    await anonymizeSubscriber("proj_a", "alice@example.com", "user_admin");
+
+    expect(cancelSubscription).toHaveBeenCalledWith("sub_stripe_1");
+    expect(cancelSubscription).toHaveBeenCalledWith("sub_stripe_2");
+  });
+
+  test("erasure still succeeds when a subscription cancel fails", async () => {
+    subscriberStore["sub_1"] = {
+      id: "sub_1",
+      projectId: "proj_a",
+      appUserId: "alice@example.com",
+      attributes: {},
+      deletedAt: null,
+    };
+    drizzleMock.purchaseRepo.findActiveStripeSubscriptionIds.mockResolvedValue([
+      "sub_stripe_1",
+    ]);
+    cancelSubscription.mockRejectedValueOnce(new Error("stripe down"));
+    getConnectedStripe.mockResolvedValue({
+      account: { subscriptions: { cancel: cancelSubscription } },
+      accountId: "acct_1",
+      livemode: true,
+    });
+
+    // The row is already anonymized; a cancel failure must not undo it.
+    const result = await anonymizeSubscriber(
+      "proj_a",
+      "alice@example.com",
+      "user_admin",
+    );
+    expect(result.alreadyAnonymized).toBe(false);
+    expect(
+      drizzleMock.subscriberRepo.anonymizeSubscriberRow,
+    ).toHaveBeenCalled();
   });
 });
 

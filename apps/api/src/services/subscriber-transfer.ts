@@ -3,6 +3,7 @@ import { type Db, CreditLedgerType, drizzle } from "@rovenue/db";
 import { logger } from "../lib/logger";
 import { audit } from "../lib/audit";
 import { syncAccess } from "./access-engine";
+import { getConnectedStripe } from "../lib/stripe-platform";
 
 // =============================================================
 // Subscriber account lifecycle — merge + anonymize
@@ -273,7 +274,13 @@ export async function anonymizeSubscriber(
     );
   }
 
-  return drizzle.db.transaction(async (tx) => {
+  // Filled inside the transaction, cancelled after it commits — Stripe
+  // calls must not run inside a DB transaction. A forgotten customer must
+  // stop being billed, so their live funnel subscriptions are cancelled on
+  // the connected account.
+  let stripeSubscriptionIds: string[] = [];
+
+  const result = await drizzle.db.transaction(async (tx) => {
     // Advisory lock scoped to (project, appUserId) serialises
     // concurrent anonymize calls for the same user so the find →
     // update sequence can't race with a transfer in flight.
@@ -312,6 +319,15 @@ export async function anonymizeSubscriber(
       };
     }
 
+    // Read the live Stripe subscription ids before the row is anonymized,
+    // inside the lock so a concurrent renewal can't slip a new one past us.
+    // Cancelled after commit (see below), not here.
+    stripeSubscriptionIds =
+      await drizzle.purchaseRepo.findActiveStripeSubscriptionIds(
+        tx,
+        subscriber.id,
+      );
+
     await drizzle.subscriberRepo.anonymizeSubscriberRow(
       tx,
       subscriber.id,
@@ -349,4 +365,43 @@ export async function anonymizeSubscriber(
       alreadyAnonymized: false,
     };
   });
+
+  // Post-commit, best-effort: cancel the forgotten customer's live funnel
+  // subscriptions on the connected account so they are not billed again.
+  // A failure here must not undo the erasure (the row is already
+  // anonymized) — log it for follow-up. If the project has no connection
+  // any subscription is already unreachable, so there is nothing to do.
+  if (!result.alreadyAnonymized && stripeSubscriptionIds.length > 0) {
+    const connected = await getConnectedStripe(projectId).catch(() => null);
+    if (connected) {
+      for (const subscriptionId of stripeSubscriptionIds) {
+        try {
+          await connected.account.subscriptions.cancel(subscriptionId);
+          log.info("cancelled a forgotten customer's stripe subscription", {
+            projectId,
+            subscriberId: result.subscriberId,
+            subscriptionId,
+          });
+        } catch (err) {
+          log.error("could not cancel a forgotten customer's subscription", {
+            projectId,
+            subscriberId: result.subscriberId,
+            subscriptionId,
+            err: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    } else {
+      log.warn(
+        "erased subscriber has stripe subscriptions but no live connection to cancel them",
+        {
+          projectId,
+          subscriberId: result.subscriberId,
+          count: stripeSubscriptionIds.length,
+        },
+      );
+    }
+  }
+
+  return result;
 }

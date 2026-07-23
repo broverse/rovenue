@@ -308,3 +308,30 @@ export async function updatePurchaseStatusIf(
     .returning({ id: purchases.id });
   return result.length;
 }
+
+/**
+ * The Stripe subscription ids a subscriber still has live access through.
+ * Used by GDPR erasure to cancel a forgotten customer's funnel
+ * subscriptions so they are not billed further. Only recurring
+ * subscriptions (`sub_…`) are returned — a one-time purchase's
+ * storeTransactionId is a PaymentIntent, already captured and nothing to
+ * cancel. Status is restricted to the access-granting set so an already
+ * -ended subscription is not re-touched.
+ */
+export async function findActiveStripeSubscriptionIds(
+  db: Db,
+  subscriberId: string,
+): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ storeTransactionId: purchases.storeTransactionId })
+    .from(purchases)
+    .where(
+      and(
+        eq(purchases.subscriberId, subscriberId),
+        eq(purchases.store, "STRIPE"),
+        inArray(purchases.status, ["ACTIVE", "TRIAL", "GRACE_PERIOD"]),
+        sql`${purchases.storeTransactionId} LIKE 'sub_%'`,
+      ),
+    );
+  return rows.map((r) => r.storeTransactionId);
+}
