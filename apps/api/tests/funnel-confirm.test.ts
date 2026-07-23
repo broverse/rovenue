@@ -73,9 +73,16 @@ const requireConnectedStripe = vi.hoisted(() =>
     livemode: false,
   })),
 );
+class StripeNotConnectedError extends Error {
+  constructor(projectId: string) {
+    super(`Project ${projectId} has no active Stripe connection`);
+    this.name = "StripeNotConnectedError";
+  }
+}
 vi.mock("../src/lib/stripe-platform", () => ({
   chargesEnabled: vi.fn(async () => true),
   requireConnectedStripe,
+  StripeNotConnectedError,
 }));
 
 // The settlement predicate is wrapped, not stubbed: these tests must
@@ -207,6 +214,21 @@ describe("POST /public/funnel-sessions/:sessionId/confirm", () => {
     expect(insertClaimToken).not.toHaveBeenCalled();
     expect(markPaid).not.toHaveBeenCalled();
     expect(setSessionState).not.toHaveBeenCalled();
+  });
+
+  it("503s (not 500) when the project disconnected Stripe mid-flow", async () => {
+    requireConnectedStripe.mockRejectedValueOnce(
+      new StripeNotConnectedError("proj_1"),
+    );
+
+    const res = await confirm();
+
+    expect(res.status).toBe(503);
+    expect(JSON.stringify(await res.json())).toContain(
+      "PAYMENT_TEMPORARILY_UNAVAILABLE",
+    );
+    expect(insertClaimToken).not.toHaveBeenCalled();
+    expect(markPaid).not.toHaveBeenCalled();
   });
 
   it("mints a token and returns the claim links when the intent succeeded", async () => {

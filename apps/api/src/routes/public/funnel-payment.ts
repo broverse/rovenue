@@ -8,7 +8,11 @@ import { env } from "../../lib/env";
 import { logger } from "../../lib/logger";
 import { ok } from "../../lib/response";
 import { LockUnavailableError, withLock } from "../../lib/redis-lock";
-import { chargesEnabled, requireConnectedStripe } from "../../lib/stripe-platform";
+import {
+  StripeNotConnectedError,
+  chargesEnabled,
+  requireConnectedStripe,
+} from "../../lib/stripe-platform";
 import { resolvePricesForPackages } from "../../services/stripe/price-resolver";
 import { hasPaidOrAttachedACard } from "../../services/stripe/payment-settled";
 import {
@@ -1139,7 +1143,27 @@ export const funnelPaymentRoute = new Hono()
         // settlement is decided on the SetupIntent this session recorded
         // in `rawPayload`, and that id is on the row precisely so the
         // answer does not depend on Stripe still exposing it.
-        const { account } = await requireConnectedStripe(session.projectId);
+        //
+        // If the project disconnected Stripe between paying and
+        // confirming, we can no longer verify settlement — but this buyer
+        // may already have paid, so a 500 ("something broke") is a lie.
+        // A 503 says finalizing-not-broken; the email magic link is their
+        // recovery once the project reconnects.
+        let account: AccountScopedStripe;
+        try {
+          ({ account } = await requireConnectedStripe(session.projectId));
+        } catch (err) {
+          if (err instanceof StripeNotConnectedError) {
+            throw new HTTPException(503, {
+              message: JSON.stringify({
+                code: "PAYMENT_TEMPORARILY_UNAVAILABLE",
+                message:
+                  "We can't finalize this payment right now. If you were charged, restore your purchase from the app using the email you paid with.",
+              }),
+            });
+          }
+          throw err;
+        }
         if (!(await isSettled(account, purchase))) {
           throw new HTTPException(409, { message: "Payment is not complete" });
         }
