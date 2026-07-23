@@ -2,10 +2,9 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { component, useService } from "impair";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { Maximize, Minus, Monitor, Plus, Smartphone, Tablet } from "lucide-react";
+import { Maximize, Minus, Plus } from "lucide-react";
 import { PaywallRenderer } from "@rovenue/paywall-renderer";
 import type { DashboardOfferingRow } from "@rovenue/shared";
-import { cn } from "../../lib/cn";
 import { rpc, unwrap } from "../../lib/api";
 import { useOfferingById } from "../../lib/hooks/useProjectOfferings";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
@@ -16,34 +15,8 @@ import {
   toRendererOffering,
   type Rect,
 } from "./canvas-helpers";
-import type { CanvasDevice } from "./types";
-
-// Device chrome — same frame dimensions/style as funnel-builder's
-// canvas-editor.tsx so the two builders share a visual language.
-const DEVICE_FRAMES: Record<
-  CanvasDevice,
-  { icon: typeof Smartphone; outer: string; screen: string; notch: boolean }
-> = {
-  phone: {
-    icon: Smartphone,
-    outer: "h-[640px] w-[320px] rounded-[44px] border border-white/15 bg-rv-c1 p-2",
-    screen: "rounded-[36px]",
-    notch: true,
-  },
-  tablet: {
-    icon: Tablet,
-    outer: "h-[760px] w-[560px] rounded-[28px] border border-white/15 bg-rv-c1 p-3",
-    screen: "rounded-[18px]",
-    notch: false,
-  },
-  desktop: {
-    icon: Monitor,
-    outer:
-      "h-[600px] w-[900px] rounded-[12px] border border-white/15 bg-rv-c1 p-2 shadow-[0_28px_60px_rgba(0,0,0,0.5)]",
-    screen: "rounded-[6px]",
-    notch: false,
-  },
-};
+import { deviceById } from "./device-catalog";
+import { DeviceFrame } from "./device-frame";
 
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
@@ -177,9 +150,8 @@ export const Canvas = component(() => {
     [vm],
   );
 
-  const device = vm.canvasDevice;
   const zoom = vm.canvasZoom;
-  const frame = DEVICE_FRAMES[device];
+  const spec = deviceById(vm.canvasDevice);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-rv-bg">
@@ -230,34 +202,23 @@ export const Canvas = component(() => {
         ref={setViewportEl}
         className="relative flex flex-1 items-center justify-center overflow-auto bg-gradient-to-b from-rv-c1 to-rv-bg p-8"
       >
-        <div
-          style={{ transform: `scale(${zoom})`, transformOrigin: "center center" }}
-          className="transition-transform duration-150"
-        >
-          <div className={cn("relative", frame.outer)}>
-            <div
-              onClick={handleClick}
-              className={cn("relative h-full w-full cursor-default overflow-auto bg-white", frame.screen)}
-            >
-              {frame.notch && (
-                <div className="absolute left-1/2 top-2 z-10 h-1.5 w-20 -translate-x-1/2 rounded-full bg-black/40" />
-              )}
-              <PaywallRenderer
-                key={rendererKey}
-                config={vm.config}
-                offering={offering}
-                locale={vm.editLocale}
-                colorScheme={vm.colorScheme}
-                priceView={priceView}
-                eligibility={eligibility}
-                onPurchase={noop}
-                onClose={noop}
-                onRestore={noop}
-                onUrl={noop}
-              />
-            </div>
+        <DeviceFrame spec={spec} scale={zoom} scheme={vm.colorScheme} showSafeArea={vm.showSafeArea}>
+          <div onClick={handleClick} className="min-h-full">
+            <PaywallRenderer
+              key={rendererKey}
+              config={vm.config}
+              offering={offering}
+              locale={vm.editLocale}
+              colorScheme={vm.colorScheme}
+              priceView={priceView}
+              eligibility={eligibility}
+              onPurchase={noop}
+              onClose={noop}
+              onRestore={noop}
+              onUrl={noop}
+            />
           </div>
-        </div>
+        </DeviceFrame>
 
         {ring && (
           <div
