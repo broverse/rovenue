@@ -650,21 +650,22 @@ describe("blank localization values count as missing", () => {
     };
   }
 
-  it("a blank default-locale value is a blocking UNKNOWN_LOC_KEY", () => {
+  it("a blank default-locale value is a publish-blocking EMPTY_LOC_VALUE (present, not absent)", () => {
     const issues = validateBuilderConfig(configWith({ en: { title: "" } }), {
       offeringPackageIds: [],
     });
-    const unknown = issues.filter((i) => i.code === "UNKNOWN_LOC_KEY");
-    expect(unknown).toHaveLength(1);
-    expect(unknown[0]).toMatchObject({ nodeId: "t1", key: "title" });
-    expect(isBlockingIssue(unknown[0]!)).toBe(true);
+    const blank = issues.filter((i) => i.code === "EMPTY_LOC_VALUE");
+    expect(blank).toHaveLength(1);
+    expect(blank[0]).toMatchObject({ nodeId: "t1", key: "title" });
+    expect(isBlockingIssue(blank[0]!)).toBe(false);
+    expect(isPublishBlockingIssue(blank[0]!)).toBe(true);
   });
 
-  it("a whitespace-only default-locale value is also blocking", () => {
+  it("a whitespace-only default-locale value is also a publish-blocking EMPTY_LOC_VALUE", () => {
     const issues = validateBuilderConfig(configWith({ en: { title: "   " } }), {
       offeringPackageIds: [],
     });
-    expect(issues.some((i) => i.code === "UNKNOWN_LOC_KEY")).toBe(true);
+    expect(issues.some((i) => i.code === "EMPTY_LOC_VALUE")).toBe(true);
   });
 
   it("a filled default-locale value emits no UNKNOWN_LOC_KEY", () => {
@@ -691,6 +692,75 @@ describe("blank localization values count as missing", () => {
       { offeringPackageIds: [] },
     );
     expect(issues.some((i) => i.code === "LOCALE_KEY_GAP")).toBe(false);
+  });
+});
+
+describe("absent vs blank default-locale values", () => {
+  function configWith(localizations: Record<string, Record<string, string>>) {
+    return {
+      formatVersion: 2 as const,
+      defaultLocale: "en",
+      localizations,
+      root: {
+        type: "stack" as const,
+        id: "root",
+        axis: "v" as const,
+        children: [{ type: "text" as const, id: "t1", key: "title", role: "title" as const }],
+      },
+    };
+  }
+
+  it("reports an ABSENT key as UNKNOWN_LOC_KEY, which blocks the save", () => {
+    const issues = validateBuilderConfig(configWith({ en: {} }), { offeringPackageIds: [] });
+    const issue = issues.find((i) => i.key === "title");
+    expect(issue?.code).toBe("UNKNOWN_LOC_KEY");
+    expect(isBlockingIssue(issue!)).toBe(true);
+  });
+
+  it("reports a BLANK key as EMPTY_LOC_VALUE, which blocks publish but NOT the save", () => {
+    const issues = validateBuilderConfig(configWith({ en: { title: "" } }), {
+      offeringPackageIds: [],
+    });
+    const issue = issues.find((i) => i.key === "title");
+    expect(issue?.code).toBe("EMPTY_LOC_VALUE");
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(true);
+  });
+
+  it("treats a whitespace-only value as blank, not as written copy", () => {
+    const issues = validateBuilderConfig(configWith({ en: { title: "   " } }), {
+      offeringPackageIds: [],
+    });
+    expect(issues.find((i) => i.key === "title")?.code).toBe("EMPTY_LOC_VALUE");
+  });
+
+  it("reports nothing once the default-locale value is written", () => {
+    const issues = validateBuilderConfig(configWith({ en: { title: "Unlock everything" } }), {
+      offeringPackageIds: [],
+    });
+    expect(issues.filter((i) => i.key === "title")).toEqual([]);
+  });
+
+  it("does not mistake a prototype-chain property for a present key", () => {
+    // `"constructor" in {}` is true — a key named after an Object.prototype
+    // member must still be reported as absent, not blank. Built with the key
+    // in place rather than mutated afterwards: `root.children[0]` is typed as
+    // the PaywallNode union, which has no `.key`.
+    const issues = validateBuilderConfig(
+      {
+        formatVersion: 2,
+        defaultLocale: "en",
+        localizations: { en: {} },
+        root: {
+          type: "stack",
+          id: "root",
+          axis: "v",
+          children: [{ type: "text", id: "t1", key: "constructor", role: "title" }],
+        },
+      },
+      { offeringPackageIds: [] },
+    );
+    expect(issues.find((i) => i.key === "constructor")?.code).toBe("UNKNOWN_LOC_KEY");
   });
 });
 

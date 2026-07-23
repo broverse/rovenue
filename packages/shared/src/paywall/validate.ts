@@ -172,7 +172,7 @@ export function collectLocalizationKeys(root: StackNode): string[] {
  * dashboard's localization matrix cannot drift on what "missing" means.
  */
 export function isMissingLocaleValue(value: string | undefined): boolean {
-  return value === undefined || value.trim() === "";
+  return typeof value !== "string" || value.trim() === "";
 }
 
 export function validateBuilderConfig(
@@ -217,12 +217,19 @@ export function validateBuilderConfig(
     for (const key of keysToCheck) {
       if (checked.has(key)) continue;
       checked.add(key);
-      if (isMissingLocaleValue(defaultLocaleTable[key])) {
+      if (!Object.hasOwn(defaultLocaleTable, key)) {
         issues.push({
           code: "UNKNOWN_LOC_KEY",
           nodeId: node.id,
           key,
-          message: `Key "${key}" (node "${node.id}") has no text in the default locale ("${config.defaultLocale}").`,
+          message: `Key "${key}" (node "${node.id}") has no entry in the default locale ("${config.defaultLocale}").`,
+        });
+      } else if (isMissingLocaleValue(defaultLocaleTable[key])) {
+        issues.push({
+          code: "EMPTY_LOC_VALUE",
+          nodeId: node.id,
+          key,
+          message: `Key "${key}" (node "${node.id}") is blank in the default locale ("${config.defaultLocale}") — fill it in before publishing.`,
         });
       }
     }
