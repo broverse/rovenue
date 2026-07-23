@@ -29,7 +29,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
     if (startDecided.current || vm.isLoading || !vm.paywall) return;
     startDecided.current = true;
     if (shouldAutoOpenStart(vm.config)) setShowStart(true);
-  }, [vm.isLoading, vm.paywall, vm.config]);
+  }, [vm.isLoading, vm.paywall]);
 
   if (vm.isLoading) {
     return (

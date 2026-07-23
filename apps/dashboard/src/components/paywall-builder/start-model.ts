@@ -1,4 +1,4 @@
-import type { BuilderConfig, PaywallNode } from "@rovenue/shared/paywall";
+import type { BuilderConfig, PaywallNode, TextNode } from "@rovenue/shared/paywall";
 
 // =============================================================
 // Pure helpers behind the start gallery. The card preview is derived
@@ -18,7 +18,7 @@ export type PreviewBlock =
  * Bar width per text role, as a fraction of the card width — so the
  * silhouette reads like a paywall instead of a stack of identical bars.
  */
-const LINE_WIDTH_BY_ROLE: Record<string, number> = {
+const LINE_WIDTH_BY_ROLE: Record<TextNode["role"], number> = {
   title: 0.8,
   subtitle: 0.65,
   body: 0.7,

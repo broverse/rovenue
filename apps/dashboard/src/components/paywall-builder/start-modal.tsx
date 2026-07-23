@@ -70,6 +70,10 @@ export const StartModal = component(({ onClose }: Props) => {
   const [confirmingId, setConfirmingId] = useState<PresetId | null>(null);
 
   const treeIsEmpty = vm.config.root.children.length === 0;
+  // Applying a preset replaces `config` wholesale, and a preset's
+  // `localizations` only carries its default locale — so every OTHER
+  // locale (and every translated string in it) is silently dropped.
+  const otherLocalesLost = vm.locales.filter((l) => l !== vm.defaultLocale).length;
 
   // Building a preset's config just to draw its silhouette is pure work —
   // do it once per locale rather than on every re-render.
@@ -137,18 +141,29 @@ export const StartModal = component(({ onClose }: Props) => {
                   <Silhouette blocks={silhouettes.get(preset.id) ?? []} />
                   <div className="mt-2.5">
                     <span className="rounded bg-rv-accent-500/15 px-1.5 py-0.5 font-rv-mono text-[9px] uppercase tracking-wider text-rv-accent-500">
-                      {preset.tag}
+                      {t(`paywalls.builder.start.presets.${preset.id}.tag`, preset.tag)}
                     </span>
                     <div className="mt-1.5 text-[13px] font-medium text-foreground">
-                      {preset.name}
+                      {t(`paywalls.builder.start.presets.${preset.id}.name`, preset.name)}
                     </div>
                     <div className="mt-0.5 text-[11px] leading-snug text-rv-mute-500">
                       {confirming
-                        ? t(
-                            "paywalls.builder.start.confirmReplace",
-                            "Click again to replace your current design.",
-                          )
-                        : preset.description}
+                        ? otherLocalesLost > 0
+                          ? t("paywalls.builder.start.confirmReplaceLocalized", {
+                              count: otherLocalesLost,
+                              defaultValue:
+                                "Click again to replace your current design — this also deletes {{count}} other locale and all its translations.",
+                              defaultValue_other:
+                                "Click again to replace your current design — this also deletes {{count}} other locales and all their translations.",
+                            })
+                          : t(
+                              "paywalls.builder.start.confirmReplace",
+                              "Click again to replace your current design.",
+                            )
+                        : t(
+                            `paywalls.builder.start.presets.${preset.id}.description`,
+                            preset.description,
+                          )}
                     </div>
                   </div>
                 </button>
