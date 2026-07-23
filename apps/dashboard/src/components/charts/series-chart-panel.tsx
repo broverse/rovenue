@@ -179,6 +179,13 @@ export function SeriesChartPanel({ projectId, chartId, chartType, range }: Props
   );
 
   const windowTruncated = isRangeWindowTruncated(range);
+  // Read the served span off the RESPONSE, not off `range`. The client's
+  // own cap and the server's `windowQuerySchema.max()` are two constants
+  // either side of a service boundary; recomputing the number here would
+  // state a stale figure the moment they drift — which is the exact
+  // silent mismatch this note exists to remove. `points` is one entry per
+  // day in the window the server actually built.
+  const servedDays = points.length;
 
   if (error) {
     return (
@@ -229,7 +236,7 @@ export function SeriesChartPanel({ projectId, chartId, chartType, range }: Props
           data-testid="series-chart-window-note"
           className="mb-2 text-[11px] text-rv-mute-500"
         >
-          {t("charts.series.windowCapped", { days: windowDays })}
+          {t("charts.series.windowCapped", { days: servedDays })}
         </p>
       )}
       <svg

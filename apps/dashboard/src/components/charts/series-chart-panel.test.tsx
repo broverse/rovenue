@@ -30,6 +30,16 @@ function response(
   };
 }
 
+/** `n` consecutive daily points, so a test can vary the SERVED span. */
+function days(n: number): ChartSeriesPoint[] {
+  return Array.from({ length: n }, (_, i) => ({
+    bucket: new Date(Date.UTC(2026, 0, 1) + i * 86_400_000).toISOString(),
+    value: 40,
+    numerator: 4,
+    denominator: 10,
+  }));
+}
+
 function arrange(
   data: ChartSeriesResponse | undefined,
   extra: Record<string, unknown> = {},
@@ -148,17 +158,24 @@ describe("SeriesChartPanel", () => {
   // Finding 2 — "All" must never silently serve a shorter window
   // ===========================================================
   it("states the actual served window when the selected range exceeds the server's cap", async () => {
-    arrange(
-      response([
-        { bucket: "2026-01-01T00:00:00.000Z", value: 40, numerator: 4, denominator: 10 },
-      ]),
-      {},
-      "All",
-    );
+    arrange(response(days(365)), {}, "All");
     const note = await screen.findByTestId("series-chart-window-note");
     // 24mo (RANGE_MONTHS.All) * 30d would be 720d — the note must
-    // reflect the actual 365d cap, not the nominal "All" span.
+    // reflect the served span, not the nominal "All" span.
     expect(note).toHaveTextContent("365");
+  });
+
+  it("takes the served span from the RESPONSE, not from a client recomputation", async () => {
+    // The client's cap and the server's `windowQuerySchema.max()` are two
+    // constants either side of a service boundary. If the note is derived
+    // from the range instead of the response, it states a stale figure the
+    // moment they drift — the exact silent mismatch the note exists to
+    // remove. Here the server serves 400 days while the client's own cap
+    // would compute 365: the note must say what arrived.
+    arrange(response(days(400)), {}, "All");
+    const note = await screen.findByTestId("series-chart-window-note");
+    expect(note).toHaveTextContent("400");
+    expect(note).not.toHaveTextContent("365");
   });
 
   it("does not show a window-cap note for a range the server serves in full", async () => {
