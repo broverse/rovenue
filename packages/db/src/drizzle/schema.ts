@@ -2446,6 +2446,12 @@ export const funnelPurchases = pgTable(
     amountCents: integer("amount_cents"),
     currency: text("currency"),
     status: funnelPurchaseStatus("status").notNull().default("pending"),
+    // Fencing token for the payment lock. Every writer increments the
+    // value it read under the lock; `upsertPending` refuses a write whose
+    // token is not strictly greater than the stored one, so a holder
+    // whose TTL expired mid-flight cannot clobber the current holder's
+    // row. Defaults to 0 so a brand-new row's first write (token 1) wins.
+    fenceToken: integer("fence_token").notNull().default(0),
     paidAt: timestamp("paid_at", { withTimezone: true }),
     rawPayload: jsonb("raw_payload").notNull().default(sql`'{}'::jsonb`),
   },

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "../client";
 import { funnelPurchases, type FunnelPurchase, type NewFunnelPurchase } from "../schema";
 
@@ -128,10 +128,21 @@ export async function upsertPending(
     .onConflictDoUpdate({
       target: funnelPurchases.sessionId,
       set: { ...row, status: "pending" },
-      // Guards the row that already records a real payment. Unqualified
-      // in Postgres' own terms this reads the EXISTING row (the proposed
-      // one is `excluded.*`), which is exactly what has to be tested.
-      setWhere: eq(funnelPurchases.status, "pending"),
+      // Two guards, both read the EXISTING row (Postgres exposes the
+      // proposed one as `excluded.*`):
+      //
+      // 1. status = 'pending' protects a row that already records a real
+      //    payment.
+      // 2. fence_token < excluded.fence_token rejects a writer whose lock
+      //    was taken over mid-flight. Every writer increments the token it
+      //    read under the lock, so a holder that lost the lock carries a
+      //    token the winner has already used — `n < n` is false and the
+      //    stale write is refused by SQL rather than by a hopeful
+      //    `stillHeld()` check that cannot be atomic with the write.
+      setWhere: and(
+        eq(funnelPurchases.status, "pending"),
+        sql`"funnel_purchases"."fence_token" < excluded."fence_token"`,
+      ),
     })
     .returning();
   return saved ?? null;

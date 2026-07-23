@@ -809,6 +809,14 @@ export const funnelPaymentRoute = new Hono()
         });
       }
 
+      // Fencing token for the write far below. Derived from the row we
+      // just read *under the lock*: if our TTL expires and a newer holder
+      // writes first, it will have consumed this same number, so our write
+      // fails the `fence_token < excluded.fence_token` guard and is
+      // refused by SQL. This is what makes the write safe — not the
+      // `stillHeld()` check further down, which cannot be atomic with it.
+      const fenceToken = (existing?.fenceToken ?? 0) + 1;
+
       const superseded =
         existing &&
         existing.status === "pending" &&
@@ -949,13 +957,16 @@ export const funnelPaymentRoute = new Hono()
       }
 
       // Everything above this line is additive: a Customer, and one
-      // unconfirmed Stripe object nobody else references. Everything below
-      // it destroys state — it cancels another attempt's objects and
-      // overwrites the single row for this session. If our TTL expired
-      // while we were waiting on Stripe, another request now holds the key
-      // and is doing that same work from a *newer* `existing` read, so
-      // continuing would cancel what it just created and overwrite its row
-      // with our stale ids: precisely the race the lock exists to close.
+      // unconfirmed Stripe object nobody else references.
+      //
+      // This check is an OPTIMISATION, not the safety mechanism. If our
+      // TTL expired while we waited on Stripe, another request now holds
+      // the lock and is redoing this work from a newer `existing` read.
+      // Bailing here avoids a pointless `cancelSuperseded` and lets us
+      // clean up the Stripe objects we created while we still know their
+      // ids. What actually prevents us from clobbering the current
+      // holder's row is the fencing token in `upsertPending`'s ON CONFLICT
+      // guard, which is atomic with the write; this check is not.
       if (!(await lock.stillHeld())) {
         // There is nothing we can safely *write*. `upsertPending` is the
         // only write this endpoint has and it would clobber the current
@@ -1013,6 +1024,7 @@ export const funnelPaymentRoute = new Hono()
         stripeCustomerId: customerId,
         stripeSubscriptionId,
         stripePaymentIntentId,
+        fenceToken,
         // This is the only moment the buyer's address is in our hands:
         // `completeFunnelPurchase` is handed a session id and Stripe ids
         // and nothing else, and the row it reads has no email. Parking
