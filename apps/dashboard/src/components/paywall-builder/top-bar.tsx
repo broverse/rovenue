@@ -9,19 +9,15 @@ import {
   CloudUpload,
   GitBranch,
   Languages,
-  Monitor,
   Moon,
   Plus,
-  Smartphone,
   Sun,
-  Tablet,
   Trash2,
   TriangleAlert,
   X,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
-import type { CanvasDevice } from "./types";
 import { VersionMenu } from "./version-menu";
 
 type Props = {
@@ -29,12 +25,6 @@ type Props = {
   onOpenValidation: () => void;
   onOpenDiff: () => void;
 };
-
-const DEVICES: ReadonlyArray<{ value: CanvasDevice; icon: typeof Smartphone; label: string }> = [
-  { value: "phone", icon: Smartphone, label: "Phone" },
-  { value: "tablet", icon: Tablet, label: "Tablet" },
-  { value: "desktop", icon: Monitor, label: "Desktop" },
-];
 
 export const TopBar = component(({ projectId, onOpenValidation, onOpenDiff }: Props) => {
   const vm = useService(PaywallBuilderViewModel);
@@ -74,27 +64,6 @@ export const TopBar = component(({ projectId, onOpenValidation, onOpenDiff }: Pr
           </button>
         )}
         <LocaleSwitcher />
-
-        <div className="mx-0.5 h-5 w-px bg-rv-divider" />
-
-        <div className="inline-flex rounded-md border border-rv-divider bg-rv-c2 p-0.5">
-          {DEVICES.map(({ value, icon: Icon, label }) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => vm.setCanvasDevice(value)}
-              title={t(`paywalls.builder.topbar.device${label}`, label)}
-              className={cn(
-                "flex h-6 w-7 cursor-pointer items-center justify-center rounded transition",
-                vm.canvasDevice === value
-                  ? "bg-rv-c4 text-foreground"
-                  : "text-rv-mute-600 hover:text-foreground",
-              )}
-            >
-              <Icon size={13} />
-            </button>
-          ))}
-        </div>
 
         <button
           type="button"
