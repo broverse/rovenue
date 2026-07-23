@@ -2740,8 +2740,10 @@ describe("publish flow", () => {
   });
 
   it("revertTo() applies the server response and reloads the version list", async () => {
+    const revertedConfig = emptyBuilderConfig("en");
+    revertedConfig.localizations.en.t1_key = "Reverted";
     const listVersions = vi.fn().mockResolvedValue([LIVE_VERSION]);
-    const revert = vi.fn().mockResolvedValue(fakeDetail());
+    const revert = vi.fn().mockResolvedValue(fakeDetail({ builderConfig: revertedConfig }));
     const vm = makeVm({
       get: vi.fn().mockResolvedValue(fakeDetail()),
       patchBuilderConfig: vi.fn(),
@@ -2756,6 +2758,9 @@ describe("publish flow", () => {
 
     expect(revert).toHaveBeenCalledWith("p_1", "pw_1", 2);
     expect(listVersions).toHaveBeenCalled();
+    expect(vm.config.localizations.en?.t1_key).toBe("Reverted");
+    expect(vm.config.root.children).toEqual([]);
+    expect(vm.isDirty).toBe(false);
   });
 });
 ```
@@ -2999,6 +3004,10 @@ Add the action methods at the end of the class:
       await this.api.publish(this.props.projectId, this.props.paywallId);
       this.status = "published";
       await this.refreshPublishState();
+      // publish returns only { versionNo }; the live version's id comes from
+      // the refreshed version list so publishedVersionId can't go stale.
+      this.publishedVersionId =
+        this.versions.find((v) => v.isLive)?.id ?? this.publishedVersionId;
       this.publishState = "idle";
     } catch (err) {
       this.publishState = "error";

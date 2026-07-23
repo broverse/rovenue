@@ -434,17 +434,14 @@ export class PaywallBuilderViewModel {
     );
   }
 
-  /**
-   * True when the draft differs from what devices are currently served.
-   * Unsaved local edits (`isDirty`) always count; once saved, the
-   * server-computed diff's entry count is the sole signal — deliberately
-   * NOT `publishedVersionId === null` or an `updatedAt` comparison, since
-   * publishing bumps `updatedAt` and would always read as "changed".
-   */
+  /** True when the draft differs from what devices are currently served.
+   * A never-published paywall (publishedVersionId === null) always has
+   * unpublished changes — nothing has shipped. Otherwise: dirty local
+   * edits, or a non-empty server diff. NOT an updatedAt comparison —
+   * publishing bumps updatedAt, which would always read as "changed". */
   @derived get hasUnpublishedChanges(): boolean {
     if (this.isDirty) return true;
-    // Unknown until the first diff lands — report "no changes" rather
-    // than flashing a false warning chip on load.
+    if (this.publishedVersionId === null) return true;
     return (this.diffResult?.entries.length ?? 0) > 0;
   }
 
@@ -568,6 +565,10 @@ export class PaywallBuilderViewModel {
       await this.api.publish(this.props.projectId, this.props.paywallId);
       this.status = "published";
       await this.refreshPublishState();
+      // publish returns only { versionNo }; the live version's id comes from
+      // the refreshed version list so publishedVersionId can't go stale.
+      this.publishedVersionId =
+        this.versions.find((v) => v.isLive)?.id ?? this.publishedVersionId;
       this.publishState = "idle";
     } catch (err) {
       this.publishState = "error";

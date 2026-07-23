@@ -542,8 +542,10 @@ describe("PaywallBuilderViewModel", () => {
     });
 
     it("revertTo() applies the server response and reloads the version list", async () => {
+      const revertedConfig = emptyBuilderConfig("en");
+      revertedConfig.localizations.en.t1_key = "Reverted";
       const listVersions = vi.fn().mockResolvedValue([LIVE_VERSION]);
-      const revert = vi.fn().mockResolvedValue(fakeDetail());
+      const revert = vi.fn().mockResolvedValue(fakeDetail({ builderConfig: revertedConfig }));
       const vm = makeVm({
         get: vi.fn().mockResolvedValue(fakeDetail()),
         patchBuilderConfig: vi.fn(),
@@ -558,6 +560,9 @@ describe("PaywallBuilderViewModel", () => {
 
       expect(revert).toHaveBeenCalledWith("p_1", "pw_1", 2);
       expect(listVersions).toHaveBeenCalled();
+      expect(vm.config.localizations.en?.t1_key).toBe("Reverted");
+      expect(vm.config.root.children).toEqual([]);
+      expect(vm.isDirty).toBe(false);
     });
   });
 });
