@@ -100,6 +100,9 @@ Today there is one axis — `WARNING_ISSUE_CODES` and `isBlockingIssue` — and 
 the publish gate read it. That is the whole bug: two gates that need different answers share one
 predicate.
 
+A third tier is needed, and the tiers form a total order: everything that blocks a save also blocks
+a publish.
+
 Three tiers:
 
 | Tier | Blocks save | Blocks publish | Codes |
@@ -109,36 +112,52 @@ Three tiers:
 | Blocking | yes | yes | everything else (`DUPLICATE_NODE_ID`, `UNKNOWN_LOC_KEY`, `FOREIGN_PACKAGE_ID`, `MISSING_PURCHASE_BUTTON`, `SCHEMA_INVALID`, `CELL_TEMPLATE_BAD_NODE`, `OVERRIDE_BAD_PROP`) |
 
 ```ts
+export type IssueSeverity = "save" | "publish" | "warning";
+
 /**
- * Issue codes that must not block a SAVE but must block a PUBLISH: the
- * config is a legitimate work-in-progress that persists fine, but shipping
- * it to devices would be wrong.
+ * The single severity table. A code appears at most once, so the tiers cannot
+ * overlap. Anything NOT listed blocks the save — the strictest tier, and the
+ * right default for a code added later and not yet classified.
  */
-export const PUBLISH_BLOCKING_ISSUE_CODES: ReadonlySet<string> = new Set(["EMPTY_LOC_VALUE"]);
+const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
+  LOCALE_KEY_GAP: "warning",
+  OVERRIDE_SELECTED_OUTSIDE_CELL: "warning",
+  INTRO_VARIABLE_UNGUARDED: "warning",
+  EMPTY_LOC_VALUE: "publish",
+};
+
+export function issueSeverity(issue: { code: string }): IssueSeverity {
+  return ISSUE_SEVERITY[issue.code] ?? "save";
+}
 
 /** True when an issue must block the save. */
 export function isBlockingIssue(issue: { code: string }): boolean {
-  return !WARNING_ISSUE_CODES.has(issue.code) && !PUBLISH_BLOCKING_ISSUE_CODES.has(issue.code);
+  return issueSeverity(issue) === "save";
 }
 
-/** True when an issue must block a publish (every blocking issue, plus the publish-only tier). */
+/** True when an issue must block a publish — every save-blocker, plus the publish-only tier. */
 export function isPublishBlockingIssue(issue: { code: string }): boolean {
-  return !WARNING_ISSUE_CODES.has(issue.code);
+  return issueSeverity(issue) !== "warning";
 }
 ```
 
-`isBlockingIssue` keeps its name and its documented meaning — "blocks the save" — and only loses
-the codes that never should have been in it. `isPublishBlockingIssue` is exactly today's
-`isBlockingIssue` body, so the publish gate's behaviour is unchanged for every pre-existing code.
+**Why one table and not two sets.** The obvious shape — keep `WARNING_ISSUE_CODES`, add a
+`PUBLISH_BLOCKING_ISSUE_CODES`, and define each predicate as a negation over them — has a latent
+footgun: a code accidentally added to *both* sets satisfies neither predicate and silently
+degrades to a warning, i.e. the strictest-looking mistake produces the loosest behaviour. Severity
+is a total function from code to tier, so it should be written as one. The map also makes the
+ordering (`save` ⊃ `publish` ⊃ `warning`) readable in one place instead of inferred from two
+negations.
 
-**This is the dangerous part of the change.** `isBlockingIssue` is called at the publish gate
-today; narrowing it without swapping that call site would silently weaken the publish gate. Both
-call sites — `paywalls.ts:494` and the dashboard's `errorIssues` — must move to
-`isPublishBlockingIssue` in the same change.
+`WARNING_ISSUE_CODES` is **removed**, not kept alongside. A repo-wide grep finds it referenced
+only inside `validate.ts` itself (the one other hit is a stale `dist/` build artifact), so nothing
+external breaks. Leaving both the set and the map would recreate exactly the two-sources-of-truth
+problem this phase exists to fix.
 
-Keeping both sets `ReadonlySet<string>` rather than `ReadonlySet<BuilderIssue["code"]>` follows the
-existing file's deliberate choice, so a code that is spec'd before it is emitted stays forward-
-tolerant.
+The map is keyed `Record<string, IssueSeverity>` rather than
+`Record<BuilderIssue["code"], IssueSeverity>` for the same reason the old set was
+`ReadonlySet<string>`: `INTRO_VARIABLE_UNGUARDED` is spec'd but not yet emitted, so membership
+stays forward-tolerant instead of becoming a type error the day the validator starts emitting it.
 
 ---
 
@@ -147,7 +166,7 @@ tolerant.
 The `UNKNOWN_LOC_KEY` loop splits by whether the key is in the table at all:
 
 ```ts
-if (!(key in defaultLocaleTable)) {
+if (!Object.hasOwn(defaultLocaleTable, key)) {
   issues.push({
     code: "UNKNOWN_LOC_KEY",
     nodeId: node.id,
@@ -164,11 +183,31 @@ if (!(key in defaultLocaleTable)) {
 }
 ```
 
-`in` rather than `!== undefined`: a key explicitly set to `undefined` is not a shape the schema can
-produce, and `in` states the intent — presence, not value.
+**`Object.hasOwn`, not the `in` operator.** Localization keys are author-supplied strings, and `in`
+walks the prototype chain: `"constructor" in {}` and `"toString" in {}` are both `true`. A key
+named `constructor` would be reported as present, and the follow-up
+`isMissingLocaleValue(defaultLocaleTable[key])` would then call `.trim()` on a function and throw —
+a 500 on the save path from a legal key name. `Object.hasOwn` (ES2022; the repo targets ES2022)
+asks the question actually being asked: does the table own this key.
 
-`isMissingLocaleValue` itself is unchanged. It stays the single predicate the matrix modal shares
-with the validator, which is what keeps the matrix and the gates in agreement.
+**`isMissingLocaleValue` gets one defensive line** for the same reason — the type says
+`string | undefined`, but a prototype-chain value is neither:
+
+```ts
+export function isMissingLocaleValue(value: string | undefined): boolean {
+  return typeof value !== "string" || value.trim() === "";
+}
+```
+
+Behaviour for every value the schema can actually produce is identical, so no existing test
+changes. It stays the single predicate the matrix modal shares with the validator, which is what
+keeps the matrix and the gates in agreement.
+
+**Blank is never legitimate today — a deliberate decision.** Making a blank default value block
+publishing assumes no author legitimately wants an empty string. That holds for the current node
+set: a text node with no text is a `spacer`, and a label-less button would be an icon button, which
+the component model does not have until P4b. If P4b introduces a node where blank is meaningful,
+this tier is where that decision gets revisited.
 
 ---
 
@@ -222,6 +261,7 @@ left without a signal.
 | `apps/api/.../paywalls.ts:494` — publish | `isBlockingIssue` | **`isPublishBlockingIssue`** |
 | `vm.errorIssues` → `canPublish`, drawer errors, top-bar red count | `isBlockingIssue` | **`isPublishBlockingIssue`** |
 | `vm.warningIssues` | `!isBlockingIssue` | **`!isPublishBlockingIssue`** |
+| `validation-drawer.tsx` — `issueTitle()` | switch over `issue.code` | **new `EMPTY_LOC_VALUE` case + relabelled `UNKNOWN_LOC_KEY`** |
 
 Routing `errorIssues` onto the publish predicate is what makes the UI honest: a blank default
 string shows as a red error that names the blocking condition and disables Publish, while the work
@@ -233,10 +273,24 @@ precisely because the publish gate still rejects it: `/v1/placements` and the fa
 serve the **published version snapshot**, and a snapshot is only ever written by the publish route
 this change keeps gated. The draft is builder state, not device state.
 
+**The drawer does switch on the code.** `validation-drawer.tsx`'s `issueTitle()` maps each code to
+a translated human label with `default: return issue.code`, so an unhandled `EMPTY_LOC_VALUE` would
+render the raw machine string as its heading. It needs a case. And the existing
+`UNKNOWN_LOC_KEY` label — *"Missing default-locale text"* — now describes `EMPTY_LOC_VALUE` better
+than it describes `UNKNOWN_LOC_KEY`, so both labels move:
+
+| code | label |
+|---|---|
+| `UNKNOWN_LOC_KEY` | "Unknown localization key" |
+| `EMPTY_LOC_VALUE` | "Blank default-locale text" |
+
+Both new `t()` keys must land in `apps/dashboard/src/i18n/locales/en.json` **in the same commit**.
+That file was just backfilled from 52 missing keys to zero for this directory (`a7e64cc3`); adding
+a key without its JSON entry re-opens the drift immediately.
+
 Blast radius outside these: none. A repo-wide grep found `collectLocalizationKeys` referenced only
-by `validate.ts` and its test; the Rust core, the four renderers, `render-fixtures.json` and the
-rest of the API never consume issue codes. `EMPTY_LOC_VALUE` joins the `BuilderIssue["code"]` union
-and the dashboard renders `issue.message` verbatim, so nothing needs a new label.
+by `validate.ts` and its test, and `WARNING_ISSUE_CODES` only inside `validate.ts`; the Rust core,
+the four renderers, `render-fixtures.json` and the rest of the API never consume issue codes.
 
 ---
 
@@ -253,6 +307,11 @@ the gates, not just the validator.
   default-locale value is blank and assert **200**, then assert the publish route rejects the same
   config with `PAYWALL_NOT_PUBLISHABLE`. This must use the real route, not the validator directly —
   validator-level assertions are what missed it the first time.
+- **`apps/api`, the other direction** — narrowing `isBlockingIssue` while it is still called by the
+  publish route is the way this change could silently weaken the publish gate. So: a config
+  carrying a pre-existing save-blocking code (e.g. `DUPLICATE_NODE_ID`) must still be rejected by
+  the **publish** route. Without this test, swapping only one of the two call sites passes
+  everything else.
 - **`apps/dashboard`** — `canPublish` false while a blank default string exists; `errorIssues`
   contains the `EMPTY_LOC_VALUE`; the localization matrix still marks the same cell missing (the
   matrix and the gates agree).
