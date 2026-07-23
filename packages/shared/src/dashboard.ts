@@ -649,6 +649,39 @@ export interface MrrSeriesResponse {
 }
 
 // =============================================================
+// Charts — generic per-chart daily series
+// =============================================================
+//
+// One shape for every catalog chart, so the dashboard can render
+// any id without a per-chart response type. `supported` is false
+// for a catalog id that has no reader yet: the panel then shows an
+// empty state instead of another chart's data.
+
+export interface ChartSeriesPoint {
+  /** ISO timestamp at start-of-day UTC. */
+  bucket: string;
+  /**
+   * null when the metric is undefined for that day — a ratio whose
+   * denominator is zero. Distinct from 0, which means "measured, and
+   * it was zero".
+   */
+  value: number | null;
+  /** Ratio inputs, exposed so a reader can show "3 of 120". */
+  numerator?: number;
+  denominator?: number;
+}
+
+export interface ChartSeriesResponse {
+  chartId: string;
+  unit: "count" | "percent";
+  from: string;
+  to: string;
+  points: ChartSeriesPoint[];
+  /** false when this catalog id has no reader wired yet. */
+  supported: boolean;
+}
+
+// =============================================================
 // Revenue summary — window KPIs (analytics surfacing Phase 1)
 // =============================================================
 //

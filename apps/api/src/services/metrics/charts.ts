@@ -7,6 +7,7 @@ import type {
   ChartFunnelStep,
   ChartHeatmapCell,
   ChartHeatmapResponse,
+  ChartSeriesPoint,
 } from "@rovenue/shared";
 import {
   ClickHouseUnavailableError,
@@ -310,3 +311,63 @@ export const __chartsConstants = {
   WINDOW_DEFAULT_DAYS: 28,
   WINDOW_MAX_DAYS,
 };
+
+// =============================================================
+// Generic chart series — shared rate arithmetic
+// =============================================================
+
+/** One day's count as ClickHouse returns it: counts arrive stringified. */
+export interface DailyCountRow {
+  day: string; // YYYY-MM-DD
+  n: string;
+}
+
+/**
+ * Rounding scale for percentages: multiply, round, divide back.
+ * 10 gives one decimal place.
+ */
+const PCT_ROUNDING_SCALE = 10;
+
+/**
+ * Align two daily aggregates into one point per day across the
+ * window and divide them.
+ *
+ * A zero denominator yields `value: null`, never 0 — a day with no
+ * traffic has an UNDEFINED rate, and drawing it as 0% would read as a
+ * collapse rather than an absence. The inputs are reported either way
+ * so a caller can show "3 of 120".
+ *
+ * Extracted from the readers deliberately: this repo cannot run
+ * ClickHouse in tests, so keeping the arithmetic out of SQL is what
+ * makes it provable.
+ */
+export function buildRatePoints(
+  numerator: DailyCountRow[],
+  denominator: DailyCountRow[],
+  from: Date,
+  to: Date,
+): ChartSeriesPoint[] {
+  const num = new Map(numerator.map((r) => [r.day, Number(r.n)]));
+  const den = new Map(denominator.map((r) => [r.day, Number(r.n)]));
+
+  const points: ChartSeriesPoint[] = [];
+  const cursor = new Date(from);
+  cursor.setUTCHours(0, 0, 0, 0);
+  const end = new Date(to);
+  end.setUTCHours(0, 0, 0, 0);
+
+  while (cursor.getTime() <= end.getTime()) {
+    const key = toDateOnly(cursor);
+    const n = num.get(key) ?? 0;
+    const d = den.get(key) ?? 0;
+    points.push({
+      bucket: new Date(cursor).toISOString(),
+      value: d > 0 ? Math.round((n / d) * 100 * PCT_ROUNDING_SCALE) / PCT_ROUNDING_SCALE : null,
+      numerator: n,
+      denominator: d,
+    });
+    cursor.setTime(cursor.getTime() + DAY_MS);
+  }
+
+  return points;
+}
