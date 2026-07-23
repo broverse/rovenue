@@ -26,7 +26,7 @@ The tasks are ordered so **no intermediate commit weakens the publish gate**:
 
 1. The severity model is refactored with no code classified `publish` yet — a pure refactor, behaviour identical.
 2. The publish consumers are swapped onto `isPublishBlockingIssue` while the two predicates still agree — again behaviour identical, but the call sites are now correct.
-3. The drawer learns a label for a code nothing emits yet — inert.
+3. The new code is declared (union + severity entry) and the drawer learns its label — inert, because nothing emits it. The declaration must live here, not with the emission: a `switch` case for a code outside the union is a TypeScript error.
 4. Only now is `EMPTY_LOC_VALUE` emitted. Every consumer is already in the right place, so the behaviour change lands atomically and correctly.
 5. The dashboard consumer is pinned by tests.
 6. The gap loop is scoped last, independent of the above.
@@ -310,14 +310,34 @@ git commit -m "refactor(paywall): gate publish on publish severity, save on save
 ### Task 3: Drawer labels for the split
 
 **Files:**
+- Modify: `packages/shared/src/paywall/validate.ts`
 - Modify: `apps/dashboard/src/components/paywall-builder/validation-drawer.tsx`
 - Modify: `apps/dashboard/src/i18n/locales/en.json`
 
 **Interfaces:**
-- Consumes: nothing (the code it labels is emitted in Task 4).
-- Produces: `issueTitle()` handles `EMPTY_LOC_VALUE`; `UNKNOWN_LOC_KEY`'s label narrows to match its narrowed meaning.
+- Consumes: `ISSUE_SEVERITY` (Task 1).
+- Produces: `EMPTY_LOC_VALUE` exists in the `BuilderIssue["code"]` union and is classified `"publish"`; `issueTitle()` handles it; `UNKNOWN_LOC_KEY`'s label narrows to match its narrowed meaning.
 
-Inert until Task 4 — a `switch` case for a code nothing emits changes nothing. Done now so the code never renders as a raw machine string in between.
+Inert — nothing emits `EMPTY_LOC_VALUE` until Task 4. Done now so the code never renders as a raw machine string in between.
+
+- [ ] **Step 0: Declare the code**
+
+The drawer's `switch` cannot carry a case for a code that is not in the union — TypeScript rejects it with `TS2678: Type '"EMPTY_LOC_VALUE"' is not comparable to type ...`. So the declaration lands here, with the label, rather than with the emission.
+
+In `packages/shared/src/paywall/validate.ts`, add to the `BuilderIssue["code"]` union directly after `"UNKNOWN_LOC_KEY"`:
+
+```ts
+    // The key exists in the default locale but its value is blank. A normal
+    // in-progress authoring state, so it must NOT block the save — only the
+    // publish. See ISSUE_SEVERITY.
+    | "EMPTY_LOC_VALUE"
+```
+
+and add the entry to `ISSUE_SEVERITY`:
+
+```ts
+  EMPTY_LOC_VALUE: "publish",
+```
 
 - [ ] **Step 1: Retitle `UNKNOWN_LOC_KEY` and add `EMPTY_LOC_VALUE`**
 
@@ -360,9 +380,10 @@ Expected: `valid json`; tsc exits 0; suite green.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add apps/dashboard/src/components/paywall-builder/validation-drawer.tsx \
+git add packages/shared/src/paywall/validate.ts \
+  apps/dashboard/src/components/paywall-builder/validation-drawer.tsx \
   apps/dashboard/src/i18n/locales/en.json
-git commit -m "feat(dashboard): drawer labels for the absent-vs-blank localization split"
+git commit -m "feat(paywall): declare EMPTY_LOC_VALUE and label it in the validation drawer"
 ```
 
 ---
@@ -375,8 +396,8 @@ git commit -m "feat(dashboard): drawer labels for the absent-vs-blank localizati
 - Create: `apps/api/tests/paywall-builder-severity.integration.test.ts`
 
 **Interfaces:**
-- Consumes: `issueSeverity` / `isPublishBlockingIssue` (Task 1); the swapped consumers (Task 2).
-- Produces: `EMPTY_LOC_VALUE` in the `BuilderIssue["code"]` union, classified `publish`; `UNKNOWN_LOC_KEY` narrowed to "absent"; `isMissingLocaleValue` hardened.
+- Consumes: `issueSeverity` / `isPublishBlockingIssue` (Task 1); the swapped consumers (Task 2); the `EMPTY_LOC_VALUE` declaration (Task 3).
+- Produces: `EMPTY_LOC_VALUE` is now actually EMITTED (it was declared and classified in Task 3); `UNKNOWN_LOC_KEY` narrowed to "absent"; `isMissingLocaleValue` hardened.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -460,24 +481,7 @@ Add `isPublishBlockingIssue` to the test file's imports if Task 1 did not alread
 Run: `pnpm --filter @rovenue/shared exec vitest run src/paywall/validate.test.ts`
 Expected: FAIL — the blank cases still report `UNKNOWN_LOC_KEY`, and the `constructor` case reports `EMPTY_LOC_VALUE`-or-throws rather than `UNKNOWN_LOC_KEY`.
 
-- [ ] **Step 3: Add the code to the union and the severity table**
-
-In `packages/shared/src/paywall/validate.ts`, add to the `BuilderIssue["code"]` union, directly after `"UNKNOWN_LOC_KEY"`:
-
-```ts
-    // The key exists in the default locale but its value is blank. A normal
-    // in-progress authoring state, so it must NOT block the save — only the
-    // publish. See ISSUE_SEVERITY.
-    | "EMPTY_LOC_VALUE"
-```
-
-and add the entry to `ISSUE_SEVERITY`:
-
-```ts
-  EMPTY_LOC_VALUE: "publish",
-```
-
-- [ ] **Step 4: Harden `isMissingLocaleValue`**
+- [ ] **Step 3: Harden `isMissingLocaleValue`**
 
 Replace its body:
 
@@ -489,7 +493,7 @@ export function isMissingLocaleValue(value: string | undefined): boolean {
 
 The type says `string | undefined`, but a prototype-chain lookup can hand back a function, and `.trim()` on a function throws — a 500 on the save path from a legal key name. Behaviour for every value the schema can actually produce is identical.
 
-- [ ] **Step 5: Split the loop**
+- [ ] **Step 4: Split the loop**
 
 In `validateBuilderConfig`'s `UNKNOWN_LOC_KEY` loop, replace:
 
@@ -526,12 +530,12 @@ with:
 
 `Object.hasOwn`, not `key in defaultLocaleTable`: localization keys are author-supplied, and `in` walks the prototype chain, so `"constructor"` and `"toString"` would read as present.
 
-- [ ] **Step 6: Run the shared suite**
+- [ ] **Step 5: Run the shared suite**
 
 Run: `pnpm --filter @rovenue/shared exec vitest run src/paywall`
 Expected: PASS. Pre-existing tests that assert `UNKNOWN_LOC_KEY` for a **blank** value will now legitimately fail — that is the behaviour change. For each such failure, update the expectation to `EMPTY_LOC_VALUE` **only if** the fixture's key is present-but-blank; if the fixture's key is genuinely absent it must still be `UNKNOWN_LOC_KEY`, and a failure there is a real regression. Report which tests you changed and why.
 
-- [ ] **Step 7: Write the API gate tests**
+- [ ] **Step 6: Write the API gate tests**
 
 Create `apps/api/tests/paywall-builder-severity.integration.test.ts`. These must drive the **real routes** — asserting against `validateBuilderConfig` directly is exactly what missed this bug the first time.
 
@@ -543,12 +547,12 @@ Three cases:
 2. **Publish is still gated.** POST the publish route for that same paywall. Assert **400** with `code: "PAYWALL_NOT_PUBLISHABLE"` and an `EMPTY_LOC_VALUE` issue in the body.
 3. **The publish gate was not weakened.** A config carrying a pre-existing save-blocking code — two nodes sharing one id, i.e. `DUPLICATE_NODE_ID` — must be rejected by the **publish** route with 400. Without this, swapping only one of the two call sites in Task 2 would pass every other test.
 
-- [ ] **Step 8: Run the API tests**
+- [ ] **Step 7: Run the API tests**
 
 Run: `pnpm --filter @rovenue/api exec vitest run tests/paywall-builder-severity.integration.test.ts`
 Expected: PASS, all three. If the suite needs Postgres via testcontainers, that is expected — do not stub the database to avoid it; a mocked route proves nothing here.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add packages/shared/src/paywall/validate.ts packages/shared/src/paywall/validate.test.ts \
