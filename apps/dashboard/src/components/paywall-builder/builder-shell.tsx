@@ -7,6 +7,7 @@ import { Canvas } from "./canvas";
 import { PropertiesPanel } from "./properties-panel";
 import { ValidationDrawer } from "./validation-drawer";
 import { DiffModal } from "./diff-modal";
+import { LocalizationModal } from "./localization-modal";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 
 type Props = {
@@ -18,6 +19,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
   const { t } = useTranslation();
   const [showValidation, setShowValidation] = useState(false);
   const [showDiff, setShowDiff] = useState(false);
+  const [showLocalization, setShowLocalization] = useState(false);
 
   if (vm.isLoading) {
     return (
@@ -47,6 +49,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
         projectId={projectId}
         onOpenValidation={() => setShowValidation(true)}
         onOpenDiff={() => setShowDiff(true)}
+        onOpenLocalization={() => setShowLocalization(true)}
       />
       <main className="flex flex-1 overflow-hidden">
         <LayerTree />
@@ -55,6 +58,7 @@ export const BuilderShell = component(({ projectId }: Props) => {
       </main>
       {showValidation && <ValidationDrawer onClose={() => setShowValidation(false)} />}
       {showDiff && <DiffModal onClose={() => setShowDiff(false)} />}
+      {showLocalization && <LocalizationModal onClose={() => setShowLocalization(false)} />}
     </div>
   );
 });

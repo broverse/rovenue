@@ -24,12 +24,15 @@ type Props = {
   projectId: string;
   onOpenValidation: () => void;
   onOpenDiff: () => void;
+  onOpenLocalization: () => void;
 };
 
-export const TopBar = component(({ projectId, onOpenValidation, onOpenDiff }: Props) => {
+export const TopBar = component(({ projectId, onOpenValidation, onOpenDiff, onOpenLocalization }: Props) => {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
   const [versionsOpen, setVersionsOpen] = useState(false);
+  // Temporary: Task 5 replaces this with the real localization button.
+  void onOpenLocalization;
 
   return (
     <header className="flex h-14 flex-shrink-0 items-center justify-between border-b border-rv-divider bg-rv-c1 px-4">
