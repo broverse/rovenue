@@ -6,6 +6,8 @@ import {
   BadgeCheck,
   BadgeX,
   ChevronDown,
+  CloudUpload,
+  GitBranch,
   Languages,
   Monitor,
   Moon,
@@ -20,10 +22,12 @@ import {
 import { cn } from "../../lib/cn";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import type { CanvasDevice } from "./types";
+import { VersionMenu } from "./version-menu";
 
 type Props = {
   projectId: string;
   onOpenValidation: () => void;
+  onOpenDiff: () => void;
 };
 
 const DEVICES: ReadonlyArray<{ value: CanvasDevice; icon: typeof Smartphone; label: string }> = [
@@ -32,9 +36,10 @@ const DEVICES: ReadonlyArray<{ value: CanvasDevice; icon: typeof Smartphone; lab
   { value: "desktop", icon: Monitor, label: "Desktop" },
 ];
 
-export const TopBar = component(({ projectId, onOpenValidation }: Props) => {
+export const TopBar = component(({ projectId, onOpenValidation, onOpenDiff }: Props) => {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
+  const [versionsOpen, setVersionsOpen] = useState(false);
 
   return (
     <header className="flex h-14 flex-shrink-0 items-center justify-between border-b border-rv-divider bg-rv-c1 px-4">
@@ -57,6 +62,17 @@ export const TopBar = component(({ projectId, onOpenValidation }: Props) => {
 
       <div className="flex flex-shrink-0 items-center gap-2">
         <AutosaveBadge />
+        {vm.publishState === "error" && (
+          <button
+            type="button"
+            onClick={onOpenValidation}
+            title={vm.publishError ?? ""}
+            className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-rv-danger/40 bg-rv-danger/15 px-2 text-[11px] font-medium text-rv-danger"
+          >
+            <TriangleAlert size={12} />
+            {t("paywalls.builder.topbar.publishFailed", "Publish failed")}
+          </button>
+        )}
         <LocaleSwitcher />
 
         <div className="mx-0.5 h-5 w-px bg-rv-divider" />
@@ -136,6 +152,58 @@ export const TopBar = component(({ projectId, onOpenValidation }: Props) => {
             {t("paywalls.builder.topbar.noIssues", "No issues")}
           </button>
         )}
+
+        <div className="mx-0.5 h-5 w-px bg-rv-divider" />
+
+        {vm.status === "published" && !vm.hasUnpublishedChanges && (
+          <span
+            title={t(
+              "paywalls.builder.topbar.inSyncHint",
+              "The draft matches what devices are being served",
+            )}
+            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-rv-mute-600"
+          >
+            {t("paywalls.builder.topbar.inSync", "in sync")}
+          </span>
+        )}
+
+        <div className="relative flex items-center">
+          <button
+            type="button"
+            disabled={!vm.canPublish}
+            onClick={() => void vm.publish()}
+            title={
+              vm.canPublish
+                ? t("paywalls.builder.topbar.publishHint", "Publish over-the-air")
+                : t(
+                    "paywalls.builder.topbar.publishBlocked",
+                    "Resolve blocking issues before publishing",
+                  )
+            }
+            className={cn(
+              "inline-flex h-7 items-center gap-1.5 rounded-l-md border border-r-0 px-2.5 text-[11px] font-medium transition",
+              vm.canPublish
+                ? "cursor-pointer border-rv-accent-500 bg-rv-accent-500 text-white hover:bg-rv-accent-600"
+                : "cursor-not-allowed border-rv-divider bg-rv-c2 text-rv-mute-600 opacity-60",
+            )}
+          >
+            <CloudUpload size={13} />
+            {vm.publishState === "publishing"
+              ? t("paywalls.builder.topbar.publishing", "Publishing…")
+              : t("paywalls.builder.topbar.publish", "Publish")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setVersionsOpen((o) => !o)}
+            title={t("paywalls.builder.topbar.versions", "Version history")}
+            className="flex h-7 w-6 cursor-pointer items-center justify-center rounded-r-md border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
+          >
+            <GitBranch size={12} />
+          </button>
+          {versionsOpen && (
+            <VersionMenu onClose={() => setVersionsOpen(false)} onOpenDiff={onOpenDiff} />
+          )}
+        </div>
       </div>
     </header>
   );

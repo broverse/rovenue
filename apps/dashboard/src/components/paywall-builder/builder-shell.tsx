@@ -41,7 +41,12 @@ export const BuilderShell = component(({ projectId }: Props) => {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-rv-bg text-foreground">
-      <TopBar projectId={projectId} onOpenValidation={() => setShowValidation(true)} />
+      {/* TODO(task-12): wire the real diff-modal opener; this is a temporary no-op. */}
+      <TopBar
+        projectId={projectId}
+        onOpenValidation={() => setShowValidation(true)}
+        onOpenDiff={() => {}}
+      />
       <main className="flex flex-1 overflow-hidden">
         <LayerTree />
         <Canvas />
