@@ -264,6 +264,19 @@ Adding node types is normally a hard SDK-rollout dependency: an old SDK receivin
 can't be"*). Superwall's "designs are versioned against the SDK so old paywalls render on new SDKs
 and new paywalls render on legacy ones" is the same idea.
 
+**⚠️ UPDATE (2026-07-23, discovered during P1 brainstorming):** rule (1) below — the
+unknown-type lenient-decode + fallback-render branch on all four platforms — **is already
+shipped**, as part of Phase D (2026-07-22). Evidence: `render-fixtures.json` has an
+`acceptLenient` bucket with "unknown node type with valid fallback / without fallback /
+override with unknown when.kind"; the web renderer (`packages/paywall-renderer/src/nodes.tsx`)
+has `renderFallbackOrNull` + a switch `default:`; Swift `PaywallUI/BuilderConfigModel.swift`,
+Kotlin `paywallui/BuilderConfigModel.kt` (explicit "unrecognized node type decodes LENIENTLY
+to UnknownNode retaining id+fallback", with an `UnknownNode` type + `OverrideConditionKind.UNKNOWN`),
+and RN `paywall-ui/model.ts` + `RovenuePaywallView.tsx` (`case "unknown"`) all decode leniently
+and render the fallback. **P4a as a standalone enabling phase is therefore DONE** — the
+additive-node-types strategy's substrate already exists and is contract-pinned. Rules (2)–(4)
+below are inherently part of P4b (they only matter once real new node types are added).
+
 **Recommendation:** additive expansion, `formatVersion` stays 2, with a hard rule:
 
 1. Every renderer gains an **unknown-type branch**: render `node.fallback` if present, else render
@@ -390,7 +403,7 @@ Dependency-ordered. Each phase gets its own design spec → implementation plan.
 | **P1** | **Canvas fidelity.** Real device catalog with safe areas + notches, status bar, All-sizes grid, safe-area overlay, canvas-bar locale + scheme switchers. §6.11 resolved-catalog endpoint so the preview shows real prices | P0 (nice-to-have) | No | Low |
 | **P2** | **Localization matrix.** §6.8–6.10, staleness sidecar (§5.5), `LOCALE_STALE`, matrix modal, jump-to-node, auto-translate via copilot | — | Additive | Low–Med |
 | **P3** | **Start modal + templates.** `paywall_templates` table mirroring `funnel_templates`, §6.12–6.13, gallery UI with blank-last | P0 | No | Low |
-| **P4a** | **Unknown-type fallback branch in all four renderers** (§5.2 rule 1). Small, standalone, unblocks everything after it | — | No | Low |
+| ~~**P4a**~~ | ~~Unknown-type fallback branch in all four renderers~~ — **ALREADY SHIPPED in Phase D (2026-07-22)**; see the §5.2 update. No work remains | — | No | — |
 | **P4b** | **Node types wave 1 (non-commerce):** stickyFooter, divider, icon, socialProof, timeline, countdown, featureList. Auto-fallback authoring, fixtures per type + per fallback | P4a | **Yes, additive** | Med |
 | **P4c** | **Node types wave 2 (media):** carousel, video/lottie | P4b | Yes, additive | Med |
 | **P5** | **Inspector 5 tabs + visibility.** Split the 914-line properties panel into tab modules; `visibility { platform, minAppVersion, maxAppVersion }` on every node + client-side predicate in 4 renderers; per-tab dot indicators | P4a | Yes, additive | Med |
@@ -400,9 +413,14 @@ Dependency-ordered. Each phase gets its own design spec → implementation plan.
 | **P9** | **On-device preview.** §6.16–6.18 + SDK support; descope the standalone preview app (§5.6) | P0 | Yes (SDK) | High |
 | **P10** | **Fonts.** §6.20, per-platform embedding, native font registration, `FONT_NOT_EMBEDDED_FOR_PLATFORM` | P5 | Yes | High |
 
-**Suggested first three:** P0 → P4a → P1. P0 removes the production risk and unlocks every
-publish-gated feature; P4a is a cheap insurance policy that makes all later node work additive
-and independently shippable; P1 delivers the most visible chunk of the design with zero wire risk.
+**Suggested first three:** P0 → ~~P4a~~ → P1. P0 removes the production risk and unlocks every
+publish-gated feature; P4a turned out to be **already shipped in Phase D** (the lenient-decoder +
+fallback substrate exists and is contract-pinned — see §5.2 update), so it is struck; P1 delivers
+the most visible chunk of the design with zero wire risk and is the next actual phase.
+
+**Status (2026-07-23): P0 SHIPPED** (12 tasks + final-review fix + concurrency fix, all reviewed;
+`docs/superpowers/plans/2026-07-23-paywall-draft-publish-split.md`). **P4a: already done (Phase D).**
+Next: **P1**.
 
 ---
 
