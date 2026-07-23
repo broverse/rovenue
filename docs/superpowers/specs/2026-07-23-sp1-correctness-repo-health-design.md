@@ -71,9 +71,31 @@ We fix the repository rather than the ~13 teardowns because a function that
 silently discards its own authorisation is the defect. Patching call sites would
 leave the next caller to rediscover it.
 
-**Verification required during implementation:** confirm `DbOrTx` exposes
-`.transaction`. If it does not, widen the type — do not fall back to
-`set_config(..., false)`, which would leak the flag into a pooled connection.
+`DbOrTx` is `export type DbOrTx = Db` (`projects.ts:15`), i.e. a
+`NodePgDatabase`, so `.transaction` is available. Drizzle's `PgTransaction`
+also exposes `.transaction`, producing the savepoint described above.
+
+**Confirmed against the live database**, not assumed:
+
+```
+$ psql -c "SET LOCAL \"rovenue.allow_ledger_delete\" = 'on';" \
+       -c "SHOW \"rovenue.allow_ledger_delete\";"
+WARNING:  SET LOCAL can only be used in transaction blocks
+SET
+ rovenue.allow_ledger_delete
+-----------------------------
+
+(1 row)
+```
+
+The setting is empty afterwards and the client exit code is 0 — the discard is
+silent.
+
+A regression test for this cascade already exists
+(`packages/db/src/drizzle/repositories/projects.delete.integration.test.ts`) but
+it wraps the call in an explicit transaction, commented "mirror the production
+call site". That aligned the test with the defect instead of exposing it; the new
+pool-called case goes in this same file.
 
 ### Not chosen
 
@@ -190,11 +212,28 @@ write and the audit row are wrapped in one transaction on this branch only. The
 ordinary path (subscriber not erased) keeps its current shape.
 
 **Efficiency.** Detecting a rare condition must not cost a query on every
-`invoice.paid`. `findPurchaseByStoreTransaction`
-(`packages/db/src/drizzle/repositories/purchases-ext.ts:21`) already queries
-`purchases`; extend it with a `LEFT JOIN` on `subscribers` returning
-`subscriberDeletedAt` alongside the purchase. Zero extra round-trips. All callers
-of that function must be checked and updated for the widened return shape.
+`invoice.paid`. The lookup already in place —
+`findPurchaseByStoreTransaction` (`purchases-ext.ts:21`) — has **nine**
+production callers across the Apple, Google, Stripe and receipt-verify paths, so
+widening its return shape would churn all nine for a check only one of them
+needs. Instead add a sibling in the same module:
+
+```ts
+findStripePurchaseWithSubscriberState(db, projectId, subscriptionId):
+  Promise<{ purchase: Purchase; subscriberDeletedAt: Date | null } | null>
+```
+
+A single query with a `LEFT JOIN` on `subscribers`. `applyInvoicePaid` switches
+to it; the other eight callers are untouched. Zero extra round-trips, zero blast
+radius.
+
+**Replay.** `createRevenueEvent` is idempotent on `dedupeKey` and returns the
+pre-existing row on a conflict, so a duplicate cannot be distinguished from a
+fresh insert by return value. No machinery is added for this: the webhook layer
+already dedupes deliveries before dispatch (`webhookReplayGuard` answers a
+repeated delivery with `200 {status:"duplicate"}`), so `applyInvoicePaid` runs
+once per Stripe event, and a genuinely distinct second `invoice.paid` for the
+same erased subscriber deserves its own audit row.
 
 ### Not chosen
 
