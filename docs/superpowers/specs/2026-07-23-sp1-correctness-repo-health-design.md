@@ -168,11 +168,31 @@ newer holder always wins. Two writers can never both succeed with the same token
 the caller's own Stripe objects. The rejected stale writer therefore lands on an
 existing, tested path.
 
-4. **Existing fence.** The `stillHeld()` check at line 959 stays where it is. It
-   is now an optimisation — it avoids a pointless `cancelSuperseded` and cancels
-   the caller's own Stripe objects early — not the safety mechanism. Its comment
-   block must be rewritten to say so, because it currently claims to be the thing
-   that prevents the clobber.
+4. **Existing fence.** The `stillHeld()` check at line 959 stays where it is.
+
+   **Correction (found in review, 2026-07-23).** An earlier draft of this spec
+   called the check "now an optimisation, not the safety mechanism". That is
+   wrong, and it caused two successive comment rewrites to ship overstatements.
+   The two mechanisms compose; neither alone is sufficient:
+
+   - The fence guarantees two writers can never both succeed with the same
+     derived token. Once a winner has written and advanced the stored token, any
+     other writer still holding that token is refused by SQL. That is what
+     prevents a clobber *after* the winner wrote.
+   - The fence does **not** guarantee the newest holder wins. If holder A's TTL
+     expires and holder B then acquires the lock, both read `n` and derive
+     `n+1`. Should A write **first**, the row still reads `n`, so A's stale write
+     succeeds — and B, the legitimate holder with a live buyer, is the one
+     refused.
+   - `stillHeld()` is therefore the tie-breaker biasing the race toward the
+     fresher writer: a holder that has lost the lock bails before writing, making
+     the stale-writes-first ordering unreachable. Deleting the check would make
+     it reachable again.
+
+   A fenced-out writer answers `409 PAYMENT_IN_FLIGHT`, and its buyer's retry
+   reads the advanced token and wins — self-healing, no double charge, but a
+   wasted Stripe object, which is why biasing toward the fresher writer earns its
+   keep. Every comment in this region must agree with this model.
 
 5. **Other writers.** `completeFunnelPurchase` transitions `pending → paid` and
    does not write `fence_token`; the `status = 'pending'` half of the guard
