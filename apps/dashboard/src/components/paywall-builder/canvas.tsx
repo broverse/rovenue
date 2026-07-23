@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Maximize, Minus, Plus } from "lucide-react";
 import { PaywallRenderer } from "@rovenue/paywall-renderer";
 import type { DashboardOfferingRow } from "@rovenue/shared";
+import { cn } from "../../lib/cn";
 import { rpc, unwrap } from "../../lib/api";
 import { useOfferingById } from "../../lib/hooks/useProjectOfferings";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
@@ -15,10 +16,13 @@ import {
   toRendererOffering,
   type Rect,
 } from "./canvas-helpers";
-import { deviceById } from "./device-catalog";
+import { deviceById, devicesForPlatform } from "./device-catalog";
 import { DeviceFrame } from "./device-frame";
 
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+// All-sizes mode ignores the live zoom and renders every device at a fixed
+// scale so the whole platform fits in a scrolling row.
+const ALL_SIZES_SCALE = 0.64;
 
 interface ProductNameDto {
   id: string;
@@ -48,6 +52,7 @@ function noop() {
 export const Canvas = component(() => {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
+  const [deviceMenuOpen, setDeviceMenuOpen] = useState(false);
 
   const offeringQuery = useOfferingById(vm.projectId, vm.paywall?.offeringId ?? null);
   const { data: displayNameById = new Map<string, string>() } = useProductDisplayNames(vm.projectId);
@@ -153,6 +158,27 @@ export const Canvas = component(() => {
   const zoom = vm.canvasZoom;
   const spec = deviceById(vm.canvasDevice);
 
+  // Factored so the single-device and all-sizes branches share one renderer
+  // element; each DeviceFrame is a distinct parent, so React mounts an
+  // independent renderer instance per frame.
+  const renderPaywall = (
+    <div onClick={handleClick} className="min-h-full">
+      <PaywallRenderer
+        key={rendererKey}
+        config={vm.config}
+        offering={offering}
+        locale={vm.editLocale}
+        colorScheme={vm.colorScheme}
+        priceView={priceView}
+        eligibility={eligibility}
+        onPurchase={noop}
+        onClose={noop}
+        onRestore={noop}
+        onUrl={noop}
+      />
+    </div>
+  );
+
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-rv-bg">
       <div className="flex items-center gap-2 border-b border-rv-divider bg-rv-c1 px-4 py-2">
@@ -161,7 +187,7 @@ export const Canvas = component(() => {
             type="button"
             onClick={() => vm.zoomStep(-1)}
             title={t("paywalls.builder.canvas.zoomOut", "Zoom out")}
-            disabled={zoom === ZOOM_STEPS[0]}
+            disabled={vm.showAllSizes || zoom === ZOOM_STEPS[0]}
             className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Minus size={12} />
@@ -178,7 +204,7 @@ export const Canvas = component(() => {
             type="button"
             onClick={() => vm.zoomStep(1)}
             title={t("paywalls.builder.canvas.zoomIn", "Zoom in")}
-            disabled={zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1]}
+            disabled={vm.showAllSizes || zoom === ZOOM_STEPS[ZOOM_STEPS.length - 1]}
             className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Plus size={12} />
@@ -193,6 +219,93 @@ export const Canvas = component(() => {
           <Maximize size={13} />
         </button>
 
+        <div className="mx-1 h-5 w-px bg-rv-divider" />
+
+        {/* platform segment */}
+        <div className="inline-flex rounded-md border border-rv-divider bg-rv-c2 p-0.5">
+          {(["ios", "android"] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => vm.setCanvasPlatform(p)}
+              className={cn(
+                "cursor-pointer rounded px-2 py-1 text-[11px] font-medium capitalize transition",
+                vm.canvasPlatform === p ? "bg-rv-c4 text-foreground" : "text-rv-mute-600 hover:text-foreground",
+              )}
+            >
+              {p === "ios" ? "iOS" : "Android"}
+            </button>
+          ))}
+        </div>
+
+        {/* device dropdown */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setDeviceMenuOpen((o) => !o)}
+            className="inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-rv-divider bg-rv-c2 px-2 text-[11px] text-foreground transition hover:bg-rv-c3"
+          >
+            {deviceById(vm.canvasDevice).label}
+            <span className="font-rv-mono text-[10px] text-rv-mute-500">
+              {deviceById(vm.canvasDevice).w}×{deviceById(vm.canvasDevice).h}
+            </span>
+          </button>
+          {deviceMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-[49]" onClick={() => setDeviceMenuOpen(false)} />
+              <div className="absolute left-0 top-full z-50 mt-1 w-[220px] rounded-lg border border-rv-divider-strong bg-rv-c1 p-1.5 shadow-[0_18px_44px_rgba(0,0,0,0.5)]">
+                <div className="mb-1 px-1.5 py-1 font-rv-mono text-[9px] uppercase tracking-wider text-rv-mute-500">
+                  {t("paywalls.builder.canvas.devices", "{{platform}} devices", { platform: vm.canvasPlatform })}
+                </div>
+                {devicesForPlatform(vm.canvasPlatform).map((d) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => {
+                      vm.setCanvasDevice(d.id);
+                      vm.setAllSizes(false);
+                      setDeviceMenuOpen(false);
+                    }}
+                    className={cn(
+                      "flex w-full cursor-pointer items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[12px]",
+                      d.id === vm.canvasDevice ? "bg-rv-c2 text-foreground" : "text-foreground hover:bg-rv-c2",
+                    )}
+                  >
+                    <span>{d.label}</span>
+                    <span className="font-rv-mono text-[10px] text-rv-mute-500">{d.w}×{d.h}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* all-sizes + safe-area chips */}
+        <button
+          type="button"
+          onClick={() => vm.toggleAllSizes()}
+          className={cn(
+            "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition",
+            vm.showAllSizes
+              ? "border-rv-accent-500/40 bg-rv-accent-500/10 text-rv-accent-500"
+              : "border-rv-divider bg-rv-c2 text-rv-mute-600 hover:bg-rv-c3 hover:text-foreground",
+          )}
+        >
+          {t("paywalls.builder.canvas.allSizes", "All sizes")}
+        </button>
+        <button
+          type="button"
+          onClick={() => vm.toggleSafeArea()}
+          className={cn(
+            "inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-[11px] font-medium transition",
+            vm.showSafeArea
+              ? "border-rv-accent-500/40 bg-rv-accent-500/10 text-rv-accent-500"
+              : "border-rv-divider bg-rv-c2 text-rv-mute-600 hover:bg-rv-c3 hover:text-foreground",
+          )}
+        >
+          {t("paywalls.builder.canvas.safeArea", "Safe area")}
+        </button>
+
         <div className="ml-auto font-rv-mono text-[10px] uppercase tracking-wider text-rv-mute-500">
           {t("paywalls.builder.canvas.previewBadge", "Preview — placeholder prices")}
         </div>
@@ -202,23 +315,28 @@ export const Canvas = component(() => {
         ref={setViewportEl}
         className="relative flex flex-1 items-center justify-center overflow-auto bg-gradient-to-b from-rv-c1 to-rv-bg p-8"
       >
-        <DeviceFrame spec={spec} scale={zoom} scheme={vm.colorScheme} showSafeArea={vm.showSafeArea}>
-          <div onClick={handleClick} className="min-h-full">
-            <PaywallRenderer
-              key={rendererKey}
-              config={vm.config}
-              offering={offering}
-              locale={vm.editLocale}
-              colorScheme={vm.colorScheme}
-              priceView={priceView}
-              eligibility={eligibility}
-              onPurchase={noop}
-              onClose={noop}
-              onRestore={noop}
-              onUrl={noop}
-            />
+        {!vm.showAllSizes && (
+          <DeviceFrame spec={spec} scale={zoom} scheme={vm.colorScheme} showSafeArea={vm.showSafeArea}>
+            {renderPaywall}
+          </DeviceFrame>
+        )}
+
+        {vm.showAllSizes && (
+          <div className="flex items-start gap-6">
+            {devicesForPlatform(vm.canvasPlatform).map((d) => (
+              <DeviceFrame
+                key={d.id}
+                spec={d}
+                scale={ALL_SIZES_SCALE}
+                scheme={vm.colorScheme}
+                showSafeArea={vm.showSafeArea}
+                label
+              >
+                {renderPaywall}
+              </DeviceFrame>
+            ))}
           </div>
-        </DeviceFrame>
+        )}
 
         {ring && (
           <div
