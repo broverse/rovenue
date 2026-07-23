@@ -458,6 +458,11 @@ describe("PaywallBuilderViewModel", () => {
       const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
       await vm.load(() => {});
 
+      // Pin the precondition here rather than leaning on the test above:
+      // without it this passes vacuously the day the blank value stops
+      // producing an issue at all.
+      expect(vm.errorIssues.map((i) => i.code)).toContain("EMPTY_LOC_VALUE");
+
       vm.setLocaleText("t1_key", "en", "Unlock everything");
 
       expect(vm.errorIssues).toEqual([]);
