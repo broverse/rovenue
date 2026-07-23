@@ -9,6 +9,7 @@ import {
   CloudUpload,
   GitBranch,
   Languages,
+  LayoutTemplate,
   Moon,
   Plus,
   Sun,
@@ -40,8 +41,6 @@ export const TopBar = component(({
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
   const [versionsOpen, setVersionsOpen] = useState(false);
-  // Temporary: Task 4 replaces this with the real start button.
-  void onOpenStart;
 
   const locRows = buildMatrixRows(vm.config);
   const baseGapCount = localeCompletion(vm.config, locRows, vm.defaultLocale).missingKeys.length;
@@ -97,6 +96,15 @@ export const TopBar = component(({
               )}
             />
           )}
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenStart}
+          title={t("paywalls.builder.topbar.start", "Start from a layout")}
+          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-rv-divider bg-rv-c2 text-rv-mute-600 transition hover:bg-rv-c3 hover:text-foreground"
+        >
+          <LayoutTemplate size={13} />
         </button>
 
         <button
