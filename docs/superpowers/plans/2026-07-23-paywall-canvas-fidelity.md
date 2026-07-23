@@ -16,6 +16,7 @@
 - Commerce preview (`packageList`/`purchaseButton`/CTA) is **unchanged** — it keeps the current placeholder/`{{variable}}` rendering (prices are store-side, not server-knowable). The existing "Preview — placeholder prices" badge stays; no new banner (YAGNI).
 - Do NOT touch funnel-builder. Its generic frames stay; P1's catalog is paywall-builder-local.
 - Ephemeral canvas UI state is never persisted server-side — no migration.
+- **No magic values.** Hoist meaningful literals (style dimensions, scales, z-index layers, thresholds) into named constants near the top of the module. Structured data tables (e.g. the device catalog's `w`/`h`/`safeTop` fields) are NOT magic values.
 - **Stay on the current branch (`main`).** No branches, no worktrees.
 - Tests run with `pnpm --filter @rovenue/dashboard exec vitest run <path>` (no bare `vitest` script). Typecheck: `pnpm --filter @rovenue/dashboard exec tsc --noEmit`. Build: `pnpm --filter @rovenue/dashboard build`.
 - Conventional commits; commit per task.
