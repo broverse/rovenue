@@ -94,21 +94,58 @@ function overrideLocKeys(node: PaywallNode): string[] {
   return keys;
 }
 
+/** One (localization key → owning node) pair discovered in the tree. */
+export interface LocalizationUsage {
+  key: string;
+  nodeId: string;
+  nodeType: PaywallNode["type"];
+  /** True when the key came from `overrides[].props`, not the node's own field. */
+  viaOverride: boolean;
+}
+
+/**
+ * Every (key, owning node) pair in the tree, in document order — including
+ * `fallback` and `packageList.cellTemplate` subtrees, and keys introduced by
+ * `overrides`. This is the single traversal; `collectLocalizationKeys` is a
+ * projection of it, so the two can never disagree about what the tree uses.
+ */
+export function collectLocalizationUsages(root: StackNode): LocalizationUsage[] {
+  const usages: LocalizationUsage[] = [];
+  walkNodes(root, (node) => {
+    if (node.type === "text") {
+      usages.push({ key: node.key, nodeId: node.id, nodeType: node.type, viaOverride: false });
+    }
+    if (node.type === "button" || node.type === "purchaseButton") {
+      usages.push({ key: node.labelKey, nodeId: node.id, nodeType: node.type, viaOverride: false });
+    }
+    for (const key of overrideLocKeys(node)) {
+      usages.push({ key, nodeId: node.id, nodeType: node.type, viaOverride: true });
+    }
+  });
+  return usages;
+}
+
 /**
  * Every localization key referenced by a text/button/purchaseButton node
  * anywhere in the tree (including inside `fallback` and `cellTemplate`
- * subtrees), PLUS any `key`/`labelKey` introduced by an override, deduped.
+ * subtrees), PLUS any `key`/`labelKey` introduced by an override, deduped
+ * in first-seen order.
  */
 export function collectLocalizationKeys(root: StackNode): string[] {
   const seen = new Set<string>();
-  walkNodes(root, (node) => {
-    if (node.type === "text") seen.add(node.key);
-    if (node.type === "button" || node.type === "purchaseButton") {
-      seen.add(node.labelKey);
-    }
-    for (const key of overrideLocKeys(node)) seen.add(key);
-  });
+  for (const usage of collectLocalizationUsages(root)) seen.add(usage.key);
   return [...seen];
+}
+
+/**
+ * A localization value is missing when the key is absent OR the value is
+ * blank. Presence alone says nothing: the builder stubs every newly-added
+ * key as `""` in every locale, so a blank-but-present value is the normal
+ * "nobody has written this yet" state. Shared so the validator and the
+ * dashboard's localization matrix cannot drift on what "missing" means.
+ */
+export function isMissingLocaleValue(value: string | undefined): boolean {
+  return value === undefined || value.trim() === "";
 }
 
 export function validateBuilderConfig(

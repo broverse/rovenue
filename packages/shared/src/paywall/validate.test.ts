@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyOverrides,
   collectLocalizationKeys,
+  collectLocalizationUsages,
+  isMissingLocaleValue,
   resolveText,
   validateBuilderConfig,
   type BuilderIssue,
@@ -555,5 +557,77 @@ describe("applyOverrides", () => {
     };
     const result = applyOverrides(node, { introEligible: false, selected: false });
     expect(result).toBe(node);
+  });
+});
+
+describe("collectLocalizationUsages", () => {
+  function tree(): StackNode {
+    return {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: [
+        { type: "text", id: "t1", key: "title", role: "title" },
+        {
+          type: "text",
+          id: "t2",
+          key: "sub",
+          role: "body",
+          overrides: [{ when: { kind: "introEligible" }, props: { key: "sub_intro" } }],
+        },
+        {
+          type: "packageList",
+          id: "pl",
+          packageIds: ["monthly"],
+          cellLayout: "row",
+          cellTemplate: { type: "text", id: "cell", key: "cell_name", role: "caption" },
+        },
+        {
+          type: "purchaseButton",
+          id: "pb",
+          labelKey: "cta",
+          fallback: { type: "button", id: "fb", labelKey: "cta_fallback", style: "plain", action: { kind: "close" } },
+        },
+      ],
+    };
+  }
+
+  it("reports every key with its owning node, in document order", () => {
+    expect(collectLocalizationUsages(tree())).toEqual([
+      { key: "title", nodeId: "t1", nodeType: "text", viaOverride: false },
+      { key: "sub", nodeId: "t2", nodeType: "text", viaOverride: false },
+      { key: "sub_intro", nodeId: "t2", nodeType: "text", viaOverride: true },
+      { key: "cell_name", nodeId: "cell", nodeType: "text", viaOverride: false },
+      { key: "cta", nodeId: "pb", nodeType: "purchaseButton", viaOverride: false },
+      { key: "cta_fallback", nodeId: "fb", nodeType: "button", viaOverride: false },
+    ]);
+  });
+
+  it("collectLocalizationKeys stays a deduped projection in first-seen order", () => {
+    const shared: StackNode = {
+      type: "stack",
+      id: "root",
+      axis: "v",
+      children: [
+        { type: "text", id: "a", key: "same", role: "title" },
+        { type: "text", id: "b", key: "same", role: "body" },
+        { type: "text", id: "c", key: "other", role: "body" },
+      ],
+    };
+    expect(collectLocalizationUsages(shared).map((u) => u.nodeId)).toEqual(["a", "b", "c"]);
+    expect(collectLocalizationKeys(shared)).toEqual(["same", "other"]);
+  });
+});
+
+describe("isMissingLocaleValue", () => {
+  it("treats absent, empty and whitespace-only as missing", () => {
+    expect(isMissingLocaleValue(undefined)).toBe(true);
+    expect(isMissingLocaleValue("")).toBe(true);
+    expect(isMissingLocaleValue("   ")).toBe(true);
+  });
+
+  it("treats any real text as present", () => {
+    expect(isMissingLocaleValue("x")).toBe(false);
+    expect(isMissingLocaleValue(" x ")).toBe(false);
   });
 });
