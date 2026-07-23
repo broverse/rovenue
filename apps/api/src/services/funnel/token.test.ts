@@ -74,22 +74,24 @@ describe("email hash", () => {
     expect(hashEmail("buyer@example.com")).not.toBe(hashEmail("buyer2@example.com"));
   });
 
-  // The exact bytes, pinned. Any change to the algorithm, the encoding
-  // or the normalisation — including adding a salt — orphans every
-  // email_hash already stored, and the only symptom would be magic links
-  // quietly no longer finding anything.
-  it("is an unsalted sha256 hex digest of the normalised address", () => {
-    expect(hashEmail("  Buyer@Example.COM ")).toBe(
-      "6a6c26195c3682faa816966af789717c3bfa834eee6c599d667d2b3429c27cfd",
-    );
-    expect(hashEmail("buyer@example.com")).toBe(
-      createHash("sha256").update("buyer@example.com").digest("hex"),
-    );
+  // Deterministic and 64 hex chars, so it is a stable searchable key. The
+  // exact bytes are NOT pinned: they depend on ENCRYPTION_KEY, and pinning
+  // them would either leak the dev key or break when it is set. Changing
+  // the algorithm, encoding, normalisation or key orphans every stored
+  // hash silently (the magic link stops finding anything), which is why
+  // both sides go through this one function and the scheme is versioned.
+  it("is deterministic and 64 hex chars", () => {
+    const h = hashEmail("buyer@example.com");
+    expect(h).toBe(hashEmail("buyer@example.com"));
+    expect(h).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it("is exactly hashToken over the normalised address", () => {
-    // Same primitive as the claim token's own hash — one function, so
-    // the write side and the read side cannot drift apart.
-    expect(hashEmail(" BUYER@example.com ")).toBe(hashToken("buyer@example.com"));
+  // A KEYED hash, not a bare digest: a leak of the column must not let an
+  // attacker confirm "did address X buy?" by hashing a guess. So the value
+  // is NOT the plain SHA-256 of the address.
+  it("is not an unkeyed sha256 of the address (defeats offline guessing)", () => {
+    expect(hashEmail("buyer@example.com")).not.toBe(
+      createHash("sha256").update("buyer@example.com").digest("hex"),
+    );
   });
 });

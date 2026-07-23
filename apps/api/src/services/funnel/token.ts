@@ -1,4 +1,10 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
+import { env } from "../../lib/env";
 
 const TOKEN_BYTES = 32;
 
@@ -25,15 +31,40 @@ export function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+// Domain-separated sub-key for the email hash, derived from the same
+// ENCRYPTION_KEY that protects stored credentials. Deriving (rather than
+// keying on ENCRYPTION_KEY directly) keeps this independent of any other
+// use of that secret, and the version label lets the scheme be rotated.
+// In dev/test with no key set, a fixed label keeps the hash deterministic
+// and self-consistent — the write side and the read side both call this,
+// so they agree within a deployment regardless.
+const EMAIL_HASH_LABEL = "funnel-email-hash-v1";
+function emailHashKey(): Buffer {
+  const keyHex = env.ENCRYPTION_KEY;
+  const root = keyHex
+    ? Buffer.from(keyHex, "hex")
+    : Buffer.from("rovenue-dev-funnel-email-hash");
+  return createHmac("sha256", root).update(EMAIL_HASH_LABEL).digest();
+}
+
 /**
  * The hash stored in `funnel_purchases.email_hash` and
  * `funnel_claim_tokens.email_hash`, and the one
- * `POST /v1/sdk/claim-via-email` looks up by. Unsalted on purpose: a
- * salt no writer could reproduce from the address alone would make the
- * column unsearchable, and searching it is its only job.
+ * `POST /v1/sdk/claim-via-email` looks up by.
+ *
+ * A KEYED hash (HMAC), not a bare digest: the column has to stay
+ * searchable, so a per-row salt is impossible — but an unkeyed SHA-256 of
+ * an email is dictionary-attackable, so a leak of this column would let
+ * anyone confirm "did address X buy?". Keying on a server-side secret
+ * defeats the offline attack while keeping the value deterministic and
+ * searchable. Changing the key or the normalisation orphans every stored
+ * hash silently (the magic link just stops finding anything), so both are
+ * versioned and both sides go through this one function.
  */
 export function hashEmail(email: string): string {
-  return hashToken(normalizeEmail(email));
+  return createHmac("sha256", emailHashKey())
+    .update(normalizeEmail(email))
+    .digest("hex");
 }
 
 export function safeEqualHash(a: string, b: string): boolean {
