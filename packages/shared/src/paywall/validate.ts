@@ -66,11 +66,14 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
   INTRO_VARIABLE_UNGUARDED: "warning",
 
   // Publish-only — a draft in this state is ordinary work in progress and
-  // MUST still persist. Each of these is reachable from the builder UI in
+  // MUST still persist. Four of these are reachable from the builder UI in
   // one or two clicks (add a package list before its purchase button;
   // switch the offering; switch the default locale to a new empty one; add
   // a node inside a cellTemplate), and blocking the save on them meant the
-  // author kept working while nothing was written.
+  // author kept working while nothing was written. OVERRIDE_BAD_PROP is
+  // listed for consistency only: the strict authoring schema rejects a
+  // non-allow-listed override prop at parse time, so such a config answers
+  // SCHEMA_INVALID before this table is ever consulted.
   UNKNOWN_LOC_KEY: "publish",
   EMPTY_LOC_VALUE: "publish",
   FOREIGN_PACKAGE_ID: "publish",

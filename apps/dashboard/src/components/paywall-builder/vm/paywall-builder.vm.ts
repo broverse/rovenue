@@ -496,11 +496,17 @@ export class PaywallBuilderViewModel {
 
   // ----- Autosave + manual save -----
   /**
-   * A 4xx from the write path cannot be fixed by trying again — the payload
-   * is what the server rejected. Anything else (network, 5xx, abort) can.
-   * After the save-gate retier the only 4xx the builder can provoke are
-   * SCHEMA_INVALID and DUPLICATE_NODE_ID, both of which mean the builder
-   * itself produced something invalid, so surfacing them loudly is right.
+   * A 4xx cannot be fixed by retrying the SAME request — the server has
+   * already judged this payload, or this session. Anything else (network,
+   * 5xx, abort) can.
+   *
+   * The save-gate retier removed the common cause (ordinary incomplete
+   * drafts), but a 4xx is still not always the config's fault: 401 on an
+   * expired session, 403 on a role change, 404 if the paywall was deleted
+   * in another tab, and SCHEMA_INVALID if the tree crosses
+   * MAX_BUILDER_NODES/MAX_BUILDER_DEPTH. All share the same remedy —
+   * reload — which is what the badge says. Do not narrow this to "the
+   * builder produced something invalid"; that was true of only some of them.
    */
   private autosaveFailureStatus(err: unknown): "error" | "permanentError" {
     return err instanceof ApiError && err.status >= 400 && err.status < 500
@@ -509,9 +515,8 @@ export class PaywallBuilderViewModel {
   }
 
   // Reset a sticky "error" status the moment the user edits anything
-  // again — FunnelDraftViewModel.clearAutosaveError has the same rationale,
-  // but do NOT copy its body: it still reads `autosaveStatus` tracked and
-  // therefore carries the self-erasing bug described below.
+  // again. FunnelDraftViewModel.clearAutosaveError is the same shape and
+  // carries the same `untrack` for the same reason — keep them in step.
   @trigger
   clearAutosaveError() {
     void this.config;
@@ -549,6 +554,10 @@ export class PaywallBuilderViewModel {
         controller.signal,
       );
       if (this.saveController !== controller) return;
+      // The builder flushes on unmount, so this continuation can land after
+      // the view model was disposed. The writes below are inert on a dead
+      // instance, but refreshDiffAfterSave would still fire a pointless GET.
+      if (this.disposed) return;
       this.syncFromDetail(detail);
       this.lastSavedAt = Date.now();
       // Snapshot AFTER syncFromDetail: Postgres jsonb re-orders object keys,
