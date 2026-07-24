@@ -59,6 +59,14 @@ Dotted numeric, component-wise, missing components read as `0`, so `1.2` == `1.2
 
 Not semver. A real semver implementation would have to be written four times (TS, Swift, Kotlin, and again for RN's JS) and agree exactly, and pre-release ordering (`1.0.0-beta` < `1.0.0`) is a rule nobody authoring a paywall bound is thinking about. Four small comparators that agree on digits and refuse to guess otherwise is the honest version. `render-fixtures.json` pins the agreement, including the refusals.
 
+### Strict on write, lenient on read — not a contradiction
+
+A fair question came out of review: the Zod schema hard-rejects a `platform` string outside the enum, failing the **whole config** with `SCHEMA_INVALID`, while `isNodeVisible` fails open on an unknown platform. Those look opposed. They are the two halves of an architecture this repo already documents, in `render-fixtures.json`'s own header: *"The TS authoring schema is STRICT (unknown node types are rejected)… Platform decoders are lenient by design."*
+
+Writing is strict because the dashboard is the only writer and only ever emits the three known platforms; anything else is a hand-crafted payload or a client deployed ahead of its server, and neither should be persisted quietly. Reading is lenient because the four renderers run on devices we did not deploy today, where a value we do not recognise must never be a reason to hide content the author wrote.
+
+So `visibility.platform` follows the same rule as node types do. No change; recorded here so it is not re-litigated.
+
 ### A hidden node does not render its `fallback`
 
 `fallback` exists for decode failures — an unknown node type on an older SDK. Hidden means the author said "not here". Rendering a fallback for a deliberately hidden node would put content on exactly the platform it was excluded from.
