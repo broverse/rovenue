@@ -32,6 +32,20 @@ export type RovenueConfig = {
   environment?: "prod" | "staging" | "development";
 };
 
+// The host app's version, as passed to `configure()`. Already in JS
+// hands (it's forwarded to the native module below) but not otherwise
+// retained JS-side; stashed here so the paywall render layer can read it
+// for `visibility.minAppVersion`/`maxAppVersion` evaluation without a
+// native round-trip. `undefined` until `configure()` runs, or when the
+// caller omits it (native auto-reads its own value in that case, which
+// this getter has no way to see).
+let configuredAppVersion: string | undefined;
+
+/** The `appVersion` most recently passed to `configure()`, if any. */
+export function getConfiguredAppVersion(): string | undefined {
+  return configuredAppVersion;
+}
+
 export function configure(opts: RovenueConfig): void {
   if (!opts.apiKey || opts.apiKey.trim() === "") {
     throw new RovenueError("InvalidApiKey", "apiKey is blank");
@@ -39,6 +53,7 @@ export function configure(opts: RovenueConfig): void {
   if (opts.baseUrl !== undefined && !/^https?:\/\//.test(opts.baseUrl)) {
     throw new RovenueError("InvalidApiKey", "baseUrl must start with http:// or https://");
   }
+  configuredAppVersion = opts.appVersion;
   const native = getNative();
   native.configure(
     opts.apiKey,

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { _setNativeForTesting } from "../core/native";
 import { stopEventBridge } from "../core/eventBridge";
 import { store } from "../store/reactiveStore";
-import { configure } from "../api/configure";
+import { configure, getConfiguredAppVersion } from "../api/configure";
 import { makeMockNative, MockNative } from "./_mockNative";
 
 /**
@@ -49,5 +49,15 @@ describe("configure forwards appVersion to native", () => {
       "2.7.0",
       undefined,
     );
+  });
+
+  it("getConfiguredAppVersion() reflects the value passed to configure()", () => {
+    configure({ apiKey: "pk_test", baseUrl: "https://api.example.com", appVersion: "2.7.0" });
+    expect(getConfiguredAppVersion()).toBe("2.7.0");
+  });
+
+  it("getConfiguredAppVersion() is undefined when configure() omits appVersion", () => {
+    configure({ apiKey: "pk_test", baseUrl: "https://api.example.com" });
+    expect(getConfiguredAppVersion()).toBeUndefined();
   });
 });

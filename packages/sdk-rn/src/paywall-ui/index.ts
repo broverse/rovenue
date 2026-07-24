@@ -20,3 +20,10 @@ export {
   activeOverrideConditions,
   type OverrideActiveConditions,
 } from "./overrides";
+export {
+  compareVersions,
+  isNodeVisible,
+  type NodeVisibility,
+  type VisibilityContext,
+  type VisibilityPlatform,
+} from "./visibility";

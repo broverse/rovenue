@@ -6,7 +6,7 @@
 // @testing-library/react drives real interaction against the real
 // renderer logic — the same gate style the web renderer uses.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { Offering, Paywall, StoreProduct } from "../../types";
 
@@ -24,6 +24,9 @@ vi.mock("../../api/paywalls", async (importOriginal) => ({
 }));
 
 import { RovenuePaywallView } from "../RovenuePaywallView";
+import { configure } from "../../api/configure";
+import { _setNativeForTesting } from "../../core/native";
+import { makeMockNative } from "../../__tests__/_mockNative";
 
 function product(overrides: Partial<StoreProduct> = {}): StoreProduct {
   return {
@@ -356,5 +359,110 @@ describe("RovenuePaywallView — overrides and cellTemplate (Phase D2)", () => {
     const monthlyCell = screen.getByTestId("rov-cell-$rov_monthly");
     expect(monthlyCell.textContent).toContain("Pro Monthly");
     expect(monthlyCell.textContent).toContain("$9.99/month");
+  });
+});
+
+// -------------------------------------------------------------
+// Visibility gate — node-level platform/appVersion targeting
+// -------------------------------------------------------------
+//
+// `_stubReactNative`'s `Platform.OS` is fixed to "ios" for these tests,
+// so a "web"/"android"-only visibility rule is always the hidden case
+// and an "ios"-inclusive (or absent) rule is always the visible case.
+
+describe("RovenuePaywallView — visibility gate", () => {
+  const mockNative = makeMockNative();
+
+  beforeEach(() => {
+    _setNativeForTesting(mockNative);
+  });
+  afterEach(() => {
+    // Reset the module-scoped appVersion so later tests in this file see
+    // the default (undefined) state, matching a fresh SDK.
+    configure({ apiKey: "pk_test" });
+    _setNativeForTesting(null);
+  });
+
+  function visibilityConfig(overrides: Record<string, unknown> = {}) {
+    return {
+      formatVersion: 2,
+      defaultLocale: "en",
+      localizations: { en: { title: "Go Pro", caption: "Fallback text" } },
+      root: {
+        type: "stack",
+        id: "root",
+        axis: "v",
+        children: [
+          {
+            type: "text",
+            id: "hidden_text",
+            key: "title",
+            role: "body",
+            visibility: { platform: ["web"] },
+            fallback: { type: "text", id: "hidden_fallback", key: "caption", role: "caption" },
+          },
+          {
+            type: "stack",
+            id: "hidden_stack",
+            axis: "v",
+            visibility: { platform: ["android"] },
+            children: [{ type: "text", id: "hidden_stack_child", key: "title", role: "body" }],
+          },
+          {
+            type: "text",
+            id: "visible_text",
+            key: "title",
+            role: "body",
+            visibility: { platform: ["ios", "android"] },
+          },
+          ...(overrides.extraChildren as unknown[] | undefined ?? []),
+        ],
+      },
+    };
+  }
+
+  it("hides a node whose platform list excludes this platform, rendering NEITHER its fallback nor its children", () => {
+    render(<RovenuePaywallView paywall={paywall({ builderConfig: visibilityConfig() })} />);
+    expect(screen.queryByTestId("rov-node-hidden_text")).toBeNull();
+    expect(screen.queryByTestId("rov-node-hidden_fallback")).toBeNull();
+    expect(screen.queryByTestId("rov-node-hidden_stack")).toBeNull();
+    expect(screen.queryByTestId("rov-node-hidden_stack_child")).toBeNull();
+  });
+
+  it("renders a node whose platform list includes this platform", () => {
+    render(<RovenuePaywallView paywall={paywall({ builderConfig: visibilityConfig() })} />);
+    expect(screen.getByTestId("rov-node-visible_text")).toBeTruthy();
+  });
+
+  it("hides a node below its minAppVersion bound (using the configured app version)", () => {
+    configure({ apiKey: "pk_test", appVersion: "1.0.0" });
+    const config = visibilityConfig({
+      extraChildren: [
+        { type: "text", id: "min_gated", key: "title", role: "body", visibility: { minAppVersion: "2.0.0" } },
+      ],
+    });
+    render(<RovenuePaywallView paywall={paywall({ builderConfig: config })} />);
+    expect(screen.queryByTestId("rov-node-min_gated")).toBeNull();
+  });
+
+  it("shows a node whose bounds the configured app version satisfies (inclusive)", () => {
+    configure({ apiKey: "pk_test", appVersion: "2.0.0" });
+    const config = visibilityConfig({
+      extraChildren: [
+        { type: "text", id: "min_gated", key: "title", role: "body", visibility: { minAppVersion: "2.0.0" } },
+      ],
+    });
+    render(<RovenuePaywallView paywall={paywall({ builderConfig: config })} />);
+    expect(screen.getByTestId("rov-node-min_gated")).toBeTruthy();
+  });
+
+  it("FAILS OPEN — shows a version-gated node when no appVersion has been configured", () => {
+    const config = visibilityConfig({
+      extraChildren: [
+        { type: "text", id: "min_gated", key: "title", role: "body", visibility: { minAppVersion: "99.0.0" } },
+      ],
+    });
+    render(<RovenuePaywallView paywall={paywall({ builderConfig: config })} />);
+    expect(screen.getByTestId("rov-node-min_gated")).toBeTruthy();
   });
 });

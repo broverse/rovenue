@@ -23,7 +23,8 @@
 // =============================================================
 
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
-import { Image, Pressable, Text, View } from "react-native";
+import { Image, Platform, Pressable, Text, View } from "react-native";
+import { getConfiguredAppVersion } from "../api/configure";
 import { logPaywallShown, logPaywallClosed } from "../api/paywalls";
 import { purchase } from "../api/purchases";
 import type { Offering, Paywall, PurchaseResult } from "../types";
@@ -38,6 +39,15 @@ import {
 } from "./helpers";
 import { decodeBuilderConfig, type BuilderConfigModel, type BuilderNode } from "./model";
 import { activeOverrideConditions, applyOverrides } from "./overrides";
+import { isNodeVisible, type VisibilityPlatform } from "./visibility";
+
+// `Platform.OS` is only ever "ios" or "android" on a real React Native
+// runtime (never "web" — react-native-web isn't part of this SDK's
+// target surface); a `visibility.platform` list containing "web" simply
+// never matches here, which is correct: a web-only node IS hidden on
+// native, by design.
+const NATIVE_PLATFORM: VisibilityPlatform | null =
+  Platform.OS === "ios" || Platform.OS === "android" ? Platform.OS : null;
 
 export type RovenuePaywallViewProps = {
   paywall: Paywall;
@@ -64,6 +74,10 @@ type Ctx = {
   onClose?: () => void;
   onRestore?: () => void;
   onUrl?: (url: string) => void;
+  /** Where this render is happening. Absent means unknown, which makes
+   * every `visibility` rule fail open — see isNodeVisible in ./visibility. */
+  platform: VisibilityPlatform | null;
+  appVersion: string | null;
 };
 
 /**
@@ -137,6 +151,8 @@ export function RovenuePaywallView(props: RovenuePaywallViewProps): ReactElement
     },
     onRestore: props.onRestore,
     onUrl: props.onUrl,
+    platform: NATIVE_PLATFORM,
+    appVersion: getConfiguredAppVersion() ?? null,
   };
 
   return (
@@ -184,6 +200,19 @@ function NodeView({
   ctx: Ctx;
   cell: CellScope | null;
 }): ReactElement | null {
+  // Hidden means the author said "not here", which is NOT the same as
+  // "could not decode" — so a hidden node does not render its `fallback`.
+  // Doing so would put content on exactly the platform/version it was
+  // excluded from. Returning here also takes the node's children with
+  // it (a hidden stack never descends). Gated on `node.visibility` (the
+  // pre-override node), not `resolved.visibility`: `visibility` is
+  // deliberately absent from every override's whitelist (see
+  // OVERRIDABLE_PROP_KEYS in ./model.ts), so an override can never
+  // resurrect a hidden node — this ordering just keeps that guarantee
+  // correct if that allow-list is ever widened. Mirrors nodes.tsx's
+  // `renderNode` gate.
+  if (!isNodeVisible(node.type === "unknown" ? undefined : node.visibility, ctx)) return null;
+
   // Every node passes through `applyOverrides` here, BEFORE any
   // style/text resolution happens below — `resolved` (not the original
   // `node`) is what gets dispatched. Mirrors nodes.tsx's `renderNode` /

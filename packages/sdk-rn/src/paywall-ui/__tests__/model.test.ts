@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { decodeBuilderConfig, type BuilderConfigModel, type BuilderNode } from "../model";
 import { resolveText, resolveVariables, type PackageView } from "../helpers";
+import { isNodeVisible, type NodeVisibility, type VisibilityPlatform } from "../visibility";
 
 // Asserts the RN decoder against the SHARED cross-platform contract file —
 // the same render-fixtures.json the TS schema, Swift, and Kotlin tests
@@ -21,6 +22,13 @@ interface Fixture {
   reject: Array<{ name: string; reason: string; config: unknown }>;
   variables: Array<{ text: string; pkg: PackageView | null; expected: string }>;
   resolveText: Array<{ locale: string; key: string; expected: string | null }>;
+  visibility: Array<{
+    name: string;
+    visibility: NodeVisibility;
+    platform: VisibilityPlatform | null;
+    appVersion: string | null;
+    expected: boolean;
+  }>;
 }
 
 const fixture: Fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
@@ -137,5 +145,18 @@ describe("RN builder-config decoder vs render-fixtures", () => {
         expect(resolveText(config, v.locale, v.key)).toBe(v.expected);
       });
     }
+  });
+
+  // The shared cross-platform contract: the RN evaluator (../visibility)
+  // must agree with the TS/Swift/Kotlin siblings on every one of these
+  // 13 vectors, including every FAILS OPEN case.
+  describe("visibility vectors", () => {
+    fixture.visibility.forEach((v) => {
+      it(v.name, () => {
+        expect(isNodeVisible(v.visibility, { platform: v.platform, appVersion: v.appVersion })).toBe(
+          v.expected,
+        );
+      });
+    });
   });
 });

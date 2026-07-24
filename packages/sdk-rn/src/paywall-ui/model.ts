@@ -27,7 +27,19 @@
 // decoder is deliberately looser on unknown types/override kinds only.
 // Input is the ALREADY-PARSED object (`paywall.builderConfig`), not a
 // JSON string.
+//
+// Visibility: every KNOWN node type (the seven cases below, not the
+// lenient `unknown` catch-all) carries an optional `visibility` — see
+// ./visibility.ts. Unlike the rest of this decoder, `visibility` parses
+// LENIENTLY: a malformed `visibility` (wrong shape, an out-of-union
+// platform string, an empty platform list after filtering) never fails
+// the config decode — it just drops the offending piece, which is
+// consistent with the evaluator's own fail-open rule (see
+// ./visibility.ts's header). `visibility` is deliberately NOT
+// overridable (mirrors the strict schema's OVERRIDABLE_PROP_KEYS).
 // =============================================================
+
+import type { NodeVisibility, VisibilityPlatform } from "./visibility";
 
 export type ThemePair = { light: string; dark?: string };
 export type NodeSize = "fit" | "fill" | number;
@@ -81,6 +93,7 @@ export type BuilderNode =
       background?: ThemePair;
       cornerRadius?: number;
       overrides?: NodeOverride[];
+      visibility?: NodeVisibility;
       fallback?: BuilderNode;
     }
   | {
@@ -91,6 +104,7 @@ export type BuilderNode =
       color?: ThemePair;
       align?: HAlign;
       overrides?: NodeOverride[];
+      visibility?: NodeVisibility;
       fallback?: BuilderNode;
     }
   | {
@@ -101,6 +115,7 @@ export type BuilderNode =
       cornerRadius?: number;
       alt?: string;
       overrides?: NodeOverride[];
+      visibility?: NodeVisibility;
       fallback?: BuilderNode;
     }
   | {
@@ -110,6 +125,7 @@ export type BuilderNode =
       style: ButtonVisualStyle;
       action: ButtonAction;
       overrides?: NodeOverride[];
+      visibility?: NodeVisibility;
       fallback?: BuilderNode;
     }
   | {
@@ -126,10 +142,25 @@ export type BuilderNode =
        */
       cellTemplate?: BuilderNode;
       overrides?: NodeOverride[];
+      visibility?: NodeVisibility;
       fallback?: BuilderNode;
     }
-  | { type: "purchaseButton"; id: string; labelKey: string; overrides?: NodeOverride[]; fallback?: BuilderNode }
-  | { type: "spacer"; id: string; size?: number; overrides?: NodeOverride[]; fallback?: BuilderNode }
+  | {
+      type: "purchaseButton";
+      id: string;
+      labelKey: string;
+      overrides?: NodeOverride[];
+      visibility?: NodeVisibility;
+      fallback?: BuilderNode;
+    }
+  | {
+      type: "spacer";
+      id: string;
+      size?: number;
+      overrides?: NodeOverride[];
+      visibility?: NodeVisibility;
+      fallback?: BuilderNode;
+    }
   | { type: "unknown"; id: string; fallback?: BuilderNode };
 
 export type BuilderConfigModel = {
@@ -209,6 +240,44 @@ function parseNodeSize(v: unknown): NodeSize {
   if (v === "fit" || v === "fill") return v;
   if (typeof v === "number" && Number.isFinite(v)) return v;
   throw new DecodeError('NodeSize must be "fit", "fill", or a number');
+}
+
+const VISIBILITY_PLATFORMS: readonly VisibilityPlatform[] = ["ios", "android", "web"] as const;
+
+/**
+ * `visibility.platform` decodes LENIENTLY: any entry outside the known
+ * union is dropped rather than failing the whole config, and an
+ * empty-after-filtering array is treated the same as absent — both mean
+ * "no constraint" to `isNodeVisible`, so there is nothing lost by
+ * omitting the key entirely.
+ */
+function parseVisibilityPlatformList(v: unknown): VisibilityPlatform[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const kept = v.filter((p): p is VisibilityPlatform =>
+    (VISIBILITY_PLATFORMS as readonly unknown[]).includes(p),
+  );
+  return kept.length > 0 ? kept : undefined;
+}
+
+/**
+ * Lenient `visibility` parse: a missing/non-object `visibility`, or one
+ * whose every field is unusable, decodes to `undefined` rather than
+ * throwing — this is the one field on a known node type that does NOT
+ * fail the whole config decode on a structural defect. See the header
+ * comment on why: an author-facing gate that is not overridable, ported
+ * against a shared fail-open contract.
+ */
+function parseVisibility(o: Obj): NodeVisibility | undefined {
+  const v = o.visibility;
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return undefined;
+  const vo = v as Obj;
+  const platform = parseVisibilityPlatformList(vo.platform);
+  const minAppVersion = typeof vo.minAppVersion === "string" ? vo.minAppVersion : undefined;
+  const maxAppVersion = typeof vo.maxAppVersion === "string" ? vo.maxAppVersion : undefined;
+  if (platform === undefined && minAppVersion === undefined && maxAppVersion === undefined) {
+    return undefined;
+  }
+  return { platform, minAppVersion, maxAppVersion };
 }
 
 // -------------------------------------------------------------
@@ -388,6 +457,7 @@ function parseNode(o: Obj): BuilderNode {
           : parseThemePair(o.background, "stack.background"),
         cornerRadius: optionalNumber(o, "cornerRadius"),
         overrides: parseOverridesArray(o, "stack"),
+        visibility: parseVisibility(o),
         fallback,
       };
     }
@@ -400,6 +470,7 @@ function parseNode(o: Obj): BuilderNode {
         color: o.color === undefined || o.color === null ? undefined : parseThemePair(o.color, "text.color"),
         align: optionalEnum(o, "align", ["start", "center", "end"] as const),
         overrides: parseOverridesArray(o, "text"),
+        visibility: parseVisibility(o),
         fallback,
       };
     case "image":
@@ -411,6 +482,7 @@ function parseNode(o: Obj): BuilderNode {
         cornerRadius: optionalNumber(o, "cornerRadius"),
         alt: optionalString(o, "alt"),
         overrides: parseOverridesArray(o, "image"),
+        visibility: parseVisibility(o),
         fallback,
       };
     case "button": {
@@ -428,6 +500,7 @@ function parseNode(o: Obj): BuilderNode {
         style: requireEnum(o, "style", ["primary", "secondary", "plain"] as const),
         action: parsedAction,
         overrides: parseOverridesArray(o, "button"),
+        visibility: parseVisibility(o),
         fallback,
       };
     }
@@ -449,6 +522,7 @@ function parseNode(o: Obj): BuilderNode {
         cellLayout: requireEnum(o, "cellLayout", ["row", "column"] as const),
         cellTemplate,
         overrides: parseOverridesArray(o, "packageList"),
+        visibility: parseVisibility(o),
         fallback,
       };
     }
@@ -458,6 +532,7 @@ function parseNode(o: Obj): BuilderNode {
         id,
         labelKey: requireString(o, "labelKey"),
         overrides: parseOverridesArray(o, "purchaseButton"),
+        visibility: parseVisibility(o),
         fallback,
       };
     case "spacer":
@@ -466,6 +541,7 @@ function parseNode(o: Obj): BuilderNode {
         id,
         size: optionalNumber(o, "size"),
         overrides: parseOverridesArray(o, "spacer"),
+        visibility: parseVisibility(o),
         fallback,
       };
     default:

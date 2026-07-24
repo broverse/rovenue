@@ -28,6 +28,14 @@ export const AppState = {
 
 export type NativeEventSubscription = { remove: () => void };
 
+// Minimal `Platform.OS` stand-in for the paywall-ui visibility gate
+// (RovenuePaywallView reads it directly, the way it would on a real
+// device). Fixed to "ios" — tests that need to exercise the other
+// branch of the gate use a visibility rule targeting "android"/"web"
+// rather than flipping this value, keeping the stub static like AppState
+// isn't required to be here.
+export const Platform = { OS: "ios" as const };
+
 // -------------------------------------------------------------
 // Minimal host-component stand-ins for the paywall-ui renderer
 // tests (@testing-library/react + happy-dom). They map the RN
