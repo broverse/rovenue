@@ -35,6 +35,31 @@ describe("nextRuleSchema", () => {
     expect(ok.success).toBe(true);
   });
 
+  it("accepts 'not_contains' with a string value", () => {
+    const ok = nextRuleSchema.safeParse({
+      id: "r4",
+      condition: { op: "all", clauses: [{ question_id: "g", op: "not_contains", value: "a" }] },
+      goto: "end",
+    });
+    expect(ok.success).toBe(true);
+  });
+
+  it.each(["contains", "not_contains"] as const)(
+    "rejects '%s' with a non-string value",
+    (op) => {
+      // The evaluator compares against a string member of a string[]
+      // answer, so a numeric operand would validate here and then
+      // silently never fire — the writable-but-dead rule this whole
+      // sub-project removes. Rejecting at the boundary is the fix.
+      const bad = nextRuleSchema.safeParse({
+        id: "r5",
+        condition: { op: "all", clauses: [{ question_id: "g", op, value: 3 }] },
+        goto: "end",
+      });
+      expect(bad.success).toBe(false);
+    },
+  );
+
   it("rejects unknown op", () => {
     const bad = nextRuleSchema.safeParse({
       id: "r4",

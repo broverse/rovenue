@@ -40,6 +40,18 @@ const clauseSchema = z
         ctx.addIssue({ code: "custom", message: `Op ${c.op} requires array value`, path: ["value"] });
       }
     }
+    if (c.op === "contains" || c.op === "not_contains") {
+      // The evaluator compares against a string member of a string[]
+      // answer, so a non-string operand validates here and then silently
+      // never fires. Reject it at the boundary instead.
+      if (typeof c.value !== "string") {
+        ctx.addIssue({
+          code: "custom",
+          message: `Op ${c.op} requires a string value`,
+          path: ["value"],
+        });
+      }
+    }
     if (c.op === "between") {
       if (!Array.isArray(c.value) || c.value.length !== 2) {
         ctx.addIssue({

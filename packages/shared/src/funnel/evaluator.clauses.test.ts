@@ -64,6 +64,37 @@ describe("evalClause — an array answer never matches a scalar operator", () =>
   });
 });
 
+describe("evalClause — the guards are narrow, not blanket", () => {
+  // A one-sided table proves a guard is PRESENT, never that it is NARROW.
+  // Without these, `case "not_in": return false;` passes every other test
+  // in this file and every "is not one of" rule in production silently
+  // routes to default_next while the suite stays green.
+  it("not_in fires when the scalar answer is absent from the list", () => {
+    expect(fires("not_in", "a", ["b", "z"])).toBe(true);
+  });
+
+  it("not_in does NOT fire when the scalar answer is in the list", () => {
+    expect(fires("not_in", "a", ["a", "z"])).toBe(false);
+  });
+
+  it("lt fires for a smaller number", () => {
+    expect(fires("lt", 1, 3)).toBe(true);
+  });
+
+  it("lte fires at the boundary", () => {
+    expect(fires("lte", 3, 3)).toBe(true);
+  });
+
+  it("in fires when the scalar answer is in the list", () => {
+    expect(fires("in", "a", ["a", "z"])).toBe(true);
+  });
+
+  it("between fires inside the range and not outside it", () => {
+    expect(fires("between", 3, [1, 5])).toBe(true);
+    expect(fires("between", 9, [1, 5])).toBe(false);
+  });
+});
+
 describe("evalClause — arrays have their own operators", () => {
   it("contains fires when the option is among the selections", () => {
     expect(fires("contains", ["a", "b"], "a")).toBe(true);
@@ -79,6 +110,16 @@ describe("evalClause — arrays have their own operators", () => {
 
   it("not_contains does NOT fire when the option is present", () => {
     expect(fires("not_contains", ["a", "b"], "a")).toBe(false);
+  });
+
+  it("not_contains fires for an EMPTY selection", () => {
+    // Deliberate and pinned because it is the one place the two readings
+    // inside evalClause differ: `answered` treats [] as no answer, while
+    // not_contains treats it as an array that genuinely does not contain
+    // the option. "They did not pick X" is true of someone who picked
+    // nothing, so this is the reading we want — but it must be stated,
+    // not left to whoever reads the code next.
+    expect(fires("not_contains", [], "a")).toBe(true);
   });
 
   it("not_contains does not fire for a non-array answer — same can't-compare rule", () => {
