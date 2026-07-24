@@ -87,16 +87,19 @@ function verdictDetail(domain: Stripe.PaymentMethodDomain): string | null {
  * made. Apple Pay being unavailable must never cost someone their Stripe
  * connection.
  */
-export async function registerApplePayDomain(projectId: string): Promise<ApplePayDomainOutcome> {
-  const domainName = env.FUNNEL_PAYMENT_DOMAIN;
+export async function registerApplePayDomain(
+  projectId: string,
+  // Defaults to the canonical funnel host so every existing caller is
+  // unchanged. The custom-domain cert poller passes a verified customer
+  // hostname instead.
+  domainName: string | undefined = env.FUNNEL_PAYMENT_DOMAIN,
+): Promise<ApplePayDomainOutcome> {
   if (!domainName) {
     // Deliberately not derived from DASHBOARD_URL. Registering a host the
     // paywall is not served from succeeds at the API level and then Apple
     // Pay silently never appears — the failure this whole path exists to
     // prevent. An operator names the host or nothing is registered.
-    log.warn("FUNNEL_PAYMENT_DOMAIN is unset; skipping Apple Pay domain registration", {
-      projectId,
-    });
+    log.warn("no domain to register for Apple Pay; skipping", { projectId });
     return "skipped";
   }
 
@@ -133,11 +136,18 @@ export async function registerApplePayDomain(projectId: string): Promise<ApplePa
       already ?? (await account.paymentMethodDomains.create({ domain_name: domainName }));
 
     const status = applePayVerdict(domain);
-    await drizzle.stripeConnectionRepo.updateApplePayDomainStatus(
-      drizzle.db,
-      connection.id,
-      status,
-    );
+    // `applePayDomainStatus` lives on the CONNECTION row — one per project —
+    // and means "the canonical FUNNEL_PAYMENT_DOMAIN's status". A project
+    // can now have many registered domains, so a custom domain's verdict
+    // must not be written here: it would overwrite the canonical host's
+    // status and make the dashboard report Apple Pay broken there.
+    if (domainName === env.FUNNEL_PAYMENT_DOMAIN) {
+      await drizzle.stripeConnectionRepo.updateApplePayDomainStatus(
+        drizzle.db,
+        connection.id,
+        status,
+      );
+    }
 
     if (status === "active") {
       log.info("apple pay domain active", {

@@ -211,4 +211,30 @@ describe("registerApplePayDomain", () => {
     await expect(registerApplePayDomain("prj_1")).resolves.toBe("skipped");
     expect(createMock).not.toHaveBeenCalled();
   });
+
+  test("registers the domain it is given, not the env default", async () => {
+    await registerApplePayDomain("prj_1", "quiz.acme.com");
+
+    // `create` is called through the connected-account facade, which always
+    // appends a second { stripeAccount } argument (see the "connected
+    // account" test above) — asserting on calls[0][0] isolates the part
+    // this test cares about, the same idiom the file already uses.
+    expect(createMock.mock.calls[0]?.[0]).toEqual({ domain_name: "quiz.acme.com" });
+  });
+
+  test("does not write the connection-level status for a non-canonical domain", async () => {
+    // That column describes the canonical FUNNEL_PAYMENT_DOMAIN. A custom
+    // domain's verdict must not overwrite it, or the dashboard reports
+    // Apple Pay broken on the canonical host because someone else's
+    // domain is still pending.
+    await registerApplePayDomain("prj_1", "quiz.acme.com");
+
+    expect(drizzleMock.stripeConnectionRepo.updateApplePayDomainStatus).not.toHaveBeenCalled();
+  });
+
+  test("still writes the connection-level status for the canonical domain", async () => {
+    await registerApplePayDomain("prj_1");
+
+    expect(drizzleMock.stripeConnectionRepo.updateApplePayDomainStatus).toHaveBeenCalledTimes(1);
+  });
 });

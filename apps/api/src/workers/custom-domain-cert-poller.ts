@@ -26,6 +26,7 @@ import {
   liveCertProbe,
   type CertProbe,
 } from "../services/custom-domains/cert-probe";
+import { registerApplePayDomain } from "../services/stripe/apple-pay-domain";
 
 const log = logger.child("custom-domain-cert-poller");
 
@@ -82,6 +83,23 @@ export async function runCustomDomainCertPollerSweep(
         // Flip the resolver cache so the next public request sees
         // the row as serveable (was negative-cached otherwise).
         await invalidateHost(row.hostname);
+        // Stripe will not render an Apple Pay button on a host that is not
+        // a registered payment-method domain, so a customer's own domain
+        // would silently lose Apple Pay that works on the canonical host.
+        // Registration is idempotent (it lists before creating).
+        //
+        // Best-effort on purpose: a failure here leaves a domain that
+        // serves its funnel without Apple Pay — degraded. Rethrowing would
+        // leave it stuck at `issuing` — broken.
+        try {
+          await registerApplePayDomain(row.projectId, row.hostname);
+        } catch (err) {
+          log.error("apple pay domain registration failed for a custom domain", {
+            hostname: row.hostname,
+            projectId: row.projectId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
         issued++;
       } else if (result.status === "failed") {
         await drizzle.customDomainRepo.updateById(drizzle.db, row.id, {

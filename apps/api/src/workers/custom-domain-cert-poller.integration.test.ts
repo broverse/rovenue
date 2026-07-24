@@ -7,7 +7,7 @@
 // probe itself is unit-tested via the matchName / certCoversHostname
 // helpers (small enough to test indirectly through the sweep).
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import {
   customDomains,
@@ -17,9 +17,20 @@ import {
   projects,
 } from "@rovenue/db";
 import { redis } from "../lib/redis";
+
+// ---- mock registerApplePayDomain before any imports resolve it ----
+// The registration call itself is exercised in apple-pay-domain.test.ts;
+// here we only need to prove the poller calls it (and only when) it should.
+vi.mock("../services/stripe/apple-pay-domain", () => ({
+  registerApplePayDomain: vi.fn(),
+}));
+
+import { registerApplePayDomain } from "../services/stripe/apple-pay-domain";
 import {
   runCustomDomainCertPollerSweep,
 } from "./custom-domain-cert-poller";
+
+const registerApplePayDomainMock = registerApplePayDomain as ReturnType<typeof vi.fn>;
 
 const RUN_ID = Date.now();
 const REDIS_PREFIX = "custom_domain:host:";
@@ -86,6 +97,10 @@ afterAll(async () => {
 });
 
 describe("runCustomDomainCertPollerSweep", () => {
+  beforeEach(() => {
+    registerApplePayDomainMock.mockReset();
+  });
+
   it("flips cert_status to issued when the probe says so", async () => {
     const { id: projectId } = await seedProject("_c1");
     createdProjectIds.push(projectId);
@@ -216,5 +231,86 @@ describe("runCustomDomainCertPollerSweep", () => {
     const after = await drizzle.customDomainRepo.findById(getDb(), row!.id);
     expect(after?.certStatus).toBe("issued"); // unchanged
     expect(probedThisHost).toBe(false);
+  });
+
+  it("registers the hostname with Stripe on the issued transition", async () => {
+    const { id: projectId } = await seedProject("_c6");
+    createdProjectIds.push(projectId);
+    const { id: funnelId } = await seedFunnel(projectId, "_c6");
+    const host = `cert-register-${RUN_ID}.example.com`;
+    seededHostnames.push(host);
+    await seedDomain({
+      projectId,
+      funnelId,
+      hostname: host,
+      verifiedAt: new Date(Date.now() - 60 * 1000),
+      certStatus: "pending",
+    });
+
+    await runCustomDomainCertPollerSweep(new Date(), async () => ({
+      status: "issued",
+      notAfter: new Date(Date.now() + 90 * 86400000),
+    }));
+
+    expect(registerApplePayDomainMock).toHaveBeenCalledWith(projectId, host);
+  });
+
+  it("does not register on the failed transition", async () => {
+    const { id: projectId } = await seedProject("_c7");
+    createdProjectIds.push(projectId);
+    const { id: funnelId } = await seedFunnel(projectId, "_c7");
+    const host = `cert-register-failed-${RUN_ID}.example.com`;
+    seededHostnames.push(host);
+    await seedDomain({
+      projectId,
+      funnelId,
+      hostname: host,
+      verifiedAt: new Date(Date.now() - 60 * 1000),
+      certStatus: "pending",
+    });
+
+    await runCustomDomainCertPollerSweep(new Date(), async () => ({
+      status: "failed",
+      reason: "hostname_mismatch",
+    }));
+
+    expect(registerApplePayDomainMock).not.toHaveBeenCalled();
+  });
+
+  it("leaves certStatus issued when registration throws", async () => {
+    // Best-effort by design: a domain that serves its funnel without an
+    // Apple Pay registration is degraded; a domain stuck at `issuing`
+    // because a Stripe call failed is broken.
+    const { id: projectId } = await seedProject("_c8");
+    createdProjectIds.push(projectId);
+    const { id: funnelId } = await seedFunnel(projectId, "_c8");
+    const host = `cert-register-throws-${RUN_ID}.example.com`;
+    seededHostnames.push(host);
+    const row = await seedDomain({
+      projectId,
+      funnelId,
+      hostname: host,
+      verifiedAt: new Date(Date.now() - 60 * 1000),
+      certStatus: "pending",
+    });
+
+    registerApplePayDomainMock.mockRejectedValue(new Error("stripe down"));
+
+    // `registerApplePayDomain` sits inside the sweep's pre-existing per-row
+    // try/catch (there to stop one bad TLS probe killing the whole sweep),
+    // so an *uncaught* registration error is silently absorbed by that
+    // outer catch too — it would still leave certStatus at "issued"
+    // (already written beforehand) but would fall into the "stillPending"
+    // bucket instead of "issued" in the summary counts. Assert on the
+    // return value as well as the row so a regression that drops the
+    // dedicated try/catch is actually caught here.
+    const result = await runCustomDomainCertPollerSweep(new Date(), async () => ({
+      status: "issued",
+      notAfter: new Date(Date.now() + 90 * 86400000),
+    }));
+
+    const after = await drizzle.customDomainRepo.findById(getDb(), row!.id);
+    expect(after?.certStatus).toBe("issued");
+    expect(result.issued).toBeGreaterThanOrEqual(1);
   });
 });
