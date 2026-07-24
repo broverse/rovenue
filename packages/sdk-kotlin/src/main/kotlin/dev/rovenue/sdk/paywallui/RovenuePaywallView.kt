@@ -166,11 +166,31 @@ class RovenuePaywallView @JvmOverloads constructor(
             onRestore = options.onRestore,
             onUrl = options.onUrl,
             loadImage = { imageView, url -> loadImageInto(imageView, url, scopeForImageLoads()) },
+            appVersion = configuredAppVersion(),
         )
 
         val rootView = NodeViewFactory.build(context, cfg.root, ctx, cell = null) ?: return
         addView(rootView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
+
+    /**
+     * The app version supplied to `Rovenue.configure` (`null` when
+     * configure omitted it), feeding the `visibility` gate's
+     * minAppVersion/maxAppVersion bounds — see NodeViewFactory.build.
+     * `Rovenue.shared` throws before configure() ever runs; this view's
+     * builder-config visibility gate must still fail open rather than
+     * crash a render triggered ahead of (or without) configuration, so
+     * that case is treated the same as "no appVersion" instead of
+     * propagating the exception. Platform itself is NOT threaded through
+     * the context — it's the compile-time literal NodeViewFactory.build
+     * gates on.
+     */
+    private fun configuredAppVersion(): String? =
+        try {
+            Rovenue.shared.resolvedAppVersionForTesting
+        } catch (_: IllegalStateException) {
+            null
+        }
 
     private fun scopeForImageLoads(): CoroutineScope {
         viewScope?.let { return it }

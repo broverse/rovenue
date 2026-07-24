@@ -49,6 +49,25 @@ sealed class ButtonAction {
 }
 
 // =============================================================
+// Node-level visibility (see Visibility.kt for the evaluator:
+// `isNodeVisible` + `compareVersions`). Kotlin mirror of the shared
+// `NodeVisibility` type (packages/shared/src/paywall/visibility.ts) and
+// the RN model's `NodeVisibility` (packages/sdk-rn/src/paywall-ui/
+// model.ts). Carried by every KNOWN node type below — NOT by
+// [BuilderNode.Unknown], which never has one to parse (see
+// `parseVisibility`'s decode contract) — and deliberately NOT
+// overridable (absent from OVERRIDABLE_PROP_KEYS on every type).
+// =============================================================
+
+/** Platforms this node renders on. `null`/absent OR EMPTY means all of
+ *  them. Bounds are inclusive. */
+data class Visibility(
+    val platform: List<String>? = null,
+    val minAppVersion: String? = null,
+    val maxAppVersion: String? = null,
+)
+
+// =============================================================
 // Overrides (Phase D2) — Kotlin mirror of the Swift
 // BuilderConfigModel.swift's "Overrides" section and the shared
 // cross-platform contract in packages/shared/src/paywall/schema.ts
@@ -121,6 +140,7 @@ object SpacerOverrideProps
 
 sealed class BuilderNode {
     abstract val id: String
+    abstract val visibility: Visibility?
     abstract val fallback: BuilderNode?
 
     data class Stack(
@@ -134,6 +154,7 @@ sealed class BuilderNode {
         val background: ThemePair? = null,
         val cornerRadius: Double? = null,
         val overrides: List<NodeOverride<StackOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
@@ -144,6 +165,7 @@ sealed class BuilderNode {
         val color: ThemePair? = null,
         val align: HAlign? = null,
         val overrides: List<NodeOverride<TextOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
@@ -154,6 +176,7 @@ sealed class BuilderNode {
         val cornerRadius: Double? = null,
         val alt: String? = null,
         val overrides: List<NodeOverride<ImageOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
@@ -163,6 +186,7 @@ sealed class BuilderNode {
         val style: ButtonVisualStyle,
         val action: ButtonAction,
         val overrides: List<NodeOverride<ButtonOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
@@ -177,6 +201,7 @@ sealed class BuilderNode {
          *  Recursive, exactly like [fallback]. */
         val cellTemplate: BuilderNode? = null,
         val overrides: List<NodeOverride<PackageListOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
@@ -184,6 +209,7 @@ sealed class BuilderNode {
         override val id: String,
         val labelKey: String,
         val overrides: List<NodeOverride<PurchaseButtonOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
@@ -191,13 +217,19 @@ sealed class BuilderNode {
         override val id: String,
         val size: Double? = null,
         val overrides: List<NodeOverride<SpacerOverrideProps>>? = null,
+        override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
+    /** Never carries a [visibility] — an unrecognized node `type` has
+     *  none to parse (see `parseVisibility`'s decode contract); always
+     *  visible as far as this gate is concerned. */
     data class Unknown(
         override val id: String,
         override val fallback: BuilderNode? = null,
-    ) : BuilderNode()
+    ) : BuilderNode() {
+        override val visibility: Visibility? = null
+    }
 }
 
 data class BuilderConfigModel(
@@ -264,6 +296,7 @@ private fun parseNode(obj: JsonObject): BuilderNode {
     val type = obj.requireString("type")
     val id = obj.requireString("id")
     val fallback = obj["fallback"]?.letObject(::parseNode)
+    val visibility = parseVisibility(obj)
 
     return when (type) {
         "stack" -> BuilderNode.Stack(
@@ -283,6 +316,7 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             background = obj["background"]?.letObject(::parseThemePair),
             cornerRadius = obj.optionalDouble("cornerRadius"),
             overrides = obj.parseOverrideList(::parseStackOverrideProps),
+            visibility = visibility,
             fallback = fallback,
         )
         "text" -> BuilderNode.Text(
@@ -298,6 +332,7 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             color = obj["color"]?.letObject(::parseThemePair),
             align = obj.optionalAlign(),
             overrides = obj.parseOverrideList(::parseTextOverrideProps),
+            visibility = visibility,
             fallback = fallback,
         )
         "image" -> BuilderNode.Image(
@@ -308,6 +343,7 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             cornerRadius = obj.optionalDouble("cornerRadius"),
             alt = obj.optionalString("alt"),
             overrides = obj.parseOverrideList(::parseImageOverrideProps),
+            visibility = visibility,
             fallback = fallback,
         )
         "button" -> BuilderNode.Button(
@@ -325,6 +361,7 @@ private fun parseNode(obj: JsonObject): BuilderNode {
                 obj["action"] as? JsonObject ?: throw BuilderDecodeException("button.action required"),
             ),
             overrides = obj.parseOverrideList(::parseButtonOverrideProps),
+            visibility = visibility,
             fallback = fallback,
         )
         "packageList" -> BuilderNode.PackageList(
@@ -343,24 +380,64 @@ private fun parseNode(obj: JsonObject): BuilderNode {
             ),
             cellTemplate = obj["cellTemplate"]?.letObject(::parseNode),
             overrides = obj.parseOverrideList(::parsePackageListOverrideProps),
+            visibility = visibility,
             fallback = fallback,
         )
         "purchaseButton" -> BuilderNode.PurchaseButton(
             id = id,
             labelKey = obj.requireString("labelKey"),
             overrides = obj.parseOverrideList(::parsePurchaseButtonOverrideProps),
+            visibility = visibility,
             fallback = fallback,
         )
         "spacer" -> BuilderNode.Spacer(
             id = id,
             size = obj.optionalDouble("size"),
             overrides = obj.parseOverrideList(::parseSpacerOverrideProps),
+            visibility = visibility,
             fallback = fallback,
         )
         // Lenient branch: unknown types keep id + fallback and never fail
         // the decode. The fallback subtree itself is still parsed strictly.
+        // No `visibility` — see [BuilderNode.Unknown]'s doc.
         else -> BuilderNode.Unknown(id = id, fallback = fallback)
     }
+}
+
+// ----- visibility -----
+
+/** Platforms recognized by node-level `visibility` — Kotlin mirror of
+ *  shared's `VisibilityPlatform` union / the RN decoder's
+ *  `VISIBILITY_PLATFORMS`. */
+private val VISIBILITY_PLATFORMS: Set<String> = setOf("ios", "android", "web")
+
+/**
+ * `visibility.platform` decodes LENIENTLY: any entry outside the known
+ * set is dropped rather than failing the whole config, and an
+ * empty-after-filtering array is treated the same as absent (`null`) —
+ * both mean "no constraint" to [isNodeVisible].
+ */
+private fun parseVisibilityPlatformList(el: kotlinx.serialization.json.JsonElement?): List<String>? {
+    val arr = el as? JsonArray ?: return null
+    val kept = arr.mapNotNull { entry -> (entry as? JsonPrimitive)?.takeIf { it.isString }?.content }
+        .filter { it in VISIBILITY_PLATFORMS }
+    return kept.ifEmpty { null }
+}
+
+/**
+ * Lenient `visibility` parse: a missing/non-object `visibility`, or one
+ * whose every field is unusable, decodes to `null` rather than failing —
+ * this is the one field on a known node type that does NOT fail the
+ * whole config decode on a structural defect (mirrors the RN decoder's
+ * `parseVisibility` exactly; see this file's `Visibility` doc for why).
+ */
+private fun parseVisibility(obj: JsonObject): Visibility? {
+    val v = obj["visibility"] as? JsonObject ?: return null
+    val platform = parseVisibilityPlatformList(v["platform"])
+    val minAppVersion = (v["minAppVersion"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    val maxAppVersion = (v["maxAppVersion"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    if (platform == null && minAppVersion == null && maxAppVersion == null) return null
+    return Visibility(platform = platform, minAppVersion = minAppVersion, maxAppVersion = maxAppVersion)
 }
 
 // ----- overrides -----

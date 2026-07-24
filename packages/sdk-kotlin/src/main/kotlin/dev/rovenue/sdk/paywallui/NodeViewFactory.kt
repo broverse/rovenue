@@ -311,6 +311,12 @@ internal class PaywallRenderContext(
     val onRestore: (() -> Unit)?,
     val onUrl: ((String) -> Unit)?,
     val loadImage: (ImageView, String) -> Unit,
+    /** The host app's version, as supplied to `Rovenue.configure`/`shared`
+     *  at bind time — feeds the `visibility.minAppVersion`/
+     *  `maxAppVersion` gate in [NodeViewFactory.build]. `null` when a
+     *  paywall renders before an appVersion was ever configured; the
+     *  gate fails open in that case (see Visibility.kt), never crashes. */
+    val appVersion: String? = null,
 ) {
     /** Localized + variable-resolved label. [cell] scopes variables to a
      *  package cell; elsewhere the selected package wins. */
@@ -332,10 +338,23 @@ internal class PaywallRenderContext(
  */
 internal data class CellScope(val packageId: String, val view: PackageView)
 
+/** This SDK's compile-time platform literal for the `visibility` gate —
+ *  never "web", the other value the shared `VisibilityPlatform` enum
+ *  allows (see BuilderConfigModel.kt's `VISIBILITY_PLATFORMS`). */
+private const val PLATFORM = "android"
+
 /** Builds the android.view.View tree for a [BuilderNode] subtree. */
 internal object NodeViewFactory {
 
     fun build(context: Context, node: BuilderNode, ctx: PaywallRenderContext, cell: CellScope?): View? {
+        // Visibility is gated FIRST, on the RAW node — before overrides
+        // are resolved, and before any style/text/child work happens. A
+        // hidden node renders NOTHING: not its fallback, not its
+        // children. `visibility` is deliberately NOT overridable (see
+        // BuilderConfigModel.kt's `Visibility` doc), so it must be read
+        // off `node`, never off the post-`applyOverrides` result.
+        if (!isNodeVisible(node.visibility, PLATFORM, ctx.appVersion)) return null
+
         // Every node passes through `applyOverrides` here, BEFORE any
         // style/text resolution happens in the per-type builders below —
         // `resolved` (not the original `node`) is what gets dispatched.

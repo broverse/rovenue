@@ -212,6 +212,38 @@ class BuilderConfigModelTest {
         assertEquals(ButtonVisualStyle.SECONDARY, cta.overrides?.first()?.props?.style)
     }
 
+    // ---- node visibility ---------------------------------------------------
+
+    /**
+     * Conformance proof: runs the Kotlin `isNodeVisible` against every
+     * `{ visibility, platform, appVersion, expected }` case in the shared
+     * `visibility` vector table — the same table the TS schema tests and
+     * the RN/Swift decoders are checked against. The Kotlin evaluator
+     * must agree with all 13.
+     */
+    @Test
+    fun `visibility vectors match`() {
+        for (el in section("visibility")) {
+            val v = el.jsonObject
+            val caseName = name(v)
+            val visibilityObj = v["visibility"]!!.jsonObject
+            val platformList = (visibilityObj["platform"] as? JsonArray)
+                ?.map { it.jsonPrimitive.content }
+            val visibility = Visibility(
+                platform = platformList,
+                minAppVersion = (visibilityObj["minAppVersion"] as? JsonPrimitive)?.content,
+                maxAppVersion = (visibilityObj["maxAppVersion"] as? JsonPrimitive)?.content,
+            )
+            val platformEl = v["platform"]
+            val platform = if (platformEl is JsonPrimitive && platformEl.isString) platformEl.content else null
+            val appVersionEl = v["appVersion"]
+            val appVersion = if (appVersionEl is JsonPrimitive && appVersionEl.isString) appVersionEl.content else null
+            val expected = v["expected"]!!.jsonPrimitive.content.toBoolean()
+
+            assertEquals(expected, isNodeVisible(visibility, platform, appVersion), caseName)
+        }
+    }
+
     @Test
     fun `resolveText vectors match against accept0`() {
         val config = decodeBuilderConfig(configJson(section("accept").first().jsonObject))!!

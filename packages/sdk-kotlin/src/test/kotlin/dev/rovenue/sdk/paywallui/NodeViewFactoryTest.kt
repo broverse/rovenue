@@ -1,5 +1,6 @@
 package dev.rovenue.sdk.paywallui
 
+import android.content.Context
 import dev.rovenue.sdk.Offering
 import dev.rovenue.sdk.Package
 import dev.rovenue.sdk.PackageType
@@ -8,6 +9,7 @@ import dev.rovenue.sdk.PeriodUnit
 import dev.rovenue.sdk.ProductCategory
 import dev.rovenue.sdk.ProductType
 import dev.rovenue.sdk.StoreProduct
+import io.mockk.mockk
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -330,5 +332,75 @@ class NodeViewFactoryTest {
         routeButtonAction(ButtonAction.Close, onClose = null, onRestore = null, onUrl = null)
         routeButtonAction(ButtonAction.Restore, onClose = null, onRestore = null, onUrl = null)
         routeButtonAction(ButtonAction.Url("x"), onClose = null, onRestore = null, onUrl = null)
+    }
+
+    // ---- NodeViewFactory.build: visibility gate ---------------------------
+    //
+    // These exercise the actual `build()` entry point (not just the pure
+    // `isNodeVisible` predicate covered by VisibilityTest/
+    // BuilderConfigModelTest) — a real android.content.Context is needed
+    // to construct it, but every case here is hidden (or gated before any
+    // view work happens), so the mocked Context is never actually
+    // exercised. Verifying a hidden result is the reliable part of this
+    // module's Android surface: it's a plain reference-equality check,
+    // unlike a ViewGroup's own bookkeeping (`childCount` etc.), which this
+    // module's stub Android jar always reports as empty regardless of
+    // what was actually added (`isReturnDefaultValues = true` — see
+    // build.gradle.kts) — that's exactly why this module has no
+    // Android-runtime test framework and construction is manually smoked
+    // instead (see RovenuePaywallView.kt's class doc). `build()` returning
+    // `null`, however, IS a faithful, directly observable contract.
+
+    private fun mockContext(): Context = mockk(relaxed = true)
+
+    private fun renderContext(appVersion: String? = "2.0.0") = PaywallRenderContext(
+        config = BuilderConfigModel(
+            formatVersion = 2,
+            defaultLocale = "en",
+            localizations = emptyMap(),
+            background = null,
+            root = BuilderNode.Stack(id = "root", axis = Axis.V, children = emptyList()),
+        ),
+        locale = null,
+        dark = false,
+        offering = null,
+        selectedPackageId = null,
+        isPurchasing = false,
+        select = {},
+        purchase = {},
+        onClose = null,
+        onRestore = null,
+        onUrl = null,
+        loadImage = { _, _ -> },
+        appVersion = appVersion,
+    )
+
+    @Test
+    fun `build returns null for a node hidden by platform`() {
+        val node = textNode().copy(visibility = Visibility(platform = listOf("ios")))
+        assertNull(NodeViewFactory.build(mockContext(), node, renderContext(), cell = null))
+    }
+
+    @Test
+    fun `build returns null for a hidden stack -- none of its children are built`() {
+        val stack = stackNode().copy(
+            visibility = Visibility(platform = listOf("ios")),
+            children = listOf(textNode(), spacerNode()),
+        )
+        assertNull(NodeViewFactory.build(mockContext(), stack, renderContext(), cell = null))
+    }
+
+    @Test
+    fun `build returns null for a hidden node even when it carries a fallback`() {
+        val node = textNode().copy(
+            visibility = Visibility(minAppVersion = "99.0.0"),
+            fallback = textNode(),
+        )
+        assertNull(NodeViewFactory.build(mockContext(), node, renderContext(appVersion = "1.0.0"), cell = null))
+    }
+
+    @Test
+    fun `build renders a node with no visibility rules`() {
+        assertTrue(NodeViewFactory.build(mockContext(), textNode(), renderContext(), cell = null) != null)
     }
 }
