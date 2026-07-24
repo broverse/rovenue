@@ -39,18 +39,11 @@ export const BuilderShell = component(({ projectId }: Props) => {
     };
   }, [vm]);
 
-  // A full page unload cannot be flushed reliably — a credentialed
+  // A full page unload is NOT flushed here on purpose: a credentialed
   // cross-origin JSON beacon needs a CORS preflight, which browsers drop
-  // during unload. So hand the decision to the person instead of pretending.
-  useEffect(() => {
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (!vm.isDirty) return;
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [vm]);
+  // during unload, so the decision is handed to the person instead. That
+  // prompt already exists — PaywallBuilderViewModel.guardUnload registers
+  // the `beforeunload` handler. Do not add a second one here.
 
   if (vm.isLoading) {
     return (

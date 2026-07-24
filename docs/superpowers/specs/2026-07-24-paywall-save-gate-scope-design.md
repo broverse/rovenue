@@ -24,7 +24,7 @@ The add-node palette (`add-node-popover.tsx`) is a flat list of all seven node t
 
 ### Why this is worse than it looks
 
-`autosave()` has no pre-flight check: it PATCHes unconditionally and, on the throw, only sets `autosaveStatus = "error"`. `lastSavedSnapshot` never advances. There is no `beforeunload` and no unmount flush. So the author keeps working — laying out nodes, moving things, writing copy — while nothing is being persisted, and closing the tab discards all of it.
+`autosave()` has no pre-flight check: it PATCHes unconditionally and, on the throw, only sets `autosaveStatus = "error"`. `lastSavedSnapshot` never advances, and there is no unmount flush. (A `beforeunload` prompt does already exist — `PaywallBuilderViewModel.guardUnload` — but it only warns; it saves nothing.) So the author keeps working — laying out nodes, moving things, writing copy — while nothing is being persisted, and closing the tab discards all of it.
 
 `AutosaveBadge` reports this as **"Save failed — retrying"**, which is false for a permanent 400, and `clearAutosaveError` flips the badge back to "saving" on the next mutation, so the red state is easy to miss.
 
@@ -80,7 +80,7 @@ After the retier, the only issues that can 400 the PATCH are `SCHEMA_INVALID` an
 Even with permanent 400s gone, autosave is throttled at 30s, so a tab closed mid-window loses whatever changed since the last successful save. Two additions:
 
 - **Unmount flush** — when the builder unmounts (closing the builder, navigating away), fire a final save if `isDirty`.
-- **`beforeunload` guard** — if `isDirty` when the tab/window is closing, prompt the browser's "leave site?" dialog (`preventDefault()` + `returnValue`). **No save is attempted here**, and that is deliberate: `navigator.sendBeacon` was the obvious candidate and does not work in this architecture. The API is a separate origin (`API_BASE_URL` comes from `VITE_API_URL`), and a JSON body makes the beacon a non-simple cross-origin request, so it needs a CORS preflight — which browsers drop unreliably during unload. A beacon that silently fails is worse than an honest prompt.
+- **`beforeunload` guard — already present.** `PaywallBuilderViewModel.guardUnload` already prompts the browser's "leave site?" dialog when `isDirty`. Nothing to add; do not register a second listener. **No save is attempted there**, and that is deliberate: `navigator.sendBeacon` was the obvious candidate and does not work in this architecture. The API is a separate origin (`API_BASE_URL` comes from `VITE_API_URL`), and a JSON body makes the beacon a non-simple cross-origin request, so it needs a CORS preflight — which browsers drop unreliably during unload. A beacon that silently fails is worse than an honest prompt.
 
   The unmount flush is what actually saves work, and it covers the common case (closing the builder, navigating within the app). The `beforeunload` prompt covers the rest by handing the decision to the person, which is the only guarantee available. Do not claim a guarantee the browser does not give — the requirement is "flush on unmount, prompt on unload", not "never loses data".
 
