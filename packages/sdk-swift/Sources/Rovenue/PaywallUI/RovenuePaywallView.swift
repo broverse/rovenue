@@ -203,6 +203,19 @@ struct BuilderNodeView: View {
     let ctx: PaywallRenderContext
     let cell: CellScope?
 
+    /// The gate's decision for this node, split out of `body` so it is
+    /// reachable from tests: SwiftUI's `body` cannot be inspected without a
+    /// view-testing dependency this package does not carry, so asserting on
+    /// `body` directly is not possible here. Testing THIS instead pins the
+    /// wiring that can realistically drift — that the platform literal is
+    /// the SDK's own, that the app version comes from the render context,
+    /// and that the RAW `node.visibility` is read rather than the
+    /// overrides-applied node. What it cannot pin is `body` continuing to
+    /// branch on it; see PaywallRenderSupportTests.
+    var isVisible: Bool {
+        isNodeVisible(node.visibility, platform: paywallVisibilityPlatform, appVersion: ctx.appVersion)
+    }
+
     var body: some View {
         // Visibility is gated FIRST, on the RAW `node.visibility` — before
         // overrides are resolved, and before any style/text/child work
@@ -210,7 +223,7 @@ struct BuilderNodeView: View {
         // its children. `visibility` is deliberately NOT overridable (see
         // BuilderConfigModel.swift's `Visibility` doc), so it must be read
         // off `node` directly, never off `applyOverrides`'s result.
-        if isNodeVisible(node.visibility, platform: paywallVisibilityPlatform, appVersion: ctx.appVersion) {
+        if isVisible {
             resolvedContent
         } else {
             EmptyView()

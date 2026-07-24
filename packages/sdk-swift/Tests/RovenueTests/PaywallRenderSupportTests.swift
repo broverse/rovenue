@@ -72,55 +72,93 @@ final class PaywallRenderSupportTests: XCTestCase {
 
     // MARK: - visibility gate (BuilderNodeView)
     //
-    // BuilderNodeView.body gates on `isNodeVisible(node.visibility,
-    // platform:appVersion:)` BEFORE dispatching to `resolvedContent` — a
-    // bare SwiftUI view body isn't unit-testable without a rendering
-    // harness, so these pin exactly the predicate call the gate makes,
-    // for three representative cases: platform-hidden, a
-    // hidden stack (whose children the gate never even reaches, since it
-    // returns `EmptyView()` before `resolvedContent`'s switch looks at
-    // `props.children`), and a hidden node that still carries a fallback
-    // (rendered NEITHER — the fallback is irrelevant to the gate; it can
-    // only ever be reached from inside `resolvedContent`, which the gate
-    // never enters).
+    // These construct a REAL `BuilderNodeView` and assert its `isVisible`
+    // — the same value `body` branches on. That pins the wiring that can
+    // realistically drift: the platform literal being the SDK's own (not a
+    // value the test supplies), the app version coming from the render
+    // context, and the RAW `node.visibility` being read rather than the
+    // overrides-applied node.
+    //
+    // KNOWN LIMIT, stated rather than implied: they do NOT prove `body`
+    // still branches on `isVisible`. Deleting that `if` would leave these
+    // green. SwiftUI bodies are not inspectable without a view-testing
+    // dependency (ViewInspector / snapshot testing) that this package does
+    // not carry, so closing that last gap needs new test infrastructure —
+    // a deliberate scope call, not an oversight. The Kotlin sibling asserts
+    // on `NodeViewFactory.build(...)` returning null and the RN sibling
+    // renders the whole view, because both have a testable entry point at
+    // that level; Swift does not.
 
-    func test_platformHidden_gateHidesTheNode() {
-        let props = TextProps(id: "t1", key: "k", role: .body, visibility: Visibility(platform: ["android"]))
-        XCTAssertFalse(isNodeVisible(props.visibility, platform: "ios", appVersion: nil))
+    private func makeCtx(appVersion: String?) throws -> PaywallRenderContext {
+        let json = """
+        {"formatVersion":2,"defaultLocale":"en","localizations":{"en":{}},
+         "root":{"type":"stack","id":"root","axis":"v","children":[]}}
+        """
+        let config = try JSONDecoder().decode(BuilderConfigModel.self, from: Data(json.utf8))
+        return PaywallRenderContext(
+            config: config, locale: "en", dark: false, offering: nil,
+            selectedPackageId: nil, isPurchasing: false,
+            select: { _ in }, purchase: {},
+            onClose: nil, onRestore: nil, onUrl: nil,
+            appVersion: appVersion
+        )
     }
 
-    func test_hiddenStack_gateHidesBeforeAnyChildIsReached() {
-        let stack = StackProps(
+    private func view(_ node: BuilderNode, appVersion: String? = nil) throws -> BuilderNodeView {
+        BuilderNodeView(node: node, ctx: try makeCtx(appVersion: appVersion), cell: nil)
+    }
+
+    func test_platformHidden_gateHidesTheNode() throws {
+        // This SDK's literal is "ios", so an android-only node is hidden —
+        // and the test never says "ios" itself, so a wrong literal fails.
+        let node = BuilderNode.text(
+            TextProps(id: "t1", key: "k", role: .body, visibility: Visibility(platform: ["android"])))
+        XCTAssertFalse(try view(node).isVisible)
+    }
+
+    func test_platformMatching_gateShowsTheNode() throws {
+        let node = BuilderNode.text(
+            TextProps(id: "t1", key: "k", role: .body, visibility: Visibility(platform: ["ios"])))
+        XCTAssertTrue(try view(node).isVisible)
+    }
+
+    func test_hiddenStack_gateHidesItBeforeAnyChildIsReached() throws {
+        let node = BuilderNode.stack(StackProps(
             id: "root", axis: .v,
             children: [
                 .text(TextProps(id: "c1", key: "k1", role: .body)),
                 .spacer(SpacerProps(id: "c2")),
             ],
             visibility: Visibility(platform: ["android"])
-        )
-        XCTAssertFalse(isNodeVisible(stack.visibility, platform: "ios", appVersion: nil))
-        // The children themselves carry no visibility of their own here —
-        // the gate short-circuits on the STACK before BuilderNodeView ever
-        // recurses into `stack.children`, so their own visibility is never
-        // even consulted for this tree.
-        XCTAssertTrue(stack.children.allSatisfy { isNodeVisible($0.visibility, platform: "ios", appVersion: nil) })
+        ))
+        // The gate returns before `resolvedContent` ever looks at
+        // `children`, so the children's own (absent) visibility never runs.
+        XCTAssertFalse(try view(node).isVisible)
     }
 
-    func test_hiddenNodeWithFallback_stillHidden_fallbackNeverRenders() {
+    func test_hiddenNodeWithFallback_stillHidden_fallbackNeverRenders() throws {
         let fallback = BuilderNodeBox(node: .text(TextProps(id: "fb", key: "k2", role: .body)))
         let props = TextProps(
             id: "t1", key: "k", role: .body,
             visibility: Visibility(minAppVersion: "99.0.0"), fallback: fallback
         )
         XCTAssertNotNil(props.fallback, "the node does carry a fallback")
-        XCTAssertFalse(
-            isNodeVisible(props.visibility, platform: "ios", appVersion: "1.0.0"),
-            "a hidden node renders neither its own content nor its fallback"
-        )
+        // `fallback` is only reachable from inside `resolvedContent`, which
+        // the gate never enters — hidden means neither content nor fallback.
+        XCTAssertFalse(try view(.text(props), appVersion: "1.0.0").isVisible)
     }
 
-    func test_noVisibilityRules_gateShowsTheNode() {
-        let props = TextProps(id: "t1", key: "k", role: .body)
-        XCTAssertTrue(isNodeVisible(props.visibility, platform: "ios", appVersion: nil))
+    func test_versionBound_readsTheAppVersionFromTheRenderContext() throws {
+        // Same node, two contexts: the only difference is ctx.appVersion,
+        // so this fails if the gate stops reading it.
+        let props = TextProps(
+            id: "t1", key: "k", role: .body, visibility: Visibility(minAppVersion: "2.0.0"))
+        XCTAssertFalse(try view(.text(props), appVersion: "1.9.9").isVisible)
+        XCTAssertTrue(try view(.text(props), appVersion: "2.0.0").isVisible)
+    }
+
+    func test_noVisibilityRules_gateShowsTheNode() throws {
+        let node = BuilderNode.text(TextProps(id: "t1", key: "k", role: .body))
+        XCTAssertTrue(try view(node).isVisible)
     }
 }
