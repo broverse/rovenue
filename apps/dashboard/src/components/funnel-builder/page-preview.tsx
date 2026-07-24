@@ -392,7 +392,7 @@ export const PagePreview = component(
         )}
         {page.type === "rating" && (
           <Cap>
-            <RatingStars page={resolved} theme={theme} />
+            <RatingStars page={resolved} theme={theme} {...liveProps} />
           </Cap>
         )}
         {page.type === "short_text" && (
@@ -1050,45 +1050,60 @@ const OpinionScale = component(
 
 // ---------- Rating stars ----------
 
-const RatingStars = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
-  const max = page.max ?? 5;
-  // Local interactive preview state — click fills up to that star.
-  // Hover lights up the in-flight rating so it feels live in the canvas.
-  const [picked, setPicked] = useState(0);
-  const [hover, setHover] = useState(0);
-  const filledThrough = hover || picked;
-  return (
-    <div className="mt-3 flex items-center gap-1.5" onMouseLeave={() => setHover(0)}>
-      {Array.from({ length: max }, (_, i) => {
-        const n = i + 1;
-        const on = n <= filledThrough;
-        return (
-          <button
-            key={i}
-            type="button"
-            onClick={() => setPicked(n)}
-            onMouseEnter={() => setHover(n)}
-            className="cursor-pointer p-0.5 transition hover:scale-110"
-          >
-            <Star
-              size={30}
-              strokeWidth={1.5}
-              style={{
-                color: theme.primary,
-                fill: on ? theme.primary : "transparent",
-              }}
-            />
-          </button>
-        );
-      })}
-      {picked > 0 && (
-        <span className="ml-2 font-rv-mono text-[11px] opacity-60">
-          {picked} / {max}
-        </span>
-      )}
-    </div>
-  );
-});
+const RatingStars = component(
+  ({
+    page,
+    theme,
+    live = false,
+    value,
+    onChange,
+  }: {
+    page: ResolvedPage;
+    theme: Theme;
+    live?: boolean;
+    value?: AnswerValue;
+    onChange?: (next: AnswerValue) => void;
+  }) => {
+    const max = page.max ?? 5;
+    const [localPicked, setLocalPicked] = useState(0);
+    const [hover, setHover] = useState(0);
+    // The recorded rating in live mode; the local preview pick otherwise.
+    const picked = live ? (typeof value === "number" ? value : 0) : localPicked;
+    const filledThrough = hover || picked;
+    return (
+      <div className="mt-3 flex items-center gap-1.5" onMouseLeave={() => setHover(0)}>
+        {Array.from({ length: max }, (_, i) => {
+          const n = i + 1;
+          const on = n <= filledThrough;
+          return (
+            <button
+              key={i}
+              type="button"
+              aria-label={`rate ${n}`}
+              onClick={() => (live ? onChange?.(n) : setLocalPicked(n))}
+              onMouseEnter={() => setHover(n)}
+              className="cursor-pointer p-0.5 transition hover:scale-110"
+            >
+              <Star
+                size={30}
+                strokeWidth={1.5}
+                style={{
+                  color: theme.primary,
+                  fill: on ? theme.primary : "transparent",
+                }}
+              />
+            </button>
+          );
+        })}
+        {picked > 0 && (
+          <span className="ml-2 font-rv-mono text-[11px] opacity-60">
+            {picked} / {max}
+          </span>
+        )}
+      </div>
+    );
+  },
+);
 
 // ---------- Text inputs ----------
 

@@ -90,6 +90,14 @@ const opinionPage: Page = {
   max: 5,
 } as Page;
 
+const ratingPage: Page = {
+  id: "pg_rate",
+  type: "rating",
+  question_id: "q_rate",
+  title: L("Rate your experience"),
+  max: 5,
+} as Page;
+
 function base(page: Page) {
   return {
     page,
@@ -209,6 +217,13 @@ describe("PagePreview — live mode", () => {
     render(<PagePreview {...base(opinionPage)} mode="live" value={null} onAnswer={onAnswer} />);
     await userEvent.click(screen.getByRole("button", { name: "3" }));
     expect(onAnswer).toHaveBeenLastCalledWith(3);
+  });
+
+  it("rating emits the picked star count as a number", async () => {
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(ratingPage)} mode="live" value={null} onAnswer={onAnswer} />);
+    await userEvent.click(screen.getByLabelText("rate 4"));
+    expect(onAnswer).toHaveBeenLastCalledWith(4);
   });
 });
 
