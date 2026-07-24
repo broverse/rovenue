@@ -87,7 +87,7 @@ Refusing silently would be its own bug, which is why the disabled affordance and
 ## 4. Testing
 
 - **The barrier** — a view-model test where the flush's PATCH is still pending when `load()` is called: assert the GET happens after the PATCH resolves. This must fail without the barrier, so write it against a controllable deferred promise rather than a timer.
-- **A rejected flush** — `load()` still completes. Without this the barrier turns a save failure into a builder that never opens.
+- **A rejected flush** — `load()` still completes. This one cannot fail today: `saveNow` catches its own errors and does not rethrow, so the flush promise never rejects. Keep it as a guard for a future change that makes it rethrow, and label it as such rather than implying it is discriminating.
 - **The caps** — `addNode` returns `null` and leaves the tree unchanged at the node cap and at the depth cap; returns an id one below each.
 - **One definition** — a test asserting the API's bound check and the dashboard's guard read the same exported constants, so a future edit to one cannot silently diverge.
 

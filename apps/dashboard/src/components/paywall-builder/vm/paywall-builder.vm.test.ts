@@ -864,6 +864,13 @@ describe("reopen after an unmount flush", () => {
     expect(order).toEqual(["patch:start", "get"]);
   });
 
+  // NOTE: this cannot fail today, and that is worth stating rather than
+  // dressing it up. `saveNowInner` catches its own errors (it sets
+  // autosaveStatus and does not rethrow), so the flush promise never
+  // rejects and the barrier's `.catch()` is belt-and-braces. The test is a
+  // guard for the day someone makes saveNow rethrow: at that moment the
+  // `.catch()` is the only thing keeping a failed save from turning into a
+  // builder that never opens.
   it("does not wedge the reopen when the flush fails", async () => {
     const flushGate = deferred<PaywallBuilderDetailDto>();
     const oldVm = makeVm({
@@ -875,13 +882,18 @@ describe("reopen after an unmount flush", () => {
     void oldVm.saveNow();
     await Promise.resolve();
 
-    flushGate.reject(new Error("boom"));
-
     const newVm = makeVm({
       get: vi.fn().mockResolvedValue(fakeDetail()),
       patchBuilderConfig: vi.fn(),
     });
-    await newVm.load(() => {});
+    // Start the load FIRST so it is parked on the barrier, then fail the
+    // flush. Rejecting before the load starts would clear `pendingFlush`
+    // via its `finally`, so the load would never await it and the test
+    // would pass without exercising the rejection path at all.
+    const loading = newVm.load(() => {});
+    await Promise.resolve();
+    flushGate.reject(new Error("boom"));
+    await loading;
 
     expect(newVm.isLoading).toBe(false);
     expect(newVm.error).toBeNull();

@@ -122,7 +122,7 @@ describe("reopen after an unmount flush", () => {
 });
 ```
 
-Note the second test is the one that matters most: a barrier that propagates a rejection turns a failed save into a builder that never opens, which is worse than the race it fixes.
+Note on the second test: it cannot fail today. `saveNowInner` catches its own errors and does not rethrow, so the flush promise never rejects and the barrier's `.catch()` is belt-and-braces. Keep both, but label the test honestly — it guards the day someone makes `saveNow` rethrow, at which point that `.catch()` is the only thing keeping a failed save from becoming a builder that never opens.
 
 - [ ] **Step 2: Run to verify failure**
 
