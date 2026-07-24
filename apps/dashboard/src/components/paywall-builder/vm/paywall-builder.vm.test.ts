@@ -7,10 +7,14 @@ import { PaywallBuilderApi, type PaywallBuilderDetailDto } from "../../../lib/se
 import { ApiError } from "../../../lib/api";
 import { findNode } from "../tree-ops";
 import {
+  MAX_BUILDER_DEPTH,
+  MAX_BUILDER_NODES,
   emptyBuilderConfig,
+  measureNodeTree,
   type BuilderConfig,
   type PackageListNode,
   type PaywallNode,
+  type StackNode,
   type TextNode,
 } from "@rovenue/shared/paywall";
 
@@ -291,7 +295,7 @@ describe("PaywallBuilderViewModel", () => {
     const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
     await vm.load(() => {});
 
-    const plId = vm.addNode("packageList", "root");
+    const plId = vm.addNode("packageList", "root")!;
     vm.setCellTemplate(plId, "default");
 
     const pl = treeOpsFindNode(vm, plId) as PackageListNode;
@@ -308,7 +312,7 @@ describe("PaywallBuilderViewModel", () => {
     const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
     await vm.load(() => {});
 
-    const plId = vm.addNode("packageList", "root");
+    const plId = vm.addNode("packageList", "root")!;
     vm.setCellTemplate(plId, "default");
     expect((treeOpsFindNode(vm, plId) as PackageListNode).cellTemplate).toBeDefined();
 
@@ -982,5 +986,51 @@ describe("reopen after an unmount flush", () => {
 
     expect(newVm.isLoading).toBe(false);
     expect(newVm.error).toBeNull();
+  });
+});
+
+describe("size caps", () => {
+  it("refuses to add a node past the node cap and leaves the tree unchanged", async () => {
+    const config = fakeConfig();
+    // One under the cap counting the root itself.
+    while (measureNodeTree(config).nodes < MAX_BUILDER_NODES) {
+      config.root.children.push({ type: "spacer", id: `s${config.root.children.length}`, size: 4 });
+    }
+    const get = vi.fn().mockResolvedValue(fakeDetail({ builderConfig: config }));
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    const before = vm.config.root.children.length;
+    expect(vm.addNode("spacer", "root")).toBeNull();
+    expect(vm.config.root.children.length).toBe(before);
+    expect(vm.atNodeCapacity).toBe(true);
+  });
+
+  it("refuses to add past the depth cap", async () => {
+    const config = fakeConfig();
+    // Nest stacks until the tree is exactly at the depth cap, keeping a
+    // handle on the deepest one. Typed as StackNode so `.children` stays
+    // addressable — `config.root.children` is a PaywallNode[].
+    let cursor: StackNode = config.root;
+    let n = 0;
+    while (measureNodeTree(config).depth < MAX_BUILDER_DEPTH) {
+      const child: StackNode = { type: "stack", id: `st${n++}`, axis: "v", children: [] };
+      cursor.children.push(child);
+      cursor = child;
+    }
+    const get = vi.fn().mockResolvedValue(fakeDetail({ builderConfig: config }));
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    expect(vm.addNode("spacer", cursor.id)).toBeNull();
+  });
+
+  it("still adds when there is room", async () => {
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    await vm.load(() => {});
+
+    expect(vm.addNode("spacer", "root")).toEqual(expect.any(String));
+    expect(vm.atNodeCapacity).toBe(false);
   });
 });

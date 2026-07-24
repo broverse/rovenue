@@ -5,10 +5,13 @@ import { z } from "zod";
 import { sql } from "drizzle-orm";
 import { MemberRole, drizzle, type Offering } from "@rovenue/db";
 import {
+  MAX_BUILDER_DEPTH,
+  MAX_BUILDER_NODES,
   builderConfigSchema,
   diffBuilderConfigs,
   isBlockingIssue,
   isPublishBlockingIssue,
+  measureNodeTree,
   validateBuilderConfig,
 } from "@rovenue/shared/paywall";
 import { requireDashboardAuth } from "../../middleware/dashboard-auth";
@@ -108,39 +111,6 @@ async function loadOffering(
 function extractOfferingPackageIds(offering: { packages: unknown }): string[] {
   const parsed = packagesSchema.safeParse(offering.packages);
   return parsed.success ? parsed.data.map((p) => p.identifier) : [];
-}
-
-const MAX_BUILDER_DEPTH = 32;
-const MAX_BUILDER_NODES = 500;
-
-/**
- * Iterative (explicit-stack) walk over a raw candidate builder-config,
- * counting node-ish objects and tracking depth via `children` arrays and
- * `fallback` objects. Runs on UNVALIDATED input, so it treats any object as
- * a potential node — an over-count is fine (limits are generous), the point
- * is that this function itself can never blow the call stack.
- */
-function measureNodeTree(raw: unknown): { depth: number; nodes: number } {
-  const root = (raw as { root?: unknown } | null)?.root;
-  if (typeof root !== "object" || root === null) return { depth: 0, nodes: 0 };
-  let nodes = 0;
-  let maxDepth = 0;
-  const stack: Array<{ value: unknown; depth: number }> = [{ value: root, depth: 1 }];
-  while (stack.length > 0) {
-    const { value, depth } = stack.pop()!;
-    if (typeof value !== "object" || value === null) continue;
-    nodes += 1;
-    if (depth > maxDepth) maxDepth = depth;
-    if (nodes > MAX_BUILDER_NODES || depth > MAX_BUILDER_DEPTH) break;
-    const node = value as { children?: unknown; fallback?: unknown };
-    if (Array.isArray(node.children)) {
-      for (const child of node.children) stack.push({ value: child, depth: depth + 1 });
-    }
-    if (typeof node.fallback === "object" && node.fallback !== null) {
-      stack.push({ value: node.fallback, depth: depth + 1 });
-    }
-  }
-  return { depth: maxDepth, nodes };
 }
 
 /**

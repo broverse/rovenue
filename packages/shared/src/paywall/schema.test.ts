@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { builderConfigSchema, emptyBuilderConfig, type BuilderConfig } from "./schema";
+import {
+  MAX_BUILDER_DEPTH,
+  builderConfigSchema,
+  emptyBuilderConfig,
+  measureNodeTree,
+  type BuilderConfig,
+} from "./schema";
 
 describe("builderConfigSchema", () => {
   it("round-trips a two-level tree exercising every node type", () => {
@@ -446,5 +452,32 @@ describe("emptyBuilderConfig", () => {
     const config = emptyBuilderConfig();
     expect(config.defaultLocale).toBe("en");
     expect(builderConfigSchema.safeParse(config).success).toBe(true);
+  });
+});
+
+describe("measureNodeTree", () => {
+  it("counts nodes and depth through children and fallback", () => {
+    const raw = {
+      root: {
+        type: "stack",
+        children: [
+          { type: "spacer" },
+          { type: "image", fallback: { type: "spacer" } },
+        ],
+      },
+    };
+    expect(measureNodeTree(raw)).toEqual({ depth: 3, nodes: 4 });
+  });
+
+  it("returns zeroes when there is no root object", () => {
+    expect(measureNodeTree(null)).toEqual({ depth: 0, nodes: 0 });
+    expect(measureNodeTree({})).toEqual({ depth: 0, nodes: 0 });
+  });
+
+  it("stops early instead of walking an unbounded tree", () => {
+    let deep: unknown = { type: "stack", children: [] };
+    for (let i = 0; i < MAX_BUILDER_DEPTH + 50; i++) deep = { type: "stack", children: [deep] };
+    const measured = measureNodeTree({ root: deep });
+    expect(measured.depth).toBeGreaterThan(MAX_BUILDER_DEPTH);
   });
 });

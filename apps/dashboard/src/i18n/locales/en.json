@@ -1309,6 +1309,7 @@
       "layers": {
         "title": "Layers",
         "add": "Add node",
+        "addAtCapacity": "This paywall has reached the maximum number of elements.",
         "moveUp": "Move up",
         "moveDown": "Move down",
         "delete": "Delete",

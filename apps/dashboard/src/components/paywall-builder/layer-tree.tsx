@@ -114,9 +114,17 @@ function LayerRow({
           <div className="relative">
             <button
               type="button"
-              title={t("paywalls.builder.layers.add", "Add node")}
+              disabled={vm.atNodeCapacity}
+              title={
+                vm.atNodeCapacity
+                  ? t(
+                      "paywalls.builder.layers.addAtCapacity",
+                      "This paywall has reached the maximum number of elements.",
+                    )
+                  : t("paywalls.builder.layers.add", "Add node")
+              }
               onClick={() => setAddOpen((o) => !o)}
-              className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-rv-mute-500 transition hover:bg-rv-c3 hover:text-foreground"
+              className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-rv-mute-500 transition hover:bg-rv-c3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Plus size={11} />
             </button>

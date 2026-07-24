@@ -15,8 +15,11 @@ import type {
   DashboardPaywallVersionRow,
 } from "@rovenue/shared";
 import {
+  MAX_BUILDER_DEPTH,
+  MAX_BUILDER_NODES,
   emptyBuilderConfig,
   isPublishBlockingIssue,
+  measureNodeTree,
   validateBuilderConfig,
 } from "@rovenue/shared/paywall";
 import {
@@ -282,9 +285,22 @@ export class PaywallBuilderViewModel {
     this.selectedNodeId = id;
   }
 
-  addNode(type: PaywallNode["type"], parentId: string, index?: number): string {
+  /** True when the tree is at the size the API will reject a save for. */
+  @derived get atNodeCapacity(): boolean {
+    return measureNodeTree(this.config).nodes >= MAX_BUILDER_NODES;
+  }
+
+  /**
+   * Returns the new node's id, or `null` when the insert would cross a cap
+   * the API enforces. Producing an over-cap config would make every autosave
+   * 400 permanently — the failure mode the save-gate phase existed to remove.
+   */
+  addNode(type: PaywallNode["type"], parentId: string, index?: number): string | null {
     const node = treeOps.newNode(type, () => createId().slice(0, 8));
-    this.config = { ...this.config, root: treeOps.insertNode(this.config.root, parentId, node, index) };
+    const nextRoot = treeOps.insertNode(this.config.root, parentId, node, index);
+    const bounds = measureNodeTree({ root: nextRoot });
+    if (bounds.nodes > MAX_BUILDER_NODES || bounds.depth > MAX_BUILDER_DEPTH) return null;
+    this.config = { ...this.config, root: nextRoot };
     this.registerFreshLocKeys(node);
     this.selectedNodeId = node.id;
     return node.id;
