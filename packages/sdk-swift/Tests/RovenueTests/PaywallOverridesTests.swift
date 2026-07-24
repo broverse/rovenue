@@ -110,7 +110,7 @@ final class PaywallOverridesTests: XCTestCase {
     }
 
     func test_builderNodeDispatch_unknownNodePassesThroughUnchanged() {
-        let node = BuilderNode.unknown(id: "u1", fallback: nil)
+        let node = BuilderNode.unknown(id: "u1", visibility: nil, fallback: nil)
         let result = applyOverrides(node, active: OverrideActiveConditions(introEligible: true, selected: true))
         XCTAssertEqual(result.id, "u1")
     }

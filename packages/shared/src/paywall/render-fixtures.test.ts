@@ -45,7 +45,10 @@ interface Fixture {
   visibility: Array<{
     name: string;
     visibility: NodeVisibility;
-    platform: VisibilityPlatform | null;
+    // Deliberately `string`, not `VisibilityPlatform`: the table carries a
+    // blank-platform case that TS's own types forbid but the native ports'
+    // nullable String allows, so the contract can pin all four on it.
+    platform: string | null;
     appVersion: string | null;
     expected: boolean;
   }>;
@@ -60,7 +63,7 @@ describe("render-fixtures contract", () => {
     expect(fixture.reject.length).toBeGreaterThanOrEqual(5);
     expect(fixture.variables.length).toBeGreaterThanOrEqual(8);
     expect(fixture.resolveText.length).toBeGreaterThanOrEqual(4);
-    expect(fixture.visibility.length).toBeGreaterThanOrEqual(10);
+    expect(fixture.visibility.length).toBeGreaterThanOrEqual(14);
     expect(fixture._comment).toContain("lenient");
   });
 
@@ -112,7 +115,12 @@ describe("render-fixtures contract", () => {
   describe("visibility vectors", () => {
     for (const v of fixture.visibility) {
       it(`${v.name}`, () => {
-        expect(isNodeVisible(v.visibility, { platform: v.platform, appVersion: v.appVersion })).toBe(
+        expect(
+          isNodeVisible(v.visibility, {
+            platform: v.platform as VisibilityPlatform | null,
+            appVersion: v.appVersion,
+          }),
+        ).toBe(
           v.expected,
         );
       });

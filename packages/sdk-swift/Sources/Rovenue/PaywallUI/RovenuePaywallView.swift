@@ -252,7 +252,7 @@ struct BuilderNodeView: View {
             } else {
                 Spacer()
             }
-        case .unknown(_, let fallback):
+        case .unknown(_, _, let fallback):
             if let fallback {
                 BuilderNodeView(node: fallback.node, ctx: ctx, cell: cell)
             }

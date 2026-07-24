@@ -5,7 +5,7 @@
 //  strict authoring schema (Zod, used by the dashboard builder + API
 //  validation). This decoder is the LENIENT platform counterpart per
 //  packages/shared/src/paywall/render-fixtures.json's `_comment` — an
-//  unrecognized node `type` decodes to `.unknown(id:fallback:)` instead of
+//  unrecognized node `type` decodes to `.unknown(id:visibility:fallback:)` instead of
 //  throwing, so a paywall shipped with a node type added in a later SDK
 //  release still renders (falling back, or rendering nothing for that node)
 //  on older clients. Any other structural defect (bad enum value, missing
@@ -673,10 +673,10 @@ public enum BuilderNode: Decodable {
     case packageList(PackageListProps)
     case purchaseButton(PurchaseButtonProps)
     case spacer(SpacerProps)
-    case unknown(id: String, fallback: BuilderNodeBox?)
+    case unknown(id: String, visibility: Visibility?, fallback: BuilderNodeBox?)
 
     private enum TypeKey: String, CodingKey { case type }
-    private enum UnknownKeys: String, CodingKey { case id, fallback }
+    private enum UnknownKeys: String, CodingKey { case id, visibility, fallback }
 
     public init(from decoder: Decoder) throws {
         let typeContainer = try decoder.container(keyedBy: TypeKey.self)
@@ -693,7 +693,13 @@ public enum BuilderNode: Decodable {
             let container = try decoder.container(keyedBy: UnknownKeys.self)
             let id = try container.decode(String.self, forKey: .id)
             let fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
-            self = .unknown(id: id, fallback: fallback)
+            // `visibility` IS retained here: it is the author's "don't show
+            // this here", and an unknown type is exactly the forward-compat
+            // case where a platform restriction matters most — dropping it
+            // would render the fallback on a platform the author excluded,
+            // which the web renderer already refuses to do.
+            let visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+            self = .unknown(id: id, visibility: visibility, fallback: fallback)
         }
     }
 
@@ -707,7 +713,7 @@ public enum BuilderNode: Decodable {
         case .packageList(let p): return p.id
         case .purchaseButton(let p): return p.id
         case .spacer(let p): return p.id
-        case .unknown(let id, _): return id
+        case .unknown(let id, _, _): return id
         }
     }
 
@@ -725,7 +731,7 @@ public enum BuilderNode: Decodable {
         case .packageList(let p): return p.visibility
         case .purchaseButton(let p): return p.visibility
         case .spacer(let p): return p.visibility
-        case .unknown: return nil
+        case .unknown(_, let v, _): return v
         }
     }
 }

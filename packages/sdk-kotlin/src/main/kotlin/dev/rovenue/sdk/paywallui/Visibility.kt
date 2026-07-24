@@ -86,7 +86,11 @@ fun isNodeVisible(visibility: Visibility?, platform: String?, appVersion: String
     // An empty list is what the builder produces the moment an author
     // unticks the last box. Reading it as "nowhere" would let a stray
     // click delete content from every device.
-    if (!allowedPlatforms.isNullOrEmpty() && platform != null && platform !in allowedPlatforms) {
+    // `isNullOrBlank`, not `!= null`: the TS reference guards with JS
+    // falsiness, so an empty-string platform reads as UNKNOWN there and
+    // fails open. Checking only for null here would hide the node instead
+    // — a reference-vs-port split on the same input.
+    if (!allowedPlatforms.isNullOrEmpty() && !platform.isNullOrBlank() && platform !in allowedPlatforms) {
         return false
     }
 

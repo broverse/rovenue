@@ -161,7 +161,7 @@ export type BuilderNode =
       visibility?: NodeVisibility;
       fallback?: BuilderNode;
     }
-  | { type: "unknown"; id: string; fallback?: BuilderNode };
+  | { type: "unknown"; id: string; visibility?: NodeVisibility; fallback?: BuilderNode };
 
 export type BuilderConfigModel = {
   formatVersion: 2;
@@ -547,8 +547,12 @@ function parseNode(o: Obj): BuilderNode {
     default:
       // Lenient branch: unknown types keep id + fallback and never fail
       // the decode; the fallback subtree above was still parsed strictly.
-      // No `overrides` field exists on this case (mirrors Swift's
-      // `.unknown(id:fallback:)` / Kotlin's `BuilderNode.Unknown`).
-      return { type: "unknown", id, fallback };
+      // No `overrides` field exists on this case. `visibility` IS
+      // retained: it is the author's "don't show this here", and an
+      // unknown type is exactly the forward-compat case where a
+      // platform restriction matters most — dropping it would render
+      // the fallback on a platform the author excluded, which is what
+      // the web renderer already refuses to do.
+      return { type: "unknown", id, visibility: parseVisibility(o), fallback };
   }
 }

@@ -211,7 +211,7 @@ function NodeView({
   // resurrect a hidden node — this ordering just keeps that guarantee
   // correct if that allow-list is ever widened. Mirrors nodes.tsx's
   // `renderNode` gate.
-  if (!isNodeVisible(node.type === "unknown" ? undefined : node.visibility, ctx)) return null;
+  if (!isNodeVisible(node.visibility, ctx)) return null;
 
   // Every node passes through `applyOverrides` here, BEFORE any
   // style/text resolution happens below — `resolved` (not the original

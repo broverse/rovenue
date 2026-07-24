@@ -786,6 +786,41 @@
           ]
         }
       }
+    },
+    {
+      "name": "unknown node type carrying visibility (decoders MUST retain it)",
+      "_note": "visibility is the author's 'don't show this here'. An unknown type is exactly the forward-compat case where that matters most: dropping it renders the fallback on a platform the author excluded. The web renderer gates before it ever reaches the unknown branch, so the three native decoders must retain visibility on their unknown node too.",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "t": "Hello"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "video",
+              "id": "v1",
+              "visibility": {
+                "platform": [
+                  "ios"
+                ]
+              },
+              "fallback": {
+                "type": "text",
+                "id": "v1_fb",
+                "key": "t",
+                "role": "body"
+              }
+            }
+          ]
+        }
+      }
     }
   ],
   "reject": [
@@ -1404,6 +1439,18 @@
       "appVersion": "1.0.0-beta",
       "expected": true,
       "_note": "A component that is not a run of digits makes the comparison inconclusive; inconclusive fails OPEN. `\"1.0.0-beta\".split('.').map(Int)` MUST NOT throw the decoder."
+    },
+    {
+      "name": "blank platform string is UNKNOWN, not a mismatch -> fail open",
+      "_note": "TS's own types forbid this input (VisibilityPlatform | null), but the native ports take a nullable String, so \"\" is reachable there. The TS reference fails open on it via JS falsiness; Kotlin and Swift must agree rather than hiding the node.",
+      "visibility": {
+        "platform": [
+          "ios"
+        ]
+      },
+      "platform": "",
+      "appVersion": "1.0.0",
+      "expected": true
     }
   ]
 }

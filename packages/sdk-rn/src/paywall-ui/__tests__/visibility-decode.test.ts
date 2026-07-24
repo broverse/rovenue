@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { decodeBuilderConfig, type BuilderNode } from "../model";
+
+const FIXTURES = JSON.parse(
+  readFileSync(join(__dirname, "../../../../shared/src/paywall/render-fixtures.json"), "utf8"),
+) as { acceptLenient: Array<{ name: string; config: unknown }> };
 
 // The evaluator vectors run isNodeVisible directly and the render-fixtures
 // `accept` cases only assert a non-null decode — so the DECODER's lenient
@@ -67,5 +73,17 @@ describe("decoder retains node visibility, leniently", () => {
       decodeBuilderConfig(root({ type: "text", id: "t", key: "k", role: "body" })),
     );
     expect(node.visibility).toBeUndefined();
+  });
+
+  it("retains visibility on an UNKNOWN node type — the contract's forward-compat case", () => {
+    // Driven off the shared fixture so all three native decoders are held
+    // to the same entry. Dropping visibility here would render the
+    // fallback on a platform the author excluded.
+    const entry = FIXTURES.acceptLenient.find((c) => c.name.startsWith("unknown node type carrying visibility"))!;
+    const model = decodeBuilderConfig(entry.config)!;
+    const stack = model.root as Extract<BuilderNode, { type: "stack" }>;
+    const unknown = stack.children[0]!;
+    expect(unknown.type).toBe("unknown");
+    expect(unknown.visibility).toEqual({ platform: ["ios"] });
   });
 });

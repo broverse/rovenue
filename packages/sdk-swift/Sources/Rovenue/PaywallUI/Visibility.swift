@@ -102,7 +102,12 @@ func isNodeVisible(_ visibility: Visibility?, platform: String?, appVersion: Str
     // An empty array is what the builder produces the moment an author
     // unticks the last box. Reading it as "nowhere" would let a stray
     // click delete content from every device.
-    if let allowedPlatforms, !allowedPlatforms.isEmpty, let platform, !allowedPlatforms.contains(platform) {
+    // `!platform.isEmpty`, not just `let platform`: the TS reference
+    // guards with JS falsiness, so an empty-string platform reads as
+    // UNKNOWN there and fails open. Unwrapping only for nil here would
+    // hide the node instead — a reference-vs-port split on the same input.
+    if let allowedPlatforms, !allowedPlatforms.isEmpty, let platform, !platform.isEmpty,
+       !allowedPlatforms.contains(platform) {
         return false
     }
 

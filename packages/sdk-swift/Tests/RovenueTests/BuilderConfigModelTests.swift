@@ -178,7 +178,7 @@ final class BuilderConfigModelTests: XCTestCase {
         let config = try XCTUnwrap(entry["config"])
         let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)), "lenient fixture must decode")
         guard case .stack(let root) = decoded.root else { return XCTFail("root must be .stack") }
-        guard case .unknown(let id, let fallback) = root.children[0] else {
+        guard case .unknown(let id, _, let fallback) = root.children[0] else {
             return XCTFail("expected root.children[0] to decode as .unknown")
         }
         XCTAssertEqual(id, "cd_1")
@@ -196,7 +196,7 @@ final class BuilderConfigModelTests: XCTestCase {
         let config = try XCTUnwrap(entry["config"])
         let decoded = try XCTUnwrap(decodeBuilderConfig(RenderFixtures.jsonString(for: config)), "lenient fixture must decode")
         guard case .stack(let root) = decoded.root else { return XCTFail("root must be .stack") }
-        guard case .unknown(let id, let fallback) = root.children[0] else {
+        guard case .unknown(let id, _, let fallback) = root.children[0] else {
             return XCTFail("expected root.children[0] to decode as .unknown")
         }
         XCTAssertEqual(id, "vid_1")

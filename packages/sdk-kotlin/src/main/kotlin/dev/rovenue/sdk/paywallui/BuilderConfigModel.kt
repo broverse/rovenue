@@ -221,15 +221,16 @@ sealed class BuilderNode {
         override val fallback: BuilderNode? = null,
     ) : BuilderNode()
 
-    /** Never carries a [visibility] — an unrecognized node `type` has
-     *  none to parse (see `parseVisibility`'s decode contract); always
-     *  visible as far as this gate is concerned. */
+    /** An unrecognized node `type`. `visibility` IS retained: it is the
+     *  author's "don't show this here", and an unknown type is exactly the
+     *  forward-compat case where a platform restriction matters most —
+     *  dropping it would render the fallback on a platform the author
+     *  excluded, which the web renderer already refuses to do. */
     data class Unknown(
         override val id: String,
+        override val visibility: Visibility? = null,
         override val fallback: BuilderNode? = null,
-    ) : BuilderNode() {
-        override val visibility: Visibility? = null
-    }
+    ) : BuilderNode()
 }
 
 data class BuilderConfigModel(
@@ -399,8 +400,7 @@ private fun parseNode(obj: JsonObject): BuilderNode {
         )
         // Lenient branch: unknown types keep id + fallback and never fail
         // the decode. The fallback subtree itself is still parsed strictly.
-        // No `visibility` — see [BuilderNode.Unknown]'s doc.
-        else -> BuilderNode.Unknown(id = id, fallback = fallback)
+        else -> BuilderNode.Unknown(id = id, visibility = visibility, fallback = fallback)
     }
 }
 

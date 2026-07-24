@@ -4,6 +4,10 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The evaluator vectors build [Visibility] objects by hand and the
@@ -72,5 +76,27 @@ class VisibilityDecodeTest {
     fun noVisibilityDecodesToNull() {
         val node = firstChild(rootWith("""{"type":"text","id":"t","key":"k","role":"body"}"""))
         assertNull(node.visibility)
+    }
+
+    /**
+     * The contract's forward-compat case: an unknown node `type` carrying
+     * `visibility`. Dropping it would render the fallback on a platform the
+     * author excluded. Driven off the shared fixture so all three native
+     * decoders are held to the same entry.
+     */
+    @Test
+    fun retainsVisibilityOnAnUnknownNodeType() {
+        val fixture = java.io.File("../shared/src/paywall/render-fixtures.json")
+            .takeIf { it.exists() }
+            ?: java.io.File("../../packages/shared/src/paywall/render-fixtures.json")
+        val root = kotlinx.serialization.json.Json.parseToJsonElement(fixture.readText())
+        val entry = root.jsonObject["acceptLenient"]!!.jsonArray.first {
+            it.jsonObject["name"]!!.jsonPrimitive.content.startsWith("unknown node type carrying visibility")
+        }
+        val model = decodeBuilderConfig(entry.jsonObject["config"]!!.toString())
+        assertNotNull(model)
+        val unknown = (model.root as BuilderNode.Stack).children.first()
+        assertTrue(unknown is BuilderNode.Unknown, "expected the node to decode as Unknown")
+        assertEquals(listOf("ios"), unknown.visibility?.platform)
     }
 }
