@@ -981,3 +981,66 @@ describe("VISIBILITY_BOUND_UNPARSEABLE", () => {
     expect(issues.some((i) => i.code === "VISIBILITY_BOUND_UNPARSEABLE")).toBe(false);
   });
 });
+
+describe("MISSING_PURCHASE_BUTTON is per-platform once visibility is in play", () => {
+  function tree(children: unknown[]) {
+    return baseConfig({
+      root: { type: "stack", id: "root", axis: "v", children: children as never },
+    });
+  }
+  const pkg = { type: "packageList", id: "pl", packageIds: ["pkg_monthly"], cellLayout: "row" };
+
+  it("fires for the platform where the only purchase button is hidden", () => {
+    const config = tree([
+      pkg,
+      { type: "purchaseButton", id: "pb", labelKey: "cta_key", visibility: { platform: ["ios"] } },
+    ]);
+    const issue = validateBuilderConfig(config, { offeringPackageIds }).find(
+      (i) => i.code === "MISSING_PURCHASE_BUTTON",
+    );
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain("android");
+    expect(issue!.message).toContain("web");
+    expect(issue!.message).not.toContain("ios");
+    expect(isPublishBlockingIssue(issue!)).toBe(true);
+  });
+
+  it("does not fire when the package list is hidden on the same platform as the button", () => {
+    const config = tree([
+      { ...pkg, visibility: { platform: ["ios"] } },
+      { type: "purchaseButton", id: "pb", labelKey: "cta_key", visibility: { platform: ["ios"] } },
+    ]);
+    expect(
+      validateBuilderConfig(config, { offeringPackageIds }).some(
+        (i) => i.code === "MISSING_PURCHASE_BUTTON",
+      ),
+    ).toBe(false);
+  });
+
+  it("follows ancestor visibility — a button inside an iOS-only stack is iOS-only", () => {
+    const config = tree([
+      pkg,
+      {
+        type: "stack",
+        id: "ios_stack",
+        axis: "v",
+        visibility: { platform: ["ios"] },
+        children: [{ type: "purchaseButton", id: "pb", labelKey: "cta_key" }],
+      },
+    ]);
+    const issue = validateBuilderConfig(config, { offeringPackageIds }).find(
+      (i) => i.code === "MISSING_PURCHASE_BUTTON",
+    );
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain("android");
+  });
+
+  it("is silent when a button reaches every platform the list does", () => {
+    const config = tree([pkg, { type: "purchaseButton", id: "pb", labelKey: "cta_key" }]);
+    expect(
+      validateBuilderConfig(config, { offeringPackageIds }).some(
+        (i) => i.code === "MISSING_PURCHASE_BUTTON",
+      ),
+    ).toBe(false);
+  });
+});

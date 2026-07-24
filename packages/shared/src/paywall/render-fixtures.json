@@ -1,5 +1,5 @@
 {
-  "_comment": "Cross-platform contract for builder-paywall decoding + text/variable semantics. The TS authoring schema is STRICT (unknown node types are rejected: acceptLenient entries FAIL it). Platform decoders (Swift Codable, Kotlin kotlinx-serialization) are lenient by design: unknown node types decode to an unknown node retaining id+fallback and render the fallback (or nothing); an override entry with an unknown `when.kind` is skipped individually (that one entry ignored, config otherwise decodes normally) — also acceptLenient, per the unknown-condition-kind leniency rule (spec D2/D3). reject entries must fail EVERYWHERE (schema AND platform decoders → null), including a structural key (e.g. `type`) inside override props on an otherwise-KNOWN when.kind — malformed props in a known kind is a whole-config failure, not a skippable entry. Overrides APPLICATION semantics (base props, then matching overrides in array order, later wins, shallow per-field) are pinned by per-platform unit tests sharing D-Task 1's TS case table (schema.test.ts / validate.test.ts `applyOverrides` cases) — NOT by fixture sections here, since applying overrides needs live selected/introEligible state the static fixture format doesn't carry. Generated from the real TS implementations; frozen — regenerate only by re-running the generator against packages/shared/src/paywall.",
+  "_comment": "Cross-platform contract for builder-paywall decoding + text/variable semantics. The TS authoring schema is STRICT (unknown node types are rejected: acceptLenient entries FAIL it). Platform decoders (Swift Codable, Kotlin kotlinx-serialization) are lenient by design: unknown node types decode to an unknown node retaining id+fallback and render the fallback (or nothing); an override entry with an unknown `when.kind` is skipped individually (that one entry ignored, config otherwise decodes normally) — also acceptLenient, per the unknown-condition-kind leniency rule (spec D2/D3). reject entries must fail EVERYWHERE (schema AND platform decoders → null), including a structural key (e.g. `type`) inside override props on an otherwise-KNOWN when.kind — malformed props in a known kind is a whole-config failure, not a skippable entry. Overrides APPLICATION semantics (base props, then matching overrides in array order, later wins, shallow per-field) are pinned by per-platform unit tests sharing D-Task 1's TS case table (schema.test.ts / validate.test.ts `applyOverrides` cases) — NOT by fixture sections here, since applying overrides needs live selected/introEligible state the static fixture format doesn't carry. Generated from the real TS implementations; frozen — regenerate only by re-running the generator against packages/shared/src/paywall. VISIBILITY vectors (`visibility` section) pin EVALUATION, not just decoding: each case is {visibility, platform, appVersion} -> expected boolean, and the TS `isNodeVisible` is proven against them here. The three `accept` entries only prove a decoder PARSES the key — they go green even on a decoder that drops `visibility` entirely — so stage 2's SwiftUI/Kotlin/RN visibility MUST be driven by this vector table (mirror the `variables`/`resolveText` pattern), not by the accept entries. The load-bearing rules a naive decoder gets wrong: component-wise digit comparison (1.10 > 1.9, 1.2 == 1.2.0), inclusive bounds, and FAIL OPEN on unknown platform / unknown version / non-numeric component — the last of which must not throw when splitting on '.'.",
   "accept": [
     {
       "name": "canonical every-node multi-locale",
@@ -1276,6 +1276,134 @@
       "locale": "tr",
       "key": "empty_1",
       "expected": ""
+    }
+  ],
+  "visibility": [
+    {
+      "name": "no rules -> visible",
+      "visibility": {},
+      "platform": "ios",
+      "appVersion": "1.0.0",
+      "expected": true
+    },
+    {
+      "name": "platform match",
+      "visibility": {
+        "platform": [
+          "ios"
+        ]
+      },
+      "platform": "ios",
+      "appVersion": "1.0.0",
+      "expected": true
+    },
+    {
+      "name": "platform miss -> hidden",
+      "visibility": {
+        "platform": [
+          "ios"
+        ]
+      },
+      "platform": "android",
+      "appVersion": "1.0.0",
+      "expected": false
+    },
+    {
+      "name": "empty platform list means all",
+      "visibility": {
+        "platform": []
+      },
+      "platform": "ios",
+      "appVersion": "1.0.0",
+      "expected": true,
+      "_note": "An empty array is NOT 'nowhere' — it is 'no constraint'."
+    },
+    {
+      "name": "unknown platform fails open",
+      "visibility": {
+        "platform": [
+          "ios"
+        ]
+      },
+      "platform": null,
+      "appVersion": "1.0.0",
+      "expected": true
+    },
+    {
+      "name": "min bound satisfied (inclusive)",
+      "visibility": {
+        "minAppVersion": "1.0.0"
+      },
+      "platform": "ios",
+      "appVersion": "1.0.0",
+      "expected": true
+    },
+    {
+      "name": "below min -> hidden",
+      "visibility": {
+        "minAppVersion": "2.0.0"
+      },
+      "platform": "ios",
+      "appVersion": "1.9.9",
+      "expected": false
+    },
+    {
+      "name": "max bound satisfied (inclusive)",
+      "visibility": {
+        "maxAppVersion": "2.0.0"
+      },
+      "platform": "ios",
+      "appVersion": "2.0.0",
+      "expected": true
+    },
+    {
+      "name": "above max -> hidden",
+      "visibility": {
+        "maxAppVersion": "1.9.9"
+      },
+      "platform": "ios",
+      "appVersion": "2.0.0",
+      "expected": false
+    },
+    {
+      "name": "missing components are zero: 1.2 == 1.2.0",
+      "visibility": {
+        "minAppVersion": "1.2",
+        "maxAppVersion": "1.2.0"
+      },
+      "platform": "ios",
+      "appVersion": "1.2.0",
+      "expected": true
+    },
+    {
+      "name": "component-wise, not lexical: 1.10 > 1.9",
+      "visibility": {
+        "minAppVersion": "1.10.0"
+      },
+      "platform": "ios",
+      "appVersion": "1.9.0",
+      "expected": false,
+      "_note": "1.9.0 is BELOW 1.10.0 — decoders splitting on '.' and comparing strings get this wrong."
+    },
+    {
+      "name": "unknown app version fails open, both bounds",
+      "visibility": {
+        "minAppVersion": "99.0.0",
+        "maxAppVersion": "0.0.1"
+      },
+      "platform": "ios",
+      "appVersion": null,
+      "expected": true
+    },
+    {
+      "name": "non-numeric component is inconclusive -> fail open",
+      "visibility": {
+        "minAppVersion": "99.0.0"
+      },
+      "platform": "ios",
+      "appVersion": "1.0.0-beta",
+      "expected": true,
+      "_note": "A component that is not a run of digits makes the comparison inconclusive; inconclusive fails OPEN. `\"1.0.0-beta\".split('.').map(Int)` MUST NOT throw the decoder."
     }
   ]
 }

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { builderConfigSchema } from "./schema";
 import { resolveText } from "./validate";
+import { isNodeVisible, type NodeVisibility, type VisibilityPlatform } from "./visibility";
 import { resolveVariables, type PackageView } from "./variables";
 import type { BuilderConfig } from "./schema";
 
@@ -41,6 +42,13 @@ interface Fixture {
     key: string;
     expected: string | null;
   }>;
+  visibility: Array<{
+    name: string;
+    visibility: NodeVisibility;
+    platform: VisibilityPlatform | null;
+    appVersion: string | null;
+    expected: boolean;
+  }>;
 }
 
 const fixture: Fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
@@ -52,6 +60,7 @@ describe("render-fixtures contract", () => {
     expect(fixture.reject.length).toBeGreaterThanOrEqual(5);
     expect(fixture.variables.length).toBeGreaterThanOrEqual(8);
     expect(fixture.resolveText.length).toBeGreaterThanOrEqual(4);
+    expect(fixture.visibility.length).toBeGreaterThanOrEqual(10);
     expect(fixture._comment).toContain("lenient");
   });
 
@@ -93,6 +102,19 @@ describe("render-fixtures contract", () => {
     for (const v of fixture.resolveText) {
       it(`${v.locale}/${v.key} → ${JSON.stringify(v.expected)}`, () => {
         expect(resolveText(config, v.locale, v.key)).toBe(v.expected);
+      });
+    }
+  });
+
+  // The four-platform contract for node visibility. `isNodeVisible` is the
+  // reference implementation these pin; stage 2's SwiftUI/Kotlin/RN
+  // evaluators run the SAME table and must agree case-for-case.
+  describe("visibility vectors", () => {
+    for (const v of fixture.visibility) {
+      it(`${v.name}`, () => {
+        expect(isNodeVisible(v.visibility, { platform: v.platform, appVersion: v.appVersion })).toBe(
+          v.expected,
+        );
       });
     }
   });

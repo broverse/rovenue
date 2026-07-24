@@ -147,6 +147,41 @@ function walkNodes(
   if (node.fallback) walkNodes(node.fallback, visit, insideCellTemplate);
 }
 
+const ALL_PLATFORMS = ["ios", "android", "web"] as const;
+type PlatformId = (typeof ALL_PLATFORMS)[number];
+
+/** Platforms this node ITSELF allows. Absent or empty = all (fail open). */
+function ownPlatforms(node: PaywallNode): ReadonlySet<PlatformId> {
+  const p = node.visibility?.platform;
+  return p && p.length > 0 ? new Set(p) : new Set(ALL_PLATFORMS);
+}
+
+/**
+ * Record every packageList and purchaseButton with the set of platforms on
+ * which it can actually appear — its own visibility intersected with every
+ * ancestor's. Version bounds are ignored on purpose: they are unknowable at
+ * author time and fail open, so a node hidden only by version still counts
+ * as reachable, which keeps this check from over-blocking.
+ *
+ * cellTemplate entry does NOT reset the platform set (a nested node inherits
+ * it), which keeps the no-visibility case byte-identical to the old
+ * boolean check — a purchaseButton anywhere still counts.
+ */
+function collectCommerceReach(
+  node: PaywallNode,
+  inherited: ReadonlySet<PlatformId>,
+  out: { packageLists: Set<PlatformId>[]; purchaseButtons: Set<PlatformId>[] },
+): void {
+  const effective = new Set<PlatformId>(
+    [...inherited].filter((pl) => ownPlatforms(node).has(pl)),
+  );
+  if (node.type === "packageList") out.packageLists.push(effective);
+  if (node.type === "purchaseButton") out.purchaseButtons.push(effective);
+  if (node.type === "stack") for (const c of node.children) collectCommerceReach(c, effective, out);
+  if (node.type === "packageList" && node.cellTemplate) collectCommerceReach(node.cellTemplate, effective, out);
+  if (node.fallback) collectCommerceReach(node.fallback, effective, out);
+}
+
 /**
  * `key`/`labelKey` values carried by a node's `overrides` — an override
  * that swaps a text/button node's key introduces a NEW localization key
@@ -309,14 +344,8 @@ export function validateBuilderConfig(
   }
 
   // FOREIGN_PACKAGE_ID — packageList.packageIds/defaultSelected outside the offering.
-  // MISSING_PURCHASE_BUTTON — a packageList exists but no purchaseButton does.
-  let hasPackageList = false;
-  let hasPurchaseButton = false;
   for (const node of allNodes) {
-    if (node.type === "purchaseButton") hasPurchaseButton = true;
     if (node.type !== "packageList") continue;
-    hasPackageList = true;
-
     for (const packageId of node.packageIds) {
       if (!offeringSet.has(packageId)) {
         issues.push({
@@ -334,10 +363,26 @@ export function validateBuilderConfig(
       });
     }
   }
-  if (hasPackageList && !hasPurchaseButton) {
+  // MISSING_PURCHASE_BUTTON — on every platform where a package list can
+  // appear, a purchase button must too. `visibility` makes this per-platform:
+  // hiding the only purchase button on Android leaves that store's paywall
+  // showing plans with no way to buy. With no visibility anywhere this
+  // reduces to the old "packageList exists but no purchaseButton" — all
+  // three platforms break together, one issue.
+  const reach = { packageLists: [] as Set<PlatformId>[], purchaseButtons: [] as Set<PlatformId>[] };
+  collectCommerceReach(config.root, new Set(ALL_PLATFORMS), reach);
+  const brokenPlatforms = ALL_PLATFORMS.filter(
+    (pl) =>
+      reach.packageLists.some((s) => s.has(pl)) && !reach.purchaseButtons.some((s) => s.has(pl)),
+  );
+  if (brokenPlatforms.length > 0) {
+    const where =
+      brokenPlatforms.length === ALL_PLATFORMS.length
+        ? "no purchaseButton renders on any platform"
+        : `no purchaseButton renders on ${brokenPlatforms.join(", ")}`;
     issues.push({
       code: "MISSING_PURCHASE_BUTTON",
-      message: "A packageList is present but no purchaseButton exists in the tree.",
+      message: `A packageList is present but ${where}, so those users cannot buy.`,
     });
   }
 
