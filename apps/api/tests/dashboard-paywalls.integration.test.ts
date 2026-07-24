@@ -466,7 +466,13 @@ describe("PATCH /projects/:projectId/paywalls/:id — builderConfig", () => {
     expect(parsed.issues[0]?.code).toBe("SCHEMA_INVALID");
   });
 
-  it("400s with INVALID_BUILDER_CONFIG + issues when a packageList references a foreign packageId", async () => {
+  // A foreign packageId used to 400 here. It no longer does: the save gate
+  // was narrowed to what makes a draft unstorable, and a packageList pointing
+  // at an id outside the offering is an ordinary work-in-progress state —
+  // reachable in one click by switching the paywall's offering. It is caught
+  // by the PUBLISH gate instead; see paywall-save-gate.integration.test.ts,
+  // which asserts both halves for this exact config.
+  it("accepts a config referencing a foreign packageId — completeness is a publish concern", async () => {
     const { userId, cookie } = await createUserAndSession("bc-foreign");
     const project = await seedProject("bc-foreign");
     trackProject(project.id);
@@ -496,11 +502,12 @@ describe("PATCH /projects/:projectId/paywalls/:id — builderConfig", () => {
       headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ builderConfig: badConfig }),
     });
-    expect(patchRes.status).toBe(400);
-    const { error } = (await patchRes.json()) as { error: { message: string } };
-    const parsed = JSON.parse(error.message) as { code: string; issues: Array<{ code: string }> };
-    expect(parsed.code).toBe("INVALID_BUILDER_CONFIG");
-    expect(parsed.issues.some((i) => i.code === "FOREIGN_PACKAGE_ID")).toBe(true);
+    expect(patchRes.status).toBe(200);
+    const { data } = (await patchRes.json()) as {
+      data: { paywall: { builderConfig: { root: { children: Array<{ packageIds?: string[] }> } } } };
+    };
+    // ...and it round-trips, rather than being silently dropped.
+    expect(data.paywall.builderConfig.root.children[1]?.packageIds).toEqual(["pkg_unknown"]);
   });
 
   it("accepts a config whose only issues are LOCALE_KEY_GAP warnings", async () => {
