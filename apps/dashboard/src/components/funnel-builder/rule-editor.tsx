@@ -5,9 +5,40 @@ import { ArrowRight, Plus, Trash2, TriangleAlert } from "lucide-react";
 import type { Clause, ClauseOp, NextRule } from "@rovenue/shared/funnel";
 import { cn } from "../../lib/cn";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
-import { OPERATORS_BY_KIND, PAGE_TYPES, type AnswerKind } from "./types";
+import { OPERATORS_BY_KIND, PAGE_TYPES, type AnswerKind, type Page } from "./types";
+import { coerceOperandValue } from "./coerce-operand";
 
-const NUMERIC_COMPARISONS: ReadonlySet<ClauseOp> = new Set(["gt", "gte", "lt", "lte"]);
+// Re-exported so existing imports (`import { coerceOperandValue } from
+// "./rule-editor"`) keep working — the implementation moved to
+// coerce-operand.ts so the view model can reuse it too without importing
+// this component module (which imports FunnelDraftViewModel from the VM).
+export { coerceOperandValue };
+
+/** Safe lookup for `PAGE_TYPES[type].answerKind`. `Page.type` is typed
+ * `PageType`, but the value originates in server JSON through `as never`
+ * casts, so an unknown/legacy type must resolve to "none" (unbranchable)
+ * rather than throw a runtime TypeError that takes down the rule editor. */
+export function answerKindFor(type: string): AnswerKind {
+  return (PAGE_TYPES as Record<string, { answerKind: AnswerKind } | undefined>)[type]?.answerKind ?? "none";
+}
+
+/** Question ids from pages before `uptoIdx` that can actually be branched
+ * on. A page can carry a `question_id` despite having no comparable
+ * answer — `contact_info` collects name/email/phone as a composite, not a
+ * single value, so it is classified `answerKind: "none"` even though it
+ * has a question id. Offering it here would let an author pick a question
+ * for which `OPERATORS_BY_KIND` has nothing to offer, leaving a clause
+ * with zero valid operators — the `<select>` for `op` would render no
+ * `<option>`s at all. */
+export function branchableQuestionIds(pages: Page[], uptoIdx: number): string[] {
+  return pages
+    .slice(0, uptoIdx)
+    .filter(
+      (p): p is Page & { question_id: string } =>
+        Boolean(p.question_id) && answerKindFor(p.type) !== "none",
+    )
+    .map((p) => p.question_id);
+}
 
 /**
  * What shape of operand an operator takes. Used to reset a stale value
@@ -40,36 +71,6 @@ export function operandShape(op: ClauseOp): OperandShape {
   return "scalar";
 }
 
-/**
- * Store an operand in the type `evalClause` will compare it with.
- *
- * `gt`/`gte`/`lt`/`lte` require `typeof clause.value === "number"`. So do
- * `eq`/`neq` when the question answers with a number, because evalClause
- * compares with `===` and `5 === "5"` is false — without this, `eq` on a
- * numeric question is dead and `neq` fires for EVERY visitor.
- * (`between` coerces its own pair separately.)
- *
- * Applied on BLUR, not on every keystroke. Coercing as the author types
- * makes `1.5` untypeable (`"1."` → `Number` → `1` → re-rendered as `"1"`,
- * so the `.` can never be followed), turns a cleared box into `0`, and
- * turns `"-"` into `NaN` — which JSON-serialises to `null`, passes the
- * schema's value-present check, and then never matches. Leaving the field
- * is the moment the value is finished, so that is when it is typed.
- *
- * A string that is not a number is left alone rather than becoming `NaN`.
- */
-export function coerceOperandValue(
-  op: ClauseOp,
-  raw: string,
-  kind: AnswerKind = "text",
-): string | number {
-  const needsNumber =
-    NUMERIC_COMPARISONS.has(op) || (kind === "number" && (op === "eq" || op === "neq"));
-  if (!needsNumber) return raw;
-  const n = Number(raw);
-  return raw.trim() === "" || Number.isNaN(n) ? raw : n;
-}
-
 const OPERATORS: ReadonlyArray<{ v: ClauseOp; l: string }> = [
   { v: "eq", l: "equals" },
   { v: "neq", l: "≠" },
@@ -99,10 +100,7 @@ export const RuleEditor = component(({ pageId }: Props) => {
   const vm = useService(FunnelDraftViewModel);
   const rules = vm.rules[pageId] ?? [];
   const myIdx = vm.pages.findIndex((p) => p.id === pageId);
-  const earlierQs = vm.pages
-    .slice(0, myIdx)
-    .map((p) => p.question_id)
-    .filter((q): q is string => Boolean(q));
+  const earlierQs = branchableQuestionIds(vm.pages, myIdx);
 
   const addRule = () => {
     const newRule: NextRule = {
@@ -139,6 +137,25 @@ export const RuleEditor = component(({ pageId }: Props) => {
     if (!rule) return;
     const nextClauses = rule.condition.clauses.slice();
     nextClauses[clauseIdx] = { ...nextClauses[clauseIdx], ...patch } as Clause;
+    vm.updateRule(pageId, ruleIdx, {
+      ...rule,
+      condition: { ...rule.condition, clauses: nextClauses },
+    });
+  };
+
+  // A clause whose question resolves to zero valid operators (see
+  // branchableQuestionIds) cannot be displayed or saved meaningfully —
+  // drop it rather than leave a stale operator the <select> renders no
+  // <option> for. Falls back to removing the whole rule when it was the
+  // clause's last one, matching removeRule's own empty-list handling.
+  const removeClause = (ruleIdx: number, clauseIdx: number) => {
+    const rule = rules[ruleIdx];
+    if (!rule) return;
+    if (rule.condition.clauses.length <= 1) {
+      vm.removeRule(pageId, ruleIdx);
+      return;
+    }
+    const nextClauses = rule.condition.clauses.filter((_, i) => i !== clauseIdx);
     vm.updateRule(pageId, ruleIdx, {
       ...rule,
       condition: { ...rule.condition, clauses: nextClauses },
@@ -197,7 +214,7 @@ export const RuleEditor = component(({ pageId }: Props) => {
               // The clause's question, not the page being edited — the
               // operators offered depend on what the ANSWER looks like.
               const questionPage = vm.pages.find((p) => p.question_id === c.question_id);
-              const answerKind = questionPage ? PAGE_TYPES[questionPage.type].answerKind : "none";
+              const answerKind = questionPage ? answerKindFor(questionPage.type) : "none";
               const allowedOps = OPERATORS_BY_KIND[answerKind];
               return (
                 <Fragment key={clauseIdx}>
@@ -212,8 +229,18 @@ export const RuleEditor = component(({ pageId }: Props) => {
                       onChange={(e) => {
                         const nextQuestionId = e.currentTarget.value;
                         const nextPage = vm.pages.find((p) => p.question_id === nextQuestionId);
-                        const nextKind = nextPage ? PAGE_TYPES[nextPage.type].answerKind : "none";
+                        const nextKind = nextPage ? answerKindFor(nextPage.type) : "none";
                         const nextAllowed = OPERATORS_BY_KIND[nextKind];
+                        // earlierQs (branchableQuestionIds) already excludes
+                        // "none"-kind questions, so nextAllowed is never
+                        // empty for anything this <select> can offer.
+                        // nextOp therefore always resolves — this guard is
+                        // a defensive fallback, not the primary fix, for
+                        // if that invariant is ever broken.
+                        if (nextAllowed.length === 0) {
+                          removeClause(ruleIdx, clauseIdx);
+                          return;
+                        }
                         // Without clamping, an operator the new question
                         // does not allow stays in the clause while the
                         // <select> — having no matching <option> — shows
@@ -221,9 +248,8 @@ export const RuleEditor = component(({ pageId }: Props) => {
                         const nextOp = nextAllowed.includes(c.op) ? c.op : nextAllowed[0];
                         updateClause(ruleIdx, clauseIdx, {
                           question_id: nextQuestionId,
-                          ...(nextOp === undefined
-                            ? {}
-                            : { op: nextOp, value: defaultOperand(nextOp) }),
+                          op: nextOp,
+                          value: defaultOperand(nextOp),
                         } as Partial<Clause>);
                       }}
                       className="h-6 max-w-[110px] rounded border border-rv-divider bg-rv-c1 px-1.5 font-rv-mono text-[11px] text-rv-accent-500 outline-none focus:border-rv-accent-500"
@@ -282,11 +308,20 @@ export const RuleEditor = component(({ pageId }: Props) => {
                         <input
                           value={String(value[0] ?? "")}
                           onChange={(e) => {
-                            const next: [number, number] = [
-                              Number(e.currentTarget.value),
-                              Number(value[1] ?? 0),
+                            // Raw while typing — see coerceOperandValue.
+                            // Number() on every keystroke made "1.5"
+                            // untypeable ("1." -> 1 -> re-rendered "1",
+                            // the "." can never be followed) and turned a
+                            // cleared box into 0.
+                            const next = [e.currentTarget.value, value[1] ?? 0];
+                            updateClause(ruleIdx, clauseIdx, { value: next as never } as Partial<Clause>);
+                          }}
+                          onBlur={(e) => {
+                            const next = [
+                              coerceOperandValue("between", e.currentTarget.value, answerKind),
+                              value[1] ?? 0,
                             ];
-                            updateClause(ruleIdx, clauseIdx, { value: next } as Partial<Clause>);
+                            updateClause(ruleIdx, clauseIdx, { value: next as never } as Partial<Clause>);
                           }}
                           className="h-6 w-12 rounded border border-rv-divider bg-rv-c1 px-1.5 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
                         />
@@ -294,11 +329,15 @@ export const RuleEditor = component(({ pageId }: Props) => {
                         <input
                           value={String(value[1] ?? "")}
                           onChange={(e) => {
-                            const next: [number, number] = [
-                              Number(value[0] ?? 0),
-                              Number(e.currentTarget.value),
+                            const next = [value[0] ?? 0, e.currentTarget.value];
+                            updateClause(ruleIdx, clauseIdx, { value: next as never } as Partial<Clause>);
+                          }}
+                          onBlur={(e) => {
+                            const next = [
+                              value[0] ?? 0,
+                              coerceOperandValue("between", e.currentTarget.value, answerKind),
                             ];
-                            updateClause(ruleIdx, clauseIdx, { value: next } as Partial<Clause>);
+                            updateClause(ruleIdx, clauseIdx, { value: next as never } as Partial<Clause>);
                           }}
                           className="h-6 w-12 rounded border border-rv-divider bg-rv-c1 px-1.5 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
                         />
