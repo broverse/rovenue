@@ -921,7 +921,7 @@ describe("reopen after an unmount flush", () => {
     expect(order).toEqual(["patch1:start", "patch2:start", "reopen:get"]);
   });
 
-  it("gives up on a flush that never settles instead of wedging the builder", async () => {
+  it("errors instead of loading a row it knows is stale when the flush never settles", async () => {
     // `pendingFlush` is module-scoped, so a flush left unsettled here would
     // leak into the NEXT test and hang it. The gate is therefore resolved at
     // the end of this test rather than abandoned.
@@ -935,19 +935,62 @@ describe("reopen after an unmount flush", () => {
     void oldVm.saveNow();
     await Promise.resolve();
 
+    const get = vi.fn().mockResolvedValue(fakeDetail());
     const newVm = makeVm({
-      get: vi.fn().mockResolvedValue(fakeDetail()),
+      get,
       patchBuilderConfig: vi.fn(),
     });
     const loading = newVm.load(() => {});
     await Promise.resolve();
     expect(newVm.isLoading).toBe(true);
 
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(15000);
     await loading;
 
+    // Must NOT have proceeded to the GET — that row is known-stale at this
+    // point (the flush is still open), so reading it would silently
+    // resurrect the overwrite this barrier exists to prevent.
+    expect(get).not.toHaveBeenCalled();
     expect(newVm.isLoading).toBe(false);
-    expect(newVm.error).toBeNull();
+    expect(newVm.error).not.toBeNull();
+
+    hung.resolve(fakeDetail());
+    await Promise.resolve();
+  });
+
+  it("does not penalize a builder opened after a flush timed out", async () => {
+    // First open: times out and errors (same setup as the test above).
+    const hung = deferred<PaywallBuilderDetailDto>();
+    const oldVm = makeVm({
+      get: vi.fn().mockResolvedValue(fakeDetail()),
+      patchBuilderConfig: vi.fn().mockReturnValue(hung.promise),
+    });
+    await oldVm.load(() => {});
+    oldVm.setLocaleText("t1_key", "en", "flushed");
+    void oldVm.saveNow();
+    await Promise.resolve();
+
+    const firstVm = makeVm({
+      get: vi.fn().mockResolvedValue(fakeDetail()),
+      patchBuilderConfig: vi.fn(),
+    });
+    const firstLoad = firstVm.load(() => {});
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(15000);
+    await firstLoad;
+    expect(firstVm.error).not.toBeNull();
+
+    // Second open, afterwards: `pendingFlush` must have been cleared by the
+    // timed-out load, so this one loads normally and immediately, without
+    // waiting on anything.
+    const get = vi.fn().mockResolvedValue(fakeDetail());
+    const secondVm = makeVm({ get, patchBuilderConfig: vi.fn() });
+    const secondLoad = secondVm.load(() => {});
+    await secondLoad;
+
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(secondVm.error).toBeNull();
+    expect(secondVm.isLoading).toBe(false);
 
     hung.resolve(fakeDetail());
     await Promise.resolve();

@@ -54,10 +54,16 @@ import {
  */
 let pendingFlush: Promise<unknown> | null = null;
 
-/** How long a builder open will wait on a previous flush before giving up
- * on it. Long enough for any healthy save, short enough that a hung request
- * cannot make the builder look broken. */
-const FLUSH_BARRIER_TIMEOUT_MS = 5000;
+/** How long a builder open will wait on a previous flush before treating it
+ * as hung. A save that has not landed in fifteen seconds is not merely
+ * slow — see `load()`, which refuses to read past this point rather than
+ * risk loading a row it knows is stale. */
+const FLUSH_BARRIER_TIMEOUT_MS = 15000;
+
+/** Sentinel `load()`'s flush-barrier race resolves to when the timeout wins,
+ * so the two outcomes of `Promise.race` are distinguishable from each other
+ * (the flush itself resolves to a DTO or `undefined`, never this symbol). */
+const FLUSH_BARRIER_TIMED_OUT = Symbol("paywall-builder-flush-barrier-timed-out");
 
 export interface PaywallBuilderProps {
   projectId: string;
@@ -221,22 +227,43 @@ export class PaywallBuilderViewModel {
       this.isLoading = true;
       this.error = null;
       // A previous builder's unmount flush may still be in flight; reading
-      // before it lands would hand us the pre-flush row. Its failure must
-      // never block the open — that would turn a failed save into a builder
-      // that will not load — which is why `pendingFlush` holds an
-      // already-swallowed promise.
+      // before it lands would hand us the pre-flush row, seed
+      // `lastSavedSnapshot` from it, and let the next save silently
+      // overwrite the flushed edits. Its failure must never block the open
+      // — that would turn a failed save into a builder that will not load —
+      // which is why `pendingFlush` holds an already-swallowed promise.
       //
       // Bounded, because patchBuilderConfig has no client-side timeout and
       // its AbortController is only tripped by a LATER save on the same
-      // instance. A genuinely hung request would otherwise wedge every
-      // subsequently opened builder — for any paywall — until a hard reload.
-      // Timing out degrades to the old behaviour (a narrow stale-read race)
-      // instead of an unrecoverable hang.
+      // (disposed) instance — a genuinely hung PATCH would otherwise wedge
+      // every subsequently opened builder, for any paywall, until a hard
+      // reload.
+      //
+      // When the timer wins, we do NOT proceed to the GET. At that point we
+      // have positive evidence the flush is still open, so the read is
+      // near-certain to return the stale, pre-flush row — this is not the
+      // old narrow stale-read race (GET beating PATCH by chance), it is a
+      // read we already know is stale. Loading it (with or without flagging
+      // it dirty) would guarantee the overwrite rather than merely risk it,
+      // so we surface an error instead and let the author retry once the
+      // save has had a chance to land. `pendingFlush` is cleared here
+      // (identity-checked, exactly like `saveNow`'s own cleanup) so a single
+      // hung PATCH does not poison every later builder open for the rest of
+      // the tab.
       if (pendingFlush) {
-        await Promise.race([
-          pendingFlush,
-          new Promise((resolve) => setTimeout(resolve, FLUSH_BARRIER_TIMEOUT_MS)),
-        ]);
+        const flush = pendingFlush;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<typeof FLUSH_BARRIER_TIMED_OUT>((resolve) => {
+          timer = setTimeout(() => resolve(FLUSH_BARRIER_TIMED_OUT), FLUSH_BARRIER_TIMEOUT_MS);
+        });
+        const winner = await Promise.race([flush, timeout]);
+        clearTimeout(timer);
+        if (winner === FLUSH_BARRIER_TIMED_OUT) {
+          if (pendingFlush === flush) pendingFlush = null;
+          throw new Error(
+            "The previous save for this paywall has not finished yet, so loading now could read stale data and silently overwrite it. Wait a moment and try again.",
+          );
+        }
       }
       const detail = await this.api.get(this.props.projectId, this.props.paywallId);
       if (this.disposed) return;

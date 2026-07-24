@@ -478,6 +478,12 @@ describe("measureNodeTree", () => {
     let deep: unknown = { type: "stack", children: [] };
     for (let i = 0; i < MAX_BUILDER_DEPTH + 50; i++) deep = { type: "stack", children: [deep] };
     const measured = measureNodeTree({ root: deep });
-    expect(measured.depth).toBeGreaterThan(MAX_BUILDER_DEPTH);
+    // The chain is 83 nodes deep (MAX_BUILDER_DEPTH + 51). Without the early
+    // `break` in the walk this would measure { depth: 83, nodes: 83 } —
+    // `toBeGreaterThan(MAX_BUILDER_DEPTH)` can't tell the two apart, since
+    // both are greater. Pin the exact value the `break` produces: it fires
+    // the first time `depth` exceeds MAX_BUILDER_DEPTH, i.e. at depth 33,
+    // and this chain has exactly one node per depth level.
+    expect(measured).toEqual({ depth: MAX_BUILDER_DEPTH + 1, nodes: MAX_BUILDER_DEPTH + 1 });
   });
 });

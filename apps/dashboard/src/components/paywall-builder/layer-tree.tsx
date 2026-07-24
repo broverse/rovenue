@@ -2,7 +2,7 @@ import { useState } from "react";
 import { component, useService } from "impair";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
-import type { PaywallNode } from "@rovenue/shared/paywall";
+import { MAX_BUILDER_DEPTH, type PaywallNode } from "@rovenue/shared/paywall";
 import { cn } from "../../lib/cn";
 import { PaywallBuilderViewModel } from "./vm/paywall-builder.vm";
 import { flattenTree } from "./layer-tree-flatten";
@@ -83,6 +83,14 @@ function LayerRow({
   // model) — move/reorder controls don't apply to it; "delete" instead
   // clears the whole template off its packageList via setCellTemplate.
   const movable = !isRoot && !isCellTemplateRoot;
+  // A row at `depth` maps to `measureNodeTree` depth `depth + 1` (that
+  // function's depth is 1-based at the root), so a child added under this
+  // row would land at `depth + 2`. Node-count and depth are independent
+  // caps — `vm.atNodeCapacity` alone would leave the add button enabled
+  // right up against the depth cap, opening the popover for a pick that
+  // `addNode` then silently refuses.
+  const atDepthCapacity = depth + 2 > MAX_BUILDER_DEPTH;
+  const addDisabled = vm.atNodeCapacity || atDepthCapacity;
 
   return (
     <div
@@ -114,14 +122,19 @@ function LayerRow({
           <div className="relative">
             <button
               type="button"
-              disabled={vm.atNodeCapacity}
+              disabled={addDisabled}
               title={
-                vm.atNodeCapacity
+                atDepthCapacity
                   ? t(
-                      "paywalls.builder.layers.addAtCapacity",
-                      "This paywall has reached the maximum number of elements.",
+                      "paywalls.builder.layers.addAtDepthCapacity",
+                      "This branch is nested too deeply to add another element.",
                     )
-                  : t("paywalls.builder.layers.add", "Add node")
+                  : vm.atNodeCapacity
+                    ? t(
+                        "paywalls.builder.layers.addAtCapacity",
+                        "This paywall has reached the maximum number of elements.",
+                      )
+                    : t("paywalls.builder.layers.add", "Add node")
               }
               onClick={() => setAddOpen((o) => !o)}
               className="flex h-5 w-5 cursor-pointer items-center justify-center rounded text-rv-mute-500 transition hover:bg-rv-c3 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"

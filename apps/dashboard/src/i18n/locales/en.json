@@ -1310,6 +1310,7 @@
         "title": "Layers",
         "add": "Add node",
         "addAtCapacity": "This paywall has reached the maximum number of elements.",
+        "addAtDepthCapacity": "This branch is nested too deeply to add another element.",
         "moveUp": "Move up",
         "moveDown": "Move down",
         "delete": "Delete",
