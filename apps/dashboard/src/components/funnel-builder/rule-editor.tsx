@@ -216,6 +216,46 @@ export const RuleEditor = component(({ pageId }: Props) => {
               const questionPage = vm.pages.find((p) => p.question_id === c.question_id);
               const answerKind = questionPage ? answerKindFor(questionPage.type) : "none";
               const allowedOps = OPERATORS_BY_KIND[answerKind];
+
+              // A clause authored before branchableQuestionIds excluded
+              // "none"-kind questions (or one referencing a page that's
+              // since been deleted) resolves here with zero valid
+              // operators. Rendering the normal controls would put a
+              // stored `question_id` into a <select> whose options
+              // (earlierQs) no longer include it — the browser silently
+              // displays some other option while state still holds the
+              // real value, and the operator <select> gets zero
+              // <option>s. That is displayed-diverges-from-saved, which
+              // SP5 exists to remove. Render an explicit, visible broken
+              // row instead: nothing about the clause changes until the
+              // author acts on it.
+              if (allowedOps.length === 0) {
+                return (
+                  <Fragment key={clauseIdx}>
+                    {clauseIdx > 0 && (
+                      <div className="my-1.5 text-center font-rv-mono text-[9px] uppercase tracking-wider text-rv-mute-500">
+                        {rule.condition.op}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1.5 rounded border border-rv-danger/30 bg-rv-danger/[0.05] px-2 py-1">
+                      <TriangleAlert size={11} className="flex-shrink-0 text-rv-danger" />
+                      <span className="flex-1 text-[11px] text-rv-danger">
+                        References an unavailable question (
+                        {c.question_id || "no question set"}) and cannot fire.
+                      </span>
+                      <button
+                        type="button"
+                        title="Remove unavailable clause"
+                        onClick={() => removeClause(ruleIdx, clauseIdx)}
+                        className="flex h-5 w-5 flex-shrink-0 cursor-pointer items-center justify-center rounded text-rv-danger transition hover:bg-rv-c3"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  </Fragment>
+                );
+              }
+
               return (
                 <Fragment key={clauseIdx}>
                   {clauseIdx > 0 && (

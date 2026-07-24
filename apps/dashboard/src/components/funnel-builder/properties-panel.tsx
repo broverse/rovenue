@@ -27,7 +27,7 @@ import {
   type ProgressStyle,
 } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
-import { RuleEditor } from "./rule-editor";
+import { RuleEditor, branchableQuestionIds } from "./rule-editor";
 import { ColorSwatchInput } from "./color-swatch-input";
 import { useProjectPaywalls } from "../../lib/hooks/useProjectPaywalls";
 
@@ -99,7 +99,18 @@ export const PropertiesPanel = component(({ editLocale, defaultLocale }: Propert
   const meta = PAGE_TYPES[page.type];
   const rules = vm.rules[page.id] ?? [];
   const sourceIndex = vm.pages.findIndex((p) => p.id === page.id);
-  const earlierQs = vm.pages
+  // Two different notions of "earlier questions" that must NOT collapse
+  // into one variable (that drift is the exact CRITICAL finding SP5
+  // already spent — see rule-editor.tsx's branchableQuestionIds):
+  //  - branching (rule editor gate below) needs a question whose answer
+  //    is a single comparable value — a page can carry a question_id
+  //    with no comparable answer (contact_info collects a composite of
+  //    name/email/phone), which OPERATORS_BY_KIND has nothing for.
+  //  - personalization chips (below) insert `{{qid}}` into result copy,
+  //    a different concept — a contact_info answer is perfectly
+  //    insertable there even though it can't be branched on.
+  const branchableEarlierQs = branchableQuestionIds(vm.pages, sourceIndex);
+  const insertableEarlierQs = vm.pages
     .slice(0, sourceIndex)
     .map((p) => p.question_id)
     .filter((q): q is string => Boolean(q));
@@ -569,7 +580,7 @@ export const PropertiesPanel = component(({ editLocale, defaultLocale }: Propert
           <Section title="Personalization">
             <Field label="Insert from earlier questions">
               <div className="flex flex-wrap gap-1.5">
-                {earlierQs.map((qid) => (
+                {insertableEarlierQs.map((qid) => (
                   <span
                     key={qid}
                     className="cursor-pointer rounded border border-rv-divider bg-rv-c3 px-2 py-1 font-rv-mono text-[11px] text-rv-mute-700 transition hover:border-rv-accent-500 hover:text-rv-accent-500"
@@ -935,7 +946,7 @@ export const PropertiesPanel = component(({ editLocale, defaultLocale }: Propert
             </>
           }
         >
-          {earlierQs.length === 0 ? (
+          {branchableEarlierQs.length === 0 ? (
             <div className="rounded border border-rv-accent-500/25 bg-rv-accent-500/[0.08] p-2.5 text-[11px] leading-relaxed text-rv-mute-700">
               No earlier questions yet. Branching can only reference pages before this one.
             </div>
