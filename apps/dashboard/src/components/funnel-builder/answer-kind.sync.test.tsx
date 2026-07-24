@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../i18n/config";
 import { PagePreview } from "./page-preview";
-import { PAGE_TYPES, type AnswerKind } from "./types";
+import { OPERATORS_BY_KIND, PAGE_TYPES, type AnswerKind } from "./types";
 import type { Page, PageType, Theme } from "./types";
 
 // =============================================================
@@ -44,8 +44,10 @@ const OPTIONS = [
  * Every page type the runner captures an answer for today (SP4 wired
  * six). Each entry says how to drive it and what shape it must hand back.
  *
- * A page type wired later and not added here is the gap this test exists
- * to make visible — see the coverage assertion at the bottom.
+ * A page type with a comparable answer (`answerKind !== "none"`) must be
+ * accounted for in either this table or NOT_WIRED_YET below — the
+ * coverage assertion at the bottom checks that partition, not just this
+ * one.
  */
 const WIRED: ReadonlyArray<{
   type: PageType;
@@ -59,6 +61,28 @@ const WIRED: ReadonlyArray<{
   { type: "multi_choice", drive: (u) => u.click(screen.getByText("Option B")), options: OPTIONS },
   { type: "yes_no", drive: (u) => u.click(screen.getByText("Yes")) },
 ];
+
+/**
+ * Page types with a comparable answer (`answerKind !== "none"`) that the
+ * runner does not capture yet. An explicit allow-list rather than "not in
+ * WIRED" so a NEW page type added to PAGE_TYPES with a non-none
+ * answerKind — the case this test exists to catch — fails the coverage
+ * assertion below instead of silently being absorbed into "not wired".
+ * Wiring one of these means moving it here out and into WIRED with a
+ * `drive` function.
+ */
+const NOT_WIRED_YET: ReadonlySet<PageType> = new Set([
+  "number_input",
+  "date_input",
+  "slider",
+  "rating",
+  "picture_choice",
+  "legal",
+  "checkbox",
+  "opinion_scale",
+  "long_text",
+  "phone",
+]);
 
 describe("answerKind agrees with what the wired inputs actually emit", () => {
   it.each(WIRED.map((w) => [w.type, w] as const))(
@@ -105,16 +129,38 @@ describe("answerKind agrees with what the wired inputs actually emit", () => {
     },
   );
 
-  it("no page type classified `multi` is missing from the wired table", () => {
-    // `multi` is the kind whose operators (contains / not_contains) are
-    // the ONLY ones that fire for an array. A multi page the runner does
-    // not capture would offer working operators against nothing.
-    const multiTypes = (Object.keys(PAGE_TYPES) as PageType[]).filter(
-      (t) => PAGE_TYPES[t].answerKind === "multi",
+  it("every page type with a comparable answer is accounted for in WIRED or NOT_WIRED_YET", () => {
+    // Every branchable page type (answerKind !== "none") must show up in
+    // one of the two lists above. A type in neither is the gap this test
+    // exists to make visible: a new page type added to PAGE_TYPES with a
+    // real answerKind but forgotten here would otherwise offer working
+    // operators (or claim not to) against nothing this test checked.
+    const branchableTypes = (Object.keys(PAGE_TYPES) as PageType[]).filter(
+      (t) => PAGE_TYPES[t].answerKind !== "none",
     );
     const wiredTypes = new Set(WIRED.map((w) => w.type));
-    for (const t of multiTypes) {
-      expect(wiredTypes.has(t), `${t} is answerKind "multi" but is not wired`).toBe(true);
+    for (const t of branchableTypes) {
+      const accountedFor = wiredTypes.has(t) || NOT_WIRED_YET.has(t);
+      expect(
+        accountedFor,
+        `${t} is answerKind "${PAGE_TYPES[t].answerKind}" but is in neither WIRED nor NOT_WIRED_YET`,
+      ).toBe(true);
     }
+  });
+
+  it("WIRED and NOT_WIRED_YET do not overlap", () => {
+    const wiredTypes = new Set(WIRED.map((w) => w.type));
+    for (const t of NOT_WIRED_YET) {
+      expect(wiredTypes.has(t), `${t} is in both WIRED and NOT_WIRED_YET`).toBe(false);
+    }
+  });
+
+  it("text and choice offer the same operators — the per-type check above cannot tell them apart", () => {
+    // The per-type assertion (above, in the `else` branch) collapses
+    // `text` and `choice` into "a string, not an array". That is only a
+    // safe simplification while the two answer kinds' operator lists are
+    // identical; the day they diverge, this is the assertion that has to
+    // red for the seam to still mean anything.
+    expect(OPERATORS_BY_KIND.text).toEqual(OPERATORS_BY_KIND.choice);
   });
 });

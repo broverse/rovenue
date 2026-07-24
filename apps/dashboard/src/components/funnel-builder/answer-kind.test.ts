@@ -83,11 +83,20 @@ describe("OPERATORS_BY_KIND", () => {
     }
   });
 
-  it("classifies every page type", () => {
-    // A new page type added without an answerKind would otherwise be
-    // silently unbranchable.
+  it("classifies every page type with a valid AnswerKind", () => {
+    // `PAGE_TYPES` is typed `Record<PageType, PageTypeMeta>` with a
+    // required `answerKind`, so `toBeDefined()` cannot fail without
+    // someone first weakening the type. Checking membership in the
+    // AnswerKind union is the version that stays meaningful if that ever
+    // happens — a new page type added without an answerKind, or with one
+    // outside the union, is what this exists to catch.
+    const VALID_KINDS: ReadonlySet<AnswerKind> = new Set([
+      "text", "choice", "multi", "number", "none",
+    ]);
     for (const [type, meta] of Object.entries(PAGE_TYPES)) {
-      expect(meta.answerKind, `${type} has no answerKind`).toBeDefined();
+      expect(VALID_KINDS.has(meta.answerKind), `${type} has an invalid answerKind: ${meta.answerKind}`).toBe(
+        true,
+      );
     }
   });
 });
