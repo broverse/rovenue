@@ -10,6 +10,7 @@ import { toEvalPage } from "../types";
 import { loadFontFamily } from "../fonts";
 import { mapFunnelLocales, normalizeFunnel } from "../i18n";
 import type { LocaleCode } from "@rovenue/shared/i18n";
+import { qid } from "../blank-page";
 
 export interface DraftProps {
   projectId: string;
@@ -282,6 +283,37 @@ export class FunnelDraftViewModel {
     if (i < 0) return;
     const copy: Page = JSON.parse(JSON.stringify(this.pages[i]));
     copy.id = `${id}_copy_${Date.now().toString(36)}`;
+
+    // A question_id is an ANSWER KEY: the runner's answer map and the
+    // server's `funnel_answers` table both key on it. Sharing one between
+    // two pages means the copy arrives pre-filled with the original's
+    // answer, satisfies its own `required` gate untouched, and re-sends
+    // that value under its own page id.
+    const previousQuestionId = copy.question_id;
+    if (previousQuestionId) {
+      copy.question_id = qid();
+
+      // Rules are not embedded on the Page — they live in `this.rules`,
+      // keyed by page id (see `applyServer`). Duplicate the source page's
+      // OWN rule set onto the new page id, rewriting only clauses that
+      // referenced the source page's own question. Rule sets keyed under
+      // every other page id are left untouched: they were authored
+      // against that question, and duplicating a page does not re-target
+      // them.
+      const sourceRules = this.rules[id];
+      if (sourceRules) {
+        const clonedRules: NextRule[] = JSON.parse(JSON.stringify(sourceRules));
+        for (const rule of clonedRules) {
+          for (const clause of rule.condition.clauses) {
+            if (clause.question_id === previousQuestionId) {
+              clause.question_id = copy.question_id;
+            }
+          }
+        }
+        this.rules[copy.id] = clonedRules;
+      }
+    }
+
     this.pages.splice(i + 1, 0, copy);
     this.selectedPageId = copy.id;
   }

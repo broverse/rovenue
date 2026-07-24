@@ -2,7 +2,7 @@ import { createId } from "@paralleldrive/cuid2";
 import type { LocaleCode, Localized } from "@rovenue/shared/i18n";
 import type { Page, PageType } from "./types";
 
-function qid(prefix = "q"): string {
+export function qid(prefix = "q"): string {
   return `${prefix}_${createId().slice(0, 6)}`;
 }
 
