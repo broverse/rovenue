@@ -1,6 +1,7 @@
 import { Fragment, type CSSProperties, type ReactElement } from "react";
 import {
   applyOverrides,
+  isNodeVisible,
   resolveText,
   resolveVariables,
   type BuilderConfig,
@@ -13,6 +14,7 @@ import {
   type SpacerNode,
   type StackNode,
   type TextNode,
+  type VisibilityPlatform,
 } from "@rovenue/shared/paywall";
 import type { RendererOffering } from "./types";
 import {
@@ -49,6 +51,10 @@ export type RenderCtx = {
    * unchanged by descendants). `overrides` with `when.kind === "selected"`
    * can only ever be active when this is true — see `activeOverrideConditions`.
    */
+  /** Where this render is happening. Absent means unknown, which makes
+   * every `visibility` rule fail open — see isNodeVisible in shared. */
+  platform?: VisibilityPlatform | null;
+  appVersion?: string | null;
   insideCellTemplate: boolean;
   /**
    * The package the current cellTemplate cell is scoped to. Null outside
@@ -405,6 +411,20 @@ function renderSpacer(node: SpacerNode, ctx: RenderCtx): ReactElement {
  * in shared), so `resolved.type` always equals `node.type` and the switch
  * below narrows exactly as it did before overrides existed. */
 export function renderNode(node: PaywallNode, ctx: RenderCtx): ReactElement | null {
+  // Hidden means the author said "not here", which is NOT the same as
+  // "could not decode" — so a hidden node does not render its `fallback`.
+  // Doing so would put content on exactly the platform it was excluded
+  // from. Returning here also takes the node's children with it.
+  //
+  // Placed before applyOverrides defensively, NOT because the ordering is
+  // what protects anything today: `visibility` is absent from
+  // OVERRIDABLE_PROP_KEYS, so `resolved.visibility` always equals
+  // `node.visibility` and moving this line below applyOverrides changes
+  // nothing observable — verified by mutation, which is why no test guards
+  // it. That allow-list is the real guarantee that an override cannot
+  // resurrect a hidden node; this ordering only keeps the gate correct if
+  // someone ever widens it.
+  if (!isNodeVisible(node.visibility, ctx)) return null;
   const resolved = applyOverrides(node, activeOverrideConditions(ctx));
   try {
     switch (resolved.type) {

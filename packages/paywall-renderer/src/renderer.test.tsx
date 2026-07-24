@@ -949,3 +949,70 @@ describe("PaywallRenderer", () => {
     });
   });
 });
+
+describe("node visibility", () => {
+  function withVisibility(node: PaywallNode): BuilderConfig {
+    return baseConfig({
+      root: { type: "stack", id: "root", axis: "v", children: [node] },
+    });
+  }
+
+  const iosOnlyText: PaywallNode = {
+    type: "text",
+    id: "t_ios",
+    key: "title",
+    role: "title",
+    visibility: { platform: ["ios"] },
+  };
+
+  it("renders a platform-scoped node on that platform", () => {
+    const { queryByText } = render(
+      <PaywallRenderer config={withVisibility(iosOnlyText)} offering={offering} colorScheme="light" platform="ios" onPurchase={vi.fn()} />,
+    );
+    expect(queryByText("Go Pro")).toBeInTheDocument();
+  });
+
+  it("hides it on another platform", () => {
+    const { queryByText } = render(
+      <PaywallRenderer config={withVisibility(iosOnlyText)} offering={offering} colorScheme="light" platform="android" onPurchase={vi.fn()} />,
+    );
+    expect(queryByText("Go Pro")).not.toBeInTheDocument();
+  });
+
+  it("FAILS OPEN when the renderer does not know its platform", () => {
+    const { queryByText } = render(
+      <PaywallRenderer config={withVisibility(iosOnlyText)} offering={offering} colorScheme="light" onPurchase={vi.fn()} />,
+    );
+    expect(queryByText("Go Pro")).toBeInTheDocument();
+  });
+
+  it("takes a hidden stack's children with it", () => {
+    const config = withVisibility({
+      type: "stack",
+      id: "hidden_stack",
+      axis: "v",
+      visibility: { platform: ["ios"] },
+      children: [{ type: "text", id: "child", key: "title", role: "title" }],
+    });
+    const { queryByText } = render(
+      <PaywallRenderer config={config} offering={offering} colorScheme="light" platform="android" onPurchase={vi.fn()} />,
+    );
+    expect(queryByText("Go Pro")).not.toBeInTheDocument();
+  });
+
+  it("does NOT render a hidden node's fallback — hidden is not a decode failure", () => {
+    const config = withVisibility({
+      type: "text",
+      id: "t_hidden",
+      key: "title",
+      role: "title",
+      visibility: { platform: ["ios"] },
+      fallback: { type: "text", id: "t_fb", key: "subtitle", role: "body" },
+    });
+    const { queryByText } = render(
+      <PaywallRenderer config={config} offering={offering} colorScheme="light" platform="android" onPurchase={vi.fn()} />,
+    );
+    expect(queryByText("Go Pro")).not.toBeInTheDocument();
+    expect(queryByText("Unlock everything")).not.toBeInTheDocument();
+  });
+});

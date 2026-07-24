@@ -189,6 +189,13 @@ export const Canvas = component(() => {
         colorScheme={vm.colorScheme}
         priceView={priceView}
         eligibility={eligibility}
+        // The previewed device's platform, so node visibility rules show
+        // their effect as the author switches between an iPhone and a
+        // Pixel. No appVersion on purpose: there is no app behind the
+        // builder, and the fail-open rule then previews version bounds as
+        // visible — honest, since the builder cannot know what is in the
+        // field.
+        platform={vm.canvasPlatform}
         onPurchase={noop}
         onClose={noop}
         onRestore={noop}

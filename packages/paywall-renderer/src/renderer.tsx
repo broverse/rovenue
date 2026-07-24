@@ -39,7 +39,7 @@ function initialSelectedPackageId(root: PaywallNode, offering: RendererOffering 
 }
 
 export function PaywallRenderer(props: PaywallRendererProps): JSX.Element {
-  const { config, offering, colorScheme, priceView, eligibility, onPurchase, onClose, onRestore, onUrl } = props;
+  const { config, offering, colorScheme, priceView, eligibility, platform, appVersion, onPurchase, onClose, onRestore, onUrl } = props;
   const locale = props.locale ?? config.defaultLocale;
 
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(() =>
@@ -57,6 +57,8 @@ export function PaywallRenderer(props: PaywallRendererProps): JSX.Element {
     eligibility,
     selectedPackageId,
     selectedPackage,
+    platform,
+    appVersion,
     insideCellTemplate: false,
     cellPackageId: null,
     onSelectPackage: setSelectedPackageId,

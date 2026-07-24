@@ -1,3 +1,4 @@
+import type { VisibilityPlatform } from "@rovenue/shared/paywall";
 import type { BuilderConfig, PackageView } from "@rovenue/shared/paywall";
 
 // =============================================================
@@ -22,6 +23,12 @@ export type RendererOffering = {
 };
 
 export type PaywallRendererProps = {
+  /** Where this paywall is being rendered. Absent means unknown, which
+   * makes every node `visibility` rule fail open. */
+  platform?: VisibilityPlatform | null;
+  /** Host app version, for a node's min/max bounds. Absent fails open. */
+  appVersion?: string | null;
+
   config: BuilderConfig;
   offering: RendererOffering | null;
   locale?: string;
