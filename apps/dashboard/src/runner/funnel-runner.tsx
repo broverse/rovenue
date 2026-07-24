@@ -7,12 +7,12 @@
 // branching rules apply (the JSON config from /public/funnels/:slug
 // has next_rules / default_next stripped).
 //
-// Answers for the five wired input types (email, short_text,
-// text_input, single_choice, multi_choice, yes_no) are captured here
-// and sent WITH the advance that evaluates them — the server writes
-// the answer before it reads the answer map, so a rule keyed on this
-// answer steers this very transition. The remaining input types still
-// click through on default-next until they are wired.
+// Answers are captured here and sent WITH the advance that evaluates
+// them — the server writes the answer before it reads the answer map, so
+// a rule keyed on this answer steers this very transition. Capture is
+// generic (any page's `onAnswer` value lands in the answer map under its
+// question_id); which page types actually emit is decided in the input
+// components, not here — every input type is now wired.
 // =============================================================
 
 import { useEffect, useMemo, useState } from "react";

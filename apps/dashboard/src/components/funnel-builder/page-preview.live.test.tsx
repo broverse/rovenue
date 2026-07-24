@@ -124,6 +124,18 @@ const legalPage: Page = {
   agreementLabel: L("I agree to the terms"),
 } as Page;
 
+// `legal` and `checkbox` render the SAME LegalCheckbox component, so the
+// legal tests already exercise the shared emit path. `checkbox` gets its
+// own case anyway: without it, a `page.type`-branching regression inside
+// LegalCheckbox that broke only `checkbox` would go uncaught.
+const checkboxPage: Page = {
+  id: "pg_checkbox",
+  type: "checkbox",
+  question_id: "q_checkbox",
+  title: L("Acknowledge"),
+  agreementLabel: L("I understand"),
+} as Page;
+
 const phonePage: Page = {
   id: "pg_phone",
   type: "phone",
@@ -299,6 +311,13 @@ describe("PagePreview — live mode", () => {
     );
     await userEvent.click(screen.getByRole("checkbox")); // uncheck
     expect(onAnswer).toHaveBeenLastCalledWith("");
+  });
+
+  it("checkbox emits the checked constant when checked", async () => {
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(checkboxPage)} mode="live" value={null} onAnswer={onAnswer} />);
+    await userEvent.click(screen.getByRole("checkbox"));
+    expect(onAnswer).toHaveBeenLastCalledWith(LEGAL_CHECKBOX_CHECKED);
   });
 
   it("phone captures the typed string", async () => {
