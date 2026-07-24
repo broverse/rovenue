@@ -259,7 +259,7 @@ Create `apps/dashboard/src/components/funnel-builder/page-preview.live.test.tsx`
     const onAnswer = vi.fn();
     render(<PagePreview {...base} page={yesNoPage} mode="live" value={null} onAnswer={onAnswer} />);
     await userEvent.click(screen.getByText("Yes"));
-    expect(onAnswer).toHaveBeenLastCalledWith(true);
+    expect(onAnswer).toHaveBeenLastCalledWith("yes");
   });
 
   it("does not fire onAnswer from a preview-mode choice click", async () => {

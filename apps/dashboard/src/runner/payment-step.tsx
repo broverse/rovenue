@@ -284,7 +284,14 @@ export function PaymentStep({
   // address the endpoint refuses to create without.
   return (
     <StepShell onCancel={onCancel}>
-      {collectedEmail ? (
+      {/* A collected address skips this form — but only while it is
+          working. If creating the intent FAILED, fall through to the form
+          so the buyer can fix the address: the funnel accepts any
+          non-empty string, the endpoint requires a valid email, and the
+          runner has no way back to the page that collected it. Without
+          this branch a typo is a dead end with no retry. The form is
+          pre-filled from `collectedEmail`, so correcting it is one edit. */}
+      {collectedEmail && !error ? (
         <p className="text-[13px] text-zinc-600">
           {creating ? "Preparing checkout…" : "Checkout unavailable"}
         </p>

@@ -146,6 +146,18 @@ describe("PagePreview — preview mode stays inert", () => {
     expect(screen.getByRole("textbox")).toHaveAttribute("readonly");
   });
 
+  it("DEFAULTS to preview when mode is omitted entirely", async () => {
+    // Every other preview assertion passes mode="preview" explicitly, so
+    // flipping the default would red nothing — and that mutation makes the
+    // builder canvas interactive, which is the whole thing `mode` exists to
+    // prevent. The builder call sites pass no `mode` at all, so this is the
+    // shape they actually get.
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(singleChoicePage)} onAnswer={onAnswer} />);
+    await userEvent.click(screen.getByText("Option B"));
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+
   it("does not fire onAnswer from a choice click even when onAnswer is passed", async () => {
     const onAnswer = vi.fn();
     render(
@@ -177,6 +189,7 @@ describe("captured answers match author-written rules", () => {
         type: "question",
         next_rules: [
           {
+            id: "rule_1",
             condition: {
               op: "all",
               clauses: [{ question_id: questionId, op: "eq", value: operand }],

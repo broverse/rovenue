@@ -168,17 +168,15 @@ export const PagePreview = component(
   }: Props) => {
   // One gate for every live input below. Reading `mode` — never
   // `onAnswer !== undefined` — is what keeps the builder canvas inert.
-  const liveProps = mode === "live" ? { value, onChange: onAnswer } : {};
+  const liveProps = { live: mode === "live", value, onChange: onAnswer };
   // TextField's value is a plain string; the shared AnswerValue union is
   // narrowed here rather than inside the leaf so the leaf stays a dumb
   // controlled input.
-  const textLiveProps =
-    mode === "live"
-      ? {
-          value: typeof value === "string" ? value : "",
-          onChange: (next: string) => onAnswer?.(next),
-        }
-      : {};
+  const textLiveProps = {
+    live: mode === "live",
+    value: typeof value === "string" ? value : "",
+    onChange: (next: string) => onAnswer?.(next),
+  };
   const resolved: ResolvedPage = useMemo(
     () => resolvePage(page, locale, defaultLocale),
     [page, locale, defaultLocale],
@@ -518,17 +516,23 @@ const ChoiceListReadOnly = component(
   ({
     page,
     theme,
+    live = false,
     value,
     onChange,
   }: {
     page: ResolvedPage;
     theme: Theme;
-    // Supplied only in live mode. `value` is a single option value for
-    // single_choice and an array for multi_choice.
+    // Passed explicitly, never inferred from `onChange` being present.
+    // Inferring it reproduces one level down the very anti-pattern the
+    // `mode` prop exists to prevent: a live page with no handler would
+    // silently render as a PREVIEW and highlight row 0, showing the
+    // visitor an answer they never gave.
+    live?: boolean;
+    // `value` is a single option value for single_choice and an array for
+    // multi_choice.
     value?: AnswerValue;
     onChange?: (next: AnswerValue) => void;
   }) => {
-    const live = onChange !== undefined;
     const multi = page.type === "multi_choice";
     const selected: string[] = multi
       ? Array.isArray(value)
@@ -562,7 +566,11 @@ const ChoiceListReadOnly = component(
 
     return (
       <div className="mt-2 flex flex-col gap-2">
-        {(page.options || []).slice(0, 6).map((o, i) => {
+        {/* The cap is a mock-up aesthetic — six rows is what fits the
+            phone frame. In live mode it would silently hide a 7th choice
+            from a visitor who could then never answer it, so the real page
+            shows every option. */}
+        {(live ? page.options || [] : (page.options || []).slice(0, 6)).map((o, i) => {
           const active = isActive(o, i);
           const row = (
             <>
@@ -624,10 +632,19 @@ const ChoiceListEditable = component(({ page, theme }: { page: ResolvedPage; the
     }
   };
 
-  // Seed a draft branching rule for this option (question_id eq value) and
-  // jump to the Workflow tab so the user can pick the goto target.
+  // Seed a draft branching rule for this option and jump to the Workflow
+  // tab so the user can pick the goto target.
+  //
+  // The operator depends on the page type, and getting it wrong is silent.
+  // A multi_choice answer is a string[]; `eq` compares with `===`, so
+  // `["a"] === "a"` is false and the rule could NEVER fire. `contains` is
+  // the only positive operator in the evaluator that handles an array
+  // (see evalClause). Seeding `eq` here handed the author a rule that
+  // looked right, was written for them in one click, and silently never
+  // matched.
   const onBranch = (optionValue: string) => {
     if (!page.question_id) return;
+    const op = page.type === "multi_choice" ? "contains" : "eq";
     vm.addRule(page.id, {
       id: Math.random().toString(36).slice(2, 10),
       condition: {
@@ -635,7 +652,7 @@ const ChoiceListEditable = component(({ page, theme }: { page: ResolvedPage; the
         clauses: [
           {
             question_id: page.question_id,
-            op: "eq",
+            op,
             value: optionValue,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
           } as any,
@@ -739,11 +756,14 @@ const YesNoButtons = component(
   ({
     page,
     theme,
+    live = false,
     value,
     onChange,
   }: {
     page: ResolvedPage;
     theme: Theme;
+    // Passed explicitly, never inferred — see ChoiceListReadOnly.
+    live?: boolean;
     // Supplied only in live mode. The recorded answer is the option's
     // VALUE STRING, exactly like single_choice.
     //
@@ -761,7 +781,6 @@ const YesNoButtons = component(
     { label: "No", value: "no" },
   ];
   const [picked, setPicked] = useState<string | null>(null);
-  const live = onChange !== undefined;
   const activeValue = live ? (typeof value === "string" ? value : null) : picked;
   return (
     <div className="mt-3 grid grid-cols-2 gap-2">
@@ -771,7 +790,7 @@ const YesNoButtons = component(
           <button
             key={o.value}
             type="button"
-            onClick={() => (live ? onChange(o.value) : setPicked(o.value))}
+            onClick={() => (live && onChange ? onChange(o.value) : setPicked(o.value))}
             className="h-14 text-[14px] font-semibold transition"
             style={{
               borderRadius: theme.radius,
@@ -1008,6 +1027,7 @@ function TextField({
   theme,
   type = "text",
   icon,
+  live = false,
   value,
   onChange,
 }: {
@@ -1015,12 +1035,11 @@ function TextField({
   theme: Theme;
   type?: "text" | "email" | "tel";
   icon?: React.ReactNode;
-  // Supplied only in live mode. Without them the field stays read-only,
-  // which is what the builder canvas and the theme-tab preview need.
+  // Passed explicitly, never inferred — see ChoiceListReadOnly.
+  live?: boolean;
   value?: string;
   onChange?: (next: string) => void;
 }) {
-  const live = onChange !== undefined;
   return (
     <div
       className="mt-3 flex h-10 w-full items-center gap-2 px-3"
@@ -1032,7 +1051,7 @@ function TextField({
         type={type}
         placeholder={placeholder ?? "Type your answer…"}
         className="h-full flex-1 bg-transparent text-[13px] outline-none placeholder:opacity-50"
-        {...(live
+        {...(live && onChange
           ? { value: value ?? "", onChange: (e) => onChange(e.currentTarget.value) }
           : {})}
       />

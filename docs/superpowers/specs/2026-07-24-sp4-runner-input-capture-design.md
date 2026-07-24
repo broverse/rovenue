@@ -99,7 +99,7 @@ shared; restructuring it is not in scope.
 |---|---|
 | `email` | `string` |
 | `text_input`, `short_text` | `string` |
-| `single_choice` | `string` (the chosen option's id) |
+| `single_choice` | `string` (the chosen option's `value`) |
 | `multi_choice` | `string[]` |
 | `yes_no` | `string` (the chosen option's value) |
 
@@ -146,7 +146,11 @@ so a reviewer does not mistake the client-only check for a gap.
 ## Item 6 — the email reaches `PaymentStep`
 
 `PaymentStep` already takes `collectedEmail` and asks for an address when it is
-absent. The runner passes the answer belonging to the **last `email`-typed page in
+absent. **A collected address skips that confirmation step entirely** — the
+payment intent is created from it automatically. Because the funnel accepts any
+non-empty string while the endpoint requires `z.string().email()`, a typo would
+otherwise dead-end the buyer with no form and no way back, so `PaymentStep` falls
+through to the (pre-filled) form whenever the automatic attempt fails. The runner passes the answer belonging to the **last `email`-typed page in
 page order** that has been answered.
 
 The tie-break is stated because it is a real choice: a funnel may legitimately have
