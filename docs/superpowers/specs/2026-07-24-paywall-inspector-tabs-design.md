@@ -92,14 +92,16 @@ export type InspectorTabId = (typeof INSPECTOR_TABS)[number]["id"];
 
 Mapping is explicit, per tab:
 
-| Tab | Issue codes |
-|---|---|
-| Content | `UNKNOWN_LOC_KEY`, `EMPTY_LOC_VALUE` |
-| Binding | `FOREIGN_PACKAGE_ID`, `CELL_TEMPLATE_BAD_NODE` |
-| Layout | — |
-| Style | — |
+| Tab | Issue codes | because the offending field is |
+|---|---|---|
+| Content | `UNKNOWN_LOC_KEY`, `EMPTY_LOC_VALUE` | the node's localized text key |
+| Binding | `FOREIGN_PACKAGE_ID` | `packageIds` / `defaultSelected` |
+| Layout | `CELL_TEMPLATE_BAD_NODE` | `cellTemplate` |
+| Style | — | |
 
-Codes with no tab get no dot: `DUPLICATE_NODE_ID` is not a field, `MISSING_PURCHASE_BUTTON` is a property of the tree rather than of any node, and `LOCALE_KEY_GAP` is per-locale rather than per-node. Those already surface in the validation drawer, which stays the complete list. The inspector dot is a pointer, not a second issue system — it must never be the only place an issue appears.
+`cellTemplate` and `cellLayout` sit on **Layout**, not Binding: they decide how the list draws each cell. Binding is only "which commerce data does this node point at" — `packageIds` and `defaultSelected`. The issue code follows its field.
+
+Codes with no tab get no dot: `DUPLICATE_NODE_ID` is not a field, `MISSING_PURCHASE_BUTTON` is a property of the tree rather than of any node, `LOCALE_KEY_GAP` is per-locale rather than per-node, and `OVERRIDE_BAD_PROP` / `OVERRIDE_SELECTED_OUTSIDE_CELL` belong to Overrides, which is deliberately outside the tab strip (§4). Those already surface in the validation drawer, which stays the complete list. The inspector dot is a pointer, not a second issue system — it must never be the only place an issue appears.
 
 Severity follows the existing model: a dot is danger when any of the tab's issues is publish-blocking, warning otherwise. It reuses `isPublishBlockingIssue`; it does not reimplement severity.
 
