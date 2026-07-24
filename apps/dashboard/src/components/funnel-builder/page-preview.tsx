@@ -15,6 +15,7 @@ import { useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode 
 import { PAGE_TYPES, type Page, type ProgressStyle, type Theme } from "./types";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
 import type { LocaleCode } from "@rovenue/shared/i18n";
+import type { AnswerValue } from "@rovenue/shared/funnel";
 import { resolvePage, type ResolvedPage } from "./i18n";
 
 function isFilledColor(c?: string): c is string {
@@ -116,6 +117,18 @@ type Props = {
   // "full": no rounded corners, no status bar. Used by the public runner
   // where the page is the real document, not a mock-up inside a frame.
   chrome?: "phone" | "full";
+  // Whether this preview's INPUTS are live.
+  //
+  // Deliberately an explicit parameter rather than inferred from
+  // `onAnswer` being present: the builder canvas's inertness is a
+  // requirement, not a side effect of a callback being absent. Inferring
+  // it means anyone who later passes `onAnswer` for an unrelated reason
+  // silently makes the canvas interactive, and nobody is watching for
+  // that. Defaults to "preview" so every existing call site is unchanged.
+  mode?: "preview" | "live";
+  // The current answer for this page, when `mode` is "live".
+  value?: AnswerValue;
+  onAnswer?: (value: AnswerValue) => void;
 };
 
 /**
@@ -145,7 +158,23 @@ export const PagePreview = component(
     editable = false,
     onAdvance,
     chrome = "phone",
+    mode = "preview",
+    value,
+    onAnswer,
   }: Props) => {
+  // One gate for every live input below. Reading `mode` — never
+  // `onAnswer !== undefined` — is what keeps the builder canvas inert.
+  const liveProps = mode === "live" ? { value, onChange: onAnswer } : {};
+  // TextField's value is a plain string; the shared AnswerValue union is
+  // narrowed here rather than inside the leaf so the leaf stays a dumb
+  // controlled input.
+  const textLiveProps =
+    mode === "live"
+      ? {
+          value: typeof value === "string" ? value : "",
+          onChange: (next: string) => onAnswer?.(next),
+        }
+      : {};
   const resolved: ResolvedPage = useMemo(
     () => resolvePage(page, locale, defaultLocale),
     [page, locale, defaultLocale],
@@ -328,13 +357,13 @@ export const PagePreview = component(
             {editable ? (
               <ChoiceListEditable page={resolved} theme={theme} />
             ) : (
-              <ChoiceListReadOnly page={resolved} theme={theme} />
+              <ChoiceListReadOnly page={resolved} theme={theme} {...liveProps} />
             )}
           </Cap>
         )}
         {page.type === "yes_no" && (
           <Cap>
-            <YesNoButtons page={resolved} theme={theme} />
+            <YesNoButtons page={resolved} theme={theme} {...liveProps} />
           </Cap>
         )}
         {page.type === "picture_choice" && (
@@ -359,7 +388,7 @@ export const PagePreview = component(
         )}
         {page.type === "short_text" && (
           <Cap>
-            <TextField placeholder={resolved.placeholder} theme={theme} />
+            <TextField placeholder={resolved.placeholder} theme={theme} {...textLiveProps} />
           </Cap>
         )}
         {page.type === "long_text" && (
@@ -374,6 +403,7 @@ export const PagePreview = component(
               theme={theme}
               type="email"
               icon={<Mail size={14} />}
+              {...textLiveProps}
             />
           </Cap>
         )}
@@ -389,7 +419,7 @@ export const PagePreview = component(
         )}
         {page.type === "text_input" && (
           <Cap>
-            <TextField placeholder={resolved.placeholder} theme={theme} />
+            <TextField placeholder={resolved.placeholder} theme={theme} {...textLiveProps} />
           </Cap>
         )}
         {page.type === "number_input" && (
@@ -479,36 +509,93 @@ export const PagePreview = component(
 
 // ---------- Choice list ----------
 
-const ChoiceListReadOnly = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
-  return (
-    <div className="mt-2 flex flex-col gap-2">
-      {(page.options || []).slice(0, 6).map((o, i) => (
-        <div
-          key={i}
-          className="flex items-center gap-2 px-3 py-2.5 text-[12px]"
-          style={{
+const ChoiceListReadOnly = component(
+  ({
+    page,
+    theme,
+    value,
+    onChange,
+  }: {
+    page: ResolvedPage;
+    theme: Theme;
+    // Supplied only in live mode. `value` is a single option value for
+    // single_choice and an array for multi_choice.
+    value?: AnswerValue;
+    onChange?: (next: AnswerValue) => void;
+  }) => {
+    const live = onChange !== undefined;
+    const multi = page.type === "multi_choice";
+    const selected: string[] = multi
+      ? Array.isArray(value)
+        ? value
+        : []
+      : typeof value === "string"
+        ? [value]
+        : [];
+
+    // In preview mode the first row is highlighted as a static sample of
+    // what a selection looks like. In live mode nothing is highlighted
+    // until the visitor picks — a pre-highlighted row would read as an
+    // answer they did not give.
+    const isActive = (o: { value: string }, i: number) =>
+      live ? selected.includes(o.value) : i === 0;
+
+    const pick = (optionValue: string) => {
+      if (!onChange) return;
+      if (!multi) {
+        onChange(optionValue);
+        return;
+      }
+      // Toggle: add when absent, remove when present, and leave the order
+      // of everything else alone.
+      onChange(
+        selected.includes(optionValue)
+          ? selected.filter((v) => v !== optionValue)
+          : [...selected, optionValue],
+      );
+    };
+
+    return (
+      <div className="mt-2 flex flex-col gap-2">
+        {(page.options || []).slice(0, 6).map((o, i) => {
+          const active = isActive(o, i);
+          const row = (
+            <>
+              <span
+                className="block flex-shrink-0"
+                style={{
+                  width: 14,
+                  height: 14,
+                  border: `1.5px solid ${theme.primary}`,
+                  borderRadius: multi ? 3 : "50%",
+                  background: active ? theme.primary : "transparent",
+                }}
+              />
+              {o.label}
+            </>
+          );
+          const style = {
             borderRadius: theme.radius,
             background: "white",
-            border: `1px solid ${i === 0 ? theme.primary : "rgba(0,0,0,0.08)"}`,
-            boxShadow: i === 0 ? `0 0 0 2px ${theme.primary}25` : undefined,
-          }}
-        >
-          <span
-            className="block flex-shrink-0"
-            style={{
-              width: 14,
-              height: 14,
-              border: `1.5px solid ${theme.primary}`,
-              borderRadius: page.type === "multi_choice" ? 3 : "50%",
-              background: i === 0 ? theme.primary : "transparent",
-            }}
-          />
-          {o.label}
-        </div>
-      ))}
-    </div>
-  );
-});
+            border: `1px solid ${active ? theme.primary : "rgba(0,0,0,0.08)"}`,
+            boxShadow: active ? `0 0 0 2px ${theme.primary}25` : undefined,
+          };
+          const className = "flex items-center gap-2 px-3 py-2.5 text-[12px]";
+
+          return live ? (
+            <button key={i} type="button" onClick={() => pick(o.value)} className={className} style={style}>
+              {row}
+            </button>
+          ) : (
+            <div key={i} className={className} style={style}>
+              {row}
+            </div>
+          );
+        })}
+      </div>
+    );
+  },
+);
 
 const ChoiceListEditable = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
   const vm = useService(FunnelDraftViewModel);
@@ -643,21 +730,42 @@ const ChoiceListEditable = component(({ page, theme }: { page: ResolvedPage; the
 
 // ---------- Yes / No ----------
 
-const YesNoButtons = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
+const YesNoButtons = component(
+  ({
+    page,
+    theme,
+    value,
+    onChange,
+  }: {
+    page: ResolvedPage;
+    theme: Theme;
+    // Supplied only in live mode. The recorded answer is a BOOLEAN, not
+    // the option's value string — "yes"/"no" is presentation.
+    value?: AnswerValue;
+    onChange?: (next: AnswerValue) => void;
+  }) => {
   const opts = page.options?.length === 2 ? page.options : [
     { label: "Yes", value: "yes" },
     { label: "No", value: "no" },
   ];
   const [picked, setPicked] = useState<string | null>(null);
+  const live = onChange !== undefined;
+  // The first option is the affirmative one, so it maps to `true`.
+  const asBool = (optionValue: string) => optionValue === opts[0]!.value;
+  const activeValue = live
+    ? typeof value === "boolean"
+      ? (value ? opts[0]!.value : opts[1]!.value)
+      : null
+    : picked;
   return (
     <div className="mt-3 grid grid-cols-2 gap-2">
       {opts.map((o) => {
-        const active = picked === o.value;
+        const active = activeValue === o.value;
         return (
           <button
             key={o.value}
             type="button"
-            onClick={() => setPicked(o.value)}
+            onClick={() => (live ? onChange(asBool(o.value)) : setPicked(o.value))}
             className="h-14 text-[14px] font-semibold transition"
             style={{
               borderRadius: theme.radius,
@@ -673,7 +781,8 @@ const YesNoButtons = component(({ page, theme }: { page: ResolvedPage; theme: Th
       })}
     </div>
   );
-});
+  },
+);
 
 // ---------- Number counter ----------
 
@@ -893,12 +1002,19 @@ function TextField({
   theme,
   type = "text",
   icon,
+  value,
+  onChange,
 }: {
   placeholder?: string;
   theme: Theme;
   type?: "text" | "email" | "tel";
   icon?: React.ReactNode;
+  // Supplied only in live mode. Without them the field stays read-only,
+  // which is what the builder canvas and the theme-tab preview need.
+  value?: string;
+  onChange?: (next: string) => void;
 }) {
+  const live = onChange !== undefined;
   return (
     <div
       className="mt-3 flex h-10 w-full items-center gap-2 px-3"
@@ -906,10 +1022,13 @@ function TextField({
     >
       {icon && <span style={{ color: theme.primary }}>{icon}</span>}
       <input
-        readOnly
+        readOnly={!live}
         type={type}
         placeholder={placeholder ?? "Type your answer…"}
         className="h-full flex-1 bg-transparent text-[13px] outline-none placeholder:opacity-50"
+        {...(live
+          ? { value: value ?? "", onChange: (e) => onChange(e.currentTarget.value) }
+          : {})}
       />
     </div>
   );
