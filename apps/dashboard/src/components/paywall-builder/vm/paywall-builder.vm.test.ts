@@ -713,4 +713,17 @@ describe("PaywallBuilderViewModel", () => {
       expect(fresh.canPublish).toBe(true);
     });
   });
+
+  describe("an incomplete draft is still unpublishable", () => {
+    it("keeps canPublish false when a package list has no purchase button", async () => {
+      const config = fakeConfig();
+      config.root.children.push({ type: "packageList", id: "pl", packageIds: [], cellLayout: "row" });
+      const get = vi.fn().mockResolvedValue(fakeDetail({ builderConfig: config }));
+      const vm = makeVm({ get, patchBuilderConfig: vi.fn() });
+      await vm.load(() => {});
+
+      expect(vm.errorIssues.map((i) => i.code)).toContain("MISSING_PURCHASE_BUTTON");
+      expect(vm.canPublish).toBe(false);
+    });
+  });
 });

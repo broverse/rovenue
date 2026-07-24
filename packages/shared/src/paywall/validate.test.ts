@@ -710,11 +710,16 @@ describe("absent vs blank default-locale values", () => {
     };
   }
 
-  it("reports an ABSENT key as UNKNOWN_LOC_KEY, which blocks the save", () => {
+  it("reports an ABSENT key as UNKNOWN_LOC_KEY, which blocks publish but NOT the save", () => {
+    // Retiered: an absent default-locale key is reachable from the builder UI
+    // in one click (switch the default locale to a newly added empty one),
+    // so it must persist like any other in-progress authoring state — see
+    // ISSUE_SEVERITY.
     const issues = validateBuilderConfig(configWith({ en: {} }), { offeringPackageIds: [] });
     const issue = issues.find((i) => i.key === "title");
     expect(issue?.code).toBe("UNKNOWN_LOC_KEY");
-    expect(isBlockingIssue(issue!)).toBe(true);
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(true);
   });
 
   it("reports a BLANK key as EMPTY_LOC_VALUE, which blocks publish but NOT the save", () => {
@@ -807,13 +812,18 @@ describe("LOCALE_KEY_GAP scoping", () => {
 
 describe("issue severity", () => {
   it("classifies every currently-emitted code", () => {
+    // Retiered: UNKNOWN_LOC_KEY / FOREIGN_PACKAGE_ID / MISSING_PURCHASE_BUTTON /
+    // CELL_TEMPLATE_BAD_NODE / OVERRIDE_BAD_PROP moved save -> publish (see
+    // "save gate scope" below and ISSUE_SEVERITY's comments). DUPLICATE_NODE_ID
+    // and SCHEMA_INVALID are untouched — the builder can't reach either from
+    // the UI, so blocking the save on them costs an author nothing.
     expect(issueSeverity({ code: "DUPLICATE_NODE_ID" })).toBe("save");
-    expect(issueSeverity({ code: "UNKNOWN_LOC_KEY" })).toBe("save");
-    expect(issueSeverity({ code: "FOREIGN_PACKAGE_ID" })).toBe("save");
-    expect(issueSeverity({ code: "MISSING_PURCHASE_BUTTON" })).toBe("save");
+    expect(issueSeverity({ code: "UNKNOWN_LOC_KEY" })).toBe("publish");
+    expect(issueSeverity({ code: "FOREIGN_PACKAGE_ID" })).toBe("publish");
+    expect(issueSeverity({ code: "MISSING_PURCHASE_BUTTON" })).toBe("publish");
     expect(issueSeverity({ code: "SCHEMA_INVALID" })).toBe("save");
-    expect(issueSeverity({ code: "CELL_TEMPLATE_BAD_NODE" })).toBe("save");
-    expect(issueSeverity({ code: "OVERRIDE_BAD_PROP" })).toBe("save");
+    expect(issueSeverity({ code: "CELL_TEMPLATE_BAD_NODE" })).toBe("publish");
+    expect(issueSeverity({ code: "OVERRIDE_BAD_PROP" })).toBe("publish");
     expect(issueSeverity({ code: "LOCALE_KEY_GAP" })).toBe("warning");
     expect(issueSeverity({ code: "OVERRIDE_SELECTED_OUTSIDE_CELL" })).toBe("warning");
     expect(issueSeverity({ code: "INTRO_VARIABLE_UNGUARDED" })).toBe("warning");
@@ -857,5 +867,43 @@ describe("issue severity", () => {
     // defaulting to the strictest tier.
     expect(issueSeverity({ code: "constructor" })).toBe("save");
     expect(isBlockingIssue({ code: "constructor" })).toBe(true);
+  });
+});
+
+describe("save gate scope", () => {
+  const MOVED = [
+    "UNKNOWN_LOC_KEY",
+    "EMPTY_LOC_VALUE",
+    "FOREIGN_PACKAGE_ID",
+    "MISSING_PURCHASE_BUTTON",
+    "CELL_TEMPLATE_BAD_NODE",
+    "OVERRIDE_BAD_PROP",
+  ];
+
+  it("lets an incomplete draft save while still blocking its publish", () => {
+    for (const code of MOVED) {
+      expect(issueSeverity({ code })).toBe("publish");
+      expect(isBlockingIssue({ code })).toBe(false);
+      expect(isPublishBlockingIssue({ code })).toBe(true);
+    }
+  });
+
+  it("still blocks the save on a config the builder could not address", () => {
+    expect(issueSeverity({ code: "DUPLICATE_NODE_ID" })).toBe("save");
+    expect(isBlockingIssue({ code: "DUPLICATE_NODE_ID" })).toBe(true);
+  });
+
+  it("leaves an unclassified code at the strictest tier", () => {
+    expect(isBlockingIssue({ code: "SOME_CODE_ADDED_LATER" })).toBe(true);
+  });
+
+  it("does not change what a publish rejects", () => {
+    // The invariant this whole phase must not break: retiering moves codes
+    // between save and publish, never in or out of the warning tier.
+    const WARNINGS = ["LOCALE_KEY_GAP", "OVERRIDE_SELECTED_OUTSIDE_CELL", "INTRO_VARIABLE_UNGUARDED"];
+    for (const code of WARNINGS) expect(isPublishBlockingIssue({ code })).toBe(false);
+    for (const code of [...MOVED, "DUPLICATE_NODE_ID", "SCHEMA_INVALID", "SOME_CODE_ADDED_LATER"]) {
+      expect(isPublishBlockingIssue({ code })).toBe(true);
+    }
   });
 });

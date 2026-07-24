@@ -60,10 +60,28 @@ export type IssueSeverity = "save" | "publish" | "warning";
  * instead of becoming a type error the day the validator starts emitting it.
  */
 const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
+  // Warnings — block nothing.
   LOCALE_KEY_GAP: "warning",
   OVERRIDE_SELECTED_OUTSIDE_CELL: "warning",
   INTRO_VARIABLE_UNGUARDED: "warning",
+
+  // Publish-only — a draft in this state is ordinary work in progress and
+  // MUST still persist. Each of these is reachable from the builder UI in
+  // one or two clicks (add a package list before its purchase button;
+  // switch the offering; switch the default locale to a new empty one; add
+  // a node inside a cellTemplate), and blocking the save on them meant the
+  // author kept working while nothing was written.
+  UNKNOWN_LOC_KEY: "publish",
   EMPTY_LOC_VALUE: "publish",
+  FOREIGN_PACKAGE_ID: "publish",
+  MISSING_PURCHASE_BUTTON: "publish",
+  CELL_TEMPLATE_BAD_NODE: "publish",
+  OVERRIDE_BAD_PROP: "publish",
+
+  // Anything unlisted stays "save" — see issueSeverity. Only DUPLICATE_NODE_ID
+  // relies on that today: tree-ops addresses nodes by id, so a duplicate makes
+  // the builder's own next edit ambiguous. It is not reachable from the UI
+  // (the builder generates ids), so blocking it costs an author nothing.
 };
 
 /** Anything unlisted blocks the save — the strictest tier, so a code added
