@@ -387,7 +387,7 @@ export const PagePreview = component(
         )}
         {page.type === "opinion_scale" && (
           <Cap>
-            <OpinionScale page={resolved} theme={theme} />
+            <OpinionScale page={resolved} theme={theme} {...liveProps} />
           </Cap>
         )}
         {page.type === "rating" && (
@@ -1004,30 +1004,49 @@ const LegalCheckbox = component(({ page, theme }: { page: ResolvedPage; theme: T
 
 // ---------- Opinion scale 1-5 ----------
 
-const OpinionScale = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => {
-  const min = page.min ?? 1;
-  const max = page.max ?? 5;
-  const items = [] as number[];
-  for (let i = min; i <= max; i++) items.push(i);
-  return (
-    <div className="mt-3 flex flex-wrap gap-1.5">
-      {items.map((n) => (
-        <button
-          key={n}
-          type="button"
-          className="flex h-9 min-w-9 items-center justify-center rounded-md text-[13px] font-medium"
-          style={{
-            border: `1px solid ${theme.primary}`,
-            color: theme.primary,
-            background: "white",
-          }}
-        >
-          {n}
-        </button>
-      ))}
-    </div>
-  );
-});
+const OpinionScale = component(
+  ({
+    page,
+    theme,
+    live = false,
+    value,
+    onChange,
+  }: {
+    page: ResolvedPage;
+    theme: Theme;
+    live?: boolean;
+    value?: AnswerValue;
+    onChange?: (next: AnswerValue) => void;
+  }) => {
+    const min = page.min ?? 1;
+    const max = page.max ?? 5;
+    const items = [] as number[];
+    for (let i = min; i <= max; i++) items.push(i);
+    const selected = live && typeof value === "number" ? value : null;
+    return (
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {items.map((n) => {
+          const on = selected === n;
+          return (
+            <button
+              key={n}
+              type="button"
+              onClick={live ? () => onChange?.(n) : undefined}
+              className="flex h-9 min-w-9 items-center justify-center rounded-md text-[13px] font-medium"
+              style={{
+                border: `1px solid ${theme.primary}`,
+                color: on ? "white" : theme.primary,
+                background: on ? theme.primary : "white",
+              }}
+            >
+              {n}
+            </button>
+          );
+        })}
+      </div>
+    );
+  },
+);
 
 // ---------- Rating stars ----------
 

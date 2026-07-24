@@ -81,6 +81,15 @@ const sliderPage: Page = {
   step: 1,
 } as Page;
 
+const opinionPage: Page = {
+  id: "pg_op",
+  type: "opinion_scale",
+  question_id: "q_op",
+  title: L("Rate this"),
+  min: 1,
+  max: 5,
+} as Page;
+
 function base(page: Page) {
   return {
     page,
@@ -193,6 +202,13 @@ describe("PagePreview — live mode", () => {
     nativeSetter.call(range, "42");
     range.dispatchEvent(new Event("input", { bubbles: true }));
     expect(onAnswer).toHaveBeenLastCalledWith(42);
+  });
+
+  it("opinion_scale emits the picked cell as a number", async () => {
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(opinionPage)} mode="live" value={null} onAnswer={onAnswer} />);
+    await userEvent.click(screen.getByRole("button", { name: "3" }));
+    expect(onAnswer).toHaveBeenLastCalledWith(3);
   });
 });
 

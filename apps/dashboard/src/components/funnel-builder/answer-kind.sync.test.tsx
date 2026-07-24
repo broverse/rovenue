@@ -67,6 +67,7 @@ const WIRED: ReadonlyArray<{
       fireEvent.change(screen.getByRole("slider"), { target: { value: "42" } });
     },
   },
+  { type: "opinion_scale", drive: (u) => u.click(screen.getByRole("button", { name: "3" })) },
 ];
 
 /**
@@ -84,7 +85,6 @@ const NOT_WIRED_YET: ReadonlySet<PageType> = new Set([
   "picture_choice",
   "legal",
   "checkbox",
-  "opinion_scale",
   "long_text",
   "phone",
 ]);
