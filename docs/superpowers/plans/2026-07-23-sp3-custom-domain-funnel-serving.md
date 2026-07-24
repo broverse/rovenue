@@ -76,9 +76,16 @@ The assertions the test must make:
     // An empty ?host= must not silently fall back to the Host header —
     // that would resolve the API's own hostname and return whatever
     // funnel happened to be bound to it.
+    //
+    // CORRECTED (found by the implementer): a status-only assertion here
+    // is VACUOUS. With a constant mock and no distinguishing Host header,
+    // both `??` and `||` produce a 404 and the test passes either way,
+    // proving nothing. Send a Host header set to a DIFFERENT value and
+    // assert the argument — that is what pins the contract.
     resolveHostMock.mockResolvedValue(null);
-    // GET /host/lookup?host=
+    // GET /host/lookup?host=  with header Host: other-tenant.example.com
     expect(res.status).toBe(404);
+    expect(resolveHostMock).toHaveBeenCalledWith("");
   });
 ```
 
