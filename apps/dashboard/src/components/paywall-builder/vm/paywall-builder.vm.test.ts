@@ -781,4 +781,31 @@ describe("PaywallBuilderViewModel", () => {
       expect(vm.autosaveStatus).toBe("saving");
     });
   });
+
+  describe("flushing pending work", () => {
+    it("saveNow() PATCHes when there are unsaved edits", async () => {
+      const get = vi.fn().mockResolvedValue(fakeDetail());
+      const patchBuilderConfig = vi.fn().mockResolvedValue(fakeDetail());
+      const vm = makeVm({ get, patchBuilderConfig });
+      await vm.load(() => {});
+
+      vm.setLocaleText("t1_key", "en", "changed");
+      expect(vm.isDirty).toBe(true);
+
+      await vm.saveNow();
+
+      expect(patchBuilderConfig).toHaveBeenCalledTimes(1);
+    });
+
+    it("saveNow() does not PATCH when nothing changed", async () => {
+      const get = vi.fn().mockResolvedValue(fakeDetail());
+      const patchBuilderConfig = vi.fn().mockResolvedValue(fakeDetail());
+      const vm = makeVm({ get, patchBuilderConfig });
+      await vm.load(() => {});
+
+      await vm.saveNow();
+
+      expect(patchBuilderConfig).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -31,6 +31,27 @@ export const BuilderShell = component(({ projectId }: Props) => {
     if (shouldAutoOpenStart(vm.config)) setShowStart(true);
   }, [vm.isLoading, vm.paywall]);
 
+  // Autosave is throttled, so closing the builder mid-window would drop
+  // everything since the last successful save. Flush on the way out.
+  useEffect(() => {
+    return () => {
+      if (vm.isDirty) void vm.saveNow();
+    };
+  }, [vm]);
+
+  // A full page unload cannot be flushed reliably — a credentialed
+  // cross-origin JSON beacon needs a CORS preflight, which browsers drop
+  // during unload. So hand the decision to the person instead of pretending.
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!vm.isDirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [vm]);
+
   if (vm.isLoading) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-rv-bg font-rv-mono text-[11px] text-rv-mute-500">
