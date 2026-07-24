@@ -12,6 +12,17 @@ describe("compareVersions", () => {
     expect(compareVersions("2", "2.0.0")).toBe(0);
   });
 
+  it("looks at a longer version's extra components", () => {
+    // Every other differing-length case here pads with zeros, so swapping
+    // Math.max for Math.min would pass them all. This one would not.
+    expect(compareVersions("1.2.5", "1.2")).toBeGreaterThan(0);
+    expect(compareVersions("1.2", "1.2.5")).toBeLessThan(0);
+  });
+
+  it("stays exact past the safe-integer range", () => {
+    expect(compareVersions("9007199254740993.0.0", "9007199254740992.0.0")).toBeGreaterThan(0);
+  });
+
   it("refuses to guess at a non-numeric component", () => {
     expect(compareVersions("1.0.0-beta", "1.0.0")).toBeNull();
     expect(compareVersions("2024.spring", "2024.1")).toBeNull();
@@ -58,7 +69,7 @@ describe("isNodeVisible", () => {
     expect(isNodeVisible({ minAppVersion: "99.0.0" }, beta)).toBe(true);
   });
 
-  it("hides only when every rule that CAN be evaluated says hide", () => {
+  it("hides as soon as any applicable rule says hide", () => {
     expect(isNodeVisible({ platform: ["ios"], minAppVersion: "3.0.0" }, ios)).toBe(false);
     expect(isNodeVisible({ platform: ["android"], minAppVersion: "1.0.0" }, ios)).toBe(false);
   });

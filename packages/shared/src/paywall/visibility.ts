@@ -29,8 +29,23 @@ const VERSION_SEPARATOR = ".";
 const NUMERIC_COMPONENT = /^\d+$/;
 
 /**
+ * Compare two digit components exactly, without going through a double.
+ * `Number()` would silently lose precision past MAX_SAFE_INTEGER and report
+ * two different versions as equal; comparing normalised digit strings by
+ * length then lexically is exact for any length.
+ */
+function compareComponent(a: string, b: string): number {
+  const left = a.replace(/^0+(?=\d)/, "");
+  const right = b.replace(/^0+(?=\d)/, "");
+  if (left.length !== right.length) return left.length - right.length;
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
  * Component-wise numeric comparison. Missing components read as 0, so
- * "1.2" equals "1.2.0" and "1.10" beats "1.9".
+ * "1.2" equals "1.2.0" and "1.10" beats "1.9". `Math.max` over the two
+ * lengths is what makes "1.2.5" beat "1.2" — with `Math.min` the extra
+ * component would never be looked at.
  *
  * Returns `null` — inconclusive — when either side has a component that
  * is not a run of digits. Deliberately NOT semver: a real implementation
@@ -45,9 +60,8 @@ export function compareVersions(a: string, b: string): number | null {
   if (![...left, ...right].every((part) => NUMERIC_COMPONENT.test(part))) return null;
   const length = Math.max(left.length, right.length);
   for (let i = 0; i < length; i++) {
-    const l = Number(left[i] ?? 0);
-    const r = Number(right[i] ?? 0);
-    if (l !== r) return l - r;
+    const cmp = compareComponent(left[i] ?? "0", right[i] ?? "0");
+    if (cmp !== 0) return cmp;
   }
   return 0;
 }
@@ -70,6 +84,11 @@ export function isNodeVisible(
   const version = ctx.appVersion;
   if (!version) return true;
 
+  // The `cmp !== null` guards below are belt-and-braces and CANNOT be
+  // exercised by a test: JS coerces `null` to 0 in a relational comparison,
+  // so `null < 0` and `null > 0` are already false. They stay because the
+  // intent — an inconclusive comparison never hides — should be readable
+  // without knowing that coercion rule, not because they change behaviour.
   const { minAppVersion, maxAppVersion } = visibility;
   if (minAppVersion) {
     const cmp = compareVersions(version, minAppVersion);
