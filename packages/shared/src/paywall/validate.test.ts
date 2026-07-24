@@ -947,3 +947,37 @@ describe("VISIBILITY_NEVER_MATCHES", () => {
     expect(issues.some((i) => i.code === "VISIBILITY_NEVER_MATCHES")).toBe(false);
   });
 });
+
+describe("VISIBILITY_BOUND_UNPARSEABLE", () => {
+  function withVisibility(visibility: Record<string, unknown>) {
+    const config = baseConfig();
+    (config.root.children[0] as { visibility?: unknown }).visibility = visibility;
+    return config;
+  }
+
+  it("warns about a bound the comparator cannot read, rather than ignoring it silently", () => {
+    const issues = validateBuilderConfig(withVisibility({ minAppVersion: "v1.2.0" }), {
+      offeringPackageIds,
+    });
+    const issue = issues.find((i) => i.code === "VISIBILITY_BOUND_UNPARSEABLE");
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain("minAppVersion");
+    expect(isPublishBlockingIssue(issue!)).toBe(false);
+  });
+
+  it("names each unreadable bound separately", () => {
+    const issues = validateBuilderConfig(
+      withVisibility({ minAppVersion: "v1", maxAppVersion: "2.0.0-rc" }),
+      { offeringPackageIds },
+    );
+    expect(issues.filter((i) => i.code === "VISIBILITY_BOUND_UNPARSEABLE")).toHaveLength(2);
+  });
+
+  it("says nothing about bounds it can read", () => {
+    const issues = validateBuilderConfig(
+      withVisibility({ minAppVersion: "1.0", maxAppVersion: "2.0.0" }),
+      { offeringPackageIds },
+    );
+    expect(issues.some((i) => i.code === "VISIBILITY_BOUND_UNPARSEABLE")).toBe(false);
+  });
+});

@@ -423,6 +423,11 @@ export function FunnelRunner({ slug }: { slug: string }) {
           offering={toRunnerOffering(builderPaywall.offering)}
           locale={locale}
           colorScheme="light"
+          // The one place in the repo where the platform is statically
+          // known. Without it every node `visibility.platform` rule fails
+          // open here — an author unticking "Web" would see no effect on
+          // the only renderer this stage actually ships to users.
+          platform="web"
           priceView={priceView}
           // The CTA opens the in-page checkout for the selected package —
           // but only when it can actually be charged. A project that

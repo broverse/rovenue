@@ -353,6 +353,12 @@ export class PaywallBuilderViewModel {
     this.config = { ...this.config, root: nextRoot };
     this.registerFreshLocKeys(node);
     this.selectedNodeId = node.id;
+    // Drop the carried-over tab for a BRAND-NEW node. Visibility applies to
+    // every type, so once chosen it would otherwise stick forever and a
+    // fresh text node — blank until its string is written — would open on
+    // Visibility rather than Content. Ordinary selection keeps its
+    // stickiness; only creation resets.
+    this.inspectorTabRaw = null;
     return node.id;
   }
 

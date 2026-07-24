@@ -81,7 +81,7 @@ export const INSPECTOR_TABS = [
       "purchaseButton",
       "spacer",
     ]),
-    issueCodes: new Set<BuilderIssue["code"]>(["VISIBILITY_NEVER_MATCHES"]),
+    issueCodes: new Set<BuilderIssue["code"]>(["VISIBILITY_NEVER_MATCHES", "VISIBILITY_BOUND_UNPARSEABLE"]),
   },
 ] as const satisfies readonly InspectorTabShape[];
 
@@ -99,11 +99,10 @@ export function tabsForNode(type: PaywallNode["type"]): readonly InspectorTab[] 
  * blocks publishing, "warning" otherwise. Severity is read from the shared
  * model rather than restated here.
  *
- * NOTE: every code currently mapped to a tab is publish-blocking, so the
- * "warning" result is unreachable as things stand. It is kept because the
- * severity question belongs here rather than at the call site, and because
- * mapping a warning-tier code later should not need this function changed
- * — but do not read the branch as evidence that warning dots exist.
+ * Both severities are reachable: VISIBILITY_NEVER_MATCHES is warning tier,
+ * every other mapped code is publish-blocking. (This note used to say the
+ * warning branch was unreachable — it was, until the Visibility tab mapped
+ * a warning-tier code to it.)
  */
 export interface TabIssueSummary {
   severity: "error" | "warning";

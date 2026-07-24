@@ -17,12 +17,26 @@ const ALL_PLATFORMS: VisibilityPlatform[] = ["ios", "android", "web"];
 /** Collapse an all-defaults visibility back to `undefined`, so a node the
  * author has reset is indistinguishable from one never touched — otherwise
  * the diff, the fixtures and the wire all carry a meaningless `{}`. */
-function normalize(v: NodeVisibility): NodeVisibility | undefined {
+export function normalize(v: NodeVisibility): NodeVisibility | undefined {
   const platform = v.platform && v.platform.length > 0 ? v.platform : undefined;
   const min = v.minAppVersion?.trim() || undefined;
   const max = v.maxAppVersion?.trim() || undefined;
   if (!platform && !min && !max) return undefined;
   return { ...(platform && { platform }), ...(min && { minAppVersion: min }), ...(max && { maxAppVersion: max }) };
+}
+
+/**
+ * The platform list after ticking or unticking one box. Absent/empty
+ * already means "all", so the FIRST untick has to produce the list of the
+ * others — writing `[]` would normalize straight back to `undefined` and
+ * the box would spring back ticked.
+ */
+export function togglePlatformList(
+  current: VisibilityPlatform[] | undefined,
+  p: VisibilityPlatform,
+): VisibilityPlatform[] {
+  const selected = current && current.length > 0 ? current : ALL_PLATFORMS;
+  return selected.includes(p) ? selected.filter((x) => x !== p) : [...selected, p];
 }
 
 export const VisibilityTab = component(({ node }: { node: PaywallNode }) => {
@@ -36,9 +50,7 @@ export const VisibilityTab = component(({ node }: { node: PaywallNode }) => {
     // Absent/empty already means "all", so the first untick has to produce the
     // list of the OTHERS, not an empty array — otherwise unticking one box
     // would read as no constraint and the node would stay everywhere.
-    const selected = current.platform && current.platform.length > 0 ? current.platform : ALL_PLATFORMS;
-    const next = selected.includes(p) ? selected.filter((x) => x !== p) : [...selected, p];
-    set({ visibility: normalize({ ...current, platform: next }) });
+    set({ visibility: normalize({ ...current, platform: togglePlatformList(current.platform, p) }) });
   };
 
   const setBound = (key: "minAppVersion" | "maxAppVersion", value: string) =>

@@ -30,6 +30,8 @@ export type BuilderIssue = {
     | "SCHEMA_INVALID"
     // A node whose visibility bounds cross, so it renders nowhere.
     | "VISIBILITY_NEVER_MATCHES"
+    // A visibility bound the comparator cannot read, so it never applies.
+    | "VISIBILITY_BOUND_UNPARSEABLE"
     // Phase D2 — overrides / cellTemplate.
     | "CELL_TEMPLATE_BAD_NODE"
     | "OVERRIDE_BAD_PROP"
@@ -70,6 +72,10 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
   // Dead content, not a broken config. A gate that refused it would be the
   // fifth in this project to reject a legitimate work-in-progress.
   VISIBILITY_NEVER_MATCHES: "warning",
+  // Fail open is the right answer when RENDERING — but silence is the wrong
+  // answer when AUTHORING. Without this the author types "v1.2.0", the node
+  // shows everywhere, and nothing anywhere says the bound was ignored.
+  VISIBILITY_BOUND_UNPARSEABLE: "warning",
 
   // Publish-only — a draft in this state is ordinary work in progress and
   // MUST still persist. Four of these are reachable from the builder UI in
@@ -242,6 +248,21 @@ export function validateBuilderConfig(
   // VISIBILITY_NEVER_MATCHES — bounds that cross, so the node renders nowhere.
   for (const node of allNodes) {
     const { minAppVersion, maxAppVersion } = node.visibility ?? {};
+    // A bound the comparator cannot read is silently ignored at render time
+    // (fail open). Say so here, or the author believes a gate exists that
+    // does not — "v1.2.0" is the likeliest thing anyone types.
+    for (const [field, bound] of [
+      ["minAppVersion", minAppVersion],
+      ["maxAppVersion", maxAppVersion],
+    ] as const) {
+      if (bound && compareVersions(bound, bound) === null) {
+        issues.push({
+          code: "VISIBILITY_BOUND_UNPARSEABLE",
+          nodeId: node.id,
+          message: `Node "${node.id}" has ${field} "${bound}", which is not a dotted number, so it will be ignored.`,
+        });
+      }
+    }
     if (!minAppVersion || !maxAppVersion) continue;
     const cmp = compareVersions(minAppVersion, maxAppVersion);
     // `null` means we could not compare them, which is NOT the same as
