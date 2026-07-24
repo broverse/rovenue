@@ -72,7 +72,7 @@ export const PropertiesPanel = component(() => {
 
       <div className="flex items-center gap-0.5 border-b border-rv-divider px-2 py-1.5">
         {tabs.map((tab) => {
-          const severity = issues.get(tab.id);
+          const summary = issues.get(tab.id);
           return (
             <button
               key={tab.id}
@@ -86,15 +86,16 @@ export const PropertiesPanel = component(() => {
               )}
             >
               {t(`paywalls.builder.inspector.tab.${tab.id}`, tab.fallbackLabel)}
-              {severity && (
+              {summary && (
                 <span
-                  title={t(
-                    "paywalls.builder.inspector.tabHasIssues",
-                    "This tab has a validation issue",
-                  )}
+                  title={t("paywalls.builder.inspector.tabHasIssues", {
+                    count: summary.count,
+                    defaultValue: "{{count}} validation issue on this tab",
+                    defaultValue_other: "{{count}} validation issues on this tab",
+                  })}
                   className={cn(
                     "ml-1.5 h-1.5 w-1.5 rounded-full",
-                    severity === "error" ? "bg-rv-danger" : "bg-rv-warning",
+                    summary.severity === "error" ? "bg-rv-danger" : "bg-rv-warning",
                   )}
                 />
               )}

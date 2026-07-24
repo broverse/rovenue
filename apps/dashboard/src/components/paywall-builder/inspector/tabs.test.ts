@@ -48,8 +48,8 @@ describe("tabIssues", () => {
 
   it("groups a node's issues onto the tab holding the offending field", () => {
     const map = tabIssues(issues, "n1");
-    expect(map.get("content")).toBe("error");
-    expect(map.get("binding")).toBe("error");
+    expect(map.get("content")?.severity).toBe("error");
+    expect(map.get("binding")?.severity).toBe("error");
   });
 
   it("ignores issues belonging to other nodes", () => {
@@ -58,6 +58,16 @@ describe("tabIssues", () => {
 
   it("gives no dot to a code that maps to no tab", () => {
     const map = tabIssues([{ code: "DUPLICATE_NODE_ID", nodeId: "n1", message: "" }], "n1");
+    expect(map.size).toBe(0);
+  });
+
+  it("gives no dot for CELL_TEMPLATE_BAD_NODE, whose nodeId names where a node SITS", () => {
+    // The validator attaches this to the offending node inside the
+    // cellTemplate — a packageList or purchaseButton — not to the
+    // packageList that owns the template. There is no field on the named
+    // node to point at, and a purchaseButton has no Layout tab, so mapping
+    // it there computed a dot that the strip then silently dropped.
+    const map = tabIssues([{ code: "CELL_TEMPLATE_BAD_NODE", nodeId: "pb", message: "" }], "pb");
     expect(map.size).toBe(0);
   });
 
@@ -77,7 +87,7 @@ describe("tabIssues", () => {
       everyMappedCode.map((code) => ({ code, nodeId: "n1", message: "" })),
       "n1",
     );
-    expect([...map.values()].every((s) => s === "error")).toBe(true);
+    expect([...map.values()].every((s) => s.severity === "error")).toBe(true);
   });
 });
 
@@ -91,7 +101,16 @@ describe("resolveActiveTab", () => {
     expect(resolveActiveTab("layout", "purchaseButton")).toBe("content");
   });
 
-  it("picks the first applicable tab when there is no current one", () => {
-    expect(resolveActiveTab(null, "text")).toBe("style");
+  it("opens on Content when the node has it, rather than the first tab in table order", () => {
+    // Table order is the mock's (Layout first), but a fresh text node is
+    // blank until its string is written, so Style-first would hide the very
+    // field the author came for.
+    expect(resolveActiveTab(null, "text")).toBe("content");
+    expect(resolveActiveTab(null, "button")).toBe("content");
+  });
+
+  it("falls back to the first applicable tab for a node with no Content", () => {
+    expect(resolveActiveTab(null, "spacer")).toBe("layout");
+    expect(resolveActiveTab(null, "stack")).toBe("layout");
   });
 });

@@ -1336,7 +1336,8 @@
           "content": "Content",
           "binding": "Binding"
         },
-        "tabHasIssues": "This tab has a validation issue"
+        "tabHasIssues_one": "{{count}} validation issue on this tab",
+        "tabHasIssues_other": "{{count}} validation issues on this tab"
       },
       "properties": {
         "emptyTitle": "No node selected",

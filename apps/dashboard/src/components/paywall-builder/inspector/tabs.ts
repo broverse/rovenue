@@ -23,7 +23,16 @@ interface InspectorTabShape {
    * from every tab gets no dot on purpose: DUPLICATE_NODE_ID is not a
    * field, MISSING_PURCHASE_BUTTON is a property of the tree rather than
    * of a node, LOCALE_KEY_GAP is per-locale, and the OVERRIDE_* codes
-   * belong to the overrides section, which sits outside the strip. The
+   * belong to the overrides section, which sits outside the strip.
+   *
+   * CELL_TEMPLATE_BAD_NODE is in the same family and deliberately absent.
+   * It names the OFFENDING node — a packageList or purchaseButton sitting
+   * inside a cellTemplate — not the packageList that owns the template, so
+   * there is no field on the named node to point at; the fault is where the
+   * node sits. Mapping it to Layout also dropped the dot outright, because
+   * a purchaseButton has no Layout tab for it to render on. The
+
+
    * validation drawer remains the complete list; this is a pointer.
    */
   issueCodes: ReadonlySet<BuilderIssue["code"]>;
@@ -40,7 +49,7 @@ export const INSPECTOR_TABS = [
     id: "layout",
     fallbackLabel: "Layout",
     appliesTo: new Set<PaywallNode["type"]>(["stack", "image", "packageList", "spacer"]),
-    issueCodes: new Set<BuilderIssue["code"]>(["CELL_TEMPLATE_BAD_NODE"]),
+    issueCodes: new Set<BuilderIssue["code"]>(),
   },
   {
     id: "style",
@@ -82,26 +91,47 @@ export function tabsForNode(type: PaywallNode["type"]): readonly InspectorTab[] 
  * mapping a warning-tier code later should not need this function changed
  * — but do not read the branch as evidence that warning dots exist.
  */
+export interface TabIssueSummary {
+  severity: "error" | "warning";
+  count: number;
+}
+
 export function tabIssues(
   issues: BuilderIssue[],
   nodeId: string,
-): Map<InspectorTabId, "error" | "warning"> {
-  const out = new Map<InspectorTabId, "error" | "warning">();
+): Map<InspectorTabId, TabIssueSummary> {
+  const out = new Map<InspectorTabId, TabIssueSummary>();
   for (const issue of issues) {
     if (issue.nodeId !== nodeId) continue;
     for (const tab of INSPECTOR_TABS) {
       if (!tab.issueCodes.has(issue.code)) continue;
       const severity = isPublishBlockingIssue(issue) ? "error" : "warning";
-      if (severity === "error" || !out.has(tab.id)) out.set(tab.id, severity);
+      const prev = out.get(tab.id);
+      out.set(tab.id, {
+        // An error is never demoted by a later warning, whatever the order.
+        severity: prev?.severity === "error" || severity === "error" ? "error" : "warning",
+        count: (prev?.count ?? 0) + 1,
+      });
     }
   }
   return out;
 }
 
 /**
+ * Which tab to open on when nothing is carried over. Table order is the
+ * MOCK's order (Layout first), but the copy is what authors edit most: a
+ * freshly added text or button node renders blank until its string is
+ * written, and opening on Style would put Role/Align/Color in front of the
+ * author while the text input sat one click away. Display order and
+ * open-first order are two different questions.
+ */
+const PREFERRED_INITIAL_TAB = "content";
+
+/**
  * Keep the author's current tab across a selection change when it still
- * applies; otherwise fall back to the new node's FIRST applicable tab
- * rather than a fixed default, so the fallback is always meaningful.
+ * applies; otherwise open the preferred tab if the new node has it, and
+ * fall back to that node's FIRST applicable tab if it does not — never a
+ * fixed default that the node might not offer.
  */
 export function resolveActiveTab(
   current: InspectorTabId | null,
@@ -109,5 +139,6 @@ export function resolveActiveTab(
 ): InspectorTabId | null {
   const applicable = tabsForNode(type);
   if (current && applicable.some((tab) => tab.id === current)) return current;
-  return applicable[0]?.id ?? null;
+  const preferred = applicable.find((tab) => tab.id === PREFERRED_INITIAL_TAB);
+  return preferred?.id ?? applicable[0]?.id ?? null;
 }
