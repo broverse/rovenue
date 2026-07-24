@@ -41,8 +41,17 @@ function fakeFunnel(): FunnelDetailDto {
           goto: "pg_info",
         },
       ],
+      // An info page has no question of its own but can still branch on
+      // an earlier one — the case that used to lose its rules entirely.
+      pg_info: [
+        {
+          id: "r_3",
+          condition: { op: "all", clauses: [{ question_id: "q_a", op: "eq", value: "x" }] },
+          goto: "pg_2",
+        },
+      ],
     },
-    draftDefaultNext: {},
+    draftDefaultNext: { pg_1: "pg_info" },
     draftDiffersFromPublished: false,
     defaultLocale: "en",
     locales: ["en"],
@@ -111,5 +120,36 @@ describe("FunnelDraftViewModel — duplicatePage answer-key isolation", () => {
 
     const copy = vm.pages[3]!;
     expect(copy.question_id).toBeUndefined();
+  });
+
+  it("keeps the rules of a page that has NO question of its own", async () => {
+    // An info or paywall page carries no question_id but can still branch
+    // on an earlier one. Gating the rule copy on the page having its own
+    // question silently deleted that branch.
+    const vm = makeVm();
+    await vm.load(() => {});
+
+    vm.duplicatePage("pg_info");
+
+    const copy = vm.pages[3]!;
+    const copied = vm.rules[copy.id];
+    expect(copied, "the copy lost its rules").toBeDefined();
+    expect(copied![0]!.goto).toBe("pg_2");
+    // Its clause still points at the earlier page's question — the copy
+    // asks the same thing of the same answer.
+    expect(copied![0]!.condition.clauses[0]!.question_id).toBe("q_a");
+  });
+
+  it("copies the explicit default_next too", async () => {
+    // Half-copied branching is worse than none: without this the copy
+    // falls through to the SEQUENTIAL next page while the original went
+    // somewhere explicit.
+    const vm = makeVm();
+    await vm.load(() => {});
+
+    vm.duplicatePage("pg_1");
+
+    const copy = vm.pages[1]!;
+    expect(vm.defaultNext[copy.id]).toBe("pg_info");
   });
 });

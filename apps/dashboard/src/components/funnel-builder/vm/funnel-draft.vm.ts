@@ -290,19 +290,21 @@ export class FunnelDraftViewModel {
     // answer, satisfies its own `required` gate untouched, and re-sends
     // that value under its own page id.
     const previousQuestionId = copy.question_id;
-    if (previousQuestionId) {
-      copy.question_id = qid();
+    if (previousQuestionId) copy.question_id = qid();
 
-      // Rules are not embedded on the Page — they live in `this.rules`,
-      // keyed by page id (see `applyServer`). Duplicate the source page's
-      // OWN rule set onto the new page id, rewriting only clauses that
-      // referenced the source page's own question. Rule sets keyed under
-      // every other page id are left untouched: they were authored
-      // against that question, and duplicating a page does not re-target
-      // them.
-      const sourceRules = this.rules[id];
-      if (sourceRules) {
-        const clonedRules: NextRule[] = JSON.parse(JSON.stringify(sourceRules));
+    // Branching does NOT live on the Page — rules are keyed by page id in
+    // `this.rules` and the fallback target in `this.defaultNext` (see
+    // `applyServer`), so the structural clone above carries neither.
+    // Both are copied, and both unconditionally: an info or paywall page
+    // has no question of its own but can still branch on an earlier one,
+    // and dropping its rules would silently delete that branch.
+    const sourceRules = this.rules[id];
+    if (sourceRules) {
+      const clonedRules: NextRule[] = JSON.parse(JSON.stringify(sourceRules));
+      // Only clauses on the SOURCE page's own question are re-pointed at
+      // the copy's new one. Clauses on an earlier page's question are
+      // left alone — the copy asks the same thing of the same answer.
+      if (previousQuestionId && copy.question_id) {
         for (const rule of clonedRules) {
           for (const clause of rule.condition.clauses) {
             if (clause.question_id === previousQuestionId) {
@@ -310,8 +312,15 @@ export class FunnelDraftViewModel {
             }
           }
         }
-        this.rules[copy.id] = clonedRules;
       }
+      this.rules[copy.id] = clonedRules;
+    }
+    // Half-copied branching is worse than none: without this the copy
+    // falls through to the SEQUENTIAL next page while the original went
+    // somewhere explicit.
+    const sourceDefaultNext = this.defaultNext[id];
+    if (sourceDefaultNext !== undefined) {
+      this.defaultNext[copy.id] = sourceDefaultNext;
     }
 
     this.pages.splice(i + 1, 0, copy);
