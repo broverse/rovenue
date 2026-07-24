@@ -1,5 +1,5 @@
 import {
-  injectable, inject, state, onMount, onInit, derived, trigger,
+  injectable, inject, state, onMount, onInit, derived, trigger, untrack,
   type Cleanup, Props,
 } from "impair";
 import type { NextRule } from "@rovenue/shared/funnel";
@@ -527,7 +527,14 @@ export class FunnelDraftViewModel {
     void this.defaultNext;
     void this.defaultLocale;
     void this.locales;
-    if (this.autosaveStatus === "error") this.autosaveStatus = "saving";
+    // `untrack` is load-bearing, not cosmetic. This is a @trigger, i.e. a
+    // @vue/reactivity effect that re-runs SYNCHRONOUSLY when a tracked field
+    // it read is written. Reading `autosaveStatus` as a plain tracked access
+    // made this method a dependent of the very field it writes, so the catch
+    // blocks' `autosaveStatus = "error"` re-invoked it in the same tick and
+    // reset it to "saving" — the failed state was erased before any render
+    // could show it, and the error badge was therefore never visible.
+    if (untrack(() => this.autosaveStatus) === "error") this.autosaveStatus = "saving";
   }
 
   @trigger.throttle(30000)

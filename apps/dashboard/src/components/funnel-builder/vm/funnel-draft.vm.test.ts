@@ -142,3 +142,42 @@ describe("FunnelDraftViewModel — locale actions", () => {
     expect([...vm.locales].filter((x) => typeof x === "string")).toContain("en");
   });
 });
+
+describe("FunnelDraftViewModel — autosave failure visibility", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  // Regression guard for a bug that survived the entire life of this view
+  // model: `clearAutosaveError` is a @trigger (a synchronous reactivity
+  // effect). Reading `autosaveStatus` tracked made it a dependent of the
+  // field it writes, so setting "error" re-ran it in the same tick and reset
+  // it to "saving". Nothing ever asserted the status after a failure, so the
+  // error badge was invisible and nobody noticed.
+  it("keeps a failed save visible instead of erasing it in the same tick", async () => {
+    const get = vi.fn().mockResolvedValue(fakeFunnel());
+    const patchDraft = vi.fn().mockRejectedValue(new Error("boom"));
+    const vm = makeVm({ get, patchDraft });
+    await vm.load(() => {});
+
+    vm.rename("changed");
+    await vm.saveNow();
+
+    expect(vm.autosaveStatus).toBe("error");
+  });
+
+  it("still clears the error on the next edit", async () => {
+    const get = vi.fn().mockResolvedValue(fakeFunnel());
+    const patchDraft = vi.fn().mockRejectedValue(new Error("boom"));
+    const vm = makeVm({ get, patchDraft });
+    await vm.load(() => {});
+
+    vm.rename("changed");
+    await vm.saveNow();
+    expect(vm.autosaveStatus).toBe("error");
+
+    vm.rename("changed again");
+
+    expect(vm.autosaveStatus).toBe("saving");
+  });
+});
