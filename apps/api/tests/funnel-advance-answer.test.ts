@@ -203,4 +203,46 @@ describe("POST /public/funnel-sessions/:sessionId/advance — answer", () => {
     expect(res.status).toBe(409);
     expect(upsertMock).not.toHaveBeenCalled();
   });
+
+  it("does not persist an answer for a page id that does not exist", async () => {
+    // A 400 from this endpoint used to have no side effects. An answer row
+    // keyed to a nonexistent page would sit in the table under a page id
+    // nothing resolves, so `from_page_id` is validated before the write.
+    const res = await advance({
+      from_page_id: "pg_does_not_exist",
+      answer: { question_id: "q1", answer: "yes" },
+    });
+
+    expect(res.status).toBe(400);
+    expect(upsertMock).not.toHaveBeenCalled();
+  });
+
+  it("pins the cap at ANSWER_MAX_BYTES rather than merely 'large'", async () => {
+    // Without a boundary pair the 413 case above still passes if someone
+    // quietly raises the cap: its payload serialises to ~20 KB, well past
+    // any plausible new value. These two straddle the real 16_384
+    // threshold by 48 bytes either side.
+    //
+    // The cap can only be reached with an ARRAY: answerValueSchema caps
+    // each string at 2000 chars, so a single long string 400s on field
+    // validation and never reaches the size check.
+    const chunk = "a".repeat(2000);
+    const under = [...Array.from({ length: 8 }, () => chunk), "a".repeat(300)]; // 16_336
+    const over = [...Array.from({ length: 8 }, () => chunk), "a".repeat(400)]; // 16_436
+
+    const okRes = await advance({
+      from_page_id: "pg_1",
+      answer: { question_id: "q1", answer: under },
+    });
+    expect(okRes.status).toBe(200);
+
+    upsertMock.mockClear();
+
+    const bigRes = await advance({
+      from_page_id: "pg_1",
+      answer: { question_id: "q1", answer: over },
+    });
+    expect(bigRes.status).toBe(413);
+    expect(upsertMock).not.toHaveBeenCalled();
+  });
 });

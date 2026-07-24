@@ -69,7 +69,6 @@ const answerValueSchema: z.ZodType<unknown> = z.lazy(() =>
 /** Hard cap on a serialised answer payload (F16). */
 const ANSWER_MAX_BYTES = 16_384;
 
-
 interface PublishedRuntimeConfig {
   id: string;
   slug: string;
@@ -440,12 +439,6 @@ export const publicFunnelsRoute = new Hono()
         if (session.state !== "in_progress") {
           throw new HTTPException(409, { message: "Session is closed" });
         }
-        await drizzle.funnelAnswerRepo.upsert(drizzle.db, {
-          sessionId: sid,
-          pageId: body.from_page_id,
-          questionId: body.answer.question_id,
-          answerJson: { value: body.answer.answer },
-        });
       }
       const version = await drizzle.funnelVersionRepo.findById(
         drizzle.db,
@@ -455,6 +448,29 @@ export const publicFunnelsRoute = new Hono()
         throw new HTTPException(500, { message: "Version missing" });
       }
       const pages = (version.pagesJson as EvalPage[]) ?? [];
+      const pagesById: PageGraph = new Map(pages.map((p) => [p.id, p]));
+      const pagesOrder = pages.map((p) => p.id);
+      const page = pagesById.get(body.from_page_id);
+      if (!page) {
+        throw new HTTPException(400, { message: "Unknown from_page_id" });
+      }
+      // Written only once `from_page_id` is known to be a real page. A 400
+      // from this endpoint used to have no side effects, and a request that
+      // ends in one should not leave an answer row keyed to a page nothing
+      // resolves.
+      //
+      // Still strictly BEFORE `listBySession` below, which is the ordering
+      // this endpoint exists to guarantee: the answer sent with an advance
+      // must steer that same advance, leaving a caller no sequence to get
+      // wrong.
+      if (body.answer) {
+        await drizzle.funnelAnswerRepo.upsert(drizzle.db, {
+          sessionId: sid,
+          pageId: body.from_page_id,
+          questionId: body.answer.question_id,
+          answerJson: { value: body.answer.answer },
+        });
+      }
       const answers = await drizzle.funnelAnswerRepo.listBySession(
         drizzle.db,
         sid,
@@ -465,12 +481,6 @@ export const publicFunnelsRoute = new Hono()
           (a.answerJson as { value: AnswerValue }).value,
         ]),
       );
-      const pagesById: PageGraph = new Map(pages.map((p) => [p.id, p]));
-      const pagesOrder = pages.map((p) => p.id);
-      const page = pagesById.get(body.from_page_id);
-      if (!page) {
-        throw new HTTPException(400, { message: "Unknown from_page_id" });
-      }
       const result = evaluateNext({
         page,
         pagesOrder,
