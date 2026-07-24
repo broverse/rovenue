@@ -1117,10 +1117,6 @@ describe("size caps", () => {
 });
 
 describe("inspector tab", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
   it("keeps the chosen tab while it applies to the selected node", async () => {
     const get = vi.fn().mockResolvedValue(fakeDetail());
     const vm = makeVm({ get, patchBuilderConfig: vi.fn() });

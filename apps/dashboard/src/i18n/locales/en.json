@@ -1388,6 +1388,7 @@
         "selection": "Selection",
         "defaultSelected": "Default selected",
         "defaultSelectedNone": "First available",
+        "cells": "Cells",
         "cellLayout": "Layout",
         "cellLayoutRow": "Row",
         "cellLayoutColumn": "Column",

@@ -101,7 +101,7 @@ function PackageListLayout({ node }: { node: PackageListNode }) {
 
   return (
     <>
-      <Section title={t("paywalls.builder.properties.layout", "Layout")} defaultOpen>
+      <Section title={t("paywalls.builder.properties.cells", "Cells")} defaultOpen>
         <Field label={t("paywalls.builder.properties.cellLayout", "Layout")}>
           <Segmented
             value={node.cellLayout}
