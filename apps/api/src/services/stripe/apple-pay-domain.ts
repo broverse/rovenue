@@ -175,11 +175,25 @@ export async function registerApplePayDomain(
       err: err instanceof Error ? err.message : String(err),
     });
     try {
-      await drizzle.stripeConnectionRepo.updateApplePayDomainStatus(
-        drizzle.db,
-        connection.id,
-        "failed",
-      );
+      // Same guard as the success path above, and for the same reason:
+      // this column describes the canonical FUNNEL_PAYMENT_DOMAIN. A
+      // custom domain whose registration threw must not stamp "failed"
+      // onto the connection — that would report Apple Pay as broken on
+      // the canonical host because someone else's domain hit a Stripe
+      // error. The failure is already logged above with its domainName.
+      // Same guard as the success path above, and for the same reason:
+      // this column describes the canonical FUNNEL_PAYMENT_DOMAIN. A
+      // custom domain whose registration threw must not stamp "failed"
+      // onto the connection — that would report Apple Pay as broken on
+      // the canonical host, which is serving fine. The failure is already
+      // logged above with its own domainName.
+      if (domainName === env.FUNNEL_PAYMENT_DOMAIN) {
+        await drizzle.stripeConnectionRepo.updateApplePayDomainStatus(
+          drizzle.db,
+          connection.id,
+          "failed",
+        );
+      }
     } catch (writeErr) {
       // The status write is itself best-effort — this function's promise
       // must resolve even if the database is the thing that is down.

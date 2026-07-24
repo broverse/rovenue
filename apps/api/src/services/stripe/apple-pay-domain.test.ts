@@ -237,4 +237,29 @@ describe("registerApplePayDomain", () => {
 
     expect(drizzleMock.stripeConnectionRepo.updateApplePayDomainStatus).toHaveBeenCalledTimes(1);
   });
+
+  test("does not stamp 'failed' on the connection when a NON-canonical domain throws", async () => {
+    // The error path needs the same guard as the success path. Without it
+    // a customer's own domain hitting a Stripe error writes "failed" onto
+    // the connection row, and the dashboard reports Apple Pay broken on
+    // the canonical host — which is serving fine.
+    createMock.mockRejectedValue(new Error("domain_invalid"));
+
+    const result = await registerApplePayDomain("prj_1", "quiz.acme.com");
+
+    expect(result).toBe("failed");
+    expect(drizzleMock.stripeConnectionRepo.updateApplePayDomainStatus).not.toHaveBeenCalled();
+  });
+
+  test("still stamps 'failed' on the connection when the CANONICAL domain throws", async () => {
+    createMock.mockRejectedValue(new Error("domain_invalid"));
+
+    await registerApplePayDomain("prj_1");
+
+    expect(drizzleMock.stripeConnectionRepo.updateApplePayDomainStatus).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "failed",
+    );
+  });
 });
