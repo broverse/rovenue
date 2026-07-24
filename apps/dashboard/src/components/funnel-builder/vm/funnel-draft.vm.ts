@@ -6,11 +6,12 @@ import type { NextRule } from "@rovenue/shared/funnel";
 import { validateFunnelGraph, type ValidatorIssue } from "@rovenue/shared/funnel";
 import { FunnelApi, type FunnelDetailDto } from "../../../lib/services/funnel-api";
 import type { Page, Theme, Settings, TabId, Funnel } from "../types";
-import { toEvalPage } from "../types";
+import { toEvalPage, PAGE_TYPES, type AnswerKind } from "../types";
 import { loadFontFamily } from "../fonts";
 import { mapFunnelLocales, normalizeFunnel } from "../i18n";
 import type { LocaleCode } from "@rovenue/shared/i18n";
 import { qid } from "../blank-page";
+import { coerceClauseValue } from "../coerce-operand";
 
 export interface DraftProps {
   projectId: string;
@@ -403,6 +404,39 @@ export class FunnelDraftViewModel {
   updateTheme(patch: Partial<Theme>) { Object.assign(this.theme, patch); }
   updateSettings(patch: Partial<Settings>) { Object.assign(this.settings, patch); }
 
+  // The rule editor coerces an operand to its typed form on BLUR, not on
+  // every keystroke (coerceOperandValue's own doc comment explains why:
+  // per-keystroke coercion makes "1.5" untypeable). That leaves a window —
+  // the throttled autosave firing while an operand input is still focused,
+  // or a re-render that unmounts the inspector without a blur event ever
+  // firing — where a still-string "42" for a numeric operator is
+  // persist-eligible. branching-schema now rejects that string outright,
+  // which would turn ordinary mid-typing into a save error. Re-run the
+  // same coercion here, once, right before the draft leaves the VM, so a
+  // parseable operand is always typed by the time it reaches the server
+  // regardless of focus state. An unparseable operand (empty, "-",
+  // non-numeric text) is left alone — same as coerceOperandValue always
+  // does — because it is genuinely incomplete, not a focus artifact.
+  private coercedRules(): Record<string, NextRule[]> {
+    const kindByQuestionId = new Map<string, AnswerKind>();
+    for (const p of this.pages) {
+      if (p.question_id) kindByQuestionId.set(p.question_id, PAGE_TYPES[p.type]?.answerKind ?? "none");
+    }
+    const out: Record<string, NextRule[]> = {};
+    for (const [pageId, rules] of Object.entries(this.rules)) {
+      out[pageId] = rules.map((rule) => ({
+        ...rule,
+        condition: {
+          ...rule.condition,
+          clauses: rule.condition.clauses.map((c) =>
+            coerceClauseValue(c, kindByQuestionId.get(c.question_id) ?? "text"),
+          ),
+        },
+      }));
+    }
+    return out;
+  }
+
   // Force-flush the current draft to the backend, bypassing the autosave
   // throttle. Used by explicit "Save" buttons so the user gets an immediate
   // "Saved" confirmation instead of waiting for the next throttle tick.
@@ -430,7 +464,7 @@ export class FunnelDraftViewModel {
         payload.draftPages = this.pages as never;
         payload.draftTheme = this.theme as never;
         payload.draftSettings = this.settings as never;
-        payload.draftRules = this.rules;
+        payload.draftRules = this.coercedRules();
         payload.draftDefaultNext = this.defaultNext;
         payload.defaultLocale = this.defaultLocale;
         payload.locales = this.locales;
@@ -440,7 +474,7 @@ export class FunnelDraftViewModel {
         payload.draftTheme = this.theme as never;
       } else if (scope === "pages") {
         payload.draftPages = this.pages as never;
-        payload.draftRules = this.rules;
+        payload.draftRules = this.coercedRules();
         payload.draftDefaultNext = this.defaultNext;
       } else if (scope === "name") {
         payload.name = this.name;
@@ -589,7 +623,7 @@ export class FunnelDraftViewModel {
       draftPages: this.pages as never,
       draftTheme: this.theme as never,
       draftSettings: this.settings as never,
-      draftRules: this.rules,
+      draftRules: this.coercedRules(),
       draftDefaultNext: this.defaultNext,
       defaultLocale: this.defaultLocale,
       locales: this.locales,

@@ -60,6 +60,63 @@ describe("nextRuleSchema", () => {
     },
   );
 
+  it.each(["gt", "gte", "lt", "lte"] as const)(
+    "accepts '%s' with a number value",
+    (op) => {
+      const ok = nextRuleSchema.safeParse({
+        id: "r6",
+        condition: { op: "all", clauses: [{ question_id: "age", op, value: 40 }] },
+        goto: "end",
+      });
+      expect(ok.success).toBe(true);
+    },
+  );
+
+  it.each(["gt", "gte", "lt", "lte"] as const)(
+    "rejects '%s' with a non-number value",
+    (op) => {
+      // evaluator.ts requires typeof clause.value === "number" for these
+      // four ops. A numeric-looking string ("40") validates as a string
+      // and then silently never fires — the same writable-but-dead class
+      // the contains/not_contains guard above exists to close.
+      const bad = nextRuleSchema.safeParse({
+        id: "r7",
+        condition: { op: "all", clauses: [{ question_id: "age", op, value: "40" }] },
+        goto: "end",
+      });
+      expect(bad.success).toBe(false);
+    },
+  );
+
+  it("accepts 'between' with two number bounds", () => {
+    const ok = nextRuleSchema.safeParse({
+      id: "r8",
+      condition: { op: "all", clauses: [{ question_id: "age", op: "between", value: [18, 65] }] },
+      goto: "end",
+    });
+    expect(ok.success).toBe(true);
+  });
+
+  it("rejects 'between' with non-number bounds", () => {
+    // [null, null] is what a NaN bound JSON-serialises to. It has the
+    // right length and used to pass, then never matched in evalClause.
+    const bad = nextRuleSchema.safeParse({
+      id: "r9",
+      condition: { op: "all", clauses: [{ question_id: "age", op: "between", value: [null, null] }] },
+      goto: "end",
+    });
+    expect(bad.success).toBe(false);
+  });
+
+  it("rejects 'between' with one number bound and one string bound", () => {
+    const bad = nextRuleSchema.safeParse({
+      id: "r10",
+      condition: { op: "all", clauses: [{ question_id: "age", op: "between", value: [18, "65"] }] },
+      goto: "end",
+    });
+    expect(bad.success).toBe(false);
+  });
+
   it("rejects unknown op", () => {
     const bad = nextRuleSchema.safeParse({
       id: "r4",

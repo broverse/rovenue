@@ -52,11 +52,32 @@ const clauseSchema = z
         });
       }
     }
+    if (c.op === "gt" || c.op === "gte" || c.op === "lt" || c.op === "lte") {
+      // evaluator.ts requires `typeof clause.value === "number"` for these
+      // four — the same reasoning as the contains/not_contains guard
+      // above: a numeric-looking string validates here and then silently
+      // never fires. Reject it at the boundary instead.
+      if (typeof c.value !== "number") {
+        ctx.addIssue({
+          code: "custom",
+          message: `Op ${c.op} requires a number value`,
+          path: ["value"],
+        });
+      }
+    }
     if (c.op === "between") {
       if (!Array.isArray(c.value) || c.value.length !== 2) {
         ctx.addIssue({
           code: "custom",
           message: `Op between requires [min, max]`,
+          path: ["value"],
+        });
+      } else if (typeof c.value[0] !== "number" || typeof c.value[1] !== "number") {
+        // `[null, null]` — what a NaN bound JSON-serialises to — passes
+        // the length-2 check above and then never matches in evalClause.
+        ctx.addIssue({
+          code: "custom",
+          message: `Op between requires [min, max] as numbers`,
           path: ["value"],
         });
       }
