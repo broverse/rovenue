@@ -69,4 +69,58 @@ final class PaywallRenderSupportTests: XCTestCase {
         XCTAssertNil(relevantPackageView(cell: nil, selectedPackageId: nil, offering: nil))
         XCTAssertNil(relevantPackageView(cell: nil, selectedPackageId: "missing", offering: nil))
     }
+
+    // MARK: - visibility gate (BuilderNodeView)
+    //
+    // BuilderNodeView.body gates on `isNodeVisible(node.visibility,
+    // platform:appVersion:)` BEFORE dispatching to `resolvedContent` — a
+    // bare SwiftUI view body isn't unit-testable without a rendering
+    // harness, so these pin exactly the predicate call the gate makes,
+    // for three representative cases: platform-hidden, a
+    // hidden stack (whose children the gate never even reaches, since it
+    // returns `EmptyView()` before `resolvedContent`'s switch looks at
+    // `props.children`), and a hidden node that still carries a fallback
+    // (rendered NEITHER — the fallback is irrelevant to the gate; it can
+    // only ever be reached from inside `resolvedContent`, which the gate
+    // never enters).
+
+    func test_platformHidden_gateHidesTheNode() {
+        let props = TextProps(id: "t1", key: "k", role: .body, visibility: Visibility(platform: ["android"]))
+        XCTAssertFalse(isNodeVisible(props.visibility, platform: "ios", appVersion: nil))
+    }
+
+    func test_hiddenStack_gateHidesBeforeAnyChildIsReached() {
+        let stack = StackProps(
+            id: "root", axis: .v,
+            children: [
+                .text(TextProps(id: "c1", key: "k1", role: .body)),
+                .spacer(SpacerProps(id: "c2")),
+            ],
+            visibility: Visibility(platform: ["android"])
+        )
+        XCTAssertFalse(isNodeVisible(stack.visibility, platform: "ios", appVersion: nil))
+        // The children themselves carry no visibility of their own here —
+        // the gate short-circuits on the STACK before BuilderNodeView ever
+        // recurses into `stack.children`, so their own visibility is never
+        // even consulted for this tree.
+        XCTAssertTrue(stack.children.allSatisfy { isNodeVisible($0.visibility, platform: "ios", appVersion: nil) })
+    }
+
+    func test_hiddenNodeWithFallback_stillHidden_fallbackNeverRenders() {
+        let fallback = BuilderNodeBox(node: .text(TextProps(id: "fb", key: "k2", role: .body)))
+        let props = TextProps(
+            id: "t1", key: "k", role: .body,
+            visibility: Visibility(minAppVersion: "99.0.0"), fallback: fallback
+        )
+        XCTAssertNotNil(props.fallback, "the node does carry a fallback")
+        XCTAssertFalse(
+            isNodeVisible(props.visibility, platform: "ios", appVersion: "1.0.0"),
+            "a hidden node renders neither its own content nor its fallback"
+        )
+    }
+
+    func test_noVisibilityRules_gateShowsTheNode() {
+        let props = TextProps(id: "t1", key: "k", role: .body)
+        XCTAssertTrue(isNodeVisible(props.visibility, platform: "ios", appVersion: nil))
+    }
 }

@@ -40,4 +40,27 @@ final class AppVersionTests: XCTestCase {
         try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.io")
         XCTAssertNil(Rovenue.shared.resolvedAppVersionForTesting)
     }
+
+    /// `configuredAppVersion` is the production-facing accessor the
+    /// builder paywall renderer's `visibility` gate reads (see
+    /// RovenuePaywallView.swift) — it must agree with
+    /// `resolvedAppVersionForTesting`, which exists only for the tests
+    /// above.
+    func test_configuredAppVersion_agreesWithResolvedAppVersionForTesting() throws {
+        Rovenue._appVersionReaderForTesting = { "9.9.9-fake" }
+        defer { Rovenue._appVersionReaderForTesting = nil }
+
+        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.io")
+        XCTAssertEqual(Rovenue.shared.configuredAppVersion, "9.9.9-fake")
+        XCTAssertEqual(Rovenue.shared.configuredAppVersion, Rovenue.shared.resolvedAppVersionForTesting)
+    }
+
+    /// `sharedIfConfigured` is the non-trapping peek the paywall renderer
+    /// uses so a render triggered before `configure()` fails open (nil
+    /// appVersion) instead of hitting `.shared`'s `fatalError`.
+    func test_sharedIfConfigured_nilBeforeConfigure_setAfterConfigure() throws {
+        XCTAssertNil(Rovenue.sharedIfConfigured)
+        try Rovenue.configure(apiKey: "pk_test_xyz", baseUrl: "https://api.rovenue.io")
+        XCTAssertNotNil(Rovenue.sharedIfConfigured)
+    }
 }

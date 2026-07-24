@@ -120,6 +120,80 @@ public enum ButtonAction: Decodable, Equatable, Sendable {
     }
 }
 
+// MARK: - Visibility (node-level render gating)
+//
+// Cross-platform contract: packages/shared/src/paywall/visibility.ts's
+// `NodeVisibility` type / the RN (model.ts) and Kotlin (BuilderConfigModel.kt)
+// mirrors. Every KNOWN node type below carries an optional `visibility` —
+// NOT `.unknown`, which never has one to parse (mirrors both siblings).
+// Deliberately NOT overridable (absent from `OverridablePropKeys` on every
+// node type) — see Visibility.swift for `isNodeVisible`/`compareVersions`.
+//
+// `visibility` decodes LENIENTLY, unlike the rest of this file: a
+// malformed shape, an out-of-union platform string, or a non-string bound
+// is dropped rather than failing the whole config decode — visibility is
+// the one field on a known node type that behaves this way (mirrors the
+// RN/Kotlin decoders' `parseVisibility` exactly).
+
+/// Platforms recognized by node-level `visibility` — Swift mirror of
+/// shared's `VisibilityPlatform` union / the RN decoder's
+/// `VISIBILITY_PLATFORMS` / Kotlin's `VISIBILITY_PLATFORMS`.
+private let visibilityPlatforms: Set<String> = ["ios", "android", "web"]
+
+/// A JSON array element that may or may not decode as a `String` — used
+/// to filter a `platform` list down to recognized strings without
+/// failing the whole decode on a stray non-string entry (mirrors
+/// Kotlin's `JsonPrimitive`-then-`isString` check). Never throws.
+private enum LenientStringElement: Decodable {
+    case string(String)
+    case other
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else {
+            self = .other
+        }
+    }
+}
+
+/// Platforms this node renders on. `nil`/absent OR EMPTY means all of
+/// them. Bounds (`minAppVersion`/`maxAppVersion`) are inclusive.
+public struct Visibility: Decodable, Equatable, Sendable {
+    public let platform: [String]?
+    public let minAppVersion: String?
+    public let maxAppVersion: String?
+
+    public init(platform: [String]? = nil, minAppVersion: String? = nil, maxAppVersion: String? = nil) {
+        self.platform = platform
+        self.minAppVersion = minAppVersion
+        self.maxAppVersion = maxAppVersion
+    }
+
+    private enum CodingKeys: String, CodingKey { case platform, minAppVersion, maxAppVersion }
+
+    /// `visibility.platform` decodes LENIENTLY: any entry outside the
+    /// known set (or any non-string entry) is dropped rather than
+    /// failing the whole config, and an empty-after-filtering array is
+    /// treated the same as absent (`nil`) — both mean "no constraint" to
+    /// `isNodeVisible`. `minAppVersion`/`maxAppVersion` similarly drop
+    /// (rather than throw for) a present-but-non-string value.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        let rawPlatform = (try? container.decodeIfPresent([LenientStringElement].self, forKey: .platform)) ?? nil
+        let kept = rawPlatform?.compactMap { element -> String? in
+            guard case .string(let value) = element, visibilityPlatforms.contains(value) else { return nil }
+            return value
+        }
+        self.platform = (kept?.isEmpty ?? true) ? nil : kept
+
+        self.minAppVersion = (try? container.decodeIfPresent(String.self, forKey: .minAppVersion)) ?? nil
+        self.maxAppVersion = (try? container.decodeIfPresent(String.self, forKey: .maxAppVersion)) ?? nil
+    }
+}
+
 // MARK: - Overrides (Phase D2)
 //
 // Cross-platform contract: packages/shared/src/paywall/schema.ts's
@@ -356,6 +430,7 @@ public struct StackProps: Decodable {
     public let background: ThemePair?
     public let cornerRadius: Double?
     public let overrides: [NodeOverride<StackOverrideProps>]?
+    public let visibility: Visibility?
     public let fallback: BuilderNodeBox?
 
     // Explicit memberwise init: conforming to `Decodable` alone suppresses
@@ -364,10 +439,35 @@ public struct StackProps: Decodable {
     public init(id: String, axis: Axis, children: [BuilderNode], spacing: Double? = nil, align: HAlign? = nil,
                 padding: Padding? = nil, size: SizeSpec? = nil, background: ThemePair? = nil,
                 cornerRadius: Double? = nil, overrides: [NodeOverride<StackOverrideProps>]? = nil,
-                fallback: BuilderNodeBox? = nil) {
+                visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
         self.id = id; self.axis = axis; self.children = children; self.spacing = spacing; self.align = align
         self.padding = padding; self.size = size; self.background = background
-        self.cornerRadius = cornerRadius; self.overrides = overrides; self.fallback = fallback
+        self.cornerRadius = cornerRadius; self.overrides = overrides
+        self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, axis, children, spacing, align, padding, size, background, cornerRadius, overrides, visibility, fallback
+    }
+
+    // A custom decoder (rather than relying on Codable synthesis, as this
+    // type did before visibility existed) is required because `visibility`
+    // is the one field here that must decode LENIENTLY — see Visibility's
+    // doc comment above.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        axis = try container.decode(Axis.self, forKey: .axis)
+        children = try container.decode([BuilderNode].self, forKey: .children)
+        spacing = try container.decodeIfPresent(Double.self, forKey: .spacing)
+        align = try container.decodeIfPresent(HAlign.self, forKey: .align)
+        padding = try container.decodeIfPresent(Padding.self, forKey: .padding)
+        size = try container.decodeIfPresent(SizeSpec.self, forKey: .size)
+        background = try container.decodeIfPresent(ThemePair.self, forKey: .background)
+        cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
+        overrides = try container.decodeIfPresent([NodeOverride<StackOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
     }
 }
 
@@ -378,12 +478,28 @@ public struct TextProps: Decodable {
     public let color: ThemePair?
     public let align: HAlign?
     public let overrides: [NodeOverride<TextOverrideProps>]?
+    public let visibility: Visibility?
     public let fallback: BuilderNodeBox?
 
     public init(id: String, key: String, role: TextRole, color: ThemePair? = nil, align: HAlign? = nil,
-                overrides: [NodeOverride<TextOverrideProps>]? = nil, fallback: BuilderNodeBox? = nil) {
+                overrides: [NodeOverride<TextOverrideProps>]? = nil, visibility: Visibility? = nil,
+                fallback: BuilderNodeBox? = nil) {
         self.id = id; self.key = key; self.role = role; self.color = color; self.align = align
-        self.overrides = overrides; self.fallback = fallback
+        self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, key, role, color, align, overrides, visibility, fallback }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        key = try container.decode(String.self, forKey: .key)
+        role = try container.decode(TextRole.self, forKey: .role)
+        color = try container.decodeIfPresent(ThemePair.self, forKey: .color)
+        align = try container.decodeIfPresent(HAlign.self, forKey: .align)
+        overrides = try container.decodeIfPresent([NodeOverride<TextOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
     }
 }
 
@@ -394,13 +510,30 @@ public struct ImageProps: Decodable {
     public let cornerRadius: Double?
     public let alt: String?
     public let overrides: [NodeOverride<ImageOverrideProps>]?
+    public let visibility: Visibility?
     public let fallback: BuilderNodeBox?
 
     public init(id: String, url: ThemePair, height: Double? = nil, cornerRadius: Double? = nil,
                 alt: String? = nil, overrides: [NodeOverride<ImageOverrideProps>]? = nil,
-                fallback: BuilderNodeBox? = nil) {
+                visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
         self.id = id; self.url = url; self.height = height; self.cornerRadius = cornerRadius
-        self.alt = alt; self.overrides = overrides; self.fallback = fallback
+        self.alt = alt; self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, url, height, cornerRadius, alt, overrides, visibility, fallback
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        url = try container.decode(ThemePair.self, forKey: .url)
+        height = try container.decodeIfPresent(Double.self, forKey: .height)
+        cornerRadius = try container.decodeIfPresent(Double.self, forKey: .cornerRadius)
+        alt = try container.decodeIfPresent(String.self, forKey: .alt)
+        overrides = try container.decodeIfPresent([NodeOverride<ImageOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
     }
 }
 
@@ -410,12 +543,27 @@ public struct ButtonProps: Decodable {
     public let style: ButtonVisualStyle
     public let action: ButtonAction
     public let overrides: [NodeOverride<ButtonOverrideProps>]?
+    public let visibility: Visibility?
     public let fallback: BuilderNodeBox?
 
     public init(id: String, labelKey: String, style: ButtonVisualStyle, action: ButtonAction,
-                overrides: [NodeOverride<ButtonOverrideProps>]? = nil, fallback: BuilderNodeBox? = nil) {
+                overrides: [NodeOverride<ButtonOverrideProps>]? = nil, visibility: Visibility? = nil,
+                fallback: BuilderNodeBox? = nil) {
         self.id = id; self.labelKey = labelKey; self.style = style; self.action = action
-        self.overrides = overrides; self.fallback = fallback
+        self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, labelKey, style, action, overrides, visibility, fallback }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        labelKey = try container.decode(String.self, forKey: .labelKey)
+        style = try container.decode(ButtonVisualStyle.self, forKey: .style)
+        action = try container.decode(ButtonAction.self, forKey: .action)
+        overrides = try container.decodeIfPresent([NodeOverride<ButtonOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
     }
 }
 
@@ -430,14 +578,31 @@ public struct PackageListProps: Decodable {
     /// `BuilderNodeBox`, exactly like `fallback`.
     public let cellTemplate: BuilderNodeBox?
     public let overrides: [NodeOverride<PackageListOverrideProps>]?
+    public let visibility: Visibility?
     public let fallback: BuilderNodeBox?
 
     public init(id: String, packageIds: [String], defaultSelected: String? = nil, cellLayout: CellLayout,
                 cellTemplate: BuilderNodeBox? = nil, overrides: [NodeOverride<PackageListOverrideProps>]? = nil,
-                fallback: BuilderNodeBox? = nil) {
+                visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
         self.id = id; self.packageIds = packageIds; self.defaultSelected = defaultSelected
         self.cellLayout = cellLayout; self.cellTemplate = cellTemplate
-        self.overrides = overrides; self.fallback = fallback
+        self.overrides = overrides; self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, packageIds, defaultSelected, cellLayout, cellTemplate, overrides, visibility, fallback
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        packageIds = try container.decode([String].self, forKey: .packageIds)
+        defaultSelected = try container.decodeIfPresent(String.self, forKey: .defaultSelected)
+        cellLayout = try container.decode(CellLayout.self, forKey: .cellLayout)
+        cellTemplate = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .cellTemplate)
+        overrides = try container.decodeIfPresent([NodeOverride<PackageListOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
     }
 }
 
@@ -445,11 +610,24 @@ public struct PurchaseButtonProps: Decodable {
     public let id: String
     public let labelKey: String
     public let overrides: [NodeOverride<PurchaseButtonOverrideProps>]?
+    public let visibility: Visibility?
     public let fallback: BuilderNodeBox?
 
     public init(id: String, labelKey: String, overrides: [NodeOverride<PurchaseButtonOverrideProps>]? = nil,
-                fallback: BuilderNodeBox? = nil) {
-        self.id = id; self.labelKey = labelKey; self.overrides = overrides; self.fallback = fallback
+                visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.labelKey = labelKey; self.overrides = overrides
+        self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, labelKey, overrides, visibility, fallback }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        labelKey = try container.decode(String.self, forKey: .labelKey)
+        overrides = try container.decodeIfPresent([NodeOverride<PurchaseButtonOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
     }
 }
 
@@ -457,11 +635,24 @@ public struct SpacerProps: Decodable {
     public let id: String
     public let size: Double?
     public let overrides: [NodeOverride<SpacerOverrideProps>]?
+    public let visibility: Visibility?
     public let fallback: BuilderNodeBox?
 
     public init(id: String, size: Double? = nil, overrides: [NodeOverride<SpacerOverrideProps>]? = nil,
-                fallback: BuilderNodeBox? = nil) {
-        self.id = id; self.size = size; self.overrides = overrides; self.fallback = fallback
+                visibility: Visibility? = nil, fallback: BuilderNodeBox? = nil) {
+        self.id = id; self.size = size; self.overrides = overrides
+        self.visibility = visibility; self.fallback = fallback
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, size, overrides, visibility, fallback }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        size = try container.decodeIfPresent(Double.self, forKey: .size)
+        overrides = try container.decodeIfPresent([NodeOverride<SpacerOverrideProps>].self, forKey: .overrides)
+        visibility = (try? container.decodeIfPresent(Visibility.self, forKey: .visibility)) ?? nil
+        fallback = try container.decodeIfPresent(BuilderNodeBox.self, forKey: .fallback)
     }
 }
 
@@ -517,6 +708,24 @@ public enum BuilderNode: Decodable {
         case .purchaseButton(let p): return p.id
         case .spacer(let p): return p.id
         case .unknown(let id, _): return id
+        }
+    }
+
+    /// This node's own `visibility`, regardless of case. `.unknown` never
+    /// carries one — an unrecognized node `type` has none to parse (see
+    /// `Visibility`'s decode contract above) — so it's always visible as
+    /// far as this gate is concerned. Deliberately NOT overridable; see
+    /// `OverridablePropKeys`.
+    public var visibility: Visibility? {
+        switch self {
+        case .stack(let p): return p.visibility
+        case .text(let p): return p.visibility
+        case .image(let p): return p.visibility
+        case .button(let p): return p.visibility
+        case .packageList(let p): return p.visibility
+        case .purchaseButton(let p): return p.visibility
+        case .spacer(let p): return p.visibility
+        case .unknown: return nil
         }
     }
 }

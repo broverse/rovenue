@@ -65,6 +65,17 @@ public final class Rovenue: @unchecked Sendable {
         return instance
     }
 
+    /// Non-trapping peek at the shared instance, for call sites (the
+    /// builder paywall renderer's `visibility` gate) that must fail open —
+    /// never crash a render — when reached before `configure()` ever ran.
+    /// Everywhere else should keep using `.shared`; this exists only where
+    /// a crash would be worse than silently degrading.
+    internal static var sharedIfConfigured: Rovenue? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _shared
+    }
+
     /// Configure the SDK. Must be called before any other API.
     /// Throws `RovenueError(kind: .invalidApiKey, …)` if the api key is empty/whitespace.
     /// Calling this a second time replaces the shared instance.
@@ -200,6 +211,16 @@ public final class Rovenue: @unchecked Sendable {
     /// Test-only accessor — used by `AppVersionTests` to verify that
     /// `configure(...)` correctly resolved the bundle / override.
     internal var resolvedAppVersionForTesting: String? { appVersion }
+
+    /// The app version resolved at `configure()` time (bundle
+    /// `CFBundleShortVersionString` or an explicit override), threaded
+    /// into the builder paywall's render context to feed the
+    /// `visibility.minAppVersion`/`maxAppVersion` gate (see
+    /// RovenuePaywallView.swift). Production code reads THIS, never
+    /// `resolvedAppVersionForTesting` — that accessor exists only for
+    /// `AppVersionTests` and carries no compiler signal against being
+    /// deleted as "test-only scaffolding".
+    internal var configuredAppVersion: String? { appVersion }
 
     // MARK: - Version
 

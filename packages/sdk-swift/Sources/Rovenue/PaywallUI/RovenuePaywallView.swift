@@ -97,7 +97,8 @@ public struct RovenuePaywallView: View {
                 onClose?()
             },
             onRestore: onRestore,
-            onUrl: onUrl
+            onUrl: onUrl,
+            appVersion: configuredAppVersionOrNil
         )
         ZStack {
             if let bg = config.background,
@@ -113,6 +114,18 @@ public struct RovenuePaywallView: View {
     /// with different offerings and config edits on the same paywall).
     private var paywallStateKey: String {
         (paywall.paywallIdentifier ?? "") + "|" + (paywall.builderConfigJson ?? "")
+    }
+
+    /// The app version supplied to `Rovenue.configure`, feeding the
+    /// `visibility.minAppVersion`/`maxAppVersion` gate in
+    /// `BuilderNodeView`. `nil` when a paywall renders before
+    /// `configure()` ever ran — `Rovenue.shared` traps in that case, so
+    /// this reads the non-trapping `sharedIfConfigured` peek instead and
+    /// fails open (see `BuilderNodeView.body`), never crashes. Platform
+    /// itself is NOT threaded through the context — it's the compile-time
+    /// literal `BuilderNodeView` gates on directly.
+    private var configuredAppVersionOrNil: String? {
+        Rovenue.sharedIfConfigured?.configuredAppVersion
     }
 
     private func startPurchase() {
@@ -147,6 +160,12 @@ struct PaywallRenderContext {
     let onClose: (() -> Void)?
     let onRestore: (() -> Void)?
     let onUrl: ((URL) -> Void)?
+    /// The host app's version, as resolved by `Rovenue.configure`/`shared`
+    /// at bind time — feeds the `visibility.minAppVersion`/
+    /// `maxAppVersion` gate in `BuilderNodeView.body`. `nil` when a
+    /// paywall renders before an appVersion was ever configured; the gate
+    /// fails open in that case (see Visibility.swift), never crashes.
+    let appVersion: String?
 
     /// Localized + variable-resolved label. `cell` scopes variables to a
     /// package cell; elsewhere the selected package wins.
@@ -172,12 +191,34 @@ struct CellScope {
 
 // MARK: - Node views
 
+/// This SDK's compile-time platform literal for the `visibility` gate —
+/// never "web", the other value the shared `VisibilityPlatform` union
+/// allows (see BuilderConfigModel.swift's `Visibility` doc). NOT threaded
+/// through `PaywallRenderContext` — every renderer gates on its own
+/// compile-time literal directly (mirrors the Kotlin/RN siblings).
+private let paywallVisibilityPlatform = "ios"
+
 struct BuilderNodeView: View {
     let node: BuilderNode
     let ctx: PaywallRenderContext
     let cell: CellScope?
 
     var body: some View {
+        // Visibility is gated FIRST, on the RAW `node.visibility` — before
+        // overrides are resolved, and before any style/text/child work
+        // happens. A hidden node renders NOTHING: not its fallback, not
+        // its children. `visibility` is deliberately NOT overridable (see
+        // BuilderConfigModel.swift's `Visibility` doc), so it must be read
+        // off `node` directly, never off `applyOverrides`'s result.
+        if isNodeVisible(node.visibility, platform: paywallVisibilityPlatform, appVersion: ctx.appVersion) {
+            resolvedContent
+        } else {
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var resolvedContent: some View {
         // Every node passes through `applyOverrides` here, BEFORE any
         // style/text resolution happens in the per-type views below —
         // `resolved` (not the original `node`) is what gets dispatched.

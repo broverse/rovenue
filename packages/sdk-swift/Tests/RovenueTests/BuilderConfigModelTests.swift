@@ -302,6 +302,31 @@ final class BuilderConfigModelTests: XCTestCase {
         }
     }
 
+    // MARK: - visibility (cross-platform render-fixtures.json vector table)
+
+    /// Runs every `visibility` vector in render-fixtures.json through the
+    /// Swift `isNodeVisible` — the same 13 cases the RN and Kotlin ports
+    /// run, including every FAILS OPEN one (empty platform list, unknown
+    /// platform, unknown app version, a non-numeric version component).
+    /// The evaluator's own unit tests live in VisibilityTests.swift; this
+    /// is the cross-platform contract conformance proof.
+    func testVisibilityVectorsAgreeWithSharedFixture() throws {
+        let entries = try XCTUnwrap(fixtures["visibility"] as? [[String: Any]])
+        XCTAssertFalse(entries.isEmpty)
+        for entry in entries {
+            let name = try XCTUnwrap(entry["name"] as? String)
+            let visibilityJSON = try XCTUnwrap(entry["visibility"])
+            let visibilityData = try JSONSerialization.data(withJSONObject: visibilityJSON)
+            let visibility = try JSONDecoder().decode(Visibility.self, from: visibilityData)
+            let platform = entry["platform"] as? String // nil surfaces JSON `null`
+            let appVersion = entry["appVersion"] as? String // nil surfaces JSON `null`
+            let expected = try XCTUnwrap(entry["expected"] as? Bool)
+            XCTAssertEqual(
+                isNodeVisible(visibility, platform: platform, appVersion: appVersion), expected,
+                "visibility vector \"\(name)\"")
+        }
+    }
+
     func testResolveTextWithNilLocaleFallsStraightToDefaultLocale() throws {
         let accept = try XCTUnwrap(fixtures["accept"] as? [[String: Any]])
         let canonicalEntry = try XCTUnwrap(accept.first { ($0["name"] as? String) == "canonical every-node multi-locale" })
