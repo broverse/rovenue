@@ -129,6 +129,9 @@ type Props = {
   // The current answer for this page, when `mode` is "live".
   value?: AnswerValue;
   onAnswer?: (value: AnswerValue) => void;
+  // Disables the footer CTA. The runner sets it while a `required` page
+  // has no answer yet.
+  ctaDisabled?: boolean;
 };
 
 /**
@@ -161,6 +164,7 @@ export const PagePreview = component(
     mode = "preview",
     value,
     onAnswer,
+    ctaDisabled = false,
   }: Props) => {
   // One gate for every live input below. Reading `mode` — never
   // `onAnswer !== undefined` — is what keeps the builder canvas inert.
@@ -493,9 +497,10 @@ export const PagePreview = component(
           <button
             type="button"
             onClick={onAdvance}
+            disabled={ctaDisabled}
             className={`mx-auto block h-10 w-full max-w-md text-[13px] font-semibold text-white${
-              onAdvance ? " cursor-pointer transition active:scale-[0.98]" : ""
-            }`}
+              onAdvance && !ctaDisabled ? " cursor-pointer transition active:scale-[0.98]" : ""
+            }${ctaDisabled ? " cursor-not-allowed opacity-50" : ""}`}
             style={r({ background: footer?.buttonColor || theme.primary })}
           >
             {ctaLabel}

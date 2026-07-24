@@ -199,10 +199,25 @@ export function submitAnswer(
 export function advanceSession(
   sessionId: string,
   fromPageId: string,
+  answer?: { question_id: string; answer: unknown },
 ): Promise<AdvanceResponse> {
   return request<AdvanceResponse>(
     `/public/funnel-sessions/${encodeURIComponent(sessionId)}/advance`,
-    { method: "POST", body: JSON.stringify({ from_page_id: fromPageId }) },
+    {
+      method: "POST",
+      // Spread rather than `answer: answer` so the key is ABSENT when
+      // there is nothing to record — a no-answer request stays
+      // byte-identical to the shape this endpoint has always received.
+      //
+      // The answer rides with the advance because the server writes it
+      // before it evaluates branching. Recording it in a separate call
+      // first would put that ordering in the client's hands, where a
+      // mistake branches on the PREVIOUS answer, silently.
+      body: JSON.stringify({
+        from_page_id: fromPageId,
+        ...(answer ? { answer } : {}),
+      }),
+    },
   );
 }
 

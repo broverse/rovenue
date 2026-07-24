@@ -7,9 +7,12 @@
 // branching rules apply (the JSON config from /public/funnels/:slug
 // has next_rules / default_next stripped).
 //
-// Phase 1 scope: click-through. The CTA fires `advance` with no
-// answer; default-next routing carries the user forward. Real
-// input capture (text, choice, slider, etc.) lands in Phase 2.
+// Answers for the five wired input types (email, short_text,
+// text_input, single_choice, multi_choice, yes_no) are captured here
+// and sent WITH the advance that evaluates them — the server writes
+// the answer before it reads the answer map, so a rule keyed on this
+// answer steers this very transition. The remaining input types still
+// click through on default-next until they are wired.
 // =============================================================
 
 import { useEffect, useMemo, useState } from "react";
@@ -29,6 +32,7 @@ import {
 import { PaymentStep, type FunnelPaymentOutcome } from "./payment-step";
 import { writeFunnelTokenToClipboard } from "./clipboard";
 import { type LocaleCode } from "@rovenue/shared/i18n";
+import type { AnswerValue } from "@rovenue/shared/funnel";
 import { useRunnerLocale } from "./use-runner-locale";
 
 /** Maps the server-hydrated offering shape into the renderer's minimal contract. */
@@ -246,13 +250,54 @@ export function FunnelRunner({ slug }: { slug: string }) {
   );
   const locale = useRunnerLocale(localeConfig);
 
+  // Keyed by QUESTION id, not page id: branching rules look answers up
+  // by question_id (see the evaluator's evalClause), and a question id
+  // survives page reordering.
+  const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
+
+  const questionId = (currentPage as { question_id?: string } | null)?.question_id;
+  const currentAnswer = questionId ? answers[questionId] : undefined;
+  const answered =
+    currentAnswer !== undefined &&
+    currentAnswer !== null &&
+    currentAnswer !== "" &&
+    !(Array.isArray(currentAnswer) && currentAnswer.length === 0);
+  const required = Boolean((currentPage as { required?: boolean } | null)?.required);
+
+  // The email PaymentStep should pre-fill. Tie-break is deliberate: a
+  // funnel may legitimately have more than one email page, and "last in
+  // PAGE ORDER" is deterministic where "most recently answered" would
+  // depend on back-navigation. contact_info also collects an email but is
+  // not among the wired types, so it is not consulted.
+  const collectedEmail = useMemo(() => {
+    const pages = (state?.config.pages ?? []) as Array<{
+      type?: string;
+      question_id?: string;
+    }>;
+    let found: string | undefined;
+    for (const p of pages) {
+      if (p.type !== "email" || !p.question_id) continue;
+      const v = answers[p.question_id];
+      if (typeof v === "string" && v.trim()) found = v.trim();
+    }
+    return found;
+  }, [state?.config.pages, answers]);
+
   const handleAdvance = async () => {
     if (!state || !currentPage || busy) return;
     setBusy(true);
     try {
+      // No question_id means this answer cannot be keyed for branching or
+      // read back meaningfully by either answer consumer, so it is NOT
+      // recorded under the page id instead — a row nothing can match is
+      // worse than an absent one. blank-page.ts gives every input page a
+      // question_id, so this is a defensive branch, not an expected path.
       const res: AdvanceResponse = await advanceSession(
         state.sessionId,
         currentPage.id,
+        questionId && currentAnswer !== undefined
+          ? { question_id: questionId, answer: currentAnswer }
+          : undefined,
       );
       if (res.next === "page") {
         setState({ ...state, currentPageId: res.page_id });
@@ -367,6 +412,7 @@ export function FunnelRunner({ slug }: { slug: string }) {
           // resolves the package through this page, so what is charged
           // is what `priceView` below is showing.
           pageId={currentPage.id}
+          email={collectedEmail}
           priceLabel={priceView?.[payingPackage]?.price}
           onPaid={handlePaid}
           onCancel={() => setPayingPackage(null)}
@@ -406,6 +452,13 @@ export function FunnelRunner({ slug }: { slug: string }) {
           chrome="full"
           locale={locale}
           defaultLocale={localeConfig.defaultLocale}
+          mode="live"
+          value={currentAnswer ?? null}
+          onAnswer={(next) => {
+            if (!questionId) return;
+            setAnswers((prev) => ({ ...prev, [questionId]: next }));
+          }}
+          ctaDisabled={required && !answered}
         />
       )}
     </div>
