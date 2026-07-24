@@ -89,8 +89,15 @@ export async function runCustomDomainCertPollerSweep(
         // Registration is idempotent (it lists before creating).
         //
         // Best-effort on purpose: a failure here leaves a domain that
-        // serves its funnel without Apple Pay — degraded. Rethrowing would
-        // leave it stuck at `issuing` — broken.
+        // serves its funnel without Apple Pay — degraded, not broken.
+        //
+        // What this catch actually buys is accounting and a truthful log,
+        // NOT durability. `certStatus: "issued"` and `invalidateHost` are
+        // both committed above, before this call, so the row is serveable
+        // either way. Without the catch the per-row handler at the bottom
+        // of this loop swallows the error, logs it as "cert probe threw"
+        // — which it was not — and counts the row as `stillPending` even
+        // though its certificate issued.
         try {
           await registerApplePayDomain(row.projectId, row.hostname);
         } catch (err) {

@@ -81,11 +81,20 @@ function verdictDetail(domain: Stripe.PaymentMethodDomain): string | null {
  * project's connected Stripe account and record whether Apple Pay is
  * actually live on it.
  *
- * **Never throws.** Its caller is the OAuth callback, mid-connect, with a
- * live Stripe authorization on the other end — a throw there would take
- * the deauthorize-and-report path and undo a connection the customer just
- * made. Apple Pay being unavailable must never cost someone their Stripe
- * connection.
+ * **Every Stripe call is caught.** The original caller is the OAuth
+ * callback, mid-connect, with a live Stripe authorization on the other
+ * end — a throw there would take the deauthorize-and-report path and undo
+ * a connection the customer just made. Apple Pay being unavailable must
+ * never cost someone their Stripe connection.
+ *
+ * It is not, however, throw-free: the connection lookup and the platform
+ * client resolution below run OUTSIDE that try, so a database or config
+ * failure does escape. Callers that must not fail because of this —
+ * notably the custom-domain cert poller — wrap the call themselves.
+ *
+ * Three callers today: the OAuth callback, the Apple Pay backfill script,
+ * and the cert poller (which passes a customer hostname rather than the
+ * canonical one).
  */
 export async function registerApplePayDomain(
   projectId: string,
@@ -175,12 +184,6 @@ export async function registerApplePayDomain(
       err: err instanceof Error ? err.message : String(err),
     });
     try {
-      // Same guard as the success path above, and for the same reason:
-      // this column describes the canonical FUNNEL_PAYMENT_DOMAIN. A
-      // custom domain whose registration threw must not stamp "failed"
-      // onto the connection — that would report Apple Pay as broken on
-      // the canonical host because someone else's domain hit a Stripe
-      // error. The failure is already logged above with its domainName.
       // Same guard as the success path above, and for the same reason:
       // this column describes the canonical FUNNEL_PAYMENT_DOMAIN. A
       // custom domain whose registration threw must not stamp "failed"
