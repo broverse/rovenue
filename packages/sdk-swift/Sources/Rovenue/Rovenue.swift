@@ -187,9 +187,10 @@ public final class Rovenue: @unchecked Sendable {
     internal let bridge: ObserverBridge
     internal let funnelBridge: FunnelClaimBridge
     internal let dispatcher: Dispatcher
-    /// Captured at configure() time — exposed via
-    /// `resolvedAppVersionForTesting` so tests can verify the wiring
-    /// without scraping the actual session-event request body.
+    /// Captured at configure() time — exposed via `configuredAppVersion`,
+    /// which the builder paywall's visibility gate reads in production and
+    /// `AppVersionTests` reads to verify the wiring without scraping the
+    /// actual session-event request body.
     private let appVersion: String?
 
     /// Background task draining `Transaction.updates` (renewals, refunds,
@@ -208,18 +209,16 @@ public final class Rovenue: @unchecked Sendable {
         }
     }
 
-    /// Test-only accessor — used by `AppVersionTests` to verify that
-    /// `configure(...)` correctly resolved the bundle / override.
-    internal var resolvedAppVersionForTesting: String? { appVersion }
-
     /// The app version resolved at `configure()` time (bundle
-    /// `CFBundleShortVersionString` or an explicit override), threaded
-    /// into the builder paywall's render context to feed the
+    /// `CFBundleShortVersionString` or an explicit override), threaded into
+    /// the builder paywall's render context to feed the
     /// `visibility.minAppVersion`/`maxAppVersion` gate (see
-    /// RovenuePaywallView.swift). Production code reads THIS, never
-    /// `resolvedAppVersionForTesting` — that accessor exists only for
-    /// `AppVersionTests` and carries no compiler signal against being
-    /// deleted as "test-only scaffolding".
+    /// RovenuePaywallView.swift), and read by `AppVersionTests`.
+    ///
+    /// Deliberately NOT named `*ForTesting`: production visibility gating
+    /// depends on it, and a test-suffixed name invites a maintainer to
+    /// delete it as scaffolding — which would break version gating with no
+    /// compiler signal. The Android SDK hit exactly that and was renamed.
     internal var configuredAppVersion: String? { appVersion }
 
     // MARK: - Version
