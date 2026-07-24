@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { BuilderIssue } from "@rovenue/shared/paywall";
-import { INSPECTOR_TABS, resolveActiveTab, tabIssues, tabsForNode } from "./tabs";
+import {
+  INSPECTOR_TABS,
+  resolveActiveTab,
+  tabIssues,
+  tabsForNode,
+  type InspectorTabId,
+} from "./tabs";
+
+// Compile-time tripwire, not a runtime test. `InspectorTabId` must derive from
+// the TABLE; re-adding a `: readonly InspectorTab[]` annotation to
+// INSPECTOR_TABS silently restores the circular derivation — tsc stays green,
+// every runtime test still passes, and a bogus id compiles again. If that
+// happens this expect-error becomes UNUSED and tsc fails, which is the whole
+// point: the regression is otherwise invisible to both tsc and vitest.
+// @ts-expect-error — "visibility" is not an id in INSPECTOR_TABS
+const NOT_A_TAB: InspectorTabId = "visibility";
+void NOT_A_TAB;
 
 describe("tabsForNode", () => {
   it("gives every node type at least one tab", () => {
