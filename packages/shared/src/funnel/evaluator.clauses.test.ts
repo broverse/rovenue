@@ -85,8 +85,29 @@ describe("evalClause — the guards are narrow, not blanket", () => {
     expect(fires("lte", 3, 3)).toBe(true);
   });
 
+  it("gte fires at the boundary", () => {
+    // The array table (line ~51) only asserts the false direction for gte
+    // — this is the positive-direction row that belongs alongside lte's,
+    // so this file stays self-contained instead of relying on
+    // evaluator.test.ts to catch a collapsed `case "gte": return false;`.
+    expect(fires("gte", 3, 3)).toBe(true);
+  });
+
   it("in fires when the scalar answer is in the list", () => {
     expect(fires("in", "a", ["a", "z"])).toBe(true);
+  });
+
+  it("in fires for a numeric answer against a numeric list", () => {
+    // OPERATORS_BY_KIND.number now offers in/not_in — evalClause already
+    // placed no element-type constraint on them, so this is a coverage
+    // gap being closed, not a behavior change.
+    expect(fires("in", 5, [5, 10, 15])).toBe(true);
+    expect(fires("in", 7, [5, 10, 15])).toBe(false);
+  });
+
+  it("not_in fires for a numeric answer absent from a numeric list", () => {
+    expect(fires("not_in", 7, [5, 10, 15])).toBe(true);
+    expect(fires("not_in", 5, [5, 10, 15])).toBe(false);
   });
 
   it("between fires inside the range and not outside it", () => {

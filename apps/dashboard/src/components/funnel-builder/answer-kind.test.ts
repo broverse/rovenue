@@ -21,6 +21,14 @@ describe("OPERATORS_BY_KIND", () => {
     }
   });
 
+  it("offers 'in'/'not_in' to number too — evalClause places no element-type constraint on them", () => {
+    // {op:"in", value:[5,10,15]} against a numeric answer fires exactly as
+    // eq does. Omitting it from `number` was live-but-unoffered — the
+    // mirror image of the writable-but-dead class this sub-project removes.
+    expect(OPERATORS_BY_KIND.number).toContain("in");
+    expect(OPERATORS_BY_KIND.number).toContain("not_in");
+  });
+
   it("never offers a scalar equality operator to multi", () => {
     // These are the ones that used to fire by accident on an array.
     for (const op of ["eq", "neq", "in", "not_in"] as const) {

@@ -87,7 +87,10 @@ export const OPERATORS_BY_KIND: Record<AnswerKind, ReadonlyArray<ClauseOp>> = {
   text: ["eq", "neq", "in", "not_in", "is_answered", "is_not_answered"],
   choice: ["eq", "neq", "in", "not_in", "is_answered", "is_not_answered"],
   multi: ["contains", "not_contains", "is_answered", "is_not_answered"],
-  number: ["eq", "neq", "gt", "gte", "lt", "lte", "between", "is_answered", "is_not_answered"],
+  number: [
+    "eq", "neq", "gt", "gte", "lt", "lte", "between", "in", "not_in",
+    "is_answered", "is_not_answered",
+  ],
   none: [],
 };
 

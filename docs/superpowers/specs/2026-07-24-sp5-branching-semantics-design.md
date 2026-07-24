@@ -94,14 +94,26 @@ a number. The evaluator is not made to guess — a comparison that silently coer
 | `text` | `email`, `short_text`, `text_input`, `long_text`, `phone` | `eq`, `neq`, `in`, `not_in`, `is_answered`, `is_not_answered` |
 | `choice` | `single_choice`, `yes_no`, `picture_choice`, `legal`, `checkbox` | `eq`, `neq`, `in`, `not_in`, `is_answered`, `is_not_answered` |
 | `multi` | `multi_choice` | `contains`, `not_contains`, `is_answered`, `is_not_answered` |
-| `number` | `number_input`, `slider`, `rating`, `opinion_scale` | `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `between`, `is_answered`, `is_not_answered` |
-| `none` | every non-input page (`info`, `paywall`, `welcome`, …) | — not offered as a question at all |
+| `number` | `number_input`, `slider`, `rating`, `opinion_scale` | `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `between`, `in`, `not_in`, `is_answered`, `is_not_answered` |
+| `none` | every non-input page (`info`, `paywall`, `welcome`, …) that asks no *single comparable* question | — not offered as a question at all |
 
 `date_input` is classified `text` for now: the runner does not wire it, and inventing
 date comparison before there is a date answer to compare would be speculative.
 `contains` is not offered for `text` — it requires an array in the evaluator, so
 "email contains @" is exactly the writable-but-dead rule this item removes. Substring
 matching would be a new operator and is deliberately not in scope.
+
+`in`/`not_in` are offered for `number` alongside `eq`/`neq`: `evalClause` places no
+element-type constraint on `in`/`not_in`'s array operand, so `{op:"in", value:[5,10,15]}`
+against a numeric answer fires exactly as `eq` does — the omission was
+live-but-unoffered, the mirror image of the writable-but-dead class this item removes.
+
+`contact_info` is classified `none` even though it *is* an input page
+(`collectName`/`collectEmail`/`collectPhone`): its answer is a composite of up to three
+values, not the single comparable value every other kind produces, and the runner does
+not currently record it as a branchable answer. It keeps a `question_id` (used for
+required-field validation, not branching) — the rule editor's question picker excludes
+it explicitly rather than relying on it having no id.
 
 **The seam this item creates, and how it is held closed.** The evaluator dispatches on
 the **runtime value's type**; the editor dispatches on the **page type**. Those are
