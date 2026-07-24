@@ -11,6 +11,7 @@ export const CLAUSE_OPS = [
   "in",
   "not_in",
   "contains",
+  "not_contains",
   "is_answered",
   "is_not_answered",
 ] as const;

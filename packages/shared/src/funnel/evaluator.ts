@@ -99,15 +99,37 @@ function matches(
 
 function evalClause(clause: Clause, answers: AnswerMap): boolean {
   const a = answers.get(clause.question_id);
+
+  // One definition of "answered", matching the runner's own gate: an
+  // empty string and an empty selection are not answers. The evaluator
+  // and the client disagreeing about this was two definitions one hop
+  // apart.
+  const answered =
+    a !== undefined &&
+    a !== null &&
+    a !== "" &&
+    !(Array.isArray(a) && a.length === 0);
+
+  // A multi_choice answer is a string[]. Comparing it with a scalar
+  // operator is a type mismatch, not a question with an answer — so the
+  // scalar operators below refuse it in BOTH directions rather than
+  // letting `neq`/`not_in` come back true by accident and route the
+  // visitor somewhere nobody chose. Arrays have `contains` /
+  // `not_contains` instead.
+  const isArray = Array.isArray(a);
+
   switch (clause.op) {
     case "is_answered":
-      return a !== undefined && a !== null;
+      return answered;
     case "is_not_answered":
-      return a === undefined || a === null;
+      return !answered;
     case "eq":
-      return a === clause.value;
+      return !isArray && a === clause.value;
     case "neq":
-      return a !== clause.value;
+      // NOTE: an UNANSWERED question still fires here, deliberately.
+      // "they did not say x, including by skipping" is meaningful;
+      // narrowing it would also make is_not_answered redundant.
+      return !isArray && a !== clause.value;
     case "gt":
       return typeof a === "number" && typeof clause.value === "number" && a > clause.value;
     case "gte":
@@ -124,11 +146,13 @@ function evalClause(clause: Clause, answers: AnswerMap): boolean {
       return a >= min && a <= max;
     }
     case "in":
-      return Array.isArray(clause.value) && (clause.value as unknown[]).includes(a);
+      return !isArray && Array.isArray(clause.value) && (clause.value as unknown[]).includes(a);
     case "not_in":
-      return Array.isArray(clause.value) && !(clause.value as unknown[]).includes(a);
+      return !isArray && Array.isArray(clause.value) && !(clause.value as unknown[]).includes(a);
     case "contains":
-      return Array.isArray(a) && typeof clause.value === "string" && a.includes(clause.value);
+      return isArray && typeof clause.value === "string" && (a as string[]).includes(clause.value);
+    case "not_contains":
+      return isArray && typeof clause.value === "string" && !(a as string[]).includes(clause.value);
     default:
       return false;
   }
