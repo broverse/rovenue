@@ -599,6 +599,94 @@
           ]
         }
       }
+    },
+    {
+      "name": "visibility — platform-scoped node",
+      "_note": "Every decoder must parse `visibility.platform` and render the node only on the listed platforms. An absent or EMPTY list means all platforms.",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "t": "Hello"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "text",
+              "id": "t1",
+              "key": "t",
+              "role": "body",
+              "visibility": {
+                "platform": [
+                  "ios"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "visibility — both app-version bounds",
+      "_note": "Bounds are INCLUSIVE and compared component-wise on digits, not as semver. An unknown app version, or a component that is not a run of digits, must FAIL OPEN — render the node.",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "t": "Hello"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "text",
+              "id": "t1",
+              "key": "t",
+              "role": "body",
+              "visibility": {
+                "minAppVersion": "1.2",
+                "maxAppVersion": "2.0.0"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "visibility — empty object means no constraint",
+      "_note": "`visibility: {}` must decode and behave exactly like an absent key: the node renders everywhere.",
+      "config": {
+        "formatVersion": 2,
+        "defaultLocale": "en",
+        "localizations": {
+          "en": {
+            "t": "Hello"
+          }
+        },
+        "root": {
+          "type": "stack",
+          "id": "root",
+          "axis": "v",
+          "children": [
+            {
+              "type": "text",
+              "id": "t1",
+              "key": "t",
+              "role": "body",
+              "visibility": {}
+            }
+          ]
+        }
+      }
     }
   ],
   "acceptLenient": [

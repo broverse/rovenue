@@ -1,4 +1,5 @@
 import { OVERRIDABLE_PROP_KEYS, type BuilderConfig, type PaywallNode, type StackNode } from "./schema";
+import { compareVersions } from "./visibility";
 
 // =============================================================
 // Cross-node-tree validation for a builder config: things Zod's
@@ -27,6 +28,8 @@ export type BuilderIssue = {
     // validateBuilderConfig itself, which only sees parsed configs. In the
     // union so the dashboard renders API issue lists fully typed.
     | "SCHEMA_INVALID"
+    // A node whose visibility bounds cross, so it renders nowhere.
+    | "VISIBILITY_NEVER_MATCHES"
     // Phase D2 — overrides / cellTemplate.
     | "CELL_TEMPLATE_BAD_NODE"
     | "OVERRIDE_BAD_PROP"
@@ -64,6 +67,9 @@ const ISSUE_SEVERITY: Readonly<Record<string, IssueSeverity>> = {
   LOCALE_KEY_GAP: "warning",
   OVERRIDE_SELECTED_OUTSIDE_CELL: "warning",
   INTRO_VARIABLE_UNGUARDED: "warning",
+  // Dead content, not a broken config. A gate that refused it would be the
+  // fifth in this project to reject a legitimate work-in-progress.
+  VISIBILITY_NEVER_MATCHES: "warning",
 
   // Publish-only — a draft in this state is ordinary work in progress and
   // MUST still persist. Four of these are reachable from the builder UI in
@@ -229,6 +235,22 @@ export function validateBuilderConfig(
         code: "DUPLICATE_NODE_ID",
         nodeId: id,
         message: `Node id "${id}" is used by ${count} nodes; ids must be unique across the tree.`,
+      });
+    }
+  }
+
+  // VISIBILITY_NEVER_MATCHES — bounds that cross, so the node renders nowhere.
+  for (const node of allNodes) {
+    const { minAppVersion, maxAppVersion } = node.visibility ?? {};
+    if (!minAppVersion || !maxAppVersion) continue;
+    const cmp = compareVersions(minAppVersion, maxAppVersion);
+    // `null` means we could not compare them, which is NOT the same as
+    // knowing they cross — say nothing rather than guess.
+    if (cmp !== null && cmp > 0) {
+      issues.push({
+        code: "VISIBILITY_NEVER_MATCHES",
+        nodeId: node.id,
+        message: `Node "${node.id}" has minAppVersion "${minAppVersion}" above maxAppVersion "${maxAppVersion}", so it can never render.`,
       });
     }
   }

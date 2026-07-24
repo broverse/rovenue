@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { NodeVisibility } from "./visibility";
 
 // =============================================================
 // Paywall builder-config schema — the wire format the dashboard's
@@ -43,6 +44,8 @@ export type StackNode = {
   cornerRadius?: number;
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
+  /** Which platforms / app versions this node renders on. Absent = everywhere. */
+  visibility?: NodeVisibility;
 };
 
 export type TextNode = {
@@ -54,6 +57,8 @@ export type TextNode = {
   align?: "start" | "center" | "end";
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
+  /** Which platforms / app versions this node renders on. Absent = everywhere. */
+  visibility?: NodeVisibility;
 };
 
 export type ImageNode = {
@@ -65,6 +70,8 @@ export type ImageNode = {
   alt?: string;
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
+  /** Which platforms / app versions this node renders on. Absent = everywhere. */
+  visibility?: NodeVisibility;
 };
 
 export type ButtonNode = {
@@ -75,6 +82,8 @@ export type ButtonNode = {
   action: { kind: "close" } | { kind: "url"; url: string } | { kind: "restore" };
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
+  /** Which platforms / app versions this node renders on. Absent = everywhere. */
+  visibility?: NodeVisibility;
 };
 
 export type PackageListNode = {
@@ -94,6 +103,8 @@ export type PackageListNode = {
   cellTemplate?: PaywallNode;
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
+  /** Which platforms / app versions this node renders on. Absent = everywhere. */
+  visibility?: NodeVisibility;
 };
 
 export type PurchaseButtonNode = {
@@ -102,6 +113,8 @@ export type PurchaseButtonNode = {
   labelKey: string;
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
+  /** Which platforms / app versions this node renders on. Absent = everywhere. */
+  visibility?: NodeVisibility;
 };
 
 export type SpacerNode = {
@@ -110,6 +123,8 @@ export type SpacerNode = {
   size?: number;
   overrides?: NodeOverride[];
   fallback?: PaywallNode;
+  /** Which platforms / app versions this node renders on. Absent = everywhere. */
+  visibility?: NodeVisibility;
 };
 
 export type PaywallNode =
@@ -203,6 +218,12 @@ function overridesArraySchema(allowedKeys: readonly string[]): z.ZodType<NodeOve
   );
 }
 
+const nodeVisibilitySchema = z.object({
+  platform: z.array(z.enum(["ios", "android", "web"])).optional(),
+  minAppVersion: z.string().optional(),
+  maxAppVersion: z.string().optional(),
+});
+
 const stackNodeSchema: z.ZodType<StackNode> = z.object({
   type: z.literal("stack"),
   id: z.string().min(1),
@@ -228,6 +249,7 @@ const stackNodeSchema: z.ZodType<StackNode> = z.object({
   cornerRadius: z.number().optional(),
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.stack).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
 });
 
 const textNodeSchema: z.ZodType<TextNode> = z.object({
@@ -239,6 +261,7 @@ const textNodeSchema: z.ZodType<TextNode> = z.object({
   align: z.enum(["start", "center", "end"]).optional(),
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.text).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
 });
 
 const imageNodeSchema: z.ZodType<ImageNode> = z.object({
@@ -250,6 +273,7 @@ const imageNodeSchema: z.ZodType<ImageNode> = z.object({
   alt: z.string().optional(),
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.image).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
 });
 
 const buttonActionSchema: z.ZodType<ButtonNode["action"]> = z.union([
@@ -266,6 +290,7 @@ const buttonNodeSchema: z.ZodType<ButtonNode> = z.object({
   action: buttonActionSchema,
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.button).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
 });
 
 const packageListNodeSchema: z.ZodType<PackageListNode> = z.object({
@@ -277,6 +302,7 @@ const packageListNodeSchema: z.ZodType<PackageListNode> = z.object({
   cellTemplate: lazyPaywallNodeSchema.optional(),
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.packageList).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
 });
 
 const purchaseButtonNodeSchema: z.ZodType<PurchaseButtonNode> = z.object({
@@ -285,6 +311,7 @@ const purchaseButtonNodeSchema: z.ZodType<PurchaseButtonNode> = z.object({
   labelKey: z.string(),
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.purchaseButton).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
 });
 
 const spacerNodeSchema: z.ZodType<SpacerNode> = z.object({
@@ -293,6 +320,7 @@ const spacerNodeSchema: z.ZodType<SpacerNode> = z.object({
   size: z.number().optional(),
   overrides: overridesArraySchema(OVERRIDABLE_PROP_KEYS.spacer).optional(),
   fallback: lazyPaywallNodeSchema.optional(),
+  visibility: nodeVisibilitySchema.optional(),
 });
 
 const paywallNodeSchema: z.ZodType<PaywallNode> = z.union([

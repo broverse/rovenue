@@ -907,3 +907,43 @@ describe("save gate scope", () => {
     }
   });
 });
+
+describe("VISIBILITY_NEVER_MATCHES", () => {
+  function withVisibility(visibility: Record<string, unknown>) {
+    const config = baseConfig();
+    (config.root.children[0] as { visibility?: unknown }).visibility = visibility;
+    return config;
+  }
+
+  it("warns when the version bounds cross, so the node can never render", () => {
+    const issues = validateBuilderConfig(
+      withVisibility({ minAppVersion: "3.0.0", maxAppVersion: "2.0.0" }),
+      { offeringPackageIds },
+    );
+    const issue = issues.find((i) => i.code === "VISIBILITY_NEVER_MATCHES");
+    expect(issue).toBeDefined();
+    expect(isBlockingIssue(issue!)).toBe(false);
+    expect(isPublishBlockingIssue(issue!)).toBe(false);
+  });
+
+  it("does not warn about an empty platform list, which means 'all'", () => {
+    const issues = validateBuilderConfig(withVisibility({ platform: [] }), { offeringPackageIds });
+    expect(issues.some((i) => i.code === "VISIBILITY_NEVER_MATCHES")).toBe(false);
+  });
+
+  it("does not warn on bounds that can be satisfied", () => {
+    const issues = validateBuilderConfig(
+      withVisibility({ minAppVersion: "1.0.0", maxAppVersion: "3.0.0" }),
+      { offeringPackageIds },
+    );
+    expect(issues.some((i) => i.code === "VISIBILITY_NEVER_MATCHES")).toBe(false);
+  });
+
+  it("does not warn when the bounds cannot be compared", () => {
+    const issues = validateBuilderConfig(
+      withVisibility({ minAppVersion: "1.0.0-beta", maxAppVersion: "2.0.0" }),
+      { offeringPackageIds },
+    );
+    expect(issues.some((i) => i.code === "VISIBILITY_NEVER_MATCHES")).toBe(false);
+  });
+});
