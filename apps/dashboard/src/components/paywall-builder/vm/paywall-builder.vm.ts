@@ -35,6 +35,22 @@ import {
 } from "../device-catalog";
 
 
+/**
+ * The most recent unmount flush, if one is still in flight.
+ *
+ * BuilderShell flushes pending edits in an unmount cleanup, which cannot
+ * await. The route is keyed per paywall, so React tears the old provider
+ * down and mounts the new one in the same commit — closing a builder and
+ * reopening the SAME paywall inside one round trip would otherwise let the
+ * new view model's GET read the pre-flush row, seed `lastSavedSnapshot`
+ * from it, and then write that stale tree back over the flushed edits.
+ *
+ * Module scope rather than a service: the two view-model instances never
+ * coexist in a container, so there is nowhere instance-scoped to put it.
+ * It always holds an already-swallowed promise, so awaiting it cannot throw.
+ */
+let pendingFlush: Promise<unknown> | null = null;
+
 export interface PaywallBuilderProps {
   projectId: string;
   paywallId: string;
@@ -196,6 +212,12 @@ export class PaywallBuilderViewModel {
     try {
       this.isLoading = true;
       this.error = null;
+      // A previous builder's unmount flush may still be in flight; reading
+      // before it lands would hand us the pre-flush row. Its failure must
+      // never block the open — that would turn a failed save into a builder
+      // that will not load — which is why `pendingFlush` holds an
+      // already-swallowed promise.
+      if (pendingFlush) await pendingFlush;
       const detail = await this.api.get(this.props.projectId, this.props.paywallId);
       if (this.disposed) return;
       this.applyServer(detail);
@@ -590,6 +612,17 @@ export class PaywallBuilderViewModel {
 
   /** Force-flush the current config to the backend, bypassing the autosave throttle. */
   async saveNow() {
+    const run = this.saveNowInner();
+    pendingFlush = run.catch(() => {});
+    void run
+      .catch(() => {})
+      .finally(() => {
+        pendingFlush = null;
+      });
+    return run;
+  }
+
+  private async saveNowInner() {
     if (!this.paywall || this.isLoading) return;
     if (!this.isDirty) {
       this.autosaveStatus = "saved";

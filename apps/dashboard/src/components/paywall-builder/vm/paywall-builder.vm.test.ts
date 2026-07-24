@@ -809,3 +809,81 @@ describe("PaywallBuilderViewModel", () => {
     });
   });
 });
+
+describe("reopen after an unmount flush", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  /** A promise plus the handles to settle it, so the test controls ordering
+   * instead of racing a timer. */
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  it("waits for an in-flight flush before loading, so the GET cannot read the pre-flush row", async () => {
+    const order: string[] = [];
+
+    const flushGate = deferred<PaywallBuilderDetailDto>();
+    const oldVm = makeVm({
+      get: vi.fn().mockResolvedValue(fakeDetail()),
+      patchBuilderConfig: vi.fn().mockImplementation(() => {
+        order.push("patch:start");
+        return flushGate.promise;
+      }),
+    });
+    await oldVm.load(() => {});
+    oldVm.setLocaleText("t1_key", "en", "flushed");
+
+    // The unmount flush — deliberately not awaited, exactly as BuilderShell does it.
+    void oldVm.saveNow();
+    await Promise.resolve();
+
+    const newVm = makeVm({
+      get: vi.fn().mockImplementation(async () => {
+        order.push("get");
+        return fakeDetail();
+      }),
+      patchBuilderConfig: vi.fn(),
+    });
+    const loading = newVm.load(() => {});
+    await Promise.resolve();
+
+    // The GET must not have fired yet — the flush is still open.
+    expect(order).toEqual(["patch:start"]);
+
+    flushGate.resolve(fakeDetail());
+    await loading;
+
+    expect(order).toEqual(["patch:start", "get"]);
+  });
+
+  it("does not wedge the reopen when the flush fails", async () => {
+    const flushGate = deferred<PaywallBuilderDetailDto>();
+    const oldVm = makeVm({
+      get: vi.fn().mockResolvedValue(fakeDetail()),
+      patchBuilderConfig: vi.fn().mockImplementation(() => flushGate.promise),
+    });
+    await oldVm.load(() => {});
+    oldVm.setLocaleText("t1_key", "en", "flushed");
+    void oldVm.saveNow();
+    await Promise.resolve();
+
+    flushGate.reject(new Error("boom"));
+
+    const newVm = makeVm({
+      get: vi.fn().mockResolvedValue(fakeDetail()),
+      patchBuilderConfig: vi.fn(),
+    });
+    await newVm.load(() => {});
+
+    expect(newVm.isLoading).toBe(false);
+    expect(newVm.error).toBeNull();
+  });
+});
