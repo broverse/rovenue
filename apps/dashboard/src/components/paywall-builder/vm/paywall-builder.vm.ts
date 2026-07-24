@@ -509,7 +509,9 @@ export class PaywallBuilderViewModel {
   }
 
   // Reset a sticky "error" status the moment the user edits anything
-  // again — see FunnelDraftViewModel.clearAutosaveError for rationale.
+  // again — FunnelDraftViewModel.clearAutosaveError has the same rationale,
+  // but do NOT copy its body: it still reads `autosaveStatus` tracked and
+  // therefore carries the self-erasing bug described below.
   @trigger
   clearAutosaveError() {
     void this.config;
