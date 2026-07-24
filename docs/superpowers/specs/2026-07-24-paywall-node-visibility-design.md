@@ -85,9 +85,17 @@ Nothing server-side changes. `/v1/placements` keeps shipping the published snaps
 
 ## 4. Validator
 
-One new code, warning tier: **`VISIBILITY_NEVER_MATCHES`** — a node that cannot render anywhere, because `minAppVersion` > `maxAppVersion`. Warning rather than blocking: it is dead content, not a broken config, and a publish gate that refuses it would be the fifth instance in this project of the save/publish gates rejecting a legitimate work-in-progress.
+Three visibility-related codes:
 
-It maps to the Visibility tab's dot.
+- **`VISIBILITY_NEVER_MATCHES`** (warning) — a node that cannot render anywhere, because `minAppVersion` > `maxAppVersion`. Dead content, not a broken config, so it warns rather than blocks — a publish gate refusing it would be the fifth instance in this project of a gate rejecting a legitimate work-in-progress.
+- **`VISIBILITY_BOUND_UNPARSEABLE`** (warning) — a bound the comparator cannot read (`"v1.2.0"`). At render time this fails open silently; without a warning the author believes a version gate exists that does not. Fail open is the right *render* answer and the wrong *authoring* answer. (Added after the final review surfaced the silent case.)
+- **`MISSING_PURCHASE_BUTTON`** (publish-blocking) is now **platform-aware**. It was tree-global — it fired only when no purchase button existed at all. But visibility makes every structural gate platform-blind: the only purchase button set to iOS-only leaves the Android store showing plans with no way to buy, and the gate stayed silent. It now computes each node's effective platform set (its own visibility intersected with every ancestor's; version bounds ignored, since they fail open and are unknowable at author time) and fires for any platform where a package list appears but no purchase button does. With no visibility anywhere it reduces to the old single-issue behaviour.
+
+The first two map to the Visibility tab's dot. `MISSING_PURCHASE_BUTTON` maps to no tab — it is a property of the tree, not a field on a node (same treatment as before).
+
+### The four-platform contract must be able to fail
+
+The `render-fixtures.json` `accept` entries prove only that a decoder *parses* the `visibility` key — they go green even on a decoder that drops it entirely, because the three native decoders already ignore unknown keys. So a `visibility` **vector section** pins evaluation: `{ visibility, platform, appVersion } → expected boolean`, thirteen cases including component-wise comparison (`1.10 > 1.9`), inclusive bounds, and every fail-open path. The TS `isNodeVisible` is proven against it here; stage 2's three native evaluators run the same table. A lexical-compare regression turns the table red — it is a real contract, not the three prose `_note` strings it replaces.
 
 Deliberately **not** flagged: an empty `platform` array (that means "all", per §2) and a node hidden on every platform *individually* selected — the author may be mid-edit.
 
