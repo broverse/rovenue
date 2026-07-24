@@ -28,6 +28,7 @@ import {
 
 import type { Localized, LocaleCode } from "@rovenue/shared/i18n";
 import { pick } from "@rovenue/shared/i18n";
+import type { ClauseOp } from "@rovenue/shared/funnel";
 
 export type PageType =
   // Original primitives
@@ -65,44 +66,70 @@ export type PageType =
 
 export type PageTone = "" | "result" | "paywall" | "success";
 
+/**
+ * What shape of answer a page type produces, and therefore which
+ * branching operators can actually fire against it.
+ *
+ * `none` is every page that asks nothing — it is not offered as a
+ * question in the rule editor at all.
+ */
+export type AnswerKind = "text" | "choice" | "multi" | "number" | "none";
+
+/**
+ * Operators the rule editor offers for each answer kind.
+ *
+ * Only operators that CAN fire. `contains` needs an array, the numeric
+ * comparisons need a number, and `eq`/`neq`/`in`/`not_in` refuse arrays
+ * outright (see evalClause) — offering any of them against the wrong
+ * kind produces a rule that is writable and dead.
+ */
+export const OPERATORS_BY_KIND: Record<AnswerKind, ReadonlyArray<ClauseOp>> = {
+  text: ["eq", "neq", "in", "not_in", "is_answered", "is_not_answered"],
+  choice: ["eq", "neq", "in", "not_in", "is_answered", "is_not_answered"],
+  multi: ["contains", "not_contains", "is_answered", "is_not_answered"],
+  number: ["eq", "neq", "gt", "gte", "lt", "lte", "between", "is_answered", "is_not_answered"],
+  none: [],
+};
+
 export type PageTypeMeta = {
   label: string;
   icon: LucideIcon;
   tone: PageTone;
+  answerKind: AnswerKind;
 };
 
 export const PAGE_TYPES: Record<PageType, PageTypeMeta> = {
-  single_choice: { label: "Single choice", icon: Circle, tone: "" },
-  multi_choice: { label: "Multiple choice", icon: SquareCheck, tone: "" },
-  text_input: { label: "Text input", icon: TypeIcon, tone: "" },
-  number_input: { label: "Number input", icon: Hash, tone: "" },
-  date_input: { label: "Date", icon: Calendar, tone: "" },
-  slider: { label: "Slider", icon: SlidersHorizontal, tone: "" },
-  rating: { label: "Rating", icon: Star, tone: "" },
-  info: { label: "Info screen", icon: Info, tone: "" },
-  loading: { label: "Loading", icon: Hourglass, tone: "" },
-  result: { label: "Personalized result", icon: Sparkles, tone: "result" },
-  paywall: { label: "Payment screen", icon: CreditCard, tone: "paywall" },
-  success: { label: "Success", icon: PartyPopper, tone: "success" },
+  single_choice: { label: "Single choice", icon: Circle, tone: "", answerKind: "choice" },
+  multi_choice: { label: "Multiple choice", icon: SquareCheck, tone: "", answerKind: "multi" },
+  text_input: { label: "Text input", icon: TypeIcon, tone: "", answerKind: "text" },
+  number_input: { label: "Number input", icon: Hash, tone: "", answerKind: "number" },
+  date_input: { label: "Date", icon: Calendar, tone: "", answerKind: "text" },
+  slider: { label: "Slider", icon: SlidersHorizontal, tone: "", answerKind: "number" },
+  rating: { label: "Rating", icon: Star, tone: "", answerKind: "number" },
+  info: { label: "Info screen", icon: Info, tone: "", answerKind: "none" },
+  loading: { label: "Loading", icon: Hourglass, tone: "", answerKind: "none" },
+  result: { label: "Personalized result", icon: Sparkles, tone: "result", answerKind: "none" },
+  paywall: { label: "Payment screen", icon: CreditCard, tone: "paywall", answerKind: "none" },
+  success: { label: "Success", icon: PartyPopper, tone: "success", answerKind: "none" },
 
-  contact_info: { label: "Contact info", icon: Contact, tone: "" },
-  email: { label: "Email", icon: Mail, tone: "" },
-  phone: { label: "Phone number", icon: Phone, tone: "" },
+  contact_info: { label: "Contact info", icon: Contact, tone: "", answerKind: "none" },
+  email: { label: "Email", icon: Mail, tone: "", answerKind: "text" },
+  phone: { label: "Phone number", icon: Phone, tone: "", answerKind: "text" },
 
-  picture_choice: { label: "Picture choice", icon: ImageIcon, tone: "" },
-  yes_no: { label: "Yes/No", icon: CircleDot, tone: "" },
-  legal: { label: "Legal", icon: ShieldCheck, tone: "" },
-  checkbox: { label: "Checkbox", icon: CheckSquare, tone: "" },
+  picture_choice: { label: "Picture choice", icon: ImageIcon, tone: "", answerKind: "choice" },
+  yes_no: { label: "Yes/No", icon: CircleDot, tone: "", answerKind: "choice" },
+  legal: { label: "Legal", icon: ShieldCheck, tone: "", answerKind: "choice" },
+  checkbox: { label: "Checkbox", icon: CheckSquare, tone: "", answerKind: "choice" },
 
-  opinion_scale: { label: "Opinion scale", icon: Gauge, tone: "" },
+  opinion_scale: { label: "Opinion scale", icon: Gauge, tone: "", answerKind: "number" },
 
-  long_text: { label: "Long text", icon: AlignLeft, tone: "" },
-  short_text: { label: "Short text", icon: TypeIcon, tone: "" },
+  long_text: { label: "Long text", icon: AlignLeft, tone: "", answerKind: "text" },
+  short_text: { label: "Short text", icon: TypeIcon, tone: "", answerKind: "text" },
 
-  welcome: { label: "Welcome screen", icon: Hand, tone: "" },
-  statement: { label: "Statement screen", icon: MessageSquare, tone: "" },
-  feature: { label: "Feature screen", icon: Sparkles, tone: "" },
-  end_screen: { label: "End screen", icon: Flag, tone: "success" },
+  welcome: { label: "Welcome screen", icon: Hand, tone: "", answerKind: "none" },
+  statement: { label: "Statement screen", icon: MessageSquare, tone: "", answerKind: "none" },
+  feature: { label: "Feature screen", icon: Sparkles, tone: "", answerKind: "none" },
+  end_screen: { label: "End screen", icon: Flag, tone: "success", answerKind: "none" },
 };
 
 export const PAGE_TYPE_DESC: Record<PageType, string> = {

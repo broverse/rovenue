@@ -5,6 +5,21 @@ import { ArrowRight, Plus, Trash2, TriangleAlert } from "lucide-react";
 import type { Clause, ClauseOp, NextRule } from "@rovenue/shared/funnel";
 import { cn } from "../../lib/cn";
 import { FunnelDraftViewModel } from "./vm/funnel-draft.vm";
+import { OPERATORS_BY_KIND, PAGE_TYPES } from "./types";
+
+const NUMERIC_OPS: ReadonlySet<ClauseOp> = new Set(["gt", "gte", "lt", "lte"]);
+
+/**
+ * `gt`/`gte`/`lt`/`lte` require `typeof clause.value === "number"` in
+ * evalClause (see packages/shared/src/funnel/evaluator.ts) — a raw string
+ * operand can never match. `between` already coerces its own pair with
+ * `Number(...)` above, so it is not in NUMERIC_OPS here.
+ * Exported so the coercion — not just the operator filtering — has a unit
+ * test that would fail if this regressed to storing the raw string.
+ */
+export function coerceOperandValue(op: ClauseOp, raw: string): string | number {
+  return NUMERIC_OPS.has(op) ? Number(raw) : raw;
+}
 
 const OPERATORS: ReadonlyArray<{ v: ClauseOp; l: string }> = [
   { v: "eq", l: "equals" },
@@ -124,6 +139,11 @@ export const RuleEditor = component(({ pageId }: Props) => {
               const isArr = c.op === "in" || c.op === "not_in";
               const isUnary = c.op === "is_answered" || c.op === "is_not_answered";
               const value = "value" in c ? c.value : undefined;
+              // The clause's question, not the page being edited — the
+              // operators offered depend on what the ANSWER looks like.
+              const questionPage = vm.pages.find((p) => p.question_id === c.question_id);
+              const answerKind = questionPage ? PAGE_TYPES[questionPage.type].answerKind : "none";
+              const allowedOps = OPERATORS_BY_KIND[answerKind];
               return (
                 <Fragment key={clauseIdx}>
                   {clauseIdx > 0 && (
@@ -152,7 +172,7 @@ export const RuleEditor = component(({ pageId }: Props) => {
                       }
                       className="h-6 rounded border border-rv-divider bg-rv-c1 px-1.5 text-[11px] text-rv-mute-700 outline-none focus:border-rv-accent-500"
                     >
-                      {OPERATORS.map((o) => (
+                      {OPERATORS.filter((o) => allowedOps.includes(o.v)).map((o) => (
                         <option key={o.v} value={o.v}>
                           {o.l}
                         </option>
@@ -163,7 +183,7 @@ export const RuleEditor = component(({ pageId }: Props) => {
                         value={value === undefined ? "" : String(value)}
                         onChange={(e) =>
                           updateClause(ruleIdx, clauseIdx, {
-                            value: e.currentTarget.value as never,
+                            value: coerceOperandValue(c.op, e.currentTarget.value) as never,
                           } as Partial<Clause>)
                         }
                         className="h-6 max-w-[110px] flex-1 rounded border border-rv-divider bg-rv-c1 px-1.5 font-rv-mono text-[11px] text-foreground outline-none focus:border-rv-accent-500"
