@@ -377,7 +377,7 @@ export const PagePreview = component(
         )}
         {page.type === "picture_choice" && (
           <Cap>
-            <PictureChoiceList page={resolved} theme={theme} />
+            <PictureChoiceList page={resolved} theme={theme} {...liveProps} />
           </Cap>
         )}
         {(page.type === "legal" || page.type === "checkbox") && (
@@ -954,34 +954,58 @@ const SliderInput = component(
 
 // ---------- Picture choice ----------
 
-const PictureChoiceList = component(({ page, theme }: { page: ResolvedPage; theme: Theme }) => (
-  <div className="mt-2 grid grid-cols-2 gap-2">
-    {(page.options ?? []).slice(0, 6).map((o, i) => (
-      <div
-        key={i}
-        className="flex flex-col gap-1 overflow-hidden"
-        style={{
-          borderRadius: theme.radius,
-          background: "white",
-          border: `1px solid ${i === 0 ? theme.primary : "rgba(0,0,0,0.08)"}`,
-          boxShadow: i === 0 ? `0 0 0 2px ${theme.primary}25` : undefined,
-        }}
-      >
-        <div
-          className="flex aspect-square w-full items-center justify-center text-[10px] opacity-50"
-          style={{ background: "rgba(0,0,0,0.04)" }}
-        >
-          {o.imageUrl ? (
-            <img src={o.imageUrl} alt={o.label} className="h-full w-full object-cover" />
-          ) : (
-            "no image"
-          )}
-        </div>
-        <div className="px-2 py-1.5 text-[11px]">{o.label}</div>
+const PictureChoiceList = component(
+  ({
+    page,
+    theme,
+    live = false,
+    value,
+    onChange,
+  }: {
+    page: ResolvedPage;
+    theme: Theme;
+    live?: boolean;
+    value?: AnswerValue;
+    onChange?: (next: AnswerValue) => void;
+  }) => {
+    const selected = live && typeof value === "string" ? value : null;
+    return (
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        {(page.options ?? []).slice(0, 6).map((o, i) => {
+          // Preview highlights the first option as a sample; live highlights
+          // only the visitor's pick.
+          const active = live ? o.value === selected : i === 0;
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={live ? () => onChange?.(o.value) : undefined}
+              className="flex flex-col gap-1 overflow-hidden text-left"
+              style={{
+                borderRadius: theme.radius,
+                background: "white",
+                border: `1px solid ${active ? theme.primary : "rgba(0,0,0,0.08)"}`,
+                boxShadow: active ? `0 0 0 2px ${theme.primary}25` : undefined,
+              }}
+            >
+              <div
+                className="flex aspect-square w-full items-center justify-center text-[10px] opacity-50"
+                style={{ background: "rgba(0,0,0,0.04)" }}
+              >
+                {o.imageUrl ? (
+                  <img src={o.imageUrl} alt={o.label} className="h-full w-full object-cover" />
+                ) : (
+                  "no image"
+                )}
+              </div>
+              <div className="px-2 py-1.5 text-[11px]">{o.label}</div>
+            </button>
+          );
+        })}
       </div>
-    ))}
-  </div>
-));
+    );
+  },
+);
 
 // ---------- Legal / checkbox ----------
 

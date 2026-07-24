@@ -98,6 +98,17 @@ const ratingPage: Page = {
   max: 5,
 } as Page;
 
+const picturePage: Page = {
+  id: "pg_pic",
+  type: "picture_choice",
+  question_id: "q_pic",
+  title: L("Pick the one that fits"),
+  options: [
+    { label: L("Option A") as never, value: "opt_a", imageUrl: "" },
+    { label: L("Option B") as never, value: "opt_b", imageUrl: "" },
+  ],
+} as Page;
+
 function base(page: Page) {
   return {
     page,
@@ -224,6 +235,13 @@ describe("PagePreview — live mode", () => {
     render(<PagePreview {...base(ratingPage)} mode="live" value={null} onAnswer={onAnswer} />);
     await userEvent.click(screen.getByLabelText("rate 4"));
     expect(onAnswer).toHaveBeenLastCalledWith(4);
+  });
+
+  it("picture_choice emits the clicked option's value", async () => {
+    const onAnswer = vi.fn();
+    render(<PagePreview {...base(picturePage)} mode="live" value={null} onAnswer={onAnswer} />);
+    await userEvent.click(screen.getByText("Option B"));
+    expect(onAnswer).toHaveBeenLastCalledWith("opt_b");
   });
 });
 

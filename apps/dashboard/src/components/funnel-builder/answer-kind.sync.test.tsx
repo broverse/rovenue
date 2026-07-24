@@ -69,6 +69,7 @@ const WIRED: ReadonlyArray<{
   },
   { type: "opinion_scale", drive: (u) => u.click(screen.getByRole("button", { name: "3" })) },
   { type: "rating", drive: (u) => u.click(screen.getByLabelText("rate 4")) },
+  { type: "picture_choice", drive: (u) => u.click(screen.getByText("Option B")), options: OPTIONS },
 ];
 
 /**
@@ -82,7 +83,6 @@ const WIRED: ReadonlyArray<{
  */
 const NOT_WIRED_YET: ReadonlySet<PageType> = new Set([
   "date_input",
-  "picture_choice",
   "legal",
   "checkbox",
   "long_text",
