@@ -13,7 +13,7 @@ import { server } from "../../tests/msw/server";
 import { API_BASE_URL } from "../lib/api";
 import { queryClient } from "../lib/queryClient";
 import { Route as RootRouteImport } from "./__root";
-import { Route as IndexRouteImport } from "./index";
+import { Route as IndexRouteImport, _resetCustomHostSlugForTests } from "./index";
 import { Route as LoginRouteImport } from "./login";
 // initialise i18n so login.tsx's email placeholder renders real copy
 // instead of the raw translation key.
@@ -115,6 +115,10 @@ describe("custom-domain funnel serving", () => {
     queryClient.clear();
     redirectMock.mockClear();
     hostEnv.VITE_DASHBOARD_HOST = undefined;
+    // The lookup is memoised for the life of the document so `/` and the
+    // root outlet cannot ask twice and get different answers. Each test is
+    // a fresh document, so drop it here.
+    _resetCustomHostSlugForTests();
   });
 
   afterEach(() => {
@@ -147,6 +151,32 @@ describe("custom-domain funnel serving", () => {
     expect(lookupMock).toHaveBeenCalled();
     // The bug being fixed: a funnel visitor must not be bounced to login.
     expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("asks the server exactly once even though two places need the answer", async () => {
+    // `__root.tsx` (which swaps the outlet for the runner on every path)
+    // and the "/" route both need to know whether this host is a funnel.
+    // Landing on "/" therefore reaches the resolver twice. It is memoised
+    // for the life of the document so they cannot get DIFFERENT answers —
+    // the server's negative cache expires on a 60s timer, and an outlet
+    // that says "funnel" while the route says "dashboard" would render a
+    // contradiction.
+    setHostname("quiz.acme.com");
+    hostEnv.VITE_DASHBOARD_HOST = "app.rovenue.io";
+    const lookupMock = vi.fn();
+    server.use(
+      http.get(`${API_BASE_URL}/public/host/lookup`, () => {
+        lookupMock();
+        return HttpResponse.json({
+          data: { funnelId: "fun_1", slug: "quiz" },
+        });
+      }),
+    );
+
+    renderApp("/");
+
+    expect(await screen.findByTestId("mock-funnel-runner")).toBeTruthy();
+    expect(lookupMock).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the dashboard landing behaviour on the canonical host", async () => {

@@ -31,6 +31,19 @@ export function resolveLandingTarget(projects: ProjectSummary[]): LandingTarget 
 }
 
 /**
+ * Memoised answer for the life of the document.
+ *
+ * Both `__root.tsx` and the "/" route need to know whether this host is a
+ * funnel domain, so landing directly on "/" reaches the resolver twice.
+ * The hostname cannot change without a page load, so a second lookup
+ * could only return the same answer — or, if the server's 60s negative
+ * cache expired between the two calls, a DIFFERENT one, leaving the
+ * outlet and the route disagreeing about what this host is. One
+ * question, one answer.
+ */
+let inFlight: Promise<string | null> | null = null;
+
+/**
  * Resolve the browser's current hostname to a funnel slug, or null.
  *
  * Runs before the session check because a funnel visitor on a customer's
@@ -45,19 +58,27 @@ export function resolveLandingTarget(projects: ProjectSummary[]): LandingTarget 
  * customer's funnel domain.
  */
 export async function resolveCustomHostSlug(): Promise<string | null> {
-  if (typeof window === "undefined") return null;
-  const hostname = window.location.hostname;
-  // Skips one request on the canonical host. UNSET means "not known to be
-  // canonical" and the lookup runs — see lib/custom-host.ts.
-  if (isCanonicalDashboardHost(dashboardHostEnv, hostname)) return null;
-  try {
-    const res = await unwrap<{ funnelId: string; slug: string }>(
-      rpc.public.host.lookup.$get({ query: { host: hostname } }),
-    );
-    return res.slug;
-  } catch {
-    return null;
-  }
+  inFlight ??= (async () => {
+    if (typeof window === "undefined") return null;
+    const hostname = window.location.hostname;
+    // Skips one request on the canonical host. UNSET means "not known to be
+    // canonical" and the lookup runs — see lib/custom-host.ts.
+    if (isCanonicalDashboardHost(dashboardHostEnv, hostname)) return null;
+    try {
+      const res = await unwrap<{ funnelId: string; slug: string }>(
+        rpc.public.host.lookup.$get({ query: { host: hostname } }),
+      );
+      return res.slug;
+    } catch {
+      return null;
+    }
+  })();
+  return inFlight;
+}
+
+/** Test-only: drop the memoised lookup between cases. */
+export function _resetCustomHostSlugForTests(): void {
+  inFlight = null;
 }
 
 export const Route = createFileRoute("/")({
