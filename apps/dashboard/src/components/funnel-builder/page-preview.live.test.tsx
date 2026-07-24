@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "../../i18n/config";
+import { evaluateNext, type AnswerMap } from "@rovenue/shared/funnel";
 import { PagePreview } from "./page-preview";
 import type { Page, Theme } from "./types";
 
@@ -122,13 +123,17 @@ describe("PagePreview — live mode", () => {
     expect(onAnswer).toHaveBeenLastCalledWith(["opt_b"]);
   });
 
-  it("captures yes/no as a boolean, not the option string", async () => {
+  it("captures yes/no as the option's VALUE STRING, so a rule operand can match it", async () => {
+    // Not a boolean. rule-editor.tsx writes a clause operand from a
+    // free-text input, so it is always a string, and evalClause's `eq` is
+    // strict equality — a boolean answer could never match a rule an
+    // author is able to write.
     const onAnswer = vi.fn();
     render(
       <PagePreview {...base(yesNoPage)} mode="live" value={null} onAnswer={onAnswer} />,
     );
     await userEvent.click(screen.getByText("Yes"));
-    expect(onAnswer).toHaveBeenLastCalledWith(true);
+    expect(onAnswer).toHaveBeenLastCalledWith("yes");
   });
 });
 
@@ -148,5 +153,79 @@ describe("PagePreview — preview mode stays inert", () => {
     );
     await userEvent.click(screen.getByText("Option B"));
     expect(onAnswer).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================
+// Round trip: does a captured answer actually match a rule an author
+// can write?
+// =============================================================
+//
+// The seam neither per-type test can see. Task 2 proved "yes_no captures
+// X" and Task 3 proved "X is sent"; nobody checked what the OTHER side of
+// the comparison holds. rule-editor.tsx writes a clause operand from a
+// free-text input, so it is always a string, and evalClause's `eq` is
+// strict equality — a boolean answer could never match. These tests feed
+// the captured value straight into the real evaluator.
+
+describe("captured answers match author-written rules", () => {
+  function routes(questionId: string, captured: unknown, operand: string) {
+    const answers: AnswerMap = new Map([[questionId, captured as never]]);
+    return evaluateNext({
+      page: {
+        id: "pg_1",
+        type: "question",
+        next_rules: [
+          {
+            condition: {
+              op: "all",
+              clauses: [{ question_id: questionId, op: "eq", value: operand }],
+            },
+            goto: "pg_match",
+          },
+        ],
+        default_next: "pg_default",
+      },
+      pagesOrder: ["pg_1", "pg_match", "pg_default"],
+      answers,
+      pagesById: new Map([
+        ["pg_1", { id: "pg_1", type: "question" }],
+        ["pg_match", { id: "pg_match", type: "info" }],
+        ["pg_default", { id: "pg_default", type: "info" }],
+      ]),
+    });
+  }
+
+  it("a yes/no answer matches a rule whose operand is the option value", async () => {
+    const onAnswer = vi.fn();
+    render(
+      <PagePreview {...base(yesNoPage)} mode="live" value={null} onAnswer={onAnswer} />,
+    );
+    await userEvent.click(screen.getByText("Yes"));
+    const captured = onAnswer.mock.calls.at(-1)![0];
+
+    expect(routes("q_yn", captured, "yes")).toEqual({
+      next: "page",
+      pageId: "pg_match",
+    });
+  });
+
+  it("a single-choice answer matches a rule whose operand is the option value", async () => {
+    const onAnswer = vi.fn();
+    render(
+      <PagePreview
+        {...base(singleChoicePage)}
+        mode="live"
+        value={null}
+        onAnswer={onAnswer}
+      />,
+    );
+    await userEvent.click(screen.getByText("Option B"));
+    const captured = onAnswer.mock.calls.at(-1)![0];
+
+    expect(routes("q_goal", captured, "opt_b")).toEqual({
+      next: "page",
+      pageId: "pg_match",
+    });
   });
 });

@@ -101,7 +101,20 @@ shared; restructuring it is not in scope.
 | `text_input`, `short_text` | `string` |
 | `single_choice` | `string` (the chosen option's id) |
 | `multi_choice` | `string[]` |
-| `yes_no` | `boolean` |
+| `yes_no` | `string` (the chosen option's value) |
+
+**Corrected during the final review.** `yes_no` was specified as a `boolean`,
+on the reasoning that `"yes"`/`"no"` is presentation. That ignored the other side
+of the comparison. `rule-editor.tsx:163-166` builds a clause operand from a
+free-text input, so an authored operand is **always a string**, and `evalClause`'s
+`eq` is strict equality (`a === clause.value`). A boolean answer could therefore
+never match any rule an author is able to write — every yes/no branch would
+silently fall through to `default_next`, which is exactly the pre-SP4 behaviour
+this sub-project removes, wearing the appearance of working.
+
+The seam was invisible to both per-type tests: one proved the value was captured,
+the other proved it was sent. Neither looked at what the rule holds. A round-trip
+test now feeds the captured value straight into the real `evaluateNext`.
 
 All are inside what `answerValueSchema` accepts (`funnels.ts:54-61`: a recursive
 union of scalars and arrays capped at 100 elements).

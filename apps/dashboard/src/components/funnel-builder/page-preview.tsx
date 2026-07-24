@@ -744,8 +744,15 @@ const YesNoButtons = component(
   }: {
     page: ResolvedPage;
     theme: Theme;
-    // Supplied only in live mode. The recorded answer is a BOOLEAN, not
-    // the option's value string — "yes"/"no" is presentation.
+    // Supplied only in live mode. The recorded answer is the option's
+    // VALUE STRING, exactly like single_choice.
+    //
+    // It was a boolean at first, on the reasoning that "yes"/"no" is
+    // presentation. That was wrong, because it ignored the other side of
+    // the comparison: rule-editor.tsx writes a clause operand from a
+    // free-text input, so it is always a string, and evalClause's `eq` is
+    // strict equality. `true === "yes"` is false, so every yes/no
+    // branching rule would silently never match.
     value?: AnswerValue;
     onChange?: (next: AnswerValue) => void;
   }) => {
@@ -755,13 +762,7 @@ const YesNoButtons = component(
   ];
   const [picked, setPicked] = useState<string | null>(null);
   const live = onChange !== undefined;
-  // The first option is the affirmative one, so it maps to `true`.
-  const asBool = (optionValue: string) => optionValue === opts[0]!.value;
-  const activeValue = live
-    ? typeof value === "boolean"
-      ? (value ? opts[0]!.value : opts[1]!.value)
-      : null
-    : picked;
+  const activeValue = live ? (typeof value === "string" ? value : null) : picked;
   return (
     <div className="mt-3 grid grid-cols-2 gap-2">
       {opts.map((o) => {
@@ -770,7 +771,7 @@ const YesNoButtons = component(
           <button
             key={o.value}
             type="button"
-            onClick={() => (live ? onChange(asBool(o.value)) : setPicked(o.value))}
+            onClick={() => (live ? onChange(o.value) : setPicked(o.value))}
             className="h-14 text-[14px] font-semibold transition"
             style={{
               borderRadius: theme.radius,
