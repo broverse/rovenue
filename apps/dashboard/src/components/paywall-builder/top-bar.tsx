@@ -224,27 +224,41 @@ const AutosaveBadge = component(() => {
   const vm = useService(PaywallBuilderViewModel);
   const { t } = useTranslation();
   const saving = vm.autosaveStatus === "saving";
-  const err = vm.autosaveStatus === "error";
+  const retrying = vm.autosaveStatus === "error";
+  const failed = vm.autosaveStatus === "permanentError";
   return (
     <span
       title={
-        err
-          ? t("paywalls.builder.topbar.autosaveErrorHint", "Save failed — retrying")
-          : t("paywalls.builder.topbar.autosaveHint", "Autosaved on every change")
+        failed
+          ? t(
+              "paywalls.builder.topbar.autosaveFailedHint",
+              "This change was rejected and will not save on its own. Reload the builder; if it persists, report it.",
+            )
+          : retrying
+            ? t("paywalls.builder.topbar.autosaveErrorHint", "Save failed — will retry on your next change")
+            : t("paywalls.builder.topbar.autosaveHint", "Autosaved on every change")
       }
       className="inline-flex h-7 items-center gap-1.5 rounded-md border border-rv-divider bg-rv-c2 px-2 font-rv-mono text-[11px] text-rv-mute-600"
     >
       <span
         className={cn(
           "h-1.5 w-1.5 rounded-full",
-          saving ? "animate-pulse bg-rv-warning" : err ? "bg-rv-danger" : "bg-rv-success",
+          saving
+            ? "animate-pulse bg-rv-warning"
+            : failed
+              ? "bg-rv-danger"
+              : retrying
+                ? "bg-rv-warning"
+                : "bg-rv-success",
         )}
       />
       {saving
         ? t("paywalls.builder.topbar.autosaveSaving", "saving")
-        : err
-          ? t("paywalls.builder.topbar.autosaveError", "retrying")
-          : t("paywalls.builder.topbar.autosaveSaved", "saved")}
+        : failed
+          ? t("paywalls.builder.topbar.autosaveFailed", "not saved")
+          : retrying
+            ? t("paywalls.builder.topbar.autosaveError", "retrying")
+            : t("paywalls.builder.topbar.autosaveSaved", "saved")}
     </span>
   );
 });

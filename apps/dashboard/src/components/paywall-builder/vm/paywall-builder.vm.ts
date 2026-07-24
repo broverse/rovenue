@@ -1,5 +1,5 @@
 import {
-  injectable, inject, state, onMount, onInit, derived, trigger,
+  injectable, inject, state, onMount, onInit, derived, trigger, untrack,
   type Cleanup, Props,
 } from "impair";
 import { createId } from "@paralleldrive/cuid2";
@@ -23,6 +23,7 @@ import {
   PaywallBuilderApi,
   type PaywallBuilderDetailDto,
 } from "../../../lib/services/paywall-builder-api";
+import { ApiError } from "../../../lib/api";
 import * as treeOps from "../tree-ops";
 import { PRESETS, type PresetId } from "../presets";
 import type { CanvasDevice, ColorScheme } from "../types";
@@ -152,7 +153,7 @@ export class PaywallBuilderViewModel {
     }
   }
 
-  @state autosaveStatus: "saved" | "saving" | "error" = "saved";
+  @state autosaveStatus: "saved" | "saving" | "error" | "permanentError" = "saved";
   @state lastSavedAt: number | null = null;
   // JSON snapshot of the most recently saved `config`. Compared against
   // the current snapshot to drive `isDirty` — the only thing autosave
@@ -494,12 +495,34 @@ export class PaywallBuilderViewModel {
   }
 
   // ----- Autosave + manual save -----
+  /**
+   * A 4xx from the write path cannot be fixed by trying again — the payload
+   * is what the server rejected. Anything else (network, 5xx, abort) can.
+   * After the save-gate retier the only 4xx the builder can provoke are
+   * SCHEMA_INVALID and DUPLICATE_NODE_ID, both of which mean the builder
+   * itself produced something invalid, so surfacing them loudly is right.
+   */
+  private autosaveFailureStatus(err: unknown): "error" | "permanentError" {
+    return err instanceof ApiError && err.status >= 400 && err.status < 500
+      ? "permanentError"
+      : "error";
+  }
+
   // Reset a sticky "error" status the moment the user edits anything
   // again — see FunnelDraftViewModel.clearAutosaveError for rationale.
   @trigger
   clearAutosaveError() {
     void this.config;
-    if (this.autosaveStatus === "error") this.autosaveStatus = "saving";
+    // Only a retryable failure clears on the next edit. A permanent one stays
+    // visible until a save actually succeeds — otherwise the red state
+    // disappears on the very next keystroke and nobody sees it.
+    // `untrack` here is load-bearing, not cosmetic: this method must only
+    // re-run when `config` changes (an edit). Reading `autosaveStatus`
+    // as a plain tracked access would make THIS method itself a dependent
+    // of the very field it writes, so the write below would immediately
+    // re-invoke it, in the same tick, and erase "error"/"permanentError"
+    // before anyone ever observed the failed state.
+    if (untrack(() => this.autosaveStatus) === "error") this.autosaveStatus = "saving";
   }
 
   @trigger.throttle(30000)
@@ -535,7 +558,7 @@ export class PaywallBuilderViewModel {
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
       if (this.saveController !== controller) return;
-      this.autosaveStatus = "error";
+      this.autosaveStatus = this.autosaveFailureStatus(err);
     } finally {
       if (this.saveController === controller) this.saveController = null;
     }
@@ -586,7 +609,7 @@ export class PaywallBuilderViewModel {
     } catch (err) {
       if ((err as { name?: string })?.name === "AbortError") return;
       if (this.saveController !== controller) return;
-      this.autosaveStatus = "error";
+      this.autosaveStatus = this.autosaveFailureStatus(err);
     } finally {
       if (this.saveController === controller) this.saveController = null;
     }

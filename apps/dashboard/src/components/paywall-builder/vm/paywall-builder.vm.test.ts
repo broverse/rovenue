@@ -4,6 +4,7 @@ import { Container } from "impair";
 import { container as tsyringeContainer } from "tsyringe";
 import { PaywallBuilderViewModel } from "./paywall-builder.vm";
 import { PaywallBuilderApi, type PaywallBuilderDetailDto } from "../../../lib/services/paywall-builder-api";
+import { ApiError } from "../../../lib/api";
 import { findNode } from "../tree-ops";
 import {
   emptyBuilderConfig,
@@ -724,6 +725,60 @@ describe("PaywallBuilderViewModel", () => {
 
       expect(vm.errorIssues.map((i) => i.code)).toContain("MISSING_PURCHASE_BUTTON");
       expect(vm.canPublish).toBe(false);
+    });
+  });
+
+  describe("autosave failure kinds", () => {
+    it("marks a 4xx from the write path as permanent", async () => {
+      const get = vi.fn().mockResolvedValue(fakeDetail());
+      const patchBuilderConfig = vi.fn().mockRejectedValue(new ApiError("INVALID_BUILDER_CONFIG", "nope", 400));
+      const vm = makeVm({ get, patchBuilderConfig });
+      await vm.load(() => {});
+
+      vm.setLocaleText("t1_key", "en", "changed");
+      await vm.saveNow();
+
+      expect(vm.autosaveStatus).toBe("permanentError");
+    });
+
+    it("marks a 5xx as retryable", async () => {
+      const get = vi.fn().mockResolvedValue(fakeDetail());
+      const patchBuilderConfig = vi.fn().mockRejectedValue(new ApiError("INTERNAL", "boom", 500));
+      const vm = makeVm({ get, patchBuilderConfig });
+      await vm.load(() => {});
+
+      vm.setLocaleText("t1_key", "en", "changed");
+      await vm.saveNow();
+
+      expect(vm.autosaveStatus).toBe("error");
+    });
+
+    it("does not launder a permanent failure into 'saving' on the next edit", async () => {
+      const get = vi.fn().mockResolvedValue(fakeDetail());
+      const patchBuilderConfig = vi.fn().mockRejectedValue(new ApiError("INVALID_BUILDER_CONFIG", "nope", 400));
+      const vm = makeVm({ get, patchBuilderConfig });
+      await vm.load(() => {});
+
+      vm.setLocaleText("t1_key", "en", "changed");
+      await vm.saveNow();
+      expect(vm.autosaveStatus).toBe("permanentError");
+
+      vm.clearAutosaveError();
+
+      expect(vm.autosaveStatus).toBe("permanentError");
+    });
+
+    it("still clears a retryable failure so the next attempt reads as in flight", async () => {
+      const get = vi.fn().mockResolvedValue(fakeDetail());
+      const patchBuilderConfig = vi.fn().mockRejectedValue(new ApiError("INTERNAL", "boom", 500));
+      const vm = makeVm({ get, patchBuilderConfig });
+      await vm.load(() => {});
+
+      vm.setLocaleText("t1_key", "en", "changed");
+      await vm.saveNow();
+      vm.clearAutosaveError();
+
+      expect(vm.autosaveStatus).toBe("saving");
     });
   });
 });
