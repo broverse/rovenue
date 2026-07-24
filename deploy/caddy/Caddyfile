@@ -28,12 +28,22 @@
     email {$TLS_EMAIL:ops@rovenue.io}
 
     # Gate on-demand cert issuance through the api's ask-endpoint.
+    #
+    # The ask-endpoint is the ONLY gate. This block used to also carry
+    # `interval 2m` / `burst 5` as defence in depth against a
+    # misconfigured ask-endpoint, but Caddy removed those options and now
+    # REFUSES TO START when they are present ("the on_demand_tls
+    # 'interval' option is no longer supported"). Since docker-compose
+    # pins the floating `caddy:2-alpine` tag, the edge stopped booting
+    # the moment that tag rolled forward — this file did not validate on
+    # main before the removal.
+    #
+    # So the throttle is genuinely gone, not relocated: if
+    # /internal/domains/check ever starts answering 200 for hostnames it
+    # should refuse, nothing downstream limits issuance. That endpoint is
+    # the control worth guarding.
     on_demand_tls {
         ask http://api:3001/internal/domains/check
-        # Throttle issuance even when the ask passes — defence in
-        # depth in case the ask-endpoint is misconfigured.
-        interval 2m
-        burst 5
     }
 }
 
