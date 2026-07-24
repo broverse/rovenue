@@ -864,6 +864,91 @@ describe("reopen after an unmount flush", () => {
     expect(order).toEqual(["patch:start", "get"]);
   });
 
+  it("keeps the barrier up when an older overlapping flush settles first", async () => {
+    const order: string[] = [];
+    const gate1 = deferred<PaywallBuilderDetailDto>();
+    const gate2 = deferred<PaywallBuilderDetailDto>();
+    let call = 0;
+
+    const oldVm = makeVm({
+      get: vi.fn().mockResolvedValue(fakeDetail()),
+      patchBuilderConfig: vi.fn().mockImplementation(() => {
+        call += 1;
+        order.push(`patch${call}:start`);
+        return call === 1 ? gate1.promise : gate2.promise;
+      }),
+    });
+    await oldVm.load(() => {});
+
+    oldVm.setLocaleText("t1_key", "en", "first");
+    void oldVm.saveNow();
+    await Promise.resolve();
+
+    // A second save on the SAME instance — reachable because isDirty stays
+    // true until a save succeeds, so publish() and the unmount flush can
+    // both fire. This aborts call 1's controller.
+    oldVm.setLocaleText("t1_key", "en", "second");
+    void oldVm.saveNow();
+    await Promise.resolve();
+
+    // The OLDER call settles first. Its cleanup must not clear the barrier,
+    // because call 2's PATCH is still open. Drain enough microtasks for the
+    // whole run -> catch -> finally chain of call 1 to complete: with fewer
+    // ticks the cleanup has not run yet when `load()` reads the barrier, and
+    // the test would pass even with the bug present.
+    gate1.resolve(fakeDetail());
+    for (let i = 0; i < 8; i++) await Promise.resolve();
+
+    const newVm = makeVm({
+      get: vi.fn().mockImplementation(async () => {
+        order.push("reopen:get");
+        return fakeDetail();
+      }),
+      patchBuilderConfig: vi.fn(),
+    });
+    const loading = newVm.load(() => {});
+    await Promise.resolve();
+
+    expect(order).toEqual(["patch1:start", "patch2:start"]);
+
+    gate2.resolve(fakeDetail());
+    await loading;
+
+    expect(order).toEqual(["patch1:start", "patch2:start", "reopen:get"]);
+  });
+
+  it("gives up on a flush that never settles instead of wedging the builder", async () => {
+    // `pendingFlush` is module-scoped, so a flush left unsettled here would
+    // leak into the NEXT test and hang it. The gate is therefore resolved at
+    // the end of this test rather than abandoned.
+    const hung = deferred<PaywallBuilderDetailDto>();
+    const oldVm = makeVm({
+      get: vi.fn().mockResolvedValue(fakeDetail()),
+      patchBuilderConfig: vi.fn().mockReturnValue(hung.promise),
+    });
+    await oldVm.load(() => {});
+    oldVm.setLocaleText("t1_key", "en", "flushed");
+    void oldVm.saveNow();
+    await Promise.resolve();
+
+    const newVm = makeVm({
+      get: vi.fn().mockResolvedValue(fakeDetail()),
+      patchBuilderConfig: vi.fn(),
+    });
+    const loading = newVm.load(() => {});
+    await Promise.resolve();
+    expect(newVm.isLoading).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(5000);
+    await loading;
+
+    expect(newVm.isLoading).toBe(false);
+    expect(newVm.error).toBeNull();
+
+    hung.resolve(fakeDetail());
+    await Promise.resolve();
+  });
+
   // NOTE: this cannot fail today, and that is worth stating rather than
   // dressing it up. `saveNowInner` catches its own errors (it sets
   // autosaveStatus and does not rethrow), so the flush promise never

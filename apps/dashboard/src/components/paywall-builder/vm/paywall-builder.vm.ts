@@ -51,6 +51,11 @@ import {
  */
 let pendingFlush: Promise<unknown> | null = null;
 
+/** How long a builder open will wait on a previous flush before giving up
+ * on it. Long enough for any healthy save, short enough that a hung request
+ * cannot make the builder look broken. */
+const FLUSH_BARRIER_TIMEOUT_MS = 5000;
+
 export interface PaywallBuilderProps {
   projectId: string;
   paywallId: string;
@@ -217,7 +222,19 @@ export class PaywallBuilderViewModel {
       // never block the open — that would turn a failed save into a builder
       // that will not load — which is why `pendingFlush` holds an
       // already-swallowed promise.
-      if (pendingFlush) await pendingFlush;
+      //
+      // Bounded, because patchBuilderConfig has no client-side timeout and
+      // its AbortController is only tripped by a LATER save on the same
+      // instance. A genuinely hung request would otherwise wedge every
+      // subsequently opened builder — for any paywall — until a hard reload.
+      // Timing out degrades to the old behaviour (a narrow stale-read race)
+      // instead of an unrecoverable hang.
+      if (pendingFlush) {
+        await Promise.race([
+          pendingFlush,
+          new Promise((resolve) => setTimeout(resolve, FLUSH_BARRIER_TIMEOUT_MS)),
+        ]);
+      }
       const detail = await this.api.get(this.props.projectId, this.props.paywallId);
       if (this.disposed) return;
       this.applyServer(detail);
@@ -613,12 +630,18 @@ export class PaywallBuilderViewModel {
   /** Force-flush the current config to the backend, bypassing the autosave throttle. */
   async saveNow() {
     const run = this.saveNowInner();
-    pendingFlush = run.catch(() => {});
-    void run
-      .catch(() => {})
-      .finally(() => {
-        pendingFlush = null;
-      });
+    // Identity-checked, not null-checked. Two saveNow calls can overlap —
+    // `publish()` awaits one while the unmount handler fires another on the
+    // same instance, because isDirty stays true until a save SUCCEEDS. The
+    // older call settles first (the newer one aborted its controller), and
+    // an unconditional `pendingFlush = null` would then clear the NEWER
+    // flush's promise while its PATCH is still in flight, reopening exactly
+    // the stale-overwrite race this barrier exists to close.
+    const flush = run.catch(() => {});
+    pendingFlush = flush;
+    void flush.finally(() => {
+      if (pendingFlush === flush) pendingFlush = null;
+    });
     return run;
   }
 
