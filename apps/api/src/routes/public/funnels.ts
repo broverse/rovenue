@@ -221,14 +221,27 @@ export const publicFunnelsRoute = new Hono()
   // else would mean the edge is serving traffic that can't be
   // attributed to a funnel.
   // ---------------------------------------------------------------
-  .get("/host/lookup", async (c) => {
-    const host = c.req.header("host") ?? "";
-    const resolved = await resolveHost(host);
-    if (!resolved) {
-      throw new HTTPException(404, { message: "Unknown host" });
-    }
-    return c.json({ data: resolved });
-  })
+  .get(
+    "/host/lookup",
+    validate("query", z.object({ host: z.string().optional() })),
+    async (c) => {
+      const { host: queried } = c.req.valid("query");
+      // The query parameter wins. A cross-origin caller's `Host` header is
+      // the API's own hostname, so the header alone cannot answer "which
+      // funnel is this custom domain?" — which is what this endpoint is
+      // for. The header stays as the same-origin fallback.
+      //
+      // Client-named hosts are safe here: the response is {funnelId, slug},
+      // a mapping already public at /f/<slug>, and `resolveHost` still only
+      // resolves rows that are verified AND cert-issued.
+      const host = queried ?? c.req.header("host") ?? "";
+      const resolved = await resolveHost(host);
+      if (!resolved) {
+        throw new HTTPException(404, { message: "Unknown host" });
+      }
+      return c.json({ data: resolved });
+    },
+  )
 
   // ---------------------------------------------------------------
   // GET /funnels/:slug — published runtime bundle
