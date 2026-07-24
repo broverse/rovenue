@@ -140,6 +140,22 @@ describe("FunnelDraftViewModel — duplicatePage answer-key isolation", () => {
     expect(copied![0]!.condition.clauses[0]!.question_id).toBe("q_a");
   });
 
+  it("gives two duplicates made back-to-back different ids", async () => {
+    // The old id was `${id}_copy_${Date.now().toString(36)}` — two
+    // duplicates in the same millisecond collided, and the id keys both
+    // this.rules and this.defaultNext, so the second duplicate's rules
+    // would silently overwrite the first's.
+    const vm = makeVm();
+    await vm.load(() => {});
+
+    vm.duplicatePage("pg_1");
+    vm.duplicatePage("pg_1");
+
+    const copyIds = vm.pages.filter((p) => p.id.startsWith("pg_1_copy_")).map((p) => p.id);
+    expect(copyIds.length).toBe(2);
+    expect(copyIds[0]).not.toBe(copyIds[1]);
+  });
+
   it("copies the explicit default_next too", async () => {
     // Half-copied branching is worse than none: without this the copy
     // falls through to the SEQUENTIAL next page while the original went

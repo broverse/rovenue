@@ -2,6 +2,7 @@ import {
   injectable, inject, state, onMount, onInit, derived, trigger, untrack,
   type Cleanup, Props,
 } from "impair";
+import { createId } from "@paralleldrive/cuid2";
 import type { NextRule } from "@rovenue/shared/funnel";
 import { validateFunnelGraph, type ValidatorIssue } from "@rovenue/shared/funnel";
 import { FunnelApi, type FunnelDetailDto } from "../../../lib/services/funnel-api";
@@ -283,7 +284,10 @@ export class FunnelDraftViewModel {
     const i = this.pages.findIndex((p) => p.id === id);
     if (i < 0) return;
     const copy: Page = JSON.parse(JSON.stringify(this.pages[i]));
-    copy.id = `${id}_copy_${Date.now().toString(36)}`;
+    // cuid2, not Date.now() — two duplicates made in the same millisecond
+    // would otherwise collide, and this id keys both `this.rules` and
+    // `this.defaultNext` below.
+    copy.id = `${id}_copy_${createId().slice(0, 8)}`;
 
     // A question_id is an ANSWER KEY: the runner's answer map and the
     // server's `funnel_answers` table both key on it. Sharing one between
